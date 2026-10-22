@@ -886,7 +886,7 @@ fn recording_over_a_loop_makes_a_take_lane_for_each_pass() {
         assert_eq!(pass(n).start, Ticks::QUARTER, "every pass sits on the loop");
         // Recorded audio is warped, so a pass's place in the file is where
         // its Start marker's beat maps to.
-        let by = pass(n).data.in_seconds().start - pass(n - 1).data.in_seconds().start;
+        let by = audio_of(pass(n)).in_seconds().start - audio_of(pass(n - 1)).in_seconds().start;
         assert!(
             (by - seconds).abs() < 1e-3,
             "pass {n} follows the one before: {by}"
@@ -901,8 +901,12 @@ fn recording_over_a_loop_makes_a_take_lane_for_each_pass() {
         .find(|clip| clip.start == Ticks::QUARTER)
         .expect("a clip on the loop");
     let last = pass(lanes.len() - 1);
-    assert_eq!(latest.data, bl_model::ClipData::Audio(last.data.clone()));
+    assert_eq!(latest.data, last.data);
     assert_eq!(latest.length, last.length);
+    assert_ne!(
+        latest.id, last.id,
+        "the main lane's clip is a copy of its own"
+    );
 
     // The whole path stayed off the heap.
     let stats = shell.audio().stats().expect("a stream is open");
@@ -1035,4 +1039,267 @@ fn recorded_audio_is_warped_as_the_setting_says() {
         .unwrap();
     let audio = audio_of(&record_take(&control, &mut shell, &dir, start, 300));
     assert!(!audio.warp && audio.warp_markers.is_empty(), "{audio:?}");
+}
+
+/// A new armed MIDI track, with the computer keyboard on to play it.
+fn armed_midi_track(shell: &mut Shell, name: &str) -> TrackId {
+    shell
+        .invoke("track.create", json!({ "kind": "midi", "name": name }))
+        .unwrap();
+    let track = shell.editor().document().top_level().last().unwrap();
+    shell
+        .run("mixer.set_arm", json!({ "track": track, "arm": true }))
+        .unwrap();
+    shell
+        .run("midi.toggle_computer_keyboard", json!({ "on": true }))
+        .unwrap();
+    track
+}
+
+/// Plays the keyboard's A key for `millis`, after `wait` milliseconds.
+fn tap_a(control: &NullControl, shell: &mut Shell, wait: u64, millis: u64) {
+    play_for(control, shell, wait);
+    for pressed in [true, false] {
+        shell
+            .run(
+                "midi.computer_keyboard_key",
+                json!({ "key": "A", "pressed": pressed }),
+            )
+            .unwrap();
+        if pressed {
+            play_for(control, shell, millis);
+        }
+    }
+}
+
+/// The track's take lanes, once `count` clips are on them in all.
+fn lanes_with_clips(
+    control: &NullControl,
+    shell: &mut Shell,
+    track: TrackId,
+    count: usize,
+) -> Vec<bl_model::TakeLane> {
+    let mut found = Vec::new();
+    testing::wait_for(control, shell, "the take lanes' clips", |shell| {
+        found = shell
+            .editor()
+            .document()
+            .track(track)
+            .map(|track| track.take_lanes().cloned().collect())
+            .unwrap_or_default();
+        found.iter().map(|lane| lane.clips.len()).sum::<usize>() >= count
+    });
+    found
+}
+
+fn notes_of(clip: &bl_model::Clip) -> Vec<(u8, i64)> {
+    let bl_model::ClipData::Midi(midi) = &clip.data else {
+        panic!("a MIDI clip: {clip:?}");
+    };
+    let mut notes: Vec<(u8, i64)> = midi.notes.iter().map(|n| (n.key, n.start.get())).collect();
+    notes.sort_unstable();
+    notes
+}
+
+/// Records from `start` for `millis` on `track`, then stops.
+fn record_from(control: &NullControl, shell: &mut Shell, start: Ticks, millis: u64) {
+    shell
+        .run("transport.locate", json!({ "position": start }))
+        .unwrap();
+    shell
+        .run("transport.set_recording", json!({ "recording": true }))
+        .unwrap();
+    shell.run("transport.play", json!({})).unwrap();
+    play_for(control, shell, millis);
+    shell.run("transport.stop", json!({})).unwrap();
+}
+
+// Spec: comping R10, R11; recording R16. An audio take goes on a take lane
+// and is copied to the main lane, in the one undo step that places it; a
+// take after it reuses the lane, and one over the same bars gets a lane of
+// its own.
+#[test]
+fn an_audio_take_goes_on_a_take_lane_and_a_later_take_reuses_it() {
+    let dir = TestDir::new("lane-reuse");
+    let (mut shell, control) = duplex_shell();
+    shell
+        .run("set.save_as", json!({ "path": dir.arg("Lanes.blset") }))
+        .unwrap();
+    let track = armed_track(&mut shell, 3, "Guitar");
+    let rate = shell.audio().status().sample_rate.expect("a device runs");
+    control.set_input_tone(2, f64::from(rate) / 4.0, 0.5);
+
+    // A first take of a second, then the same bars again, then a verse after.
+    record_from(&control, &mut shell, Ticks::ZERO, 500);
+    let lanes = lanes_with_clips(&control, &mut shell, track, 1);
+    assert_eq!(lanes.len(), 1);
+    assert_eq!(lanes[0].name, "Take 1");
+    let on_lane = &lanes[0].clips[0];
+    let main = main_lane(&shell, track);
+    assert_eq!(main.len(), 1, "the main lane plays the take");
+    assert_ne!(main[0].id, on_lane.id, "a copy of its own");
+    assert_eq!(
+        (main[0].start, main[0].length, &main[0].data, &main[0].name),
+        (on_lane.start, on_lane.length, &on_lane.data, &on_lane.name)
+    );
+    assert!(!on_lane.name.is_empty(), "named after its file");
+    assert_eq!(shell.editor().undo_history().next(), Some("Recorded Clip"));
+
+    // Over the same bars: a lane of its own, and the main lane takes the new one.
+    record_from(&control, &mut shell, Ticks::ZERO, 500);
+    let lanes = lanes_with_clips(&control, &mut shell, track, 2);
+    let names: Vec<&str> = lanes.iter().map(|lane| lane.name.as_str()).collect();
+    assert_eq!(names, ["Take 1", "Take 2"]);
+    let main = main_lane(&shell, track);
+    assert_eq!(main.len(), 1);
+    assert_eq!(main[0].data, lanes[1].clips[0].data);
+
+    // After both: the first lane is free from there on, so it takes the verse.
+    record_from(&control, &mut shell, Ticks::WHOLE * 4, 300);
+    let lanes = lanes_with_clips(&control, &mut shell, track, 3);
+    assert_eq!(lanes.len(), 2, "no third lane");
+    assert_eq!(lanes[0].clips.len(), 2, "the verse is on the first lane");
+    assert_eq!(lanes[1].clips.len(), 1);
+    assert_eq!(main_lane(&shell, track).len(), 2);
+
+    // Each take is one undo step: undoing the verse takes its lane clip with
+    // its main-lane copy.
+    shell.run("edit.undo", json!({})).unwrap();
+    let held = shell.editor().document().track(track).unwrap();
+    assert_eq!(held.clips().len(), 1);
+    assert_eq!(
+        held.take_lanes()
+            .map(|lane| lane.clips.len())
+            .sum::<usize>(),
+        2
+    );
+}
+
+// Spec: comping R10 to R12; recording R16. A MIDI take goes on a take lane
+// and is copied to the main lane, and a take over the same bars gets a lane
+// of its own; with MIDI Arrangement Overdub on the main lane merges them.
+#[test]
+fn a_midi_take_goes_on_a_take_lane_and_overdub_merges_only_the_main_lane() {
+    let (mut shell, control) = duplex_shell();
+    let track = armed_midi_track(&mut shell, "Keys");
+
+    shell
+        .run("transport.set_recording", json!({ "recording": true }))
+        .unwrap();
+    shell.run("transport.play", json!({})).unwrap();
+    tap_a(&control, &mut shell, 100, 100);
+    play_for(&control, &mut shell, 100);
+    shell.run("transport.stop", json!({})).unwrap();
+    let lanes = lanes_with_clips(&control, &mut shell, track, 1);
+    assert_eq!(lanes.len(), 1);
+    assert_eq!(lanes[0].name, "Take 1");
+    let main = main_lane(&shell, track);
+    assert_eq!(main.len(), 1);
+    assert_ne!(main[0].id, lanes[0].clips[0].id);
+    assert_eq!(notes_of(&main[0]), notes_of(&lanes[0].clips[0]));
+    assert_eq!(notes_of(&main[0]).len(), 1);
+    assert_eq!(shell.editor().undo_history().next(), Some("Recorded Clip"));
+
+    // A second take over the same bars replaces the main lane's clip.
+    record_from_midi(&control, &mut shell, false);
+    let lanes = lanes_with_clips(&control, &mut shell, track, 2);
+    assert_eq!(lanes.len(), 2, "a lane of its own");
+    let main = main_lane(&shell, track);
+    assert_eq!(main.len(), 1, "the main lane plays the latest take");
+    assert_eq!(notes_of(&main[0]), notes_of(&lanes[1].clips[0]));
+
+    // With Overdub on, a third take merges into the main lane's clip and
+    // the lanes hold each take alone.
+    shell
+        .run("transport.set_midi_overdub", json!({ "enabled": true }))
+        .unwrap();
+    record_from_midi(&control, &mut shell, true);
+    let lanes = lanes_with_clips(&control, &mut shell, track, 3);
+    assert_eq!(lanes.len(), 3);
+    assert!(lanes.iter().all(|lane| notes_of(&lane.clips[0]).len() == 1));
+    let main = main_lane(&shell, track);
+    assert_eq!(main.len(), 1);
+    assert_eq!(
+        notes_of(&main[0]).len(),
+        2,
+        "the third take's note joined the second's"
+    );
+}
+
+/// A MIDI take over the same bars as the first, with a note at another
+/// moment if `later`.
+fn record_from_midi(control: &NullControl, shell: &mut Shell, later: bool) {
+    shell
+        .run("transport.locate", json!({ "position": Ticks::ZERO }))
+        .unwrap();
+    shell
+        .run("transport.set_recording", json!({ "recording": true }))
+        .unwrap();
+    shell.run("transport.play", json!({})).unwrap();
+    tap_a(control, shell, if later { 250 } else { 100 }, 100);
+    play_for(control, shell, 100);
+    shell.run("transport.stop", json!({})).unwrap();
+}
+
+// Spec: comping R12; recording R12, R16. MIDI passes round the loop each go
+// on a take lane and are copied to the main lane one by one, each in an undo
+// step of its own, rather than merging into one clip.
+#[test]
+fn midi_passes_round_the_loop_each_go_on_a_take_lane() {
+    let (mut shell, control) = duplex_shell();
+    let track = armed_midi_track(&mut shell, "Keys");
+    let sixteenth = Ticks::QUARTER / 4;
+    shell
+        .run(
+            "transport.set_loop",
+            json!({ "start": Ticks::QUARTER, "length": sixteenth }),
+        )
+        .unwrap();
+    shell
+        .run("transport.set_loop_enabled", json!({ "enabled": true }))
+        .unwrap();
+    shell
+        .run(
+            "transport.locate",
+            json!({ "position": Ticks::QUARTER - sixteenth }),
+        )
+        .unwrap();
+    shell
+        .run("transport.set_recording", json!({ "recording": true }))
+        .unwrap();
+    shell.run("transport.play", json!({})).unwrap();
+    // A sixteenth is 125 ms: the lead-in, then a note in the first pass and
+    // another in the second.
+    tap_a(&control, &mut shell, 150, 20);
+    tap_a(&control, &mut shell, 105, 20);
+    play_for(&control, &mut shell, 400);
+    shell.run("transport.stop", json!({})).unwrap();
+
+    let lanes = lanes_with_clips(&control, &mut shell, track, 2);
+    assert_eq!(lanes.len(), 2, "a lane for each pass that was played");
+    assert!(lanes.iter().all(|lane| lane.clips.len() == 1));
+    for lane in &lanes {
+        let clip = &lane.clips[0];
+        assert_eq!(
+            (clip.start, clip.length),
+            (Ticks::QUARTER, sixteenth),
+            "{lane:?}"
+        );
+        assert_eq!(notes_of(clip).len(), 1);
+    }
+    let main = main_lane(&shell, track);
+    assert_eq!(main.len(), 1, "the latest pass over the loop");
+    assert_eq!(notes_of(&main[0]), notes_of(&lanes[1].clips[0]));
+
+    // Each pass is an undo step: undo unrolls them from the last.
+    shell.run("edit.undo", json!({})).unwrap();
+    let held = shell.editor().document().track(track).unwrap();
+    assert_eq!(held.take_lanes().len(), 1);
+    assert_eq!(
+        notes_of(held.clips().next().unwrap()),
+        notes_of(&lanes[0].clips[0])
+    );
+    shell.run("edit.undo", json!({})).unwrap();
+    let held = shell.editor().document().track(track).unwrap();
+    assert_eq!((held.take_lanes().len(), held.clips().len()), (0, 0));
 }

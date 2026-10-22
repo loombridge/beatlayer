@@ -21,8 +21,8 @@ use bl_core::time::{Bpm, TempoMap, Ticks, TimeSignature, TimeSignatureMap};
 use bl_model::{
     AudioData, BeatsUpdate, Change, ChangeSet, Clip, ClipData, ClipId, Command, ContentHash,
     Device, DeviceId, DeviceKind, Document, EditError, Editor, Input, LaunchMode, MidiData, Mixer,
-    Monitor, Note, ParamId, PluginFormat, Routing, SceneId, SendTap, TonesUpdate, TrackId,
-    TrackKind, WarpMode,
+    Monitor, NewTakeLane, Note, ParamId, PluginFormat, Routing, SceneId, SendTap, TakeClip,
+    TakeClipData, TakeLane, TakeLaneId, TonesUpdate, TrackId, TrackKind, WarpMode,
 };
 use proptest::prelude::*;
 use proptest::sample::Index;
@@ -89,6 +89,25 @@ enum Op {
         data: Data,
     },
     DeleteClip(Index),
+    /// A take lane (WP-6.21) with up to three clips, at a place among the
+    /// track's lanes.
+    AddTakeLane {
+        track: Index,
+        clips: Vec<(u16, u16, Data)>,
+        index: u8,
+    },
+    CreateTakeClip {
+        lane: Index,
+        start: u16,
+        length: u16,
+        data: Data,
+    },
+    RenameTakeLane(Index, u8),
+    DeleteTakeLanes(Vec<Index>),
+    DeleteAllTakeLanes(Index),
+    DeleteUnusedTakeLanes(Index),
+    MoveTakeLanes(Vec<Index>, u8),
+    SetAudition(Index, bool),
     MoveClip {
         clip: Index,
         track: Index,
@@ -210,6 +229,16 @@ fn op() -> impl Strategy<Value = Op> {
         5 => (i(), any::<u16>(), 1u16..256, data())
             .prop_map(|(track, start, length, data)| Op::CreateClip { track, start, length, data }),
         1 => i().prop_map(Op::DeleteClip),
+        2 => (i(), prop::collection::vec((any::<u16>(), 1u16..256, data()), 0..4), 0u8..4)
+            .prop_map(|(track, clips, index)| Op::AddTakeLane { track, clips, index }),
+        2 => (i(), any::<u16>(), 1u16..256, data())
+            .prop_map(|(lane, start, length, data)| Op::CreateTakeClip { lane, start, length, data }),
+        1 => (i(), any::<u8>()).prop_map(|(l, n)| Op::RenameTakeLane(l, n)),
+        1 => prop::collection::vec(i(), 1..4).prop_map(Op::DeleteTakeLanes),
+        1 => i().prop_map(Op::DeleteAllTakeLanes),
+        1 => i().prop_map(Op::DeleteUnusedTakeLanes),
+        2 => (prop::collection::vec(i(), 1..4), 0u8..4).prop_map(|(l, at)| Op::MoveTakeLanes(l, at)),
+        2 => (i(), any::<bool>()).prop_map(|(l, on)| Op::SetAudition(l, on)),
         3 => (i(), i(), any::<u16>()).prop_map(|(clip, track, start)| Op::MoveClip { clip, track, start }),
         2 => (prop::collection::vec(i(), 1..5), any::<i16>()).prop_map(|(c, by)| Op::MoveClips(c, by)),
         2 => (i(), 0u16..256).prop_map(|(c, l)| Op::SetClipLength(c, l)),
@@ -265,6 +294,8 @@ struct Targets {
     /// The clips on Arrangement lanes, for the commands that place a clip in
     /// the Arrangement.
     lane_clips: Vec<ClipId>,
+    /// The take lanes (WP-6.21).
+    take_lanes: Vec<TakeLaneId>,
 }
 
 impl Targets {
@@ -297,6 +328,19 @@ impl Targets {
             returns: doc.returns().collect(),
             audio_clips,
             lane_clips,
+            take_lanes: doc
+                .tracks()
+                .flat_map(|track| track.take_lanes().map(|lane| lane.id))
+                .collect(),
+        }
+    }
+
+    /// An existing take lane, or one that doesn't exist.
+    fn take_lane(&self, i: &Index) -> TakeLaneId {
+        if self.take_lanes.is_empty() {
+            TakeLaneId(Id::new(u64::MAX).unwrap())
+        } else {
+            *i.get(&self.take_lanes)
         }
     }
 
@@ -549,6 +593,72 @@ impl Op {
                 Command::CreateClip { track, clip }
             }
             Self::DeleteClip(c) => Command::DeleteClip { clip: at.clip(c) },
+            Self::AddTakeLane {
+                track,
+                clips,
+                index,
+            } => {
+                let track = at.track(track);
+                let kind = kind_of(track);
+                let clips = clips
+                    .iter()
+                    .map(|(start, length, data)| TakeClip {
+                        id: Some(editor.new_id()),
+                        name: name(0),
+                        start: sixteenths(*start),
+                        length: sixteenths(*length),
+                        data: TakeClipData::Tagged(clip_data(data, kind)),
+                    })
+                    .collect();
+                Command::AddTakeLane {
+                    track,
+                    lane: NewTakeLane {
+                        id: Some(editor.new_id()),
+                        name: name(0),
+                        clips,
+                    },
+                    index: Some(usize::from(*index)),
+                }
+            }
+            Self::CreateTakeClip {
+                lane,
+                start,
+                length,
+                data,
+            } => {
+                let lane = at.take_lane(lane);
+                let kind = doc.take_lane_track(lane).and_then(kind_of);
+                Command::CreateTakeClip {
+                    lane,
+                    clip: Clip::new(
+                        editor.new_id(),
+                        sixteenths(*start),
+                        sixteenths(*length),
+                        clip_data(data, kind),
+                    ),
+                }
+            }
+            Self::RenameTakeLane(l, n) => Command::RenameTakeLane {
+                lane: at.take_lane(l),
+                name: name(*n),
+            },
+            Self::DeleteTakeLanes(lanes) => Command::DeleteTakeLanes {
+                lanes: lanes.iter().map(|l| at.take_lane(l)).collect(),
+            },
+            Self::DeleteAllTakeLanes(t) => Command::DeleteAllTakeLanes {
+                tracks: vec![at.track(t)],
+            },
+            Self::DeleteUnusedTakeLanes(t) => Command::DeleteUnusedTakeLanes {
+                tracks: vec![at.track(t)],
+            },
+            Self::MoveTakeLanes(lanes, index) => Command::MoveTakeLanes {
+                lanes: lanes.iter().map(|l| at.take_lane(l)).collect(),
+                index: usize::from(*index),
+            },
+            Self::SetAudition(l, on) => Command::SetAudition {
+                lane: at.take_lane(l),
+                on: *on,
+            },
             Self::MoveClip { clip, track, start } => Command::MoveClip {
                 clip: at.clip(clip),
                 track: at.track(track),
@@ -969,6 +1079,9 @@ type OwnSettings = (
     Vec<TrackId>,
     Vec<DeviceId>,
     Routing,
+    // Its take lanes with their clips, and the one auditioned.
+    Vec<TakeLane>,
+    Option<TakeLaneId>,
 );
 
 /// A song flattened into plain maps, for working out change sets the slow
@@ -980,8 +1093,9 @@ struct Flat {
     tracks: BTreeMap<TrackId, OwnSettings>,
     scenes: BTreeMap<SceneId, (usize, String)>,
     /// Each clip and where it sits: its track, the scene whose slot holds it
-    /// (`null` for an Arrangement lane), and the clip.
-    clips: BTreeMap<ClipId, (TrackId, Option<SceneId>, Clip)>,
+    /// (`null` for an Arrangement lane), the take lane it sits on (`null`
+    /// for the main lane), and the clip.
+    clips: BTreeMap<ClipId, (TrackId, Option<SceneId>, Option<TakeLaneId>, Clip)>,
     devices: BTreeMap<DeviceId, (TrackId, Device)>,
 }
 
@@ -1009,14 +1123,23 @@ impl Flat {
                 track.children().collect(),
                 devices,
                 track.routing().clone(),
+                track.take_lanes().cloned().collect(),
+                track.audition(),
             );
             flat.tracks.insert(track.id(), own);
             for clip in track.clips() {
-                flat.clips.insert(clip.id, (track.id(), None, clip.clone()));
+                flat.clips
+                    .insert(clip.id, (track.id(), None, None, clip.clone()));
+            }
+            for lane in track.take_lanes() {
+                for clip in &lane.clips {
+                    flat.clips
+                        .insert(clip.id, (track.id(), None, Some(lane.id), clip.clone()));
+                }
             }
             for (scene, clip) in track.slots() {
                 flat.clips
-                    .insert(clip.id, (track.id(), Some(scene), clip.clone()));
+                    .insert(clip.id, (track.id(), Some(scene), None, clip.clone()));
             }
             for device in track.devices() {
                 flat.devices.insert(device.id, (track.id(), device.clone()));

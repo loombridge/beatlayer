@@ -702,3 +702,183 @@ fn a_paste_over_a_clip_on_a_later_destination_asks_first() {
         "R1: the clip it would replace is named: {call:?}"
     );
 }
+
+/// Puts the clip `source` plays on a new take lane of `track` in its place
+/// (the clip is deleted from the main lane first).
+fn move_to_take_lane(shell: &mut Shell, track: TrackId, source: ClipId) -> bl_model::TakeLaneId {
+    let (name, start, length, data) = {
+        let clip = shell.editor().document().clip(source).unwrap();
+        (
+            clip.name.clone(),
+            clip.start,
+            clip.length,
+            clip.data.clone(),
+        )
+    };
+    shell.run("clip.delete", json!({ "clip": source })).unwrap();
+    shell
+        .run(
+            "track.add_take_lane",
+            json!({ "track": track, "lane": { "name": "Take 1", "clips": [
+                { "name": name, "start": start, "length": length, "data": data }
+            ] } }),
+        )
+        .unwrap();
+    shell
+        .editor()
+        .document()
+        .track(track)
+        .unwrap()
+        .take_lanes()
+        .next()
+        .unwrap()
+        .id
+}
+
+// Spec: freeze-and-bounce R30. A bounce renders a track's main lane: a take
+// lane's clips aren't in it, auditioned or not, and the new track has none.
+#[test]
+fn a_bounce_renders_the_main_lane_only_and_the_new_track_has_no_take_lanes() {
+    let scratch = Scratch::new("take-lanes");
+    let mut shell = new_shell(&scratch);
+    let track = audio_track(&shell);
+    let tone = scratch.path("tone.wav");
+    wav(&tone, 1.0, 2);
+    place(&mut shell, track, &tone, 0);
+    // A louder take on a lane of its own, later in the song.
+    let loud = scratch.path("loud.wav");
+    {
+        let mut writer = bl_media::AudioWriter::create(
+            &loud,
+            bl_media::EncodeSpec {
+                file_type: bl_media::FileType::Wav,
+                bit_depth: bl_media::BitDepth::Float32,
+                dither: bl_media::Dither::None,
+                sample_rate: 48_000,
+                channels: 2,
+            },
+        )
+        .unwrap();
+        for _ in 0..48_000 {
+            writer.write(&[0.9, 0.9]).unwrap();
+        }
+        writer.finish().unwrap();
+    }
+    let taken = place(&mut shell, track, &loud, 4 * 705_600);
+    let lane = move_to_take_lane(&mut shell, track, taken);
+    shell
+        .run(
+            "take_lane.set_audition",
+            json!({ "lane": lane, "on": true }),
+        )
+        .unwrap();
+    saved(&scratch, &mut shell);
+
+    let result = shell
+        .run(ids::BOUNCE_IN_PLACE, json!({ "tracks": [track] }))
+        .unwrap();
+    let decoded = bl_media::decode_file(Path::new(result["files"][0].as_str().unwrap())).unwrap();
+    let left = decoded.channel(0).unwrap();
+    assert!(
+        left[1_000..24_000].iter().all(|s| (0.2..0.5).contains(s)),
+        "the main lane's tone, not the auditioned lane's 0.9"
+    );
+    let held = shell.editor().document().track(track).unwrap();
+    assert_eq!(held.take_lanes().len(), 0, "the bounce has no take lanes");
+    assert_eq!(held.audition(), None);
+}
+
+// Spec: freeze-and-bounce R30. Bounce to New Track skips material that is
+// all on take lanes, and is disabled when the whole selection is.
+#[test]
+fn bounce_to_new_track_skips_take_lane_material() {
+    let scratch = Scratch::new("take-lane-bounce");
+    let mut shell = new_shell(&scratch);
+    let track = audio_track(&shell);
+    let tone = scratch.path("tone.wav");
+    wav(&tone, 1.0, 2);
+    let clip = place(&mut shell, track, &tone, 0);
+    let lane = move_to_take_lane(&mut shell, track, clip);
+    let on_lane = shell.editor().document().take_lane(lane).unwrap().clips[0].id;
+    saved(&scratch, &mut shell);
+
+    let args = json!({ "clips": [on_lane] });
+    assert!(!shell.can_invoke(ids::BOUNCE_TO_NEW_TRACK, &args));
+    let before = shell.editor().document().track_count();
+    assert!(shell.run(ids::BOUNCE_TO_NEW_TRACK, args).is_err());
+    assert_eq!(
+        shell.editor().document().track_count(),
+        before,
+        "no track is made"
+    );
+}
+
+// Spec: freeze-and-bounce R30. A source whose selected material is all
+// deactivated gets no track, and the command is disabled when every source's
+// is.
+#[test]
+fn bounce_to_new_track_skips_deactivated_material() {
+    let scratch = Scratch::new("deactivated-bounce");
+    let mut shell = new_shell(&scratch);
+    let track = audio_track(&shell);
+    let tone = scratch.path("tone.wav");
+    wav(&tone, 1.0, 2);
+    let clip = place(&mut shell, track, &tone, 0);
+    shell
+        .run("clip.set_mute", json!({ "clip": clip, "mute": true }))
+        .unwrap();
+    saved(&scratch, &mut shell);
+
+    let args = json!({ "clips": [clip] });
+    assert!(!shell.can_invoke(ids::BOUNCE_TO_NEW_TRACK, &args));
+    let before = shell.editor().document().track_count();
+    assert!(shell.run(ids::BOUNCE_TO_NEW_TRACK, args).is_err());
+    assert_eq!(shell.editor().document().track_count(), before);
+}
+
+// Spec: freeze-and-bounce R25, R30. Paste Bounced Audio onto a take lane
+// places the audio on that lane, and the main lane is left as it was.
+#[test]
+fn paste_bounced_audio_onto_a_take_lane_places_the_audio_on_that_lane() {
+    let scratch = Scratch::new("paste-lane");
+    let mut shell = new_shell(&scratch);
+    let track = audio_track(&shell);
+    let file = scratch.path("tone.wav");
+    wav(&file, 1.0, 2);
+    let clip = place(&mut shell, track, &file, 0);
+    saved(&scratch, &mut shell);
+    shell
+        .run(
+            "track.add_take_lane",
+            json!({ "track": track, "lane": { "name": "Take 1", "clips": [] } }),
+        )
+        .unwrap();
+    let lane = shell
+        .editor()
+        .document()
+        .track(track)
+        .unwrap()
+        .take_lanes()
+        .next()
+        .unwrap()
+        .id;
+    shell
+        .run("arrangement.copy", json!({ "clips": [clip] }))
+        .unwrap();
+
+    let result = shell
+        .run(
+            ids::PASTE_BOUNCED_AUDIO,
+            json!({ "lane": lane, "at": 8 * 705_600 }),
+        )
+        .unwrap();
+    let made: ClipId = serde_json::from_value(result["clips"][0].clone()).unwrap();
+    let doc = shell.editor().document();
+    assert_eq!(doc.clip_lane(made), Some(lane), "on the lane");
+    assert_eq!(
+        doc.track(track).unwrap().clips().count(),
+        1,
+        "the main lane is as it was"
+    );
+    assert_eq!(doc.take_lane(lane).unwrap().clips.len(), 1);
+}

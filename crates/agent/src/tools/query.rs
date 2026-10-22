@@ -17,7 +17,7 @@ use bl_core::time::{Ticks, TimeSignatureMap};
 use bl_model::automation::{Automation, AutomationTarget};
 use bl_model::{
     Chain, ChainId, Clip, ClipData, ClipId, Device, DeviceId, Document, SavedSong, Scene, SceneId,
-    TakeLane, Track, TrackId,
+    TakeLane, TakeLaneId, Track, TrackId,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -69,7 +69,7 @@ pub(crate) fn definition() -> Value {
         "Query the project",
         "Reads the open project without changing it. With no arguments: an overview of the \
          song (its set, tempo, time signatures, counts, the tracks in order, and the undo \
-         history). With `id`: the track, clip, device, or rack chain with that ID (a rack's `chains`, each with its mixer and devices, read with the rack). With `path`: a readable \
+         history). With `id`: the track, clip, device, take lane, or rack chain with that ID (a rack's `chains`, each with its mixer and devices, read with the rack). With `path`: a readable \
          path such as `track \"Bass\"`, `track \"Bass\" / clip #1` (the first clip by start), \
          `track main`, `device \"EQ\" / param 0`, `clip \"Verse\"`, `tracks`, `tempo`, `time \
          signatures`, `history`, or `checkpoints`. Positions are given as bar.beat.sixteenth \
@@ -79,8 +79,8 @@ pub(crate) fn definition() -> Value {
          undone, who made it, and its index counted up from the set's start, and says which row \
          is current. Also \
          `scene 1` or `scene \"Verse\"`, `track \"Bass\" / slot 3` (a Session slot, scenes \
-         counted from 1), `track \"Bass\" / lane 1` (a take lane, with its \
-         passes), and `track \"Bass\" / automation` (its envelopes; \
+         counted from 1), `track \"Bass\" / lane 1` (a take lane, by its place or name, with its \
+         clips), and `track \"Bass\" / automation` (its envelopes; \
          `automation \"volume\"` reads one, with its points). With `detail: \"full\"` a \
          track, clip, device, chain, scene, and the song (`song`) also return `saved`: everything \
          the set file saves for it, in the file\'s own form, so a setting you can change is \
@@ -218,6 +218,10 @@ fn find_id(document: &Document, raw: u64) -> Option<Found<'_>> {
         Some(Found::Device(device))
     } else if let Some(chain) = document.chain(ChainId(id)) {
         Some(Found::Chain(chain))
+    } else if let Some(lane) = document.take_lane(TakeLaneId(id)) {
+        let track = document.track(document.take_lane_track(lane.id)?)?;
+        let number = track.take_lanes().position(|held| held.id == lane.id)? + 1;
+        Some(Found::Lane(track, lane, number))
     } else {
         document.scene(SceneId(id)).map(Found::Scene)
     }
@@ -311,21 +315,19 @@ impl View<'_> {
         if track.take_lanes().len() > 0 {
             let lanes: Vec<Value> = track
                 .take_lanes()
-                .map(|lane| {
-                    let clips: Vec<Value> = lane
-                        .clips
-                        .iter()
-                        .map(|clip| {
-                            json!({
-                                "name": clip.name,
-                                "start": self.position(clip.start),
-                                "end": self.position(clip.start.saturating_add(clip.length)),
-                                "length": Self::length(clip.length),
-                                "media": clip.data.media,
-                            })
-                        })
-                        .collect();
-                    json!({ "name": lane.name, "clips": clips })
+                .enumerate()
+                .map(|(place, lane)| {
+                    let mut held: Vec<&Clip> = lane.clips.iter().collect();
+                    held.sort_by_key(|clip| (clip.start, clip.id));
+                    let clips: Vec<Value> =
+                        held.iter().map(|clip| self.clip_summary(clip)).collect();
+                    json!({
+                        "id": lane.id,
+                        "name": lane.name,
+                        "number": place + 1,
+                        "audition": track.audition() == Some(lane.id),
+                        "clips": clips,
+                    })
                 })
                 .collect();
             value["take_lanes"] = json!(lanes);
@@ -338,7 +340,7 @@ impl View<'_> {
             ClipData::Audio(audio) => ("audio", json!({ "media": audio.media })),
             ClipData::Midi(midi) => ("midi", json!({ "notes": midi.notes.len() })),
         };
-        json!({
+        let mut value = json!({
             "id": clip.id,
             "name": clip.name,
             "kind": kind,
@@ -349,7 +351,11 @@ impl View<'_> {
             "mute": clip.mute,
             "scale": scale_value(clip.scale),
             "content": content,
-        })
+        });
+        if let Some(lane) = self.document.clip_lane(clip.id) {
+            value["lane"] = json!(lane);
+        }
+        value
     }
 
     fn clip(&self, clip: &Clip) -> Value {
@@ -576,12 +582,16 @@ impl View<'_> {
     }
 
     fn lane(&self, track: &Track, lane: &TakeLane, number: usize) -> Value {
-        let passes: Vec<Value> = lane.clips.iter().map(|pass| self.saved(pass)).collect();
+        let mut held: Vec<&Clip> = lane.clips.iter().collect();
+        held.sort_by_key(|clip| (clip.start, clip.id));
+        let clips: Vec<Value> = held.iter().map(|clip| self.saved(*clip)).collect();
         json!({
             "track": track.id(),
+            "id": lane.id,
             "name": lane.name,
             "number": number,
-            "passes": self.page.slice(passes),
+            "audition": track.audition() == Some(lane.id),
+            "clips": self.page.slice(clips),
         })
     }
 
@@ -1060,7 +1070,13 @@ fn resolve<'a>(document: &'a Document, segments: &[Segment]) -> Result<Found<'a>
                     return Err("a lane can follow only a track".to_owned());
                 };
                 let lanes: Vec<&TakeLane> = track.take_lanes().collect();
-                let lane = pick(*kind, selector, lanes.clone(), |_| 0, |l| l.name.clone())?;
+                let lane = pick(
+                    *kind,
+                    selector,
+                    lanes.clone(),
+                    |l| l.id.0.get(),
+                    |l| l.name.clone(),
+                )?;
                 let number = lanes
                     .iter()
                     .position(|l| std::ptr::eq(*l, lane))

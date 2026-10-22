@@ -647,3 +647,114 @@ fn the_locators_and_the_song_start_time_are_saved_and_load_again() {
     assert_eq!(loaded.document.locators()[0].name, "Intro");
     assert_eq!(loaded.document.song_start_ticks(), Some(Ticks::WHOLE * 2));
 }
+
+// Spec: comping R3. A set saved with WP-2.13's take lanes, whose passes had no
+// IDs, opens with each pass a clip of its lane under a new ID, and plays as
+// it did: a take lane plays only while it's auditioned.
+#[test]
+fn a_version_7_set_with_take_lanes_loads_and_plays_as_it_did() {
+    let mut editor = Editor::new();
+    let track = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: track,
+            kind: TrackKind::Audio,
+            name: "Audio".to_owned(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    let audio = AudioData::new(MEDIA);
+    let main = Clip::new(
+        editor.new_id(),
+        Ticks::ZERO,
+        Ticks::WHOLE * 2,
+        ClipData::Audio(audio.clone()),
+    );
+    editor
+        .apply(Command::CreateClip { track, clip: main })
+        .unwrap();
+    let expected = render(editor.document());
+    assert!(expected.iter().any(|&s| s != 0.0));
+
+    // As version 7 saved a track with two take lanes of passes.
+    let lane = |editor: &mut Editor, name: &str, start: f64| bl_model::NewTakeLane {
+        id: Some(editor.new_id()),
+        name: name.to_owned(),
+        clips: vec![bl_model::TakeClip {
+            id: Some(editor.new_id()),
+            name: "pass".to_owned(),
+            start: Ticks::QUARTER,
+            length: Ticks::QUARTER * 4,
+            data: bl_model::TakeClipData::Audio(AudioData {
+                start,
+                ..audio.clone()
+            }),
+        }],
+    };
+    for (name, start) in [("Take 1", 0.5), ("Take 2", 1.0)] {
+        let lane = lane(&mut editor, name, start);
+        editor
+            .apply(Command::AddTakeLane {
+                track,
+                lane,
+                index: None,
+            })
+            .unwrap();
+    }
+    let project = Project {
+        document: editor.document().clone(),
+        ids: editor.ids(),
+        media: Media::default(),
+        windows: bl_model::DeviceWindows::new(),
+        rack_views: bl_model::RackViewMap::new(),
+        folds: bl_model::ClipFolds::new(),
+        launch: bl_model::LaunchSettings::default(),
+        multisamplers: bl_model::MultisamplerViews::new(),
+    };
+    let mut saved: Value = serde_json::from_slice(&encode_json(&project, 1).unwrap()).unwrap();
+    saved["schema"] = json!(7);
+    for lane in saved["document"]["tracks"][0]["take_lanes"]
+        .as_array_mut()
+        .unwrap()
+    {
+        let lane = lane.as_object_mut().unwrap();
+        lane.remove("id");
+        for pass in lane["clips"].as_array_mut().unwrap() {
+            let pass = pass.as_object_mut().unwrap();
+            pass.remove("id");
+            pass.remove("mute");
+            // The pass's data was the audio's own fields.
+            let data = pass.remove("data").unwrap();
+            pass.insert("data".to_owned(), data["audio"].clone());
+        }
+    }
+
+    let (loaded, info) = decode_json(
+        &serde_json::to_vec(&saved).unwrap(),
+        &LoadOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(info.schema, 7);
+    loaded.document.check_invariants().unwrap();
+    let before = project.document.track(track).unwrap();
+    let after = loaded.document.track(track).unwrap();
+    assert_eq!(after.take_lanes().len(), 2);
+    for (was, now) in before.take_lanes().zip(after.take_lanes()) {
+        assert_eq!(was.name, now.name);
+        assert_eq!(was.clips.len(), now.clips.len());
+        assert_eq!(was.clips[0].data, now.clips[0].data);
+        assert_eq!(
+            (was.clips[0].start, was.clips[0].length),
+            (now.clips[0].start, now.clips[0].length)
+        );
+    }
+    assert_eq!(render(&loaded.document), expected, "plays as it did");
+    // Auditioned, a lane plays in its place.
+    let mut audition = Editor::from_document(loaded.document.clone(), loaded.ids);
+    let lane = after.take_lanes().next().unwrap().id;
+    audition
+        .apply(Command::SetAudition { lane, on: true })
+        .unwrap();
+    assert_ne!(render(audition.document()), expected);
+}

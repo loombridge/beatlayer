@@ -24,6 +24,7 @@ use bl_shell_spec::audio_editing as audio_ids;
 use bl_shell_spec::audio_editing::CropArgs;
 use bl_shell_spec::bounce::{self as bounce_ids, PasteBouncedAudioArgs};
 use bl_shell_spec::browser::{self as browser_ids, AddToArrangementArgs};
+use bl_shell_spec::comping::{self as comping_ids, MoveCompEdgeArgs};
 use bl_shell_spec::editing as edit_ids;
 use bl_shell_spec::midi_files::{self as midi_ids, MidiImportArgs};
 use serde_json::Value;
@@ -51,6 +52,9 @@ pub const RAISED_BY_ARGUMENTS: &[&str] = &[
     midi_ids::IMPORT,
     SET_CLIP_DATA,
     bounce_ids::PASTE_BOUNCED_AUDIO,
+    comping_ids::COPY_TO_MAIN_LANE,
+    comping_ids::REPLACE_WITH_TAKE,
+    comping_ids::MOVE_COMP_EDGE,
 ];
 
 /// Whether `id`'s class can rise with its arguments.
@@ -344,8 +348,16 @@ fn paste_bounced(args: &Value, registered: Permission, scene: Scene<'_>) -> Call
             cropped: None,
         };
     }
+    // A take lane: the audio lands on the lane at its place in each track.
+    let lane_place = args.lane.and_then(|lane| {
+        doc.track(doc.take_lane_track(lane)?)?
+            .take_lanes()
+            .position(|held| held.id == lane)
+    });
     let track = args
-        .track
+        .lane
+        .and_then(|lane| doc.take_lane_track(lane))
+        .or(args.track)
         .or(scene.selected_track)
         .or_else(|| clipboard.source.first().copied());
     let Some(track) = track else {
@@ -375,8 +387,16 @@ fn paste_bounced(args: &Value, registered: Permission, scene: Scene<'_>) -> Call
             return unchanged;
         };
         if let Some(held) = doc.track(*destination) {
+            let on_lane: Vec<&bl_model::Clip> = match lane_place {
+                Some(place) => held
+                    .take_lanes()
+                    .nth(place)
+                    .map_or_else(Vec::new, |lane| lane.clips.iter().collect()),
+                None => held.clips().collect(),
+            };
             replaces.extend(
-                held.clips()
+                on_lane
+                    .into_iter()
                     .filter(|clip| clip.start < end && clip.end() > at)
                     .map(|clip| clip.id),
             );
@@ -413,13 +433,34 @@ fn tried(id: &str, args: &Value, registered: Permission, scene: Scene<'_>) -> Ca
                 None => view.selected_clips().iter().copied().collect(),
             }
         }
+        // The two clips either side of the boundary a comp edge moves.
+        comping_ids::MOVE_COMP_EDGE => {
+            let doc = editor.document();
+            serde_json::from_value::<MoveCompEdgeArgs>(args.clone())
+                .ok()
+                .and_then(|args| {
+                    let at = args.from.resolve(&doc.settings().time_signatures).ok()?;
+                    Some(
+                        doc.track(args.track)?
+                            .clips()
+                            .filter(|clip| clip.start == at || clip.end() == at)
+                            .map(|clip| clip.id)
+                            .collect(),
+                    )
+                })
+                .unwrap_or_default()
+        }
         _ => BTreeSet::new(),
     };
     let before = editor.document().clone();
     let mut view = view.clone();
     let mut clipboard = clipboard.clone();
     editor.begin("Check a call's permission");
-    let ran = editing::run(id, args.clone(), editor, &mut view, &mut clipboard).is_ok();
+    let ran = if comping_ids::handles(id) {
+        crate::arrangement::comping::run(id, args.clone(), editor, &view).is_ok()
+    } else {
+        editing::run(id, args.clone(), editor, &mut view, &mut clipboard).is_ok()
+    };
     let after = editor.document().clone();
     editor.cancel().ok();
     if !ran {

@@ -4,7 +4,9 @@
 //! boundaries as clips are made, edited, moved, and deleted, with the old
 //! lists (and the last references to their media) let go of on the audio
 //! thread for the collector to free; locates into the middle of clips; and
-//! program swaps from tempo changes, with the players migrating. RTSan stops
+//! program swaps from tempo changes, with the players migrating; and a take
+//! lane auditioned and let go of again as the clips play, which swaps a
+//! track's clip list for the lane's and back (the comping spec, R14). RTSan stops
 //! the process at the first allocation, free, lock, or blocking call in any
 //! of it, and the allocation trap, installed as in every Beatlayer test
 //! binary, fails the test at any heap use it sees.
@@ -87,6 +89,28 @@ fn clip_playback_passes_under_rtsan() {
         editor.apply(Command::CreateClip { track, clip }).unwrap();
         clips.push(id);
     }
+    // A take lane on the first track, to audition now and then.
+    let lane: bl_model::TakeLaneId = editor.new_id();
+    editor
+        .apply(Command::AddTakeLane {
+            track: tracks[0],
+            lane: bl_model::NewTakeLane {
+                id: Some(lane),
+                name: "Take 1".to_owned(),
+                clips: Vec::new(),
+            },
+            index: None,
+        })
+        .unwrap();
+    let take = Clip::new(
+        editor.new_id(),
+        Ticks::ZERO,
+        Ticks::WHOLE * 2,
+        ClipData::Audio(AudioData::new(ContentHash([2; 32]))),
+    );
+    editor
+        .apply(Command::CreateTakeClip { lane, clip: take })
+        .unwrap();
     sender.send_update(compiler.sync(editor.document()));
     sender.transport(TransportCommand::Play);
 
@@ -108,6 +132,11 @@ fn clip_playback_passes_under_rtsan() {
                 clip,
                 track: tracks[(round % 2) as usize + 1],
                 start: Ticks::QUARTER * (round % 4) as i64,
+            }),
+            // The lane is auditioned for a stretch, then let go of.
+            2 => Some(Command::SetAudition {
+                lane,
+                on: round % 40 == 2,
             }),
             12 => Some(Command::SetClipMute {
                 clip,

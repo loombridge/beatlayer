@@ -267,3 +267,25 @@ fn overlapping_clips_on_two_tracks_add_to_the_bit() {
         peak(1)
     );
 }
+
+// Spec: comping R17, R18. A comp copied from two takes renders as the
+// stretches of the takes it was cut from: the main lane's parts play what the
+// model says, and the take lanes, auditioned or not here, add nothing.
+#[test]
+fn a_comp_copied_from_two_takes_renders_their_stretches() {
+    let (scene, render) = matches_the_model("comp-from-two-takes");
+    let chirp = chirp(&scene);
+    // The first half of the bar is the first take from its start, the second
+    // half the other take from where the cut left it: a beat is 24,000 frames.
+    assert_eq!(left(&render, 0), chirp[0]);
+    assert_eq!(left(&render, 47_999), chirp[47_999]);
+    // The second take started 0.75 seconds (36,000 frames) later in the file.
+    assert_eq!(left(&render, 48_000), chirp[36_000 + 48_000]);
+    assert_ne!(chirp[48_000], chirp[84_000], "mid-waveform");
+    let takes = scene
+        .document()
+        .tracks()
+        .map(|track| track.take_lanes().count())
+        .sum::<usize>();
+    assert_eq!(takes, 2);
+}

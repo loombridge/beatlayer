@@ -13,7 +13,7 @@
 use std::collections::BTreeSet;
 
 use bl_core::time::{TempoMap, Ticks};
-use bl_model::{Clip, ClipId, Command, EditError, Editor, ModelError, TrackId};
+use bl_model::{Clip, ClipId, Command, EditError, Editor, ModelError, TakeLaneId, TrackId};
 
 /// A clip's part from `from` to `to`, which must lie inside it, playing what
 /// it played there under `tempo` ([`Clip::part`]).
@@ -23,8 +23,8 @@ pub fn piece(clip: &Clip, from: Ticks, to: Ticks, tempo: &TempoMap) -> Clip {
 }
 
 /// Splits `clip` at `at`, strictly inside it: the clip keeps the part before
-/// and a new clip, which is returned, takes the part after, each playing
-/// what it played before.
+/// and a new clip on the same lane, which is returned, takes the part after,
+/// each playing what it played before.
 ///
 /// # Errors
 ///
@@ -33,6 +33,8 @@ pub fn split_off(editor: &mut Editor, clip: ClipId, at: Ticks) -> Result<ClipId,
     let doc = editor.document();
     let missing = || EditError::Command(ModelError::NoSuchClip(clip));
     let track = doc.clip_track(clip).ok_or_else(missing)?;
+    // The part after the split goes on the lane the clip sits on.
+    let lane = doc.clip_lane(clip);
     let original = doc.clip(clip).ok_or_else(missing)?.clone();
     let tempo = doc.settings().tempo.clone();
     let id: ClipId = editor.new_id();
@@ -46,17 +48,20 @@ pub fn split_off(editor: &mut Editor, clip: ClipId, at: Ticks) -> Result<ClipId,
     })?;
     // Spec: scales R7. A split keeps the clip's scale.
     let scale = original.scale;
-    editor.apply(Command::CreateClip { track, clip: right })?;
+    editor.apply(match lane {
+        Some(lane) => Command::CreateTakeClip { lane, clip: right },
+        None => Command::CreateClip { track, clip: right },
+    })?;
     if scale != editor.document().settings().scale {
         editor.apply(scale.command(vec![id]))?;
     }
     Ok(id)
 }
 
-/// Clears `start..end` on `track` for something placed there: clips inside
-/// it are deleted, clips crossing an edge shortened from that edge, and a
-/// clip spanning it split around it, so the clips left play nothing in the
-/// span. Clips in `keep` are left alone.
+/// Clears `start..end` on `track`'s main lane for something placed there:
+/// clips inside it are deleted, clips crossing an edge shortened from that
+/// edge, and a clip spanning it split around it, so the clips left play
+/// nothing in the span. Clips in `keep` are left alone.
 ///
 /// # Errors
 ///
@@ -69,12 +74,29 @@ pub fn clear(
     end: Ticks,
     keep: &BTreeSet<ClipId>,
 ) -> Result<(), EditError> {
-    clear_spans(editor, track, &[(start, end)], keep)
+    clear_spans(editor, track, None, &[(start, end)], keep)
 }
 
-/// Clears every span in `spans` on `track`, as [`clear`] does each, looking
-/// through the track's clips once however many spans there are, as moving
-/// many clips at once needs. Spans may overlap and come in any order; empty
+/// Clears `start..end` on `track`'s main lane, or on its take lane `lane`,
+/// as [`clear`] does.
+///
+/// # Errors
+///
+/// [`EditError`] if the document refuses a step.
+pub fn clear_on(
+    editor: &mut Editor,
+    track: TrackId,
+    lane: Option<TakeLaneId>,
+    start: Ticks,
+    end: Ticks,
+    keep: &BTreeSet<ClipId>,
+) -> Result<(), EditError> {
+    clear_spans(editor, track, lane, &[(start, end)], keep)
+}
+
+/// Clears every span in `spans` on `track`'s main lane, or on its take lane
+/// `lane`, as [`clear`] does each, looking through the lane's clips once
+/// however many spans there are, as moving many clips at once needs. Spans may overlap and come in any order; empty
 /// ones are ignored. Clips in `keep` are left alone.
 ///
 /// # Errors
@@ -84,6 +106,7 @@ pub fn clear(
 pub fn clear_spans(
     editor: &mut Editor,
     track: TrackId,
+    lane: Option<TakeLaneId>,
     spans: &[(Ticks, Ticks)],
     keep: &BTreeSet<ClipId>,
 ) -> Result<(), EditError> {
@@ -105,13 +128,19 @@ pub fn clear_spans(
     }
     merged.truncate(write + 1);
 
-    let Some(lane) = editor.document().track(track) else {
+    let Some(held) = editor.document().track(track) else {
         return Ok(());
+    };
+    let on_lane: Vec<&Clip> = match lane {
+        None => held.clips().collect(),
+        Some(lane) => held
+            .take_lane(lane)
+            .map_or_else(Vec::new, |lane| lane.clips.iter().collect()),
     };
     // Each clip a span covers part of, with the first span it meets.
     let (first_start, last_end) = (merged[0].0, merged[merged.len() - 1].1);
-    let covered: Vec<(ClipId, usize)> = lane
-        .clips()
+    let covered: Vec<(ClipId, usize)> = on_lane
+        .into_iter()
         .filter(|c| c.start < last_end && c.end() > first_start)
         .filter_map(|c| {
             // The first span that ends after the clip starts.
@@ -242,7 +271,7 @@ mod tests {
                 clear(&mut one_by_one, track, *start, *end, &keep).unwrap();
             }
             let (mut editor, _, _) = build();
-            clear_spans(&mut editor, track, &cuts, &keep).unwrap();
+            clear_spans(&mut editor, track, None, &cuts, &keep).unwrap();
             assert_eq!(
                 spans(&editor, track),
                 spans(&one_by_one, track),

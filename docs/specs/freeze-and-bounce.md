@@ -109,4 +109,4 @@ This spec covers what each command renders, what it does to the tracks and clips
 | R27 | `crates/shell/tests/bounce.rs`, `a_bounced_track_nulls_against_its_source` | shell test |
 | R28 | `xtask/src/keymap.rs` (S-BOUNCE-001 and S-BOUNCE-002 bound) | shell test |
 | R29 | `crates/cli/tests/agent_bounce.rs`, `an_agent_bounces_a_track_in_place_and_undoes_it` | shell test |
-| R30 | to be written in WP-6.21 | shell test |
+| R30 | `crates/shell/tests/bounce.rs`, `a_bounce_renders_the_main_lane_only_and_the_new_track_has_no_take_lanes`, `bounce_to_new_track_skips_take_lane_material`, `bounce_to_new_track_skips_deactivated_material`, `paste_bounced_audio_onto_a_take_lane_places_the_audio_on_that_lane`; `crates/shell/tests/comping.rs`, `a_frozen_track_refuses_the_audition_and_the_copy_but_not_the_lanes_edits` | shell test |

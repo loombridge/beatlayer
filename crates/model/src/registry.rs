@@ -1154,12 +1154,98 @@ const ENTRIES: &[Entry] = &[
         permission: Permission::Edit,
         contexts: &[Arrangement],
         keys: &[],
-        description: "Adds a take lane under an audio track's arrangement lane, after the lanes \
-            it has. `lane.name` names it and `lane.clips` are the recorded passes it holds, each \
-            with a `name`, a `start` and `length` in ticks (705,600 to the quarter note), and \
-            audio `data` as `clip.create` takes it. The track plays only its arrangement lane: \
-            loop recording adds a lane for every pass and copies the latest pass to the \
-            arrangement lane. Audio tracks only.",
+        description: "Adds a take lane under an audio or MIDI track's main lane, after the \
+            lanes it has, or at `index` among them (0 is the lane nearest the main lane). \
+            `lane.name` names it and `lane.clips` are the clips it holds, each with a `name`, \
+            a `start` and `length` in ticks (705,600 to the quarter note), and `data`: audio \
+            as `clip.create` takes it, or tagged `audio` or `midi`. The lane and its clips are \
+            given IDs when `id` is left out. A lane holds clips of its track's kind. The track \
+            plays only its main lane, or the take lane that is auditioned in its place \
+            (`take_lane.set_audition`); recording adds a lane for every take and copies the \
+            latest to the main lane. Read the lanes back with the query tool's `track` \
+            `take_lanes`.",
+    },
+    Entry {
+        id: "take_lane.create_clip",
+        action: Action::Apply("create_take_clip"),
+        label: "Create Clip on Take Lane",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Puts a new clip on a take lane, at `clip.start` for `clip.length` ticks \
+            (705,600 to the quarter note), as `clip.create` puts one on a main lane: an audio \
+            clip on an audio track's lane and a MIDI clip on a MIDI track's. `clip.id` must be \
+            a new ID the project has issued for it. It does not clear what the lane holds \
+            there. The clip is then edited by its ID with the `clip.*` commands, as a \
+            main-lane clip is.",
+    },
+    Entry {
+        id: "take_lane.rename",
+        action: Action::Apply("rename_take_lane"),
+        label: "Rename Take Lane",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Gives a take lane a new name. An empty name is refused.",
+    },
+    Entry {
+        id: "take_lane.delete",
+        action: Action::Apply("delete_take_lanes"),
+        label: "Delete Take Lane(s)",
+        permission: Permission::Destructive,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Deletes take lanes with their clips. The main lane is left as it was, and \
+            a deleted lane that was auditioned stops being. Undo restores them, but because it \
+            removes the person's work an agent asks first.",
+    },
+    Entry {
+        id: "take_lane.delete_all",
+        action: Action::Apply("delete_all_take_lanes"),
+        label: "Delete All Take Lanes",
+        permission: Permission::Destructive,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Deletes every take lane of each of the audio or MIDI `tracks`, with their \
+            clips. The main lane is left as it was. Undo restores them, but because it \
+            removes the person's work an agent asks first.",
+    },
+    Entry {
+        id: "take_lane.delete_unused",
+        action: Action::Apply("delete_unused_take_lanes"),
+        label: "Delete All Unused Take Lanes",
+        permission: Permission::Destructive,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Deletes each of the audio or MIDI `tracks`' take lanes none of whose \
+            material the main lane uses: a main-lane clip uses a take-lane clip over the stretch \
+            where both lie when they play the same thing there (`take_lane.comp_sources` lists \
+            what is used). The main lane is left as it was. Undo restores them, but because it \
+            removes the person's work an agent asks first.",
+    },
+    Entry {
+        id: "take_lane.move",
+        action: Action::Apply("move_take_lanes"),
+        label: "Move Take Lane(s)",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Moves take lanes, which must all be on one track, to a new place among \
+            that track's take lanes, keeping their order: `index` counts from 0, the lane \
+            nearest the main lane, among the lanes that are not moved. The main lane stays \
+            first.",
+    },
+    Entry {
+        id: "take_lane.set_audition",
+        action: Action::Apply("set_audition"),
+        label: "Audition Take Lane",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Switches the audition of a take lane on or off. While a take lane is \
+            auditioned, its track plays that lane's clips in place of its main lane's, from the \
+            next block; a track has at most one, so switching one on switches off the one \
+            auditioned before. Session clips are unaffected. It is saved with the set.",
     },
     Entry {
         id: "clip.delete",

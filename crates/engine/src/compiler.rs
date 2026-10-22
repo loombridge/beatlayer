@@ -368,12 +368,18 @@ impl Compiler {
         // their clips again, and their nodes their envelopes again, since a
         // clip's envelopes modulate those and where the clip sits decides
         // when it plays (WP-3.15).
-        let tracks: BTreeSet<TrackId> = changes
+        let mut tracks: BTreeSet<TrackId> = changes
             .clips
             .keys()
             .flat_map(|&clip| [old.clip_track(clip), document.clip_track(clip)])
             .flatten()
             .collect();
+        // Auditioning a take lane swaps the clips the track plays (the
+        // comping spec, R14): its player gets them again.
+        tracks.extend(changes.tracks.keys().copied().filter(|&id| {
+            matches!((old.track(id), document.track(id)),
+                (Some(was), Some(now)) if was.audition() != now.audition())
+        }));
         let mut update = if recompile {
             let resend = Resend {
                 all: old.settings().tempo != document.settings().tempo,
@@ -1194,7 +1200,7 @@ impl Compiler {
         for track in document.tracks() {
             let id = track.id();
             let send = if build.new_players.contains(&id) {
-                track.clips().next().is_some() || track.slots().next().is_some()
+                track.played_clips().next().is_some() || track.slots().next().is_some()
             } else {
                 resend.all || resend.tracks.contains(&id)
             };

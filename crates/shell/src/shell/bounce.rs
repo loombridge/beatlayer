@@ -10,8 +10,8 @@ use std::rc::Rc;
 use bl_core::time::Ticks;
 use bl_model::{
     AudioData, AutomationTarget, BouncedAutomation, BouncedTrack, Clip, ClipData, ClipId, Command,
-    ContentHash, Document, Editor, FrozenClip, FrozenTrack, MidiData, SceneId, Track, TrackId,
-    TrackKind,
+    ContentHash, Document, Editor, FrozenClip, FrozenTrack, MidiData, NewTakeLane, SceneId,
+    TakeLaneId, Track, TrackId, TrackKind,
 };
 use bl_shell_spec::bounce::{
     self as ids, BounceInPlaceArgs, BounceResult, BounceToNewTrackArgs, Channels,
@@ -75,9 +75,10 @@ impl Shell {
                 };
                 self.bounce_target(&args)
                     .map(|target| {
-                        !editing::material(self.editor.document(), &target)
+                        editing::material(self.editor.document(), &target)
                             .0
-                            .is_empty()
+                            .iter()
+                            .any(|(_, clips)| clips.iter().any(|clip| !clip.mute))
                     })
                     .unwrap_or(false)
             }
@@ -527,7 +528,10 @@ impl Shell {
             if groups.iter().any(|group| group_holds(&doc, *group, source)) {
                 continue;
             }
-            if clips.is_empty() {
+            // Spec: freeze-and-bounce R30. A source whose material is all
+            // deactivated (or on take lanes, which the target leaves out)
+            // gets no track.
+            if clips.iter().all(|clip| clip.mute) {
                 continue;
             }
             let mut clips = clips;
@@ -575,7 +579,10 @@ impl Shell {
                 let clips: Vec<ClipId> = clips
                     .into_iter()
                     .filter(|clip| {
+                        // Spec: freeze-and-bounce R30. A take lane's clip is
+                        // no material to bounce.
                         doc.clip(*clip).is_some()
+                            && doc.clip_lane(*clip).is_none()
                             && tracks.as_ref().is_none_or(|tracks| {
                                 doc.clip_track(*clip)
                                     .is_some_and(|track| tracks.contains(&track))
@@ -772,8 +779,18 @@ impl Shell {
         // An empty MIDI track becomes an audio track first (R25).
         let conversions = self.midi_conversions(&tracks)?;
         let scene = match destination {
-            Destination::Track(_) => None,
+            Destination::Track(_) | Destination::Lane(..) => None,
             Destination::Slot(_, scene) => Some(scene),
+        };
+        // The place of the take lane among its track's, which each source's
+        // track puts its audio at.
+        let lane_place = match destination {
+            Destination::Lane(track, lane) => self
+                .editor
+                .document()
+                .track(track)
+                .and_then(|held| held.take_lanes().position(|held| held.id == lane)),
+            _ => None,
         };
         let made = self.editor.transact("Paste bounced audio", |editor| {
             for (track, bounced) in &conversions {
@@ -814,7 +831,45 @@ impl Shell {
                     }
                 }
             }
-            if !placements.is_empty() {
+            if let Some(place) = lane_place {
+                created.clear();
+                for (track, clips) in placements {
+                    // Spec: freeze-and-bounce R25. A lane is added where the
+                    // track has none at that place.
+                    while editor
+                        .document()
+                        .track(track)
+                        .is_some_and(|held| held.take_lanes().len() <= place)
+                    {
+                        let name = editor
+                            .document()
+                            .track(track)
+                            .map(Track::next_take_name)
+                            .unwrap_or_default();
+                        let lane: TakeLaneId = editor.new_id();
+                        editor
+                            .apply(Command::AddTakeLane {
+                                track,
+                                lane: NewTakeLane {
+                                    id: Some(lane),
+                                    name,
+                                    clips: Vec::new(),
+                                },
+                                index: None,
+                            })
+                            .map_err(|error| failed(id, error.to_string()))?;
+                    }
+                    let lane = editor
+                        .document()
+                        .track(track)
+                        .and_then(|held| held.take_lanes().nth(place).map(|lane| lane.id))
+                        .expect("the lane was just added");
+                    created.extend(
+                        editing::place_on_lane(editor, track, lane, clips)
+                            .map_err(|failure| edit_error(id, failure))?,
+                    );
+                }
+            } else if !placements.is_empty() {
                 let ids = editing::place(editor, placements)
                     .map_err(|failure| edit_error(id, failure))?;
                 created = ids;
@@ -841,7 +896,9 @@ impl Shell {
         let doc = self.editor.document();
         let lanes = editing::lanes(doc);
         let base_track = match destination {
-            Destination::Track(track) | Destination::Slot(track, _) => *track,
+            Destination::Track(track)
+            | Destination::Slot(track, _)
+            | Destination::Lane(track, _) => *track,
         };
         let base = lanes
             .iter()
@@ -876,6 +933,7 @@ impl Shell {
                 TrackKind::Midi => {
                     if held.clips().next().is_some()
                         || held.slots().next().is_some()
+                        || held.take_lanes().next().is_some()
                         || held.devices().next().is_some()
                     {
                         return Err(unavailable(
@@ -911,6 +969,19 @@ impl Shell {
     /// Session slot (R25).
     fn paste_destination(&self, args: &PasteBouncedAudioArgs) -> Result<Destination, ShellError> {
         let id = ids::PASTE_BOUNCED_AUDIO;
+        if let Some(lane) = args.lane {
+            let doc = self.editor.document();
+            let track = doc
+                .take_lane_track(lane)
+                .ok_or_else(|| unavailable(id, "no such take lane"))?;
+            if doc.track(track).map(Track::kind) != Some(TrackKind::Audio) {
+                return Err(unavailable(
+                    id,
+                    "audio can only go on an audio track's take lane",
+                ));
+            }
+            return Ok(Destination::Lane(track, lane));
+        }
         if let Some(scene) = args.scene {
             let track = args.track.or_else(|| {
                 self.session
@@ -988,6 +1059,8 @@ enum Destination {
     Track(TrackId),
     /// A Session slot.
     Slot(TrackId, SceneId),
+    /// A take lane (R25, R30).
+    Lane(TrackId, TakeLaneId),
 }
 
 /// The scene a clip is in, if it sits in a Session slot.

@@ -10,6 +10,7 @@
 //! edits that act on it are in [`editing`] (WP-1.8b), whose behaviour is in
 //! the arrangement editing spec.
 
+pub mod comping;
 pub mod editing;
 pub mod grid;
 pub mod locator;

@@ -111,7 +111,7 @@ impl MidiClipList {
     #[must_use]
     pub fn build(track: &Track, _tempo: &TempoMap, _rate: SampleRate) -> Self {
         let mut clips = Vec::new();
-        for clip in track.clips() {
+        for clip in track.played_clips() {
             if clip.mute {
                 continue;
             }

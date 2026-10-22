@@ -65,6 +65,7 @@ pub mod bounce;
 mod changes;
 mod clip;
 mod command;
+pub mod comp;
 mod device;
 pub mod device_display;
 pub mod device_layout;
@@ -112,7 +113,7 @@ pub use bounce::{BouncedAutomation, BouncedTrack};
 pub use changes::{Change, ChangeSet};
 pub use clip::{
     AudioData, Clip, ClipData, ClipEnvelope, ClipFolds, EDGE_FADE_SECONDS, EnvelopeKind, MidiData,
-    Note, PressurePoint, TakeClip, TakeLane, consolidated_midi,
+    NewTakeLane, Note, PressurePoint, TakeClip, TakeClipData, TakeLane, consolidated_midi,
 };
 pub use command::Command;
 pub use device::{
@@ -135,7 +136,7 @@ pub use follow::{
 pub use freeze::{FrozenClip, FrozenOutput, FrozenTail, FrozenTrack};
 pub use ids::{
     ChainId, ClipId, ContentHash, DeviceId, LocatorId, ParamId, ParseContentHashError, SceneId,
-    TrackId,
+    TakeLaneId, TrackId,
 };
 /// The persistent collections the document's public types hold.
 pub use imbl::{OrdMap, Vector};

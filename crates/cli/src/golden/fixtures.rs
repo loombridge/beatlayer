@@ -159,6 +159,15 @@ pub(super) const FIXTURES: &[Fixture] = &[
         build: clip_mid_bar,
     },
     Fixture {
+        name: "comp-from-two-takes",
+        about: "A comp copied from two take lanes (WP-6.21): the first half of a bar from one \
+                take of the chirp and the second from another take of it, started three \
+                quarters of a second later, each part cut from its take as Copy Selection to \
+                Main Lane cuts it, so the main lane plays the stretches of the takes they \
+                came from.",
+        build: comp_from_two_takes,
+    },
+    Fixture {
         name: "looped-clip",
         about: "A looped audio clip at -6 dB: it plays from its Start marker into its loop \
                 brace and repeats the brace nine times, each wrap on its exact frame.",
@@ -1218,6 +1227,63 @@ fn clip_mid_bar() -> Scene {
     let at = song.at("2.3.2");
     song.audio_clip(track, at, Ticks::QUARTER, late);
     song.finish(4.0)
+}
+
+/// Spec: comping R17, R18. Two takes, each on a take lane of its own; the main
+/// lane holds a part of each, cut from the take at the edges of the stretch
+/// and copied to the main lane under an ID of its own. The take lanes play
+/// nothing, so the render is the two stretches, one after the other, each
+/// from the place in its take that the comp took it from.
+fn comp_from_two_takes() -> Scene {
+    let mut song = Song::new();
+    let chirp = song.chirp();
+    let track = song.track(TrackKind::Audio, "Vocal", None);
+    let tempo = TempoMap::default();
+    let bar = Ticks::QUARTER * 4;
+    let mut takes = Vec::new();
+    for (name, audio) in [
+        ("Take 1", AudioData::new(chirp)),
+        (
+            "Take 2",
+            AudioData {
+                start: 0.75,
+                ..AudioData::new(chirp)
+            },
+        ),
+    ] {
+        let lane = song.editor.new_id();
+        song.apply(Command::AddTakeLane {
+            track,
+            lane: bl_model::NewTakeLane {
+                id: Some(lane),
+                name: name.to_owned(),
+                clips: Vec::new(),
+            },
+            index: None,
+        });
+        let clip = Clip::new(
+            song.editor.new_id(),
+            Ticks::ZERO,
+            bar,
+            ClipData::Audio(audio),
+        );
+        song.apply(Command::CreateTakeClip {
+            lane,
+            clip: clip.clone(),
+        });
+        takes.push(clip);
+    }
+    // The first two beats from the first take, the last two from the second.
+    let half = Ticks::QUARTER * 2;
+    for (take, from, to) in [(&takes[0], Ticks::ZERO, half), (&takes[1], half, bar)] {
+        let part = Clip {
+            id: song.editor.new_id(),
+            ..take.part(from, to, &tempo)
+        };
+        song.apply(Command::CreateClip { track, clip: part });
+    }
+    let seconds = song.to_last_clip();
+    song.finish(seconds)
 }
 
 /// Spec: audio-clips R4, R5. From 1.1.3, the clip plays 0.25 seconds of

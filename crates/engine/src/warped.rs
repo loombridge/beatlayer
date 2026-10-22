@@ -619,12 +619,11 @@ impl Contents {
                 beat,
                 preserve,
                 media.transients,
-                &frame_of,
-                &|frame| {
+                (&frame_of, &|frame| {
                     media.sound.map_or(0.0, |sound| {
                         sound.value(ClipParam::SampleOffset, frame) * SIXTEENTH as f64
                     })
-                },
+                }),
             );
             if stop >= end {
                 break;
@@ -667,8 +666,7 @@ impl Contents {
         beat: f64,
         preserve: Preserve,
         transients: &[f64],
-        frame_of: &dyn Fn(i64) -> f64,
-        offset: &dyn Fn(i64) -> f64,
+        (frame_of, offset): (&dyn Fn(i64) -> f64, &dyn Fn(i64) -> f64),
     ) {
         let ticks = (to - from) as f64;
         if ticks <= 0.0 {

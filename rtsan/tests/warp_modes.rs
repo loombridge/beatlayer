@@ -257,8 +257,10 @@ fn automated_clip_settings_pass_under_rtsan() {
     for param in ClipParam::ALL {
         let descriptor = param.descriptor();
         let target = AutomationTarget::Clip { param };
-        for (at, value) in [(Ticks::ZERO, descriptor.default), (Ticks::WHOLE * 2, descriptor.max())]
-        {
+        for (at, value) in [
+            (Ticks::ZERO, descriptor.default),
+            (Ticks::WHOLE * 2, descriptor.max()),
+        ] {
             editor
                 .apply(Command::SetAutomationBreakpoint {
                     track,
@@ -269,7 +271,10 @@ fn automated_clip_settings_pass_under_rtsan() {
                 .unwrap();
         }
         let (low, high) = param.envelope_range();
-        for (at, value) in [(Ticks::ZERO, low), (Ticks::WHOLE * 3, low + (high - low) / 3.0)] {
+        for (at, value) in [
+            (Ticks::ZERO, low),
+            (Ticks::WHOLE * 3, low + (high - low) / 3.0),
+        ] {
             editor
                 .apply(Command::SetClipEnvelopeBreakpoint {
                     clip,
@@ -295,7 +300,9 @@ fn automated_clip_settings_pass_under_rtsan() {
                 4 => WarpMode::Complex,
                 _ => WarpMode::ComplexPro,
             };
-            editor.apply(Command::SetClipWarpMode { clip, mode }).unwrap();
+            editor
+                .apply(Command::SetClipWarpMode { clip, mode })
+                .unwrap();
             let update = compiler.sync(editor.document());
             programs += u64::from(update.program.is_some());
             sender.send_update(update);
@@ -315,5 +322,8 @@ fn automated_clip_settings_pass_under_rtsan() {
     let state = monitor.state().clone();
     assert_eq!(state.counters.data_unrouted, 0);
     assert_eq!(state.swaps, programs);
-    assert!(state.meter(track).is_some_and(|[left, _]| left > 0.0), "the clip plays");
+    assert!(
+        state.meter(track).is_some_and(|[left, _]| left > 0.0),
+        "the clip plays"
+    );
 }

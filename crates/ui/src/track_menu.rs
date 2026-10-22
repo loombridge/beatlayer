@@ -155,7 +155,7 @@ pub fn open_device_view(shell: &Shell, track: TrackId, events: &mut Vec<UiEvent>
         json!({ "tracks": [track], "title_bars": true }),
     )));
     events.extend(
-        crate::main_window::show_only(shell, bl_shell::commands::DetailView::Device)
+        crate::main_window::open_view(shell, bl_shell::commands::DetailView::Device)
             .into_iter()
             .map(UiEvent::Invoke),
     );

@@ -377,6 +377,47 @@ fn view_state_reads_back_the_view_toggles() {
     assert_eq!(state["clip_view"]["draw_mode"], true);
 }
 
+/// Every detail command, run by ID through the agent API, reads back from
+/// `view.state`'s `detail` (the detail views spec, R17).
+#[test]
+fn view_state_reads_back_the_detail_area() {
+    let mut client = client();
+    let detail = |client: &mut _| run(client, "view.state", json!({}))["detail"].clone();
+    let before = detail(&mut client);
+    assert_eq!(before["clip_view"], false);
+    assert_eq!(before["device_view"], true);
+    assert_eq!(before["alone_last"], "device");
+    assert_eq!(before["hidden"], json!([]));
+    assert_eq!(before["clip_height"], 225.0);
+    assert_eq!(before["expanded"], false);
+
+    for (command, args) in [
+        ("view.toggle_clip_view", json!({})),
+        ("view.toggle_device_view", json!({})),
+        ("view.show_detail_views", json!({})),
+        ("view.switch_detail_view", json!({})),
+        ("view.toggle_detail_area", json!({})),
+        ("view.toggle_detail_area", json!({})),
+        ("view.set_detail_height", json!({ "points": 300 })),
+        ("view.expand_clip_view", json!({})),
+        ("focus.device_view", json!({})),
+        ("focus.clip_view", json!({})),
+    ] {
+        let returned = run(&mut client, command, args);
+        assert_eq!(returned, detail(&mut client), "{command} returns the state");
+    }
+    let after = detail(&mut client);
+    assert_eq!(after["clip_view"], true);
+    assert_eq!(after["device_view"], true);
+    assert_eq!(after["clip_height"], 300.0);
+    assert_eq!(after["expanded"], true);
+    assert_eq!(after["focus"], "clip");
+
+    let hidden = run(&mut client, "view.toggle_detail_area", json!({}));
+    assert_eq!(hidden["hidden"], json!(["clip", "device"]));
+    assert_eq!(hidden["clip_view"], false);
+}
+
 /// Every transient edit is one undo step, run by ID, and reads back from
 /// `clip.transients` (the warping spec, R23 and R24).
 #[test]

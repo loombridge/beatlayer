@@ -852,7 +852,7 @@ impl ArrangementUi {
                     json!({ "clips": [hit.clip] }),
                 );
                 events.extend(
-                    crate::main_window::show_only(shell, bl_shell::commands::DetailView::Clip)
+                    crate::main_window::open_view(shell, bl_shell::commands::DetailView::Clip)
                         .into_iter()
                         .map(UiEvent::Invoke),
                 );

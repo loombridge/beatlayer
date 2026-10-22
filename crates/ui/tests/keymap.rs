@@ -76,6 +76,14 @@ const SHELL: &[&str] = &[
     "S-VIEW-019",
     "S-VIEW-020",
     "S-VIEW-021",
+    "S-VIEW-004",
+    "S-VIEW-005",
+    "S-VIEW-015",
+    "S-VIEW-016",
+    "S-VIEW-022",
+    "S-NOTE-030",
+    "S-FOCUS-004",
+    "S-FOCUS-005",
     "S-FOCUS-001",
     "S-FOCUS-003",
     "S-FOCUS-011",
@@ -769,4 +777,89 @@ fn the_tags_shortcuts_reach_their_commands() {
     );
     assert_eq!(entry.mac, vec!["Cmd+E".to_owned()]);
     assert_eq!(entry.win, vec!["Ctrl+E".to_owned()]);
+}
+
+// Spec: detail-views R1, R2, R5, R6, R11, R14. The detail views' seven
+// shortcuts, and Cmd+Option+3, are bound to the commands that carry them
+// out, on both platforms, in the contexts the spec gives.
+#[test]
+fn the_detail_views_shortcuts_reach_their_commands() {
+    let keymap = Keymap::live12();
+    for (id, command, contexts) in [
+        (
+            "S-VIEW-004",
+            "view.switch_detail_view",
+            &[Context::Global][..],
+        ),
+        (
+            "S-VIEW-005",
+            "view.show_detail_views",
+            &[Context::Global][..],
+        ),
+        (
+            "S-VIEW-015",
+            "view.toggle_clip_view",
+            &[Context::Global][..],
+        ),
+        (
+            "S-VIEW-016",
+            "view.toggle_device_view",
+            &[Context::Global][..],
+        ),
+        (
+            "S-VIEW-022",
+            "view.toggle_detail_area",
+            &[Context::Global][..],
+        ),
+        (
+            "S-NOTE-030",
+            "view.expand_clip_view",
+            &[Context::ClipView][..],
+        ),
+        ("S-FOCUS-004", "focus.clip_view", &[Context::Global][..]),
+        ("S-FOCUS-005", "focus.device_view", &[Context::Global][..]),
+    ] {
+        let entry = keymap.entry_for(id).unwrap();
+        assert_eq!(entry.status, Status::Bound, "{id}");
+        assert_eq!(entry.commands.len(), 1, "{id}");
+        assert_eq!(entry.commands[0].id, command, "{id}");
+        assert_eq!(entry.commands[0].contexts, contexts, "{id}");
+    }
+    let plain = mods(false, false, false, false);
+    for platform in [Platform::Mac, Platform::Other] {
+        // Shift+Tab and F12 switch the views in the global context, which
+        // Tab's own setting (the `tab-focus` context) comes before.
+        let at = |key, m, contexts: &[Context]| {
+            keymap
+                .resolve(platform, key, m, contexts)
+                .map(|hit| hit.command.id.clone())
+        };
+        let shift = mods(false, false, false, true);
+        assert_eq!(
+            at(Key::F12, plain, &[Context::Global]).as_deref(),
+            Some("view.switch_detail_view")
+        );
+        assert_eq!(
+            at(Key::Tab, shift, &[Context::Global]).as_deref(),
+            Some("view.switch_detail_view")
+        );
+        assert_eq!(
+            at(Key::Tab, shift, &[Context::TabFocus, Context::Global]).as_deref(),
+            Some("focus.previous")
+        );
+        // Expand Clip View is the Clip View's own key.
+        let (cmd, ctrl) = match platform {
+            Platform::Mac => (true, false),
+            Platform::Other => (false, true),
+        };
+        let expand = mods(cmd, ctrl, true, false);
+        assert_eq!(
+            at(Key::E, expand, &[Context::ClipView, Context::Global]).as_deref(),
+            Some("view.expand_clip_view")
+        );
+        assert_eq!(
+            at(Key::E, expand, &[Context::DeviceView, Context::Global]),
+            None
+        );
+    }
 }

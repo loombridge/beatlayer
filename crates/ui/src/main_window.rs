@@ -1699,10 +1699,21 @@ fn command_of(element: Element) -> Option<&'static str> {
     }
 }
 
+/// What double-clicking a clip, a slot or a title bar, or a click on the
+/// Session View's status field, runs (detail-views R4): what a click on
+/// `view`'s selector runs, except that with both views showing neither is
+/// hidden.
+pub(crate) fn open_view(shell: &Shell, view: DetailView) -> Vec<Invocation> {
+    if shell.detail().clip_shown() && shell.detail().device_shown() {
+        Vec::new()
+    } else {
+        show_only(shell, view)
+    }
+}
+
 /// What a click on a view's selector runs (detail-views R3): the commands
-/// that show `view` and hide the other. Double-clicking a clip, a slot or a
-/// title bar, and the Session View's status field, do the same (R4).
-pub(crate) fn show_only(shell: &Shell, view: DetailView) -> Vec<Invocation> {
+/// that show `view` and hide the other.
+fn show_only(shell: &Shell, view: DetailView) -> Vec<Invocation> {
     let detail = shell.detail();
     let command = |toggle| Invocation::new(toggle, json!({}));
     let (own, own_shown, other, other_shown) = match view {

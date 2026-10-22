@@ -923,10 +923,10 @@ fn slot_at(
         .map(|column| (columns[column.index], *scene))
 }
 
-/// Shows the Clip View alone, as a click on its selector does (R3).
+/// Shows the Clip View, as a click on its selector does (R4).
 fn show_clip_view(shell: &Shell, events: &mut Vec<UiEvent>) {
     events.extend(
-        crate::main_window::show_only(shell, bl_shell::commands::DetailView::Clip)
+        crate::main_window::open_view(shell, bl_shell::commands::DetailView::Clip)
             .into_iter()
             .map(UiEvent::Invoke),
     );

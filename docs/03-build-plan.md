@@ -671,7 +671,7 @@ Total to 1.0: 256 packages planned in Phases 0 to 6, and about 110 estimated in 
 | 6.28 | done | 22 October 2026 | [#296](https://github.com/loombridge/beatlayer/pull/296); the Undo History panel lists the set's steps newest first in the Learn View's column, and a click or Enter on a row returns the set to that point in one jump that is no step of its own, with an agent's step marked with the agent's name ([undo history](specs/undo-history.md)) |
 | 6.29 | todo |  |  |
 | 6.29b | todo |  |  |
-| 6.30 | todo |  |  |
+| 6.30 | done | 22 October 2026 | [#316](https://github.com/loombridge/beatlayer/pull/316); the Theme & Colors page's Theme, Appearance (with Follow System), Tone and High Contrast rows and its four Customization number boxes, the colour pipeline every window draws, and theme files in the User Library's `Themes` folder ([themes](specs/themes.md) R1 to R13) |
 | 6.30b | todo |  |  |
 | 6.31 | done | 22 October 2026 | [#300](https://github.com/loombridge/beatlayer/pull/300); the browser's database on disk holds the index, the tags and the tag groups, the Tag Editor (Cmd+Shift+E) and Quick Tags put tags on the selected items, and `#` searches by tag ([browser tags](specs/browser-tags.md) R1 to R17) |
 | 6.32 | todo |  |  |

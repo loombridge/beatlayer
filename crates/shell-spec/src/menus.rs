@@ -318,7 +318,7 @@ const EDIT: &[Row] = &[
     (
         "M-EDIT-008",
         "Deactivate Track",
-        Key(&["S-TRACK-016", "S-SES-018", "S-ARR-027"]),
+        Key(&["S-TRACK-016", "S-SES-018", "S-ARR-027", "S-NOTE-041"]),
     ),
     SEPARATOR,
     ("M-EDIT-009", "Select All", Key(&["S-EDIT-009"])),

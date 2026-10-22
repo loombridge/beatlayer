@@ -39,7 +39,7 @@ use crate::clip_view::{self, ClipView};
 use crate::commands::{
     self as ids, ClipEnvelopeArgs, ClipTabArgs, DefaultLaunchModeArgs,
     DefaultLaunchQuantizationArgs, DefaultSetArgs, DefaultWarpModeArgs, FileReport, FoldNotesArgs,
-    LaneArgs, LoopWarpShortSamplesArgs, PathArgs, RecordSessionAutomationInArgs, SampleEditorArgs,
+    LaneArgs, LanesArgs, LoopWarpShortSamplesArgs, PathArgs, RecordSessionAutomationInArgs, SampleEditorArgs,
     SampleEditorResult, SaveAsArgs, SetResult, SettingsArgs, SwitchArgs, SwitchResult,
     TemplateArgs, TemporaryFolderArgs, TemporaryFolderResult, TestToneArgs, TestToneState,
     ThemeArgs, ViewResult, ViewState, ZoomArgs,
@@ -77,7 +77,7 @@ use bl_shell_spec::midi_files as midi_ids;
 use bl_shell_spec::midi_io as midi_io_ids;
 use bl_shell_spec::mixer_view as mixer_ids;
 use bl_shell_spec::multisampler as multisampler_ids;
-use bl_shell_spec::notes::{self as note_ids, ClipTab};
+use bl_shell_spec::notes::{self as note_ids, ClipTab, RandomizeAmounts};
 use bl_shell_spec::pads as pad_ids;
 use bl_shell_spec::perception as perception_ids;
 use bl_shell_spec::plugins as plugin_ids;
@@ -5660,6 +5660,19 @@ impl Shell {
                     _ => "Use as MIDI Effect".to_owned(),
                 })
             }
+            // Spec: note-editing R18. The item reads Activate Note(s) when
+            // every selected note is deactivated already.
+            note_ids::DEACTIVATE => Some(
+                if self
+                    .clip_view
+                    .selection_deactivated(self.editor.document(), &self.arrangement)
+                {
+                    "Activate Note(s)"
+                } else {
+                    "Deactivate Note(s)"
+                }
+                .to_owned(),
+            ),
             // The Playback menu's first item toggles with Stop (M-PLAY-001).
             transport_ids::PLAY_STOP => {
                 Some(if self.playing() { "Stop" } else { "Play" }.to_owned())
@@ -8753,6 +8766,51 @@ impl Shell {
                 // Spec: piano-roll; the lane shows one of a note's values.
                 let LaneArgs { lane } = Self::args(id, args)?;
                 self.clip_view.set_lane(lane);
+                Ok(to_value(
+                    &self
+                        .clip_view
+                        .state(self.editor.document(), &self.arrangement),
+                ))
+            }
+            ids::VIEW_LANES => {
+                // Spec: note-editing R1, R2, R13; the lanes under the note
+                // editor and their Randomize amounts.
+                let LanesArgs {
+                    lane,
+                    show,
+                    swap,
+                    amount,
+                    all,
+                } = Self::args(id, args)?;
+                if lane.is_none() && (show.is_some() || swap.is_some() || amount.is_some()) {
+                    return Err(ShellError::InvalidArgs {
+                        command: id.to_owned(),
+                        message: "`show`, `swap` and `amount` need a `lane`".to_owned(),
+                    });
+                }
+                if let Some(lane) = lane {
+                    if let Some(amount) = amount {
+                        let limit = RandomizeAmounts::limit(lane);
+                        if amount > limit {
+                            return Err(ShellError::InvalidArgs {
+                                command: id.to_owned(),
+                                message: format!("`amount` must be from 0 to {limit}"),
+                            });
+                        }
+                        self.clip_view.set_randomize_amount(lane, amount);
+                    }
+                    if swap == Some(true) {
+                        self.clip_view.swap_lane(lane);
+                    } else if let Some(on) = show {
+                        self.clip_view.show_lane(lane, on);
+                    } else if amount.is_none() && swap.is_none() {
+                        let on = !self.clip_view.lanes().is_shown(lane);
+                        self.clip_view.show_lane(lane, on);
+                    }
+                }
+                if let Some(on) = all {
+                    self.clip_view.show_all_lanes(on);
+                }
                 Ok(to_value(
                     &self
                         .clip_view

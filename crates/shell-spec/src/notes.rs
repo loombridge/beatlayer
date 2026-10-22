@@ -45,6 +45,12 @@ pub const QUANTIZE_SETTINGS: &str = "clip_view.quantize_settings";
 pub const SET_VALUE: &str = "note.set_value";
 /// `note.ramp_value`: spread evenly spaced values across notes.
 pub const RAMP_VALUE: &str = "note.ramp_value";
+/// `note.adjust_value`: change one value of notes by an amount.
+pub const ADJUST_VALUE: &str = "note.adjust_value";
+/// `note.randomize`: move one value of notes at random, up to an amount.
+pub const RANDOMIZE: &str = "note.randomize";
+/// `note.deactivate`: deactivate notes, or activate them again.
+pub const DEACTIVATE: &str = "note.deactivate";
 /// `note.copy`: copy notes to the note clipboard.
 pub const COPY: &str = "note.copy";
 /// `note.cut`: copy notes to the note clipboard and delete them.
@@ -66,6 +72,9 @@ pub const IDS: &[&str] = &[
     QUANTIZE_SETTINGS,
     SET_VALUE,
     RAMP_VALUE,
+    ADJUST_VALUE,
+    RANDOMIZE,
+    DEACTIVATE,
     COPY,
     CUT,
     PASTE,
@@ -182,6 +191,20 @@ impl NoteField {
         Self::VelocityDeviation,
     ];
 
+    /// The three fields that have a lane under the note editor, in the
+    /// order the lanes sit from the top (Spec: note-editing R1).
+    pub const LANES: [Self; 3] = [Self::Velocity, Self::Chance, Self::ReleaseVelocity];
+
+    /// The lane that edits this field: the field's own, or for velocity
+    /// deviation the Velocity lane, which shows it (Spec: note-editing R3).
+    #[must_use]
+    pub const fn lane(self) -> Self {
+        match self {
+            Self::VelocityDeviation => Self::Velocity,
+            other => other,
+        }
+    }
+
     /// The field's range: its lowest and highest value.
     #[must_use]
     pub const fn range(self) -> (f64, f64) {
@@ -224,8 +247,15 @@ pub struct SetValueArgs {
     pub notes: Option<Vec<u32>>,
     /// Which value to set.
     pub field: NoteField,
-    /// The value, within the field's range.
-    pub value: f64,
+    /// The value, within the field's range, for every one of the notes.
+    /// Give this or `values`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<f64>,
+    /// One value for each of the notes, in the order they're named, each
+    /// within the field's range: what drawing across a lane gives. Give this
+    /// or `value`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub values: Option<Vec<f64>>,
 }
 
 /// Arguments of `note.ramp_value`.
@@ -246,6 +276,69 @@ pub struct RampValueArgs {
     pub from: f64,
     /// The value the last note takes.
     pub to: f64,
+}
+
+/// Arguments of `note.adjust_value`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AdjustValueArgs {
+    /// The MIDI clip. Left out, the one the Clip View shows (the
+    /// Arrangement's selected clip).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<ClipId>,
+    /// The notes, by their place in the clip's notes in order (by start,
+    /// then pitch). Left out, the selected notes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<Vec<u32>>,
+    /// Which value to change.
+    pub field: NoteField,
+    /// How much to add to each note's value; negative lowers it. Whole
+    /// numbers for the whole-number fields; for `chance`, a fraction (0.1 is
+    /// 10 %).
+    pub by: f64,
+}
+
+/// Arguments of `note.randomize`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RandomizeArgs {
+    /// The MIDI clip. Left out, the one the Clip View shows (the
+    /// Arrangement's selected clip).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<ClipId>,
+    /// The notes, by their place in the clip's notes in order (by start,
+    /// then pitch). Left out, the selected notes, or with none selected
+    /// every note in the clip's span.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<Vec<u32>>,
+    /// Which value to randomise: `velocity`, `release_velocity` or `chance`.
+    pub field: NoteField,
+    /// How far from its value each note may move, in the field's own units:
+    /// 0 to 127 for the velocities, 0 to 1 for `chance` (0.25 is 25 %).
+    pub amount: f64,
+    /// Seeds the draw: the same seed with the same notes gives the same
+    /// values. Left out, each call draws afresh.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seed: Option<u64>,
+}
+
+/// Arguments of `note.deactivate`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DeactivateArgs {
+    /// The MIDI clip. Left out, the one the Clip View shows (the
+    /// Arrangement's selected clip).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<ClipId>,
+    /// The notes, by their place in the clip's notes in order (by start,
+    /// then pitch). Left out, the selected notes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<Vec<u32>>,
+    /// Whether the notes end up active (`true`) or deactivated (`false`).
+    /// Left out, they are deactivated, or activated when every one of them
+    /// is deactivated already.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active: Option<bool>,
 }
 
 /// Arguments of `clip_view.select_notes`.
@@ -504,9 +597,42 @@ pub struct NoteEditResult {
     pub undo_step: bool,
 }
 
+/// The Randomize amount of each lane, which the footer's control holds
+/// (Spec: note-editing R13). A new editor has 0 for each.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RandomizeAmounts {
+    /// The Velocity lane's, from 0 to 127.
+    pub velocity: u8,
+    /// The Chance lane's, a percentage from 0 to 100.
+    pub chance: u8,
+    /// The Release Velocity lane's, from 0 to 127.
+    pub release_velocity: u8,
+}
+
+impl RandomizeAmounts {
+    /// The amount of the lane that edits `field`, in the footer's units.
+    #[must_use]
+    pub const fn of(self, field: NoteField) -> u8 {
+        match field.lane() {
+            NoteField::Chance => self.chance,
+            NoteField::ReleaseVelocity => self.release_velocity,
+            _ => self.velocity,
+        }
+    }
+
+    /// The largest amount the lane that edits `field` takes.
+    #[must_use]
+    pub const fn limit(field: NoteField) -> u8 {
+        match field.lane() {
+            NoteField::Chance => 100,
+            _ => 127,
+        }
+    }
+}
+
 /// What the Clip View shows: which clip it is editing, the notes selected in
-/// it, its insert marker and time selection, the lane's setting, and the tab
-/// with the envelope it shows.
+/// it, its insert marker and time selection, its expression lanes, and the
+/// tab with the envelope it shows.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ClipViewState {
     /// Whether the Clip View shows in the detail area.
@@ -525,8 +651,17 @@ pub struct ClipViewState {
     /// The time selection's start and end, in ticks from the beginning of
     /// the clip's contents; `null` when there is none.
     pub time_selection: Option<(Ticks, Ticks)>,
-    /// Which value the lane under the note editor shows and edits.
+    /// The active lane: `velocity`, `chance` or `release_velocity`, whose
+    /// controls the footer shows.
     pub lane: NoteField,
+    /// The lanes shown under the note editor now, from the top: none while
+    /// they are all hidden.
+    pub lanes: Vec<NoteField>,
+    /// Whether the Show/Hide All Expression Editors switch has hidden every
+    /// lane.
+    pub lanes_hidden: bool,
+    /// The Randomize amounts of the three lanes.
+    pub randomize: RandomizeAmounts,
     /// Whether the note editor shows only the rows that hold notes (Fold,
     /// F).
     pub folded: bool,
@@ -669,28 +804,73 @@ fn specs() -> Vec<CommandSpec> {
             SET_VALUE,
             "Set Note Value",
             Permission::Edit,
-            "Sets one value of notes (`notes`, or the selected notes) to `value`, as dragging \
-             a note's stem in the Clip View's lane does: `field` is `velocity` (whole numbers \
+            "Sets one value of notes (`notes`, or the selected notes) to `value`, or to each \
+             note's own entry of `values` (one for each note, in the order named), as typing \
+             a value or drawing across an expression lane does: `field` is `velocity` (whole numbers \
              1 to 127), `release_velocity` (whole numbers 1 to 127), `chance` (0 to 1), or \
              `velocity_deviation` (whole numbers -127 to 127). Nothing changes if `value` is \
-             outside the field's range. The edited notes stay selected, and the whole drag is \
-             one undo step.",
+             outside the field's range. A velocity deviation is held within the room each \
+             note's velocity leaves: at most 127 less its velocity and at least 1 less. The \
+             edited notes stay selected, and the whole drag is one undo step.",
         )
         .args::<SetValueArgs>(),
         edit(
             RAMP_VALUE,
             "Ramp Note Values",
             Permission::Edit,
-            "Sets one value of notes (`notes`, or the selected notes) as a ramp, as dragging \
-             across several notes in the Clip View's lane does: the first note in the clip's \
-             order takes `from`, the last takes `to`, and those between take values evenly \
-             spaced between them (whole numbers for the whole-number fields). `field` takes \
-             the same fields and ranges as `note.set_value`; nothing changes if `from` or `to` \
-             is out of range. \
-             One note takes `from`. The edited notes stay selected, and the whole drag is one \
-             undo step.",
+            "Sets one value of notes (`notes`, or the selected notes) as a ramp, as the \
+             footer's Ramp Start and Ramp End do: the first note by start takes `from`, the \
+             last takes `to`, and those between take values on a straight line between them \
+             by their start times, notes that start together taking the same value (whole \
+             numbers for the whole-number fields). `field` takes the same fields and \
+             ranges as `note.set_value`; nothing changes if `from` or `to` is out of range. \
+             One note takes `from`, and so do notes that all start together. The edited notes \
+             stay selected, and the whole edit is one undo step.",
         )
         .args::<RampValueArgs>(),
+        edit(
+            ADJUST_VALUE,
+            "Adjust Note Values",
+            Permission::Edit,
+            "Changes one value of notes (`notes`, or the selected notes) by `by`, as the \
+             value keys and dragging a marker in an expression lane do: `field` is \
+             `velocity` or `release_velocity` (whole numbers, 1 to 127), `chance` (0 to 1; \
+             0.1 is 10 %), or `velocity_deviation` (whole numbers, held to the room each \
+             note's velocity leaves: at most 127 less its velocity and at least 1 less). \
+             Each note is held within its range, so a change past an end brings it to that \
+             end, and a call that changes no note records no undo step. The edited notes \
+             stay selected, and the whole drag is one undo step.",
+        )
+        .args::<AdjustValueArgs>(),
+        edit(
+            RANDOMIZE,
+            "Randomize Note Values",
+            Permission::Edit,
+            "Moves one value of notes (`notes`, or the selected notes, or with none \
+             selected every note in the clip's span) at random, as the footer's Randomize \
+             does: each note takes a value drawn evenly from its value less `amount` to \
+             its value plus `amount`, held within the field's range and whole for the \
+             velocities. `field` is `velocity`, `release_velocity` or `chance`; `amount` \
+             is in the field's own units, 0 to 127 or 0 to 1 for `chance`. The same `seed` \
+             with the same notes gives the same values, each note keeping its own draw so \
+             a larger `amount` moves it further the same way; left out, each call draws \
+             afresh. An `amount` of 0 changes nothing. The edit is one undo step, and the \
+             notes stay selected.",
+        )
+        .args::<RandomizeArgs>(),
+        edit(
+            DEACTIVATE,
+            "Deactivate Note(s)",
+            Permission::Edit,
+            "Deactivates notes (`notes`, or the selected notes), as 0 does: a deactivated \
+             note keeps its place and values, is drawn grey and never plays. With `active` \
+             left out the notes are deactivated, or activated again when every one of them \
+             is deactivated already (the menu item then reads Activate Note(s)); `active` \
+             `true` or `false` sets them. The edit is one undo step, and the notes stay \
+             selected.",
+        )
+        .binding("S-NOTE-041")
+        .args::<DeactivateArgs>(),
         CommandSpec::new(COPY, "Copy Notes")
             .description(
                 "Copies notes (`notes`, or the selected notes, or with none selected the notes \

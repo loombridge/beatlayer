@@ -158,6 +158,7 @@ pub fn run(args: &Args, path: &Path) -> Result<(), String> {
                 | UiEvent::FocusTrack(_)
                 | UiEvent::FocusValue(_)
                 | UiEvent::StatusHint(_)
+                | UiEvent::SearchRun(_)
                 | UiEvent::BeginGesture(_)
                 | UiEvent::BeginNamedGesture(_)
                 | UiEvent::EndGesture

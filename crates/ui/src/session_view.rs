@@ -149,7 +149,7 @@ impl GridUi {
     ) {
         let doc = shell.editor().document();
         let columns = shell.mixer_columns();
-        let returns: Vec<TrackId> = doc.returns().collect();
+        let returns: Vec<TrackId> = shell.shown_returns();
         let sections = crate::mixer::sections(shell);
         let scroll_x = shell.mixer_view().of(MixerOf::Session).scroll as f32;
         let state = shell.session().state();

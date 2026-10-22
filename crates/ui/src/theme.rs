@@ -93,6 +93,9 @@ pub struct Colours {
     /// The tint of every parameter a lit Map button can map, and of the lit
     /// button (WP-5.10).
     pub mapping: Colour,
+    /// The outline of the tracks the search field finds, in the Arrangement,
+    /// the Session View and the mixers (WP-6.42).
+    pub search: Colour,
     /// Track and clip colours, assigned to new tracks in turn.
     pub track_palette: Vec<Colour>,
 }

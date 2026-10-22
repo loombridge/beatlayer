@@ -1367,10 +1367,27 @@ impl Shell {
         let Recovered { set, project, .. } = recovered;
         self.set_replaced();
         self.editor = project.editor();
-        self.saved = snapshot(&self.editor);
         self.set_path = set.as_ref().map(|set| set.path().to_owned());
+        // Discard Changes goes back to the set file, or, for a set never
+        // saved, to the set a new one starts from.
+        self.saved = new_set_from(
+            self.set_path
+                .as_deref()
+                .or(self.prefs.default_set.as_deref()),
+        );
         self.dirty = true;
         self.store.adopt(set, project);
+        // The views saved beside the song, and its files, as `set.open`
+        // takes them.
+        self.devices.set_windows(self.store.windows());
+        self.devices.set_rack_views(self.store.rack_views());
+        self.devices
+            .set_multisampler_views(self.store.multisampler_views());
+        self.clip_view.set_folds(self.store.folds());
+        for (hash, path, size) in self.store.media_files() {
+            self.media
+                .add_reference(bl_media::ContentHash::from_bytes(hash.0), path, size);
+        }
         self.arrangement.reset();
         self.clip_view.forget_selection();
         self.mixer.reset();

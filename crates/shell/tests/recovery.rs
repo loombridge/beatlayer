@@ -124,7 +124,8 @@ struct Run {
     child: Child,
     lines: mpsc::Receiver<String>,
     reader: std::thread::JoinHandle<()>,
-    edited: Option<u64>,
+    /// The last edit the child reported on disk.
+    durable: Option<u64>,
 }
 
 impl Run {
@@ -156,7 +157,7 @@ impl Run {
             child,
             lines,
             reader,
-            edited: None,
+            durable: None,
         };
         // Wait until it has the set open.
         loop {
@@ -176,8 +177,8 @@ impl Run {
     fn note(&mut self, line: &str) {
         // The test harness starts the first line with the test's name.
         let line = line.rsplit(" ... ").next().unwrap_or(line);
-        if let Some(n) = line.strip_prefix("edit ") {
-            self.edited = Some(n.parse().unwrap());
+        if let Some(n) = line.strip_prefix("durable ") {
+            self.durable = Some(n.parse().unwrap());
         }
     }
 
@@ -194,27 +195,47 @@ impl Run {
     }
 }
 
+/// The tracks the child's edits have made after its edit `n`: every fourth
+/// edit makes one, the one two after it undoes it, and the next redoes it.
+fn tracks_after(n: u64) -> usize {
+    let made = usize::try_from(n / 4 + 1).unwrap();
+    if n % 4 == 2 { made - 1 } else { made }
+}
+
 #[test]
 fn a_killed_session_is_offered_and_recovered() {
     // Spec: crash-recovery R2, R3, R21, R28.
     let scratch = Scratch::new("killed");
     let recovery = scratch.path("Recovery");
     let set = saved_set(&scratch.path(""));
+    let tracks = bl_project::SetFile::open(&set)
+        .unwrap()
+        .1
+        .document
+        .tracks()
+        .count();
     let run = Run::start(&recovery, &set);
-    // Let it make a few edits, and wait until they are on disk, then kill
-    // it, as a crash would.
+    // Let it make a number of edits that differs from run to run, wait
+    // until they are on disk, then kill it, as a crash would.
+    let stop = 3 + std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .subsec_nanos()
+        % 16;
     let run = {
         let mut run = run;
         loop {
             let line = run.lines.recv_timeout(Duration::from_secs(60)).unwrap();
             run.note(&line);
-            if line.ends_with("durable 3") {
+            if run.durable >= Some(u64::from(stop)) {
                 break;
             }
         }
         run.kill()
     };
-    assert!(run.edited.is_some(), "the child made an edit");
+    // Every edit it reported on disk is recovered; the one after it may be
+    // on disk too, killed before it said so.
+    let durable = run.durable.expect("the child's edits are on disk");
 
     // The next launch offers the set.
     let mut shell = shell(&recovery);
@@ -237,6 +258,16 @@ fn a_killed_session_is_offered_and_recovered() {
         "the recovered set has no history"
     );
     assert!(shell.is_dirty(), "the recovered set is unsaved");
+    let recovered = shell.editor().document().tracks().count() - tracks;
+    assert!(
+        recovered == tracks_after(durable) || recovered == tracks_after(durable + 1),
+        "the song is as it was after edit {durable}: {recovered} tracks made"
+    );
+
+    // Discard Changes goes back to the set file.
+    shell.run("set.discard_changes", json!({})).unwrap();
+    assert_eq!(shell.editor().document().tracks().count(), tracks);
+    assert!(!shell.is_dirty());
 }
 
 #[test]
@@ -354,8 +385,13 @@ fn save_continuously_leaves_a_set_with_a_file_clean() {
     );
 }
 
+// Windows has no read-only folder to make: its read-only attribute doesn't
+// stop files being made in one.
+#[cfg(unix)]
 #[test]
 fn a_read_only_recovery_folder_says_so_once_and_the_set_still_edits() {
+    use std::os::unix::fs::PermissionsExt;
+
     // Spec: crash-recovery R27.
     let scratch = Scratch::new("read-only");
     let recovery = scratch.path("Recovery");
@@ -364,11 +400,7 @@ fn a_read_only_recovery_folder_says_so_once_and_the_set_still_edits() {
     // Make the folder unwritable, as a disk that is full or a folder that
     // has gone would be.
     let mut permissions = std::fs::metadata(&recovery).unwrap().permissions();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        permissions.set_mode(0o500);
-    }
+    permissions.set_mode(0o500);
     std::fs::set_permissions(&recovery, permissions).unwrap();
     // The session can't start, so the app says so.
     shell.use_recovery(recovery.clone()).unwrap();
@@ -395,11 +427,7 @@ fn a_read_only_recovery_folder_says_so_once_and_the_set_still_edits() {
         "{}",
         message.text
     );
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut permissions = std::fs::metadata(&recovery).unwrap().permissions();
-        permissions.set_mode(0o700);
-        std::fs::set_permissions(&recovery, permissions).unwrap();
-    }
+    let mut permissions = std::fs::metadata(&recovery).unwrap().permissions();
+    permissions.set_mode(0o700);
+    std::fs::set_permissions(&recovery, permissions).unwrap();
 }

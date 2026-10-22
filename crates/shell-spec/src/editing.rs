@@ -46,6 +46,12 @@ pub const COPY: &str = "arrangement.copy";
 pub const CUT: &str = "arrangement.cut";
 /// `arrangement.paste`: place the clipboard's material (Cmd-V).
 pub const PASTE: &str = "arrangement.paste";
+/// `arrangement.create_fade`: make fades and crossfades from the selection
+/// (Cmd-Option-F).
+pub const CREATE_FADE: &str = "arrangement.create_fade";
+/// `arrangement.delete_fades`: delete the fades and crossfades of clips
+/// (Cmd-Option-Delete, and Delete with a fade handle selected).
+pub const DELETE_FADES: &str = "arrangement.delete_fades";
 /// `arrangement.nudge`: move the selection by one grid step (Left, Right).
 pub const NUDGE: &str = "arrangement.nudge";
 /// `arrangement.loop_selection`: set the loop brace to the selection and
@@ -71,6 +77,8 @@ pub const IDS: &[&str] = &[
     NUDGE,
     LOOP_SELECTION,
     SELECT_LOOP,
+    CREATE_FADE,
+    DELETE_FADES,
 ];
 
 /// Whether `id` is one of the Arrangement's editing commands.
@@ -294,6 +302,19 @@ pub struct PasteArgs {
     /// selected track, or the track the material was copied from.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub track: Option<TrackId>,
+}
+
+/// Arguments of `arrangement.delete_fades`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DeleteFadesArgs {
+    /// The audio clips. Left out, the selected clips.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clips: Option<Vec<ClipId>>,
+    /// Only the fade at this edge of each clip, as Delete does with one fade
+    /// handle selected. Left out, both edges.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edge: Option<Edge>,
 }
 
 /// Which way `arrangement.nudge` moves.
@@ -557,6 +578,40 @@ fn specs() -> Vec<CommandSpec> {
         )
         .binding("S-ARR-011")
         .args::<LoopSelectionArgs>(),
+        edit(
+            CREATE_FADE,
+            "Create Fade",
+            Permission::Edit,
+            "Makes fades and crossfades from the Arrangement's selection, as Create Fade \
+             (Cmd-Option-F) does, on the selected audio clips (`clips`) or the time selection \
+             on its audio tracks (`tracks`, `start`, `end`). With a span of time: a clip whose \
+             start the span holds, and not its end, gets a fade-in from its start to the span's \
+             end; a clip whose end it holds, and not its start, gets a fade-out from the span's \
+             start to its end; two audio clips that meet inside the span get a crossfade over \
+             it; a clip the span holds whole, or holds neither edge of, is left as it is. \
+             With clips, each boundary where two of them meet gets a 4 ms crossfade, 2 ms each \
+             side, whatever the Create Fades on Clip Edges setting. Each fade is kept within \
+             its clip's limits, so a span longer than a clip allows makes the longest fade \
+             there is. One undo step, named Create Fade or Create Crossfade. Refused where the \
+             selection gives no fade. Read the result back from the clips' `data` with the \
+             query tool: `fade_in`, `fade_out`, their curves, `fade_in_before` and \
+             `fade_out_after`.",
+        )
+        .binding("S-ARR-008")
+        .args::<TargetArgs>(),
+        edit(
+            DELETE_FADES,
+            "Delete Fades",
+            Permission::Edit,
+            "Deletes the fades and crossfades of audio clips (`clips`, or the selected clips), \
+             or only those at one `edge` of each, as Delete does with a fade handle selected. \
+             With Create Fades on Clip Edges on, a fade goes back to 4 ms and a crossfade to \
+             the 4 ms crossfade of two clips that meet; with it off, fades go, and a crossfade \
+             with them, leaving the clips meeting with no fade. One undo step, named Delete \
+             Fade or Delete Fades. Cmd-Option-Delete (Ctrl-Alt-Backspace) runs this.",
+        )
+        .binding("S-ARR-009")
+        .args::<DeleteFadesArgs>(),
         CommandSpec::new(SELECT_LOOP, "Select Loop")
             .description(
                 "Selects the time inside the Arrangement's loop brace on every track, as \

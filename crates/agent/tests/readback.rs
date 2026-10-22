@@ -521,6 +521,10 @@ fn fixture() -> Project {
             gain: 0.5,
             fade_in: 0.25,
             fade_out: 0.5,
+            fade_in_curve: 0.5,
+            fade_out_curve: -0.25,
+            fade_in_before: 0.125,
+            fade_out_after: 0.0625,
             warp: true,
             warp_markers: vec![
                 WarpMarker {
@@ -1008,6 +1012,10 @@ fn the_fixture_sets_a_non_default_value_of_every_saved_field() {
                 "data.audio.gain",
                 "data.audio.fade_in",
                 "data.audio.fade_out",
+                "data.audio.fade_in_curve",
+                "data.audio.fade_out_curve",
+                "data.audio.fade_in_before",
+                "data.audio.fade_out_after",
                 "data.audio.warp",
                 "data.audio.warp_markers.0.time",
                 "data.audio.warp_markers.1.beat",

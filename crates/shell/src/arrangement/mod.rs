@@ -11,6 +11,7 @@
 //! the arrangement editing spec.
 
 pub mod editing;
+pub(crate) mod fades;
 pub mod grid;
 pub mod locator;
 pub mod placing;

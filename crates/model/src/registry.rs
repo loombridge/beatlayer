@@ -1407,10 +1407,51 @@ const ENTRIES: &[Entry] = &[
         keys: &[],
         description: "Sets the lengths, in seconds, of an audio clip's fade-in, from silence \
             at the clip's start in the arrangement, and its fade-out, to silence at its end; \
-            0 is no fade. Each fade is a straight line in amplitude. Short fades stop a clip \
-            that starts or ends mid-waveform from clicking: 0.004 (4 ms) is the length that \
-            Create Fades on Clip Edges gives new clips. Lengths must be finite and at least \
-            0.",
+            0 is no fade. `fade_in_curve` and `fade_out_curve`, from -1 to 1, shape each: 0, \
+            the default, is a straight line in amplitude, a positive curve bows the fade \
+            towards full level and a negative one towards silence; left out, a curve stays as \
+            it is. Short fades stop a clip that starts or ends mid-waveform from clicking: \
+            0.004 (4 ms) is the length that Create Fades on Clip Edges gives new clips. \
+            Lengths must be finite, at least 0 and within the clip's limits: a fade-in ends \
+            no later than the fade-out begins, and a fade takes in no point where the clip \
+            goes round its loop brace. Where a crossfade begins or ends at the clip, \
+            this sets the crossfade's part inside the clip and its curve, and the clip it \
+            meets follows. Read the result back with the query tool's `clip` field `data` \
+            and the clip's `fade_in_before` and `fade_out_after`.",
+    },
+    Entry {
+        id: "arrangement.set_crossfade",
+        action: Action::Apply("set_crossfade"),
+        label: "Set Crossfade",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Makes or changes the crossfade between two audio clips on a track that \
+            meet, the earlier one ending exactly where the later one starts: `boundary` is \
+            that position. The crossfade runs from `before` seconds before the boundary to \
+            `after` seconds past it, at least one of them above 0; over it the earlier \
+            clip fades out and the later one fades in, each playing what it would play there \
+            if its edge were moved to the span's far end, as resizing it would. `curve`, from \
+            -1 to 1, shapes both fades; 0, the default, is a straight line, so the two \
+            gains add to 1. Refused where no two audio clips meet at the boundary, or past a \
+            clip's fade limits: a crossfade reaches no further into a clip than the clip's \
+            other fade allows, takes in no point where a clip goes round its loop brace, and \
+            reads nothing before the start of a file. Read it back with the query tool's \
+            `clip` field `data`: the earlier clip's `fade_out` and `fade_out_after` and the \
+            later clip's `fade_in` and `fade_in_before`.",
+    },
+    Entry {
+        id: "arrangement.delete_crossfade",
+        action: Action::Apply("delete_crossfade"),
+        label: "Delete Crossfade",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Ends the crossfade between the two audio clips on a track that meet at \
+            `boundary`, leaving neither a fade there. Refused where they have no crossfade. \
+            The shell's `arrangement.delete_fades` does what Delete does on a selected fade \
+            handle, which with Create Fades on Clip Edges on gives the clips a 4 ms \
+            crossfade instead.",
     },
     Entry {
         id: "clip.set_warp",

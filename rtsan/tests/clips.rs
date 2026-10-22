@@ -103,6 +103,8 @@ fn clip_playback_passes_under_rtsan() {
                 clip,
                 fade_in: (round % 5) as f64 * 0.01,
                 fade_out: 0.004,
+                fade_in_curve: None,
+                fade_out_curve: None,
             }),
             8 => Some(Command::MoveClip {
                 clip,

@@ -72,6 +72,7 @@ mod document;
 mod editor;
 mod error;
 mod external;
+mod fades;
 pub mod fader;
 mod follow;
 pub mod graph;
@@ -111,8 +112,8 @@ pub use bl_stretch::WarpMap;
 pub use bounce::{BouncedAutomation, BouncedTrack};
 pub use changes::{Change, ChangeSet};
 pub use clip::{
-    AudioData, Clip, ClipData, ClipEnvelope, ClipFolds, EDGE_FADE_SECONDS, EnvelopeKind, MidiData,
-    Note, PressurePoint, TakeClip, TakeLane, consolidated_midi,
+    AudioData, Clip, ClipData, ClipEnvelope, ClipFolds, Crossfade, EDGE_FADE_SECONDS, EnvelopeKind,
+    MidiData, Note, PressurePoint, TakeClip, TakeLane, consolidated_midi, crossfades, fade_power,
 };
 pub use command::Command;
 pub use device::{
@@ -121,6 +122,7 @@ pub use device::{
 };
 pub use device_display::{DeviceDisplay, DisplayMarker, DisplayReading, DisplaySeries};
 pub use device_layout::DeviceLayout;
+pub use fades::{EdgeRoom, FadeLimits};
 pub use document::{ArrangementLoop, Document, MAX_CUE_VOLUME, Settings};
 pub use editor::{EditError, Editor, HistoryStep, Maker};
 pub use error::ModelError;

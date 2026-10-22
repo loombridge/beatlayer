@@ -16,6 +16,7 @@ use crate::automation::{
 };
 use crate::clip::{
     AudioData, Clip, ClipData, ClipEnvelope, EnvelopeKind, MidiData, Note, TakeLane, clip_entry,
+    crossfades,
 };
 use crate::device::{Device, DeviceKind, DeviceRole};
 use crate::document::Document;
@@ -917,16 +918,58 @@ pub enum Command {
         #[schemars(range(min = 0.0))]
         gain: f64,
     },
-    /// Sets the lengths of an audio clip's fade-in and fade-out.
+    /// Sets the lengths and curves of an audio clip's fade-in and fade-out.
     SetClipFades {
         /// The audio clip.
         clip: ClipId,
         /// The fade-in's length in seconds from the clip's start: 0 for none.
+        /// Where a crossfade begins at the clip's start, this is how far
+        /// past the start it runs.
         #[schemars(range(min = 0.0))]
         fade_in: f64,
         /// The fade-out's length in seconds up to the clip's end: 0 for none.
+        /// Where a crossfade ends at the clip's end, this is how far before
+        /// the end it begins.
         #[schemars(range(min = 0.0))]
         fade_out: f64,
+        /// The fade-in's curve, from −1 to 1: 0 is a straight line, a
+        /// positive curve bows towards full level and a negative one towards
+        /// silence. Left out, the curve stays as it is.
+        #[serde(default)]
+        #[schemars(range(min = -1.0, max = 1.0))]
+        fade_in_curve: Option<f64>,
+        /// The fade-out's curve, from −1 to 1. Left out, the curve stays as
+        /// it is.
+        #[serde(default)]
+        #[schemars(range(min = -1.0, max = 1.0))]
+        fade_out_curve: Option<f64>,
+    },
+    /// Makes or changes the crossfade between two audio clips on a track
+    /// that meet at `boundary`.
+    SetCrossfade {
+        /// The track.
+        track: TrackId,
+        /// Where the earlier clip ends and the later one starts.
+        boundary: Ticks,
+        /// How many seconds before the boundary the crossfade starts.
+        #[schemars(range(min = 0.0))]
+        before: f64,
+        /// How many seconds after the boundary the crossfade ends.
+        #[schemars(range(min = 0.0))]
+        after: f64,
+        /// The curve of both fades, from −1 to 1: 0 is a straight line, so
+        /// the two gains add to 1.
+        #[serde(default)]
+        #[schemars(range(min = -1.0, max = 1.0))]
+        curve: f64,
+    },
+    /// Ends the crossfade between the two audio clips on a track that meet
+    /// at `boundary`, leaving neither clip a fade there.
+    DeleteCrossfade {
+        /// The track.
+        track: TrackId,
+        /// Where the earlier clip ends and the later one starts.
+        boundary: Ticks,
     },
     /// Switches an audio clip's Warp on or off (WP-4.1): its Start and End
     /// markers and loop brace convert through the warp map and it keeps its
@@ -2444,7 +2487,9 @@ impl Command {
             Self::SetMidiClipLoop { .. } => "Change clip loop",
             Self::SetClipLoopEnabled { .. } => "Switch clip loop",
             Self::SetClipGain { .. } => "Change clip gain",
-            Self::SetClipFades { .. } => "Change clip fades",
+            Self::SetClipFades { .. } => "Change Fade",
+            Self::SetCrossfade { .. } => "Change Fade",
+            Self::DeleteCrossfade { .. } => "Delete Fade",
             // WP-4.1. Live's undo names for the warp edits are to observe;
             // Beatlayer's name the edit.
             Self::SetClipWarp { .. } => "Switch Warp",
@@ -3431,10 +3476,36 @@ impl Document {
                 clip,
                 fade_in,
                 fade_out,
-            } => self.edit_audio(*clip, |audio| {
-                audio.fade_in = *fade_in;
-                audio.fade_out = *fade_out;
-            }),
+                fade_in_curve,
+                fade_out_curve,
+            } => self.set_clip_fades(*clip, *fade_in, *fade_out, *fade_in_curve, *fade_out_curve),
+            Command::SetCrossfade {
+                track,
+                boundary,
+                before,
+                after,
+                curve,
+            } => {
+                if *before <= 0.0 && *after <= 0.0 {
+                    return Err(ModelError::InvalidInput(
+                        "a crossfade must reach before or after the boundary; use \
+                         `arrangement.delete_crossfade` to end one",
+                    ));
+                }
+                self.set_crossfade(*track, *boundary, *before, *after, *curve)
+            }
+            Command::DeleteCrossfade { track, boundary } => {
+                let (earlier, later) = self.meeting_audio_clips(*track, *boundary)?;
+                if !crossfades(self.track(*track).iter().flat_map(|t| t.clips()))
+                    .iter()
+                    .any(|c| c.earlier == earlier && c.later == later)
+                {
+                    return Err(ModelError::InvalidInput(
+                        "there is no crossfade where those clips meet",
+                    ));
+                }
+                self.set_crossfade(*track, *boundary, 0.0, 0.0, 0.0)
+            }
             Command::SetClipWarp { clip, warp } => {
                 let at = self.clip_ref(*clip)?.start;
                 let set_tempo = self.settings.tempo.bpm_at(at);
@@ -5729,6 +5800,123 @@ impl Document {
         Ok(())
     }
 
+    /// The two audio clips on `track` that meet at `boundary`: the one that
+    /// ends there and the one that starts there.
+    fn meeting_audio_clips(
+        &self,
+        track: TrackId,
+        boundary: Ticks,
+    ) -> Result<(ClipId, ClipId), ModelError> {
+        let lane = self.track(track).ok_or(ModelError::NoSuchTrack(track))?;
+        let audio_at = |ends: bool| {
+            lane.clips().find(|clip| {
+                clip.data.is_audio() && if ends { clip.end() } else { clip.start } == boundary
+            })
+        };
+        match (audio_at(true), audio_at(false)) {
+            (Some(earlier), Some(later)) if earlier.id != later.id => Ok((earlier.id, later.id)),
+            _ => Err(ModelError::InvalidInput(
+                "no two audio clips on the track meet at that position",
+            )),
+        }
+    }
+
+    /// Checks that the fades of `audio`, the data clip `id` would have, stay
+    /// within the audio clips spec's R25 limits.
+    fn check_fades_of(&self, id: ClipId, audio: &AudioData) -> Result<(), ModelError> {
+        crate::fades::check_fades(self.clip_ref(id)?, audio, &self.settings.tempo)
+    }
+
+    /// Sets a clip's fades (R30), keeping a crossfade that ends or begins at
+    /// the clip consistent on its other clip.
+    fn set_clip_fades(
+        &mut self,
+        clip: ClipId,
+        fade_in: f64,
+        fade_out: f64,
+        fade_in_curve: Option<f64>,
+        fade_out_curve: Option<f64>,
+    ) -> Result<(), ModelError> {
+        let ClipData::Audio(current) = &self.clip_ref(clip)?.data else {
+            return Err(ModelError::NotAudioClip(clip));
+        };
+        let mut next = current.clone();
+        next.fade_in = fade_in;
+        next.fade_out = fade_out;
+        next.fade_in_curve = fade_in_curve.unwrap_or(next.fade_in_curve);
+        next.fade_out_curve = fade_out_curve.unwrap_or(next.fade_out_curve);
+        let track = self.clip_owner(clip)?;
+        let existing = self
+            .track(track)
+            .map(|t| crossfades(t.clips()))
+            .unwrap_or_default();
+        let at_start = existing.iter().find(|c| c.later == clip);
+        let at_end = existing.iter().find(|c| c.earlier == clip);
+        // The crossfade at an edge keeps the clip's length there as its own
+        // and the other clip follows.
+        // An edge without one is a plain fade, whatever an earlier crossfade
+        // left.
+        let mut partners = Vec::new();
+        next.fade_in_before = at_start.map_or(0.0, |c| c.before);
+        next.fade_out_after = at_end.map_or(0.0, |c| c.after);
+        if let Some(c) = at_start {
+            partners.push((c.earlier, true));
+        }
+        if let Some(c) = at_end {
+            partners.push((c.later, false));
+        }
+        check_audio(&next)?;
+        self.check_fades_of(clip, &next)?;
+        let mut others = Vec::with_capacity(partners.len());
+        for (id, is_earlier) in partners {
+            let ClipData::Audio(data) = &self.clip_ref(id)?.data else {
+                continue;
+            };
+            let mut other = data.clone();
+            if is_earlier {
+                other.fade_out_after = next.fade_in;
+                other.fade_out_curve = next.fade_in_curve;
+            } else {
+                other.fade_in_before = next.fade_out;
+                other.fade_in_curve = next.fade_out_curve;
+            }
+            check_audio(&other)?;
+            self.check_fades_of(id, &other)?;
+            others.push((id, other));
+        }
+        self.edit_audio(clip, |audio| *audio = next)?;
+        for (id, other) in others {
+            self.edit_audio(id, |audio| *audio = other)?;
+        }
+        Ok(())
+    }
+
+    /// Gives the audio clips on `track` that meet at `boundary` a crossfade
+    /// of the span and curve, or none if `before` and `after` are 0 (R30).
+    fn set_crossfade(
+        &mut self,
+        track: TrackId,
+        boundary: Ticks,
+        before: f64,
+        after: f64,
+        curve: f64,
+    ) -> Result<(), ModelError> {
+        let (earlier, later) = self.meeting_audio_clips(track, boundary)?;
+        let (ClipData::Audio(first), ClipData::Audio(second)) =
+            (&self.clip_ref(earlier)?.data, &self.clip_ref(later)?.data)
+        else {
+            return Err(ModelError::InvalidInput("a crossfade is between audio clips"));
+        };
+        let (mut first, mut second) = (first.clone(), second.clone());
+        first.crossfade_into(&mut second, before, after, curve);
+        for (id, audio) in [(earlier, &first), (later, &second)] {
+            check_audio(audio)?;
+            self.check_fades_of(id, audio)?;
+        }
+        self.edit_audio(earlier, |audio| *audio = first)?;
+        self.edit_audio(later, |audio| *audio = second)
+    }
+
     /// Changes an audio clip's data with `edit`, if the result is valid.
     fn edit_audio(
         &mut self,
@@ -7410,6 +7598,23 @@ pub(crate) fn check_audio(audio: &AudioData) -> Result<(), ModelError> {
         "fade-out length",
         audio.fade_out,
         at_least_zero(audio.fade_out),
+    )?;
+    check_value(
+        "fade-in start before the clip",
+        audio.fade_in_before,
+        at_least_zero(audio.fade_in_before),
+    )?;
+    check_value(
+        "fade-out end after the clip",
+        audio.fade_out_after,
+        at_least_zero(audio.fade_out_after),
+    )?;
+    let curve = |value: f64| value.is_finite() && (-1.0..=1.0).contains(&value);
+    check_value("fade-in curve", audio.fade_in_curve, curve(audio.fade_in_curve))?;
+    check_value(
+        "fade-out curve",
+        audio.fade_out_curve,
+        curve(audio.fade_out_curve),
     )
 }
 
@@ -8244,6 +8449,242 @@ mod tests {
         );
     }
 
+    // Spec: audio-clips R23, R25, R30
+    #[test]
+    fn fades_take_curves_and_stop_at_their_limits() {
+        let mut song = Song::new();
+        let track = song.track(TrackKind::Audio, None);
+        // A clip of a bar at 120 BPM: two seconds.
+        let clip = song.clip(track, 0);
+        let audio = |song: &Song| match &song.doc.clip(clip).unwrap().data {
+            ClipData::Audio(audio) => audio.clone(),
+            ClipData::Midi(_) => unreachable!("an audio clip"),
+        };
+        let fades = |fade_in, fade_out, fade_in_curve, fade_out_curve| Command::SetClipFades {
+            clip,
+            fade_in,
+            fade_out,
+            fade_in_curve,
+            fade_out_curve,
+        };
+        song.apply(fades(0.25, 0.5, Some(0.5), Some(-1.0))).unwrap();
+        let set = audio(&song);
+        assert_eq!((set.fade_in_curve, set.fade_out_curve), (0.5, -1.0));
+        // A curve left out stays as it was.
+        song.apply(fades(0.5, 0.5, None, Some(0.0))).unwrap();
+        let set = audio(&song);
+        assert_eq!((set.fade_in_curve, set.fade_out_curve), (0.5, 0.0));
+        for bad in [
+            fades(0.25, 0.5, Some(1.5), None),
+            fades(0.25, 0.5, None, Some(f64::NAN)),
+        ] {
+            assert!(matches!(
+                song.reject(bad),
+                ModelError::InvalidValue { .. }
+            ));
+        }
+        // The fade-in must end no later than the fade-out begins.
+        assert!(matches!(
+            song.reject(fades(1.6, 0.5, None, None)),
+            ModelError::InvalidInput(_)
+        ));
+        song.apply(fades(1.5, 0.5, None, None)).unwrap();
+
+        // Spec: audio-clips R25. A fade takes in no point where the clip
+        // goes round its loop brace: this clip starts half a second into its
+        // file and goes round at 1.5 seconds, after one second.
+        let looped = AudioData {
+            start: 0.5,
+            looping: true,
+            loop_start: 1.0,
+            loop_end: Some(1.5),
+            ..audio(&song)
+        };
+        song.apply(Command::SetClipData {
+            clip,
+            data: ClipData::Audio(looped),
+        })
+        .unwrap();
+        song.apply(fades(1.0, 0.0, None, None)).unwrap();
+        assert!(matches!(
+            song.reject(fades(1.1, 0.0, None, None)),
+            ModelError::InvalidInput(_)
+        ));
+        // The brace repeats every half second from then, so the clip goes
+        // round at 1, 1.5 and 2: a fade-out of 0.25 takes in none, 0.75 does.
+        song.apply(fades(0.0, 0.5, None, None)).unwrap();
+        assert!(matches!(
+            song.reject(fades(0.0, 0.75, None, None)),
+            ModelError::InvalidInput(_)
+        ));
+        let limits = song.doc.fade_limits(clip).unwrap();
+        assert_eq!(
+            (limits.start.inside, limits.start.outside),
+            (1.0, 0.0),
+            "no clip meets it"
+        );
+        assert_eq!(limits.end.inside, 0.5);
+    }
+
+    // Spec: audio-clips R24, R25, R30
+    #[test]
+    fn a_crossfade_is_kept_the_same_on_both_clips_and_ends_when_they_part() {
+        let mut song = Song::new();
+        let track = song.track(TrackKind::Audio, None);
+        let earlier = song.clip(track, 0);
+        let later = song.clip(track, 4);
+        let boundary = Ticks::WHOLE;
+        let audio = |song: &Song, clip| match &song.doc.clip(clip).unwrap().data {
+            ClipData::Audio(audio) => audio.clone(),
+            ClipData::Midi(_) => unreachable!("an audio clip"),
+        };
+        let found = |song: &Song| crate::clip::crossfades(song.doc.track(track).unwrap().clips());
+        // The later clip starts half a second into its file, so it can play
+        // that long before its start.
+        song.apply(Command::SetClipRegion {
+            clip: later,
+            start: 0.5,
+            end: None,
+            ticks: false,
+        })
+        .unwrap();
+        song.apply(Command::SetCrossfade {
+            track,
+            boundary,
+            before: 0.01,
+            after: 0.02,
+            curve: 0.25,
+        })
+        .unwrap();
+        let (first, second) = (audio(&song, earlier), audio(&song, later));
+        assert_eq!(
+            (first.fade_out, first.fade_out_after, first.fade_out_curve),
+            (0.01, 0.02, 0.25)
+        );
+        assert_eq!(
+            (second.fade_in, second.fade_in_before, second.fade_in_curve),
+            (0.02, 0.01, 0.25)
+        );
+        assert_eq!(
+            found(&song),
+            [crate::clip::Crossfade {
+                earlier,
+                later,
+                boundary,
+                before: 0.01,
+                after: 0.02,
+                curve: 0.25
+            }]
+        );
+        // The room each side: the later clip's file reaches back half a
+        // second, and the earlier clip's fade-in leaves it its whole length.
+        let limits = song.doc.fade_limits(later).unwrap();
+        assert_eq!(limits.start.outside, 0.5);
+        assert_eq!(song.doc.fade_limits(earlier).unwrap().end.outside, 2.0);
+
+        // Changing the fade at one clip's edge changes the crossfade, and the
+        // other clip follows.
+        song.apply(Command::SetClipFades {
+            clip: later,
+            fade_in: 0.05,
+            fade_out: 0.0,
+            fade_in_curve: Some(-0.5),
+            fade_out_curve: None,
+        })
+        .unwrap();
+        let first = audio(&song, earlier);
+        assert_eq!(
+            (first.fade_out, first.fade_out_after, first.fade_out_curve),
+            (0.01, 0.05, -0.5)
+        );
+        song.apply(Command::SetClipFades {
+            clip: earlier,
+            fade_in: 0.0,
+            fade_out: 0.03,
+            fade_in_curve: None,
+            fade_out_curve: None,
+        })
+        .unwrap();
+        let second = audio(&song, later);
+        assert_eq!(
+            (second.fade_in, second.fade_in_before, second.fade_in_curve),
+            (0.05, 0.03, -0.5)
+        );
+        assert_eq!(found(&song).len(), 1);
+
+        // Past a limit, where no clips meet, or with no span, it is refused.
+        for bad in [
+            // The later clip's file has half a second before its start.
+            Command::SetCrossfade {
+                track,
+                boundary,
+                before: 0.6,
+                after: 0.0,
+                curve: 0.0,
+            },
+            Command::SetCrossfade {
+                track,
+                boundary: boundary * 2,
+                before: 0.01,
+                after: 0.01,
+                curve: 0.0,
+            },
+            Command::SetCrossfade {
+                track,
+                boundary,
+                before: 0.0,
+                after: 0.0,
+                curve: 0.0,
+            },
+            Command::DeleteCrossfade {
+                track,
+                boundary: boundary * 2,
+            },
+        ] {
+            assert!(matches!(song.reject(bad), ModelError::InvalidInput(_)));
+        }
+        assert!(matches!(
+            song.reject(Command::SetCrossfade {
+                track,
+                boundary,
+                before: 0.01,
+                after: 0.01,
+                curve: 2.0,
+            }),
+            ModelError::InvalidValue { .. }
+        ));
+
+        // Moving the later clip away leaves the earlier one's fields, but
+        // they name a crossfade no longer.
+        song.apply(Command::MoveClip {
+            clip: later,
+            track,
+            start: Ticks::WHOLE * 3,
+        })
+        .unwrap();
+        assert!(found(&song).is_empty());
+        song.apply(Command::MoveClip {
+            clip: later,
+            track,
+            start: boundary,
+        })
+        .unwrap();
+        assert_eq!(found(&song).len(), 1);
+
+        song.apply(Command::DeleteCrossfade { track, boundary })
+            .unwrap();
+        assert!(found(&song).is_empty());
+        let (first, second) = (audio(&song, earlier), audio(&song, later));
+        assert_eq!(
+            (first.fade_out, first.fade_out_after, second.fade_in, second.fade_in_before),
+            (0.0, 0.0, 0.0, 0.0)
+        );
+        assert!(matches!(
+            song.reject(Command::DeleteCrossfade { track, boundary }),
+            ModelError::InvalidInput(_)
+        ));
+    }
+
     // Spec: audio-clips R3, R4, R5, R6, R15
     #[test]
     fn audio_clip_settings_change_one_at_a_time_and_are_checked() {
@@ -8296,6 +8737,8 @@ mod tests {
             clip,
             fade_in: 0.25,
             fade_out: EDGE_FADE,
+            fade_in_curve: None,
+            fade_out_curve: None,
         })
         .unwrap();
         let set = audio(&song);
@@ -8357,11 +8800,15 @@ mod tests {
                 clip,
                 fade_in: -1.0,
                 fade_out: 0.0,
+                fade_in_curve: None,
+                fade_out_curve: None,
             },
             Command::SetClipFades {
                 clip,
                 fade_in: 0.0,
                 fade_out: f64::NAN,
+                fade_in_curve: None,
+                fade_out_curve: None,
             },
         ] {
             assert!(

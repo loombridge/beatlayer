@@ -106,6 +106,8 @@ mod audio_panel;
 pub mod autosample;
 mod bounce;
 mod capture;
+mod export_dialog;
+pub use export_dialog::ExportPrefs;
 mod file_manager;
 mod freeze;
 mod keymap;
@@ -236,6 +238,16 @@ pub enum Effect {
     PickSavePath {
         /// What to run after the save.
         then: Option<Invocation>,
+    },
+    /// Ask where to write the Export Audio/Video dialog's file, in a save
+    /// dialog that suggests `file_name`, then run `export.start` with the
+    /// path; cancelling goes back to the Export dialog (the export spec,
+    /// R40).
+    PickExportPath {
+        /// The suggested name: the set's, with the file type's extension.
+        file_name: String,
+        /// The folder the dialog opens in, if there is one.
+        folder: Option<PathBuf>,
     },
     /// Quit.
     Quit,
@@ -525,6 +537,8 @@ pub struct Shell {
     processed: Vec<processed_files::Pending>,
     /// Stem separation's download, separation, and dialog (IMP-11).
     stems: stems::StemsState,
+    /// The Export Audio/Video dialog and the export under way (WP-6.71).
+    export: export_dialog::ExportState,
     /// The autosampler at work (WP-5.16, IMP-27).
     autosample: Option<autosample::Job>,
     /// The autosampler's dialog, open for an instrument.
@@ -542,6 +556,11 @@ pub struct Shell {
     analysis_options: bl_analysis::cache::AnalysisOptions,
     /// The analysis cache, made when first used.
     analysis: Option<bl_analysis::cache::AnalysisCache>,
+    /// How the peaks of the files an export writes are kept (WP-6.71, R34):
+    /// in memory only until the app says otherwise.
+    peak_options: bl_media::PeakCacheOptions,
+    /// The peak cache for those files, made when first used.
+    peaks: Option<bl_media::PeakCache>,
     /// The files whose analysis has been started this session.
     analysed: std::collections::HashSet<bl_media::ContentHash>,
     /// The files opened in the external sample editor, and the content they
@@ -982,6 +1001,7 @@ impl Shell {
             media,
             processed: Vec::new(),
             stems: stems::StemsState::default(),
+            export: export_dialog::ExportState::default(),
             autosample: None,
             autosample_dialog: None,
             autosample_result_value: None,
@@ -989,6 +1009,8 @@ impl Shell {
             auditioning: None,
             analysis_options: bl_analysis::cache::AnalysisOptions::memory_only(),
             analysis: None,
+            peak_options: bl_media::PeakCacheOptions::memory_only(),
+            peaks: None,
             analysed: std::collections::HashSet::new(),
             editing: Vec::new(),
             registry,
@@ -4194,6 +4216,9 @@ impl Shell {
             self.set_message(message, true);
         }
         let mut changed = polled.changed | self.poll_processed() | self.poll_stems();
+        // Spec: export R41. The export on its thread: its share moves the
+        // progress window, and its end lands in the Status Bar.
+        changed |= self.poll_export();
         // Spec: multisampler R73. The autosampler makes one sample at a
         // time, so the dialog sees its progress and Cancel stops it.
         self.poll_autosample();
@@ -6014,6 +6039,9 @@ impl Shell {
         }
         if stems_ids::handles(id) {
             return self.can_stems(id, args);
+        }
+        if export_ids::handles(id) {
+            return self.can_export(id);
         }
         if autosampler_ids::handles(id) {
             return self.can_autosampler(id, args);
@@ -7986,40 +8014,17 @@ impl Shell {
             return self.run_slice(id, args);
         }
         if export_ids::handles(id) {
-            if id != export_ids::AUDIO {
+            return match id {
+                export_ids::AUDIO => self.run_export_audio(args),
                 // Spec: external-devices R23. The real-time render's
                 // dialog: its buttons set the session's flags.
-                return self.run_realtime(id, args);
-            }
-            // Spec: export R15. The set, its media, the Arrangement's time
-            // selection, and the engine's rate; the export changes none.
-            let engine_rate = self.engine_rate();
-            let args = Self::args(id, args)?;
-            // Spec: offline-plugin-renders R7. Export stops the song first,
-            // as Live does, and borrows the engine's plug-ins (R1).
-            if self.audio.transport_state().playing {
-                let _ = self.audio.send_transport(bl_engine::TransportCommand::Stop);
-            }
-            let media: Arc<dyn bl_engine::MediaLibrary> = self.media.clone();
-            // The plug-in hosts, without borrowing the whole shell: the
-            // export may render in real time, which needs the audio host.
-            let hosts = bl_plugin_host::Hosts {
-                clap: Some(&self.plugins),
-                vst3: Some(&self.vst3),
-                au: Some(&self.au),
+                export_ids::REALTIME_STATUS
+                | export_ids::REALTIME_RESTART
+                | export_ids::REALTIME_SKIP
+                | export_ids::REALTIME_CANCEL
+                | export_ids::REALTIME_AUTO_RESTART => self.run_realtime(id, args),
+                _ => self.run_export_dialog(id, args),
             };
-            return crate::export::run_command(
-                self.editor.document(),
-                media,
-                hosts,
-                self.arrangement.time_selection(),
-                self.arrangement.selected_tracks(),
-                engine_rate,
-                &args,
-                Some(&mut self.audio),
-                &self.realtime,
-            )
-            .map(|result| to_value(&result));
         }
         if midi_ids::handles(id) {
             return self.run_midi_files(id, args);

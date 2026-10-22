@@ -4181,13 +4181,47 @@ fn paths() -> BTreeMap<&'static str, Path> {
                 "the Slice to New MIDI Track dialog's Cancel, or Esc",
             )),
         ),
-        // Gaps.
+        // The Export Audio/Video dialog (WP-6.71): the keyboard reaches each
+        // of its controls with Tab, Return presses Export, Esc closes it.
         (
             "export.audio",
-            Exception(Gap(
-                "the Export Audio/Video dialog, which waits on observing Live (export R16)",
+            Exception(Equivalent(
+                "the Export Audio/Video dialog's Export button, which Tab reaches and Return \
+                 presses; it asks for the file and runs `export.start`",
             )),
         ),
+        (
+            "export.start",
+            Exception(Equivalent(
+                "the Export Audio/Video dialog's Export button, which Tab reaches and Return \
+                 presses",
+            )),
+        ),
+        (
+            "export.set_choices",
+            Exception(Equivalent(
+                "the Export Audio/Video dialog's controls, which Tab reaches",
+            )),
+        ),
+        (
+            "export.close_dialog",
+            Exception(Equivalent(
+                "the Export Audio/Video dialog's Cancel, which Tab reaches, or Esc",
+            )),
+        ),
+        (
+            "export.cancel",
+            Exception(Equivalent(
+                "the export's progress window's Cancel, which Tab reaches, or Esc",
+            )),
+        ),
+        (
+            "export.status",
+            Exception(Equivalent(
+                "the dialog and the progress window, which draw what it reads",
+            )),
+        ),
+        // Gaps.
         (
             "track.move",
             Exception(Gap(
@@ -4414,7 +4448,6 @@ fn every_m1_command_is_reachable_from_the_keyboard() {
             "device.set_layer_zone",
             "device.snap_layer_markers",
             "device.sort_layers",
-            "export.audio",
             "locator.set_info_text",
             "rack.set_macro_info_text",
             "set.discard_recovery",

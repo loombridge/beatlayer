@@ -731,6 +731,8 @@ fn multi_track_export_cancellation_and_failure_leave_no_partial_files() {
         replace: true,
         render_as_loop: false,
         block: bl_shell::export::BLOCK,
+        mono: false,
+        mp3: false,
     };
     let job2 = bl_shell::export::Job {
         path: scratch.path("Cancel - Bass.wav"),
@@ -745,6 +747,8 @@ fn multi_track_export_cancellation_and_failure_leave_no_partial_files() {
         replace: true,
         render_as_loop: false,
         block: bl_shell::export::BLOCK,
+        mono: false,
+        mp3: false,
     };
     let mut solo1 = doc.clone();
     solo1
@@ -794,6 +798,8 @@ fn multi_track_export_cancellation_and_failure_leave_no_partial_files() {
         replace: true,
         render_as_loop: false,
         block: bl_shell::export::BLOCK,
+        mono: false,
+        mp3: false,
     };
     let fail_renders = [(&solo1, &job1), (&solo2, &job_fail)];
     let fail_result = bl_shell::export::export_multi(

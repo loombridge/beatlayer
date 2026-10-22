@@ -75,6 +75,7 @@ pub mod sample_display;
 pub mod sample_editor;
 pub mod scene_fields;
 pub mod scene_view;
+pub mod search_field;
 pub mod session_view;
 pub mod settings_window;
 pub mod sidechain;

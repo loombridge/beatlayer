@@ -10,7 +10,7 @@
 //! check them and list them in the command reference; `bl-shell` runs them
 //! by ID.
 
-use bl_commands::Context::{ClipView, SampleEditor};
+use bl_commands::Context::{ClipView, NoteEditor, NoteSelection, SampleEditor};
 use bl_commands::{Binding, CommandSpec, Permission, RegisterError, Registry};
 use bl_core::time::Ticks;
 use bl_model::ClipId;
@@ -266,23 +266,27 @@ fn specs() -> Vec<CommandSpec> {
         .args::<SelectTransientsArgs>(),
         view(
             SET_INSERT_MARKER,
-            "Set Sample Editor Insert Marker",
-            "Puts the Sample Editor's insert marker, the point Insert Warp Marker (Cmd+I) and \
-             Insert Transient (Cmd+Shift+I) act at, at a `time` in the file in seconds or at a \
-             `beat` of a warped clip's contents in ticks from its 1.1.1; with neither it is \
-             taken away. Clicking the waveform runs this, on the nearest grid line while \
-             snapping is on. Never an undo step, and changes nothing in the set.",
+            "Set Insert Marker",
+            "Puts the editor's insert marker, the point the editor's commands act at, at a \
+             `time` in the file in seconds or at a `beat` of a warped clip's contents in ticks \
+             from its 1.1.1; with neither it is taken away. Clicking the waveform runs this, on \
+             the nearest grid line while snapping is on. In the MIDI Note Editor the marker is a \
+             `beat` of the clip's contents in ticks from their beginning, and it stays inside \
+             the clip's span. Never an undo step, and changes nothing in the set.",
         )
+        .contexts([ClipView, SampleEditor, NoteEditor, NoteSelection])
         .args::<SetInsertMarkerArgs>(),
         view(
             SELECT_TIME,
-            "Select Sample Editor Time",
-            "Makes a time selection in the Sample Editor from `start` to `end`, in seconds in \
-             the file or, with `ticks`, in ticks of a warped clip's contents; with neither the \
-             selection is cleared. Dragging across the waveform runs this. Insert Warp Marker \
-             and Delete Warp Marker with a time selection act on the transients in it, and Z \
-             zooms to it. Never an undo step, and changes nothing in the set.",
+            "Select Time",
+            "Makes a time selection in the editor from `start` to `end`, in seconds in the \
+             file or, with `ticks`, in ticks of a warped clip's contents; with neither the \
+             selection is cleared. Dragging across the waveform runs this. In the MIDI Note \
+             Editor `start` and `end` are ticks of the clip's contents, and the selection is \
+             drawn across the note area and the lanes. Never an undo step, and changes nothing \
+             in the set.",
         )
+        .contexts([ClipView, SampleEditor, NoteEditor, NoteSelection])
         .args::<SelectTimeArgs>(),
         view(
             SAMPLE_VIEW,

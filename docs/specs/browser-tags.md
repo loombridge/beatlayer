@@ -1,6 +1,6 @@
 # The browser's tags, collections, filters, saved labels, columns and history
 
-- **Status:** draft
+- **Status:** partial (R1 to R17 each have a passing test)
 - **Work packages:** WP-6.31, the browser's database on disk, tags and tag groups, the Tag Editor, Quick Tags and searching by tag (R1 to R17); WP-6.32, the Filter View and its menu, saved labels, the Library labels' order, the content pane's columns, and the browser's history (R18 to R33); WP-6.32b, collections (R34 to R40); WP-6.33, hidden plug-ins and the format preference in the browser (IMP-07, R41 to R44), and nested collections (IMP-07, R45 to R48). The browser's places, search by name and preview are [the browser spec](browser.md)'s; the plug-ins' data and commands are [plug-in scanning](plugin-scanning.md)'s; clip files are [clip files](clip-files.md)'
 - **Parity-matrix row:** Views and workflow: Browser: collections, tags, tag groups, Tag Editor, Quick Tags, filter view, saved searches, columns, history; [the improvements](../05-improvements.md), IMP-07 (hiding plug-ins in the browser, nested collections)
 - **Checked against:** the Live 12 reference manual (online edition), read 20 October 2026; the Live 12 release notes, 12.0 to 12.4.5; the UI parity reference's rows L-BRW-001 to 016, L-SET-017, S-BRW-008 to 014, M-VIEW-027, M-NAV-016, M-NAV-017, C-BROWSER-004 to 011 and 018, I-CLICK-031 and I-FOCUS-007
@@ -129,23 +129,23 @@ This spec covers the database, tags and tag groups, the Tag Editor, Quick Tags, 
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1 | to be written in WP-6.31 | |
-| R2 | to be written in WP-6.31 | |
-| R3 | to be written in WP-6.31 | |
-| R4 | to be written in WP-6.31 | |
-| R5 | to be written in WP-6.31 | |
-| R6 | to be written in WP-6.31 | |
-| R7 | to be written in WP-6.31 | |
-| R8 | to be written in WP-6.31 | |
-| R9 | to be written in WP-6.31 | |
-| R10 | to be written in WP-6.31 | |
-| R11 | to be written in WP-6.31 | |
-| R12 | to be written in WP-6.31 | |
-| R13 | to be written in WP-6.31 | |
-| R14 | to be written in WP-6.31 | |
-| R15 | to be written in WP-6.31 | |
-| R16 | to be written in WP-6.31 | |
-| R17 | to be written in WP-6.31 | |
+| R1 | `crates/shell/tests/browser_tags.rs`, `tags_and_the_index_survive_a_restart` | unit |
+| R2 | `crates/shell/src/browser/index.rs`, `a_search_of_100_000_names_keeps_up_against_the_database` | unit |
+| R3 | `crates/shell/tests/browser_tags.rs`, `a_damaged_database_is_set_aside_and_built_again`, `two_shells_on_one_configuration_folder_tag_in_turn_without_damage` | unit |
+| R4 | `crates/shell/tests/browser_tags.rs`, `a_newer_database_is_left_alone` | unit |
+| R5 | `crates/shell/tests/browser_tags.rs`, `a_tagged_file_moved_outside_beatlayer_keeps_its_tags_by_content` | unit |
+| R6 | `crates/shell/tests/browser_tags.rs`, `every_tag_command_runs_by_id_and_reads_back` | unit |
+| R7 | `crates/shell/tests/browser_tags.rs`, `beatlayers_groups_cant_be_renamed_or_deleted` | unit |
+| R8 | `crates/shell/tests/browser_tags.rs`, `every_tag_command_runs_by_id_and_reads_back` | unit |
+| R9 | `crates/shell/tests/browser_tags.rs`, `a_folders_tag_reaches_a_file_two_folders_down` | unit |
+| R10 | `crates/ui/tests/browser.rs`, `the_tag_editor_ticks_and_unticks_with_two_items_selected`; `crates/ui/tests/keymap.rs`, `the_tags_shortcuts_reach_their_commands` | UI script, unit |
+| R11 | `crates/ui/tests/browser.rs`, `the_tag_editor_ticks_and_unticks_with_two_items_selected` | UI script |
+| R12 | `crates/shell/tests/browser_tags.rs`, `every_tag_command_runs_by_id_and_reads_back` | unit |
+| R13 | `crates/ui/tests/browser.rs`, `quick_tags_adds_a_tag_with_create_new_tag` | UI script |
+| R14 | `crates/ui/tests/browser.rs`, `quick_tags_adds_a_tag_with_create_new_tag`; `crates/ui/tests/keymap.rs`, `the_tags_shortcuts_reach_their_commands` | UI script, unit |
+| R15 | `crates/shell/tests/browser_tags.rs`, `a_hash_search_finds_tagged_items` | unit |
+| R16 | `crates/shell/tests/browser_tags.rs`, `every_tag_command_runs_by_id_and_reads_back`; `crates/cli/tests/agent.rs`, `an_agent_tags_browser_items_by_command_id_and_reads_them_back` | unit |
+| R17 | `crates/ui/tests/browser.rs`, `every_part_of_the_tags_reaches_assistive_technology` | UI script |
 | R18 | to be written in WP-6.32 | |
 | R19 | to be written in WP-6.32 | |
 | R20 | to be written in WP-6.32 | |

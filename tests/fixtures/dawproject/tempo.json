@@ -1,0 +1,17 @@
+{
+  "application": "Fixture DAW 1.0",
+  "entries": [
+    {
+      "count": 1,
+      "did": "changed to 1000 BPM",
+      "what": "a tempo point",
+      "where": "in the song's tempo"
+    },
+    {
+      "count": 1,
+      "did": "left out",
+      "what": "a time signature Beatlayer can't hold",
+      "where": "in the song's time signature"
+    }
+  ]
+}

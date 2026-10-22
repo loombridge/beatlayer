@@ -16,6 +16,7 @@
 //! website, account, store, pack service, and Max for Live) are left out
 //! ([`Action::Omitted`]). Decision D21 records the rule.
 
+use crate::arrangement::{SHOW_IN_OUT, SHOW_RETURN_TRACKS, SHOW_VOLUME};
 use crate::assistant::VIEW_TOGGLE_ASSISTANT;
 use crate::audio_editing::CONSOLIDATE_TO_SCENE;
 use crate::browser::{ADD_FOLDER as BROWSER_ADD_FOLDER, SET_PREVIEW as BROWSER_PREVIEW};
@@ -492,7 +493,7 @@ const CREATE: &[Row] = &[
         Cmd(crate::stems::OPEN),
     ),
     SEPARATOR,
-    ("M-CREATE-016", "Add Locator", Pending(None)),
+    ("M-CREATE-016", "Add Locator", Cmd(crate::locator::ADD)),
     ("M-CREATE-017", "Add Time Signature Change", Pending(None)),
     SEPARATOR,
     ("M-CREATE-018", "Import Audio/MIDI File...", Pending(None)),
@@ -647,11 +648,11 @@ const VIEW: &[Row] = &[
         Cmd(MIXER_RETURN_TRACKS_SCROLL),
     ),
     ("M-VIEW-033", "Arrangement Track Controls", Submenu),
-    ("M-VIEW-033a", "In/Out", Pending(None)),
-    ("M-VIEW-033b", "Volume", Pending(None)),
+    ("M-VIEW-033a", "In/Out", Cmd(SHOW_IN_OUT)),
+    ("M-VIEW-033b", "Volume", Cmd(SHOW_VOLUME)),
     ("M-VIEW-033c", "Track Options", Cmd(MIXER_TRACK_OPTIONS)),
     ("M-VIEW-033-sep1", "", Action::Separator),
-    ("M-VIEW-033d", "Return Tracks", Pending(None)),
+    ("M-VIEW-033d", "Return Tracks", Cmd(SHOW_RETURN_TRACKS)),
     (
         IMP_01,
         "Return Tracks Scroll with Tracks",
@@ -820,7 +821,11 @@ const OPTIONS: &[Row] = &[
     // `bl-model`'s switch, which the shell turns to the other state.
     ("M-OPT-025", "Solo in Place", Cmd("mixer.set_solo_in_place")),
     SEPARATOR,
-    ("M-OPT-026", "Lock Envelopes", Pending(None)),
+    (
+        "M-OPT-026",
+        "Lock Envelopes",
+        Cmd("song.set_lock_envelopes"),
+    ),
     (
         "M-OPT-027",
         "MIDI Arrangement Overdub",
@@ -880,11 +885,11 @@ pub(crate) fn items(rows: &[Row]) -> Vec<MenuItem> {
             items: Vec::new(),
         };
         // A row joins the submenu above it when its ID starts with the
-        // submenu's, and so does one of Beatlayer's own rows, which the
-        // reference names with its improvement's ID, when the row above it
-        // was one of the submenu's.
+        // submenu's, and so does IMP-01's row, which the reference names
+        // with its improvement's ID, when the row above it was one of the
+        // submenu's.
         let joins = |submenu: &str| {
-            row.starts_with(submenu) || (!row.starts_with("M-") && previous.starts_with(submenu))
+            row.starts_with(submenu) || (row == IMP_01 && previous.starts_with(submenu))
         };
         let parent = out
             .last_mut()

@@ -1205,3 +1205,23 @@ fn the_multisamplers_title_bar_menu_holds_its_options() {
     assert!(layers.linear_loop_fades, "off now: crossfades are linear");
     assert_eq!(last_step(&h), "Change Sample Options");
 }
+
+// Spec: view-options R1.
+#[test]
+fn the_middle_button_pans_the_device_chain() {
+    let mut h = harness();
+    for _ in 0..12 {
+        add(&mut h, gain());
+    }
+    let view = device_view(&mut h);
+    let over = view.center();
+    let before = h.main.devices().scroll();
+    // A middle-button drag of 100 points right pans the chain with the
+    // pointer.
+    h.middle_drag(over, over + egui::vec2(100.0, 0.0));
+    assert!(
+        (before - h.main.devices().scroll() - 100.0).abs() < 0.5,
+        "the chain moved 100 points: {}",
+        before - h.main.devices().scroll()
+    );
+}

@@ -14,8 +14,11 @@ use bl_model::{TrackId, TrackKind};
 use bl_shell::Area;
 use bl_shell::browser::Part;
 use bl_shell::browser::places::create_user_library;
-use bl_shell::browser_commands::{self as ids, Label};
-use bl_ui::browser::{add_folder_id, label_id, list_id, raw_toggle_id, search_id};
+use bl_shell::browser_commands::{self as ids, Label, TagsState};
+use bl_ui::browser::{
+    add_folder_id, label_id, list_id, quick_tag_id, quick_tag_x_id, raw_toggle_id, search_id,
+    tag_editor_row_id,
+};
 use bl_ui::keymap::{Keymap, Mods, Platform};
 use bl_ui::main_window::UiEvent;
 use common::{Harness, Window, command};
@@ -90,6 +93,22 @@ fn harness(scratch: &Scratch) -> (Harness, PathBuf) {
         .unwrap();
     h.settle();
     (h, root)
+}
+
+/// The node with that role and label.
+fn node_with<'a>(nodes: &'a [common::Node], role: Role, label: &str) -> &'a common::Node {
+    nodes
+        .iter()
+        .find(|n| n.role == role && n.label == label)
+        .unwrap_or_else(|| panic!("no {role:?} labelled {label:?}"))
+}
+
+/// The middle of an accessible node's bounds.
+fn accesskit_center(bounds: egui::accesskit::Rect) -> Pos2 {
+    pos2(
+        ((bounds.x0 + bounds.x1) / 2.0) as f32,
+        ((bounds.y0 + bounds.y1) / 2.0) as f32,
+    )
 }
 
 /// The middle of the list's row `index`.
@@ -202,7 +221,10 @@ fn the_browser_sits_where_live_puts_it() {
     for (label, expected) in [
         ("Browser", (9.0, 61.0, 311.0, 766.0)),
         ("Browser Sidebar", (9.0, 84.0, 109.0, 766.0)),
-        ("Browser Items", (110.0, 103.0, 311.0, 744.0)),
+        // The list ends above the Quick Tags section, which is shown by
+        // default (L-BRW-012); Live's measurement (L-BRW-010) is of the
+        // browser with the section hidden.
+        ("Browser Items", (110.0, 103.0, 311.0, 682.0)),
         ("Name", (110.0, 84.0, 311.0, 103.0)),
     ] {
         assert!(
@@ -723,4 +745,322 @@ fn dragging_an_sfz_instrument_makes_a_multisampler_on_a_midi_track_or_a_new_one(
     let before = multisamplers(&h).len();
     drag(&mut h, row(at), lanes_point(4.3, 340.0), Modifiers::NONE);
     assert_eq!(multisamplers(&h).len(), before);
+}
+
+// Spec: browser-tags R11.
+#[test]
+fn the_tag_editor_ticks_and_unticks_with_two_items_selected() {
+    let scratch = Scratch::new("tag-editor");
+    let (mut h, root) = harness(&scratch);
+    h.shell
+        .run(ids::ADD_TAG_GROUP, json!({ "name": "Mine" }))
+        .unwrap();
+    h.shell
+        .run(
+            ids::ADD_TAG,
+            json!({ "name": "Favourite", "group": "Mine" }),
+        )
+        .unwrap();
+    let kick = root.join("Samples").join("Drums").join("Kick.wav");
+    let snare = root.join("Samples").join("Drums").join("Snare.wav");
+    let items = |paths: &[&std::path::Path]| -> Vec<String> {
+        paths
+            .iter()
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect()
+    };
+    let paths = |paths: &[&std::path::Path]| json!({ "paths": items(paths) });
+    h.shell.run(ids::SELECT, paths(&[&kick, &snare])).unwrap();
+    // Only one of the two files carries the tag, so the check box shows
+    // the dash.
+    h.shell
+        .run(
+            ids::TAG_ITEMS,
+            json!({
+                "items": [kick.to_string_lossy()],
+                "tags": ["Mine|Favourite"],
+                "attach": true,
+            }),
+        )
+        .unwrap();
+    h.shell
+        .run(ids::SHOW_TAG_EDITOR, json!({ "show": true }))
+        .unwrap();
+    h.settle();
+    let nodes = Harness::nodes(&h.frame(vec![]));
+    let row = node_with(&nodes, Role::CheckBox, "Mine|Favourite");
+    assert_eq!(row.value, "partly ticked", "{:?}", row);
+
+    // Ticking it puts the tag on both files.
+    let rect = h
+        .ctx
+        .read_response(tag_editor_row_id("Mine|Favourite"))
+        .expect("drawn")
+        .rect;
+    h.click(rect.center());
+    h.settle();
+    let tags: TagsState = serde_json::from_value(
+        h.shell
+            .run(ids::TAGS, json!({ "items": items(&[&kick, &snare]) }))
+            .unwrap(),
+    )
+    .unwrap();
+    for item in &tags.items {
+        assert!(
+            item.tags.iter().any(|t| t.tag == "Mine|Favourite"),
+            "{:?}",
+            item.tags
+        );
+    }
+    let nodes = Harness::nodes(&h.frame(vec![]));
+    assert_eq!(
+        node_with(&nodes, Role::CheckBox, "Mine|Favourite").value,
+        "ticked"
+    );
+
+    // Un-ticking takes it off both.
+    let rect = h
+        .ctx
+        .read_response(tag_editor_row_id("Mine|Favourite"))
+        .expect("drawn")
+        .rect;
+    h.click(rect.center());
+    h.settle();
+    let tags: TagsState = serde_json::from_value(
+        h.shell
+            .run(ids::TAGS, json!({ "items": items(&[&kick, &snare]) }))
+            .unwrap(),
+    )
+    .unwrap();
+    for item in &tags.items {
+        assert!(
+            item.tags.iter().all(|t| t.tag != "Mine|Favourite"),
+            "{:?}",
+            item.tags
+        );
+    }
+    let nodes = Harness::nodes(&h.frame(vec![]));
+    assert_eq!(
+        node_with(&nodes, Role::CheckBox, "Mine|Favourite").value,
+        "empty"
+    );
+}
+
+// Spec: browser-tags R17.
+#[test]
+fn the_tag_editor_reads_the_keyboard() {
+    let scratch = Scratch::new("tag-editor-keys");
+    let (mut h, _) = harness(&scratch);
+    h.shell
+        .run(ids::ADD_TAG_GROUP, json!({ "name": "Mine" }))
+        .unwrap();
+    h.shell
+        .run(
+            ids::ADD_TAG,
+            json!({ "name": "Favourite", "group": "Mine" }),
+        )
+        .unwrap();
+    h.shell
+        .run(ids::SHOW_TAG_EDITOR, json!({ "show": true }))
+        .unwrap();
+    h.settle();
+    // A click folds the group and puts the keyboard on its row.
+    let rect = h
+        .ctx
+        .read_response(tag_editor_row_id("Content"))
+        .expect("drawn")
+        .rect;
+    h.click(rect.center());
+    h.settle();
+    let nodes = Harness::nodes(&h.frame(vec![]));
+    assert!(
+        nodes
+            .iter()
+            .all(|n| !(n.role == Role::CheckBox && n.label == "Content|Sample")),
+        "the folded group hides its tags"
+    );
+    // Right unfolds it, and Left folds it again (R17).
+    h.key(Key::ArrowRight, Modifiers::NONE);
+    h.settle();
+    let nodes = Harness::nodes(&h.frame(vec![]));
+    assert!(
+        node_with(&nodes, Role::CheckBox, "Content|Sample").value == "empty",
+        "Right showed the tags"
+    );
+    h.key(Key::ArrowLeft, Modifiers::NONE);
+    h.settle();
+    let nodes = Harness::nodes(&h.frame(vec![]));
+    assert!(
+        nodes
+            .iter()
+            .all(|n| !(n.role == Role::CheckBox && n.label == "Content|Sample")),
+        "Left folded the tags away again"
+    );
+}
+
+// Spec: browser-tags R13 and R14.
+#[test]
+fn quick_tags_adds_a_tag_with_create_new_tag() {
+    let scratch = Scratch::new("quick-tags");
+    let (mut h, root) = harness(&scratch);
+    let kick = root.join("Samples").join("Drums").join("Kick.wav");
+    h.shell
+        .run(ids::SELECT, json!({ "paths": [kick.to_string_lossy()] }))
+        .unwrap();
+    h.shell
+        .run(ids::SHOW_QUICK_TAGS, json!({ "show": true }))
+        .unwrap();
+    h.settle();
+    h.shell.set_focused_area(Area::Browser);
+    // Cmd-E moves the keyboard focus to the Add field (S-BRW-015).
+    h.key(Key::E, command());
+    h.settle();
+    // The name is typed.
+    h.frame(vec![Event::Text("Warm".to_owned())]);
+    h.settle();
+    // The suggestions offer Create New Tag..., since no tag has that name.
+    let nodes = Harness::nodes(&h.frame(vec![]));
+    let create = Harness::node(&nodes, "Create New Tag\u{2026}");
+    let at = accesskit_center(create.bounds.expect("bounds"));
+    h.click(at);
+    h.settle();
+    // The place of the new tag is chosen: the Content group.
+    let nodes = Harness::nodes(&h.frame(vec![]));
+    let group = Harness::node(&nodes, "In Content");
+    let at = accesskit_center(group.bounds.expect("bounds"));
+    h.click(at);
+    h.settle();
+    // The tag is made and put on the selected file.
+    let tags: TagsState = serde_json::from_value(
+        h.shell
+            .run(ids::TAGS, json!({ "items": [kick.to_string_lossy()] }))
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(
+        tags.items[0].tags.iter().any(|t| t.tag == "Content|Warm"),
+        "{:?}",
+        tags.items[0].tags
+    );
+    // Quick Tags shows it, with the X that takes it off.
+    let rect = h
+        .ctx
+        .read_response(quick_tag_id("Content|Warm"))
+        .expect("drawn")
+        .rect;
+    let cross = h
+        .ctx
+        .read_response(quick_tag_x_id("Content|Warm"))
+        .expect("drawn")
+        .rect;
+    assert!(rect.intersects(cross));
+    // The pointer over a tag shows its group in the Status Bar (R13).
+    h.frame(vec![Event::PointerMoved(rect.center())]);
+    h.settle();
+    assert_eq!(
+        h.shell.hint(),
+        Some("Content"),
+        "the Status Bar shows the tag's group"
+    );
+    h.click(cross.center());
+    h.settle();
+    let tags: TagsState = serde_json::from_value(
+        h.shell
+            .run(ids::TAGS, json!({ "items": [kick.to_string_lossy()] }))
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(
+        tags.items[0].tags.iter().all(|t| t.tag != "Content|Warm"),
+        "{:?}",
+        tags.items[0].tags
+    );
+}
+
+// Spec: browser-tags R17.
+#[test]
+fn every_part_of_the_tags_reaches_assistive_technology() {
+    let scratch = Scratch::new("tags-a11y");
+    let (mut h, _) = harness(&scratch);
+    h.shell
+        .run(ids::ADD_TAG_GROUP, json!({ "name": "Mine" }))
+        .unwrap();
+    h.shell
+        .run(
+            ids::ADD_TAG,
+            json!({ "name": "Favourite", "group": "Mine" }),
+        )
+        .unwrap();
+    h.shell
+        .run(ids::SHOW_TAG_EDITOR, json!({ "show": true }))
+        .unwrap();
+    h.shell
+        .run(ids::SHOW_QUICK_TAGS, json!({ "show": true }))
+        .unwrap();
+    h.settle();
+    let nodes = Harness::nodes(&h.frame(vec![]));
+    // The Tag Editor is a group.
+    let editor = Harness::node(&nodes, "Tag Editor");
+    assert_eq!(editor.role, Role::Group);
+    // Its groups are groups, and its tags are check boxes.
+    let content = Harness::node(&nodes, "Content");
+    assert_eq!(content.role, Role::Group);
+    let tag = node_with(&nodes, Role::CheckBox, "Mine|Favourite");
+    assert_eq!(tag.value, "empty");
+    // Quick Tags is a list, and its Add field an editable field.
+    let quick = Harness::node(&nodes, "Quick Tags");
+    assert_eq!(quick.role, Role::List);
+    let field = Harness::node(&nodes, "Quick Tags Add Field");
+    assert_eq!(field.role, Role::TextInput);
+}
+
+/// The name of the list's row at `at`.
+fn row_name_at(h: &mut Harness, at: Pos2) -> Option<String> {
+    let output = h.settle();
+    let nodes = Harness::nodes(&output);
+    nodes
+        .iter()
+        .find(|n| {
+            n.role == Role::ListItem
+                && n.bounds.is_some_and(|b| {
+                    let (x, y) = (at.x as f64, at.y as f64);
+                    b.x0 <= x && x <= b.x1 && b.y0 <= y && y <= b.y1
+                })
+        })
+        .map(|n| n.label.clone())
+}
+
+// Spec: view-options R1.
+#[test]
+fn the_middle_button_pans_the_browsers_lists() {
+    let scratch = Scratch::new("middle-pan");
+    let (mut h, root) = harness(&scratch);
+    let many = root.join("Samples").join("Many");
+    std::fs::create_dir_all(&many).unwrap();
+    for i in 0..200 {
+        std::fs::write(many.join(format!("Hit {i}.wav")), b"").unwrap();
+    }
+    h.shell
+        .run(
+            ids::OPEN_FOLDER,
+            json!({ "path": root.join("Samples").to_string_lossy() }),
+        )
+        .unwrap();
+    h.shell
+        .run(ids::OPEN_FOLDER, json!({ "path": many.to_string_lossy() }))
+        .unwrap();
+    h.settle();
+    let at = row(0);
+    let name = row_name_at(&mut h, at).expect("a row in the list");
+    // The row 50 points below: the one the list's first row moves to.
+    let below = row_name_at(&mut h, at + egui::vec2(0.0, 50.0)).expect("a row in the list");
+    assert_ne!(name, below, "the list has rows to move");
+    // A middle-button drag of 50 points up pans the list with the pointer.
+    let over = pos2(160.0, 300.0);
+    h.middle_drag(over, over - egui::vec2(0.0, 50.0));
+    assert_eq!(
+        row_name_at(&mut h, at).as_deref(),
+        Some(below.as_str()),
+        "the list moved up 50 points"
+    );
 }

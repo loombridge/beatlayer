@@ -5,6 +5,7 @@ Fuzz targets for Beatlayer's file readers, run with [cargo-fuzz](https://github.
 | Target | What it feeds | Checks |
 |---|---|---|
 | `audio_header` | Bytes as read from an audio file of any format Beatlayer imports: the format probe, the header readers, and the limits on what a header may declare, then the first 4096 frames | No panic. Anything opened declares no more than `bl_media::limits` allows. |
+| `dawproject` | Bytes as read from a `.dawproject` container, and `project.xml` alone: the ZIP reader, the XML reader and the import | No panic. Whatever the import makes obeys the document model's rules. |
 | `midi_file` | Bytes as read from a `.mid` or RMID file: the size cap, header and track chunks, events, tempo and time signatures | No panic. Every note has a length, a key and velocity in range, ends within its track, and comes in order. |
 | `peak_file` | Bytes as read from a `.blpeaks` file: magic, header, run table, data block, and BLAKE3 checksum | No panic. Anything the reader accepts saves again and loads back as the same peaks. |
 | `preset` | Bytes as read from a `.blpreset` file: JSON format header, schema version, device info, and parameters | No panic. Anything the decoder accepts saves again and decodes to the same preset. |

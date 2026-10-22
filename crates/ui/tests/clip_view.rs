@@ -11,10 +11,10 @@ use bl_shell::files::factory_default_set;
 use bl_shell::note_commands::NoteField;
 use bl_ui::arrangement::benchmark;
 use bl_ui::clip_view::{
-    KEY_HEIGHT, grid_rect, lane_rect, note_rect, shown_keys, strip_rect, tick_at, x_of_tick,
-    y_of_key, y_of_value,
+    KEY_HEIGHT, KEY_WIDTH, grid_rect, lane_rect, note_rect, shown_keys, strip_rect, tick_at,
+    x_of_tick, y_of_key, y_of_value,
 };
-use common::{Harness, Window, command};
+use common::{Harness, Node, Window, command};
 use egui::{Event, Modifiers, MouseWheelUnit, PointerButton, Pos2, Rect, TouchPhase, pos2, vec2};
 use serde_json::json;
 
@@ -264,6 +264,41 @@ impl Notes {
         ]);
         self.h.frame(vec![Event::ModifiersChanged(Modifiers::NONE)]);
         self.h.settle();
+    }
+
+    /// The insert marker, in ticks from the clip's contents.
+    fn insert(&mut self) -> Option<Ticks> {
+        self.h
+            .shell
+            .clip_view()
+            .insert_marker(self.doc(), self.h.shell.arrangement())
+    }
+
+    /// The time selection, in ticks from the clip's contents.
+    fn time(&mut self) -> Option<(Ticks, Ticks)> {
+        self.h
+            .shell
+            .clip_view()
+            .time_selection(self.doc(), self.h.shell.arrangement())
+    }
+
+    /// The selected notes, by their place in the clip's notes in order.
+    fn selected(&mut self) -> Vec<u32> {
+        self.h
+            .shell
+            .clip_view()
+            .selected_notes(self.doc(), self.h.shell.arrangement())
+            .to_vec()
+    }
+
+    /// A point on the key `key` in the piano ruler.
+    fn key_at(&mut self, key: u8) -> Pos2 {
+        let grid = self.grid();
+        let top = self.h.main.clip_view().top();
+        pos2(
+            grid.left() - KEY_WIDTH / 2.0,
+            y_of_key(grid, top, key) + KEY_HEIGHT / 2.0,
+        )
     }
 
     /// Checks the newest step is exactly one, labelled `label`, and that
@@ -708,4 +743,510 @@ fn n_step() -> Ticks {
     h.shell
         .arrangement()
         .grid_ticks(h.shell.editor().document())
+}
+
+/// The modifier that moves the insert marker to a note edge: Option on
+/// macOS, Ctrl elsewhere (S-A11Y-006).
+fn edge_key() -> Modifiers {
+    if cfg!(target_os = "macos") {
+        Modifiers::ALT
+    } else {
+        Modifiers::CTRL
+    }
+}
+
+/// The modifier that adds to the selection while jumping between notes:
+/// Option with Shift on macOS, Ctrl with Shift elsewhere (S-NOTE-043).
+fn add_key() -> Modifiers {
+    if cfg!(target_os = "macos") {
+        Modifiers::ALT | Modifiers::SHIFT
+    } else {
+        Modifiers::CTRL | Modifiers::SHIFT
+    }
+}
+
+/// A right-click at `at`, which opens the editor's context menu.
+fn right_click(n: &mut Notes, at: Pos2) -> Vec<Node> {
+    n.h.frame(vec![Event::PointerMoved(at)]);
+    n.h.frame(vec![Event::PointerButton {
+        pos: at,
+        button: PointerButton::Secondary,
+        pressed: true,
+        modifiers: Modifiers::NONE,
+    }]);
+    n.h.frame(vec![Event::PointerButton {
+        pos: at,
+        button: PointerButton::Secondary,
+        pressed: false,
+        modifiers: Modifiers::NONE,
+    }]);
+    let output = n.h.settle();
+    Harness::nodes(&output)
+}
+
+/// The menu item `label`, which reads with the keys it shows after it.
+fn menu_item(nodes: &[Node], label: &str) -> Node {
+    nodes
+        .iter()
+        .find(|n| {
+            n.role == egui::accesskit::Role::Button
+                && (n.label == label
+                    || n.label
+                        .strip_prefix(label)
+                        .and_then(|keys| keys.strip_prefix(' '))
+                        .is_some_and(|keys| !keys.contains(' ')))
+        })
+        .unwrap_or_else(|| panic!("no menu item {label:?}"))
+        .clone()
+}
+
+#[test]
+fn a_click_places_the_insert_marker_and_the_arrows_move_it() {
+    // Spec: piano-roll R23. A click on empty grid places the insert marker
+    // on the nearest grid line, and Left, Right, Option-Left, Home and End
+    // move it.
+    let step = n_step();
+    let mut n = set(vec![
+        Note::new(60, Ticks::ZERO, step, 100),
+        Note::new(64, 4 * step, step, 100),
+    ]);
+    let at = n.at(62, 2 * step + step / 8);
+    n.click(at, Modifiers::NONE);
+    assert_eq!(n.insert(), Some(2 * step), "on the nearest grid line");
+    // Right moves it a grid step, Left back.
+    n.h.key(egui::Key::ArrowRight, Modifiers::NONE);
+    assert_eq!(n.insert(), Some(3 * step));
+    n.h.key(egui::Key::ArrowLeft, Modifiers::NONE);
+    assert_eq!(n.insert(), Some(2 * step));
+    // Option-Left moves it to the previous note edge, Option-Right to the
+    // next.
+    n.h.key(egui::Key::ArrowLeft, edge_key());
+    assert_eq!(n.insert(), Some(step), "the first note's end");
+    n.h.key(egui::Key::ArrowRight, edge_key());
+    assert_eq!(n.insert(), Some(4 * step), "the second note's start");
+    // Home and End move it to the clip's first and last tick.
+    n.h.key(egui::Key::Home, Modifiers::NONE);
+    assert_eq!(n.insert(), Some(Ticks::ZERO));
+    n.h.key(egui::Key::End, Modifiers::NONE);
+    assert_eq!(n.insert(), Some(n.length()));
+}
+
+#[test]
+fn the_note_editors_home_leaves_the_transport_alone() {
+    // Spec: piano-roll R23. The note editor reads Home itself, so the
+    // transport's Home, which moves the song's insert marker, doesn't run
+    // there as well.
+    let step = n_step();
+    let mut n = set(vec![Note::new(60, Ticks::ZERO, step, 100)]);
+    n.h.shell.start_audio();
+    assert!(n.h.shell.audio().engine_running(), "the engine runs");
+    // The song's insert marker is somewhere else.
+    n.h.shell
+        .run("transport.locate", json!({ "position": 4 * step }))
+        .unwrap();
+    n.h.wait("the song's insert marker to move", |h| {
+        h.shell.arrangement().insert_marker() == 4 * step
+    });
+    // A click on empty grid places the editor's insert marker.
+    let empty = n.at(62, 2 * step);
+    n.click(empty, Modifiers::NONE);
+    assert_eq!(n.insert(), Some(2 * step));
+    // Home moves the editor's insert marker, and leaves the song's alone.
+    n.h.key(egui::Key::Home, Modifiers::NONE);
+    assert_eq!(n.insert(), Some(Ticks::ZERO), "the editor's insert marker");
+    n.h.settle();
+    assert_eq!(
+        n.h.shell.arrangement().insert_marker(),
+        4 * step,
+        "the song's insert marker stays"
+    );
+}
+
+#[test]
+fn the_marquee_and_the_keys_make_the_time_selection() {
+    // Spec: piano-roll R24. A marquee's time span is the time selection,
+    // Shift with the arrows selects time from the insert marker, and Enter
+    // swaps between the notes in it and the time.
+    let step = n_step();
+    let mut n = set(vec![
+        Note::new(60, Ticks::ZERO, step, 100),
+        Note::new(64, 4 * step, step, 100),
+    ]);
+    // A marquee over the second note: its time span is the time selection.
+    let from = n.at(63, 3 * step);
+    let to = n.at(65, 5 * step);
+    n.drag(from, to, Modifiers::NONE);
+    assert_eq!(n.time(), Some((3 * step, 5 * step)), "the marquee's span");
+    // Esc takes the selection and the time away.
+    n.h.key(egui::Key::Escape, Modifiers::NONE);
+    assert!(n.selected().is_empty());
+    assert_eq!(n.time(), None);
+    // Shift with the arrows selects time from the insert marker a step at a
+    // time.
+    n.h.key(egui::Key::ArrowRight, Modifiers::SHIFT);
+    assert_eq!(n.time(), Some((Ticks::ZERO, step)), "one step");
+    n.h.key(egui::Key::ArrowRight, Modifiers::SHIFT);
+    assert_eq!(n.time(), Some((Ticks::ZERO, 2 * step)), "two steps");
+    // Option-Shift with the arrows moves the time selection's end to a note
+    // edge.
+    n.h.key(egui::Key::ArrowRight, Modifiers::ALT | Modifiers::SHIFT);
+    assert_eq!(
+        n.time(),
+        Some((Ticks::ZERO, 4 * step)),
+        "the next note's start"
+    );
+    // Enter selects the notes that start inside the time, keeping it.
+    n.h.key(egui::Key::Enter, Modifiers::NONE);
+    assert_eq!(n.selected(), [0], "the note that starts inside it");
+    assert_eq!(n.time(), Some((Ticks::ZERO, 4 * step)), "the time stays");
+    // Enter again deselects the notes and keeps the time.
+    n.h.key(egui::Key::Enter, Modifiers::NONE);
+    assert!(n.selected().is_empty());
+    assert_eq!(n.time(), Some((Ticks::ZERO, 4 * step)), "the time stays");
+}
+
+#[test]
+fn the_keyboard_selects_the_notes() {
+    // Spec: piano-roll R25. Option-Down and Option-Up select the note
+    // nearest the insert marker and then the previous or next note, and
+    // with Shift the note is added to the selection.
+    let step = n_step();
+    let mut n = set(vec![
+        Note::new(60, Ticks::ZERO, step, 100),
+        Note::new(64, 4 * step, step, 100),
+        Note::new(60, 8 * step, step, 100),
+    ]);
+    // A click places the insert marker between the notes.
+    let at = n.at(62, step);
+    n.click(at, Modifiers::NONE);
+    assert_eq!(n.insert(), Some(step));
+    // Option-Down selects the nearest note.
+    n.h.key(egui::Key::ArrowDown, Modifiers::ALT);
+    assert_eq!(n.selected(), [0], "the nearest note's start");
+    // Option-Down again has no earlier note to go to, and Option-Up the
+    // next one.
+    n.h.key(egui::Key::ArrowDown, Modifiers::ALT);
+    assert_eq!(n.selected(), [0], "and stays, with no earlier note");
+    n.h.key(egui::Key::ArrowUp, Modifiers::ALT);
+    assert_eq!(n.selected(), [1], "and the next one");
+    // Option-Shift with the arrows adds the note to the selection.
+    n.h.key(egui::Key::ArrowDown, add_key());
+    assert_eq!(n.selected(), [0, 1], "the previous note is added");
+    // Option-Left and Option-Right select the previous or next note of the
+    // same pitch.
+    let first = n.at(60, step / 2);
+    n.click(first, Modifiers::NONE);
+    n.h.key(egui::Key::ArrowRight, Modifiers::ALT);
+    assert_eq!(n.selected(), [2], "the next note at that pitch");
+    n.h.key(egui::Key::ArrowLeft, Modifiers::ALT);
+    assert_eq!(n.selected(), [0], "and the previous one");
+    // Esc deselects; with nothing selected, Option-Shift-Down adds the note
+    // nearest the insert marker (S-NOTE-043, S-A11Y-007).
+    n.h.key(egui::Key::Escape, Modifiers::NONE);
+    assert!(n.selected().is_empty());
+    n.h.key(egui::Key::ArrowDown, add_key());
+    assert_eq!(n.selected(), [0], "the nearest note is added");
+}
+
+#[test]
+fn shift_clicking_and_the_piano_ruler_select_the_notes() {
+    // Spec: piano-roll R26. Shift-clicking a note adds it to the selection
+    // or takes it out, and clicking a key in the piano ruler selects the
+    // notes at that pitch, which Shift-clicking adds or takes out.
+    let step = n_step();
+    let mut n = set(vec![
+        Note::new(60, Ticks::ZERO, step, 100),
+        Note::new(64, 4 * step, step, 100),
+    ]);
+    // Shift-clicking a note adds it to the selection.
+    let first = n.at(60, step / 2);
+    let second = n.at(64, 4 * step + step / 2);
+    n.click(first, Modifiers::NONE);
+    assert_eq!(n.selected(), [0]);
+    n.click(second, Modifiers::SHIFT);
+    assert_eq!(n.selected(), [0, 1], "Shift-click adds it");
+    n.click(second, Modifiers::SHIFT);
+    assert_eq!(n.selected(), [0], "and takes it out again");
+    // Clicking a key in the piano ruler selects the notes at that pitch.
+    let key = n.key_at(60);
+    n.click(key, Modifiers::NONE);
+    assert_eq!(n.selected(), [0], "the notes at that pitch");
+    let other = n.key_at(64);
+    n.click(other, Modifiers::SHIFT);
+    assert_eq!(n.selected(), [0, 1], "Shift-click adds the other key's");
+    n.click(other, Modifiers::SHIFT);
+    assert_eq!(n.selected(), [0], "and takes them out again");
+}
+
+#[test]
+fn the_arrows_move_and_lengthen_the_selection() {
+    // Spec: piano-roll R27. Left and Right move the selection a grid step,
+    // and Shift with them lengthens or shortens it.
+    let step = n_step();
+    let mut n = set(vec![Note::new(60, Ticks::ZERO, step, 100)]);
+    let at = n.at(60, step / 2);
+    n.click(at, Modifiers::NONE);
+    let before = n.doc().clone();
+    n.h.key(egui::Key::ArrowRight, Modifiers::NONE);
+    assert_eq!(n.notes()[0].start, step, "a grid step later");
+    n.one_step(&before, "Move notes");
+    // Shift with the arrows lengthens the note.
+    let before = n.doc().clone();
+    n.h.key(egui::Key::ArrowRight, Modifiers::SHIFT);
+    assert_eq!(n.notes()[0].length, 2 * step, "a grid step longer");
+    n.one_step(&before, "Resize notes");
+    // A move that would start before the clip's contents is refused.
+    n.h.key(egui::Key::ArrowLeft, Modifiers::NONE);
+    assert_eq!(n.notes()[0].start, Ticks::ZERO, "it moves to the contents");
+    let before = n.doc().clone();
+    n.h.key(egui::Key::ArrowLeft, Modifiers::NONE);
+    assert_eq!(*n.doc(), before, "and stops there");
+}
+
+#[test]
+fn option_dragging_a_note_copies_it() {
+    // Spec: piano-roll R29. Option-dragging a note copies it: the note
+    // stays where it is and the copy lands where it would have gone.
+    let step = n_step();
+    let mut n = set(vec![Note::new(60, Ticks::ZERO, step, 100)]);
+    let from = n.at(60, step / 2);
+    let to = n.at(60, 4 * step + step / 2);
+    let copy = if cfg!(target_os = "macos") {
+        Modifiers::ALT
+    } else {
+        Modifiers::CTRL
+    };
+    n.drag(from, to, copy);
+    assert_eq!(
+        n.notes(),
+        [
+            Note::new(60, Ticks::ZERO, step, 100),
+            Note::new(60, 4 * step, step, 100),
+        ],
+        "the note stays and the copy lands where it would have"
+    );
+}
+
+#[test]
+fn the_context_menu_lists_the_items_in_order() {
+    // Spec: piano-roll R30. Right-clicking a note opens the editor's
+    // context menu: the items whose commands exist run them, and the rest
+    // are drawn disabled and name their packages.
+    let step = n_step();
+    let mut n = set(vec![Note::new(60, Ticks::ZERO, step, 100)]);
+    let at = n.at(60, step / 2);
+    let nodes = right_click(&mut n, at);
+    // The note the menu opened on is selected alone.
+    assert_eq!(n.selected(), [0]);
+    for label in ["Cut", "Copy", "Paste", "Duplicate", "Delete"] {
+        let node = menu_item(&nodes, label);
+        assert!(!node.disabled, "{label} works");
+    }
+    for (label, package) in [
+        ("Invert Selection", "WP-6.4"),
+        ("Deactivate Note(s)", "WP-6.1"),
+        ("Group Notes", "WP-6.2"),
+        ("Ungroup Notes", "WP-6.2"),
+        ("Split Note(s)", "WP-6.3"),
+        ("Chop Note(s) on Grid", "WP-6.3"),
+        ("Join Notes", "WP-6.3"),
+        ("Fit to Time Range", "WP-6.3"),
+        ("Split Clip", "WP-6.3"),
+        ("Highlight Scales", "WP-6.7b"),
+    ] {
+        let node = menu_item(&nodes, label);
+        assert!(node.disabled, "{label} waits");
+        assert!(
+            node.description.contains(package),
+            "{label} names {package}: {:?}",
+            node.description
+        );
+    }
+}
+
+#[test]
+fn the_clipboard_keys_act_on_the_notes() {
+    // Spec: piano-roll R28. The Edit menu's keys (S-EDIT-001 to S-EDIT-005)
+    // copy, cut, paste, duplicate and delete the selected notes, and the
+    // note clipboard is apart from the clips' clipboard.
+    let step = n_step();
+    let mut n = set(vec![Note::new(60, Ticks::ZERO, step, 100)]);
+    // A click on empty grid places the insert marker.
+    let empty = n.at(62, 4 * step);
+    n.click(empty, Modifiers::NONE);
+    assert_eq!(n.insert(), Some(4 * step));
+    // A click on the note selects it.
+    let at = n.at(60, step / 2);
+    n.click(at, Modifiers::NONE);
+    assert_eq!(n.selected(), [0]);
+    // Copy puts the note on the note clipboard, and Paste puts it at the
+    // insert marker.
+    n.h.key(egui::Key::C, command());
+    n.h.key(egui::Key::V, command());
+    assert_eq!(
+        n.notes(),
+        [
+            Note::new(60, Ticks::ZERO, step, 100),
+            Note::new(60, 4 * step, step, 100),
+        ],
+        "the copy is at the insert marker"
+    );
+    // Duplicate lays another copy straight after the time selection, and
+    // Delete removes the selected notes.
+    n.h.key(egui::Key::D, command());
+    assert_eq!(n.notes().len(), 3, "and another one");
+    n.h.key(egui::Key::Delete, Modifiers::NONE);
+    assert_eq!(n.notes().len(), 2, "the selected note is deleted");
+    // Cut copies the notes and deletes them.
+    let at = n.at(60, step / 2);
+    n.click(at, Modifiers::NONE);
+    n.h.key(egui::Key::X, command());
+    assert_eq!(n.notes().len(), 1, "the cut note is gone");
+}
+
+#[test]
+fn the_piano_rulers_menu_lists_its_items_and_their_packages() {
+    // Spec: piano-roll R30. Right-clicking a key in the piano ruler opens
+    // C-KEYS: Deactivate Note(s) and the note spelling, both waiting for
+    // their packages, drawn disabled and naming them.
+    let step = n_step();
+    let mut n = set(vec![Note::new(60, Ticks::ZERO, step, 100)]);
+    let at = n.key_at(60);
+    let nodes = right_click(&mut n, at);
+    for (label, package) in [
+        ("Deactivate Note(s)", "WP-6.1"),
+        ("Note spelling", "WP-6.7b"),
+    ] {
+        let node = menu_item(&nodes, label);
+        assert!(node.disabled, "{label} waits");
+        assert!(
+            node.description.contains(package),
+            "{label} names {package}: {:?}",
+            node.description
+        );
+    }
+}
+
+#[test]
+fn the_insert_marker_and_the_time_selection_reach_assistive_technology() {
+    // Spec: piano-roll R23, R24. The insert marker's place and the time
+    // selection reach assistive technology, as the Sample Editor's markers
+    // do: an item naming it, with its place in the clip's contents.
+    let step = n_step();
+    let mut n = set(vec![Note::new(60, Ticks::ZERO, step, 100)]);
+    // A click on empty grid places the insert marker, and Shift with the
+    // arrows makes the time selection.
+    let empty = n.at(62, 2 * step);
+    n.click(empty, Modifiers::NONE);
+    n.h.key(egui::Key::ArrowRight, Modifiers::SHIFT);
+    n.h.key(egui::Key::ArrowRight, Modifiers::SHIFT);
+    let output = n.h.settle();
+    let nodes = Harness::nodes(&output);
+    let marker = Harness::node(&nodes, "Insert Marker");
+    assert_eq!(marker.role, egui::accesskit::Role::ListItem);
+    assert_eq!(marker.value, format!("tick {}", (2 * step).get()));
+    let time = Harness::node(&nodes, "Time Selection");
+    assert_eq!(time.role, egui::accesskit::Role::ListItem);
+    assert_eq!(
+        time.value,
+        format!("tick {} to tick {}", (2 * step).get(), (4 * step).get())
+    );
+    // Esc takes the time selection away and leaves the insert marker.
+    n.h.key(egui::Key::Escape, Modifiers::NONE);
+    let output = n.h.settle();
+    let nodes = Harness::nodes(&output);
+    assert!(nodes.iter().all(|node| node.label != "Time Selection"));
+    assert!(nodes.iter().any(|node| node.label == "Insert Marker"));
+}
+
+// Spec: view-options R1, piano-roll R44.
+#[test]
+fn the_middle_button_pans_the_note_area() {
+    let step = n_step();
+    let mut n = set(vec![Note::new(60, Ticks::ZERO, step, 100)]);
+    let grid = n.grid();
+    let over = grid.center();
+    let note = n.notes()[0].clone();
+    // The note's rectangle as the editor draws it, from the key at the
+    // grid's top edge.
+    let before = note_rect(
+        grid,
+        n.marker(),
+        n.length(),
+        n.h.main.clip_view().top(),
+        &note,
+    );
+    // A middle-button drag of 100 points right and 50 down pans the note
+    // area with the pointer: the note follows it 50 points down the grid.
+    n.h.middle_drag(over, over + vec2(100.0, 50.0));
+    let after = note_rect(
+        grid,
+        n.marker(),
+        n.length(),
+        n.h.main.clip_view().top(),
+        &note,
+    );
+    assert!(
+        (after.top() - before.top() - 50.0).abs() < 0.01,
+        "the note moved 50 points down with the pointer: {} to {}",
+        before.top(),
+        after.top()
+    );
+    // Nothing else changed: no selection, no note, no undo step.
+    assert!(n.selected().is_empty(), "no note is selected");
+    assert_eq!(n.notes().len(), 1, "the note is where it was");
+    assert_eq!(n.steps(), 0, "not an undo step");
+}
+
+// Spec: piano-roll R43.
+#[test]
+fn the_notes_are_paler_the_softer_their_velocity() {
+    let step = n_step();
+    let mut muted = Note::new(67, Ticks::ZERO, step, 127);
+    muted.mute = true;
+    let mut n = set(vec![
+        Note::new(60, Ticks::ZERO, step, 127),
+        Note::new(62, Ticks::ZERO, step, 64),
+        Note::new(64, Ticks::ZERO, step, 1),
+        muted,
+    ]);
+    let grid = n.grid();
+    let start = n.marker();
+    let length = n.length();
+    let track = n.doc().clip_track(n.clip).expect("the clip's track");
+    let full = bl_ui::arrangement::scene::track_colour(&n.h.theme, track);
+    let palest = bl_ui::theme::note_colour(full, 1);
+    let middle = bl_ui::theme::note_colour(full, 64);
+    let output = n.h.settle();
+    let top = n.h.main.clip_view().top();
+    let rects = common::painted_rects(&output);
+    let fill_of = |note: &Note| {
+        let rect = note_rect(grid, start, length, top, note);
+        rects
+            .iter()
+            .find(|(r, _)| *r == rect)
+            .map(|(_, colour)| *colour)
+            .unwrap_or_else(|| panic!("the note at key {} is painted", note.key))
+    };
+    let notes = n.notes();
+    assert_eq!(
+        fill_of(&notes[0]),
+        full,
+        "velocity 127 is the clip's colour"
+    );
+    assert_eq!(fill_of(&notes[1]), middle, "velocity 64 is between");
+    assert_eq!(fill_of(&notes[2]), palest, "velocity 1 is the palest");
+    assert_eq!(
+        fill_of(&notes[3]),
+        n.h.theme.colors.clip_muted.0,
+        "a deactivated note is grey"
+    );
+    // The middle is between the two ends, in every channel.
+    let (p, m, f) = (palest.to_array(), middle.to_array(), full.to_array());
+    for channel in 0..4 {
+        assert!(
+            f[channel] <= m[channel] && m[channel] <= p[channel],
+            "velocity 64 is between the palest and the full colour"
+        );
+    }
 }

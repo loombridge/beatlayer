@@ -18,6 +18,12 @@
 //!   moving, copying, resizing, splitting, deleting, and duplicating clips,
 //!   and the clipboard; [`context_menus`], the clip and time-selection
 //!   menus that reach them.
+//! - [`automation`]: the Arrangement's automation editing commands
+//!   (WP-6.25): moving the breakpoints of an envelope, the clipboard of
+//!   envelope shapes, and the edit commands that act on them.
+//! - [`locator`]: the Arrangement's locators (WP-6.24): adding, deleting,
+//!   moving, renaming and describing them, looping to the next one, the
+//!   song start time, and the jumps between them.
 //! - [`notes`]: the Clip View's note-editing commands (WP-2.3): selecting
 //!   the MIDI Note Editor's notes, drawing, deleting, moving and resizing
 //!   them.
@@ -70,18 +76,21 @@ pub mod assistant;
 pub mod audio;
 pub mod audio_editing;
 pub mod audio_panel;
+pub mod automation;
 pub mod autosampler;
 pub mod bounce;
 pub mod browser;
 pub mod capture_midi;
 pub mod commands;
 pub mod context_menus;
+pub mod dawproject;
 pub mod devices;
 pub mod editing;
 pub mod export;
 pub mod file_manager;
 pub mod freeze;
 pub mod keymap;
+pub mod locator;
 pub mod menus;
 pub mod midi_files;
 pub mod midi_io;
@@ -93,6 +102,7 @@ pub mod pads;
 pub mod perception;
 pub mod plugins;
 pub mod sample_editor;
+pub mod scales;
 pub mod session_launch;
 pub mod session_record;
 pub mod session_view;
@@ -116,6 +126,8 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     commands::register(registry)?;
     arrangement::register(registry)?;
     editing::register(registry)?;
+    automation::register(registry)?;
+    locator::register(registry)?;
     notes::register(registry)?;
     transport::register(registry)?;
     mixer_view::register(registry)?;
@@ -123,6 +135,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     export::register(registry)?;
     file_manager::register(registry)?;
     midi_files::register(registry)?;
+    dawproject::register(registry)?;
     midi_io::register(registry)?;
     devices::register(registry)?;
     multisampler::register(registry)?;
@@ -143,5 +156,6 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     freeze::register(registry)?;
     bounce::register(registry)?;
     slice::register(registry)?;
-    warping::register(registry)
+    warping::register(registry)?;
+    scales::register(registry)
 }

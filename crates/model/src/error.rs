@@ -6,7 +6,7 @@ use bl_core::id::Id;
 use bl_core::time::Ticks;
 
 use crate::device::DeviceRole;
-use crate::ids::{ChainId, ClipId, DeviceId, SceneId, TrackId};
+use crate::ids::{ChainId, ClipId, DeviceId, LocatorId, SceneId, TrackId};
 use crate::layers::LayerId;
 use crate::track::TrackKind;
 
@@ -24,6 +24,8 @@ pub enum ModelError {
     NoSuchDevice(DeviceId),
     /// No scene has this ID.
     NoSuchScene(SceneId),
+    /// No locator has this ID (WP-6.24).
+    NoSuchLocator(LocatorId),
     /// The device has no layer with this ID (WP-5.13).
     NoSuchLayer(LayerId),
     /// The device isn't a multisampler, so it holds no layers.
@@ -337,6 +339,7 @@ impl fmt::Display for ModelError {
                 "Reduced Latency When Monitoring can be on only while delay compensation is on",
             ),
             Self::NoSuchScene(id) => write!(f, "no {id}"),
+            Self::NoSuchLocator(id) => write!(f, "no {id}"),
             Self::NoSuchLayer(id) => write!(f, "no layer {}", id.0),
             Self::NoLayers(id) => write!(f, "{id} holds no layers: it isn't a multisampler"),
             Self::SlotOccupied { track, scene } => {

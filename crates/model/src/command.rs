@@ -12,7 +12,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::auto_warp::{ClipEdge, FileBeats, LOOP_BARS, WarpFrom, WarpPoint, nearest_bars};
 use crate::automation::{
-    AutomationTarget, MixerParam, PointError, check_bend, entry, override_device,
+    AutomationTarget, Breakpoint, Envelope, MixerParam, PointError, check_bend, entry,
+    override_device,
 };
 use crate::clip::{
     AudioData, Clip, ClipData, ClipEnvelope, EnvelopeKind, MidiData, Note, TakeLane, clip_entry,
@@ -22,17 +23,19 @@ use crate::document::Document;
 use crate::error::ModelError;
 use crate::external::{ExternalPort, HardwareLatency};
 use crate::follow::FollowPatch;
-use crate::ids::{ChainId, ClipId, ContentHash, DeviceId, ParamId, SceneId, TrackId};
+use crate::ids::{ChainId, ClipId, ContentHash, DeviceId, LocatorId, ParamId, SceneId, TrackId};
 use crate::launch::{ClipLaunch, LaunchMode, LaunchQuantization};
 use crate::layers::{
     Distribution, Layer, LayerId, LayerSettings, LayerSort, LayerZone, Layers, Zone, ZoneKind,
 };
+use crate::locator::{Locator, SongStart, next_locator_name};
 use crate::metronome::{CountIn, MetronomeRhythm, MetronomeSound};
 use crate::rack::{
     CHAIN_COLOURS, Chain, ChainSend, MACRO_STEPS_MAX, MACRO_STEPS_MIN, MACROS, Macro, MacroMapping,
     MacroStyle, MacroTarget, RackKind, Receive, macro_number,
 };
 use crate::sample_edits::{SampleEdit, SampleRange};
+use crate::scale::{Scale, ScaleName};
 use crate::scene::{SCENE_TEMPO_MAX, SCENE_TEMPO_MIN, Scene};
 use crate::shared::Shared;
 use crate::track::{
@@ -210,6 +213,53 @@ pub enum Command {
     SetLoopEnabled {
         /// Whether playback loops between the brace's start and end.
         enabled: bool,
+    },
+    /// Adds a locator at a position, as the Set Locator button and Add
+    /// Locator do. A locator with no name of its own is named with the next
+    /// whole number.
+    AddLocator {
+        /// The locator, with a new ID.
+        locator: Locator,
+    },
+    /// Deletes a locator. A song start time on it goes with it.
+    DeleteLocator {
+        /// The locator.
+        locator: LocatorId,
+    },
+    /// Moves a locator to a new position.
+    MoveLocator {
+        /// The locator.
+        locator: LocatorId,
+        /// Where it goes: 0 (1.1.1) or later, and not where another locator
+        /// already is.
+        to: Ticks,
+    },
+    /// Renames a locator.
+    RenameLocator {
+        /// The locator.
+        locator: LocatorId,
+        /// The new name.
+        name: String,
+    },
+    /// Sets a locator's info text, which the Info View shows while the
+    /// pointer is over it.
+    SetLocatorInfoText {
+        /// The locator.
+        locator: LocatorId,
+        /// The new info text.
+        info_text: String,
+    },
+    /// Sets the Arrangement loop brace from a locator to the next one and
+    /// switches the loop on, as Loop Selection does.
+    LoopToNextLocator {
+        /// The locator.
+        locator: LocatorId,
+    },
+    /// Sets where the song starts: a locator, the loop brace's start, or
+    /// nothing, which leaves the song starting as it otherwise does.
+    SetSongStart {
+        /// Where the song starts; nothing clears it.
+        start: Option<SongStart>,
     },
     /// Switches Punch-In on or off: with it on, recording into the
     /// Arrangement starts at the loop brace's start, whether or not the Loop
@@ -499,6 +549,19 @@ pub enum Command {
         /// The parameter.
         target: AutomationTarget,
     },
+    /// Replaces one of a track's parameter's envelope with the breakpoints
+    /// given, as the automation editing commands do when they write a shape
+    /// over a span (the automation editing spec, R5). The envelope keeps
+    /// driving the parameter, or goes on driving it if it was overridden.
+    SetAutomationEnvelope {
+        /// The track the parameter belongs to.
+        track: TrackId,
+        /// The parameter.
+        target: AutomationTarget,
+        /// The envelope's breakpoints, in position order. Empty takes the
+        /// parameter's automation with it.
+        points: Vec<Breakpoint>,
+    },
     /// Turns every overridden envelope in the song back on, as the Control
     /// Bar's Re-Enable Automation button does: every automated control a
     /// hand move turned off follows its envelope again.
@@ -514,6 +577,13 @@ pub enum Command {
     /// Switches Solo in Place on or off.
     SetSoloInPlace {
         /// Whether soloing a track keeps the return tracks audible.
+        enabled: bool,
+    },
+    /// Switches Lock Envelopes on or off: while it's on, editing the
+    /// Arrangement's clips leaves the tracks' envelopes where they are in the
+    /// song (the automation editing spec, R8).
+    SetLockEnvelopes {
+        /// Whether the envelopes stay where they are.
         enabled: bool,
     },
     /// Switches Cue mode: the tracks' Solo switches become Cue switches
@@ -2270,6 +2340,36 @@ pub enum Command {
         /// Whether it's left out.
         excluded: bool,
     },
+    /// Sets a clip's scale (the scales spec, R5): its Scale Mode switch, its
+    /// root and its scale name. It leaves the values it isn't given as they
+    /// were, and it is one undo step however many clips it sets.
+    SetClipScale {
+        /// The clips.
+        clips: Vec<ClipId>,
+        /// Whether the clips' Scale Mode is on.
+        #[serde(default)]
+        enabled: Option<bool>,
+        /// The root note: 0 (C) to 11 (B).
+        #[serde(default)]
+        root: Option<u8>,
+        /// The scale's name, from the scale list.
+        #[serde(default)]
+        name: Option<String>,
+    },
+    /// Sets the set's current scale (the scales spec, R9): its Scale Mode
+    /// switch, its root and its scale name, which the Control Bar's scale
+    /// controls show and the clips made next take.
+    SetScale {
+        /// Whether the set's Scale Mode is on.
+        #[serde(default)]
+        enabled: Option<bool>,
+        /// The root note: 0 (C) to 11 (B).
+        #[serde(default)]
+        root: Option<u8>,
+        /// The scale's name, from the scale list.
+        #[serde(default)]
+        name: Option<String>,
+    },
 }
 
 impl Command {
@@ -2289,6 +2389,13 @@ impl Command {
             Self::DeleteTimeSignatureChange { .. } => "Delete time signature change",
             Self::SetLoop { .. } => "Change loop",
             Self::SetLoopEnabled { .. } => "Switch loop",
+            Self::AddLocator { .. } => "Add Locator",
+            Self::DeleteLocator { .. } => "Delete Locator",
+            Self::MoveLocator { .. } => "Move Locator",
+            Self::RenameLocator { .. } => "Rename Locator",
+            Self::SetLocatorInfoText { .. } => "Edit Info Text",
+            Self::LoopToNextLocator { .. } => "Loop to Next Locator",
+            Self::SetSongStart { .. } => "Set Song Start Time",
             Self::SetPunchIn { .. } => "Punch-In",
             Self::SetPunchOut { .. } => "Punch-Out",
             Self::SetMetronomeEnabled { .. } => "Metronome",
@@ -2318,6 +2425,7 @@ impl Command {
             Self::SetAutomationCurve { .. } => "Curve Automation Segment",
             Self::MoveAutomationBreakpoint { .. } => "Move Automation Breakpoint",
             Self::DeleteAutomationBreakpoint { .. } => "Delete Automation Breakpoint",
+            Self::SetAutomationEnvelope { .. } => "Set Automation Envelope",
             Self::DeleteAutomation { .. } => "Delete Automation",
             Self::ReEnableAutomation { .. } | Self::ReEnableAutomationFor { .. } => {
                 "Re-Enable Automation"
@@ -2331,6 +2439,7 @@ impl Command {
             Self::SetReducedLatencyMonitoring { .. } => "Switch Reduced Latency When Monitoring",
             Self::SetKeepMonitoringLatency { .. } => "Switch Keep Monitoring Latency",
             Self::SetSoloInPlace { .. } => "Switch Solo in Place",
+            Self::SetLockEnvelopes { .. } => "Switch Lock Envelopes",
             Self::SetCueMode { .. } => "Switch Cue mode",
             Self::SetCueVolume { .. } => "Change \"Preview Volume\"",
             Self::SetInput { .. }
@@ -2550,6 +2659,10 @@ impl Command {
             Self::DeleteVariation { .. } => "Delete Macro Variation",
             Self::SetMacroVariationExcluded { .. } => "Exclude Macro from Variations",
             Self::SetMappedValue { .. } => "Change parameter",
+            // Spec: scales R5, R12. Live's undo names for the scale edits
+            // are to observe; Beatlayer's name the edit.
+            Self::SetClipScale { .. } => "Change Clip Scale",
+            Self::SetScale { .. } => "Change Scale",
         }
     }
 
@@ -2589,6 +2702,7 @@ impl Command {
             Self::AddChain { chain, .. } => chain.ids(),
             Self::GroupDevices { rack, .. } => rack.ids(),
             Self::CreateScene { id, .. } => vec![id.0],
+            Self::AddLocator { locator } => vec![locator.id.0],
             Self::BounceTrackInPlace { bounced, .. } => {
                 bounced.clip_ids().iter().map(|clip| clip.0).collect()
             }
@@ -2678,6 +2792,18 @@ impl Document {
             }
             Command::SetLoopEnabled { enabled } => {
                 self.settings.arrangement_loop.enabled = *enabled;
+                Ok(())
+            }
+            Command::AddLocator { locator } => self.add_locator(locator.clone()),
+            Command::DeleteLocator { locator } => self.delete_locator(*locator),
+            Command::MoveLocator { locator, to } => self.move_locator(*locator, *to),
+            Command::RenameLocator { locator, name } => self.rename_locator(*locator, name.clone()),
+            Command::SetLocatorInfoText { locator, info_text } => {
+                self.set_locator_info_text(*locator, info_text.clone())
+            }
+            Command::LoopToNextLocator { locator } => self.loop_to_next_locator(*locator),
+            Command::SetSongStart { start } => {
+                self.settings.song_start = *start;
                 Ok(())
             }
             Command::SetPunchIn { enabled } => {
@@ -2978,6 +3104,21 @@ impl Document {
                 self.track_mut(*track)?.automation.remove(target);
                 Ok(())
             }
+            Command::SetAutomationEnvelope {
+                track,
+                target,
+                points,
+            } => {
+                self.check_automation_target(*track, *target)?;
+                let envelope = Envelope::from_points(points.clone())?;
+                if envelope.is_empty() {
+                    self.track_mut(*track)?.automation.remove(target);
+                    return Ok(());
+                }
+                let automation = entry(&mut self.track_mut(*track)?.automation, *target);
+                automation.envelope = envelope;
+                Ok(())
+            }
             Command::ReEnableAutomation {} => {
                 for id in self.track_order() {
                     let track = self.track_mut(id)?;
@@ -3015,6 +3156,10 @@ impl Document {
             }
             Command::SetSoloInPlace { enabled } => {
                 self.settings.solo_in_place = *enabled;
+                Ok(())
+            }
+            Command::SetLockEnvelopes { enabled } => {
+                self.settings.lock_envelopes = *enabled;
                 Ok(())
             }
             Command::SetCueMode { enabled } => {
@@ -3178,6 +3323,37 @@ impl Document {
                 if self.clip_ref(*clip)?.mute != *mute {
                     self.clip_mut(*clip)?.mute = *mute;
                 }
+                Ok(())
+            }
+            // Spec: scales R5. A scale name the list doesn't hold, or a
+            // root outside C to B, is refused, and nothing changes.
+            Command::SetClipScale {
+                clips,
+                enabled,
+                root,
+                name,
+            } => {
+                let mut scales = Vec::with_capacity(clips.len());
+                for clip in clips {
+                    let current = self.clip_ref(*clip)?.scale;
+                    scales.push((*clip, scaled(current, *enabled, *root, name.as_deref())?));
+                }
+                for (clip, next) in scales {
+                    if self.clip_ref(clip)?.scale != next {
+                        self.clip_mut(clip)?.scale = next;
+                    }
+                }
+                Ok(())
+            }
+            // Spec: scales R9, R12. The set's current scale, which the
+            // Control Bar's scale controls show and a new clip takes.
+            Command::SetScale {
+                enabled,
+                root,
+                name,
+            } => {
+                let current = self.settings.scale;
+                self.settings.scale = scaled(current, *enabled, *root, name.as_deref())?;
                 Ok(())
             }
             Command::SetClipLaunchMode { clip, mode } => {
@@ -4899,10 +5075,16 @@ impl Document {
         check_extent(clip.start, clip.length)?;
         check_clip(clip)?;
         self.check_clip_envelopes(track, clip)?;
-        self.track_mut(track)?
-            .clips
-            .insert(clip.id, Shared::new(clip.clone()));
-        self.index.clip_track.insert(clip.id, track);
+        // Spec: scales R7. A clip made from nothing takes the set's current
+        // scale. A caller that named a scale keeps it, so the field the
+        // command reference lists isn't silently dropped.
+        let mut clip = clip.clone();
+        if clip.scale.is_default() {
+            clip.scale = self.settings.scale;
+        }
+        let id = clip.id;
+        self.track_mut(track)?.clips.insert(id, Shared::new(clip));
+        self.index.clip_track.insert(id, track);
         Ok(())
     }
 
@@ -5152,10 +5334,18 @@ impl Document {
         if target.slot(scene).is_some() {
             return Err(ModelError::SlotOccupied { track, scene });
         }
+        // Spec: scales R7. A clip made from nothing takes the set's current
+        // scale. A caller that named a scale keeps it, so the field the
+        // command reference lists isn't silently dropped.
+        let mut clip = clip.clone();
+        if clip.scale.is_default() {
+            clip.scale = self.settings.scale;
+        }
+        let id = clip.id;
         self.track_mut(track)?
             .slots
-            .insert(scene, Shared::new(clip.clone()));
-        self.index.clip_track.insert(clip.id, track);
+            .insert(scene, Shared::new(clip));
+        self.index.clip_track.insert(id, track);
         Ok(())
     }
 
@@ -6487,6 +6677,135 @@ impl Document {
         Ok(())
     }
 
+    /// Adds a locator at its position, naming it with the next whole number
+    /// when it has no name of its own.
+    fn add_locator(&mut self, mut locator: Locator) -> Result<(), ModelError> {
+        if locator.position < Ticks::ZERO {
+            return Err(ModelError::NegativePosition(locator.position));
+        }
+        self.check_fresh(locator.id.0)?;
+        if self
+            .settings
+            .locators
+            .iter()
+            .any(|other| other.position == locator.position)
+        {
+            return Err(ModelError::ChangeInUse {
+                what: "locator",
+                at: locator.position,
+            });
+        }
+        if locator.name.is_empty() {
+            locator.name = next_locator_name(&self.settings.locators);
+        }
+        self.settings.locators.push(locator);
+        self.settings
+            .locators
+            .sort_by_key(|locator| locator.position);
+        Ok(())
+    }
+
+    /// Deletes a locator. A song start time on it goes with it.
+    fn delete_locator(&mut self, id: LocatorId) -> Result<(), ModelError> {
+        let position = self
+            .settings
+            .locators
+            .iter()
+            .position(|locator| locator.id == id)
+            .ok_or(ModelError::NoSuchLocator(id))?;
+        self.settings.locators.remove(position);
+        if self.settings.song_start == Some(SongStart::Locator(id)) {
+            self.settings.song_start = None;
+        }
+        Ok(())
+    }
+
+    /// Moves a locator to `to`.
+    fn move_locator(&mut self, id: LocatorId, to: Ticks) -> Result<(), ModelError> {
+        if to < Ticks::ZERO {
+            return Err(ModelError::NegativePosition(to));
+        }
+        if self.locator(id).is_none() {
+            return Err(ModelError::NoSuchLocator(id));
+        }
+        if self
+            .settings
+            .locators
+            .iter()
+            .any(|other| other.id != id && other.position == to)
+        {
+            return Err(ModelError::ChangeInUse {
+                what: "locator",
+                at: to,
+            });
+        }
+        let locator = self
+            .settings
+            .locators
+            .iter_mut()
+            .find(|locator| locator.id == id)
+            .expect("just found the locator");
+        locator.position = to;
+        self.settings
+            .locators
+            .sort_by_key(|locator| locator.position);
+        Ok(())
+    }
+
+    /// Renames a locator. An empty name keeps the old one (the time editing
+    /// spec, R8).
+    fn rename_locator(&mut self, id: LocatorId, name: String) -> Result<(), ModelError> {
+        let locator = self
+            .settings
+            .locators
+            .iter_mut()
+            .find(|locator| locator.id == id)
+            .ok_or(ModelError::NoSuchLocator(id))?;
+        if !name.is_empty() {
+            locator.name = name;
+        }
+        Ok(())
+    }
+
+    /// Sets a locator's info text.
+    fn set_locator_info_text(
+        &mut self,
+        id: LocatorId,
+        info_text: String,
+    ) -> Result<(), ModelError> {
+        let locator = self
+            .settings
+            .locators
+            .iter_mut()
+            .find(|locator| locator.id == id)
+            .ok_or(ModelError::NoSuchLocator(id))?;
+        locator.info_text = info_text;
+        Ok(())
+    }
+
+    /// Sets the loop brace from a locator to the next one and switches the
+    /// loop on.
+    fn loop_to_next_locator(&mut self, id: LocatorId) -> Result<(), ModelError> {
+        let locator = self.locator(id).ok_or(ModelError::NoSuchLocator(id))?;
+        let start = locator.position;
+        let next = self
+            .settings
+            .locators
+            .iter()
+            .map(|locator| locator.position)
+            .filter(|position| *position > start)
+            .min()
+            .ok_or(ModelError::NoChange {
+                what: "next locator",
+                at: start,
+            })?;
+        let brace = &mut self.settings.arrangement_loop;
+        brace.start = start;
+        brace.length = next - start;
+        brace.enabled = true;
+        Ok(())
+    }
+
     /// Sets the time-signature marker at `at`, adding one when there's none.
     fn set_time_signature_change(
         &mut self,
@@ -6869,6 +7188,39 @@ fn check_macro_number(number: u8) -> Result<(), ModelError> {
             "a rack's macros are numbered 1 to 16",
         ))
     }
+}
+
+/// The scale a command's arguments give over `scale`: the values it gives
+/// replace the ones it has, and the ones it doesn't give stay as they were
+/// (the scales spec, R5). A root outside C to B, or a name the scale list
+/// doesn't hold, is refused.
+fn scaled(
+    scale: Scale,
+    enabled: Option<bool>,
+    root: Option<u8>,
+    name: Option<&str>,
+) -> Result<Scale, ModelError> {
+    let root = match root {
+        Some(root) if root > 11 => {
+            return Err(ModelError::InvalidValue {
+                what: "root note",
+                value: f64::from(root),
+            });
+        }
+        Some(root) => root,
+        None => scale.root,
+    };
+    let name = match name {
+        Some(name) => ScaleName::parse(name).ok_or(ModelError::InvalidInput(
+            "the scale's name is not one of the scale list's names",
+        ))?,
+        None => scale.name,
+    };
+    Ok(Scale {
+        enabled: enabled.unwrap_or(scale.enabled),
+        root,
+        name,
+    })
 }
 
 /// The next number from a SplitMix64 generator, from 0 (inclusive) to 1

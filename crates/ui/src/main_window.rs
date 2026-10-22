@@ -290,6 +290,12 @@ impl MainWindowUi {
         &self.browser
     }
 
+    /// The Device View, to read what it drew.
+    #[must_use]
+    pub fn devices(&self) -> &crate::device_view::DeviceViewUi {
+        &self.devices
+    }
+
     /// Whether a value is being typed into a Control Bar field: while it
     /// is, key presses go to the field rather than to shortcuts, as they do
     /// to a text field (the control bar transport spec, R10). The same while
@@ -344,6 +350,11 @@ impl MainWindowUi {
                 self.devices.start_variation_rename(*rack, *index);
             }
             Effect::RenameTrack(track) => crate::track_menu::start_rename(ctx, *track),
+            Effect::RenameLocator(locator) => {
+                // Spec: time-editing R8. Rename types the name in the
+                // scrub area.
+                crate::arrangement::start_rename(ctx, *locator);
+            }
             Effect::MoveFocus {
                 backwards,
                 neighbor,
@@ -435,6 +446,8 @@ impl MainWindowUi {
             )
             .translate(area.min.to_vec2());
             self.track_area_clicks(ctx, &layout, &mut events);
+            // Where the Tag Editor opens, beside the content pane.
+            let mut tag_editor = None;
             self.control_bar(ui, shell, theme, &layout, &mut events);
             if let Some(browser) = layout.browser {
                 // Spec: macros R3. A rack's Map mode puts the mappings list
@@ -447,9 +460,17 @@ impl MainWindowUi {
                     let browser =
                         crate::device_view::hot_swap_bar(ui, shell, theme, browser, &mut events);
                     self.browser.show(ui, shell, theme, browser, &mut events);
+                    tag_editor = shell.browser_view().tag_editor().then_some(browser);
                 }
             }
             self.main_view(ui, shell, theme, layout.main_view, &mut events);
+            // Spec: browser-tags R10. The Tag Editor opens beside the
+            // content pane (L-BRW-013), over the main view, so it is drawn
+            // after it.
+            if let Some(browser) = tag_editor {
+                let rect = crate::layout::tag_editor_rect(browser);
+                self.browser.tag_editor(ui, shell, theme, rect, &mut events);
+            }
             // Files dragged from the browser, or from Finder or Explorer,
             // land in the Arrangement (WP-1.10).
             // The zone editor, which sits over the foot of the Arrangement,
@@ -838,6 +859,20 @@ impl MainWindowUi {
             }
             if *el == Element::MixerMenu {
                 self.mixer_menu(&response, shell, events);
+            }
+            if *el == Element::RootNote {
+                // Spec: scales R9. The Root Note chooser lists the twelve
+                // pitch classes.
+                egui::Popup::menu(&response).show(|ui| {
+                    root_note_menu(ui, shell, events);
+                });
+            }
+            if *el == Element::ScaleName {
+                // Spec: scales R9. The Scale Name chooser lists the scale
+                // list.
+                egui::Popup::menu(&response).show(|ui| {
+                    scale_name_menu(ui, shell, events);
+                });
             }
             if *el == Element::DeviceSelector {
                 // Spec: racks R25 (S-DEV-005). A right-click lists every
@@ -1438,8 +1473,56 @@ fn look(element: Element, shell: &Shell) -> Look {
         Element::TapTempo => text("TAP"),
         // The transport section's values come from `control_bar`.
         Element::Quantization => text("1 Bar"),
-        Element::RootNote => text("C"),
-        Element::ScaleName => text("Major"),
+        // Spec: scales R6, R9, R14. The scale controls show the selected
+        // clips' scale, and an asterisk where they differ.
+        Element::ScaleMode => {
+            let display = shell.scale_display();
+            Look {
+                on: display.enabled == Some(true),
+                mixed: display.enabled.is_none(),
+                value: Some(
+                    match display.enabled {
+                        Some(true) => "on",
+                        Some(false) => "off",
+                        None => "mixed",
+                    }
+                    .to_owned(),
+                ),
+                description: Some(
+                    "Scale Mode: whether the clips carry a scale, and which keys belong to \
+                     it."
+                    .to_owned(),
+                ),
+                ..Look::default()
+            }
+        }
+        Element::RootNote => {
+            let display = shell.scale_display();
+            let name = display.root.map_or("*", bl_model::Scale::root_name);
+            Look {
+                text: Some(name.to_owned()),
+                value: Some(display.root.map_or_else(
+                    || "mixed".to_owned(),
+                    |root| bl_model::Scale::root_name(root).to_owned(),
+                )),
+                description: Some("The root note of the scale.".to_owned()),
+                ..Look::default()
+            }
+        }
+        Element::ScaleName => {
+            let display = shell.scale_display();
+            let name = display.name.map_or("*", |name| name.label());
+            Look {
+                text: Some(name.to_owned()),
+                value: Some(
+                    display
+                        .name
+                        .map_or_else(|| "mixed".to_owned(), |name| name.label().to_owned()),
+                ),
+                description: Some("The scale the keys belong to.".to_owned()),
+                ..Look::default()
+            }
+        }
         Element::KeyMap => text("KEY"),
         Element::MidiMap => text("MIDI"),
         Element::SampleRate => {
@@ -1628,8 +1711,66 @@ fn click(element: Element, shell: &Shell) -> Option<Invocation> {
                 )
             })
         }),
+        // Spec: scales R12. The Scale Mode switch changes the selected
+        // clips' scales, or the set's current scale when no clip is
+        // selected.
+        Element::ScaleMode => {
+            let on = shell.scale_display().enabled == Some(true);
+            Some(scale_command(shell, &[("enabled", json!(!on))]))
+        }
         // Play, Stop, and the Loop switch (WP-1.18).
         _ => control_bar::click(element, shell),
+    }
+}
+
+/// The command that changes the scale the Control Bar shows: the selected
+/// clips' own scales, or the set's current scale when no clip is selected
+/// (the scales spec, R12).
+fn scale_command(shell: &Shell, change: &[(&str, serde_json::Value)]) -> Invocation {
+    let targets = shell.scale_targets();
+    let mut args = serde_json::Map::new();
+    if !targets.is_empty() {
+        args.insert("clips".to_owned(), json!(targets));
+    }
+    for (key, value) in change {
+        args.insert((*key).to_owned(), value.clone());
+    }
+    let id = if targets.is_empty() {
+        bl_shell::scales_commands::SET_SCALE
+    } else {
+        bl_shell::scales_commands::SET_CLIP_SCALE
+    };
+    Invocation::new(id, serde_json::Value::Object(args))
+}
+
+/// The Root Note chooser's list: the twelve pitch classes, from C (the
+/// scales spec, R9).
+fn root_note_menu(ui: &mut egui::Ui, shell: &Shell, events: &mut Vec<UiEvent>) {
+    let display = shell.scale_display();
+    for root in 0..12u8 {
+        let item =
+            ui.selectable_label(display.root == Some(root), bl_model::Scale::root_name(root));
+        if item.clicked() {
+            events.push(UiEvent::Invoke(scale_command(
+                shell,
+                &[("root", json!(root))],
+            )));
+        }
+    }
+}
+
+/// The Scale Name chooser's list: the scale list, in its order (the scales
+/// spec, R1, R9).
+fn scale_name_menu(ui: &mut egui::Ui, shell: &Shell, events: &mut Vec<UiEvent>) {
+    let display = shell.scale_display();
+    for name in bl_model::ScaleName::ALL {
+        let item = ui.selectable_label(display.name == Some(name), name.label());
+        if item.clicked() {
+            events.push(UiEvent::Invoke(scale_command(
+                shell,
+                &[("name", json!(name.id()))],
+            )));
+        }
     }
 }
 

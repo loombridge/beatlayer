@@ -480,6 +480,14 @@ impl MixerUi {
             }
         }
         self.scroll(&ui, sections_area, of, events);
+        // Spec: view-options R1, mixer-view R23. A middle-button drag pans
+        // the mixer's columns sideways, as the wheel scrolls them.
+        if let Some(delta) = crate::middle::pan(&ui, sections_area) {
+            events.push(UiEvent::Invoke(Invocation::new(
+                ids::SCROLL,
+                json!({ "view": of, "x": -delta.x }),
+            )));
+        }
         self.focus(shell, &layout, &columns, of, events);
         // A chain dropped out of the mixer's tracks (drum racks spec, R23,
         // R24).

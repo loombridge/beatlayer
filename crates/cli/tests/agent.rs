@@ -5484,6 +5484,68 @@ fn an_agent_sets_the_audio_utilities_panel_and_reads_it_back() {
     assert_eq!(gain["gain"], 0.5);
 }
 
+// Spec: browser-tags R16.
+#[test]
+fn an_agent_tags_browser_items_by_command_id_and_reads_them_back() {
+    // The browser's commands are external: they read files outside the
+    // project.
+    let mut client = Client::new(InProcess::new(Agent::headless(true), Shell::headless()));
+    client.initialize("tags").unwrap();
+    let run = |client: &mut Client<InProcess>, command: &str, args: Value| {
+        let out = call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": command, "args": args }] }),
+        );
+        out["results"][0]["result"].clone()
+    };
+    // The person makes a group and a tag.
+    let groups = run(
+        &mut client,
+        "browser.add_tag_group",
+        json!({ "name": "Mine" }),
+    );
+    let names: Vec<&str> = groups["groups"]
+        .as_array()
+        .expect("the groups")
+        .iter()
+        .map(|g| g["name"].as_str().expect("a name"))
+        .collect();
+    assert!(names.contains(&"Mine"), "{names:?}");
+    let tags = run(
+        &mut client,
+        "browser.add_tag",
+        json!({ "name": "Favourite", "group": "Mine" }),
+    );
+    let full: Vec<&str> = tags["groups"]
+        .as_array()
+        .expect("the groups")
+        .iter()
+        .filter(|g| g["name"] == json!("Mine"))
+        .flat_map(|g| g["tags"].as_array().expect("the tags").iter())
+        .map(|t| t["full_name"].as_str().expect("a name"))
+        .collect();
+    assert_eq!(full, ["Mine|Favourite"]);
+    // The tag goes on an item.
+    let item = "/tmp/beatlayer-agent-tag.wav";
+    let tagged = run(
+        &mut client,
+        "browser.tag_items",
+        json!({ "items": [item], "tags": ["Mine|Favourite"], "attach": true }),
+    );
+    assert_eq!(tagged["items"].as_array().expect("the items").len(), 1);
+    // And it reads back.
+    let read = run(&mut client, "browser.tags", json!({ "items": [item] }));
+    let carried: Vec<&str> = read["items"][0]["tags"]
+        .as_array()
+        .expect("the tags")
+        .iter()
+        .map(|t| t["tag"].as_str().expect("a name"))
+        .collect();
+    assert!(carried.contains(&"Mine|Favourite"), "{carried:?}");
+    assert_eq!(read["items"][0]["tags"][0]["source"], json!("own"));
+}
+
 // Spec: articulation-map R18. An agent builds an Articulation Map's list by
 // command ID, headless, and reads it back through `articulation.list` and
 // the query tool.

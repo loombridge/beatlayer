@@ -638,7 +638,7 @@ Total to 1.0: 256 packages planned in Phases 0 to 6, and about 110 estimated in 
 | 6.4 | todo |  |  |
 | 6.5 | todo |  |  |
 | 6.6 | todo |  |  |
-| 6.7 | todo |  |  |
+| 6.7 | done | 22 October 2026 | [#299](https://github.com/loombridge/beatlayer/pull/299); each clip carries a scale and the set has a current scale, with the scale list, the `clip.set_scale`, `song.set_scale` and `song.scales` commands, and the Control Bar's scale controls ([the spec](specs/scales.md) R1 to R14) |
 | 6.7b | todo |  |  |
 | 6.8 | todo |  |  |
 | 6.9 | todo |  |  |
@@ -661,9 +661,9 @@ Total to 1.0: 256 packages planned in Phases 0 to 6, and about 110 estimated in 
 | 6.22 | todo |  |  |
 | 6.22b | todo |  |  |
 | 6.23 | todo |  |  |
-| 6.24 | todo |  |  |
+| 6.24 | done | 22 October 2026 | [#314](https://github.com/loombridge/beatlayer/pull/314); locators in the Arrangement's scrub area, the song start time, and playing from the scrub area on the global launch quantisation ([time editing](specs/time-editing.md) R1 to R13) |
 | 6.24b | todo |  |  |
-| 6.25 | todo |  |  |
+| 6.25 | done | 22 October 2026 | [#305](https://github.com/loombridge/beatlayer/pull/305); a time selection in the Arrangement's automation lanes names the lanes it covers, the breakpoints it covers and a segment drag move as one undo step each, Cut, Copy, Paste, Duplicate and Delete act on the selected lanes' envelopes and a copied shape pastes onto another parameter, and Lock Envelopes keeps the tracks' envelopes where they are while clip edits carry them over the clips' spans when it's off ([automation editing](specs/automation-editing.md) R1 to R10) |
 | 6.25b | todo |  |  |
 | 6.25c | todo |  |  |
 | 6.26 | todo |  |  |
@@ -671,9 +671,9 @@ Total to 1.0: 256 packages planned in Phases 0 to 6, and about 110 estimated in 
 | 6.28 | done | 22 October 2026 | [#296](https://github.com/loombridge/beatlayer/pull/296); the Undo History panel lists the set's steps newest first in the Learn View's column, and a click or Enter on a row returns the set to that point in one jump that is no step of its own, with an agent's step marked with the agent's name ([undo history](specs/undo-history.md)) |
 | 6.29 | todo |  |  |
 | 6.29b | todo |  |  |
-| 6.30 | todo |  |  |
+| 6.30 | done | 22 October 2026 | [#316](https://github.com/loombridge/beatlayer/pull/316); the Theme & Colors page's Theme, Appearance (with Follow System), Tone and High Contrast rows and its four Customization number boxes, the colour pipeline every window draws, and theme files in the User Library's `Themes` folder ([themes](specs/themes.md) R1 to R13) |
 | 6.30b | todo |  |  |
-| 6.31 | todo |  |  |
+| 6.31 | done | 22 October 2026 | [#300](https://github.com/loombridge/beatlayer/pull/300); the browser's database on disk holds the index, the tags and the tag groups, the Tag Editor (Cmd+Shift+E) and Quick Tags put tags on the selected items, and `#` searches by tag ([browser tags](specs/browser-tags.md) R1 to R17) |
 | 6.32 | todo |  |  |
 | 6.32b | todo |  |  |
 | 6.33 | todo |  |  |
@@ -697,11 +697,11 @@ Total to 1.0: 256 packages planned in Phases 0 to 6, and about 110 estimated in 
 | 6.47 | done | 22 October 2026 | [#292](https://github.com/loombridge/beatlayer/pull/292); the Articulation Map, a MIDI effect, holds up to 32 named articulations, each with a trigger and the keyswitches, controllers and channel it sends, and the list is edited by command, saved with the set and in the device's presets, and read back ([articulation map](specs/articulation-map.md) R1 to R20); IMP-32's acceptance is still open |
 | 6.48 | todo |  | Waits on IMP-33's acceptance |
 | 6.49 | todo |  | Waits on IMP-34, IMP-35 and IMP-36's acceptance |
-| 6.49b | todo |  |  |
+| 6.49b | done | 22 October 2026 | [#315](https://github.com/loombridge/beatlayer/pull/315); holding the middle mouse button and dragging pans the area under the pointer in the Arrangement's lanes, the Session View's grid, both mixers, the MIDI Note Editor, the Sample Editor, the Device View's chain and the browser's lists, selecting and moving nothing, and a note is drawn in its clip's colour, paler the softer its velocity and grey while deactivated ([view options](specs/view-options.md) R1, [the piano roll](specs/piano-roll.md) R43 and R44) |
 | 6.50 | todo |  | Waits on IMP-37's acceptance |
 | 6.51 | todo |  |  |
 | 6.52 | todo |  |  |
-| 6.53 | todo |  |  |
+| 6.53 | done | 22 October 2026 | [#302](https://github.com/loombridge/beatlayer/pull/302); the MIDI Note Editor's insert marker and time selection, its keyboard selection and moves, Shift-click and the piano ruler's keys, the note clipboard with Option-drag copies, and the editor's context menus ([the spec](specs/piano-roll.md) R23 to R31) |
 | 6.54 | todo |  |  |
 | 6.55 | todo |  |  |
 | 6.56 | todo |  |  |
@@ -712,7 +712,7 @@ Total to 1.0: 256 packages planned in Phases 0 to 6, and about 110 estimated in 
 | 6.61 | todo |  |  |
 | 6.62 | todo |  |  |
 | 6.63 | done | 22 October 2026 | [#294](https://github.com/loombridge/beatlayer/pull/294); the File Manager in the detail area's place, listing the set's files, the missing ones, the external ones and the unused ones, with the search's switches, Collect and Save, the set's backups and Save a Copy... ([file management](specs/file-management.md) R10 to R21) |
-| 6.64 | todo |  |  |
+| 6.64 | done | 22 October 2026 | [#306](https://github.com/loombridge/beatlayer/pull/306); View ▸ Arrangement Track Controls' In/Out, Volume and Return Tracks hide their parts of every track header, and the mixers' own sections stay as they are ([arrangement view](specs/arrangement-view.md) R20 to R24) |
 | 6.65 | todo |  |  |
 | 6.66 | todo |  |  |
 | 6.67 | todo |  |  |

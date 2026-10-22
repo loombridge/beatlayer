@@ -1,7 +1,8 @@
 //! The Arrangement View's view commands in the command registry (WP-1.8a;
 //! decisions D16 and D17): zoom, scroll, Follow, the editing grid, the
 //! Overview, track heights and folding, the insert marker, and the
-//! selection the zoom commands work from.
+//! selection the zoom commands work from; and, from WP-6.64, which of the
+//! track headers' controls show.
 //!
 //! These change only what the Arrangement View shows, never the set, so
 //! every one is in the read class. [`register`] adds their specs, which are
@@ -12,7 +13,7 @@
 use bl_commands::Context::{Arrangement, Global, SampleEditor, TrackHeaders};
 use bl_commands::{Binding, CommandSpec, NoArgs, Permission, RegisterError, Registry};
 use bl_core::time::Ticks;
-use bl_model::{AutomationTarget, ClipId, TrackId};
+use bl_model::{AutomationTarget, ClipId, LocatorId, TrackId};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -78,6 +79,13 @@ pub const AUTOMATION_ARM: &str = "arrangement.automation_arm";
 /// `arrangement.show_automation`: choose the parameter a track's automation
 /// lane shows, or hide the lane.
 pub const SHOW_AUTOMATION: &str = "arrangement.show_automation";
+/// `arrangement.show_in_out`: show or hide the track headers' In/Out column.
+pub const SHOW_IN_OUT: &str = "arrangement.show_in_out";
+/// `arrangement.show_volume`: show or hide the track headers' volume, pan,
+/// and sends.
+pub const SHOW_VOLUME: &str = "arrangement.show_volume";
+/// `arrangement.show_return_tracks`: show or hide the return tracks' rows.
+pub const SHOW_RETURN_TRACKS: &str = "arrangement.show_return_tracks";
 
 /// Every command [`register`] adds, so a host knows which IDs to send to
 /// `bl-shell`'s `Shell::run`.
@@ -110,6 +118,9 @@ pub const IDS: &[&str] = &[
     AUTOMATION_MODE,
     AUTOMATION_ARM,
     SHOW_AUTOMATION,
+    SHOW_IN_OUT,
+    SHOW_VOLUME,
+    SHOW_RETURN_TRACKS,
 ];
 
 /// Whether `id` is one of the Arrangement View's commands.
@@ -345,8 +356,17 @@ pub struct ArrangementState {
     /// selection otherwise.
     #[serde(default)]
     pub selected_clips: Vec<ClipId>,
+    /// The selected locators (WP-6.24), in the order they were selected.
+    /// The locator commands act on these.
+    #[serde(default)]
+    pub selected_locators: Vec<LocatorId>,
     /// The selected span of time on the selected tracks, if any.
     pub time_selection: Option<TimeRange>,
+    /// The lanes the time selection covers: each a track's own lane or its
+    /// automation lane (the automation editing spec, R1). Empty when the
+    /// selection names no lane.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub time_selection_lanes: Vec<Lane>,
     /// The folded tracks.
     pub folded_tracks: Vec<TrackId>,
     /// How many views `arrangement.zoom_back` can go back to.
@@ -362,6 +382,12 @@ pub struct ArrangementState {
     /// `target` `null` means the lane draws no envelope.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub automation_lanes: Vec<AutomationLane>,
+    /// Whether the track headers show their In/Out column.
+    pub show_in_out: bool,
+    /// Whether the track headers show their volume, pan, and sends.
+    pub show_volume: bool,
+    /// Whether the return tracks' rows show in the lanes.
+    pub show_return_tracks: bool,
 }
 
 /// One track's automation lane and the parameter it shows, as
@@ -372,6 +398,50 @@ pub struct AutomationLane {
     pub track: TrackId,
     /// The parameter the lane shows, or `null` while it draws no envelope.
     pub target: Option<AutomationTarget>,
+}
+
+/// Which lane a selection covers: a track's own lane, where its clips are,
+/// or the automation lane under it, which shows a parameter (the automation
+/// editing spec, R1).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+#[schemars(
+    description = "Which lane a selection covers: `track` for a track's own lane, where its \
+                   clips are, and `automation` for the automation lane under it, which shows a \
+                   parameter."
+)]
+pub enum Lane {
+    /// A track's own lane, where its clips are.
+    Track {
+        /// The track.
+        track: TrackId,
+    },
+    /// A track's automation lane, which shows a parameter.
+    Automation {
+        /// The track.
+        track: TrackId,
+        /// The parameter the lane shows.
+        target: AutomationTarget,
+    },
+}
+
+impl Lane {
+    /// The track the lane belongs to.
+    #[must_use]
+    pub const fn track(&self) -> TrackId {
+        match *self {
+            Self::Track { track } | Self::Automation { track, .. } => track,
+        }
+    }
+
+    /// The parameter the lane shows, for an automation lane.
+    #[must_use]
+    pub const fn target(&self) -> Option<AutomationTarget> {
+        match *self {
+            Self::Track { .. } => None,
+            Self::Automation { target, .. } => Some(target),
+        }
+    }
 }
 
 /// Arguments of `arrangement.zoom`.
@@ -503,6 +573,10 @@ pub struct SelectTimeArgs {
     /// The tracks it covers. Left out, the selected tracks.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tracks: Option<Vec<TrackId>>,
+    /// The lanes it covers: each a track's own lane or its automation lane
+    /// (the automation editing spec, R1). Left out, the tracks' own lanes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lanes: Option<Vec<Lane>>,
 }
 
 /// Arguments of `arrangement.fold_tracks`.
@@ -782,8 +856,9 @@ fn specs() -> Vec<CommandSpec> {
             SELECT_TIME,
             "Select Time",
             "Selects the span from `start` to `end` on `tracks` (or the selected tracks), as \
-             dragging across track lanes does. `arrangement.zoom_to_selection` zooms to it. \
-             Changes only the view.",
+             dragging across track lanes does. `lanes` names the lanes the selection covers, \
+             each a track's own lane or its automation lane; left out, the tracks' own lanes. \
+             `arrangement.zoom_to_selection` zooms to it. Changes only the view.",
         )
         .context(Arrangement)
         .args::<SelectTimeArgs>(),
@@ -873,6 +948,35 @@ fn specs() -> Vec<CommandSpec> {
         )
         .contexts([Global, Arrangement])
         .args::<ShowAutomationArgs>(),
+        view(
+            SHOW_IN_OUT,
+            "Arrangement Track Controls In/Out",
+            "Shows or hides the Arrangement's track headers' In/Out column (the input and output \
+             routing and monitoring), as View > Arrangement Track Controls > In/Out does. \
+             Switches unless `on` says which. Changes only the view; the mixers' own In/Out \
+             section is a switch of its own.",
+        )
+        .contexts([Global, Arrangement])
+        .args::<SwitchArgs>(),
+        view(
+            SHOW_VOLUME,
+            "Arrangement Track Controls Volume",
+            "Shows or hides the Arrangement's track headers' volume, pan, and sends, as View > \
+             Arrangement Track Controls > Volume does. Switches unless `on` says which. Changes \
+             only the view; the mixers' own sections are switches of their own.",
+        )
+        .contexts([Global, Arrangement])
+        .args::<SwitchArgs>(),
+        view(
+            SHOW_RETURN_TRACKS,
+            "Arrangement Track Controls Return Tracks",
+            "Shows or hides the return tracks' rows in the Arrangement's lanes, as View > \
+             Arrangement Track Controls > Return Tracks does. Switches unless `on` says which. \
+             Changes only the view; the returns play as before, and the mixers' own Return Tracks \
+             section is a switch of its own.",
+        )
+        .contexts([Global, Arrangement])
+        .args::<SwitchArgs>(),
     ]
 }
 

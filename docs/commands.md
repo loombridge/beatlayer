@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-600 commands in 40 areas.
+656 commands in 41 areas.
 
 ## Permission classes
 
@@ -73,8 +73,11 @@ Each command has:
 | [`arrangement.set_insert_marker`](#arrangementset_insert_marker) | Set Insert Marker | `read` |  |  |
 | [`arrangement.set_track_height`](#arrangementset_track_height) | Set Track Height | `read` |  |  |
 | [`arrangement.show_automation`](#arrangementshow_automation) | Show Automation | `read` |  |  |
+| [`arrangement.show_in_out`](#arrangementshow_in_out) | Arrangement Track Controls In/Out | `read` |  |  |
 | [`arrangement.show_range`](#arrangementshow_range) | Show Time Range | `read` |  |  |
+| [`arrangement.show_return_tracks`](#arrangementshow_return_tracks) | Arrangement Track Controls Return Tracks | `read` |  |  |
 | [`arrangement.show_track`](#arrangementshow_track) | Show Track | `read` |  |  |
+| [`arrangement.show_volume`](#arrangementshow_volume) | Arrangement Track Controls Volume | `read` |  |  |
 | [`arrangement.snap_to_grid`](#arrangementsnap_to_grid) | Snap to Grid | `read` | `Cmd+4` | `Ctrl+4` |
 | [`arrangement.split`](#arrangementsplit) | Split | `edit` | `Cmd+E` | `Ctrl+E` |
 | [`arrangement.state`](#arrangementstate) | Arrangement View State | `read` |  |  |
@@ -105,29 +108,47 @@ Each command has:
 | [`audio.set_test_tone`](#audioset_test_tone) | Test Tone | `external` |  |  |
 | [`audio.status`](#audiostatus) | Audio Status | `read` |  |  |
 | [`audio.toggle_engine`](#audiotoggle_engine) | Audio Engine On | `external` | `Cmd+Option+Shift+E` | `Ctrl+Alt+Shift+E` |
+| [`automation.copy`](#automationcopy) | Copy Automation | `read` |  |  |
+| [`automation.cut`](#automationcut) | Cut Automation | `destructive` |  |  |
 | [`automation.delete`](#automationdelete) | Delete Automation | `destructive` |  |  |
 | [`automation.delete_breakpoint`](#automationdelete_breakpoint) | Delete Automation Breakpoint | `edit` |  |  |
+| [`automation.delete_range`](#automationdelete_range) | Delete Automation Range | `destructive` |  |  |
+| [`automation.duplicate`](#automationduplicate) | Duplicate Automation | `edit` |  |  |
 | [`automation.move_breakpoint`](#automationmove_breakpoint) | Move Automation Breakpoint | `edit` |  |  |
+| [`automation.move_breakpoints`](#automationmove_breakpoints) | Move Automation Breakpoints | `edit` |  |  |
+| [`automation.paste`](#automationpaste) | Paste Automation | `edit` |  |  |
 | [`automation.re_enable`](#automationre_enable) | Re-Enable Automation | `edit` |  |  |
 | [`automation.re_enable_for`](#automationre_enable_for) | Re-Enable Automation for a Parameter | `edit` |  |  |
+| [`automation.select_segment`](#automationselect_segment) | Select Automation Segment | `read` |  |  |
 | [`automation.set_breakpoint`](#automationset_breakpoint) | Set Automation Breakpoint | `edit` |  |  |
 | [`automation.set_curve`](#automationset_curve) | Curve Automation Segment | `edit` |  |  |
+| [`automation.set_envelope`](#automationset_envelope) | Set Automation Envelope | `edit` |  |  |
 | [`browser.add_folder`](#browseradd_folder) | Add Folder to Browser... | `external` |  |  |
+| [`browser.add_tag`](#browseradd_tag) | Add Browser Tag | `edit` |  |  |
+| [`browser.add_tag_group`](#browseradd_tag_group) | Add Browser Tag Group | `edit` |  |  |
 | [`browser.add_to_arrangement`](#browseradd_to_arrangement) | Add Files to Arrangement | `external` |  |  |
+| [`browser.delete_tag`](#browserdelete_tag) | Delete Browser Tag | `destructive` |  |  |
 | [`browser.focus_search`](#browserfocus_search) | Search in Browser | `read` | `Cmd+F` | `Ctrl+F` |
 | [`browser.load_selected`](#browserload_selected) | Load Selected Item | `external` | `Enter` | `Enter` |
+| [`browser.move_tag`](#browsermove_tag) | Move Browser Tag | `edit` |  |  |
 | [`browser.open_folder`](#browseropen_folder) | Open Folder | `external` |  |  |
 | [`browser.open_place`](#browseropen_place) | Open Browser Label | `external` |  |  |
 | [`browser.preview`](#browserpreview) | Preview | `external` |  |  |
 | [`browser.remove_folder`](#browserremove_folder) | Remove from Sidebar | `edit` |  |  |
+| [`browser.rename_tag`](#browserrename_tag) | Rename Browser Tag | `edit` |  |  |
+| [`browser.reset_tag_order`](#browserreset_tag_order) | Reset Browser Tag Order | `edit` |  |  |
 | [`browser.scrub_preview`](#browserscrub_preview) | Scrub Preview | `external` |  |  |
 | [`browser.search`](#browsersearch) | Browser Search | `external` |  |  |
 | [`browser.select`](#browserselect) | Select in Browser | `external` |  |  |
 | [`browser.set_preview`](#browserset_preview) | Browser File Preview | `edit` |  |  |
 | [`browser.set_raw`](#browserset_raw) | Raw Preview | `edit` |  |  |
 | [`browser.show_file`](#browsershow_file) | Show in Browser | `external` |  |  |
+| [`browser.show_quick_tags`](#browsershow_quick_tags) | Show Quick Tags | `edit` |  |  |
+| [`browser.show_tag_editor`](#browsershow_tag_editor) | Show Tag Editor | `read` | `Cmd+Shift+E` | `Ctrl+Shift+E` |
 | [`browser.state`](#browserstate) | Browser State | `external` |  |  |
 | [`browser.stop_preview`](#browserstop_preview) | Stop Preview | `read` |  |  |
+| [`browser.tag_items`](#browsertag_items) | Tag Items | `edit` |  |  |
+| [`browser.tags`](#browsertags) | Browser Tags | `external` |  |  |
 | [`chain.add`](#chainadd) | Add Chain | `edit` |  |  |
 | [`chain.copy`](#chaincopy) | Copy Chain | `read` | `Cmd+C` | `Ctrl+C` |
 | [`chain.create`](#chaincreate) | Create Chain | `edit` |  |  |
@@ -211,6 +232,7 @@ Each command has:
 | [`clip.set_pitch`](#clipset_pitch) | Set Clip Pitch | `edit` |  |  |
 | [`clip.set_ram_mode`](#clipset_ram_mode) | Set Clip RAM Mode | `edit` |  |  |
 | [`clip.set_region`](#clipset_region) | Set Clip Start and End | `edit` |  |  |
+| [`clip.set_scale`](#clipset_scale) | Set Clip Scale | `edit` |  |  |
 | [`clip.set_segment_bpm`](#clipset_segment_bpm) | Set Warp Segment BPM | `edit` |  |  |
 | [`clip.set_tempo_leader`](#clipset_tempo_leader) | Switch Lead/Follow | `edit` |  |  |
 | [`clip.set_velocity_amount`](#clipset_velocity_amount) | Set Clip Velocity Amount | `edit` |  |  |
@@ -229,11 +251,11 @@ Each command has:
 | [`clip_view.quantize_settings`](#clip_viewquantize_settings) | Quantize Settings | `read` | `Cmd+Shift+U` | `Ctrl+Shift+U` |
 | [`clip_view.sample_editor`](#clip_viewsample_editor) | Sample Editor State | `read` |  |  |
 | [`clip_view.sample_view`](#clip_viewsample_view) | Zoom Sample Editor | `read` | `Z`; `X`; `W`; `H` | `Z`; `X`; `W`; `H` |
-| [`clip_view.select_notes`](#clip_viewselect_notes) | Select Notes | `read` |  |  |
-| [`clip_view.select_time`](#clip_viewselect_time) | Select Sample Editor Time | `read` |  |  |
+| [`clip_view.select_notes`](#clip_viewselect_notes) | Select Notes | `read` | `Cmd+A`; `Cmd+A` | `Ctrl+A`; `Ctrl+A` |
+| [`clip_view.select_time`](#clip_viewselect_time) | Select Time | `read` |  |  |
 | [`clip_view.select_transients`](#clip_viewselect_transients) | Select Transients | `read` |  |  |
 | [`clip_view.select_warp_markers`](#clip_viewselect_warp_markers) | Select Warp Markers | `read` |  |  |
-| [`clip_view.set_insert_marker`](#clip_viewset_insert_marker) | Set Sample Editor Insert Marker | `read` |  |  |
+| [`clip_view.set_insert_marker`](#clip_viewset_insert_marker) | Set Insert Marker | `read` |  |  |
 | [`device.add`](#deviceadd) | Add Device | `edit` |  |  |
 | [`device.add_layers`](#deviceadd_layers) | Add Samples | `external` |  |  |
 | [`device.add_preset`](#deviceadd_preset) | Add Preset | `external` |  |  |
@@ -354,6 +376,16 @@ Each command has:
 | [`keymap.reset`](#keymapreset) | Reset Keys | `edit` |  |  |
 | [`keymap.state`](#keymapstate) | Keymap State | `read` |  |  |
 | [`keymap.unbind`](#keymapunbind) | Unbind Keys | `edit` |  |  |
+| [`locator.add`](#locatoradd) | Add Locator | `edit` |  |  |
+| [`locator.delete`](#locatordelete) | Delete Locator | `destructive` |  |  |
+| [`locator.jump`](#locatorjump) | Jump to Locator | `read` |  |  |
+| [`locator.jump_next`](#locatorjump_next) | Jump to Next Locator | `read` |  |  |
+| [`locator.jump_previous`](#locatorjump_previous) | Jump to Previous Locator | `read` |  |  |
+| [`locator.loop_to_next`](#locatorloop_to_next) | Loop to Next Locator | `edit` |  |  |
+| [`locator.move`](#locatormove) | Move Locator | `edit` |  |  |
+| [`locator.rename`](#locatorrename) | Rename Locator | `edit` |  |  |
+| [`locator.select`](#locatorselect) | Select Locators | `read` |  |  |
+| [`locator.set_info_text`](#locatorset_info_text) | Set Locator Info Text | `edit` |  |  |
 | [`midi.capture`](#midicapture) | Capture MIDI | `edit` |  |  |
 | [`midi.computer_keyboard_key`](#midicomputer_keyboard_key) | Computer Keyboard Key | `read` |  |  |
 | [`midi.computer_keyboard_octave`](#midicomputer_keyboard_octave) | Computer Keyboard Octave | `read` |  |  |
@@ -404,8 +436,12 @@ Each command has:
 | [`modulator.set_shape`](#modulatorset_shape) | Edit Shape | `edit` |  |  |
 | [`modulator.unmap`](#modulatorunmap) | Unmap Modulator | `edit` |  |  |
 | [`note.add`](#noteadd) | Add Note | `edit` |  |  |
-| [`note.delete`](#notedelete) | Delete Notes | `destructive` |  |  |
+| [`note.copy`](#notecopy) | Copy Notes | `read` | `Cmd+C` | `Ctrl+C` |
+| [`note.cut`](#notecut) | Cut Notes | `destructive` | `Cmd+X` | `Ctrl+X` |
+| [`note.delete`](#notedelete) | Delete Notes | `destructive` | `Delete` | `Delete` |
+| [`note.duplicate`](#noteduplicate) | Duplicate Notes | `edit` | `Cmd+D` | `Ctrl+D` |
 | [`note.move`](#notemove) | Move Notes | `edit` |  |  |
+| [`note.paste`](#notepaste) | Paste Notes | `edit` | `Cmd+V` | `Ctrl+V` |
 | [`note.quantize`](#notequantize) | Quantize | `edit` | `Cmd+U` | `Ctrl+U` |
 | [`note.ramp_value`](#noteramp_value) | Ramp Note Values | `edit` |  |  |
 | [`note.resize`](#noteresize) | Resize Notes | `edit` |  |  |
@@ -521,6 +557,8 @@ Each command has:
 | [`set.collect_all_and_save`](#setcollect_all_and_save) | Collect All and Save | `external` |  |  |
 | [`set.discard_changes`](#setdiscard_changes) | Don't Save | `destructive` |  |  |
 | [`set.discard_recovery`](#setdiscard_recovery) | Discard Recovery | `destructive` |  |  |
+| [`set.import_dawproject`](#setimport_dawproject) | Import DAWproject File | `external` |  |  |
+| [`set.import_report`](#setimport_report) | DAWproject Import Report | `read` |  |  |
 | [`set.list_recoverable`](#setlist_recoverable) | List Recoverable Sets | `read` |  |  |
 | [`set.new`](#setnew) | New Beatlayer Set | `destructive` | `Cmd+N` | `Ctrl+N` |
 | [`set.open`](#setopen) | Open Beatlayer Set... | `external` | `Cmd+O` | `Ctrl+O` |
@@ -534,13 +572,19 @@ Each command has:
 | [`set.save_copy`](#setsave_copy) | Save a Copy... | `external` |  |  |
 | [`settings.next_page`](#settingsnext_page) | Next Settings Page | `read` | `Option+Tab` | `Ctrl+Tab` |
 | [`settings.previous_page`](#settingsprevious_page) | Previous Settings Page | `read` | `Option+Shift+Tab` | `Ctrl+Shift+Tab` |
+| [`settings.set_appearance`](#settingsset_appearance) | Appearance | `edit` |  |  |
 | [`settings.set_auto_hide_plug_in_windows`](#settingsset_auto_hide_plug_in_windows) | Auto-Hide Plug-In Windows | `edit` |  |  |
 | [`settings.set_auto_warp_long_samples`](#settingsset_auto_warp_long_samples) | Auto-Warp Long Samples | `edit` |  |  |
+| [`settings.set_brightness`](#settingsset_brightness) | Brightness | `edit` |  |  |
+| [`settings.set_color_hue`](#settingsset_color_hue) | Color Hue | `edit` |  |  |
+| [`settings.set_color_intensity`](#settingsset_color_intensity) | Color Intensity | `edit` |  |  |
 | [`settings.set_continuous_save`](#settingsset_continuous_save) | Save Continuously | `edit` |  |  |
 | [`settings.set_create_fades_on_clip_edges`](#settingsset_create_fades_on_clip_edges) | Create Fades on Clip Edges | `edit` |  |  |
 | [`settings.set_default_launch_mode`](#settingsset_default_launch_mode) | Default Launch Mode | `edit` |  |  |
 | [`settings.set_default_launch_quantization`](#settingsset_default_launch_quantization) | Default Launch Quantization | `edit` |  |  |
 | [`settings.set_default_warp_mode`](#settingsset_default_warp_mode) | Default Warp Mode | `edit` |  |  |
+| [`settings.set_grid_line_intensity`](#settingsset_grid_line_intensity) | Grid Line Intensity | `edit` |  |  |
+| [`settings.set_high_contrast`](#settingsset_high_contrast) | High Contrast | `edit` |  |  |
 | [`settings.set_loop_warp_short_samples`](#settingsset_loop_warp_short_samples) | Loop/Warp Short Samples | `edit` |  |  |
 | [`settings.set_outline_view_in_focus`](#settingsset_outline_view_in_focus) | Outline View in Focus | `edit` |  |  |
 | [`settings.set_record_session_automation_in`](#settingsset_record_session_automation_in) | Record Session Automation in | `edit` |  |  |
@@ -550,13 +594,25 @@ Each command has:
 | [`settings.set_start_recording_on_scene_launch`](#settingsset_start_recording_on_scene_launch) | Start Recording on Scene Launch | `edit` |  |  |
 | [`settings.set_temporary_folder`](#settingsset_temporary_folder) | Temporary Folder | `edit` |  |  |
 | [`settings.set_theme`](#settingsset_theme) | Theme | `edit` |  |  |
+| [`settings.set_tone`](#settingsset_tone) | Tone | `edit` |  |  |
 | [`settings.set_warp_recorded_audio`](#settingsset_warp_recorded_audio) | Warp Recorded Audio | `edit` |  |  |
 | [`settings.state`](#settingsstate) | Settings State | `read` |  |  |
 | [`slot.set_stop_button`](#slotset_stop_button) | Add Stop Button | `edit` | `Cmd+E` | `Ctrl+E` |
+| [`song.add_locator`](#songadd_locator) | Add Locator | `edit` |  |  |
+| [`song.delete_locator`](#songdelete_locator) | Delete Locator | `destructive` |  |  |
 | [`song.delete_tempo_breakpoint`](#songdelete_tempo_breakpoint) | Delete Tempo Breakpoint | `edit` |  |  |
 | [`song.delete_time_signature_change`](#songdelete_time_signature_change) | Delete Time Signature Change | `edit` |  |  |
+| [`song.loop_to_next_locator`](#songloop_to_next_locator) | Loop to Next Locator | `edit` |  |  |
+| [`song.move_locator`](#songmove_locator) | Move Locator | `edit` |  |  |
 | [`song.move_tempo_breakpoint`](#songmove_tempo_breakpoint) | Move Tempo Breakpoint | `edit` |  |  |
 | [`song.move_time_signature_change`](#songmove_time_signature_change) | Move Time Signature Change | `edit` |  |  |
+| [`song.rename_locator`](#songrename_locator) | Rename Locator | `edit` |  |  |
+| [`song.scales`](#songscales) | Scale List | `read` |  |  |
+| [`song.set_locator_info_text`](#songset_locator_info_text) | Set Locator Info Text | `edit` |  |  |
+| [`song.set_lock_envelopes`](#songset_lock_envelopes) | Lock Envelopes | `edit` |  |  |
+| [`song.set_scale`](#songset_scale) | Set Scale | `edit` |  |  |
+| [`song.set_start`](#songset_start) | Set Song Start Time | `edit` |  |  |
+| [`song.set_start_time`](#songset_start_time) | Set Song Start Time | `edit` |  |  |
 | [`song.set_tempo`](#songset_tempo) | Set Tempo | `edit` |  |  |
 | [`song.set_tempo_breakpoint`](#songset_tempo_breakpoint) | Set Tempo Breakpoint | `edit` |  |  |
 | [`song.set_time_signature_change`](#songset_time_signature_change) | Set Time Signature Change | `edit` |  |  |
@@ -1355,7 +1411,7 @@ Result: [`ArrangementState`](#arrangementstate).
 
 **Select Time**. Permission: `read`. Contexts: `arrangement`.
 
-Selects the span from `start` to `end` on `tracks` (or the selected tracks), as dragging across track lanes does. `arrangement.zoom_to_selection` zooms to it. Changes only the view.
+Selects the span from `start` to `end` on `tracks` (or the selected tracks), as dragging across track lanes does. `lanes` names the lanes the selection covers, each a track's own lane or its automation lane; left out, the tracks' own lanes. `arrangement.zoom_to_selection` zooms to it. Changes only the view.
 
 Default keys: none.
 
@@ -1365,6 +1421,7 @@ Arguments:
 |---|---|---|---|
 | `start` | [`Ticks`](#ticks) | yes | Where the selection starts. |
 | `end` | [`Ticks`](#ticks) | yes | Where it ends. Before `start` is fine: the two are swapped. |
+| `lanes` | array or null | no | The lanes it covers: each a track's own lane or its automation lane (the automation editing spec, R1). Left out, the tracks' own lanes. |
 | `tracks` | array or null | no | The tracks it covers. Left out, the selected tracks. |
 
 Result: [`ArrangementState`](#arrangementstate).
@@ -1458,6 +1515,22 @@ Arguments:
 
 Result: [`ArrangementState`](#arrangementstate).
 
+#### `arrangement.show_in_out`
+
+**Arrangement Track Controls In/Out**. Permission: `read`. Contexts: `global`, `arrangement`.
+
+Shows or hides the Arrangement's track headers' In/Out column (the input and output routing and monitoring), as View > Arrangement Track Controls > In/Out does. Switches unless `on` says which. Changes only the view; the mixers' own In/Out section is a switch of its own.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean or null | no | On or off. Left out, the switch toggles. |
+
+Result: [`ArrangementState`](#arrangementstate).
+
 #### `arrangement.show_range`
 
 **Show Time Range**. Permission: `read`. Contexts: `global`, `arrangement`.
@@ -1475,6 +1548,22 @@ Arguments:
 
 Result: [`ArrangementState`](#arrangementstate).
 
+#### `arrangement.show_return_tracks`
+
+**Arrangement Track Controls Return Tracks**. Permission: `read`. Contexts: `global`, `arrangement`.
+
+Shows or hides the return tracks' rows in the Arrangement's lanes, as View > Arrangement Track Controls > Return Tracks does. Switches unless `on` says which. Changes only the view; the returns play as before, and the mixers' own Return Tracks section is a switch of its own.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean or null | no | On or off. Left out, the switch toggles. |
+
+Result: [`ArrangementState`](#arrangementstate).
+
 #### `arrangement.show_track`
 
 **Show Track**. Permission: `read`. Contexts: `global`, `arrangement`.
@@ -1488,6 +1577,22 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `track` | [`TrackId`](#trackid) | yes | The track to bring into view. |
+
+Result: [`ArrangementState`](#arrangementstate).
+
+#### `arrangement.show_volume`
+
+**Arrangement Track Controls Volume**. Permission: `read`. Contexts: `global`, `arrangement`.
+
+Shows or hides the Arrangement's track headers' volume, pan, and sends, as View > Arrangement Track Controls > Volume does. Switches unless `on` says which. Changes only the view; the mixers' own sections are switches of their own.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean or null | no | On or off. Left out, the switch toggles. |
 
 Result: [`ArrangementState`](#arrangementstate).
 
@@ -1990,6 +2095,42 @@ Result: [`SwitchResult`](#switchresult).
 
 ### Area `automation`
 
+#### `automation.copy`
+
+**Copy Automation**. Permission: `read`. Contexts: `arrangement`, `envelope`.
+
+Copies the shape of the envelopes the time selection covers to the Arrangement's clipboard, for `automation.paste`: the shape over the span, with its positions from the span's start, its values as positions on each parameter's travel, and its bends. The clipboard isn't part of the set, and copying changes nothing in it.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `end` | [`Position`](#position) or null | no | Where the span ends, after `start`. Left out, the time selection's end. |
+| `lanes` | array or null | no | The lanes the shape is in: each a track and the parameter its automation lane shows. Left out, the automation lanes the time selection covers. |
+| `start` | [`Position`](#position) or null | no | Where the span starts. Left out, the time selection's start. |
+
+Result: [`EnvelopeClipboardState`](#envelopeclipboardstate).
+
+#### `automation.cut`
+
+**Cut Automation**. Permission: `destructive`. Contexts: `arrangement`, `envelope`.
+
+Copies the shape of the envelopes the time selection covers, as `automation.copy` does, then deletes it, as `automation.delete_range` does: the breakpoints inside the span go, and the envelope's values at the span's edges are kept, so it runs straight across the span. Because it removes the person's work, an agent asks first.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `end` | [`Position`](#position) or null | no | Where the span ends, after `start`. Left out, the time selection's end. |
+| `lanes` | array or null | no | The lanes the shape is in: each a track and the parameter its automation lane shows. Left out, the automation lanes the time selection covers. |
+| `start` | [`Position`](#position) or null | no | Where the span starts. Left out, the time selection's start. |
+
+Result: [`AutomationResult`](#automationresult).
+
 #### `automation.delete`
 
 **Delete Automation**. Permission: `destructive`. Contexts: `global`.
@@ -2025,6 +2166,42 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `automation.delete_range`
+
+**Delete Automation Range**. Permission: `destructive`. Contexts: `arrangement`, `envelope`.
+
+Deletes the shape of the envelopes the time selection covers over the span: the breakpoints inside it go, and the envelope's values at the span's edges are kept with a breakpoint at each, so the envelope runs straight across the span and is unchanged outside it. The clips and the other envelopes stay as they are. Because it removes the person's work, an agent asks first.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `end` | [`Position`](#position) or null | no | Where the span ends, after `start`. Left out, the time selection's end. |
+| `lanes` | array or null | no | The lanes the shape is in: each a track and the parameter its automation lane shows. Left out, the automation lanes the time selection covers. |
+| `start` | [`Position`](#position) or null | no | Where the span starts. Left out, the time selection's start. |
+
+Result: [`AutomationResult`](#automationresult).
+
+#### `automation.duplicate`
+
+**Duplicate Automation**. Permission: `edit`. Contexts: `arrangement`, `envelope`.
+
+Writes a copy of the shape the time selection covers straight after the span, and makes the copy the time selection, so running it again repeats the shape. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `end` | [`Position`](#position) or null | no | Where the span ends, after `start`. Left out, the time selection's end. |
+| `lanes` | array or null | no | The lanes the shape is in: each a track and the parameter its automation lane shows. Left out, the automation lanes the time selection covers. |
+| `start` | [`Position`](#position) or null | no | Where the span starts. Left out, the time selection's start. |
+
+Result: [`AutomationResult`](#automationresult).
+
 #### `automation.move_breakpoint`
 
 **Move Automation Breakpoint**. Permission: `edit`. Contexts: `global`.
@@ -2044,6 +2221,43 @@ Arguments:
 | `value` | number or null | no | The value it takes there, in the parameter's own units, or `null` (or nothing) to keep the value it has. |
 
 Result: [`ChangeSet`](#changeset).
+
+#### `automation.move_breakpoints`
+
+**Move Automation Breakpoints**. Permission: `edit`. Contexts: `arrangement`, `envelope`.
+
+Moves several breakpoints of one track's parameter at once, as dragging a selected breakpoint on an automation lane does: each moves `by` ticks in time and `share` of the parameter's travel in value, staying within the parameter's range, and a breakpoint the moved ones pass over is removed. `at` names the breakpoints to move, where they are now. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track the parameter belongs to. |
+| `target` | [`AutomationTarget`](#automationtarget) | yes | The parameter: a mixer control, a send, or a device parameter. |
+| `at` | array of [`Ticks`](#ticks) | yes | The breakpoints to move, where they are now. |
+| `by` | [`Ticks`](#ticks) | yes | How far to move them in time, in ticks; negative is earlier. |
+| `share` | number | yes | How far to move their values, as a share of the parameter's travel: 0.1 is a tenth of the way up the control, and −0.1 a tenth down. |
+
+Result: [`AutomationResult`](#automationresult).
+
+#### `automation.paste`
+
+**Paste Automation**. Permission: `edit`. Contexts: `arrangement`, `envelope`.
+
+Pastes the clipboard's shape into the envelopes the time selection covers, starting at `at` (left out, the time selection's start or the insert marker) and replacing each envelope over the shape's length. Each value lands at the same position on the target parameter's travel, so a shape pastes onto another parameter. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `at` | [`Position`](#position) or null | no | Where the shape starts. Left out, the time selection's start, or the insert marker. |
+| `lanes` | array or null | no | The lanes the shape is pasted into: each a track and the parameter its automation lane shows. Left out, the automation lanes the time selection covers. |
+
+Result: [`AutomationResult`](#automationresult).
 
 #### `automation.re_enable`
 
@@ -2073,6 +2287,24 @@ Arguments:
 | `target` | [`AutomationTarget`](#automationtarget) | yes | The parameter. |
 
 Result: [`ChangeSet`](#changeset).
+
+#### `automation.select_segment`
+
+**Select Automation Segment**. Permission: `read`. Contexts: `arrangement`, `envelope`.
+
+Selects a segment in a track's automation lane, as clicking near it does: its two breakpoints are drawn in the selection colour and move together when it is dragged. `at` is the breakpoint the segment starts at, or `null` to select no segment. Changes nothing in the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track whose automation lane holds the segment. |
+| `target` | [`AutomationTarget`](#automationtarget) | yes | The parameter the lane shows. |
+| `at` | [`Ticks`](#ticks) or null | no | The breakpoint the segment starts at, or `null` to select no segment. |
+
+Result: [`AutomationResult`](#automationresult).
 
 #### `automation.set_breakpoint`
 
@@ -2112,6 +2344,24 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `automation.set_envelope`
+
+**Set Automation Envelope**. Permission: `edit`. Contexts: `global`.
+
+Replaces one of a track's parameter's envelope with the breakpoints given, as the automation editing commands do when they write a shape over a span of time. `track` and `target` name the parameter as `automation.set_breakpoint` does, and `points` are the envelope's breakpoints in position order, each with its position in ticks, its value in the parameter's own units, and the bend of the segment starting at it. The breakpoints must be in order, no two at one position, and no position before 1.1.1; an empty list takes the parameter's automation with it. The envelope keeps driving the parameter.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track the parameter belongs to. |
+| `target` | [`AutomationTarget`](#automationtarget) | yes | The parameter. |
+| `points` | array of [`Breakpoint`](#breakpoint) | yes | The envelope's breakpoints, in position order. Empty takes the parameter's automation with it. |
+
+Result: [`ChangeSet`](#changeset).
+
 ### Area `browser`
 
 #### `browser.add_folder`
@@ -2129,6 +2379,40 @@ Arguments:
 | `path` | string | yes | The folder's path. |
 
 Result: [`BrowserState`](#browserstate).
+
+#### `browser.add_tag`
+
+**Add Browser Tag**. Permission: `edit`. Contexts: `global`, `browser`.
+
+Makes a tag in the browser: in the group `group`, or under the tag `parent`, which makes it a subtag. A subtag can't hold another subtag. Changes the browser's database.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | The tag's name. |
+| `group` | string or null | no | The group to make it in, by its name. Left out with `parent` left out too, the first group. |
+| `parent` | string or null | no | The tag to make it under, by its full name or its own name. It becomes a subtag. |
+
+Result: [`TagsState`](#tagsstate).
+
+#### `browser.add_tag_group`
+
+**Add Browser Tag Group**. Permission: `edit`. Contexts: `global`, `browser`.
+
+Makes a tag group in the browser, named `name`, at the end of the list. Changes the browser's database.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | The group's name. |
+
+Result: [`TagsState`](#tagsstate).
 
 #### `browser.add_to_arrangement`
 
@@ -2148,6 +2432,23 @@ Arguments:
 | `track` | [`TrackId`](#trackid) or null | no | The audio track to put them on. Left out (or `null`), a new audio track below the last track, as dropping in the drop area does. |
 
 Result: [`AddResult`](#addresult).
+
+#### `browser.delete_tag`
+
+**Delete Browser Tag**. Permission: `destructive`. Contexts: `global`, `browser`.
+
+Deletes a tag or a group in the browser: `tag` for a tag, by its full name (`Format|CLAP`) or its own name, `group` for a group, by its name. Deleting a group deletes its tags. Beatlayer's own tags and groups can't be deleted. A deleted tag is gone from every item that carried it, and undo can't bring it back.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `group` | string or null | no | The group to delete, by its name. |
+| `tag` | string or null | no | The tag to delete, by its full name or its own name. |
+
+Result: [`TagsState`](#tagsstate).
 
 #### `browser.focus_search`
 
@@ -2180,6 +2481,24 @@ Default keys:
 Arguments: none (send `{}`).
 
 Result: [`AddResult`](#addresult).
+
+#### `browser.move_tag`
+
+**Move Browser Tag**. Permission: `edit`. Contexts: `global`, `browser`.
+
+Moves a tag or a group in the browser to `position`: 0 is the first place in its group, or the first in the list for a group. Beatlayer's own tags and groups can't be moved. Changes the browser's database.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `position` | integer | yes | Where it goes: 0 is the first place in its group or the list. |
+| `group` | string or null | no | The group to move, by its name. |
+| `tag` | string or null | no | The tag to move, by its full name or its own name. |
+
+Result: [`TagsState`](#tagsstate).
 
 #### `browser.open_folder`
 
@@ -2246,6 +2565,36 @@ Arguments:
 | `path` | string | yes | The folder's path. |
 
 Result: [`BrowserState`](#browserstate).
+
+#### `browser.rename_tag`
+
+**Rename Browser Tag**. Permission: `edit`. Contexts: `global`, `browser`.
+
+Renames a tag or a group in the browser: `tag` for a tag, by its full name (`Format|CLAP`) or its own name, `group` for a group, by its name; `name` is the new name. Beatlayer's own tags and groups can't be renamed. Renaming a tag keeps it on every item that carries it. Changes the browser's database.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | The new name. |
+| `group` | string or null | no | The group to rename, by its name. |
+| `tag` | string or null | no | The tag to rename, by its full name or its own name. |
+
+Result: [`TagsState`](#tagsstate).
+
+#### `browser.reset_tag_order`
+
+**Reset Browser Tag Order**. Permission: `edit`. Contexts: `global`, `browser`.
+
+Puts every tag group and tag in the browser back in the order it was made in, as Reset Order in the Tag Editor's context menu does. Changes the browser's database.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`TagsState`](#tagsstate).
 
 #### `browser.scrub_preview`
 
@@ -2348,6 +2697,42 @@ Arguments:
 
 Result: [`BrowserState`](#browserstate).
 
+#### `browser.show_quick_tags`
+
+**Show Quick Tags**. Permission: `edit`. Contexts: `global`, `browser`.
+
+Shows Quick Tags at the browser's content pane's bottom, or hides it, as the Filter View Menu's Show Quick Tags item does. Quick Tags shows the selected items' tags and adds one by typing its name. Whether it shows is kept for the next start.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `show` | boolean or null | no | Whether it shows. Left out, it toggles. |
+
+Result: nothing (`null`).
+
+#### `browser.show_tag_editor`
+
+**Show Tag Editor**. Permission: `read`. Contexts: `global`, `browser`.
+
+Shows the Tag Editor beside the browser's content pane, or hides it, as Cmd-Shift-E (Ctrl-Shift-E) and the Filter View Menu's Tag Editor item do. Whether it shows is kept for the next start.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-BRW-014 | `Cmd+Shift+E` | `Ctrl+Shift+E` | `browser` | Show or hide the tag editor | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `show` | boolean or null | no | Whether it shows. Left out, it toggles. |
+
+Result: nothing (`null`).
+
 #### `browser.state`
 
 **Browser State**. Permission: `external`. Contexts: `global`, `browser`, `browser-sidebar`.
@@ -2376,6 +2761,40 @@ Default keys: none.
 Arguments: none (send `{}`).
 
 Result: [`PreviewState`](#previewstate).
+
+#### `browser.tag_items`
+
+**Tag Items**. Permission: `edit`. Contexts: `global`, `browser`.
+
+Puts tags on items in the browser, or takes them off (`attach` false puts them on). The items are named by their keys: a file or folder by its path, a plug-in by its format and identifier (`clap/org.example.synth`), a device or rack by its row's ID. The tags are named by their full names (`Format|CLAP`) or their own names. Beatlayer's own tags and a tag that comes from a folder can't be taken off. Changes the browser's database, not the files.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `items` | array of string | yes | The items to tag, by their keys. |
+| `tags` | array of string | yes | The tags, by their full names or their own names. |
+| `attach` | boolean or null | no | Put the tags on the items (true) or take them off (false). Left out, they're put on. |
+
+Result: [`TagsState`](#tagsstate).
+
+#### `browser.tags`
+
+**Browser Tags**. Permission: `external`. Contexts: `global`, `browser`.
+
+Reports the browser's tag groups and their tags, in order: Beatlayer's own groups (Content, Format, Creator and Devices) and the person's. With `items`, the keys of the items to report on, it also says which tags each carries and where each comes from: its own, a folder's, or Beatlayer's. Changes nothing, but lists files outside the project.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `items` | array or null | no | The items to report on, by their keys. Left out, none are. |
+
+Result: [`TagsState`](#tagsstate).
 
 ### Area `chain`
 
@@ -3899,6 +4318,25 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `clip.set_scale`
+
+**Set Clip Scale**. Permission: `edit`. Contexts: `global`, `clip-view`.
+
+Sets a clip's scale: whether its Scale Mode is on (`enabled`), its root note (`root`, 0 is C and 11 is B) and its scale (`name`, one of the names `song.scales` reads). `clips` names the clips to set; left out, the selected ones are set. It leaves the values it isn't given as they were, and it is one undo step, named "Change Clip Scale", however many clips it sets. A scale the list doesn't hold, or a root outside C to B, is refused and nothing changes. A clip's scale never changes what it plays: it tells the rest of the set which keys belong.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clips` | array of [`ClipId`](#clipid) | yes | The clips. |
+| `enabled` | boolean or null | no | Whether the clips' Scale Mode is on. |
+| `name` | string or null | no | The scale's name, from the scale list. |
+| `root` | integer or null | no | The root note: 0 (C) to 11 (B). |
+
+Result: [`ChangeSet`](#changeset).
+
 #### `clip.set_segment_bpm`
 
 **Set Warp Segment BPM**. Permission: `edit`. Contexts: `clip-view`, `sample-editor`.
@@ -4179,7 +4617,7 @@ Result: [`ChangeSet`](#changeset).
 
 #### `clip_view.quantize_settings`
 
-**Quantize Settings**. Permission: `read`. Contexts: `clip-view`, `note-editor`, `note-selection`, `sample-editor`.
+**Quantize Settings**. Permission: `read`. Contexts: `note-editor`, `note-selection`, `sample-editor`.
 
 Reads or changes the Clip View's Quantize settings, the values `note.quantize`, `clip.quantize_audio` and Cmd-U use when their arguments leave them out: `grid`, the spacing between the quantise grid's lines in ticks (positive; left unset, it follows the note or sample editor's editing grid), `target`, whether quantise moves note starts or note ends, and `amount`, how far each note moves toward its grid line as a percentage from 0 to 100. Fields left out keep their values, and the result reports all of them. The settings belong to the view, like Draw Mode: changing them changes nothing in the set and is no undo step.
 
@@ -4240,27 +4678,34 @@ Result: [`SampleEditorState`](#sampleeditorstate).
 
 #### `clip_view.select_notes`
 
-**Select Notes**. Permission: `read`. Contexts: `clip-view`, `note-editor`, `note-selection`.
+**Select Notes**. Permission: `read`. Contexts: `note-editor`, `note-selection`.
 
-Selects notes in the Clip View's MIDI Note Editor, as clicking a note or dragging a marquee over them does: `replace` selects only these, `toggle` adds or removes each (Cmd-click, Ctrl-click on Windows). Notes are named by their place in the clip's notes in order, by start and then pitch, so place 0 has the earliest start, and of notes that start together the lowest pitch. Selecting is never an undo step and changes nothing in the set.
+Selects notes in the Clip View's MIDI Note Editor, as clicking a note or dragging a marquee over them does: `replace` selects only these, `toggle` adds or removes each (Cmd-click, Ctrl-click on Windows). Notes are named by their place in the clip's notes in order, by start and then pitch, so place 0 has the earliest start, and of notes that start together the lowest pitch. With no notes named, `select` chooses them instead: `nearest` (the note whose start is nearest the insert marker), `previous` and `next` (the previous or next note in the clip's order), `same_pitch_previous` and `same_pitch_next` (the previous or next note at the selected note's pitch), `all` (every note in the clip's span, as Cmd-A does), or `key` (every note at a pitch, as clicking a key in the piano ruler does). `add` adds to the selection instead of replacing it, as Shift with the note-jump keys does. Selecting is never an undo step and changes nothing in the set.
 
-Default keys: none.
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-NOTE-001 | `Cmd+A` | `Ctrl+A` | `note-editor` | Select all notes | fixes `select` = `"all"` |
+| S-EDIT-009 | `Cmd+A` | `Ctrl+A` | `global` | Select everything in the focused view | fixes `select` = `"all"` |
 
 Arguments:
 
 | Name | Type | Required | Description |
 |---|---|---|---|
-| `notes` | array of integer, at least 0 | yes | The notes, by their place in the clip's notes in order (by start, then pitch). Empty with `replace` clears the selection. |
+| `add` | boolean | no | Add to the selection instead of replacing it, as Shift with the note-jump keys does. |
 | `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows (the Arrangement's selected clip). |
 | `mode` | [`NoteSelectMode`](#noteselectmode) | no | How to change the selection; `replace` if left out. |
+| `notes` | array of integer, at least 0 | no | The notes, by their place in the clip's notes in order (by start, then pitch). Empty with `replace` clears the selection, and empty with `select` chooses the notes `select` names. |
+| `select` | [`NoteSelection`](#noteselection) or null | no | What to select when `notes` is empty: the notes the keyboard reaches (Option with the arrows), every note in the clip's span (Cmd-A), or the notes at a pitch (a key in the piano ruler). |
 
 Result: [`ClipViewState`](#clipviewstate).
 
 #### `clip_view.select_time`
 
-**Select Sample Editor Time**. Permission: `read`. Contexts: `clip-view`, `sample-editor`.
+**Select Time**. Permission: `read`. Contexts: `clip-view`, `sample-editor`, `note-editor`, `note-selection`.
 
-Makes a time selection in the Sample Editor from `start` to `end`, in seconds in the file or, with `ticks`, in ticks of a warped clip's contents; with neither the selection is cleared. Dragging across the waveform runs this. Insert Warp Marker and Delete Warp Marker with a time selection act on the transients in it, and Z zooms to it. Never an undo step, and changes nothing in the set.
+Makes a time selection in the editor from `start` to `end`, in seconds in the file or, with `ticks`, in ticks of a warped clip's contents; with neither the selection is cleared. Dragging across the waveform runs this. In the MIDI Note Editor `start` and `end` are ticks of the clip's contents, and the selection is drawn across the note area and the lanes. Never an undo step, and changes nothing in the set.
 
 Default keys: none.
 
@@ -4314,9 +4759,9 @@ Result: [`SampleEditorState`](#sampleeditorstate).
 
 #### `clip_view.set_insert_marker`
 
-**Set Sample Editor Insert Marker**. Permission: `read`. Contexts: `clip-view`, `sample-editor`.
+**Set Insert Marker**. Permission: `read`. Contexts: `clip-view`, `sample-editor`, `note-editor`, `note-selection`.
 
-Puts the Sample Editor's insert marker, the point Insert Warp Marker (Cmd+I) and Insert Transient (Cmd+Shift+I) act at, at a `time` in the file in seconds or at a `beat` of a warped clip's contents in ticks from its 1.1.1; with neither it is taken away. Clicking the waveform runs this, on the nearest grid line while snapping is on. Never an undo step, and changes nothing in the set.
+Puts the editor's insert marker, the point the editor's commands act at, at a `time` in the file in seconds or at a `beat` of a warped clip's contents in ticks from its 1.1.1; with neither it is taken away. Clicking the waveform runs this, on the nearest grid line while snapping is on. In the MIDI Note Editor the marker is a `beat` of the clip's contents in ticks from their beginning, and it stays inside the clip's span. Never an undo step, and changes nothing in the set.
 
 Default keys: none.
 
@@ -6448,6 +6893,164 @@ Arguments:
 
 Result: [`KeymapResult`](#keymapresult).
 
+### Area `locator`
+
+#### `locator.add`
+
+**Add Locator**. Permission: `edit`. Contexts: `arrangement`.
+
+Adds a locator at `at`, as the Set Locator button and Add Locator do. Left out, it goes where the button puts one: on the line of the global launch quantisation nearest the playhead while the song plays, and at the time selection's start, or the insert marker, while it is stopped. A locator is named with the next whole number, one more than the highest any locator is named with, and becomes the only selected locator. Two locators never share a position: adding one where another is leaves that one as it is. The locators are saved with the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `at` | [`Position`](#position) or null | no | Where the locator goes. Left out, it goes where the Set Locator button puts one: on the line of the global launch quantisation nearest the playhead while the song plays, and at the time selection's start, or the insert marker, while it is stopped. |
+
+Result: [`LocatorResult`](#locatorresult).
+
+#### `locator.delete`
+
+**Delete Locator**. Permission: `destructive`. Contexts: `arrangement`.
+
+Deletes the locators (`locators`, or the selected ones), as the Delete Locator button and the Delete key do. A song start time on one of them goes with it. Because it removes the person's work, an agent asks first.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `locators` | array or null | no | The locators to delete. Left out, the selected ones. |
+
+Result: [`LocatorResult`](#locatorresult).
+
+#### `locator.jump`
+
+**Jump to Locator**. Permission: `read`. Contexts: `arrangement`.
+
+Jumps to a locator (`locator`, or the selected one), as clicking it does: while the song plays, playback jumps there on the next line of the global launch quantisation; while it is stopped, the insert marker moves there. It changes nothing in the set, and it is refused while the audio engine is off.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `locator` | [`LocatorId`](#locatorid) or null | no | The locator. Left out, the selected one. |
+
+Result: [`ArrangementState`](#arrangementstate).
+
+#### `locator.jump_next`
+
+**Jump to Next Locator**. Permission: `read`. Contexts: `arrangement`.
+
+Jumps to the locator after the current position: the playhead while the song plays, the insert marker while it is stopped. With no locator after it, it jumps to the end of the arrangement. It selects no locator, changes nothing in the set, and is refused while the audio engine is off.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`ArrangementState`](#arrangementstate).
+
+#### `locator.jump_previous`
+
+**Jump to Previous Locator**. Permission: `read`. Contexts: `arrangement`.
+
+Jumps to the locator before the current position: the playhead while the song plays, the insert marker while it is stopped. With no locator before it, it jumps to 1.1.1. It selects no locator, changes nothing in the set, and is refused while the audio engine is off.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`ArrangementState`](#arrangementstate).
+
+#### `locator.loop_to_next`
+
+**Loop to Next Locator**. Permission: `edit`. Contexts: `arrangement`.
+
+Sets the Arrangement's loop brace from a locator (`locator`, or the selected one) to the next one and switches the loop on, as the locator's context menu does. The last locator has none after it, and is refused.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `locator` | [`LocatorId`](#locatorid) or null | no | The locator. Left out, the selected one. |
+
+Result: [`LocatorResult`](#locatorresult).
+
+#### `locator.move`
+
+**Move Locator**. Permission: `edit`. Contexts: `arrangement`.
+
+Moves a locator (`locator`, or the selected ones) to `to`, the position it goes to, and moves every other selected locator by the same distance. The keys pass the grid step Left and Right move, and a drag passes the position the pointer is at, snapped to the editing grid as a clip's start does. A locator can't go before 1.1.1, and a move that would put two locators at one position changes nothing. Dragging a locator runs this, and the whole drag is one undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `to` | [`Position`](#position) | yes | Where it goes: the position the locator moves to. The keys pass the grid step Left and Right move. |
+| `locator` | [`LocatorId`](#locatorid) or null | no | The locator to move. Left out, the selected ones. |
+
+Result: [`LocatorResult`](#locatorresult).
+
+#### `locator.rename`
+
+**Rename Locator**. Permission: `edit`. Contexts: `arrangement`.
+
+Renames the locators (`locators`, or the selected ones), as Cmd-R (Ctrl-R) and Edit > Rename do. The new name is `name`; an empty name keeps the old one. Left out, the name is typed in place, as Cmd-R does.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `locators` | array or null | no | The locators to rename. Left out, the selected ones. |
+| `name` | string or null | no | The new name. An empty name keeps the old one. Left out, the name is typed in place, as Cmd-R does. |
+
+Result: [`LocatorResult`](#locatorresult).
+
+#### `locator.select`
+
+**Select Locators**. Permission: `read`. Contexts: `arrangement`.
+
+Selects locators in the Arrangement, as clicking one does: `replace` selects only these, `toggle` adds or removes each, `add` adds them, and `extend` adds them and every locator between them and the first selected locator. Selecting is never an undo step and changes nothing in the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `locators` | array of [`LocatorId`](#locatorid) | yes | The locators. |
+| `mode` | [`SelectMode`](#selectmode) | no | How to change the selection; `replace` if left out. |
+
+Result: [`ArrangementState`](#arrangementstate).
+
+#### `locator.set_info_text`
+
+**Set Locator Info Text**. Permission: `edit`. Contexts: `arrangement`.
+
+Sets the info text of a locator (`locator`, or the selected one), which the Info View shows while the pointer is over it. The person's own way of typing it comes later.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `info_text` | string | yes | The info text, which the Info View shows while the pointer is over the locator. |
+| `locator` | [`LocatorId`](#locatorid) or null | no | The locator. Left out, the selected one. |
+
+Result: [`LocatorResult`](#locatorresult).
+
 ### Area `midi`
 
 #### `midi.capture`
@@ -7300,7 +7903,7 @@ Result: [`ChangeSet`](#changeset).
 
 #### `note.add`
 
-**Add Note**. Permission: `edit`. Contexts: `clip-view`, `note-editor`, `note-selection`.
+**Add Note**. Permission: `edit`. Contexts: `note-editor`, `note-selection`.
 
 Adds a note to a MIDI clip: pitch `key` (0 to 127; 60 is middle C), starting `start` ticks from the beginning of the clip's contents, lasting `length` ticks, with `velocity` (1 to 127; 100 unless given). With Draw Mode on, clicking the note area runs this for a note one grid step long. The new note is selected afterwards, and the edit is one undo step.
 
@@ -7318,13 +7921,59 @@ Arguments:
 
 Result: [`NoteEditResult`](#noteeditresult).
 
+#### `note.copy`
+
+**Copy Notes**. Permission: `read`. Contexts: `note-editor`, `note-selection`.
+
+Copies notes (`notes`, or the selected notes, or with none selected the notes that start inside the time selection) to the note clipboard, keeping their pitches, values and their places in time from the earliest of them. The note clipboard is apart from the Arrangement's clip clipboard. Copy changes nothing in the set.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-EDIT-002 | `Cmd+C` | `Ctrl+C` | `global` | Copy | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows (the Arrangement's selected clip). |
+| `notes` | array or null | no | The notes, by their place in the clip's notes in order (by start, then pitch). Left out, the selected notes, or with none selected the notes that start inside the time selection. |
+
+Result: [`NoteClipboardState`](#noteclipboardstate).
+
+#### `note.cut`
+
+**Cut Notes**. Permission: `destructive`. Contexts: `note-editor`, `note-selection`.
+
+Copies notes to the note clipboard, as `note.copy` does, then deletes them, as `note.delete` does. Cmd-X (Ctrl-X) runs this on the selected notes, or with none selected the notes in the time selection. Because it removes the person's work, an agent asks first.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-EDIT-001 | `Cmd+X` | `Ctrl+X` | `global` | Cut | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows (the Arrangement's selected clip). |
+| `notes` | array or null | no | The notes, by their place in the clip's notes in order (by start, then pitch). Left out, the selected notes, or with none selected the notes that start inside the time selection. |
+
+Result: [`NoteEditResult`](#noteeditresult).
+
 #### `note.delete`
 
-**Delete Notes**. Permission: `destructive`. Contexts: `clip-view`, `note-editor`, `note-selection`.
+**Delete Notes**. Permission: `destructive`. Contexts: `note-editor`, `note-selection`.
 
-Deletes notes (`notes`, or the selected notes) from a MIDI clip. With Draw Mode on, clicking a note runs this. Because it removes the person's work, an agent asks first. The edit is one undo step.
+Deletes notes (`notes`, or the selected notes) from a MIDI clip. With Draw Mode on, clicking a note runs this. Delete (S-EDIT-005) runs it on the selected notes, or with none selected the notes in the time selection. Because it removes the person's work, an agent asks first. The edit is one undo step.
 
-Default keys: none.
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-EDIT-005 | `Delete` | `Delete` | `global` | Delete | runs it |
 
 Arguments:
 
@@ -7335,11 +7984,32 @@ Arguments:
 
 Result: [`NoteEditResult`](#noteeditresult).
 
+#### `note.duplicate`
+
+**Duplicate Notes**. Permission: `edit`. Contexts: `note-editor`, `note-selection`.
+
+Puts a copy of notes (`notes`, or the selected notes, or with none selected the notes that start inside the time selection) straight after the time selection, selects the copy and moves the time selection onto it, so running it again lays down another. Cmd-D (Ctrl-D) runs this.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-EDIT-004 | `Cmd+D` | `Ctrl+D` | `global` | Duplicate | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows (the Arrangement's selected clip). |
+| `notes` | array or null | no | The notes, by their place in the clip's notes in order (by start, then pitch). Left out, the selected notes, or with none selected the notes that start inside the time selection. |
+
+Result: [`NoteEditResult`](#noteeditresult).
+
 #### `note.move`
 
-**Move Notes**. Permission: `edit`. Contexts: `clip-view`, `note-editor`, `note-selection`.
+**Move Notes**. Permission: `edit`. Contexts: `note-editor`, `note-selection`.
 
-Moves notes (`notes`, or the selected notes) in time by `by` ticks and in pitch by `semitones`, as dragging them in the note editor does; dragging right and left runs it with `semitones` 0, and up and down snap the pitch. Nothing moves if any note would start before the clip's contents or leave the range of MIDI keys 0 to 127. The moved notes stay selected, and the whole drag is one undo step.
+Moves notes (`notes`, or the selected notes) in time by `by` ticks and in pitch by `semitones`, as dragging them in the note editor does; dragging right and left runs it with `semitones` 0, and up and down snap the pitch. Nothing moves if any note would start before the clip's contents or leave the range of MIDI keys 0 to 127. With `copy` the notes are copied where they would have gone and the originals stay, as Option-dragging a note does. The moved notes stay selected, and the whole drag is one undo step.
 
 Default keys: none.
 
@@ -7349,14 +8019,36 @@ Arguments:
 |---|---|---|---|
 | `by` | [`Ticks`](#ticks) or null | no | How far to move them in time, in ticks; negative is earlier. Give `by` or `semitones`, or both. |
 | `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows (the Arrangement's selected clip). |
+| `copy` | boolean or null | no | Copy them instead of moving them, as Option-dragging a note does: the copies land where the notes would have gone and the originals stay. |
 | `notes` | array or null | no | The notes, by their place in the clip's notes in order (by start, then pitch). Left out, the selected notes. |
 | `semitones` | integer or null | no | How far to move them in pitch, in semitones; negative is lower. |
 
 Result: [`NoteEditResult`](#noteeditresult).
 
+#### `note.paste`
+
+**Paste Notes**. Permission: `edit`. Contexts: `note-editor`, `note-selection`.
+
+Puts the note clipboard's notes into the clip at `at`, in ticks from the beginning of the clip's contents, or at the insert marker, or at the time selection's start, with their pitches, values and spacing, and selects them. It fails, changing nothing, if there is nothing on the clipboard. Cmd-V (Ctrl-V) runs this.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-EDIT-003 | `Cmd+V` | `Ctrl+V` | `global` | Paste | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `at` | [`Ticks`](#ticks) or null | no | Where to paste, in ticks from the beginning of the clip's contents. Left out, the insert marker, or the time selection's start. |
+| `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows (the Arrangement's selected clip). |
+
+Result: [`NoteEditResult`](#noteeditresult).
+
 #### `note.quantize`
 
-**Quantize**. Permission: `edit`. Contexts: `clip-view`, `note-editor`, `note-selection`.
+**Quantize**. Permission: `edit`. Contexts: `note-editor`, `note-selection`.
 
 Quantises notes (`notes`, or the selected notes) to `grid`: each note moves `amount` percent of the way from its start (or its end, with `target` `note_end`) to the nearest grid line, so 100 percent lands it on the line and 50 percent halves its distance to it. The lines are laid out from each bar's start, as the note editor's grid is, and a spacing of whole bars counts bars from 1.1.1. `grid`, `target`, and `amount` left out use the Clip View's Quantize settings (`clip_view.quantize_settings`), which follow the note editor's editing grid until a grid is set. Quantising is one undo step, and the quantised notes stay selected.
 
@@ -7380,7 +8072,7 @@ Result: [`NoteEditResult`](#noteeditresult).
 
 #### `note.ramp_value`
 
-**Ramp Note Values**. Permission: `edit`. Contexts: `clip-view`, `note-editor`, `note-selection`.
+**Ramp Note Values**. Permission: `edit`. Contexts: `note-editor`, `note-selection`.
 
 Sets one value of notes (`notes`, or the selected notes) as a ramp, as dragging across several notes in the Clip View's lane does: the first note in the clip's order takes `from`, the last takes `to`, and those between take values evenly spaced between them (whole numbers for the whole-number fields). `field` takes the same fields and ranges as `note.set_value`; nothing changes if `from` or `to` is out of range. One note takes `from`. The edited notes stay selected, and the whole drag is one undo step.
 
@@ -7400,7 +8092,7 @@ Result: [`NoteEditResult`](#noteeditresult).
 
 #### `note.resize`
 
-**Resize Notes**. Permission: `edit`. Contexts: `clip-view`, `note-editor`, `note-selection`.
+**Resize Notes**. Permission: `edit`. Contexts: `note-editor`, `note-selection`.
 
 Moves notes' ends (`notes`, or the selected notes) by `by` ticks, as dragging a note's end in the note editor does: a positive `by` makes them longer, a negative one shorter, and every note keeps at least one tick of length. A note's start doesn't move. The resized notes stay selected, and the whole drag is one undo step.
 
@@ -7418,7 +8110,7 @@ Result: [`NoteEditResult`](#noteeditresult).
 
 #### `note.set_value`
 
-**Set Note Value**. Permission: `edit`. Contexts: `clip-view`, `note-editor`, `note-selection`.
+**Set Note Value**. Permission: `edit`. Contexts: `note-editor`, `note-selection`.
 
 Sets one value of notes (`notes`, or the selected notes) to `value`, as dragging a note's stem in the Clip View's lane does: `field` is `velocity` (whole numbers 1 to 127), `release_velocity` (whole numbers 1 to 127), `chance` (0 to 1), or `velocity_deviation` (whole numbers -127 to 127). Nothing changes if `value` is outside the field's range. The edited notes stay selected, and the whole drag is one undo step.
 
@@ -9363,6 +10055,34 @@ Arguments:
 
 Result: [`DiscardedRecovery`](#discardedrecovery).
 
+#### `set.import_dawproject`
+
+**Import DAWproject File**. Permission: `external`. Contexts: `global`.
+
+Reads the DAWproject file at `path` and opens what it holds as a new set, in place of the open one, as opening a set does: it is refused while the open set has unsaved changes. The new set starts empty and holds what the file carries: its tracks, groups, returns and their mixer and routing, its clips with their notes, media, warping and loops, its scenes and slots, its tempo and time signature. It is unsaved, and its name is the file's name without `.dawproject` until it is first saved. The result's `report` says what the import left out or changed, and `set.import_report` gives that report again while the set the import made is open. Reads a file outside the project.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | The DAWproject file to read, absolute or relative to the app's working directory. |
+
+Result: [`ImportDawProjectResult`](#importdawprojectresult).
+
+#### `set.import_report`
+
+**DAWproject Import Report**. Permission: `read`. Contexts: `global`.
+
+Reports what the last DAWproject import left out or changed: each thing, where it was, how many there were, and what Beatlayer did, and the application and version the file says made it. It gives the report again while the set the import made is open, and nothing after another set opens. Changes nothing.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`ImportReport`](#importreport).
+
 #### `set.list_recoverable`
 
 **List Recoverable Sets**. Permission: `read`. Contexts: `global`.
@@ -9580,6 +10300,22 @@ Arguments: none (send `{}`).
 
 Result: nothing (`null`).
 
+#### `settings.set_appearance`
+
+**Appearance**. Permission: `edit`. Contexts: `settings`.
+
+Draws the theme in its light or dark colours, or follows the operating system's mode while Beatlayer runs (`follow-system`); a new install draws dark. Kept for the next start; changes nothing in the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `appearance` | [`Appearance`](#appearance) | yes | `light`, `dark` or `follow-system`. |
+
+Result: nothing (`null`).
+
 #### `settings.set_auto_hide_plug_in_windows`
 
 **Auto-Hide Plug-In Windows**. Permission: `edit`. Contexts: `settings`.
@@ -9611,6 +10347,54 @@ Arguments:
 | `on` | boolean | yes | Whether the setting is on. |
 
 Result: [`SwitchResult`](#switchresult).
+
+#### `settings.set_brightness`
+
+**Brightness**. Permission: `edit`. Contexts: `settings`.
+
+Adds points of lightness to every background colour, from -50 to 50; 0 is the default. Chromatic colours and the track palette don't change. Kept for the next start; changes nothing in the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `value` | integer from -50 to 50 | yes | Points of lightness added to the backgrounds, from -50 to 50. |
+
+Result: nothing (`null`).
+
+#### `settings.set_color_hue`
+
+**Color Hue**. Permission: `edit`. Contexts: `settings`.
+
+Turns the hue of the interface's chromatic colours by this many degrees, from -180 to 180 in steps of 5; 0 is the default. Backgrounds and the track palette don't change. Kept for the next start; changes nothing in the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `degrees` | integer from -180 to 180 | yes | Degrees the interface's colours are turned, from -180 to 180. |
+
+Result: nothing (`null`).
+
+#### `settings.set_color_intensity`
+
+**Color Intensity**. Permission: `edit`. Contexts: `settings`.
+
+Multiplies the chroma of the interface's chromatic colours, from 0 to 200 percent in steps of 5; 100 is the default. Backgrounds and the track palette don't change. Kept for the next start; changes nothing in the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `percent` | integer from 0 to 200 | yes | A whole percentage from 0 to 200, in steps of 5. |
+
+Result: nothing (`null`).
 
 #### `settings.set_continuous_save`
 
@@ -9689,6 +10473,38 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `mode` | [`DefaultWarpMode`](#defaultwarpmode) | yes | The warp mode a new warped clip takes. |
+
+Result: nothing (`null`).
+
+#### `settings.set_grid_line_intensity`
+
+**Grid Line Intensity**. Permission: `edit`. Contexts: `settings`.
+
+Sets how strong the grid lines of the Arrangement, the Clip View's editors and the automation lanes are, from 0 to 200 percent in steps of 5; 100, the default, draws the theme's grid colour, 0 shows no line. Kept for the next start; changes nothing in the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `percent` | integer from 0 to 200 | yes | A whole percentage from 0 to 200, in steps of 5. |
+
+Result: nothing (`null`).
+
+#### `settings.set_high_contrast`
+
+**High Contrast**. Permission: `edit`. Contexts: `settings`.
+
+Switches High Contrast, off in a new install. On, text stands at a contrast ratio of at least 7:1 against its background, dimmed text at 4.5:1, and separators, outlines and the focus ring at 3:1, whatever the other Theme & Colors settings are. Kept for the next start; changes nothing in the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean | yes | Whether the setting is on. |
 
 Result: nothing (`null`).
 
@@ -9824,7 +10640,7 @@ Result: [`TemporaryFolderResult`](#temporaryfolderresult).
 
 **Theme**. Permission: `edit`. Contexts: `settings`.
 
-Chooses Beatlayer's dark or light theme, which every window uses straight away. The choice is kept for the next start. Changes nothing in the set.
+Chooses the theme every window draws, by its name: Beatlayer, or a theme from the User Library's Themes folder; `settings.state` lists them in `theme_colors.themes`. `dark` and `light`, which earlier versions took, set the Appearance instead. The choice is kept for the next start, and a theme that can't be read is drawn as Beatlayer. Changes nothing in the set.
 
 Default keys: none.
 
@@ -9832,7 +10648,23 @@ Arguments:
 
 | Name | Type | Required | Description |
 |---|---|---|---|
-| `theme` | [`ThemeChoice`](#themechoice) | yes | The theme. |
+| `theme` | string | yes | A theme's name, as `settings.state`'s `theme_colors.themes` lists it. `dark` and `light`, which earlier versions took, set the Appearance instead. |
+
+Result: nothing (`null`).
+
+#### `settings.set_tone`
+
+**Tone**. Permission: `edit`. Contexts: `settings`.
+
+Tints the theme's neutral colours warm or cool, or leaves them as the theme gives them (`neutral`, the default); the chromatic colours aren't toned. Kept for the next start; changes nothing in the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `tone` | [`Tone`](#tone) | yes | `neutral`, `warm` or `cool`. |
 
 Result: nothing (`null`).
 
@@ -9856,7 +10688,7 @@ Result: [`SwitchResult`](#switchresult).
 
 **Settings State**. Permission: `read`. Contexts: `global`.
 
-Reports every preference the Settings window shows with a value, by page, in the form its own command takes it: the theme (`settings.set_theme`), Display & Input (zoom, Outline View in Focus, the Tab key settings), the audio device settings with Driver Error Compensation and the test tone (`audio.configure`, `audio.set_test_tone`), the MIDI ports and computer keyboard (`midi.set_port`), Create Fades on Clip Edges, Warp Recorded Audio, the Launch section, Auto-Hide Plug-In Windows, the plug-ins the Browser hides and prefers (`plugin.settings`), the agent server and the assistant. The server's and the agents' tokens and the assistant's API key are never reported, only whether one is stored. Preferences aren't saved with the set. Changes nothing. Use it to check a `settings.set_*` command took effect.
+Reports every preference the Settings window shows with a value, by page, in the form its own command takes it: Theme & Colors (`settings.set_theme`), Display & Input (zoom, Outline View in Focus, the Tab key settings), the audio device settings with Driver Error Compensation and the test tone (`audio.configure`, `audio.set_test_tone`), the MIDI ports and computer keyboard (`midi.set_port`), Create Fades on Clip Edges, Warp Recorded Audio, the Launch section, Auto-Hide Plug-In Windows, the plug-ins the Browser hides and prefers (`plugin.settings`), the agent server and the assistant. The server's and the agents' tokens and the assistant's API key are never reported, only whether one is stored. Preferences aren't saved with the set. Changes nothing. Use it to check a `settings.set_*` command took effect.
 
 Default keys: none.
 
@@ -9890,6 +10722,38 @@ Result: [`ChangeSet`](#changeset).
 
 ### Area `song`
 
+#### `song.add_locator`
+
+**Add Locator**. Permission: `edit`. Contexts: `arrangement`.
+
+Adds a locator at a position, as the Set Locator button and Add Locator do. A locator with no name of its own is named with the next whole number. Two locators never share a position: adding one where another is leaves that one as it is. One undo step, `Add Locator`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `locator` | [`Locator`](#locator) | yes | The locator, with a new ID. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `song.delete_locator`
+
+**Delete Locator**. Permission: `destructive`. Contexts: `arrangement`.
+
+Deletes a locator, as the Delete Locator button and the Delete key do. A song start time on it goes with it. One undo step, `Delete Locator`. Because it removes the person's work, an agent asks first.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `locator` | [`LocatorId`](#locatorid) | yes | The locator. |
+
+Result: [`ChangeSet`](#changeset).
+
 #### `song.delete_tempo_breakpoint`
 
 **Delete Tempo Breakpoint**. Permission: `edit`. Contexts: `global`.
@@ -9919,6 +10783,39 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `at` | [`Ticks`](#ticks) | yes | Where the marker is. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `song.loop_to_next_locator`
+
+**Loop to Next Locator**. Permission: `edit`. Contexts: `arrangement`.
+
+Sets the Arrangement's loop brace from a locator to the next one and switches the loop on, as the locator's context menu does. The last locator has none after it, and is refused. One undo step, `Loop to Next Locator`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `locator` | [`LocatorId`](#locatorid) | yes | The locator. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `song.move_locator`
+
+**Move Locator**. Permission: `edit`. Contexts: `arrangement`.
+
+Moves a locator to a new position, as dragging it does. A locator can't go before 1.1.1, and a move that would put two locators at one position changes nothing. One undo step, `Move Locator`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `locator` | [`LocatorId`](#locatorid) | yes | The locator. |
+| `to` | [`Ticks`](#ticks) | yes | Where it goes: 0 (1.1.1) or later, and not where another locator already is. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -9955,6 +10852,120 @@ Arguments:
 | `to` | [`Ticks`](#ticks) | yes | Where it goes: 0 (1.1.1) or later, and not where another marker already is. |
 
 Result: [`ChangeSet`](#changeset).
+
+#### `song.rename_locator`
+
+**Rename Locator**. Permission: `edit`. Contexts: `arrangement`.
+
+Renames a locator, as Cmd-R (Ctrl-R) and Edit > Rename do. An empty name keeps the old one. One undo step, `Rename Locator`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `locator` | [`LocatorId`](#locatorid) | yes | The locator. |
+| `name` | string | yes | The new name. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `song.scales`
+
+**Scale List**. Permission: `read`. Contexts: `global`.
+
+Reports the scale list: every scale a set can use, in the order the Scale Name chooser shows them, with each scale's steps above the root in semitones. The names are the ones `clip.set_scale` and `song.set_scale` take. Changes nothing. Use it to read the scales a set has before setting one.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`ScaleList`](#scalelist).
+
+#### `song.set_locator_info_text`
+
+**Set Locator Info Text**. Permission: `edit`. Contexts: `arrangement`.
+
+Sets the info text of a locator, which the Info View shows while the pointer is over it. One undo step, `Edit Info Text`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `locator` | [`LocatorId`](#locatorid) | yes | The locator. |
+| `info_text` | string | yes | The new info text. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `song.set_lock_envelopes`
+
+**Lock Envelopes**. Permission: `edit`. Contexts: `global`.
+
+Switches Lock Envelopes, the switch above the track headers and the Options menu item. Off (the default in a new set), editing the Arrangement's clips carries their tracks' envelopes over the clips' spans with them: moving, copying, cutting, deleting, duplicating and pasting clips take the envelopes over the same spans. On, the envelopes stay where they are in the song and the clips move on their own. The setting is saved with the set, and each change is one undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `enabled` | boolean | yes | Whether the envelopes stay where they are. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `song.set_scale`
+
+**Set Scale**. Permission: `edit`. Contexts: `global`.
+
+Sets the set's current scale: whether its Scale Mode is on (`enabled`), its root note (`root`, 0 is C and 11 is B) and its scale (`name`, one of the names `song.scales` reads). It leaves the values it isn't given as they were. The current scale is what the Control Bar's scale controls show, what the clips made next take, and what a device or a tool reads where no clip plays. It is one undo step, named "Change Scale", and the set is saved with it.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `enabled` | boolean or null | no | Whether the set's Scale Mode is on. |
+| `name` | string or null | no | The scale's name, from the scale list. |
+| `root` | integer or null | no | The root note: 0 (C) to 11 (B). |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `song.set_start`
+
+**Set Song Start Time**. Permission: `edit`. Contexts: `arrangement`.
+
+Sets where the song starts: at a locator, or at the loop brace's start. Choosing it where it is set clears it, so the song starts at the insert marker again. While it is set, Play starts the song there instead of at the insert marker. One undo step, `Set Song Start Time`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `start` | [`SongStart`](#songstart) or null | no | Where the song starts; nothing clears it. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `song.set_start_time`
+
+**Set Song Start Time**. Permission: `edit`. Contexts: `arrangement`.
+
+Sets where the song starts: at a locator, or at the loop brace's start, as Set Song Start Time Here does. The song start time follows its locator or the brace as they move, and deleting the locator clears it. `null` clears it, so the song starts at the insert marker again. While it is set, Play starts the song there instead of at the insert marker.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clear` | boolean | no | Whether the song start time is cleared, so the song starts at the insert marker again. |
+| `locator` | [`LocatorId`](#locatorid) or null | no | The locator the song starts at. Left out, the selected one: the song starts there, or stops starting there if it already does. |
+| `loop_brace` | boolean | no | Whether the song starts at the loop brace's start. |
+
+Result: [`LocatorResult`](#locatorresult).
 
 #### `song.set_tempo`
 
@@ -10501,7 +11512,7 @@ Result: nothing (`null`).
 
 **Set Arrangement Position**. Permission: `read`. Contexts: `global`.
 
-Moves the insert marker, where playback starts, to `position`, in ticks from the start of the arrangement (705,600 to the quarter note, so bar 2 of a 4/4 song is 2,822,400), as typing into the Control Bar's Arrangement Position fields does. While the song plays, playback jumps there at once; while it's stopped, `transport.continue` still resumes where playback stopped. Position 0 returns to 1.1.1, as the Home key and Return Play Position to 1.1.1 do. A position before 0 is taken as 0. It changes nothing in the project.
+Moves the insert marker, where playback starts, to `position`, in ticks from the start of the arrangement (705,600 to the quarter note, so bar 2 of a 4/4 song is 2,822,400), as typing into the Control Bar's Arrangement Position fields does. While the song plays, playback jumps there at once; while it's stopped, `transport.continue` still resumes where playback stopped. With `quantized` set, the jump waits while the song plays for the next line of the global launch quantisation and lands on that line's exact frame, as a locator's jump and a click in the scrub area do (the transport spec, R22); with the quantisation off or None, it jumps at once. Position 0 returns to 1.1.1, as the Home key and Return Play Position to 1.1.1 do. A position before 0 is taken as 0. It changes nothing in the project.
 
 Default keys:
 
@@ -10514,6 +11525,7 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `position` | [`Ticks`](#ticks) | yes | The new insert marker, in ticks from 1.1.1. A position before 1.1.1 is taken as 1.1.1. |
+| `quantized` | boolean | no | Whether the jump waits for the next line of the global launch quantisation while the song plays, as a locator's jump and a click in the scrub area do (the transport spec, R22). With it off, or with the quantisation off or None, the jump happens at once. |
 
 Result: nothing (`null`).
 
@@ -10521,7 +11533,7 @@ Result: nothing (`null`).
 
 **Play**. Permission: `read`. Contexts: `global`.
 
-Starts playback from the insert marker, as the Control Bar's Play button does; while the song plays, starts it again from the insert marker. Set the insert marker first with `transport.locate`. With the Arrangement loop on, playback that reaches the loop's end goes on from its start. It changes nothing in the project.
+Starts playback from the insert marker, as the Control Bar's Play button does; while the song plays, starts it again from the insert marker. When the song has a song start time (the transport spec, R21), it starts from that instead and leaves the insert marker where it is. Set the insert marker first with `transport.locate`. With the Arrangement loop on, playback that reaches the loop's end goes on from its start. It changes nothing in the project.
 
 Default keys: none.
 
@@ -10533,7 +11545,7 @@ Result: nothing (`null`).
 
 **Play From Insert Marker**. Permission: `read`. Contexts: `global`, `arrangement`.
 
-Starts playback from the insert marker. Until the arrangement has time selections, this does what `transport.play` does. It changes nothing in the project.
+Starts playback from the insert marker, even when the song has a song start time (the transport spec, R21). Until the arrangement has time selections, this does what `transport.play` does. It changes nothing in the project.
 
 Default keys:
 
@@ -11197,13 +12209,19 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`audio.configure`](#audioconfigure) | `audio.status` | `settings` |
 | [`audio.set_test_tone`](#audioset_test_tone) | `audio.status` | `test_tone` |
 | [`audio.toggle_engine`](#audiotoggle_engine) | `audio.status` | `engine_on` |
+| [`automation.cut`](#automationcut) | the query tool's `track` | `automation` |
 | [`automation.delete`](#automationdelete) | the query tool's `track` | `automation` |
 | [`automation.delete_breakpoint`](#automationdelete_breakpoint) | the query tool's `track` | `automation` |
+| [`automation.delete_range`](#automationdelete_range) | the query tool's `track` | `automation` |
+| [`automation.duplicate`](#automationduplicate) | the query tool's `track` | `automation` |
 | [`automation.move_breakpoint`](#automationmove_breakpoint) | the query tool's `track` | `automation` |
+| [`automation.move_breakpoints`](#automationmove_breakpoints) | the query tool's `track` | `automation` |
+| [`automation.paste`](#automationpaste) | the query tool's `track` | `automation` |
 | [`automation.re_enable`](#automationre_enable) | the query tool's `track` | `automation` |
 | [`automation.re_enable_for`](#automationre_enable_for) | the query tool's `track` | `automation` |
 | [`automation.set_breakpoint`](#automationset_breakpoint) | the query tool's `track` | `automation` |
 | [`automation.set_curve`](#automationset_curve) | the query tool's `track` | `automation` |
+| [`automation.set_envelope`](#automationset_envelope) | the query tool's `track` | `automation` |
 | [`browser.add_to_arrangement`](#browseradd_to_arrangement) | the query tool's `track` | `clips` |
 | [`browser.load_selected`](#browserload_selected) | the query tool's `track` | `clips` |
 | [`chain.add`](#chainadd) | the query tool's `device` | `chains` |
@@ -11282,6 +12300,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`clip.set_pitch`](#clipset_pitch) | the query tool's `clip` | `data.audio` |
 | [`clip.set_ram_mode`](#clipset_ram_mode) | the query tool's `clip` | `data.audio.ram` |
 | [`clip.set_region`](#clipset_region) | the query tool's `clip` | `data.audio.start` |
+| [`clip.set_scale`](#clipset_scale) | the query tool's `clip` | `scale` |
 | [`clip.set_segment_bpm`](#clipset_segment_bpm) | the query tool's `clip` | `data.audio.warp_markers` |
 | [`clip.set_tempo_leader`](#clipset_tempo_leader) | the query tool's `clip` | `data.audio.tempo_leader` |
 | [`clip.set_velocity_amount`](#clipset_velocity_amount) | the query tool's `clip` | `launch.velocity_amount` |
@@ -11379,6 +12398,12 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`keymap.bind`](#keymapbind) | `keymap.state` | `shortcuts` |
 | [`keymap.reset`](#keymapreset) | `keymap.state` | `shortcuts` |
 | [`keymap.unbind`](#keymapunbind) | `keymap.state` | `shortcuts` |
+| [`locator.add`](#locatoradd) | the query tool's `song` | `settings.locators` |
+| [`locator.delete`](#locatordelete) | the query tool's `song` | `settings.locators` |
+| [`locator.loop_to_next`](#locatorloop_to_next) | the query tool's `song` | `settings.arrangement_loop` |
+| [`locator.move`](#locatormove) | the query tool's `song` | `settings.locators` |
+| [`locator.rename`](#locatorrename) | the query tool's `song` | `settings.locators` |
+| [`locator.set_info_text`](#locatorset_info_text) | the query tool's `song` | `settings.locators` |
 | [`midi.capture`](#midicapture) | the query tool's `track` | `slots` |
 | [`midi.import_file`](#midiimport_file) | the query tool's `track` | `clips` |
 | [`midi.set_port`](#midiset_port) | `midi.ports` | `ports` |
@@ -11408,8 +12433,11 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`modulator.set_shape`](#modulatorset_shape) | the query tool's `device` | `shape` |
 | [`modulator.unmap`](#modulatorunmap) | the query tool's `device` | `mappings` |
 | [`note.add`](#noteadd) | the query tool's `clip` | `data.midi.notes` |
+| [`note.cut`](#notecut) | the query tool's `clip` | `data.midi.notes` |
 | [`note.delete`](#notedelete) | the query tool's `clip` | `data.midi.notes` |
+| [`note.duplicate`](#noteduplicate) | the query tool's `clip` | `data.midi.notes` |
 | [`note.move`](#notemove) | the query tool's `clip` | `data.midi.notes` |
+| [`note.paste`](#notepaste) | the query tool's `clip` | `data.midi.notes` |
 | [`note.quantize`](#notequantize) | the query tool's `clip` | `data.midi.notes` |
 | [`note.ramp_value`](#noteramp_value) | the query tool's `clip` | `data.midi.notes` |
 | [`note.resize`](#noteresize) | the query tool's `clip` | `data.midi.notes` |
@@ -11485,18 +12513,25 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`session.toggle_follow_actions`](#sessiontoggle_follow_actions) | the query tool's `clip` | `launch.follow.enabled` |
 | [`set.collect_all_and_save`](#setcollect_all_and_save) | the query tool's `song` | `set.unsaved_changes` |
 | [`set.discard_changes`](#setdiscard_changes) | the query tool's `song` | `set.unsaved_changes` |
+| [`set.import_dawproject`](#setimport_dawproject) | the query tool's `song` | `set.name` |
 | [`set.new`](#setnew) | the query tool's `song` | `set.name` |
 | [`set.open`](#setopen) | the query tool's `song` | `set.path` |
 | [`set.open_backup`](#setopen_backup) | the query tool's `song` | `set.unsaved_changes` |
 | [`set.recover`](#setrecover) | the query tool's `song` | `set.path` |
 | [`set.save`](#setsave) | the query tool's `song` | `set.unsaved_changes` |
 | [`set.save_as`](#setsave_as) | the query tool's `song` | `set.path` |
+| [`settings.set_appearance`](#settingsset_appearance) | `settings.state` | `theme_colors.appearance` |
 | [`settings.set_auto_hide_plug_in_windows`](#settingsset_auto_hide_plug_in_windows) | `settings.state` | `auto_hide_plug_in_windows` |
 | [`settings.set_auto_warp_long_samples`](#settingsset_auto_warp_long_samples) | `settings.state` | `warp.auto_warp_long_samples` |
+| [`settings.set_brightness`](#settingsset_brightness) | `settings.state` | `theme_colors.brightness` |
+| [`settings.set_color_hue`](#settingsset_color_hue) | `settings.state` | `theme_colors.color_hue` |
+| [`settings.set_color_intensity`](#settingsset_color_intensity) | `settings.state` | `theme_colors.color_intensity` |
 | [`settings.set_create_fades_on_clip_edges`](#settingsset_create_fades_on_clip_edges) | `settings.state` | `create_fades_on_clip_edges` |
 | [`settings.set_default_launch_mode`](#settingsset_default_launch_mode) | `settings.state` | `launch.default_mode` |
 | [`settings.set_default_launch_quantization`](#settingsset_default_launch_quantization) | `settings.state` | `launch.default_quantization` |
 | [`settings.set_default_warp_mode`](#settingsset_default_warp_mode) | `settings.state` | `warp.default_warp_mode` |
+| [`settings.set_grid_line_intensity`](#settingsset_grid_line_intensity) | `settings.state` | `theme_colors.grid_line_intensity` |
+| [`settings.set_high_contrast`](#settingsset_high_contrast) | `settings.state` | `theme_colors.high_contrast` |
 | [`settings.set_loop_warp_short_samples`](#settingsset_loop_warp_short_samples) | `settings.state` | `warp.loop_warp_short_samples` |
 | [`settings.set_outline_view_in_focus`](#settingsset_outline_view_in_focus) | `settings.state` | `display_input.outline_view_in_focus` |
 | [`settings.set_record_session_automation_in`](#settingsset_record_session_automation_in) | `settings.state` | `record_session_automation_in` |
@@ -11505,13 +12540,24 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`settings.set_select_on_launch`](#settingsset_select_on_launch) | `settings.state` | `launch.select_on_launch` |
 | [`settings.set_start_recording_on_scene_launch`](#settingsset_start_recording_on_scene_launch) | `settings.state` | `launch.start_recording_on_scene_launch` |
 | [`settings.set_temporary_folder`](#settingsset_temporary_folder) | `settings.state` | `file_folder.temporary_folder` |
-| [`settings.set_theme`](#settingsset_theme) | `settings.state` | `theme` |
+| [`settings.set_theme`](#settingsset_theme) | `settings.state` | `theme_colors.theme` |
+| [`settings.set_tone`](#settingsset_tone) | `settings.state` | `theme_colors.tone` |
 | [`settings.set_warp_recorded_audio`](#settingsset_warp_recorded_audio) | `settings.state` | `warp_recorded_audio` |
 | [`slot.set_stop_button`](#slotset_stop_button) | the query tool's `track` | `removed_stop_buttons` |
+| [`song.add_locator`](#songadd_locator) | the query tool's `song` | `settings.locators` |
+| [`song.delete_locator`](#songdelete_locator) | the query tool's `song` | `settings.locators` |
 | [`song.delete_tempo_breakpoint`](#songdelete_tempo_breakpoint) | the query tool's `song` | `settings.tempo` |
 | [`song.delete_time_signature_change`](#songdelete_time_signature_change) | the query tool's `song` | `settings.time_signatures` |
+| [`song.loop_to_next_locator`](#songloop_to_next_locator) | the query tool's `song` | `settings.arrangement_loop` |
+| [`song.move_locator`](#songmove_locator) | the query tool's `song` | `settings.locators` |
 | [`song.move_tempo_breakpoint`](#songmove_tempo_breakpoint) | the query tool's `song` | `settings.tempo` |
 | [`song.move_time_signature_change`](#songmove_time_signature_change) | the query tool's `song` | `settings.time_signatures` |
+| [`song.rename_locator`](#songrename_locator) | the query tool's `song` | `settings.locators` |
+| [`song.set_locator_info_text`](#songset_locator_info_text) | the query tool's `song` | `settings.locators` |
+| [`song.set_lock_envelopes`](#songset_lock_envelopes) | the query tool's `song` | `settings.lock_envelopes` |
+| [`song.set_scale`](#songset_scale) | the query tool's `song` | `scale` |
+| [`song.set_start`](#songset_start) | the query tool's `song` | `settings.song_start` |
+| [`song.set_start_time`](#songset_start_time) | the query tool's `song` | `settings.song_start` |
 | [`song.set_tempo`](#songset_tempo) | the query tool's `song` | `settings.tempo` |
 | [`song.set_tempo_breakpoint`](#songset_tempo_breakpoint) | the query tool's `song` | `settings.tempo` |
 | [`song.set_time_signature_change`](#songset_time_signature_change) | the query tool's `song` | `settings.time_signatures` |
@@ -11562,17 +12608,26 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`agent.new_token`](#agentnew_token) | a new random token, which an agent is never told: the Settings window shows it to the person |
 | [`app.quit`](#appquit) | the app ends, so there is nothing left to read from |
 | [`browser.add_folder`](#browseradd_folder) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
+| [`browser.add_tag`](#browseradd_tag) | the browser's tags are read with `browser.tags`, which is `external` because it lists files outside the project |
+| [`browser.add_tag_group`](#browseradd_tag_group) | the browser's tags are read with `browser.tags`, which is `external` because it lists files outside the project |
+| [`browser.delete_tag`](#browserdelete_tag) | the browser's tags are read with `browser.tags`, which is `external` because it lists files outside the project |
+| [`browser.move_tag`](#browsermove_tag) | the browser's tags are read with `browser.tags`, which is `external` because it lists files outside the project |
 | [`browser.open_folder`](#browseropen_folder) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.open_place`](#browseropen_place) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.preview`](#browserpreview) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.remove_folder`](#browserremove_folder) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
+| [`browser.rename_tag`](#browserrename_tag) | the browser's tags are read with `browser.tags`, which is `external` because it lists files outside the project |
+| [`browser.reset_tag_order`](#browserreset_tag_order) | the browser's tags are read with `browser.tags`, which is `external` because it lists files outside the project |
 | [`browser.scrub_preview`](#browserscrub_preview) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.search`](#browsersearch) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.select`](#browserselect) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.set_preview`](#browserset_preview) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.set_raw`](#browserset_raw) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.show_file`](#browsershow_file) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
+| [`browser.show_quick_tags`](#browsershow_quick_tags) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.state`](#browserstate) | a query of its own: it reads the Browser, and is `external` for the files it lists |
+| [`browser.tag_items`](#browsertag_items) | the browser's tags are read with `browser.tags`, which is `external` because it lists files outside the project |
+| [`browser.tags`](#browsertags) | a query of its own: it reads the tags, and is `external` for the files it lists |
 | [`chain.save_preset`](#chainsave_preset) | writes a file outside the set; the set doesn't change |
 | [`device.autosample_cancel`](#deviceautosample_cancel) | it stops a running autosample |
 | [`device.save_default_preset`](#devicesave_default_preset) | writes a file outside the set; the set doesn't change |
@@ -11942,6 +12997,43 @@ What `perception.analyze` returns. A measure not asked for is null.
 
 </details>
 
+### `Appearance`
+
+Which of a theme's two sets of colours is drawn (themes R3).
+
+One of:
+
+- `"light"`: Dark text on light panels.
+- `"dark"`: Light text on dark panels, the default.
+- `"follow-system"`: The operating system's mode, light or dark, as it changes.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Which of a theme's two sets of colours is drawn (themes R3).",
+  "oneOf": [
+    {
+      "const": "light",
+      "description": "Dark text on light panels.",
+      "type": "string"
+    },
+    {
+      "const": "dark",
+      "description": "Light text on dark panels, the default.",
+      "type": "string"
+    },
+    {
+      "const": "follow-system",
+      "description": "The operating system's mode, light or dark, as it changes.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `ArmedMap`
 
 A lit Map button.
@@ -11998,12 +13090,17 @@ What the Arrangement View shows: every view command returns it.
 | `insert_marker` | [`Ticks`](#ticks) | yes | Where the insert marker is. |
 | `selected_tracks` | array of [`TrackId`](#trackid) | yes | The selected tracks, top to bottom. |
 | `selected_clips` | array of [`ClipId`](#clipid) | yes | The selected clips (WP-1.8b), in the order they were selected. The editing commands act on these when there are any, and on the time selection otherwise. |
+| `selected_locators` | array of [`LocatorId`](#locatorid) | yes | The selected locators (WP-6.24), in the order they were selected. The locator commands act on these. |
 | `time_selection` | [`TimeRange`](#timerange) or null | yes | The selected span of time on the selected tracks, if any. |
 | `folded_tracks` | array of [`TrackId`](#trackid) | yes | The folded tracks. |
 | `zoom_back_steps` | integer, at least 0 | yes | How many views `arrangement.zoom_back` can go back to. |
 | `automation_mode` | boolean | yes | Whether Automation Mode is on: each track shows its automation lane under its lane, with the device and parameter choosers. |
 | `automation_arm` | boolean | yes | Whether Automation Arm is on: while Arrangement Record runs, moving a control writes its values into the parameter's envelope. |
+| `show_in_out` | boolean | yes | Whether the track headers show their In/Out column. |
+| `show_volume` | boolean | yes | Whether the track headers show their volume, pan, and sends. |
+| `show_return_tracks` | boolean | yes | Whether the return tracks' rows show in the lanes. |
 | `automation_lanes` | array of [`AutomationLane`](#automationlane) | no | The parameter each track's automation lane shows, for the tracks whose lane isn't showing the default (their volume): the choosers' choice. `target` `null` means the lane draws no envelope. |
+| `time_selection_lanes` | array of [`Lane`](#lane) | no | The lanes the time selection covers: each a track's own lane or its automation lane (the automation editing spec, R1). Empty when the selection names no lane. |
 
 <details><summary>JSON Schema</summary>
 
@@ -12074,12 +13171,32 @@ What the Arrangement View shows: every view command returns it.
       },
       "type": "array"
     },
+    "selected_locators": {
+      "default": [],
+      "description": "The selected locators (WP-6.24), in the order they were selected. The locator commands act on these.",
+      "items": {
+        "$ref": "#/$defs/LocatorId"
+      },
+      "type": "array"
+    },
     "selected_tracks": {
       "description": "The selected tracks, top to bottom.",
       "items": {
         "$ref": "#/$defs/TrackId"
       },
       "type": "array"
+    },
+    "show_in_out": {
+      "description": "Whether the track headers show their In/Out column.",
+      "type": "boolean"
+    },
+    "show_return_tracks": {
+      "description": "Whether the return tracks' rows show in the lanes.",
+      "type": "boolean"
+    },
+    "show_volume": {
+      "description": "Whether the track headers show their volume, pan, and sends.",
+      "type": "boolean"
     },
     "ticks_per_point": {
       "description": "The zoom: ticks of song time per point of screen.",
@@ -12096,6 +13213,13 @@ What the Arrangement View shows: every view command returns it.
         }
       ],
       "description": "The selected span of time on the selected tracks, if any."
+    },
+    "time_selection_lanes": {
+      "description": "The lanes the time selection covers: each a track's own lane or its automation lane (the automation editing spec, R1). Empty when the selection names no lane.",
+      "items": {
+        "$ref": "#/$defs/Lane"
+      },
+      "type": "array"
     },
     "visible": {
       "$ref": "#/$defs/TimeRange",
@@ -12129,11 +13253,15 @@ What the Arrangement View shows: every view command returns it.
     "insert_marker",
     "selected_tracks",
     "selected_clips",
+    "selected_locators",
     "time_selection",
     "folded_tracks",
     "zoom_back_steps",
     "automation_mode",
-    "automation_arm"
+    "automation_arm",
+    "show_in_out",
+    "show_volume",
+    "show_return_tracks"
   ],
   "type": "object"
 }
@@ -13204,6 +14332,53 @@ One track's automation lane and the parameter it shows, as `arrangement.show_aut
 
 </details>
 
+### `AutomationResult`
+
+What an automation editing command reports: what it changed in the set, and the selection afterwards.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `changes` | [`ChangeSet`](#changeset) | yes | What the edit changed in the set. |
+| `time_selection` | [`TimeRange`](#timerange) or null | yes | The time selected afterwards, if any. |
+| `undo_step` | boolean | yes | Whether the edit was recorded as an undo step: false when it changed nothing. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What an automation editing command reports: what it changed in the set, and the selection afterwards.",
+  "properties": {
+    "changes": {
+      "$ref": "#/$defs/ChangeSet",
+      "description": "What the edit changed in the set."
+    },
+    "time_selection": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TimeRange"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The time selected afterwards, if any."
+    },
+    "undo_step": {
+      "description": "Whether the edit was recorded as an undo step: false when it changed nothing.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "changes",
+    "time_selection",
+    "undo_step"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `AutomationTarget`
 
 Which parameter of the track an envelope drives: `mixer` with a `param`, `send` with the return track it feeds (`to`), `device` with the device and its `param`, `chain` with a rack's chain and its mixer `param`, or `chain_send` with a drum rack's chain and the return chain it sends to (`to`). A MIDI clip's envelope can instead name a MIDI controller: `midi.cc` with its `number` (1 to 31 or 33 to 119), `midi.pitch_bend` or `midi.channel_pressure`.
@@ -14114,6 +15289,8 @@ What the browser shows: most browser commands return it.
 | `selected` | array of string | yes | The selected items' paths. |
 | `preview` | [`PreviewState`](#previewstate) | yes | The preview. |
 | `index` | [`IndexState`](#indexstate) | yes | The index. |
+| `tag_editor` | boolean | yes | Whether the Tag Editor is open beside the content pane. |
+| `quick_tags` | boolean | yes | Whether Quick Tags shows at the content pane's bottom. |
 | `note` | string or null | no | What the content pane says when it has no rows, such as which package fills an empty Library label. |
 
 <details><summary>JSON Schema</summary>
@@ -14154,6 +15331,10 @@ What the browser shows: most browser commands return it.
       "$ref": "#/$defs/PreviewState",
       "description": "The preview."
     },
+    "quick_tags": {
+      "description": "Whether Quick Tags shows at the content pane's bottom.",
+      "type": "boolean"
+    },
     "rows": {
       "description": "Rows of the content pane, from `first_row`: the label's contents, with open folders' contents under them, or the search results.",
       "items": {
@@ -14172,6 +15353,10 @@ What the browser shows: most browser commands return it.
       },
       "type": "array"
     },
+    "tag_editor": {
+      "description": "Whether the Tag Editor is open beside the content pane.",
+      "type": "boolean"
+    },
     "total_rows": {
       "description": "How many rows the content pane has in all.",
       "format": "uint",
@@ -14188,7 +15373,9 @@ What the browser shows: most browser commands return it.
     "total_rows",
     "selected",
     "preview",
-    "index"
+    "index",
+    "tag_editor",
+    "quick_tags"
   ],
   "type": "object"
 }
@@ -15276,6 +16463,7 @@ A clip on a track's arrangement lane.
 | `envelopes` | array of [`ClipEnvelope`](#clipenvelope) | no | The clip's envelopes (WP-3.15): one per parameter of its track it modulates, in target order. Empty for a clip with none, which is what a set saved before this package holds. |
 | `launch` | [`ClipLaunch`](#cliplaunch) | no | The clip's launch settings (WP-3.4), which only a Session clip's launching reads. The defaults for a clip saved without them. |
 | `offset` | [`Ticks`](#ticks) | no | How far into its contents a MIDI clip starts: its notes are placed from `start - offset`, and the part before the clip's start doesn't play. 0 (or left out) plays the contents from their beginning. Never negative. Splitting a MIDI clip or trimming its left edge changes it, so each part plays what it played before. An audio clip's is always 0: its Start marker moves instead, as Live's does. |
+| `scale` | [`Scale`](#scale) | no | The clip's scale (WP-6.7): its Scale Mode switch, its root and its scale name. It never changes what the clip plays; it tells the rest of the set which keys belong. A clip off at C, in Major, writes nothing, so a set saved before the scales loads unchanged. |
 
 <details><summary>JSON Schema</summary>
 
@@ -15317,6 +16505,10 @@ A clip on a track's arrangement lane.
     "offset": {
       "$ref": "#/$defs/Ticks",
       "description": "How far into its contents a MIDI clip starts: its notes are placed from `start - offset`, and the part before the clip's start doesn't play. 0 (or left out) plays the contents from their beginning. Never negative. Splitting a MIDI clip or trimming its left edge changes it, so each part plays what it played before. An audio clip's is always 0: its Start marker moves instead, as Live's does."
+    },
+    "scale": {
+      "$ref": "#/$defs/Scale",
+      "description": "The clip's scale (WP-6.7): its Scale Mode switch, its root and its scale name. It never changes what the clip plays; it tells the rest of the set which keys belong. A clip off at C, in Major, writes nothing, so a set saved before the scales loads unchanged."
     },
     "start": {
       "$ref": "#/$defs/Ticks",
@@ -15738,7 +16930,7 @@ What `clip.transients` returns.
 
 ### `ClipViewState`
 
-What the Clip View shows: which clip it is editing, the notes selected in it, the lane's setting, and the tab with the envelope it shows.
+What the Clip View shows: which clip it is editing, the notes selected in it, its insert marker and time selection, the lane's setting, and the tab with the envelope it shows.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -15746,6 +16938,8 @@ What the Clip View shows: which clip it is editing, the notes selected in it, th
 | `draw_mode` | boolean | yes | Whether Draw Mode is on (B): clicking the note area adds a note, and clicking a note removes it. |
 | `clip` | [`ClipId`](#clipid) or null | yes | The clip the note editor shows; `null` when none does. |
 | `selected` | array of integer, at least 0 | yes | The selected notes, by their place in the clip's notes in order (by start, then pitch). |
+| `insert_marker` | [`Ticks`](#ticks) or null | yes | The insert marker, in ticks from the beginning of the clip's contents; `null` when there is none. |
+| `time_selection` | array or null | yes | The time selection's start and end, in ticks from the beginning of the clip's contents; `null` when there is none. |
 | `lane` | [`NoteField`](#notefield) | yes | Which value the lane under the note editor shows and edits. |
 | `folded` | boolean | yes | Whether the note editor shows only the rows that hold notes (Fold, F). |
 | `tab` | [`ClipTab`](#cliptab) | yes | The tab the Clip View shows. |
@@ -15755,7 +16949,7 @@ What the Clip View shows: which clip it is editing, the notes selected in it, th
 
 ```json
 {
-  "description": "What the Clip View shows: which clip it is editing, the notes selected in it, the lane's setting, and the tab with the envelope it shows.",
+  "description": "What the Clip View shows: which clip it is editing, the notes selected in it, its insert marker and time selection, the lane's setting, and the tab with the envelope it shows.",
   "properties": {
     "clip": {
       "anyOf": [
@@ -15787,6 +16981,17 @@ What the Clip View shows: which clip it is editing, the notes selected in it, th
       "description": "Whether the note editor shows only the rows that hold notes (Fold, F).",
       "type": "boolean"
     },
+    "insert_marker": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Ticks"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The insert marker, in ticks from the beginning of the clip's contents; `null` when there is none."
+    },
     "lane": {
       "$ref": "#/$defs/NoteField",
       "description": "Which value the lane under the note editor shows and edits."
@@ -15804,6 +17009,23 @@ What the Clip View shows: which clip it is editing, the notes selected in it, th
       "$ref": "#/$defs/ClipTab",
       "description": "The tab the Clip View shows."
     },
+    "time_selection": {
+      "description": "The time selection's start and end, in ticks from the beginning of the clip's contents; `null` when there is none.",
+      "maxItems": 2,
+      "minItems": 2,
+      "prefixItems": [
+        {
+          "$ref": "#/$defs/Ticks"
+        },
+        {
+          "$ref": "#/$defs/Ticks"
+        }
+      ],
+      "type": [
+        "array",
+        "null"
+      ]
+    },
     "visible": {
       "description": "Whether the Clip View shows in the detail area.",
       "type": "boolean"
@@ -15814,6 +17036,8 @@ What the Clip View shows: which clip it is editing, the notes selected in it, th
     "draw_mode",
     "clip",
     "selected",
+    "insert_marker",
+    "time_selection",
     "lane",
     "folded",
     "tab",
@@ -18984,6 +20208,42 @@ A parameter's envelope: breakpoints joined by straight or curved segments, in po
 
 </details>
 
+### `EnvelopeClipboardState`
+
+What `automation.copy` put on the clipboard.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `lanes` | integer, at least 0 | yes | How many lanes' shapes it holds. |
+| `length` | [`Ticks`](#ticks) | yes | How long the shape is. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `automation.copy` put on the clipboard.",
+  "properties": {
+    "lanes": {
+      "description": "How many lanes' shapes it holds.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "length": {
+      "$ref": "#/$defs/Ticks",
+      "description": "How long the shape is."
+    }
+  },
+  "required": [
+    "lanes",
+    "length"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `EnvelopeKind`
 
 What a clip envelope does: `modulation` (the default) moves the value the control or the track's automation gives by a share of the parameter's travel; `automation` (a Session clip's) sets the value outright while the clip plays.
@@ -20772,6 +22032,124 @@ Hot-swapping, while it lasts.
 
 </details>
 
+### `ImportDawProjectResult`
+
+What `set.import_dawproject` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | The new set's name, as the title bar shows it: the file's name without `.dawproject`. |
+| `report` | [`ImportReport`](#importreport) | yes | What the import left out or changed. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `set.import_dawproject` returns.",
+  "properties": {
+    "name": {
+      "description": "The new set's name, as the title bar shows it: the file's name without `.dawproject`.",
+      "type": "string"
+    },
+    "report": {
+      "$ref": "#/$defs/ImportReport",
+      "description": "What the import left out or changed."
+    }
+  },
+  "required": [
+    "name",
+    "report"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ImportReport`
+
+What the import left out or changed.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `application` | string or null | no | The application and version the file says made it. |
+| `entries` | array of [`ImportReportEntry`](#importreportentry) | no | Each thing left out or changed, in the file's order. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What the import left out or changed.",
+  "properties": {
+    "application": {
+      "description": "The application and version the file says made it.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "entries": {
+      "description": "Each thing left out or changed, in the file's order.",
+      "items": {
+        "$ref": "#/$defs/ImportReportEntry"
+      },
+      "type": "array"
+    }
+  },
+  "type": "object"
+}
+```
+
+</details>
+
+### `ImportReportEntry`
+
+One thing the import left out or changed.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `what` | string | yes | What it was: a VST2 plug-in, a send's pan, a note's channel. |
+| `where` | string | yes | Where it was: the track by name, a clip by name and its place, a device by name. |
+| `count` | integer, at least 0 | yes | How many there were. |
+| `did` | string | yes | What Beatlayer did: left out, or changed to what. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One thing the import left out or changed.",
+  "properties": {
+    "count": {
+      "description": "How many there were.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "did": {
+      "description": "What Beatlayer did: left out, or changed to what.",
+      "type": "string"
+    },
+    "what": {
+      "description": "What it was: a VST2 plug-in, a send's pan, a note's channel.",
+      "type": "string"
+    },
+    "where": {
+      "description": "Where it was: the track by name, a clip by name and its place, a device by name.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "what",
+    "where",
+    "count",
+    "did"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `ImportedClip`
 
 A clip `midi.import_file` placed.
@@ -21157,6 +22535,40 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `ItemTag`
+
+A tag on an item, and where it comes from.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `tag` | string | yes | The tag's full name. |
+| `source` | [`TagSource`](#tagsource) | yes | Where it comes from. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A tag on an item, and where it comes from.",
+  "properties": {
+    "source": {
+      "$ref": "#/$defs/TagSource",
+      "description": "Where it comes from."
+    },
+    "tag": {
+      "description": "The tag's full name.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "tag",
+    "source"
+  ],
+  "type": "object"
 }
 ```
 
@@ -21669,6 +23081,68 @@ A label as the sidebar lists it.
     "available"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `Lane`
+
+Which lane a selection covers: `track` for a track's own lane, where its clips are, and `automation` for the automation lane under it, which shows a parameter.
+
+One of:
+
+- an object with `type` = `"track"`, `track` ([`TrackId`](#trackid)): A track's own lane, where its clips are.
+- an object with `type` = `"automation"`, `track` ([`TrackId`](#trackid)), `target` ([`AutomationTarget`](#automationtarget)): A track's automation lane, which shows a parameter.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Which lane a selection covers: `track` for a track's own lane, where its clips are, and `automation` for the automation lane under it, which shows a parameter.",
+  "oneOf": [
+    {
+      "description": "A track's own lane, where its clips are.",
+      "properties": {
+        "track": {
+          "$ref": "#/$defs/TrackId",
+          "description": "The track."
+        },
+        "type": {
+          "const": "track",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "track"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A track's automation lane, which shows a parameter.",
+      "properties": {
+        "target": {
+          "$ref": "#/$defs/AutomationTarget",
+          "description": "The parameter the lane shows."
+        },
+        "track": {
+          "$ref": "#/$defs/TrackId",
+          "description": "The track."
+        },
+        "type": {
+          "const": "automation",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "track",
+        "target"
+      ],
+      "type": "object"
+    }
+  ]
 }
 ```
 
@@ -22792,6 +24266,107 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `Locator`
+
+A locator: a place in the song to play from.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | [`LocatorId`](#locatorid) | yes | The locator's ID. |
+| `position` | [`Ticks`](#ticks) | yes | Where it sits: 0 (1.1.1) or later. |
+| `name` | string | yes | Its name, which may be empty. |
+| `info_text` | string | no | Its info text, which the Info View shows while the pointer is over it. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A locator: a place in the song to play from.",
+  "properties": {
+    "id": {
+      "$ref": "#/$defs/LocatorId",
+      "description": "The locator's ID."
+    },
+    "info_text": {
+      "description": "Its info text, which the Info View shows while the pointer is over it.",
+      "type": "string"
+    },
+    "name": {
+      "description": "Its name, which may be empty.",
+      "type": "string"
+    },
+    "position": {
+      "$ref": "#/$defs/Ticks",
+      "description": "Where it sits: 0 (1.1.1) or later."
+    }
+  },
+  "required": [
+    "id",
+    "position",
+    "name"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `LocatorId`
+
+The ID of a locator: a positive integer, unique within the project and never reused.
+
+Type: integer, at least 1.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The ID of a locator: a positive integer, unique within the project and never reused.",
+  "format": "uint64",
+  "minimum": 1,
+  "type": "integer"
+}
+```
+
+</details>
+
+### `LocatorResult`
+
+What a locator command did: the locators selected afterwards, and whether it was recorded as an undo step.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `selected_locators` | array of [`LocatorId`](#locatorid) | yes | The locators selected afterwards. |
+| `undo_step` | boolean | yes | Whether the edit was recorded as an undo step: false when it changed nothing. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a locator command did: the locators selected afterwards, and whether it was recorded as an undo step.",
+  "properties": {
+    "selected_locators": {
+      "description": "The locators selected afterwards.",
+      "items": {
+        "$ref": "#/$defs/LocatorId"
+      },
+      "type": "array"
+    },
+    "undo_step": {
+      "description": "Whether the edit was recorded as an undo step: false when it changed nothing.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "selected_locators",
+    "undo_step"
+  ],
+  "type": "object"
 }
 ```
 
@@ -24967,6 +26542,42 @@ A note in a MIDI clip.
 
 </details>
 
+### `NoteClipboardState`
+
+What the note clipboard holds, as `note.copy` reports it.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `notes` | integer, at least 0 | yes | How many notes it holds. |
+| `length` | [`Ticks`](#ticks) | yes | How long they last, from the earliest of them. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What the note clipboard holds, as `note.copy` reports it.",
+  "properties": {
+    "length": {
+      "$ref": "#/$defs/Ticks",
+      "description": "How long they last, from the earliest of them."
+    },
+    "notes": {
+      "description": "How many notes it holds.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "notes",
+    "length"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `NoteEditResult`
 
 What a note edit did, and what's selected afterwards.
@@ -25084,6 +26695,78 @@ One of:
       "const": "toggle",
       "description": "Select each note that isn't selected and deselect each that is.",
       "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `NoteSelection`
+
+What to select in the note editor: `nearest` (the note whose start is nearest the insert marker), `previous` and `next` (the previous or next note in the clip's order), `same_pitch_previous` and `same_pitch_next` (the previous or next note at the selected note's pitch), `all` (every note in the clip's span), or `key` (every note at a pitch, as clicking a key in the piano ruler does).
+
+One of:
+
+- `"nearest"`: The note whose start is nearest the insert marker.
+- `"previous"`: The previous note in the clip's order.
+- `"next"`: The next note in the clip's order.
+- `"same_pitch_previous"`: The previous note at the selected note's pitch.
+- `"same_pitch_next"`: The next note at the selected note's pitch.
+- `"all"`: Every note in the clip's span.
+- an object with `key` (integer from 0 to 255): Every note at a pitch, as clicking a key in the piano ruler does.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What to select in the note editor: `nearest` (the note whose start is nearest the insert marker), `previous` and `next` (the previous or next note in the clip's order), `same_pitch_previous` and `same_pitch_next` (the previous or next note at the selected note's pitch), `all` (every note in the clip's span), or `key` (every note at a pitch, as clicking a key in the piano ruler does).",
+  "oneOf": [
+    {
+      "const": "nearest",
+      "description": "The note whose start is nearest the insert marker.",
+      "type": "string"
+    },
+    {
+      "const": "previous",
+      "description": "The previous note in the clip's order.",
+      "type": "string"
+    },
+    {
+      "const": "next",
+      "description": "The next note in the clip's order.",
+      "type": "string"
+    },
+    {
+      "const": "same_pitch_previous",
+      "description": "The previous note at the selected note's pitch.",
+      "type": "string"
+    },
+    {
+      "const": "same_pitch_next",
+      "description": "The next note at the selected note's pitch.",
+      "type": "string"
+    },
+    {
+      "const": "all",
+      "description": "Every note in the clip's span.",
+      "type": "string"
+    },
+    {
+      "additionalProperties": false,
+      "description": "Every note at a pitch, as clicking a key in the piano ruler does.",
+      "properties": {
+        "key": {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "key"
+      ],
+      "type": "object"
     }
   ]
 }
@@ -29213,6 +30896,235 @@ What `clip.save_default` and `clip.defaults` return.
 
 </details>
 
+### `Scale`
+
+A scale: whether Scale Mode is on (`enabled`), the root note (0 is C, 11 is B), and the scale's `name`, from the scale list. A scale with `enabled` false is the chromatic scale, whose degree is a semitone.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `enabled` | boolean | yes | Whether Scale Mode is on: the scale's keys are the ones the rest of the set reads. |
+| `root` | integer from 0 to 255 | yes | The root note: 0 (C) to 11 (B). |
+| `name` | [`ScaleName`](#scalename) | yes | The scale's name, from the scale list. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A scale: whether Scale Mode is on (`enabled`), the root note (0 is C, 11 is B), and the scale's `name`, from the scale list. A scale with `enabled` false is the chromatic scale, whose degree is a semitone.",
+  "properties": {
+    "enabled": {
+      "description": "Whether Scale Mode is on: the scale's keys are the ones the rest of the set reads.",
+      "type": "boolean"
+    },
+    "name": {
+      "$ref": "#/$defs/ScaleName",
+      "description": "The scale's name, from the scale list."
+    },
+    "root": {
+      "description": "The root note: 0 (C) to 11 (B).",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "enabled",
+    "root",
+    "name"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ScaleEntry`
+
+One scale in the list.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | The scale's name, as the Scale Name chooser shows it. |
+| `steps` | array of integer from 0 to 255 | yes | The scale's steps above the root, in semitones: the notes it holds in every octave. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One scale in the list.",
+  "properties": {
+    "name": {
+      "description": "The scale's name, as the Scale Name chooser shows it.",
+      "type": "string"
+    },
+    "steps": {
+      "description": "The scale's steps above the root, in semitones: the notes it holds in every octave.",
+      "items": {
+        "format": "uint8",
+        "maximum": 255,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "name",
+    "steps"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ScaleList`
+
+What `song.scales` returns: the scale list, in the order the Scale Name chooser shows it.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `scales` | array of [`ScaleEntry`](#scaleentry) | yes | The scales, in the list's order. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `song.scales` returns: the scale list, in the order the Scale Name chooser shows it.",
+  "properties": {
+    "scales": {
+      "description": "The scales, in the list's order.",
+      "items": {
+        "$ref": "#/$defs/ScaleEntry"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "scales"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ScaleName`
+
+The names of the scales in the scale list, in the order the chooser shows them (the scales spec, R1).
+
+One of:
+
+- `"major"`: The major scale.
+- `"minor"`: The natural minor scale.
+- `"dorian"`: The Dorian mode.
+- `"mixolydian"`: The Mixolydian mode.
+- `"lydian"`: The Lydian mode.
+- `"phrygian"`: The Phrygian mode.
+- `"locrian"`: The Locrian mode.
+- `"harmonic_minor"`: The harmonic minor scale.
+- `"melodic_minor"`: The melodic minor scale.
+- `"harmonic_major"`: The harmonic major scale.
+- `"major_pentatonic"`: The major pentatonic scale.
+- `"minor_pentatonic"`: The minor pentatonic scale.
+- `"minor_blues"`: The minor blues scale.
+- `"whole_tone"`: The whole tone scale.
+- `"whole_half_diminished"`: The whole-half diminished scale.
+- `"half_whole_diminished"`: The half-whole diminished scale.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The names of the scales in the scale list, in the order the chooser shows them (the scales spec, R1).",
+  "oneOf": [
+    {
+      "const": "major",
+      "description": "The major scale.",
+      "type": "string"
+    },
+    {
+      "const": "minor",
+      "description": "The natural minor scale.",
+      "type": "string"
+    },
+    {
+      "const": "dorian",
+      "description": "The Dorian mode.",
+      "type": "string"
+    },
+    {
+      "const": "mixolydian",
+      "description": "The Mixolydian mode.",
+      "type": "string"
+    },
+    {
+      "const": "lydian",
+      "description": "The Lydian mode.",
+      "type": "string"
+    },
+    {
+      "const": "phrygian",
+      "description": "The Phrygian mode.",
+      "type": "string"
+    },
+    {
+      "const": "locrian",
+      "description": "The Locrian mode.",
+      "type": "string"
+    },
+    {
+      "const": "harmonic_minor",
+      "description": "The harmonic minor scale.",
+      "type": "string"
+    },
+    {
+      "const": "melodic_minor",
+      "description": "The melodic minor scale.",
+      "type": "string"
+    },
+    {
+      "const": "harmonic_major",
+      "description": "The harmonic major scale.",
+      "type": "string"
+    },
+    {
+      "const": "major_pentatonic",
+      "description": "The major pentatonic scale.",
+      "type": "string"
+    },
+    {
+      "const": "minor_pentatonic",
+      "description": "The minor pentatonic scale.",
+      "type": "string"
+    },
+    {
+      "const": "minor_blues",
+      "description": "The minor blues scale.",
+      "type": "string"
+    },
+    {
+      "const": "whole_tone",
+      "description": "The whole tone scale.",
+      "type": "string"
+    },
+    {
+      "const": "whole_half_diminished",
+      "description": "The whole-half diminished scale.",
+      "type": "string"
+    },
+    {
+      "const": "half_whole_diminished",
+      "description": "The half-whole diminished scale.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `ScannedItem`
 
 A plug-in the scanner found.
@@ -29942,7 +31854,7 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
 |---|---|---|---|
 | `page` | [`SettingsPage`](#settingspage) | yes | The page the Settings window shows, or showed last. |
 | `display_input` | [`DisplayInputSettings`](#displayinputsettings) | yes | Display & Input. |
-| `theme` | [`ThemeChoice`](#themechoice) | yes | Theme & Colors: the theme, as `settings.set_theme` takes it. |
+| `theme_colors` | [`ThemeColorsSettings`](#themecolorssettings) | yes | Theme & Colors: the Theme and Customization sections, as the `settings.set_theme` to `settings.set_color_hue` commands set them. |
 | `audio` | [`AudioPageSettings`](#audiopagesettings) | yes | Audio. |
 | `tempo_midi` | [`MidiPortsResult`](#midiportsresult) | yes | Tempo & MIDI: the MIDI ports' switches and the computer MIDI keyboard, the same as `midi.ports` reports. |
 | `create_fades_on_clip_edges` | boolean | yes | Record, Warp & Launch: Create Fades on Clip Edges, as `settings.set_create_fades_on_clip_edges` sets it. |
@@ -30010,9 +31922,9 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
       "$ref": "#/$defs/MidiPortsResult",
       "description": "Tempo & MIDI: the MIDI ports' switches and the computer MIDI keyboard, the same as `midi.ports` reports."
     },
-    "theme": {
-      "$ref": "#/$defs/ThemeChoice",
-      "description": "Theme & Colors: the theme, as `settings.set_theme` takes it."
+    "theme_colors": {
+      "$ref": "#/$defs/ThemeColorsSettings",
+      "description": "Theme & Colors: the Theme and Customization sections, as the `settings.set_theme` to `settings.set_color_hue` commands set them."
     },
     "warp": {
       "$ref": "#/$defs/WarpPrefs",
@@ -30026,7 +31938,7 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
   "required": [
     "page",
     "display_input",
-    "theme",
+    "theme_colors",
     "audio",
     "tempo_midi",
     "create_fades_on_clip_edges",
@@ -30748,6 +32660,45 @@ One slot: a track's column and a scene's row.
 
 </details>
 
+### `SongStart`
+
+Where the song starts: a locator, or the loop brace's start. It follows the locator or the brace as they move.
+
+One of:
+
+- an object with `locator` ([`LocatorId`](#locatorid)): A locator: the song starts there.
+- `"loop_brace"`: The loop brace's start: the song starts there.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Where the song starts: a locator, or the loop brace's start. It follows the locator or the brace as they move.",
+  "oneOf": [
+    {
+      "additionalProperties": false,
+      "description": "A locator: the song starts there.",
+      "properties": {
+        "locator": {
+          "$ref": "#/$defs/LocatorId"
+        }
+      },
+      "required": [
+        "locator"
+      ],
+      "type": "object"
+    },
+    {
+      "const": "loop_brace",
+      "description": "The loop brace's start: the song starts there.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `SpectrumResult`
 
 A coarse spectrum.
@@ -30986,6 +32937,219 @@ What a command that switches something returns: its new state.
   },
   "required": [
     "on"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `TagGroupInfo`
+
+A tag group, as `browser.tags` reports it.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | Its name. |
+| `builtin` | boolean | yes | Whether Beatlayer gave it: it can't be renamed or deleted. |
+| `tags` | array of [`TagInfo`](#taginfo) | yes | Its tags, in order. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A tag group, as `browser.tags` reports it.",
+  "properties": {
+    "builtin": {
+      "description": "Whether Beatlayer gave it: it can't be renamed or deleted.",
+      "type": "boolean"
+    },
+    "name": {
+      "description": "Its name.",
+      "type": "string"
+    },
+    "tags": {
+      "description": "Its tags, in order.",
+      "items": {
+        "$ref": "#/$defs/TagInfo"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "name",
+    "builtin",
+    "tags"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `TagInfo`
+
+A tag, as `browser.tags` reports it.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | Its own name, without the group's. |
+| `full_name` | string | yes | Its full name: the group's name, its own, and any subtag's, joined by `\|`, as `Format\|CLAP`. |
+| `builtin` | boolean | yes | Whether Beatlayer gave it: it can't be renamed or deleted. |
+| `position` | integer | yes | Where it sits in its group. |
+| `subtags` | array of [`TagInfo`](#taginfo) | yes | Its subtags, one level deep. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A tag, as `browser.tags` reports it.",
+  "properties": {
+    "builtin": {
+      "description": "Whether Beatlayer gave it: it can't be renamed or deleted.",
+      "type": "boolean"
+    },
+    "full_name": {
+      "description": "Its full name: the group's name, its own, and any subtag's, joined by `|`, as `Format|CLAP`.",
+      "type": "string"
+    },
+    "name": {
+      "description": "Its own name, without the group's.",
+      "type": "string"
+    },
+    "position": {
+      "description": "Where it sits in its group.",
+      "format": "int32",
+      "type": "integer"
+    },
+    "subtags": {
+      "description": "Its subtags, one level deep.",
+      "items": {
+        "$ref": "#/$defs/TagInfo"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "name",
+    "full_name",
+    "builtin",
+    "position",
+    "subtags"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `TagSource`
+
+Where a tag on an item comes from (spec: browser-tags R16).
+
+One of:
+
+- `"own"`: The item carries it in its own right.
+- `"folder"`: A folder it lies in carries it.
+- `"beatlayer"`: Beatlayer gave it, from what it knows of the item.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Where a tag on an item comes from (spec: browser-tags R16).",
+  "oneOf": [
+    {
+      "const": "own",
+      "description": "The item carries it in its own right.",
+      "type": "string"
+    },
+    {
+      "const": "folder",
+      "description": "A folder it lies in carries it.",
+      "type": "string"
+    },
+    {
+      "const": "beatlayer",
+      "description": "Beatlayer gave it, from what it knows of the item.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `TaggedItem`
+
+An item and the tags it carries.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `item` | string | yes | The item's key: a file or folder by its path, a plug-in by its format and identifier, a device or rack by its row's ID. |
+| `tags` | array of [`ItemTag`](#itemtag) | yes | The tags it carries. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "An item and the tags it carries.",
+  "properties": {
+    "item": {
+      "description": "The item's key: a file or folder by its path, a plug-in by its format and identifier, a device or rack by its row's ID.",
+      "type": "string"
+    },
+    "tags": {
+      "description": "The tags it carries.",
+      "items": {
+        "$ref": "#/$defs/ItemTag"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "item",
+    "tags"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `TagsState`
+
+What `browser.tags` reports: the tag groups and their tags, and, for the items named, what each carries.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `groups` | array of [`TagGroupInfo`](#taggroupinfo) | yes | The tag groups, in order, with their tags. |
+| `items` | array of [`TaggedItem`](#taggeditem) | yes | The items named, with the tags each carries. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `browser.tags` reports: the tag groups and their tags, and, for the items named, what each carries.",
+  "properties": {
+    "groups": {
+      "description": "The tag groups, in order, with their tags.",
+      "items": {
+        "$ref": "#/$defs/TagGroupInfo"
+      },
+      "type": "array"
+    },
+    "items": {
+      "description": "The items named, with the tags each carries.",
+      "items": {
+        "$ref": "#/$defs/TaggedItem"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "groups",
+    "items"
   ],
   "type": "object"
 }
@@ -31441,32 +33605,105 @@ Changes to Texture's controls.
 
 </details>
 
-### `ThemeChoice`
+### `ThemeColorsSettings`
 
-Beatlayer's two themes.
+Theme & Colors in `settings.state` (themes R12).
 
-One of:
-
-- `"dark"`: Light text on dark panels, the default.
-- `"light"`: Dark text on light panels.
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `theme` | string | yes | The chosen theme's name. |
+| `tone` | [`Tone`](#tone) | yes | Tone. |
+| `high_contrast` | boolean | yes | High Contrast. |
+| `grid_line_intensity` | integer from -32768 to 32767 | yes | Grid Line Intensity, in percent. |
+| `brightness` | integer from -32768 to 32767 | yes | Brightness. |
+| `color_intensity` | integer from -32768 to 32767 | yes | Color Intensity, in percent. |
+| `color_hue` | integer from -32768 to 32767 | yes | Color Hue, in degrees. |
+| `appearance` | [`Appearance`](#appearance) | yes | The Appearance chosen. |
+| `drawn_appearance` | [`Appearance`](#appearance) | yes | The appearance drawn now, `light` or `dark`: Follow System resolved. |
+| `themes` | array of string | yes | The themes the Theme chooser offers, in its order. |
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "Beatlayer's two themes.",
-  "oneOf": [
-    {
-      "const": "dark",
-      "description": "Light text on dark panels, the default.",
+  "description": "Theme & Colors in `settings.state` (themes R12).",
+  "properties": {
+    "appearance": {
+      "$ref": "#/$defs/Appearance",
+      "description": "The Appearance chosen."
+    },
+    "brightness": {
+      "default": 0,
+      "description": "Brightness.",
+      "format": "int16",
+      "maximum": 32767,
+      "minimum": -32768,
+      "type": "integer"
+    },
+    "color_hue": {
+      "default": 0,
+      "description": "Color Hue, in degrees.",
+      "format": "int16",
+      "maximum": 32767,
+      "minimum": -32768,
+      "type": "integer"
+    },
+    "color_intensity": {
+      "default": 100,
+      "description": "Color Intensity, in percent.",
+      "format": "int16",
+      "maximum": 32767,
+      "minimum": -32768,
+      "type": "integer"
+    },
+    "drawn_appearance": {
+      "$ref": "#/$defs/Appearance",
+      "description": "The appearance drawn now, `light` or `dark`: Follow System resolved."
+    },
+    "grid_line_intensity": {
+      "default": 100,
+      "description": "Grid Line Intensity, in percent.",
+      "format": "int16",
+      "maximum": 32767,
+      "minimum": -32768,
+      "type": "integer"
+    },
+    "high_contrast": {
+      "default": false,
+      "description": "High Contrast.",
+      "type": "boolean"
+    },
+    "theme": {
+      "default": "Beatlayer",
+      "description": "The chosen theme's name.",
       "type": "string"
     },
-    {
-      "const": "light",
-      "description": "Dark text on light panels.",
-      "type": "string"
+    "themes": {
+      "description": "The themes the Theme chooser offers, in its order.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "tone": {
+      "$ref": "#/$defs/Tone",
+      "default": "neutral",
+      "description": "Tone."
     }
-  ]
+  },
+  "required": [
+    "theme",
+    "tone",
+    "high_contrast",
+    "grid_line_intensity",
+    "brightness",
+    "color_intensity",
+    "color_hue",
+    "appearance",
+    "drawn_appearance",
+    "themes"
+  ],
+  "type": "object"
 }
 ```
 
@@ -31616,6 +33853,43 @@ Type: array of [`TimeSignatureChange`](#timesignaturechange), at least 1.
   },
   "minItems": 1,
   "type": "array"
+}
+```
+
+</details>
+
+### `Tone`
+
+How a theme's neutral colours are tinted (themes R4).
+
+One of:
+
+- `"neutral"`: The theme's neutral colours as its file gives them.
+- `"warm"`: Tinted towards the hue 60°.
+- `"cool"`: Tinted towards the hue 250°.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "How a theme's neutral colours are tinted (themes R4).",
+  "oneOf": [
+    {
+      "const": "neutral",
+      "description": "The theme's neutral colours as its file gives them.",
+      "type": "string"
+    },
+    {
+      "const": "warm",
+      "description": "Tinted towards the hue 60°.",
+      "type": "string"
+    },
+    {
+      "const": "cool",
+      "description": "Tinted towards the hue 250°.",
+      "type": "string"
+    }
+  ]
 }
 ```
 

@@ -316,6 +316,20 @@ const ENTRIES: &[Entry] = &[
             where they sit in bars.",
     },
     Entry {
+        id: "song.set_scale",
+        action: Action::Apply("set_scale"),
+        label: "Set Scale",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Sets the set's current scale: whether its Scale Mode is on (`enabled`), its \
+            root note (`root`, 0 is C and 11 is B) and its scale (`name`, one of the names \
+            `song.scales` reads). It leaves the values it isn't given as they were. The current \
+            scale is what the Control Bar's scale controls show, what the clips made next take, \
+            and what a device or a tool reads where no clip plays. It is one undo step, named \
+            \"Change Scale\", and the set is saved with it.",
+    },
+    Entry {
         id: "song.set_time_signatures",
         action: Action::Apply("set_time_signatures"),
         label: "Set Time Signatures",
@@ -765,6 +779,20 @@ const ENTRIES: &[Entry] = &[
             setting is saved with the set.",
     },
     Entry {
+        id: "song.set_lock_envelopes",
+        action: Action::Apply("set_lock_envelopes"),
+        label: "Lock Envelopes",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Switches Lock Envelopes, the switch above the track headers and the \
+            Options menu item. Off (the default in a new set), editing the Arrangement's clips \
+            carries their tracks' envelopes over the clips' spans with them: moving, copying, \
+            cutting, deleting, duplicating and pasting clips take the envelopes over the same \
+            spans. On, the envelopes stay where they are in the song and the clips move on \
+            their own. The setting is saved with the set, and each change is one undo step.",
+    },
+    Entry {
         id: "mixer.set_cue_mode",
         action: Action::Apply("set_cue_mode"),
         label: "Cue Switches",
@@ -986,6 +1014,22 @@ const ENTRIES: &[Entry] = &[
             breakpoint on an automation lane does. Deleting the last one takes the parameter's \
             envelope with it, so the parameter follows its control again. A position with no \
             breakpoint is refused.",
+    },
+    Entry {
+        id: "automation.set_envelope",
+        action: Action::Apply("set_automation_envelope"),
+        label: "Set Automation Envelope",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Replaces one of a track's parameter's envelope with the breakpoints \
+            given, as the automation editing commands do when they write a shape over a span \
+            of time. `track` and `target` name the parameter as `automation.set_breakpoint` \
+            does, and `points` are the envelope's breakpoints in position order, each with its \
+            position in ticks, its value in the parameter's own units, and the bend of the \
+            segment starting at it. The breakpoints must be in order, no two at one position, \
+            and no position before 1.1.1; an empty list takes the parameter's automation with \
+            it. The envelope keeps driving the parameter.",
     },
     Entry {
         id: "automation.delete",
@@ -1367,6 +1411,22 @@ const ENTRIES: &[Entry] = &[
             and 0 is silence (-inf dB). Use it to balance one clip against others on its \
             track; to change the whole track, use `mixer.set_volume`. The value must be \
             finite and at least 0.",
+    },
+    Entry {
+        id: "clip.set_scale",
+        action: Action::Apply("set_clip_scale"),
+        label: "Set Clip Scale",
+        permission: Permission::Edit,
+        contexts: &[Global, ClipView],
+        keys: &[],
+        description: "Sets a clip's scale: whether its Scale Mode is on (`enabled`), its root \
+            note (`root`, 0 is C and 11 is B) and its scale (`name`, one of the names \
+            `song.scales` reads). `clips` names the clips to set; left out, the selected ones \
+            are set. It leaves the values it isn't given as they were, and it is \
+            one undo step, named \"Change Clip Scale\", however many clips it sets. A scale the \
+            list doesn't hold, or a root outside C to B, is refused and nothing changes. A \
+            clip's scale never changes what it plays: it tells the rest of the set which keys \
+            belong.",
     },
     Entry {
         id: "clip.set_fades",
@@ -3037,6 +3097,83 @@ const ENTRIES: &[Entry] = &[
         contexts: &[DeviceView],
         keys: &[],
         description: "Takes a rack with one chain, or none, apart: the chain's devices take the rack's place in order, keeping their settings and running state; the rack, its chain and its mixer are gone. A rack of several chains can't be taken apart. One undo step. To ungroup the selected rack as a person does, use `device.ungroup`.",
+    },
+    Entry {
+        id: "song.add_locator",
+        action: Action::Apply("add_locator"),
+        label: "Add Locator",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Adds a locator at a position, as the Set Locator button and Add \
+            Locator do. A locator with no name of its own is named with the next whole \
+            number. Two locators never share a position: adding one where another is leaves \
+            that one as it is. One undo step, `Add Locator`.",
+    },
+    Entry {
+        id: "song.delete_locator",
+        action: Action::Apply("delete_locator"),
+        label: "Delete Locator",
+        permission: Permission::Destructive,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Deletes a locator, as the Delete Locator button and the Delete key do. \
+            A song start time on it goes with it. One undo step, `Delete Locator`. Because it \
+            removes the person's work, an agent asks first.",
+    },
+    Entry {
+        id: "song.move_locator",
+        action: Action::Apply("move_locator"),
+        label: "Move Locator",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Moves a locator to a new position, as dragging it does. A locator can't \
+            go before 1.1.1, and a move that would put two locators at one position changes \
+            nothing. One undo step, `Move Locator`.",
+    },
+    Entry {
+        id: "song.rename_locator",
+        action: Action::Apply("rename_locator"),
+        label: "Rename Locator",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Renames a locator, as Cmd-R (Ctrl-R) and Edit > Rename do. An empty \
+            name keeps the old one. One undo step, `Rename Locator`.",
+    },
+    Entry {
+        id: "song.set_locator_info_text",
+        action: Action::Apply("set_locator_info_text"),
+        label: "Set Locator Info Text",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Sets the info text of a locator, which the Info View shows while the \
+            pointer is over it. One undo step, `Edit Info Text`.",
+    },
+    Entry {
+        id: "song.loop_to_next_locator",
+        action: Action::Apply("loop_to_next_locator"),
+        label: "Loop to Next Locator",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Sets the Arrangement's loop brace from a locator to the next one and \
+            switches the loop on, as the locator's context menu does. The last locator has \
+            none after it, and is refused. One undo step, `Loop to Next Locator`.",
+    },
+    Entry {
+        id: "song.set_start",
+        action: Action::Apply("set_song_start"),
+        label: "Set Song Start Time",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Sets where the song starts: at a locator, or at the loop brace's start. \
+            Choosing it where it is set clears it, so the song starts at the insert marker \
+            again. While it is set, Play starts the song there instead of at the insert \
+            marker. One undo step, `Set Song Start Time`.",
     },
     Entry {
         id: UNDO,

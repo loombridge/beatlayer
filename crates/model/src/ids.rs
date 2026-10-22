@@ -100,6 +100,11 @@ object_id!(
     ChainId,
     "chain"
 );
+object_id!(
+    /// The ID of a locator.
+    LocatorId,
+    "locator"
+);
 
 // A parameter of a device, numbered by the device: the plug-in kit's
 // `lspk-params` defines it, with the parameter descriptors.

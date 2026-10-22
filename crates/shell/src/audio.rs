@@ -680,6 +680,13 @@ impl AudioHost {
         self.stream.is_some() && self.engine.is_some()
     }
 
+    /// Why the engine can't be reached, when it can't: the reason a command
+    /// that needs it is refused.
+    #[must_use]
+    pub fn engine_refusal(&self) -> Option<String> {
+        self.running_engine().err()
+    }
+
     /// The engine's compiler counters — how many programs it compiled, and
     /// so on — for diagnostics and tests. `None` while no engine runs.
     #[must_use]

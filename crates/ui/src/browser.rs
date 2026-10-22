@@ -17,7 +17,10 @@ use std::path::Path;
 use bl_core::time::Ticks;
 use bl_shell::browser::drop::{DropTarget, drop_target_on};
 use bl_shell::browser::listing::file_kind;
-use bl_shell::browser_commands::{self as ids, Item, ItemKind, Label, LabelInfo, Part, Section};
+use bl_shell::browser_commands::{
+    self as ids, Item, ItemKind, Label, LabelInfo, Part, Section, TagEditorRow, TagEditorRowKind,
+    TagState,
+};
 use bl_shell::{Area, Invocation, MainView, Shell, WindowKind};
 use egui::accesskit::Role;
 use egui::{
@@ -100,6 +103,54 @@ pub fn add_folder_id() -> Id {
     Id::new("browser-add-folder")
 }
 
+/// The Quick Tags section, at the content pane's bottom (L-BRW-012).
+#[must_use]
+pub fn quick_tags_id() -> Id {
+    Id::new("browser-quick-tags")
+}
+
+/// Quick Tags' Add field.
+#[must_use]
+pub fn quick_tags_add_id() -> Id {
+    Id::new("browser-quick-tags-add")
+}
+
+/// The Tag Editor, beside the content pane (L-BRW-013).
+#[must_use]
+pub fn tag_editor_id() -> Id {
+    Id::new("browser-tag-editor")
+}
+
+/// The Tag Editor's field, where a name is typed.
+#[must_use]
+pub fn tag_editor_field_id() -> Id {
+    Id::new("browser-tag-editor-field")
+}
+
+/// The Tag Editor's list, whose background has the context menu.
+#[must_use]
+pub fn tag_editor_list_id() -> Id {
+    Id::new("browser-tag-editor-list")
+}
+
+/// A row of the Tag Editor, by the tag's full name.
+#[must_use]
+pub fn tag_editor_row_id(full_name: &str) -> Id {
+    Id::new(("browser-tag-row", full_name))
+}
+
+/// A tag in Quick Tags, by its full name.
+#[must_use]
+pub fn quick_tag_id(full_name: &str) -> Id {
+    Id::new(("browser-quick-tag", full_name))
+}
+
+/// The X that takes a tag off the selected items.
+#[must_use]
+pub fn quick_tag_x_id(full_name: &str) -> Id {
+    Id::new(("browser-quick-tag-x", full_name))
+}
+
 /// What a drag from the browser carries: the files' paths.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BrowserDrag {
@@ -151,6 +202,34 @@ const COLLECTIONS: [(&str, Option<usize>); 7] = [
     ("Gray", Some(12)),
 ];
 
+/// What a drag in the Tag Editor carries: a tag or a group, by its name
+/// (spec: browser-tags R12).
+#[derive(Clone, Debug)]
+enum TagDrag {
+    /// A tag, by its full name.
+    Tag(String),
+    /// A group, by its name.
+    Group(String),
+}
+
+/// What the Tag Editor is asking the person to type.
+#[derive(Clone, Debug, Default, PartialEq)]
+enum TagPrompt {
+    /// Nothing.
+    #[default]
+    None,
+    /// A new tag in a group.
+    AddTag { group: String },
+    /// A new group.
+    AddGroup,
+    /// A new name for a tag.
+    RenameTag { tag: String },
+    /// A new name for a group.
+    RenameGroup { group: String },
+    /// A new subtag under a tag.
+    AddSubtag { parent: String },
+}
+
 /// The browser's state between frames: scrolling and the search field's
 /// text, never browser state. See the [module docs](self).
 #[derive(Debug, Default)]
@@ -165,6 +244,36 @@ pub struct BrowserUi {
     /// Where a Shift-extended selection started.
     anchor: Option<usize>,
     stats: BrowserStats,
+    /// The Tag Editor's scroll.
+    tag_scroll: f32,
+    /// The tag groups that are folded in the Tag Editor.
+    folded_groups: std::collections::BTreeSet<String>,
+    /// The tags that are folded in the Tag Editor, by their full names.
+    folded_tags: std::collections::BTreeSet<String>,
+    /// What the Tag Editor is asking the person to type.
+    tag_prompt: TagPrompt,
+    /// The text in the Tag Editor's field.
+    tag_text: String,
+    /// The Tag Editor's row the keyboard is on (spec: browser-tags R17).
+    tag_row: usize,
+    /// Quick Tags' text in the Add field.
+    quick_add: String,
+    /// Whether Quick Tags is choosing where a new tag goes.
+    quick_adding: bool,
+    /// The group the Status Bar shows for the Quick Tag under the pointer
+    /// (spec: browser-tags R13).
+    quick_tag_hint: Option<String>,
+}
+
+/// The text after the last `#` in the search field, when a `#` term is
+/// being typed (spec: browser-tags R15).
+fn search_tag_prefix(search: &str) -> Option<&str> {
+    let hash = search.rfind('#')?;
+    let rest = &search[hash + 1..];
+    if rest.contains(char::is_whitespace) {
+        return None;
+    }
+    Some(rest)
 }
 
 fn invoke(events: &mut Vec<UiEvent>, id: &str, args: Value) {
@@ -204,8 +313,8 @@ impl BrowserUi {
         column: Rect,
         events: &mut Vec<UiEvent>,
     ) {
-        let layout = BrowserLayout::compute(column);
         let view = shell.browser_view();
+        let layout = BrowserLayout::compute_with(column, view.quick_tags_shown());
         let region = Id::new("region-browser");
         let _ = ui.interact(column, region, Sense::hover());
         ui.ctx().accesskit_node_builder(region, |node| {
@@ -241,6 +350,9 @@ impl BrowserUi {
                 self.top_row(ui, shell, theme, &layout, events);
                 self.sidebar(ui, shell, theme, &layout, events);
                 self.content(ui, shell, theme, &layout, events);
+                if view.quick_tags_shown() {
+                    self.quick_tags(ui, shell, theme, layout.quick_tags, events);
+                }
                 self.preview_strip(ui, shell, theme, &layout, events);
                 self.keys(ui, shell, events);
             },
@@ -268,7 +380,7 @@ impl BrowserUi {
             (layout.filter_menu, "Filter View Menu", Glyph::Menu),
         ] {
             let id = Id::new(("browser-control", name));
-            let response = ui.interact(rect, id, Sense::hover());
+            let response = ui.interact(rect, id, Sense::click());
             let painter = ui.painter_at(rect.expand(1.0));
             painter.rect_filled(
                 rect,
@@ -280,6 +392,13 @@ impl BrowserUi {
             ui.ctx().accesskit_node_builder(id, |node| {
                 node.set_description("Not built yet: arrives in milestone M6.".to_owned());
             });
+            // The Filter View Menu (C-FILTER): the Tag Editor and Quick
+            // Tags for now; the Filter View's groups come with WP-6.32.
+            if name == "Filter View Menu" && response.clicked() {
+                egui::Popup::menu(&response).show(|ui| {
+                    self.filter_view_menu(ui, shell, events);
+                });
+            }
         }
 
         // The search field (S-BRW-006, S-BRW-007).
@@ -318,6 +437,45 @@ impl BrowserUi {
             invoke(events, ids::SEARCH, json!({ "query": self.search }));
             self.search_seen.clone_from(&self.search);
         }
+        // A `#` term suggests the tags it names (spec: browser-tags R15).
+        if let Some(prefix) = search_tag_prefix(&self.search) {
+            let suggestions = view.tag_suggestions(prefix);
+            if !suggestions.is_empty() {
+                let rect = Rect::from_min_size(
+                    pos2(layout.search.left(), layout.search.bottom() + 2.0),
+                    vec2(
+                        layout.search.width(),
+                        suggestions.len() as f32 * BROWSER_ROW,
+                    ),
+                );
+                let painter = ui.painter_at(rect);
+                painter.rect_filled(rect, 0.0, theme.colors.panel.0);
+                painter.line_segment(
+                    [rect.left_top(), rect.right_top()],
+                    Stroke::new(1.0, theme.colors.separator.0),
+                );
+                for (index, suggestion) in suggestions.iter().enumerate() {
+                    let row = Rect::from_min_size(
+                        pos2(rect.left(), rect.top() + index as f32 * BROWSER_ROW),
+                        vec2(rect.width(), BROWSER_ROW),
+                    );
+                    let id = Id::new(("browser-search-suggestion", suggestion.clone()));
+                    let response = ui.interact(row, id, Sense::click());
+                    painter.text(
+                        pos2(row.left() + 6.0, row.center().y),
+                        Align2::LEFT_CENTER,
+                        suggestion,
+                        theme.small_font(),
+                        theme.colors.text.0,
+                    );
+                    if response.clicked() {
+                        self.search = format!("#{suggestion}");
+                        self.search_seen.clone_from(&self.search);
+                        invoke(events, ids::SEARCH, json!({ "query": self.search }));
+                    }
+                }
+            }
+        }
         if response.has_focus() && down {
             // Down moves to the results.
             response.surrender_focus();
@@ -328,6 +486,34 @@ impl BrowserUi {
             self.search.clear();
             self.search_seen.clear();
             invoke(events, ids::SEARCH, json!({ "query": "" }));
+        }
+    }
+
+    /// The Filter View Menu (C-FILTER): the Tag Editor and Quick Tags for
+    /// now; the Filter View's groups come with WP-6.32.
+    fn filter_view_menu(&mut self, ui: &mut Ui, shell: &Shell, events: &mut Vec<UiEvent>) {
+        let view = shell.browser_view();
+        if ui
+            .selectable_label(view.tag_editor(), "Tag Editor")
+            .clicked()
+        {
+            invoke(
+                events,
+                ids::SHOW_TAG_EDITOR,
+                json!({ "show": !view.tag_editor() }),
+            );
+            ui.close();
+        }
+        if ui
+            .selectable_label(view.quick_tags_shown(), "Show Quick Tags")
+            .clicked()
+        {
+            invoke(
+                events,
+                ids::SHOW_QUICK_TAGS,
+                json!({ "show": !view.quick_tags_shown() }),
+            );
+            ui.close();
         }
     }
 
@@ -392,6 +578,12 @@ impl BrowserUi {
         let rows = Self::side_rows(shell);
         let content = rows.len() as f32 * BROWSER_ROW;
         self.sidebar_scroll = scrolled(ui, area, self.sidebar_scroll, content);
+        // Spec: view-options R1. A middle-button drag pans the list, the
+        // content following the pointer.
+        if let Some(delta) = crate::middle::pan(ui, area) {
+            self.sidebar_scroll =
+                (self.sidebar_scroll - delta.y).clamp(0.0, (content - area.height()).max(0.0));
+        }
         let first = (self.sidebar_scroll / BROWSER_ROW).floor() as usize;
         let mut sidebar_ui = ui.new_child(egui::UiBuilder::new().max_rect(area));
         sidebar_ui.set_clip_rect(area);
@@ -624,6 +816,12 @@ impl BrowserUi {
             }
         }
         self.list_scroll = scrolled(ui, list, self.list_scroll, total as f32 * BROWSER_ROW);
+        // Spec: view-options R1. A middle-button drag pans the list, the
+        // content following the pointer.
+        if let Some(delta) = crate::middle::pan(ui, list) {
+            self.list_scroll = (self.list_scroll - delta.y)
+                .clamp(0.0, (total as f32 * BROWSER_ROW - list.height()).max(0.0));
+        }
         let first = (self.list_scroll / BROWSER_ROW).floor() as usize;
         let shown =
             ((list.height() / BROWSER_ROW).ceil() as usize + 1).min(total.saturating_sub(first));
@@ -675,6 +873,832 @@ impl BrowserUi {
                 StrokeKind::Inside,
             );
         }
+    }
+
+    /// The Tag Editor (L-BRW-013; spec: browser-tags R10 to R12): the tag
+    /// groups, their tags, and the check boxes that put them on the
+    /// selected items.
+    pub fn tag_editor(
+        &mut self,
+        ui: &mut Ui,
+        shell: &Shell,
+        theme: &Theme,
+        rect: Rect,
+        events: &mut Vec<UiEvent>,
+    ) {
+        let view = shell.browser_view();
+        let painter = ui.painter_at(rect);
+        painter.rect_filled(rect, 0.0, theme.colors.panel.0);
+        let _ = ui.interact(rect, tag_editor_id(), Sense::hover());
+        ui.ctx().accesskit_node_builder(tag_editor_id(), |node| {
+            node.set_role(Role::Group);
+            node.set_label("Tag Editor".to_owned());
+            node.set_bounds(bounds(rect));
+        });
+        // The close button at the top right (L-BRW-013).
+        let close = Rect::from_center_size(
+            pos2(rect.right() - 12.0, rect.top() + 12.0),
+            vec2(14.0, 14.0),
+        );
+        let response = ui.interact(close, Id::new("browser-tag-editor-close"), Sense::click());
+        painter.text(
+            pos2(close.center().x, close.center().y),
+            Align2::CENTER_CENTER,
+            "\u{d7}",
+            theme.small_font(),
+            theme.colors.text.0,
+        );
+        if response.clicked() {
+            invoke(events, ids::SHOW_TAG_EDITOR, json!({ "show": false }));
+        }
+        let selected: Vec<String> = view
+            .selected()
+            .iter()
+            .map(|path| path.to_string_lossy().into_owned())
+            .collect();
+        let rows = view.tag_editor_rows();
+        let list = Rect::from_min_max(
+            pos2(rect.left(), rect.top() + 22.0),
+            pos2(rect.right(), rect.bottom() - 24.0),
+        );
+        let visible = self.visible_tag_rows(&rows);
+        // The list's own background takes the context menu (Reset Order).
+        // Register it before the rows, so a row on top of it takes its own
+        // clicks (spec: browser-tags R11, R12).
+        let list_response = ui.interact(list, tag_editor_list_id(), Sense::click());
+        crate::focus::register(
+            ui.ctx(),
+            tag_editor_list_id(),
+            bl_shell::Area::Browser,
+            None,
+        );
+        if list_response.clicked() {
+            ui.memory_mut(|m| m.request_focus(tag_editor_list_id()));
+        }
+        self.tag_scroll = scrolled(
+            ui,
+            list,
+            self.tag_scroll,
+            visible.len() as f32 * BROWSER_ROW,
+        );
+        // Spec: view-options R1. A middle-button drag pans the list, the
+        // content following the pointer.
+        if let Some(delta) = crate::middle::pan(ui, list) {
+            self.tag_scroll = (self.tag_scroll - delta.y).clamp(
+                0.0,
+                (visible.len() as f32 * BROWSER_ROW - list.height()).max(0.0),
+            );
+        }
+        let first = (self.tag_scroll / BROWSER_ROW).floor() as usize;
+        let shown = ((list.height() / BROWSER_ROW).ceil() as usize + 1)
+            .min(visible.len().saturating_sub(first));
+        // The keys the Tag Editor reads itself (spec: browser-tags R17):
+        // Up and Down move through its rows, and Left and Right fold and
+        // unfold them. (R17's Space, which ticks and unticks a tag, can't
+        // be reached: Space runs Play/Stop in every context.)
+        let tag_focused = ui.memory(|m| m.has_focus(tag_editor_list_id()));
+        if tag_focused && !visible.is_empty() {
+            self.tag_row = self.tag_row.min(visible.len() - 1);
+            let (up, down, left, right) = ui.input(|i| {
+                (
+                    i.key_pressed(Key::ArrowUp),
+                    i.key_pressed(Key::ArrowDown),
+                    i.key_pressed(Key::ArrowLeft),
+                    i.key_pressed(Key::ArrowRight),
+                )
+            });
+            if up {
+                self.tag_row = self.tag_row.saturating_sub(1);
+                ui.memory_mut(|m| m.move_focus(egui::FocusDirection::None));
+            }
+            if down {
+                self.tag_row = (self.tag_row + 1).min(visible.len() - 1);
+                ui.memory_mut(|m| m.move_focus(egui::FocusDirection::None));
+            }
+            if left || right {
+                // The arrows act here; egui mustn't move the focus with
+                // them.
+                ui.memory_mut(|m| m.move_focus(egui::FocusDirection::None));
+            }
+            if let Some(row) = visible.get(self.tag_row) {
+                let fold = |folded: &mut std::collections::BTreeSet<String>| {
+                    if left {
+                        folded.insert(row.name.clone());
+                    } else {
+                        folded.remove(&row.name);
+                    }
+                };
+                match row.kind {
+                    TagEditorRowKind::Group if left || right => fold(&mut self.folded_groups),
+                    TagEditorRowKind::Tag if (left || right) && row.has_subtags => {
+                        if let Some(name) = &row.full_name {
+                            if left {
+                                self.folded_tags.insert(name.clone());
+                            } else {
+                                self.folded_tags.remove(name);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        // A drag moves a tag or a group to a new place (spec: browser-tags
+        // R12).
+        let dragging =
+            egui::DragAndDrop::payload::<TagDrag>(ui.ctx()).map(|payload| (*payload).clone());
+        let pointer = ui.input(|i| i.pointer.hover_pos()).unwrap_or_default();
+        let released = ui.input(|i| i.pointer.any_released());
+        let mut menu_taken = false;
+        for (index, row) in visible.iter().enumerate().skip(first).take(shown) {
+            let row_rect = Rect::from_min_size(
+                pos2(
+                    list.left(),
+                    list.top() + (index - first) as f32 * BROWSER_ROW - self.tag_scroll,
+                ),
+                vec2(list.width(), BROWSER_ROW),
+            );
+            let over = dragging.is_some() && row_rect.contains(pointer);
+            if over {
+                ui.painter().rect_stroke(
+                    row_rect,
+                    0.0,
+                    Stroke::new(1.0, theme.colors.focus.0),
+                    StrokeKind::Inside,
+                );
+            }
+            // The row the keyboard is on shows an outline (spec:
+            // browser-tags R17).
+            if tag_focused && index == self.tag_row {
+                ui.painter().rect_stroke(
+                    row_rect,
+                    0.0,
+                    Stroke::new(1.0, theme.colors.focus.0),
+                    StrokeKind::Inside,
+                );
+            }
+            let clicked = self.tag_editor_row(
+                ui,
+                shell,
+                theme,
+                row_rect,
+                row,
+                &selected,
+                &mut menu_taken,
+                events,
+            );
+            // A click puts the keyboard's row where the pointer is (spec:
+            // browser-tags R17).
+            if clicked {
+                self.tag_row = index;
+            }
+            if over
+                && released
+                && let Some(drag) = &dragging
+            {
+                let position = Self::tag_position(&visible, index);
+                match drag {
+                    TagDrag::Tag(name) => {
+                        invoke(
+                            events,
+                            ids::MOVE_TAG,
+                            json!({ "tag": name, "position": position }),
+                        );
+                    }
+                    TagDrag::Group(name) => {
+                        invoke(
+                            events,
+                            ids::MOVE_TAG,
+                            json!({ "group": name, "position": position }),
+                        );
+                    }
+                }
+                egui::DragAndDrop::clear_payload(ui.ctx());
+            }
+        }
+        // Reset Order, in the list's context menu (C-TAG-004).
+        if list_response.secondary_clicked() && !menu_taken {
+            egui::Popup::context_menu(&list_response).show(|ui| {
+                let response = ui.button("Reset Order");
+                crate::menus::register_item(ui.ctx(), &response);
+                crate::menus::take_focus_first(ui, &response);
+                if response.clicked() {
+                    invoke(events, ids::RESET_TAG_ORDER, json!({}));
+                    ui.close();
+                }
+            });
+        }
+        // The field, where a name is typed.
+        let field = Rect::from_min_size(
+            pos2(rect.left() + 2.0, rect.bottom() - 20.0),
+            vec2(rect.width() - 4.0, 16.0),
+        );
+        let hint = match &self.tag_prompt {
+            TagPrompt::None => "",
+            TagPrompt::AddTag { .. } => "Tag name\u{2026}",
+            TagPrompt::AddGroup => "Group name\u{2026}",
+            TagPrompt::RenameTag { .. } | TagPrompt::RenameGroup { .. } => "New name\u{2026}",
+            TagPrompt::AddSubtag { .. } => "Subtag name\u{2026}",
+        };
+        let edit = egui::TextEdit::singleline(&mut self.tag_text)
+            .id(tag_editor_field_id())
+            .hint_text(hint)
+            .font(theme.small_font());
+        let response = ui.put(field, edit);
+        crate::focus::register(ui.ctx(), response.id, bl_shell::Area::Browser, None);
+        ui.ctx().accesskit_node_builder(response.id, |node| {
+            node.set_label("Tag Editor Field".to_owned())
+        });
+        if response.has_focus() {
+            let enter = ui.input(|i| i.key_pressed(Key::Enter));
+            let escape = ui.input(|i| i.key_pressed(Key::Escape));
+            if enter {
+                self.tag_prompt_apply(&selected, events);
+            } else if escape {
+                self.tag_prompt = TagPrompt::None;
+                self.tag_text.clear();
+            }
+        }
+    }
+
+    /// Where a row of the Tag Editor sits in its group, so a tag dragged
+    /// there goes to that place (spec: browser-tags R12).
+    fn tag_position(rows: &[TagEditorRow], index: usize) -> i32 {
+        let mut position = 0;
+        for row in &rows[..index] {
+            match row.kind {
+                TagEditorRowKind::Group => position = 0,
+                TagEditorRowKind::Tag if row.depth == 1 => position += 1,
+                _ => {}
+            }
+        }
+        position
+    }
+
+    /// The rows of the Tag Editor that are on screen: a folded group hides
+    /// its tags, and a folded tag its subtags.
+    fn visible_tag_rows(&self, rows: &[TagEditorRow]) -> Vec<TagEditorRow> {
+        let mut visible: Vec<TagEditorRow> = Vec::new();
+        let mut hidden_depth: Option<u16> = None;
+        for row in rows {
+            if let Some(depth) = hidden_depth {
+                if row.depth > depth {
+                    continue;
+                }
+                hidden_depth = None;
+            }
+            let folded = match row.kind {
+                TagEditorRowKind::Group => self.folded_groups.contains(&row.name),
+                TagEditorRowKind::Tag => row
+                    .full_name
+                    .as_ref()
+                    .is_some_and(|name| self.folded_tags.contains(name)),
+                _ => false,
+            };
+            visible.push(row.clone());
+            if folded {
+                hidden_depth = Some(row.depth);
+            }
+        }
+        visible
+    }
+
+    /// One row of the Tag Editor.
+    #[expect(clippy::too_many_arguments, reason = "the row's inputs")]
+    fn tag_editor_row(
+        &mut self,
+        ui: &mut Ui,
+        shell: &Shell,
+        theme: &Theme,
+        rect: Rect,
+        row: &TagEditorRow,
+        selected: &[String],
+        menu_taken: &mut bool,
+        events: &mut Vec<UiEvent>,
+    ) -> bool {
+        let painter = ui.painter_at(rect);
+        let indent = rect.left() + 4.0 + f32::from(row.depth) * 12.0;
+        let id = tag_editor_row_id(row.full_name.as_deref().unwrap_or(&row.name));
+        let response = ui.interact(rect, id, Sense::click() | Sense::drag());
+        let clicked = response.clicked();
+        // A click puts the keyboard on the Tag Editor's rows (spec:
+        // browser-tags R17).
+        if clicked {
+            ui.memory_mut(|m| m.request_focus(tag_editor_list_id()));
+        }
+        if response.drag_started() {
+            let payload = match row.kind {
+                TagEditorRowKind::Group => Some(TagDrag::Group(row.name.clone())),
+                TagEditorRowKind::Tag => row.full_name.clone().map(TagDrag::Tag),
+                _ => None,
+            };
+            if let Some(payload) = payload {
+                egui::DragAndDrop::set_payload(ui.ctx(), payload);
+            }
+        }
+        match row.kind {
+            TagEditorRowKind::Group | TagEditorRowKind::Tag => {
+                // The fold triangle.
+                let fold =
+                    Rect::from_center_size(pos2(indent + 4.0, rect.center().y), vec2(8.0, 8.0));
+                let folded = match row.kind {
+                    TagEditorRowKind::Group => self.folded_groups.contains(&row.name),
+                    _ => row
+                        .full_name
+                        .as_ref()
+                        .is_some_and(|name| self.folded_tags.contains(name)),
+                };
+                if row.kind == TagEditorRowKind::Group || row.has_subtags {
+                    glyph(
+                        &painter,
+                        fold,
+                        if folded { Glyph::Right } else { Glyph::Down },
+                        theme.colors.text_dim.0,
+                    );
+                }
+                let mut name_left = indent + 12.0;
+                if row.kind == TagEditorRowKind::Tag {
+                    // The check box (spec: browser-tags R11).
+                    let box_rect =
+                        Rect::from_center_size(pos2(indent + 4.0, rect.center().y), vec2(9.0, 9.0));
+                    let mark = match row.state {
+                        TagState::All => "\u{2713}",
+                        TagState::Some => "\u{2013}",
+                        TagState::Fixed => "\u{25cf}",
+                        TagState::None => "",
+                    };
+                    if !mark.is_empty() {
+                        painter.text(
+                            pos2(box_rect.center().x, box_rect.center().y),
+                            Align2::CENTER_CENTER,
+                            mark,
+                            theme.small_font(),
+                            theme.colors.text.0,
+                        );
+                    }
+                    painter.rect_stroke(
+                        box_rect,
+                        0.0,
+                        Stroke::new(1.0, theme.colors.text_dim.0),
+                        StrokeKind::Inside,
+                    );
+                    if response.clicked() {
+                        let attach = row.state != TagState::All;
+                        if let Some(name) = &row.full_name {
+                            invoke(
+                                events,
+                                ids::TAG_ITEMS,
+                                json!({
+                                    "items": selected,
+                                    "tags": [name],
+                                    "attach": attach,
+                                }),
+                            );
+                        }
+                    }
+                    name_left = indent + 12.0;
+                }
+                let colour = if row.marked && row.builtin {
+                    theme.colors.text.0
+                } else {
+                    theme.colors.text.0.gamma_multiply(0.92)
+                };
+                painter.text(
+                    pos2(name_left, rect.center().y),
+                    Align2::LEFT_CENTER,
+                    &row.name,
+                    theme.small_font(),
+                    colour,
+                );
+                if row.kind == TagEditorRowKind::Group {
+                    // The group folds and unfolds on a click.
+                    if response.clicked() {
+                        if folded {
+                            self.folded_groups.remove(&row.name);
+                        } else {
+                            self.folded_groups.insert(row.name.clone());
+                        }
+                    }
+                }
+                // The context menu: the person's own tags and groups can be
+                // renamed and deleted (C-TAG).
+                if !row.builtin {
+                    let mut menu = |ui: &mut Ui, events: &mut Vec<UiEvent>| {
+                        if row.kind == TagEditorRowKind::Tag
+                            && let Some(name) = &row.full_name
+                        {
+                            let response = ui.button("Add Subtag In\u{2026}");
+                            crate::menus::register_item(ui.ctx(), &response);
+                            crate::menus::take_focus_first(ui, &response);
+                            if response.clicked() {
+                                self.tag_prompt = TagPrompt::AddSubtag {
+                                    parent: name.clone(),
+                                };
+                                self.tag_text.clear();
+                                ui.close();
+                            }
+                        }
+                        let response = ui.button("Rename");
+                        crate::menus::register_item(ui.ctx(), &response);
+                        if response.clicked() {
+                            self.tag_prompt = match row.kind {
+                                TagEditorRowKind::Group => TagPrompt::RenameGroup {
+                                    group: row.name.clone(),
+                                },
+                                _ => TagPrompt::RenameTag {
+                                    tag: row.full_name.clone().unwrap_or_default(),
+                                },
+                            };
+                            self.tag_text = row.name.clone();
+                            ui.close();
+                        }
+                        let response = ui.button("Delete");
+                        crate::menus::register_item(ui.ctx(), &response);
+                        if response.clicked() {
+                            invoke(
+                                events,
+                                ids::DELETE_TAG,
+                                match row.kind {
+                                    TagEditorRowKind::Group => {
+                                        json!({ "group": row.name })
+                                    }
+                                    _ => json!({
+                                        "tag": row.full_name.clone().unwrap_or_default()
+                                    }),
+                                },
+                            );
+                            ui.close();
+                        }
+                    };
+                    response.context_menu(|ui| {
+                        *menu_taken = true;
+                        menu(ui, events);
+                    });
+                }
+                ui.ctx().accesskit_node_builder(id, |node| {
+                    node.set_role(if row.kind == TagEditorRowKind::Group {
+                        Role::Group
+                    } else {
+                        Role::CheckBox
+                    });
+                    node.set_label(row.full_name.clone().unwrap_or_else(|| row.name.clone()));
+                    node.set_value(match row.state {
+                        TagState::All => "ticked",
+                        TagState::Some => "partly ticked",
+                        TagState::Fixed => "fixed",
+                        TagState::None => "empty",
+                    });
+                    node.set_description(if row.marked {
+                        "the selection carries one of its tags".to_owned()
+                    } else {
+                        String::new()
+                    });
+                });
+            }
+            TagEditorRowKind::AddTag | TagEditorRowKind::AddGroup => {
+                painter.text(
+                    pos2(indent, rect.center().y),
+                    Align2::LEFT_CENTER,
+                    &row.name,
+                    theme.small_font(),
+                    theme.colors.text_dim.0,
+                );
+                if response.clicked() {
+                    self.tag_prompt = match row.kind {
+                        TagEditorRowKind::AddTag => {
+                            // The group the row belongs to is the one
+                            // above it.
+                            let group = shell
+                                .browser_view()
+                                .tag_editor_rows()
+                                .iter()
+                                .rev()
+                                .find(|other| {
+                                    other.kind == TagEditorRowKind::Group && other.depth < row.depth
+                                })
+                                .map_or_else(String::new, |other| other.name.clone());
+                            TagPrompt::AddTag { group }
+                        }
+                        _ => TagPrompt::AddGroup,
+                    };
+                    self.tag_text.clear();
+                }
+                ui.ctx().accesskit_node_builder(id, |node| {
+                    node.set_role(Role::Button);
+                    node.set_label(row.name.clone());
+                });
+            }
+        }
+        let _ = shell;
+        clicked
+    }
+
+    /// What the Tag Editor's field asks for, done.
+    fn tag_prompt_apply(&mut self, selected: &[String], events: &mut Vec<UiEvent>) {
+        let name = self.tag_text.trim().to_owned();
+        let prompt = self.tag_prompt.clone();
+        self.tag_prompt = TagPrompt::None;
+        self.tag_text.clear();
+        if name.is_empty() {
+            return;
+        }
+        match prompt {
+            TagPrompt::None => {}
+            TagPrompt::AddTag { group } => {
+                invoke(
+                    events,
+                    ids::ADD_TAG,
+                    json!({ "name": name, "group": group }),
+                );
+                if !group.is_empty() {
+                    invoke(
+                        events,
+                        ids::TAG_ITEMS,
+                        json!({
+                            "items": selected,
+                            "tags": [format!("{group}|{name}")],
+                            "attach": true,
+                        }),
+                    );
+                }
+            }
+            TagPrompt::AddGroup => {
+                invoke(events, ids::ADD_TAG_GROUP, json!({ "name": name }));
+            }
+            TagPrompt::RenameTag { tag } => {
+                invoke(events, ids::RENAME_TAG, json!({ "tag": tag, "name": name }));
+            }
+            TagPrompt::RenameGroup { group } => {
+                invoke(
+                    events,
+                    ids::RENAME_TAG,
+                    json!({ "group": group, "name": name }),
+                );
+            }
+            TagPrompt::AddSubtag { parent } => {
+                invoke(
+                    events,
+                    ids::ADD_TAG,
+                    json!({ "name": name, "parent": parent }),
+                );
+                invoke(
+                    events,
+                    ids::TAG_ITEMS,
+                    json!({
+                        "items": selected,
+                        "tags": [format!("{parent}|{name}")],
+                        "attach": true,
+                    }),
+                );
+            }
+        }
+    }
+
+    /// Quick Tags (L-BRW-012; spec: browser-tags R13 and R14): the selected
+    /// items' tags, and the field that adds one.
+    fn quick_tags(
+        &mut self,
+        ui: &mut Ui,
+        shell: &Shell,
+        theme: &Theme,
+        rect: Rect,
+        events: &mut Vec<UiEvent>,
+    ) {
+        let view = shell.browser_view();
+        let painter = ui.painter_at(rect);
+        painter.rect_filled(rect, 0.0, theme.colors.panel.0);
+        painter.line_segment(
+            [rect.left_top(), rect.right_top()],
+            Stroke::new(1.0, theme.colors.separator.0),
+        );
+        let _ = ui.interact(rect, quick_tags_id(), Sense::hover());
+        ui.ctx().accesskit_node_builder(quick_tags_id(), |node| {
+            node.set_role(Role::List);
+            node.set_label("Quick Tags".to_owned());
+            node.set_bounds(bounds(rect));
+        });
+        let selected: Vec<String> = view
+            .selected()
+            .iter()
+            .map(|path| path.to_string_lossy().into_owned())
+            .collect();
+        let add_height = 20.0;
+        let tags = view.quick_tags();
+        let rows = rect.height() - add_height;
+        let shown = ((rows / BROWSER_ROW).floor() as usize).min(tags.len());
+        let mut hint: Option<String> = None;
+        for (index, tag) in tags.iter().take(shown).enumerate() {
+            let row = Rect::from_min_size(
+                pos2(rect.left(), rect.top() + index as f32 * BROWSER_ROW),
+                vec2(rect.width(), BROWSER_ROW),
+            );
+            let id = quick_tag_id(&tag.full_name);
+            let response = ui.interact(row, id, Sense::click());
+            // The pointer over a tag shows its group in the Status Bar
+            // (spec: browser-tags R13).
+            if response.hovered() {
+                hint = Some(tag.group.clone());
+            }
+            // A tag not every selected item carries shows an asterisk.
+            let text = if tag.all {
+                tag.name.clone()
+            } else {
+                format!("{}*", tag.name)
+            };
+            painter.text(
+                pos2(row.left() + 6.0, row.center().y),
+                Align2::LEFT_CENTER,
+                &text,
+                theme.small_font(),
+                theme.colors.text.0,
+            );
+            // A person's own tag shows an X that takes it off.
+            if tag.removable {
+                let cross = Rect::from_center_size(
+                    pos2(row.right() - 10.0, row.center().y),
+                    vec2(10.0, 10.0),
+                );
+                let crossed = ui.interact(cross, quick_tag_x_id(&tag.full_name), Sense::click());
+                painter.text(
+                    pos2(cross.center().x, cross.center().y),
+                    Align2::CENTER_CENTER,
+                    "\u{d7}",
+                    theme.small_font(),
+                    theme.colors.text_dim.0,
+                );
+                if crossed.clicked() {
+                    invoke(
+                        events,
+                        ids::TAG_ITEMS,
+                        json!({
+                            "items": selected,
+                            "tags": [tag.full_name],
+                            "attach": false,
+                        }),
+                    );
+                }
+            }
+            // Double-clicking searches for the tag (spec: browser-tags R13).
+            if response.double_clicked() {
+                invoke(
+                    events,
+                    ids::SEARCH,
+                    json!({ "query": format!("#{}", tag.full_name) }),
+                );
+            }
+            // The context menu: Show Tag in Tag Editor (C-QTAG-001).
+            let menu = |ui: &mut Ui, events: &mut Vec<UiEvent>| {
+                let response = ui.button("Show Tag in Tag Editor");
+                crate::menus::register_item(ui.ctx(), &response);
+                crate::menus::take_focus_first(ui, &response);
+                if response.clicked() {
+                    invoke(events, ids::SHOW_TAG_EDITOR, json!({ "show": true }));
+                    ui.close();
+                }
+            };
+            response.context_menu(|ui| menu(ui, events));
+            ui.ctx().accesskit_node_builder(id, |node| {
+                node.set_role(Role::ListItem);
+                node.set_label(tag.full_name.clone());
+                node.set_value(if tag.all {
+                    "on every selected item".to_owned()
+                } else {
+                    "on some selected items".to_owned()
+                });
+            });
+        }
+
+        if hint != self.quick_tag_hint {
+            self.quick_tag_hint.clone_from(&hint);
+            events.push(UiEvent::StatusHint(hint));
+        }
+
+        // The Add field, with the tags it suggests.
+        let add = Rect::from_min_size(
+            pos2(rect.left() + 2.0, rect.bottom() - add_height),
+            vec2(rect.width() - 4.0, add_height - 4.0),
+        );
+        let hint = if self.quick_adding {
+            "Group or tag\u{2026}"
+        } else {
+            "Add\u{2026}"
+        };
+        let edit = egui::TextEdit::singleline(&mut self.quick_add)
+            .id(quick_tags_add_id())
+            .hint_text(hint)
+            .font(theme.small_font());
+        let response = ui.put(add, edit);
+        crate::focus::register(ui.ctx(), response.id, bl_shell::Area::Browser, None);
+        ui.ctx().accesskit_node_builder(response.id, |node| {
+            node.set_label("Quick Tags Add Field".to_owned())
+        });
+        if !self.quick_add.trim().is_empty() {
+            self.quick_suggestions(ui, shell, &response, events);
+        }
+    }
+
+    /// The tags the Add field suggests, and the choice of where a new tag
+    /// goes (spec: browser-tags R14).
+    fn quick_suggestions(
+        &mut self,
+        _ui: &mut Ui,
+        shell: &Shell,
+        field: &egui::Response,
+        events: &mut Vec<UiEvent>,
+    ) {
+        let view = shell.browser_view();
+        let typed = self.quick_add.trim().to_owned();
+        let selected: Vec<String> = view
+            .selected()
+            .iter()
+            .map(|path| path.to_string_lossy().into_owned())
+            .collect();
+        egui::Popup::from_response(field).show(|ui| {
+            if self.quick_adding {
+                // The group or the tag to put the new tag in.
+                for group in view.tag_groups() {
+                    let response = ui.button(format!("In {group}"));
+                    crate::menus::register_item(ui.ctx(), &response);
+                    if response.clicked() {
+                        self.make_tag(&typed, Some(&group), None, &selected, events);
+                        ui.close();
+                    }
+                }
+                for tag in view.tag_names() {
+                    let response = ui.button(format!("Under {tag}"));
+                    crate::menus::register_item(ui.ctx(), &response);
+                    if response.clicked() {
+                        self.make_tag(&typed, None, Some(&tag), &selected, events);
+                        ui.close();
+                    }
+                }
+                let response = ui.button("New Group\u{2026}");
+                crate::menus::register_item(ui.ctx(), &response);
+                if response.clicked() {
+                    invoke(events, ids::ADD_TAG_GROUP, json!({ "name": typed }));
+                    self.make_tag(&typed, Some(&typed), None, &selected, events);
+                    ui.close();
+                }
+                return;
+            }
+            let suggestions = view.tag_suggestions(&typed);
+            let mut chosen = None;
+            for suggestion in suggestions.iter().take(8) {
+                let response = ui.button(suggestion);
+                crate::menus::register_item(ui.ctx(), &response);
+                if response.clicked() {
+                    chosen = Some(suggestion.clone());
+                }
+            }
+            if let Some(tag) = chosen {
+                invoke(
+                    events,
+                    ids::TAG_ITEMS,
+                    json!({ "items": selected, "tags": [tag], "attach": true }),
+                );
+                self.quick_add.clear();
+                ui.close();
+                return;
+            }
+            // A name no tag has: Create New Tag\u{2026}. The popup stays
+            // open and shows where the new tag goes.
+            let response = ui.button("Create New Tag\u{2026}");
+            crate::menus::register_item(ui.ctx(), &response);
+            if response.clicked() {
+                self.quick_adding = true;
+            }
+        });
+    }
+
+    /// Makes a tag and puts it on the selected items.
+    fn make_tag(
+        &mut self,
+        name: &str,
+        group: Option<&str>,
+        parent: Option<&str>,
+        selected: &[String],
+        events: &mut Vec<UiEvent>,
+    ) {
+        if name.is_empty() {
+            return;
+        }
+        invoke(
+            events,
+            ids::ADD_TAG,
+            json!({ "name": name, "group": group, "parent": parent }),
+        );
+        self.quick_add.clear();
+        self.quick_adding = false;
+        let full = match (group, parent) {
+            (Some(group), _) => format!("{group}|{name}"),
+            (None, Some(parent)) => format!("{parent}|{name}"),
+            (None, None) => name.to_owned(),
+        };
+        invoke(
+            events,
+            ids::TAG_ITEMS,
+            json!({ "items": selected, "tags": [full], "attach": true }),
+        );
     }
 
     #[expect(clippy::too_many_arguments, reason = "the row's inputs")]
@@ -1196,6 +2220,15 @@ impl BrowserUi {
         let left = find(Key::ArrowLeft, false, false).is_some();
         let shift_enter = find(Key::Enter, true, false).is_some();
         let enter = find(Key::Enter, false, false).is_some();
+        // S-BRW-015: Cmd-E (Ctrl-E) moves the keyboard focus to Quick
+        // Tags' Add field.
+        if view.quick_tags_shown()
+            && let Some((_, modifiers)) = find(Key::E, false, true)
+            && command(*modifiers)
+        {
+            ui.memory_mut(|m| m.request_focus(quick_tags_add_id()));
+            return;
+        }
         if up || down || left || right {
             // The arrows act here; egui mustn't also move the focus with
             // them, which it decides before this runs when the lock filter
@@ -1366,7 +2399,7 @@ impl BrowserUi {
         }
         let view = shell.arrangement();
         let doc = shell.editor().document();
-        let pinned = bl_shell::arrangement::rows::pinned_tracks(doc).count();
+        let pinned = view.pinned_tracks(doc).count();
         let lanes = ArrangementLayout::compute(main_view, view.overview(), pinned).lanes;
         // Cmd (macOS) or Alt (Windows) ignores the grid (I-DRAG-021).
         let ignore_snap = if cfg!(target_os = "macos") {

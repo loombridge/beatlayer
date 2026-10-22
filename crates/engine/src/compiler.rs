@@ -389,6 +389,13 @@ impl Compiler {
                     .push(TransportCommand::SetLoop(loop_region(document)));
                 self.sources.cue_loop(self.loop_start_frame(document));
             }
+            // Spec: transport R21. The song's start time follows its
+            // locator or the loop brace as they move.
+            if old.song_start_ticks() != document.song_start_ticks() {
+                update
+                    .transport
+                    .push(TransportCommand::SetSongStart(document.song_start_ticks()));
+            }
             if punch(&old) != punch(document) {
                 update
                     .transport
@@ -1150,6 +1157,7 @@ impl Compiler {
             program: Some(self.gc.program(program)),
             transport: vec![
                 TransportCommand::SetLoop(loop_region(document)),
+                TransportCommand::SetSongStart(document.song_start_ticks()),
                 TransportCommand::SetPunch(punch(document)),
                 TransportCommand::SetMetronome(document.settings().metronome),
             ],
@@ -1260,6 +1268,12 @@ impl Compiler {
             old.settings().arrangement_loop != document.settings().arrangement_loop
         }) {
             commands.push(TransportCommand::SetLoop(loop_region(document)));
+        }
+        if old
+            .as_ref()
+            .is_none_or(|old| old.song_start_ticks() != document.song_start_ticks())
+        {
+            commands.push(TransportCommand::SetSongStart(document.song_start_ticks()));
         }
         if old.as_ref().is_none_or(|old| punch(old) != punch(document)) {
             commands.push(TransportCommand::SetPunch(punch(document)));

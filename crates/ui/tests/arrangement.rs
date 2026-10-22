@@ -13,17 +13,20 @@ use bl_commands::Context;
 use bl_core::time::Ticks;
 use bl_media::{MediaStatus, PeakEvent, Peaks};
 use bl_model::ContentHash;
+use bl_model::TrackId;
 use bl_shell::arrangement::TransportView;
 use bl_shell::arrangement_commands::{self as ids, ArrangementState};
+use bl_shell::mixer_controls::Switch;
 use bl_ui::arrangement::benchmark::{self, BenchmarkScene};
 use bl_ui::arrangement::headers::{fold_id, title_id};
 use bl_ui::arrangement::peaks::{PeakSource, PeakState};
 use bl_ui::layout::{ArrangementLayout, Element, REFERENCE, ShellLayout};
-use common::{Harness, Window, command};
+use bl_ui::mixer::{Place, pan_id, send_id, switch_id, volume_field_id};
+use common::{Harness, Node, Window, command};
 use egui::accesskit::Role;
 use egui::{
-    Color32, Event, FullOutput, Key, Modifiers, MouseWheelUnit, PointerButton, Pos2, Rect,
-    TouchPhase, pos2, vec2,
+    Event, FullOutput, Id, Key, Modifiers, MouseWheelUnit, PointerButton, Pos2, Rect, TouchPhase,
+    pos2, vec2,
 };
 use serde_json::json;
 
@@ -39,7 +42,11 @@ fn layout(h: &Harness) -> ArrangementLayout {
     let shell = ShellLayout::compute(h.size - vec2(0.0, bl_ui::layout::TITLE_BAR), true, true)
         .translate(vec2(0.0, bl_ui::layout::TITLE_BAR));
     let doc = h.shell.editor().document();
-    let pinned = doc.returns().len() + 1;
+    let pinned = if h.shell.arrangement().show_return_tracks() {
+        doc.returns().len() + 1
+    } else {
+        1
+    };
     ArrangementLayout::compute(shell.main_view, h.shell.arrangement().overview(), pinned)
 }
 
@@ -367,6 +374,59 @@ fn the_wheel_rulers_and_trackpad_scroll_and_zoom() {
 }
 
 #[test]
+fn the_middle_button_pans_the_lanes() {
+    // Spec: view-options R1, arrangement-view R19 (I-DRAG-058).
+    let mut h = with_scene(benchmark::scene(30, 4, 1));
+    let l = layout(&h);
+    let middle = l.lanes.center();
+    // Room to pan: the lanes are scrolled down and to the right first, by
+    // the same drag Cmd-Option makes.
+    let pan = command() | Modifiers::ALT;
+    drag(&mut h, middle, middle - vec2(0.0, 200.0), pan);
+    drag(&mut h, middle, middle - vec2(200.0, 0.0), pan);
+    let before = state(&mut h);
+    assert!(before.scroll_y > 50.0, "the lanes are scrolled down");
+    assert!(
+        before.visible.start > Ticks::ZERO,
+        "the lanes are scrolled right"
+    );
+    // A middle-button drag of 100 points right and 50 down pans the lanes
+    // with the pointer.
+    h.middle_drag(middle, middle + vec2(100.0, 50.0));
+    let after = state(&mut h);
+    let right = (before.visible.start.get() as f64 - after.visible.start.get() as f64)
+        / before.ticks_per_point;
+    assert!(
+        (right - 100.0).abs() < 0.5,
+        "the lanes moved 100 points right: {right}"
+    );
+    assert!(
+        (before.scroll_y - after.scroll_y - 50.0).abs() < 0.5,
+        "the lanes moved 50 points down: {}",
+        before.scroll_y - after.scroll_y
+    );
+    // Nothing else changed: no selection, no clip, no undo step.
+    assert_eq!(before.selected_clips, after.selected_clips);
+    assert_eq!(before.selected_tracks, after.selected_tracks);
+    assert_eq!(before.time_selection, after.time_selection);
+    assert!(!h.shell.editor().can_undo(), "not an undo step");
+
+    // The same drag with Cmd-Option (Ctrl-Alt) held gives the same view.
+    let mut h = with_scene(benchmark::scene(30, 4, 1));
+    let l = layout(&h);
+    let middle = l.lanes.center();
+    drag(&mut h, middle, middle - vec2(0.0, 200.0), pan);
+    drag(&mut h, middle, middle - vec2(200.0, 0.0), pan);
+    drag(&mut h, middle, middle + vec2(100.0, 50.0), pan);
+    let keys = state(&mut h);
+    assert!(
+        (keys.visible.start.get() as f64 - after.visible.start.get() as f64).abs() < 0.5,
+        "the middle button pans as Cmd-Option does"
+    );
+    assert!((keys.scroll_y - after.scroll_y).abs() < 0.5);
+}
+
+#[test]
 fn keys_run_the_view_commands() {
     // Spec: arrangement-view R6, R8, R9, R11, R14, R15; shortcuts S-ZOOM-003
     // to 005, S-GRID-002 to 006, S-VIEW-011, S-ARR-020 to 026, 030, 031,
@@ -472,6 +532,129 @@ fn headers_fold_select_and_resize() {
 }
 
 #[test]
+fn the_track_controls_hide_their_parts() {
+    // Spec: arrangement-view R21, R22, R23, R24.
+    let mut h = Harness::with_title_bar(Window::Main);
+    h.settle();
+    let doc = h.shell.editor().document();
+    let tracks: Vec<TrackId> = doc.top_level().collect();
+    let returns: Vec<TrackId> = doc.returns().collect();
+    let midi = tracks[0];
+    let audio = tracks[2];
+    let near = |a: f32, b: f32| (a - b).abs() < 0.51;
+    let has = |nodes: &[Node], id: Id| nodes.iter().any(|n| n.id == id.accesskit_id());
+
+    // While they show, the In/Out choosers, the volume field, the pan, and
+    // the sends are in the tree.
+    let nodes = Harness::nodes(&h.settle());
+    assert!(nodes.iter().any(|n| n.label == "Input Type"));
+    assert!(has(&nodes, volume_field_id(Place::Header, midi)));
+    assert!(has(&nodes, pan_id(Place::Header, midi)));
+    assert!(has(&nodes, send_id(Place::Header, audio, returns[0])));
+
+    // In/Out off: the title takes the In/Out column's width, and the
+    // header column and the lanes keep theirs (R21).
+    h.shell
+        .run(ids::SHOW_IN_OUT, json!({ "on": false }))
+        .unwrap();
+    let nodes = Harness::nodes(&h.settle());
+    assert!(
+        !nodes.iter().any(|n| n.label == "Input Type"),
+        "the In/Out choosers are gone"
+    );
+    let first = nodes
+        .iter()
+        .find(|n| n.role == Role::RowHeader && n.label == "1 MIDI")
+        .expect("the first track's title");
+    let bounds = first.bounds.unwrap();
+    assert!(near(bounds.x1 as f32, 1476.0), "{bounds:?}");
+    let l = layout(&h);
+    assert!(near(l.lanes.right(), 1295.0), "the lanes don't move");
+    assert!(
+        near(l.headers.right(), 1591.0),
+        "the header column keeps its width"
+    );
+
+    // Volume off: the volume field, the pan, and the sends go; the
+    // activator, Solo, and Arm stay (R22).
+    h.shell
+        .run(ids::SHOW_VOLUME, json!({ "on": false }))
+        .unwrap();
+    let nodes = Harness::nodes(&h.settle());
+    assert!(!has(&nodes, volume_field_id(Place::Header, midi)));
+    assert!(!has(&nodes, pan_id(Place::Header, midi)));
+    assert!(!has(&nodes, send_id(Place::Header, audio, returns[0])));
+    assert!(has(&nodes, switch_id(Place::Header, Switch::Solo, midi)));
+
+    // Return Tracks off: the returns' rows go, Main's stays, and the lanes
+    // take the height the returns leave (R23).
+    h.shell
+        .run(ids::SHOW_RETURN_TRACKS, json!({ "on": false }))
+        .unwrap();
+    let nodes = Harness::nodes(&h.settle());
+    let headers: Vec<&str> = nodes
+        .iter()
+        .filter(|n| n.role == Role::RowHeader)
+        .map(|n| n.label.as_str())
+        .collect();
+    assert!(
+        !headers.contains(&"A Return") && !headers.contains(&"B Return"),
+        "{headers:?}"
+    );
+    assert!(headers.contains(&"Main"), "Main's row stays");
+    let l = layout(&h);
+    assert!(
+        near(l.lanes.bottom(), 725.0),
+        "the lanes take the returns' height"
+    );
+
+    // Switching back gives the layout of a new set exactly.
+    for id in [ids::SHOW_IN_OUT, ids::SHOW_VOLUME, ids::SHOW_RETURN_TRACKS] {
+        h.shell.run(id, json!({ "on": true })).unwrap();
+    }
+    let nodes = Harness::nodes(&h.settle());
+    assert!(nodes.iter().any(|n| n.label == "Input Type"));
+    assert!(has(&nodes, volume_field_id(Place::Header, midi)));
+    assert!(has(&nodes, pan_id(Place::Header, midi)));
+    assert!(has(&nodes, send_id(Place::Header, audio, returns[0])));
+    let headers: Vec<&str> = nodes
+        .iter()
+        .filter(|n| n.role == Role::RowHeader)
+        .map(|n| n.label.as_str())
+        .collect();
+    assert!(headers.contains(&"A Return") && headers.contains(&"Main"));
+    let l = layout(&h);
+    assert!(near(l.lanes.bottom(), 688.0), "the lanes are as they were");
+    let first = nodes
+        .iter()
+        .find(|n| n.role == Role::RowHeader && n.label == "1 MIDI")
+        .expect("the first track's title");
+    let bounds = first.bounds.unwrap();
+    assert!(near(bounds.x1 as f32, 1400.0), "{bounds:?}");
+
+    // At every interface zoom, the parts that show keep their places (R24,
+    // interface-zoom R1).
+    h.shell
+        .run(ids::SHOW_IN_OUT, json!({ "on": false }))
+        .unwrap();
+    for percent in [50, 75, 100, 150, 200] {
+        h.shell
+            .run("view.set_zoom", json!({ "percent": percent }))
+            .unwrap();
+        let nodes = Harness::nodes(&h.settle());
+        let first = nodes
+            .iter()
+            .find(|n| n.role == Role::RowHeader && n.label == "1 MIDI")
+            .expect("the first track's title");
+        let bounds = first.bounds.unwrap();
+        assert!(
+            near((bounds.x1 - bounds.x0) as f32, 179.0),
+            "at {percent}%: {bounds:?}"
+        );
+    }
+}
+
+#[test]
 fn the_follow_switch_and_the_optimize_buttons_work() {
     // Spec: arrangement-view R9, R10, R13 (L-CTRL-012, L-ARR-017).
     let mut h = Harness::with_title_bar(Window::Main);
@@ -503,27 +686,6 @@ fn the_follow_switch_and_the_optimize_buttons_work() {
     assert_eq!(state(&mut h).visible.start, Ticks(600 * BAR));
 }
 
-/// Every rectangle a frame paints, and the colour it fills it with, walking
-/// the frame's shapes the way `accessibility.rs` walks its focus strokes.
-fn painted_rects(output: &FullOutput) -> Vec<(Rect, Color32)> {
-    fn walk(shape: &egui::Shape, out: &mut Vec<(Rect, Color32)>) {
-        match shape {
-            egui::Shape::Rect(rect) => out.push((rect.rect, rect.fill)),
-            egui::Shape::Vec(shapes) => {
-                for shape in shapes {
-                    walk(shape, out);
-                }
-            }
-            _ => {}
-        }
-    }
-    let mut out = Vec::new();
-    for clipped in &output.shapes {
-        walk(&clipped.shape, &mut out);
-    }
-    out
-}
-
 /// The rectangle the beat-time ruler paints the loop brace in, from the
 /// view and the set's loop, as `rulers::beat_ruler` computes it.
 fn brace(h: &mut Harness, ruler: Rect) -> Rect {
@@ -553,7 +715,7 @@ fn the_loop_brace_is_painted_in_its_on_and_off_colours() {
     // The fill of the rectangle painted where the brace sits, found by its
     // rectangle, the way `accessibility.rs` finds the focus strokes.
     let the_brace = |output: &FullOutput, want: Rect| {
-        painted_rects(output)
+        common::painted_rects(output)
             .into_iter()
             .find(|(r, _)| {
                 near(r.min.x, want.min.x)
@@ -646,8 +808,13 @@ fn every_part_reaches_assistive_technology() {
         .find(|n| n.role == Role::ComboBox && n.label == "Input Type")
         .unwrap();
     assert!(!input.disabled);
+    // Spec: time-editing R4. The Set Locator button is live now.
     let locator = Harness::node(&nodes, "Set Locator");
-    assert!(locator.disabled && locator.description.contains("M6"));
+    assert!(!locator.disabled);
+    let previous = Harness::node(&nodes, "Previous Locator");
+    assert!(!previous.disabled);
+    let next = Harness::node(&nodes, "Next Locator");
+    assert!(!next.disabled);
     for name in [
         "Optimize Height",
         "Optimize Width",
@@ -819,6 +986,14 @@ fn the_return_tracks_rows_scroll_with_the_tracks_when_the_switch_is_on() {
     let main = header_of(&nodes, "Main").expect("Main");
     assert!(a.bottom() <= main.top(), "Main stays pinned under them");
     assert_eq!(a.height(), main.height(), "the height of a pinned row");
+    // With the return tracks hidden, their scrolling rows go too, and
+    // Main stays (R23).
+    h.shell
+        .run(ids::SHOW_RETURN_TRACKS, json!({ "on": false }))
+        .unwrap();
+    let nodes = Harness::nodes(&h.settle());
+    assert!(header_of(&nodes, "A Return").is_none(), "the returns hidden");
+    assert!(header_of(&nodes, "Main").is_some(), "Main stays");
 }
 
 /// The row header named `name` in a frame's tree.

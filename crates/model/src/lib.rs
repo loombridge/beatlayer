@@ -57,6 +57,7 @@
 //!
 //! The rules taken from Live are in the tracks and undo spec.
 
+pub mod articulation;
 mod auto_warp;
 pub mod automation;
 pub mod base64;
@@ -92,6 +93,10 @@ mod track;
 mod warp;
 mod warp_settings;
 
+pub use articulation::{
+    ARTICULATION_MAP, Articulation, ArticulationOutput, ArticulationTrigger,
+    Entry as ArticulationEntry, List as ArticulationList, MAX_ARTICULATIONS, MAX_OUTPUTS,
+};
 pub use auto_warp::{
     ClipDefaults, ClipEdge, EVEN_LOOP_BARS, FileBeats, LOOP_BARS, WarpFrom, WarpPoint, loop_bpm,
     nearest_bars,

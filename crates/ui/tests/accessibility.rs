@@ -2607,6 +2607,41 @@ fn paths() -> BTreeMap<&'static str, Path> {
             )),
         ),
         ("device.set_param", Exception(device_params)),
+        // The Articulation Map's list (WP-6.47; the articulation map spec,
+        // R15): its rows are reached by the pointer, and the buttons that
+        // would add, delete and move an articulation are not built; the
+        // spec leaves the panel's own buttons open, so agents reach them.
+        (
+            "articulation.add",
+            Exception(LaterView(
+                "the Articulation Map's list's own button for adding an articulation",
+            )),
+        ),
+        (
+            "articulation.delete",
+            Exception(LaterView(
+                "the Articulation Map's list's own button for deleting an articulation",
+            )),
+        ),
+        (
+            "articulation.move",
+            Exception(LaterView(
+                "the Articulation Map's list's own button for moving an articulation",
+            )),
+        ),
+        (
+            "articulation.set",
+            Exception(Equivalent(
+                "a double-click on a row's name in the Articulation Map's list",
+            )),
+        ),
+        ("articulation.list", Exception(Query)),
+        (
+            "articulation.learn",
+            Exception(Equivalent(
+                "the Learn button in the Articulation Map's list",
+            )),
+        ),
         // Racks (WP-5.1): Group and Ungroup are on Cmd-G and Cmd-Shift-G;
         // the rack's chain list and its controls arrive with the Device
         // View's rack (WP-5.2), until then agents reach them.

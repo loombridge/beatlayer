@@ -11,7 +11,7 @@ use bl_engine::session as engine_session;
 use bl_engine::transport as engine_transport;
 use bl_media::MediaStore;
 use bl_model::{
-    AudioData, AutomationTarget, ChangeSet, Clip, ClipData, ContentHash, Editor, Input,
+    AudioData, AutomationTarget, ChangeSet, Clip, ClipData, Command, ContentHash, Editor, Input,
     LaunchSettings, TakeClip, TakeLane, TrackId, TrackKind, registry as model,
 };
 use bl_project::ProjectFolder;
@@ -4626,6 +4626,25 @@ impl Shell {
             // nodes published, which the device displays draw. Not a
             // revision either.
             self.audio.displays_into(self.devices.displays_mut());
+            // Spec: articulation-map R15. A row whose Learn button is lit
+            // takes the next note-on or control change the device hears as
+            // its trigger, which is one undo step.
+            for (device, row, trigger) in self.devices.learned_triggers() {
+                self.devices.stop_learning(device);
+                self.edit(|editor| {
+                    // The list may have changed while the button was lit,
+                    // and then the row is gone: the trigger is dropped
+                    // rather than ending the shell.
+                    let _ = editor.apply(Command::SetArticulation {
+                        device,
+                        index: row,
+                        name: None,
+                        trigger: Some(trigger),
+                        outputs: None,
+                        channel: None,
+                    });
+                });
+            }
         }
         // Spec: drum-racks R20. With Auto Select on, a drum rack's chain
         // list selects each chain a note reaches.

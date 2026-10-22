@@ -1444,6 +1444,11 @@ pub enum Command {
         /// a preset of one holds; `null` for the default shape.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         shape: Option<Vec<crate::modulator::ShapePoint>>,
+        /// An Articulation Map's articulations (the articulation map spec,
+        /// R16), which a preset of one holds; `null` to keep the ones the
+        /// device has.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        articulations: Option<Vec<crate::articulation::Articulation>>,
     },
     /// Floats a device in a window of its own, or docks it back in the
     /// Device View (IMP-14, WP-2.5b). Only native devices float.
@@ -1528,6 +1533,64 @@ pub enum Command {
         /// its place and output from 0 to 1 and the bend of the segment
         /// starting there, from −1 to 1.
         points: Vec<crate::modulator::ShapePoint>,
+    },
+    /// Adds an articulation to an Articulation Map's list (WP-6.47; the
+    /// articulation map spec, R16).
+    AddArticulation {
+        /// The device.
+        device: DeviceId,
+        /// Where in the list it goes, or `null` for the end.
+        #[serde(default)]
+        index: Option<u8>,
+        /// Its name. An empty name is the numbered one a new articulation
+        /// gets.
+        name: String,
+    },
+    /// Removes an articulation from an Articulation Map's list (the
+    /// articulation map spec, R16).
+    DeleteArticulation {
+        /// The device.
+        device: DeviceId,
+        /// Its place in the list, from 0.
+        index: u8,
+    },
+    /// Moves an articulation in an Articulation Map's list (the articulation
+    /// map spec, R16).
+    MoveArticulation {
+        /// The device.
+        device: DeviceId,
+        /// Its place in the list, from 0.
+        index: u8,
+        /// Where it goes: the articulation there takes its place, or it goes
+        /// last when `null`.
+        #[serde(default)]
+        to: Option<u8>,
+    },
+    /// Changes an articulation of an Articulation Map's list: its name, its
+    /// trigger, its outputs or its channel (the articulation map spec, R16).
+    /// What isn't given stays as it is.
+    SetArticulation {
+        /// The device.
+        device: DeviceId,
+        /// Its place in the list, from 0.
+        index: u8,
+        /// Its new name.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        /// Its new trigger.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        trigger: Option<crate::articulation::ArticulationTrigger>,
+        /// Its new outputs, in order.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        outputs: Option<Vec<crate::articulation::ArticulationOutput>>,
+        /// Its new channel: a channel from 1 to 16, or `null` for none, so
+        /// its notes keep the channel they come in on.
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            deserialize_with = "crate::articulation::double_option"
+        )]
+        channel: Option<Option<u8>>,
     },
     /// Sets the media a device plays, by content hash (WP-2.16): the
     /// sampler's sample, which the media store holds like a clip's audio.
@@ -2387,6 +2450,11 @@ impl Command {
             Self::MapModulator { .. } => "Map Modulator",
             Self::UnmapModulator { .. } => "Unmap Modulator",
             Self::SetShape { .. } => "Edit Shape",
+            // WP-6.47: Beatlayer's own names.
+            Self::AddArticulation { .. } => "Add Articulation",
+            Self::DeleteArticulation { .. } => "Delete Articulation",
+            Self::MoveArticulation { .. } => "Move Articulation",
+            Self::SetArticulation { .. } => "Change Articulation",
             Self::SetDeviceSample { media: Some(_), .. } => "Load Sample",
             Self::SetDeviceSample { media: None, .. } => "Clear Sample",
             // WP-5.15b: Warp controls and slices.
@@ -3534,10 +3602,14 @@ impl Document {
                 params,
                 name,
                 shape,
+                articulations,
             } => {
                 let mut loaded = self.device_ref(*device)?.clone();
                 loaded.set_both(params.clone());
                 loaded.shape.clone_from(shape);
+                if let Some(articulations) = articulations {
+                    loaded.set_articulations(articulations.clone());
+                }
                 loaded.set_name(name);
                 // The preset the device holds is the one its name names (the
                 // plug-in list spec, R5).
@@ -3614,6 +3686,32 @@ impl Document {
             } => self.map_modulator(*device, *slot, *target),
             Command::UnmapModulator { device, slot } => self.unmap_modulator(*device, *slot),
             Command::SetShape { device, points } => self.set_shape(*device, points),
+            Command::AddArticulation {
+                device,
+                index,
+                name,
+            } => self.add_articulation(*device, *index, name),
+            Command::DeleteArticulation { device, index } => {
+                self.delete_articulation(*device, *index)
+            }
+            Command::MoveArticulation { device, index, to } => {
+                self.move_articulation(*device, *index, *to)
+            }
+            Command::SetArticulation {
+                device,
+                index,
+                name,
+                trigger,
+                outputs,
+                channel,
+            } => self.set_articulation(
+                *device,
+                *index,
+                name.as_deref(),
+                *trigger,
+                outputs.as_deref(),
+                *channel,
+            ),
             Command::CompareSwitch { device } => {
                 if !self.device_ref(*device)?.can_compare() {
                     return Err(ModelError::NoCompare(*device));
@@ -5761,6 +5859,15 @@ impl Document {
         device: &Device,
     ) -> Result<(), ModelError> {
         self.check_all_fresh(device.ids())?;
+        // Spec: articulation-map R2. A new Articulation Map holds one
+        // articulation, named "Articulation 1".
+        let mut device = device.clone();
+        if device.is_articulation_map() && device.articulations.is_empty() {
+            device.set_articulations(vec![crate::articulation::Articulation::new(
+                crate::articulation::FIRST_NAME,
+            )]);
+        }
+        let device = &device;
         check_device(device)?;
         let chain = &mut self.track_mut(track)?.devices;
         insert_at(chain, index, Shared::new(device.clone()))?;
@@ -7055,6 +7162,12 @@ fn check_one_device(device: &Device) -> Result<(), ModelError> {
     crate::modulator::check_mappings(device)?;
     if let Some(shape) = &device.shape {
         crate::modulator::check_shape(shape)?;
+    }
+    // Spec: articulation-map R20. A saved device whose list is empty or
+    // holds more than 32 articulations, whose triggers break R3, or whose
+    // channel or values fall outside R3 to R5's ranges doesn't load.
+    if device.is_articulation_map() {
+        crate::articulation::check(&device.articulations).map_err(ModelError::InvalidInput)?;
     }
     if !device.can_compare() && (device.b_active || device.other_params.is_some()) {
         return Err(ModelError::NoCompare(device.id));
@@ -8974,6 +9087,7 @@ mod tests {
             params: params.clone(),
             name: "Warm".to_owned(),
             shape: None,
+            articulations: None,
         })
         .unwrap();
         let loaded = song.doc.device(device).unwrap();
@@ -8986,6 +9100,7 @@ mod tests {
                 params: bad,
                 name: String::new(),
                 shape: None,
+                articulations: None,
             }),
             ModelError::InvalidValue { .. }
         ));
@@ -11084,6 +11199,7 @@ mod tests {
             params: [(ParamId(2), 1.0)].into_iter().collect(),
             name: String::new(),
             shape: None,
+            articulations: None,
         })
         .unwrap();
         let d = song.doc.device(device).unwrap();

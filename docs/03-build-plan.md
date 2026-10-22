@@ -697,7 +697,7 @@ Total to 1.0: 256 packages planned in Phases 0 to 6, and about 110 estimated in 
 | 6.47 | done | 22 October 2026 | [#292](https://github.com/loombridge/beatlayer/pull/292); the Articulation Map, a MIDI effect, holds up to 32 named articulations, each with a trigger and the keyswitches, controllers and channel it sends, and the list is edited by command, saved with the set and in the device's presets, and read back ([articulation map](specs/articulation-map.md) R1 to R20); IMP-32's acceptance is still open |
 | 6.48 | todo |  | Waits on IMP-33's acceptance |
 | 6.49 | todo |  | Waits on IMP-34, IMP-35 and IMP-36's acceptance |
-| 6.49b | todo |  |  |
+| 6.49b | done | 22 October 2026 | [#315](https://github.com/loombridge/beatlayer/pull/315); holding the middle mouse button and dragging pans the area under the pointer in the Arrangement's lanes, the Session View's grid, both mixers, the MIDI Note Editor, the Sample Editor, the Device View's chain and the browser's lists, selecting and moving nothing, and a note is drawn in its clip's colour, paler the softer its velocity and grey while deactivated ([view options](specs/view-options.md) R1, [the piano roll](specs/piano-roll.md) R43 and R44) |
 | 6.50 | todo |  | Waits on IMP-37's acceptance |
 | 6.51 | todo |  |  |
 | 6.52 | todo |  |  |

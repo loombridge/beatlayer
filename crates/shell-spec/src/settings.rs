@@ -421,6 +421,31 @@ pub struct FileFolderSettings {
     pub sample_editor: String,
 }
 
+/// What happens to the audio files a clip or a set uses when it is saved to
+/// the browser (file-management R7): Collect Files on Export.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CollectFiles {
+    /// Copy the files into the saved file's project. A new install's choice.
+    #[default]
+    Always,
+    /// Copy nothing: the saved file names each file where it is.
+    Never,
+    /// Ask first, with Copy, Don't Copy and Cancel.
+    Ask,
+}
+
+/// The Library page's settings (L-SET-016).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct LibrarySettings {
+    /// Collect Files on Export, as `settings.set_collect_files_on_export`
+    /// sets it.
+    pub collect_files_on_export: CollectFiles,
+    /// The User Library's folder, as `settings.set_user_library` sets it;
+    /// empty when there is none.
+    pub user_library: String,
+}
+
 /// What `settings.state` returns: the Settings window's preferences by
 /// page. Pages whose settings no package has built yet are left out.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -456,6 +481,8 @@ pub struct SettingsState {
     /// File & Folder: the Temporary Folder, as `settings.set_temporary_folder`
     /// sets it.
     pub file_folder: FileFolderSettings,
+    /// Library: Collect Files on Export and the User Library's folder.
+    pub library: LibrarySettings,
     /// Plug-Ins: Auto-Hide Plug-In Windows, as
     /// `settings.set_auto_hide_plug_in_windows` sets it.
     pub auto_hide_plug_in_windows: bool,

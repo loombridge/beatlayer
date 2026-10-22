@@ -176,9 +176,11 @@ pub(crate) fn assess(
             // Spec: browser R14. The selected track if it holds audio,
             // otherwise a new one, at the insert marker.
             let doc = scene.editor.document();
+            // A selected clip file may be a MIDI clip's, so a MIDI track counts
+            // too (clip files R10): this errs towards destructive.
             let track = scene.selected_track.filter(|track| {
                 doc.track(*track)
-                    .is_some_and(|t| t.kind() == TrackKind::Audio)
+                    .is_some_and(|t| matches!(t.kind(), TrackKind::Audio | TrackKind::Midi))
             });
             dropped(doc, track, scene.insert_marker, registered)
         }

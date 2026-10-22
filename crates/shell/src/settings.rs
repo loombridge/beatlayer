@@ -11,9 +11,9 @@ use bl_model::PluginFormat;
 
 pub use bl_shell_spec::midi_io::PortDirection;
 pub use bl_shell_spec::settings::{
-    DefaultWarpMode, LaunchPrefs, LoopWarpShortSamples, SessionAutomationTracks, SettingsPage,
-    ThemeChoice, WarpPrefs, ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT, ZOOM_STEPS, zoom_factor,
-    zoom_percent, zoom_step,
+    CollectFiles, DefaultWarpMode, LaunchPrefs, LoopWarpShortSamples, SessionAutomationTracks,
+    SettingsPage, ThemeChoice, WarpPrefs, ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT, ZOOM_STEPS,
+    zoom_factor, zoom_percent, zoom_step,
 };
 
 use crate::keymap::UserKeymap;
@@ -131,6 +131,9 @@ pub struct Preferences {
     /// argument. `None` names no editor, so Edit opens the File & Folder
     /// page instead.
     pub sample_editor: Option<String>,
+    /// Collect Files on Export (Library, L-SET-016): what saving a clip to
+    /// the browser does with the audio files it plays (file-management R7).
+    pub collect_files_on_export: CollectFiles,
     /// The saved default set (File ▸ Save Beatlayer Set As Default Set),
     /// which a new set starts from (WP-2.25). `None` uses the factory
     /// default set.

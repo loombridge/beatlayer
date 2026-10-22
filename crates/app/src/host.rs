@@ -1381,6 +1381,15 @@ impl Host {
                     ));
                 }
             }
+            Effect::PickUserLibrary => {
+                let dialog = rfd::FileDialog::new().set_title("User Library");
+                if let Some(path) = dialog.pick_folder() {
+                    self.invoke(&Invocation::new(
+                        bl_shell::commands::SETTINGS_SET_USER_LIBRARY,
+                        json!({ "path": path.to_string_lossy() }),
+                    ));
+                }
+            }
             Effect::PickSampleEditor => {
                 // Spec: sample-editor R16. The File & Folder page's Sample
                 // Editor row names the program Edit opens a clip's file in.

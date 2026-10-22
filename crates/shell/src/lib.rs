@@ -72,6 +72,7 @@ pub mod autosample;
 pub mod browser;
 mod chord_learn;
 pub mod clip_defaults;
+pub mod clip_files;
 pub mod clip_view;
 pub mod dawproject;
 pub mod devices;

@@ -11,7 +11,8 @@
 //! commands as one undo step. The behaviour they follow is in the session
 //! view spec.
 
-use std::path::Path;
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
 
 use bl_core::time::{Bpm, Ticks, TimeSignature};
 use bl_media::MediaStore;
@@ -67,6 +68,9 @@ pub struct Context<'a> {
     pub launch_quantization: Option<LaunchQuantization>,
     /// What Capture and Insert Scene needs from the engine.
     pub capture: Capture,
+    /// Folders to search for the audio a dropped clip file names when it
+    /// isn't where the file says (clip files R12).
+    pub search: &'a [PathBuf],
 }
 
 /// What the engine knows that Capture and Insert Scene captures (WP-3.5).
@@ -95,6 +99,8 @@ pub struct SessionOutcome {
     /// The scene Capture and Insert Scene made, when the playing clips move
     /// to its copies.
     pub captured: Option<SceneId>,
+    /// What the Status Bar says, if anything.
+    pub message: Option<String>,
 }
 
 /// The Session View grid's view state. See the [module docs](self).
@@ -768,10 +774,16 @@ impl SessionView {
             .iter()
             .position(|scene| *scene == args.scene)
             .ok_or_else(|| SessionViewError::InvalidArgs("no scene has that ID".to_owned()))?;
+        if args.paths.iter().any(|path| arrange::is_clip_file(path)) {
+            return Self::drop_clips(ctx, &args, start);
+        }
+        let track = args.track.ok_or_else(|| {
+            SessionViewError::InvalidArgs("`track` is needed to drop audio files".to_owned())
+        })?;
         let track_at = ctx
             .columns
             .iter()
-            .position(|track| *track == args.track)
+            .position(|column| *column == track)
             .ok_or_else(|| SessionViewError::InvalidArgs("no track has that column".to_owned()))?;
         // Each file is read before anything changes, so a file that can't be
         // read changes nothing.
@@ -801,9 +813,7 @@ impl SessionView {
                         .get(track_at + index)
                         .map(|track| (*track, args.scene))
                 } else {
-                    ctx.scenes
-                        .get(start + index)
-                        .map(|scene| (args.track, *scene))
+                    ctx.scenes.get(start + index).map(|scene| (track, *scene))
                 }
             })
             .collect();
@@ -844,6 +854,115 @@ impl SessionView {
             .unwrap_or(Value::Null);
         outcome.media = prepared.into_iter().map(|(media, _, _)| media).collect();
         Ok(outcome)
+    }
+}
+
+impl SessionView {
+    /// Drops clip files: each clip goes in a slot, bringing its track's
+    /// devices when its track is new or empty (clip files R7, R8), as one
+    /// undo step. Every file is read and every target checked before
+    /// anything changes.
+    fn drop_clips(
+        ctx: Context<'_>,
+        args: &DropFilesArgs,
+        start: usize,
+    ) -> Result<SessionOutcome, SessionViewError> {
+        use crate::browser::arrange;
+        use crate::clip_files::{self, Lane, Spot};
+        let failed = SessionViewError::Failed;
+        if !args.paths.iter().all(|path| arrange::is_clip_file(path)) {
+            return Err(SessionViewError::InvalidArgs(
+                "clip files can't be dropped together with other files".to_owned(),
+            ));
+        }
+        let loaded = args
+            .paths
+            .iter()
+            .map(|path| clip_files::load(ctx.media, Path::new(path), ctx.search).map_err(failed))
+            .collect::<Result<Vec<_>, _>>()?;
+        let track_at = args
+            .track
+            .map(|track| {
+                ctx.columns
+                    .iter()
+                    .position(|column| *column == track)
+                    .ok_or_else(|| {
+                        SessionViewError::InvalidArgs("no track has that column".to_owned())
+                    })
+            })
+            .transpose()?;
+        // Where each file goes: an existing track, a new one, or the new one
+        // the file before it made (down the scenes of the drop area).
+        enum Target {
+            Existing(TrackId),
+            New,
+            Same,
+        }
+        let doc = ctx.editor.document();
+        let mut plan = Vec::new();
+        for (index, file) in loaded.iter().enumerate() {
+            let scene_at = if args.spread { start } else { start + index };
+            let scene = *ctx.scenes.get(scene_at).ok_or_else(|| {
+                SessionViewError::InvalidArgs("there's no scene for every file".to_owned())
+            })?;
+            let target = match (track_at, args.spread) {
+                (Some(at), true) => {
+                    let column = ctx.columns.get(at + index).ok_or_else(|| {
+                        SessionViewError::InvalidArgs("there's no track for every file".to_owned())
+                    })?;
+                    Target::Existing(*column)
+                }
+                (Some(at), false) => Target::Existing(ctx.columns[at]),
+                (None, false)
+                    if index > 0
+                        && clip_files::track_kind(&loaded[index - 1].file)
+                            == clip_files::track_kind(&file.file) =>
+                {
+                    Target::Same
+                }
+                (None, _) => Target::New,
+            };
+            if let Target::Existing(track) = target {
+                clip_files::check(doc, &file.file, Lane::Track(track), Spot::Slot(scene))
+                    .map_err(SessionViewError::InvalidArgs)?;
+            }
+            plan.push((target, scene));
+        }
+        let before = doc.clone();
+        let nothing = BTreeSet::new();
+        ctx.editor
+            .transact(clip_files::UNDO_LABEL, |editor| {
+                let mut previous = None;
+                let mut made = 0;
+                for ((target, scene), file) in plan.iter().zip(&loaded) {
+                    let lane = match target {
+                        Target::Existing(track) => Lane::Track(*track),
+                        Target::Same => Lane::Track(previous.expect("a file came before")),
+                        Target::New => {
+                            made += 1;
+                            Lane::New {
+                                parent: None,
+                                index: editor.document().top_level().len(),
+                            }
+                        }
+                    };
+                    previous = Some(
+                        clip_files::place(editor, file, lane, Spot::Slot(*scene), &nothing)?.track,
+                    );
+                }
+                let _ = made;
+                Ok::<_, bl_model::EditError>(())
+            })
+            .map_err(|e| SessionViewError::Failed(e.to_string()))?;
+        let missing = loaded.iter().map(|file| file.missing).sum();
+        Ok(SessionOutcome {
+            value: serde_json::to_value(ChangeSet::between(&before, ctx.editor.document()))
+                .unwrap_or(Value::Null),
+            media: loaded.into_iter().flat_map(|file| file.media).collect(),
+            document_changed: true,
+            message: arrange::missing_message(missing),
+            ..SessionOutcome::default()
+        })
     }
 }
 

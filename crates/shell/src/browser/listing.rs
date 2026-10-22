@@ -15,7 +15,7 @@ pub const AUDIO_EXTENSIONS: &[&str] = &[
 ];
 
 /// What a file is, by its name: an audio file, an SFZ instrument, a
-/// Beatlayer set, a device preset, or none of these
+/// Beatlayer set, a device preset, a clip file, or none of these
 /// (`None`), which the browser leaves out.
 #[must_use]
 pub fn file_kind(name: &str) -> Option<ItemKind> {
@@ -29,9 +29,23 @@ pub fn file_kind(name: &str) -> Option<ItemKind> {
         Some(ItemKind::Set)
     } else if extension == bl_project::preset::PRESET_EXTENSION {
         Some(ItemKind::Preset)
+    } else if extension == bl_project::clip_file::CLIP_EXTENSION {
+        Some(ItemKind::Clip)
     } else {
         None
     }
+}
+
+/// What a clip file holds, read from the first bytes of the file; `None`
+/// for a file that isn't a clip file or is damaged (clip files R6).
+#[must_use]
+pub fn clip_kind(path: &Path) -> Option<bl_shell_spec::browser::ClipFileKind> {
+    use bl_project::clip_file::{ClipKind, peek_kind};
+    use bl_shell_spec::browser::ClipFileKind;
+    peek_kind(path).map(|kind| match kind {
+        ClipKind::Audio => ClipFileKind::Audio,
+        ClipKind::Midi => ClipFileKind::Midi,
+    })
 }
 
 /// Whether a name is hidden: dot files, which the browser leaves out.
@@ -168,6 +182,7 @@ mod tests {
         assert_eq!(file_kind("Song.blset"), Some(ItemKind::Set));
         assert_eq!(file_kind("Warm.blpreset"), Some(ItemKind::Preset));
         assert_eq!(file_kind("Bank.SFZ"), Some(ItemKind::Sfz));
+        assert_eq!(file_kind("Idea.blclip"), Some(ItemKind::Clip));
         assert_eq!(file_kind("notes.txt"), None);
         assert_eq!(file_kind("README"), None);
         assert!(is_hidden(".DS_Store"));

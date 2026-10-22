@@ -82,6 +82,10 @@ pub struct ClipFile {
     /// Each audio file the clip and the devices play, by path relative to
     /// the clip file's folder.
     pub media: Media,
+    /// How long an unwarped audio clip lasted when it was saved, in seconds:
+    /// it lasts as long where it lands (R9). `None` for a warped audio clip
+    /// and a MIDI clip, whose length is in beats.
+    pub seconds: Option<f64>,
 }
 
 #[derive(Serialize)]
@@ -93,6 +97,8 @@ struct Writing<'a> {
     clip: &'a Clip,
     devices: &'a [Device],
     media: &'a Media,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    seconds: Option<f64>,
 }
 
 #[derive(Deserialize)]
@@ -111,6 +117,8 @@ struct Reading {
     devices: Vec<Device>,
     #[serde(default)]
     media: Media,
+    #[serde(default)]
+    seconds: Option<f64>,
 }
 
 /// Why a clip file didn't load or save.
@@ -182,6 +190,7 @@ impl ClipFile {
             clip: &self.clip,
             devices: &self.devices,
             media: &self.media,
+            seconds: self.seconds,
         })
         .map_err(|e| invalid(e.to_string()))?;
         Ok(crate::format::compress(&json))
@@ -216,6 +225,12 @@ impl ClipFile {
         if read.kind != ClipKind::of(&read.clip.data) {
             return Err(invalid("its kind isn't the kind of its clip"));
         }
+        if read
+            .seconds
+            .is_some_and(|seconds| !seconds.is_finite() || seconds <= 0.0)
+        {
+            return Err(invalid("its length in seconds isn't a positive number"));
+        }
         let mut seen = BTreeSet::new();
         for id in read.devices.iter().flat_map(Device::ids) {
             if !seen.insert(id) {
@@ -233,6 +248,7 @@ impl ClipFile {
             clip: read.clip,
             devices: read.devices,
             media: read.media,
+            seconds: read.seconds,
         })
     }
 
@@ -413,6 +429,7 @@ mod tests {
                 size: 256,
                 reversed_from: None,
             }]),
+            seconds: None,
         }
     }
 
@@ -452,6 +469,7 @@ mod tests {
             clip,
             devices: Vec::new(),
             media: Media::new(),
+            seconds: Some(1.5),
         };
         assert_eq!(ClipFile::decode(&file.encode().unwrap()).unwrap(), file);
     }

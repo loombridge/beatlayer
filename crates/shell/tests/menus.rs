@@ -219,3 +219,25 @@ fn menu_items_enable_with_what_can_run_now() {
     shell.set_focused_window(bl_shell::WindowKind::Main);
     assert!(!shell.can_invoke("window.close", &json!({})));
 }
+
+// Spec: export R16, R28.
+#[test]
+fn the_file_menus_export_item_opens_the_dialog() {
+    let mut shell = bl_shell::Shell::headless();
+    for platform in [MenuPlatform::Mac, MenuPlatform::Other] {
+        let item = menu_bar(platform)
+            .into_iter()
+            .flat_map(|menu| menu.walk().cloned().collect::<Vec<_>>())
+            .find(|item| item.row == "M-FILE-015")
+            .expect("M-FILE-015");
+        assert_eq!(item.label, "Export Audio/Video...");
+        assert_eq!(item.action, Action::Command("export.open_dialog"));
+    }
+    // Enabled in a new set, and it opens the dialog.
+    assert!(shell.can_invoke("export.open_dialog", &serde_json::json!({})));
+    assert!(shell.export_dialog().is_none());
+    shell
+        .invoke("export.open_dialog", serde_json::json!({}))
+        .unwrap();
+    assert!(shell.export_dialog().is_some());
+}

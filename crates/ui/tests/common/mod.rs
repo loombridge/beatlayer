@@ -69,6 +69,9 @@ pub struct Harness {
     /// the app's windows do.
     pub zoom: f32,
     pub events: Vec<UiEvent>,
+    /// The effects the shell asked the platform for, which the harness has
+    /// no platform to carry out: the save dialog Export asks for, say.
+    pub effects: Vec<Effect>,
     /// Whether the window draws Live's title bar itself, as on macOS (D22).
     pub title_bar: bool,
     /// The transport the engine had published when the last frame began,
@@ -141,6 +144,7 @@ impl Harness {
             size,
             zoom,
             events: Vec::new(),
+            effects: Vec::new(),
             title_bar: false,
             engine: bl_shell::audio::EngineTransport::default(),
             menu_bar: None,
@@ -306,6 +310,7 @@ impl Harness {
             self.events.push(event);
         }
         for effect in self.shell.take_effects() {
+            self.effects.push(effect.clone());
             match self.window {
                 Window::Main => self.main.apply_effect(&self.ctx, &effect),
                 Window::Settings => self.settings.apply_effect(&effect),

@@ -452,3 +452,144 @@ fn without_autonomous_an_export_is_refused_and_writes_nothing() {
     assert!(!file.exists());
     assert_eq!(fs::read_dir(&dir.0).unwrap().count(), 0, "nothing written");
 }
+
+/// The command's result in the reply to a `run` of it.
+fn ran(client: &mut Client<impl Transport>, command: &str, args: Value) -> Value {
+    let reply = call(
+        client,
+        "run",
+        json!({ "commands": [{ "command": command, "args": args }] }),
+    );
+    reply["results"][0]["result"].clone()
+}
+
+/// Spec: export R33, R34, R37, R44. An agent exports with the dialog's
+/// options by command, leaves out the bit depth and the rate, and drives
+/// the dialog's own commands: the choices, a start that returns at once,
+/// its status, and Cancel.
+#[test]
+fn an_agent_exports_with_the_dialogs_options_and_drives_the_dialog() {
+    let dir = TempDir::new("dialog");
+    let stem = dir.0.join("Stem.wav");
+    write_stem(&stem, 220.0, 1.0);
+
+    let mut client = bl_cli_mcp(&["--autonomous"]);
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "browser.add_to_arrangement",
+                               "args": { "paths": [stem.to_string_lossy()], "at": 0 } }] }),
+    );
+
+    // A path alone: 24 bits, the engine's rate, triangular dither.
+    let plain = dir.0.join("Plain.wav");
+    let result = ran(
+        &mut client,
+        "export.audio",
+        json!({ "path": plain.to_string_lossy() }),
+    );
+    assert_eq!(result["bit_depth"], 24);
+    assert_eq!(result["sample_rate"], 48_000);
+    assert_eq!(result["dither"], "triangular");
+    assert_eq!(result["channels"], 2);
+
+    // Convert to Mono, Encode MP3 and Create Analysis File.
+    let both = dir.0.join("Both.wav");
+    let result = ran(
+        &mut client,
+        "export.audio",
+        json!({ "path": both.to_string_lossy(), "convert_to_mono": true, "encode_mp3": true,
+                "create_analysis_file": true, "sample_rate": 44100 }),
+    );
+    assert_eq!(result["channels"], 1);
+    let files = result["files"].as_array().unwrap();
+    assert_eq!(files.len(), 2);
+    assert!(files[1].as_str().unwrap().ends_with("Both.mp3"));
+    for file in files {
+        let decoded = bl_media::decode_file(file.as_str().unwrap()).unwrap();
+        assert_eq!(decoded.channel_count(), 1);
+    }
+
+    // The dialog by command: open, change, read.
+    let opened = ran(&mut client, "export.open_dialog", json!({}));
+    assert_eq!(opened["dialog"]["choices"]["bit_depth"], 24);
+    assert_eq!(opened["dialog"]["choices"]["sample_rate"], 48_000);
+    assert_eq!(opened["dialog"]["can_export"], true);
+    let changed = ran(
+        &mut client,
+        "export.set_choices",
+        json!({ "normalize": true, "bit_depth": 16 }),
+    );
+    assert_eq!(changed["dialog"]["choices"]["normalize"], true);
+    // A start with a path returns at once; status reads it until it ends.
+    let started = dir.0.join("Started.wav");
+    ran(
+        &mut client,
+        "export.start",
+        json!({ "path": started.to_string_lossy() }),
+    );
+    let ended = loop {
+        let status = ran(&mut client, "export.status", json!({}));
+        if status["export"].is_null() {
+            break status;
+        }
+    };
+    assert!(ended["dialog"].is_null(), "Export closed the dialog");
+    let mut reader = hound::WavReader::open(&started).unwrap();
+    assert_eq!(reader.spec().bits_per_sample, 16);
+    let peak = reader
+        .samples::<i32>()
+        .map(|s| s.unwrap().abs())
+        .max()
+        .unwrap();
+    assert!(peak >= 32_766, "normalised to full scale: {peak}");
+
+    // A day of silence started from the dialog: the share moves, Cancel
+    // stops it, and nothing is left behind.
+    ran(&mut client, "export.open_dialog", json!({}));
+    ran(
+        &mut client,
+        "export.set_choices",
+        json!({ "sample_rate": 22050, "bit_depth": 16, "start": 0,
+                "length": 172_800 * 705_600_i64 }),
+    );
+    let long = dir.0.join("Long.wav");
+    ran(
+        &mut client,
+        "export.start",
+        json!({ "path": long.to_string_lossy() }),
+    );
+    let share = loop {
+        let status = ran(&mut client, "export.status", json!({}));
+        if let Some(progress) = status["export"]["progress"].as_f64()
+            && progress > 0.0
+        {
+            break progress;
+        }
+    };
+    assert!(share < 1.0);
+    ran(&mut client, "export.cancel", json!({}));
+    loop {
+        let status = ran(&mut client, "export.status", json!({}));
+        if status["export"].is_null() {
+            break;
+        }
+    }
+    assert!(!long.exists());
+    assert!(client.into_transport().finish().unwrap().success());
+    let mut names: Vec<String> = fs::read_dir(&dir.0)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    assert_eq!(
+        names,
+        [
+            "Both.mp3",
+            "Both.wav",
+            "Plain.wav",
+            "Started.wav",
+            "Stem.wav"
+        ]
+    );
+}

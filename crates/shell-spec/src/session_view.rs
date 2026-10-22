@@ -216,8 +216,11 @@ pub struct CopyClipArgs {
 pub struct DropFilesArgs {
     /// The files' paths, in the order dropped.
     pub paths: Vec<String>,
-    /// The track whose slot they go in.
-    pub track: TrackId,
+    /// The track whose slot they go in. Left out, the Session's drop area:
+    /// clip files make a new track of their kind each, in the scene (audio
+    /// files need a track).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub track: Option<TrackId>,
     /// The scene whose slot the first one goes in.
     pub scene: SceneId,
     /// With the command modifier (Cmd, Ctrl on Windows and Linux) held,
@@ -413,7 +416,12 @@ fn specs() -> Vec<CommandSpec> {
              while dropping), across the tracks at `scene`. Each target slot must be empty. \
              Each file becomes a Session clip of its length, starting at the clip's beginning. \
              One undo step. Reads the files, outside the project, and registers them so the set \
-             keeps them.",
+             keeps them. Clip files (`.blclip`) are placed as clips: in an empty slot on a track \
+             of their kind, bringing the track's devices when it has no clips and no devices; \
+             with no `track` (the Session's drop area), each on a new track of its kind in the \
+             scene, named after the file, with its devices; with `spread`, each on a track of \
+             its own across the tracks at `scene`. A track of the other kind, a group, return \
+             or Main track, and a slot holding a clip take none, and the command is refused.",
             )
             .permission(Permission::External)
             .context(Session)

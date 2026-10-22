@@ -801,6 +801,13 @@ pub mod header_columns {
     pub const MIXER: (f32, f32) = (182.0, 280.0);
     /// The track's meter.
     pub const METER: (f32, f32) = (283.0, 294.0);
+
+    /// The title sub-column's width: with the In/Out column hidden, the
+    /// title takes its width (arrangement-view R21).
+    #[must_use]
+    pub const fn title_width(in_out: bool) -> f32 {
+        if in_out { TITLE.1 } else { IN_OUT.1 }
+    }
 }
 
 /// The Arrangement View's parts inside the main view, from layout.md's

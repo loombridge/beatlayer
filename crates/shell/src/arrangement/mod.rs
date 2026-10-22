@@ -188,6 +188,13 @@ pub struct ArrangementView {
     /// have picked one; `None` hides that track's lane. A track with no
     /// entry shows its volume.
     automation_lanes: BTreeMap<TrackId, Option<AutomationTarget>>,
+    /// Whether the track headers show their In/Out column (WP-6.64).
+    show_in_out: bool,
+    /// Whether the track headers show their volume, pan, and sends
+    /// (WP-6.64).
+    show_volume: bool,
+    /// Whether the return tracks' rows show in the lanes (WP-6.64).
+    show_return_tracks: bool,
 }
 
 impl Default for ArrangementView {
@@ -228,6 +235,9 @@ impl ArrangementView {
             automation_mode: false,
             automation_arm: false,
             automation_lanes: BTreeMap::new(),
+            show_in_out: true,
+            show_volume: true,
+            show_return_tracks: true,
         }
     }
 
@@ -366,6 +376,24 @@ impl ArrangementView {
         self.automation_arm
     }
 
+    /// Whether the track headers show their In/Out column.
+    #[must_use]
+    pub fn show_in_out(&self) -> bool {
+        self.show_in_out
+    }
+
+    /// Whether the track headers show their volume, pan, and sends.
+    #[must_use]
+    pub fn show_volume(&self) -> bool {
+        self.show_volume
+    }
+
+    /// Whether the return tracks' rows show in the lanes.
+    #[must_use]
+    pub fn show_return_tracks(&self) -> bool {
+        self.show_return_tracks
+    }
+
     /// The parameter a track's automation lane shows: the choosers' last
     /// choice, or its volume by default. `None` draws no envelope, while
     /// the lane and its choosers stay.
@@ -477,6 +505,11 @@ impl ArrangementView {
         let shown = rows::shown_tracks(doc, |id| self.is_folded(id));
         let mut top = 0.0;
         for (track, kind, depth) in shown {
+            // Spec: arrangement-view R23: with the return tracks hidden,
+            // their rows aren't drawn, scrolling ones (R18) included.
+            if !self.show_return_tracks && kind == TrackKind::Return {
+                continue;
+            }
             let folded = self.is_folded(track);
             let height = if folded {
                 FOLDED_HEIGHT
@@ -1057,6 +1090,19 @@ impl ArrangementView {
                 self.automation_lanes.insert(track, target);
                 self.clamp_scroll(doc);
             }
+            ids::SHOW_IN_OUT => {
+                let SwitchArgs { on } = parse(args)?;
+                self.show_in_out = on.unwrap_or(!self.show_in_out);
+            }
+            ids::SHOW_VOLUME => {
+                let SwitchArgs { on } = parse(args)?;
+                self.show_volume = on.unwrap_or(!self.show_volume);
+            }
+            ids::SHOW_RETURN_TRACKS => {
+                let SwitchArgs { on } = parse(args)?;
+                self.show_return_tracks = on.unwrap_or(!self.show_return_tracks);
+                self.clamp_scroll(doc);
+            }
             other => {
                 return Err(ViewError::InvalidArgs(format!(
                     "`{other}` isn't a view command"
@@ -1112,6 +1158,9 @@ impl ArrangementView {
                     target: *target,
                 })
                 .collect(),
+            show_in_out: self.show_in_out,
+            show_volume: self.show_volume,
+            show_return_tracks: self.show_return_tracks,
         }
     }
 
@@ -1129,6 +1178,9 @@ impl ArrangementView {
             ids::FIXED_GRID => Some(self.grid.fixed_on),
             ids::AUTOMATION_MODE => Some(self.automation_mode),
             ids::AUTOMATION_ARM => Some(self.automation_arm),
+            ids::SHOW_IN_OUT => Some(self.show_in_out),
+            ids::SHOW_VOLUME => Some(self.show_volume),
+            ids::SHOW_RETURN_TRACKS => Some(self.show_return_tracks),
             _ => None,
         }
     }

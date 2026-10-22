@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-587 commands in 39 areas.
+590 commands in 39 areas.
 
 ## Permission classes
 
@@ -73,8 +73,11 @@ Each command has:
 | [`arrangement.set_insert_marker`](#arrangementset_insert_marker) | Set Insert Marker | `read` |  |  |
 | [`arrangement.set_track_height`](#arrangementset_track_height) | Set Track Height | `read` |  |  |
 | [`arrangement.show_automation`](#arrangementshow_automation) | Show Automation | `read` |  |  |
+| [`arrangement.show_in_out`](#arrangementshow_in_out) | Arrangement Track Controls In/Out | `read` |  |  |
 | [`arrangement.show_range`](#arrangementshow_range) | Show Time Range | `read` |  |  |
+| [`arrangement.show_return_tracks`](#arrangementshow_return_tracks) | Arrangement Track Controls Return Tracks | `read` |  |  |
 | [`arrangement.show_track`](#arrangementshow_track) | Show Track | `read` |  |  |
+| [`arrangement.show_volume`](#arrangementshow_volume) | Arrangement Track Controls Volume | `read` |  |  |
 | [`arrangement.snap_to_grid`](#arrangementsnap_to_grid) | Snap to Grid | `read` | `Cmd+4` | `Ctrl+4` |
 | [`arrangement.split`](#arrangementsplit) | Split | `edit` | `Cmd+E` | `Ctrl+E` |
 | [`arrangement.state`](#arrangementstate) | Arrangement View State | `read` |  |  |
@@ -1445,6 +1448,22 @@ Arguments:
 
 Result: [`ArrangementState`](#arrangementstate).
 
+#### `arrangement.show_in_out`
+
+**Arrangement Track Controls In/Out**. Permission: `read`. Contexts: `global`, `arrangement`.
+
+Shows or hides the Arrangement's track headers' In/Out column (the input and output routing and monitoring), as View > Arrangement Track Controls > In/Out does. Switches unless `on` says which. Changes only the view; the mixers' own In/Out section is a switch of its own.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean or null | no | On or off. Left out, the switch toggles. |
+
+Result: [`ArrangementState`](#arrangementstate).
+
 #### `arrangement.show_range`
 
 **Show Time Range**. Permission: `read`. Contexts: `global`, `arrangement`.
@@ -1462,6 +1481,22 @@ Arguments:
 
 Result: [`ArrangementState`](#arrangementstate).
 
+#### `arrangement.show_return_tracks`
+
+**Arrangement Track Controls Return Tracks**. Permission: `read`. Contexts: `global`, `arrangement`.
+
+Shows or hides the return tracks' rows in the Arrangement's lanes, as View > Arrangement Track Controls > Return Tracks does. Switches unless `on` says which. Changes only the view; the returns play as before, and the mixers' own Return Tracks section is a switch of its own.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean or null | no | On or off. Left out, the switch toggles. |
+
+Result: [`ArrangementState`](#arrangementstate).
+
 #### `arrangement.show_track`
 
 **Show Track**. Permission: `read`. Contexts: `global`, `arrangement`.
@@ -1475,6 +1510,22 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `track` | [`TrackId`](#trackid) | yes | The track to bring into view. |
+
+Result: [`ArrangementState`](#arrangementstate).
+
+#### `arrangement.show_volume`
+
+**Arrangement Track Controls Volume**. Permission: `read`. Contexts: `global`, `arrangement`.
+
+Shows or hides the Arrangement's track headers' volume, pan, and sends, as View > Arrangement Track Controls > Volume does. Switches unless `on` says which. Changes only the view; the mixers' own sections are switches of their own.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean or null | no | On or off. Left out, the switch toggles. |
 
 Result: [`ArrangementState`](#arrangementstate).
 
@@ -11769,6 +11820,9 @@ What the Arrangement View shows: every view command returns it.
 | `zoom_back_steps` | integer, at least 0 | yes | How many views `arrangement.zoom_back` can go back to. |
 | `automation_mode` | boolean | yes | Whether Automation Mode is on: each track shows its automation lane under its lane, with the device and parameter choosers. |
 | `automation_arm` | boolean | yes | Whether Automation Arm is on: while Arrangement Record runs, moving a control writes its values into the parameter's envelope. |
+| `show_in_out` | boolean | yes | Whether the track headers show their In/Out column. |
+| `show_volume` | boolean | yes | Whether the track headers show their volume, pan, and sends. |
+| `show_return_tracks` | boolean | yes | Whether the return tracks' rows show in the lanes. |
 | `automation_lanes` | array of [`AutomationLane`](#automationlane) | no | The parameter each track's automation lane shows, for the tracks whose lane isn't showing the default (their volume): the choosers' choice. `target` `null` means the lane draws no envelope. |
 
 <details><summary>JSON Schema</summary>
@@ -11847,6 +11901,18 @@ What the Arrangement View shows: every view command returns it.
       },
       "type": "array"
     },
+    "show_in_out": {
+      "description": "Whether the track headers show their In/Out column.",
+      "type": "boolean"
+    },
+    "show_return_tracks": {
+      "description": "Whether the return tracks' rows show in the lanes.",
+      "type": "boolean"
+    },
+    "show_volume": {
+      "description": "Whether the track headers show their volume, pan, and sends.",
+      "type": "boolean"
+    },
     "ticks_per_point": {
       "description": "The zoom: ticks of song time per point of screen.",
       "format": "double",
@@ -11899,7 +11965,10 @@ What the Arrangement View shows: every view command returns it.
     "folded_tracks",
     "zoom_back_steps",
     "automation_mode",
-    "automation_arm"
+    "automation_arm",
+    "show_in_out",
+    "show_volume",
+    "show_return_tracks"
   ],
   "type": "object"
 }

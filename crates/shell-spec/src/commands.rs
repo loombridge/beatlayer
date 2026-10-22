@@ -16,7 +16,7 @@ use bl_model::{LaunchMode, LaunchQuantization};
 
 use crate::audio::{AudioDevices, AudioStatus, ConfigureAudio};
 use crate::notes::{ClipTab, ClipViewState, NoteField};
-use crate::settings::{SettingsPage, ThemeChoice};
+use crate::settings::{Appearance, SettingsPage, Tone};
 
 /// `set.new`: replace the set with the factory default set.
 pub const SET_NEW: &str = "set.new";
@@ -122,8 +122,22 @@ pub const SETTINGS_SET_OUTLINE_VIEW_IN_FOCUS: &str = "settings.set_outline_view_
 pub const SETTINGS_NEXT_PAGE: &str = "settings.next_page";
 /// `settings.previous_page`: show the previous Settings page.
 pub const SETTINGS_PREVIOUS_PAGE: &str = "settings.previous_page";
-/// `settings.set_theme`: choose the dark or light theme.
+/// `settings.set_theme`: choose a theme.
 pub const SETTINGS_SET_THEME: &str = "settings.set_theme";
+/// `settings.set_appearance`: draw light, dark or follow the system.
+pub const SETTINGS_SET_APPEARANCE: &str = "settings.set_appearance";
+/// `settings.set_tone`: tint the neutral colours.
+pub const SETTINGS_SET_TONE: &str = "settings.set_tone";
+/// `settings.set_high_contrast`: switch High Contrast.
+pub const SETTINGS_SET_HIGH_CONTRAST: &str = "settings.set_high_contrast";
+/// `settings.set_grid_line_intensity`: how strong the grid lines are.
+pub const SETTINGS_SET_GRID_LINE_INTENSITY: &str = "settings.set_grid_line_intensity";
+/// `settings.set_brightness`: how bright the backgrounds are.
+pub const SETTINGS_SET_BRIGHTNESS: &str = "settings.set_brightness";
+/// `settings.set_color_intensity`: how intense the interface's colours are.
+pub const SETTINGS_SET_COLOR_INTENSITY: &str = "settings.set_color_intensity";
+/// `settings.set_color_hue`: how far the interface's colours are turned.
+pub const SETTINGS_SET_COLOR_HUE: &str = "settings.set_color_hue";
 /// `settings.set_create_fades_on_clip_edges`: switch Create Fades on Clip
 /// Edges.
 pub const SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES: &str = "settings.set_create_fades_on_clip_edges";
@@ -239,6 +253,13 @@ pub const IDS: &[&str] = &[
     SETTINGS_NEXT_PAGE,
     SETTINGS_PREVIOUS_PAGE,
     SETTINGS_SET_THEME,
+    SETTINGS_SET_APPEARANCE,
+    SETTINGS_SET_TONE,
+    SETTINGS_SET_HIGH_CONTRAST,
+    SETTINGS_SET_GRID_LINE_INTENSITY,
+    SETTINGS_SET_BRIGHTNESS,
+    SETTINGS_SET_COLOR_INTENSITY,
+    SETTINGS_SET_COLOR_HUE,
     SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES,
     SETTINGS_SET_TEMPORARY_FOLDER,
     SETTINGS_SET_SAMPLE_EDITOR,
@@ -383,8 +404,54 @@ pub struct SettingsArgs {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ThemeArgs {
-    /// The theme.
-    pub theme: ThemeChoice,
+    /// A theme's name, as `settings.state`'s `theme_colors.themes` lists
+    /// it. `dark` and `light`, which earlier versions took, set the
+    /// Appearance instead.
+    pub theme: String,
+}
+
+/// Arguments of `settings.set_appearance`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AppearanceArgs {
+    /// `light`, `dark` or `follow-system`.
+    pub appearance: Appearance,
+}
+
+/// Arguments of `settings.set_tone`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ToneArgs {
+    /// `neutral`, `warm` or `cool`.
+    pub tone: Tone,
+}
+
+/// Arguments of `settings.set_grid_line_intensity` and
+/// `settings.set_color_intensity`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PercentArgs {
+    /// A whole percentage from 0 to 200, in steps of 5.
+    #[schemars(range(min = 0, max = 200))]
+    pub percent: i16,
+}
+
+/// Arguments of `settings.set_brightness`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BrightnessArgs {
+    /// Points of lightness added to the backgrounds, from -50 to 50.
+    #[schemars(range(min = -50, max = 50))]
+    pub value: i16,
+}
+
+/// Arguments of `settings.set_color_hue`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct HueArgs {
+    /// Degrees the interface's colours are turned, from -180 to 180.
+    #[schemars(range(min = -180, max = 180))]
+    pub degrees: i16,
 }
 
 /// Arguments of `settings.set_loop_warp_short_samples`.
@@ -1254,12 +1321,87 @@ fn specs() -> Vec<CommandSpec> {
             .result::<()>(),
         CommandSpec::new(SETTINGS_SET_THEME, "Theme")
             .description(
-                "Chooses Beatlayer's dark or light theme, which every window uses straight \
-                 away. The choice is kept for the next start. Changes nothing in the set.",
+                "Chooses the theme every window draws, by its name: Beatlayer, or a theme from \
+                 the User Library's Themes folder; `settings.state` lists them in \
+                 `theme_colors.themes`. `dark` and `light`, which earlier versions took, set the \
+                 Appearance instead. The choice is kept for the next start, and a theme that \
+                 can't be read is drawn as Beatlayer. Changes nothing in the set.",
             )
             .permission(Permission::Edit)
             .context(Settings)
             .args::<ThemeArgs>()
+            .result::<()>(),
+        CommandSpec::new(SETTINGS_SET_APPEARANCE, "Appearance")
+            .description(
+                "Draws the theme in its light or dark colours, or follows the operating \
+                 system's mode while Beatlayer runs (`follow-system`); a new install draws \
+                 dark. Kept for the next start; changes nothing in the set.",
+            )
+            .permission(Permission::Edit)
+            .context(Settings)
+            .args::<AppearanceArgs>()
+            .result::<()>(),
+        CommandSpec::new(SETTINGS_SET_TONE, "Tone")
+            .description(
+                "Tints the theme's neutral colours warm or cool, or leaves them as the theme \
+                 gives them (`neutral`, the default); the chromatic colours aren't toned. Kept \
+                 for the next start; changes nothing in the set.",
+            )
+            .permission(Permission::Edit)
+            .context(Settings)
+            .args::<ToneArgs>()
+            .result::<()>(),
+        CommandSpec::new(SETTINGS_SET_HIGH_CONTRAST, "High Contrast")
+            .description(
+                "Switches High Contrast, off in a new install. On, text stands at a contrast \
+                 ratio of at least 7:1 against its background, dimmed text at 4.5:1, and \
+                 separators, outlines and the focus ring at 3:1, whatever the other Theme & \
+                 Colors settings are. Kept for the next start; changes nothing in the set.",
+            )
+            .permission(Permission::Edit)
+            .context(Settings)
+            .args::<SwitchArgs>()
+            .result::<()>(),
+        CommandSpec::new(SETTINGS_SET_GRID_LINE_INTENSITY, "Grid Line Intensity")
+            .description(
+                "Sets how strong the grid lines of the Arrangement, the Clip View's editors and \
+                 the automation lanes are, from 0 to 200 percent in steps of 5; 100, the default, \
+                 draws the theme's grid colour, 0 shows no line. Kept for the next start; \
+                 changes nothing in the set.",
+            )
+            .permission(Permission::Edit)
+            .context(Settings)
+            .args::<PercentArgs>()
+            .result::<()>(),
+        CommandSpec::new(SETTINGS_SET_BRIGHTNESS, "Brightness")
+            .description(
+                "Adds points of lightness to every background colour, from -50 to 50; 0 is the \
+                 default. Chromatic colours and the track palette don't change. Kept for the \
+                 next start; changes nothing in the set.",
+            )
+            .permission(Permission::Edit)
+            .context(Settings)
+            .args::<BrightnessArgs>()
+            .result::<()>(),
+        CommandSpec::new(SETTINGS_SET_COLOR_INTENSITY, "Color Intensity")
+            .description(
+                "Multiplies the chroma of the interface's chromatic colours, from 0 to 200 \
+                 percent in steps of 5; 100 is the default. Backgrounds and the track palette \
+                 don't change. Kept for the next start; changes nothing in the set.",
+            )
+            .permission(Permission::Edit)
+            .context(Settings)
+            .args::<PercentArgs>()
+            .result::<()>(),
+        CommandSpec::new(SETTINGS_SET_COLOR_HUE, "Color Hue")
+            .description(
+                "Turns the hue of the interface's chromatic colours by this many degrees, from \
+                 -180 to 180 in steps of 5; 0 is the default. Backgrounds and the track palette \
+                 don't change. Kept for the next start; changes nothing in the set.",
+            )
+            .permission(Permission::Edit)
+            .context(Settings)
+            .args::<HueArgs>()
             .result::<()>(),
         // Record, Warp & Launch, Warp/Fades (L-SET-018; WP-1.4b): an
         // edit-class preference, like the theme.

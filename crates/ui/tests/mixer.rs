@@ -1394,6 +1394,55 @@ fn the_wheel_scrolls_the_mixer_continuously() {
     assert!((a.left() - 1298.0).abs() <= 2.0);
 }
 
+// Spec: view-options R1, mixer-view R23.
+#[test]
+fn the_middle_button_pans_the_mixer() {
+    let mut h = session();
+    many_tracks(&mut h, 20);
+    let mixer = rect_of(Harness::node(&tree(&mut h), "Session Mixer"));
+    let over = mixer.center();
+    // Room to pan: the columns are scrolled right first.
+    h.shell
+        .run(ids::SCROLL, json!({ "view": "session", "x": 200.0 }))
+        .unwrap();
+    h.settle();
+    let before = state(&mut h.shell).session.scroll;
+    let steps = h.shell.editor().undo_history().len();
+    // A middle-button drag of 100 points left pans the columns with the
+    // pointer.
+    h.middle_drag(over, over - vec2(100.0, 0.0));
+    let after = state(&mut h.shell).session.scroll;
+    assert!(
+        (after - before - 100.0).abs() < 0.5,
+        "the columns moved 100 points: {after}"
+    );
+    // Nothing else changed: no undo step.
+    assert_eq!(
+        h.shell.editor().undo_history().len(),
+        steps,
+        "not an undo step"
+    );
+
+    // The Arrangement's mixer pans the same way.
+    let mut h = harness();
+    many_tracks(&mut h, 20);
+    h.shell.run(ids::TOGGLE, json!({})).unwrap();
+    h.settle();
+    let mixer = rect_of(Harness::node(&tree(&mut h), "Arrangement Mixer"));
+    let over = mixer.center();
+    h.shell
+        .run(ids::SCROLL, json!({ "view": "arrangement", "x": 200.0 }))
+        .unwrap();
+    h.settle();
+    let before = state(&mut h.shell).arrangement.scroll;
+    h.middle_drag(over, over - vec2(100.0, 0.0));
+    let after = state(&mut h.shell).arrangement.scroll;
+    assert!(
+        (after - before - 100.0).abs() < 0.5,
+        "the columns moved 100 points: {after}"
+    );
+}
+
 // Spec: mixer-view R15.
 #[test]
 fn every_mixer_control_reaches_assistive_technology() {

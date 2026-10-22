@@ -540,8 +540,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["Cmd+Shift+R"]
 win = ["Ctrl+Shift+R"]
-status = "pending"
-package = "WP-6.71"
+status = "bound"
+commands = [
+  { id = "export.open_dialog", contexts = ["global"] },
+]
 
 [[shortcut]]
 id = "S-FILE-008"
@@ -4748,7 +4750,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+Shift+P"]
 win = ["Ctrl+Shift+P"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "search.open", contexts = ["global", "text-field"], args = { scope = "commands" } },
+]
 
 [[shortcut]]
 id = "S-FOCUS-015"
@@ -4759,4 +4764,7 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+Shift+O"]
 win = ["Ctrl+Shift+O"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "search.open", contexts = ["global", "text-field"], args = { scope = "tracks" } },
+]

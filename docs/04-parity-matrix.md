@@ -22,7 +22,7 @@ Each row's **Notes** name the work packages that build it ("Built in WP-1.8a, WP
 
 | Live feature | Milestone | Notes |
 |---|---|---|
-| Placement of every view, panel, and control | M1 onwards | Each UI package matches the rows of `docs/ui-parity/layout.md` it implements (D16). Built in WP-1.7, WP-1.8a, WP-1.9, WP-1.10, WP-6.72 (the Clip View's panel arrangement) |
+| Placement of every view, panel, and control | M1 onwards | Each UI package matches the rows of `docs/ui-parity/layout.md` it implements (D16). Built in WP-1.7, WP-1.8a, WP-1.9, WP-1.10, WP-6.72 (the Clip View's panel arrangement), WP-6.49b (panning with the middle mouse button) |
 | Menu bar and context menus: structure, order, and wording of generic commands | M1 onwards | `docs/ui-parity/menus.md`. Built in WP-1.7, WP-1.8b, WP-4.22 (the track header's), WP-6.56 (the Session View's and the Clip View title bar's) |
 | Keyboard shortcuts, macOS and Windows, including held (momentary) shortcuts | M1 onwards | `docs/ui-parity/shortcuts.md`; the keymap test fails on a missing binding. Built in WP-1.7, WP-1.8a, WP-1.8b, WP-1.9, WP-1.10, WP-6.70 (the sweep of pending M1 to M3 shortcuts) |
 | Mouse gestures and modifier-key behaviours | M1 onwards | `docs/ui-parity/interactions.md`. Built in WP-1.8a, WP-1.8b, WP-1.9, WP-1.10, WP-6.59, WP-6.60 |
@@ -265,7 +265,7 @@ Each row's **Notes** name the work packages that build it ("Built in WP-1.8a, WP
 | Pack a project into one archive, export Session clips as a new set, merge sets | M6 | Beatlayer's own pack format ([spec](specs/set-exchange.md)). Built in WP-6.35, WP-6.35b |
 | Standard MIDI Files, import and export | M2 | Built in WP-2.21 |
 | Audio import: WAV, AIFF, AIFF-C, FLAC, Ogg Vorbis, MP3, M4A (AAC, ALAC), RF64 and BWF over 4 GB | M1 | M4A on every platform, not only macOS. Built in WP-1.1, WP-1.10 |
-| Export: Main, all tracks as stems, selected tracks, one track; include returns and Main effects; mono; normalise | M1 (Main), M2 (one track), M4 (stems, render as loop), M6 (the dialog, mono) | The Export Audio/Video dialog and Convert to Mono: WP-6.71 ([spec](specs/export.md) R28 to R45). Built in WP-1.12, WP-2.26, WP-4.17, WP-6.71 |
+| Export: Main, all tracks as stems, selected tracks, one track; include returns and Main effects; mono; normalise | M1 (Main), M2 (one track), M4 (stems, render as loop), M6 (the dialog, mono) | The Export Audio/Video dialog, Convert to Mono and Create Analysis File: WP-6.71 ([spec](specs/export.md) R28 to R45). Built in WP-1.12, WP-2.26, WP-4.17, WP-6.71 |
 | Export formats: WAV, AIFF, FLAC at 16, 24, or 32 bits; MP3 at 320 kbps | M1 (WAV, AIFF, FLAC), M2 (MP3) | Built in WP-1.12, WP-2.26 |
 | Dither: rectangular, triangular | M1 | Built in WP-1.12 |
 | Dither: POW-r 1, 2, 3 | Out | A licensed proprietary algorithm; Beatlayer's own noise-shaped dither takes its place, built in WP-2.27 |

@@ -45,6 +45,7 @@ use crate::commands::{
     TemplateArgs, TemporaryFolderArgs, TemporaryFolderResult, TestToneArgs, TestToneState,
     ThemeArgs, UserLibraryArgs, UserLibraryResult, ViewResult, ViewState, ZoomArgs,
 };
+use crate::commands::{AppearanceArgs, BrightnessArgs, HueArgs, PercentArgs, ToneArgs};
 use crate::devices::{self, DeviceError, DeviceView};
 use crate::files::{ProjectFiles, SetStore, new_set_from};
 use crate::midi::MidiHost;
@@ -54,8 +55,8 @@ use crate::permission::CallPermission;
 use crate::sample_editor;
 use crate::session_view::{SessionView, SessionViewError};
 use crate::settings::{
-    OnByDefault, Preferences, SettingsPage, ThemeChoice, WarpPrefs, ZOOM_MAX_PERCENT,
-    ZOOM_MIN_PERCENT, zoom_factor, zoom_percent, zoom_step,
+    Appearance, BUNDLED_THEME, OnByDefault, Preferences, SettingsPage, ThemeLook, WarpPrefs,
+    ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT, zoom_factor, zoom_percent, zoom_step,
 };
 use bl_devices::KitHost;
 use bl_plugin_host::au::AuHost;
@@ -86,12 +87,13 @@ use bl_shell_spec::perception as perception_ids;
 use bl_shell_spec::plugins as plugin_ids;
 use bl_shell_spec::sample_editor as sample_ids;
 use bl_shell_spec::scales as scales_ids;
+use bl_shell_spec::search as search_ids;
 use bl_shell_spec::session_launch as session_launch_ids;
 use bl_shell_spec::session_record as session_record_ids;
 use bl_shell_spec::session_view as session_ids;
 use bl_shell_spec::settings::{
     AgentsPageSettings, AudioPageSettings, DisplayInputSettings, FileFolderSettings, LaunchPrefs,
-    LibrarySettings, STATE as SETTINGS_STATE, SettingsState,
+    LibrarySettings, STATE as SETTINGS_STATE, SettingsState, ThemeColorsSettings,
 };
 use bl_shell_spec::slice as slice_ids;
 use bl_shell_spec::stems as stems_ids;
@@ -104,6 +106,8 @@ mod audio_panel;
 pub mod autosample;
 mod bounce;
 mod capture;
+mod export_dialog;
+pub use export_dialog::ExportPrefs;
 mod file_manager;
 mod freeze;
 mod keymap;
@@ -113,6 +117,7 @@ mod processed_files;
 mod sample_edits;
 mod sample_keys;
 pub use sample_keys::TransientList;
+mod search;
 mod session_recording;
 mod slice;
 mod stems;
@@ -233,6 +238,16 @@ pub enum Effect {
     PickSavePath {
         /// What to run after the save.
         then: Option<Invocation>,
+    },
+    /// Ask where to write the Export Audio/Video dialog's file, in a save
+    /// dialog that suggests `file_name`, then run `export.start` with the
+    /// path; cancelling goes back to the Export dialog (the export spec,
+    /// R40).
+    PickExportPath {
+        /// The suggested name: the set's, with the file type's extension.
+        file_name: String,
+        /// The folder the dialog opens in, if there is one.
+        folder: Option<PathBuf>,
     },
     /// Quit.
     Quit,
@@ -444,6 +459,11 @@ pub struct Shell {
     info_view: bool,
     full_screen: bool,
     settings_open: bool,
+    /// The themes the Theme chooser offers, which the host reads from the
+    /// theme files (themes R2, R9), and whether the operating system is in
+    /// its dark mode, which Follow System draws (themes R3).
+    themes: Vec<String>,
+    system_dark: bool,
     focused_window: WindowKind,
     focused_area: Area,
     /// The track whose control has the keyboard focus (WP-1.14).
@@ -503,6 +523,8 @@ pub struct Shell {
     /// and the Automatic Search's switches. View state, never part of the
     /// set, like the browser's.
     file_manager: FileManager,
+    /// The search field (WP-6.42): view state, never saved.
+    search: crate::search::Field,
     /// The list of the set's plug-ins (IMP-29, WP-6.41): whether it shows
     /// in the detail area's place, and whether Show Only Missing is on.
     plugin_list: plugin_list::PluginList,
@@ -518,6 +540,8 @@ pub struct Shell {
     processed: Vec<processed_files::Pending>,
     /// Stem separation's download, separation, and dialog (IMP-11).
     stems: stems::StemsState,
+    /// The Export Audio/Video dialog and the export under way (WP-6.71).
+    export: export_dialog::ExportState,
     /// The autosampler at work (WP-5.16, IMP-27).
     autosample: Option<autosample::Job>,
     /// The autosampler's dialog, open for an instrument.
@@ -535,6 +559,11 @@ pub struct Shell {
     analysis_options: bl_analysis::cache::AnalysisOptions,
     /// The analysis cache, made when first used.
     analysis: Option<bl_analysis::cache::AnalysisCache>,
+    /// How the peaks of the files an export writes are kept (WP-6.71, R34):
+    /// in memory only until the app says otherwise.
+    peak_options: bl_media::PeakCacheOptions,
+    /// The peak cache for those files, made when first used.
+    peaks: Option<bl_media::PeakCache>,
     /// The files whose analysis has been started this session.
     analysed: std::collections::HashSet<bl_media::ContentHash>,
     /// The files opened in the external sample editor, and the content they
@@ -975,6 +1004,7 @@ impl Shell {
             media,
             processed: Vec::new(),
             stems: stems::StemsState::default(),
+            export: export_dialog::ExportState::default(),
             autosample: None,
             autosample_dialog: None,
             autosample_result_value: None,
@@ -982,6 +1012,8 @@ impl Shell {
             auditioning: None,
             analysis_options: bl_analysis::cache::AnalysisOptions::memory_only(),
             analysis: None,
+            peak_options: bl_media::PeakCacheOptions::memory_only(),
+            peaks: None,
             analysed: std::collections::HashSet::new(),
             editing: Vec::new(),
             registry,
@@ -1002,6 +1034,8 @@ impl Shell {
             user_keymap: crate::keymap::UserKeymap::default(),
             keymap_revision: 0,
             settings_open: false,
+            themes: vec![BUNDLED_THEME.to_owned()],
+            system_dark: true,
             prefs,
             config_dir,
             main_view: MainView::Arrangement,
@@ -1032,6 +1066,7 @@ impl Shell {
             arrangement: ArrangementView::new(),
             clip_view: ClipView::default(),
             file_manager: FileManager::default(),
+            search: crate::search::Field::default(),
             plugin_list: plugin_list::PluginList::default(),
             document_revision: 0,
             clipboard: None,
@@ -2053,7 +2088,16 @@ impl Shell {
                 use_tab_key_to_move_focus: self.tab_navigation(),
                 wrap_tab_navigation: self.wrap_navigation(),
             },
-            theme: self.prefs.theme,
+            theme_colors: ThemeColorsSettings {
+                look: self.prefs.look.clone(),
+                appearance: self.prefs.appearance,
+                drawn_appearance: if self.theme_dark() {
+                    Appearance::Dark
+                } else {
+                    Appearance::Light
+                },
+                themes: self.themes.clone(),
+            },
             audio: AudioPageSettings {
                 device: self.audio.settings().clone(),
                 tone: self.audio.tone(),
@@ -2089,10 +2133,55 @@ impl Shell {
         }
     }
 
-    /// The theme in use.
+    /// The Appearance chosen (themes R3).
     #[must_use]
-    pub fn theme(&self) -> ThemeChoice {
-        self.prefs.theme
+    pub fn appearance(&self) -> Appearance {
+        self.prefs.appearance
+    }
+
+    /// The theme, tone, high contrast and Customization chosen (themes R1).
+    #[must_use]
+    pub fn look(&self) -> &ThemeLook {
+        &self.prefs.look
+    }
+
+    /// Whether the dark colours are drawn now: Follow System resolved
+    /// (themes R3).
+    #[must_use]
+    pub fn theme_dark(&self) -> bool {
+        match self.prefs.appearance {
+            Appearance::Light => false,
+            Appearance::Dark => true,
+            Appearance::FollowSystem => self.system_dark,
+        }
+    }
+
+    /// Tells the shell the operating system's mode changed; the host calls
+    /// it at start and on winit's theme event (themes R3).
+    pub fn set_system_dark(&mut self, dark: bool) {
+        self.system_dark = dark;
+    }
+
+    /// The User Library's `Themes` folder, where theme files are read
+    /// from (themes R9), if the User Library is known.
+    #[must_use]
+    pub fn themes_folder(&self) -> Option<PathBuf> {
+        self.browser_view
+            .user_library()
+            .map(|library| library.join("Themes"))
+    }
+
+    /// The themes the Theme chooser offers, Beatlayer first.
+    #[must_use]
+    pub fn themes(&self) -> &[String] {
+        &self.themes
+    }
+
+    /// Replaces the list of themes the chooser offers (themes R2); the
+    /// host calls it after reading the theme files.
+    pub fn set_themes(&mut self, names: Vec<String>) {
+        self.themes = names;
+        self.touch();
     }
 
     /// Whether Tab moves the keyboard focus in the main window.
@@ -4175,6 +4264,9 @@ impl Shell {
             self.set_message(message, true);
         }
         let mut changed = polled.changed | self.poll_processed() | self.poll_stems();
+        // Spec: export R41. The export on its thread: its share moves the
+        // progress window, and its end lands in the Status Bar.
+        changed |= self.poll_export();
         // Spec: multisampler R73. The autosampler makes one sample at a
         // time, so the dialog sees its progress and Cancel stops it.
         self.poll_autosample();
@@ -5961,8 +6053,13 @@ impl Shell {
             // R3).
             ids::VIEW_ZOOM_IN => return self.zoom_percent() < ZOOM_MAX_PERCENT,
             ids::VIEW_ZOOM_OUT => return self.zoom_percent() > ZOOM_MIN_PERCENT,
-            // A person's Zoom setting always names a percentage in range.
-            ids::VIEW_SET_ZOOM => {
+            // A person's Zoom setting always names a percentage in range, as
+            // the Customization settings do (themes R7).
+            ids::VIEW_SET_ZOOM
+            | ids::SETTINGS_SET_GRID_LINE_INTENSITY
+            | ids::SETTINGS_SET_BRIGHTNESS
+            | ids::SETTINGS_SET_COLOR_INTENSITY
+            | ids::SETTINGS_SET_COLOR_HUE => {
                 return spec
                     .args
                     .as_ref()
@@ -5993,6 +6090,9 @@ impl Shell {
         }
         if stems_ids::handles(id) {
             return self.can_stems(id, args);
+        }
+        if export_ids::handles(id) {
+            return self.can_export(id);
         }
         if autosampler_ids::handles(id) {
             return self.can_autosampler(id, args);
@@ -6855,6 +6955,11 @@ impl Shell {
         let slot = self.selected_slot_clip();
         let shown = self.shown_clip();
         let result = self.run_command(id, args);
+        if self.search.open && !search_ids::handles(id) {
+            // Spec: command-palette R7, R10. The rows' availability and the
+            // outlines follow the set as it changes.
+            self.refresh_search();
+        }
         if result.is_ok() {
             self.follow_clip_selection(id, &arranged, slot);
             // Spec: scales R10. Selecting a clip makes its scale the
@@ -8008,40 +8113,17 @@ impl Shell {
             return self.run_slice(id, args);
         }
         if export_ids::handles(id) {
-            if id != export_ids::AUDIO {
+            return match id {
+                export_ids::AUDIO => self.run_export_audio(args),
                 // Spec: external-devices R23. The real-time render's
                 // dialog: its buttons set the session's flags.
-                return self.run_realtime(id, args);
-            }
-            // Spec: export R15. The set, its media, the Arrangement's time
-            // selection, and the engine's rate; the export changes none.
-            let engine_rate = self.engine_rate();
-            let args = Self::args(id, args)?;
-            // Spec: offline-plugin-renders R7. Export stops the song first,
-            // as Live does, and borrows the engine's plug-ins (R1).
-            if self.audio.transport_state().playing {
-                let _ = self.audio.send_transport(bl_engine::TransportCommand::Stop);
-            }
-            let media: Arc<dyn bl_engine::MediaLibrary> = self.media.clone();
-            // The plug-in hosts, without borrowing the whole shell: the
-            // export may render in real time, which needs the audio host.
-            let hosts = bl_plugin_host::Hosts {
-                clap: Some(&self.plugins),
-                vst3: Some(&self.vst3),
-                au: Some(&self.au),
+                export_ids::REALTIME_STATUS
+                | export_ids::REALTIME_RESTART
+                | export_ids::REALTIME_SKIP
+                | export_ids::REALTIME_CANCEL
+                | export_ids::REALTIME_AUTO_RESTART => self.run_realtime(id, args),
+                _ => self.run_export_dialog(id, args),
             };
-            return crate::export::run_command(
-                self.editor.document(),
-                media,
-                hosts,
-                self.arrangement.time_selection(),
-                self.arrangement.selected_tracks(),
-                engine_rate,
-                &args,
-                Some(&mut self.audio),
-                &self.realtime,
-            )
-            .map(|result| to_value(&result));
         }
         if midi_ids::handles(id) {
             return self.run_midi_files(id, args);
@@ -8058,6 +8140,10 @@ impl Shell {
             let result = self.run_file_manager(id, args);
             self.touch();
             return result;
+        }
+        if search_ids::handles(id) {
+            // Spec: command-palette R15, R16. The search field's commands.
+            return self.run_search(id, args);
         }
         if !ids::handles(id) {
             return Err(ShellError::UnknownCommand(id.to_owned()));
@@ -9231,7 +9317,65 @@ impl Shell {
             }
             ids::SETTINGS_SET_THEME => {
                 let ThemeArgs { theme } = Self::args(id, args)?;
-                self.prefs.theme = theme;
+                match theme.as_str() {
+                    // What earlier versions took (themes R12).
+                    "dark" => self.prefs.appearance = Appearance::Dark,
+                    "light" => self.prefs.appearance = Appearance::Light,
+                    name if self.themes.iter().any(|t| t == name) => {
+                        self.prefs.look.theme = theme;
+                    }
+                    _ => {
+                        return Err(ShellError::InvalidArgs {
+                            command: id.to_owned(),
+                            message: format!(
+                                "there is no theme `{theme}`; the themes are {}",
+                                self.themes.join(", ")
+                            ),
+                        });
+                    }
+                }
+                self.save_preferences();
+                Ok(Value::Null)
+            }
+            ids::SETTINGS_SET_APPEARANCE => {
+                let AppearanceArgs { appearance } = Self::args(id, args)?;
+                self.prefs.appearance = appearance;
+                self.save_preferences();
+                Ok(Value::Null)
+            }
+            ids::SETTINGS_SET_TONE => {
+                let ToneArgs { tone } = Self::args(id, args)?;
+                self.prefs.look.tone = tone;
+                self.save_preferences();
+                Ok(Value::Null)
+            }
+            ids::SETTINGS_SET_HIGH_CONTRAST => {
+                let SwitchArgs { on } = Self::args(id, args)?;
+                self.prefs.look.high_contrast = on;
+                self.save_preferences();
+                Ok(Value::Null)
+            }
+            ids::SETTINGS_SET_GRID_LINE_INTENSITY => {
+                let PercentArgs { percent } = Self::args(id, args)?;
+                self.prefs.look.grid_line_intensity = percent.clamp(0, 200);
+                self.save_preferences();
+                Ok(Value::Null)
+            }
+            ids::SETTINGS_SET_BRIGHTNESS => {
+                let BrightnessArgs { value } = Self::args(id, args)?;
+                self.prefs.look.brightness = value.clamp(-50, 50);
+                self.save_preferences();
+                Ok(Value::Null)
+            }
+            ids::SETTINGS_SET_COLOR_INTENSITY => {
+                let PercentArgs { percent } = Self::args(id, args)?;
+                self.prefs.look.color_intensity = percent.clamp(0, 200);
+                self.save_preferences();
+                Ok(Value::Null)
+            }
+            ids::SETTINGS_SET_COLOR_HUE => {
+                let HueArgs { degrees } = Self::args(id, args)?;
+                self.prefs.look.color_hue = degrees.clamp(-180, 180);
                 self.save_preferences();
                 Ok(Value::Null)
             }

@@ -693,6 +693,12 @@ impl BrowserUi {
         let rows = Self::side_rows(shell);
         let content = rows.len() as f32 * BROWSER_ROW;
         self.sidebar_scroll = scrolled(ui, area, self.sidebar_scroll, content);
+        // Spec: view-options R1. A middle-button drag pans the list, the
+        // content following the pointer.
+        if let Some(delta) = crate::middle::pan(ui, area) {
+            self.sidebar_scroll =
+                (self.sidebar_scroll - delta.y).clamp(0.0, (content - area.height()).max(0.0));
+        }
         let first = (self.sidebar_scroll / BROWSER_ROW).floor() as usize;
         let mut sidebar_ui = ui.new_child(egui::UiBuilder::new().max_rect(area));
         sidebar_ui.set_clip_rect(area);
@@ -934,6 +940,12 @@ impl BrowserUi {
             }
         }
         self.list_scroll = scrolled(ui, list, self.list_scroll, total as f32 * BROWSER_ROW);
+        // Spec: view-options R1. A middle-button drag pans the list, the
+        // content following the pointer.
+        if let Some(delta) = crate::middle::pan(ui, list) {
+            self.list_scroll = (self.list_scroll - delta.y)
+                .clamp(0.0, (total as f32 * BROWSER_ROW - list.height()).max(0.0));
+        }
         let first = (self.list_scroll / BROWSER_ROW).floor() as usize;
         let shown =
             ((list.height() / BROWSER_ROW).ceil() as usize + 1).min(total.saturating_sub(first));
@@ -1053,6 +1065,14 @@ impl BrowserUi {
             self.tag_scroll,
             visible.len() as f32 * BROWSER_ROW,
         );
+        // Spec: view-options R1. A middle-button drag pans the list, the
+        // content following the pointer.
+        if let Some(delta) = crate::middle::pan(ui, list) {
+            self.tag_scroll = (self.tag_scroll - delta.y).clamp(
+                0.0,
+                (visible.len() as f32 * BROWSER_ROW - list.height()).max(0.0),
+            );
+        }
         let first = (self.tag_scroll / BROWSER_ROW).floor() as usize;
         let shown = ((list.height() / BROWSER_ROW).ceil() as usize + 1)
             .min(visible.len().saturating_sub(first));
@@ -2625,8 +2645,7 @@ impl BrowserUi {
         }
         let view = shell.arrangement();
         let doc = shell.editor().document();
-        let pinned =
-            bl_shell::arrangement::rows::pinned_tracks(doc, view.show_return_tracks()).count();
+        let pinned = bl_shell::arrangement::rows::pinned_tracks(doc, view).count();
         let lanes = ArrangementLayout::compute(main_view, view.overview(), pinned).lanes;
         // Cmd (macOS) or Alt (Windows) ignores the grid (I-DRAG-021).
         let ignore_snap = if cfg!(target_os = "macos") {

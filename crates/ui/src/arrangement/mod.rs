@@ -443,8 +443,7 @@ impl ArrangementUi {
         let view = shell.arrangement();
         // The pinned rows: the return tracks and Main, with the returns
         // left out while they're hidden (arrangement-view R23).
-        let pinned: Vec<TrackId> =
-            bl_shell::arrangement::rows::pinned_tracks(doc, view.show_return_tracks()).collect();
+        let pinned: Vec<TrackId> = bl_shell::arrangement::rows::pinned_tracks(doc, view).collect();
         // With its mixer showing, the view splits (WP-1.9; L-ARR-018).
         let layout = if shell
             .mixer_view()
@@ -836,6 +835,11 @@ impl ArrangementUi {
                 }
                 _ => {}
             }
+        }
+        // Spec: view-options R1, arrangement-view R19. A middle-button drag
+        // pans the lanes, as Cmd-Option dragging does.
+        if let Some(delta) = crate::middle::pan(ui, lanes) {
+            invoke(events, ids::SCROLL, json!({ "x": -delta.x, "y": -delta.y }));
         }
         // Esc abandons a clip drag; egui ends the drag on it too.
         if self.drag == Some(Drag::Clips) && ui.input(|i| i.key_pressed(Key::Escape)) {
@@ -1611,7 +1615,7 @@ impl ArrangementUi {
             // A return's own letter, and Main's after the returns
             // (L-ARR-006), which keep their places while the return tracks
             // are hidden (R23).
-            let letter = if *id == doc.main_id() { returns } else { index } % 26;
+            let letter = doc.returns().position(|r| r == *id).unwrap_or(returns) % 26;
             headers::header(
                 ui,
                 theme,

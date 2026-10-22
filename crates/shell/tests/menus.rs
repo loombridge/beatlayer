@@ -90,7 +90,16 @@ fn every_shell_command_is_on_a_menu_or_a_control() {
         commands::SET_DISCARD_CHANGES,
         commands::SETTINGS_NEXT_PAGE,
         commands::SETTINGS_PREVIOUS_PAGE,
+        // The Theme & Colors page's Theme and Customization sections
+        // (themes R12).
         commands::SETTINGS_SET_THEME,
+        commands::SETTINGS_SET_APPEARANCE,
+        commands::SETTINGS_SET_TONE,
+        commands::SETTINGS_SET_HIGH_CONTRAST,
+        commands::SETTINGS_SET_GRID_LINE_INTENSITY,
+        commands::SETTINGS_SET_BRIGHTNESS,
+        commands::SETTINGS_SET_COLOR_INTENSITY,
+        commands::SETTINGS_SET_COLOR_HUE,
         // The Record, Warp & Launch page's switch (the audio clips spec,
         // R22).
         commands::SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES,
@@ -210,4 +219,26 @@ fn menu_items_enable_with_what_can_run_now() {
     assert!(shell.can_invoke("window.close", &json!({})));
     shell.set_focused_window(bl_shell::WindowKind::Main);
     assert!(!shell.can_invoke("window.close", &json!({})));
+}
+
+// Spec: export R16, R28.
+#[test]
+fn the_file_menus_export_item_opens_the_dialog() {
+    let mut shell = bl_shell::Shell::headless();
+    for platform in [MenuPlatform::Mac, MenuPlatform::Other] {
+        let item = menu_bar(platform)
+            .into_iter()
+            .flat_map(|menu| menu.walk().cloned().collect::<Vec<_>>())
+            .find(|item| item.row == "M-FILE-015")
+            .expect("M-FILE-015");
+        assert_eq!(item.label, "Export Audio/Video...");
+        assert_eq!(item.action, Action::Command("export.open_dialog"));
+    }
+    // Enabled in a new set, and it opens the dialog.
+    assert!(shell.can_invoke("export.open_dialog", &serde_json::json!({})));
+    assert!(shell.export_dialog().is_none());
+    shell
+        .invoke("export.open_dialog", serde_json::json!({}))
+        .unwrap();
+    assert!(shell.export_dialog().is_some());
 }

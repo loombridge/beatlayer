@@ -91,6 +91,9 @@ fn fixture() -> Project {
     );
     for command in [
         Command::SetLoopEnabled { enabled: true },
+        // Spec: automation-editing R8. Lock Envelopes is saved with the
+        // set, so the fixture has it on.
+        Command::SetLockEnvelopes { enabled: true },
         Command::SetPunchIn { enabled: true },
         Command::SetPunchOut { enabled: true },
         Command::SetMidiOverdub { enabled: true },
@@ -894,6 +897,7 @@ fn the_fixture_sets_a_non_default_value_of_every_saved_field() {
                 "crossfader",
                 "arrangement_loop",
                 "solo_in_place",
+                "lock_envelopes",
                 "metronome",
                 "punch_in",
                 "punch_out",

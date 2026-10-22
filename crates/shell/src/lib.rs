@@ -111,6 +111,9 @@ pub use bl_shell_spec::arrangement as arrangement_commands;
 /// The Audio Utilities panel's command IDs and their argument and result
 /// types (WP-4.10b).
 pub use bl_shell_spec::audio_panel as audio_panel_commands;
+/// The automation editing command IDs and their argument and result types
+/// (WP-6.25).
+pub use bl_shell_spec::automation as automation_commands;
 /// The autosampler's command IDs and its argument and result types
 /// (WP-5.16).
 pub use bl_shell_spec::autosampler as autosampler_commands;

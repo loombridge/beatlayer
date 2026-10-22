@@ -237,6 +237,9 @@ impl Shell {
                     data: FrozenTrack::default().audio_for(&region),
                     envelopes: Vec::new(),
                     launch: clip.launch,
+                    // Spec: scales R7. A bounced clip keeps its source's
+                    // scale.
+                    scale: clip.scale,
                 },
             ));
         }
@@ -300,6 +303,8 @@ impl Shell {
                 data: FrozenTrack::default().audio_for(&region),
                 envelopes: Vec::new(),
                 launch: clip.launch,
+                // Spec: scales R7. A bounced clip keeps its source's scale.
+                scale: clip.scale,
             });
         }
         Ok(lane)
@@ -347,6 +352,9 @@ impl Shell {
             data: ClipData::Audio(audio),
             envelopes: Vec::new(),
             launch: Default::default(),
+            // Spec: scales R7. A clip made from nothing takes the set's
+            // current scale.
+            scale: doc.settings().scale,
         };
         Ok(BouncedTrack {
             name: bounced_name(name),
@@ -658,6 +666,9 @@ impl Shell {
                         data: FrozenTrack::default().audio_for(&region),
                         envelopes: Vec::new(),
                         launch: clip.launch,
+                        // Spec: scales R7. A bounced clip keeps its source's
+                        // scale.
+                        scale: clip.scale,
                     },
                 ));
             }
@@ -752,6 +763,9 @@ impl Shell {
                     data: FrozenTrack::default().audio_for(&region),
                     envelopes: Vec::new(),
                     launch: Default::default(),
+                    // Spec: scales R7. A clip made from nothing takes the
+                    // set's current scale.
+                    scale: self.editor.document().settings().scale,
                 },
             ));
         }

@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-597 commands in 40 areas.
+600 commands in 40 areas.
 
 ## Permission classes
 
@@ -211,6 +211,7 @@ Each command has:
 | [`clip.set_pitch`](#clipset_pitch) | Set Clip Pitch | `edit` |  |  |
 | [`clip.set_ram_mode`](#clipset_ram_mode) | Set Clip RAM Mode | `edit` |  |  |
 | [`clip.set_region`](#clipset_region) | Set Clip Start and End | `edit` |  |  |
+| [`clip.set_scale`](#clipset_scale) | Set Clip Scale | `edit` |  |  |
 | [`clip.set_segment_bpm`](#clipset_segment_bpm) | Set Warp Segment BPM | `edit` |  |  |
 | [`clip.set_tempo_leader`](#clipset_tempo_leader) | Switch Lead/Follow | `edit` |  |  |
 | [`clip.set_velocity_amount`](#clipset_velocity_amount) | Set Clip Velocity Amount | `edit` |  |  |
@@ -555,6 +556,8 @@ Each command has:
 | [`song.delete_time_signature_change`](#songdelete_time_signature_change) | Delete Time Signature Change | `edit` |  |  |
 | [`song.move_tempo_breakpoint`](#songmove_tempo_breakpoint) | Move Tempo Breakpoint | `edit` |  |  |
 | [`song.move_time_signature_change`](#songmove_time_signature_change) | Move Time Signature Change | `edit` |  |  |
+| [`song.scales`](#songscales) | Scale List | `read` |  |  |
+| [`song.set_scale`](#songset_scale) | Set Scale | `edit` |  |  |
 | [`song.set_tempo`](#songset_tempo) | Set Tempo | `edit` |  |  |
 | [`song.set_tempo_breakpoint`](#songset_tempo_breakpoint) | Set Tempo Breakpoint | `edit` |  |  |
 | [`song.set_time_signature_change`](#songset_time_signature_change) | Set Time Signature Change | `edit` |  |  |
@@ -3893,6 +3896,25 @@ Arguments:
 | `start` | number | yes | The Start marker, in seconds into the file: 0 or more. While the loop is on, it must be before the loop brace's end. A warped clip's is whole ticks of its contents (`ticks` true). |
 | `end` | number or null | no | The End marker, in seconds into the file, after `start`; `null` (or nothing) for the end of the file. |
 | `ticks` | boolean | no | Whether `start` and `end` are ticks of a warped clip's contents instead of seconds in the file of an unwarped one: they must be the form the clip shows. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `clip.set_scale`
+
+**Set Clip Scale**. Permission: `edit`. Contexts: `global`, `clip-view`.
+
+Sets a clip's scale: whether its Scale Mode is on (`enabled`), its root note (`root`, 0 is C and 11 is B) and its scale (`name`, one of the names `song.scales` reads). It leaves the values it isn't given as they were, and it is one undo step, named "Change Clip Scale", however many clips it sets. A scale the list doesn't hold, or a root outside C to B, is refused and nothing changes. A clip's scale never changes what it plays: it tells the rest of the set which keys belong.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clips` | array of [`ClipId`](#clipid) | yes | The clips. |
+| `enabled` | boolean or null | no | Whether the clips' Scale Mode is on. |
+| `name` | string or null | no | The scale's name, from the scale list. |
+| `root` | integer or null | no | The root note: 0 (C) to 11 (B). |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -9921,6 +9943,36 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `song.scales`
+
+**Scale List**. Permission: `read`. Contexts: `global`.
+
+Reports the scale list: every scale a set can use, in the order the Scale Name chooser shows them, with each scale's steps above the root in semitones. The names are the ones `clip.set_scale` and `song.set_scale` take. Changes nothing. Use it to read the scales a set has before setting one.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`ScaleList`](#scalelist).
+
+#### `song.set_scale`
+
+**Set Scale**. Permission: `edit`. Contexts: `global`.
+
+Sets the set's current scale: whether its Scale Mode is on (`enabled`), its root note (`root`, 0 is C and 11 is B) and its scale (`name`, one of the names `song.scales` reads). It leaves the values it isn't given as they were. The current scale is what the Control Bar's scale controls show, what the clips made next take, and what a device or a tool reads where no clip plays. It is one undo step, named "Change Scale", and the set is saved with it.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `enabled` | boolean or null | no | Whether the set's Scale Mode is on. |
+| `name` | string or null | no | The scale's name, from the scale list. |
+| `root` | integer or null | no | The root note: 0 (C) to 11 (B). |
+
+Result: [`ChangeSet`](#changeset).
+
 #### `song.set_tempo`
 
 **Set Tempo**. Permission: `edit`. Contexts: `global`.
@@ -11231,6 +11283,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`clip.set_pitch`](#clipset_pitch) | the query tool's `clip` | `data.audio` |
 | [`clip.set_ram_mode`](#clipset_ram_mode) | the query tool's `clip` | `data.audio.ram` |
 | [`clip.set_region`](#clipset_region) | the query tool's `clip` | `data.audio.start` |
+| [`clip.set_scale`](#clipset_scale) | the query tool's `clip` | `scale` |
 | [`clip.set_segment_bpm`](#clipset_segment_bpm) | the query tool's `clip` | `data.audio.warp_markers` |
 | [`clip.set_tempo_leader`](#clipset_tempo_leader) | the query tool's `clip` | `data.audio.tempo_leader` |
 | [`clip.set_velocity_amount`](#clipset_velocity_amount) | the query tool's `clip` | `launch.velocity_amount` |
@@ -11460,6 +11513,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`song.delete_time_signature_change`](#songdelete_time_signature_change) | the query tool's `song` | `settings.time_signatures` |
 | [`song.move_tempo_breakpoint`](#songmove_tempo_breakpoint) | the query tool's `song` | `settings.tempo` |
 | [`song.move_time_signature_change`](#songmove_time_signature_change) | the query tool's `song` | `settings.time_signatures` |
+| [`song.set_scale`](#songset_scale) | the query tool's `song` | `scale` |
 | [`song.set_tempo`](#songset_tempo) | the query tool's `song` | `settings.tempo` |
 | [`song.set_tempo_breakpoint`](#songset_tempo_breakpoint) | the query tool's `song` | `settings.tempo` |
 | [`song.set_time_signature_change`](#songset_time_signature_change) | the query tool's `song` | `settings.time_signatures` |
@@ -15224,6 +15278,7 @@ A clip on a track's arrangement lane.
 | `envelopes` | array of [`ClipEnvelope`](#clipenvelope) | no | The clip's envelopes (WP-3.15): one per parameter of its track it modulates, in target order. Empty for a clip with none, which is what a set saved before this package holds. |
 | `launch` | [`ClipLaunch`](#cliplaunch) | no | The clip's launch settings (WP-3.4), which only a Session clip's launching reads. The defaults for a clip saved without them. |
 | `offset` | [`Ticks`](#ticks) | no | How far into its contents a MIDI clip starts: its notes are placed from `start - offset`, and the part before the clip's start doesn't play. 0 (or left out) plays the contents from their beginning. Never negative. Splitting a MIDI clip or trimming its left edge changes it, so each part plays what it played before. An audio clip's is always 0: its Start marker moves instead, as Live's does. |
+| `scale` | [`Scale`](#scale) | no | The clip's scale (WP-6.7): its Scale Mode switch, its root and its scale name. It never changes what the clip plays; it tells the rest of the set which keys belong. A clip off at C, in Major, writes nothing, so a set saved before the scales loads unchanged. |
 
 <details><summary>JSON Schema</summary>
 
@@ -15265,6 +15320,10 @@ A clip on a track's arrangement lane.
     "offset": {
       "$ref": "#/$defs/Ticks",
       "description": "How far into its contents a MIDI clip starts: its notes are placed from `start - offset`, and the part before the clip's start doesn't play. 0 (or left out) plays the contents from their beginning. Never negative. Splitting a MIDI clip or trimming its left edge changes it, so each part plays what it played before. An audio clip's is always 0: its Start marker moves instead, as Live's does."
+    },
+    "scale": {
+      "$ref": "#/$defs/Scale",
+      "description": "The clip's scale (WP-6.7): its Scale Mode switch, its root and its scale name. It never changes what the clip plays; it tells the rest of the set which keys belong. A clip off at C, in Major, writes nothing, so a set saved before the scales loads unchanged."
     },
     "start": {
       "$ref": "#/$defs/Ticks",
@@ -29150,6 +29209,235 @@ What `clip.save_default` and `clip.defaults` return.
     "defaults"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `Scale`
+
+A scale: whether Scale Mode is on (`enabled`), the root note (0 is C, 11 is B), and the scale's `name`, from the scale list. A scale with `enabled` false is the chromatic scale, whose degree is a semitone.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `enabled` | boolean | yes | Whether Scale Mode is on: the scale's keys are the ones the rest of the set reads. |
+| `root` | integer from 0 to 255 | yes | The root note: 0 (C) to 11 (B). |
+| `name` | [`ScaleName`](#scalename) | yes | The scale's name, from the scale list. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A scale: whether Scale Mode is on (`enabled`), the root note (0 is C, 11 is B), and the scale's `name`, from the scale list. A scale with `enabled` false is the chromatic scale, whose degree is a semitone.",
+  "properties": {
+    "enabled": {
+      "description": "Whether Scale Mode is on: the scale's keys are the ones the rest of the set reads.",
+      "type": "boolean"
+    },
+    "name": {
+      "$ref": "#/$defs/ScaleName",
+      "description": "The scale's name, from the scale list."
+    },
+    "root": {
+      "description": "The root note: 0 (C) to 11 (B).",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "enabled",
+    "root",
+    "name"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ScaleEntry`
+
+One scale in the list.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | The scale's name, as the Scale Name chooser shows it. |
+| `steps` | array of integer from 0 to 255 | yes | The scale's steps above the root, in semitones: the notes it holds in every octave. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One scale in the list.",
+  "properties": {
+    "name": {
+      "description": "The scale's name, as the Scale Name chooser shows it.",
+      "type": "string"
+    },
+    "steps": {
+      "description": "The scale's steps above the root, in semitones: the notes it holds in every octave.",
+      "items": {
+        "format": "uint8",
+        "maximum": 255,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "name",
+    "steps"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ScaleList`
+
+What `song.scales` returns: the scale list, in the order the Scale Name chooser shows it.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `scales` | array of [`ScaleEntry`](#scaleentry) | yes | The scales, in the list's order. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `song.scales` returns: the scale list, in the order the Scale Name chooser shows it.",
+  "properties": {
+    "scales": {
+      "description": "The scales, in the list's order.",
+      "items": {
+        "$ref": "#/$defs/ScaleEntry"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "scales"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ScaleName`
+
+The names of the scales in the scale list, in the order the chooser shows them (the scales spec, R1).
+
+One of:
+
+- `"major"`: The major scale.
+- `"minor"`: The natural minor scale.
+- `"dorian"`: The Dorian mode.
+- `"mixolydian"`: The Mixolydian mode.
+- `"lydian"`: The Lydian mode.
+- `"phrygian"`: The Phrygian mode.
+- `"locrian"`: The Locrian mode.
+- `"harmonic_minor"`: The harmonic minor scale.
+- `"melodic_minor"`: The melodic minor scale.
+- `"harmonic_major"`: The harmonic major scale.
+- `"major_pentatonic"`: The major pentatonic scale.
+- `"minor_pentatonic"`: The minor pentatonic scale.
+- `"minor_blues"`: The minor blues scale.
+- `"whole_tone"`: The whole tone scale.
+- `"whole_half_diminished"`: The whole-half diminished scale.
+- `"half_whole_diminished"`: The half-whole diminished scale.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The names of the scales in the scale list, in the order the chooser shows them (the scales spec, R1).",
+  "oneOf": [
+    {
+      "const": "major",
+      "description": "The major scale.",
+      "type": "string"
+    },
+    {
+      "const": "minor",
+      "description": "The natural minor scale.",
+      "type": "string"
+    },
+    {
+      "const": "dorian",
+      "description": "The Dorian mode.",
+      "type": "string"
+    },
+    {
+      "const": "mixolydian",
+      "description": "The Mixolydian mode.",
+      "type": "string"
+    },
+    {
+      "const": "lydian",
+      "description": "The Lydian mode.",
+      "type": "string"
+    },
+    {
+      "const": "phrygian",
+      "description": "The Phrygian mode.",
+      "type": "string"
+    },
+    {
+      "const": "locrian",
+      "description": "The Locrian mode.",
+      "type": "string"
+    },
+    {
+      "const": "harmonic_minor",
+      "description": "The harmonic minor scale.",
+      "type": "string"
+    },
+    {
+      "const": "melodic_minor",
+      "description": "The melodic minor scale.",
+      "type": "string"
+    },
+    {
+      "const": "harmonic_major",
+      "description": "The harmonic major scale.",
+      "type": "string"
+    },
+    {
+      "const": "major_pentatonic",
+      "description": "The major pentatonic scale.",
+      "type": "string"
+    },
+    {
+      "const": "minor_pentatonic",
+      "description": "The minor pentatonic scale.",
+      "type": "string"
+    },
+    {
+      "const": "minor_blues",
+      "description": "The minor blues scale.",
+      "type": "string"
+    },
+    {
+      "const": "whole_tone",
+      "description": "The whole tone scale.",
+      "type": "string"
+    },
+    {
+      "const": "whole_half_diminished",
+      "description": "The whole-half diminished scale.",
+      "type": "string"
+    },
+    {
+      "const": "half_whole_diminished",
+      "description": "The half-whole diminished scale.",
+      "type": "string"
+    }
+  ]
 }
 ```
 

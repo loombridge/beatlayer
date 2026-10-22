@@ -555,3 +555,105 @@ pub fn place(
         length,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use bl_core::id::Id;
+    use bl_model::{MixerParam, ParamId};
+
+    use super::*;
+
+    fn id(n: u64) -> Id {
+        Id::new(n).unwrap()
+    }
+
+    // Spec: clip files R9. An envelope follows its device or chain when that
+    // came with the clip, a mixer control and a MIDI controller stay, and
+    // the rest are left out.
+    #[test]
+    fn envelopes_follow_the_devices_that_came_and_drop_the_rest() {
+        use AutomationTarget as T;
+        let devices = BTreeMap::from([(DeviceId(id(1)), DeviceId(id(11)))]);
+        let chains = BTreeMap::from([
+            (ChainId(id(2)), ChainId(id(12))),
+            (ChainId(id(3)), ChainId(id(13))),
+        ]);
+        let param = ParamId(4);
+        let mixer = T::Mixer {
+            param: MixerParam::Volume,
+        };
+        assert_eq!(retarget(mixer, &devices, &chains), Some(mixer));
+        assert_eq!(
+            retarget(T::MidiCc { number: 7 }, &devices, &chains),
+            Some(T::MidiCc { number: 7 })
+        );
+        assert_eq!(
+            retarget(
+                T::Device {
+                    device: DeviceId(id(1)),
+                    param
+                },
+                &devices,
+                &chains
+            ),
+            Some(T::Device {
+                device: DeviceId(id(11)),
+                param
+            })
+        );
+        assert_eq!(
+            retarget(
+                T::Device {
+                    device: DeviceId(id(9)),
+                    param
+                },
+                &devices,
+                &chains
+            ),
+            None
+        );
+        assert_eq!(
+            retarget(
+                T::Chain {
+                    chain: ChainId(id(2)),
+                    param: MixerParam::Pan
+                },
+                &devices,
+                &chains
+            ),
+            Some(T::Chain {
+                chain: ChainId(id(12)),
+                param: MixerParam::Pan
+            })
+        );
+        assert_eq!(
+            retarget(
+                T::ChainSend {
+                    chain: ChainId(id(2)),
+                    to: ChainId(id(3))
+                },
+                &devices,
+                &chains
+            ),
+            Some(T::ChainSend {
+                chain: ChainId(id(12)),
+                to: ChainId(id(13))
+            })
+        );
+        assert_eq!(
+            retarget(
+                T::ChainSend {
+                    chain: ChainId(id(2)),
+                    to: ChainId(id(9))
+                },
+                &devices,
+                &chains
+            ),
+            None
+        );
+        assert_eq!(
+            retarget(T::Send { to: TrackId(id(5)) }, &devices, &chains),
+            None
+        );
+    }
+}

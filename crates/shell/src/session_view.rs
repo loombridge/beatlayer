@@ -933,24 +933,19 @@ impl SessionView {
         ctx.editor
             .transact(clip_files::UNDO_LABEL, |editor| {
                 let mut previous = None;
-                let mut made = 0;
                 for ((target, scene), file) in plan.iter().zip(&loaded) {
                     let lane = match target {
                         Target::Existing(track) => Lane::Track(*track),
                         Target::Same => Lane::Track(previous.expect("a file came before")),
-                        Target::New => {
-                            made += 1;
-                            Lane::New {
-                                parent: None,
-                                index: editor.document().top_level().len(),
-                            }
-                        }
+                        Target::New => Lane::New {
+                            parent: None,
+                            index: editor.document().top_level().len(),
+                        },
                     };
                     previous = Some(
                         clip_files::place(editor, file, lane, Spot::Slot(*scene), &nothing)?.track,
                     );
                 }
-                let _ = made;
                 Ok::<_, bl_model::EditError>(())
             })
             .map_err(|e| SessionViewError::Failed(e.to_string()))?;

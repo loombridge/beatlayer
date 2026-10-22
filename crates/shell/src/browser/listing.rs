@@ -63,6 +63,8 @@ pub struct Entry {
     pub name: String,
     /// What it is.
     pub kind: ItemKind,
+    /// For a clip file, what it holds, read when the folder was listed.
+    pub clip: Option<bl_shell_spec::browser::ClipFileKind>,
 }
 
 /// Compares names as the browser orders them: ignoring case, with runs of
@@ -143,7 +145,13 @@ pub fn list(folder: &Path) -> io::Result<Vec<Entry>> {
             file_kind(&name)
         };
         if let Some(kind) = kind {
-            entries.push(Entry { path, name, kind });
+            let clip = (kind == ItemKind::Clip).then(|| clip_kind(&path)).flatten();
+            entries.push(Entry {
+                path,
+                name,
+                kind,
+                clip,
+            });
         }
     }
     entries.sort_by(browser_order);

@@ -330,13 +330,6 @@ pub fn unused_path(folder: &Path, name: &str) -> PathBuf {
     path
 }
 
-/// Whether a path names a clip file, by its extension.
-#[must_use]
-pub fn is_clip_file(path: &Path) -> bool {
-    path.extension()
-        .is_some_and(|e| e.eq_ignore_ascii_case(CLIP_EXTENSION))
-}
-
 #[cfg(test)]
 mod tests {
     use bl_core::id::Id;
@@ -548,7 +541,6 @@ mod tests {
         );
         fs::write(dir.join("Other.blclip"), b"not a clip").unwrap();
         assert_eq!(peek_kind(&dir.join("Other.blclip")), None);
-        assert!(is_clip_file(&path));
         fs::remove_dir_all(&dir).ok();
     }
 }

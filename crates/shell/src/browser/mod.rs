@@ -1377,7 +1377,7 @@ impl BrowserView {
                 open,
                 folder: None,
                 format: None,
-                clip_kind: clip_kind_of(entry.kind, &entry.path),
+                clip_kind: entry.clip,
             });
             if open {
                 self.list_into(&entry.path, depth.saturating_add(1), out);
@@ -2077,12 +2077,19 @@ impl BrowserView {
     /// Renames the file at `path` to `name`, keeping its extension; returns
     /// its new path.
     fn renamed(&self, path: &Path, name: &str) -> Result<PathBuf, BrowserError> {
-        let name = bl_project::preset::file_safe(name);
-        let mut new = path.with_file_name(&name);
-        if let Some(extension) = path.extension() {
-            new.set_extension("");
-            new = path.with_file_name(format!("{name}.{}", extension.to_string_lossy()));
+        if !path.is_file() {
+            return Err(BrowserError::InvalidArgs(format!(
+                "{} isn't a file",
+                path.to_string_lossy()
+            )));
         }
+        let name = bl_project::preset::file_safe(name);
+        let new = match path.extension() {
+            Some(extension) => {
+                path.with_file_name(format!("{name}.{}", extension.to_string_lossy()))
+            }
+            None => path.with_file_name(&name),
+        };
         if new == path {
             return Ok(new);
         }

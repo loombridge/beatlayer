@@ -1166,7 +1166,23 @@ fn the_view_menu_and_keys_show_and_hide_the_mixer_and_its_sections() {
             && track_options.chord.is_none()
     );
     assert!(menu_item(&h, "M-VIEW-033c").enabled);
-    assert!(!menu_item(&h, "M-VIEW-033a").enabled, "it waits");
+    // The Arrangement's own track controls (WP-6.64): In/Out, Volume, and
+    // Return Tracks, each ticked in a new set and with no key.
+    for (row, id) in [
+        ("M-VIEW-033a", "arrangement.show_in_out"),
+        ("M-VIEW-033b", "arrangement.show_volume"),
+        ("M-VIEW-033d", "arrangement.show_return_tracks"),
+    ] {
+        let item = menu_item(&h, row);
+        assert!(item.enabled, "{row}");
+        assert_eq!(item.checked, Some(true), "{row}");
+        assert!(item.chord.is_none(), "{row} has no key");
+        assert_eq!(
+            item.invocation.as_ref().map(|i| i.id.as_str()),
+            Some(id),
+            "{row}"
+        );
+    }
     // Performance Impact is built now (WP-5.38), unticked in a new set
     // (observed: hidden by default).
     let impact = menu_item(&h, "M-VIEW-032f");

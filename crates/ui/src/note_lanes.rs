@@ -734,6 +734,13 @@ impl LaneUi {
         let modifiers = ui.input(|i| i.modifiers);
         let draw_mode = shell.clip_view().draw_mode();
         let active = shell.clip_view().lane();
+        // A lane hidden since its marker was clicked gives the keyboard back.
+        if self
+            .focus
+            .is_some_and(|focus| !frame.layout.lanes.iter().any(|(field, _)| *field == focus))
+        {
+            self.focus = None;
+        }
         // A lane dragged to nothing hides when the drag ends, though the
         // divider that was dragged has gone with the lane's height.
         if self.divider && !ui.input(|i| i.pointer.any_down()) {
@@ -1462,24 +1469,33 @@ impl LaneUi {
             let (low, high) = control_range(control, lane);
             let unit = unit(field);
             let value = (drag.base + steps(&response) * unit).clamp(low, high);
+            // Until the value first moves, nothing runs: a press on the
+            // amount that doesn't change it randomises nothing (R13).
+            let moved = value != drag.base || drag.last != drag.base;
             drag.last = value;
             let drag = drag.clone();
-            if let Some((id, args)) = footer_command(frame, lane, &drag, value) {
-                gesture(events, GesturePhase::Update, id, args);
-            } else if control == Control::Amount {
-                invoke(
-                    events,
-                    VIEW_LANES,
-                    json!({ "lane": lane, "amount": amount_of(lane, value) }),
-                );
+            if moved {
+                if let Some((id, args)) = footer_command(frame, lane, &drag, value) {
+                    gesture(events, GesturePhase::Update, id, args);
+                } else if control == Control::Amount {
+                    invoke(
+                        events,
+                        VIEW_LANES,
+                        json!({ "lane": lane, "amount": amount_of(lane, value) }),
+                    );
+                }
             }
         }
         if response.drag_stopped()
             && let Some(drag) = self.footer_drag.take_if(|drag| drag.control == control)
         {
-            let last = footer_command(frame, lane, &drag, drag.last)
+            // A drag back to where it began leaves its last frame, which
+            // ran there already.
+            let last = (drag.last != drag.base)
+                .then(|| footer_command(frame, lane, &drag, drag.last))
+                .flatten()
                 .map(|(id, args)| Invocation::new(id, args));
-            if last.is_some() {
+            if last.is_some() || drag.notes {
                 events.push(UiEvent::Gesture {
                     phase: GesturePhase::Commit,
                     invocation: last,

@@ -51,6 +51,8 @@ insert_marker = "#79c0ff"
 # The loop brace while the loop is on, and while it's off.
 loop_on = "#35c2b0"
 loop_off = "#59626d"
+# The locator that holds the song start time.
+song_start = "#e0a458"
 # The time selection, drawn translucent over the lanes.
 time_selection = "#9fc8ff"
 # A clip's name, over its colour, and its waveform.

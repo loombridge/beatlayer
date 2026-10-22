@@ -872,7 +872,6 @@ impl Host {
         }
     }
 
-    /// Every open window's surface.
     /// Makes the theme again if the Theme & Colors settings or the system's
     /// mode changed since it was made. Returns whether it did.
     fn sync_theme(&mut self) -> bool {
@@ -885,6 +884,7 @@ impl Host {
         true
     }
 
+    /// Every open window's surface.
     fn surfaces(&self) -> impl Iterator<Item = &Surface> {
         [&self.main, &self.settings, &self.assistant]
             .into_iter()
@@ -1476,7 +1476,8 @@ impl Host {
             | Effect::RenameChain(_)
             | Effect::RenameMacro(_, _)
             | Effect::RenameVariation(_, _)
-            | Effect::RenameTrack(_) => {
+            | Effect::RenameTrack(_)
+            | Effect::RenameLocator(_) => {
                 if let Some(main) = &self.main {
                     self.main_ui.apply_effect(&main.ctx, &effect);
                     main.window.request_redraw();

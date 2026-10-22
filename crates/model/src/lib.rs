@@ -78,6 +78,7 @@ pub mod graph;
 mod ids;
 mod launch;
 mod layers;
+mod locator;
 mod metronome;
 pub mod modulation;
 pub mod modulator;
@@ -133,7 +134,8 @@ pub use follow::{
 };
 pub use freeze::{FrozenClip, FrozenOutput, FrozenTail, FrozenTrack};
 pub use ids::{
-    ChainId, ClipId, ContentHash, DeviceId, ParamId, ParseContentHashError, SceneId, TrackId,
+    ChainId, ClipId, ContentHash, DeviceId, LocatorId, ParamId, ParseContentHashError, SceneId,
+    TrackId,
 };
 /// The persistent collections the document's public types hold.
 pub use imbl::{OrdMap, Vector};
@@ -143,6 +145,7 @@ pub use layers::{
     LayerSettings, LayerSort, LayerZone, Layers, MultisamplerView, MultisamplerViews, ReleaseMode,
     SamplerTab, SustainMode, Zone, ZoneKind, snap_to_zero_crossing,
 };
+pub use locator::{Locator, SongStart};
 pub use metronome::{CountIn, MetronomeRhythm, MetronomeSettings, MetronomeSound};
 pub use param::{DeviceDescription, ParamDescriptor, ParamKind, ParamUnit};
 pub use rack::{

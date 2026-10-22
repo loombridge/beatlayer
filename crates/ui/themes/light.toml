@@ -32,6 +32,8 @@ playhead = "#1c2026"
 insert_marker = "#1f6feb"
 loop_on = "#11877a"
 loop_off = "#9aa3ad"
+# The locator that holds the song start time.
+song_start = "#9a6b12"
 time_selection = "#1f6feb"
 clip_text = "#14181d"
 waveform = "#1c2026"

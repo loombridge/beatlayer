@@ -189,6 +189,41 @@ impl LaunchQuantization {
         }
     }
 
+    /// The tick of the grid line nearest `from`: where a locator set while
+    /// the song plays lands (the time editing spec, R3). Bars are counted
+    /// from the start of the arrangement, so the "1 Bar" grid has a line at
+    /// 1.1.1 and at every bar after it. With no quantisation, `from` itself.
+    #[must_use]
+    pub fn nearest_line(self, from: Ticks, signatures: &TimeSignatureMap) -> Ticks {
+        let from = from.max(Ticks::ZERO);
+        if let Some(bars) = self.bars() {
+            // The lines are every `bars` bars from the start of the
+            // arrangement. The nearest one is the closer of the line before
+            // the position and the line after it.
+            let (index, into_bar) = signatures.bar_at(from);
+            let bar = signatures.signature_at(from).bar_length();
+            let since = index.rem_euclid(bars);
+            let before = bar * since + into_bar;
+            let after = bar * (bars - since) - into_bar;
+            let line = if before <= after {
+                index - since
+            } else {
+                index + (bars - since)
+            };
+            return signatures.bar_start(line);
+        }
+        let bar = signatures.signature_at(from).bar_length();
+        let Some(unit) = self.ticks(bar) else {
+            return from;
+        };
+        let into = from.rem_euclid(unit);
+        if into * 2 <= unit {
+            from - into
+        } else {
+            from + (unit - into)
+        }
+    }
+
     /// This step's place in the menu.
     fn position(self) -> usize {
         Self::ALL
@@ -383,6 +418,52 @@ mod tests {
             LaunchQuantization::None.next_line(at, &sigs),
             at,
             "no quantisation takes effect at once"
+        );
+    }
+
+    #[test]
+    fn the_nearest_line_is_the_closest_one() {
+        // Spec: time-editing R3. A locator set while the song plays lands
+        // on the line of the global launch quantisation nearest the
+        // playhead.
+        let sigs = four_four();
+        let bar = Ticks::WHOLE;
+        assert_eq!(
+            LaunchQuantization::Bar.nearest_line(Ticks::ZERO, &sigs),
+            Ticks::ZERO,
+            "1.1.1 is on a line"
+        );
+        assert_eq!(
+            LaunchQuantization::Bar.nearest_line(bar + Ticks::QUARTER, &sigs),
+            bar,
+            "2.2.1 is nearer 2.1.1 than 3.1.1"
+        );
+        assert_eq!(
+            LaunchQuantization::Bar.nearest_line(bar + Ticks::QUARTER * 3, &sigs),
+            bar * 2,
+            "2.4.1 is nearer 3.1.1 than 2.1.1"
+        );
+        assert_eq!(
+            LaunchQuantization::Quarter.nearest_line(bar + Ticks::QUARTER * 2, &sigs),
+            bar + Ticks::QUARTER * 2,
+            "a quarter-note grid has a line on every quarter"
+        );
+        assert_eq!(
+            LaunchQuantization::Quarter
+                .nearest_line(bar + Ticks::QUARTER * 3 - Ticks::SIXTEENTH, &sigs),
+            bar + Ticks::QUARTER * 3,
+            "2.3.4 is nearer the next quarter than the last"
+        );
+        assert_eq!(
+            LaunchQuantization::Sixteenth
+                .nearest_line(bar + Ticks::QUARTER * 2 + Ticks::SIXTEENTH, &sigs),
+            bar + Ticks::QUARTER * 2 + Ticks::SIXTEENTH,
+            "a sixteenth-note grid has a line on every sixteenth"
+        );
+        assert_eq!(
+            LaunchQuantization::None.nearest_line(bar + Ticks::QUARTER, &sigs),
+            bar + Ticks::QUARTER,
+            "no quantisation lands on the playhead"
         );
     }
 

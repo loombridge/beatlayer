@@ -2,7 +2,7 @@
 # policy). Every colour the UI draws comes from a token here; light.toml has
 # the same tokens. Colours are #RRGGBB.
 
-name = "Dark"
+name = "Beatlayer"
 dark = true
 
 [colors]

@@ -112,7 +112,7 @@ impl Harness {
         let ctx = Context::default();
         ctx.set_fonts(fonts());
         ctx.enable_accesskit();
-        let theme = Theme::builtin(shell.theme());
+        let theme = Theme::of(&shell);
         theme.apply(&ctx);
         let zoom = shell.zoom();
         apply_zoom(&ctx, zoom);

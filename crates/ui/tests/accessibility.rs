@@ -1015,6 +1015,12 @@ enum Reason {
 
 fn nothing(_: &mut Harness) {}
 
+/// A second theme for the Theme chooser to step to (themes R2).
+fn a_second_theme(h: &mut Harness) {
+    h.shell
+        .set_themes(vec!["Beatlayer".to_owned(), "Other".to_owned()]);
+}
+
 /// The Shortcuts page, narrowed to Duplicate Track Without Clips, with a
 /// key of the person's own on it (the custom shortcuts spec, R8).
 fn a_bound_shortcut(h: &mut Harness) {
@@ -2017,7 +2023,35 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ),
         (
             "settings.set_theme",
-            settings("theme-colors", nothing, "Theme", Key::ArrowDown),
+            settings("theme-colors", a_second_theme, "Theme", Key::ArrowDown),
+        ),
+        (
+            "settings.set_appearance",
+            settings("theme-colors", nothing, "Appearance", Key::ArrowDown),
+        ),
+        (
+            "settings.set_tone",
+            settings("theme-colors", nothing, "Tone", Key::ArrowDown),
+        ),
+        (
+            "settings.set_high_contrast",
+            settings("theme-colors", nothing, "High Contrast", Key::Enter),
+        ),
+        (
+            "settings.set_grid_line_intensity",
+            settings("theme-colors", nothing, "Grid Line Intensity", Key::ArrowUp),
+        ),
+        (
+            "settings.set_brightness",
+            settings("theme-colors", nothing, "Brightness", Key::ArrowUp),
+        ),
+        (
+            "settings.set_color_intensity",
+            settings("theme-colors", nothing, "Color Intensity", Key::ArrowUp),
+        ),
+        (
+            "settings.set_color_hue",
+            settings("theme-colors", nothing, "Color Hue", Key::ArrowUp),
         ),
         (
             "settings.set_create_fades_on_clip_edges",

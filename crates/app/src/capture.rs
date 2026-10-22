@@ -333,7 +333,7 @@ mod tests {
     fn drawn(shell: &Shell) -> MainWindowUi {
         let ctx = egui::Context::default();
         ctx.set_fonts(fonts());
-        let theme = Theme::builtin(shell.theme());
+        let theme = Theme::of(&shell);
         theme.apply(&ctx);
         let mut main = MainWindowUi::new();
         for frame in 0..2 {
@@ -410,7 +410,7 @@ mod tests {
         let shell = Shell::headless();
         let ctx = egui::Context::default();
         ctx.set_fonts(fonts());
-        let theme = Theme::builtin(shell.theme());
+        let theme = Theme::of(&shell);
         theme.apply(&ctx);
         let mut main = MainWindowUi::new();
         let size = vec2(1600.0, 977.0);

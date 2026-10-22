@@ -1653,6 +1653,40 @@ fn control_bar(h: &mut Harness) {
     h.key(Key::Num0, Modifiers::ALT);
 }
 
+/// A MIDI clip on the first MIDI track, selected, so the Control Bar's
+/// scale controls change the clip's scale (the scales spec, R12).
+fn a_clip_selected(h: &mut Harness) {
+    let track = h
+        .shell
+        .editor()
+        .document()
+        .tracks()
+        .find(|track| track.kind() == bl_model::TrackKind::Midi)
+        .expect("the default set has a MIDI track")
+        .id();
+    let clip: ClipId = h.shell.new_id();
+    h.shell
+        .run(
+            "clip.create",
+            json!({
+                "track": track,
+                "clip": {
+                    "id": clip,
+                    "name": "",
+                    "start": 0,
+                    "length": 705_600,
+                    "offset": 0,
+                    "mute": false,
+                    "data": { "midi": { "notes": [] } },
+                },
+            }),
+        )
+        .unwrap();
+    h.shell
+        .run("arrangement.select_clips", json!({ "clips": [clip] }))
+        .unwrap();
+}
+
 /// The assistant's pane open.
 fn assistant_open(h: &mut Harness) {
     h.shell.run("view.toggle_assistant", json!({})).unwrap();
@@ -1803,6 +1837,17 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ),
         ("transport.set_metronome_sound", Exception(metronome_menu)),
         ("transport.set_metronome_rhythm", Exception(metronome_menu)),
+        // The Control Bar's scale controls (scales R9, R12, R14): the
+        // switch changes the selected clips' scales, or the set's current
+        // scale when no clip is selected.
+        (
+            "song.set_scale",
+            main(nothing, control_bar, "Scale Mode", Key::Enter),
+        ),
+        (
+            "clip.set_scale",
+            main(a_clip_selected, control_bar, "Scale Mode", Key::Enter),
+        ),
         ("transport.set_recording", Exception(recording)),
         ("transport.stop_recording", Exception(recording)),
         // Tempo breakpoints and time-signature markers (WP-2.20): the
@@ -2139,6 +2184,7 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("audio.devices", Exception(Query)),
         ("midi.ports", Exception(Query)),
         ("set.list_recoverable", Exception(Query)),
+        ("song.scales", Exception(Query)),
         // The File Manager (WP-6.63): its own rows and buttons reach
         // these, and its views open from the File and View menus.
         ("file_manager.state", Exception(Query)),

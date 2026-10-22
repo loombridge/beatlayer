@@ -44,6 +44,7 @@ fn frozen_output_clip(output: crate::freeze::FrozenOutput) -> Clip {
         data: ClipData::Audio(audio),
         envelopes: Vec::new(),
         launch: crate::launch::ClipLaunch::default(),
+        scale: crate::scale::Scale::default(),
     }
 }
 

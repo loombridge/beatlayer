@@ -11,6 +11,7 @@ use crate::device::Device;
 use crate::ids::{ChainId, ClipId, DeviceId, SceneId, TrackId};
 use crate::metronome::MetronomeSettings;
 use crate::rack::Chain;
+use crate::scale::Scale;
 use crate::scene::Scene;
 use crate::shared::Shared;
 use crate::track::{Track, TrackKind};
@@ -85,6 +86,12 @@ pub struct Settings {
     /// delay compensation is on.
     #[serde(default, skip_serializing_if = "is_off")]
     pub reduced_latency_monitoring: bool,
+    /// The set's current scale (WP-6.7): its Scale Mode switch, its root and
+    /// its scale name, which the Control Bar's scale controls show and which
+    /// a new clip takes. Off, at C, in Major, in a new set, and not written
+    /// then, so a set saved before the scales loads unchanged.
+    #[serde(default, skip_serializing_if = "Scale::is_default")]
+    pub scale: Scale,
 }
 
 impl Default for Settings {
@@ -106,6 +113,7 @@ impl Default for Settings {
             midi_overdub: false,
             delay_compensation: true,
             reduced_latency_monitoring: false,
+            scale: Scale::default(),
         }
     }
 }

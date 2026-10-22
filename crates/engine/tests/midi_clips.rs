@@ -638,3 +638,50 @@ fn clip_region_and_loop_edits_play_back_as_edited() {
         .collect();
     assert_eq!(ons, [(0, 60)], "the End marker silences the note past it");
 }
+
+/// The notes a clip with a C#4 in it plays, with a scale on the clip or
+/// off.
+fn played_with_a_scale(scale: bool) -> Vec<(i64, u8)> {
+    let mut rig = Rig::new(256);
+    let trk = midi_track(&mut rig.editor);
+    instrument(&mut rig.editor, trk);
+    let clip = midi_clip(
+        &mut rig.editor,
+        trk,
+        Ticks::ZERO,
+        BAR,
+        MidiData::new([Note::new(61, Ticks::ZERO, BEAT, 100)]),
+    );
+    if scale {
+        // Spec: scales R5. The clip's scale, which nothing in playback
+        // reads yet.
+        rig.editor
+            .apply(Command::SetClipScale {
+                clips: vec![clip],
+                enabled: Some(true),
+                root: Some(0),
+                name: Some("major".to_owned()),
+            })
+            .unwrap();
+    }
+    rig.sync();
+    rig.sender.transport(TransportCommand::Play);
+    play(&mut rig, 48_000, 256);
+    rig.probe
+        .recorded_notes()
+        .iter()
+        .map(|note| (note.frame, note.event.key))
+        .collect()
+}
+
+// Spec: scales R4.
+#[test]
+fn a_clip_s_scale_doesnt_change_what_it_plays() {
+    let without = played_with_a_scale(false);
+    assert_eq!(without, [(0, 61), (24_000, 61)], "the note plays as it is");
+    let with = played_with_a_scale(true);
+    assert_eq!(
+        with, without,
+        "the clip's scale doesn't change what it plays"
+    );
+}

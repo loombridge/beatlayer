@@ -844,6 +844,32 @@ fn dropping_on_an_audio_track_places_a_clip_snapped() {
     assert_eq!(shell.editor().undo_history().len(), 1);
 }
 
+// Spec: scales R7. A dropped audio file is a clip made from nothing, so it
+// takes the set's current scale.
+#[test]
+fn a_dropped_audio_file_takes_the_current_scale() {
+    let scratch = Scratch::new("drop-scale");
+    let (mut shell, root) = shell_with_library(&scratch);
+    let track = audio_tracks(&shell)[0];
+    shell
+        .run(
+            "song.set_scale",
+            json!({ "enabled": true, "root": 2, "name": "dorian" }),
+        )
+        .unwrap();
+    let result: AddResult = run(
+        &mut shell,
+        ids::ADD_TO_ARRANGEMENT,
+        json!({ "paths": [text(&root.join("Loop 120.wav"))], "track": track, "at": 0 }),
+    );
+    let clip = result.clips[0].clip;
+    assert_eq!(
+        shell.editor().document().clip(clip).unwrap().scale,
+        bl_model::Scale::new(2, bl_model::ScaleName::Dorian),
+        "the dropped clip takes the current scale"
+    );
+}
+
 // Spec: browser R13. A drop over part of a clip replaces that part, as the
 // Arrangement's edits do: the clip is split around it, shortened, or has
 // its start trimmed (playing on from where it was), all in the drop's one

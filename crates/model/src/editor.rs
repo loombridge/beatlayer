@@ -11,6 +11,7 @@ use crate::command::Command;
 use crate::document::Document;
 use crate::error::ModelError;
 use crate::ids::{SceneId, TrackId};
+use crate::scale::Scale;
 use crate::scene::DEFAULT_SCENE_COUNT;
 
 /// Owns the current document, its undo history, and the project's ID
@@ -71,6 +72,10 @@ struct Step {
     label: Cow<'static, str>,
     maker: Maker,
     document: Box<Document>,
+    /// The set's current scale the step set, when the step changed it:
+    /// redoing brings it back. A step that only followed a selection leaves
+    /// the scale as it is (the scales spec, R12).
+    scale: Option<Scale>,
 }
 
 /// Who made a step in the history: the person, an agent by the name the
@@ -293,6 +298,20 @@ impl Editor {
         Ok(())
     }
 
+    /// Points the set's current scale at `scale`, as selecting a clip or a
+    /// clip that starts playing does (the scales spec, R10 and R11): the
+    /// current scale follows, and that is no undo step, though the set is
+    /// marked as changed.
+    ///
+    /// It isn't a command: no person asked for it, so it is the app
+    /// following the set's own state, as
+    /// [`Editor::amend_plugin_state`] does for a plug-in's.
+    pub fn follow_scale(&mut self, scale: Scale) -> ChangeSet {
+        let before = self.document.clone();
+        self.document.settings.scale = scale;
+        ChangeSet::between(&before, &self.document)
+    }
+
     /// Replaces the whole document with another version of it, inside the
     /// open transaction or as an undo step of its own labelled `label`, and
     /// returns what that changed. The agent API restores a checkpoint this
@@ -444,15 +463,23 @@ impl Editor {
             label,
             maker,
             document,
+            scale,
         } = self.undo.pop_back().ok_or(EditError::NothingToUndo)?;
         let mut document = *document;
         // Cue mode is no undo step, so undoing keeps it as it is.
         document.settings.cue_mode = self.document.settings.cue_mode;
+        // The current scale follows a selection or a clip that starts, and
+        // that is no undo step either, so a step that didn't change the
+        // scale leaves it as it is.
+        if scale.is_none() {
+            document.settings.scale = self.document.settings.scale;
+        }
         let after = std::mem::replace(&mut self.document, document);
         self.redo.push(Step {
             label,
             maker,
             document: Box::new(after),
+            scale,
         });
         Ok(())
     }
@@ -480,14 +507,21 @@ impl Editor {
             label,
             maker,
             document,
+            scale,
         } = self.redo.pop().ok_or(EditError::NothingToRedo)?;
         let mut document = *document;
         document.settings.cue_mode = self.document.settings.cue_mode;
+        // A step that changed the scale brings it back; one that didn't
+        // leaves it as it is.
+        if let Some(scale) = scale {
+            document.settings.scale = scale;
+        }
         let before = std::mem::replace(&mut self.document, document);
         self.undo.push_back(Step {
             label,
             maker,
             document: Box::new(before),
+            scale,
         });
         Ok(())
     }
@@ -609,10 +643,13 @@ impl Editor {
 
     fn record(&mut self, label: Cow<'static, str>, maker: Maker, before: Document) {
         self.redo.clear();
+        let scale = (before.settings.scale != self.document.settings.scale)
+            .then_some(self.document.settings.scale);
         self.undo.push_back(Step {
             label,
             maker,
             document: Box::new(before),
+            scale,
         });
         self.trim();
     }

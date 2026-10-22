@@ -481,6 +481,39 @@ fn an_armed_midi_track_records_without_a_folder_and_makes_no_clip_without_notes(
     assert_eq!(stats.heap_operations, 0, "{stats:?}");
 }
 
+// Spec: scales R7. A recorded clip is made from nothing, so it takes the
+// set's current scale.
+#[test]
+fn a_recorded_clip_takes_the_current_scale() {
+    let dir = TestDir::new("record-scale");
+    let (mut shell, control) = duplex_shell();
+    shell
+        .run("set.save_as", json!({ "path": dir.arg("Take.blset") }))
+        .unwrap();
+    let track = armed_track(&mut shell, 3, "Guitar");
+    let rate = shell.audio().status().sample_rate.expect("a device runs");
+    control.set_input_tone(2, f64::from(rate) / 4.0, 0.5);
+    shell
+        .run(
+            "song.set_scale",
+            json!({ "enabled": true, "root": 9, "name": "minor_pentatonic" }),
+        )
+        .unwrap();
+    shell
+        .run("transport.set_recording", json!({ "recording": true }))
+        .unwrap();
+    shell.run("transport.play", json!({})).unwrap();
+    play_for(&control, &mut shell, 300);
+    shell.run("transport.stop", json!({})).unwrap();
+
+    let clip = wait_for_clip(&control, &mut shell, track);
+    assert_eq!(
+        clip.scale,
+        bl_model::Scale::new(9, bl_model::ScaleName::MinorPentatonic),
+        "the recorded clip takes the current scale"
+    );
+}
+
 // Spec: WP-2.14. MIDI Arrangement Overdub is a command, saved with the set,
 // and one undo step.
 #[test]

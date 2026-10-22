@@ -115,6 +115,12 @@ fn fixture() -> Project {
         Command::SetCueMode { enabled: true },
         Command::SetCueVolume { volume: 0.5 },
         Command::SetReducedLatencyMonitoring { enabled: true },
+        // Spec: scales R9.
+        Command::SetScale {
+            enabled: Some(true),
+            root: Some(2),
+            name: Some("dorian".to_owned()),
+        },
     ] {
         apply(&mut editor, command);
     }
@@ -587,6 +593,16 @@ fn fixture() -> Project {
             clip: midi,
         },
     );
+    // Spec: scales R5. The clip's own scale.
+    apply(
+        &mut editor,
+        Command::SetClipScale {
+            clips: vec![midi_id],
+            enabled: Some(true),
+            root: Some(5),
+            name: Some("minor".to_owned()),
+        },
+    );
     // MIDI controller envelopes (WP-2.29): a modulation wheel one and an
     // unlinked pitch bend one.
     for (target, value) in [
@@ -867,6 +883,7 @@ fn the_fixture_sets_a_non_default_value_of_every_saved_field() {
                 "punch_in",
                 "punch_out",
                 "midi_overdub",
+                "scale",
             ][..],
         ),
         (
@@ -1002,6 +1019,7 @@ fn the_fixture_sets_a_non_default_value_of_every_saved_field() {
                 "data.midi.loop_end",
                 "data.midi.signature",
                 "data.midi.notes.0.probability",
+                "scale",
             ][..],
         ),
     ] {

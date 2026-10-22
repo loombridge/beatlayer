@@ -11,9 +11,10 @@ use bl_shell::files::factory_default_set;
 use bl_shell::note_commands::NoteField;
 use bl_ui::arrangement::benchmark;
 use bl_ui::clip_view::{
-    KEY_HEIGHT, KEY_WIDTH, grid_rect, lane_rect, note_rect, shown_keys, strip_rect, tick_at,
-    x_of_tick, y_of_key, y_of_value,
+    KEY_HEIGHT, KEY_WIDTH, note_rect, shown_keys, strip_rect, tick_at, x_of_tick, y_of_key,
+    y_of_value,
 };
+use bl_ui::note_lanes::{NoteLayout, note_layout};
 use common::{Harness, Node, Window, command};
 use egui::{Event, Modifiers, MouseWheelUnit, PointerButton, Pos2, Rect, TouchPhase, pos2, vec2};
 use serde_json::json;
@@ -123,21 +124,34 @@ impl Notes {
         )
     }
 
-    /// The note area's rectangle.
-    fn grid(&mut self) -> Rect {
-        grid_rect(self.view())
+    /// Where the note area, the lanes and the footer sit, as the editor
+    /// lays them out for the lanes shown now.
+    fn layout(&mut self) -> NoteLayout {
+        let view = self.view();
+        let shown = self.h.shell.clip_view().lanes().shown();
+        note_layout(view, &self.h.main.clip_view().lane_heights(&shown))
     }
 
-    /// The lane's rectangle under the note area.
+    /// The note area's rectangle.
+    fn grid(&mut self) -> Rect {
+        self.layout().grid
+    }
+
+    /// The Velocity lane's rectangle under the note area.
     fn lane(&mut self) -> Rect {
-        lane_rect(self.view())
+        self.lane_of(NoteField::Velocity)
+    }
+
+    /// The rectangle of a lane that shows.
+    fn lane_of(&mut self, field: NoteField) -> Rect {
+        self.layout().lane(field).expect("the lane shows")
     }
 
     /// A point in the lane at `tick`'s x — a note's stem when the tick is
     /// its start — and the height of `value` of `field`.
     fn lane_at(&mut self, tick: Ticks, field: NoteField, value: f64) -> Pos2 {
         let grid = self.grid();
-        let lane = self.lane();
+        let lane = self.lane_of(field);
         pos2(
             x_of_tick(grid, self.marker(), self.length(), tick) + 1.0,
             y_of_value(lane, field, value),
@@ -634,7 +648,7 @@ fn dragging_the_start_marker_edits_the_clips_region_in_one_step() {
 
 #[test]
 fn dragging_a_stem_sets_that_notes_velocity_and_nothing_else() {
-    // Spec: piano-roll R14. A drag on a note's stem in the lane sets that
+    // Spec: note-editing R5 (replacing piano-roll R14, R15). A drag on a note's stem in the lane sets that
     // note's velocity — the lane's default value — and the whole drag is
     // one undo step.
     let step = n_step();
@@ -650,7 +664,7 @@ fn dragging_a_stem_sets_that_notes_velocity_and_nothing_else() {
     n.drag(from, to, Modifiers::NONE);
     assert_eq!(n.notes()[0].velocity, 20);
     assert_eq!(n.notes()[1].velocity, 40, "the other note is untouched");
-    n.one_step(&before, "Set note values");
+    n.one_step(&before, "Adjust note values");
     // The same drag in the chance lane sets chances.
     n.h.shell
         .run(bl_shell::commands::VIEW_LANE, json!({ "lane": "chance" }))
@@ -665,32 +679,7 @@ fn dragging_a_stem_sets_that_notes_velocity_and_nothing_else() {
         "the chance follows the pointer, {chance}"
     );
     assert_eq!(n.notes()[1].probability, 1.0, "and nothing else");
-    n.one_step(&before, "Set note values");
-}
-
-#[test]
-fn dragging_across_notes_draws_a_ramp() {
-    // Spec: piano-roll R14. A drag across several notes ramps their values
-    // evenly, from where it began to the pointer, as one undo step.
-    let step = n_step();
-    let mut n = set(vec![
-        Note::new(60, Ticks::ZERO, step, 20),
-        Note::new(62, 4 * step, step, 20),
-        Note::new(64, 8 * step, step, 20),
-    ]);
-    let before = n.doc().clone();
-    let from = n.lane_at(Ticks::ZERO, NoteField::Velocity, 20.0);
-    let to = n.lane_at(8 * step, NoteField::Velocity, 120.0);
-    n.drag(from, to, Modifiers::NONE);
-    assert_eq!(
-        n.notes()
-            .iter()
-            .map(|note| note.velocity)
-            .collect::<Vec<_>>(),
-        [20, 70, 120],
-        "evenly spaced from the first note to the last"
-    );
-    n.one_step(&before, "Ramp note values");
+    n.one_step(&before, "Adjust note values");
 }
 
 #[test]
@@ -1038,13 +1027,19 @@ fn the_context_menu_lists_the_items_in_order() {
     let nodes = right_click(&mut n, at);
     // The note the menu opened on is selected alone.
     assert_eq!(n.selected(), [0]);
-    for label in ["Cut", "Copy", "Paste", "Duplicate", "Delete"] {
+    for label in [
+        "Cut",
+        "Copy",
+        "Paste",
+        "Duplicate",
+        "Delete",
+        "Deactivate Note(s)",
+    ] {
         let node = menu_item(&nodes, label);
         assert!(!node.disabled, "{label} works");
     }
     for (label, package) in [
         ("Invert Selection", "WP-6.4"),
-        ("Deactivate Note(s)", "WP-6.1"),
         ("Group Notes", "WP-6.2"),
         ("Ungroup Notes", "WP-6.2"),
         ("Split Note(s)", "WP-6.3"),
@@ -1107,16 +1102,14 @@ fn the_clipboard_keys_act_on_the_notes() {
 #[test]
 fn the_piano_rulers_menu_lists_its_items_and_their_packages() {
     // Spec: piano-roll R30. Right-clicking a key in the piano ruler opens
-    // C-KEYS: Deactivate Note(s) and the note spelling, both waiting for
-    // their packages, drawn disabled and naming them.
+    // C-KEYS: Deactivate Note(s), which works, and the note spelling, which
+    // waits for its package, drawn disabled and naming it.
     let step = n_step();
     let mut n = set(vec![Note::new(60, Ticks::ZERO, step, 100)]);
     let at = n.key_at(60);
     let nodes = right_click(&mut n, at);
-    for (label, package) in [
-        ("Deactivate Note(s)", "WP-6.1"),
-        ("Note spelling", "WP-6.7b"),
-    ] {
+    assert!(!menu_item(&nodes, "Deactivate Note(s)").disabled);
+    for (label, package) in [("Note spelling", "WP-6.7b")] {
         let node = menu_item(&nodes, label);
         assert!(node.disabled, "{label} waits");
         assert!(
@@ -1157,4 +1150,736 @@ fn the_insert_marker_and_the_time_selection_reach_assistive_technology() {
     let nodes = Harness::nodes(&output);
     assert!(nodes.iter().all(|node| node.label != "Time Selection"));
     assert!(nodes.iter().any(|node| node.label == "Insert Marker"));
+}
+
+// -- The expression lanes and the footer (WP-6.1) ---------------------------
+
+use bl_shell::Area;
+use bl_ui::note_lanes::{footer_rects, shows_corner};
+use egui::Key;
+
+impl Notes {
+    /// The rectangle of a footer control for the active lane.
+    fn footer(&mut self, name: &str) -> Rect {
+        let layout = self.layout();
+        let lane = self.h.shell.clip_view().lane();
+        footer_rects(layout.footer, lane)
+            .into_iter()
+            .find(|(named, _)| *named == name)
+            .unwrap_or_else(|| panic!("no footer control {name:?}"))
+            .1
+    }
+
+    /// The lanes shown, from the top.
+    fn shown(&self) -> Vec<NoteField> {
+        self.h.shell.clip_view().lanes().shown()
+    }
+
+    /// Gives the note editor the keyboard.
+    fn focus(&mut self) {
+        self.h.shell.set_focused_area(Area::Detail);
+        self.h.settle();
+    }
+
+    fn select(&mut self, places: &[u32]) {
+        self.h
+            .shell
+            .run(
+                "clip_view.select_notes",
+                json!({ "clip": self.clip, "notes": places }),
+            )
+            .unwrap();
+        self.h.settle();
+    }
+
+    /// A double-click: two presses and releases in quick succession.
+    fn double_click(&mut self, at: Pos2, modifiers: Modifiers) {
+        self.h.frame(vec![Event::PointerMoved(at)]);
+        for _ in 0..2 {
+            for pressed in [true, false] {
+                self.h.frame(vec![Event::PointerButton {
+                    pos: at,
+                    button: PointerButton::Primary,
+                    pressed,
+                    modifiers,
+                }]);
+            }
+        }
+        self.h.settle();
+    }
+
+    /// Clicks the middle of a node found by its label and role.
+    fn click_node(&mut self, nodes: &[Node], role: egui::accesskit::Role, label: &str) {
+        let node = nodes
+            .iter()
+            .find(|node| node.role == role && node.label == label)
+            .unwrap_or_else(|| panic!("no {role:?} {label:?}"));
+        let b = node.bounds.expect("bounds");
+        let at = pos2(((b.x0 + b.x1) / 2.0) as f32, ((b.y0 + b.y1) / 2.0) as f32);
+        self.h.click(at);
+        self.h.settle();
+    }
+
+    fn velocities(&self) -> Vec<u8> {
+        self.notes().iter().map(|note| note.velocity).collect()
+    }
+}
+
+/// A set of `count` notes one grid step apart, all at velocity `velocity`.
+fn run_of_notes(count: i64, velocity: u8) -> Notes {
+    let step = n_step();
+    set((0..count)
+        .map(|i| Note::new(60 + i as u8, i * step, step, velocity))
+        .collect())
+}
+
+#[test]
+fn the_lane_selector_the_switch_and_swap_lane_show_hide_and_swap_lanes() {
+    // Spec: note-editing R1, R2, R3. A new editor shows the Velocity lane
+    // alone; the Lane Selector shows and hides each lane; the switch hides
+    // them all and shows them as they were; Swap Lane trades a lane for the
+    // next hidden one.
+    use NoteField::{Chance, ReleaseVelocity, Velocity};
+    let mut n = run_of_notes(2, 100);
+    let steps = n.steps();
+    assert_eq!(n.shown(), [Velocity]);
+    // The Lane Selector lists the three lanes; choosing Chance shows it and
+    // makes it the active lane.
+    let selector = n.footer("Lane Selector").center();
+    n.h.click(selector);
+    let nodes = Harness::nodes(&n.h.settle());
+    n.click_node(&nodes, egui::accesskit::Role::CheckBox, "Chance");
+    assert_eq!(n.shown(), [Velocity, Chance]);
+    assert_eq!(n.h.shell.clip_view().lane(), Chance, "the active lane");
+    // The footer follows the active lane.
+    let randomize = n.footer("Randomize");
+    assert!(randomize.is_positive());
+    assert!(n.layout().lane(Chance).is_some());
+    // Swap Lane, in the lane header's menu, hides the Velocity lane and shows
+    // the first hidden lane after it.
+    let velocity = n.lane_of(Velocity);
+    let header = pos2(velocity.left() + 4.0, velocity.center().y);
+    let nodes = right_click(&mut n, header);
+    let swap = menu_item(&nodes, "Swap Lane");
+    assert!(!swap.disabled);
+    let b = swap.bounds.unwrap();
+    n.h.click(pos2(
+        ((b.x0 + b.x1) / 2.0) as f32,
+        ((b.y0 + b.y1) / 2.0) as f32,
+    ));
+    n.h.settle();
+    assert_eq!(n.shown(), [Chance, ReleaseVelocity]);
+    // The switch hides every lane, and shows them again.
+    let switch = n.footer("Show/Hide All Expression Editors").center();
+    n.h.click(switch);
+    n.h.settle();
+    assert!(n.shown().is_empty());
+    assert!(n.h.shell.clip_view().lanes().all_hidden());
+    let grid_without_lanes = n.grid();
+    n.h.click(switch);
+    n.h.settle();
+    assert_eq!(n.shown(), [Chance, ReleaseVelocity], "as they were");
+    assert!(
+        n.grid().bottom() < grid_without_lanes.bottom(),
+        "the lanes take the note area's room"
+    );
+    assert_eq!(n.steps(), steps, "none of it is an undo step");
+    assert!(!n.h.shell.is_dirty(), "and none of it dirties the set");
+}
+
+#[test]
+fn dragging_a_marker_moves_every_selected_note_by_the_same_amount() {
+    // Spec: note-editing R5. Dragging a selected note's marker changes every
+    // selected note by the same amount, each held within its range; one undo
+    // step, and Esc puts the values back.
+    let step = n_step();
+    let mut n = set(vec![
+        Note::new(60, Ticks::ZERO, step, 100),
+        Note::new(62, 4 * step, step, 60),
+        Note::new(64, 8 * step, step, 40),
+    ]);
+    n.select(&[0, 1]);
+    let before = n.doc().clone();
+    let from = n.lane_at(4 * step, NoteField::Velocity, 60.0);
+    let to = n.lane_at(4 * step, NoteField::Velocity, 30.0);
+    n.drag(from, to, Modifiers::NONE);
+    assert_eq!(n.velocities(), [70, 30, 40], "both by -30, the third alone");
+    n.one_step(&before, "Adjust note values");
+    assert_eq!(n.selected(), [0, 1], "the selection holds");
+    // Dragging past an end brings them all to it.
+    let before = n.doc().clone();
+    let lane = n.lane();
+    let from = n.lane_at(4 * step, NoteField::Velocity, 30.0);
+    let to = pos2(from.x, lane.bottom() + 40.0);
+    n.drag(from, to, Modifiers::NONE);
+    assert_eq!(n.velocities(), [1, 1, 40], "both stop at the end");
+    n.one_step(&before, "Adjust note values");
+    // Esc puts the values back and records nothing.
+    let before = n.doc().clone();
+    let steps = n.steps();
+    let from = n.lane_at(8 * step, NoteField::Velocity, 40.0);
+    let to = n.lane_at(8 * step, NoteField::Velocity, 120.0);
+    n.drag_frames(from, to, Modifiers::NONE);
+    assert_eq!(n.velocities()[2], 120, "the drag shows as it goes");
+    n.h.key(Key::Escape, Modifiers::NONE);
+    n.release(to, Modifiers::NONE);
+    assert_eq!(*n.doc(), before);
+    assert_eq!(n.steps(), steps);
+    // A marker that isn't selected moves alone.
+    let from = n.lane_at(8 * step, NoteField::Velocity, 40.0);
+    let to = n.lane_at(8 * step, NoteField::Velocity, 70.0);
+    n.drag(from, to, Modifiers::NONE);
+    assert_eq!(n.velocities(), [1, 1, 70]);
+}
+
+#[test]
+fn clicking_a_marker_selects_its_note_and_shift_adds_and_removes() {
+    // Spec: note-editing R5, R3. A click on a marker selects its note and
+    // makes its lane the active lane.
+    let step = n_step();
+    let mut n = set(vec![
+        Note::new(60, Ticks::ZERO, step, 100),
+        Note::new(62, 4 * step, step, 60),
+    ]);
+    let at = n.lane_at(4 * step, NoteField::Velocity, 60.0);
+    n.click(at, Modifiers::NONE);
+    assert_eq!(n.selected(), [1]);
+    let other = n.lane_at(Ticks::ZERO, NoteField::Velocity, 100.0);
+    n.click(other, Modifiers::SHIFT);
+    assert_eq!(n.selected(), [1, 0], "Shift adds");
+    n.click(other, Modifiers::SHIFT);
+    assert_eq!(n.selected(), [1], "and removes");
+    // A press in the Chance lane makes it the active lane.
+    n.h.shell
+        .run("view.lanes", json!({ "lane": "chance" }))
+        .unwrap();
+    n.h.shell
+        .run("view.lane", json!({ "lane": "velocity" }))
+        .unwrap();
+    let chance = n.lane_at(4 * step, NoteField::Chance, 1.0);
+    n.click(chance, Modifiers::NONE);
+    assert_eq!(n.h.shell.clip_view().lane(), NoteField::Chance);
+}
+
+#[test]
+fn drawing_in_a_lane_with_draw_mode_sets_values_per_grid_step_or_per_note() {
+    // Spec: note-editing R6. With Draw Mode on, dragging across a lane gives
+    // each note whose start lies in a step the pointer passes the value at
+    // the pointer's height there; without the grid each note takes the
+    // height at its own start; only the selected notes when some are.
+    let step = n_step();
+    let mut n = run_of_notes(8, 100);
+    n.h.shell.run("view.draw_mode", json!({})).unwrap();
+    n.h.settle();
+    let before = n.doc().clone();
+    // A descending line across the first four notes, on the grid.
+    let from = n.lane_at(Ticks::ZERO, NoteField::Velocity, 120.0);
+    let to = n.lane_at(3 * step, NoteField::Velocity, 20.0);
+    n.drag(from, to, Modifiers::NONE);
+    let drawn = n.velocities();
+    assert!(
+        drawn[..4].windows(2).all(|pair| pair[0] > pair[1]),
+        "the values follow the pointer down: {drawn:?}"
+    );
+    assert!(
+        drawn[4..].iter().all(|v| *v == 100),
+        "the rest are untouched"
+    );
+    assert!(drawn[0] > 90 && drawn[3] < 40, "{drawn:?}");
+    n.one_step(&before, "Set note values");
+    // Without the grid (Cmd held, Alt on Windows) each note takes the height
+    // at its own start: the first note's, at the press, is the pressed
+    // height.
+    let from = n.lane_at(Ticks::ZERO, NoteField::Velocity, 120.0);
+    let to = n.lane_at(3 * step, NoteField::Velocity, 20.0);
+    n.drag(from, to, bypass_key());
+    let off_grid = n.velocities();
+    assert!(
+        (i32::from(off_grid[0]) - 120).abs() <= 3 && (i32::from(off_grid[3]) - 20).abs() <= 3,
+        "{off_grid:?}"
+    );
+    // With notes selected, only those are drawn on.
+    let mut n = run_of_notes(8, 100);
+    n.h.shell.run("view.draw_mode", json!({})).unwrap();
+    n.h.settle();
+    n.select(&[1]);
+    let from = n.lane_at(Ticks::ZERO, NoteField::Velocity, 50.0);
+    let to = n.lane_at(3 * step, NoteField::Velocity, 50.0);
+    n.drag(from, to, Modifiers::NONE);
+    let only = n.velocities();
+    assert_eq!(only[0], 100);
+    assert!((i32::from(only[1]) - 50).abs() <= 3, "{only:?}");
+    assert!(only[2..].iter().all(|v| *v == 100), "{only:?}");
+}
+
+#[test]
+fn option_draws_a_straight_line_and_with_shift_a_level_one() {
+    // Spec: note-editing R6. Option-dragging draws a straight line from
+    // where the drag began to the pointer, and with Shift too a level line
+    // at the starting value.
+    let step = n_step();
+    let mut n = run_of_notes(8, 100);
+    n.h.shell.run("view.draw_mode", json!({})).unwrap();
+    n.h.settle();
+    let line = if cfg!(target_os = "macos") {
+        Modifiers::ALT
+    } else {
+        // Alt is also the key that bypasses the grid on Windows.
+        Modifiers::ALT
+    };
+    let start = n.lane_at(Ticks::ZERO, NoteField::Velocity, 20.0);
+    let end = n.lane_at(7 * step, NoteField::Velocity, 100.0);
+    let wobble = n.lane_at(3 * step, NoteField::Velocity, 127.0);
+    // A drag that wanders: the line ignores where it went.
+    n.drag_frames(start, wobble, line);
+    n.h.frame(vec![Event::PointerMoved(end)]);
+    n.release(end, line);
+    let drawn = n.velocities();
+    assert!(
+        drawn.windows(2).all(|pair| pair[0] <= pair[1] + 1),
+        "a straight line up: {drawn:?}"
+    );
+    assert!((i32::from(drawn[0]) - 20).abs() <= 6, "{drawn:?}");
+    assert!((i32::from(drawn[7]) - 100).abs() <= 6, "{drawn:?}");
+    // With Shift too the line is level at the starting value.
+    let level = line | Modifiers::SHIFT;
+    n.drag(start, end, level);
+    let flat = n.velocities();
+    assert!(
+        flat.iter().all(|v| (i32::from(*v) - 20).abs() <= 6),
+        "{flat:?}"
+    );
+}
+
+#[test]
+fn cmd_dragging_a_velocity_marker_sets_its_deviation_and_a_double_click_resets_it() {
+    // Spec: note-editing R7. Cmd-dragging up or down from a marker sets its
+    // note's deviation, or every selected note's, within the room the
+    // velocity leaves; a double-click on a marker with a deviation resets it.
+    let step = n_step();
+    let mut n = set(vec![
+        Note::new(60, Ticks::ZERO, step, 60),
+        Note::new(62, 4 * step, step, 100),
+    ]);
+    let cmd = if cfg!(target_os = "macos") {
+        Modifiers::MAC_CMD | Modifiers::COMMAND
+    } else {
+        Modifiers::CTRL | Modifiers::COMMAND
+    };
+    let before = n.doc().clone();
+    let from = n.lane_at(Ticks::ZERO, NoteField::Velocity, 60.0);
+    let to = n.lane_at(Ticks::ZERO, NoteField::Velocity, 100.0);
+    n.drag(from, to, cmd);
+    assert_eq!(
+        n.notes()[0].velocity_deviation,
+        40,
+        "up to where the pointer is"
+    );
+    assert_eq!(n.notes()[0].velocity, 60, "the velocity stays");
+    assert_eq!(n.notes()[1].velocity_deviation, 0);
+    n.one_step(&before, "Set note values");
+    // Past the room a velocity of 100 leaves: held to +27.
+    n.select(&[1]);
+    let from = n.lane_at(4 * step, NoteField::Velocity, 100.0);
+    let to = n.lane_at(4 * step, NoteField::Velocity, 127.0);
+    n.drag(from, to, cmd);
+    assert_eq!(n.notes()[1].velocity_deviation, 27);
+    // Double-clicking a marker with a range resets it.
+    let before = n.doc().clone();
+    let marker = n.lane_at(Ticks::ZERO, NoteField::Velocity, 60.0);
+    n.double_click(marker, Modifiers::NONE);
+    assert_eq!(n.notes()[0].velocity_deviation, 0);
+    n.one_step(&before, "Set note values");
+}
+
+#[test]
+fn a_typed_velocity_sets_the_selected_notes_and_zero_is_a_digit_only_while_typing() {
+    // Spec: note-editing R14, R18. A digit from 1 to 9 starts a velocity,
+    // Enter sets it; a number outside 1 to 127 changes nothing; Esc drops it;
+    // 0 deactivates the notes unless a number is being typed.
+    let mut n = run_of_notes(3, 100);
+    n.focus();
+    n.select(&[0, 1]);
+    let before = n.doc().clone();
+    n.h.key(Key::Num5, Modifiers::NONE);
+    assert!(n.h.main.clip_view().is_typing());
+    n.h.key(Key::Num0, Modifiers::NONE);
+    assert!(
+        n.notes().iter().all(|note| !note.mute),
+        "0 is a digit while a number is being typed"
+    );
+    n.h.key(Key::Enter, Modifiers::NONE);
+    assert_eq!(n.velocities(), [50, 50, 100]);
+    assert!(!n.h.main.clip_view().is_typing());
+    n.one_step(&before, "Set note values");
+    // Out of range changes nothing.
+    let before = n.doc().clone();
+    for key in [Key::Num2, Key::Num0, Key::Num0, Key::Enter] {
+        n.h.key(key, Modifiers::NONE);
+    }
+    assert_eq!(*n.doc(), before, "200 is refused");
+    // Esc drops it and keeps the selection.
+    n.h.key(Key::Num7, Modifiers::NONE);
+    assert!(n.h.main.clip_view().is_typing());
+    n.h.key(Key::Escape, Modifiers::NONE);
+    assert!(!n.h.main.clip_view().is_typing());
+    assert_eq!(n.selected(), [0, 1], "the notes stay selected");
+    assert_eq!(*n.doc(), before);
+    // 0 on its own deactivates the selected notes, and again activates them.
+    n.h.key(Key::Num0, Modifiers::NONE);
+    assert!(n.notes()[0].mute && n.notes()[1].mute && !n.notes()[2].mute);
+    n.h.key(Key::Num0, Modifiers::NONE);
+    assert!(n.notes().iter().all(|note| !note.mute));
+}
+
+#[test]
+fn the_value_keys_change_the_selected_notes() {
+    // Spec: note-editing R15, R16. Cmd with Up and Down changes the
+    // velocity by 10, Cmd-Option the chance by 10 %, and Cmd-Shift the
+    // deviation by 10; after a marker is clicked its lane has the keys.
+    let step = n_step();
+    let mut n = set(vec![
+        Note::new(60, Ticks::ZERO, step, 100),
+        Note::new(64, 4 * step, step, 100),
+    ]);
+    n.focus();
+    n.select(&[0]);
+    let before = n.doc().clone();
+    n.h.key(Key::ArrowDown, command());
+    assert_eq!(n.velocities(), [90, 100]);
+    n.one_step(&before, "Adjust note values");
+    n.h.key(Key::ArrowUp, command());
+    assert_eq!(n.velocities(), [100, 100]);
+    n.h.key(Key::ArrowUp, command());
+    assert_eq!(n.velocities(), [110, 100]);
+    // Chance, by 10 %.
+    n.h.key(Key::ArrowDown, command() | Modifiers::ALT);
+    assert!((n.notes()[0].probability - 0.9).abs() < 1e-9);
+    if cfg!(target_os = "macos") {
+        // Deviation, within the room: velocity 110 leaves +17.
+        n.h.key(Key::ArrowUp, command() | Modifiers::SHIFT);
+        assert_eq!(n.notes()[0].velocity_deviation, 10);
+    }
+    // After a marker in the Chance lane is clicked, plain Up and Down change
+    // the chance by 10 %, and Shift by 1 %, until the note area is clicked.
+    n.h.shell
+        .run("view.lanes", json!({ "lane": "chance" }))
+        .unwrap();
+    n.h.settle();
+    let marker = n.lane_at(4 * step, NoteField::Chance, 1.0);
+    n.click(marker, Modifiers::NONE);
+    assert_eq!(n.selected(), [1]);
+    n.h.key(Key::ArrowDown, Modifiers::NONE);
+    assert!((n.notes()[1].probability - 0.9).abs() < 1e-9);
+    n.h.key(Key::ArrowDown, Modifiers::SHIFT);
+    assert!((n.notes()[1].probability - 0.89).abs() < 1e-9);
+    assert_eq!(n.notes()[1].key, 64, "the notes aren't transposed");
+    // In the Velocity lane Cmd-Shift steps the velocity by 1.
+    n.h.shell
+        .run("view.lane", json!({ "lane": "velocity" }))
+        .unwrap();
+    n.h.settle();
+    let marker = n.lane_at(4 * step, NoteField::Velocity, 100.0);
+    n.click(marker, Modifiers::NONE);
+    n.h.key(Key::ArrowDown, command() | Modifiers::SHIFT);
+    assert_eq!(n.velocities()[1], 99);
+    // Clicking the note area gives the keys back: Up transposes.
+    let at = n.at(64, step / 2 + 4 * step);
+    n.click(at, Modifiers::NONE);
+    n.h.key(Key::ArrowUp, Modifiers::NONE);
+    assert_eq!(n.notes()[1].key, 65, "a semitone up again");
+}
+
+#[test]
+fn cmd_dragging_a_note_changes_its_velocity_and_along_the_grid_moves_it() {
+    // Spec: note-editing R17, piano-roll R10. Cmd-dragging a note up or down
+    // raises or lowers its velocity by one for each point; along the note
+    // area it still moves off the grid.
+    let step = n_step();
+    let mut n = set(vec![
+        Note::new(60, Ticks::ZERO, step, 100),
+        Note::new(64, 8 * step, step, 50),
+    ]);
+    let before = n.doc().clone();
+    let from = n.at(64, 8 * step + step / 2);
+    n.drag(from, from + vec2(0.0, -20.0), bypass_key());
+    assert_eq!(n.velocities(), [100, 70], "20 points up");
+    assert_eq!(n.notes()[1].key, 64, "the pitch holds");
+    assert_eq!(n.notes()[1].start, 8 * step, "and so does the start");
+    n.one_step(&before, "Adjust note values");
+    let to = from + vec2(0.0, 10.0);
+    n.drag(from, to, bypass_key());
+    assert_eq!(n.velocities()[1], 60, "down lowers it");
+}
+
+#[test]
+fn deactivating_notes_from_the_menus_and_the_piano_ruler() {
+    // Spec: note-editing R18, R19. The editor's and the piano ruler's menus
+    // deactivate the selected notes, and read Activate Note(s) when they are
+    // all off; right-clicking a key selects its notes first.
+    let step = n_step();
+    let mut n = set(vec![
+        Note::new(60, Ticks::ZERO, step, 100),
+        Note::new(64, 4 * step, step, 100),
+    ]);
+    let key = n.key_at(64);
+    let nodes = right_click(&mut n, key);
+    assert_eq!(n.selected(), [1], "the key's notes are selected first");
+    let item = menu_item(&nodes, "Deactivate Note(s)");
+    assert!(!item.disabled);
+    let before = n.doc().clone();
+    n.click_node(&nodes, egui::accesskit::Role::Button, &item.label);
+    assert!(!n.notes()[0].mute && n.notes()[1].mute);
+    n.one_step(&before, "Deactivate notes");
+    // The editor's menu now reads Activate Note(s) for that note.
+    let at = n.at(64, 4 * step + step / 2);
+    let nodes = right_click(&mut n, at);
+    let item = menu_item(&nodes, "Activate Note(s)");
+    assert!(!item.disabled);
+    n.click_node(&nodes, egui::accesskit::Role::Button, &item.label);
+    assert!(n.notes().iter().all(|note| !note.mute));
+}
+
+#[test]
+fn the_footer_has_the_active_lanes_controls() {
+    // Spec: note-editing R10 to R13. Velocity: Randomize with its amount,
+    // Ramp's start and end, Deviation; Chance: Randomize with its amount, and
+    // Play All, Play One and Ungroup, drawn disabled until WP-6.2.
+    let mut n = run_of_notes(3, 100);
+    let nodes = Harness::nodes(&n.h.settle());
+    for label in [
+        "Randomize",
+        "Randomize Amount",
+        "Ramp Start",
+        "Ramp End",
+        "Velocity Deviation",
+    ] {
+        assert!(nodes.iter().any(|node| node.label == label), "{label}");
+    }
+    n.h.shell
+        .run("view.lane", json!({ "lane": "chance" }))
+        .unwrap();
+    let nodes = Harness::nodes(&n.h.settle());
+    for label in ["Play All", "Play One", "Ungroup"] {
+        let node = nodes
+            .iter()
+            .find(|node| node.label == label)
+            .unwrap_or_else(|| panic!("{label}"));
+        assert!(node.disabled, "{label} waits for probability groups");
+    }
+    assert!(!nodes.iter().any(|node| node.label == "Ramp Start"));
+}
+
+#[test]
+fn the_footers_randomize_button_and_amount_randomise_in_one_step() {
+    // Spec: note-editing R13. The Randomize button applies the amount once
+    // to the selected notes, or to every note when none are; moving the
+    // amount with notes selected randomises them at once from where they
+    // were; each is one undo step, and with no notes selected moving the
+    // amount changes nothing.
+    let mut n = run_of_notes(8, 100);
+    n.h.shell
+        .run("view.lanes", json!({ "lane": "velocity", "amount": 30 }))
+        .unwrap();
+    n.h.settle();
+    let before = n.doc().clone();
+    let button = n.footer("Randomize").center();
+    n.h.click(button);
+    n.h.settle();
+    let first = n.velocities();
+    assert!(first.iter().all(|v| (70..=127).contains(v)), "{first:?}");
+    assert!(first.iter().any(|v| *v != 100), "{first:?}");
+    n.one_step(&before, "Randomize note values");
+    // With notes selected, dragging the amount up randomises them, and Esc
+    // puts it back.
+    n.select(&[0, 1, 2]);
+    let amount = n.footer("Randomize Amount");
+    let from = amount.center();
+    let before = n.doc().clone();
+    let was = n.velocities();
+    n.drag_frames(from, from + vec2(0.0, -30.0), Modifiers::NONE);
+    let during = n.velocities();
+    assert!(during[..3] != was[..3], "{during:?}");
+    assert!(during[3..] == was[3..], "the others hold: {during:?}");
+    n.h.key(Key::Escape, Modifiers::NONE);
+    n.release(from + vec2(0.0, -30.0), Modifiers::NONE);
+    assert_eq!(*n.doc(), before, "Esc puts the values back");
+    // The drag, finished, is one step and the amount stays.
+    n.drag(from, from + vec2(0.0, -30.0), Modifiers::NONE);
+    n.one_step(&before, "Randomize note values");
+    assert_eq!(n.h.shell.clip_view().randomize_amounts().velocity, 40);
+    // With nothing selected, moving the amount changes nothing.
+    n.select(&[]);
+    let before = n.doc().clone();
+    n.drag(from, from + vec2(0.0, -30.0), Modifiers::NONE);
+    assert_eq!(*n.doc(), before);
+    assert_eq!(n.h.shell.clip_view().randomize_amounts().velocity, 50);
+}
+
+#[test]
+fn typing_into_the_footers_fields_sets_the_ramp_the_deviation_and_the_amount() {
+    // Spec: note-editing R10 to R13. A value field shows the selected notes'
+    // value and takes a typed value on Enter.
+    let step = n_step();
+    let mut n = set(vec![
+        Note::new(60, Ticks::ZERO, step, 100),
+        Note::new(62, 4 * step, step, 100),
+        Note::new(64, 8 * step, step, 100),
+    ]);
+    n.select(&[0, 1, 2]);
+    let type_into = |n: &mut Notes, name: &str, keys: &[Key]| {
+        let at = n.footer(name).center();
+        n.h.click(at);
+        n.h.settle();
+        for key in keys {
+            n.h.key(*key, Modifiers::NONE);
+        }
+        n.h.key(Key::Enter, Modifiers::NONE);
+    };
+    // Ramp Start, then Ramp End: the notes between are on the line.
+    let before = n.doc().clone();
+    type_into(&mut n, "Ramp Start", &[Key::Num2, Key::Num0]);
+    assert_eq!(
+        n.velocities(),
+        [20, 60, 100],
+        "from 20 to the last note's 100"
+    );
+    n.one_step(&before, "Ramp note values");
+    type_into(&mut n, "Ramp End", &[Key::Num1, Key::Num2, Key::Num0]);
+    assert_eq!(n.velocities(), [20, 70, 120]);
+    // Deviation takes a negative number.
+    type_into(
+        &mut n,
+        "Velocity Deviation",
+        &[Key::Minus, Key::Num1, Key::Num0],
+    );
+    assert!(n.notes().iter().all(|note| note.velocity_deviation == -10));
+    // An out-of-range value changes nothing.
+    let before = n.doc().clone();
+    type_into(&mut n, "Ramp End", &[Key::Num2, Key::Num0, Key::Num0]);
+    assert_eq!(*n.doc(), before);
+    // The amount, typed, sets it and randomises the selected notes.
+    type_into(&mut n, "Randomize Amount", &[Key::Num1, Key::Num5]);
+    assert_eq!(n.h.shell.clip_view().randomize_amounts().velocity, 15);
+    let velocities = n.velocities();
+    assert!(
+        velocities
+            .iter()
+            .zip([20u8, 70, 120])
+            .all(|(now, was)| now.abs_diff(was) <= 15),
+        "{velocities:?}"
+    );
+}
+
+#[test]
+fn the_ramps_ends_follow_the_selection() {
+    // Spec: note-editing R11. With one note selected only the start is
+    // available, and with every selected note starting together the end is
+    // disabled.
+    let step = n_step();
+    let mut n = set(vec![
+        Note::new(60, Ticks::ZERO, step, 100),
+        Note::new(64, Ticks::ZERO, step, 100),
+        Note::new(62, 4 * step, step, 100),
+    ]);
+    let disabled = |n: &mut Notes, label: &str| -> bool {
+        let nodes = Harness::nodes(&n.h.settle());
+        nodes
+            .iter()
+            .find(|node| node.label == label)
+            .unwrap_or_else(|| panic!("{label}"))
+            .disabled
+    };
+    assert!(disabled(&mut n, "Ramp Start"), "nothing selected");
+    n.select(&[0]);
+    assert!(!disabled(&mut n, "Ramp Start"));
+    assert!(disabled(&mut n, "Ramp End"), "one note");
+    n.select(&[0, 1]);
+    assert!(disabled(&mut n, "Ramp End"), "a chord starts together");
+    n.select(&[0, 2]);
+    assert!(!disabled(&mut n, "Ramp End"));
+}
+
+#[test]
+fn a_note_that_doesnt_always_play_shows_a_corner_triangle_on_a_tall_enough_row() {
+    // Spec: note-editing R4. Notes below 100 % show the triangle while their
+    // key row is at least 9 points tall.
+    let mut note = Note::new(60, Ticks::ZERO, Ticks(10), 100);
+    assert!(!shows_corner(&note, 12.0), "100 %");
+    note.probability = 0.5;
+    assert!(shows_corner(&note, 9.0));
+    assert!(!shows_corner(&note, 8.0), "too short a row");
+}
+
+#[test]
+fn the_lanes_dividers_wheel_and_a_lane_dragged_to_nothing_resize_and_hide() {
+    // Spec: note-editing R2. Dragging the split resizes the lanes, Option
+    // with the wheel makes them taller or shorter, and a lane dragged down
+    // to nothing hides.
+    use NoteField::{Chance, Velocity};
+    let mut n = run_of_notes(2, 100);
+    n.h.shell
+        .run("view.lanes", json!({ "lane": "chance" }))
+        .unwrap();
+    n.h.settle();
+    let tall = n.lane_of(Velocity).height();
+    // Dragging the divider above the Chance lane up makes it taller and the
+    // Velocity lane shorter.
+    let divider = n.lane_of(Chance).left_top() + vec2(300.0, -1.5);
+    n.drag(divider, divider + vec2(0.0, -10.0), Modifiers::NONE);
+    assert!(n.lane_of(Velocity).height() < tall);
+    assert!(n.lane_of(Chance).height() > tall);
+    // Option with the wheel makes every lane taller.
+    let lane = n.lane_of(Velocity);
+    let at = pos2(lane.center().x, lane.center().y);
+    let before = n.lane_of(Velocity).height();
+    n.h.frame(vec![Event::PointerMoved(at)]);
+    n.h.frame(vec![
+        Event::ModifiersChanged(Modifiers::ALT),
+        Event::MouseWheel {
+            unit: MouseWheelUnit::Point,
+            delta: vec2(0.0, 12.0),
+            phase: TouchPhase::Move,
+            modifiers: Modifiers::ALT,
+        },
+    ]);
+    n.h.frame(vec![Event::ModifiersChanged(Modifiers::NONE)]);
+    n.h.settle();
+    assert!(n.lane_of(Velocity).height() > before);
+    // Dragged to nothing, the Chance lane hides.
+    let chance = n.lane_of(Chance);
+    let top = chance.left_top() + vec2(300.0, -1.5);
+    n.drag(
+        top,
+        top + vec2(0.0, chance.height() + 20.0),
+        Modifiers::NONE,
+    );
+    assert_eq!(n.shown(), [Velocity], "the lane hides");
+}
+
+#[test]
+fn assistive_technology_reads_each_lane_marker_and_footer_control() {
+    // Spec: note-editing R20. Each lane is a group named for its value, each
+    // marker an item with its note's name and value, and each footer control
+    // its name and value.
+    let step = n_step();
+    let mut n = set(vec![Note::new(60, Ticks::ZERO, step, 77)]);
+    let nodes = Harness::nodes(&n.h.settle());
+    assert!(
+        nodes
+            .iter()
+            .any(|node| node.role == egui::accesskit::Role::Group && node.label == "Velocity"),
+        "the lane is a group named Velocity"
+    );
+    let marker = nodes
+        .iter()
+        .find(|node| node.role == egui::accesskit::Role::ListItem && node.value == "77")
+        .expect("the marker reads its value");
+    assert_eq!(marker.label, "C3", "and its note's name");
+    let amount = nodes
+        .iter()
+        .find(|node| node.label == "Randomize Amount")
+        .expect("the footer's amount");
+    assert_eq!(amount.value, "0");
+    assert_eq!(amount.numeric, Some(0.0));
 }

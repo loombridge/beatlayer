@@ -301,6 +301,7 @@ impl MainWindowUi {
             || self.mixer_typing
             || self.menu_open
             || self.devices.is_typing()
+            || self.clip_view.is_typing()
     }
 
     /// The Arrangement View, to give it a peak source or read what it drew.

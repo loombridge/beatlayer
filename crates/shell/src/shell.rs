@@ -39,10 +39,10 @@ use crate::clip_view::{self, ClipView};
 use crate::commands::{
     self as ids, ClipEnvelopeArgs, ClipTabArgs, DefaultLaunchModeArgs,
     DefaultLaunchQuantizationArgs, DefaultSetArgs, DefaultWarpModeArgs, FileReport, FoldNotesArgs,
-    LaneArgs, LanesArgs, LoopWarpShortSamplesArgs, PathArgs, RecordSessionAutomationInArgs, SampleEditorArgs,
-    SampleEditorResult, SaveAsArgs, SetResult, SettingsArgs, SwitchArgs, SwitchResult,
-    TemplateArgs, TemporaryFolderArgs, TemporaryFolderResult, TestToneArgs, TestToneState,
-    ThemeArgs, ViewResult, ViewState, ZoomArgs,
+    LaneArgs, LanesArgs, LoopWarpShortSamplesArgs, PathArgs, RecordSessionAutomationInArgs,
+    SampleEditorArgs, SampleEditorResult, SaveAsArgs, SetResult, SettingsArgs, SwitchArgs,
+    SwitchResult, TemplateArgs, TemporaryFolderArgs, TemporaryFolderResult, TestToneArgs,
+    TestToneState, ThemeArgs, ViewResult, ViewState, ZoomArgs,
 };
 use crate::devices::{self, DeviceError, DeviceView};
 use crate::files::{ProjectFiles, SetStore, new_set_from};
@@ -5687,6 +5687,24 @@ impl Shell {
     #[must_use]
     pub fn can_invoke(&self, id: &str, args: &Value) -> bool {
         self.can_invoke_in(id, args, &self.active_contexts())
+    }
+
+    /// The contexts the MIDI Note Editor's context menus work in (C-NOTE,
+    /// C-KEYS): the note editor's, and the note selection's while notes are
+    /// selected, whatever has the keyboard, because the menu acts on what it
+    /// was opened on (Spec: piano-roll R30; note-editing R18).
+    #[must_use]
+    pub fn note_menu_contexts(&self) -> Vec<Context> {
+        let mut contexts = vec![Context::NoteEditor];
+        if !self
+            .clip_view
+            .selected_notes(self.editor.document(), &self.arrangement)
+            .is_empty()
+        {
+            contexts.push(Context::NoteSelection);
+        }
+        contexts.extend([Context::ClipView, Context::Global]);
+        contexts
     }
 
     /// The contexts a track's title-bar menu works in (WP-4.22): the active

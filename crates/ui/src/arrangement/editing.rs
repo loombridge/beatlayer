@@ -278,6 +278,17 @@ impl ClipGestures {
         self.handles_held
     }
 
+    /// The clips a move drag is carrying, with the one grabbed first, if
+    /// one is under way: released over the browser, one clip is saved as a
+    /// clip file and several save nothing (clip files R3).
+    #[must_use]
+    pub fn moving(&self) -> Option<(ClipId, usize)> {
+        match &self.drag {
+            Some(ClipDrag::Move { anchor, clips, .. }) => Some((*anchor, clips.len())),
+            _ => None,
+        }
+    }
+
     /// Whether a drag or a keyboard resize is under way.
     #[must_use]
     pub fn active(&self) -> bool {

@@ -50,6 +50,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "clip_file"
+path = "fuzz_targets/clip_file.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "preset"
 path = "fuzz_targets/preset.rs"
 test = false

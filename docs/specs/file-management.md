@@ -1,6 +1,6 @@
 # Templates and file management
 
-- **Status:** partial (R1 to R6 and R10 to R21 each have a passing test; R7 to R9 are WP-6.34's)
+- **Status:** partial (R1 to R21 each have a passing test, but for the parts of R10 to R17 listed under "Not built yet")
 - **Work packages:** WP-2.25 (R1 to R6); WP-6.34 (Collect Files on Export, R7 to R9); WP-6.63 (the File Manager, Open Beatlayer Set Backups and Save a Copy..., R10 to R21). The save history, which lists a set's backups too, is [crash recovery](crash-recovery.md)'s (WP-6.39); the list of a set's plug-ins, which opens in the File Manager's place, is [the plug-in list](plugin-list.md)'s (WP-6.41); Create Pack, in the Manage Project view, is [set exchange](set-exchange.md)'s (WP-6.35b)
 - **Parity-matrix row:** Files and export: Sets, templates, Collect All and Save, File Manager (missing files); Clip, device preset, and rack preset files (the copying of a clip's files)
 - **Checked against:** the Live 12 reference manual (online edition), read on 14 October 2026, and for R7 to R21 on 20 October 2026; the Live 12 release notes, 12.2; the UI parity reference's rows L-SET-016, L-OTH-002, M-FILE-007, M-FILE-008, M-FILE-011, M-VIEW-007, C-BROWSER-014 and I-DROP-012
@@ -73,9 +73,9 @@ You make a set the one a new set starts from, and save templates to reuse a setu
 | R4 | `crates/shell/tests/file_management.rs`, `collect_all_and_save_copies_external_files_into_the_project` | unit, through `Shell::run` on real folders |
 | R5 | `crates/shell/tests/file_management.rs`, `templates_are_saved_into_the_user_library_and_listed` | unit |
 | R6 | `crates/shell/tests/file_management.rs`, `a_moved_file_is_found_by_the_automatic_search` | unit, through `Shell::run` on real folders |
-| R7 | to be written in WP-6.34 | |
-| R8 | to be written in WP-6.34 | |
-| R9 | to be written in WP-6.34 | |
+| R7 | `crates/shell/tests/clip_files.rs`, `collect_files_on_export_copies_refers_or_asks`; `crates/ui/tests/clip_files.rs`, `the_library_page_has_collect_files_on_export_and_the_user_library` | unit, UI script |
+| R8 | `crates/shell/tests/clip_files.rs`, `collect_files_on_export_copies_refers_or_asks`; `crates/ui/tests/clip_files.rs`, `ask_shows_copy_dont_copy_and_cancel` | unit, UI script |
+| R9 | `crates/shell/tests/clip_files.rs`, `copies_go_into_the_project_the_file_lands_in`, `collect_files_on_export_copies_refers_or_asks` | unit, through `Shell::run` on real folders |
 | R10 | `crates/shell/tests/file_manager.rs`, `the_file_manager_commands_are_registered_and_reach_the_agent_api`; `crates/ui/tests/file_manager.rs`, `the_file_manager_opens_in_the_detail_areas_place_from_each_entry_point` | unit, through `Shell::run` on real folders; UI script |
 | R11 | `crates/shell/tests/file_manager.rs`, `the_files_list_where_they_are`, `replacing_a_file_changes_every_clip_that_used_it_in_one_step` | unit, through `Shell::run` on real folders |
 | R12 | `crates/shell/tests/file_manager.rs`, `a_renamed_file_shows_in_the_status_bar_and_the_missing_files` | unit, through `Shell::run` on real folders |

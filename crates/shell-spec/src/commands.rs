@@ -187,6 +187,11 @@ pub const SETTINGS_SET_AUTOMATION_RECORD_MODE: &str = "settings.set_automation_r
 /// `settings.set_auto_hide_plug_in_windows`: switch Auto-Hide Plug-In
 /// Windows (WP-2.5b).
 pub const SETTINGS_SET_AUTO_HIDE_PLUG_IN_WINDOWS: &str = "settings.set_auto_hide_plug_in_windows";
+/// `settings.set_collect_files_on_export`: choose Collect Files on Export
+/// (WP-6.34).
+pub const SETTINGS_SET_COLLECT_FILES_ON_EXPORT: &str = "settings.set_collect_files_on_export";
+/// `settings.set_user_library`: choose the User Library's folder (WP-6.34).
+pub const SETTINGS_SET_USER_LIBRARY: &str = "settings.set_user_library";
 /// `audio.devices`: list drivers and devices.
 pub const AUDIO_DEVICES: &str = "audio.devices";
 /// `audio.status`: what the audio device runs at.
@@ -279,6 +284,8 @@ pub const IDS: &[&str] = &[
     SETTINGS_SET_AUTOMATION_RECORD_MODE,
     SETTINGS_SET_AUTO_HIDE_PLUG_IN_WINDOWS,
     SETTINGS_SET_OUTLINE_VIEW_IN_FOCUS,
+    SETTINGS_SET_COLLECT_FILES_ON_EXPORT,
+    SETTINGS_SET_USER_LIBRARY,
     AUDIO_DEVICES,
     AUDIO_STATUS,
     AUDIO_CONFIGURE,
@@ -504,6 +511,32 @@ pub struct DefaultLaunchQuantizationArgs {
     /// the global one, Live's "Global".
     #[serde(default)]
     pub quantization: Option<LaunchQuantization>,
+}
+
+/// Arguments of `settings.set_collect_files_on_export`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CollectFilesArgs {
+    /// `always`, `never` or `ask`.
+    pub mode: crate::settings::CollectFiles,
+}
+
+/// Arguments of `settings.set_user_library`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct UserLibraryArgs {
+    /// The folder's absolute path, or `null` for the default: a `User
+    /// Library` folder in a Beatlayer folder in the Music folder (the
+    /// Documents folder on Windows).
+    pub path: Option<String>,
+}
+
+/// What `settings.set_user_library` returns: the User Library in use
+/// afterwards.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct UserLibraryResult {
+    /// The User Library's path; empty when there is none.
+    pub path: String,
 }
 
 /// Arguments of `settings.set_temporary_folder`.
@@ -1424,6 +1457,42 @@ fn specs() -> Vec<CommandSpec> {
         .context(Settings)
         .args::<SwitchArgs>()
         .result::<SwitchResult>(),
+        // Library (L-SET-016; WP-6.34): an edit-class preference.
+        CommandSpec::new(
+            SETTINGS_SET_COLLECT_FILES_ON_EXPORT,
+            "Collect Files on Export",
+        )
+        .description(
+            "Chooses Collect Files on Export on the Settings window's Library page: what \
+                 happens to the audio files a clip or a set uses when it is saved to the \
+                 browser as a clip file or a set. `always` (a new install's choice) copies \
+                 every such file that isn't already in the saved file's project into its \
+                 `Samples/Imported` folder; `never` copies none, and the saved file names each \
+                 file where it is; `ask` asks first, with Copy, Don't Copy and Cancel, and the \
+                 commands that save to the browser refuse to run under it without their `copy` \
+                 argument, so an agent asks the person first. Collect All and Save and device \
+                 presets don't follow it. The setting is kept for the next start, and isn't \
+                 part of the set or an undo step.",
+        )
+        .permission(Permission::Edit)
+        .context(Settings)
+        .args::<CollectFilesArgs>()
+        .result::<()>(),
+        CommandSpec::new(SETTINGS_SET_USER_LIBRARY, "User Library")
+            .description(
+                "Chooses the User Library's folder on the Settings window's Library page. \
+                 `path` is an absolute path, or `null` for the default. The folder becomes the \
+                 User Library at once: its starting folders (Clips, Defaults, Grooves, \
+                 Presets, Samples, Tunings) are made in it if it has none, and it is indexed \
+                 in the background. Nothing is moved from the folder before. Run by a person \
+                 from the Browse button without a `path`, it asks for a folder. The setting is \
+                 kept for the next start, and isn't part of the set or an undo step. The \
+                 result's `path` is the User Library in use afterwards.",
+            )
+            .permission(Permission::Edit)
+            .context(Settings)
+            .args::<UserLibraryArgs>()
+            .result::<UserLibraryResult>(),
         // File & Folder (L-SET-015; WP-4.20): an edit-class preference.
         CommandSpec::new(SETTINGS_SET_TEMPORARY_FOLDER, "Temporary Folder")
             .description(

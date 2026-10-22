@@ -17,6 +17,7 @@ use bl_shell_spec::browser::{AddResult, AddToArrangementArgs, ItemKind, PlacedCl
 use super::listing::{self, stem};
 use crate::arrangement::placing;
 use crate::auto_warp::{Warping, new_clip};
+use crate::clip_files::{self, Lane, Spot};
 
 /// The undo step a drop makes. Live's name for it isn't observed yet
 /// (browser, "To observe in Live").
@@ -84,6 +85,24 @@ pub(crate) fn is_audio(path: &str) -> bool {
         .file_name()
         .and_then(|name| listing::file_kind(&name.to_string_lossy()))
         == Some(ItemKind::Audio)
+}
+
+/// Whether `path` names a clip file, by its extension.
+pub(crate) fn is_clip_file(path: &str) -> bool {
+    Path::new(path)
+        .file_name()
+        .and_then(|name| listing::file_kind(&name.to_string_lossy()))
+        == Some(ItemKind::Clip)
+}
+
+/// What the Status Bar says when placing a clip file left audio files
+/// missing (clip files R12), if any.
+pub(crate) fn missing_message(missing: usize) -> Option<String> {
+    match missing {
+        0 => None,
+        1 => Some("1 audio file the clip plays is missing.".to_owned()),
+        n => Some(format!("{n} audio files the clips play are missing.")),
+    }
 }
 
 /// Reads one file for a Session slot: its media entry, its name, and how
@@ -242,4 +261,115 @@ pub fn add_files(
     });
     applied.map_err(|e| AddError::Failed(e.to_string()))?;
     Ok((result, files.into_iter().map(|f| f.media).collect()))
+}
+
+/// Puts the clips in clip files into the Arrangement (clip files R7 to R9)
+/// as `browser.add_to_arrangement` describes, as one undo step: each on the
+/// track of its kind the file says, or on a new track of its kind, which
+/// brings the file's device chain with it. Every file is read before
+/// anything changes, and every placement checked, so one that can't go
+/// changes nothing. Returns what was placed, the audio files found for the
+/// set's media table, and how many files the clips play that weren't.
+///
+/// # Errors
+///
+/// [`AddError`] if no file is given, the files aren't all clip files, a file
+/// can't be read, or one can't go where it is asked to.
+pub fn add_clip_files(
+    editor: &mut Editor,
+    media: &MediaStore,
+    insert_marker: Ticks,
+    search: &[PathBuf],
+    args: &AddToArrangementArgs,
+) -> Result<(AddResult, Vec<MediaFile>, usize), AddError> {
+    if args.paths.is_empty() {
+        return Err(AddError::InvalidArgs("`paths` lists no files".to_owned()));
+    }
+    if !args.paths.iter().all(|path| is_clip_file(path)) {
+        return Err(AddError::InvalidArgs(
+            "clip files can't be added together with other files".to_owned(),
+        ));
+    }
+    let start = args.at.unwrap_or(insert_marker);
+    if start < Ticks::ZERO {
+        return Err(AddError::InvalidArgs(
+            "`at` can't be before the song's start".to_owned(),
+        ));
+    }
+    let loaded = args
+        .paths
+        .iter()
+        .map(|path| clip_files::load(media, Path::new(path), search).map_err(AddError::Failed))
+        .collect::<Result<Vec<_>, _>>()?;
+    if let Some(track) = args.track {
+        // The target track takes the first file with `spread`, all of them
+        // without it.
+        let count = if args.spread { 1 } else { loaded.len() };
+        for file in loaded.iter().take(count) {
+            clip_files::check(
+                editor.document(),
+                &file.file,
+                Lane::Track(track),
+                Spot::Arrangement(start),
+            )
+            .map_err(AddError::InvalidArgs)?;
+        }
+    }
+
+    let mut result = AddResult::default();
+    editor
+        .transact(clip_files::UNDO_LABEL, |editor| {
+            let mut current = args.track;
+            let mut made = 0;
+            let mut at = start;
+            let mut placed: BTreeSet<ClipId> = BTreeSet::new();
+            for (index, file) in loaded.iter().enumerate() {
+                let kind = clip_files::track_kind(&file.file);
+                let kept = current
+                    .filter(|track| {
+                        editor
+                            .document()
+                            .track(*track)
+                            .is_some_and(|t| t.kind() == kind)
+                    })
+                    .filter(|_| !args.spread || index == 0);
+                let lane = match kept {
+                    Some(track) => Lane::Track(track),
+                    None => {
+                        let (parent, place) = place_below(editor.document(), args.track, made);
+                        made += 1;
+                        Lane::New {
+                            parent,
+                            index: place,
+                        }
+                    }
+                };
+                if args.spread {
+                    at = start;
+                }
+                let done = clip_files::place(editor, file, lane, Spot::Arrangement(at), &placed)?;
+                placed.insert(done.clip);
+                if done.created {
+                    result.created_tracks.push(done.track);
+                }
+                result.clips.push(PlacedClip {
+                    clip: done.clip,
+                    track: done.track,
+                    start: done.start,
+                    length: done.length,
+                    name: editor
+                        .document()
+                        .clip(done.clip)
+                        .map_or_else(String::new, |clip| clip.name.clone()),
+                    path: args.paths[index].clone(),
+                });
+                current = Some(done.track);
+                at = at.saturating_add(done.length);
+            }
+            Ok::<_, bl_model::EditError>(())
+        })
+        .map_err(|e| AddError::Failed(e.to_string()))?;
+    let missing = loaded.iter().map(|file| file.missing).sum();
+    let media = loaded.into_iter().flat_map(|file| file.media).collect();
+    Ok((result, media, missing))
 }

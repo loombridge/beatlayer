@@ -9,7 +9,7 @@
 //! person first. The behaviour they follow is in the browser spec.
 
 use bl_commands::Context::{
-    Arrangement, Browser, BrowserSearch, BrowserSidebar, ClipView, Global, SampleEditor,
+    Arrangement, Browser, BrowserSearch, BrowserSidebar, ClipView, Global, SampleEditor, Session,
 };
 use bl_commands::{CommandSpec, NoArgs, Permission, RegisterError, Registry};
 use bl_core::time::Ticks;
@@ -48,6 +48,11 @@ pub const SCRUB_PREVIEW: &str = "browser.scrub_preview";
 /// `browser.load_selected`: load the selected files onto the selected track
 /// (Enter).
 pub const LOAD_SELECTED: &str = "browser.load_selected";
+/// `clip.save_file`: save a clip as a clip file in a browser folder.
+pub const SAVE_CLIP_FILE: &str = "clip.save_file";
+/// `browser.rename_file`: give the file whose name is open for editing its
+/// new name, or stop editing it.
+pub const RENAME_FILE: &str = "browser.rename_file";
 /// `browser.add_to_arrangement`: put files on a track, or on a new track.
 pub const ADD_TO_ARRANGEMENT: &str = "browser.add_to_arrangement";
 /// `browser.tags`: the tag groups and their tags, and what the given items
@@ -94,6 +99,8 @@ pub const IDS: &[&str] = &[
     SCRUB_PREVIEW,
     LOAD_SELECTED,
     ADD_TO_ARRANGEMENT,
+    SAVE_CLIP_FILE,
+    RENAME_FILE,
     TAGS,
     TAG_ITEMS,
     ADD_TAG,
@@ -220,7 +227,6 @@ impl Label {
                 "Instrument presets appear here once Beatlayer has instruments (milestone M2); \
                  its own sound library comes in milestone M9.",
             ),
-            Self::Clips => Some("Clip files arrive in milestone M6."),
             Self::Grooves => Some("Grooves arrive with the Groove Pool in milestone M6."),
             Self::Tunings => Some("Tunings arrive in milestone M6."),
             _ => None,
@@ -288,6 +294,19 @@ pub enum ItemKind {
     /// One of Beatlayer's own devices, listed under a device label (the
     /// Modulators label, WP-5.10); its path is the device type's ID.
     Device,
+    /// A clip file (WP-6.34); the row's `clip_kind` says whether it holds an
+    /// audio clip or a MIDI clip.
+    Clip,
+}
+
+/// What a clip file holds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ClipFileKind {
+    /// An audio clip.
+    Audio,
+    /// A MIDI clip.
+    Midi,
 }
 
 /// One row of the content pane.
@@ -313,6 +332,10 @@ pub struct Item {
     /// scanning spec, R11).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub format: Option<bl_model::PluginFormat>,
+    /// For a clip file, what it holds; `null` when its first bytes don't say
+    /// (a damaged file), which placing refuses (clip files R6).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip_kind: Option<ClipFileKind>,
 }
 
 /// The preview: the switch, the volume, and what plays.
@@ -371,6 +394,10 @@ pub struct BrowserState {
     pub note: Option<String>,
     /// The selected items' paths.
     pub selected: Vec<String>,
+    /// The file whose name is open for editing, after `clip.save_file` saved
+    /// it: `browser.rename_file` gives it its new name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub renaming: Option<String>,
     /// The preview.
     pub preview: PreviewState,
     /// The index.
@@ -804,6 +831,56 @@ pub struct AddToArrangementArgs {
     pub spread: bool,
 }
 
+/// Arguments of `clip.save_file`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SaveClipFileArgs {
+    /// The clip to save: one in the Arrangement or in a Session slot.
+    pub clip: ClipId,
+    /// The folder to save it in. Left out, the User Library's `Clips`
+    /// folder.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder: Option<String>,
+    /// The file's name, without the extension. Left out, the clip's name, or
+    /// its track's when the clip has none. A name already taken in the
+    /// folder gets " 2", " 3" and so on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Answers Collect Files on Export when it is set to Ask: `true` copies
+    /// the audio files the clip and its track's devices play, `false` leaves
+    /// the clip file naming them where they are. Under Always and Never it
+    /// is ignored; under Ask, leaving it out refuses the command.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub copy: Option<bool>,
+}
+
+/// What `clip.save_file` returns.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SaveClipFileResult {
+    /// The clip file's path.
+    pub path: String,
+    /// Its name, without the extension.
+    pub name: String,
+    /// Whether it holds an audio clip or a MIDI clip.
+    pub kind: ClipFileKind,
+    /// How many audio files were copied beside it.
+    pub copied: usize,
+}
+
+/// Arguments of `browser.rename_file`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RenameFileArgs {
+    /// The file to rename. Left out, the file whose name is open for
+    /// editing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// The new name, without the extension. Left out (or `null`), the name
+    /// is kept and editing ends, as Esc does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
 /// A clip a browser command placed.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct PlacedClip {
@@ -1052,6 +1129,38 @@ fn specs() -> Vec<CommandSpec> {
             .contexts([Arrangement, Browser])
             .args::<AddToArrangementArgs>()
             .result::<AddResult>(),
+        CommandSpec::new(SAVE_CLIP_FILE, "Save Clip as File")
+            .description(
+                "Saves a clip from the Arrangement or a Session slot as a clip file (`.blclip`) \
+                 in `folder` (the User Library's `Clips` folder if left out), as dragging the \
+                 clip onto a folder in the browser does. The file keeps the clip as the set \
+                 saves it (its notes or its warp markers, envelopes and launch settings) and the \
+                 devices of its track with their state. It is named `name`, the clip's name, or \
+                 its track's when the clip has none, with \" 2\", \" 3\" added for a name already \
+                 taken, and written whole or not at all. The audio the clip and the devices play \
+                 is copied into the `Samples/Imported` folder of the project the file lands in or \
+                 left where it is, as Collect Files on Export says (`settings.state`'s \
+                 `library.collect_files_on_export`); under Ask, `copy` answers for the person and \
+                 leaving it out refuses the command. The new row is selected with its name open \
+                 for editing (`browser.state`'s `renaming`; `browser.rename_file` finishes it). \
+                 Changes nothing in the set. Writes files outside the project.",
+            )
+            .permission(Permission::External)
+            .contexts([Arrangement, Browser, Session])
+            .args::<SaveClipFileArgs>()
+            .result::<SaveClipFileResult>(),
+        CommandSpec::new(RENAME_FILE, "Rename Browser File")
+            .description(
+                "Renames the file whose name is open for editing in the browser (or the file at \
+                 `path`) to `name`, keeping its extension, as typing a name and pressing Enter \
+                 does after a clip is saved. A name another file in the folder has is refused. \
+                 Without a `name` the name is kept and editing ends, as Esc does. Renames a file \
+                 outside the project.",
+            )
+            .permission(Permission::External)
+            .context(Browser)
+            .args::<RenameFileArgs>()
+            .result::<BrowserState>(),
         CommandSpec::new(TAGS, "Browser Tags")
             .description(
                 "Reports the browser's tag groups and their tags, in order: Beatlayer's own \
@@ -1208,6 +1317,8 @@ mod tests {
             SCRUB_PREVIEW,
             LOAD_SELECTED,
             ADD_TO_ARRANGEMENT,
+            SAVE_CLIP_FILE,
+            RENAME_FILE,
         ] {
             assert_eq!(class(id), Permission::External, "{id} reads outside");
         }
@@ -1248,5 +1359,6 @@ mod tests {
         assert_eq!(Label::Folder("/a/Loops".into()).name(), "Loops");
         assert!(Label::Sounds.pending().is_some());
         assert!(Label::All.pending().is_none() && Label::Samples.pending().is_none());
+        assert!(Label::Clips.pending().is_none(), "clip files are built");
     }
 }

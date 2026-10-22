@@ -207,7 +207,12 @@ impl Lanes<'_> {
             horizontal: self.horizontal,
             scale: travel(self.doc, shell.devices(), target),
             selected: selected_breakpoints(self.doc, self.view, row.track, target),
-            span: self.view.time_selection(),
+            span: self.view.time_selection().filter(|_| {
+                self.view
+                    .time_selection_lanes()
+                    .iter()
+                    .any(|lane| lane.track() == row.track && lane.target() == Some(target))
+            }),
         })
     }
 

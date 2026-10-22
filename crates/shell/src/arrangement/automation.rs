@@ -700,7 +700,13 @@ fn move_breakpoints(
     );
     for point in moved_points {
         let at = points.partition_point(|other| other.at < point.at);
-        points.insert(at, point);
+        // Two moved breakpoints can land on one position when a drag snaps
+        // them together: the one moved last keeps the position.
+        if points.get(at).is_some_and(|other| other.at == point.at) {
+            points[at] = point;
+        } else {
+            points.insert(at, point);
+        }
     }
     apply(
         editor,

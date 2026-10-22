@@ -233,6 +233,79 @@ fn a_set_saved_before_the_scales_loads_unchanged() {
     assert_eq!(encode_json(&loaded, 1).unwrap(), saved);
 }
 
+// Spec: note-editing R20. The lanes, the footer and the value keys save
+// nothing new: a set saved before them loads unchanged, and every note value
+// a lane edits is saved in the shape it always was and read back.
+#[test]
+fn a_set_saved_before_the_lanes_loads_unchanged_and_every_note_value_round_trips() {
+    use bl_model::{MidiData, Note};
+    let mut editor = Editor::new();
+    let track = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: track,
+            kind: TrackKind::Midi,
+            name: "Keys".to_owned(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    let plain = Note::new(60, Ticks::ZERO, Ticks::QUARTER, 100);
+    let mut edited = Note::new(64, Ticks::QUARTER, Ticks::QUARTER, 33);
+    edited.release_velocity = 99;
+    edited.probability = 0.25;
+    edited.velocity_deviation = -20;
+    edited.mute = true;
+    let clip = editor.new_id();
+    editor
+        .apply(Command::CreateClip {
+            track,
+            clip: Clip::new(
+                clip,
+                Ticks::ZERO,
+                Ticks::WHOLE,
+                ClipData::Midi(MidiData::new([plain.clone(), edited.clone()])),
+            ),
+        })
+        .unwrap();
+    let project = Project {
+        document: editor.document().clone(),
+        ids: editor.ids(),
+        media: Media::default(),
+        windows: bl_model::DeviceWindows::new(),
+        rack_views: bl_model::RackViewMap::new(),
+        folds: bl_model::ClipFolds::new(),
+        launch: bl_model::LaunchSettings::default(),
+        multisamplers: bl_model::MultisamplerViews::new(),
+    };
+    let saved = encode_json(&project, 1).unwrap();
+    let value: Value = serde_json::from_slice(&saved).unwrap();
+    let notes = &value["document"]["tracks"][0]["clips"][0]["data"]["midi"]["notes"];
+    for field in [
+        "release_velocity",
+        "probability",
+        "velocity_deviation",
+        "mute",
+    ] {
+        assert!(
+            notes[0].get(field).is_none(),
+            "a plain note writes no {field}"
+        );
+        assert!(
+            notes[1].get(field).is_some(),
+            "an edited note writes {field}"
+        );
+    }
+    let (loaded, _) = decode_json(&saved, &LoadOptions::default()).unwrap();
+    assert_eq!(loaded.document, project.document);
+    let ClipData::Midi(midi) = &loaded.document.clip(clip).unwrap().data else {
+        panic!("a MIDI clip");
+    };
+    let notes: Vec<Note> = midi.notes.iter().cloned().collect();
+    assert_eq!(notes, [plain, edited], "every value comes back");
+    assert_eq!(encode_json(&loaded, 1).unwrap(), saved);
+}
+
 /// A one-bar MIDI clip, on the track from the start of the song.
 fn midi_clip(editor: &mut Editor, track: bl_model::TrackId) -> bl_model::ClipId {
     let clip = editor.new_id();

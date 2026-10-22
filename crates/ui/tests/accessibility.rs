@@ -1755,6 +1755,9 @@ fn paths() -> BTreeMap<&'static str, Path> {
     // keys (shortcuts.md, `note-editor` and `note-selection`) come with a
     // later package.
     let note_editor = LaterView("the note editor's keys (the note-editor shortcuts, milestone M2)");
+    let note_footer = LaterView(
+        "the note editor's footer and Lane Selector in the Tab order (WP-6.1's follow-up)",
+    );
     let clip_launch = LaterView("the Clip View's Launch panel (WP-3.9)");
     let audio_panel = LaterView("the Audio Utilities panel's controls (WP-4.10b)");
     let clip_title_bar = LaterView("the audio clip's title bar Save button (WP-4.10b)");
@@ -2659,9 +2662,14 @@ fn paths() -> BTreeMap<&'static str, Path> {
         // `clip_view.select_notes` have keys of their own now: the
         // note-selection keys (S-A11Y-010, S-A11Y-011), Delete
         // (S-EDIT-005) and Cmd-A (S-NOTE-001).
-        ("note.set_value", Exception(note_editor)),
         ("note.ramp_value", Exception(note_editor)),
         ("view.lane", Exception(note_editor)),
+        // The expression lanes and the footer (WP-6.1): the pointer drags
+        // the markers and uses the footer's controls and the Lane
+        // Selector, which assistive technology reads by name and value
+        // (note-editing R20); Tab doesn't reach them yet.
+        ("note.randomize", Exception(note_footer)),
+        ("view.lanes", Exception(note_footer)),
         // The list of the set's plug-ins (IMP-29, WP-6.41): Enter on its
         // Show Only Missing switch.
         (

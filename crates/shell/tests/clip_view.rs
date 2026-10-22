@@ -938,19 +938,23 @@ fn adjusting_values_is_one_step_and_holds_each_note_in_range() {
         json!({ "notes": [0], "field": "velocity", "value": 20 }),
     );
     song.view(ids::SELECT_NOTES, json!({ "notes": [0, 1] }));
-    let result = song.one_step(
-        ids::ADJUST_VALUE,
-        json!({ "field": "velocity", "by": 10 }),
+    let result = song.one_step(ids::ADJUST_VALUE, json!({ "field": "velocity", "by": 10 }));
+    let velocities =
+        |song: &Song| -> Vec<u8> { song.notes().iter().map(|note| note.velocity).collect() };
+    assert_eq!(
+        velocities(&song),
+        [30, 100 + 10, 100],
+        "{:?}",
+        velocities(&song)
     );
-    let velocities = |song: &Song| -> Vec<u8> {
-        song.notes().iter().map(|note| note.velocity).collect()
-    };
-    assert_eq!(velocities(&song), [30, 100 + 10, 100], "{:?}", velocities(&song));
     assert_eq!(result.selected, [0, 1], "the notes stay selected");
     // Past the end, each stops at it.
     song.one_step(ids::ADJUST_VALUE, json!({ "field": "velocity", "by": 100 }));
     assert_eq!(velocities(&song), [127, 127, 100]);
-    song.one_step(ids::ADJUST_VALUE, json!({ "field": "velocity", "by": -300 }));
+    song.one_step(
+        ids::ADJUST_VALUE,
+        json!({ "field": "velocity", "by": -300 }),
+    );
     assert_eq!(velocities(&song), [1, 1, 100]);
     // A change that moves no note is no step.
     let steps = song.steps();
@@ -972,7 +976,10 @@ fn adjusting_values_is_one_step_and_holds_each_note_in_range() {
         json!({ "field": "velocity", "by": 1, "nope": 1 }),
         json!({ "field": "velocity", "notes": [9], "by": 1 }),
     ] {
-        assert!(song.shell.run(ids::ADJUST_VALUE, args.clone()).is_err(), "{args}");
+        assert!(
+            song.shell.run(ids::ADJUST_VALUE, args.clone()).is_err(),
+            "{args}"
+        );
         assert_eq!(*song.doc(), before, "{args}");
     }
 }
@@ -996,7 +1003,10 @@ fn a_deviation_is_held_to_the_room_its_velocity_leaves() {
         json!({ "field": "velocity_deviation", "value": 127 }),
     );
     let deviations = |song: &Song| -> Vec<i8> {
-        song.notes().iter().map(|note| note.velocity_deviation).collect()
+        song.notes()
+            .iter()
+            .map(|note| note.velocity_deviation)
+            .collect()
     };
     assert_eq!(deviations(&song), [77, 27]);
     // And below: at least 1 less than the velocity.
@@ -1119,17 +1129,26 @@ fn randomizing_repeats_with_a_seed_and_an_amount_of_zero_changes_nothing() {
         json!({ "field": "chance", "amount": 0.5, "seed": 3 }),
     );
     let chances: Vec<f64> = song.notes().iter().map(|note| note.probability).collect();
-    assert!(chances.iter().all(|c| (0.5..=1.0).contains(c)), "{chances:?}");
+    assert!(
+        chances.iter().all(|c| (0.5..=1.0).contains(c)),
+        "{chances:?}"
+    );
     // Only the selected notes move when some are selected, and each call
     // without a seed draws afresh.
     song.view(ids::SELECT_NOTES, json!({ "notes": [0, 1, 2] }));
     let mid = song.doc().clone();
-    song.edit(ids::RANDOMIZE, json!({ "field": "release_velocity", "amount": 30 }));
+    song.edit(
+        ids::RANDOMIZE,
+        json!({ "field": "release_velocity", "amount": 30 }),
+    );
     let one: Vec<u8> = song.notes().iter().map(|n| n.release_velocity).collect();
     assert!(one[3..].iter().all(|v| *v == 64), "{one:?}");
     song.shell.run("edit.undo", json!({})).unwrap();
     assert_eq!(*song.doc(), mid);
-    song.edit(ids::RANDOMIZE, json!({ "field": "release_velocity", "amount": 30 }));
+    song.edit(
+        ids::RANDOMIZE,
+        json!({ "field": "release_velocity", "amount": 30 }),
+    );
     let two: Vec<u8> = song.notes().iter().map(|n| n.release_velocity).collect();
     assert_ne!(one, two, "an unseeded call draws afresh");
     // Out of range or the wrong field changes nothing.
@@ -1140,7 +1159,10 @@ fn randomizing_repeats_with_a_seed_and_an_amount_of_zero_changes_nothing() {
         json!({ "field": "chance", "amount": 1.5 }),
         json!({ "field": "velocity_deviation", "amount": 5 }),
     ] {
-        assert!(song.shell.run(ids::RANDOMIZE, args.clone()).is_err(), "{args}");
+        assert!(
+            song.shell.run(ids::RANDOMIZE, args.clone()).is_err(),
+            "{args}"
+        );
         assert_eq!(*song.doc(), before, "{args}");
     }
 }
@@ -1206,15 +1228,27 @@ fn the_lanes_are_view_state_that_shows_hides_and_swaps() {
     let state = song.view(VIEW_LANES, json!({ "lane": "chance" }));
     assert_eq!(state.lanes, [Velocity, Chance], "in the lanes' order");
     assert_eq!(state.lane, Chance);
-    let state = song.view(VIEW_LANES, json!({ "lane": "release_velocity", "show": true }));
+    let state = song.view(
+        VIEW_LANES,
+        json!({ "lane": "release_velocity", "show": true }),
+    );
     assert_eq!(state.lanes, [Velocity, Chance, ReleaseVelocity]);
     // Choosing a shown lane hides it; the active lane moves on if it was.
-    let state = song.view(VIEW_LANES, json!({ "lane": "release_velocity", "show": false }));
+    let state = song.view(
+        VIEW_LANES,
+        json!({ "lane": "release_velocity", "show": false }),
+    );
     assert_eq!(state.lanes, [Velocity, Chance]);
-    assert_eq!(state.lane, Velocity, "the first lane still shown takes over");
+    assert_eq!(
+        state.lane, Velocity,
+        "the first lane still shown takes over"
+    );
     let state = song.view(VIEW_LANES, json!({ "lane": "chance" }));
     assert_eq!(state.lanes, [Velocity]);
-    assert_eq!(state.lane, Velocity, "the active lane stays among those shown");
+    assert_eq!(
+        state.lane, Velocity,
+        "the active lane stays among those shown"
+    );
     // `view.lane` shows the lane too, and velocity deviation is Velocity's.
     let state = song.view(VIEW_LANE, json!({ "lane": "release_velocity" }));
     assert_eq!(state.lanes, [Velocity, ReleaseVelocity]);
@@ -1226,10 +1260,16 @@ fn the_lanes_are_view_state_that_shows_hides_and_swaps() {
     let state = song.view(VIEW_LANES, json!({ "lane": "velocity", "swap": true }));
     assert_eq!(state.lanes, [Chance, ReleaseVelocity]);
     assert_eq!(state.lane, Chance, "the active lane's place is taken");
-    let state = song.view(VIEW_LANES, json!({ "lane": "release_velocity", "swap": true }));
+    let state = song.view(
+        VIEW_LANES,
+        json!({ "lane": "release_velocity", "swap": true }),
+    );
     assert_eq!(state.lanes, [Velocity, Chance], "round to the first");
     // With every lane shown a swap changes nothing.
-    song.view(VIEW_LANES, json!({ "lane": "release_velocity", "show": true }));
+    song.view(
+        VIEW_LANES,
+        json!({ "lane": "release_velocity", "show": true }),
+    );
     let state = song.view(VIEW_LANES, json!({ "lane": "chance", "swap": true }));
     assert_eq!(state.lanes, [Velocity, Chance, ReleaseVelocity]);
     // The switch hides every lane and shows them again as they were.
@@ -1240,7 +1280,11 @@ fn the_lanes_are_view_state_that_shows_hides_and_swaps() {
     // Randomize's amounts are the lane's own, held to its limit.
     let state = song.view(VIEW_LANES, json!({ "lane": "velocity", "amount": 40 }));
     assert_eq!(state.randomize.velocity, 40);
-    assert_eq!(state.lanes.len(), 3, "setting an amount doesn't hide the lane");
+    assert_eq!(
+        state.lanes.len(),
+        3,
+        "setting an amount doesn't hide the lane"
+    );
     let state = song.view(VIEW_LANES, json!({ "lane": "chance", "amount": 25 }));
     assert_eq!(state.randomize.chance, 25);
     for args in [
@@ -1270,7 +1314,11 @@ fn each_note_takes_its_own_value_in_one_step() {
         json!({ "notes": [2, 0], "field": "velocity", "values": [10, 120] }),
     );
     let velocities: Vec<u8> = song.notes().iter().map(|note| note.velocity).collect();
-    assert_eq!(velocities, [120, 100, 10], "in the order the notes were named");
+    assert_eq!(
+        velocities,
+        [120, 100, 10],
+        "in the order the notes were named"
+    );
     let before = song.doc().clone();
     for args in [
         json!({ "notes": [0, 1], "field": "velocity", "values": [10] }),
@@ -1278,7 +1326,10 @@ fn each_note_takes_its_own_value_in_one_step() {
         json!({ "notes": [0], "field": "velocity", "value": 10, "values": [10] }),
         json!({ "notes": [0], "field": "velocity" }),
     ] {
-        assert!(song.shell.run(ids::SET_VALUE, args.clone()).is_err(), "{args}");
+        assert!(
+            song.shell.run(ids::SET_VALUE, args.clone()).is_err(),
+            "{args}"
+        );
         assert_eq!(*song.doc(), before, "{args}");
     }
 }

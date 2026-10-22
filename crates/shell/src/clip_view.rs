@@ -1516,9 +1516,7 @@ pub fn run(
             let length = doc.clip(clip).map_or(Ticks::ZERO, |clip| clip.length);
             let ordered = notes_in_order(&midi);
             // With none named or selected, every note in the clip's span.
-            let places = if notes.is_none()
-                && view.selected_notes(doc, arrangement).is_empty()
-            {
+            let places = if notes.is_none() && view.selected_notes(doc, arrangement).is_empty() {
                 let (from, to) = span(&midi, length);
                 let inside: Vec<u32> = (0..ordered.len() as u32)
                     .filter(|place| {

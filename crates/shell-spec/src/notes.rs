@@ -946,6 +946,10 @@ mod tests {
         assert_eq!(class(MOVE_NOTES), Some(Permission::Edit));
         assert_eq!(class(RESIZE_NOTES), Some(Permission::Edit));
         assert_eq!(class(QUANTIZE_NOTES), Some(Permission::Edit));
+        // The value commands the lanes, the footer and the keys run.
+        for id in [SET_VALUE, RAMP_VALUE, ADJUST_VALUE, RANDOMIZE, DEACTIVATE] {
+            assert_eq!(class(id), Some(Permission::Edit), "{id}");
+        }
         // The note clipboard: copying changes nothing, cutting removes work.
         assert_eq!(class(COPY), Some(Permission::Read));
         assert_eq!(class(CUT), Some(Permission::Destructive));
@@ -969,6 +973,15 @@ mod tests {
                 .collect();
             assert_eq!(bindings, [shortcut], "{id}");
         }
+        // 0 deactivates the selected notes (S-NOTE-041).
+        let deactivate: Vec<&str> = registry
+            .get(DEACTIVATE)
+            .unwrap()
+            .bindings
+            .iter()
+            .map(|binding| binding.shortcut.as_ref())
+            .collect();
+        assert_eq!(deactivate, ["S-NOTE-041"]);
         // The Quantize settings are view state, like Draw Mode.
         assert_eq!(class(QUANTIZE_SETTINGS), Some(Permission::Read));
         // Cmd-U quantises the selected notes (S-NOTE-011).

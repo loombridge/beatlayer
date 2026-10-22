@@ -685,7 +685,7 @@ Total to 1.0: 256 packages planned in Phases 0 to 6, and about 110 estimated in 
 | 6.36b | todo |  |  |
 | 6.37 | todo |  |  |
 | 6.37b | todo |  |  |
-| 6.38 | todo |  |  |
+| 6.38 | done | 22 October 2026 | [#310](https://github.com/loombridge/beatlayer/pull/310); View ▸ Return Tracks Scroll with Tracks (`mixer_view.return_tracks_scroll`, off by default and kept in the preferences) puts the returns after the drop area in the Session View's grid, both mixers and the Arrangement's lanes, scrolling with the tracks, with only Main pinned |
 | 6.39 | todo |  |  |
 | 6.40 | todo |  |  |
 | 6.41 | done | 21 October 2026 | [#288](https://github.com/loombridge/beatlayer/pull/288); the set's plug-ins listed in the detail area's place, with each device's preset name, the tracks it is on, the missing ones marked, and a tab-separated text export ([plug-in list](specs/plugin-list.md) R1 to R11); IMP-29's acceptance is still open |

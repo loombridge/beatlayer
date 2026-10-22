@@ -630,7 +630,7 @@ fn a_track_export_converts_to_mono_and_writes_an_mp3_beside_each_file() {
     .unwrap();
     assert_eq!(result.channels, 1);
     assert!(
-        result.files.len() >= 2 && result.files.len() % 2 == 0,
+        result.files.len() >= 2 && result.files.len().is_multiple_of(2),
         "{:?}",
         result.files
     );

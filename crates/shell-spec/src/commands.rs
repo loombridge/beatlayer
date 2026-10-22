@@ -312,8 +312,8 @@ pub struct TemplateArgs {
     pub name: Option<String>,
 }
 
-/// Arguments of `set.relink_missing`: folders to search besides the set's
-/// project folder and the User Library.
+/// Arguments of `set.relink_missing`: where to search for the set's missing
+/// files (file-management R14).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RelinkArgs {
@@ -321,6 +321,32 @@ pub struct RelinkArgs {
     /// the app's working directory. May be empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub folders: Vec<String>,
+    /// Whether the set's project folder is searched. On unless asked
+    /// otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project: Option<bool>,
+    /// Whether the User Library is searched. On unless asked otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub library: Option<bool>,
+    /// The folder the Automatic Search's Search Folder names.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder: Option<String>,
+}
+
+/// Arguments of `set.collect_all_and_save`: the groups of external files to
+/// collect (file-management R15).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CollectArgs {
+    /// The groups to collect from: "other-project", "user-library" or
+    /// "elsewhere". All of them when none are given.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub groups: Vec<crate::file_manager::ExternalGroup>,
+    /// The project folder to collect for, when it isn't the open set's:
+    /// every set in it is rewritten, each keeping the version it replaces
+    /// in its project's `Backup` folder (R16).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project: Option<String>,
 }
 
 /// What `set.collect_all_and_save` and `set.relink_missing` return.
@@ -331,6 +357,10 @@ pub struct FileReport {
     /// The number of files the command copied (Collect All and Save) or
     /// relinked (automatic search).
     pub files: usize,
+    /// The files the search found for each missing file, when there was more
+    /// than one candidate (R14).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub candidates: Vec<crate::file_manager::Candidate>,
 }
 
 /// Arguments of `app.settings`.
@@ -724,25 +754,31 @@ fn specs() -> Vec<CommandSpec> {
             .result::<SetResult>(),
         CommandSpec::new(SET_COLLECT_ALL, "Collect All and Save")
             .description(
-                "Copies every file the open set uses that lives outside its project folder into \
+                "Copies the files the open set uses that live outside its project folder into \
                  the project's `Samples/Imported` folder, re-points the set's media table at \
                  the copies, and saves the set, as File ▸ Collect All and Save does in Live, so \
-                 the set no longer depends on files elsewhere. Fails if the set has never been \
-                 saved; use `set.save_as` to give it a project folder first. The result's \
-                 `files` is how many files were copied.",
+                 the set no longer depends on files elsewhere. `groups` chooses which places to \
+                 collect from: \"other-project\", \"user-library\" and \"elsewhere\"; all of them \
+                 when none are given. Fails if the set has never been saved; use `set.save_as` \
+                 to give it a project folder first. The result's `files` is how many files were \
+                 copied.",
             )
             .permission(Permission::External)
             .context(Global)
-            .args::<NoArgs>()
+            .args::<CollectArgs>()
             .result::<FileReport>(),
         CommandSpec::new(SET_RELINK_MISSING, "Relink Missing Files")
             .description(
                 "Searches for the files the open set uses that are missing or changed, and \
-                 relinks each one to the first file found with the same content, as Live's \
-                 automatic search does. The search covers the set's project folder, the User \
-                 Library, the folders the files were last in, and any `folders` given, each \
-                 with its subfolders. The result's `files` is how many files were relinked. It \
-                 also runs by itself when a set is opened.",
+                 relinks each one to the file found with the same content, as Live's automatic \
+                 search does. The search covers the set's project folder, the User Library, the \
+                 folders the files were last in, and any `folders` given, each with its \
+                 subfolders; `project` and `library` switch the first two off, and `folder` \
+                 names the folder the Automatic Search's Search Folder chooses. A file with one \
+                 candidate is relinked to it; a file with several keeps its row, and the \
+                 candidates are in the result's `candidates`, so the person chooses. The result's \
+                 `files` is how many files were relinked. It also runs by itself when a set is \
+                 opened.",
             )
             .permission(Permission::External)
             .context(Global)

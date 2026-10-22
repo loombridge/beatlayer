@@ -6,6 +6,8 @@
 //! keys (Tab, Delete, Space) still reach the window and the keymap. On
 //! Windows the keys are shown for reading; the keymap handles every press.
 
+use std::cell::RefCell;
+
 use bl_shell::menus::{Action, Menu, MenuItem, SystemItem, shown};
 use bl_shell::{Invocation, Shell};
 use bl_ui::keymap::{Chord, Keymap, Platform};
@@ -25,11 +27,17 @@ enum Native {
 struct Entry {
     model: MenuItem,
     native: Native,
+    /// The rows the shell fills in now (WP-6.63: the backups), with the
+    /// items they are drawn as.
+    dynamic: RefCell<Vec<(muda::MenuItem, String)>>,
 }
 
 /// The native menu bar and the items it can update.
 pub struct NativeMenu {
     menu: muda::Menu,
+    /// The rows the shell fills in now (WP-6.63: the backups), by the id of
+    /// the item, with the invocation it runs.
+    dynamic: RefCell<Vec<(String, Invocation)>>,
     #[cfg_attr(
         not(target_os = "macos"),
         expect(dead_code, reason = "only macOS has a Help menu role")
@@ -74,6 +82,7 @@ impl NativeMenu {
             menu,
             help,
             entries,
+            dynamic: RefCell::new(Vec::new()),
         })
     }
 
@@ -115,7 +124,41 @@ impl NativeMenu {
                     item.set_enabled(state.enabled);
                     item.set_checked(state.checked.unwrap_or(false));
                 }
-                Native::Submenu(submenu) => submenu.set_enabled(state.enabled),
+                Native::Submenu(submenu) => {
+                    submenu.set_enabled(state.enabled);
+                    // The rows the shell fills in now (WP-6.63: the
+                    // backups), which change as the set is saved.
+                    let wanted: Vec<(String, Invocation)> = shell
+                        .menu_items(entry.model.row)
+                        .into_iter()
+                        .map(|item| {
+                            let args: serde_json::Value =
+                                serde_json::from_str(&item.args).unwrap_or(serde_json::Value::Null);
+                            (
+                                format!("{}|{}", entry.model.row, item.label),
+                                Invocation::new(item.id, args),
+                            )
+                        })
+                        .collect();
+                    let mut drawn = entry.dynamic.borrow_mut();
+                    let labels: Vec<&str> = drawn.iter().map(|(_, label)| label.as_str()).collect();
+                    let same = labels.len() == wanted.len()
+                        && labels.iter().zip(wanted.iter()).all(|(a, (b, _))| a == b);
+                    if !same {
+                        for (item, _) in drawn.iter() {
+                            let _ = submenu.remove(item);
+                        }
+                        drawn.clear();
+                        for (id, _) in &wanted {
+                            let label = id.split_once('|').map_or(id.as_str(), |(_, l)| l);
+                            let item =
+                                muda::MenuItem::with_id(MenuId::new(id.clone()), label, true, None);
+                            let _ = submenu.append(&item);
+                            drawn.push((item, label.to_owned()));
+                        }
+                        *self.dynamic.borrow_mut() = wanted;
+                    }
+                }
             }
         }
     }
@@ -128,6 +171,14 @@ impl NativeMenu {
         keymap: &Keymap,
         platform: Platform,
     ) -> Option<Invocation> {
+        if let Some((_, invocation)) = self
+            .dynamic
+            .borrow()
+            .iter()
+            .find(|(item, _)| item == id.as_ref())
+        {
+            return Some(invocation.clone());
+        }
         let entry = self.entries.iter().find(|e| e.model.row == id.as_ref())?;
         let state = item_state(&entry.model, shell, keymap, platform);
         state.enabled.then_some(state.invocation).flatten()
@@ -153,6 +204,7 @@ fn add_items(
                 entries.push(Entry {
                     model: item.clone(),
                     native: Native::Submenu(submenu),
+                    dynamic: RefCell::new(Vec::new()),
                 });
                 appended
             }
@@ -194,6 +246,7 @@ fn add_items(
                 entries.push(Entry {
                     model: item.clone(),
                     native,
+                    dynamic: RefCell::new(Vec::new()),
                 });
                 appended
             }

@@ -201,7 +201,15 @@ fn relinks_every_missing_file_in_one_pass() {
         .unwrap();
     }
 
-    let mut relinked = store.relink_missing(&[&backup]).unwrap();
+    let mut relinked: Vec<(ContentHash, PathBuf)> = store
+        .relink_candidates(&[&backup])
+        .unwrap()
+        .into_iter()
+        .filter_map(|(hash, paths)| Some((hash, paths.first()?.clone())))
+        .collect();
+    for (hash, path) in &relinked {
+        store.relocate(*hash, path);
+    }
     relinked.sort();
     let mut expected = vec![
         (hashes[0], backup.join(names[0])),

@@ -13,7 +13,9 @@ use bl_ui::main_window::{MainWindowUi, UiEvent};
 use bl_ui::settings_window::SettingsUi;
 use bl_ui::theme::{Theme, fonts};
 use egui::accesskit::{self, Role};
-use egui::{Context, Event, FullOutput, Id, Modifiers, PointerButton, Pos2, RawInput, Rect, vec2};
+use egui::{
+    Color32, Context, Event, FullOutput, Id, Modifiers, PointerButton, Pos2, RawInput, Rect, vec2,
+};
 
 /// Which window a harness draws.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -115,7 +117,7 @@ impl Harness {
         let ctx = Context::default();
         ctx.set_fonts(fonts());
         ctx.enable_accesskit();
-        let theme = Theme::builtin(shell.theme());
+        let theme = Theme::of(&shell);
         theme.apply(&ctx);
         let zoom = shell.zoom();
         apply_zoom(&ctx, zoom);
@@ -217,6 +219,9 @@ impl Harness {
             dropped_files: std::mem::take(&mut self.dropped),
             ..Default::default()
         };
+        // Spec: view-options R1. The middle button pans the area under the
+        // pointer, so egui never sees it.
+        bl_ui::middle::take(&mut input, &self.ctx);
         // As the app does: the keys go to a value being typed as to a text
         // field, and the frame draws what the engine last published.
         let text_focused = self.ctx.text_edit_focused() || self.main.is_typing();
@@ -403,6 +408,29 @@ impl Harness {
         }])
     }
 
+    /// A drag with the middle mouse button held: Live pans the area under
+    /// the pointer with it (view-options R1).
+    pub fn middle_drag(&mut self, from: Pos2, to: Pos2) {
+        self.frame(vec![Event::PointerMoved(from)]);
+        self.frame(vec![Event::PointerButton {
+            pos: from,
+            button: PointerButton::Middle,
+            pressed: true,
+            modifiers: Modifiers::NONE,
+        }]);
+        for step in 1..=4 {
+            let t = step as f32 / 4.0;
+            self.frame(vec![Event::PointerMoved(from + (to - from) * t)]);
+        }
+        self.frame(vec![Event::PointerButton {
+            pos: to,
+            button: PointerButton::Middle,
+            pressed: false,
+            modifiers: Modifiers::NONE,
+        }]);
+        self.settle();
+    }
+
     /// A key press and release with modifiers.
     pub fn key(&mut self, key: egui::Key, modifiers: Modifiers) -> FullOutput {
         self.frame(vec![Event::Key {
@@ -442,4 +470,24 @@ pub fn command() -> Modifiers {
         } else {
             Modifiers::CTRL
         }
+}
+
+/// Every rectangle a frame paints, and the colour it fills it with.
+pub fn painted_rects(output: &FullOutput) -> Vec<(Rect, Color32)> {
+    fn walk(shape: &egui::Shape, out: &mut Vec<(Rect, Color32)>) {
+        match shape {
+            egui::Shape::Rect(rect) => out.push((rect.rect, rect.fill)),
+            egui::Shape::Vec(shapes) => {
+                for shape in shapes {
+                    walk(shape, out);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    for clipped in &output.shapes {
+        walk(&clipped.shape, &mut out);
+    }
+    out
 }

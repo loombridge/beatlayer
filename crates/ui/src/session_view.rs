@@ -20,6 +20,7 @@ use bl_core::time::TICKS_PER_QUARTER;
 use bl_engine::SlotState;
 use bl_model::{ClipId, Document, SceneId, TrackId, TrackKind};
 use bl_shell::mixer_view::MixerOf;
+use bl_shell::mixer_view_commands as mixer_ids;
 use bl_shell::session_view_commands as ids;
 use bl_shell::session_view_commands::SessionViewState;
 use bl_shell::{Area, Invocation, Shell, WindowKind};
@@ -251,6 +252,19 @@ impl GridUi {
         self.status_row(ui, shell, theme, session, &layout, &columns, events);
         self.keys(&grid, shell, &columns, &scenes, events);
         self.take_drop(&grid, shell, session, &layout, &columns, &scenes, events);
+        // Spec: view-options R1, session-view R35. A middle-button drag
+        // pans the grid: sideways through the columns and up and down
+        // through the scenes.
+        if let Some(delta) = crate::middle::pan(ui, session.slots) {
+            events.push(UiEvent::Invoke(Invocation::new(
+                mixer_ids::SCROLL,
+                json!({ "view": MixerOf::Session, "x": -delta.x }),
+            )));
+            events.push(UiEvent::Invoke(Invocation::new(
+                ids::SCROLL,
+                json!({ "y": -delta.y }),
+            )));
+        }
         // A clip drag that ended: move it to the slot it was released on, or
         // copy it with the copy modifier held (I-DRAG-001, I-DRAG-002).
         if let Some((clip, from)) = self.released.take() {

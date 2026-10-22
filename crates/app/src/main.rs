@@ -204,11 +204,8 @@ fn check() -> ExitCode {
             }
         },
     );
-    for choice in [
-        bl_shell::settings::ThemeChoice::Dark,
-        bl_shell::settings::ThemeChoice::Light,
-    ] {
-        let _ = bl_ui::theme::Theme::builtin(choice);
+    for dark in [true, false] {
+        let _ = bl_ui::theme::Theme::bundled(dark);
     }
     println!(
         "{}: {} commands, {} problems; keymap of {} shortcuts, {bound} bound; {} menus, {items} \

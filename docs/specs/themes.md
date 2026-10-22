@@ -1,6 +1,6 @@
 # Themes and colours: the Theme & Colors settings, theme files, and the colours of tracks, clips and scenes
 
-- **Status:** draft
+- **Status:** partial (R1 to R13 each have a passing test; R14 to R32 come with WP-6.30b and WP-6.50)
 - **Work packages:** WP-6.30 (the Theme and Customization sections and theme files: R1 to R13), WP-6.30b (the colours of tracks, clips and scenes, their palettes, and the Track and Clip Colors section: R14 to R27; R16's palettes in the Session clip's, the scene's and the Clip View title bar's context menus come with those menus in WP-6.56, [session-context-menus.md](session-context-menus.md)), WP-6.50 (a row of custom colours, and new tracks taking their group's colour, IMP-37: R28 to R32). The interface zoom on the Display & Input page is [interface-zoom.md](interface-zoom.md)'s; the colours of rack chains and macros are [racks.md](racks.md)'s and [macros.md](macros.md)'s, which take their swatches from R15
 - **Parity-matrix row:** Views and workflow: Themes, light and dark, follow the OS, tone and contrast controls; [the improvements](../05-improvements.md), IMP-37 (a larger colour palette, and new tracks taking their group's colour)
 - **Checked against:** the Live 12 reference manual (online edition), read 20 October 2026; the Live 12 release notes, 12.0, 12.2 and 12.4.3; the UI parity reference's rows L-SET-002, L-SET-003, L-SET-011, C-TRACK-015 to C-TRACK-017, C-SCENE-014, C-CLIP-SES-018 and the Arrangement clip menu's colours, L-CLIP-002, L-MIX-009, recorded from Live 12.4.3 and 12.4.6 on macOS
@@ -37,7 +37,7 @@ This spec covers the Theme & Colors page, the theme files and how their colours 
 - **R2.** Theme is a chooser of the themes Beatlayer finds: its bundled theme, named "Beatlayer", first, then the themes in the User Library's `Themes` folder (R9), by name. A new install draws Beatlayer. (S1, S8)
 - **R3.** Appearance is a chooser of Light, Dark and Follow System. Light and Dark draw the theme's light and dark colours. Follow System draws the light colours while the operating system is in its light mode and the dark ones in its dark mode, and follows a change of mode while Beatlayer runs. A new install draws Dark (Beatlayer's own default). (S1, S2)
 - **R4.** Tone is a chooser of Neutral, Warm and Cool. Neutral draws the theme's neutral colours (R6) as its file gives them; Warm and Cool give each of them, at its own lightness, a chroma of 8 towards the hue 60° (warm) or 250° (cool) of the CIE LCh(ab) space (Beatlayer's own law and amounts). The chromatic colours aren't toned. A new install draws Neutral. (S1, S2)
-- **R5.** High Contrast is an On/Off switch, off in a new install. On, every text colour stands at a contrast ratio of at least 7:1 against each background it's drawn on, the dimmed text at least 4.5:1, and separators, control outlines and the focus outline at least 3:1, the ratio as WCAG 2.2 defines it (Beatlayer's own levels): where the colours the theme and R7 give fall short, the text and lines are moved in lightness, towards white on a dark background and black on a light one, until they reach them. Off, the bundled theme's text reaches 4.5:1 and its dimmed text 3:1 against the backgrounds they're drawn on, in both appearances and every tone (Beatlayer's own levels). (S1, S2, S9)
+- **R5.** High Contrast is an On/Off switch, off in a new install. On, every text colour stands at a contrast ratio of at least 7:1 against each background it's drawn on, the dimmed text at least 4.5:1, and separators, control outlines and the focus outline at least 3:1, the ratio as WCAG 2.2 defines it (Beatlayer's own levels): where the colours the theme and R7 give fall short, the text and lines are moved in lightness, towards white on a dark background and black on a light one, until they reach them. Where moving the text or lines alone can't reach a level, because the backgrounds have been brightened or darkened to mid-grey (Brightness near its ends) or the accent is too close in lightness to the text on it, the backgrounds in the pairing are moved in lightness too, the least that lets white or black text reach the level. Off, the bundled theme's text reaches 4.5:1 and its dimmed text 3:1 against the backgrounds they're drawn on, in both appearances and every tone (Beatlayer's own levels). (S1, S2, S9)
 - **R6.** A theme's colours are of two kinds, fixed by their token names: the neutral colours (the window, panels, bars, controls and their hover and pressed states, lanes, rulers, display backgrounds, separators, grid lines, text and dimmed text) and the chromatic colours (the accent and the text on it, record, errors, the focus, meters, the playhead and insert marker, loop and time-selection colours, automation, modulation and mapping colours). The background colours are the neutral colours less separators, grid lines and text. The track palette (R15) is of neither kind. (S3, S8)
 - **R7.** Customization holds four number boxes, which step by a drag, by Up and Down while they have the keyboard focus, and by a screen reader's increment and decrement, as Zoom does ([interface-zoom.md](interface-zoom.md) R4); their ranges, steps and defaults are Beatlayer's own:
   - **Grid Line Intensity**, 0 to 200 % in steps of 5, 100 % in a new install: the grid lines of the Arrangement, the Clip View's editors and the automation lanes are drawn as the lane's colour mixed towards the theme's grid colour by that much, 0 % showing no line and 200 % going on past the grid colour by as much again, within the colour range.
@@ -92,19 +92,19 @@ This spec covers the Theme & Colors page, the theme files and how their colours 
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1 | to be written in WP-6.30 | |
-| R2 | to be written in WP-6.30 | |
-| R3 | to be written in WP-6.30 | |
-| R4 | to be written in WP-6.30 | |
-| R5 | to be written in WP-6.30 | |
-| R6 | to be written in WP-6.30 | |
-| R7 | to be written in WP-6.30 | |
-| R8 | to be written in WP-6.30 | |
-| R9 | to be written in WP-6.30 | |
-| R10 | to be written in WP-6.30 | |
-| R11 | to be written in WP-6.30 | |
-| R12 | to be written in WP-6.30 | |
-| R13 | to be written in WP-6.30 | |
+| R1 | `theme_page::the_rows_are_in_l_set_011_s_order_at_l_set_003_s_places`; `shell_commands::the_theme_and_customization_commands_set_and_read_back_and_touch_no_set` (no set change, no undo step) | UI script, shell |
+| R2 | `theme_library::a_good_theme_file_is_listed_and_drawn`; `readback_runtime::each_settings_command_reads_back_from_settings_state` (a new install lists Beatlayer, draws it) | unit, shell |
+| R3 | `shell_commands::follow_system_draws_the_systems_mode_as_it_changes`; `theme_page::the_choosers_and_the_switch_run_their_commands` | shell, UI script |
+| R4 | `theme_look::warm_and_cool_land_at_their_hue_and_chroma` | unit |
+| R5 | `theme_look::high_contrast_reaches_its_levels_at_every_extreme`; `theme_look::the_bundled_theme_meets_its_levels_without_high_contrast`; `theme_look::high_contrast_changes_nothing_that_already_holds` | unit |
+| R6 | `theme_look::each_step_leaves_the_tokens_of_the_other_kinds_alone` | unit |
+| R7 | `theme_page::the_number_boxes_step_by_key_by_drag_and_by_a_screen_reader`; `theme_look::brightness_moves_only_backgrounds_and_colour_only_chromatic_colours`; `theme_look::grid_line_intensity_mixes_the_lane_towards_the_grid_colour` | UI script, unit |
+| R8 | `theme_look::each_step_leaves_the_tokens_of_the_other_kinds_alone` (the steps in order); `theme_look::high_contrast_reaches_its_levels_at_every_extreme` (High Contrast last) | unit |
+| R9 | `theme_library::a_broken_theme_file_is_refused_with_its_message`; `theme_library::a_theme_is_a_light_file_and_a_dark_file` | unit |
+| R10 | `theme_library::a_missing_chosen_theme_draws_beatlayer_and_comes_back_with_its_file` | unit |
+| R11 | `shell_commands::preferences_saved_before_the_page_keep_their_look` | shell |
+| R12 | `shell_commands::the_theme_and_customization_commands_set_and_read_back_and_touch_no_set`; `readback_runtime::each_settings_command_reads_back_from_settings_state`; `accessibility` (each command reachable from the keyboard) | shell, agent |
+| R13 | `theme_page::the_rows_are_in_l_set_011_s_order_at_l_set_003_s_places` | UI script |
 | R14 | to be written in WP-6.30b | |
 | R15 | to be written in WP-6.30b | |
 | R16 | to be written in WP-6.30b | |

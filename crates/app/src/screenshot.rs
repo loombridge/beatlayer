@@ -93,7 +93,7 @@ pub fn run(args: &Args, path: &Path) -> Result<(), String> {
 
     let ctx = egui::Context::default();
     ctx.set_fonts(fonts());
-    let theme = Theme::builtin(shell.theme());
+    let theme = Theme::of(&shell);
     theme.apply(&ctx);
     let mut settings_ui = SettingsUi::new();
     let mut output: Option<egui::FullOutput> = None;

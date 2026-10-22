@@ -6,7 +6,7 @@
 
 mod common;
 
-use bl_shell::settings::{SettingsPage, ThemeChoice};
+use bl_shell::settings::{Appearance, SettingsPage};
 use common::{Harness, Window};
 use egui::accesskit::{Action, Role};
 use egui::{Id, Key, Modifiers};
@@ -191,11 +191,11 @@ fn tab_esc_and_page_keys_work_in_the_settings_window() {
     h.key(Key::Tab, next_page | Modifiers::SHIFT);
     assert_eq!(h.shell.settings_page(), SettingsPage::ThemeColors);
     h.settle();
-    let theme = Id::new(("chooser", "theme"));
-    h.accesskit(theme, Action::Focus);
+    let appearance = Id::new(("chooser", "appearance"));
+    h.accesskit(appearance, Action::Focus);
     h.settle();
-    h.key(Key::ArrowDown, Modifiers::NONE);
-    assert_eq!(h.shell.theme(), ThemeChoice::Light);
+    h.key(Key::ArrowUp, Modifiers::NONE);
+    assert_eq!(h.shell.appearance(), Appearance::Light);
     h.key(Key::Escape, Modifiers::NONE);
     assert!(!h.shell.settings_open(), "Esc closes the Settings window");
 }

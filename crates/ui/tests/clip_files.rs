@@ -484,3 +484,62 @@ fn the_library_page_has_collect_files_on_export_and_the_user_library() {
         "the User Library's folder is shown"
     );
 }
+
+// Spec: clip files R7 (I-DROP-005). A clip file dragged from the browser onto
+// an Arrangement lane of its clip's kind is placed at the drop position; on
+// a lane of the other kind nothing is highlighted and nothing changes.
+#[test]
+fn a_clip_file_dragged_onto_a_lane_of_its_kind_is_placed_there() {
+    let scratch = Scratch::new("lane");
+    let root = scratch.0.join("User Library");
+    create_user_library(&root).unwrap();
+    let mut h = Harness::with_title_bar(Window::Main);
+    h.shell.set_user_library(Some(root.clone()));
+    h.settle();
+    let midis = tracks(&h, TrackKind::Midi);
+    let clip = midi_clip(&mut h, midis[0], "Idea", 2, 4);
+    let saved: Value = h
+        .shell
+        .run("clip.save_file", json!({ "clip": clip }))
+        .unwrap();
+    let file = saved["path"].as_str().unwrap().to_owned();
+    h.shell.run("browser.rename_file", json!({})).unwrap();
+    h.shell
+        .run("browser.open_place", json!({ "label": "user_library" }))
+        .unwrap();
+    let clips_folder = text(&root.join("Clips"));
+    h.shell
+        .run(
+            "browser.open_folder",
+            json!({ "path": clips_folder, "open": true }),
+        )
+        .unwrap();
+    h.settle();
+    let rows: Vec<String> = {
+        let browser = h.shell.browser_view();
+        (0..browser.row_count())
+            .map(|i| browser.row(i).unwrap().path)
+            .collect()
+    };
+    let at = rows
+        .iter()
+        .position(|path| *path == file)
+        .unwrap_or_else(|| panic!("the clip file's row {file} in {rows:?}"));
+
+    // On the audio lane nothing happens.
+    let before = h.shell.editor().document().clone();
+    drag(&mut h, row(at), pos2(560.0, 340.0));
+    assert_eq!(*h.shell.editor().document(), before);
+
+    // On the second MIDI track, at bar 8 of the lanes.
+    drag(&mut h, row(at), pos2(560.0, 250.0));
+    let doc = h.shell.editor().document();
+    let placed = doc
+        .track(midis[1])
+        .unwrap()
+        .clips()
+        .next()
+        .expect("the clip landed on the second MIDI track");
+    assert_eq!(placed.start, Ticks(8 * BAR));
+    assert_eq!(placed.name, "Idea");
+}

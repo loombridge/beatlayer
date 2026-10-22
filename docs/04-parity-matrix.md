@@ -159,7 +159,7 @@ Each row's **Notes** name the work packages that build it ("Built in WP-1.8a, WP
 | Arrangement automation lanes, several per track; Automation Arm; Re-Enable Automation; tempo automation | M2 (one lane, Automation Arm, Re-Enable Automation, tempo), M6 (several lanes per track) | Several lanes per track, the lanes' menus and Snap Automation to Grid: WP-6.57 ([spec](specs/automation.md) R24 to R33). Built in WP-2.12, WP-2.20, WP-6.57 |
 | Curved segments | M2 | Built in WP-2.12 |
 | Session automation recording | M3 | Built in WP-3.12 |
-| Insert shapes, stretch and skew, simplify, lock envelopes, keyboard breakpoint editing | M6 | [Spec](specs/automation-editing.md). Built in WP-6.25, WP-6.25b, WP-6.25c, WP-6.26 |
+| Insert shapes, stretch and skew, simplify, lock envelopes, keyboard breakpoint editing | M6 | [Spec](specs/automation-editing.md). The selections in lanes, moving the breakpoints, the edit commands on envelopes and Lock Envelopes are built in WP-6.25; the shapes, stretch and skew, and Simplify Envelope in WP-6.25b, the keys in WP-6.26, and the clip envelopes in WP-6.25c |
 | Relative modulation on top of automation | M5 | Built in WP-5.9 |
 | Modulators: LFO, Shaper, Envelope Follower, Envelope MIDI, Shaper MIDI, Expression Control | M5 | Built in WP-5.10, WP-5.11 |
 | Macros (16 per rack), variations, randomise, map mode with per-mapping ranges | M5 | Built in WP-5.4, WP-5.5 |

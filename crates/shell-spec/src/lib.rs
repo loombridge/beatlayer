@@ -18,6 +18,9 @@
 //!   moving, copying, resizing, splitting, deleting, and duplicating clips,
 //!   and the clipboard; [`context_menus`], the clip and time-selection
 //!   menus that reach them.
+//! - [`automation`]: the Arrangement's automation editing commands
+//!   (WP-6.25): moving the breakpoints of an envelope, the clipboard of
+//!   envelope shapes, and the edit commands that act on them.
 //! - [`locator`]: the Arrangement's locators (WP-6.24): adding, deleting,
 //!   moving, renaming and describing them, looping to the next one, the
 //!   song start time, and the jumps between them.
@@ -73,6 +76,7 @@ pub mod assistant;
 pub mod audio;
 pub mod audio_editing;
 pub mod audio_panel;
+pub mod automation;
 pub mod autosampler;
 pub mod bounce;
 pub mod browser;
@@ -122,6 +126,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     commands::register(registry)?;
     arrangement::register(registry)?;
     editing::register(registry)?;
+    automation::register(registry)?;
     locator::register(registry)?;
     notes::register(registry)?;
     transport::register(registry)?;

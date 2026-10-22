@@ -1,6 +1,6 @@
 # Automation editing: selections, the edit commands, Lock Envelopes, shapes, stretch and skew, Simplify Envelope, and the keyboard
 
-- **Status:** draft
+- **Status:** partial (R1 to R10 each have a passing test; R11 to R19 are WP-6.25b's, R20 to R29 WP-6.26's, and R30 to R33 WP-6.57's)
 - **Work packages:** WP-6.25 (selections in automation lanes, moving selected breakpoints and segments, the edit commands on envelopes, and Lock Envelopes: R1 to R10); WP-6.25b (automation shapes, stretching and skewing, and Simplify Envelope in the Arrangement's automation lanes: R11 to R19); WP-6.26 (editing envelopes from the keyboard, in the Arrangement's automation lanes and the Clip View's Envelope Editor, and Edit Value and Add Value: R20 to R29). The Clip View's Envelope Editor gets R1 to R6 and R11 to R19 on clip envelopes in WP-6.25c ([clip-envelopes.md](clip-envelopes.md) R12, R13)
 - **Parity-matrix row:** Automation and modulation: Insert shapes, stretch and skew, simplify, lock envelopes, keyboard breakpoint editing
 - **Checked against:** the Live 12 reference manual (online edition), read 20 October 2026: chapter 25 "Automation and Editing Envelopes" (numbered 26 in the manual's table of contents; the section numbers below are the chapter page's own), chapter 6 section 6.1, chapter 41 section 41.5, chapter 42 sections 42.5 and 42.7; the Live 12 release notes, 12.1, 12.2 and 12.4.3; the UI parity reference's rows L-ARR-010, L-ARR-011, M-EDIT-039, M-OPT-026, C-TIME-021, I-CLICK-034, I-DRAG-023, I-CLICK-044, I-DRAG-047 to I-DRAG-049, C-TIME-026, and shortcuts S-EDIT-016, S-ENV-002 to S-ENV-006 and S-A11Y-018 to S-A11Y-030
@@ -41,7 +41,7 @@ This spec covers these edits in the Arrangement's automation lanes, the keys in 
 - **R4.** Clicking within 4 points of a segment but not on it, or Shift-clicking on it, selects the segment: its two breakpoints (I-CLICK-044). Dragging a selected segment moves its two breakpoints as R2 moves selected ones. Dragging a segment that lies inside the time selection first adds breakpoints at the selection's edges, at the envelope's values there, then moves every breakpoint between them, so the stretch of envelope inside the selection moves and the envelope outside stays. Each drag is one undo step. (S1)
 - **R5.** With the time selection in automation lanes, Cut, Copy, Paste, Duplicate and Delete act on those lanes' envelopes only; the clips and the track's other envelopes stay as they are. Copy puts on the clipboard each selected lane's envelope over the span: its shape (positions from the span's start, values as positions on the parameter's travel, bends) and the parameter it came from. Delete removes the breakpoints inside the span and keeps the envelope's values at the span's edges with a breakpoint at each, so it runs straight across the span and is unchanged outside it. Cut copies, then deletes. Paste writes the clipboard's shape into the selected automation lanes, in the order they were copied, from the time selection's start or the insert marker, replacing each envelope over the shape's length; each value lands at the same position on the target parameter's travel, so a shape pastes onto another parameter. Duplicate writes a copy straight after the span and makes the copy the time selection. Each is one undo step; Cut and Delete are `destructive`. How Delete leaves the span, and pasting by travel position, are Beatlayer's own. (S6)
 - **R6.** In the Arrangement, Option (Alt on Windows) held with Cut, Copy, Paste, Duplicate or Delete (S-EDIT-016) applies the command, as R5 does, to the automation lanes shown under the tracks of the time selection, even when the selection is in the tracks' own lanes (Beatlayer's reading of S9). (S9)
-- **R7.** These are registered commands with schemas, descriptions and permission classes, run headless with explicit tracks, parameters and spans in ticks or as bars, beats and sixteenths, or with those left out on the selection: `automation.move_breakpoints` (several breakpoints by a time and a share of the travel), `automation.paste` and `automation.duplicate` are `edit`; `automation.cut` and `automation.delete_range` are `destructive`; `automation.copy` is `read`. `arrangement.select_time` takes the lanes a selection covers. The query tool's track (`automation`) reads them back, and `arrangement.state` reports the time selection's lanes. (S11)
+- **R7.** These are registered commands with schemas, descriptions and permission classes, run headless with explicit tracks, parameters and spans in ticks or as bars, beats and sixteenths, or with those left out on the selection: `automation.move_breakpoints` (several breakpoints by a time and a share of the travel), `automation.paste` and `automation.duplicate` are `edit`; `automation.cut` and `automation.delete_range` are `destructive`; `automation.copy` and `automation.select_segment` are `read`. `arrangement.select_time` takes the lanes a selection covers, and `automation.set_envelope` (the document's own) writes a whole envelope. The query tool's track (`automation`) reads them back, and `arrangement.state` reports the time selection's lanes. (S11)
 
 **Lock Envelopes (WP-6.25)**
 
@@ -78,16 +78,16 @@ This spec covers these edits in the Arrangement's automation lanes, the keys in 
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1 | to be written in WP-6.25 | |
-| R2 | to be written in WP-6.25 | |
-| R3 | to be written in WP-6.25 | |
-| R4 | to be written in WP-6.25 | |
-| R5 | to be written in WP-6.25 | |
-| R6 | to be written in WP-6.25 | |
-| R7 | to be written in WP-6.25 | |
-| R8 | to be written in WP-6.25 | |
-| R9 | to be written in WP-6.25 | |
-| R10 | to be written in WP-6.25 | |
+| R1 | `a_selection_names_the_lanes_it_covers` | `bl-shell` |
+| R2 | `moving_several_breakpoints_moves_them_all_as_one` | `bl-shell` |
+| R3 | `shift_keeps_a_breakpoint_drag_to_one_axis` | `bl-ui` |
+| R4 | `dragging_a_segment_inside_a_time_selection_adds_breakpoints_at_its_edges`, `dragging_a_selected_segment_moves_it_in_one_undo_step` | `bl-ui` |
+| R5 | `a_span_keeps_the_values_at_its_edges_and_runs_straight_across_it`, `a_shape_over_a_span_holds_the_edges_the_values_there_and_the_bends_inside` (`bl-model`); `deleting_an_envelopes_range_leaves_it_straight_across_and_the_rest_alone`, `copying_an_envelope_and_pasting_it_onto_another_parameter_keeps_its_shape` | `bl-model`, `bl-shell` |
+| R6 | `the_edit_keys_in_an_automation_lane_act_on_the_envelopes`, `option_with_an_edit_key_acts_on_the_shown_automation_lanes` | `bl-ui` |
+| R7 | `every_listed_id_is_registered_and_complete` | `bl-shell-spec` |
+| R8 | `lock_envelopes_is_off_in_a_new_set_and_saved_with_the_set`, `an_older_set_loads_with_lock_envelopes_off` | `bl-shell`, `bl-cli` |
+| R9 | `moving_a_clip_carries_its_automation_with_it`, `pasting_a_clip_onto_another_track_leaves_the_device_envelopes_behind` | `bl-shell` |
+| R10 | `with_lock_envelopes_on_a_clip_moves_on_its_own` | `bl-shell` |
 | R11 | to be written in WP-6.25b | |
 | R12 | to be written in WP-6.25b | |
 | R13 | to be written in WP-6.25b | |

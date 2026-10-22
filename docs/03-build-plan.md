@@ -693,7 +693,7 @@ Total to 1.0: 256 packages planned in Phases 0 to 6, and about 110 estimated in 
 | 6.43 | done | 21 October 2026 | [#290](https://github.com/loombridge/beatlayer/pull/290); a person gives commands their own keys in `keymap.toml` beside the preferences, layered over Live's, and the Shortcuts page in Settings records them, asks before taking a key from another command, and gives Live's keys back ([custom shortcuts](specs/custom-shortcuts.md)) |
 | 6.44 | todo |  | Waits on IMP-21's acceptance |
 | 6.45 | todo |  | Waits on IMP-22's acceptance |
-| 6.46 | todo |  | Waits on IMP-23's acceptance |
+| 6.46 | done | 22 October 2026 | [#324](https://github.com/loombridge/beatlayer/pull/324); Touch, Latch and Write recording modes on the Automation Arm button's context menu, kept between launches by `settings.set_automation_record_mode` and read back by `settings.state` and `transport.state`, with Latch and Write holds carried over the loop's wrap ([automation](specs/automation.md) R18 to R23) |
 | 6.47 | done | 22 October 2026 | [#292](https://github.com/loombridge/beatlayer/pull/292); the Articulation Map, a MIDI effect, holds up to 32 named articulations, each with a trigger and the keyswitches, controllers and channel it sends, and the list is edited by command, saved with the set and in the device's presets, and read back ([articulation map](specs/articulation-map.md) R1 to R20); IMP-32's acceptance is still open |
 | 6.48 | todo |  | Waits on IMP-33's acceptance |
 | 6.49 | todo |  | Waits on IMP-34, IMP-35 and IMP-36's acceptance |

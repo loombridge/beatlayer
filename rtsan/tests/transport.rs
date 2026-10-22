@@ -12,10 +12,12 @@ bl_rt::install_trap!();
 use bl_core::time::{Bpm, SampleRate, TempoMap, Ticks};
 use bl_engine::nodes::{BEAT_TONE, beat_tone};
 use bl_engine::{
-    Action, Collector, Compiler, EngineConfig, Registry, ScheduledCommand, TransportCommand, When,
-    channel,
+    Action, Collector, Compiler, EngineConfig, Registry, ScheduledCommand, SessionCommand,
+    TransportCommand, When, channel,
 };
-use bl_model::{Command, Device, DeviceKind, Editor, TrackKind};
+use bl_model::{
+    Command, Device, DeviceKind, Editor, LaunchQuantization, LaunchSettings, TrackKind,
+};
 
 // Without `--cfg lspk_rtsan` (`rtsan/.cargo/config.toml`), this doesn't build.
 const _: () = assert!(
@@ -76,6 +78,14 @@ fn the_transport_passes_under_rtsan() {
         .apply(Command::SetLoopEnabled { enabled: true })
         .unwrap();
     sender.send_update(compiler.sync(editor.document()));
+    // A quantised locate resolves the next line on the audio thread from the
+    // engine's own playhead, with nothing allocated or locked (the transport
+    // spec, R22).
+    sender.session(SessionCommand::SetQuantization(LaunchSettings {
+        quantization: LaunchQuantization::Bar,
+        enabled: true,
+        ..LaunchSettings::default()
+    }));
 
     let mut wraps = 0;
     let mut last = processor.position();
@@ -86,6 +96,7 @@ fn the_transport_passes_under_rtsan() {
             1 => Some(TransportCommand::Play),
             15 => Some(TransportCommand::Stop),
             16 => Some(TransportCommand::Continue),
+            20 => Some(TransportCommand::QuantizedLocate(Ticks::WHOLE * 2)),
             25 => Some(TransportCommand::InsertMarkerToPlayhead),
             30 => Some(TransportCommand::PlayStop),
             31 => Some(TransportCommand::Stop),

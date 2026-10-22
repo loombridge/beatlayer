@@ -779,6 +779,20 @@ const ENTRIES: &[Entry] = &[
             setting is saved with the set.",
     },
     Entry {
+        id: "song.set_lock_envelopes",
+        action: Action::Apply("set_lock_envelopes"),
+        label: "Lock Envelopes",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Switches Lock Envelopes, the switch above the track headers and the \
+            Options menu item. Off (the default in a new set), editing the Arrangement's clips \
+            carries their tracks' envelopes over the clips' spans with them: moving, copying, \
+            cutting, deleting, duplicating and pasting clips take the envelopes over the same \
+            spans. On, the envelopes stay where they are in the song and the clips move on \
+            their own. The setting is saved with the set, and each change is one undo step.",
+    },
+    Entry {
         id: "mixer.set_cue_mode",
         action: Action::Apply("set_cue_mode"),
         label: "Cue Switches",
@@ -1000,6 +1014,22 @@ const ENTRIES: &[Entry] = &[
             breakpoint on an automation lane does. Deleting the last one takes the parameter's \
             envelope with it, so the parameter follows its control again. A position with no \
             breakpoint is refused.",
+    },
+    Entry {
+        id: "automation.set_envelope",
+        action: Action::Apply("set_automation_envelope"),
+        label: "Set Automation Envelope",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Replaces one of a track's parameter's envelope with the breakpoints \
+            given, as the automation editing commands do when they write a shape over a span \
+            of time. `track` and `target` name the parameter as `automation.set_breakpoint` \
+            does, and `points` are the envelope's breakpoints in position order, each with its \
+            position in ticks, its value in the parameter's own units, and the bend of the \
+            segment starting at it. The breakpoints must be in order, no two at one position, \
+            and no position before 1.1.1; an empty list takes the parameter's automation with \
+            it. The envelope keeps driving the parameter.",
     },
     Entry {
         id: "automation.delete",
@@ -3067,6 +3097,83 @@ const ENTRIES: &[Entry] = &[
         contexts: &[DeviceView],
         keys: &[],
         description: "Takes a rack with one chain, or none, apart: the chain's devices take the rack's place in order, keeping their settings and running state; the rack, its chain and its mixer are gone. A rack of several chains can't be taken apart. One undo step. To ungroup the selected rack as a person does, use `device.ungroup`.",
+    },
+    Entry {
+        id: "song.add_locator",
+        action: Action::Apply("add_locator"),
+        label: "Add Locator",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Adds a locator at a position, as the Set Locator button and Add \
+            Locator do. A locator with no name of its own is named with the next whole \
+            number. Two locators never share a position: adding one where another is leaves \
+            that one as it is. One undo step, `Add Locator`.",
+    },
+    Entry {
+        id: "song.delete_locator",
+        action: Action::Apply("delete_locator"),
+        label: "Delete Locator",
+        permission: Permission::Destructive,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Deletes a locator, as the Delete Locator button and the Delete key do. \
+            A song start time on it goes with it. One undo step, `Delete Locator`. Because it \
+            removes the person's work, an agent asks first.",
+    },
+    Entry {
+        id: "song.move_locator",
+        action: Action::Apply("move_locator"),
+        label: "Move Locator",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Moves a locator to a new position, as dragging it does. A locator can't \
+            go before 1.1.1, and a move that would put two locators at one position changes \
+            nothing. One undo step, `Move Locator`.",
+    },
+    Entry {
+        id: "song.rename_locator",
+        action: Action::Apply("rename_locator"),
+        label: "Rename Locator",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Renames a locator, as Cmd-R (Ctrl-R) and Edit > Rename do. An empty \
+            name keeps the old one. One undo step, `Rename Locator`.",
+    },
+    Entry {
+        id: "song.set_locator_info_text",
+        action: Action::Apply("set_locator_info_text"),
+        label: "Set Locator Info Text",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Sets the info text of a locator, which the Info View shows while the \
+            pointer is over it. One undo step, `Edit Info Text`.",
+    },
+    Entry {
+        id: "song.loop_to_next_locator",
+        action: Action::Apply("loop_to_next_locator"),
+        label: "Loop to Next Locator",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Sets the Arrangement's loop brace from a locator to the next one and \
+            switches the loop on, as the locator's context menu does. The last locator has \
+            none after it, and is refused. One undo step, `Loop to Next Locator`.",
+    },
+    Entry {
+        id: "song.set_start",
+        action: Action::Apply("set_song_start"),
+        label: "Set Song Start Time",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Sets where the song starts: at a locator, or at the loop brace's start. \
+            Choosing it where it is set clears it, so the song starts at the insert marker \
+            again. While it is set, Play starts the song there instead of at the insert \
+            marker. One undo step, `Set Song Start Time`.",
     },
     Entry {
         id: UNDO,

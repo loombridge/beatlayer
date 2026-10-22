@@ -1,6 +1,6 @@
 # Keyboard and screen readers: the baseline for every M1 view
 
-- **Status:** partial (R1 to R9 each have a passing headless test; R10 is WP-6.24's and WP-6.25's)
+- **Status:** partial (R1 to R9 each have a passing headless test; R10's locator half is WP-6.24's, and Lock Envelopes' place in the Tab order is WP-6.25's)
 - **Work packages:** WP-1.14 (this spec, R1 to R9); WP-6.24 (the locator buttons, the locators and Automation Mode in the Arrangement's Tab order, R10) and WP-6.25 (Lock Envelopes in it, R10). Editing envelopes from the keyboard is [automation-editing.md](automation-editing.md)'s (WP-6.26). It builds on the keyboard paths each M1 package gave its own view: the app shell's areas and Settings keys ([app-shell](app-shell.md) R5, R11, R12), the Arrangement's keys ([arrangement-view](arrangement-view.md), [arrangement-editing](arrangement-editing.md) R12), the browser's ([browser](browser.md) R5, R17), the Control Bar's fields ([control-bar-transport](control-bar-transport.md) R8 to R11), and the mixer's ([mixer-view](mixer-view.md) R13, R15)
 - **Parity-matrix row:** Views and workflow: Keyboard navigation (focus, area jumps, held shortcuts); Screen readers (VoiceOver, NVDA, Narrator)
 - **Checked against:** Live 12.4.6 on macOS, observed on 11 October 2026 (the defaults, the Tab orders, the neighbour items, the names, and Outline View in Focus), the Live 12 reference manual as published that day (chapter 41, and section 2.3.1), and the UI parity reference recorded in Live 12.4.3 on 10 October 2026
@@ -115,7 +115,7 @@ The test of R8 walks the whole registry. A command is reached by a key, a menu i
 | R7 | `crates/ui/tests/accessibility.rs`, `outline_view_in_focus_outlines_the_focused_area_and_control_until_switched_off` | UI script (drawn shapes) |
 | R8 | `crates/ui/tests/accessibility.rs`, `every_m1_command_is_reachable_from_the_keyboard` (prints the table with `--nocapture`), `the_reachability_test_fails_for_a_command_with_no_keyboard_path`, `the_keys_open_the_arrangement_s_context_menus`, `the_keys_open_a_sidebar_place_s_context_menu`; `crates/ui/tests/track_menu.rs`, `the_keys_open_the_selected_title_bar_s_menu`, `the_keys_open_a_session_column_s_title_menu`; `crates/shell/tests/menus.rs`, `every_shell_command_is_on_a_menu_or_a_control` | UI script, unit |
 | R9 | `crates/ui/tests/accessibility.rs`, `the_navigate_and_options_menus_reach_their_commands`; `crates/shell-spec/src/menus.rs`, `every_menu_row_and_separator_is_in_the_model_in_order` | UI script, unit |
-| R10 | to be written in WP-6.24 and WP-6.25 | |
+| R10 | `crates/ui/tests/accessibility.rs`, `the_screen_reader_follows_the_keyboard_focus`, `tab_runs_through_the_arrangement_and_the_neighbour_keys_to_the_next_track`, `outline_view_in_focus_outlines_the_focused_area_and_control_until_switched_off`; `crates/ui/tests/automation.rs`, `the_lock_envelopes_switch_is_in_the_tab_order` (Lock Envelopes, WP-6.25's); the Set Locator, Previous Locator, Next Locator and Automation Mode controls | headless UI |
 
 ## Screen readers: the manual test
 

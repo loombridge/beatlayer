@@ -3,6 +3,7 @@
 //! drawn with egui's painter (arrangement-view R5, R13).
 
 use bl_core::time::{TempoMap, Ticks, TimeSignatureMap};
+use bl_model::{Locator, LocatorId, SongStart};
 use bl_shell::arrangement::{Horizontal, TransportView};
 use egui::{Align2, Color32, Painter, Rect, Stroke, pos2};
 
@@ -150,13 +151,47 @@ pub fn beat_ruler(
     );
 }
 
-/// Draws the scrub area. Locators come with the locator commands (M6).
-pub fn scrub_area(painter: &Painter, rect: Rect, theme: &Theme) {
+/// Draws the scrub area, with the locators in it (L-ARR-003): each at its
+/// position, with its name, a selected one in the selection colour, and the
+/// one that holds the song start time in the theme's song start colour.
+pub fn scrub_area(
+    painter: &Painter,
+    rect: Rect,
+    horizontal: Horizontal,
+    locators: &[Locator],
+    selected: &[LocatorId],
+    song_start: Option<SongStart>,
+    theme: &Theme,
+) {
     painter.rect_filled(rect, 0.0, theme.colors.bar.0);
     painter.line_segment(
         [rect.left_bottom(), rect.right_bottom()],
         Stroke::new(1.0, theme.colors.separator.0),
     );
+    let font = egui::FontId::proportional(10.0);
+    let left = rect.left();
+    for locator in locators {
+        let x = (horizontal.x(locator.position) + f64::from(left)) as f32;
+        if x < left - 40.0 || x > rect.right() + 40.0 {
+            continue;
+        }
+        let colour = if song_start == Some(SongStart::Locator(locator.id)) {
+            theme.colors.song_start.0
+        } else if selected.contains(&locator.id) {
+            theme.colors.accent.0
+        } else {
+            theme.colors.text_dim.0
+        };
+        let marker = Rect::from_min_max(pos2(x - 4.0, rect.top()), pos2(x + 4.0, rect.bottom()));
+        painter.rect_filled(marker, 0.0, colour);
+        painter.text(
+            pos2(x + 6.0, rect.center().y),
+            Align2::LEFT_CENTER,
+            &locator.name,
+            font.clone(),
+            colour,
+        );
+    }
 }
 
 /// The time ruler's label spacings, in seconds.

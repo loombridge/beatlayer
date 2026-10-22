@@ -26,6 +26,7 @@ use crate::agent::{
     self as agent, AgentServerState, AgentServerStatus, AgentSettings, AutonomousArgs, ClientArgs,
     SetServerArgs,
 };
+use crate::arrangement::automation::{self as automation, EnvelopeClipboard};
 use crate::arrangement::editing::{self, Clipboard, EditFailure};
 use crate::arrangement::{ArrangementView, TransportView, ViewError, Viewport};
 use crate::assistant::{
@@ -63,6 +64,7 @@ use bl_plugin_host::scan::Scanner;
 use bl_plugin_host::vst3::Vst3Host;
 use bl_shell_spec::arrangement as view_ids;
 use bl_shell_spec::audio_editing as audio_ids;
+use bl_shell_spec::automation as automation_ids;
 use bl_shell_spec::autosampler as autosampler_ids;
 use bl_shell_spec::bounce as bounce_ids;
 use bl_shell_spec::browser as browser_ids;
@@ -73,6 +75,7 @@ use bl_shell_spec::editing as edit_ids;
 use bl_shell_spec::export as export_ids;
 use bl_shell_spec::file_manager as file_manager_ids;
 use bl_shell_spec::freeze as freeze_ids;
+use bl_shell_spec::locator as locator_ids;
 use bl_shell_spec::midi_files as midi_ids;
 use bl_shell_spec::midi_io as midi_io_ids;
 use bl_shell_spec::mixer_view as mixer_ids;
@@ -186,6 +189,9 @@ const DELAY_COMPENSATION: &str = "mixer.set_delay_compensation";
 /// `mixer.set_reduced_latency_monitoring`, which Options ▸ Reduced Latency
 /// When Monitoring runs as a switch (M-OPT-009).
 const REDUCED_LATENCY_MONITORING: &str = "mixer.set_reduced_latency_monitoring";
+/// `song.set_lock_envelopes`, which Options ▸ Lock Envelopes runs as a
+/// switch (M-OPT-026).
+const LOCK_ENVELOPES: &str = "song.set_lock_envelopes";
 
 /// A command and its arguments, kept to run later (after a dialog).
 #[derive(Clone, Debug, PartialEq)]
@@ -297,6 +303,10 @@ pub enum Effect {
     /// Start renaming a track in its title bar, where the person types the
     /// new name; Return runs `track.rename` with it (WP-4.22).
     RenameTrack(TrackId),
+    /// Start renaming a locator in the Arrangement's scrub area, where the
+    /// person types the new name; Return runs `locator.rename` with it
+    /// (WP-6.24; the time editing spec, R8).
+    RenameLocator(bl_model::LocatorId),
 }
 
 /// Where a gesture that edits the set is (WP-1.8b): see [`Shell::gesture`].
@@ -550,6 +560,9 @@ pub struct Shell {
     /// The Arrangement's clipboard (WP-1.8b), kept across sets as Live
     /// keeps it, and never part of a set.
     clipboard: Option<Clipboard>,
+    /// The clipboard of copied envelope shapes (WP-6.25), kept across sets
+    /// as Live keeps it, and never part of a set.
+    envelope_clipboard: Option<EnvelopeClipboard>,
     /// A gesture that edits the set, under way (WP-1.8b).
     edit_gesture: Option<Gesture>,
     /// The engine's insert marker when the shell last looked, so a move of
@@ -695,6 +708,27 @@ fn edit_error(id: &str, failure: EditFailure) -> ShellError {
             command: id.to_owned(),
             message,
         },
+    }
+}
+
+/// The automation editing command an Arrangement editing command runs as,
+/// when the time selection is in automation lanes (the automation editing
+/// spec, R5).
+fn automation_command(id: &str, view: &ArrangementView) -> Option<&'static str> {
+    let in_lanes = view
+        .time_selection_lanes()
+        .iter()
+        .any(|lane| lane.target().is_some());
+    if !in_lanes {
+        return None;
+    }
+    match id {
+        edit_ids::COPY => Some(automation_ids::COPY),
+        edit_ids::CUT => Some(automation_ids::CUT),
+        edit_ids::PASTE => Some(automation_ids::PASTE),
+        edit_ids::DUPLICATE => Some(automation_ids::DUPLICATE),
+        edit_ids::DELETE => Some(automation_ids::DELETE_RANGE),
+        _ => None,
     }
 }
 
@@ -1020,6 +1054,7 @@ impl Shell {
             plugin_list: plugin_list::PluginList::default(),
             document_revision: 0,
             clipboard: None,
+            envelope_clipboard: None,
             edit_gesture: None,
             au,
             seen_insert_marker: None,
@@ -4388,6 +4423,13 @@ impl Shell {
         self.clipboard.as_ref()
     }
 
+    /// The clipboard of copied envelope shapes, if anything has been
+    /// copied (WP-6.25).
+    #[must_use]
+    pub fn envelope_clipboard(&self) -> Option<&EnvelopeClipboard> {
+        self.envelope_clipboard.as_ref()
+    }
+
     /// Whether a gesture that edits the set is under way.
     #[must_use]
     pub fn gesture_open(&self) -> bool {
@@ -4516,8 +4558,10 @@ impl Shell {
         let mut outcome = Ok(Value::Null);
         if let Some(invocation) = invocation {
             if !edit_ids::handles(&invocation.id)
+                && !locator_ids::handles(&invocation.id)
                 && !note_ids::handles(&invocation.id)
                 && !is_automation_edit(&invocation.id)
+                && !automation_ids::handles(&invocation.id)
                 && !clip_marker_command(&invocation.id)
                 && !arrangement_clip_command(&invocation.id)
             {
@@ -4544,6 +4588,10 @@ impl Shell {
     fn gesture_step(&mut self, invocation: &Invocation) -> Result<Value, ShellError> {
         let label = if note_ids::handles(&invocation.id) {
             clip_view::label(&invocation.id)
+        } else if automation_ids::handles(&invocation.id) {
+            automation::label(&invocation.id)
+        } else if locator_ids::handles(&invocation.id) {
+            crate::arrangement::locator::label(&invocation.id)
         } else if is_automation_edit(&invocation.id) {
             automation_label(&invocation.id)
         } else if clip_marker_command(&invocation.id) || arrangement_clip_command(&invocation.id) {
@@ -4578,10 +4626,13 @@ impl Shell {
             }
         }
         self.editor.begin(label);
+        let launch = self.launch_settings();
         let run = |editor: &mut Editor,
                    arrangement: &mut ArrangementView,
                    clip_view: &mut ClipView,
                    clipboard: &mut Option<Clipboard>,
+                   envelope_clipboard: &mut Option<EnvelopeClipboard>,
+                   devices: &DeviceView,
                    invocation: &Invocation| {
             if clip_marker_command(&invocation.id) || arrangement_clip_command(&invocation.id) {
                 // The document's own clip commands, run per frame like the
@@ -4597,6 +4648,17 @@ impl Shell {
                     clip_view,
                     arrangement,
                 )
+            } else if automation_ids::handles(&invocation.id) {
+                // Spec: automation-editing R2. A drag that moves several
+                // breakpoints of an envelope at once.
+                automation::run(
+                    &invocation.id,
+                    invocation.args.clone(),
+                    editor,
+                    arrangement,
+                    envelope_clipboard,
+                    devices,
+                )
             } else if is_automation_edit(&invocation.id) {
                 // WP-2.12: a drag on an automation lane moves, curves, or
                 // deletes breakpoints, as one undo step.
@@ -4605,6 +4667,16 @@ impl Shell {
                     .map_err(|error| {
                         crate::arrangement::editing::EditFailure::Refused(error.to_string())
                     })
+            } else if locator_ids::handles(&invocation.id) {
+                // The locators' own commands (WP-6.24).
+                crate::arrangement::locator::run(
+                    &invocation.id,
+                    invocation.args.clone(),
+                    editor,
+                    arrangement,
+                    &launch,
+                    None,
+                )
             } else {
                 editing::run(
                     &invocation.id,
@@ -4634,6 +4706,8 @@ impl Shell {
                 &mut self.arrangement,
                 &mut self.clip_view,
                 &mut self.clipboard,
+                &mut self.envelope_clipboard,
+                &self.devices,
                 step,
             );
             if result.is_err() {
@@ -5562,6 +5636,12 @@ impl Shell {
     pub fn choice_state(&self, id: &str, args: &Value) -> Option<bool> {
         match id {
             CUE_MODE => Some(self.editor.document().cue_active() == args["enabled"].as_bool()?),
+            // Spec: time-editing R10. The loop brace's menu item is ticked
+            // while the song starts at the brace's start.
+            locator_ids::SET_START_TIME if args["loop_brace"].as_bool() == Some(true) => Some(
+                self.editor.document().settings().song_start
+                    == Some(bl_model::SongStart::LoopBrace),
+            ),
             _ => None,
         }
     }
@@ -5571,6 +5651,15 @@ impl Shell {
     #[must_use]
     pub fn switch_state(&self, id: &str) -> Option<bool> {
         match id {
+            // Spec: time-editing R10. A locator's menu item is ticked while
+            // the song starts at that locator.
+            locator_ids::SET_START_TIME => {
+                let selected = self.arrangement.selected_locators().first().copied();
+                Some(
+                    self.editor.document().settings().song_start
+                        == selected.map(bl_model::SongStart::Locator),
+                )
+            }
             ids::VIEW_FULL_SCREEN => Some(self.full_screen),
             ids::VIEW_TOGGLE_BROWSER => Some(self.browser),
             ids::VIEW_TOGGLE_CLIP_VIEW => Some(self.clip_view.visible()),
@@ -5593,6 +5682,7 @@ impl Shell {
             REDUCED_LATENCY_MONITORING => {
                 Some(self.editor.document().settings().reduced_latency_monitoring)
             }
+            LOCK_ENVELOPES => Some(self.editor.document().settings().lock_envelopes),
             "transport.set_metronome_enabled" => {
                 Some(self.editor.document().settings().metronome.enabled)
             }
@@ -5640,8 +5730,30 @@ impl Shell {
     /// The label a menu shows for a command now: Undo and Redo name the step
     /// they act on, or say there's nothing (M-EDIT-001, M-EDIT-002).
     #[must_use]
+    /// The command a menu item runs: the one its row names, or the one
+    /// that fits the state, such as Create ▸ Add Locator, which reads
+    /// Delete Locator and deletes while a locator is selected (the time
+    /// editing spec, R4).
+    pub fn menu_command<'a>(&self, id: &'a str) -> &'a str {
+        if self.arrangement.selected_locators().is_empty() {
+            return id;
+        }
+        match id {
+            // Spec: time-editing R4. Create ▸ Add Locator reads Delete
+            // Locator and deletes while a locator is selected.
+            locator_ids::ADD => locator_ids::DELETE,
+            // Spec: time-editing R8. Edit ▸ Rename renames the selected
+            // locator.
+            "clip.rename" => locator_ids::RENAME,
+            _ => id,
+        }
+    }
+
     pub fn dynamic_label(&self, id: &str) -> Option<String> {
         match id {
+            // Spec: time-editing R4. The Create menu's Add Locator reads
+            // Delete Locator while a locator is selected.
+            locator_ids::DELETE => Some("Delete Locator".to_owned()),
             model::UNDO => Some(self.editor.undo_history().next().map_or_else(
                 || "Nothing to Undo".to_owned(),
                 |step| format!("Undo {step}"),
@@ -5816,6 +5928,9 @@ impl Shell {
             }
             ids::FOCUS_NEXT_NEIGHBOR => return self.has_neighbor(false),
             ids::FOCUS_PREVIOUS_NEIGHBOR => return self.has_neighbor(true),
+            // Spec: time-editing R8. Cmd-R renames the selected locators
+            // while there are any.
+            "clip.rename" => return self.arrangement.selected_locators().is_empty(),
             // Zoom In and Zoom Out stop at the zoom's ends (interface-zoom
             // R3).
             ids::VIEW_ZOOM_IN => return self.zoom_percent() < ZOOM_MAX_PERCENT,
@@ -6011,6 +6126,9 @@ impl Shell {
                 .args
                 .as_ref()
                 .is_some_and(|schema| bl_commands::validate(schema, &args).is_ok())
+                // Spec: time-editing R4. The Delete key deletes the
+                // selected locators while there are any.
+                && !(id == edit_ids::DELETE && !self.arrangement.selected_locators().is_empty())
                 && editing::can_run(
                     id,
                     &args,
@@ -6071,6 +6189,31 @@ impl Shell {
                 .as_ref()
                 .is_some_and(|schema| bl_commands::validate(schema, &args).is_ok())
                 && self.arrangement.can_run(id, &args, self.editor.document());
+        }
+        if locator_ids::handles(id) {
+            let args = if args.is_null() {
+                json!({})
+            } else {
+                args.clone()
+            };
+            if !spec
+                .args
+                .as_ref()
+                .is_some_and(|schema| bl_commands::validate(schema, &args).is_ok())
+            {
+                return false;
+            }
+            return match id {
+                locator_ids::DELETE => {
+                    args.get("locators").is_some()
+                        || !self.arrangement.selected_locators().is_empty()
+                }
+                // Spec: time-editing R13. The jumps need the engine.
+                locator_ids::JUMP | locator_ids::JUMP_PREVIOUS | locator_ids::JUMP_NEXT => {
+                    self.audio.engine_running()
+                }
+                _ => true,
+            };
         }
         if mixer_ids::handles(id) {
             let args = if args.is_null() {
@@ -6226,6 +6369,12 @@ impl Shell {
             let on = self.editor.document().settings().midi_overdub;
             fields.insert("enabled".to_owned(), json!(!on));
         }
+        if id == LOCK_ENVELOPES && !fields.contains_key("enabled") {
+            // Spec: automation-editing R8. Options ▸ Lock Envelopes switches
+            // the setting to the other state.
+            let on = self.editor.document().settings().lock_envelopes;
+            fields.insert("enabled".to_owned(), json!(!on));
+        }
         if id == SOLO_IN_PLACE && !fields.contains_key("enabled") {
             // Spec: accessibility R9. Options ▸ Solo in Place switches the
             // setting to the other state.
@@ -6364,6 +6513,23 @@ impl Shell {
             })
     }
 
+    /// The locator Rename reaches: the one `args` names, else the first
+    /// selected.
+    fn renamable_locator(&self, args: &Value) -> Option<bl_model::LocatorId> {
+        let named: Option<Vec<bl_model::LocatorId>> = args
+            .get("locators")
+            .and_then(|v| serde_json::from_value(v.clone()).ok());
+        named
+            .and_then(|mut locators| {
+                if locators.is_empty() {
+                    None
+                } else {
+                    Some(locators.remove(0))
+                }
+            })
+            .or_else(|| self.arrangement.selected_locators().first().copied())
+    }
+
     /// Runs a command as a person asked for it, from a menu, a key, or a
     /// control: fills in arguments the person didn't give, asks before
     /// losing unsaved changes, and asks for a file where one is needed (as
@@ -6484,6 +6650,19 @@ impl Shell {
                 self.touch();
                 Ok(Value::Null)
             }
+            locator_ids::RENAME if !has("name") => {
+                // Spec: time-editing R8. Cmd-R and Edit ▸ Rename type the
+                // new name in the scrub area.
+                let locator =
+                    self.renamable_locator(&args)
+                        .ok_or_else(|| ShellError::Unavailable {
+                            command: id.to_owned(),
+                            reason: "select a locator first".to_owned(),
+                        })?;
+                self.effects.push(Effect::RenameLocator(locator));
+                self.touch();
+                Ok(Value::Null)
+            }
             "device.rename" if !has("name") => {
                 let args = self.filled_args(id, args)?;
                 // Spec: macros R29. With a variation selected, Rename names
@@ -6568,7 +6747,7 @@ impl Shell {
                 let args = self.filled_args(id, args)?;
                 self.run(id, args)
             }
-            SOLO_IN_PLACE if !has("enabled") => {
+            SOLO_IN_PLACE | LOCK_ENVELOPES if !has("enabled") => {
                 let args = self.filled_args(id, args)?;
                 self.run(id, args)
             }
@@ -7160,6 +7339,27 @@ impl Shell {
         Ok(())
     }
 
+    /// Runs an automation editing command, on the lanes the selection
+    /// covers (the automation editing spec, R5, R7).
+    fn run_automation(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        let before = self.editor.document().clone();
+        let result = automation::run(
+            id,
+            args,
+            &mut self.editor,
+            &mut self.arrangement,
+            &mut self.envelope_clipboard,
+            &self.devices,
+        )
+        .map_err(|failure| edit_error(id, failure));
+        if *self.editor.document() != before {
+            self.dirty = true;
+            self.document_changed();
+        }
+        self.touch();
+        result
+    }
+
     fn run_command(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
         if let Some(track) = self.frozen_blocks(id, &args) {
             return Err(ShellError::Unavailable {
@@ -7203,6 +7403,12 @@ impl Shell {
             return self.run_bounce(id, args);
         }
         if edit_ids::handles(id) {
+            // Spec: automation-editing R5. With the time selection in
+            // automation lanes, the edit commands act on the envelopes
+            // alone, and the clips stay as they are.
+            if let Some(automation_id) = automation_command(id, &self.arrangement) {
+                return self.run_automation(automation_id, args);
+            }
             let before = self.editor.document().clone();
             let result = editing::run(
                 id,
@@ -7210,6 +7416,30 @@ impl Shell {
                 &mut self.editor,
                 &mut self.arrangement,
                 &mut self.clipboard,
+            )
+            .map_err(|failure| edit_error(id, failure));
+            if *self.editor.document() != before {
+                self.dirty = true;
+                self.document_changed();
+            }
+            self.touch();
+            return result;
+        }
+        if automation_ids::handles(id) {
+            return self.run_automation(id, args);
+        }
+        if locator_ids::handles(id) {
+            // Spec: time-editing R1 to R13. The locators are part of the
+            // set, and the jumps between them need the engine.
+            let before = self.editor.document().clone();
+            let launch = self.launch_settings();
+            let result = crate::arrangement::locator::run(
+                id,
+                args,
+                &mut self.editor,
+                &mut self.arrangement,
+                &launch,
+                Some(&mut self.audio),
             )
             .map_err(|failure| edit_error(id, failure));
             if *self.editor.document() != before {

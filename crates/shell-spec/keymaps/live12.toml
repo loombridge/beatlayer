@@ -3604,7 +3604,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+Shift+E"]
 win = ["Ctrl+Shift+E"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "browser.show_tag_editor", contexts = ["browser"] },
+]
 
 [[shortcut]]
 id = "S-SWAP-001"
@@ -4706,7 +4709,8 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+E"]
 win = ["Ctrl+E"]
-status = "pending"
+status = "widget"
+handler = "the browser's Quick Tags: Cmd-E (Ctrl-E) moves the keyboard focus to the Add field"
 
 [[shortcut]]
 id = "S-MENU-007"

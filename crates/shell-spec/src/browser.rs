@@ -50,6 +50,28 @@ pub const SCRUB_PREVIEW: &str = "browser.scrub_preview";
 pub const LOAD_SELECTED: &str = "browser.load_selected";
 /// `browser.add_to_arrangement`: put files on a track, or on a new track.
 pub const ADD_TO_ARRANGEMENT: &str = "browser.add_to_arrangement";
+/// `browser.tags`: the tag groups and their tags, and what the given items
+/// carry.
+pub const TAGS: &str = "browser.tags";
+/// `browser.tag_items`: put tags on items, or take them off.
+pub const TAG_ITEMS: &str = "browser.tag_items";
+/// `browser.add_tag`: make a tag in a group, or a subtag under a tag.
+pub const ADD_TAG: &str = "browser.add_tag";
+/// `browser.add_tag_group`: make a tag group.
+pub const ADD_TAG_GROUP: &str = "browser.add_tag_group";
+/// `browser.rename_tag`: rename a tag or a group.
+pub const RENAME_TAG: &str = "browser.rename_tag";
+/// `browser.move_tag`: move a tag or a group.
+pub const MOVE_TAG: &str = "browser.move_tag";
+/// `browser.reset_tag_order`: put every group and tag back in its first
+/// order.
+pub const RESET_TAG_ORDER: &str = "browser.reset_tag_order";
+/// `browser.delete_tag`: delete a tag or a group.
+pub const DELETE_TAG: &str = "browser.delete_tag";
+/// `browser.show_tag_editor`: show or hide the Tag Editor.
+pub const SHOW_TAG_EDITOR: &str = "browser.show_tag_editor";
+/// `browser.show_quick_tags`: show or hide Quick Tags.
+pub const SHOW_QUICK_TAGS: &str = "browser.show_quick_tags";
 /// `focus.browser`: move the keyboard focus to the browser (Option-5).
 pub const FOCUS_BROWSER: &str = "focus.browser";
 
@@ -72,6 +94,16 @@ pub const IDS: &[&str] = &[
     SCRUB_PREVIEW,
     LOAD_SELECTED,
     ADD_TO_ARRANGEMENT,
+    TAGS,
+    TAG_ITEMS,
+    ADD_TAG,
+    ADD_TAG_GROUP,
+    RENAME_TAG,
+    MOVE_TAG,
+    RESET_TAG_ORDER,
+    DELETE_TAG,
+    SHOW_TAG_EDITOR,
+    SHOW_QUICK_TAGS,
     FOCUS_BROWSER,
 ];
 
@@ -343,6 +375,253 @@ pub struct BrowserState {
     pub preview: PreviewState,
     /// The index.
     pub index: IndexState,
+    /// Whether the Tag Editor is open beside the content pane.
+    pub tag_editor: bool,
+    /// Whether Quick Tags shows at the content pane's bottom.
+    pub quick_tags: bool,
+}
+
+/// How a tag sits on the selection (spec: browser-tags R11).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TagState {
+    /// No selected item carries it.
+    None,
+    /// Every selected item carries it.
+    All,
+    /// Some of them carry it.
+    Some,
+    /// It can't be taken off: Beatlayer gave it, or it comes from a folder.
+    Fixed,
+}
+
+/// Where a tag on an item comes from (spec: browser-tags R16).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TagSource {
+    /// The item carries it in its own right.
+    Own,
+    /// A folder it lies in carries it.
+    Folder,
+    /// Beatlayer gave it, from what it knows of the item.
+    Beatlayer,
+}
+
+/// A tag, as `browser.tags` reports it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TagInfo {
+    /// Its own name, without the group's.
+    pub name: String,
+    /// Its full name: the group's name, its own, and any subtag's, joined
+    /// by `|`, as `Format|CLAP`.
+    pub full_name: String,
+    /// Whether Beatlayer gave it: it can't be renamed or deleted.
+    pub builtin: bool,
+    /// Where it sits in its group.
+    pub position: i32,
+    /// Its subtags, one level deep.
+    pub subtags: Vec<TagInfo>,
+}
+
+/// A tag group, as `browser.tags` reports it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TagGroupInfo {
+    /// Its name.
+    pub name: String,
+    /// Whether Beatlayer gave it: it can't be renamed or deleted.
+    pub builtin: bool,
+    /// Its tags, in order.
+    pub tags: Vec<TagInfo>,
+}
+
+/// A tag on an item, and where it comes from.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ItemTag {
+    /// The tag's full name.
+    pub tag: String,
+    /// Where it comes from.
+    pub source: TagSource,
+}
+
+/// An item and the tags it carries.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TaggedItem {
+    /// The item's key: a file or folder by its path, a plug-in by its
+    /// format and identifier, a device or rack by its row's ID.
+    pub item: String,
+    /// The tags it carries.
+    pub tags: Vec<ItemTag>,
+}
+
+/// What `browser.tags` reports: the tag groups and their tags, and, for the
+/// items named, what each carries.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TagsState {
+    /// The tag groups, in order, with their tags.
+    pub groups: Vec<TagGroupInfo>,
+    /// The items named, with the tags each carries.
+    pub items: Vec<TaggedItem>,
+}
+
+/// One row of the Tag Editor.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TagEditorRow {
+    /// What the row is.
+    pub kind: TagEditorRowKind,
+    /// Its name.
+    pub name: String,
+    /// Its full name, for a tag: the group's name, its own, and any
+    /// subtag's, joined by `|`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub full_name: Option<String>,
+    /// How deep it's indented: 0 for a group, 1 for a tag, 2 for a subtag.
+    pub depth: u16,
+    /// How the tag sits on the selection.
+    pub state: TagState,
+    /// Whether Beatlayer gave it, so it can't be renamed, deleted or
+    /// taken off.
+    pub builtin: bool,
+    /// Whether it has subtags, so it shows an arrow.
+    pub has_subtags: bool,
+    /// Whether the selection carries one of its tags, for a folded row.
+    pub marked: bool,
+}
+
+/// What a row of the Tag Editor is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TagEditorRowKind {
+    /// A tag group.
+    Group,
+    /// A tag, or a subtag.
+    Tag,
+    /// Add Tag..., at the end of a group.
+    AddTag,
+    /// Add Group..., at the end of the list.
+    AddGroup,
+}
+
+/// A tag in Quick Tags.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct QuickTag {
+    /// Its own name.
+    pub name: String,
+    /// Its full name: the group's name, its own, and any subtag's, joined
+    /// by `|`.
+    pub full_name: String,
+    /// The group it's in.
+    pub group: String,
+    /// Whether every selected item carries it. Otherwise it shows an
+    /// asterisk.
+    pub all: bool,
+    /// Whether it can be taken off the selected items: the person's own
+    /// tags can, Beatlayer's and a folder's can't.
+    pub removable: bool,
+}
+
+/// Arguments of `browser.tags`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TagsArgs {
+    /// The items to report on, by their keys. Left out, none are.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub items: Option<Vec<String>>,
+}
+
+/// Arguments of `browser.tag_items`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TagItemsArgs {
+    /// The items to tag, by their keys.
+    pub items: Vec<String>,
+    /// The tags, by their full names or their own names.
+    pub tags: Vec<String>,
+    /// Put the tags on the items (true) or take them off (false). Left out,
+    /// they're put on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attach: Option<bool>,
+}
+
+/// Arguments of `browser.add_tag`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AddTagArgs {
+    /// The tag's name.
+    pub name: String,
+    /// The group to make it in, by its name. Left out with `parent` left
+    /// out too, the first group.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
+    /// The tag to make it under, by its full name or its own name. It
+    /// becomes a subtag.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
+}
+
+/// Arguments of `browser.add_tag_group`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AddTagGroupArgs {
+    /// The group's name.
+    pub name: String,
+}
+
+/// Arguments of `browser.rename_tag`. Give `tag` or `group`, not both.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RenameTagArgs {
+    /// The tag to rename, by its full name or its own name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tag: Option<String>,
+    /// The group to rename, by its name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
+    /// The new name.
+    pub name: String,
+}
+
+/// Arguments of `browser.move_tag`. Give `tag` or `group`, not both.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MoveTagArgs {
+    /// The tag to move, by its full name or its own name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tag: Option<String>,
+    /// The group to move, by its name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
+    /// Where it goes: 0 is the first place in its group or the list.
+    pub position: i32,
+}
+
+/// Arguments of `browser.delete_tag`. Give `tag` or `group`, not both.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DeleteTagArgs {
+    /// The tag to delete, by its full name or its own name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tag: Option<String>,
+    /// The group to delete, by its name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
+}
+
+/// Arguments of `browser.show_tag_editor`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ShowTagEditorArgs {
+    /// Whether it shows. Left out, it toggles.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub show: Option<bool>,
+}
+
+/// Arguments of `browser.show_quick_tags`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ShowQuickTagsArgs {
+    /// Whether it shows. Left out, it toggles.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub show: Option<bool>,
 }
 
 /// A part of the browser that takes the keyboard focus.
@@ -773,6 +1052,115 @@ fn specs() -> Vec<CommandSpec> {
             .contexts([Arrangement, Browser])
             .args::<AddToArrangementArgs>()
             .result::<AddResult>(),
+        CommandSpec::new(TAGS, "Browser Tags")
+            .description(
+                "Reports the browser's tag groups and their tags, in order: Beatlayer's own \
+                 groups (Content, Format, Creator and Devices) and the person's. With `items`, \
+                 the keys of the items to report on, it also says which tags each carries and \
+                 where each comes from: its own, a folder's, or Beatlayer's. Changes nothing, \
+                 but lists files outside the project.",
+            )
+            .permission(Permission::External)
+            .contexts([Global, Browser])
+            .args::<TagsArgs>()
+            .result::<TagsState>(),
+        CommandSpec::new(TAG_ITEMS, "Tag Items")
+            .description(
+                "Puts tags on items in the browser, or takes them off (`attach` false puts them \
+                 on). The items are named by their keys: a file or folder by its path, a \
+                 plug-in by its format and identifier (`clap/org.example.synth`), a device or \
+                 rack by its row's ID. The tags are named by their full names (`Format|CLAP`) \
+                 or their own names. Beatlayer's own tags and a tag that comes from a folder \
+                 can't be taken off. Changes the browser's database, not the files.",
+            )
+            .permission(Permission::Edit)
+            .contexts([Global, Browser])
+            .args::<TagItemsArgs>()
+            .result::<TagsState>(),
+        CommandSpec::new(ADD_TAG, "Add Browser Tag")
+            .description(
+                "Makes a tag in the browser: in the group `group`, or under the tag `parent`, \
+                 which makes it a subtag. A subtag can't hold another subtag. Changes the \
+                 browser's database.",
+            )
+            .permission(Permission::Edit)
+            .contexts([Global, Browser])
+            .args::<AddTagArgs>()
+            .result::<TagsState>(),
+        CommandSpec::new(ADD_TAG_GROUP, "Add Browser Tag Group")
+            .description(
+                "Makes a tag group in the browser, named `name`, at the end of the list. \
+                 Changes the browser's database.",
+            )
+            .permission(Permission::Edit)
+            .contexts([Global, Browser])
+            .args::<AddTagGroupArgs>()
+            .result::<TagsState>(),
+        CommandSpec::new(RENAME_TAG, "Rename Browser Tag")
+            .description(
+                "Renames a tag or a group in the browser: `tag` for a tag, by its full name \
+                 (`Format|CLAP`) or its own name, `group` for a group, by its name; `name` is \
+                 the new name. Beatlayer's own tags and groups can't be renamed. Renaming a \
+                 tag keeps it on every item that carries it. Changes the browser's database.",
+            )
+            .permission(Permission::Edit)
+            .contexts([Global, Browser])
+            .args::<RenameTagArgs>()
+            .result::<TagsState>(),
+        CommandSpec::new(MOVE_TAG, "Move Browser Tag")
+            .description(
+                "Moves a tag or a group in the browser to `position`: 0 is the first place in \
+                 its group, or the first in the list for a group. Beatlayer's own tags and \
+                 groups can't be moved. Changes the browser's database.",
+            )
+            .permission(Permission::Edit)
+            .contexts([Global, Browser])
+            .args::<MoveTagArgs>()
+            .result::<TagsState>(),
+        CommandSpec::new(RESET_TAG_ORDER, "Reset Browser Tag Order")
+            .description(
+                "Puts every tag group and tag in the browser back in the order it was made \
+                 in, as Reset Order in the Tag Editor's context menu does. Changes the \
+                 browser's database.",
+            )
+            .permission(Permission::Edit)
+            .contexts([Global, Browser])
+            .args::<NoArgs>()
+            .result::<TagsState>(),
+        CommandSpec::new(DELETE_TAG, "Delete Browser Tag")
+            .description(
+                "Deletes a tag or a group in the browser: `tag` for a tag, by its full name \
+                 (`Format|CLAP`) or its own name, `group` for a group, by its name. Deleting a \
+                 group deletes its tags. Beatlayer's own tags and groups can't be deleted. \
+                 A deleted tag is gone from every item that carried it, and undo can't bring \
+                 it back.",
+            )
+            .permission(Permission::Destructive)
+            .contexts([Global, Browser])
+            .args::<DeleteTagArgs>()
+            .result::<TagsState>(),
+        CommandSpec::new(SHOW_TAG_EDITOR, "Show Tag Editor")
+            .description(
+                "Shows the Tag Editor beside the browser's content pane, or hides it, as \
+                 Cmd-Shift-E (Ctrl-Shift-E) and the Filter View Menu's Tag Editor item do. \
+                 Whether it shows is kept for the next start.",
+            )
+            .permission(Permission::Read)
+            .contexts([Global, Browser])
+            .binding("S-BRW-014")
+            .args::<ShowTagEditorArgs>()
+            .result::<()>(),
+        CommandSpec::new(SHOW_QUICK_TAGS, "Show Quick Tags")
+            .description(
+                "Shows Quick Tags at the browser's content pane's bottom, or hides it, as the \
+                 Filter View Menu's Show Quick Tags item does. Quick Tags shows the selected \
+                 items' tags and adds one by typing its name. Whether it shows is kept for \
+                 the next start.",
+            )
+            .permission(Permission::Edit)
+            .contexts([Global, Browser])
+            .args::<ShowQuickTagsArgs>()
+            .result::<()>(),
         CommandSpec::new(FOCUS_BROWSER, "Browser")
             .description(
                 "Moves the keyboard focus to the browser (to `part`: the sidebar, the list, or \
@@ -826,6 +1214,20 @@ mod tests {
         for id in [SET_PREVIEW, SET_RAW, REMOVE_FOLDER] {
             assert_eq!(class(id), Permission::Edit, "{id}");
         }
+        for id in [
+            TAG_ITEMS,
+            ADD_TAG,
+            ADD_TAG_GROUP,
+            RENAME_TAG,
+            MOVE_TAG,
+            RESET_TAG_ORDER,
+            SHOW_QUICK_TAGS,
+        ] {
+            assert_eq!(class(id), Permission::Edit, "{id}");
+        }
+        assert_eq!(class(DELETE_TAG), Permission::Destructive);
+        assert_eq!(class(TAGS), Permission::External);
+        assert_eq!(class(SHOW_TAG_EDITOR), Permission::Read);
         for id in [FOCUS_SEARCH, STOP_PREVIEW, FOCUS_BROWSER] {
             assert_eq!(class(id), Permission::Read, "{id}");
         }

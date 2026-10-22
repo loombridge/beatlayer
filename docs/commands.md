@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-604 commands in 40 areas.
+614 commands in 40 areas.
 
 ## Permission classes
 
@@ -116,21 +116,31 @@ Each command has:
 | [`automation.set_breakpoint`](#automationset_breakpoint) | Set Automation Breakpoint | `edit` |  |  |
 | [`automation.set_curve`](#automationset_curve) | Curve Automation Segment | `edit` |  |  |
 | [`browser.add_folder`](#browseradd_folder) | Add Folder to Browser... | `external` |  |  |
+| [`browser.add_tag`](#browseradd_tag) | Add Browser Tag | `edit` |  |  |
+| [`browser.add_tag_group`](#browseradd_tag_group) | Add Browser Tag Group | `edit` |  |  |
 | [`browser.add_to_arrangement`](#browseradd_to_arrangement) | Add Files to Arrangement | `external` |  |  |
+| [`browser.delete_tag`](#browserdelete_tag) | Delete Browser Tag | `destructive` |  |  |
 | [`browser.focus_search`](#browserfocus_search) | Search in Browser | `read` | `Cmd+F` | `Ctrl+F` |
 | [`browser.load_selected`](#browserload_selected) | Load Selected Item | `external` | `Enter` | `Enter` |
+| [`browser.move_tag`](#browsermove_tag) | Move Browser Tag | `edit` |  |  |
 | [`browser.open_folder`](#browseropen_folder) | Open Folder | `external` |  |  |
 | [`browser.open_place`](#browseropen_place) | Open Browser Label | `external` |  |  |
 | [`browser.preview`](#browserpreview) | Preview | `external` |  |  |
 | [`browser.remove_folder`](#browserremove_folder) | Remove from Sidebar | `edit` |  |  |
+| [`browser.rename_tag`](#browserrename_tag) | Rename Browser Tag | `edit` |  |  |
+| [`browser.reset_tag_order`](#browserreset_tag_order) | Reset Browser Tag Order | `edit` |  |  |
 | [`browser.scrub_preview`](#browserscrub_preview) | Scrub Preview | `external` |  |  |
 | [`browser.search`](#browsersearch) | Browser Search | `external` |  |  |
 | [`browser.select`](#browserselect) | Select in Browser | `external` |  |  |
 | [`browser.set_preview`](#browserset_preview) | Browser File Preview | `edit` |  |  |
 | [`browser.set_raw`](#browserset_raw) | Raw Preview | `edit` |  |  |
 | [`browser.show_file`](#browsershow_file) | Show in Browser | `external` |  |  |
+| [`browser.show_quick_tags`](#browsershow_quick_tags) | Show Quick Tags | `edit` |  |  |
+| [`browser.show_tag_editor`](#browsershow_tag_editor) | Show Tag Editor | `read` | `Cmd+Shift+E` | `Ctrl+Shift+E` |
 | [`browser.state`](#browserstate) | Browser State | `external` |  |  |
 | [`browser.stop_preview`](#browserstop_preview) | Stop Preview | `read` |  |  |
+| [`browser.tag_items`](#browsertag_items) | Tag Items | `edit` |  |  |
+| [`browser.tags`](#browsertags) | Browser Tags | `external` |  |  |
 | [`chain.add`](#chainadd) | Add Chain | `edit` |  |  |
 | [`chain.copy`](#chaincopy) | Copy Chain | `read` | `Cmd+C` | `Ctrl+C` |
 | [`chain.create`](#chaincreate) | Create Chain | `edit` |  |  |
@@ -2182,6 +2192,40 @@ Arguments:
 
 Result: [`BrowserState`](#browserstate).
 
+#### `browser.add_tag`
+
+**Add Browser Tag**. Permission: `edit`. Contexts: `global`, `browser`.
+
+Makes a tag in the browser: in the group `group`, or under the tag `parent`, which makes it a subtag. A subtag can't hold another subtag. Changes the browser's database.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | The tag's name. |
+| `group` | string or null | no | The group to make it in, by its name. Left out with `parent` left out too, the first group. |
+| `parent` | string or null | no | The tag to make it under, by its full name or its own name. It becomes a subtag. |
+
+Result: [`TagsState`](#tagsstate).
+
+#### `browser.add_tag_group`
+
+**Add Browser Tag Group**. Permission: `edit`. Contexts: `global`, `browser`.
+
+Makes a tag group in the browser, named `name`, at the end of the list. Changes the browser's database.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | The group's name. |
+
+Result: [`TagsState`](#tagsstate).
+
 #### `browser.add_to_arrangement`
 
 **Add Files to Arrangement**. Permission: `external`. Contexts: `arrangement`, `browser`.
@@ -2200,6 +2244,23 @@ Arguments:
 | `track` | [`TrackId`](#trackid) or null | no | The audio track to put them on. Left out (or `null`), a new audio track below the last track, as dropping in the drop area does. |
 
 Result: [`AddResult`](#addresult).
+
+#### `browser.delete_tag`
+
+**Delete Browser Tag**. Permission: `destructive`. Contexts: `global`, `browser`.
+
+Deletes a tag or a group in the browser: `tag` for a tag, by its full name (`Format|CLAP`) or its own name, `group` for a group, by its name. Deleting a group deletes its tags. Beatlayer's own tags and groups can't be deleted. A deleted tag is gone from every item that carried it, and undo can't bring it back.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `group` | string or null | no | The group to delete, by its name. |
+| `tag` | string or null | no | The tag to delete, by its full name or its own name. |
+
+Result: [`TagsState`](#tagsstate).
 
 #### `browser.focus_search`
 
@@ -2232,6 +2293,24 @@ Default keys:
 Arguments: none (send `{}`).
 
 Result: [`AddResult`](#addresult).
+
+#### `browser.move_tag`
+
+**Move Browser Tag**. Permission: `edit`. Contexts: `global`, `browser`.
+
+Moves a tag or a group in the browser to `position`: 0 is the first place in its group, or the first in the list for a group. Beatlayer's own tags and groups can't be moved. Changes the browser's database.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `position` | integer | yes | Where it goes: 0 is the first place in its group or the list. |
+| `group` | string or null | no | The group to move, by its name. |
+| `tag` | string or null | no | The tag to move, by its full name or its own name. |
+
+Result: [`TagsState`](#tagsstate).
 
 #### `browser.open_folder`
 
@@ -2298,6 +2377,36 @@ Arguments:
 | `path` | string | yes | The folder's path. |
 
 Result: [`BrowserState`](#browserstate).
+
+#### `browser.rename_tag`
+
+**Rename Browser Tag**. Permission: `edit`. Contexts: `global`, `browser`.
+
+Renames a tag or a group in the browser: `tag` for a tag, by its full name (`Format|CLAP`) or its own name, `group` for a group, by its name; `name` is the new name. Beatlayer's own tags and groups can't be renamed. Renaming a tag keeps it on every item that carries it. Changes the browser's database.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | The new name. |
+| `group` | string or null | no | The group to rename, by its name. |
+| `tag` | string or null | no | The tag to rename, by its full name or its own name. |
+
+Result: [`TagsState`](#tagsstate).
+
+#### `browser.reset_tag_order`
+
+**Reset Browser Tag Order**. Permission: `edit`. Contexts: `global`, `browser`.
+
+Puts every tag group and tag in the browser back in the order it was made in, as Reset Order in the Tag Editor's context menu does. Changes the browser's database.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`TagsState`](#tagsstate).
 
 #### `browser.scrub_preview`
 
@@ -2400,6 +2509,42 @@ Arguments:
 
 Result: [`BrowserState`](#browserstate).
 
+#### `browser.show_quick_tags`
+
+**Show Quick Tags**. Permission: `edit`. Contexts: `global`, `browser`.
+
+Shows Quick Tags at the browser's content pane's bottom, or hides it, as the Filter View Menu's Show Quick Tags item does. Quick Tags shows the selected items' tags and adds one by typing its name. Whether it shows is kept for the next start.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `show` | boolean or null | no | Whether it shows. Left out, it toggles. |
+
+Result: nothing (`null`).
+
+#### `browser.show_tag_editor`
+
+**Show Tag Editor**. Permission: `read`. Contexts: `global`, `browser`.
+
+Shows the Tag Editor beside the browser's content pane, or hides it, as Cmd-Shift-E (Ctrl-Shift-E) and the Filter View Menu's Tag Editor item do. Whether it shows is kept for the next start.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-BRW-014 | `Cmd+Shift+E` | `Ctrl+Shift+E` | `browser` | Show or hide the tag editor | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `show` | boolean or null | no | Whether it shows. Left out, it toggles. |
+
+Result: nothing (`null`).
+
 #### `browser.state`
 
 **Browser State**. Permission: `external`. Contexts: `global`, `browser`, `browser-sidebar`.
@@ -2428,6 +2573,40 @@ Default keys: none.
 Arguments: none (send `{}`).
 
 Result: [`PreviewState`](#previewstate).
+
+#### `browser.tag_items`
+
+**Tag Items**. Permission: `edit`. Contexts: `global`, `browser`.
+
+Puts tags on items in the browser, or takes them off (`attach` false puts them on). The items are named by their keys: a file or folder by its path, a plug-in by its format and identifier (`clap/org.example.synth`), a device or rack by its row's ID. The tags are named by their full names (`Format|CLAP`) or their own names. Beatlayer's own tags and a tag that comes from a folder can't be taken off. Changes the browser's database, not the files.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `items` | array of string | yes | The items to tag, by their keys. |
+| `tags` | array of string | yes | The tags, by their full names or their own names. |
+| `attach` | boolean or null | no | Put the tags on the items (true) or take them off (false). Left out, they're put on. |
+
+Result: [`TagsState`](#tagsstate).
+
+#### `browser.tags`
+
+**Browser Tags**. Permission: `external`. Contexts: `global`, `browser`.
+
+Reports the browser's tag groups and their tags, in order: Beatlayer's own groups (Content, Format, Creator and Devices) and the person's. With `items`, the keys of the items to report on, it also says which tags each carries and where each comes from: its own, a folder's, or Beatlayer's. Changes nothing, but lists files outside the project.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `items` | array or null | no | The items to report on, by their keys. Left out, none are. |
+
+Result: [`TagsState`](#tagsstate).
 
 ### Area `chain`
 
@@ -11627,17 +11806,26 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`agent.new_token`](#agentnew_token) | a new random token, which an agent is never told: the Settings window shows it to the person |
 | [`app.quit`](#appquit) | the app ends, so there is nothing left to read from |
 | [`browser.add_folder`](#browseradd_folder) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
+| [`browser.add_tag`](#browseradd_tag) | the browser's tags are read with `browser.tags`, which is `external` because it lists files outside the project |
+| [`browser.add_tag_group`](#browseradd_tag_group) | the browser's tags are read with `browser.tags`, which is `external` because it lists files outside the project |
+| [`browser.delete_tag`](#browserdelete_tag) | the browser's tags are read with `browser.tags`, which is `external` because it lists files outside the project |
+| [`browser.move_tag`](#browsermove_tag) | the browser's tags are read with `browser.tags`, which is `external` because it lists files outside the project |
 | [`browser.open_folder`](#browseropen_folder) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.open_place`](#browseropen_place) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.preview`](#browserpreview) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.remove_folder`](#browserremove_folder) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
+| [`browser.rename_tag`](#browserrename_tag) | the browser's tags are read with `browser.tags`, which is `external` because it lists files outside the project |
+| [`browser.reset_tag_order`](#browserreset_tag_order) | the browser's tags are read with `browser.tags`, which is `external` because it lists files outside the project |
 | [`browser.scrub_preview`](#browserscrub_preview) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.search`](#browsersearch) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.select`](#browserselect) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.set_preview`](#browserset_preview) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.set_raw`](#browserset_raw) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.show_file`](#browsershow_file) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
+| [`browser.show_quick_tags`](#browsershow_quick_tags) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.state`](#browserstate) | a query of its own: it reads the Browser, and is `external` for the files it lists |
+| [`browser.tag_items`](#browsertag_items) | the browser's tags are read with `browser.tags`, which is `external` because it lists files outside the project |
+| [`browser.tags`](#browsertags) | a query of its own: it reads the tags, and is `external` for the files it lists |
 | [`chain.save_preset`](#chainsave_preset) | writes a file outside the set; the set doesn't change |
 | [`device.autosample_cancel`](#deviceautosample_cancel) | it stops a running autosample |
 | [`device.save_default_preset`](#devicesave_default_preset) | writes a file outside the set; the set doesn't change |
@@ -14197,6 +14385,8 @@ What the browser shows: most browser commands return it.
 | `selected` | array of string | yes | The selected items' paths. |
 | `preview` | [`PreviewState`](#previewstate) | yes | The preview. |
 | `index` | [`IndexState`](#indexstate) | yes | The index. |
+| `tag_editor` | boolean | yes | Whether the Tag Editor is open beside the content pane. |
+| `quick_tags` | boolean | yes | Whether Quick Tags shows at the content pane's bottom. |
 | `note` | string or null | no | What the content pane says when it has no rows, such as which package fills an empty Library label. |
 
 <details><summary>JSON Schema</summary>
@@ -14237,6 +14427,10 @@ What the browser shows: most browser commands return it.
       "$ref": "#/$defs/PreviewState",
       "description": "The preview."
     },
+    "quick_tags": {
+      "description": "Whether Quick Tags shows at the content pane's bottom.",
+      "type": "boolean"
+    },
     "rows": {
       "description": "Rows of the content pane, from `first_row`: the label's contents, with open folders' contents under them, or the search results.",
       "items": {
@@ -14255,6 +14449,10 @@ What the browser shows: most browser commands return it.
       },
       "type": "array"
     },
+    "tag_editor": {
+      "description": "Whether the Tag Editor is open beside the content pane.",
+      "type": "boolean"
+    },
     "total_rows": {
       "description": "How many rows the content pane has in all.",
       "format": "uint",
@@ -14271,7 +14469,9 @@ What the browser shows: most browser commands return it.
     "total_rows",
     "selected",
     "preview",
-    "index"
+    "index",
+    "tag_editor",
+    "quick_tags"
   ],
   "type": "object"
 }
@@ -21358,6 +21558,40 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `ItemTag`
+
+A tag on an item, and where it comes from.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `tag` | string | yes | The tag's full name. |
+| `source` | [`TagSource`](#tagsource) | yes | Where it comes from. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A tag on an item, and where it comes from.",
+  "properties": {
+    "source": {
+      "$ref": "#/$defs/TagSource",
+      "description": "Where it comes from."
+    },
+    "tag": {
+      "description": "The tag's full name.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "tag",
+    "source"
+  ],
+  "type": "object"
 }
 ```
 
@@ -31181,6 +31415,219 @@ What a command that switches something returns: its new state.
   },
   "required": [
     "on"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `TagGroupInfo`
+
+A tag group, as `browser.tags` reports it.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | Its name. |
+| `builtin` | boolean | yes | Whether Beatlayer gave it: it can't be renamed or deleted. |
+| `tags` | array of [`TagInfo`](#taginfo) | yes | Its tags, in order. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A tag group, as `browser.tags` reports it.",
+  "properties": {
+    "builtin": {
+      "description": "Whether Beatlayer gave it: it can't be renamed or deleted.",
+      "type": "boolean"
+    },
+    "name": {
+      "description": "Its name.",
+      "type": "string"
+    },
+    "tags": {
+      "description": "Its tags, in order.",
+      "items": {
+        "$ref": "#/$defs/TagInfo"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "name",
+    "builtin",
+    "tags"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `TagInfo`
+
+A tag, as `browser.tags` reports it.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | Its own name, without the group's. |
+| `full_name` | string | yes | Its full name: the group's name, its own, and any subtag's, joined by `\|`, as `Format\|CLAP`. |
+| `builtin` | boolean | yes | Whether Beatlayer gave it: it can't be renamed or deleted. |
+| `position` | integer | yes | Where it sits in its group. |
+| `subtags` | array of [`TagInfo`](#taginfo) | yes | Its subtags, one level deep. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A tag, as `browser.tags` reports it.",
+  "properties": {
+    "builtin": {
+      "description": "Whether Beatlayer gave it: it can't be renamed or deleted.",
+      "type": "boolean"
+    },
+    "full_name": {
+      "description": "Its full name: the group's name, its own, and any subtag's, joined by `|`, as `Format|CLAP`.",
+      "type": "string"
+    },
+    "name": {
+      "description": "Its own name, without the group's.",
+      "type": "string"
+    },
+    "position": {
+      "description": "Where it sits in its group.",
+      "format": "int32",
+      "type": "integer"
+    },
+    "subtags": {
+      "description": "Its subtags, one level deep.",
+      "items": {
+        "$ref": "#/$defs/TagInfo"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "name",
+    "full_name",
+    "builtin",
+    "position",
+    "subtags"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `TagSource`
+
+Where a tag on an item comes from (spec: browser-tags R16).
+
+One of:
+
+- `"own"`: The item carries it in its own right.
+- `"folder"`: A folder it lies in carries it.
+- `"beatlayer"`: Beatlayer gave it, from what it knows of the item.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Where a tag on an item comes from (spec: browser-tags R16).",
+  "oneOf": [
+    {
+      "const": "own",
+      "description": "The item carries it in its own right.",
+      "type": "string"
+    },
+    {
+      "const": "folder",
+      "description": "A folder it lies in carries it.",
+      "type": "string"
+    },
+    {
+      "const": "beatlayer",
+      "description": "Beatlayer gave it, from what it knows of the item.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `TaggedItem`
+
+An item and the tags it carries.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `item` | string | yes | The item's key: a file or folder by its path, a plug-in by its format and identifier, a device or rack by its row's ID. |
+| `tags` | array of [`ItemTag`](#itemtag) | yes | The tags it carries. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "An item and the tags it carries.",
+  "properties": {
+    "item": {
+      "description": "The item's key: a file or folder by its path, a plug-in by its format and identifier, a device or rack by its row's ID.",
+      "type": "string"
+    },
+    "tags": {
+      "description": "The tags it carries.",
+      "items": {
+        "$ref": "#/$defs/ItemTag"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "item",
+    "tags"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `TagsState`
+
+What `browser.tags` reports: the tag groups and their tags, and, for the items named, what each carries.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `groups` | array of [`TagGroupInfo`](#taggroupinfo) | yes | The tag groups, in order, with their tags. |
+| `items` | array of [`TaggedItem`](#taggeditem) | yes | The items named, with the tags each carries. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `browser.tags` reports: the tag groups and their tags, and, for the items named, what each carries.",
+  "properties": {
+    "groups": {
+      "description": "The tag groups, in order, with their tags.",
+      "items": {
+        "$ref": "#/$defs/TagGroupInfo"
+      },
+      "type": "array"
+    },
+    "items": {
+      "description": "The items named, with the tags each carries.",
+      "items": {
+        "$ref": "#/$defs/TaggedItem"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "groups",
+    "items"
   ],
   "type": "object"
 }

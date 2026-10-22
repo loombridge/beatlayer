@@ -884,7 +884,12 @@ impl Shell {
             midi_output,
             &prefs.midi,
         );
-        let browser_view = BrowserView::new(&prefs.browser, Waker::default());
+        let mut browser_view = BrowserView::new(&prefs.browser, Waker::default());
+        // Spec: browser-tags R1. The browser's database holds the index of
+        // the places' files, the tags, and the items that carry them.
+        if let Some(dir) = &config_dir {
+            browser_view.open_database(dir.join(crate::settings::BROWSER_DATABASE_FILE));
+        }
         audio.set_preview_gain(prefs.browser.preview_volume as f32);
         // Spec: file-management R1. A saved default set is what a new set
         // starts from; without one, the factory default set.
@@ -4069,6 +4074,11 @@ impl Shell {
         if let Some(error) = polled.error {
             self.set_message(error, true);
         }
+        // Spec: browser-tags R3. A database that couldn't be read is set
+        // aside and a new one is built; the Status Bar says so.
+        if let Some(message) = self.browser_view.take_message() {
+            self.set_message(message, true);
+        }
         let mut changed = polled.changed | self.poll_processed() | self.poll_stems();
         // Spec: multisampler R73. The autosampler makes one sample at a
         // time, so the dialog sees its progress and Cancel stops it.
@@ -4320,6 +4330,9 @@ impl Shell {
         }
         if outcome.show_browser {
             self.browser = true;
+        }
+        if let Some(message) = outcome.message {
+            self.set_message(message, false);
         }
         if outcome.focus {
             self.focused_window = WindowKind::Main;

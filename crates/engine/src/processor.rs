@@ -272,6 +272,8 @@ pub struct Processor {
     /// Where the song starts, when it has a song start time (the transport
     /// spec, R21).
     song_start: Option<Ticks>,
+    /// The Global Amount of groove, 1 at 100 %.
+    groove_amount: f32,
     /// A jump waiting for the next line of the global launch quantisation
     /// (the transport spec, R22).
     pending_locate: Option<PendingLocate>,
@@ -355,6 +357,7 @@ impl Processor {
             loop_region: None,
             loop_frames: None,
             song_start: None,
+            groove_amount: 1.0,
             pending_locate: None,
             punch: Punch::default(),
             punch_frames: PunchFrames::default(),
@@ -1028,6 +1031,10 @@ impl Processor {
                 self.song_start = start;
             }
             TransportCommand::SetMetronome(settings) => self.metronome.set_settings(settings),
+            // Spec: grooves R21
+            TransportCommand::SetGrooveAmount(tenths) => {
+                self.groove_amount = f32::from(tenths) / 1000.0;
+            }
             TransportCommand::SetPunch(punch) => {
                 self.punch = punch;
                 self.update_loop_frames();
@@ -1760,6 +1767,7 @@ impl Processor {
                         events: &self.resolved,
                         transport,
                         session: &self.session_playback,
+                        groove_amount: self.groove_amount,
                     },
                 );
                 // Spec: external-devices R4, R5

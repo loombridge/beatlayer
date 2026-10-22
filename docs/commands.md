@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-639 commands in 41 areas.
+652 commands in 42 areas.
 
 ## Permission classes
 
@@ -211,6 +211,7 @@ Each command has:
 | [`clip.set_fades`](#clipset_fades) | Set Clip Fades | `edit` |  |  |
 | [`clip.set_follow_actions`](#clipset_follow_actions) | Set Clip Follow Actions | `edit` |  |  |
 | [`clip.set_gain`](#clipset_gain) | Set Clip Gain | `edit` |  |  |
+| [`clip.set_groove`](#clipset_groove) | Set Clip Groove | `edit` |  |  |
 | [`clip.set_high_quality`](#clipset_high_quality) | Set Clip High Quality | `edit` |  |  |
 | [`clip.set_launch_mode`](#clipset_launch_mode) | Set Clip Launch Mode | `edit` |  |  |
 | [`clip.set_launch_quantization`](#clipset_launch_quantization) | Set Clip Launch Quantization | `edit` |  |  |
@@ -364,6 +365,18 @@ Each command has:
 | [`focus.previous_neighbor`](#focusprevious_neighbor) | Previous Neighbor | `read` | `Option+Shift+Tab` | `Ctrl+Shift+Tab` |
 | [`focus.toggle_tab_navigation`](#focustoggle_tab_navigation) | Use Tab Key to Move Focus | `read` |  |  |
 | [`focus.toggle_wrap_navigation`](#focustoggle_wrap_navigation) | Wrap Keyboard Navigation | `read` |  |  |
+| [`groove.add`](#grooveadd) | Add Groove | `edit` |  |  |
+| [`groove.commit`](#groovecommit) | Commit Groove | `edit` |  |  |
+| [`groove.delete`](#groovedelete) | Delete Groove | `destructive` |  |  |
+| [`groove.extract`](#grooveextract) | Extract Groove | `edit` |  |  |
+| [`groove.load`](#grooveload) | Load Groove | `external` |  |  |
+| [`groove.pool`](#groovepool) | Groove Pool | `read` |  |  |
+| [`groove.rename`](#grooverename) | Rename Groove | `edit` |  |  |
+| [`groove.save`](#groovesave) | Save Groove | `external` |  |  |
+| [`groove.set`](#grooveset) | Set Groove | `edit` |  |  |
+| [`groove.set_auto_load`](#grooveset_auto_load) | Set Auto Load Groove | `edit` |  |  |
+| [`groove.set_global_amount`](#grooveset_global_amount) | Set Global Groove Amount | `edit` |  |  |
+| [`groove.to_clip`](#grooveto_clip) | Groove to Clip | `edit` |  |  |
 | [`keymap.bind`](#keymapbind) | Bind Keys | `edit` |  |  |
 | [`keymap.reset`](#keymapreset) | Reset Keys | `edit` |  |  |
 | [`keymap.state`](#keymapstate) | Keymap State | `read` |  |  |
@@ -3923,6 +3936,23 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `clip.set_groove`
+
+**Set Clip Groove**. Permission: `edit`. Contexts: `global`, `clip-view`.
+
+Sets the Clip Groove of MIDI or audio clips to a groove of the Groove Pool (`groove`), or to none when `groove` is left out. `clips` names the clips; left out, the selected ones are set. The groove changes when a clip's notes play and how loud, or where its audio plays, and changes nothing in the clip until `groove.commit`; an audio clip plays its groove only while it is warped. One undo step, `Change Clip Groove`, however many clips it sets.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clips` | array of [`ClipId`](#clipid) | no | The clips; left out, the ones selected. |
+| `groove` | [`GrooveId`](#grooveid) or null | no | The groove; left out, none. |
+
+Result: [`ChangeSet`](#changeset).
+
 #### `clip.set_high_quality`
 
 **Set Clip High Quality**. Permission: `edit`. Contexts: `clip-view`.
@@ -6659,6 +6689,210 @@ Default keys: none.
 Arguments: none (send `{}`).
 
 Result: [`SwitchResult`](#switchresult).
+
+### Area `groove`
+
+#### `groove.add`
+
+**Add Groove**. Permission: `edit`. Contexts: `global`.
+
+Adds a groove to the end of the set's Groove Pool: a `groove` with a new ID, a name, a `length` in ticks, its `notes` (each a `position` from 0 to before the length and a `velocity` from 1 to 127, none two at one position) and its parameters, which are Base `1/16`, Quantize 0, Timing 100, Random 0 and Velocity 0 where left out. It changes no clip: use `clip.set_groove` to give a clip the groove. A groove that breaks those limits is refused. One undo step, `Add Groove`. To make a groove from a clip, use `groove.extract`; from a file, `groove.load`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `groove` | [`Groove`](#groove) | yes | The groove, with a new ID. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `groove.commit`
+
+**Commit Groove**. Permission: `edit`. Contexts: `global`, `clip-view`.
+
+Writes a clip's groove into the clip and sets its groove to none. A MIDI clip's notes move to where they play with the groove and take the velocities they play at, Random drawn once from `seed` (a new seed if left out). A warped audio clip gets a warp marker at each grid line and moved transient where the groove puts it, over the part of its contents that plays, and, while the groove's Velocity is above 0, a Volume clip envelope stepping through the gains it gives, replacing any Volume envelope the clip had (a Volume envelope only lowers a level, so the steps are shares of the loudest and the clip's gain rises by that gain). `clips` names the clips; left out, the selected ones; with `groove` and no clips, every clip that uses the groove. A clip with no groove is left as it is. One undo step, `Commit Groove`, however many clips it commits. An audio clip needs its file's analysis to be ready. Returns the clips committed.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clips` | array or null | no | The clips to commit. Left out, the selected ones. |
+| `groove` | [`GrooveId`](#grooveid) or null | no | A groove: with it and no `clips`, every clip that uses the groove is committed. |
+| `seed` | integer or null | no | The seed Random's one draw comes from. Left out, a new one. |
+
+Result: [`GrooveCommitted`](#groovecommitted).
+
+#### `groove.delete`
+
+**Delete Groove**. Permission: `destructive`. Contexts: `global`.
+
+Takes a groove out of the Groove Pool, as the Delete key does in the pool: every clip that used it is set to no groove, and if it was the auto-load groove nothing is auto-loaded any more. One undo step, `Delete Groove`. Because it removes the person's work, an agent asks first.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `groove` | [`GrooveId`](#grooveid) | yes | The groove. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `groove.extract`
+
+**Extract Groove**. Permission: `edit`. Contexts: `global`, `clip-view`.
+
+Makes a groove of each clip it names (`clips`, or the selected clips) at the end of the Groove Pool, from the part of the clip that plays: its loop brace while its loop is on, otherwise its Start to its End marker, the groove as long as that part. From a MIDI clip, a groove note at each note's start with its velocity, the loudest where notes start together. From an audio clip, a groove note at each of its transients, in its beats through its warp map (an unwarped clip's at the set's tempo where it starts), with a velocity from the audio's peak level in the 20 ms after it: the loudest peak 127, and 48 dB below it 1. The groove is named after the clip (`Groove` if it has no name) and has Base 1/16, Quantize 0, Timing 100, Random 0 and Velocity 0. An audio clip needs its file's analysis to be ready. One undo step, `Extract Groove`. Returns the grooves' IDs.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clips` | array or null | no | The clips to make grooves of. Left out, the selected ones. |
+
+Result: [`GrooveExtracted`](#grooveextracted).
+
+#### `groove.load`
+
+**Load Groove**. Permission: `external`. Contexts: `global`.
+
+Reads a groove file (`.blgroove`, Beatlayer's own JSON format) and adds the groove it holds to the end of the Groove Pool, with the parameters it holds, as double-clicking a groove in the browser does. With `clips`, those clips are given the groove too. One undo step, `Load Groove`. A file that is damaged, was saved by a newer Beatlayer or breaks a groove's limits is refused and changes nothing; loading the same file twice adds two grooves. Reads a file outside the project. Returns the groove's ID and name.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | The groove file, a `.blgroove`, absolute or relative to the app's working directory. |
+| `clips` | array of [`ClipId`](#clipid) | no | Clips to give the groove to as well, in the same undo step. |
+
+Result: [`GrooveLoaded`](#grooveloaded).
+
+#### `groove.pool`
+
+**Groove Pool**. Permission: `read`. Contexts: `global`.
+
+Reports the set's grooves: each with its ID, name, length, notes and its Base, Quantize, Timing, Random and Velocity, whether it is active (some clip uses it) and which clips use it; the Global Amount; and Auto Load Groove with its groove. Changes nothing.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`GroovePoolState`](#groovepoolstate).
+
+#### `groove.rename`
+
+**Rename Groove**. Permission: `edit`. Contexts: `global`.
+
+Renames a groove in the Groove Pool. One undo step, `Rename Groove`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `groove` | [`GrooveId`](#grooveid) | yes | The groove. |
+| `name` | string | yes | The new name. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `groove.save`
+
+**Save Groove**. Permission: `external`. Contexts: `global`.
+
+Writes a groove of the pool, with its current parameters, to a groove file: at `path`, or as `<name>.blgroove` in the User Library's Grooves folder, where the browser's Grooves label finds it. The file is written whole or not at all, and a file already there is left alone and the save refused unless `replace` is true. Changes nothing in the set and is no undo step; writes a file outside the project. Returns the path written.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `groove` | [`GrooveId`](#grooveid) | yes | The groove, one of the pool's. |
+| `path` | string or null | no | The file to write. Left out, `<name>.blgroove` in the User Library's Grooves folder. |
+| `replace` | boolean | no | Replace a file already there. Without it, an existing file is left alone and the save refused. |
+
+Result: [`GrooveSaved`](#groovesaved).
+
+#### `groove.set`
+
+**Set Groove**. Permission: `edit`. Contexts: `global`.
+
+Sets any of a groove's parameters, as its row in the Groove Pool does, and keeps those left out: `base` (`1/4`, `1/8`, `1/8T`, `1/16`, `1/16T` or `1/32`), `quantize` (0 to 100 percent), `timing` (0 to 100), `random` (0 to 100) and `velocity` (-100 to +100). A value out of range refuses them all. A change reaches every clip playing the groove from the next block. One undo step, named for the parameter when one is set: `Change Base`, `Change Quantize`, `Change Timing`, `Change Random` or `Change Velocity`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `groove` | [`GrooveId`](#grooveid) | yes | The groove. |
+| `base` | [`GrooveBase`](#groovebase) or null | no | The grid its notes are measured against. |
+| `quantize` | number or null | no | Quantize, from 0 to 100 percent. |
+| `random` | number or null | no | Random, from 0 to 100 percent. |
+| `timing` | number or null | no | Timing, from 0 to 100 percent. |
+| `velocity` | number or null | no | Velocity, from -100 to +100 percent. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `groove.set_auto_load`
+
+**Set Auto Load Groove**. Permission: `edit`. Contexts: `global`.
+
+Sets the Auto Load Groove switch (`enabled`) and the groove a new MIDI clip takes while it is on (`groove`, one of the pool's), and keeps what is left out. A MIDI clip made new, empty or by recording takes that groove; a clip made by copying, pasting or importing keeps its own. One undo step, `Change Auto Load Groove`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `enabled` | boolean or null | no | Whether a new MIDI clip takes the auto-load groove. |
+| `groove` | [`GrooveId`](#grooveid) or null | no | The auto-load groove, one of the pool's. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `groove.set_global_amount`
+
+**Set Global Groove Amount**. Permission: `edit`. Contexts: `global`.
+
+Sets the Global Amount, from 0 to 130 percent: it scales Timing, Random and Velocity for every groove in the set at once, and not Quantize; 100 plays each groove as set. The set holds one. It reaches every clip playing a groove from the next block. One undo step, `Change Global Amount`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `amount` | number | yes | The amount, in percent. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `groove.to_clip`
+
+**Groove to Clip**. Permission: `edit`. Contexts: `global`.
+
+Makes a MIDI clip of a groove of the pool on a MIDI track at a position, as dragging the groove onto the track does: a note on C3 (key 60) at each groove note with its velocity, each a sixteenth long or as long as the gap to the next note, whichever is shorter; the clip one groove long, looping, and named after the groove. A clip made so takes no auto-load groove. A clip already there is replaced where the new one covers it. One undo step, `Groove to Clip`. Returns the clip's ID.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `groove` | [`GrooveId`](#grooveid) | yes | The groove, one of the pool's. |
+| `track` | [`TrackId`](#trackid) | yes | The MIDI track to put the clip on. |
+| `at` | [`Ticks`](#ticks) | yes | Where the clip starts, in ticks. |
+
+Result: [`GrooveClip`](#grooveclip).
 
 ### Area `keymap`
 
@@ -11974,6 +12208,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`clip.set_fades`](#clipset_fades) | the query tool's `clip` | `data.audio.fade_in` |
 | [`clip.set_follow_actions`](#clipset_follow_actions) | the query tool's `clip` | `launch.follow` |
 | [`clip.set_gain`](#clipset_gain) | the query tool's `clip` | `data.audio.gain` |
+| [`clip.set_groove`](#clipset_groove) | the query tool's `clip` | `groove` |
 | [`clip.set_high_quality`](#clipset_high_quality) | the query tool's `clip` | `data.audio.high_quality` |
 | [`clip.set_launch_mode`](#clipset_launch_mode) | the query tool's `clip` | `launch.mode` |
 | [`clip.set_launch_quantization`](#clipset_launch_quantization) | the query tool's `clip` | `launch.quantization` |
@@ -12082,6 +12317,16 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`export.realtime.skip`](#exportrealtimeskip) | `export.realtime.status` | `phase` |
 | [`file_manager.edit_file`](#file_manageredit_file) | the query tool's `clip` | `data.audio.media` |
 | [`file_manager.replace_file`](#file_managerreplace_file) | the query tool's `clip` | `data.audio.media` |
+| [`groove.add`](#grooveadd) | the query tool's `song` | `settings.grooves` |
+| [`groove.commit`](#groovecommit) | the query tool's `clip` | `groove` |
+| [`groove.delete`](#groovedelete) | the query tool's `song` | `settings.grooves` |
+| [`groove.extract`](#grooveextract) | the query tool's `song` | `settings.grooves` |
+| [`groove.load`](#grooveload) | the query tool's `song` | `settings.grooves` |
+| [`groove.rename`](#grooverename) | the query tool's `song` | `settings.grooves` |
+| [`groove.set`](#grooveset) | the query tool's `song` | `settings.grooves` |
+| [`groove.set_auto_load`](#grooveset_auto_load) | the query tool's `song` | `settings.grooves` |
+| [`groove.set_global_amount`](#grooveset_global_amount) | the query tool's `song` | `settings.grooves` |
+| [`groove.to_clip`](#grooveto_clip) | the query tool's `track` | `clips` |
 | [`keymap.bind`](#keymapbind) | `keymap.state` | `shortcuts` |
 | [`keymap.reset`](#keymapreset) | `keymap.state` | `shortcuts` |
 | [`keymap.unbind`](#keymapunbind) | `keymap.state` | `shortcuts` |
@@ -12315,6 +12560,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`file_manager.delete_unused`](#file_managerdelete_unused) | moves files outside the set to the trash; the set doesn't change |
 | [`file_manager.hot_swap`](#file_managerhot_swap) | the File Manager's state is read with `file_manager.state`, which is `external` because it lists files outside the project |
 | [`file_manager.state`](#file_managerstate) | a query of its own: it reads the File Manager, and is `external` for the files it lists |
+| [`groove.save`](#groovesave) | writes a file outside the set; the set doesn't change |
 | [`midi.export_clip`](#midiexport_clip) | writes a file outside the set; the set doesn't change |
 | [`pad.save_default`](#padsave_default) | the default pad is the shell's, kept in memory and in the User Library, not in the set; the next `pad.drop` on an empty pad makes its chain from it |
 | [`plugin.export_list`](#pluginexport_list) | writes a file outside the set; the set doesn't change |
@@ -16048,6 +16294,7 @@ A clip on a track's arrangement lane.
 | `mute` | boolean | yes | Whether the clip is switched off, so it stays in place but doesn't play. |
 | `data` | [`ClipData`](#clipdata) | yes | What the clip plays. |
 | `envelopes` | array of [`ClipEnvelope`](#clipenvelope) | no | The clip's envelopes (WP-3.15): one per parameter of its track it modulates, in target order. Empty for a clip with none, which is what a set saved before this package holds. |
+| `groove` | [`GrooveId`](#grooveid) or null | no | The clip's groove (WP-6.19): one of the set's Groove Pool, or none. It changes when the clip's notes play, or where its audio plays, and nothing in the clip itself until it is committed. |
 | `launch` | [`ClipLaunch`](#cliplaunch) | no | The clip's launch settings (WP-3.4), which only a Session clip's launching reads. The defaults for a clip saved without them. |
 | `offset` | [`Ticks`](#ticks) | no | How far into its contents a MIDI clip starts: its notes are placed from `start - offset`, and the part before the clip's start doesn't play. 0 (or left out) plays the contents from their beginning. Never negative. Splitting a MIDI clip or trimming its left edge changes it, so each part plays what it played before. An audio clip's is always 0: its Start marker moves instead, as Live's does. |
 | `scale` | [`Scale`](#scale) | no | The clip's scale (WP-6.7): its Scale Mode switch, its root and its scale name. It never changes what the clip plays; it tells the rest of the set which keys belong. A clip off at C, in Major, writes nothing, so a set saved before the scales loads unchanged. |
@@ -16068,6 +16315,17 @@ A clip on a track's arrangement lane.
         "$ref": "#/$defs/ClipEnvelope"
       },
       "type": "array"
+    },
+    "groove": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/GrooveId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The clip's groove (WP-6.19): one of the set's Groove Pool, or none. It changes when the clip's notes play, or where its audio plays, and nothing in the clip itself until it is committed."
     },
     "id": {
       "$ref": "#/$defs/ClipId",
@@ -21448,6 +21706,511 @@ The editing grid, as the Arrangement View uses it now.
     "snap",
     "step",
     "label"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `Groove`
+
+A groove (the grooves spec, R1).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | [`GrooveId`](#grooveid) | yes | The groove's ID. |
+| `name` | string | yes | Its name. |
+| `length` | [`Ticks`](#ticks) | yes | How long it is, in ticks: positive. It repeats along a clip's contents every length. |
+| `notes` | array of [`GrooveNote`](#groovenote) | yes | Its notes, by position, no two at one position. |
+| `base` | [`GrooveBase`](#groovebase) | no | The grid its notes are measured against. |
+| `quantize` | number | no | How much straight quantisation to the Base grid is applied first, from 0 to 100 percent. |
+| `random` | number | no | How much random timing is added, from 0 to 100 percent. |
+| `timing` | number | no | How strongly the groove's timing acts, from 0 to 100 percent. |
+| `velocity` | number | no | How strongly the groove's velocities act, from -100 to +100 percent. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A groove (the grooves spec, R1).",
+  "properties": {
+    "base": {
+      "$ref": "#/$defs/GrooveBase",
+      "default": "1/16",
+      "description": "The grid its notes are measured against."
+    },
+    "id": {
+      "$ref": "#/$defs/GrooveId",
+      "description": "The groove's ID."
+    },
+    "length": {
+      "$ref": "#/$defs/Ticks",
+      "description": "How long it is, in ticks: positive. It repeats along a clip's contents every length."
+    },
+    "name": {
+      "description": "Its name.",
+      "type": "string"
+    },
+    "notes": {
+      "description": "Its notes, by position, no two at one position.",
+      "items": {
+        "$ref": "#/$defs/GrooveNote"
+      },
+      "type": "array"
+    },
+    "quantize": {
+      "default": 0.0,
+      "description": "How much straight quantisation to the Base grid is applied first, from 0 to 100 percent.",
+      "format": "double",
+      "type": "number"
+    },
+    "random": {
+      "default": 0.0,
+      "description": "How much random timing is added, from 0 to 100 percent.",
+      "format": "double",
+      "type": "number"
+    },
+    "timing": {
+      "default": 100.0,
+      "description": "How strongly the groove's timing acts, from 0 to 100 percent.",
+      "format": "double",
+      "type": "number"
+    },
+    "velocity": {
+      "default": 0.0,
+      "description": "How strongly the groove's velocities act, from -100 to +100 percent.",
+      "format": "double",
+      "type": "number"
+    }
+  },
+  "required": [
+    "id",
+    "name",
+    "length",
+    "notes"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `GrooveBase`
+
+The grid a groove's notes are measured against (the grooves spec, R2).
+
+One of:
+
+- `"1/4"`: A quarter note.
+- `"1/8"`: An eighth note.
+- `"1/8T"`: An eighth-note triplet.
+- `"1/16"`: A sixteenth note.
+- `"1/16T"`: A sixteenth-note triplet.
+- `"1/32"`: A thirty-second note.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The grid a groove's notes are measured against (the grooves spec, R2).",
+  "oneOf": [
+    {
+      "const": "1/4",
+      "description": "A quarter note.",
+      "type": "string"
+    },
+    {
+      "const": "1/8",
+      "description": "An eighth note.",
+      "type": "string"
+    },
+    {
+      "const": "1/8T",
+      "description": "An eighth-note triplet.",
+      "type": "string"
+    },
+    {
+      "const": "1/16",
+      "description": "A sixteenth note.",
+      "type": "string"
+    },
+    {
+      "const": "1/16T",
+      "description": "A sixteenth-note triplet.",
+      "type": "string"
+    },
+    {
+      "const": "1/32",
+      "description": "A thirty-second note.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `GrooveClip`
+
+What `groove.to_clip` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The clip it made. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `groove.to_clip` returns.",
+  "properties": {
+    "clip": {
+      "$ref": "#/$defs/ClipId",
+      "description": "The clip it made."
+    }
+  },
+  "required": [
+    "clip"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `GrooveCommitted`
+
+What `groove.commit` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clips` | array of [`ClipId`](#clipid) | yes | The clips whose groove was written in. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `groove.commit` returns.",
+  "properties": {
+    "clips": {
+      "description": "The clips whose groove was written in.",
+      "items": {
+        "$ref": "#/$defs/ClipId"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "clips"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `GrooveExtracted`
+
+What `groove.extract` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `grooves` | array of [`GrooveId`](#grooveid) | yes | The grooves it added to the end of the pool, one for each clip, in the clips' order. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `groove.extract` returns.",
+  "properties": {
+    "grooves": {
+      "description": "The grooves it added to the end of the pool, one for each clip, in the clips' order.",
+      "items": {
+        "$ref": "#/$defs/GrooveId"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "grooves"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `GrooveId`
+
+The ID of a groove: a positive integer, unique within the project and never reused.
+
+Type: integer, at least 1.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The ID of a groove: a positive integer, unique within the project and never reused.",
+  "format": "uint64",
+  "minimum": 1,
+  "type": "integer"
+}
+```
+
+</details>
+
+### `GrooveLoaded`
+
+What `groove.load` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `groove` | [`GrooveId`](#grooveid) | yes | The groove it added to the end of the pool. |
+| `name` | string | yes | Its name. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `groove.load` returns.",
+  "properties": {
+    "groove": {
+      "$ref": "#/$defs/GrooveId",
+      "description": "The groove it added to the end of the pool."
+    },
+    "name": {
+      "description": "Its name.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "groove",
+    "name"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `GrooveNote`
+
+One note of a groove: where it sits in the groove and how hard.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `position` | [`Ticks`](#ticks) | yes | From 0 to before the groove's length. |
+| `velocity` | integer from 0 to 255 | yes | From 1 to 127. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One note of a groove: where it sits in the groove and how hard.",
+  "properties": {
+    "position": {
+      "$ref": "#/$defs/Ticks",
+      "description": "From 0 to before the groove's length."
+    },
+    "velocity": {
+      "description": "From 1 to 127.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "position",
+    "velocity"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `GroovePoolEntry`
+
+One groove of the pool, as `groove.pool` reports it.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | [`GrooveId`](#grooveid) | yes | The groove's ID. |
+| `name` | string | yes | Its name. |
+| `length` | [`Ticks`](#ticks) | yes | How long it is, in ticks: positive. It repeats along a clip's contents every length. |
+| `notes` | array of [`GrooveNote`](#groovenote) | yes | Its notes, by position, no two at one position. |
+| `base` | [`GrooveBase`](#groovebase) | yes | The grid its notes are measured against. |
+| `quantize` | number | yes | How much straight quantisation to the Base grid is applied first, from 0 to 100 percent. |
+| `timing` | number | yes | How strongly the groove's timing acts, from 0 to 100 percent. |
+| `random` | number | yes | How much random timing is added, from 0 to 100 percent. |
+| `velocity` | number | yes | How strongly the groove's velocities act, from -100 to +100 percent. |
+| `active` | boolean | yes | Whether any clip uses it: an inactive groove's parameters are greyed. |
+| `clips` | array of [`ClipId`](#clipid) | yes | The clips that use it. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One groove of the pool, as `groove.pool` reports it.",
+  "properties": {
+    "active": {
+      "description": "Whether any clip uses it: an inactive groove's parameters are greyed.",
+      "type": "boolean"
+    },
+    "base": {
+      "$ref": "#/$defs/GrooveBase",
+      "default": "1/16",
+      "description": "The grid its notes are measured against."
+    },
+    "clips": {
+      "description": "The clips that use it.",
+      "items": {
+        "$ref": "#/$defs/ClipId"
+      },
+      "type": "array"
+    },
+    "id": {
+      "$ref": "#/$defs/GrooveId",
+      "description": "The groove's ID."
+    },
+    "length": {
+      "$ref": "#/$defs/Ticks",
+      "description": "How long it is, in ticks: positive. It repeats along a clip's contents every length."
+    },
+    "name": {
+      "description": "Its name.",
+      "type": "string"
+    },
+    "notes": {
+      "description": "Its notes, by position, no two at one position.",
+      "items": {
+        "$ref": "#/$defs/GrooveNote"
+      },
+      "type": "array"
+    },
+    "quantize": {
+      "default": 0.0,
+      "description": "How much straight quantisation to the Base grid is applied first, from 0 to 100 percent.",
+      "format": "double",
+      "type": "number"
+    },
+    "random": {
+      "default": 0.0,
+      "description": "How much random timing is added, from 0 to 100 percent.",
+      "format": "double",
+      "type": "number"
+    },
+    "timing": {
+      "default": 100.0,
+      "description": "How strongly the groove's timing acts, from 0 to 100 percent.",
+      "format": "double",
+      "type": "number"
+    },
+    "velocity": {
+      "default": 0.0,
+      "description": "How strongly the groove's velocities act, from -100 to +100 percent.",
+      "format": "double",
+      "type": "number"
+    }
+  },
+  "required": [
+    "id",
+    "name",
+    "length",
+    "notes",
+    "base",
+    "quantize",
+    "timing",
+    "random",
+    "velocity",
+    "active",
+    "clips"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `GroovePoolState`
+
+What `groove.pool` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `grooves` | array of [`GroovePoolEntry`](#groovepoolentry) | yes | The grooves, in the order they were added. |
+| `global_amount` | number | yes | The Global Amount, from 0 to 130 percent. |
+| `auto_load` | boolean | yes | The Auto Load Groove switch. |
+| `auto_load_groove` | [`GrooveId`](#grooveid) or null | no | The groove new MIDI clips take while the switch is on. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `groove.pool` returns.",
+  "properties": {
+    "auto_load": {
+      "description": "The Auto Load Groove switch.",
+      "type": "boolean"
+    },
+    "auto_load_groove": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/GrooveId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The groove new MIDI clips take while the switch is on."
+    },
+    "global_amount": {
+      "description": "The Global Amount, from 0 to 130 percent.",
+      "format": "double",
+      "type": "number"
+    },
+    "grooves": {
+      "description": "The grooves, in the order they were added.",
+      "items": {
+        "$ref": "#/$defs/GroovePoolEntry"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "grooves",
+    "global_amount",
+    "auto_load"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `GrooveSaved`
+
+What `groove.save` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | The file written. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `groove.save` returns.",
+  "properties": {
+    "path": {
+      "description": "The file written.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "path"
   ],
   "type": "object"
 }

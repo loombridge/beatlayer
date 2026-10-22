@@ -34,6 +34,15 @@ pub fn check_peaks(peaks: &bl_media::peaks::Peaks, source: bl_media::ContentHash
     assert_eq!(&again, peaks, "a loaded peak file changes over a save");
 }
 
+/// Anything the groove file decoder accepts saves again and decodes to the
+/// same groove.
+pub fn check_groove(groove: &bl_project::groove_file::GrooveFile) {
+    let bytes = groove.encode();
+    let again = bl_project::groove_file::GrooveFile::decode(&bytes)
+        .expect("a re-encoded groove loads");
+    assert_eq!(&again, groove, "a loaded groove changes over a save");
+}
+
 /// Anything the preset decoder accepts saves again and decodes to the same
 /// preset.
 pub fn check_preset(preset: &bl_project::preset::Preset) {

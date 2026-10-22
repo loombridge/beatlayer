@@ -348,6 +348,7 @@ impl View<'_> {
             "length": Self::length(clip.length),
             "mute": clip.mute,
             "scale": scale_value(clip.scale),
+            "groove": clip.groove,
             "content": content,
         })
     }

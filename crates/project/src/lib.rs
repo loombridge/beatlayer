@@ -51,6 +51,7 @@
 
 pub mod autosave;
 pub mod format;
+pub mod groove_file;
 pub mod journal;
 pub mod migrate;
 pub mod preset;

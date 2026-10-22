@@ -72,35 +72,21 @@ fn release_touch(touch: &mut Touch, at: Ticks) {
     }
 }
 
-/// Notes a move in a Latch or Write touch (automation R19 to R21): the touch
-/// carries on over the Arrangement loop's wrap, so the value it held holds
-/// from the loop's start and the move overwrites what the earlier pass wrote.
-fn write_latch(touches: &mut Vec<Touch>, at: Ticks, value: f64, loop_start: Ticks) {
-    let Some(touch) = touches.last_mut().filter(|touch| touch.end.is_none()) else {
-        touches.push(Touch {
-            written: vec![(at, value)],
-            end: None,
-        });
-        return;
-    };
-    let Some(last) = touch.written.last().copied() else {
-        touch.written.push((at, value));
-        return;
-    };
-    if at > last.0 {
-        touch.written.push((at, value));
+/// Notes a move in a Latch or Write touch (automation R19): a later move
+/// carries the open touch on, and one at the same position as the last
+/// replaces its value.
+fn write_latch(touches: &mut Vec<Touch>, at: Ticks, value: f64) {
+    if let Some(touch) = touches.last_mut().filter(|touch| touch.end.is_none()) {
+        match touch.written.last_mut() {
+            Some(last) if last.0 == at => last.1 = value,
+            _ => touch.written.push((at, value)),
+        }
         return;
     }
-    // The playhead wrapped: the touch carries on with the value it held,
-    // which holds from the loop's start, and the move overwrites what the
-    // earlier pass wrote from there on.
-    let carried = last.1;
-    let keep_to = loop_start.min(at);
-    touch.written.retain(|(at, _)| *at < keep_to);
-    if at > keep_to {
-        touch.written.push((keep_to, carried));
-    }
-    touch.written.push((at, value));
+    touches.push(Touch {
+        written: vec![(at, value)],
+        end: None,
+    });
 }
 
 /// The moves of a recording under way.
@@ -118,6 +104,9 @@ pub struct Take {
     /// Where the Arrangement loop starts, so that a wrap is worked out
     /// (automation R21).
     loop_start: Ticks,
+    /// The playhead's position when last seen, so that a wrap is noticed
+    /// (automation R21).
+    last: Ticks,
 }
 
 impl Take {
@@ -127,6 +116,34 @@ impl Take {
         self.mode = mode;
         self.start = start;
         self.loop_start = loop_start;
+        self.last = start;
+    }
+
+    /// Notes that the playhead is at `at`. When it went back (the loop brace
+    /// wrapped it), each open Latch or Write touch carries on from the
+    /// loop's start with the value it held, and what earlier passes wrote
+    /// from there on is written over (automation R21).
+    pub fn advance(&mut self, at: Ticks) {
+        let wrapped = at < self.last;
+        self.last = at;
+        if !wrapped || self.mode == AutomationRecordMode::Touch {
+            return;
+        }
+        let keep_to = self.loop_start.min(at);
+        for touch in self
+            .touches
+            .values_mut()
+            .filter_map(|touches| touches.last_mut())
+        {
+            if touch.end.is_some() {
+                continue;
+            }
+            let Some(&(_, carried)) = touch.written.last() else {
+                continue;
+            };
+            touch.written.retain(|(at, _)| *at < keep_to);
+            touch.written.push((keep_to, carried));
+        }
     }
 
     /// Notes that `target` of `track` was moved to `value` at `at`. `before`
@@ -143,11 +160,14 @@ impl Take {
         before: f64,
     ) {
         let key = (track, target);
+        if self.mode != AutomationRecordMode::Touch {
+            self.advance(at);
+        }
         let touches = self.touches.entry(key).or_default();
         match self.mode {
             AutomationRecordMode::Touch => write_touch(touches, at, value),
             AutomationRecordMode::Latch | AutomationRecordMode::Write => {
-                write_latch(touches, at, value, self.loop_start);
+                write_latch(touches, at, value);
             }
         }
         if self.mode == AutomationRecordMode::Write {

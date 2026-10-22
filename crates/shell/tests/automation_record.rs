@@ -454,6 +454,98 @@ fn a_latch_touch_carries_on_over_the_loops_wrap() {
     assert_eq!(recorded_steps(&shell), 1);
 }
 
+// Spec: automation R19
+#[test]
+fn in_latch_two_moves_at_one_position_keep_the_last() {
+    let (mut shell, control, track) = shell_with_a_track();
+    set_mode(&mut shell, "latch");
+    shell
+        .run("arrangement.automation_arm", json!({ "on": true }))
+        .unwrap();
+    start_recording(&control, &mut shell);
+
+    // Two moves before the playhead moves on: the second replaces the
+    // first, as in Touch.
+    let at = pass_time(&control, &mut shell, 150);
+    for volume in [0.25, 0.5] {
+        shell
+            .run(
+                "mixer.set_volume",
+                json!({ "track": track, "volume": volume }),
+            )
+            .unwrap();
+    }
+    pass_time(&control, &mut shell, 150);
+    stop_recording(&control, &mut shell);
+    let stop = shell.poll_engine().position;
+
+    let recorded = envelope(&shell, track).unwrap();
+    let points: Vec<_> = recorded.points().map(|p| (p.at, p.value)).collect();
+    assert_eq!(points, [(at, 0.5), (stop, 0.5)], "{points:?}");
+}
+
+// Spec: automation R21
+#[test]
+fn a_latch_touch_holds_over_the_wrap_without_another_move() {
+    let (mut shell, control, track) = shell_with_a_track();
+    let end = Ticks::WHOLE * 1000;
+    for (at, value) in [(Ticks::ZERO, 0.0), (end, 1.0)] {
+        shell
+            .run(
+                "automation.set_breakpoint",
+                json!({ "track": track, "target": { "type": "mixer", "param": "volume" },
+                        "at": at, "value": value }),
+            )
+            .unwrap();
+    }
+    let old = envelope(&shell, track).unwrap();
+    shell
+        .run(
+            "transport.set_loop",
+            json!({ "start": 0, "length": 4 * Ticks::WHOLE.get() }),
+        )
+        .unwrap();
+    shell
+        .run("transport.set_loop_enabled", json!({ "enabled": true }))
+        .unwrap();
+    set_mode(&mut shell, "latch");
+    shell
+        .run("arrangement.automation_arm", json!({ "on": true }))
+        .unwrap();
+    start_recording(&control, &mut shell);
+
+    // One move in the first pass, then the recording stops early in the
+    // second, before the move's position.
+    let first = pass_time(&control, &mut shell, 500);
+    shell
+        .run(
+            "mixer.set_volume",
+            json!({ "track": track, "volume": 0.25 }),
+        )
+        .unwrap();
+    wait_for_the_wrap(&control, &mut shell);
+    pass_time(&control, &mut shell, 100);
+    stop_recording(&control, &mut shell);
+    let stop = shell.poll_engine().position;
+    assert!(stop < first, "the recording stops in the second pass");
+
+    // The held value carries on from the loop's start to the stop, and the
+    // old envelope resumes a tick after it.
+    let recorded = envelope(&shell, track).unwrap();
+    let points: Vec<_> = recorded.points().map(|p| (p.at, p.value)).collect();
+    assert_eq!(
+        points,
+        [
+            (Ticks::ZERO, 0.25),
+            (stop, 0.25),
+            (stop + Ticks(1), old.value_at(stop + Ticks(1)).unwrap()),
+            (end, 1.0),
+        ],
+        "{points:?}"
+    );
+    assert_eq!(recorded_steps(&shell), 1);
+}
+
 // Spec: automation R18
 #[test]
 fn the_mode_is_kept_between_launches() {

@@ -5094,6 +5094,7 @@ impl Shell {
                     settings.arrangement_loop.start,
                 );
             }
+            self.automation_take.advance(engine.position);
             return;
         }
         if !was {

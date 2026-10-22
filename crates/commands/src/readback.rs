@@ -60,6 +60,8 @@ impl Object {
                 "undo.next_undo",
                 "undo.next_redo",
                 "undo.steps",
+                "undo.redo_steps",
+                "undo.current",
                 "scheduled",
                 "checkpoints",
                 "tracks",
@@ -378,6 +380,7 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("device.wrap_in_rack", query(Track, "devices")),
     ("edit.redo", query(Song, "undo.next_redo")),
     ("edit.undo", query(Song, "undo.next_undo")),
+    ("edit.go_to_step", query(Song, "undo.current")),
     ("export.audio", nothing(FILE)),
     (
         "file_manager.delete_unused",

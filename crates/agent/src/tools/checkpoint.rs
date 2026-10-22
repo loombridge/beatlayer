@@ -194,8 +194,9 @@ pub(crate) fn checkpoint(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
                 tally["removed"], tally["modified"]
             )));
             let label = ctx.step_label(&format!("Restore checkpoint \u{201c}{name}\u{201d}"));
+            let maker = ctx.maker();
             ctx.shell
-                .edit(|editor| editor.replace(label.clone(), checkpoint.document));
+                .edit(|editor| editor.replace_by(maker, label.clone(), checkpoint.document));
             done(json!({
                 "restored": name,
                 "undo_step": label,

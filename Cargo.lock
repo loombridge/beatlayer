@@ -1038,6 +1038,7 @@ name = "bl-stretch"
 version = "0.2.0"
 dependencies = [
  "bl-dsp",
+ "cc",
  "proptest",
 ]
 

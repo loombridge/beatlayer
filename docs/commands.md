@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-607 commands in 40 areas.
+609 commands in 40 areas.
 
 ## Permission classes
 
@@ -336,6 +336,7 @@ Each command has:
 | [`device.windows`](#devicewindows) | Floating Device Windows | `read` |  |  |
 | [`device.wrap_in_rack`](#devicewrap_in_rack) | Wrap Devices in a Rack | `edit` |  |  |
 | [`device_view.state`](#device_viewstate) | Device View State | `read` |  |  |
+| [`edit.go_to_step`](#editgo_to_step) | Go to Step | `edit` |  |  |
 | [`edit.redo`](#editredo) | Redo | `edit` | `Cmd+Shift+Z` | `Ctrl+Y` |
 | [`edit.undo`](#editundo) | Undo | `edit` | `Cmd+Z` | `Ctrl+Z` |
 | [`export.audio`](#exportaudio) | Export Audio | `external` |  |  |
@@ -633,6 +634,7 @@ Each command has:
 | [`view.toggle_plug_in_windows`](#viewtoggle_plug_in_windows) | Plug-In Windows | `read` | `Cmd+Option+P` | `Ctrl+Alt+P` |
 | [`view.toggle_plugin_list`](#viewtoggle_plugin_list) | Plug-In List | `read` |  |  |
 | [`view.toggle_session_arrangement`](#viewtoggle_session_arrangement) | Toggle Arrangement/Session View | `read` | `Tab` | `Tab` |
+| [`view.toggle_undo_history`](#viewtoggle_undo_history) | Undo History | `read` | `Cmd+Option+Z` | `Ctrl+Alt+Z` |
 | [`view.zoom_in`](#viewzoom_in) | Zoom In | `edit` | `Cmd+Plus` | `Ctrl+Plus` |
 | [`view.zoom_out`](#viewzoom_out) | Zoom Out | `edit` | `Cmd+Minus` | `Ctrl+Minus` |
 | [`view.zoom_reset`](#viewzoom_reset) | Reset Zoom to 100% | `edit` |  |  |
@@ -6171,6 +6173,22 @@ Result: [`DeviceViewState`](#deviceviewstate).
 
 ### Area `edit`
 
+#### `edit.go_to_step`
+
+**Go to Step**. Permission: `edit`. Contexts: `global`.
+
+Returns the set to the state just after the step at `index`, counted up from the set's start: 0 is the set's start, before any step, and the newest step is the number of steps there are. The steps above that row are undone and stay listed, greyed, until a new change replaces them. The jump is no step of its own.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `index` | integer, at least 0 | yes | The row, counted up from the set's start: 0 is the set's start, before any step, and the newest step is the number of steps there are. |
+
+Result: [`ChangeSet`](#changeset).
+
 #### `edit.redo`
 
 **Redo**. Permission: `edit`. Contexts: `global`.
@@ -11092,7 +11110,7 @@ Result: [`ViewResult`](#viewresult).
 
 **View State**. Permission: `read`. Contexts: `global`.
 
-Reports what the view commands switch: the main view (Arrangement or Session), whether the browser and the Info View show, full-screen mode and the zoom (`view.toggle_session_arrangement`, `view.toggle_browser`, `view.toggle_info_view`, `view.full_screen`, `view.set_zoom`), the Clip View with Draw Mode, the lane, Fold and the selected notes (`view.toggle_clip_view`, `view.draw_mode`, `view.lane`, `view.fold_notes`), the assistant's panel and whether plug-in windows are shown (`view.toggle_plug_in_windows`). Changes nothing. The Arrangement's own view is in `arrangement.state`, the Mixer's in `mixer_view.state`, the Session View's in `session.state` and the Device View's in `device_view.state`.
+Reports what the view commands switch: the main view (Arrangement or Session), whether the browser and the Info View show, full-screen mode and the zoom (`view.toggle_session_arrangement`, `view.toggle_browser`, `view.toggle_info_view`, `view.full_screen`, `view.set_zoom`), the Clip View with Draw Mode, the lane, Fold and the selected notes (`view.toggle_clip_view`, `view.draw_mode`, `view.lane`, `view.fold_notes`), the assistant's panel, the Undo History (`view.toggle_undo_history`), and whether plug-in windows are shown (`view.toggle_plug_in_windows`). Changes nothing. The Arrangement's own view is in `arrangement.state`, the Mixer's in `mixer_view.state`, the Session View's in `session.state` and the Device View's in `device_view.state`.
 
 Default keys: none.
 
@@ -11226,6 +11244,22 @@ Default keys:
 Arguments: none (send `{}`).
 
 Result: [`ViewResult`](#viewresult).
+
+#### `view.toggle_undo_history`
+
+**Undo History**. Permission: `read`. Contexts: `global`.
+
+Shows or hides the Undo History panel at the right of the main window, in the column the Learn View uses. The panel lists the set's steps, newest first, with the ones that can be redone greyed, and clicking a row returns the set to that point. Whether it shows is view state: it isn't saved with the set and isn't an undo step. Changes nothing in the set.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-VIEW-021 | `Cmd+Option+Z` | `Ctrl+Alt+Z` | `global` | Open the Undo History | runs it |
+
+Arguments: none (send `{}`).
+
+Result: [`UndoHistoryState`](#undohistorystate).
 
 #### `view.zoom_in`
 
@@ -11495,6 +11529,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`device.unwrap_rack`](#deviceunwrap_rack) | the query tool's `track` | `devices` |
 | [`device.update_layers`](#deviceupdate_layers) | the query tool's `device` | `layers` |
 | [`device.wrap_in_rack`](#devicewrap_in_rack) | the query tool's `track` | `devices` |
+| [`edit.go_to_step`](#editgo_to_step) | the query tool's `song` | `undo.current` |
 | [`edit.redo`](#editredo) | the query tool's `song` | `undo.next_redo` |
 | [`edit.undo`](#editundo) | the query tool's `song` | `undo.next_undo` |
 | [`export.realtime.auto_restart`](#exportrealtimeauto_restart) | `export.realtime.status` | `auto_restart` |
@@ -32793,6 +32828,50 @@ One of:
 
 </details>
 
+### `UndoHistoryState`
+
+What `view.toggle_undo_history` returns: the Undo History panel's state afterwards.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `open` | boolean | yes | Whether the panel shows. |
+| `steps` | integer, at least 0 | yes | How many steps the history holds. |
+| `current` | integer, at least 0 | yes | The current row's place in the history, counted up from the set's start: 0 before any step. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `view.toggle_undo_history` returns: the Undo History panel's state afterwards.",
+  "properties": {
+    "current": {
+      "description": "The current row's place in the history, counted up from the set's start: 0 before any step.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "open": {
+      "description": "Whether the panel shows.",
+      "type": "boolean"
+    },
+    "steps": {
+      "description": "How many steps the history holds.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "open",
+    "steps",
+    "current"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `Ungrouped`
 
 What `device.ungroup` returns.
@@ -33203,6 +33282,7 @@ What `view.state` returns: what the view commands switch, without switching any 
 | `clip_view` | [`ClipViewState`](#clipviewstate) | yes | The Clip View and its note editor: whether it shows, Draw Mode, the clip it holds, the selected notes, the lane and Fold. |
 | `plugin_list` | [`PluginListState`](#pluginliststate) | yes | The list of the set's plug-ins: whether it shows, and whether Show Only Missing is on. |
 | `assistant` | [`AssistantPanelState`](#assistantpanelstate) | yes | The assistant's panel. |
+| `undo_history` | boolean | yes | Whether the Undo History panel shows. |
 | `plug_in_windows` | boolean | yes | Whether floating devices' and plug-ins' windows are shown, as `view.toggle_plug_in_windows` sets it. |
 
 <details><summary>JSON Schema</summary>
@@ -33227,6 +33307,10 @@ What `view.state` returns: what the view commands switch, without switching any 
       "$ref": "#/$defs/PluginListState",
       "description": "The list of the set's plug-ins: whether it shows, and whether Show Only Missing is on."
     },
+    "undo_history": {
+      "description": "Whether the Undo History panel shows.",
+      "type": "boolean"
+    },
     "window": {
       "$ref": "#/$defs/ViewResult",
       "description": "The main window: the main view, the browser, the Info View, full-screen mode and the interface zoom."
@@ -33237,6 +33321,7 @@ What `view.state` returns: what the view commands switch, without switching any 
     "clip_view",
     "plugin_list",
     "assistant",
+    "undo_history",
     "plug_in_windows"
   ],
   "type": "object"

@@ -4242,7 +4242,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+Option+Z"]
 win = ["Ctrl+Alt+Z"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "view.toggle_undo_history", contexts = ["global"] },
+]
 
 [[shortcut]]
 id = "S-NOTE-038"

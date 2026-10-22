@@ -149,6 +149,8 @@ pub struct MainWindowUi {
     /// The assistant's pane (WP-2.23, part 3): the prompt being typed and a
     /// drag on its edge.
     assistant: crate::assistant_panel::AssistantPanelUi,
+    /// The File Manager's switches (WP-6.63).
+    file_manager: crate::file_manager::FileManagerUi,
 }
 
 /// A move of the keyboard focus asked for by `focus.next`,
@@ -218,6 +220,7 @@ impl MainWindowUi {
             clip_view: crate::clip_view::ClipViewUi::default(),
             plugin_list: crate::plugin_list::PluginListUi::default(),
             keymap: None,
+            file_manager: crate::file_manager::FileManagerUi::default(),
             keymap_revision: 0,
             info: InfoViewContent::default(),
             mixer_typing: false,
@@ -464,7 +467,19 @@ impl MainWindowUi {
             // under the pointer are known by the time it reads them.
             self.status_bar(ui, shell, theme, &layout, &mut events);
             self.info_view(ui, theme, shell, layout.info_view);
-            if shell.plugin_list().visible() {
+            if shell.file_manager_open() {
+                // Spec: file-management R10. The File Manager takes the
+                // detail area's place, in front of the Clip or Device View,
+                // and the list of the set's plug-ins gives way to it.
+                crate::file_manager::show(
+                    ui,
+                    shell,
+                    theme,
+                    layout.device_view,
+                    &mut self.file_manager,
+                    &mut events,
+                );
+            } else if shell.plugin_list().visible() {
                 // Spec: plugin-list R1. The list of the set's plug-ins takes
                 // the detail area's place, where the File Manager opens
                 // (L-OTH-002), in front of the Clip or Device View.
@@ -493,6 +508,7 @@ impl MainWindowUi {
             if !shell.plugin_list().visible()
                 && !shell.clip_view().visible()
                 && shell.scene_view_scene().is_none()
+                && !shell.file_manager_open()
             {
                 // Spec: multisampler R1. The zone editor sits above the
                 // Device View.
@@ -1502,10 +1518,23 @@ fn look(element: Element, shell: &Shell) -> Look {
                 text: Some(hint.to_owned()),
                 ..Look::default()
             },
-            (None, None) => Look {
-                text: Some(String::new()),
-                ..Look::default()
-            },
+            // Spec: file-management R12. The Status Bar says how many of
+            // the set's files are missing, until none is.
+            (None, None) => {
+                let missing = shell.missing_files();
+                Look {
+                    text: Some(if missing == 0 {
+                        String::new()
+                    } else {
+                        format!(
+                            "{missing} file{} missing: click to open the File Manager",
+                            if missing == 1 { " is" } else { "s are" }
+                        )
+                    }),
+                    on: missing > 0,
+                    ..Look::default()
+                }
+            }
         },
         _ => Look::default(),
     }
@@ -1575,7 +1604,16 @@ fn click(element: Element, shell: &Shell) -> Option<Invocation> {
         Element::ArrangementView if shell.main_view() != MainView::Arrangement => Some(
             Invocation::new(ids::VIEW_TOGGLE_SESSION_ARRANGEMENT, json!({})),
         ),
-        Element::Message => shell.message().and_then(|m| m.action.clone()),
+        // Spec: file-management R12. A click on the missing-files message
+        // shows the File Manager's Manage Set view.
+        Element::Message => shell.message().and_then(|m| m.action.clone()).or_else(|| {
+            (shell.missing_files() > 0).then(|| {
+                Invocation::new(
+                    "view.toggle_file_manager",
+                    json!({ "view": "set", "open": true }),
+                )
+            })
+        }),
         // Play, Stop, and the Loop switch (WP-1.18).
         _ => control_bar::click(element, shell),
     }

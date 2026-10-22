@@ -36,6 +36,12 @@ impl PluginList {
         }
     }
 
+    /// Hides the list, as the File Manager opening does (file-management
+    /// R10: showing either hides the other).
+    pub fn hide(&mut self) {
+        self.visible = false;
+    }
+
     /// Switches Show Only Missing.
     pub fn set_only_missing(&mut self, only_missing: bool) {
         self.only_missing = only_missing;

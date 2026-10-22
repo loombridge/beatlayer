@@ -2118,6 +2118,34 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("audio.devices", Exception(Query)),
         ("midi.ports", Exception(Query)),
         ("set.list_recoverable", Exception(Query)),
+        // The File Manager (WP-6.63): its own rows and buttons reach
+        // these, and its views open from the File and View menus.
+        ("file_manager.state", Exception(Query)),
+        ("set.backups", Exception(Query)),
+        (
+            "file_manager.replace_file",
+            Exception(Equivalent("the File Manager's rows (WP-6.63)")),
+        ),
+        (
+            "file_manager.hot_swap",
+            Exception(Equivalent("the File Manager's rows (WP-6.63)")),
+        ),
+        (
+            "file_manager.edit_file",
+            Exception(Equivalent("the File Manager's rows (WP-6.63)")),
+        ),
+        (
+            "file_manager.delete_unused",
+            Exception(Equivalent("the File Manager's rows (WP-6.63)")),
+        ),
+        (
+            "file_manager.set_search_folder",
+            Exception(Equivalent("the File Manager's rows (WP-6.63)")),
+        ),
+        (
+            "set.open_backup",
+            Exception(Equivalent("File ▸ Open Beatlayer Set Backups (WP-6.63)")),
+        ),
         ("keymap.state", Exception(Query)),
         // Agent perception (WP-1.16): how an agent hears and sees the set,
         // which a person does with their own ears and eyes.

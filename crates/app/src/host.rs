@@ -1392,6 +1392,20 @@ impl Host {
                     ));
                 }
             }
+            Effect::PickSearchFolder => {
+                // Spec: file-management R14. The File Manager's Set Folder…
+                // button names the folder the Automatic Search looks in.
+                let mut dialog = rfd::FileDialog::new().set_title("Search Folder");
+                if let Some(main) = &self.main {
+                    dialog = dialog.set_parent(main.window.as_ref());
+                }
+                if let Some(path) = dialog.pick_folder() {
+                    self.invoke(&Invocation::new(
+                        bl_shell::file_manager_commands::SET_SEARCH_FOLDER,
+                        json!({ "folder": path.to_string_lossy() }),
+                    ));
+                }
+            }
             Effect::PickPluginListPath { default_name } => {
                 // Spec: plugin-list R7. The list's Export… button asks
                 // where to save the list.

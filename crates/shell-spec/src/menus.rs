@@ -16,6 +16,7 @@
 //! website, account, store, pack service, and Max for Live) are left out
 //! ([`Action::Omitted`]). Decision D21 records the rule.
 
+use crate::arrangement::{SHOW_IN_OUT, SHOW_RETURN_TRACKS, SHOW_VOLUME};
 use crate::assistant::VIEW_TOGGLE_ASSISTANT;
 use crate::audio_editing::CONSOLIDATE_TO_SCENE;
 use crate::browser::{ADD_FOLDER as BROWSER_ADD_FOLDER, SET_PREVIEW as BROWSER_PREVIEW};
@@ -634,11 +635,11 @@ const VIEW: &[Row] = &[
     ("M-VIEW-032-sep2", "", Action::Separator),
     ("M-VIEW-032g", "Return Tracks", Cmd(MIXER_RETURN_TRACKS)),
     ("M-VIEW-033", "Arrangement Track Controls", Submenu),
-    ("M-VIEW-033a", "In/Out", Pending(None)),
-    ("M-VIEW-033b", "Volume", Pending(None)),
+    ("M-VIEW-033a", "In/Out", Cmd(SHOW_IN_OUT)),
+    ("M-VIEW-033b", "Volume", Cmd(SHOW_VOLUME)),
     ("M-VIEW-033c", "Track Options", Cmd(MIXER_TRACK_OPTIONS)),
     ("M-VIEW-033-sep1", "", Action::Separator),
-    ("M-VIEW-033d", "Return Tracks", Pending(None)),
+    ("M-VIEW-033d", "Return Tracks", Cmd(SHOW_RETURN_TRACKS)),
     SEPARATOR,
     ("M-VIEW-034", "Overview", Key(&["S-VIEW-011"])),
     (

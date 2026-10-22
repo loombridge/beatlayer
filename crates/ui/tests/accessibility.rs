@@ -537,6 +537,46 @@ fn peak_id(place: Place, track: TrackId) -> Id {
     Id::new(("mixer-peak", place, track))
 }
 
+// Spec: arrangement-view R24; accessibility R4.
+#[test]
+fn the_hidden_track_controls_leave_the_tab_order() {
+    let (mut h, tracks, _) = set();
+    tab_navigation_on(&mut h);
+    press(&mut h, Key::Num2, Modifiers::ALT);
+    h.shell
+        .run(
+            "arrangement.select_tracks",
+            json!({ "tracks": [tracks[2]] }),
+        )
+        .unwrap();
+    h.settle();
+    use bl_shell::mixer_controls::Switch;
+    let header = |switch| switch_id(Place::Header, switch, tracks[2]);
+    // The In/Out choosers, the volume, the pan, and the sends are hidden:
+    // they leave the Tab order, and the rest of the header's controls stay
+    // in it.
+    for id in [
+        "arrangement.show_in_out",
+        "arrangement.show_volume",
+        "arrangement.show_return_tracks",
+    ] {
+        h.shell.run(id, json!({ "on": false })).unwrap();
+    }
+    h.settle();
+    let expected = [
+        title_id(tracks[2]),
+        header(Switch::Activator),
+        header(Switch::Solo),
+        header(Switch::Arm),
+        bl_ui::arrangement::optimize_height_id(),
+        bl_ui::arrangement::optimize_width_id(),
+    ];
+    for want in expected {
+        press(&mut h, Key::Tab, Modifiers::NONE);
+        assert_eq!(focused_id(&h), Some(want));
+    }
+}
+
 // Spec: accessibility R4.
 #[test]
 fn tab_goes_round_a_session_strip_in_live_s_order() {

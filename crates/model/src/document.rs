@@ -88,6 +88,11 @@ pub struct Settings {
     /// delay compensation is on.
     #[serde(default, skip_serializing_if = "is_off")]
     pub reduced_latency_monitoring: bool,
+    /// Lock Envelopes: whether the tracks' envelopes stay where they are in
+    /// the song when their clips are edited (the automation editing spec,
+    /// R8). Off in a new set, and in a set saved before it.
+    #[serde(default, skip_serializing_if = "is_off")]
+    pub lock_envelopes: bool,
     /// The song's locators: the markers in the Arrangement's scrub area
     /// (WP-6.24). A set saved before locators has none and loads with none;
     /// a set with none doesn't write them, so its saved form is unchanged.
@@ -130,6 +135,7 @@ impl Default for Settings {
             midi_overdub: false,
             delay_compensation: true,
             reduced_latency_monitoring: false,
+            lock_envelopes: false,
             locators: Vec::new(),
             song_start: None,
             grooves: GroovePool::default(),

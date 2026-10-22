@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-652 commands in 42 areas.
+661 commands in 42 areas.
 
 ## Permission classes
 
@@ -108,13 +108,21 @@ Each command has:
 | [`audio.set_test_tone`](#audioset_test_tone) | Test Tone | `external` |  |  |
 | [`audio.status`](#audiostatus) | Audio Status | `read` |  |  |
 | [`audio.toggle_engine`](#audiotoggle_engine) | Audio Engine On | `external` | `Cmd+Option+Shift+E` | `Ctrl+Alt+Shift+E` |
+| [`automation.copy`](#automationcopy) | Copy Automation | `read` |  |  |
+| [`automation.cut`](#automationcut) | Cut Automation | `destructive` |  |  |
 | [`automation.delete`](#automationdelete) | Delete Automation | `destructive` |  |  |
 | [`automation.delete_breakpoint`](#automationdelete_breakpoint) | Delete Automation Breakpoint | `edit` |  |  |
+| [`automation.delete_range`](#automationdelete_range) | Delete Automation Range | `destructive` |  |  |
+| [`automation.duplicate`](#automationduplicate) | Duplicate Automation | `edit` |  |  |
 | [`automation.move_breakpoint`](#automationmove_breakpoint) | Move Automation Breakpoint | `edit` |  |  |
+| [`automation.move_breakpoints`](#automationmove_breakpoints) | Move Automation Breakpoints | `edit` |  |  |
+| [`automation.paste`](#automationpaste) | Paste Automation | `edit` |  |  |
 | [`automation.re_enable`](#automationre_enable) | Re-Enable Automation | `edit` |  |  |
 | [`automation.re_enable_for`](#automationre_enable_for) | Re-Enable Automation for a Parameter | `edit` |  |  |
+| [`automation.select_segment`](#automationselect_segment) | Select Automation Segment | `read` |  |  |
 | [`automation.set_breakpoint`](#automationset_breakpoint) | Set Automation Breakpoint | `edit` |  |  |
 | [`automation.set_curve`](#automationset_curve) | Curve Automation Segment | `edit` |  |  |
+| [`automation.set_envelope`](#automationset_envelope) | Set Automation Envelope | `edit` |  |  |
 | [`browser.add_folder`](#browseradd_folder) | Add Folder to Browser... | `external` |  |  |
 | [`browser.add_tag`](#browseradd_tag) | Add Browser Tag | `edit` |  |  |
 | [`browser.add_tag_group`](#browseradd_tag_group) | Add Browser Tag Group | `edit` |  |  |
@@ -606,6 +614,7 @@ Each command has:
 | [`song.rename_locator`](#songrename_locator) | Rename Locator | `edit` |  |  |
 | [`song.scales`](#songscales) | Scale List | `read` |  |  |
 | [`song.set_locator_info_text`](#songset_locator_info_text) | Set Locator Info Text | `edit` |  |  |
+| [`song.set_lock_envelopes`](#songset_lock_envelopes) | Lock Envelopes | `edit` |  |  |
 | [`song.set_scale`](#songset_scale) | Set Scale | `edit` |  |  |
 | [`song.set_start`](#songset_start) | Set Song Start Time | `edit` |  |  |
 | [`song.set_start_time`](#songset_start_time) | Set Song Start Time | `edit` |  |  |
@@ -1407,7 +1416,7 @@ Result: [`ArrangementState`](#arrangementstate).
 
 **Select Time**. Permission: `read`. Contexts: `arrangement`.
 
-Selects the span from `start` to `end` on `tracks` (or the selected tracks), as dragging across track lanes does. `arrangement.zoom_to_selection` zooms to it. Changes only the view.
+Selects the span from `start` to `end` on `tracks` (or the selected tracks), as dragging across track lanes does. `lanes` names the lanes the selection covers, each a track's own lane or its automation lane; left out, the tracks' own lanes. `arrangement.zoom_to_selection` zooms to it. Changes only the view.
 
 Default keys: none.
 
@@ -1417,6 +1426,7 @@ Arguments:
 |---|---|---|---|
 | `start` | [`Ticks`](#ticks) | yes | Where the selection starts. |
 | `end` | [`Ticks`](#ticks) | yes | Where it ends. Before `start` is fine: the two are swapped. |
+| `lanes` | array or null | no | The lanes it covers: each a track's own lane or its automation lane (the automation editing spec, R1). Left out, the tracks' own lanes. |
 | `tracks` | array or null | no | The tracks it covers. Left out, the selected tracks. |
 
 Result: [`ArrangementState`](#arrangementstate).
@@ -2090,6 +2100,42 @@ Result: [`SwitchResult`](#switchresult).
 
 ### Area `automation`
 
+#### `automation.copy`
+
+**Copy Automation**. Permission: `read`. Contexts: `arrangement`, `envelope`.
+
+Copies the shape of the envelopes the time selection covers to the Arrangement's clipboard, for `automation.paste`: the shape over the span, with its positions from the span's start, its values as positions on each parameter's travel, and its bends. The clipboard isn't part of the set, and copying changes nothing in it.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `end` | [`Position`](#position) or null | no | Where the span ends, after `start`. Left out, the time selection's end. |
+| `lanes` | array or null | no | The lanes the shape is in: each a track and the parameter its automation lane shows. Left out, the automation lanes the time selection covers. |
+| `start` | [`Position`](#position) or null | no | Where the span starts. Left out, the time selection's start. |
+
+Result: [`EnvelopeClipboardState`](#envelopeclipboardstate).
+
+#### `automation.cut`
+
+**Cut Automation**. Permission: `destructive`. Contexts: `arrangement`, `envelope`.
+
+Copies the shape of the envelopes the time selection covers, as `automation.copy` does, then deletes it, as `automation.delete_range` does: the breakpoints inside the span go, and the envelope's values at the span's edges are kept, so it runs straight across the span. Because it removes the person's work, an agent asks first.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `end` | [`Position`](#position) or null | no | Where the span ends, after `start`. Left out, the time selection's end. |
+| `lanes` | array or null | no | The lanes the shape is in: each a track and the parameter its automation lane shows. Left out, the automation lanes the time selection covers. |
+| `start` | [`Position`](#position) or null | no | Where the span starts. Left out, the time selection's start. |
+
+Result: [`AutomationResult`](#automationresult).
+
 #### `automation.delete`
 
 **Delete Automation**. Permission: `destructive`. Contexts: `global`.
@@ -2125,6 +2171,42 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `automation.delete_range`
+
+**Delete Automation Range**. Permission: `destructive`. Contexts: `arrangement`, `envelope`.
+
+Deletes the shape of the envelopes the time selection covers over the span: the breakpoints inside it go, and the envelope's values at the span's edges are kept with a breakpoint at each, so the envelope runs straight across the span and is unchanged outside it. The clips and the other envelopes stay as they are. Because it removes the person's work, an agent asks first.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `end` | [`Position`](#position) or null | no | Where the span ends, after `start`. Left out, the time selection's end. |
+| `lanes` | array or null | no | The lanes the shape is in: each a track and the parameter its automation lane shows. Left out, the automation lanes the time selection covers. |
+| `start` | [`Position`](#position) or null | no | Where the span starts. Left out, the time selection's start. |
+
+Result: [`AutomationResult`](#automationresult).
+
+#### `automation.duplicate`
+
+**Duplicate Automation**. Permission: `edit`. Contexts: `arrangement`, `envelope`.
+
+Writes a copy of the shape the time selection covers straight after the span, and makes the copy the time selection, so running it again repeats the shape. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `end` | [`Position`](#position) or null | no | Where the span ends, after `start`. Left out, the time selection's end. |
+| `lanes` | array or null | no | The lanes the shape is in: each a track and the parameter its automation lane shows. Left out, the automation lanes the time selection covers. |
+| `start` | [`Position`](#position) or null | no | Where the span starts. Left out, the time selection's start. |
+
+Result: [`AutomationResult`](#automationresult).
+
 #### `automation.move_breakpoint`
 
 **Move Automation Breakpoint**. Permission: `edit`. Contexts: `global`.
@@ -2144,6 +2226,43 @@ Arguments:
 | `value` | number or null | no | The value it takes there, in the parameter's own units, or `null` (or nothing) to keep the value it has. |
 
 Result: [`ChangeSet`](#changeset).
+
+#### `automation.move_breakpoints`
+
+**Move Automation Breakpoints**. Permission: `edit`. Contexts: `arrangement`, `envelope`.
+
+Moves several breakpoints of one track's parameter at once, as dragging a selected breakpoint on an automation lane does: each moves `by` ticks in time and `share` of the parameter's travel in value, staying within the parameter's range, and a breakpoint the moved ones pass over is removed. `at` names the breakpoints to move, where they are now. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track the parameter belongs to. |
+| `target` | [`AutomationTarget`](#automationtarget) | yes | The parameter: a mixer control, a send, or a device parameter. |
+| `at` | array of [`Ticks`](#ticks) | yes | The breakpoints to move, where they are now. |
+| `by` | [`Ticks`](#ticks) | yes | How far to move them in time, in ticks; negative is earlier. |
+| `share` | number | yes | How far to move their values, as a share of the parameter's travel: 0.1 is a tenth of the way up the control, and −0.1 a tenth down. |
+
+Result: [`AutomationResult`](#automationresult).
+
+#### `automation.paste`
+
+**Paste Automation**. Permission: `edit`. Contexts: `arrangement`, `envelope`.
+
+Pastes the clipboard's shape into the envelopes the time selection covers, starting at `at` (left out, the time selection's start or the insert marker) and replacing each envelope over the shape's length. Each value lands at the same position on the target parameter's travel, so a shape pastes onto another parameter. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `at` | [`Position`](#position) or null | no | Where the shape starts. Left out, the time selection's start, or the insert marker. |
+| `lanes` | array or null | no | The lanes the shape is pasted into: each a track and the parameter its automation lane shows. Left out, the automation lanes the time selection covers. |
+
+Result: [`AutomationResult`](#automationresult).
 
 #### `automation.re_enable`
 
@@ -2173,6 +2292,24 @@ Arguments:
 | `target` | [`AutomationTarget`](#automationtarget) | yes | The parameter. |
 
 Result: [`ChangeSet`](#changeset).
+
+#### `automation.select_segment`
+
+**Select Automation Segment**. Permission: `read`. Contexts: `arrangement`, `envelope`.
+
+Selects a segment in a track's automation lane, as clicking near it does: its two breakpoints are drawn in the selection colour and move together when it is dragged. `at` is the breakpoint the segment starts at, or `null` to select no segment. Changes nothing in the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track whose automation lane holds the segment. |
+| `target` | [`AutomationTarget`](#automationtarget) | yes | The parameter the lane shows. |
+| `at` | [`Ticks`](#ticks) or null | no | The breakpoint the segment starts at, or `null` to select no segment. |
+
+Result: [`AutomationResult`](#automationresult).
 
 #### `automation.set_breakpoint`
 
@@ -2209,6 +2346,24 @@ Arguments:
 | `target` | [`AutomationTarget`](#automationtarget) | yes | The parameter. |
 | `at` | [`Ticks`](#ticks) | yes | Where the segment starts: the breakpoint there. |
 | `bend` | number | yes | The bend, from −1 to 1: 0 is the straight line, and the sign chooses which side the segment bows to. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `automation.set_envelope`
+
+**Set Automation Envelope**. Permission: `edit`. Contexts: `global`.
+
+Replaces one of a track's parameter's envelope with the breakpoints given, as the automation editing commands do when they write a shape over a span of time. `track` and `target` name the parameter as `automation.set_breakpoint` does, and `points` are the envelope's breakpoints in position order, each with its position in ticks, its value in the parameter's own units, and the bend of the segment starting at it. The breakpoints must be in order, no two at one position, and no position before 1.1.1; an empty list takes the parameter's automation with it. The envelope keeps driving the parameter.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track the parameter belongs to. |
+| `target` | [`AutomationTarget`](#automationtarget) | yes | The parameter. |
+| `points` | array of [`Breakpoint`](#breakpoint) | yes | The envelope's breakpoints, in position order. Empty takes the parameter's automation with it. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -10842,6 +10997,22 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `song.set_lock_envelopes`
+
+**Lock Envelopes**. Permission: `edit`. Contexts: `global`.
+
+Switches Lock Envelopes, the switch above the track headers and the Options menu item. Off (the default in a new set), editing the Arrangement's clips carries their tracks' envelopes over the clips' spans with them: moving, copying, cutting, deleting, duplicating and pasting clips take the envelopes over the same spans. On, the envelopes stay where they are in the song and the clips move on their own. The setting is saved with the set, and each change is one undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `enabled` | boolean | yes | Whether the envelopes stay where they are. |
+
+Result: [`ChangeSet`](#changeset).
+
 #### `song.set_scale`
 
 **Set Scale**. Permission: `edit`. Contexts: `global`.
@@ -12136,13 +12307,19 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`audio.configure`](#audioconfigure) | `audio.status` | `settings` |
 | [`audio.set_test_tone`](#audioset_test_tone) | `audio.status` | `test_tone` |
 | [`audio.toggle_engine`](#audiotoggle_engine) | `audio.status` | `engine_on` |
+| [`automation.cut`](#automationcut) | the query tool's `track` | `automation` |
 | [`automation.delete`](#automationdelete) | the query tool's `track` | `automation` |
 | [`automation.delete_breakpoint`](#automationdelete_breakpoint) | the query tool's `track` | `automation` |
+| [`automation.delete_range`](#automationdelete_range) | the query tool's `track` | `automation` |
+| [`automation.duplicate`](#automationduplicate) | the query tool's `track` | `automation` |
 | [`automation.move_breakpoint`](#automationmove_breakpoint) | the query tool's `track` | `automation` |
+| [`automation.move_breakpoints`](#automationmove_breakpoints) | the query tool's `track` | `automation` |
+| [`automation.paste`](#automationpaste) | the query tool's `track` | `automation` |
 | [`automation.re_enable`](#automationre_enable) | the query tool's `track` | `automation` |
 | [`automation.re_enable_for`](#automationre_enable_for) | the query tool's `track` | `automation` |
 | [`automation.set_breakpoint`](#automationset_breakpoint) | the query tool's `track` | `automation` |
 | [`automation.set_curve`](#automationset_curve) | the query tool's `track` | `automation` |
+| [`automation.set_envelope`](#automationset_envelope) | the query tool's `track` | `automation` |
 | [`browser.add_to_arrangement`](#browseradd_to_arrangement) | the query tool's `track` | `clips` |
 | [`browser.load_selected`](#browserload_selected) | the query tool's `track` | `clips` |
 | [`chain.add`](#chainadd) | the query tool's `device` | `chains` |
@@ -12479,6 +12656,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`song.move_time_signature_change`](#songmove_time_signature_change) | the query tool's `song` | `settings.time_signatures` |
 | [`song.rename_locator`](#songrename_locator) | the query tool's `song` | `settings.locators` |
 | [`song.set_locator_info_text`](#songset_locator_info_text) | the query tool's `song` | `settings.locators` |
+| [`song.set_lock_envelopes`](#songset_lock_envelopes) | the query tool's `song` | `settings.lock_envelopes` |
 | [`song.set_scale`](#songset_scale) | the query tool's `song` | `scale` |
 | [`song.set_start`](#songset_start) | the query tool's `song` | `settings.song_start` |
 | [`song.set_start_time`](#songset_start_time) | the query tool's `song` | `settings.song_start` |
@@ -12988,6 +13166,7 @@ What the Arrangement View shows: every view command returns it.
 | `show_volume` | boolean | yes | Whether the track headers show their volume, pan, and sends. |
 | `show_return_tracks` | boolean | yes | Whether the return tracks' rows show in the lanes. |
 | `automation_lanes` | array of [`AutomationLane`](#automationlane) | no | The parameter each track's automation lane shows, for the tracks whose lane isn't showing the default (their volume): the choosers' choice. `target` `null` means the lane draws no envelope. |
+| `time_selection_lanes` | array of [`Lane`](#lane) | no | The lanes the time selection covers: each a track's own lane or its automation lane (the automation editing spec, R1). Empty when the selection names no lane. |
 
 <details><summary>JSON Schema</summary>
 
@@ -13100,6 +13279,13 @@ What the Arrangement View shows: every view command returns it.
         }
       ],
       "description": "The selected span of time on the selected tracks, if any."
+    },
+    "time_selection_lanes": {
+      "description": "The lanes the time selection covers: each a track's own lane or its automation lane (the automation editing spec, R1). Empty when the selection names no lane.",
+      "items": {
+        "$ref": "#/$defs/Lane"
+      },
+      "type": "array"
     },
     "visible": {
       "$ref": "#/$defs/TimeRange",
@@ -14205,6 +14391,53 @@ One track's automation lane and the parameter it shows, as `arrangement.show_aut
   "required": [
     "track",
     "target"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `AutomationResult`
+
+What an automation editing command reports: what it changed in the set, and the selection afterwards.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `changes` | [`ChangeSet`](#changeset) | yes | What the edit changed in the set. |
+| `time_selection` | [`TimeRange`](#timerange) or null | yes | The time selected afterwards, if any. |
+| `undo_step` | boolean | yes | Whether the edit was recorded as an undo step: false when it changed nothing. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What an automation editing command reports: what it changed in the set, and the selection afterwards.",
+  "properties": {
+    "changes": {
+      "$ref": "#/$defs/ChangeSet",
+      "description": "What the edit changed in the set."
+    },
+    "time_selection": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TimeRange"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The time selected afterwards, if any."
+    },
+    "undo_step": {
+      "description": "Whether the edit was recorded as an undo step: false when it changed nothing.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "changes",
+    "time_selection",
+    "undo_step"
   ],
   "type": "object"
 }
@@ -20053,6 +20286,42 @@ A parameter's envelope: breakpoints joined by straight or curved segments, in po
 
 </details>
 
+### `EnvelopeClipboardState`
+
+What `automation.copy` put on the clipboard.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `lanes` | integer, at least 0 | yes | How many lanes' shapes it holds. |
+| `length` | [`Ticks`](#ticks) | yes | How long the shape is. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `automation.copy` put on the clipboard.",
+  "properties": {
+    "lanes": {
+      "description": "How many lanes' shapes it holds.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "length": {
+      "$ref": "#/$defs/Ticks",
+      "description": "How long the shape is."
+    }
+  },
+  "required": [
+    "lanes",
+    "length"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `EnvelopeKind`
 
 What a clip envelope does: `modulation` (the default) moves the value the control or the track's automation gives by a share of the parameter's travel; `automation` (a Session clip's) sets the value outright while the clip plays.
@@ -23395,6 +23664,68 @@ A label as the sidebar lists it.
     "available"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `Lane`
+
+Which lane a selection covers: `track` for a track's own lane, where its clips are, and `automation` for the automation lane under it, which shows a parameter.
+
+One of:
+
+- an object with `type` = `"track"`, `track` ([`TrackId`](#trackid)): A track's own lane, where its clips are.
+- an object with `type` = `"automation"`, `track` ([`TrackId`](#trackid)), `target` ([`AutomationTarget`](#automationtarget)): A track's automation lane, which shows a parameter.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Which lane a selection covers: `track` for a track's own lane, where its clips are, and `automation` for the automation lane under it, which shows a parameter.",
+  "oneOf": [
+    {
+      "description": "A track's own lane, where its clips are.",
+      "properties": {
+        "track": {
+          "$ref": "#/$defs/TrackId",
+          "description": "The track."
+        },
+        "type": {
+          "const": "track",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "track"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A track's automation lane, which shows a parameter.",
+      "properties": {
+        "target": {
+          "$ref": "#/$defs/AutomationTarget",
+          "description": "The parameter the lane shows."
+        },
+        "track": {
+          "$ref": "#/$defs/TrackId",
+          "description": "The track."
+        },
+        "type": {
+          "const": "automation",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "track",
+        "target"
+      ],
+      "type": "object"
+    }
+  ]
 }
 ```
 

@@ -921,7 +921,8 @@ trigger = "held"
 milestone = "M2"
 mac = ["Option (with the command)"]
 win = ["Alt (with the command)"]
-status = "pending"
+status = "widget"
+handler = "the Arrangement's automation lane: the edit keys with Option (Alt on Windows) held apply to the envelopes (the automation editing spec, R6)"
 
 [[shortcut]]
 id = "S-VAL-001"
@@ -1042,7 +1043,8 @@ trigger = "held"
 milestone = "M2"
 mac = ["Shift (hold while dragging)"]
 win = ["Shift (hold while dragging)"]
-status = "pending"
+status = "widget"
+handler = "the drag on an automation lane moves the breakpoint's value in finer steps"
 
 [[shortcut]]
 id = "S-ENV-003"
@@ -1087,7 +1089,8 @@ trigger = "held"
 milestone = "M2"
 mac = ["Cmd (hold while dragging)"]
 win = ["Alt (hold while dragging)"]
-status = "pending"
+status = "widget"
+handler = "the drag on an automation lane ignores the grid while the key is held"
 
 [[shortcut]]
 id = "S-LOOP-001"

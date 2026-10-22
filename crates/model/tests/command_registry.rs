@@ -9,15 +9,15 @@ use bl_commands::{Registry, args_schema, tagged_variant, validate};
 use bl_core::time::{Bpm, TempoMap, Ticks, TimeSignature, TimeSignatureMap};
 use bl_model::registry::{self, RunError};
 use bl_model::{
-    ArrangementLoop, AudioData, AutomationTarget, BeatsUpdate, Chain, ChainId, Change, ChangeSet,
-    Channel, Clip, ClipData, ClipEdge, ClipId, ClipLaunch, Command, ComplexProUpdate, ContentHash,
-    CountIn, CrossfadeAssign, Device, DeviceId, DeviceKind, DeviceRole, EditError, Editor,
-    ExternalPort, FileBeats, FollowAction, FollowActions, FollowPatch, GrooveBase, GrooveId,
-    GrooveNote, HardwareLatency, Input, LaunchMode, LaunchQuantization, Locator, LocatorId,
-    MacroStyle, MacroTarget, MetronomeRhythm, MetronomeSound, MidiData, MidiTo, MixerParam,
-    ModelError, Monitor, Note, Output, PanMode, ParamId, PluginFormat, Preserve, RackKind, SceneId,
-    SendTap, SongStart, TakeClip, TakeLane, Tap, TonesUpdate, TrackDelay, TrackId, TrackKind,
-    WarpFrom, WarpMode, WarpPoint,
+    ArrangementLoop, AudioData, AutomationTarget, BeatsUpdate, Breakpoint, Chain, ChainId, Change,
+    ChangeSet, Channel, Clip, ClipData, ClipEdge, ClipId, ClipLaunch, Command, ComplexProUpdate,
+    ContentHash, CountIn, CrossfadeAssign, Device, DeviceId, DeviceKind, DeviceRole, EditError,
+    Editor, ExternalPort, FileBeats, FollowAction, FollowActions, FollowPatch, GrooveBase,
+    GrooveId, GrooveNote, HardwareLatency, Input, LaunchMode, LaunchQuantization, Locator,
+    LocatorId, MacroStyle, MacroTarget, MetronomeRhythm, MetronomeSound, MidiData, MidiTo,
+    MixerParam, ModelError, Monitor, Note, Output, PanMode, ParamId, PluginFormat, Preserve,
+    RackKind, SceneId, SendTap, SongStart, TakeClip, TakeLane, Tap, TonesUpdate, TrackDelay,
+    TrackId, TrackKind, WarpFrom, WarpMode, WarpPoint,
 };
 use serde_json::{Value, json};
 
@@ -55,14 +55,15 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        232,
+        234,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
              the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
              routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
              set_device_floating, WP-2.20 six for tempo breakpoints and time-signature markers, \
              WP-2.1 two for MIDI clips, WP-2.16 set_device_sample, WP-2.15 five for the metronome, \
              WP-2.13 the two for Main Out and Cue Out, WP-3.1 five for scenes and two for slot \
-             clips, WP-3.2 set_slot_stop_button, WP-2.12 seven for automation, WP-3.15 six for clip \
+             clips, WP-3.2 set_slot_stop_button, WP-2.12 seven for automation, WP-6.25 \
+             set_automation_envelope and set_lock_envelopes, WP-3.15 six for clip \
              envelopes, WP-3.17 two for the crossfader, WP-2.14 set_midi_overdub, WP-2.13 the \
              two punch switches, WP-2.13 add_take_lane, WP-3.4 three for a clip's launch \
              settings, WP-3.5 two for a scene's tempo and signature, WP-3.3 \
@@ -1675,6 +1676,15 @@ fn every_command_runs_by_id() {
         "automation.set_curve",
         json!({ "track": drums, "target": volume, "at": 0, "bend": -0.5 }),
     );
+    // WP-6.25: the whole envelope, and the Lock Envelopes switch.
+    agent.run(
+        "automation.set_envelope",
+        json!({ "track": drums, "target": volume, "points": [
+            { "at": 0, "value": 1.0, "bend": -0.5 },
+            { "at": bar, "value": 0.25, "bend": 0.0 },
+        ] }),
+    );
+    agent.run("song.set_lock_envelopes", json!({ "enabled": true }));
     agent.run(
         "automation.set_breakpoint",
         json!({ "track": group, "target": send, "at": 0, "value": 0.5 }),
@@ -2466,6 +2476,24 @@ fn schemas_match_what_commands_serialise() {
                 at: Ticks::QUARTER,
                 bend: -0.5,
             },
+        ),
+        (
+            "automation.set_envelope",
+            Command::SetAutomationEnvelope {
+                track,
+                target: AutomationTarget::Mixer {
+                    param: MixerParam::Pan,
+                },
+                points: vec![Breakpoint {
+                    at: Ticks::QUARTER,
+                    value: 0.5,
+                    bend: 0.0,
+                }],
+            },
+        ),
+        (
+            "song.set_lock_envelopes",
+            Command::SetLockEnvelopes { enabled: true },
         ),
         (
             "automation.move_breakpoint",

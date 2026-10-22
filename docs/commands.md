@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-600 commands in 40 areas.
+621 commands in 40 areas.
 
 ## Permission classes
 
@@ -73,8 +73,11 @@ Each command has:
 | [`arrangement.set_insert_marker`](#arrangementset_insert_marker) | Set Insert Marker | `read` |  |  |
 | [`arrangement.set_track_height`](#arrangementset_track_height) | Set Track Height | `read` |  |  |
 | [`arrangement.show_automation`](#arrangementshow_automation) | Show Automation | `read` |  |  |
+| [`arrangement.show_in_out`](#arrangementshow_in_out) | Arrangement Track Controls In/Out | `read` |  |  |
 | [`arrangement.show_range`](#arrangementshow_range) | Show Time Range | `read` |  |  |
+| [`arrangement.show_return_tracks`](#arrangementshow_return_tracks) | Arrangement Track Controls Return Tracks | `read` |  |  |
 | [`arrangement.show_track`](#arrangementshow_track) | Show Track | `read` |  |  |
+| [`arrangement.show_volume`](#arrangementshow_volume) | Arrangement Track Controls Volume | `read` |  |  |
 | [`arrangement.snap_to_grid`](#arrangementsnap_to_grid) | Snap to Grid | `read` | `Cmd+4` | `Ctrl+4` |
 | [`arrangement.split`](#arrangementsplit) | Split | `edit` | `Cmd+E` | `Ctrl+E` |
 | [`arrangement.state`](#arrangementstate) | Arrangement View State | `read` |  |  |
@@ -113,21 +116,31 @@ Each command has:
 | [`automation.set_breakpoint`](#automationset_breakpoint) | Set Automation Breakpoint | `edit` |  |  |
 | [`automation.set_curve`](#automationset_curve) | Curve Automation Segment | `edit` |  |  |
 | [`browser.add_folder`](#browseradd_folder) | Add Folder to Browser... | `external` |  |  |
+| [`browser.add_tag`](#browseradd_tag) | Add Browser Tag | `edit` |  |  |
+| [`browser.add_tag_group`](#browseradd_tag_group) | Add Browser Tag Group | `edit` |  |  |
 | [`browser.add_to_arrangement`](#browseradd_to_arrangement) | Add Files to Arrangement | `external` |  |  |
+| [`browser.delete_tag`](#browserdelete_tag) | Delete Browser Tag | `destructive` |  |  |
 | [`browser.focus_search`](#browserfocus_search) | Search in Browser | `read` | `Cmd+F` | `Ctrl+F` |
 | [`browser.load_selected`](#browserload_selected) | Load Selected Item | `external` | `Enter` | `Enter` |
+| [`browser.move_tag`](#browsermove_tag) | Move Browser Tag | `edit` |  |  |
 | [`browser.open_folder`](#browseropen_folder) | Open Folder | `external` |  |  |
 | [`browser.open_place`](#browseropen_place) | Open Browser Label | `external` |  |  |
 | [`browser.preview`](#browserpreview) | Preview | `external` |  |  |
 | [`browser.remove_folder`](#browserremove_folder) | Remove from Sidebar | `edit` |  |  |
+| [`browser.rename_tag`](#browserrename_tag) | Rename Browser Tag | `edit` |  |  |
+| [`browser.reset_tag_order`](#browserreset_tag_order) | Reset Browser Tag Order | `edit` |  |  |
 | [`browser.scrub_preview`](#browserscrub_preview) | Scrub Preview | `external` |  |  |
 | [`browser.search`](#browsersearch) | Browser Search | `external` |  |  |
 | [`browser.select`](#browserselect) | Select in Browser | `external` |  |  |
 | [`browser.set_preview`](#browserset_preview) | Browser File Preview | `edit` |  |  |
 | [`browser.set_raw`](#browserset_raw) | Raw Preview | `edit` |  |  |
 | [`browser.show_file`](#browsershow_file) | Show in Browser | `external` |  |  |
+| [`browser.show_quick_tags`](#browsershow_quick_tags) | Show Quick Tags | `edit` |  |  |
+| [`browser.show_tag_editor`](#browsershow_tag_editor) | Show Tag Editor | `read` | `Cmd+Shift+E` | `Ctrl+Shift+E` |
 | [`browser.state`](#browserstate) | Browser State | `external` |  |  |
 | [`browser.stop_preview`](#browserstop_preview) | Stop Preview | `read` |  |  |
+| [`browser.tag_items`](#browsertag_items) | Tag Items | `edit` |  |  |
+| [`browser.tags`](#browsertags) | Browser Tags | `external` |  |  |
 | [`chain.add`](#chainadd) | Add Chain | `edit` |  |  |
 | [`chain.copy`](#chaincopy) | Copy Chain | `read` | `Cmd+C` | `Ctrl+C` |
 | [`chain.create`](#chaincreate) | Create Chain | `edit` |  |  |
@@ -230,11 +243,11 @@ Each command has:
 | [`clip_view.quantize_settings`](#clip_viewquantize_settings) | Quantize Settings | `read` | `Cmd+Shift+U` | `Ctrl+Shift+U` |
 | [`clip_view.sample_editor`](#clip_viewsample_editor) | Sample Editor State | `read` |  |  |
 | [`clip_view.sample_view`](#clip_viewsample_view) | Zoom Sample Editor | `read` | `Z`; `X`; `W`; `H` | `Z`; `X`; `W`; `H` |
-| [`clip_view.select_notes`](#clip_viewselect_notes) | Select Notes | `read` |  |  |
-| [`clip_view.select_time`](#clip_viewselect_time) | Select Sample Editor Time | `read` |  |  |
+| [`clip_view.select_notes`](#clip_viewselect_notes) | Select Notes | `read` | `Cmd+A`; `Cmd+A` | `Ctrl+A`; `Ctrl+A` |
+| [`clip_view.select_time`](#clip_viewselect_time) | Select Time | `read` |  |  |
 | [`clip_view.select_transients`](#clip_viewselect_transients) | Select Transients | `read` |  |  |
 | [`clip_view.select_warp_markers`](#clip_viewselect_warp_markers) | Select Warp Markers | `read` |  |  |
-| [`clip_view.set_insert_marker`](#clip_viewset_insert_marker) | Set Sample Editor Insert Marker | `read` |  |  |
+| [`clip_view.set_insert_marker`](#clip_viewset_insert_marker) | Set Insert Marker | `read` |  |  |
 | [`device.add`](#deviceadd) | Add Device | `edit` |  |  |
 | [`device.add_layers`](#deviceadd_layers) | Add Samples | `external` |  |  |
 | [`device.add_preset`](#deviceadd_preset) | Add Preset | `external` |  |  |
@@ -327,6 +340,7 @@ Each command has:
 | [`device.windows`](#devicewindows) | Floating Device Windows | `read` |  |  |
 | [`device.wrap_in_rack`](#devicewrap_in_rack) | Wrap Devices in a Rack | `edit` |  |  |
 | [`device_view.state`](#device_viewstate) | Device View State | `read` |  |  |
+| [`edit.go_to_step`](#editgo_to_step) | Go to Step | `edit` |  |  |
 | [`edit.redo`](#editredo) | Redo | `edit` | `Cmd+Shift+Z` | `Ctrl+Y` |
 | [`edit.undo`](#editundo) | Undo | `edit` | `Cmd+Z` | `Ctrl+Z` |
 | [`export.audio`](#exportaudio) | Export Audio | `external` |  |  |
@@ -403,8 +417,12 @@ Each command has:
 | [`modulator.set_shape`](#modulatorset_shape) | Edit Shape | `edit` |  |  |
 | [`modulator.unmap`](#modulatorunmap) | Unmap Modulator | `edit` |  |  |
 | [`note.add`](#noteadd) | Add Note | `edit` |  |  |
-| [`note.delete`](#notedelete) | Delete Notes | `destructive` |  |  |
+| [`note.copy`](#notecopy) | Copy Notes | `read` | `Cmd+C` | `Ctrl+C` |
+| [`note.cut`](#notecut) | Cut Notes | `destructive` | `Cmd+X` | `Ctrl+X` |
+| [`note.delete`](#notedelete) | Delete Notes | `destructive` | `Delete` | `Delete` |
+| [`note.duplicate`](#noteduplicate) | Duplicate Notes | `edit` | `Cmd+D` | `Ctrl+D` |
 | [`note.move`](#notemove) | Move Notes | `edit` |  |  |
+| [`note.paste`](#notepaste) | Paste Notes | `edit` | `Cmd+V` | `Ctrl+V` |
 | [`note.quantize`](#notequantize) | Quantize | `edit` | `Cmd+U` | `Ctrl+U` |
 | [`note.ramp_value`](#noteramp_value) | Ramp Note Values | `edit` |  |  |
 | [`note.resize`](#noteresize) | Resize Notes | `edit` |  |  |
@@ -520,6 +538,8 @@ Each command has:
 | [`set.collect_all_and_save`](#setcollect_all_and_save) | Collect All and Save | `external` |  |  |
 | [`set.discard_changes`](#setdiscard_changes) | Don't Save | `destructive` |  |  |
 | [`set.discard_recovery`](#setdiscard_recovery) | Discard Recovery | `destructive` |  |  |
+| [`set.import_dawproject`](#setimport_dawproject) | Import DAWproject File | `external` |  |  |
+| [`set.import_report`](#setimport_report) | DAWproject Import Report | `read` |  |  |
 | [`set.list_recoverable`](#setlist_recoverable) | List Recoverable Sets | `read` |  |  |
 | [`set.new`](#setnew) | New Beatlayer Set | `destructive` | `Cmd+N` | `Ctrl+N` |
 | [`set.open`](#setopen) | Open Beatlayer Set... | `external` | `Cmd+O` | `Ctrl+O` |
@@ -626,6 +646,7 @@ Each command has:
 | [`view.toggle_plug_in_windows`](#viewtoggle_plug_in_windows) | Plug-In Windows | `read` | `Cmd+Option+P` | `Ctrl+Alt+P` |
 | [`view.toggle_plugin_list`](#viewtoggle_plugin_list) | Plug-In List | `read` |  |  |
 | [`view.toggle_session_arrangement`](#viewtoggle_session_arrangement) | Toggle Arrangement/Session View | `read` | `Tab` | `Tab` |
+| [`view.toggle_undo_history`](#viewtoggle_undo_history) | Undo History | `read` | `Cmd+Option+Z` | `Ctrl+Alt+Z` |
 | [`view.zoom_in`](#viewzoom_in) | Zoom In | `edit` | `Cmd+Plus` | `Ctrl+Plus` |
 | [`view.zoom_out`](#viewzoom_out) | Zoom Out | `edit` | `Cmd+Minus` | `Ctrl+Minus` |
 | [`view.zoom_reset`](#viewzoom_reset) | Reset Zoom to 100% | `edit` |  |  |
@@ -1458,6 +1479,22 @@ Arguments:
 
 Result: [`ArrangementState`](#arrangementstate).
 
+#### `arrangement.show_in_out`
+
+**Arrangement Track Controls In/Out**. Permission: `read`. Contexts: `global`, `arrangement`.
+
+Shows or hides the Arrangement's track headers' In/Out column (the input and output routing and monitoring), as View > Arrangement Track Controls > In/Out does. Switches unless `on` says which. Changes only the view; the mixers' own In/Out section is a switch of its own.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean or null | no | On or off. Left out, the switch toggles. |
+
+Result: [`ArrangementState`](#arrangementstate).
+
 #### `arrangement.show_range`
 
 **Show Time Range**. Permission: `read`. Contexts: `global`, `arrangement`.
@@ -1475,6 +1512,22 @@ Arguments:
 
 Result: [`ArrangementState`](#arrangementstate).
 
+#### `arrangement.show_return_tracks`
+
+**Arrangement Track Controls Return Tracks**. Permission: `read`. Contexts: `global`, `arrangement`.
+
+Shows or hides the return tracks' rows in the Arrangement's lanes, as View > Arrangement Track Controls > Return Tracks does. Switches unless `on` says which. Changes only the view; the returns play as before, and the mixers' own Return Tracks section is a switch of its own.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean or null | no | On or off. Left out, the switch toggles. |
+
+Result: [`ArrangementState`](#arrangementstate).
+
 #### `arrangement.show_track`
 
 **Show Track**. Permission: `read`. Contexts: `global`, `arrangement`.
@@ -1488,6 +1541,22 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `track` | [`TrackId`](#trackid) | yes | The track to bring into view. |
+
+Result: [`ArrangementState`](#arrangementstate).
+
+#### `arrangement.show_volume`
+
+**Arrangement Track Controls Volume**. Permission: `read`. Contexts: `global`, `arrangement`.
+
+Shows or hides the Arrangement's track headers' volume, pan, and sends, as View > Arrangement Track Controls > Volume does. Switches unless `on` says which. Changes only the view; the mixers' own sections are switches of their own.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean or null | no | On or off. Left out, the switch toggles. |
 
 Result: [`ArrangementState`](#arrangementstate).
 
@@ -2130,6 +2199,40 @@ Arguments:
 
 Result: [`BrowserState`](#browserstate).
 
+#### `browser.add_tag`
+
+**Add Browser Tag**. Permission: `edit`. Contexts: `global`, `browser`.
+
+Makes a tag in the browser: in the group `group`, or under the tag `parent`, which makes it a subtag. A subtag can't hold another subtag. Changes the browser's database.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | The tag's name. |
+| `group` | string or null | no | The group to make it in, by its name. Left out with `parent` left out too, the first group. |
+| `parent` | string or null | no | The tag to make it under, by its full name or its own name. It becomes a subtag. |
+
+Result: [`TagsState`](#tagsstate).
+
+#### `browser.add_tag_group`
+
+**Add Browser Tag Group**. Permission: `edit`. Contexts: `global`, `browser`.
+
+Makes a tag group in the browser, named `name`, at the end of the list. Changes the browser's database.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | The group's name. |
+
+Result: [`TagsState`](#tagsstate).
+
 #### `browser.add_to_arrangement`
 
 **Add Files to Arrangement**. Permission: `external`. Contexts: `arrangement`, `browser`.
@@ -2148,6 +2251,23 @@ Arguments:
 | `track` | [`TrackId`](#trackid) or null | no | The audio track to put them on. Left out (or `null`), a new audio track below the last track, as dropping in the drop area does. |
 
 Result: [`AddResult`](#addresult).
+
+#### `browser.delete_tag`
+
+**Delete Browser Tag**. Permission: `destructive`. Contexts: `global`, `browser`.
+
+Deletes a tag or a group in the browser: `tag` for a tag, by its full name (`Format|CLAP`) or its own name, `group` for a group, by its name. Deleting a group deletes its tags. Beatlayer's own tags and groups can't be deleted. A deleted tag is gone from every item that carried it, and undo can't bring it back.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `group` | string or null | no | The group to delete, by its name. |
+| `tag` | string or null | no | The tag to delete, by its full name or its own name. |
+
+Result: [`TagsState`](#tagsstate).
 
 #### `browser.focus_search`
 
@@ -2180,6 +2300,24 @@ Default keys:
 Arguments: none (send `{}`).
 
 Result: [`AddResult`](#addresult).
+
+#### `browser.move_tag`
+
+**Move Browser Tag**. Permission: `edit`. Contexts: `global`, `browser`.
+
+Moves a tag or a group in the browser to `position`: 0 is the first place in its group, or the first in the list for a group. Beatlayer's own tags and groups can't be moved. Changes the browser's database.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `position` | integer | yes | Where it goes: 0 is the first place in its group or the list. |
+| `group` | string or null | no | The group to move, by its name. |
+| `tag` | string or null | no | The tag to move, by its full name or its own name. |
+
+Result: [`TagsState`](#tagsstate).
 
 #### `browser.open_folder`
 
@@ -2246,6 +2384,36 @@ Arguments:
 | `path` | string | yes | The folder's path. |
 
 Result: [`BrowserState`](#browserstate).
+
+#### `browser.rename_tag`
+
+**Rename Browser Tag**. Permission: `edit`. Contexts: `global`, `browser`.
+
+Renames a tag or a group in the browser: `tag` for a tag, by its full name (`Format|CLAP`) or its own name, `group` for a group, by its name; `name` is the new name. Beatlayer's own tags and groups can't be renamed. Renaming a tag keeps it on every item that carries it. Changes the browser's database.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | The new name. |
+| `group` | string or null | no | The group to rename, by its name. |
+| `tag` | string or null | no | The tag to rename, by its full name or its own name. |
+
+Result: [`TagsState`](#tagsstate).
+
+#### `browser.reset_tag_order`
+
+**Reset Browser Tag Order**. Permission: `edit`. Contexts: `global`, `browser`.
+
+Puts every tag group and tag in the browser back in the order it was made in, as Reset Order in the Tag Editor's context menu does. Changes the browser's database.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`TagsState`](#tagsstate).
 
 #### `browser.scrub_preview`
 
@@ -2348,6 +2516,42 @@ Arguments:
 
 Result: [`BrowserState`](#browserstate).
 
+#### `browser.show_quick_tags`
+
+**Show Quick Tags**. Permission: `edit`. Contexts: `global`, `browser`.
+
+Shows Quick Tags at the browser's content pane's bottom, or hides it, as the Filter View Menu's Show Quick Tags item does. Quick Tags shows the selected items' tags and adds one by typing its name. Whether it shows is kept for the next start.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `show` | boolean or null | no | Whether it shows. Left out, it toggles. |
+
+Result: nothing (`null`).
+
+#### `browser.show_tag_editor`
+
+**Show Tag Editor**. Permission: `read`. Contexts: `global`, `browser`.
+
+Shows the Tag Editor beside the browser's content pane, or hides it, as Cmd-Shift-E (Ctrl-Shift-E) and the Filter View Menu's Tag Editor item do. Whether it shows is kept for the next start.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-BRW-014 | `Cmd+Shift+E` | `Ctrl+Shift+E` | `browser` | Show or hide the tag editor | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `show` | boolean or null | no | Whether it shows. Left out, it toggles. |
+
+Result: nothing (`null`).
+
 #### `browser.state`
 
 **Browser State**. Permission: `external`. Contexts: `global`, `browser`, `browser-sidebar`.
@@ -2376,6 +2580,40 @@ Default keys: none.
 Arguments: none (send `{}`).
 
 Result: [`PreviewState`](#previewstate).
+
+#### `browser.tag_items`
+
+**Tag Items**. Permission: `edit`. Contexts: `global`, `browser`.
+
+Puts tags on items in the browser, or takes them off (`attach` false puts them on). The items are named by their keys: a file or folder by its path, a plug-in by its format and identifier (`clap/org.example.synth`), a device or rack by its row's ID. The tags are named by their full names (`Format|CLAP`) or their own names. Beatlayer's own tags and a tag that comes from a folder can't be taken off. Changes the browser's database, not the files.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `items` | array of string | yes | The items to tag, by their keys. |
+| `tags` | array of string | yes | The tags, by their full names or their own names. |
+| `attach` | boolean or null | no | Put the tags on the items (true) or take them off (false). Left out, they're put on. |
+
+Result: [`TagsState`](#tagsstate).
+
+#### `browser.tags`
+
+**Browser Tags**. Permission: `external`. Contexts: `global`, `browser`.
+
+Reports the browser's tag groups and their tags, in order: Beatlayer's own groups (Content, Format, Creator and Devices) and the person's. With `items`, the keys of the items to report on, it also says which tags each carries and where each comes from: its own, a folder's, or Beatlayer's. Changes nothing, but lists files outside the project.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `items` | array or null | no | The items to report on, by their keys. Left out, none are. |
+
+Result: [`TagsState`](#tagsstate).
 
 ### Area `chain`
 
@@ -4198,7 +4436,7 @@ Result: [`ChangeSet`](#changeset).
 
 #### `clip_view.quantize_settings`
 
-**Quantize Settings**. Permission: `read`. Contexts: `clip-view`, `note-editor`, `note-selection`, `sample-editor`.
+**Quantize Settings**. Permission: `read`. Contexts: `note-editor`, `note-selection`, `sample-editor`.
 
 Reads or changes the Clip View's Quantize settings, the values `note.quantize`, `clip.quantize_audio` and Cmd-U use when their arguments leave them out: `grid`, the spacing between the quantise grid's lines in ticks (positive; left unset, it follows the note or sample editor's editing grid), `target`, whether quantise moves note starts or note ends, and `amount`, how far each note moves toward its grid line as a percentage from 0 to 100. Fields left out keep their values, and the result reports all of them. The settings belong to the view, like Draw Mode: changing them changes nothing in the set and is no undo step.
 
@@ -4259,27 +4497,34 @@ Result: [`SampleEditorState`](#sampleeditorstate).
 
 #### `clip_view.select_notes`
 
-**Select Notes**. Permission: `read`. Contexts: `clip-view`, `note-editor`, `note-selection`.
+**Select Notes**. Permission: `read`. Contexts: `note-editor`, `note-selection`.
 
-Selects notes in the Clip View's MIDI Note Editor, as clicking a note or dragging a marquee over them does: `replace` selects only these, `toggle` adds or removes each (Cmd-click, Ctrl-click on Windows). Notes are named by their place in the clip's notes in order, by start and then pitch, so place 0 has the earliest start, and of notes that start together the lowest pitch. Selecting is never an undo step and changes nothing in the set.
+Selects notes in the Clip View's MIDI Note Editor, as clicking a note or dragging a marquee over them does: `replace` selects only these, `toggle` adds or removes each (Cmd-click, Ctrl-click on Windows). Notes are named by their place in the clip's notes in order, by start and then pitch, so place 0 has the earliest start, and of notes that start together the lowest pitch. With no notes named, `select` chooses them instead: `nearest` (the note whose start is nearest the insert marker), `previous` and `next` (the previous or next note in the clip's order), `same_pitch_previous` and `same_pitch_next` (the previous or next note at the selected note's pitch), `all` (every note in the clip's span, as Cmd-A does), or `key` (every note at a pitch, as clicking a key in the piano ruler does). `add` adds to the selection instead of replacing it, as Shift with the note-jump keys does. Selecting is never an undo step and changes nothing in the set.
 
-Default keys: none.
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-NOTE-001 | `Cmd+A` | `Ctrl+A` | `note-editor` | Select all notes | fixes `select` = `"all"` |
+| S-EDIT-009 | `Cmd+A` | `Ctrl+A` | `global` | Select everything in the focused view | fixes `select` = `"all"` |
 
 Arguments:
 
 | Name | Type | Required | Description |
 |---|---|---|---|
-| `notes` | array of integer, at least 0 | yes | The notes, by their place in the clip's notes in order (by start, then pitch). Empty with `replace` clears the selection. |
+| `add` | boolean | no | Add to the selection instead of replacing it, as Shift with the note-jump keys does. |
 | `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows (the Arrangement's selected clip). |
 | `mode` | [`NoteSelectMode`](#noteselectmode) | no | How to change the selection; `replace` if left out. |
+| `notes` | array of integer, at least 0 | no | The notes, by their place in the clip's notes in order (by start, then pitch). Empty with `replace` clears the selection, and empty with `select` chooses the notes `select` names. |
+| `select` | [`NoteSelection`](#noteselection) or null | no | What to select when `notes` is empty: the notes the keyboard reaches (Option with the arrows), every note in the clip's span (Cmd-A), or the notes at a pitch (a key in the piano ruler). |
 
 Result: [`ClipViewState`](#clipviewstate).
 
 #### `clip_view.select_time`
 
-**Select Sample Editor Time**. Permission: `read`. Contexts: `clip-view`, `sample-editor`.
+**Select Time**. Permission: `read`. Contexts: `clip-view`, `sample-editor`, `note-editor`, `note-selection`.
 
-Makes a time selection in the Sample Editor from `start` to `end`, in seconds in the file or, with `ticks`, in ticks of a warped clip's contents; with neither the selection is cleared. Dragging across the waveform runs this. Insert Warp Marker and Delete Warp Marker with a time selection act on the transients in it, and Z zooms to it. Never an undo step, and changes nothing in the set.
+Makes a time selection in the editor from `start` to `end`, in seconds in the file or, with `ticks`, in ticks of a warped clip's contents; with neither the selection is cleared. Dragging across the waveform runs this. In the MIDI Note Editor `start` and `end` are ticks of the clip's contents, and the selection is drawn across the note area and the lanes. Never an undo step, and changes nothing in the set.
 
 Default keys: none.
 
@@ -4333,9 +4578,9 @@ Result: [`SampleEditorState`](#sampleeditorstate).
 
 #### `clip_view.set_insert_marker`
 
-**Set Sample Editor Insert Marker**. Permission: `read`. Contexts: `clip-view`, `sample-editor`.
+**Set Insert Marker**. Permission: `read`. Contexts: `clip-view`, `sample-editor`, `note-editor`, `note-selection`.
 
-Puts the Sample Editor's insert marker, the point Insert Warp Marker (Cmd+I) and Insert Transient (Cmd+Shift+I) act at, at a `time` in the file in seconds or at a `beat` of a warped clip's contents in ticks from its 1.1.1; with neither it is taken away. Clicking the waveform runs this, on the nearest grid line while snapping is on. Never an undo step, and changes nothing in the set.
+Puts the editor's insert marker, the point the editor's commands act at, at a `time` in the file in seconds or at a `beat` of a warped clip's contents in ticks from its 1.1.1; with neither it is taken away. Clicking the waveform runs this, on the nearest grid line while snapping is on. In the MIDI Note Editor the marker is a `beat` of the clip's contents in ticks from their beginning, and it stays inside the clip's span. Never an undo step, and changes nothing in the set.
 
 Default keys: none.
 
@@ -6014,6 +6259,22 @@ Result: [`DeviceViewState`](#deviceviewstate).
 
 ### Area `edit`
 
+#### `edit.go_to_step`
+
+**Go to Step**. Permission: `edit`. Contexts: `global`.
+
+Returns the set to the state just after the step at `index`, counted up from the set's start: 0 is the set's start, before any step, and the newest step is the number of steps there are. The steps above that row are undone and stay listed, greyed, until a new change replaces them. The jump is no step of its own.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `index` | integer, at least 0 | yes | The row, counted up from the set's start: 0 is the set's start, before any step, and the newest step is the number of steps there are. |
+
+Result: [`ChangeSet`](#changeset).
+
 #### `edit.redo`
 
 **Redo**. Permission: `edit`. Contexts: `global`.
@@ -7287,7 +7548,7 @@ Result: [`ChangeSet`](#changeset).
 
 #### `note.add`
 
-**Add Note**. Permission: `edit`. Contexts: `clip-view`, `note-editor`, `note-selection`.
+**Add Note**. Permission: `edit`. Contexts: `note-editor`, `note-selection`.
 
 Adds a note to a MIDI clip: pitch `key` (0 to 127; 60 is middle C), starting `start` ticks from the beginning of the clip's contents, lasting `length` ticks, with `velocity` (1 to 127; 100 unless given). With Draw Mode on, clicking the note area runs this for a note one grid step long. The new note is selected afterwards, and the edit is one undo step.
 
@@ -7305,13 +7566,59 @@ Arguments:
 
 Result: [`NoteEditResult`](#noteeditresult).
 
+#### `note.copy`
+
+**Copy Notes**. Permission: `read`. Contexts: `note-editor`, `note-selection`.
+
+Copies notes (`notes`, or the selected notes, or with none selected the notes that start inside the time selection) to the note clipboard, keeping their pitches, values and their places in time from the earliest of them. The note clipboard is apart from the Arrangement's clip clipboard. Copy changes nothing in the set.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-EDIT-002 | `Cmd+C` | `Ctrl+C` | `global` | Copy | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows (the Arrangement's selected clip). |
+| `notes` | array or null | no | The notes, by their place in the clip's notes in order (by start, then pitch). Left out, the selected notes, or with none selected the notes that start inside the time selection. |
+
+Result: [`NoteClipboardState`](#noteclipboardstate).
+
+#### `note.cut`
+
+**Cut Notes**. Permission: `destructive`. Contexts: `note-editor`, `note-selection`.
+
+Copies notes to the note clipboard, as `note.copy` does, then deletes them, as `note.delete` does. Cmd-X (Ctrl-X) runs this on the selected notes, or with none selected the notes in the time selection. Because it removes the person's work, an agent asks first.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-EDIT-001 | `Cmd+X` | `Ctrl+X` | `global` | Cut | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows (the Arrangement's selected clip). |
+| `notes` | array or null | no | The notes, by their place in the clip's notes in order (by start, then pitch). Left out, the selected notes, or with none selected the notes that start inside the time selection. |
+
+Result: [`NoteEditResult`](#noteeditresult).
+
 #### `note.delete`
 
-**Delete Notes**. Permission: `destructive`. Contexts: `clip-view`, `note-editor`, `note-selection`.
+**Delete Notes**. Permission: `destructive`. Contexts: `note-editor`, `note-selection`.
 
-Deletes notes (`notes`, or the selected notes) from a MIDI clip. With Draw Mode on, clicking a note runs this. Because it removes the person's work, an agent asks first. The edit is one undo step.
+Deletes notes (`notes`, or the selected notes) from a MIDI clip. With Draw Mode on, clicking a note runs this. Delete (S-EDIT-005) runs it on the selected notes, or with none selected the notes in the time selection. Because it removes the person's work, an agent asks first. The edit is one undo step.
 
-Default keys: none.
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-EDIT-005 | `Delete` | `Delete` | `global` | Delete | runs it |
 
 Arguments:
 
@@ -7322,11 +7629,32 @@ Arguments:
 
 Result: [`NoteEditResult`](#noteeditresult).
 
+#### `note.duplicate`
+
+**Duplicate Notes**. Permission: `edit`. Contexts: `note-editor`, `note-selection`.
+
+Puts a copy of notes (`notes`, or the selected notes, or with none selected the notes that start inside the time selection) straight after the time selection, selects the copy and moves the time selection onto it, so running it again lays down another. Cmd-D (Ctrl-D) runs this.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-EDIT-004 | `Cmd+D` | `Ctrl+D` | `global` | Duplicate | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows (the Arrangement's selected clip). |
+| `notes` | array or null | no | The notes, by their place in the clip's notes in order (by start, then pitch). Left out, the selected notes, or with none selected the notes that start inside the time selection. |
+
+Result: [`NoteEditResult`](#noteeditresult).
+
 #### `note.move`
 
-**Move Notes**. Permission: `edit`. Contexts: `clip-view`, `note-editor`, `note-selection`.
+**Move Notes**. Permission: `edit`. Contexts: `note-editor`, `note-selection`.
 
-Moves notes (`notes`, or the selected notes) in time by `by` ticks and in pitch by `semitones`, as dragging them in the note editor does; dragging right and left runs it with `semitones` 0, and up and down snap the pitch. Nothing moves if any note would start before the clip's contents or leave the range of MIDI keys 0 to 127. The moved notes stay selected, and the whole drag is one undo step.
+Moves notes (`notes`, or the selected notes) in time by `by` ticks and in pitch by `semitones`, as dragging them in the note editor does; dragging right and left runs it with `semitones` 0, and up and down snap the pitch. Nothing moves if any note would start before the clip's contents or leave the range of MIDI keys 0 to 127. With `copy` the notes are copied where they would have gone and the originals stay, as Option-dragging a note does. The moved notes stay selected, and the whole drag is one undo step.
 
 Default keys: none.
 
@@ -7336,14 +7664,36 @@ Arguments:
 |---|---|---|---|
 | `by` | [`Ticks`](#ticks) or null | no | How far to move them in time, in ticks; negative is earlier. Give `by` or `semitones`, or both. |
 | `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows (the Arrangement's selected clip). |
+| `copy` | boolean or null | no | Copy them instead of moving them, as Option-dragging a note does: the copies land where the notes would have gone and the originals stay. |
 | `notes` | array or null | no | The notes, by their place in the clip's notes in order (by start, then pitch). Left out, the selected notes. |
 | `semitones` | integer or null | no | How far to move them in pitch, in semitones; negative is lower. |
 
 Result: [`NoteEditResult`](#noteeditresult).
 
+#### `note.paste`
+
+**Paste Notes**. Permission: `edit`. Contexts: `note-editor`, `note-selection`.
+
+Puts the note clipboard's notes into the clip at `at`, in ticks from the beginning of the clip's contents, or at the insert marker, or at the time selection's start, with their pitches, values and spacing, and selects them. It fails, changing nothing, if there is nothing on the clipboard. Cmd-V (Ctrl-V) runs this.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-EDIT-003 | `Cmd+V` | `Ctrl+V` | `global` | Paste | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `at` | [`Ticks`](#ticks) or null | no | Where to paste, in ticks from the beginning of the clip's contents. Left out, the insert marker, or the time selection's start. |
+| `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows (the Arrangement's selected clip). |
+
+Result: [`NoteEditResult`](#noteeditresult).
+
 #### `note.quantize`
 
-**Quantize**. Permission: `edit`. Contexts: `clip-view`, `note-editor`, `note-selection`.
+**Quantize**. Permission: `edit`. Contexts: `note-editor`, `note-selection`.
 
 Quantises notes (`notes`, or the selected notes) to `grid`: each note moves `amount` percent of the way from its start (or its end, with `target` `note_end`) to the nearest grid line, so 100 percent lands it on the line and 50 percent halves its distance to it. The lines are laid out from each bar's start, as the note editor's grid is, and a spacing of whole bars counts bars from 1.1.1. `grid`, `target`, and `amount` left out use the Clip View's Quantize settings (`clip_view.quantize_settings`), which follow the note editor's editing grid until a grid is set. Quantising is one undo step, and the quantised notes stay selected.
 
@@ -7367,7 +7717,7 @@ Result: [`NoteEditResult`](#noteeditresult).
 
 #### `note.ramp_value`
 
-**Ramp Note Values**. Permission: `edit`. Contexts: `clip-view`, `note-editor`, `note-selection`.
+**Ramp Note Values**. Permission: `edit`. Contexts: `note-editor`, `note-selection`.
 
 Sets one value of notes (`notes`, or the selected notes) as a ramp, as dragging across several notes in the Clip View's lane does: the first note in the clip's order takes `from`, the last takes `to`, and those between take values evenly spaced between them (whole numbers for the whole-number fields). `field` takes the same fields and ranges as `note.set_value`; nothing changes if `from` or `to` is out of range. One note takes `from`. The edited notes stay selected, and the whole drag is one undo step.
 
@@ -7387,7 +7737,7 @@ Result: [`NoteEditResult`](#noteeditresult).
 
 #### `note.resize`
 
-**Resize Notes**. Permission: `edit`. Contexts: `clip-view`, `note-editor`, `note-selection`.
+**Resize Notes**. Permission: `edit`. Contexts: `note-editor`, `note-selection`.
 
 Moves notes' ends (`notes`, or the selected notes) by `by` ticks, as dragging a note's end in the note editor does: a positive `by` makes them longer, a negative one shorter, and every note keeps at least one tick of length. A note's start doesn't move. The resized notes stay selected, and the whole drag is one undo step.
 
@@ -7405,7 +7755,7 @@ Result: [`NoteEditResult`](#noteeditresult).
 
 #### `note.set_value`
 
-**Set Note Value**. Permission: `edit`. Contexts: `clip-view`, `note-editor`, `note-selection`.
+**Set Note Value**. Permission: `edit`. Contexts: `note-editor`, `note-selection`.
 
 Sets one value of notes (`notes`, or the selected notes) to `value`, as dragging a note's stem in the Clip View's lane does: `field` is `velocity` (whole numbers 1 to 127), `release_velocity` (whole numbers 1 to 127), `chance` (0 to 1), or `velocity_deviation` (whole numbers -127 to 127). Nothing changes if `value` is outside the field's range. The edited notes stay selected, and the whole drag is one undo step.
 
@@ -9350,6 +9700,34 @@ Arguments:
 
 Result: [`DiscardedRecovery`](#discardedrecovery).
 
+#### `set.import_dawproject`
+
+**Import DAWproject File**. Permission: `external`. Contexts: `global`.
+
+Reads the DAWproject file at `path` and opens what it holds as a new set, in place of the open one, as opening a set does: it is refused while the open set has unsaved changes. The new set starts empty and holds what the file carries: its tracks, groups, returns and their mixer and routing, its clips with their notes, media, warping and loops, its scenes and slots, its tempo and time signature. It is unsaved, and its name is the file's name without `.dawproject` until it is first saved. The result's `report` says what the import left out or changed, and `set.import_report` gives that report again while the set the import made is open. Reads a file outside the project.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | The DAWproject file to read, absolute or relative to the app's working directory. |
+
+Result: [`ImportDawProjectResult`](#importdawprojectresult).
+
+#### `set.import_report`
+
+**DAWproject Import Report**. Permission: `read`. Contexts: `global`.
+
+Reports what the last DAWproject import left out or changed: each thing, where it was, how many there were, and what Beatlayer did, and the application and version the file says made it. It gives the report again while the set the import made is open, and nothing after another set opens. Changes nothing.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`ImportReport`](#importreport).
+
 #### `set.list_recoverable`
 
 **List Recoverable Sets**. Permission: `read`. Contexts: `global`.
@@ -10965,7 +11343,7 @@ Result: [`ViewResult`](#viewresult).
 
 **View State**. Permission: `read`. Contexts: `global`.
 
-Reports what the view commands switch: the main view (Arrangement or Session), whether the browser and the Info View show, full-screen mode and the zoom (`view.toggle_session_arrangement`, `view.toggle_browser`, `view.toggle_info_view`, `view.full_screen`, `view.set_zoom`), the Clip View with Draw Mode, the lane, Fold and the selected notes (`view.toggle_clip_view`, `view.draw_mode`, `view.lane`, `view.fold_notes`), the assistant's panel and whether plug-in windows are shown (`view.toggle_plug_in_windows`). Changes nothing. The Arrangement's own view is in `arrangement.state`, the Mixer's in `mixer_view.state`, the Session View's in `session.state` and the Device View's in `device_view.state`.
+Reports what the view commands switch: the main view (Arrangement or Session), whether the browser and the Info View show, full-screen mode and the zoom (`view.toggle_session_arrangement`, `view.toggle_browser`, `view.toggle_info_view`, `view.full_screen`, `view.set_zoom`), the Clip View with Draw Mode, the lane, Fold and the selected notes (`view.toggle_clip_view`, `view.draw_mode`, `view.lane`, `view.fold_notes`), the assistant's panel, the Undo History (`view.toggle_undo_history`), and whether plug-in windows are shown (`view.toggle_plug_in_windows`). Changes nothing. The Arrangement's own view is in `arrangement.state`, the Mixer's in `mixer_view.state`, the Session View's in `session.state` and the Device View's in `device_view.state`.
 
 Default keys: none.
 
@@ -11099,6 +11477,22 @@ Default keys:
 Arguments: none (send `{}`).
 
 Result: [`ViewResult`](#viewresult).
+
+#### `view.toggle_undo_history`
+
+**Undo History**. Permission: `read`. Contexts: `global`.
+
+Shows or hides the Undo History panel at the right of the main window, in the column the Learn View uses. The panel lists the set's steps, newest first, with the ones that can be redone greyed, and clicking a row returns the set to that point. Whether it shows is view state: it isn't saved with the set and isn't an undo step. Changes nothing in the set.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-VIEW-021 | `Cmd+Option+Z` | `Ctrl+Alt+Z` | `global` | Open the Undo History | runs it |
+
+Arguments: none (send `{}`).
+
+Result: [`UndoHistoryState`](#undohistorystate).
 
 #### `view.zoom_in`
 
@@ -11369,6 +11763,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`device.unwrap_rack`](#deviceunwrap_rack) | the query tool's `track` | `devices` |
 | [`device.update_layers`](#deviceupdate_layers) | the query tool's `device` | `layers` |
 | [`device.wrap_in_rack`](#devicewrap_in_rack) | the query tool's `track` | `devices` |
+| [`edit.go_to_step`](#editgo_to_step) | the query tool's `song` | `undo.current` |
 | [`edit.redo`](#editredo) | the query tool's `song` | `undo.next_redo` |
 | [`edit.undo`](#editundo) | the query tool's `song` | `undo.next_undo` |
 | [`export.realtime.auto_restart`](#exportrealtimeauto_restart) | `export.realtime.status` | `auto_restart` |
@@ -11409,8 +11804,11 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`modulator.set_shape`](#modulatorset_shape) | the query tool's `device` | `shape` |
 | [`modulator.unmap`](#modulatorunmap) | the query tool's `device` | `mappings` |
 | [`note.add`](#noteadd) | the query tool's `clip` | `data.midi.notes` |
+| [`note.cut`](#notecut) | the query tool's `clip` | `data.midi.notes` |
 | [`note.delete`](#notedelete) | the query tool's `clip` | `data.midi.notes` |
+| [`note.duplicate`](#noteduplicate) | the query tool's `clip` | `data.midi.notes` |
 | [`note.move`](#notemove) | the query tool's `clip` | `data.midi.notes` |
+| [`note.paste`](#notepaste) | the query tool's `clip` | `data.midi.notes` |
 | [`note.quantize`](#notequantize) | the query tool's `clip` | `data.midi.notes` |
 | [`note.ramp_value`](#noteramp_value) | the query tool's `clip` | `data.midi.notes` |
 | [`note.resize`](#noteresize) | the query tool's `clip` | `data.midi.notes` |
@@ -11486,6 +11884,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`session.toggle_follow_actions`](#sessiontoggle_follow_actions) | the query tool's `clip` | `launch.follow.enabled` |
 | [`set.collect_all_and_save`](#setcollect_all_and_save) | the query tool's `song` | `set.unsaved_changes` |
 | [`set.discard_changes`](#setdiscard_changes) | the query tool's `song` | `set.unsaved_changes` |
+| [`set.import_dawproject`](#setimport_dawproject) | the query tool's `song` | `set.name` |
 | [`set.new`](#setnew) | the query tool's `song` | `set.name` |
 | [`set.open`](#setopen) | the query tool's `song` | `set.path` |
 | [`set.open_backup`](#setopen_backup) | the query tool's `song` | `set.unsaved_changes` |
@@ -11564,17 +11963,26 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`agent.new_token`](#agentnew_token) | a new random token, which an agent is never told: the Settings window shows it to the person |
 | [`app.quit`](#appquit) | the app ends, so there is nothing left to read from |
 | [`browser.add_folder`](#browseradd_folder) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
+| [`browser.add_tag`](#browseradd_tag) | the browser's tags are read with `browser.tags`, which is `external` because it lists files outside the project |
+| [`browser.add_tag_group`](#browseradd_tag_group) | the browser's tags are read with `browser.tags`, which is `external` because it lists files outside the project |
+| [`browser.delete_tag`](#browserdelete_tag) | the browser's tags are read with `browser.tags`, which is `external` because it lists files outside the project |
+| [`browser.move_tag`](#browsermove_tag) | the browser's tags are read with `browser.tags`, which is `external` because it lists files outside the project |
 | [`browser.open_folder`](#browseropen_folder) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.open_place`](#browseropen_place) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.preview`](#browserpreview) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.remove_folder`](#browserremove_folder) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
+| [`browser.rename_tag`](#browserrename_tag) | the browser's tags are read with `browser.tags`, which is `external` because it lists files outside the project |
+| [`browser.reset_tag_order`](#browserreset_tag_order) | the browser's tags are read with `browser.tags`, which is `external` because it lists files outside the project |
 | [`browser.scrub_preview`](#browserscrub_preview) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.search`](#browsersearch) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.select`](#browserselect) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.set_preview`](#browserset_preview) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.set_raw`](#browserset_raw) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.show_file`](#browsershow_file) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
+| [`browser.show_quick_tags`](#browsershow_quick_tags) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.state`](#browserstate) | a query of its own: it reads the Browser, and is `external` for the files it lists |
+| [`browser.tag_items`](#browsertag_items) | the browser's tags are read with `browser.tags`, which is `external` because it lists files outside the project |
+| [`browser.tags`](#browsertags) | a query of its own: it reads the tags, and is `external` for the files it lists |
 | [`chain.save_preset`](#chainsave_preset) | writes a file outside the set; the set doesn't change |
 | [`device.autosample_cancel`](#deviceautosample_cancel) | it stops a running autosample |
 | [`device.save_default_preset`](#devicesave_default_preset) | writes a file outside the set; the set doesn't change |
@@ -12005,6 +12413,9 @@ What the Arrangement View shows: every view command returns it.
 | `zoom_back_steps` | integer, at least 0 | yes | How many views `arrangement.zoom_back` can go back to. |
 | `automation_mode` | boolean | yes | Whether Automation Mode is on: each track shows its automation lane under its lane, with the device and parameter choosers. |
 | `automation_arm` | boolean | yes | Whether Automation Arm is on: while Arrangement Record runs, moving a control writes its values into the parameter's envelope. |
+| `show_in_out` | boolean | yes | Whether the track headers show their In/Out column. |
+| `show_volume` | boolean | yes | Whether the track headers show their volume, pan, and sends. |
+| `show_return_tracks` | boolean | yes | Whether the return tracks' rows show in the lanes. |
 | `automation_lanes` | array of [`AutomationLane`](#automationlane) | no | The parameter each track's automation lane shows, for the tracks whose lane isn't showing the default (their volume): the choosers' choice. `target` `null` means the lane draws no envelope. |
 
 <details><summary>JSON Schema</summary>
@@ -12083,6 +12494,18 @@ What the Arrangement View shows: every view command returns it.
       },
       "type": "array"
     },
+    "show_in_out": {
+      "description": "Whether the track headers show their In/Out column.",
+      "type": "boolean"
+    },
+    "show_return_tracks": {
+      "description": "Whether the return tracks' rows show in the lanes.",
+      "type": "boolean"
+    },
+    "show_volume": {
+      "description": "Whether the track headers show their volume, pan, and sends.",
+      "type": "boolean"
+    },
     "ticks_per_point": {
       "description": "The zoom: ticks of song time per point of screen.",
       "format": "double",
@@ -12135,7 +12558,10 @@ What the Arrangement View shows: every view command returns it.
     "folded_tracks",
     "zoom_back_steps",
     "automation_mode",
-    "automation_arm"
+    "automation_arm",
+    "show_in_out",
+    "show_volume",
+    "show_return_tracks"
   ],
   "type": "object"
 }
@@ -14116,6 +14542,8 @@ What the browser shows: most browser commands return it.
 | `selected` | array of string | yes | The selected items' paths. |
 | `preview` | [`PreviewState`](#previewstate) | yes | The preview. |
 | `index` | [`IndexState`](#indexstate) | yes | The index. |
+| `tag_editor` | boolean | yes | Whether the Tag Editor is open beside the content pane. |
+| `quick_tags` | boolean | yes | Whether Quick Tags shows at the content pane's bottom. |
 | `note` | string or null | no | What the content pane says when it has no rows, such as which package fills an empty Library label. |
 
 <details><summary>JSON Schema</summary>
@@ -14156,6 +14584,10 @@ What the browser shows: most browser commands return it.
       "$ref": "#/$defs/PreviewState",
       "description": "The preview."
     },
+    "quick_tags": {
+      "description": "Whether Quick Tags shows at the content pane's bottom.",
+      "type": "boolean"
+    },
     "rows": {
       "description": "Rows of the content pane, from `first_row`: the label's contents, with open folders' contents under them, or the search results.",
       "items": {
@@ -14174,6 +14606,10 @@ What the browser shows: most browser commands return it.
       },
       "type": "array"
     },
+    "tag_editor": {
+      "description": "Whether the Tag Editor is open beside the content pane.",
+      "type": "boolean"
+    },
     "total_rows": {
       "description": "How many rows the content pane has in all.",
       "format": "uint",
@@ -14190,7 +14626,9 @@ What the browser shows: most browser commands return it.
     "total_rows",
     "selected",
     "preview",
-    "index"
+    "index",
+    "tag_editor",
+    "quick_tags"
   ],
   "type": "object"
 }
@@ -15745,7 +16183,7 @@ What `clip.transients` returns.
 
 ### `ClipViewState`
 
-What the Clip View shows: which clip it is editing, the notes selected in it, the lane's setting, and the tab with the envelope it shows.
+What the Clip View shows: which clip it is editing, the notes selected in it, its insert marker and time selection, the lane's setting, and the tab with the envelope it shows.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -15753,6 +16191,8 @@ What the Clip View shows: which clip it is editing, the notes selected in it, th
 | `draw_mode` | boolean | yes | Whether Draw Mode is on (B): clicking the note area adds a note, and clicking a note removes it. |
 | `clip` | [`ClipId`](#clipid) or null | yes | The clip the note editor shows; `null` when none does. |
 | `selected` | array of integer, at least 0 | yes | The selected notes, by their place in the clip's notes in order (by start, then pitch). |
+| `insert_marker` | [`Ticks`](#ticks) or null | yes | The insert marker, in ticks from the beginning of the clip's contents; `null` when there is none. |
+| `time_selection` | array or null | yes | The time selection's start and end, in ticks from the beginning of the clip's contents; `null` when there is none. |
 | `lane` | [`NoteField`](#notefield) | yes | Which value the lane under the note editor shows and edits. |
 | `folded` | boolean | yes | Whether the note editor shows only the rows that hold notes (Fold, F). |
 | `tab` | [`ClipTab`](#cliptab) | yes | The tab the Clip View shows. |
@@ -15762,7 +16202,7 @@ What the Clip View shows: which clip it is editing, the notes selected in it, th
 
 ```json
 {
-  "description": "What the Clip View shows: which clip it is editing, the notes selected in it, the lane's setting, and the tab with the envelope it shows.",
+  "description": "What the Clip View shows: which clip it is editing, the notes selected in it, its insert marker and time selection, the lane's setting, and the tab with the envelope it shows.",
   "properties": {
     "clip": {
       "anyOf": [
@@ -15794,6 +16234,17 @@ What the Clip View shows: which clip it is editing, the notes selected in it, th
       "description": "Whether the note editor shows only the rows that hold notes (Fold, F).",
       "type": "boolean"
     },
+    "insert_marker": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Ticks"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The insert marker, in ticks from the beginning of the clip's contents; `null` when there is none."
+    },
     "lane": {
       "$ref": "#/$defs/NoteField",
       "description": "Which value the lane under the note editor shows and edits."
@@ -15811,6 +16262,23 @@ What the Clip View shows: which clip it is editing, the notes selected in it, th
       "$ref": "#/$defs/ClipTab",
       "description": "The tab the Clip View shows."
     },
+    "time_selection": {
+      "description": "The time selection's start and end, in ticks from the beginning of the clip's contents; `null` when there is none.",
+      "maxItems": 2,
+      "minItems": 2,
+      "prefixItems": [
+        {
+          "$ref": "#/$defs/Ticks"
+        },
+        {
+          "$ref": "#/$defs/Ticks"
+        }
+      ],
+      "type": [
+        "array",
+        "null"
+      ]
+    },
     "visible": {
       "description": "Whether the Clip View shows in the detail area.",
       "type": "boolean"
@@ -15821,6 +16289,8 @@ What the Clip View shows: which clip it is editing, the notes selected in it, th
     "draw_mode",
     "clip",
     "selected",
+    "insert_marker",
+    "time_selection",
     "lane",
     "folded",
     "tab",
@@ -20779,6 +21249,124 @@ Hot-swapping, while it lasts.
 
 </details>
 
+### `ImportDawProjectResult`
+
+What `set.import_dawproject` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | The new set's name, as the title bar shows it: the file's name without `.dawproject`. |
+| `report` | [`ImportReport`](#importreport) | yes | What the import left out or changed. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `set.import_dawproject` returns.",
+  "properties": {
+    "name": {
+      "description": "The new set's name, as the title bar shows it: the file's name without `.dawproject`.",
+      "type": "string"
+    },
+    "report": {
+      "$ref": "#/$defs/ImportReport",
+      "description": "What the import left out or changed."
+    }
+  },
+  "required": [
+    "name",
+    "report"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ImportReport`
+
+What the import left out or changed.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `application` | string or null | no | The application and version the file says made it. |
+| `entries` | array of [`ImportReportEntry`](#importreportentry) | no | Each thing left out or changed, in the file's order. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What the import left out or changed.",
+  "properties": {
+    "application": {
+      "description": "The application and version the file says made it.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "entries": {
+      "description": "Each thing left out or changed, in the file's order.",
+      "items": {
+        "$ref": "#/$defs/ImportReportEntry"
+      },
+      "type": "array"
+    }
+  },
+  "type": "object"
+}
+```
+
+</details>
+
+### `ImportReportEntry`
+
+One thing the import left out or changed.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `what` | string | yes | What it was: a VST2 plug-in, a send's pan, a note's channel. |
+| `where` | string | yes | Where it was: the track by name, a clip by name and its place, a device by name. |
+| `count` | integer, at least 0 | yes | How many there were. |
+| `did` | string | yes | What Beatlayer did: left out, or changed to what. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One thing the import left out or changed.",
+  "properties": {
+    "count": {
+      "description": "How many there were.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "did": {
+      "description": "What Beatlayer did: left out, or changed to what.",
+      "type": "string"
+    },
+    "what": {
+      "description": "What it was: a VST2 plug-in, a send's pan, a note's channel.",
+      "type": "string"
+    },
+    "where": {
+      "description": "Where it was: the track by name, a clip by name and its place, a device by name.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "what",
+    "where",
+    "count",
+    "did"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `ImportedClip`
 
 A clip `midi.import_file` placed.
@@ -21164,6 +21752,40 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `ItemTag`
+
+A tag on an item, and where it comes from.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `tag` | string | yes | The tag's full name. |
+| `source` | [`TagSource`](#tagsource) | yes | Where it comes from. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A tag on an item, and where it comes from.",
+  "properties": {
+    "source": {
+      "$ref": "#/$defs/TagSource",
+      "description": "Where it comes from."
+    },
+    "tag": {
+      "description": "The tag's full name.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "tag",
+    "source"
+  ],
+  "type": "object"
 }
 ```
 
@@ -24968,6 +25590,42 @@ A note in a MIDI clip.
 
 </details>
 
+### `NoteClipboardState`
+
+What the note clipboard holds, as `note.copy` reports it.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `notes` | integer, at least 0 | yes | How many notes it holds. |
+| `length` | [`Ticks`](#ticks) | yes | How long they last, from the earliest of them. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What the note clipboard holds, as `note.copy` reports it.",
+  "properties": {
+    "length": {
+      "$ref": "#/$defs/Ticks",
+      "description": "How long they last, from the earliest of them."
+    },
+    "notes": {
+      "description": "How many notes it holds.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "notes",
+    "length"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `NoteEditResult`
 
 What a note edit did, and what's selected afterwards.
@@ -25085,6 +25743,78 @@ One of:
       "const": "toggle",
       "description": "Select each note that isn't selected and deselect each that is.",
       "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `NoteSelection`
+
+What to select in the note editor: `nearest` (the note whose start is nearest the insert marker), `previous` and `next` (the previous or next note in the clip's order), `same_pitch_previous` and `same_pitch_next` (the previous or next note at the selected note's pitch), `all` (every note in the clip's span), or `key` (every note at a pitch, as clicking a key in the piano ruler does).
+
+One of:
+
+- `"nearest"`: The note whose start is nearest the insert marker.
+- `"previous"`: The previous note in the clip's order.
+- `"next"`: The next note in the clip's order.
+- `"same_pitch_previous"`: The previous note at the selected note's pitch.
+- `"same_pitch_next"`: The next note at the selected note's pitch.
+- `"all"`: Every note in the clip's span.
+- an object with `key` (integer from 0 to 255): Every note at a pitch, as clicking a key in the piano ruler does.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What to select in the note editor: `nearest` (the note whose start is nearest the insert marker), `previous` and `next` (the previous or next note in the clip's order), `same_pitch_previous` and `same_pitch_next` (the previous or next note at the selected note's pitch), `all` (every note in the clip's span), or `key` (every note at a pitch, as clicking a key in the piano ruler does).",
+  "oneOf": [
+    {
+      "const": "nearest",
+      "description": "The note whose start is nearest the insert marker.",
+      "type": "string"
+    },
+    {
+      "const": "previous",
+      "description": "The previous note in the clip's order.",
+      "type": "string"
+    },
+    {
+      "const": "next",
+      "description": "The next note in the clip's order.",
+      "type": "string"
+    },
+    {
+      "const": "same_pitch_previous",
+      "description": "The previous note at the selected note's pitch.",
+      "type": "string"
+    },
+    {
+      "const": "same_pitch_next",
+      "description": "The next note at the selected note's pitch.",
+      "type": "string"
+    },
+    {
+      "const": "all",
+      "description": "Every note in the clip's span.",
+      "type": "string"
+    },
+    {
+      "additionalProperties": false,
+      "description": "Every note at a pitch, as clicking a key in the piano ruler does.",
+      "properties": {
+        "key": {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "key"
+      ],
+      "type": "object"
     }
   ]
 }
@@ -31223,6 +31953,219 @@ What a command that switches something returns: its new state.
 
 </details>
 
+### `TagGroupInfo`
+
+A tag group, as `browser.tags` reports it.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | Its name. |
+| `builtin` | boolean | yes | Whether Beatlayer gave it: it can't be renamed or deleted. |
+| `tags` | array of [`TagInfo`](#taginfo) | yes | Its tags, in order. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A tag group, as `browser.tags` reports it.",
+  "properties": {
+    "builtin": {
+      "description": "Whether Beatlayer gave it: it can't be renamed or deleted.",
+      "type": "boolean"
+    },
+    "name": {
+      "description": "Its name.",
+      "type": "string"
+    },
+    "tags": {
+      "description": "Its tags, in order.",
+      "items": {
+        "$ref": "#/$defs/TagInfo"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "name",
+    "builtin",
+    "tags"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `TagInfo`
+
+A tag, as `browser.tags` reports it.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | Its own name, without the group's. |
+| `full_name` | string | yes | Its full name: the group's name, its own, and any subtag's, joined by `\|`, as `Format\|CLAP`. |
+| `builtin` | boolean | yes | Whether Beatlayer gave it: it can't be renamed or deleted. |
+| `position` | integer | yes | Where it sits in its group. |
+| `subtags` | array of [`TagInfo`](#taginfo) | yes | Its subtags, one level deep. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A tag, as `browser.tags` reports it.",
+  "properties": {
+    "builtin": {
+      "description": "Whether Beatlayer gave it: it can't be renamed or deleted.",
+      "type": "boolean"
+    },
+    "full_name": {
+      "description": "Its full name: the group's name, its own, and any subtag's, joined by `|`, as `Format|CLAP`.",
+      "type": "string"
+    },
+    "name": {
+      "description": "Its own name, without the group's.",
+      "type": "string"
+    },
+    "position": {
+      "description": "Where it sits in its group.",
+      "format": "int32",
+      "type": "integer"
+    },
+    "subtags": {
+      "description": "Its subtags, one level deep.",
+      "items": {
+        "$ref": "#/$defs/TagInfo"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "name",
+    "full_name",
+    "builtin",
+    "position",
+    "subtags"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `TagSource`
+
+Where a tag on an item comes from (spec: browser-tags R16).
+
+One of:
+
+- `"own"`: The item carries it in its own right.
+- `"folder"`: A folder it lies in carries it.
+- `"beatlayer"`: Beatlayer gave it, from what it knows of the item.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Where a tag on an item comes from (spec: browser-tags R16).",
+  "oneOf": [
+    {
+      "const": "own",
+      "description": "The item carries it in its own right.",
+      "type": "string"
+    },
+    {
+      "const": "folder",
+      "description": "A folder it lies in carries it.",
+      "type": "string"
+    },
+    {
+      "const": "beatlayer",
+      "description": "Beatlayer gave it, from what it knows of the item.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `TaggedItem`
+
+An item and the tags it carries.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `item` | string | yes | The item's key: a file or folder by its path, a plug-in by its format and identifier, a device or rack by its row's ID. |
+| `tags` | array of [`ItemTag`](#itemtag) | yes | The tags it carries. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "An item and the tags it carries.",
+  "properties": {
+    "item": {
+      "description": "The item's key: a file or folder by its path, a plug-in by its format and identifier, a device or rack by its row's ID.",
+      "type": "string"
+    },
+    "tags": {
+      "description": "The tags it carries.",
+      "items": {
+        "$ref": "#/$defs/ItemTag"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "item",
+    "tags"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `TagsState`
+
+What `browser.tags` reports: the tag groups and their tags, and, for the items named, what each carries.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `groups` | array of [`TagGroupInfo`](#taggroupinfo) | yes | The tag groups, in order, with their tags. |
+| `items` | array of [`TaggedItem`](#taggeditem) | yes | The items named, with the tags each carries. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `browser.tags` reports: the tag groups and their tags, and, for the items named, what each carries.",
+  "properties": {
+    "groups": {
+      "description": "The tag groups, in order, with their tags.",
+      "items": {
+        "$ref": "#/$defs/TagGroupInfo"
+      },
+      "type": "array"
+    },
+    "items": {
+      "description": "The items named, with the tags each carries.",
+      "items": {
+        "$ref": "#/$defs/TaggedItem"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "groups",
+    "items"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `TakeClip`
 
 A recorded pass on a take lane: its `name`, `start` and `length` in ticks (705,600 to the quarter note), and the audio clip `data` it plays.
@@ -32634,6 +33577,50 @@ One of:
 
 </details>
 
+### `UndoHistoryState`
+
+What `view.toggle_undo_history` returns: the Undo History panel's state afterwards.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `open` | boolean | yes | Whether the panel shows. |
+| `steps` | integer, at least 0 | yes | How many steps the history holds. |
+| `current` | integer, at least 0 | yes | The current row's place in the history, counted up from the set's start: 0 before any step. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `view.toggle_undo_history` returns: the Undo History panel's state afterwards.",
+  "properties": {
+    "current": {
+      "description": "The current row's place in the history, counted up from the set's start: 0 before any step.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "open": {
+      "description": "Whether the panel shows.",
+      "type": "boolean"
+    },
+    "steps": {
+      "description": "How many steps the history holds.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "open",
+    "steps",
+    "current"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `Ungrouped`
 
 What `device.ungroup` returns.
@@ -33044,6 +34031,7 @@ What `view.state` returns: what the view commands switch, without switching any 
 | `clip_view` | [`ClipViewState`](#clipviewstate) | yes | The Clip View and its note editor: whether it shows, Draw Mode, the clip it holds, the selected notes, the lane and Fold. |
 | `plugin_list` | [`PluginListState`](#pluginliststate) | yes | The list of the set's plug-ins: whether it shows, and whether Show Only Missing is on. |
 | `assistant` | [`AssistantPanelState`](#assistantpanelstate) | yes | The assistant's panel. |
+| `undo_history` | boolean | yes | Whether the Undo History panel shows. |
 | `plug_in_windows` | boolean | yes | Whether floating devices' and plug-ins' windows are shown, as `view.toggle_plug_in_windows` sets it. |
 
 <details><summary>JSON Schema</summary>
@@ -33068,6 +34056,10 @@ What `view.state` returns: what the view commands switch, without switching any 
       "$ref": "#/$defs/PluginListState",
       "description": "The list of the set's plug-ins: whether it shows, and whether Show Only Missing is on."
     },
+    "undo_history": {
+      "description": "Whether the Undo History panel shows.",
+      "type": "boolean"
+    },
     "window": {
       "$ref": "#/$defs/ViewResult",
       "description": "The main window: the main view, the browser, the Info View, full-screen mode and the interface zoom."
@@ -33078,6 +34070,7 @@ What `view.state` returns: what the view commands switch, without switching any 
     "clip_view",
     "plugin_list",
     "assistant",
+    "undo_history",
     "plug_in_windows"
   ],
   "type": "object"

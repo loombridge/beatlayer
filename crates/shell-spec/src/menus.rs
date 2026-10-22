@@ -16,6 +16,7 @@
 //! website, account, store, pack service, and Max for Live) are left out
 //! ([`Action::Omitted`]). Decision D21 records the rule.
 
+use crate::arrangement::{SHOW_IN_OUT, SHOW_RETURN_TRACKS, SHOW_VOLUME};
 use crate::assistant::VIEW_TOGGLE_ASSISTANT;
 use crate::audio_editing::CONSOLIDATE_TO_SCENE;
 use crate::browser::{ADD_FOLDER as BROWSER_ADD_FOLDER, SET_PREVIEW as BROWSER_PREVIEW};
@@ -27,8 +28,8 @@ use crate::commands::{
     SET_COLLECT_ALL, SET_NEW, SET_OPEN, SET_SAVE, SET_SAVE_AS, SET_SAVE_AS_DEFAULT,
     SET_SAVE_AS_TEMPLATE, VIEW_DRAW_MODE, VIEW_FULL_SCREEN, VIEW_TOGGLE_BROWSER,
     VIEW_TOGGLE_CLIP_VIEW, VIEW_TOGGLE_INFO_VIEW, VIEW_TOGGLE_PLUG_IN_WINDOWS,
-    VIEW_TOGGLE_PLUGIN_LIST, VIEW_TOGGLE_SESSION_ARRANGEMENT, VIEW_ZOOM_IN, VIEW_ZOOM_OUT,
-    VIEW_ZOOM_RESET, WINDOW_CLOSE,
+    VIEW_TOGGLE_PLUGIN_LIST, VIEW_TOGGLE_SESSION_ARRANGEMENT, VIEW_TOGGLE_UNDO_HISTORY,
+    VIEW_ZOOM_IN, VIEW_ZOOM_OUT, VIEW_ZOOM_RESET, WINDOW_CLOSE,
 };
 use crate::devices::COMPARE_COPY;
 use crate::file_manager::{SET_SAVE_COPY, VIEW_TOGGLE_FILE_MANAGER};
@@ -549,7 +550,7 @@ const VIEW: &[Row] = &[
         Omitted("Ableton's pack service (D21)"),
     ),
     ("M-VIEW-007", "File Manager", Cmd(VIEW_TOGGLE_FILE_MANAGER)),
-    ("M-VIEW-008", "Undo History", Key(&["S-VIEW-021"])),
+    ("M-VIEW-008", "Undo History", Cmd(VIEW_TOGGLE_UNDO_HISTORY)),
     (D24, "Assistant", Cmd(VIEW_TOGGLE_ASSISTANT)),
     SEPARATOR,
     (
@@ -634,11 +635,11 @@ const VIEW: &[Row] = &[
     ("M-VIEW-032-sep2", "", Action::Separator),
     ("M-VIEW-032g", "Return Tracks", Cmd(MIXER_RETURN_TRACKS)),
     ("M-VIEW-033", "Arrangement Track Controls", Submenu),
-    ("M-VIEW-033a", "In/Out", Pending(None)),
-    ("M-VIEW-033b", "Volume", Pending(None)),
+    ("M-VIEW-033a", "In/Out", Cmd(SHOW_IN_OUT)),
+    ("M-VIEW-033b", "Volume", Cmd(SHOW_VOLUME)),
     ("M-VIEW-033c", "Track Options", Cmd(MIXER_TRACK_OPTIONS)),
     ("M-VIEW-033-sep1", "", Action::Separator),
-    ("M-VIEW-033d", "Return Tracks", Pending(None)),
+    ("M-VIEW-033d", "Return Tracks", Cmd(SHOW_RETURN_TRACKS)),
     SEPARATOR,
     ("M-VIEW-034", "Overview", Key(&["S-VIEW-011"])),
     (

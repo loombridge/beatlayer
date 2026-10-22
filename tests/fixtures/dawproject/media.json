@@ -1,0 +1,35 @@
+{
+  "application": "Fixture DAW 1.0",
+  "entries": [
+    {
+      "count": 1,
+      "did": "the file's own rate, channels and length were used",
+      "what": "the file `audio/drum.wav`",
+      "where": "the clip \"Embedded\" at 1.1.1 on the track \"Drums\""
+    },
+    {
+      "count": 1,
+      "did": "found at media-files/sub/found.wav",
+      "what": "the file `/nonexistent-dawproject/found.wav`",
+      "where": "the clip \"Elsewhere\" at 2.2.1 on the track \"Drums\""
+    },
+    {
+      "count": 1,
+      "did": "left out; the container doesn't hold it",
+      "what": "the file `audio/nowhere.wav`",
+      "where": "the clip \"Missing\" at 2.3.1 on the track \"Drums\""
+    },
+    {
+      "count": 1,
+      "did": "left out; it wasn't found",
+      "what": "the file `elsewhere/nowhere.wav`",
+      "where": "the clip \"Nowhere\" at 2.4.1 on the track \"Drums\""
+    },
+    {
+      "count": 1,
+      "did": "left out; it isn't a file Beatlayer can play",
+      "what": "the file `audio/broken.wav`",
+      "where": "the clip \"Broken\" at 3.1.1 on the track \"Drums\""
+    }
+  ]
+}

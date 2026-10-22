@@ -18,7 +18,7 @@ use egui::{
 };
 use serde_json::json;
 
-use crate::layout::header_columns::{IN_OUT, METER, MIXER, TITLE};
+use crate::layout::header_columns::{self, IN_OUT, METER, MIXER, TITLE};
 use crate::layout::mixer::split_pan_row;
 use crate::main_window::UiEvent;
 use crate::mixer::{Place, SplitSide, StripParts};
@@ -52,6 +52,10 @@ pub struct Header<'a> {
     pub menus: &'a TrackMenus,
     /// Whether the keys open that menu for this title bar now (S-CTX-002).
     pub keys: bool,
+    /// Whether the header shows its In/Out column (arrangement-view R21).
+    pub show_in_out: bool,
+    /// Whether the header shows its volume, pan, and sends (R22).
+    pub show_volume: bool,
 }
 
 /// The ID of a track's title, for tests and focus.
@@ -110,6 +114,8 @@ pub fn header(
         resizable,
         menus,
         keys,
+        show_in_out,
+        show_volume,
     } = *header;
     let id = track.id();
     let colors = &theme.colors;
@@ -118,7 +124,12 @@ pub fn header(
         Rect::from_min_max(pos2(left + x0, top), pos2(left + x1, bottom))
     };
     let height = rect.height();
-    let title = column(TITLE, rect.top(), rect.bottom() - 1.0);
+    // With the In/Out column hidden, the title takes its width (R21).
+    let title = column(
+        (TITLE.0, header_columns::title_width(show_in_out)),
+        rect.top(),
+        rect.bottom() - 1.0,
+    );
     let painter = ui.painter_at(rect);
 
     // The title, filled with the track's colour.
@@ -313,40 +324,43 @@ pub fn header(
     if height < 36.0 || folded {
         return;
     }
-    // Second row: volume and pan; third: the sends (L-ARR-009).
-    let row2 = column(MIXER, row_top + 16.0, row_top + 30.0);
-    let half = row2.width() / 2.0;
-    let left_half = Rect::from_min_max(row2.min, pos2(row2.left() + half - 1.0, row2.bottom()));
-    let right_half = Rect::from_min_max(pos2(row2.left() + half + 1.0, row2.top()), row2.max);
-    parts.volume_field(ui, left_half, events);
-    // In Split Stereo Pan Mode two controls sit beside the pan in this row,
-    // one placing each input channel (the mixer spec, R3, R29).
-    if track.mixer().pan_mode == bl_model::PanMode::Split {
-        let [left, pan, right] = split_pan_row(right_half);
-        parts.split_pan(ui, left, SplitSide::Left, events);
-        parts.pan(ui, pan, None, events);
-        parts.split_pan(ui, right, SplitSide::Right, events);
-    } else {
-        parts.pan(ui, right_half, None, events);
-    }
-    let midi_only = track.kind() == TrackKind::Midi && track.devices().len() == 0;
-    if height >= 52.0 && track.kind().has_sends() && !midi_only {
-        // The sends, one per return, side by side (L-ARR-009; with more
-        // returns than fit, the first that do).
-        let row3 = column(MIXER, row_top + 32.0, row_top + 46.0);
-        let doc = shell.editor().document();
-        let returns: Vec<TrackId> = doc.returns().collect();
-        let width = (row3.width() / returns.len().max(2) as f32).max(14.0);
-        for (index, &to) in returns.iter().enumerate() {
-            let left = row3.left() + width * index as f32;
-            if left + width > row3.right() + 0.5 {
-                break;
+    // Second row: volume and pan; third: the sends (L-ARR-009). With
+    // Volume off, neither shows (R22).
+    if show_volume {
+        let row2 = column(MIXER, row_top + 16.0, row_top + 30.0);
+        let half = row2.width() / 2.0;
+        let left_half = Rect::from_min_max(row2.min, pos2(row2.left() + half - 1.0, row2.bottom()));
+        let right_half = Rect::from_min_max(pos2(row2.left() + half + 1.0, row2.top()), row2.max);
+        parts.volume_field(ui, left_half, events);
+        // In Split Stereo Pan Mode two controls sit beside the pan in this row,
+        // one placing each input channel (the mixer spec, R3, R29).
+        if track.mixer().pan_mode == bl_model::PanMode::Split {
+            let [left, pan, right] = split_pan_row(right_half);
+            parts.split_pan(ui, left, SplitSide::Left, events);
+            parts.pan(ui, pan, None, events);
+            parts.split_pan(ui, right, SplitSide::Right, events);
+        } else {
+            parts.pan(ui, right_half, None, events);
+        }
+        let midi_only = track.kind() == TrackKind::Midi && track.devices().len() == 0;
+        if height >= 52.0 && track.kind().has_sends() && !midi_only {
+            // The sends, one per return, side by side (L-ARR-009; with more
+            // returns than fit, the first that do).
+            let row3 = column(MIXER, row_top + 32.0, row_top + 46.0);
+            let doc = shell.editor().document();
+            let returns: Vec<TrackId> = doc.returns().collect();
+            let width = (row3.width() / returns.len().max(2) as f32).max(14.0);
+            for (index, &to) in returns.iter().enumerate() {
+                let left = row3.left() + width * index as f32;
+                if left + width > row3.right() + 0.5 {
+                    break;
+                }
+                let cell = Rect::from_min_max(
+                    pos2(left + 1.0, row3.top()),
+                    pos2(left + width - 1.0, row3.bottom()),
+                );
+                parts.send(ui, cell, to, index, events);
             }
-            let cell = Rect::from_min_max(
-                pos2(left + 1.0, row3.top()),
-                pos2(left + width - 1.0, row3.bottom()),
-            );
-            parts.send(ui, cell, to, index, events);
         }
     }
     // The Track Options row (L-MIX-005): the Track Delay with its unit
@@ -356,9 +370,11 @@ pub fn header(
         parts.track_options_section(ui, row4, (row4.top(), row4.bottom()), events);
     }
 
-    // The In/Out column (L-ARR-008), as many rows as fit.
-    if let Some(section) =
-        bl_shell::routing::in_out(shell.editor().document(), id, &shell.interface())
+    // The In/Out column (L-ARR-008), as many rows as fit. With In/Out off,
+    // it isn't drawn (R21).
+    if show_in_out
+        && let Some(section) =
+            bl_shell::routing::in_out(shell.editor().document(), id, &shell.interface())
     {
         let in_out = crate::in_out::InOutParts {
             theme,

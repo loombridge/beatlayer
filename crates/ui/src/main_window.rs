@@ -149,6 +149,8 @@ pub struct MainWindowUi {
     /// The assistant's pane (WP-2.23, part 3): the prompt being typed and a
     /// drag on its edge.
     assistant: crate::assistant_panel::AssistantPanelUi,
+    /// The Undo History panel (WP-6.28): the row the keyboard has moved to.
+    undo_history: crate::undo_history_panel::UndoHistoryPanelUi,
     /// The File Manager's switches (WP-6.63).
     file_manager: crate::file_manager::FileManagerUi,
 }
@@ -229,6 +231,7 @@ impl MainWindowUi {
             device_titles: Vec::new(),
             chain_names: Vec::new(),
             assistant: crate::assistant_panel::AssistantPanelUi::default(),
+            undo_history: crate::undo_history_panel::UndoHistoryPanelUi::default(),
         }
     }
 
@@ -420,14 +423,20 @@ impl MainWindowUi {
             let assistant = shell
                 .assistant_docked_width()
                 .map(|width| self.assistant.drag_width().unwrap_or(width));
-            let layout = ShellLayout::compute_with_assistant(
+            let undo_history = shell
+                .undo_history_open()
+                .then_some(crate::layout::UNDO_HISTORY_WIDTH);
+            let layout = ShellLayout::compute_with_panes(
                 area.size(),
                 shell.browser_visible(),
                 shell.info_view_visible(),
                 assistant,
+                undo_history,
             )
             .translate(area.min.to_vec2());
             self.track_area_clicks(ctx, &layout, &mut events);
+            // Where the Tag Editor opens, beside the content pane.
+            let mut tag_editor = None;
             self.control_bar(ui, shell, theme, &layout, &mut events);
             if let Some(browser) = layout.browser {
                 // Spec: macros R3. A rack's Map mode puts the mappings list
@@ -440,9 +449,17 @@ impl MainWindowUi {
                     let browser =
                         crate::device_view::hot_swap_bar(ui, shell, theme, browser, &mut events);
                     self.browser.show(ui, shell, theme, browser, &mut events);
+                    tag_editor = shell.browser_view().tag_editor().then_some(browser);
                 }
             }
             self.main_view(ui, shell, theme, layout.main_view, &mut events);
+            // Spec: browser-tags R10. The Tag Editor opens beside the
+            // content pane (L-BRW-013), over the main view, so it is drawn
+            // after it.
+            if let Some(browser) = tag_editor {
+                let rect = crate::layout::tag_editor_rect(browser);
+                self.browser.tag_editor(ui, shell, theme, rect, &mut events);
+            }
             // Files dragged from the browser, or from Finder or Explorer,
             // land in the Arrangement (WP-1.10).
             // The zone editor, which sits over the foot of the Arrangement,
@@ -527,6 +544,11 @@ impl MainWindowUi {
             if let Some(pane) = layout.assistant {
                 self.assistant
                     .show(ui, shell, theme, pane, true, &mut events);
+            }
+            if let Some(pane) = layout.undo_history {
+                self.undo_history.show(ui, shell, theme, pane, &mut events);
+            } else {
+                self.undo_history.hide(&mut events);
             }
             outline_focused_area(ui, shell, theme, &layout);
             self.drawn = Some(layout);
@@ -744,6 +766,7 @@ impl MainWindowUi {
             (Area::Detail, Some(layout.detail)),
             (Area::StatusBar, Some(layout.status_bar)),
             (Area::Assistant, layout.assistant),
+            (Area::UndoHistory, layout.undo_history),
         ];
         if let Some((area, _)) = areas
             .iter()
@@ -1281,6 +1304,7 @@ fn outline_focused_area(ui: &Ui, shell: &Shell, theme: &Theme, layout: &ShellLay
         Area::Detail => Some(layout.detail),
         Area::StatusBar => Some(layout.status_bar),
         Area::Assistant => layout.assistant,
+        Area::UndoHistory => layout.undo_history,
     };
     if let Some(rect) = rect {
         ui.painter().rect_stroke(

@@ -102,7 +102,8 @@ fn every_document_command_is_registered() {
     }
     assert!(commands.contains(registry::UNDO));
     assert!(commands.contains(registry::REDO));
-    assert_eq!(commands.len(), ops.len() + 2);
+    assert!(commands.contains(registry::GO_TO_STEP));
+    assert_eq!(commands.len(), ops.len() + 3);
     assert!(commands.iter().all(|spec| registry::handles(&spec.id)));
     assert!(!registry::handles("transport.play"));
 }
@@ -2023,8 +2024,18 @@ fn every_command_runs_by_id() {
     assert!(agent.editor.document().track(group).is_none());
     assert_eq!(agent.editor.undo_history().len(), steps);
 
+    // A jump to a row of the history returns the set to that point, and is
+    // no step of its own (undo history R6, R7).
+    let listed = agent.editor.history().len();
+    let end = agent.editor.document().clone();
+    agent.run(registry::GO_TO_STEP, json!({ "index": 1 }));
+    assert!(agent.editor.document().track(group).is_none());
+    assert_eq!(agent.editor.history().len(), listed);
+    agent.run(registry::GO_TO_STEP, json!({ "index": listed }));
+    assert_eq!(agent.editor.document(), &end);
+
     // One undo step per edit, labelled as the document labels it.
-    let edits = agent.ran.len() - 2;
+    let edits = agent.ran.len() - 3;
     assert!(steps >= edits, "{steps} steps for {edits} kinds of edit");
     assert_eq!(agent.editor.undo_history().next(), Some("Delete track"));
 
@@ -3641,7 +3652,7 @@ fn schemas_match_what_commands_serialise() {
     let document_commands: BTreeSet<&str> = commands
         .iter()
         .map(|spec| spec.id.as_ref())
-        .filter(|id| *id != registry::UNDO && *id != registry::REDO)
+        .filter(|id| *id != registry::UNDO && *id != registry::REDO && *id != registry::GO_TO_STEP)
         .collect();
     assert_eq!(
         covered, document_commands,

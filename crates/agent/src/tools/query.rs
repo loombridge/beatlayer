@@ -74,7 +74,10 @@ pub(crate) fn definition() -> Value {
          `track main`, `device \"EQ\" / param 0`, `clip \"Verse\"`, `tracks`, `tempo`, `time \
          signatures`, `history`, or `checkpoints`. Positions are given as bar.beat.sixteenth \
          (as Live shows them, from 1.1.1) and as ticks (705,600 to the quarter note). Long \
-         lists come a page at a time: pass the `next_offset` a result gives as `offset`. Also \
+         lists come a page at a time: pass the `next_offset` a result gives as `offset`. The \
+         `history` path lists the set's steps from the top, each with its label, whether it is \
+         undone, who made it, and its index counted up from the set's start, and says which row \
+         is current. Also \
          `scene 1` or `scene \"Verse\"`, `track \"Bass\" / slot 3` (a Session slot, scenes \
          counted from 1), `track \"Bass\" / lane 1` (a take lane, with its \
          passes), and `track \"Bass\" / automation` (its envelopes; \
@@ -125,9 +128,30 @@ pub(crate) fn query(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
             })),
             "history" => {
                 let editor = ctx.shell.editor();
+                let mut rows: Vec<Value> = editor
+                    .history()
+                    .iter()
+                    .map(|step| {
+                        json!({
+                            "label": step.label.as_ref(),
+                            "undone": step.undone,
+                            "made_by": maker(&step.maker),
+                            "index": step.index,
+                        })
+                    })
+                    .collect();
+                // The set's start is the bottom row, which no step undoes.
+                rows.push(json!({
+                    "label": ctx.shell.set_start_label(),
+                    "undone": false,
+                    "made_by": Value::Null,
+                    "index": 0,
+                }));
                 done(json!({
                     "undo": page.slice(editor.undo_history().map(str::to_owned).collect()),
                     "redo": page.slice(editor.redo_history().map(str::to_owned).collect()),
+                    "rows": page.slice(rows),
+                    "current": editor.current_index(),
                 }))
             }
             "checkpoints" => done(ctx.state.checkpoints.list()),
@@ -624,6 +648,8 @@ fn overview(ctx: &Ctx<'_>, view: &View<'_>) -> Value {
             "next_undo": editor.undo_history().next(),
             "next_redo": editor.redo_history().next(),
             "steps": editor.undo_history().len(),
+            "redo_steps": editor.redo_history().len(),
+            "current": editor.current_index(),
         },
         "scheduled": ctx.state.schedule.waiting(),
         "checkpoints": ctx.state.checkpoints.len(),
@@ -650,6 +676,16 @@ fn scale_value(scale: bl_model::Scale) -> Value {
         "root": scale.root,
         "name": scale.name.id(),
     })
+}
+
+/// Who made a step, for the history's rows: the person, an agent by name,
+/// or the built-in assistant (undo history R9).
+fn maker(maker: &bl_model::Maker) -> Value {
+    match maker {
+        bl_model::Maker::Person => json!({ "kind": "person" }),
+        bl_model::Maker::Agent(name) => json!({ "kind": "agent", "name": name }),
+        bl_model::Maker::Assistant => json!({ "kind": "assistant" }),
+    }
 }
 
 /// One envelope of a track, without its points.

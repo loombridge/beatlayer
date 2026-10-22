@@ -668,12 +668,12 @@ Total to 1.0: 256 packages planned in Phases 0 to 6, and about 110 estimated in 
 | 6.25c | todo |  |  |
 | 6.26 | todo |  |  |
 | 6.27 | todo |  |  |
-| 6.28 | todo |  |  |
+| 6.28 | done | 22 October 2026 | [#296](https://github.com/loombridge/beatlayer/pull/296); the Undo History panel lists the set's steps newest first in the Learn View's column, and a click or Enter on a row returns the set to that point in one jump that is no step of its own, with an agent's step marked with the agent's name ([undo history](specs/undo-history.md)) |
 | 6.29 | todo |  |  |
 | 6.29b | todo |  |  |
 | 6.30 | todo |  |  |
 | 6.30b | todo |  |  |
-| 6.31 | todo |  |  |
+| 6.31 | done | 22 October 2026 | [#300](https://github.com/loombridge/beatlayer/pull/300); the browser's database on disk holds the index, the tags and the tag groups, the Tag Editor (Cmd+Shift+E) and Quick Tags put tags on the selected items, and `#` searches by tag ([browser tags](specs/browser-tags.md) R1 to R17) |
 | 6.32 | todo |  |  |
 | 6.32b | todo |  |  |
 | 6.33 | todo |  |  |
@@ -701,7 +701,7 @@ Total to 1.0: 256 packages planned in Phases 0 to 6, and about 110 estimated in 
 | 6.50 | todo |  | Waits on IMP-37's acceptance |
 | 6.51 | todo |  |  |
 | 6.52 | todo |  |  |
-| 6.53 | todo |  |  |
+| 6.53 | done | 22 October 2026 | [#302](https://github.com/loombridge/beatlayer/pull/302); the MIDI Note Editor's insert marker and time selection, its keyboard selection and moves, Shift-click and the piano ruler's keys, the note clipboard with Option-drag copies, and the editor's context menus ([the spec](specs/piano-roll.md) R23 to R31) |
 | 6.54 | todo |  |  |
 | 6.55 | todo |  |  |
 | 6.56 | todo |  |  |
@@ -712,7 +712,7 @@ Total to 1.0: 256 packages planned in Phases 0 to 6, and about 110 estimated in 
 | 6.61 | todo |  |  |
 | 6.62 | todo |  |  |
 | 6.63 | done | 22 October 2026 | [#294](https://github.com/loombridge/beatlayer/pull/294); the File Manager in the detail area's place, listing the set's files, the missing ones, the external ones and the unused ones, with the search's switches, Collect and Save, the set's backups and Save a Copy... ([file management](specs/file-management.md) R10 to R21) |
-| 6.64 | todo |  |  |
+| 6.64 | done | 22 October 2026 | [#306](https://github.com/loombridge/beatlayer/pull/306); View ▸ Arrangement Track Controls' In/Out, Volume and Return Tracks hide their parts of every track header, and the mixers' own sections stay as they are ([arrangement view](specs/arrangement-view.md) R20 to R24) |
 | 6.65 | todo |  |  |
 | 6.66 | todo |  |  |
 | 6.67 | todo |  |  |

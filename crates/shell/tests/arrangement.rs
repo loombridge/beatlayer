@@ -120,6 +120,45 @@ fn every_view_command_is_registered_read_only_and_reachable() {
 }
 
 #[test]
+fn the_track_controls_are_view_state() {
+    // Spec: arrangement-view R20.
+    let mut shell = Shell::headless();
+    let before = shell.editor().document().clone();
+    let state = state(&mut shell);
+    assert!(
+        state.show_in_out && state.show_volume && state.show_return_tracks,
+        "all three on in a new set"
+    );
+    // Each command switches its own part, and the state follows.
+    let off = run(&mut shell, ids::SHOW_IN_OUT, json!({ "on": false }));
+    assert!(!off.show_in_out && off.show_volume && off.show_return_tracks);
+    // With no argument, the switch toggles.
+    let on = run(&mut shell, ids::SHOW_IN_OUT, json!({}));
+    assert!(on.show_in_out);
+    let off = run(&mut shell, ids::SHOW_VOLUME, json!({ "on": false }));
+    assert!(!off.show_volume && off.show_in_out);
+    let off = run(&mut shell, ids::SHOW_RETURN_TRACKS, json!({ "on": false }));
+    assert!(!off.show_return_tracks && off.show_in_out && !off.show_volume);
+    // View state: the set doesn't change, it isn't saved with the set, and
+    // it isn't an undo step.
+    assert!(!shell.is_dirty());
+    assert_eq!(
+        shell.editor().document().track_count(),
+        before.track_count()
+    );
+    assert!(!shell.editor().can_undo(), "nor is it an undo step");
+    // The mixers' own sections don't change (R20).
+    let mixer = shell.run("mixer_view.state", json!({})).unwrap();
+    assert!(
+        mixer["in_out"].as_bool().unwrap()
+            && mixer["sends"].as_bool().unwrap()
+            && mixer["volume"].as_bool().unwrap()
+            && mixer["return_tracks"].as_bool().unwrap(),
+        "{mixer}"
+    );
+}
+
+#[test]
 fn a_new_set_opens_at_bar_one_with_live_s_defaults() {
     // Spec: arrangement-view R6, R10, R11.
     let mut shell = Shell::headless();

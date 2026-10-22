@@ -13,16 +13,19 @@ use bl_commands::Context;
 use bl_core::time::Ticks;
 use bl_media::{MediaStatus, PeakEvent, Peaks};
 use bl_model::ContentHash;
+use bl_model::TrackId;
 use bl_shell::arrangement::TransportView;
 use bl_shell::arrangement_commands::{self as ids, ArrangementState};
+use bl_shell::mixer_controls::Switch;
 use bl_ui::arrangement::benchmark::{self, BenchmarkScene};
 use bl_ui::arrangement::headers::{fold_id, title_id};
 use bl_ui::arrangement::peaks::{PeakSource, PeakState};
 use bl_ui::layout::{ArrangementLayout, Element, REFERENCE, ShellLayout};
-use common::{Harness, Window, command};
+use bl_ui::mixer::{Place, pan_id, send_id, switch_id, volume_field_id};
+use common::{Harness, Node, Window, command};
 use egui::accesskit::Role;
 use egui::{
-    Color32, Event, FullOutput, Key, Modifiers, MouseWheelUnit, PointerButton, Pos2, Rect,
+    Color32, Event, FullOutput, Id, Key, Modifiers, MouseWheelUnit, PointerButton, Pos2, Rect,
     TouchPhase, pos2, vec2,
 };
 use serde_json::json;
@@ -39,7 +42,11 @@ fn layout(h: &Harness) -> ArrangementLayout {
     let shell = ShellLayout::compute(h.size - vec2(0.0, bl_ui::layout::TITLE_BAR), true, true)
         .translate(vec2(0.0, bl_ui::layout::TITLE_BAR));
     let doc = h.shell.editor().document();
-    let pinned = doc.returns().len() + 1;
+    let pinned = if h.shell.arrangement().show_return_tracks() {
+        doc.returns().len() + 1
+    } else {
+        1
+    };
     ArrangementLayout::compute(shell.main_view, h.shell.arrangement().overview(), pinned)
 }
 
@@ -469,6 +476,129 @@ fn headers_fold_select_and_resize() {
     );
     let height = h.shell.arrangement().track_height(tracks[1]);
     assert!((height - 128.0).abs() < 2.0, "{height}");
+}
+
+#[test]
+fn the_track_controls_hide_their_parts() {
+    // Spec: arrangement-view R21, R22, R23, R24.
+    let mut h = Harness::with_title_bar(Window::Main);
+    h.settle();
+    let doc = h.shell.editor().document();
+    let tracks: Vec<TrackId> = doc.top_level().collect();
+    let returns: Vec<TrackId> = doc.returns().collect();
+    let midi = tracks[0];
+    let audio = tracks[2];
+    let near = |a: f32, b: f32| (a - b).abs() < 0.51;
+    let has = |nodes: &[Node], id: Id| nodes.iter().any(|n| n.id == id.accesskit_id());
+
+    // While they show, the In/Out choosers, the volume field, the pan, and
+    // the sends are in the tree.
+    let nodes = Harness::nodes(&h.settle());
+    assert!(nodes.iter().any(|n| n.label == "Input Type"));
+    assert!(has(&nodes, volume_field_id(Place::Header, midi)));
+    assert!(has(&nodes, pan_id(Place::Header, midi)));
+    assert!(has(&nodes, send_id(Place::Header, audio, returns[0])));
+
+    // In/Out off: the title takes the In/Out column's width, and the
+    // header column and the lanes keep theirs (R21).
+    h.shell
+        .run(ids::SHOW_IN_OUT, json!({ "on": false }))
+        .unwrap();
+    let nodes = Harness::nodes(&h.settle());
+    assert!(
+        !nodes.iter().any(|n| n.label == "Input Type"),
+        "the In/Out choosers are gone"
+    );
+    let first = nodes
+        .iter()
+        .find(|n| n.role == Role::RowHeader && n.label == "1 MIDI")
+        .expect("the first track's title");
+    let bounds = first.bounds.unwrap();
+    assert!(near(bounds.x1 as f32, 1476.0), "{bounds:?}");
+    let l = layout(&h);
+    assert!(near(l.lanes.right(), 1295.0), "the lanes don't move");
+    assert!(
+        near(l.headers.right(), 1591.0),
+        "the header column keeps its width"
+    );
+
+    // Volume off: the volume field, the pan, and the sends go; the
+    // activator, Solo, and Arm stay (R22).
+    h.shell
+        .run(ids::SHOW_VOLUME, json!({ "on": false }))
+        .unwrap();
+    let nodes = Harness::nodes(&h.settle());
+    assert!(!has(&nodes, volume_field_id(Place::Header, midi)));
+    assert!(!has(&nodes, pan_id(Place::Header, midi)));
+    assert!(!has(&nodes, send_id(Place::Header, audio, returns[0])));
+    assert!(has(&nodes, switch_id(Place::Header, Switch::Solo, midi)));
+
+    // Return Tracks off: the returns' rows go, Main's stays, and the lanes
+    // take the height the returns leave (R23).
+    h.shell
+        .run(ids::SHOW_RETURN_TRACKS, json!({ "on": false }))
+        .unwrap();
+    let nodes = Harness::nodes(&h.settle());
+    let headers: Vec<&str> = nodes
+        .iter()
+        .filter(|n| n.role == Role::RowHeader)
+        .map(|n| n.label.as_str())
+        .collect();
+    assert!(
+        !headers.contains(&"A Return") && !headers.contains(&"B Return"),
+        "{headers:?}"
+    );
+    assert!(headers.contains(&"Main"), "Main's row stays");
+    let l = layout(&h);
+    assert!(
+        near(l.lanes.bottom(), 725.0),
+        "the lanes take the returns' height"
+    );
+
+    // Switching back gives the layout of a new set exactly.
+    for id in [ids::SHOW_IN_OUT, ids::SHOW_VOLUME, ids::SHOW_RETURN_TRACKS] {
+        h.shell.run(id, json!({ "on": true })).unwrap();
+    }
+    let nodes = Harness::nodes(&h.settle());
+    assert!(nodes.iter().any(|n| n.label == "Input Type"));
+    assert!(has(&nodes, volume_field_id(Place::Header, midi)));
+    assert!(has(&nodes, pan_id(Place::Header, midi)));
+    assert!(has(&nodes, send_id(Place::Header, audio, returns[0])));
+    let headers: Vec<&str> = nodes
+        .iter()
+        .filter(|n| n.role == Role::RowHeader)
+        .map(|n| n.label.as_str())
+        .collect();
+    assert!(headers.contains(&"A Return") && headers.contains(&"Main"));
+    let l = layout(&h);
+    assert!(near(l.lanes.bottom(), 688.0), "the lanes are as they were");
+    let first = nodes
+        .iter()
+        .find(|n| n.role == Role::RowHeader && n.label == "1 MIDI")
+        .expect("the first track's title");
+    let bounds = first.bounds.unwrap();
+    assert!(near(bounds.x1 as f32, 1400.0), "{bounds:?}");
+
+    // At every interface zoom, the parts that show keep their places (R24,
+    // interface-zoom R1).
+    h.shell
+        .run(ids::SHOW_IN_OUT, json!({ "on": false }))
+        .unwrap();
+    for percent in [50, 75, 100, 150, 200] {
+        h.shell
+            .run("view.set_zoom", json!({ "percent": percent }))
+            .unwrap();
+        let nodes = Harness::nodes(&h.settle());
+        let first = nodes
+            .iter()
+            .find(|n| n.role == Role::RowHeader && n.label == "1 MIDI")
+            .expect("the first track's title");
+        let bounds = first.bounds.unwrap();
+        assert!(
+            near((bounds.x1 - bounds.x0) as f32, 179.0),
+            "at {percent}%: {bounds:?}"
+        );
+    }
 }
 
 #[test]

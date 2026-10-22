@@ -72,4 +72,4 @@ The panel that lists the history and jumps through it is [undo-history.md](undo-
 
 | Choice | Test |
 |---|---|
-| Each step records who made it: the person, an agent by the name the agent API knows it by, or the built-in assistant ([undo-history.md](undo-history.md) R9). | to be written in WP-6.28 |
+| Each step records who made it: the person, an agent by the name the agent API knows it by, or the built-in assistant ([undo-history.md](undo-history.md) R9). | `crates/model/src/editor.rs`, `a_steps_maker_survives_undo_and_redo`; `crates/shell/tests/undo_history.rs`, `an_agents_step_says_who_made_it`, `an_assistants_turn_is_one_row_marked_with_the_assistant` |

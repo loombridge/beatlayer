@@ -67,6 +67,7 @@ use bl_shell_spec::autosampler as autosampler_ids;
 use bl_shell_spec::bounce as bounce_ids;
 use bl_shell_spec::browser as browser_ids;
 use bl_shell_spec::capture_midi as capture_ids;
+use bl_shell_spec::dawproject as dawproject_ids;
 use bl_shell_spec::devices as device_ids;
 use bl_shell_spec::editing as edit_ids;
 use bl_shell_spec::export as export_ids;
@@ -169,6 +170,8 @@ pub enum Area {
     StatusBar,
     /// The assistant's pane at the right edge (D24).
     Assistant,
+    /// The Undo History panel at the right edge (WP-6.28).
+    UndoHistory,
 }
 
 /// `mixer.set_solo_in_place`, which Options ▸ Solo in Place runs as a
@@ -390,6 +393,12 @@ pub struct Shell {
     /// set), which `set.discard_changes` goes back to.
     saved: Editor,
     set_path: Option<PathBuf>,
+    /// The name a set that has never been saved shows, until it is saved
+    /// (the DAWproject spec, R11).
+    pending_name: Option<String>,
+    /// The report of the last DAWproject import, while the set the import
+    /// made is open (R12).
+    import_report: Option<bl_shell_spec::dawproject::ImportReport>,
     dirty: bool,
     store: Box<dyn SetStore>,
     audio: AudioHost,
@@ -469,6 +478,9 @@ pub struct Shell {
     /// The panel's Stop button, which the turn running looks at between
     /// calls.
     assistant_stop_flag: crate::assistant::StopFlag,
+    /// Whether the Undo History panel shows (WP-6.28): view state, never
+    /// part of the set, like the browser's.
+    undo_history_open: bool,
     /// What the Arrangement View shows (WP-1.8a).
     arrangement: ArrangementView,
     /// What the Clip View shows (WP-2.3): whether it's open, Draw Mode, and
@@ -882,7 +894,12 @@ impl Shell {
             midi_output,
             &prefs.midi,
         );
-        let browser_view = BrowserView::new(&prefs.browser, Waker::default());
+        let mut browser_view = BrowserView::new(&prefs.browser, Waker::default());
+        // Spec: browser-tags R1. The browser's database holds the index of
+        // the places' files, the tags, and the items that carry them.
+        if let Some(dir) = &config_dir {
+            browser_view.open_database(dir.join(crate::settings::BROWSER_DATABASE_FILE));
+        }
         audio.set_preview_gain(prefs.browser.preview_volume as f32);
         // Spec: file-management R1. A saved default set is what a new set
         // starts from; without one, the factory default set.
@@ -934,6 +951,8 @@ impl Shell {
             editor,
             saved,
             set_path: None,
+            pending_name: None,
+            import_report: None,
             dirty: false,
             store,
             audio,
@@ -972,6 +991,7 @@ impl Shell {
             assistant_open: false,
             assistant_conversation: Arc::default(),
             assistant_stop_flag: Arc::default(),
+            undo_history_open: false,
             arrangement: ArrangementView::new(),
             clip_view: ClipView::default(),
             file_manager: FileManager::default(),
@@ -1472,6 +1492,42 @@ impl Shell {
         }
     }
 
+    /// Whether the Undo History panel shows (WP-6.28).
+    #[must_use]
+    pub fn undo_history_open(&self) -> bool {
+        self.undo_history_open
+    }
+
+    /// The Undo History panel's state, for the command's result.
+    #[must_use]
+    pub fn undo_history_state(&self) -> bl_shell_spec::commands::UndoHistoryState {
+        let editor = self.editor();
+        bl_shell_spec::commands::UndoHistoryState {
+            open: self.undo_history_open,
+            steps: editor.undo_history().len() + editor.redo_history().len(),
+            current: editor.current_index(),
+        }
+    }
+
+    /// The history's rows, from the top: the steps that can be redone
+    /// first, then the ones that can be undone.
+    #[must_use]
+    pub fn undo_history_rows(&self) -> Vec<bl_model::HistoryStep> {
+        self.editor.history()
+    }
+
+    /// The bottom row of the Undo History panel: the set's start, which no
+    /// step undoes. A set made new reads "New Beatlayer Set", and one
+    /// opened from a file "Open Beatlayer Set".
+    #[must_use]
+    pub fn set_start_label(&self) -> &'static str {
+        if self.set_path().is_some() {
+            "Open Beatlayer Set"
+        } else {
+            "New Beatlayer Set"
+        }
+    }
+
     /// The flag Stop sets, for a host that runs a turn while it also takes
     /// the person's clicks: setting it ends the turn between two calls, as
     /// `assistant.stop` does.
@@ -1508,7 +1564,8 @@ impl Shell {
     /// assistant loop closes with [`Shell::end_assistant_turn`]
     /// (WP-2.23, part 2).
     pub(crate) fn begin_assistant_turn(&mut self, label: &str) {
-        self.editor.begin(label.to_owned());
+        self.editor
+            .begin_by(bl_model::Maker::Assistant, label.to_owned());
     }
 
     /// Closes the turn's undo step, keeping whatever ran.
@@ -1803,7 +1860,11 @@ impl Shell {
             .as_deref()
             .and_then(Path::file_stem)
             .map_or_else(
-                || "Untitled".to_owned(),
+                || {
+                    self.pending_name
+                        .clone()
+                        .unwrap_or_else(|| "Untitled".to_owned())
+                },
                 |s| s.to_string_lossy().into_owned(),
             )
     }
@@ -2373,6 +2434,9 @@ impl Shell {
     /// Lets go of the plug-ins of the set being replaced (WP-2.6): the new
     /// set's plug-in devices load their plug-ins from their saved state.
     fn set_replaced(&mut self) {
+        // What a DAWproject import said about the set that's gone (R11, R12).
+        self.pending_name = None;
+        self.import_report = None;
         // A file still being written was for the set that's gone: its worker
         // deletes it when it finds nobody waiting (WP-4.20).
         self.processed.clear();
@@ -4022,6 +4086,11 @@ impl Shell {
         if let Some(error) = polled.error {
             self.set_message(error, true);
         }
+        // Spec: browser-tags R3. A database that couldn't be read is set
+        // aside and a new one is built; the Status Bar says so.
+        if let Some(message) = self.browser_view.take_message() {
+            self.set_message(message, true);
+        }
         let mut changed = polled.changed | self.poll_processed() | self.poll_stems();
         // Spec: multisampler R73. The autosampler makes one sample at a
         // time, so the dialog sees its progress and Cancel stops it.
@@ -4274,6 +4343,9 @@ impl Shell {
         if outcome.show_browser {
             self.browser = true;
         }
+        if let Some(message) = outcome.message {
+            self.set_message(message, false);
+        }
         if outcome.focus {
             self.focused_window = WindowKind::Main;
             self.focused_area = Area::Browser;
@@ -4308,20 +4380,22 @@ impl Shell {
 
     /// Runs a command as [`Shell::run`] does, recording what it changes in
     /// the set as one undo step named `label`, such as an agent's edit
-    /// labelled with the agent's name. A command that changes nothing in
-    /// the set records nothing. Undo and redo can't be labelled, nor can a
-    /// command that replaces the set (opening or making one).
+    /// labelled with the agent's name, and made by `maker`, so the history
+    /// says who made it. A command that changes nothing in the set records
+    /// nothing. Undo and redo can't be labelled, nor can a command that
+    /// replaces the set (opening or making one).
     ///
     /// # Errors
     ///
     /// As [`Shell::run`]; the set is unchanged.
     pub fn run_labelled(
         &mut self,
+        maker: bl_model::Maker,
         label: impl Into<std::borrow::Cow<'static, str>>,
         id: &str,
         args: Value,
     ) -> Result<Value, ShellError> {
-        let labelled = !matches!(id, model::UNDO | model::REDO)
+        let labelled = !matches!(id, model::UNDO | model::REDO | model::GO_TO_STEP)
             && (model::handles(id)
                 || audio_ids::handles(id)
                 || freeze_ids::handles(id)
@@ -4340,7 +4414,7 @@ impl Shell {
         if !labelled || self.edit_gesture.is_some() {
             return self.run(id, args);
         }
-        self.editor.begin(label);
+        self.editor.begin_by(maker, label);
         let result = self.run(id, args);
         if result.is_ok() {
             if self.editor.commit().unwrap_or(false) {
@@ -5444,7 +5518,7 @@ impl Shell {
                         }
                         contexts.push(Context::DeviceView);
                     }
-                    Area::ControlBar | Area::StatusBar | Area::Assistant => {}
+                    Area::ControlBar | Area::StatusBar | Area::Assistant | Area::UndoHistory => {}
                 }
                 if self.prefs.tab_navigation {
                     contexts.push(Context::TabFocus);
@@ -5484,6 +5558,7 @@ impl Shell {
             ),
             ids::VIEW_TOGGLE_INFO_VIEW => Some(self.info_view),
             assistant_ids::VIEW_TOGGLE_ASSISTANT => Some(self.assistant_open),
+            ids::VIEW_TOGGLE_UNDO_HISTORY => Some(self.undo_history_open),
             ids::VIEW_TOGGLE_PLUG_IN_WINDOWS => Some(self.plug_in_windows),
             ids::FOCUS_TOGGLE_TAB_NAVIGATION => Some(self.prefs.tab_navigation),
             ids::FOCUS_TOGGLE_WRAP_NAVIGATION => Some(self.prefs.wrap_navigation.0),
@@ -6720,17 +6795,19 @@ impl Shell {
     /// each with the macro law's follow-ups (macros spec, R6, R7, R11 and
     /// R13), as [`Shell::run`] does for one. The agent's `run` tool calls it
     /// for a batch of edits, so a macro moves the same way through the agent
-    /// API as through a gesture.
+    /// API as through a gesture. The step is made by `maker`, so the history
+    /// says who made it.
     ///
     /// # Errors
     ///
     /// [`ShellError`] saying which step failed and why; the set is unchanged.
     pub fn run_document_edits(
         &mut self,
+        maker: bl_model::Maker,
         label: &str,
         steps: &[(String, Value)],
     ) -> Result<(Vec<Value>, bool), ShellError> {
-        self.editor.begin(label.to_owned());
+        self.editor.begin_by(maker, label.to_owned());
         let start = self.editor.document().clone();
         let mut results = Vec::with_capacity(steps.len());
         for (index, (id, args)) in steps.iter().enumerate() {
@@ -7609,6 +7686,9 @@ impl Shell {
         if midi_ids::handles(id) {
             return self.run_midi_files(id, args);
         }
+        if dawproject_ids::handles(id) {
+            return self.run_dawproject(id, args);
+        }
         if midi_io_ids::handles(id) {
             return self.run_midi_io(id, args);
         }
@@ -7751,6 +7831,93 @@ impl Shell {
         };
         self.touch();
         Ok(result)
+    }
+
+    /// Runs a DAWproject command (WP-6.36): opening a `.dawproject` file as
+    /// a new set, or reading back the report of the last import.
+    ///
+    /// Spec: dawproject R10 to R12. The import is refused while the open
+    /// set has unsaved changes; the reading, the extracting and the building
+    /// run on a worker thread; the set changes only when the new set is
+    /// whole, and a failure leaves the open set as it was.
+    fn run_dawproject(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        let failed = |message: String| ShellError::Failed {
+            command: id.to_owned(),
+            message,
+        };
+        let unavailable = |reason: &str| ShellError::Unavailable {
+            command: id.to_owned(),
+            reason: reason.to_owned(),
+        };
+        match id {
+            dawproject_ids::IMPORT_DAWPROJECT => {
+                let args = Self::args::<dawproject_ids::ImportDawProjectArgs>(id, args)?;
+                if self.dirty {
+                    return Err(unavailable(
+                        "the set has unsaved changes; save them with `set.save` or \
+                         `set.save_as`, or throw them away with `set.discard_changes`, first",
+                    ));
+                }
+                let path = PathBuf::from(&args.path);
+                let folder = crate::dawproject::import_folder(&self.temporary_folder(), &path);
+                let warp_mode = crate::auto_warp::warp_mode(self.prefs.warp.default_warp_mode);
+                let mut job = crate::dawproject::Job::start(&path, &folder, warp_mode)
+                    .map_err(|error| failed(error.to_string()))?;
+                // An agent's call returns when the new set is open (R10).
+                let imported = loop {
+                    if let Some(result) = job.poll() {
+                        break result;
+                    }
+                    self.set_message(
+                        format!("Importing {} ({}%)", path.display(), job.percent()),
+                        false,
+                    );
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                };
+                let imported = imported.map_err(|error| {
+                    self.set_message(error.to_string(), true);
+                    failed(error.to_string())
+                })?;
+                // The set changes only when the new set is whole.
+                self.store.close();
+                for (hash, at, size) in &imported.media {
+                    self.store.add_media(*hash, at, *size);
+                    let hash = bl_media::ContentHash::from_bytes(hash.0);
+                    if self.media.entry(hash).is_none() {
+                        let _ = self.media.import(at);
+                    }
+                }
+                self.saved = snapshot(&imported.editor);
+                self.set_replaced();
+                self.editor = imported.editor;
+                self.set_path = None;
+                // Spec: dawproject R11. Until the set is first saved its
+                // name is the file's name without `.dawproject`.
+                self.pending_name = path
+                    .file_stem()
+                    .map(|stem| stem.to_string_lossy().into_owned());
+                self.dirty = false;
+                self.message = None;
+                self.arrangement.reset();
+                self.clip_view.forget_selection();
+                self.mixer.reset();
+                self.session.reset();
+                self.new_set_transport();
+                self.document_changed();
+                self.set_file_changed();
+                self.import_report = Some(imported.report.clone());
+                Ok(to_value(&dawproject_ids::ImportDawProjectResult {
+                    name: self.set_name(),
+                    report: imported.report,
+                }))
+            }
+            dawproject_ids::IMPORT_REPORT => {
+                Self::args::<NoArgs>(id, args)?;
+                let report = self.import_report.clone().unwrap_or_default();
+                Ok(to_value(&report))
+            }
+            _ => Err(ShellError::UnknownCommand(id.to_owned())),
+        }
     }
 
     /// Runs a Standard MIDI File command (WP-2.21): importing a file into the
@@ -8570,8 +8737,17 @@ impl Shell {
                         .state(self.editor.document(), &self.arrangement),
                     plugin_list: self.plugin_list.state(),
                     assistant: self.assistant_panel_state(),
+                    undo_history: self.undo_history_open,
                     plug_in_windows: self.plug_in_windows,
                 }))
+            }
+            ids::VIEW_TOGGLE_UNDO_HISTORY => {
+                // Spec: undo-history R1, R3. The panel is view state: it
+                // isn't saved with the set and isn't an undo step.
+                Self::args::<NoArgs>(id, args)?;
+                self.undo_history_open = !self.undo_history_open;
+                self.touch();
+                Ok(to_value(&self.undo_history_state()))
             }
             ids::VIEW_TOGGLE_INFO_VIEW => {
                 Self::args::<NoArgs>(id, args)?;

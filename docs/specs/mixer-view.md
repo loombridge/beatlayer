@@ -148,7 +148,6 @@ This spec covers the mixer's placement in both views, the controls in a strip an
 Drawn in place, disabled, and saying what brings them:
 
 - In the In/Out section, the audio interface's channels, Ext. Out, and Main's Cue Out and Main Out (WP-2.13) and MIDI ports and the computer keyboard (WP-2.2), the rest being live since WP-2.19 ([routing](routing.md)); the returns' own sends (with the track context menu); the Main strip's cue volume and Solo/Cue button (Phase 3), and Performance Impact with its menu item (Phase 5).
-- The Arrangement Track Controls submenu's In/Out, Volume and Return Tracks: WP-6.64 ([arrangement-view.md](arrangement-view.md) R20 to R23).
 - The Exclusive Solo and Exclusive Arm switches, on the Record, Warp & Launch settings page, which isn't built: Beatlayer behaves as Live's settings are, both on (R20).
 - Dragging the mixer taller with the extended meters (I-DRAG-030, L-MIX-008) and resizing a column's width (I-DRAG-004): WP-6.65 (R32 to R39). The Session View's clip slots, scenes, title-bar selection, and status row came with M3.
 - Renaming tracks' default names when they're grouped (observed: the group's tracks renumber their names too), which comes with grouping (Cmd-G, S-TRACK-006).

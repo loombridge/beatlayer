@@ -338,6 +338,10 @@ impl Importer<'_, '_> {
             // Colours wait for WP-6.36b (R23).
             self.report.add("a colour", &place, "left out");
         }
+        if source.info.comment.is_some() {
+            // Comments aren't kept, and are counted in the report (R20).
+            self.report.add("a comment", &place, "left out");
+        }
         let content_unit = source.content_time_unit.unwrap_or(unit);
         let Some(content) = self.resolve_content(source, &place) else {
             return Vec::new();

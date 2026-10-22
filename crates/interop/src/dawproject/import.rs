@@ -505,8 +505,9 @@ impl Importer<'_, '_> {
                 }
             }
         }
-        let mut placed: Vec<(Ticks, TimeSignature)> = Vec::new();
-        for (time, numerator, denominator, unit) in points {
+        // Each point, its place and the order it came in the file.
+        let mut placed: Vec<(Ticks, TimeSignature, usize)> = Vec::new();
+        for (points_index, (time, numerator, denominator, unit)) in points.into_iter().enumerate() {
             let Some(time) = time else { continue };
             let Some(signature) = self.signature(
                 numerator.and_then(|n| u8::try_from(n).ok()),
@@ -523,15 +524,22 @@ impl Importer<'_, '_> {
                 TimeUnit::Seconds => self.seconds_to_ticks(self.tempo.clone(), time),
                 TimeUnit::Beats => beats_to_ticks(time),
             };
-            if let Some(last) = placed.last_mut()
+            placed.push((at, signature, points_index));
+        }
+        // The points in the order the map holds them: by their place, and of
+        // two at one tick the later in the file wins (R14).
+        placed.sort_by(|a, b| a.0.cmp(&b.0).then(a.2.cmp(&b.2)));
+        let mut unique: Vec<(Ticks, TimeSignature)> = Vec::new();
+        for (at, signature, _) in placed {
+            if let Some(last) = unique.last_mut()
                 && last.0 == at
             {
                 *last = (at, signature);
             } else {
-                placed.push((at, signature));
+                unique.push((at, signature));
             }
         }
-        for (at, signature) in placed {
+        for (at, signature) in unique {
             if at == Ticks::ZERO {
                 changes[0].signature = signature;
             } else {
@@ -608,7 +616,7 @@ impl Importer<'_, '_> {
                 return;
             }
             self.master_seen = true;
-            self.make_main(track, channel, &place);
+            self.make_main(track, channel);
             return;
         }
         if role == MixerRole::Vca {
@@ -678,6 +686,10 @@ impl Importer<'_, '_> {
             // Colours wait for WP-6.36b (R23).
             self.report.add("a colour", place, "left out");
         }
+        if track.info.comment.is_some() {
+            // Comments aren't kept, and are counted in the report (R20).
+            self.report.add("a comment", place, "left out");
+        }
         if track.loaded == Some(false) {
             // A track that isn't loaded has its Track Activator off (R20).
             self.apply(bl_model::Command::SetMute {
@@ -725,15 +737,10 @@ impl Importer<'_, '_> {
     }
 
     /// The master channel becomes Main (R18).
-    fn make_main(&mut self, track: &model::Track, channel: Option<Channel>, place: &str) {
+    fn make_main(&mut self, track: &model::Track, channel: Option<Channel>) {
         let main = self.editor.document().main_id();
-        if let Some(channel) = &channel {
-            if channel.mute.as_ref().and_then(|mute| mute.value) == Some(true) {
-                // Main has no activator (R18).
-                self.report.add("a muted master channel", place, "left out");
-            }
-            self.report_devices(channel, place);
-        }
+        // The channel's mute, solo, volume, pan and devices are handled by
+        // the mixer pass, which lists what Main can't hold (R18).
         let made = Made {
             id: main,
             kind: TrackKind::Main,
@@ -768,7 +775,6 @@ impl Importer<'_, '_> {
                         children: Vec::new(),
                     },
                     Some(channel.clone()),
-                    &place,
                 );
                 return;
             }
@@ -910,16 +916,28 @@ impl Importer<'_, '_> {
                 });
             }
             if channel.mute.as_ref().and_then(|mute| mute.value) == Some(true) {
-                self.apply(bl_model::Command::SetMute {
-                    track: track.id,
-                    mute: true,
-                });
+                if track.kind == TrackKind::Main {
+                    // Main has no activator (R18).
+                    self.report
+                        .add("a muted master channel", &place, "left out");
+                } else {
+                    self.apply(bl_model::Command::SetMute {
+                        track: track.id,
+                        mute: true,
+                    });
+                }
             }
             if channel.solo == Some(true) {
-                self.apply(bl_model::Command::SetSolo {
-                    track: track.id,
-                    solo: true,
-                });
+                if track.kind == TrackKind::Main {
+                    // Main can't be soloed (R18).
+                    self.report
+                        .add("a soloed master channel", &place, "left out");
+                } else {
+                    self.apply(bl_model::Command::SetSolo {
+                        track: track.id,
+                        solo: true,
+                    });
+                }
             }
             if track.kind == TrackKind::Audio && channel.audio_channels.is_some_and(|n| n != 2) {
                 // Beatlayer's tracks are stereo (R20).
@@ -1416,6 +1434,11 @@ impl Importer<'_, '_> {
             if scene.info.color.is_some() {
                 self.report
                     .add("a colour", &scene_place_of(scene, index), "left out");
+            }
+            if scene.info.comment.is_some() {
+                // Comments aren't kept, and are counted in the report (R20).
+                self.report
+                    .add("a comment", &scene_place_of(scene, index), "left out");
             }
             if let Some(name) = &scene.info.name {
                 self.apply(bl_model::Command::RenameScene {

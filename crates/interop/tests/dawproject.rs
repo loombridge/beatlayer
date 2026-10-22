@@ -263,6 +263,37 @@ fn import_of(name: &str) -> dawproject::Imported {
     dawproject::import(&container, &Context::new(&folder, &folder)).unwrap()
 }
 
+/// A container holding `project.xml` only, with the XML in it.
+fn container_of(xml: &str) -> Vec<u8> {
+    use std::io::Write;
+
+    let mut bytes = Vec::new();
+    let mut writer = zip::ZipWriter::new(std::io::Cursor::new(&mut bytes));
+    writer
+        .start_file("project.xml", zip::write::SimpleFileOptions::default())
+        .unwrap();
+    writer.write_all(xml.as_bytes()).unwrap();
+    writer.finish().unwrap();
+    bytes
+}
+
+/// A file with the given XML in it imports to.
+fn import_xml(xml: &str) -> dawproject::Imported {
+    let container = dawproject::read_container(&container_of(xml)).unwrap();
+    let folder = fixtures();
+    dawproject::import(&container, &Context::new(&folder, &folder)).expect("the file imports")
+}
+
+/// The entries of an import's report that say `what`.
+fn entries_with<'a>(imported: &'a dawproject::Imported, what: &str) -> Vec<&'a dawproject::Entry> {
+    imported
+        .report
+        .entries
+        .iter()
+        .filter(|entry| entry.what == what)
+        .collect()
+}
+
 /// A track's clips in order of their start.
 fn clips_of<'a>(document: &'a bl_model::Document, name: &str) -> Vec<&'a bl_model::Clip> {
     let mut clips: Vec<_> = track(document, name).clips().collect();
@@ -471,18 +502,84 @@ fn imported_scene_count(name: &str) -> usize {
     import_of(name).project.document.scenes().count()
 }
 
-/// A container holding `project.xml` only.
-fn container_of(xml: &str) -> Vec<u8> {
-    use std::io::Write;
+/// A muted or a soloed master channel is listed, and the file still imports
+/// (R18): Main has no activator and can't be soloed.
+#[test]
+fn a_muted_or_soloed_master_channel_is_listed_and_the_file_still_imports() {
+    let file = |channel: &str| {
+        format!(
+            r#"<?xml version="1.0"?>
+<Project version="1.0"><Application name="t" version="1"/>
+<Transport><Tempo unit="bpm" value="120" id="tempo"/></Transport>
+<Structure>
+<Track contentType="audio" id="a" name="A"><Channel role="regular" id="ca"/></Track>
+<Track contentType="audio" id="m" name="Master"><Channel role="master" id="cm">{channel}</Channel></Track>
+</Structure>
+<Arrangement id="a2"><Lanes id="all"/></Arrangement><Scenes/></Project>"#
+        )
+    };
+    let muted = import_xml(&file(r#"<Mute value="true" id="mm"/>"#));
+    assert_eq!(entries_with(&muted, "a muted master channel").len(), 1);
+    let soloed = import_xml(&file(r#"<Mute value="false" id="mm"/>"#));
+    assert!(entries_with(&soloed, "a muted master channel").is_empty());
+}
 
-    let mut bytes = Vec::new();
-    let mut writer = zip::ZipWriter::new(std::io::Cursor::new(&mut bytes));
-    writer
-        .start_file("project.xml", zip::write::SimpleFileOptions::default())
-        .unwrap();
-    writer.write_all(xml.as_bytes()).unwrap();
-    writer.finish().unwrap();
-    bytes
+/// A device on the master channel is listed once, not twice (R12).
+#[test]
+fn a_device_on_the_master_channel_is_listed_once() {
+    let imported = import_xml(
+        r#"<?xml version="1.0"?>
+<Project version="1.0"><Application name="t" version="1"/>
+<Transport><Tempo unit="bpm" value="120" id="tempo"/></Transport>
+<Structure>
+<Track contentType="audio" id="a" name="A"><Channel role="regular" id="ca"/></Track>
+<Track contentType="audio" id="m" name="Master"><Channel role="master" id="cm"><Devices><ClapPlugin id="d1" deviceID="x" deviceRole="audioFX"/></Devices></Channel></Track>
+</Structure>
+<Arrangement id="a2"><Lanes id="all"/></Arrangement><Scenes/></Project>"#,
+    );
+    let listed = entries_with(&imported, "a CLAP plug-in");
+    assert_eq!(listed.len(), 1, "the plug-in was listed more than once");
+    assert_eq!(listed[0].place, "the track \"Main\"");
+}
+
+/// The signature changes are all kept when the file lists them out of time
+/// order (R14).
+#[test]
+fn signature_changes_out_of_time_order_are_kept() {
+    let imported = import_xml(
+        r#"<?xml version="1.0"?>
+<Project version="1.0"><Application name="t" version="1"/>
+<Transport><Tempo unit="bpm" value="120" id="tempo"/><TimeSignature numerator="4" denominator="4" id="sig"/></Transport>
+<Structure><Track contentType="notes" id="b" name="B"/></Structure>
+<Arrangement id="a"><TimeSignatureAutomation id="tsa"><Target parameter="sig"/>
+<TimeSignaturePoint time="8" numerator="5" denominator="4"/>
+<TimeSignaturePoint time="4" numerator="3" denominator="4"/>
+</TimeSignatureAutomation>
+<Lanes id="all"/></Arrangement><Scenes/></Project>"#,
+    );
+    let changes: Vec<_> = imported
+        .project
+        .document
+        .settings()
+        .time_signatures
+        .changes()
+        .collect();
+    assert_eq!(changes.len(), 3, "a signature change was lost: {changes:?}");
+    assert_eq!(changes[1].signature.numerator(), 3);
+    assert_eq!(changes[2].signature.numerator(), 5);
+}
+
+/// A comment isn't kept, and is counted in the report (R20).
+#[test]
+fn a_comment_is_counted_in_the_report() {
+    let imported = import_xml(
+        r#"<?xml version="1.0"?>
+<Project version="1.0"><Application name="t" version="1"/>
+<Transport><Tempo unit="bpm" value="120" id="tempo"/></Transport>
+<Structure><Track contentType="notes" id="b" name="B" comment="a note"/></Structure>
+<Arrangement id="a"><Lanes id="all"/></Arrangement><Scenes/></Project>"#,
+    );
+    assert_eq!(entries_with(&imported, "a comment").len(), 1);
 }
 
 /// A time in beats and the same time in seconds become one tick through the

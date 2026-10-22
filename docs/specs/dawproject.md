@@ -176,15 +176,15 @@ The fixtures are written by `tests/fixtures/gen/gen_dawproject.py` into `tests/f
 | R9 | a_clip_in_seconds_starts_where_the_same_clip_in_beats_does | unit, property |
 | R10 | an_import_opens_the_file_as_a_new_set | unit, agent test |
 | R11 | an_import_opens_the_file_as_a_new_set | unit |
-| R12 | the_report_is_read_back_while_the_imported_set_is_open | unit, agent test |
+| R12 | the_report_is_read_back_while_the_imported_set_is_open, a_device_on_the_master_channel_is_listed_once | unit, agent test |
 | R13 | an_imported_tempo_map_holds_the_ramp_the_file_asks_for | unit |
-| R14 | every_fixture_gives_the_report_it_should | unit |
+| R14 | every_fixture_gives_the_report_it_should, signature_changes_out_of_time_order_are_kept | unit |
 | R15 | tracks_mixer_and_routing_follow_the_file | unit |
 | R16 | tracks_mixer_and_routing_follow_the_file | unit |
 | R17 | tracks_mixer_and_routing_follow_the_file | unit |
-| R18 | every_fixture_gives_the_report_it_should | unit |
+| R18 | every_fixture_gives_the_report_it_should, a_muted_or_soloed_master_channel_is_listed_and_the_file_still_imports | unit |
 | R19 | the_imported_set_renders_the_same_samples_as_the_set_built_by_commands | unit, golden render |
-| R20 | every_fixture_gives_the_report_it_should | unit |
+| R20 | every_fixture_gives_the_report_it_should, a_comment_is_counted_in_the_report | unit |
 | R21 | tracks_mixer_and_routing_follow_the_file | unit |
 | R22 | the_imported_set_renders_the_same_samples_as_the_set_built_by_commands | unit, golden render |
 | R23 | to be written in WP-6.36b (reading) and WP-6.37 (writing) | unit |

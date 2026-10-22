@@ -1,7 +1,8 @@
 //! The Arrangement View's view commands in the command registry (WP-1.8a;
 //! decisions D16 and D17): zoom, scroll, Follow, the editing grid, the
 //! Overview, track heights and folding, the insert marker, and the
-//! selection the zoom commands work from.
+//! selection the zoom commands work from; and, from WP-6.64, which of the
+//! track headers' controls show.
 //!
 //! These change only what the Arrangement View shows, never the set, so
 //! every one is in the read class. [`register`] adds their specs, which are
@@ -78,6 +79,13 @@ pub const AUTOMATION_ARM: &str = "arrangement.automation_arm";
 /// `arrangement.show_automation`: choose the parameter a track's automation
 /// lane shows, or hide the lane.
 pub const SHOW_AUTOMATION: &str = "arrangement.show_automation";
+/// `arrangement.show_in_out`: show or hide the track headers' In/Out column.
+pub const SHOW_IN_OUT: &str = "arrangement.show_in_out";
+/// `arrangement.show_volume`: show or hide the track headers' volume, pan,
+/// and sends.
+pub const SHOW_VOLUME: &str = "arrangement.show_volume";
+/// `arrangement.show_return_tracks`: show or hide the return tracks' rows.
+pub const SHOW_RETURN_TRACKS: &str = "arrangement.show_return_tracks";
 
 /// Every command [`register`] adds, so a host knows which IDs to send to
 /// `bl-shell`'s `Shell::run`.
@@ -110,6 +118,9 @@ pub const IDS: &[&str] = &[
     AUTOMATION_MODE,
     AUTOMATION_ARM,
     SHOW_AUTOMATION,
+    SHOW_IN_OUT,
+    SHOW_VOLUME,
+    SHOW_RETURN_TRACKS,
 ];
 
 /// Whether `id` is one of the Arrangement View's commands.
@@ -367,6 +378,12 @@ pub struct ArrangementState {
     /// `target` `null` means the lane draws no envelope.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub automation_lanes: Vec<AutomationLane>,
+    /// Whether the track headers show their In/Out column.
+    pub show_in_out: bool,
+    /// Whether the track headers show their volume, pan, and sends.
+    pub show_volume: bool,
+    /// Whether the return tracks' rows show in the lanes.
+    pub show_return_tracks: bool,
 }
 
 /// One track's automation lane and the parameter it shows, as
@@ -927,6 +944,35 @@ fn specs() -> Vec<CommandSpec> {
         )
         .contexts([Global, Arrangement])
         .args::<ShowAutomationArgs>(),
+        view(
+            SHOW_IN_OUT,
+            "Arrangement Track Controls In/Out",
+            "Shows or hides the Arrangement's track headers' In/Out column (the input and output \
+             routing and monitoring), as View > Arrangement Track Controls > In/Out does. \
+             Switches unless `on` says which. Changes only the view; the mixers' own In/Out \
+             section is a switch of its own.",
+        )
+        .contexts([Global, Arrangement])
+        .args::<SwitchArgs>(),
+        view(
+            SHOW_VOLUME,
+            "Arrangement Track Controls Volume",
+            "Shows or hides the Arrangement's track headers' volume, pan, and sends, as View > \
+             Arrangement Track Controls > Volume does. Switches unless `on` says which. Changes \
+             only the view; the mixers' own sections are switches of their own.",
+        )
+        .contexts([Global, Arrangement])
+        .args::<SwitchArgs>(),
+        view(
+            SHOW_RETURN_TRACKS,
+            "Arrangement Track Controls Return Tracks",
+            "Shows or hides the return tracks' rows in the Arrangement's lanes, as View > \
+             Arrangement Track Controls > Return Tracks does. Switches unless `on` says which. \
+             Changes only the view; the returns play as before, and the mixers' own Return Tracks \
+             section is a switch of its own.",
+        )
+        .contexts([Global, Arrangement])
+        .args::<SwitchArgs>(),
     ]
 }
 

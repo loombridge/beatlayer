@@ -34,6 +34,7 @@ use crate::session::FollowTable;
 use crate::session::{SceneMaps, SceneOverride};
 use crate::sidechain::{self, SidechainKey};
 use crate::sources::{ClipSources, Loaded, Loader};
+use crate::warped::PoolSpec;
 use crate::zones::{self, ChainSelector, ZoneFilter};
 
 /// What the audio thread needs after an edit: a new program if the edit
@@ -171,6 +172,10 @@ pub struct Compiler {
     scene_override: SceneOverride,
     layout: BTreeMap<NodeKey, Placed>,
     sources: ClipSources,
+    /// The stretcher pool each track's player holds, by track (WP-4.6, R5,
+    /// R21): what the last list it was sent left it with, so a list that
+    /// still fits carries none and the player keeps it.
+    pool_specs: BTreeMap<TrackId, PoolSpec>,
     /// The long layers being read in the background (WP-5.13, R23), by
     /// media, so an edit that sends the layers again shares them rather
     /// than reading each file again. A sample goes when no node holds it.
@@ -229,6 +234,7 @@ impl Compiler {
             scene_override: SceneOverride::default(),
             layout: BTreeMap::new(),
             sources: ClipSources::default(),
+            pool_specs: BTreeMap::new(),
             progressive: BTreeMap::new(),
             modulator_rows: crate::modbus::ModRows::default(),
             displays: Displays::default(),
@@ -446,6 +452,19 @@ impl Compiler {
                     self.gc.data(crate::modbus::Shape(shape)),
                 ));
             }
+            // Spec: articulation-map R14. An Articulation Map's list reaches
+            // its node as node data, so a change to it reaches the playing
+            // device without a new program.
+            if let (Change::Modified, Some(before), Some(after)) =
+                (change, old.device(id), document.device(id))
+                && before.articulations != after.articulations
+            {
+                let list = bl_model::ArticulationList::of(&after.articulations);
+                update.data.push((
+                    NodeKey::Device(id),
+                    self.gc.data(crate::node::Articulations(list)),
+                ));
+            }
         }
         for track in document.tracks() {
             let id = track.id();
@@ -644,6 +663,7 @@ impl Compiler {
     ) {
         let loop_start = self.loop_start_frame(document);
         let previous = previous.and_then(|last| last.track(track.id()));
+        let pool = self.pool_specs.get(&track.id()).copied();
         let built = ClipList::build(
             track,
             previous,
@@ -651,9 +671,11 @@ impl Compiler {
             self.config.sample_rate,
             self.config.channels,
             loop_start,
+            pool,
             &mut self.sources,
             self.registry.media(),
         );
+        self.pool_specs.insert(track.id(), built.pool);
         update.missing.extend(built.missing);
         update.missing.sort_unstable();
         update.missing.dedup();
@@ -1153,6 +1175,11 @@ impl Compiler {
             |track| document.track(track).is_some() && !build.new_players.contains(&track),
             |clip| document.clip_track(clip).is_some(),
         );
+        // A track that went, or whose player is new and so holds nothing,
+        // keeps no pool spec: the next list it is sent builds its pool.
+        self.pool_specs.retain(|track, _| {
+            document.track(*track).is_some() && !build.new_players.contains(track)
+        });
         // A new player gets its track's clips if it has any, in the
         // Arrangement or in a Session slot; a player that migrated keeps its
         // own unless they changed, or the tempo map moved them.
@@ -1271,6 +1298,7 @@ impl Compiler {
         self.original = None;
         self.layout.clear();
         self.sources.reset();
+        self.pool_specs.clear();
     }
 
     /// The slot of the route that carries `edge` into `to`: made with the

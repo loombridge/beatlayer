@@ -305,6 +305,24 @@ fn clip_of(
         .ok_or_else(|| unavailable("no audio clip is shown in the Clip View"))
 }
 
+/// The MIDI clip a command acts on, when the arguments name one or the
+/// Clip View shows one: the note editor's own insert marker and time
+/// selection (piano-roll R23, R24, R31).
+fn midi_target(
+    doc: &Document,
+    view: &ClipView,
+    arrangement: &ArrangementView,
+    args: &serde_json::Value,
+) -> Option<ClipId> {
+    let named = args
+        .get("clip")
+        .and_then(|clip| serde_json::from_value::<ClipId>(clip.clone()).ok());
+    let clip = named.or_else(|| view.shown_any_clip(doc, arrangement))?;
+    doc.clip(clip)
+        .is_some_and(|value| matches!(value.data, ClipData::Midi(_)))
+        .then_some(clip)
+}
+
 /// Runs a Sample Editor command (`clip_view.select_warp_markers` and its
 /// siblings), which change only the view.
 ///
@@ -378,6 +396,11 @@ pub fn run(
             Ok(report(view, clip))
         }
         ids::SET_INSERT_MARKER => {
+            // A MIDI clip's editor has an insert marker and a time
+            // selection of its own (piano-roll R23, R24, R31).
+            if midi_target(doc, view, arrangement, &args).is_some() {
+                return crate::clip_view::run_view(id, args, doc, view, arrangement);
+            }
             let SetInsertMarkerArgs { clip, time, beat } = parse(args)?;
             let clip = clip_of(doc, view, arrangement, clip)?;
             let audio = audio_of(doc, clip)?;
@@ -409,6 +432,11 @@ pub fn run(
             Ok(report(view, clip))
         }
         ids::SELECT_TIME => {
+            // A MIDI clip's editor has an insert marker and a time
+            // selection of its own (piano-roll R23, R24, R31).
+            if midi_target(doc, view, arrangement, &args).is_some() {
+                return crate::clip_view::run_view(id, args, doc, view, arrangement);
+            }
             let SelectTimeArgs {
                 clip,
                 start,

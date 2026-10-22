@@ -539,6 +539,46 @@ fn peak_id(place: Place, track: TrackId) -> Id {
     Id::new(("mixer-peak", place, track))
 }
 
+// Spec: arrangement-view R24; accessibility R4.
+#[test]
+fn the_hidden_track_controls_leave_the_tab_order() {
+    let (mut h, tracks, _) = set();
+    tab_navigation_on(&mut h);
+    press(&mut h, Key::Num2, Modifiers::ALT);
+    h.shell
+        .run(
+            "arrangement.select_tracks",
+            json!({ "tracks": [tracks[2]] }),
+        )
+        .unwrap();
+    h.settle();
+    use bl_shell::mixer_controls::Switch;
+    let header = |switch| switch_id(Place::Header, switch, tracks[2]);
+    // The In/Out choosers, the volume, the pan, and the sends are hidden:
+    // they leave the Tab order, and the rest of the header's controls stay
+    // in it.
+    for id in [
+        "arrangement.show_in_out",
+        "arrangement.show_volume",
+        "arrangement.show_return_tracks",
+    ] {
+        h.shell.run(id, json!({ "on": false })).unwrap();
+    }
+    h.settle();
+    let expected = [
+        title_id(tracks[2]),
+        header(Switch::Activator),
+        header(Switch::Solo),
+        header(Switch::Arm),
+        bl_ui::arrangement::optimize_height_id(),
+        bl_ui::arrangement::optimize_width_id(),
+    ];
+    for want in expected {
+        press(&mut h, Key::Tab, Modifiers::NONE);
+        assert_eq!(focused_id(&h), Some(want));
+    }
+}
+
 // Spec: accessibility R4.
 #[test]
 fn tab_goes_round_a_session_strip_in_live_s_order() {
@@ -1735,7 +1775,27 @@ fn paths() -> BTreeMap<&'static str, Path> {
          the envelopes (S-EDIT-016), and the lane's gestures move and select their breakpoints \
          (automation-editing R2 to R4)",
     );
+    // The browser's tags (browser-tags R10 to R16): the Tag Editor and
+    // Quick Tags reach them.
+    let tag_editor = Equivalent(
+        "the browser's Tag Editor: its check boxes, its Add Tag\u{2026} and Add Group\u{2026} \
+         rows, its context menu's Rename and Delete items, its list's context menu's Reset \
+         Order item, and dragging a tag or a group (the browser tags spec, R10 to R12)",
+    );
+    let quick_tags = Equivalent(
+        "the browser's Quick Tags: its Add\u{2026} field, its X, and its Create New Tag\u{2026} \
+         item (the browser tags spec, R13 and R14)",
+    );
     BTreeMap::from([
+        // The browser's tags (browser-tags R10 to R16).
+        ("browser.add_tag", Exception(tag_editor)),
+        ("browser.add_tag_group", Exception(tag_editor)),
+        ("browser.delete_tag", Exception(tag_editor)),
+        ("browser.move_tag", Exception(tag_editor)),
+        ("browser.rename_tag", Exception(tag_editor)),
+        ("browser.reset_tag_order", Exception(tag_editor)),
+        ("browser.tag_items", Exception(tag_editor)),
+        ("browser.show_quick_tags", Exception(quick_tags)),
         // The Control Bar's transport (control-bar-transport R11).
         ("automation.copy", Exception(envelope_edit)),
         ("automation.cut", Exception(envelope_edit)),
@@ -2097,6 +2157,7 @@ fn paths() -> BTreeMap<&'static str, Path> {
         // Queries.
         ("arrangement.state", Exception(Query)),
         ("browser.state", Exception(Query)),
+        ("browser.tags", Exception(Query)),
         ("mixer_view.state", Exception(Query)),
         ("transport.state", Exception(Query)),
         ("settings.state", Exception(Query)),
@@ -2106,6 +2167,34 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("audio.devices", Exception(Query)),
         ("midi.ports", Exception(Query)),
         ("set.list_recoverable", Exception(Query)),
+        // The File Manager (WP-6.63): its own rows and buttons reach
+        // these, and its views open from the File and View menus.
+        ("file_manager.state", Exception(Query)),
+        ("set.backups", Exception(Query)),
+        (
+            "file_manager.replace_file",
+            Exception(Equivalent("the File Manager's rows (WP-6.63)")),
+        ),
+        (
+            "file_manager.hot_swap",
+            Exception(Equivalent("the File Manager's rows (WP-6.63)")),
+        ),
+        (
+            "file_manager.edit_file",
+            Exception(Equivalent("the File Manager's rows (WP-6.63)")),
+        ),
+        (
+            "file_manager.delete_unused",
+            Exception(Equivalent("the File Manager's rows (WP-6.63)")),
+        ),
+        (
+            "file_manager.set_search_folder",
+            Exception(Equivalent("the File Manager's rows (WP-6.63)")),
+        ),
+        (
+            "set.open_backup",
+            Exception(Equivalent("File ▸ Open Beatlayer Set Backups (WP-6.63)")),
+        ),
         ("keymap.state", Exception(Query)),
         // Agent perception (WP-1.16): how an agent hears and sees the set,
         // which a person does with their own ears and eyes.
@@ -2351,6 +2440,13 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ),
         ("clip.create", Exception(editing)),
         (
+            "edit.go_to_step",
+            Exception(Equivalent(
+                "the Undo History panel's rows: click one, or move to it with the arrow keys \
+                 and press Enter (undo history R6, R8)",
+            )),
+        ),
+        (
             "track.add_take_lane",
             Exception(LaterView(
                 "the take lanes' view and comping (milestone M6); loop recording makes the lanes",
@@ -2410,6 +2506,21 @@ fn paths() -> BTreeMap<&'static str, Path> {
             "track.clear_frozen",
             Exception(Equivalent(
                 "track.unfreeze, the same item read as Unfreeze Track (freeze-and-bounce R10, R13)",
+            )),
+        ),
+        // The bounces' document-level commands (WP-4.15): the three bounce
+        // commands are the ones a person and an agent run, from the menus
+        // and the keys, and they apply these.
+        (
+            "track.set_bounced",
+            Exception(Equivalent(
+                "track.bounce_in_place, from the Edit menu and the track and clip menus (freeze-and-bounce R21, R26)",
+            )),
+        ),
+        (
+            "track.create_bounced_track",
+            Exception(Equivalent(
+                "track.bounce_to_new_track, from the Edit menu, the clip and slot menus, and Cmd-B (freeze-and-bounce R22, R26)",
             )),
         ),
         (
@@ -2525,12 +2636,11 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("clip.set_legato", Exception(clip_launch)),
         ("clip.set_launch_quantization", Exception(clip_launch)),
         ("clip.set_velocity_amount", Exception(clip_launch)),
-        ("clip_view.select_notes", Exception(note_editor)),
         ("note.add", Exception(note_editor)),
-        ("note.delete", Exception(note_editor)),
-        // `note.move` has its own path now: the note-selection keys
-        // transpose the selected notes (S-A11Y-008, S-A11Y-009).
-        ("note.resize", Exception(note_editor)),
+        // `note.move`, `note.resize`, `note.delete` and
+        // `clip_view.select_notes` have keys of their own now: the
+        // note-selection keys (S-A11Y-010, S-A11Y-011), Delete
+        // (S-EDIT-005) and Cmd-A (S-NOTE-001).
         ("note.set_value", Exception(note_editor)),
         ("note.ramp_value", Exception(note_editor)),
         ("view.lane", Exception(note_editor)),
@@ -2592,6 +2702,41 @@ fn paths() -> BTreeMap<&'static str, Path> {
             )),
         ),
         ("device.set_param", Exception(device_params)),
+        // The Articulation Map's list (WP-6.47; the articulation map spec,
+        // R15): its rows are reached by the pointer, and the buttons that
+        // would add, delete and move an articulation are not built; the
+        // spec leaves the panel's own buttons open, so agents reach them.
+        (
+            "articulation.add",
+            Exception(LaterView(
+                "the Articulation Map's list's own button for adding an articulation",
+            )),
+        ),
+        (
+            "articulation.delete",
+            Exception(LaterView(
+                "the Articulation Map's list's own button for deleting an articulation",
+            )),
+        ),
+        (
+            "articulation.move",
+            Exception(LaterView(
+                "the Articulation Map's list's own button for moving an articulation",
+            )),
+        ),
+        (
+            "articulation.set",
+            Exception(Equivalent(
+                "a double-click on a row's name in the Articulation Map's list",
+            )),
+        ),
+        ("articulation.list", Exception(Query)),
+        (
+            "articulation.learn",
+            Exception(Equivalent(
+                "the Learn button in the Articulation Map's list",
+            )),
+        ),
         // Racks (WP-5.1): Group and Ungroup are on Cmd-G and Cmd-Shift-G;
         // the rack's chain list and its controls arrive with the Device
         // View's rack (WP-5.2), until then agents reach them.
@@ -3549,6 +3694,18 @@ fn paths() -> BTreeMap<&'static str, Path> {
                 "the File menu's Export MIDI Clip... dialog, which waits on the file dialogs \
                  (midi-clips R19)",
             )),
+        ),
+        // DAWproject import (WP-6.36): the Open dialog, the browser, a drop
+        // on the window and the report window are WP-6.37b's.
+        (
+            "set.import_dawproject",
+            Exception(LaterView(
+                "the Open dialog, the browser and a drop on the window (WP-6.37b)",
+            )),
+        ),
+        (
+            "set.import_report",
+            Exception(LaterView("the DAWproject Import window (WP-6.37b)")),
         ),
         // The Session View's scenes and slots (WP-3.1): the grid, its
         // context menus, and their keys are WP-3.7's.

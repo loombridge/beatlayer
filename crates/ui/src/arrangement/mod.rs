@@ -337,7 +337,10 @@ impl ArrangementUi {
     ) {
         let doc = shell.editor().document();
         let view = shell.arrangement();
-        let pinned: Vec<TrackId> = bl_shell::arrangement::rows::pinned_tracks(doc).collect();
+        // The pinned rows: the return tracks and Main, with the returns
+        // left out while they're hidden (arrangement-view R23).
+        let pinned: Vec<TrackId> =
+            bl_shell::arrangement::rows::pinned_tracks(doc, view.show_return_tracks()).collect();
         // With its mixer showing, the view splits (WP-1.9; L-ARR-018).
         let layout = if shell
             .mixer_view()
@@ -1218,6 +1221,8 @@ impl ArrangementUi {
                     resizable: !view.optimize_height(),
                     menus: &self.track_menus,
                     keys: keys && selected.first() == Some(&row.track),
+                    show_in_out: view.show_in_out(),
+                    show_volume: view.show_volume(),
                 },
                 &self.every_track,
                 events,
@@ -1228,7 +1233,7 @@ impl ArrangementUi {
                 let lane = Rect::from_min_max(
                     pos2(column.left(), top + row.height),
                     pos2(
-                        column.left() + header_columns::TITLE.1,
+                        column.left() + header_columns::title_width(view.show_in_out()),
                         top + row.height + row.automation,
                     ),
                 );
@@ -1244,6 +1249,7 @@ impl ArrangementUi {
             }
         }
         // The returns and Main, pinned under the lanes (L-ARR-014).
+        let returns = doc.returns().count();
         for (index, id) in pinned.iter().enumerate() {
             let Some(track) = doc.track(*id) else {
                 continue;
@@ -1257,6 +1263,10 @@ impl ArrangementUi {
                 Stroke::new(1.0, theme.colors.lane_line.0),
             );
             let is_selected = selected.contains(id);
+            // A return's own letter, and Main's after the returns
+            // (L-ARR-006), which keep their places while the return tracks
+            // are hidden (R23).
+            let letter = if *id == doc.main_id() { returns } else { index } % 26;
             headers::header(
                 ui,
                 theme,
@@ -1267,7 +1277,7 @@ impl ArrangementUi {
                         pos2(layout.pinned_headers.left(), row.top()),
                         row.max,
                     ),
-                    activator: char::from(b'A' + (index % 26) as u8).to_string(),
+                    activator: char::from(b'A' + letter as u8).to_string(),
                     colour: if track.kind() == TrackKind::Main {
                         theme.colors.control_pressed.0
                     } else {
@@ -1280,6 +1290,8 @@ impl ArrangementUi {
                     resizable: false,
                     menus: &self.track_menus,
                     keys: keys && selected.first() == Some(id),
+                    show_in_out: view.show_in_out(),
+                    show_volume: view.show_volume(),
                 },
                 &[],
                 events,

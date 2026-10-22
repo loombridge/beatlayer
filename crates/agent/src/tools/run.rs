@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 use bl_commands::{CommandSpec, Permission};
 use bl_core::id::Id;
 use bl_model::ChangeSet;
-use bl_model::registry::{self as model, REDO, UNDO};
+use bl_model::registry::{self as model, GO_TO_STEP, REDO, UNDO};
 use bl_shell::permission::{CallPermission, raised_by_arguments};
 pub(crate) use bl_shell::placeholders::resolve_placeholders;
 use schemars::JsonSchema;
@@ -87,7 +87,7 @@ pub(crate) fn definition() -> Value {
 
 /// Whether a command is a document edit, which can run in a batch.
 fn is_edit(id: &str) -> bool {
-    model::handles(id) && id != UNDO && id != REDO
+    model::handles(id) && id != UNDO && id != REDO && id != GO_TO_STEP
 }
 
 /// A command looked up and its arguments made ready.
@@ -362,7 +362,7 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
             let step_label = ctx.step_label(&label);
             let before = ctx.shell.editor().document().clone();
             ctx.shell
-                .run_labelled(step_label.clone(), &step.id, step.args.clone())
+                .run_labelled(ctx.maker(), step_label.clone(), &step.id, step.args.clone())
                 .map(|result| {
                     // An undo step only if this call recorded one: a
                     // command that replaces the set (a new or opened one)
@@ -387,7 +387,7 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
                 .map(|step| (step.id.clone(), step.args.clone()))
                 .collect();
             ctx.shell
-                .run_document_edits(&step_label, &steps)
+                .run_document_edits(ctx.maker(), &step_label, &steps)
                 .map(|(results, changed)| (results, changed.then_some(undo_label)))
                 .map_err(|error| error.to_string())
         };

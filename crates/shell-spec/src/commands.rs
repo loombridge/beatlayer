@@ -94,6 +94,8 @@ pub const VIEW_ZOOM_OUT: &str = "view.zoom_out";
 pub const VIEW_ZOOM_RESET: &str = "view.zoom_reset";
 /// `view.set_zoom`: set the interface zoom to a percentage.
 pub const VIEW_SET_ZOOM: &str = "view.set_zoom";
+/// `view.toggle_undo_history`: show or hide the Undo History panel.
+pub const VIEW_TOGGLE_UNDO_HISTORY: &str = "view.toggle_undo_history";
 /// `focus.control_bar`: move the keyboard focus to the Control Bar.
 pub const FOCUS_CONTROL_BAR: &str = "focus.control_bar";
 /// `focus.arrangement`: move the keyboard focus to the Arrangement View.
@@ -220,6 +222,7 @@ pub const IDS: &[&str] = &[
     VIEW_ZOOM_OUT,
     VIEW_ZOOM_RESET,
     VIEW_SET_ZOOM,
+    VIEW_TOGGLE_UNDO_HISTORY,
     FOCUS_CONTROL_BAR,
     FOCUS_ARRANGEMENT,
     FOCUS_NEXT,
@@ -309,8 +312,8 @@ pub struct TemplateArgs {
     pub name: Option<String>,
 }
 
-/// Arguments of `set.relink_missing`: folders to search besides the set's
-/// project folder and the User Library.
+/// Arguments of `set.relink_missing`: where to search for the set's missing
+/// files (file-management R14).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RelinkArgs {
@@ -318,6 +321,32 @@ pub struct RelinkArgs {
     /// the app's working directory. May be empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub folders: Vec<String>,
+    /// Whether the set's project folder is searched. On unless asked
+    /// otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project: Option<bool>,
+    /// Whether the User Library is searched. On unless asked otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub library: Option<bool>,
+    /// The folder the Automatic Search's Search Folder names.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder: Option<String>,
+}
+
+/// Arguments of `set.collect_all_and_save`: the groups of external files to
+/// collect (file-management R15).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CollectArgs {
+    /// The groups to collect from: "other-project", "user-library" or
+    /// "elsewhere". All of them when none are given.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub groups: Vec<crate::file_manager::ExternalGroup>,
+    /// The project folder to collect for, when it isn't the open set's:
+    /// every set in it is rewritten, each keeping the version it replaces
+    /// in its project's `Backup` folder (R16).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project: Option<String>,
 }
 
 /// What `set.collect_all_and_save` and `set.relink_missing` return.
@@ -328,6 +357,10 @@ pub struct FileReport {
     /// The number of files the command copied (Collect All and Save) or
     /// relinked (automatic search).
     pub files: usize,
+    /// The files the search found for each missing file, when there was more
+    /// than one candidate (R14).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub candidates: Vec<crate::file_manager::Candidate>,
 }
 
 /// Arguments of `app.settings`.
@@ -582,9 +615,24 @@ pub struct ViewState {
     pub plugin_list: crate::plugins::PluginListState,
     /// The assistant's panel.
     pub assistant: crate::assistant::AssistantPanelState,
+    /// Whether the Undo History panel shows.
+    pub undo_history: bool,
     /// Whether floating devices' and plug-ins' windows are shown, as
     /// `view.toggle_plug_in_windows` sets it.
     pub plug_in_windows: bool,
+}
+
+/// What `view.toggle_undo_history` returns: the Undo History panel's state
+/// afterwards.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct UndoHistoryState {
+    /// Whether the panel shows.
+    pub open: bool,
+    /// How many steps the history holds.
+    pub steps: usize,
+    /// The current row's place in the history, counted up from the set's
+    /// start: 0 before any step.
+    pub current: usize,
 }
 
 /// Adds the shell's commands to a registry, the agent server's
@@ -706,25 +754,31 @@ fn specs() -> Vec<CommandSpec> {
             .result::<SetResult>(),
         CommandSpec::new(SET_COLLECT_ALL, "Collect All and Save")
             .description(
-                "Copies every file the open set uses that lives outside its project folder into \
+                "Copies the files the open set uses that live outside its project folder into \
                  the project's `Samples/Imported` folder, re-points the set's media table at \
                  the copies, and saves the set, as File ▸ Collect All and Save does in Live, so \
-                 the set no longer depends on files elsewhere. Fails if the set has never been \
-                 saved; use `set.save_as` to give it a project folder first. The result's \
-                 `files` is how many files were copied.",
+                 the set no longer depends on files elsewhere. `groups` chooses which places to \
+                 collect from: \"other-project\", \"user-library\" and \"elsewhere\"; all of them \
+                 when none are given. Fails if the set has never been saved; use `set.save_as` \
+                 to give it a project folder first. The result's `files` is how many files were \
+                 copied.",
             )
             .permission(Permission::External)
             .context(Global)
-            .args::<NoArgs>()
+            .args::<CollectArgs>()
             .result::<FileReport>(),
         CommandSpec::new(SET_RELINK_MISSING, "Relink Missing Files")
             .description(
                 "Searches for the files the open set uses that are missing or changed, and \
-                 relinks each one to the first file found with the same content, as Live's \
-                 automatic search does. The search covers the set's project folder, the User \
-                 Library, the folders the files were last in, and any `folders` given, each \
-                 with its subfolders. The result's `files` is how many files were relinked. It \
-                 also runs by itself when a set is opened.",
+                 relinks each one to the file found with the same content, as Live's automatic \
+                 search does. The search covers the set's project folder, the User Library, the \
+                 folders the files were last in, and any `folders` given, each with its \
+                 subfolders; `project` and `library` switch the first two off, and `folder` \
+                 names the folder the Automatic Search's Search Folder chooses. A file with one \
+                 candidate is relinked to it; a file with several keeps its row, and the \
+                 candidates are in the result's `candidates`, so the person chooses. The result's \
+                 `files` is how many files were relinked. It also runs by itself when a set is \
+                 opened.",
             )
             .permission(Permission::External)
             .context(Global)
@@ -836,8 +890,9 @@ fn specs() -> Vec<CommandSpec> {
                  the zoom (`view.toggle_session_arrangement`, `view.toggle_browser`, \
                  `view.toggle_info_view`, `view.full_screen`, `view.set_zoom`), the Clip View \
                  with Draw Mode, the lane, Fold and the selected notes (`view.toggle_clip_view`, \
-                 `view.draw_mode`, `view.lane`, `view.fold_notes`), the assistant's panel and \
-                 whether plug-in windows are shown (`view.toggle_plug_in_windows`). Changes \
+                 `view.draw_mode`, `view.lane`, `view.fold_notes`), the assistant's panel, the \
+                 Undo History (`view.toggle_undo_history`), and whether plug-in windows are \
+                 shown (`view.toggle_plug_in_windows`). Changes \
                  nothing. The Arrangement's own view is in `arrangement.state`, the Mixer's in \
                  `mixer_view.state`, the Session View's in `session.state` and the Device \
                  View's in `device_view.state`.",
@@ -1040,6 +1095,19 @@ fn specs() -> Vec<CommandSpec> {
             .contexts([Global, Settings])
             .args::<ZoomArgs>()
             .result::<ViewResult>(),
+        CommandSpec::new(VIEW_TOGGLE_UNDO_HISTORY, "Undo History")
+            .description(
+                "Shows or hides the Undo History panel at the right of the main window, in the \
+                 column the Learn View uses. The panel lists the set's steps, newest first, with \
+                 the ones that can be redone greyed, and clicking a row returns the set to that \
+                 point. Whether it shows is view state: it isn't saved with the set and isn't an \
+                 undo step. Changes nothing in the set.",
+            )
+            .permission(Permission::Read)
+            .context(Global)
+            .binding("S-VIEW-021")
+            .args::<NoArgs>()
+            .result::<UndoHistoryState>(),
         CommandSpec::new(FOCUS_CONTROL_BAR, "Control Bar")
             .description(
                 "Moves the keyboard focus to the Control Bar at the top of the main window, \

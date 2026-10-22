@@ -60,6 +60,8 @@ impl Object {
                 "undo.next_undo",
                 "undo.next_redo",
                 "undo.steps",
+                "undo.redo_steps",
+                "undo.current",
                 "scheduled",
                 "checkpoints",
                 "tracks",
@@ -116,6 +118,14 @@ use Object::{Clip, Device, Scene, Song, Track};
 /// Why the Browser's commands read back through nothing a read command gives.
 const BROWSER: &str = "the Browser's state is read with `browser.state`, which is `external` \
                        because it lists files outside the project";
+/// Why the browser's tag commands read back through nothing a read command
+/// gives.
+const TAGS: &str = "the browser's tags are read with `browser.tags`, which is `external` because \
+                    it lists files outside the project";
+/// Why the File Manager's commands read back through nothing a read command
+/// gives.
+const FILE_MANAGER: &str = "the File Manager's state is read with `file_manager.state`, which \
+                             is `external` because it lists files outside the project";
 /// Why Save Continuously has nothing to read.
 const CONTINUOUS: &str = "the app doesn't host the autosave service yet, so no read command \
                           reports Save Continuously; the command's own result does";
@@ -148,6 +158,10 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("arrangement.paste", query(Track, "clips")),
     ("arrangement.resize_clips", query(Track, "clips")),
     ("arrangement.split", query(Track, "clips")),
+    ("articulation.add", read("articulation.list", "articulations")),
+    ("articulation.delete", read("articulation.list", "articulations")),
+    ("articulation.move", read("articulation.list", "articulations")),
+    ("articulation.set", read("articulation.list", "articulations")),
     ("assistant.forget_key", read("settings.state", "assistant.key_set")),
     ("assistant.set_base_url", read("settings.state", "assistant.base_url")),
     ("assistant.set_key", read("settings.state", "assistant.key_set")),
@@ -173,18 +187,32 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("keymap.reset", read("keymap.state", "shortcuts")),
     ("keymap.unbind", read("keymap.state", "shortcuts")),
     ("browser.add_folder", nothing(BROWSER)),
+    ("browser.add_tag", nothing(TAGS)),
+    ("browser.add_tag_group", nothing(TAGS)),
     ("browser.add_to_arrangement", query(Track, "clips")),
+    ("browser.delete_tag", nothing(TAGS)),
     ("browser.load_selected", query(Track, "clips")),
+    ("browser.move_tag", nothing(TAGS)),
     ("browser.open_folder", nothing(BROWSER)),
     ("browser.open_place", nothing(BROWSER)),
     ("browser.preview", nothing(BROWSER)),
     ("browser.remove_folder", nothing(BROWSER)),
+    ("browser.rename_tag", nothing(TAGS)),
+    ("browser.reset_tag_order", nothing(TAGS)),
     ("browser.scrub_preview", nothing(BROWSER)),
     ("browser.search", nothing(BROWSER)),
     ("browser.select", nothing(BROWSER)),
     ("browser.set_preview", nothing(BROWSER)),
     ("browser.set_raw", nothing(BROWSER)),
     ("browser.show_file", nothing(BROWSER)),
+    ("browser.show_quick_tags", nothing(BROWSER)),
+    ("browser.tag_items", nothing(TAGS)),
+    (
+        "browser.tags",
+        nothing(
+            "a query of its own: it reads the tags, and is `external` for the files it lists",
+        ),
+    ),
     (
         "browser.state",
         nothing(
@@ -358,7 +386,22 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("device.wrap_in_rack", query(Track, "devices")),
     ("edit.redo", query(Song, "undo.next_redo")),
     ("edit.undo", query(Song, "undo.next_undo")),
+    ("edit.go_to_step", query(Song, "undo.current")),
     ("export.audio", nothing(FILE)),
+    (
+        "file_manager.delete_unused",
+        nothing("moves files outside the set to the trash; the set doesn't change"),
+    ),
+    ("file_manager.edit_file", query(Clip, "data.audio.media")),
+    ("file_manager.hot_swap", nothing(FILE_MANAGER)),
+    ("file_manager.replace_file", query(Clip, "data.audio.media")),
+    (
+        "file_manager.state",
+        nothing(
+            "a query of its own: it reads the File Manager, and is `external` for the files it \
+             lists",
+        ),
+    ),
     ("export.realtime.auto_restart", read("export.realtime.status", "auto_restart")),
     ("export.realtime.cancel", read("export.realtime.status", "phase")),
     ("export.realtime.restart", read("export.realtime.status", "phase")),
@@ -397,8 +440,11 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("modulator.set_shape", query(Device, "shape")),
     ("modulator.unmap", query(Device, "mappings")),
     ("note.add", query(Clip, "data.midi.notes")),
+    ("note.cut", query(Clip, "data.midi.notes")),
     ("note.delete", query(Clip, "data.midi.notes")),
+    ("note.duplicate", query(Clip, "data.midi.notes")),
     ("note.move", query(Clip, "data.midi.notes")),
+    ("note.paste", query(Clip, "data.midi.notes")),
     ("note.quantize", query(Clip, "data.midi.notes")),
     ("note.ramp_value", query(Clip, "data.midi.notes")),
     ("note.resize", query(Clip, "data.midi.notes")),
@@ -483,13 +529,16 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("set.collect_all_and_save", query(Song, "set.unsaved_changes")),
     ("set.discard_changes", query(Song, "set.unsaved_changes")),
     ("set.discard_recovery", nothing("deletes a recovery file outside the set")),
+    ("set.import_dawproject", query(Song, "set.name")),
     ("set.new", query(Song, "set.name")),
     ("set.open", query(Song, "set.path")),
+    ("set.open_backup", query(Song, "set.unsaved_changes")),
     ("set.recover", query(Song, "set.path")),
     ("set.relink_missing", nothing("finds files outside the set; the clips that use them read their media")),
     ("set.save", query(Song, "set.unsaved_changes")),
     ("set.save_as", query(Song, "set.path")),
     ("set.save_as_default", nothing(FILE)),
+    ("set.save_copy", nothing(FILE)),
     ("set.save_as_template", nothing(FILE)),
     ("settings.set_auto_hide_plug_in_windows", read("settings.state", "auto_hide_plug_in_windows")),
     ("settings.set_continuous_save", nothing(CONTINUOUS)),
@@ -525,14 +574,19 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("stems.install", read("stems.status", "install")),
     ("stems.separate", query(Song, "tracks")),
     ("track.add_take_lane", query(Track, "take_lanes")),
+    ("track.bounce_in_place", query(Song, "tracks")),
+    ("track.bounce_to_new_track", query(Song, "tracks")),
     ("track.create", query(Song, "tracks")),
+    ("track.create_bounced_track", query(Song, "tracks")),
     ("track.delete", query(Song, "tracks")),
     ("track.duplicate_without_clips", query(Song, "tracks")),
     ("track.group", query(Song, "tracks")),
     ("track.move", query(Song, "tracks")),
+    ("track.paste_bounced_audio", query(Track, "clips")),
     ("track.clear_frozen", query(Track, "frozen")),
     ("track.freeze", query(Track, "frozen")),
     ("track.set_frozen", query(Track, "frozen")),
+    ("track.set_bounced", query(Song, "tracks")),
     ("track.unfreeze", query(Track, "frozen")),
     ("track.rename", query(Track, "name")),
     ("track.set_devices_enabled", query(Track, "devices")),

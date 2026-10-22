@@ -46,6 +46,15 @@ impl<T> Handoff<T> {
         }
     }
 
+    /// An empty handoff, holding nothing: what a list carries where it keeps
+    /// the value the player already has rather than replacing it, so `take`
+    /// says so with `None`.
+    pub(crate) fn empty() -> Self {
+        Self {
+            slot: AtomicPtr::new(ptr::null_mut()),
+        }
+    }
+
     /// Takes the value out, if it's there. Real-time safe: one atomic swap.
     pub(crate) fn take(&self) -> Option<Box<T>> {
         let value = self.slot.swap(ptr::null_mut(), AcqRel);

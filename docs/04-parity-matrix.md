@@ -32,7 +32,7 @@ Each row's **Notes** name the work packages that build it ("Built in WP-1.8a, WP
 
 | Live feature | Milestone | Notes |
 |---|---|---|
-| Arrangement View | M1 | The Arrangement Track Controls' In/Out, Volume and Return Tracks: WP-6.64; the scrub area's hold and Shift-click: WP-6.59. Built in WP-1.8a, WP-1.8b, WP-6.64, WP-6.59 |
+| Arrangement View | M1 | The scrub area's hold and Shift-click: WP-6.59. Built in WP-1.8a, WP-1.8b, WP-6.64, WP-6.59 |
 | Session View | M3 | Built in WP-3.1, WP-3.7, WP-3.8 |
 | Mixer, with sections you can show or hide | M1 | Sections and Mixer in Arrangement too, moved from M6 because M1's mixer keys need them (11 October 2026); each view keeping its own sections (Live 12.0), the extended meters and column widths: WP-6.65. Built in WP-1.6, WP-1.9, WP-6.65 |
 | Clip View and Device View shown together | M6 | Separate views from M2. Stacked, with the detail area's switches and Expand Clip View ([spec](specs/detail-views.md)). Built in WP-6.27 |
@@ -222,6 +222,7 @@ Each row's **Notes** name the work packages that build it ("Built in WP-1.8a, WP
 | Live device | Milestone | Notes |
 |---|---|---|
 | Arpeggiator, CC Control, Chord, MIDI Monitor, MPE Control, Note Echo, Note Length, Pitch, Random, Rotating Rhythm Generator, Scale, Velocity | M5 (the devices), M6 (the Arpeggiator's Groove) | Rotating Rhythm Generator has no package yet: the manual doesn't describe it. The Arpeggiator's Groove chooser: WP-6.68 ([spec](specs/arpeggiator.md)). Built in WP-5.30, WP-5.31, WP-5.32, WP-6.68 |
+| Articulation Map (Beatlayer's own device, not in Live) | M6 | A list of up to 32 named articulations, each with a trigger and the keyswitches, controllers and channel it sends. Built in WP-6.47 ([spec](specs/articulation-map.md)) |
 | Melodic Steps, Bouncy Notes, Step Arp, SQ Sequencer, Rhythmic Steps (the Sequencer Pack) | M9 | Built with the extension SDK |
 | MIDI Tools Pack (extra rhythmic and melodic generators and transformations) | M9 | Built with the extension SDK as MIDI Tools; list its tools from the pack's product page when the package is planned |
 | Performance Pack (Performer, Variations, Arrangement Looper, Prearranger) | M9 | Built with the extension SDK |

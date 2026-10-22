@@ -185,6 +185,10 @@ pub const PREFERENCES_FILE: &str = "preferences.json";
 /// inside the config directory.
 pub const PLUGIN_SCAN_FILE: &str = "plugin-scan.json";
 
+/// The file name of the browser's database (WP-6.31), inside the config
+/// directory: the index of the places' files, the tags and tag groups, and
+/// the items that carry them.
+pub const BROWSER_DATABASE_FILE: &str = "browser.db";
 /// The file name of the person's own keymap, inside the config directory,
 /// beside the preferences (R1).
 pub const KEYMAP_FILE: &str = "keymap.toml";

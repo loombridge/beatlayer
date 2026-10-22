@@ -47,11 +47,13 @@ crates/plugin-host/tests/scan.rs # waits for a real plug-in scan
 crates/project/tests/crash_recovery.rs # kills the process at a real moment
 crates/project/tests/interrupted_save.rs # kills the process at a real moment
 crates/project/tests/round_trip.rs # measures a real save's time
+crates/shell/src/browser/hash.rs # a timeout on the hashing thread
 crates/shell/src/browser/index.rs # a timeout on the index's thread
 crates/shell/src/recording.rs # a timeout on a recording's thread
 crates/shell/tests/au_editor.rs # waits for a real Audio Unit's window
 crates/shell/tests/audio_settings.rs # a device's status changes on the system's clock
 crates/shell/tests/browser.rs # waits for the browser's index thread to read the disk
+crates/shell/tests/browser_tags.rs # waits for the browser's index thread to read the disk
 crates/shell/tests/clip_streaming.rs # a timeout on a disk read
 crates/shell/tests/device_input.rs # a timeout on the engine's input
 crates/shell/tests/export.rs # waits for a real plug-in render's thread

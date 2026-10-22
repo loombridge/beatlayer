@@ -870,9 +870,14 @@ name = "bl-interop"
 version = "0.2.0"
 dependencies = [
  "bl-core",
+ "bl-media",
  "bl-model",
  "bl-project",
+ "flate2",
  "midly",
+ "quick-xml",
+ "serde_json",
+ "zip",
 ]
 
 [[package]]
@@ -970,11 +975,13 @@ dependencies = [
  "bl-commands",
  "bl-core",
  "bl-model",
+ "libc",
  "proptest",
  "ruzstd",
  "schemars",
  "serde",
  "serde_json",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1010,6 +1017,7 @@ dependencies = [
  "lspk-example-gain",
  "midly",
  "rtrb",
+ "rustix 1.1.5",
  "serde",
  "serde_json",
  "sha2",
@@ -1035,6 +1043,7 @@ name = "bl-stretch"
 version = "0.2.0"
 dependencies = [
  "bl-dsp",
+ "cc",
  "proptest",
 ]
 

@@ -53,6 +53,11 @@ pub const MINIMUM: Vec2 = vec2(1340.0, 640.0);
 /// (L-WIN-009).
 pub const MARGIN: f32 = 9.0;
 
+/// The Undo History panel's width in layout points: the Learn View
+/// column's width (L-WIN-008), which the panel takes the place of
+/// (L-OTH-001).
+pub const UNDO_HISTORY_WIDTH: f32 = 295.0;
+
 /// The Settings window's size with its title bar (L-SET-001).
 pub const SETTINGS_WINDOW: Vec2 = vec2(562.0, 617.0);
 
@@ -479,6 +484,11 @@ pub struct ShellLayout {
     /// Bar's bottom to the window's bottom, and the main view, the detail
     /// area and the Status Bar stop at its left edge.
     pub assistant: Option<Rect>,
+    /// The Undo History panel, in the Learn View's column at the right
+    /// edge (L-OTH-001), while it shows. It sits immediately left of the
+    /// assistant's pane when both show, and the main view, the detail area
+    /// and the Status Bar stop at its left edge.
+    pub undo_history: Option<Rect>,
     /// Every element's rectangle, in [`ELEMENTS`] order.
     pub elements: Vec<(Element, Rect)>,
 }
@@ -501,13 +511,43 @@ impl ShellLayout {
         info_view: bool,
         assistant: Option<f32>,
     ) -> Self {
+        Self::compute_with_panes(size, browser, info_view, assistant, None)
+    }
+
+    /// The same, with the Undo History panel in the Learn View's column
+    /// when `undo_history` gives its width in points. The panel sits
+    /// immediately left of the assistant's pane when both show (L-OTH-001).
+    #[must_use]
+    pub fn compute_with_panes(
+        size: Vec2,
+        browser: bool,
+        info_view: bool,
+        assistant: Option<f32>,
+        undo_history: Option<f32>,
+    ) -> Self {
         let size = size.max(MINIMUM);
         let (w, h) = (size.x, size.y);
         let extra = w - REFERENCE.x;
-        // What the pane takes from the panes and the Status Bar beside it:
-        // its width and the margin between.
-        let taken = assistant.map_or(0.0, |width| width + MARGIN);
-        let right = w - MARGIN - taken;
+        // The panes at the right edge, from the window's margin inwards:
+        // the assistant's, then the Undo History's, 9 points apart.
+        let edge = w - MARGIN;
+        let assistant_left = assistant.map(|width| edge - width);
+        let panel_right = match assistant_left {
+            Some(left) => left - MARGIN,
+            None => edge,
+        };
+        let undo_history = undo_history.map(|width| {
+            Rect::from_min_max(pos2(panel_right - width, y(61.0)), pos2(panel_right, h))
+        });
+        // The main view and the detail area stop 9 points left of the
+        // leftmost pane, and the Status Bar at its left edge (L-WIN-007,
+        // L-WIN-009).
+        let (right, status_right) = match (&undo_history, assistant_left) {
+            (Some(panel), _) => (panel.left() - MARGIN, panel.left()),
+            (None, Some(left)) => (left - MARGIN, left),
+            (None, None) => (edge, w),
+        };
+        let taken = w - status_right;
 
         // Rows measured from the top keep their place; the detail area and
         // the Status Bar keep their distance from the bottom.
@@ -577,6 +617,7 @@ impl ShellLayout {
             device_view,
             status_bar,
             assistant,
+            undo_history,
             elements,
         }
     }
@@ -601,6 +642,9 @@ impl ShellLayout {
         }
         if let Some(assistant) = &mut self.assistant {
             move_rect(assistant);
+        }
+        if let Some(undo_history) = &mut self.undo_history {
+            move_rect(undo_history);
         }
         if let Some(info_view) = &mut self.info_view {
             move_rect(info_view);
@@ -632,6 +676,9 @@ impl ShellLayout {
         if let Some(assistant) = &mut self.assistant {
             scale(assistant);
         }
+        if let Some(undo_history) = &mut self.undo_history {
+            scale(undo_history);
+        }
         if let Some(info_view) = &mut self.info_view {
             scale(info_view);
         }
@@ -661,6 +708,9 @@ impl ShellLayout {
         if let Some(assistant) = self.assistant {
             rows.push(row(D24, "Assistant", assistant));
         }
+        if let Some(undo_history) = self.undo_history {
+            rows.push(row("L-OTH-001", "Undo History", undo_history));
+        }
         rows.extend(
             ELEMENTS
                 .iter()
@@ -684,6 +734,14 @@ impl ShellLayout {
 /// A row's height in the browser's sidebar and content pane. Not measured
 /// in Live (browser, "To observe in Live").
 pub const BROWSER_ROW: f32 = 17.0;
+
+/// How high the Quick Tags section is, when it shows (L-BRW-012). Live's
+/// isn't measured; this is Beatlayer's own.
+pub const QUICK_TAGS_HEIGHT: f32 = 62.0;
+
+/// How wide the Tag Editor is, when it opens beside the content pane
+/// (L-BRW-013). Live's isn't measured; this is Beatlayer's own.
+pub const TAG_EDITOR_WIDTH: f32 = 190.0;
 
 /// The browser's parts inside its column (L-BRW rows), from layout.md's
 /// measurements in Live 12.4.3 at 1600 × 1000 points. The top row and the
@@ -713,6 +771,9 @@ pub struct BrowserLayout {
     pub header: Rect,
     /// The item list (L-BRW-010).
     pub list: Rect,
+    /// The Quick Tags section, at the content pane's bottom, above the
+    /// preview strip (L-BRW-012).
+    pub quick_tags: Rect,
     /// The preview strip at the content pane's bottom (L-BRW-011).
     pub strip: Rect,
     /// The Preview switch, at the strip's left (L-BRW-011).
@@ -724,9 +785,15 @@ pub struct BrowserLayout {
 }
 
 impl BrowserLayout {
-    /// Lays the browser out in its column.
+    /// Lays the browser out in its column, with Quick Tags hidden.
     #[must_use]
     pub fn compute(column: Rect) -> Self {
+        Self::compute_with(column, false)
+    }
+
+    /// Lays the browser out in its column, with Quick Tags showing or not.
+    #[must_use]
+    pub fn compute_with(column: Rect, quick_tags_shown: bool) -> Self {
         // Offsets from layout.md's window coordinates: the column spans x 9
         // to 311 and y 61 to 766 at the reference size.
         let x = |window_x: f32| column.left() + window_x - 9.0;
@@ -742,9 +809,20 @@ impl BrowserLayout {
         let header = Rect::from_min_max(content.min, pos2(right, content.top() + 19.0));
         // The strip from y 744 to the column's bottom (766).
         let strip = Rect::from_min_max(pos2(content.left(), column.bottom() - 22.0), content.max);
+        // Quick Tags sits at the content pane's bottom, above the preview
+        // strip (L-BRW-012).
+        let quick_tags = Rect::from_min_max(
+            pos2(content.left(), strip.top() - QUICK_TAGS_HEIGHT),
+            pos2(right, strip.top()),
+        );
+        let list_bottom = if quick_tags_shown {
+            quick_tags.top()
+        } else {
+            strip.top()
+        };
         let list = Rect::from_min_max(
             pos2(content.left(), header.bottom()),
-            pos2(right, strip.top()),
+            pos2(right, list_bottom),
         );
         let preview_toggle = Rect::from_min_size(
             pos2(content.left() + 4.0, strip.top() + 4.0),
@@ -769,12 +847,23 @@ impl BrowserLayout {
             content,
             header,
             list,
+            quick_tags,
             strip,
             preview_toggle,
             raw_toggle,
             preview_wave,
         }
     }
+}
+
+/// Where the Tag Editor opens, beside the browser's content pane
+/// (L-BRW-013).
+#[must_use]
+pub fn tag_editor_rect(browser: Rect) -> Rect {
+    Rect::from_min_size(
+        pos2(browser.right() + 6.0, browser.top()),
+        vec2(TAG_EDITOR_WIDTH, browser.height()),
+    )
 }
 
 /// The Arrangement View's track header column (L-ARR-006): 294 points at
@@ -801,6 +890,13 @@ pub mod header_columns {
     pub const MIXER: (f32, f32) = (182.0, 280.0);
     /// The track's meter.
     pub const METER: (f32, f32) = (283.0, 294.0);
+
+    /// The title sub-column's width: with the In/Out column hidden, the
+    /// title takes its width (arrangement-view R21).
+    #[must_use]
+    pub const fn title_width(in_out: bool) -> f32 {
+        if in_out { TITLE.1 } else { IN_OUT.1 }
+    }
 }
 
 /// The Arrangement View's parts inside the main view, from layout.md's

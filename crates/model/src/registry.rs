@@ -47,7 +47,8 @@ use bl_commands::{
     Binding, CommandSpec, NoArgs, Permission, RegisterError, Registry, args_schema, result_schema,
     tagged_variant,
 };
-use schemars::Schema;
+use schemars::{JsonSchema, Schema};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::changes::ChangeSet;
@@ -61,6 +62,8 @@ pub const UNDO: &str = "edit.undo";
 pub const RE_ENABLE_AUTOMATION: &str = "automation.re_enable";
 /// The ID of the command that redoes the newest undone step.
 pub const REDO: &str = "edit.redo";
+/// The ID of the command that jumps to a point in the undo history.
+pub const GO_TO_STEP: &str = "edit.go_to_step";
 /// The ID of `clip.set_midi_region`: a MIDI clip's Start and End markers.
 pub const SET_MIDI_REGION: &str = "clip.set_midi_region";
 /// The ID of `clip.set_midi_loop`: a MIDI clip's loop brace.
@@ -112,7 +115,21 @@ pub fn run(editor: &mut Editor, id: &str, args: Value) -> Result<ChangeSet, RunE
             no_args(entry.id, args)?;
             Ok(editor.redo()?)
         }
+        Action::GoToStep => {
+            let GoToStepArgs { index } = go_to_step_args(entry.id, args)?;
+            Ok(editor.go_to_step(index)?)
+        }
     }
+}
+
+/// Arguments of [`GO_TO_STEP`]: which row of the history to go to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct GoToStepArgs {
+    /// The row, counted up from the set's start: 0 is the set's start,
+    /// before any step, and the newest step is the number of steps there
+    /// are.
+    pub index: usize,
 }
 
 /// The [`Command`] a document command's ID and JSON arguments describe,
@@ -156,6 +173,13 @@ fn no_args(command: &'static str, args: Value) -> Result<(), RunError> {
             command,
             message: error.to_string(),
         })
+}
+
+fn go_to_step_args(command: &'static str, args: Value) -> Result<GoToStepArgs, RunError> {
+    serde_json::from_value::<GoToStepArgs>(args).map_err(|error| RunError::InvalidArgs {
+        command,
+        message: error.to_string(),
+    })
 }
 
 /// Why [`run`] or [`command_from_args`] refused a command.
@@ -216,6 +240,8 @@ enum Action {
     Undo,
     /// Redoes the newest undone step.
     Redo,
+    /// Jumps to a row of the history.
+    GoToStep,
 }
 
 /// A default binding, in a form a constant can hold.
@@ -256,6 +282,7 @@ impl Entry {
                 None => spec,
             },
             Action::Undo | Action::Redo => spec.args::<NoArgs>(),
+            Action::GoToStep => spec.args::<GoToStepArgs>(),
         };
         for key in self.keys {
             spec = spec.binding(match *key {
@@ -579,6 +606,32 @@ const ENTRIES: &[Entry] = &[
         description: "Plays tracks through their devices and clips again, dropping their frozen \
             audio and restoring the clip data the freeze kept. `tracks` names them. \
             `track.unfreeze` is the command a person and an agent run.",
+    },
+    Entry {
+        id: "track.set_bounced",
+        action: Action::Apply("bounce_track_in_place"),
+        label: "Set Track Bounced",
+        permission: Permission::Destructive,
+        contexts: &[TrackHeaders, Arrangement, Session],
+        keys: &[],
+        description: "Replaces a track with the audio track a bounce made: no devices, the \
+            track's name with \" (Bounce)\" after it, its mixer settings, and its clips playing \
+            the bounce file. `bounced` is what the new track holds. `track.bounce_in_place` is \
+            the command a person and an agent run: it renders the file and applies this one. \
+            Used directly, it names a file the caller has already written.",
+    },
+    Entry {
+        id: "track.create_bounced_track",
+        action: Action::Apply("bounce_to_new_track"),
+        label: "Create Bounced Track",
+        permission: Permission::Edit,
+        contexts: &[TrackHeaders, Arrangement, Session],
+        keys: &[],
+        description: "Makes a new audio track directly after the track that was bounced, \
+            holding the bounced audio. `bounced` is what the new track holds. \
+            `track.bounce_to_new_track` is the command a person and an agent run: it renders \
+            the file and applies this one. Used directly, it names a file the caller has \
+            already written.",
     },
     Entry {
         id: "mixer.set_volume",
@@ -2257,6 +2310,56 @@ const ENTRIES: &[Entry] = &[
             a shape). An empty list outputs 0. One undo step (Edit Shape).",
     },
     Entry {
+        id: "articulation.add",
+        action: Action::Apply("add_articulation"),
+        label: "Add Articulation",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Adds an articulation to an Articulation Map's list, at `index` (or at the \
+            end when it isn't given), with the name `name`. The list holds up to 32 \
+            articulations and keeps one at least. One undo step (Add Articulation).",
+    },
+    Entry {
+        id: "articulation.delete",
+        action: Action::Apply("delete_articulation"),
+        label: "Delete Articulation",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Removes the articulation at `index` (counted from 0) from an Articulation \
+            Map's list. The list keeps one articulation at least. One undo step (Delete \
+            Articulation).",
+    },
+    Entry {
+        id: "articulation.move",
+        action: Action::Apply("move_articulation"),
+        label: "Move Articulation",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Moves the articulation at `index` (counted from 0) in an Articulation Map's \
+            list to `to`, or to the end of the list when `to` isn't given. One undo step (Move \
+            Articulation).",
+    },
+    Entry {
+        id: "articulation.set",
+        action: Action::Apply("set_articulation"),
+        label: "Change Articulation",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Changes the articulation at `index` (counted from 0) in an Articulation \
+            Map's list: its `name`, its `trigger`, its `outputs` or its `channel`. What isn't \
+            given stays as it is. A trigger is `{\"kind\":\"none\"}`, `{\"kind\":\"key\", \
+            \"key\":36}` or `{\"kind\":\"controller\",\"controller\":1,\"lowest\":0,\"highest\":63}`; \
+            an output is `{\"kind\":\"key\",\"key\":36,\"velocity\":100}` or \
+            `{\"kind\":\"controller\",\"controller\":1,\"value\":64}`; a channel is a number from \
+            1 to 16, or null for none, so the articulation's notes keep the channel they come \
+            in on. Two articulations of a device never trigger on the same key or on \
+            overlapping ranges of the same controller. One undo step (Change Articulation).",
+    },
+    Entry {
         id: "device.compare_switch",
         action: Action::Apply("compare_switch"),
         label: "Compare: Switch",
@@ -2986,5 +3089,17 @@ const ENTRIES: &[Entry] = &[
         description: "Redoes the step most recently undone. It fails if nothing has been \
             undone since the last new change, because a new change discards the steps that \
             could have been redone.",
+    },
+    Entry {
+        id: GO_TO_STEP,
+        action: Action::GoToStep,
+        label: "Go to Step",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Returns the set to the state just after the step at `index`, counted up \
+            from the set's start: 0 is the set's start, before any step, and the newest step \
+            is the number of steps there are. The steps above that row are undone and stay \
+            listed, greyed, until a new change replaces them. The jump is no step of its own.",
     },
 ];

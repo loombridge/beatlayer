@@ -64,7 +64,11 @@ fn every_item_reaches_a_command_or_is_pending() {
                     Action::Pending(Some(id)) => {
                         assert!(shortcuts.contains(&format!("id = \"{id}\"")), "{id}");
                     }
-                    Action::Submenu => assert!(!item.items.is_empty(), "{}", item.row),
+                    Action::Submenu => assert!(
+                        !item.items.is_empty() || bl_shell::menus::DYNAMIC_ROWS.contains(&item.row),
+                        "{}",
+                        item.row
+                    ),
                     Action::Pending(None)
                     | Action::System(_)
                     | Action::Omitted(_)

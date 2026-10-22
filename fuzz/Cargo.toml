@@ -29,6 +29,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "dawproject"
+path = "fuzz_targets/dawproject.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "midi_file"
 path = "fuzz_targets/midi_file.rs"
 test = false

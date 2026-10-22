@@ -40,6 +40,7 @@
 //! `egui::Context` and synthetic input.
 
 pub mod arrangement;
+pub mod articulation_map;
 pub mod assistant_panel;
 pub mod audio_panel;
 pub mod autosampler;
@@ -53,6 +54,7 @@ pub mod device_panel;
 pub mod device_view;
 pub mod drum_view;
 pub mod external;
+pub mod file_manager;
 pub mod focus;
 pub mod follow_controls;
 pub mod in_out;
@@ -79,4 +81,5 @@ pub mod slice_dialog;
 pub mod stems_dialog;
 pub mod theme;
 pub mod track_menu;
+pub mod undo_history_panel;
 pub mod widgets;

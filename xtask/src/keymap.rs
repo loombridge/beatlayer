@@ -110,6 +110,10 @@ const WIDGET: &[(&str, &str)] = &[
          (`focus.browser`, `browser.select`)",
     ),
     (
+        "S-BRW-015",
+        "the browser's Quick Tags: Cmd-E (Ctrl-E) moves the keyboard focus to the Add field",
+    ),
+    (
         "S-A11Y-015",
         "the browser's list: Shift-Up and Shift-Down extend the selection (`browser.select`)",
     ),
@@ -234,6 +238,83 @@ const WIDGET: &[(&str, &str)] = &[
         "S-A11Y-009",
         "the Clip View's note editor: Shift-Up and Shift-Down transpose the selected notes by \
          an octave (`note.move`)",
+    ),
+    // WP-6.53: the note editor reads the keys that move its insert marker,
+    // select time and select notes itself, because each of them does
+    // something different depending on what is selected.
+    (
+        "S-NOTE-002",
+        "the Clip View's note editor: Option-dragging a note copies it (`note.move` with `copy`)",
+    ),
+    (
+        "S-NOTE-017",
+        "the Clip View's note editor: Home moves the insert marker to the clip's start \
+         (`clip_view.set_insert_marker`)",
+    ),
+    (
+        "S-NOTE-018",
+        "the Clip View's note editor: End moves the insert marker to the clip's end \
+         (`clip_view.set_insert_marker`)",
+    ),
+    (
+        "S-NOTE-019",
+        "the Clip View's note editor: Option-Down and Option-Up select the note nearest the \
+         insert marker, and the previous or next note after that (`clip_view.select_notes`)",
+    ),
+    (
+        "S-NOTE-020",
+        "the Clip View's note editor: Option-Left and Option-Right select the previous or next \
+         note of the same pitch (`clip_view.select_notes`)",
+    ),
+    (
+        "S-NOTE-042",
+        "the Clip View's note editor: Esc deselects the notes and clears the time selection \
+         (`clip_view.select_notes`, `clip_view.select_time`)",
+    ),
+    (
+        "S-NOTE-043",
+        "the Clip View's note editor: Option-Shift-Down and Option-Shift-Up add the previous \
+         or next note to the selection (`clip_view.select_notes`)",
+    ),
+    (
+        "S-NOTE-045",
+        "the Clip View's note editor: Left and Right move the insert marker a grid step, or \
+         the selected notes (`clip_view.set_insert_marker`, `note.move`)",
+    ),
+    (
+        "S-NOTE-046",
+        "the Clip View's note editor: Option-Shift-Left and Option-Shift-Right move the time \
+         selection's end to the next or previous note edge (`clip_view.select_time`)",
+    ),
+    (
+        "S-A11Y-004",
+        "the Clip View's note editor: Shift-Left and Shift-Right select time, a grid step at a \
+         time (`clip_view.select_time`)",
+    ),
+    (
+        "S-A11Y-005",
+        "the Clip View's note editor: Enter selects the notes that start inside the time \
+         selection (`clip_view.select_notes`)",
+    ),
+    (
+        "S-A11Y-006",
+        "the Clip View's note editor: Option-Left and Option-Right (Ctrl on Windows) move the \
+         insert marker to the previous or next note edge (`clip_view.set_insert_marker`)",
+    ),
+    (
+        "S-A11Y-007",
+        "the Clip View's note editor: Shift with the note-jump keys adds the note to the \
+         selection (`clip_view.select_notes`)",
+    ),
+    (
+        "S-A11Y-010",
+        "the Clip View's note editor: Shift-Left and Shift-Right lengthen or shorten the \
+         selected notes by the grid (`note.resize`)",
+    ),
+    (
+        "S-A11Y-011",
+        "the Clip View's note editor: Left and Right move the selected notes by the grid \
+         (`note.move`)",
     ),
     // WP-4.10: the Sample Editor reads its arrow keys itself, because each
     // shortcut has two keys that act differently and the keymap gives a

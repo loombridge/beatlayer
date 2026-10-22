@@ -40,6 +40,7 @@
 //! `egui::Context` and synthetic input.
 
 pub mod arrangement;
+pub mod articulation_map;
 pub mod assistant_panel;
 pub mod audio_panel;
 pub mod autosampler;
@@ -67,6 +68,7 @@ pub mod mixer;
 pub mod multisampler;
 pub mod plugin_list;
 pub mod rack_view;
+pub mod realtime_dialog;
 pub mod sample_display;
 pub mod sample_editor;
 pub mod scene_fields;

@@ -54,7 +54,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        210,
+        216,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
              the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
              routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -82,7 +82,9 @@ fn every_document_command_is_registered() {
              for the macro variations: store_variation, launch_variation, \
              overwrite_variation, rename_variation, duplicate_variation, \
              delete_variation and set_macro_variation_excluded, WP-4.7 the two \
-             for a clip's pitch and its reversal, and WP-5.33 set_device_role"
+             for a clip's pitch and its reversal, WP-5.33 set_device_role, WP-5.4b \
+             set_macro_style, and WP-4.15 the two for bouncing a track in place and to a new \
+             track"
     );
 
     for op in &ops {
@@ -191,6 +193,21 @@ fn every_command_runs_by_id() {
     assert_eq!(document.parent(bass), Some(group));
     assert_eq!(document.track(drums).unwrap().name(), "Break");
     assert_eq!(document.track(reverb).unwrap().kind(), TrackKind::Return);
+
+    // Bounces: a track in place, and a new track beside its source.
+    let bounced: TrackId = agent.new_id();
+    agent.run(
+        "track.set_bounced",
+        json!({ "track": drums, "bounced": { "name": "Drums (Bounce)" } }),
+    );
+    agent.run(
+        "track.create_bounced_track",
+        json!({ "source": bass, "track": bounced, "bounced": { "name": "Bass (Bounce)" } }),
+    );
+    let document = agent.editor.document();
+    assert_eq!(document.track(drums).unwrap().name(), "Drums (Bounce)");
+    assert_eq!(document.track(drums).unwrap().kind(), TrackKind::Audio);
+    assert_eq!(document.track(bounced).unwrap().name(), "Bass (Bounce)");
 
     // Mixer.
     agent.run("mixer.set_volume", json!({ "track": drums, "volume": 0.5 }));
@@ -1299,6 +1316,35 @@ fn every_command_runs_by_id() {
     );
     agent.run("device.remove", json!({ "device": wave }));
 
+    // WP-6.47: an Articulation Map's list is edited by command.
+    let map: DeviceId = agent.new_id();
+    agent.run(
+        "device.insert",
+        json!({ "track": keys, "index": 0, "device": {
+            "id": map, "name": "Articulation Map", "enabled": true, "params": [],
+            "role": "midi_effect",
+            "kind": { "native": { "device_type": "beatlayer.articulation_map" } },
+        } }),
+    );
+    agent.run(
+        "articulation.add",
+        json!({ "device": map, "name": "Staccato" }),
+    );
+    agent.run(
+        "articulation.set",
+        json!({ "device": map, "index": 1,
+            "trigger": { "kind": "key", "key": 36 },
+            "outputs": [{ "kind": "key", "key": 24, "velocity": 100 }],
+            "channel": 5 }),
+    );
+    agent.run(
+        "articulation.move",
+        json!({ "device": map, "index": 1, "to": 0 }),
+    );
+    agent.run("articulation.delete", json!({ "device": map, "index": 0 }));
+    let list = &agent.editor.document().device(map).unwrap().articulations;
+    assert_eq!(list.len(), 1, "the list keeps one articulation");
+
     // A device with a sidechain input (WP-2.19b), listening to another
     // track.
     let duck: DeviceId = agent.new_id();
@@ -2116,6 +2162,21 @@ fn schemas_match_what_commands_serialise() {
             },
         ),
         (
+            "track.set_bounced",
+            Command::BounceTrackInPlace {
+                track,
+                bounced: bl_model::BouncedTrack::default(),
+            },
+        ),
+        (
+            "track.create_bounced_track",
+            Command::BounceToNewTrack {
+                source: track,
+                track: TrackId(fresh()),
+                bounced: bl_model::BouncedTrack::default(),
+            },
+        ),
+        (
             "track.clear_frozen",
             Command::UnfreezeTracks {
                 tracks: vec![track],
@@ -2798,6 +2859,7 @@ fn schemas_match_what_commands_serialise() {
         (
             "device.set_state",
             Command::SetDeviceState {
+                articulations: None,
                 device,
                 params: [(ParamId(4), 0.5)].into_iter().collect(),
                 name: "Warm Pad".to_owned(),
@@ -3056,6 +3118,40 @@ fn schemas_match_what_commands_serialise() {
             Command::UnmapModulator { device, slot: 3 },
         ),
         (
+            "articulation.add",
+            Command::AddArticulation {
+                device,
+                index: None,
+                name: "Staccato".to_owned(),
+            },
+        ),
+        (
+            "articulation.delete",
+            Command::DeleteArticulation { device, index: 0 },
+        ),
+        (
+            "articulation.move",
+            Command::MoveArticulation {
+                device,
+                index: 0,
+                to: Some(1),
+            },
+        ),
+        (
+            "articulation.set",
+            Command::SetArticulation {
+                device,
+                index: 0,
+                name: Some("Legato".to_owned()),
+                trigger: Some(bl_model::ArticulationTrigger::Key { key: 36 }),
+                outputs: Some(vec![bl_model::ArticulationOutput::Key {
+                    key: 24,
+                    velocity: 100,
+                }]),
+                channel: Some(Some(5)),
+            },
+        ),
+        (
             "modulator.set_shape",
             Command::SetShape {
                 device,
@@ -3107,6 +3203,7 @@ fn schemas_match_what_commands_serialise() {
             "device.set_external",
             Command::SetExternal {
                 device,
+                audio_to: None,
                 midi_to: Some(ExternalPort::Port {
                     name: "Synth".to_owned(),
                 }),

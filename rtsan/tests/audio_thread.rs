@@ -229,6 +229,7 @@ fn request(buffer: u32) -> StreamRequest {
 /// Runs `callback` on a real-time-paced null stream for `seconds`.
 fn play(callback: impl AudioCallback, seconds: f64) -> bl_audio_io::StreamStats {
     let backend = NullBackend::with_options(NullOptions {
+        dropout_after: None,
         pacing: Pacing::RealTime,
         frame_limit: Some((seconds * 48_000.0) as u64),
         channels: 2,

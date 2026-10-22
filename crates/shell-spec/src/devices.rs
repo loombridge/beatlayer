@@ -153,6 +153,11 @@ pub const COMPARE_SWITCH: &str = "device.compare_switch";
 /// other (`bl-model`'s).
 pub const COMPARE_COPY: &str = "device.compare_copy";
 
+/// `articulation.list`: the articulations an Articulation Map holds.
+pub const ARTICULATION_LIST: &str = "articulation.list";
+/// `articulation.learn`: arms a row's Learn button.
+pub const ARTICULATION_LEARN: &str = "articulation.learn";
+
 /// Every command [`register`] adds, so a host knows which IDs to send to
 /// `bl-shell`'s `Shell::run`.
 pub const IDS: &[&str] = &[
@@ -204,6 +209,8 @@ pub const IDS: &[&str] = &[
     RACK_SELECT_MACRO,
     RACK_SHOW_VARIATIONS,
     RACK_SELECT_VARIATION,
+    ARTICULATION_LIST,
+    ARTICULATION_LEARN,
 ];
 
 /// The document's device commands that act on the selected device when
@@ -491,6 +498,14 @@ pub struct DevicePanel {
     /// names notes (`C3`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub slot_keys: Vec<String>,
+    /// An Articulation Map's articulations, in order: the list its panel
+    /// shows. Empty for every other device.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub articulations: Vec<bl_model::Articulation>,
+    /// The articulation whose Learn button is lit, counted from 0: the
+    /// panel's state, not the set's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub learning: Option<u8>,
 }
 
 /// One parameter a plug-in device's panel can show (clap-hosting R5,
@@ -872,6 +887,15 @@ pub struct ExternalSection {
     pub channel: u8,
     /// What Audio From shows: a channel `3` or a pair `3/4`.
     pub audio_from: String,
+    /// What Audio To shows: a channel `3` or a pair `3/4`, for a device that
+    /// sends its signal to the interface's outputs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio_to: Option<String>,
+    /// Whether the device sends its signal to the interface's outputs and
+    /// hears it back, as the External Audio Effect does: it has an Audio To
+    /// and no MIDI To (WP-5.35).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub output: bool,
     /// Hardware Latency, in the unit its switch is on.
     pub hardware_latency: bl_model::HardwareLatency,
 }
@@ -1001,6 +1025,48 @@ pub struct DeviceArgs {
     /// The device; the selected one if left out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub device: Option<DeviceId>,
+}
+
+/// Arguments of `articulation.list`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ArticulationListArgs {
+    /// The device; the selected one if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+}
+
+/// Arguments of `articulation.learn`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ArticulationLearnArgs {
+    /// The device; the selected one if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// The articulation's place in the list, from 0; without it, the row
+    /// that is learning stops.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub index: Option<u8>,
+}
+
+/// What `articulation.list` returns: an Articulation Map's articulations, in
+/// order.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ArticulationList {
+    /// The device.
+    pub device: DeviceId,
+    /// Its articulations, in order.
+    pub articulations: Vec<bl_model::Articulation>,
+}
+
+/// What `articulation.learn` returns: the row that is learning.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ArticulationLearn {
+    /// The device.
+    pub device: DeviceId,
+    /// The articulation's place in the list, from 0, or `null` when none is
+    /// learning.
+    pub index: Option<u8>,
 }
 
 /// Arguments of `device.select`.
@@ -2303,6 +2369,31 @@ fn specs() -> Vec<CommandSpec> {
             .context(DeviceView)
             .args::<SetDisplayViewArgs>()
             .result::<DeviceViewState>(),
+        CommandSpec::new(ARTICULATION_LIST, "List Articulations")
+            .description(
+                "Reports the articulations an Articulation Map holds, in order: each with its \
+                 name, its trigger (`{\"kind\":\"none\"}`, `{\"kind\":\"key\",\"key\":36}` or \
+                 `{\"kind\":\"controller\",\"controller\":1,\"lowest\":0,\"highest\":63}`), its \
+                 outputs (a key with a velocity, or a controller with a value) and its channel \
+                 (a number from 1 to 16, or null for none). Changes nothing.",
+            )
+            .permission(Permission::Read)
+            .context(DeviceView)
+            .args::<ArticulationListArgs>()
+            .result::<ArticulationList>(),
+        CommandSpec::new(ARTICULATION_LEARN, "Learn Articulation")
+            .description(
+                "Lights a row's Learn button, as clicking it does, so the next note-on or \
+                 control change the device hears becomes that articulation's trigger: a key, or \
+                 the controller with that one value as its range. Learning it is one undo step \
+                 (Change Articulation); the button goes out afterwards. Clicking a lit button \
+                 again, or leaving `index` out, puts it out without a change. It changes only \
+                 the panel: it isn't an undo step, and it isn't saved with the set.",
+            )
+            .permission(Permission::Read)
+            .context(DeviceView)
+            .args::<ArticulationLearnArgs>()
+            .result::<ArticulationLearn>(),
         CommandSpec::new(ARM_MAP, "Map")
             .description(
                 "Lights or puts out a modulator slot's Map button, as clicking it does. While \

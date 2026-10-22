@@ -608,6 +608,32 @@ const ENTRIES: &[Entry] = &[
             `track.unfreeze` is the command a person and an agent run.",
     },
     Entry {
+        id: "track.set_bounced",
+        action: Action::Apply("bounce_track_in_place"),
+        label: "Set Track Bounced",
+        permission: Permission::Destructive,
+        contexts: &[TrackHeaders, Arrangement, Session],
+        keys: &[],
+        description: "Replaces a track with the audio track a bounce made: no devices, the \
+            track's name with \" (Bounce)\" after it, its mixer settings, and its clips playing \
+            the bounce file. `bounced` is what the new track holds. `track.bounce_in_place` is \
+            the command a person and an agent run: it renders the file and applies this one. \
+            Used directly, it names a file the caller has already written.",
+    },
+    Entry {
+        id: "track.create_bounced_track",
+        action: Action::Apply("bounce_to_new_track"),
+        label: "Create Bounced Track",
+        permission: Permission::Edit,
+        contexts: &[TrackHeaders, Arrangement, Session],
+        keys: &[],
+        description: "Makes a new audio track directly after the track that was bounced, \
+            holding the bounced audio. `bounced` is what the new track holds. \
+            `track.bounce_to_new_track` is the command a person and an agent run: it renders \
+            the file and applies this one. Used directly, it names a file the caller has \
+            already written.",
+    },
+    Entry {
         id: "mixer.set_volume",
         action: Action::Apply("set_volume"),
         label: "Set Track Volume",
@@ -2254,6 +2280,56 @@ const ENTRIES: &[Entry] = &[
             a shape). An empty list outputs 0. One undo step (Edit Shape).",
     },
     Entry {
+        id: "articulation.add",
+        action: Action::Apply("add_articulation"),
+        label: "Add Articulation",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Adds an articulation to an Articulation Map's list, at `index` (or at the \
+            end when it isn't given), with the name `name`. The list holds up to 32 \
+            articulations and keeps one at least. One undo step (Add Articulation).",
+    },
+    Entry {
+        id: "articulation.delete",
+        action: Action::Apply("delete_articulation"),
+        label: "Delete Articulation",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Removes the articulation at `index` (counted from 0) from an Articulation \
+            Map's list. The list keeps one articulation at least. One undo step (Delete \
+            Articulation).",
+    },
+    Entry {
+        id: "articulation.move",
+        action: Action::Apply("move_articulation"),
+        label: "Move Articulation",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Moves the articulation at `index` (counted from 0) in an Articulation Map's \
+            list to `to`, or to the end of the list when `to` isn't given. One undo step (Move \
+            Articulation).",
+    },
+    Entry {
+        id: "articulation.set",
+        action: Action::Apply("set_articulation"),
+        label: "Change Articulation",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Changes the articulation at `index` (counted from 0) in an Articulation \
+            Map's list: its `name`, its `trigger`, its `outputs` or its `channel`. What isn't \
+            given stays as it is. A trigger is `{\"kind\":\"none\"}`, `{\"kind\":\"key\", \
+            \"key\":36}` or `{\"kind\":\"controller\",\"controller\":1,\"lowest\":0,\"highest\":63}`; \
+            an output is `{\"kind\":\"key\",\"key\":36,\"velocity\":100}` or \
+            `{\"kind\":\"controller\",\"controller\":1,\"value\":64}`; a channel is a number from \
+            1 to 16, or null for none, so the articulation's notes keep the channel they come \
+            in on. Two articulations of a device never trigger on the same key or on \
+            overlapping ranges of the same controller. One undo step (Change Articulation).",
+    },
+    Entry {
         id: "device.compare_switch",
         action: Action::Apply("compare_switch"),
         label: "Compare: Switch",
@@ -2533,13 +2609,15 @@ const ENTRIES: &[Entry] = &[
         contexts: &[DeviceView],
         keys: &[],
         description: "Sets the routing of a device that works with hardware outside the \
-            computer (the External Instrument), as the choosers in its title bar do; give only \
-            the settings to change. `midi_to` is `{ \"type\": \"none\" }` (No Output, a new \
-            device's) or `{ \"type\": \"port\", \"name\": ... }` with a MIDI output port's \
-            name as `midi.ports` lists it, with its Track switch on; `channel` is the MIDI \
-            channel to send on, 1 to 16 (1 on a new device); `audio_from` is the audio \
-            interface's inputs the hardware's sound comes back on, a channel or a pair \
-            (`{ \"type\": \"pair\", \"channel\": 1 }`, the first pair on a new device); \
+            computer (the External Instrument and the External Audio Effect), as the choosers \
+            in its title bar do; give only the settings to change. `midi_to` is `{ \"type\": \
+            \"none\" }` (No Output, a new device's) or `{ \"type\": \"port\", \"name\": ... }` \
+            with a MIDI output port's name as `midi.ports` lists it, with its Track switch \
+            on; `channel` is the MIDI channel to send on, 1 to 16 (1 on a new device); \
+            `audio_from` is the audio interface's inputs the hardware's sound comes back on, \
+            a channel or a pair (`{ \"type\": \"pair\", \"channel\": 1 }`, the first pair on a \
+            new device); `audio_to` is the audio interface's outputs an External Audio Effect \
+            sends its signal to, a channel or a pair (the first pair on a new device); \
             `hardware_latency` is the delay the hardware adds that the computer can't detect, \
             in the unit the unit switch is on: `{ \"unit\": \"milliseconds\", \"value\": 12.5 }` \
             (0 to 1000, kept in milliseconds when the sample rate changes) or `{ \"unit\": \

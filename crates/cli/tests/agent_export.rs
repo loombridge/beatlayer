@@ -233,6 +233,42 @@ fn an_agent_exports_an_mp3_by_command() {
     );
 }
 
+/// Spec: external-devices R27. The export takes the real-time render's
+/// arguments, and says whether it rendered in real time: a set with no
+/// hardware renders offline, and makes no attempt.
+#[test]
+fn an_agent_exports_with_the_real_time_arguments() {
+    let dir = TempDir::new("realtime");
+    let stem = dir.0.join("Stem.wav");
+    write_stem(&stem, 220.0, 1.0);
+
+    let mut client = bl_cli_mcp(&["--autonomous"]);
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "browser.add_to_arrangement",
+                               "args": { "paths": [stem.to_string_lossy()], "at": 0 } }] }),
+    );
+
+    let file = dir.0.join("Agent Mix.wav");
+    let exported = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "export.audio",
+                               "args": { "path": file.to_string_lossy(), "bit_depth": 24,
+                                         "sample_rate": 48000, "wait_seconds": 0,
+                                         "max_attempts": 3 } }] }),
+    );
+    let result = &exported["results"][0]["result"];
+    assert_eq!(result["real_time"], false, "the set has no hardware");
+    assert_eq!(result["attempts"], 0, "an offline render makes no attempt");
+    assert!(
+        result["dropouts"].as_array().is_none_or(|d| d.is_empty()),
+        "no dropouts: {result:?}"
+    );
+    assert!(file.exists(), "the file was written");
+}
+
 /// Exports the set as a 32-bit float WAV file by command, and returns its
 /// left channel.
 fn export_float(client: &mut Client<impl Transport>, path: &Path) -> Vec<f32> {

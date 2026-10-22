@@ -4758,7 +4758,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+Shift+P"]
 win = ["Ctrl+Shift+P"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "search.open", contexts = ["global", "text-field"], args = { scope = "commands" } },
+]
 
 [[shortcut]]
 id = "S-FOCUS-015"
@@ -4769,4 +4772,7 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+Shift+O"]
 win = ["Ctrl+Shift+O"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "search.open", contexts = ["global", "text-field"], args = { scope = "tracks" } },
+]

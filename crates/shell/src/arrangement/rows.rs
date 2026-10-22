@@ -3,6 +3,8 @@
 
 use bl_model::{Document, TrackId, TrackKind};
 
+use super::ArrangementView;
+
 /// A new track's height, unfolded, in points (layout.md, L-ARR-005).
 pub const DEFAULT_TRACK_HEIGHT: f32 = 88.0;
 
@@ -60,17 +62,30 @@ impl Row {
 }
 
 /// The tracks in the scrolling part of the lanes, in display order: every
-/// track but the returns and Main, skipping those inside a folded group.
+/// track but the returns and Main, skipping those inside a folded group and,
+/// while the search field's Show Only Matches is on, those it hides
+/// (command-palette R12).
 pub fn shown_tracks<'a>(
     doc: &'a Document,
-    is_folded: impl Fn(TrackId) -> bool + 'a,
+    view: &'a ArrangementView,
 ) -> impl Iterator<Item = (TrackId, TrackKind, u16)> + 'a {
-    let mut stack: Vec<(TrackId, u16)> = doc.top_level().rev().map(|id| (id, 0)).collect();
+    let mut stack: Vec<(TrackId, u16)> = doc
+        .top_level()
+        .rev()
+        .filter(|id| view.search_keeps(*id))
+        .map(|id| (id, 0))
+        .collect();
     std::iter::from_fn(move || {
         let (id, depth) = stack.pop()?;
         let track = doc.track(id)?;
-        if track.kind() == TrackKind::Group && !is_folded(id) {
-            stack.extend(track.children().rev().map(|child| (child, depth + 1)));
+        if track.kind() == TrackKind::Group && !view.is_folded_in(doc, id) {
+            stack.extend(
+                track
+                    .children()
+                    .rev()
+                    .filter(|child| view.search_keeps(*child))
+                    .map(|child| (child, depth + 1)),
+            );
         }
         Some((id, track.kind(), depth))
     })
@@ -78,9 +93,14 @@ pub fn shown_tracks<'a>(
 
 /// The pinned rows under the scrolling ones: the return tracks, then Main,
 /// with the return tracks left out while they're hidden (arrangement-view
-/// R23).
-pub fn pinned_tracks(doc: &Document, show_returns: bool) -> impl Iterator<Item = TrackId> + '_ {
-    let returns = doc.returns().filter(move |_| show_returns);
+/// R23) or Show Only Matches hides them (command-palette R12).
+pub fn pinned_tracks<'a>(
+    doc: &'a Document,
+    view: &'a ArrangementView,
+) -> impl Iterator<Item = TrackId> + 'a {
+    let returns = doc
+        .returns()
+        .filter(move |id| view.show_return_tracks() && view.search_keeps(*id));
     returns.chain(std::iter::once(doc.main_id()))
 }
 

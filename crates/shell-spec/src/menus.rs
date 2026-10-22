@@ -120,6 +120,15 @@ pub const IMP_25_CLOSE_WINDOWS: &str = "IMP-25-close-windows";
 /// Files: an improvement, so not a row of menus.md.
 pub const IMP_29: &str = "IMP-29";
 
+/// The rows of Beatlayer's own Search Commands… (IMP-16) at the top of Help,
+/// with the separator after it, and Find Track (IMP-18) after Next Neighbor:
+/// improvements, so not rows of menus.md, which records Live's menus.
+pub const IMP_16: &str = "IMP-16";
+/// See [`IMP_16`].
+pub const IMP_16_SEPARATOR: &str = "IMP-16-separator";
+/// See [`IMP_16`].
+pub const IMP_18: &str = "IMP-18";
+
 /// The rows of the Create menu's Sample Editor items, which menus.md's note
 /// under the Create menu names but gives no rows (WP-4.10).
 pub const SAMPLE_WARP: &str = "WP-4.10-warp";
@@ -693,6 +702,7 @@ const NAVIGATE: &[Row] = &[
         Cmd(FOCUS_PREVIOUS_NEIGHBOR),
     ),
     ("M-NAV-015", "Next Neighbor", Cmd(FOCUS_NEXT_NEIGHBOR)),
+    (IMP_18, "Find Track", Key(&["S-FOCUS-015"])),
     SEPARATOR,
     ("M-NAV-016", "Browser History Back", Key(&["S-BRW-011"])),
     ("M-NAV-017", "Browser History Forward", Key(&["S-BRW-012"])),
@@ -824,6 +834,8 @@ const OPTIONS: &[Row] = &[
 ];
 
 const HELP: &[Row] = &[
+    (IMP_16, "Search Commands…", Key(&["S-MENU-007"])),
+    (IMP_16_SEPARATOR, "", Action::Separator),
     ("M-HELP-001", "Learn View", Key(&["S-VIEW-018"])),
     (
         "M-HELP-002",

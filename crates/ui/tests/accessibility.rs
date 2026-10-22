@@ -1710,6 +1710,20 @@ fn device_view(h: &mut Harness) {
     });
 }
 
+/// The search field, open on its Commands scope.
+fn search_commands(h: &mut Harness) {
+    h.shell
+        .run("search.open", json!({ "scope": "commands" }))
+        .unwrap();
+}
+
+/// The search field, open on its Tracks scope.
+fn search_tracks(h: &mut Harness) {
+    h.shell
+        .run("search.open", json!({ "scope": "tracks" }))
+        .unwrap();
+}
+
 /// The list of the set's plug-ins, open in the detail area, with the
 /// keyboard in it (IMP-29, WP-6.41).
 fn plugin_list(h: &mut Harness) {
@@ -2947,6 +2961,40 @@ fn paths() -> BTreeMap<&'static str, Path> {
             "view.set_plugin_list_only_missing",
             main(nothing, plugin_list, "Show Only Missing", Key::Enter),
         ),
+        // The search field (WP-6.42): Tab reaches its scope buttons and Show
+        // Only Matches, and Enter presses them; the text, the arrows, Return
+        // and Esc act on it from the keyboard.
+        (
+            "search.set_scope",
+            main(search_commands, nothing, "Tracks", Key::Enter),
+        ),
+        (
+            "search.set_only_matches",
+            main(search_tracks, nothing, "Show Only Matches", Key::Enter),
+        ),
+        (
+            "search.set_text",
+            Exception(Equivalent("typing in the search field")),
+        ),
+        (
+            "search.next",
+            Exception(Equivalent(
+                "Down in the search field's Commands scope, Return in its Tracks scope",
+            )),
+        ),
+        (
+            "search.previous",
+            Exception(Equivalent(
+                "Up in the search field's Commands scope, Shift-Return in its Tracks scope",
+            )),
+        ),
+        (
+            "search.close",
+            Exception(Equivalent("Esc in the search field")),
+        ),
+        ("search.state", Exception(Query)),
+        ("search.commands", Exception(Query)),
+        ("search.tracks", Exception(Query)),
         // The Device View (WP-2.4): Enter on a title bar's controls.
         (
             "device.select",

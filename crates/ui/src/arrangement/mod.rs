@@ -745,7 +745,11 @@ impl ArrangementUi {
             } else if automation {
                 Drag::Automation
             } else if self.clips.begin(&clip_lanes, press, keys, events) {
-                // WP-1.8b: a clip's title bar or edge.
+                // WP-1.8b: a clip's title bar or edge. Spec: clip files R3. A
+                // clip moved by its title bar can be dropped on the browser.
+                if self.clips.move_anchor().is_some() {
+                    crate::browser::begin_clip_drag(ui.ctx());
+                }
                 Drag::Clips
             } else if keys.extend {
                 // Shift-drag extends the time selection (I-DRAG-010).
@@ -808,6 +812,9 @@ impl ArrangementUi {
         }
         // Esc abandons a clip drag; egui ends the drag on it too.
         if self.drag == Some(Drag::Clips) && ui.input(|i| i.key_pressed(Key::Escape)) {
+            if self.clips.move_anchor().is_some() {
+                crate::browser::end_clip_drag(ui.ctx());
+            }
             self.clips.cancel(events);
             self.drag = None;
         }
@@ -817,7 +824,20 @@ impl ArrangementUi {
         }
         if response.drag_stopped() {
             match self.drag {
-                Some(Drag::Clips) => self.clips.end(&clip_lanes, pointer, keys, events),
+                Some(Drag::Clips) => {
+                    // Spec: clip files R3. Released over a folder or label of
+                    // the browser, a moved clip goes back where it was and
+                    // is saved as a clip file there.
+                    let anchor = self.clips.move_anchor();
+                    let target = anchor.and_then(|_| crate::browser::end_clip_drag(ui.ctx()));
+                    match (anchor, target) {
+                        (Some(clip), Some(target)) => {
+                            self.clips.cancel(events);
+                            crate::browser::save_clip(ui.ctx(), shell, clip, &target, events);
+                        }
+                        _ => self.clips.end(&clip_lanes, pointer, keys, events),
+                    }
+                }
                 Some(Drag::Automation) => {
                     self.automation
                         .end(view, doc, horizontal, pointer, modifiers, events);

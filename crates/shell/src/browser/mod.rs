@@ -2186,6 +2186,13 @@ impl BrowserView {
         files.into_iter().map(|(_, path)| path).collect()
     }
 
+    /// The file whose name is open for editing after a clip was saved (clip
+    /// files R4).
+    #[must_use]
+    pub fn renaming(&self) -> Option<&Path> {
+        self.renaming.as_deref()
+    }
+
     /// The selected clip files, in the content pane's order.
     pub(crate) fn selected_clip_files(&self) -> Vec<PathBuf> {
         let mut files: Vec<(Option<usize>, PathBuf)> = self

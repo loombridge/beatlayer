@@ -251,6 +251,16 @@ fn invoke(events: &mut Vec<UiEvent>, id: &str, args: Value) {
 }
 
 impl ClipGestures {
+    /// The clip a move drag is carrying, if one is under way: released over
+    /// the browser it is saved as a clip file (clip files R3).
+    #[must_use]
+    pub fn move_anchor(&self) -> Option<ClipId> {
+        match &self.drag {
+            Some(ClipDrag::Move { anchor, .. }) => Some(*anchor),
+            _ => None,
+        }
+    }
+
     /// Whether a drag or a keyboard resize is under way.
     #[must_use]
     pub fn active(&self) -> bool {

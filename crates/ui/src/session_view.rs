@@ -255,7 +255,12 @@ impl GridUi {
         // copy it with the copy modifier held (I-DRAG-001, I-DRAG-002).
         if let Some((clip, from)) = self.released.take() {
             let (pos, modifiers) = ui.input(|i| (i.pointer.interact_pos(), i.modifiers));
-            if let Some(pos) = pos
+            // Released over a folder or label of the browser, the clip is
+            // saved as a clip file there instead (clip files R3).
+            let target = crate::browser::end_clip_drag(ui.ctx());
+            if let Some(target) = target {
+                crate::browser::save_clip(ui.ctx(), shell, clip, &target, events);
+            } else if let Some(pos) = pos
                 && let Some((to_track, to_scene)) =
                     slot_at(session, &layout, &columns, &scenes, scroll_y, pos)
                 && (to_track, to_scene) != from
@@ -411,6 +416,8 @@ impl GridUi {
                 clip,
                 from: (track, scene),
             });
+            // Spec: clip files R3. A clip can be dropped on the browser.
+            crate::browser::begin_clip_drag(ui.ctx());
         }
         if response.drag_stopped()
             && let Some(Drag::Clip { clip, from }) = self.drag.take()
@@ -851,27 +858,55 @@ impl GridUi {
         let Some(pos) = pointer else {
             return;
         };
-        let Some((track, scene)) =
-            slot_at(session, layout, columns, scenes, state.scroll_y as f32, pos)
-        else {
+        // Clip files can also be dropped in the drop area, where each makes
+        // a track of its kind in the scene it is dropped at (clip files R7).
+        let clips = payload
+            .as_ref()
+            .is_some_and(|p| p.paths.iter().all(|p| crate::browser::is_clip(p)))
+            || (!dropped.is_empty() && dropped.iter().all(|p| crate::browser::is_clip(p)));
+        let slot = slot_at(session, layout, columns, scenes, state.scroll_y as f32, pos);
+        let area = layout
+            .drop_area
+            .map(|area| area.intersect(session.slots))
+            .filter(|area| clips && slot.is_none() && area.contains(pos));
+        let Some((track, scene)) = slot.map(|(track, scene)| (Some(track), scene)).or_else(|| {
+            let row = ((pos.y - session.slots.top() + state.scroll_y as f32) / SLOT_ROW).floor();
+            let scene = scenes.get(usize::try_from(row as i64).ok()?)?.0;
+            area.map(|_| (None, scene))
+        }) else {
             return;
         };
+        if let Some(area) = area {
+            ui.painter_at(area).rect_stroke(
+                area,
+                0.0,
+                egui::Stroke::new(2.0, ui.visuals().selection.stroke.color),
+                egui::StrokeKind::Inside,
+            );
+        }
         // Several files spread across the tracks with the command modifier
         // held (I-DROP-003), as the Arrangement's drop overlay does.
         let spread = spread_modifier(modifiers);
+        let args = |paths: &[String]| {
+            let mut args = json!({ "paths": paths, "scene": scene, "spread": spread });
+            if let Some(track) = track {
+                args["track"] = json!(track);
+            }
+            args
+        };
         if let Some(payload) = payload
             && released
         {
             egui::DragAndDrop::clear_payload(&ctx);
             events.push(UiEvent::Invoke(Invocation::new(
                 ids::DROP_FILES,
-                json!({ "paths": payload.paths, "track": track, "scene": scene, "spread": spread }),
+                args(&payload.paths),
             )));
         }
         if !dropped.is_empty() {
             events.push(UiEvent::Invoke(Invocation::new(
                 ids::DROP_FILES,
-                json!({ "paths": dropped, "track": track, "scene": scene, "spread": spread }),
+                args(&dropped),
             )));
         }
     }

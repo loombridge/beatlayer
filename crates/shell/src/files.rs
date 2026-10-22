@@ -69,6 +69,26 @@ pub trait SetStore {
     /// Forgets the open set's file, as a new set has none.
     fn close(&mut self);
 
+    /// The open set's file and what its last load or save said about it,
+    /// if it has one.
+    fn set_file(&self) -> Option<&SetFile> {
+        None
+    }
+
+    /// The set as it would be saved: the editor's document with the open
+    /// set's media table and views (WP-6.62, the crash-recovery spec R21).
+    /// The journal holds this, so a recovered set is the set as it was.
+    fn project(&self, editor: &Editor) -> Project {
+        Project::from_editor(editor, Media::new())
+    }
+
+    /// Takes over a set the app didn't open from a file: the recovery's
+    /// set file, and the project the journal held (WP-6.62, the
+    /// crash-recovery spec R3).
+    fn adopt(&mut self, set: Option<SetFile>, project: Project) {
+        let _ = (set, project);
+    }
+
     /// Reads the set at `path` into an editor with an empty undo history,
     /// without making it the open set: the File Manager opens a backup as
     /// the set, which keeps its own file (WP-6.63, R18). A store that
@@ -277,13 +297,6 @@ impl ProjectFiles {
     pub fn new() -> Self {
         Self::default()
     }
-
-    /// The open set's file and what its last load or save said about it,
-    /// if it has one.
-    #[must_use]
-    pub fn set_file(&self) -> Option<&SetFile> {
-        self.set.as_ref()
-    }
 }
 
 impl SetStore for ProjectFiles {
@@ -370,6 +383,34 @@ impl SetStore for ProjectFiles {
         self.multisamplers = MultisamplerViews::new();
         self.folds = ClipFolds::new();
         self.launch = LaunchSettings::default();
+        self.added.clear();
+    }
+
+    fn set_file(&self) -> Option<&SetFile> {
+        self.set.as_ref()
+    }
+
+    fn project(&self, editor: &Editor) -> Project {
+        let mut media = self.media.clone();
+        if let Some(set) = &self.set {
+            self.add_media_to(&mut media, set.path());
+        }
+        Project::from_editor(editor, media)
+            .with_windows(&self.windows)
+            .with_rack_views(&self.rack_views)
+            .with_multisamplers(&self.multisamplers)
+            .with_folds(&self.folds)
+            .with_launch(self.launch)
+    }
+
+    fn adopt(&mut self, set: Option<SetFile>, project: Project) {
+        self.set = set;
+        self.media = project.media;
+        self.windows = project.windows;
+        self.rack_views = project.rack_views;
+        self.multisamplers = project.multisamplers;
+        self.folds = project.folds;
+        self.launch = project.launch;
         self.added.clear();
     }
 

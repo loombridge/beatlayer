@@ -108,6 +108,16 @@ impl Harness {
         harness
     }
 
+    /// A harness whose shell journals the open set's edits in `dir`, as
+    /// the app does at start-up (WP-6.62, the crash-recovery spec, R21),
+    /// and which offers the sets a crash left.
+    pub fn with_recovery(window: Window, dir: std::path::PathBuf) -> Self {
+        let mut shell = Shell::headless();
+        shell.start_audio();
+        shell.use_recovery(dir).unwrap();
+        Self::with_shell(window, shell)
+    }
+
     fn with_shell(window: Window, shell: Shell) -> Self {
         let ctx = Context::default();
         ctx.set_fonts(fonts());

@@ -3877,24 +3877,34 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ),
         (
             "set.recover",
-            Exception(Gap(
-                "the recovery prompt at launch, which the app doesn't show yet (crash-recovery)",
-            )),
+            main(crashed_session, nothing, "Recover", Key::Enter),
         ),
         (
             "set.discard_recovery",
-            Exception(Gap(
-                "the recovery prompt at launch, which the app doesn't show yet (crash-recovery)",
-            )),
+            main(crashed_session, nothing, "Discard", Key::Enter),
+        ),
+        (
+            "set.later_recovery",
+            main(crashed_session, nothing, "Later", Key::Enter),
         ),
         (
             "settings.set_continuous_save",
-            Exception(Gap(
-                "the Save Continuously switch on File & Folder, not drawn yet (crash-recovery \
-                 R11)",
-            )),
+            settings("file-folder", nothing, "Save Continuously", Key::Enter),
         ),
     ])
+}
+
+/// A session that stopped without closing its set, so the recovery prompt
+/// offers it (WP-6.62, the crash-recovery spec, R22).
+fn crashed_session(h: &mut Harness) {
+    let dir = std::env::temp_dir().join(format!("bl-a11y-recovery-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let mut autosave = bl_project::autosave::Autosave::start(&dir).unwrap();
+    autosave.begin(None).unwrap();
+    autosave.edited(&bl_project::Project::new(), "Move Clip");
+    // The session ends as a crash would: its lock goes with it.
+    drop(autosave);
+    h.shell.use_recovery(dir).unwrap();
 }
 
 /// Every registered command, from every crate that registers them.
@@ -4097,9 +4107,6 @@ fn every_m1_command_is_reachable_from_the_keyboard() {
             "device.sort_layers",
             "export.audio",
             "rack.set_macro_info_text",
-            "set.discard_recovery",
-            "set.recover",
-            "settings.set_continuous_save",
             "track.move",
         ],
         "the gaps the accessibility spec lists"

@@ -260,7 +260,7 @@ fn a_clip_is_saved_named_and_its_row_opened_for_renaming() {
 
     // The new row is selected with its name ready to edit.
     let browser = state(&mut shell);
-    assert_eq!(browser.selected, [saved.path.clone()]);
+    assert_eq!(browser.selected, std::slice::from_ref(&saved.path));
     assert_eq!(browser.renaming.as_deref(), Some(saved.path.as_str()));
     let row = browser
         .rows

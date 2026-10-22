@@ -64,6 +64,8 @@ impl From<bl_model::EditError> for EditFailure {
 /// track's span of a copied time selection.
 #[derive(Clone, Debug, PartialEq)]
 pub struct EnvelopeMaterial {
+    /// The track the piece was on.
+    pub source: TrackId,
     /// The track's distance from the first track of the material.
     pub distance: usize,
     /// Where the piece starts, counted from the material's start.
@@ -483,6 +485,7 @@ fn envelope_material(
             .iter()
             .flat_map(|(track, clips)| {
                 clips.iter().map(|clip| EnvelopeMaterial {
+                    source: *track,
                     distance: distance(track),
                     start: clip.start - start,
                     length: clip.length,
@@ -493,6 +496,7 @@ fn envelope_material(
         Target::Time { .. } => by_track
             .iter()
             .map(|(track, _)| EnvelopeMaterial {
+                source: *track,
                 distance: distance(track),
                 start: Ticks::ZERO,
                 length: end - start,
@@ -504,6 +508,11 @@ fn envelope_material(
 
 /// Writes the envelopes of `materials` into the tracks they name, each
 /// piece at its own place from `at`.
+///
+/// A piece that lands on another track keeps only the envelopes that go
+/// with a clip to another track: the mixer controls and the sends that
+/// track also has. A device's parameters stay on the track they're on (the
+/// automation editing spec, R9).
 fn write_envelopes(
     editor: &mut Editor,
     materials: &[EnvelopeMaterial],
@@ -517,6 +526,12 @@ fn write_envelopes(
         let start = at + material.start;
         let end = start + material.length;
         for (target, shape) in &material.shapes {
+            if material.source != *track {
+                let doc = editor.document();
+                if !travels_with(target, doc, *track) {
+                    continue;
+                }
+            }
             let mut envelope = automation::envelope_of(editor.document(), *track, *target)
                 .cloned()
                 .unwrap_or_default();
@@ -558,14 +573,12 @@ fn remove_envelopes(
 /// Whether a parameter's envelope goes with a clip to another track: the
 /// mixer controls and the sends that track also has. A device's parameters
 /// stay on the track they're on (the automation editing spec, R9).
-fn travels_with(target: &AutomationTarget, doc: &Document, to: TrackId) -> bool {
+fn travels_with(target: &AutomationTarget, doc: &Document, destination: TrackId) -> bool {
     match target {
         AutomationTarget::Mixer { .. } => true,
-        AutomationTarget::Send { to: return_track } => doc.track(to).is_some_and(|track| {
-            track
-                .sends()
-                .any(|(destination, _)| destination == *return_track)
-        }),
+        AutomationTarget::Send { to: return_track } => doc
+            .track(destination)
+            .is_some_and(|track| track.sends().any(|(to, _)| to == *return_track)),
         _ => false,
     }
 }

@@ -8,8 +8,8 @@ use std::sync::atomic::AtomicBool;
 
 use bl_core::time::Ticks;
 use bl_model::{
-    AudioData, AutomationTarget, Clip, ClipData, Command, ContentHash, Document, Editor,
-    MixerParam, TrackId,
+    AudioData, AutomationTarget, Clip, ClipData, Command, ContentHash, Device, DeviceKind,
+    Document, Editor, MixerParam, TrackId,
 };
 use bl_plugin_host::Hosts;
 use bl_shell::Shell;
@@ -446,6 +446,103 @@ fn cutting_a_clip_carries_its_automation_with_it() {
         song.envelope(),
         vec![(0, 0.0), (2, 0.5)],
         "the span runs straight across"
+    );
+}
+
+// Spec: automation-editing R9. A clip pasted onto another track takes the
+// envelopes of the mixer controls and sends that track also has; a device's
+// parameters stay on the track they're on.
+#[test]
+fn pasting_a_clip_onto_another_track_leaves_the_device_envelopes_behind() {
+    let mut editor = factory_default_set();
+    let track = editor
+        .document()
+        .top_level()
+        .find(|id| {
+            editor
+                .document()
+                .track(*id)
+                .is_some_and(|track| track.kind() == bl_model::TrackKind::Audio)
+        })
+        .unwrap();
+    let other = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: other,
+            kind: bl_model::TrackKind::Audio,
+            name: String::new(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    // A device on the first track, with an envelope on its gain.
+    let device = editor.new_id();
+    editor
+        .apply(Command::InsertDevice {
+            track,
+            index: 0,
+            device: Device::new(
+                device,
+                "",
+                DeviceKind::Native {
+                    device_type: bl_devices::testing::UTILITY.to_owned(),
+                },
+            ),
+        })
+        .unwrap();
+    let target = AutomationTarget::Device {
+        device,
+        param: bl_devices::testing::UTILITY_GAIN,
+    };
+    editor
+        .apply(Command::SetAutomationBreakpoint {
+            track,
+            target,
+            at: Ticks::ZERO,
+            value: 0.5,
+        })
+        .unwrap();
+    let clip: bl_model::ClipId = editor.new_id();
+    editor
+        .apply(Command::CreateClip {
+            track,
+            clip: Clip::new(
+                clip,
+                Ticks::ZERO,
+                Ticks(BAR * 2),
+                ClipData::Audio(AudioData::new(ContentHash([7; 32]))),
+            ),
+        })
+        .unwrap();
+    editor.clear_history().unwrap();
+    let mut shell = Shell::new(
+        Preferences::default(),
+        None,
+        AudioHost::null(Default::default()),
+        Box::new(Preloaded(Some(editor))),
+    );
+    shell
+        .run("set.open", json!({ "path": "Automation.blset" }))
+        .unwrap();
+    // Copy the clip and paste it onto the other track.
+    shell
+        .run(edit_ids::COPY, json!({ "clips": [clip] }))
+        .unwrap();
+    let pasted = shell.run(
+        edit_ids::PASTE,
+        json!({ "at": Ticks(BAR * 4), "track": other }),
+    );
+    assert!(pasted.is_ok(), "the paste failed: {pasted:?}");
+    // The device's envelope stays on the track it was on.
+    assert!(
+        shell
+            .editor()
+            .document()
+            .track(other)
+            .unwrap()
+            .automation_for(&target)
+            .is_none(),
+        "the device's envelope followed the clip"
     );
 }
 

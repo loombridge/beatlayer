@@ -86,7 +86,7 @@ This spec covers these edits in the Arrangement's automation lanes, the keys in 
 | R6 | `the_edit_keys_in_an_automation_lane_act_on_the_envelopes`, `option_with_an_edit_key_acts_on_the_shown_automation_lanes` | `bl-ui` |
 | R7 | `every_listed_id_is_registered_and_complete` | `bl-shell-spec` |
 | R8 | `lock_envelopes_is_off_in_a_new_set_and_saved_with_the_set`, `an_older_set_loads_with_lock_envelopes_off` | `bl-shell`, `bl-cli` |
-| R9 | `moving_a_clip_carries_its_automation_with_it` | `bl-shell` |
+| R9 | `moving_a_clip_carries_its_automation_with_it`, `pasting_a_clip_onto_another_track_leaves_the_device_envelopes_behind` | `bl-shell` |
 | R10 | `with_lock_envelopes_on_a_clip_moves_on_its_own` | `bl-shell` |
 | R11 | to be written in WP-6.25b | |
 | R12 | to be written in WP-6.25b | |

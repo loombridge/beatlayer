@@ -333,7 +333,7 @@ mod tests {
     fn drawn(shell: &Shell) -> MainWindowUi {
         let ctx = egui::Context::default();
         ctx.set_fonts(fonts());
-        let theme = Theme::of(&shell);
+        let theme = Theme::of(shell);
         theme.apply(&ctx);
         let mut main = MainWindowUi::new();
         for frame in 0..2 {

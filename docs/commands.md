@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-621 commands in 40 areas.
+639 commands in 41 areas.
 
 ## Permission classes
 
@@ -368,6 +368,16 @@ Each command has:
 | [`keymap.reset`](#keymapreset) | Reset Keys | `edit` |  |  |
 | [`keymap.state`](#keymapstate) | Keymap State | `read` |  |  |
 | [`keymap.unbind`](#keymapunbind) | Unbind Keys | `edit` |  |  |
+| [`locator.add`](#locatoradd) | Add Locator | `edit` |  |  |
+| [`locator.delete`](#locatordelete) | Delete Locator | `destructive` |  |  |
+| [`locator.jump`](#locatorjump) | Jump to Locator | `read` |  |  |
+| [`locator.jump_next`](#locatorjump_next) | Jump to Next Locator | `read` |  |  |
+| [`locator.jump_previous`](#locatorjump_previous) | Jump to Previous Locator | `read` |  |  |
+| [`locator.loop_to_next`](#locatorloop_to_next) | Loop to Next Locator | `edit` |  |  |
+| [`locator.move`](#locatormove) | Move Locator | `edit` |  |  |
+| [`locator.rename`](#locatorrename) | Rename Locator | `edit` |  |  |
+| [`locator.select`](#locatorselect) | Select Locators | `read` |  |  |
+| [`locator.set_info_text`](#locatorset_info_text) | Set Locator Info Text | `edit` |  |  |
 | [`midi.capture`](#midicapture) | Capture MIDI | `edit` |  |  |
 | [`midi.computer_keyboard_key`](#midicomputer_keyboard_key) | Computer Keyboard Key | `read` |  |  |
 | [`midi.computer_keyboard_octave`](#midicomputer_keyboard_octave) | Computer Keyboard Octave | `read` |  |  |
@@ -572,12 +582,20 @@ Each command has:
 | [`settings.set_warp_recorded_audio`](#settingsset_warp_recorded_audio) | Warp Recorded Audio | `edit` |  |  |
 | [`settings.state`](#settingsstate) | Settings State | `read` |  |  |
 | [`slot.set_stop_button`](#slotset_stop_button) | Add Stop Button | `edit` | `Cmd+E` | `Ctrl+E` |
+| [`song.add_locator`](#songadd_locator) | Add Locator | `edit` |  |  |
+| [`song.delete_locator`](#songdelete_locator) | Delete Locator | `destructive` |  |  |
 | [`song.delete_tempo_breakpoint`](#songdelete_tempo_breakpoint) | Delete Tempo Breakpoint | `edit` |  |  |
 | [`song.delete_time_signature_change`](#songdelete_time_signature_change) | Delete Time Signature Change | `edit` |  |  |
+| [`song.loop_to_next_locator`](#songloop_to_next_locator) | Loop to Next Locator | `edit` |  |  |
+| [`song.move_locator`](#songmove_locator) | Move Locator | `edit` |  |  |
 | [`song.move_tempo_breakpoint`](#songmove_tempo_breakpoint) | Move Tempo Breakpoint | `edit` |  |  |
 | [`song.move_time_signature_change`](#songmove_time_signature_change) | Move Time Signature Change | `edit` |  |  |
+| [`song.rename_locator`](#songrename_locator) | Rename Locator | `edit` |  |  |
 | [`song.scales`](#songscales) | Scale List | `read` |  |  |
+| [`song.set_locator_info_text`](#songset_locator_info_text) | Set Locator Info Text | `edit` |  |  |
 | [`song.set_scale`](#songset_scale) | Set Scale | `edit` |  |  |
+| [`song.set_start`](#songset_start) | Set Song Start Time | `edit` |  |  |
+| [`song.set_start_time`](#songset_start_time) | Set Song Start Time | `edit` |  |  |
 | [`song.set_tempo`](#songset_tempo) | Set Tempo | `edit` |  |  |
 | [`song.set_tempo_breakpoint`](#songset_tempo_breakpoint) | Set Tempo Breakpoint | `edit` |  |  |
 | [`song.set_time_signature_change`](#songset_time_signature_change) | Set Time Signature Change | `edit` |  |  |
@@ -6712,6 +6730,164 @@ Arguments:
 
 Result: [`KeymapResult`](#keymapresult).
 
+### Area `locator`
+
+#### `locator.add`
+
+**Add Locator**. Permission: `edit`. Contexts: `arrangement`.
+
+Adds a locator at `at`, as the Set Locator button and Add Locator do. Left out, it goes where the button puts one: on the line of the global launch quantisation nearest the playhead while the song plays, and at the time selection's start, or the insert marker, while it is stopped. A locator is named with the next whole number, one more than the highest any locator is named with, and becomes the only selected locator. Two locators never share a position: adding one where another is leaves that one as it is. The locators are saved with the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `at` | [`Position`](#position) or null | no | Where the locator goes. Left out, it goes where the Set Locator button puts one: on the line of the global launch quantisation nearest the playhead while the song plays, and at the time selection's start, or the insert marker, while it is stopped. |
+
+Result: [`LocatorResult`](#locatorresult).
+
+#### `locator.delete`
+
+**Delete Locator**. Permission: `destructive`. Contexts: `arrangement`.
+
+Deletes the locators (`locators`, or the selected ones), as the Delete Locator button and the Delete key do. A song start time on one of them goes with it. Because it removes the person's work, an agent asks first.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `locators` | array or null | no | The locators to delete. Left out, the selected ones. |
+
+Result: [`LocatorResult`](#locatorresult).
+
+#### `locator.jump`
+
+**Jump to Locator**. Permission: `read`. Contexts: `arrangement`.
+
+Jumps to a locator (`locator`, or the selected one), as clicking it does: while the song plays, playback jumps there on the next line of the global launch quantisation; while it is stopped, the insert marker moves there. It changes nothing in the set, and it is refused while the audio engine is off.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `locator` | [`LocatorId`](#locatorid) or null | no | The locator. Left out, the selected one. |
+
+Result: [`ArrangementState`](#arrangementstate).
+
+#### `locator.jump_next`
+
+**Jump to Next Locator**. Permission: `read`. Contexts: `arrangement`.
+
+Jumps to the locator after the current position: the playhead while the song plays, the insert marker while it is stopped. With no locator after it, it jumps to the end of the arrangement. It selects no locator, changes nothing in the set, and is refused while the audio engine is off.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`ArrangementState`](#arrangementstate).
+
+#### `locator.jump_previous`
+
+**Jump to Previous Locator**. Permission: `read`. Contexts: `arrangement`.
+
+Jumps to the locator before the current position: the playhead while the song plays, the insert marker while it is stopped. With no locator before it, it jumps to 1.1.1. It selects no locator, changes nothing in the set, and is refused while the audio engine is off.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`ArrangementState`](#arrangementstate).
+
+#### `locator.loop_to_next`
+
+**Loop to Next Locator**. Permission: `edit`. Contexts: `arrangement`.
+
+Sets the Arrangement's loop brace from a locator (`locator`, or the selected one) to the next one and switches the loop on, as the locator's context menu does. The last locator has none after it, and is refused.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `locator` | [`LocatorId`](#locatorid) or null | no | The locator. Left out, the selected one. |
+
+Result: [`LocatorResult`](#locatorresult).
+
+#### `locator.move`
+
+**Move Locator**. Permission: `edit`. Contexts: `arrangement`.
+
+Moves a locator (`locator`, or the selected ones) to `to`, the position it goes to, and moves every other selected locator by the same distance. The keys pass the grid step Left and Right move, and a drag passes the position the pointer is at, snapped to the editing grid as a clip's start does. A locator can't go before 1.1.1, and a move that would put two locators at one position changes nothing. Dragging a locator runs this, and the whole drag is one undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `to` | [`Position`](#position) | yes | Where it goes: the position the locator moves to. The keys pass the grid step Left and Right move. |
+| `locator` | [`LocatorId`](#locatorid) or null | no | The locator to move. Left out, the selected ones. |
+
+Result: [`LocatorResult`](#locatorresult).
+
+#### `locator.rename`
+
+**Rename Locator**. Permission: `edit`. Contexts: `arrangement`.
+
+Renames the locators (`locators`, or the selected ones), as Cmd-R (Ctrl-R) and Edit > Rename do. The new name is `name`; an empty name keeps the old one. Left out, the name is typed in place, as Cmd-R does.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `locators` | array or null | no | The locators to rename. Left out, the selected ones. |
+| `name` | string or null | no | The new name. An empty name keeps the old one. Left out, the name is typed in place, as Cmd-R does. |
+
+Result: [`LocatorResult`](#locatorresult).
+
+#### `locator.select`
+
+**Select Locators**. Permission: `read`. Contexts: `arrangement`.
+
+Selects locators in the Arrangement, as clicking one does: `replace` selects only these, `toggle` adds or removes each, `add` adds them, and `extend` adds them and every locator between them and the first selected locator. Selecting is never an undo step and changes nothing in the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `locators` | array of [`LocatorId`](#locatorid) | yes | The locators. |
+| `mode` | [`SelectMode`](#selectmode) | no | How to change the selection; `replace` if left out. |
+
+Result: [`ArrangementState`](#arrangementstate).
+
+#### `locator.set_info_text`
+
+**Set Locator Info Text**. Permission: `edit`. Contexts: `arrangement`.
+
+Sets the info text of a locator (`locator`, or the selected one), which the Info View shows while the pointer is over it. The person's own way of typing it comes later.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `info_text` | string | yes | The info text, which the Info View shows while the pointer is over the locator. |
+| `locator` | [`LocatorId`](#locatorid) or null | no | The locator. Left out, the selected one. |
+
+Result: [`LocatorResult`](#locatorresult).
+
 ### Area `midi`
 
 #### `midi.capture`
@@ -10255,6 +10431,38 @@ Result: [`ChangeSet`](#changeset).
 
 ### Area `song`
 
+#### `song.add_locator`
+
+**Add Locator**. Permission: `edit`. Contexts: `arrangement`.
+
+Adds a locator at a position, as the Set Locator button and Add Locator do. A locator with no name of its own is named with the next whole number. Two locators never share a position: adding one where another is leaves that one as it is. One undo step, `Add Locator`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `locator` | [`Locator`](#locator) | yes | The locator, with a new ID. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `song.delete_locator`
+
+**Delete Locator**. Permission: `destructive`. Contexts: `arrangement`.
+
+Deletes a locator, as the Delete Locator button and the Delete key do. A song start time on it goes with it. One undo step, `Delete Locator`. Because it removes the person's work, an agent asks first.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `locator` | [`LocatorId`](#locatorid) | yes | The locator. |
+
+Result: [`ChangeSet`](#changeset).
+
 #### `song.delete_tempo_breakpoint`
 
 **Delete Tempo Breakpoint**. Permission: `edit`. Contexts: `global`.
@@ -10284,6 +10492,39 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `at` | [`Ticks`](#ticks) | yes | Where the marker is. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `song.loop_to_next_locator`
+
+**Loop to Next Locator**. Permission: `edit`. Contexts: `arrangement`.
+
+Sets the Arrangement's loop brace from a locator to the next one and switches the loop on, as the locator's context menu does. The last locator has none after it, and is refused. One undo step, `Loop to Next Locator`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `locator` | [`LocatorId`](#locatorid) | yes | The locator. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `song.move_locator`
+
+**Move Locator**. Permission: `edit`. Contexts: `arrangement`.
+
+Moves a locator to a new position, as dragging it does. A locator can't go before 1.1.1, and a move that would put two locators at one position changes nothing. One undo step, `Move Locator`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `locator` | [`LocatorId`](#locatorid) | yes | The locator. |
+| `to` | [`Ticks`](#ticks) | yes | Where it goes: 0 (1.1.1) or later, and not where another locator already is. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -10321,6 +10562,23 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `song.rename_locator`
+
+**Rename Locator**. Permission: `edit`. Contexts: `arrangement`.
+
+Renames a locator, as Cmd-R (Ctrl-R) and Edit > Rename do. An empty name keeps the old one. One undo step, `Rename Locator`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `locator` | [`LocatorId`](#locatorid) | yes | The locator. |
+| `name` | string | yes | The new name. |
+
+Result: [`ChangeSet`](#changeset).
+
 #### `song.scales`
 
 **Scale List**. Permission: `read`. Contexts: `global`.
@@ -10332,6 +10590,23 @@ Default keys: none.
 Arguments: none (send `{}`).
 
 Result: [`ScaleList`](#scalelist).
+
+#### `song.set_locator_info_text`
+
+**Set Locator Info Text**. Permission: `edit`. Contexts: `arrangement`.
+
+Sets the info text of a locator, which the Info View shows while the pointer is over it. One undo step, `Edit Info Text`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `locator` | [`LocatorId`](#locatorid) | yes | The locator. |
+| `info_text` | string | yes | The new info text. |
+
+Result: [`ChangeSet`](#changeset).
 
 #### `song.set_scale`
 
@@ -10350,6 +10625,40 @@ Arguments:
 | `root` | integer or null | no | The root note: 0 (C) to 11 (B). |
 
 Result: [`ChangeSet`](#changeset).
+
+#### `song.set_start`
+
+**Set Song Start Time**. Permission: `edit`. Contexts: `arrangement`.
+
+Sets where the song starts: at a locator, or at the loop brace's start. Choosing it where it is set clears it, so the song starts at the insert marker again. While it is set, Play starts the song there instead of at the insert marker. One undo step, `Set Song Start Time`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `start` | [`SongStart`](#songstart) or null | no | Where the song starts; nothing clears it. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `song.set_start_time`
+
+**Set Song Start Time**. Permission: `edit`. Contexts: `arrangement`.
+
+Sets where the song starts: at a locator, or at the loop brace's start, as Set Song Start Time Here does. The song start time follows its locator or the brace as they move, and deleting the locator clears it. `null` clears it, so the song starts at the insert marker again. While it is set, Play starts the song there instead of at the insert marker.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clear` | boolean | no | Whether the song start time is cleared, so the song starts at the insert marker again. |
+| `locator` | [`LocatorId`](#locatorid) or null | no | The locator the song starts at. Left out, the selected one: the song starts there, or stops starting there if it already does. |
+| `loop_brace` | boolean | no | Whether the song starts at the loop brace's start. |
+
+Result: [`LocatorResult`](#locatorresult).
 
 #### `song.set_tempo`
 
@@ -10896,7 +11205,7 @@ Result: nothing (`null`).
 
 **Set Arrangement Position**. Permission: `read`. Contexts: `global`.
 
-Moves the insert marker, where playback starts, to `position`, in ticks from the start of the arrangement (705,600 to the quarter note, so bar 2 of a 4/4 song is 2,822,400), as typing into the Control Bar's Arrangement Position fields does. While the song plays, playback jumps there at once; while it's stopped, `transport.continue` still resumes where playback stopped. Position 0 returns to 1.1.1, as the Home key and Return Play Position to 1.1.1 do. A position before 0 is taken as 0. It changes nothing in the project.
+Moves the insert marker, where playback starts, to `position`, in ticks from the start of the arrangement (705,600 to the quarter note, so bar 2 of a 4/4 song is 2,822,400), as typing into the Control Bar's Arrangement Position fields does. While the song plays, playback jumps there at once; while it's stopped, `transport.continue` still resumes where playback stopped. With `quantized` set, the jump waits while the song plays for the next line of the global launch quantisation and lands on that line's exact frame, as a locator's jump and a click in the scrub area do (the transport spec, R22); with the quantisation off or None, it jumps at once. Position 0 returns to 1.1.1, as the Home key and Return Play Position to 1.1.1 do. A position before 0 is taken as 0. It changes nothing in the project.
 
 Default keys:
 
@@ -10909,6 +11218,7 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `position` | [`Ticks`](#ticks) | yes | The new insert marker, in ticks from 1.1.1. A position before 1.1.1 is taken as 1.1.1. |
+| `quantized` | boolean | no | Whether the jump waits for the next line of the global launch quantisation while the song plays, as a locator's jump and a click in the scrub area do (the transport spec, R22). With it off, or with the quantisation off or None, the jump happens at once. |
 
 Result: nothing (`null`).
 
@@ -10916,7 +11226,7 @@ Result: nothing (`null`).
 
 **Play**. Permission: `read`. Contexts: `global`.
 
-Starts playback from the insert marker, as the Control Bar's Play button does; while the song plays, starts it again from the insert marker. Set the insert marker first with `transport.locate`. With the Arrangement loop on, playback that reaches the loop's end goes on from its start. It changes nothing in the project.
+Starts playback from the insert marker, as the Control Bar's Play button does; while the song plays, starts it again from the insert marker. When the song has a song start time (the transport spec, R21), it starts from that instead and leaves the insert marker where it is. Set the insert marker first with `transport.locate`. With the Arrangement loop on, playback that reaches the loop's end goes on from its start. It changes nothing in the project.
 
 Default keys: none.
 
@@ -10928,7 +11238,7 @@ Result: nothing (`null`).
 
 **Play From Insert Marker**. Permission: `read`. Contexts: `global`, `arrangement`.
 
-Starts playback from the insert marker. Until the arrangement has time selections, this does what `transport.play` does. It changes nothing in the project.
+Starts playback from the insert marker, even when the song has a song start time (the transport spec, R21). Until the arrangement has time selections, this does what `transport.play` does. It changes nothing in the project.
 
 Default keys:
 
@@ -11775,6 +12085,12 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`keymap.bind`](#keymapbind) | `keymap.state` | `shortcuts` |
 | [`keymap.reset`](#keymapreset) | `keymap.state` | `shortcuts` |
 | [`keymap.unbind`](#keymapunbind) | `keymap.state` | `shortcuts` |
+| [`locator.add`](#locatoradd) | the query tool's `song` | `settings.locators` |
+| [`locator.delete`](#locatordelete) | the query tool's `song` | `settings.locators` |
+| [`locator.loop_to_next`](#locatorloop_to_next) | the query tool's `song` | `settings.arrangement_loop` |
+| [`locator.move`](#locatormove) | the query tool's `song` | `settings.locators` |
+| [`locator.rename`](#locatorrename) | the query tool's `song` | `settings.locators` |
+| [`locator.set_info_text`](#locatorset_info_text) | the query tool's `song` | `settings.locators` |
 | [`midi.capture`](#midicapture) | the query tool's `track` | `slots` |
 | [`midi.import_file`](#midiimport_file) | the query tool's `track` | `clips` |
 | [`midi.set_port`](#midiset_port) | `midi.ports` | `ports` |
@@ -11908,11 +12224,19 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`settings.set_theme`](#settingsset_theme) | `settings.state` | `theme` |
 | [`settings.set_warp_recorded_audio`](#settingsset_warp_recorded_audio) | `settings.state` | `warp_recorded_audio` |
 | [`slot.set_stop_button`](#slotset_stop_button) | the query tool's `track` | `removed_stop_buttons` |
+| [`song.add_locator`](#songadd_locator) | the query tool's `song` | `settings.locators` |
+| [`song.delete_locator`](#songdelete_locator) | the query tool's `song` | `settings.locators` |
 | [`song.delete_tempo_breakpoint`](#songdelete_tempo_breakpoint) | the query tool's `song` | `settings.tempo` |
 | [`song.delete_time_signature_change`](#songdelete_time_signature_change) | the query tool's `song` | `settings.time_signatures` |
+| [`song.loop_to_next_locator`](#songloop_to_next_locator) | the query tool's `song` | `settings.arrangement_loop` |
+| [`song.move_locator`](#songmove_locator) | the query tool's `song` | `settings.locators` |
 | [`song.move_tempo_breakpoint`](#songmove_tempo_breakpoint) | the query tool's `song` | `settings.tempo` |
 | [`song.move_time_signature_change`](#songmove_time_signature_change) | the query tool's `song` | `settings.time_signatures` |
+| [`song.rename_locator`](#songrename_locator) | the query tool's `song` | `settings.locators` |
+| [`song.set_locator_info_text`](#songset_locator_info_text) | the query tool's `song` | `settings.locators` |
 | [`song.set_scale`](#songset_scale) | the query tool's `song` | `scale` |
+| [`song.set_start`](#songset_start) | the query tool's `song` | `settings.song_start` |
+| [`song.set_start_time`](#songset_start_time) | the query tool's `song` | `settings.song_start` |
 | [`song.set_tempo`](#songset_tempo) | the query tool's `song` | `settings.tempo` |
 | [`song.set_tempo_breakpoint`](#songset_tempo_breakpoint) | the query tool's `song` | `settings.tempo` |
 | [`song.set_time_signature_change`](#songset_time_signature_change) | the query tool's `song` | `settings.time_signatures` |
@@ -12408,6 +12732,7 @@ What the Arrangement View shows: every view command returns it.
 | `insert_marker` | [`Ticks`](#ticks) | yes | Where the insert marker is. |
 | `selected_tracks` | array of [`TrackId`](#trackid) | yes | The selected tracks, top to bottom. |
 | `selected_clips` | array of [`ClipId`](#clipid) | yes | The selected clips (WP-1.8b), in the order they were selected. The editing commands act on these when there are any, and on the time selection otherwise. |
+| `selected_locators` | array of [`LocatorId`](#locatorid) | yes | The selected locators (WP-6.24), in the order they were selected. The locator commands act on these. |
 | `time_selection` | [`TimeRange`](#timerange) or null | yes | The selected span of time on the selected tracks, if any. |
 | `folded_tracks` | array of [`TrackId`](#trackid) | yes | The folded tracks. |
 | `zoom_back_steps` | integer, at least 0 | yes | How many views `arrangement.zoom_back` can go back to. |
@@ -12487,6 +12812,14 @@ What the Arrangement View shows: every view command returns it.
       },
       "type": "array"
     },
+    "selected_locators": {
+      "default": [],
+      "description": "The selected locators (WP-6.24), in the order they were selected. The locator commands act on these.",
+      "items": {
+        "$ref": "#/$defs/LocatorId"
+      },
+      "type": "array"
+    },
     "selected_tracks": {
       "description": "The selected tracks, top to bottom.",
       "items": {
@@ -12554,6 +12887,7 @@ What the Arrangement View shows: every view command returns it.
     "insert_marker",
     "selected_tracks",
     "selected_clips",
+    "selected_locators",
     "time_selection",
     "folded_tracks",
     "zoom_back_steps",
@@ -23426,6 +23760,107 @@ One of:
 
 </details>
 
+### `Locator`
+
+A locator: a place in the song to play from.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | [`LocatorId`](#locatorid) | yes | The locator's ID. |
+| `position` | [`Ticks`](#ticks) | yes | Where it sits: 0 (1.1.1) or later. |
+| `name` | string | yes | Its name, which may be empty. |
+| `info_text` | string | no | Its info text, which the Info View shows while the pointer is over it. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A locator: a place in the song to play from.",
+  "properties": {
+    "id": {
+      "$ref": "#/$defs/LocatorId",
+      "description": "The locator's ID."
+    },
+    "info_text": {
+      "description": "Its info text, which the Info View shows while the pointer is over it.",
+      "type": "string"
+    },
+    "name": {
+      "description": "Its name, which may be empty.",
+      "type": "string"
+    },
+    "position": {
+      "$ref": "#/$defs/Ticks",
+      "description": "Where it sits: 0 (1.1.1) or later."
+    }
+  },
+  "required": [
+    "id",
+    "position",
+    "name"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `LocatorId`
+
+The ID of a locator: a positive integer, unique within the project and never reused.
+
+Type: integer, at least 1.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The ID of a locator: a positive integer, unique within the project and never reused.",
+  "format": "uint64",
+  "minimum": 1,
+  "type": "integer"
+}
+```
+
+</details>
+
+### `LocatorResult`
+
+What a locator command did: the locators selected afterwards, and whether it was recorded as an undo step.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `selected_locators` | array of [`LocatorId`](#locatorid) | yes | The locators selected afterwards. |
+| `undo_step` | boolean | yes | Whether the edit was recorded as an undo step: false when it changed nothing. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a locator command did: the locators selected afterwards, and whether it was recorded as an undo step.",
+  "properties": {
+    "selected_locators": {
+      "description": "The locators selected afterwards.",
+      "items": {
+        "$ref": "#/$defs/LocatorId"
+      },
+      "type": "array"
+    },
+    "undo_step": {
+      "description": "Whether the edit was recorded as an undo step: false when it changed nothing.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "selected_locators",
+    "undo_step"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `LoopKind`
 
 Which of a layer's loops `device.snap_layer_markers` snaps.
@@ -31703,6 +32138,45 @@ One slot: a track's column and a scene's row.
     "scene"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `SongStart`
+
+Where the song starts: a locator, or the loop brace's start. It follows the locator or the brace as they move.
+
+One of:
+
+- an object with `locator` ([`LocatorId`](#locatorid)): A locator: the song starts there.
+- `"loop_brace"`: The loop brace's start: the song starts there.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Where the song starts: a locator, or the loop brace's start. It follows the locator or the brace as they move.",
+  "oneOf": [
+    {
+      "additionalProperties": false,
+      "description": "A locator: the song starts there.",
+      "properties": {
+        "locator": {
+          "$ref": "#/$defs/LocatorId"
+        }
+      },
+      "required": [
+        "locator"
+      ],
+      "type": "object"
+    },
+    {
+      "const": "loop_brace",
+      "description": "The loop brace's start: the song starts there.",
+      "type": "string"
+    }
+  ]
 }
 ```
 

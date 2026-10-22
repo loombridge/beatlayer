@@ -3069,6 +3069,83 @@ const ENTRIES: &[Entry] = &[
         description: "Takes a rack with one chain, or none, apart: the chain's devices take the rack's place in order, keeping their settings and running state; the rack, its chain and its mixer are gone. A rack of several chains can't be taken apart. One undo step. To ungroup the selected rack as a person does, use `device.ungroup`.",
     },
     Entry {
+        id: "song.add_locator",
+        action: Action::Apply("add_locator"),
+        label: "Add Locator",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Adds a locator at a position, as the Set Locator button and Add \
+            Locator do. A locator with no name of its own is named with the next whole \
+            number. Two locators never share a position: adding one where another is leaves \
+            that one as it is. One undo step, `Add Locator`.",
+    },
+    Entry {
+        id: "song.delete_locator",
+        action: Action::Apply("delete_locator"),
+        label: "Delete Locator",
+        permission: Permission::Destructive,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Deletes a locator, as the Delete Locator button and the Delete key do. \
+            A song start time on it goes with it. One undo step, `Delete Locator`. Because it \
+            removes the person's work, an agent asks first.",
+    },
+    Entry {
+        id: "song.move_locator",
+        action: Action::Apply("move_locator"),
+        label: "Move Locator",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Moves a locator to a new position, as dragging it does. A locator can't \
+            go before 1.1.1, and a move that would put two locators at one position changes \
+            nothing. One undo step, `Move Locator`.",
+    },
+    Entry {
+        id: "song.rename_locator",
+        action: Action::Apply("rename_locator"),
+        label: "Rename Locator",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Renames a locator, as Cmd-R (Ctrl-R) and Edit > Rename do. An empty \
+            name keeps the old one. One undo step, `Rename Locator`.",
+    },
+    Entry {
+        id: "song.set_locator_info_text",
+        action: Action::Apply("set_locator_info_text"),
+        label: "Set Locator Info Text",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Sets the info text of a locator, which the Info View shows while the \
+            pointer is over it. One undo step, `Edit Info Text`.",
+    },
+    Entry {
+        id: "song.loop_to_next_locator",
+        action: Action::Apply("loop_to_next_locator"),
+        label: "Loop to Next Locator",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Sets the Arrangement's loop brace from a locator to the next one and \
+            switches the loop on, as the locator's context menu does. The last locator has \
+            none after it, and is refused. One undo step, `Loop to Next Locator`.",
+    },
+    Entry {
+        id: "song.set_start",
+        action: Action::Apply("set_song_start"),
+        label: "Set Song Start Time",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Sets where the song starts: at a locator, or at the loop brace's start. \
+            Choosing it where it is set clears it, so the song starts at the insert marker \
+            again. While it is set, Play starts the song there instead of at the insert \
+            marker. One undo step, `Set Song Start Time`.",
+    },
+    Entry {
         id: UNDO,
         action: Action::Undo,
         label: "Undo",

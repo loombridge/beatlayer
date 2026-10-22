@@ -13,10 +13,10 @@ use bl_model::{
     Channel, Clip, ClipData, ClipEdge, ClipId, ClipLaunch, Command, ComplexProUpdate, ContentHash,
     CountIn, CrossfadeAssign, Device, DeviceId, DeviceKind, DeviceRole, EditError, Editor,
     ExternalPort, FileBeats, FollowAction, FollowActions, FollowPatch, HardwareLatency, Input,
-    LaunchMode, LaunchQuantization, MacroStyle, MacroTarget, MetronomeRhythm, MetronomeSound,
-    MidiData, MidiTo, MixerParam, ModelError, Monitor, Note, Output, PanMode, ParamId,
-    PluginFormat, Preserve, RackKind, SceneId, SendTap, TakeClip, TakeLane, Tap, TonesUpdate,
-    TrackDelay, TrackId, TrackKind, WarpFrom, WarpMode, WarpPoint,
+    LaunchMode, LaunchQuantization, Locator, LocatorId, MacroStyle, MacroTarget, MetronomeRhythm,
+    MetronomeSound, MidiData, MidiTo, MixerParam, ModelError, Monitor, Note, Output, PanMode,
+    ParamId, PluginFormat, Preserve, RackKind, SceneId, SendTap, SongStart, TakeClip, TakeLane,
+    Tap, TonesUpdate, TrackDelay, TrackId, TrackKind, WarpFrom, WarpMode, WarpPoint,
 };
 use serde_json::{Value, json};
 
@@ -54,7 +54,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        218,
+        225,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
              the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
              routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -84,7 +84,10 @@ fn every_document_command_is_registered() {
              delete_variation and set_macro_variation_excluded, WP-4.7 the two \
              for a clip's pitch and its reversal, WP-5.33 set_device_role, WP-5.4b \
              set_macro_style, WP-4.15 the two for bouncing a track in place and to a new \
-             track, and WP-6.7 the two for the scales: set_clip_scale and set_scale"
+             track, WP-6.7 the two for the scales: set_clip_scale and set_scale, and \
+             WP-6.24 seven for \
+             locators: add_locator, delete_locator, move_locator, rename_locator, \
+             set_locator_info_text, loop_to_next_locator and set_song_start"
     );
 
     for op in &ops {
@@ -2013,6 +2016,34 @@ fn every_command_runs_by_id() {
     assert_eq!(varied.macros.variations[0].name, "Quiet");
     assert!(varied.macros.setting(2).variation_excluded);
 
+    // Locators (WP-6.24): adding, renaming, describing, looping to the next
+    // one, the song start time, moving, and deleting.
+    let intro: LocatorId = agent.new_id();
+    agent.run(
+        "song.add_locator",
+        json!({ "locator": { "id": intro, "position": bar, "name": "Intro" } }),
+    );
+    let chorus: LocatorId = agent.new_id();
+    agent.run(
+        "song.add_locator",
+        json!({ "locator": { "id": chorus, "position": bar * 2, "name": "Chorus" } }),
+    );
+    agent.run(
+        "song.rename_locator",
+        json!({ "locator": intro, "name": "Verse" }),
+    );
+    agent.run(
+        "song.set_locator_info_text",
+        json!({ "locator": intro, "info_text": "Opens the song" }),
+    );
+    agent.run("song.loop_to_next_locator", json!({ "locator": intro }));
+    agent.run("song.set_start", json!({ "start": { "locator": intro } }));
+    agent.run(
+        "song.move_locator",
+        json!({ "locator": chorus, "to": bar * 3 }),
+    );
+    agent.run("song.delete_locator", json!({ "locator": chorus }));
+
     // Deleting the group deletes the bass inside it; undo brings both back.
     agent.run("track.delete", json!({ "track": group }));
     assert!(agent.editor.document().track(bass).is_none());
@@ -2062,6 +2093,7 @@ fn schemas_match_what_commands_serialise() {
     let fresh_id = fresh();
     let scene = SceneId(fresh());
     let scene_copy = SceneId(fresh());
+    let locator = LocatorId(fresh());
     let notes = MidiData::new([Note::new(127, Ticks::ZERO, Ticks::QUARTER, 1)]);
     let mut plugin = Device::new(
         device,
@@ -2129,6 +2161,44 @@ fn schemas_match_what_commands_serialise() {
                 at: Ticks::QUARTER * 4,
             },
         ),
+        (
+            "song.add_locator",
+            Command::AddLocator {
+                locator: Locator::new(locator, Ticks::WHOLE, "Intro".to_owned()),
+            },
+        ),
+        (
+            "song.rename_locator",
+            Command::RenameLocator {
+                locator,
+                name: "Verse".to_owned(),
+            },
+        ),
+        (
+            "song.set_locator_info_text",
+            Command::SetLocatorInfoText {
+                locator,
+                info_text: "Opens the song".to_owned(),
+            },
+        ),
+        (
+            "song.move_locator",
+            Command::MoveLocator {
+                locator,
+                to: Ticks::WHOLE * 2,
+            },
+        ),
+        (
+            "song.loop_to_next_locator",
+            Command::LoopToNextLocator { locator },
+        ),
+        (
+            "song.set_start",
+            Command::SetSongStart {
+                start: Some(SongStart::Locator(locator)),
+            },
+        ),
+        ("song.delete_locator", Command::DeleteLocator { locator }),
         (
             "transport.set_loop",
             Command::SetLoop {

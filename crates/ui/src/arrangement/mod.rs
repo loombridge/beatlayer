@@ -34,7 +34,8 @@ use bl_model::{Document, TrackId, TrackKind};
 use bl_shell::arrangement::rows::{Row, rows_between};
 use bl_shell::arrangement::{ArrangementView, Horizontal};
 use bl_shell::arrangement_commands as ids;
-use bl_shell::{Invocation, Shell};
+use bl_shell::locator_commands as locator_ids;
+use bl_shell::{GesturePhase, Invocation, Shell};
 use egui::accesskit::Role;
 use egui::{
     Align2, Color32, CursorIcon, EventFilter, Id, Key, Pos2, Rect, Sense, Stroke, StrokeKind, Ui,
@@ -183,6 +184,12 @@ pub struct ArrangementUi {
     /// The playhead the last frame drew: its position and its x, if it was
     /// in view (WP-1.18).
     playhead: Option<(Ticks, f32)>,
+    /// The locator being dragged in the scrub area, if a drag is under way
+    /// (WP-6.24).
+    locator_drag: Option<bl_model::LocatorId>,
+    /// The locators the last frame drew, so a new one can take the focus
+    /// (WP-6.24; time-editing R3).
+    locators_drawn: Vec<bl_model::LocatorId>,
     /// Where the last frame put the Arrangement's mixer, while it shows
     /// (WP-1.9).
     mixer: Option<Rect>,
@@ -205,6 +212,101 @@ impl Default for ArrangementUi {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// The loop brace's rectangle, in the beat-time ruler.
+fn brace_rect(
+    ruler: Rect,
+    horizontal: Horizontal,
+    transport: &bl_shell::arrangement::TransportView,
+) -> Rect {
+    let left = horizontal.x(transport.loop_start) + f64::from(ruler.left());
+    let right = horizontal.x(transport.loop_end()) + f64::from(ruler.left());
+    Rect::from_min_max(
+        pos2(left as f32, ruler.bottom() - 6.0),
+        pos2(right as f32, ruler.bottom() - 1.0),
+    )
+}
+
+/// The loop brace's ID.
+fn brace_id() -> Id {
+    Id::new("arrangement-loop-brace")
+}
+
+/// The locator under the pointer in the scrub area, if any.
+fn locator_under(
+    doc: &Document,
+    horizontal: Horizontal,
+    left: f32,
+    pos: Pos2,
+) -> Option<bl_model::LocatorId> {
+    let x = f64::from(pos.x - left);
+    doc.locators()
+        .iter()
+        .filter(|locator| (horizontal.x(locator.position) - x).abs() <= 6.0)
+        .min_by(|a, b| {
+            let da = (horizontal.x(a.position) - x).abs();
+            let db = (horizontal.x(b.position) - x).abs();
+            da.total_cmp(&db)
+        })
+        .map(|locator| locator.id)
+}
+
+/// The Set Locator button's ID.
+pub fn set_locator_id() -> Id {
+    Id::new("arrangement-set-locator")
+}
+
+/// The Previous Locator button's ID.
+pub fn previous_locator_id() -> Id {
+    Id::new("arrangement-previous-locator")
+}
+
+/// The Next Locator button's ID.
+pub fn next_locator_id() -> Id {
+    Id::new("arrangement-next-locator")
+}
+
+/// A locator's ID, in the scrub area.
+pub fn locator_id(locator: bl_model::LocatorId) -> Id {
+    Id::new(("arrangement-locator", locator))
+}
+
+/// A locator being renamed in the scrub area, and the name being typed.
+#[derive(Clone, Debug)]
+struct Renaming {
+    /// The locator.
+    locator: bl_model::LocatorId,
+    /// The name being typed.
+    text: Option<String>,
+    /// Whether the field has the keyboard.
+    focused: bool,
+}
+
+/// Where the rename being typed is kept.
+fn renaming_id() -> Id {
+    Id::new("arrangement-locator-renaming")
+}
+
+/// Starts typing a new name for `locator` in the scrub area, as Cmd-R does
+/// (the time editing spec, R8).
+pub fn start_rename(ctx: &egui::Context, locator: bl_model::LocatorId) {
+    ctx.data_mut(|d| {
+        d.insert_temp(
+            renaming_id(),
+            Some(Renaming {
+                locator,
+                text: None,
+                focused: false,
+            }),
+        );
+    });
+}
+
+/// The locator being renamed, if a rename is under way.
+fn renaming(ctx: &egui::Context) -> Option<Renaming> {
+    ctx.data(|d| d.get_temp::<Option<Renaming>>(renaming_id()))
+        .flatten()
 }
 
 fn invoke(events: &mut Vec<UiEvent>, id: &str, args: Value) {
@@ -234,6 +336,8 @@ impl ArrangementUi {
             menus: ContextMenus::new(),
             track_menus: TrackMenus::default(),
             playhead: None,
+            locator_drag: None,
+            locators_drawn: Vec::new(),
             mixer: None,
             described: Vec::new(),
             lanes: None,
@@ -515,7 +619,15 @@ impl ArrangementUi {
             &view.transport(),
             theme,
         );
-        rulers::scrub_area(&ui.painter_at(layout.scrub), layout.scrub, theme);
+        rulers::scrub_area(
+            &ui.painter_at(layout.scrub),
+            layout.scrub,
+            horizontal,
+            doc.locators(),
+            view.selected_locators(),
+            doc.settings().song_start,
+            theme,
+        );
         rulers::time_ruler(
             &ui.painter_at(layout.time_ruler),
             layout.time_ruler,
@@ -523,7 +635,7 @@ impl ArrangementUi {
             horizontal,
             theme,
         );
-        self.ruler_input(ui, doc, &layout, horizontal, events);
+        self.ruler_input(ui, shell, doc, view, &layout, horizontal, theme, events);
 
         // The playhead, over the rulers and the lanes.
         let transport = view.transport();
@@ -1008,14 +1120,26 @@ impl ArrangementUi {
         });
     }
 
+    #[expect(clippy::too_many_arguments, reason = "the frame's inputs")]
     fn ruler_input(
         &mut self,
         ui: &mut Ui,
+        shell: &Shell,
         doc: &Document,
+        view: &ArrangementView,
         layout: &ArrangementLayout,
         horizontal: Horizontal,
+        theme: &Theme,
         events: &mut Vec<UiEvent>,
     ) {
+        // Esc abandons a locator drag, as it does a clip drag; egui ends the
+        // drag on it too (the time editing spec, R7).
+        if ui.input(|i| i.key_pressed(Key::Escape)) && self.locator_drag.take().is_some() {
+            events.push(UiEvent::Gesture {
+                phase: GesturePhase::Cancel,
+                invocation: None,
+            });
+        }
         let ruler = layout.beat_ruler;
         let at = |pos: Pos2| horizontal.at(f64::from(pos.x - ruler.left()));
         let response = ui.interact(ruler, beat_ruler_id(), Sense::click_and_drag());
@@ -1063,21 +1187,220 @@ impl ArrangementUi {
             );
         });
 
-        let scrub = ui.interact(layout.scrub, scrub_id(), Sense::click());
-        if scrub.clicked() {
-            // Clicking the scrub area resumes Follow. Starting playback from
-            // the click (I-CLICK-012) jumps by the global launch
-            // quantisation, which comes with the Quantization Menu (M3;
-            // control-bar-transport, "Open questions").
-            invoke(events, ids::FOLLOW, json!({ "paused": false }));
+        let scrub = ui.interact(layout.scrub, scrub_id(), Sense::click_and_drag());
+        let scrub_at = |pos: Pos2| horizontal.at(f64::from(pos.x - layout.scrub.left()));
+        let locator_at = |pos: Pos2| locator_under(doc, horizontal, layout.scrub.left(), pos);
+        let pointer = scrub.interact_pointer_pos();
+        // The locators in the scrub area are controls the keyboard reaches
+        // (accessibility R10).
+        for locator in doc.locators() {
+            let x = (horizontal.x(locator.position) + f64::from(layout.scrub.left())) as f32;
+            if x < layout.scrub.left() - 40.0 || x > layout.scrub.right() + 40.0 {
+                continue;
+            }
+            let id = locator_id(locator.id);
+            let rect = Rect::from_min_max(
+                pos2(x - 6.0, layout.scrub.top()),
+                pos2(x + 6.0, layout.scrub.bottom()),
+            );
+            let response = ui.interact(rect, id, Sense::click_and_drag());
+            if response.secondary_clicked() {
+                // Spec: time-editing R9, R10. A locator's own menu.
+                invoke(
+                    events,
+                    locator_ids::SELECT,
+                    json!({ "locators": [locator.id] }),
+                );
+                self.menus.open_scrub(Some(locator.id), locator.position);
+            } else if response.double_clicked() {
+                // Spec: time-editing R5. Double-clicking a locator while
+                // stopped selects it and starts playback from it.
+                invoke(
+                    events,
+                    locator_ids::SELECT,
+                    json!({ "locators": [locator.id] }),
+                );
+                invoke(events, locator_ids::JUMP, json!({ "locator": locator.id }));
+                if !view.transport().playing {
+                    invoke(events, "transport.play_from_insert_marker", json!({}));
+                }
+            } else if response.clicked() {
+                // Spec: time-editing R5. Clicking a locator selects it
+                // alone and jumps to it.
+                invoke(
+                    events,
+                    locator_ids::SELECT,
+                    json!({ "locators": [locator.id] }),
+                );
+                invoke(events, locator_ids::JUMP, json!({ "locator": locator.id }));
+            }
+            // The menu must be drawn every frame it is open, not only the
+            // frame it opened.
+            response.context_menu(|ui| self.menus.show(ui, shell, events));
+            let name = locator.name.clone();
+            response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, &name));
+            ui.ctx().accesskit_node_builder(id, |node| {
+                node.set_role(Role::Button);
+                node.set_label(name.as_str());
+                node.set_value(
+                    doc.settings()
+                        .time_signatures
+                        .to_bbs(locator.position)
+                        .to_string(),
+                );
+                node.set_selected(view.is_locator_selected(locator.id));
+            });
+            crate::focus::register_above(
+                ui.ctx(),
+                id,
+                bl_shell::Area::MainView,
+                crate::focus::ABOVE_LOCATORS,
+            );
+            // Spec: time-editing R3, R12, accessibility R10. A new locator
+            // takes the keyboard focus, and Tab reaching a locator selects
+            // it.
+            if shell.tab_navigation()
+                && !self.locators_drawn.contains(&locator.id)
+                && view.is_locator_selected(locator.id)
+            {
+                response.request_focus();
+            }
+            if response.has_focus() && !view.is_locator_selected(locator.id) {
+                invoke(
+                    events,
+                    locator_ids::SELECT,
+                    json!({ "locators": [locator.id] }),
+                );
+            }
+            // Spec: time-editing R8. The name being typed, over the
+            // locator's name: Return keeps it and Esc drops it.
+            if let Some(mut renaming) = renaming(ui.ctx()).filter(|r| r.locator == locator.id) {
+                let text = renaming.text.get_or_insert_with(|| locator.name.clone());
+                let edit = ui.put(
+                    Rect::from_min_max(
+                        pos2(x + 6.0, layout.scrub.center().y - 9.0),
+                        pos2(x + 126.0, layout.scrub.center().y + 9.0),
+                    ),
+                    egui::TextEdit::singleline(text)
+                        .id(Id::new(("arrangement-locator-rename", locator.id)))
+                        .font(theme.small_font()),
+                );
+                if !renaming.focused {
+                    edit.request_focus();
+                    renaming.focused = true;
+                }
+                let (enter, escape) =
+                    ui.input(|i| (i.key_pressed(Key::Enter), i.key_pressed(Key::Escape)));
+                if edit.lost_focus() || enter || escape {
+                    if enter || (edit.lost_focus() && !escape) {
+                        events.push(UiEvent::Invoke(Invocation::new(
+                            locator_ids::RENAME,
+                            json!({ "locators": [locator.id], "name": text }),
+                        )));
+                    }
+                    ui.ctx()
+                        .data_mut(|d| d.insert_temp(renaming_id(), None::<Renaming>));
+                } else {
+                    ui.ctx()
+                        .data_mut(|d| d.insert_temp(renaming_id(), Some(renaming)));
+                }
+            }
+            // Spec: time-editing R7. Dragging a locator moves it, and the
+            // whole drag is one undo step.
+            if response.drag_started() {
+                self.locator_drag = Some(locator.id);
+            }
+            if response.dragged()
+                && self.locator_drag == Some(locator.id)
+                && let Some(pos) = response.interact_pointer_pos()
+            {
+                let to = view.snap(doc, scrub_at(pos));
+                events.push(UiEvent::Gesture {
+                    phase: GesturePhase::Update,
+                    invocation: Some(Invocation::new(
+                        locator_ids::MOVE,
+                        json!({ "locator": locator.id, "to": to }),
+                    )),
+                });
+            }
+            if response.drag_stopped() && self.locator_drag.take() == Some(locator.id) {
+                events.push(UiEvent::Gesture {
+                    phase: GesturePhase::Commit,
+                    invocation: None,
+                });
+            }
         }
+        // The locators this frame drew, so the next frame can tell a new
+        // one and give it the focus (time-editing R3).
+        self.locators_drawn = doc.locators().iter().map(|locator| locator.id).collect();
+        if scrub.double_clicked() {
+            // Spec: time-editing R5. Double-clicking a locator while stopped
+            // selects it and starts playback from it.
+            if let Some(locator) = pointer.and_then(locator_at) {
+                invoke(
+                    events,
+                    locator_ids::SELECT,
+                    json!({ "locators": [locator] }),
+                );
+                invoke(events, locator_ids::JUMP, json!({ "locator": locator }));
+                if !view.transport().playing {
+                    invoke(events, "transport.play_from_insert_marker", json!({}));
+                }
+            }
+        } else if scrub.clicked() {
+            if let Some(locator) = pointer.and_then(locator_at) {
+                // Spec: time-editing R5. Clicking a locator selects it
+                // alone and jumps to it.
+                invoke(
+                    events,
+                    locator_ids::SELECT,
+                    json!({ "locators": [locator] }),
+                );
+                invoke(events, locator_ids::JUMP, json!({ "locator": locator }));
+            } else {
+                // Spec: time-editing R11. Clicking the scrub area away from
+                // a locator plays from that point, on the editing grid
+                // while snapping is on, and resumes Follow.
+                let Some(pos) = pointer else {
+                    return;
+                };
+                let at = view.snap(doc, scrub_at(pos));
+                invoke(events, ids::SET_INSERT_MARKER, json!({ "at": at }));
+                invoke(
+                    events,
+                    "transport.locate",
+                    json!({ "position": at, "quantized": true }),
+                );
+                if !view.transport().playing {
+                    invoke(events, "transport.play_from_insert_marker", json!({}));
+                }
+                invoke(events, ids::FOLLOW, json!({ "paused": false }));
+            }
+        }
+        // The scrub area's own menu (C-TIME-022), away from a locator.
+        let on_locator = pointer.and_then(locator_at).is_some();
+        if scrub.secondary_clicked() && !on_locator {
+            // The Add Locator in it adds one where the area was
+            // right-clicked, on the editing grid (the time editing spec,
+            // R3).
+            let at = pointer.map_or(Ticks::ZERO, |pos| view.snap(doc, scrub_at(pos)));
+            self.menus.open_scrub(None, at);
+        }
+        if !on_locator {
+            scrub.context_menu(|ui| self.menus.show(ui, shell, events));
+        }
+        // The loop brace's menu (C-TIME-023).
+        let brace = brace_rect(layout.beat_ruler, horizontal, &view.transport());
+        let brace = ui.interact(brace, brace_id(), Sense::click());
+        if brace.secondary_clicked() {
+            self.menus.open_brace();
+        }
+        brace.context_menu(|ui| self.menus.show(ui, shell, events));
         scrub.widget_info(|| WidgetInfo::labeled(WidgetType::Other, true, "Scrub Area"));
         ui.ctx().accesskit_node_builder(scrub.id, |node| {
             node.set_role(Role::Group);
             node.set_description(
-                "Playing from a click here comes with the global launch quantisation (M3); the \
-                 locators sit here."
-                    .to_owned(),
+                "Clicking here plays from that point; the locators sit here.".to_owned(),
             );
         });
 
@@ -1291,16 +1614,71 @@ impl ArrangementUi {
         layout: &ArrangementLayout,
         events: &mut Vec<UiEvent>,
     ) {
-        // L-ARR-010: inert until locators (M6).
-        for (rect, name, text, package) in [
-            (layout.set_locator, "Set Locator", "Set", "milestone M6"),
+        // L-ARR-010: Set Locator, reading Delete Locator while a locator is
+        // selected, and Previous and Next Locator, live (WP-6.24).
+        let locator_selected = !view.selected_locators().is_empty();
+        for (rect, id, name, text, command, rank) in [
+            (
+                layout.set_locator,
+                set_locator_id(),
+                if locator_selected {
+                    "Delete Locator"
+                } else {
+                    "Set Locator"
+                },
+                if locator_selected { "Del" } else { "Set" },
+                if locator_selected {
+                    locator_ids::DELETE
+                } else {
+                    locator_ids::ADD
+                },
+                crate::focus::ABOVE_SET_LOCATOR,
+            ),
             (
                 layout.previous_locator,
+                previous_locator_id(),
                 "Previous Locator",
                 "◀",
-                "milestone M6",
+                locator_ids::JUMP_PREVIOUS,
+                crate::focus::ABOVE_PREVIOUS_LOCATOR,
             ),
-            (layout.next_locator, "Next Locator", "▶", "milestone M6"),
+            (
+                layout.next_locator,
+                next_locator_id(),
+                "Next Locator",
+                "▶",
+                locator_ids::JUMP_NEXT,
+                crate::focus::ABOVE_NEXT_LOCATOR,
+            ),
+        ] {
+            let response = ui.interact(rect, id, Sense::click());
+            let painter = ui.painter_at(rect.expand(1.0));
+            let fill = if response.hovered() {
+                theme.colors.control_hover.0
+            } else {
+                theme.colors.control.0
+            };
+            painter.rect_filled(rect, theme.sizes.corner, fill);
+            painter.text(
+                rect.center(),
+                Align2::CENTER_CENTER,
+                text,
+                theme.small_font(),
+                theme.colors.text.0,
+            );
+            if response.clicked() {
+                invoke(events, command, json!({}));
+            }
+            response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, name));
+            ui.ctx().accesskit_node_builder(id, |node| {
+                node.set_role(Role::Button);
+                node.set_label(name);
+            });
+            // Spec: accessibility R10. The controls above the track headers
+            // come first in the Arrangement's Tab order.
+            crate::focus::register_above(ui.ctx(), id, bl_shell::Area::MainView, rank);
+        }
+        for (rect, name, text, package) in [
             (layout.lock_envelopes, "Lock Envelopes", "L", "WP-2.12"),
             (layout.waveform_zoom, "Waveform Zoom", "", "milestone M2"),
             (
@@ -1384,11 +1762,19 @@ impl ArrangementUi {
             if response.clicked() {
                 invoke(events, command, json!({}));
             }
-            // Optimize Height and Width come after the selected track's
-            // header in the Arrangement's Tab order (observed in Live
-            // 12.4.6; the accessibility spec, R4). Automation Mode's
-            // keyboard path is its A key (S-ENV-001).
-            if command != ids::AUTOMATION_MODE {
+            if command == ids::AUTOMATION_MODE {
+                // Spec: accessibility R10. Automation Mode is above the
+                // track headers, in Live's order.
+                crate::focus::register_above(
+                    ui.ctx(),
+                    id,
+                    bl_shell::Area::MainView,
+                    crate::focus::ABOVE_AUTOMATION_MODE,
+                );
+            } else {
+                // Optimize Height and Width come after the selected track's
+                // header in the Arrangement's Tab order (observed in Live
+                // 12.4.6; the accessibility spec, R4).
                 crate::focus::register(ui.ctx(), id, bl_shell::Area::MainView, None);
             }
             response.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, true, on, name));
@@ -1474,11 +1860,17 @@ impl ArrangementUi {
             && shell.focused_window() == bl_shell::WindowKind::Main
             && !ui.ctx().text_edit_focused()
             && ui.ctx().memory(|m| {
-                // The view, or a track's title bar in its Tab order, has
-                // the keyboard: the arrows move the selection.
+                // The view, a track's title bar in its Tab order, or a
+                // locator, has the keyboard: the arrows move the selection.
                 m.focused().is_none_or(|id| {
                     id == main_view_id()
                         || self.rows.iter().any(|r| headers::title_id(r.track) == id)
+                        || shell
+                            .editor()
+                            .document()
+                            .locators()
+                            .iter()
+                            .any(|locator| locator_id(locator.id) == id)
                 })
             });
         if !focused {
@@ -1547,6 +1939,42 @@ impl ArrangementUi {
         if (taller || shorter) && !view.selected_tracks().is_empty() {
             let delta = if taller { HEIGHT_STEP } else { -HEIGHT_STEP };
             invoke(events, ids::SET_TRACK_HEIGHT, json!({ "delta": delta }));
+        }
+        // Spec: time-editing R8. Cmd-R renames the selected locators.
+        if !view.selected_locators().is_empty()
+            && ui.input(|i| {
+                i.events.iter().any(|event| {
+                    matches!(
+                        event,
+                        egui::Event::Key {
+                            key: Key::R,
+                            pressed: true,
+                            modifiers,
+                            ..
+                        } if modifiers.command && !modifiers.shift && !modifiers.alt
+                    )
+                })
+            })
+        {
+            invoke(events, locator_ids::RENAME, json!({}));
+        }
+        // Spec: time-editing R4. The Delete key deletes the selected
+        // locators.
+        if !view.selected_locators().is_empty()
+            && ui.input(|i| {
+                i.events.iter().any(|event| {
+                    matches!(
+                        event,
+                        egui::Event::Key {
+                            key: Key::Delete,
+                            pressed: true,
+                            ..
+                        }
+                    )
+                })
+            })
+        {
+            invoke(events, locator_ids::DELETE, json!({}));
         }
         // WP-1.8b: nudging, clip edges, extending the selection, and
         // resizing from the keyboard.

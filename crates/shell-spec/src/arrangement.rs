@@ -13,7 +13,7 @@
 use bl_commands::Context::{Arrangement, Global, SampleEditor, TrackHeaders};
 use bl_commands::{Binding, CommandSpec, NoArgs, Permission, RegisterError, Registry};
 use bl_core::time::Ticks;
-use bl_model::{AutomationTarget, ClipId, TrackId};
+use bl_model::{AutomationTarget, ClipId, LocatorId, TrackId};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -356,6 +356,10 @@ pub struct ArrangementState {
     /// selection otherwise.
     #[serde(default)]
     pub selected_clips: Vec<ClipId>,
+    /// The selected locators (WP-6.24), in the order they were selected.
+    /// The locator commands act on these.
+    #[serde(default)]
+    pub selected_locators: Vec<LocatorId>,
     /// The selected span of time on the selected tracks, if any.
     pub time_selection: Option<TimeRange>,
     /// The folded tracks.

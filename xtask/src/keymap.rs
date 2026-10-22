@@ -149,7 +149,7 @@ const WIDGET: &[(&str, &str)] = &[
     (
         "S-A11Y-001",
         "the Arrangement View: Option-Left and Option-Right (Alt) move the insert marker to \
-         the previous or next clip edge (`arrangement.set_insert_marker`)",
+         the previous or next clip edge or locator (`arrangement.set_insert_marker`)",
     ),
     (
         "S-A11Y-002",

@@ -12,13 +12,14 @@
 
 pub mod editing;
 pub mod grid;
+pub mod locator;
 pub mod placing;
 pub mod rows;
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use bl_core::time::{Ticks, TimeSignature};
-use bl_model::{AutomationTarget, ClipId, Document, MixerParam, TrackId, TrackKind};
+use bl_model::{AutomationTarget, ClipId, Document, LocatorId, MixerParam, TrackId, TrackKind};
 use bl_shell_spec::arrangement::{
     self as ids, ArrangementState, AutomationLane, FoldArgs, FoldGroupsArgs, FollowArgs,
     InsertMarkerArgs, ScrollArgs, SelectTimeArgs, SelectTracksArgs, SetGridArgs,
@@ -171,6 +172,8 @@ pub struct ArrangementView {
     selected: Vec<TrackId>,
     /// The selected clips (WP-1.8b): see [`editing`].
     selected_clips: Vec<ClipId>,
+    /// The selected locators (WP-6.24): see [`locator`].
+    selected_locators: Vec<LocatorId>,
     title_bars: bool,
     time_selection: Option<(Ticks, Ticks)>,
     history: Vec<Saved>,
@@ -227,6 +230,7 @@ impl ArrangementView {
             insert_marker: Ticks::ZERO,
             selected: Vec::new(),
             selected_clips: Vec::new(),
+            selected_locators: Vec::new(),
             title_bars: false,
             time_selection: None,
             history: Vec::new(),
@@ -477,6 +481,37 @@ impl ArrangementView {
         self.time_selection
     }
 
+    /// The selected locators, in the order they were selected (WP-6.24).
+    #[must_use]
+    pub fn selected_locators(&self) -> &[LocatorId] {
+        &self.selected_locators
+    }
+
+    /// Whether a locator is selected.
+    #[must_use]
+    pub fn is_locator_selected(&self, locator: LocatorId) -> bool {
+        self.selected_locators.contains(&locator)
+    }
+
+    /// Selects locators, as clicking one does. An empty list clears the
+    /// locator selection and leaves the rest.
+    pub fn select_locators(&mut self, locators: Vec<LocatorId>) {
+        self.selected_locators = locators;
+    }
+
+    /// Drops selected locators the document no longer has.
+    pub fn forget_missing_locators(&mut self, doc: &Document) {
+        self.selected_locators
+            .retain(|id| doc.locator(*id).is_some());
+    }
+
+    /// Clears the clip selection and the time selection, as clicking a
+    /// locator does (the time editing spec, R5).
+    pub(crate) fn clear_clip_selection(&mut self) {
+        self.selected_clips.clear();
+        self.time_selection = None;
+    }
+
     /// Whether a track is folded.
     #[must_use]
     pub fn is_folded(&self, track: TrackId) -> bool {
@@ -710,6 +745,7 @@ impl ArrangementView {
     pub fn forget_missing_tracks(&mut self, doc: &Document) {
         self.selected.retain(|id| doc.track(*id).is_some());
         self.forget_missing_clips(doc);
+        self.forget_missing_locators(doc);
         self.folded.retain(|id| doc.track(*id).is_some());
         self.heights.retain(|id, _| doc.track(*id).is_some());
         self.automation_lanes
@@ -1143,6 +1179,7 @@ impl ArrangementView {
             insert_marker: self.insert_marker,
             selected_tracks: self.selected.clone(),
             selected_clips: self.selected_clips.clone(),
+            selected_locators: self.selected_locators.clone(),
             time_selection: self
                 .time_selection
                 .map(|(start, end)| TimeRange { start, end }),

@@ -72,6 +72,7 @@ pub mod multisampler;
 pub mod plugin_list;
 pub mod rack_view;
 pub mod realtime_dialog;
+pub mod recovery_dialog;
 pub mod sample_display;
 pub mod sample_editor;
 pub mod scene_fields;

@@ -166,6 +166,13 @@ fn every_shell_command_is_on_a_menu_or_a_control() {
         commands::SETTINGS_SET_SAMPLE_EDITOR,
         bl_shell::audio_panel_commands::EDIT_SAMPLE,
         bl_shell::audio_panel_commands::REPLACE_SAMPLE,
+        // The recovery prompt's buttons (the crash-recovery spec, R22 and
+        // R23), and the File & Folder page's Save Continuously switch
+        // (R24).
+        bl_project::registry::RECOVER,
+        bl_project::registry::DISCARD_RECOVERY,
+        commands::SET_LATER_RECOVERY,
+        bl_project::registry::SET_CONTINUOUS_SAVE,
     ]
     .into();
     let bar = menu_bar(MenuPlatform::Mac);

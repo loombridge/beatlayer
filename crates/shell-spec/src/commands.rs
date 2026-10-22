@@ -28,6 +28,10 @@ pub const SET_SAVE: &str = "set.save";
 pub const SET_SAVE_AS: &str = "set.save_as";
 /// `set.discard_changes`: throw away the set's unsaved changes.
 pub const SET_DISCARD_CHANGES: &str = "set.discard_changes";
+/// `set.later_recovery`: close the recovery prompt, leaving the sets it
+/// listed to be offered at the next launch (WP-6.62, the crash-recovery
+/// spec, R22).
+pub const SET_LATER_RECOVERY: &str = "set.later_recovery";
 /// `set.save_as_default`: save the set as the default set a new set starts
 /// from.
 pub const SET_SAVE_AS_DEFAULT: &str = "set.save_as_default";
@@ -208,6 +212,7 @@ pub const IDS: &[&str] = &[
     SET_SAVE,
     SET_SAVE_AS,
     SET_DISCARD_CHANGES,
+    SET_LATER_RECOVERY,
     SET_SAVE_AS_DEFAULT,
     SET_SAVE_AS_TEMPLATE,
     SET_COLLECT_ALL,
@@ -579,6 +584,13 @@ pub struct SetResult {
     pub name: String,
 }
 
+/// What `set.later_recovery` returns: the recovery prompt's state.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RecoveryPrompt {
+    /// Whether the prompt is still open.
+    pub open: bool,
+}
+
 /// Arguments of `view.toggle_plug_in_windows`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -794,6 +806,17 @@ fn specs() -> Vec<CommandSpec> {
             .context(Global)
             .args::<NoArgs>()
             .result::<SetResult>(),
+        CommandSpec::new(SET_LATER_RECOVERY, "Later Recovery")
+            .description(
+                "Closes the recovery prompt the app shows at launch, leaving every set it \
+                 listed to be offered again at the next launch: nothing is recovered and \
+                 nothing is thrown away. The prompt's Later button runs it, and Esc does the \
+                 same. Changes nothing in the set.",
+            )
+            .permission(Permission::Read)
+            .context(Global)
+            .args::<NoArgs>()
+            .result::<RecoveryPrompt>(),
         CommandSpec::new(SET_SAVE_AS_DEFAULT, "Save Beatlayer Set As Default Set...")
             .description(
                 "Saves the open set as the default set, which every new set starts from, as \

@@ -631,7 +631,9 @@ fn overview(ctx: &Ctx<'_>, view: &View<'_>) -> Value {
         "set": {
             "name": shell.set_name(),
             "path": shell.set_path().map(|p| p.to_string_lossy().into_owned()),
-            "unsaved_changes": shell.is_dirty(),
+            // Spec: crash-recovery R25. With Save Continuously on, a set
+            // that has a file has no unsaved changes.
+            "unsaved_changes": shell.unsaved_changes(),
         },
         "tempo": {
             "bpm_at_start": start_tempo,

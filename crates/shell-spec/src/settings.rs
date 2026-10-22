@@ -516,6 +516,10 @@ pub struct FileFolderSettings {
     /// The sample editor the Edit button in the Clip View's Audio Utilities
     /// panel opens a clip's file in: its path, empty when none is named.
     pub sample_editor: String,
+    /// Save Continuously: whether every finished edit of a set that has a
+    /// file is saved within a second, as `settings.set_continuous_save`
+    /// sets it.
+    pub save_continuously: bool,
 }
 
 /// What `settings.state` returns: the Settings window's preferences by
@@ -581,8 +585,11 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                  Input (zoom, Outline View in Focus, the Tab key settings), the audio device \
                  settings with Driver Error Compensation and the test tone (`audio.configure`, \
                  `audio.set_test_tone`), the MIDI ports and computer keyboard (`midi.set_port`), \
-                 Create Fades on Clip Edges, Warp Recorded Audio, the Launch section, Auto-Hide Plug-In Windows, the plug-ins the Browser hides and prefers \
-                 (`plugin.settings`), the agent server and the \
+                 Create Fades on Clip Edges, Warp Recorded Audio, the Launch section, the File & \
+                 Folder page's Temporary Folder, sample editor and Save Continuously \
+                 (`settings.set_temporary_folder`, `settings.set_sample_editor` and \
+                 `settings.set_continuous_save`), Auto-Hide Plug-In Windows, the plug-ins the \
+                 Browser hides and prefers (`plugin.settings`), the agent server and the \
                  assistant. The server's and the agents' tokens and the assistant's API key are \
                  never reported, only whether one is stored. Preferences aren't saved with the \
                  set. Changes nothing. Use it to check a `settings.set_*` command took effect.",

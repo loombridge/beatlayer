@@ -541,6 +541,11 @@ impl Agent {
     /// call's reply comes from [`Agent::resume`], with the ticket.
     pub fn sync_export(&mut self, shell: &mut Shell) {
         let Some(ticket) = self.program().export_ticket else {
+            // Nobody waits any more (the session closed): the result is
+            // dropped, so the next export can start.
+            if shell.export_awaited() {
+                let _ = shell.take_export_result();
+            }
             return;
         };
         let Some(result) = shell.take_export_result() else {

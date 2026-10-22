@@ -68,11 +68,20 @@ pub fn show(ctx: &Context, shell: &Shell, theme: &Theme, events: &mut Vec<UiEven
         return;
     }
     let Some(dialog) = shell.export_dialog() else {
+        ctx.data_mut(|d| d.remove::<Entry>(entry_id()));
         return;
     };
-    let typing = ctx
+    // A value typed into a field that has lost focus is dropped, as Esc
+    // would drop it.
+    let typed_in = ctx
         .data(|d| d.get_temp::<Entry>(entry_id()))
-        .is_some_and(|entry| entry.field.is_some());
+        .and_then(|entry| entry.field.map(|(length, _)| length));
+    let typing = typed_in.is_some_and(|length| {
+        (0..3).any(|part| ctx.memory(|m| m.has_focus(part_id(length, part))))
+    });
+    if typed_in.is_some() && !typing {
+        ctx.data_mut(|d| d.remove::<Entry>(entry_id()));
+    }
     // Return presses Export and Esc closes the dialog (R28), unless a value
     // is being typed, which they set and drop.
     if !typing {

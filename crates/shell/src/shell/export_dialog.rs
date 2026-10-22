@@ -65,6 +65,9 @@ pub(super) struct ExportState {
     running: Option<Running>,
     /// How the last export ended, until a caller of `export.audio` takes it.
     ended: Option<Result<ExportResult, ShellError>>,
+    /// A caller of `export.audio` waits for this export's result, so no
+    /// other export starts until it has taken it.
+    awaited: bool,
 }
 
 impl Shell {
@@ -417,6 +420,13 @@ impl Shell {
     /// can't start.
     pub fn begin_export(&mut self, args: ExportArgs) -> Result<(), ShellError> {
         self.poll_export();
+        if self.export.awaited && self.export.ended.is_some() {
+            return Err(ShellError::Unavailable {
+                command: export_ids::AUDIO.to_owned(),
+                reason: "an export has just ended and its caller hasn't had its result yet"
+                    .to_owned(),
+            });
+        }
         if let Some(running) = &self.export.running {
             let files = running
                 .shared
@@ -517,6 +527,7 @@ impl Shell {
         }
         self.export.running = Some(Running { finished, shared });
         self.export.ended = None;
+        self.export.awaited = false;
         self.touch();
         Ok(())
     }
@@ -595,7 +606,26 @@ impl Shell {
     /// How the last export ended, once: for the caller that waits for
     /// `export.audio`.
     pub fn take_export_result(&mut self) -> Option<Result<ExportResult, ShellError>> {
-        self.export.ended.take()
+        let ended = self.export.ended.take();
+        if ended.is_some() {
+            self.export.awaited = false;
+        }
+        ended
+    }
+
+    /// Whether a caller of `export.audio` is waiting for an export's result.
+    #[must_use]
+    pub fn export_awaited(&self) -> bool {
+        self.export.awaited
+    }
+
+    /// Cancels the export under way, if any, and waits until its thread has
+    /// removed what it wrote: for quitting.
+    pub fn stop_export(&mut self) {
+        if let Some(running) = self.export.running.take() {
+            self.realtime.cancel();
+            let _ = running.finished.recv();
+        }
     }
 
     /// Whether an export is under way.
@@ -614,7 +644,9 @@ impl Shell {
     /// export is under way.
     pub fn start_export(&mut self, args: Value) -> Result<(), ShellError> {
         let args: ExportArgs = Self::args(export_ids::AUDIO, args)?;
-        self.begin_export(args)
+        self.begin_export(args)?;
+        self.export.awaited = true;
+        Ok(())
     }
 
     /// Runs `export.audio`: starts the export and waits for it to end, then

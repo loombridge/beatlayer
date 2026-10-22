@@ -592,6 +592,29 @@ fn an_export_runs_on_its_thread_and_cancel_stops_it() {
     assert!(done.frames > 0);
 }
 
+/// Spec: export R42, R44. An export whose caller waits keeps its result
+/// until the caller takes it: the next export waits until then.
+#[test]
+fn a_waiting_callers_result_is_kept_until_it_is_taken() {
+    let scratch = Scratch::new("awaited");
+    let mut shell = shell_with_a_clip(&scratch);
+    shell
+        .start_export(json!({ "path": text(&scratch.path("First.wav")), "length": BAR / 4 }))
+        .unwrap();
+    finish(&mut shell);
+    let error = shell
+        .start_export(json!({ "path": text(&scratch.path("Second.wav")), "length": BAR / 4 }))
+        .unwrap_err();
+    assert!(matches!(error, ShellError::Unavailable { .. }), "{error}");
+    let first = shell.take_export_result().expect("it ended").unwrap();
+    assert!(first.path.ends_with("First.wav"), "{}", first.path);
+    shell
+        .start_export(json!({ "path": text(&scratch.path("Second.wav")), "length": BAR / 4 }))
+        .unwrap();
+    finish(&mut shell);
+    assert!(shell.take_export_result().expect("it ended").is_ok());
+}
+
 /// Spec: export R41. A failure shows its reason in the Status Bar and
 /// writes nothing.
 #[test]

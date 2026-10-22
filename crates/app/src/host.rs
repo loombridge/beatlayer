@@ -1391,6 +1391,8 @@ impl Host {
                 }
                 self.shell.save_preferences();
                 self.cancel_renders();
+                // An export under way removes its partial files first.
+                self.shell.stop_export();
                 self.agent.set_view_capture(false);
                 self.quitting = true;
                 event_loop.exit();

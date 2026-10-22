@@ -719,5 +719,5 @@ Total to 1.0: 256 packages planned in Phases 0 to 6, and about 110 estimated in 
 | 6.68 | todo |  |  |
 | 6.69 | todo |  |  |
 | 6.70 | todo |  |  |
-| 6.71 | todo |  |  |
+| 6.71 | done | 22 October 2026 | [#320](https://github.com/loombridge/beatlayer/pull/320); the Export Audio/Video dialog on ⇧⌘R and the File menu, with a progress window and Cancel, exports on a worker thread, and Convert to Mono, Encode MP3 beside a PCM file and Create Analysis File ([export](specs/export.md) R28 to R45) |
 | 6.72 | todo |  |  |

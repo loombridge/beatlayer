@@ -992,7 +992,10 @@ fn the_return_tracks_rows_scroll_with_the_tracks_when_the_switch_is_on() {
         .run(ids::SHOW_RETURN_TRACKS, json!({ "on": false }))
         .unwrap();
     let nodes = Harness::nodes(&h.settle());
-    assert!(header_of(&nodes, "A Return").is_none(), "the returns hidden");
+    assert!(
+        header_of(&nodes, "A Return").is_none(),
+        "the returns hidden"
+    );
     assert!(header_of(&nodes, "Main").is_some(), "Main stays");
 }
 

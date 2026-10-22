@@ -673,7 +673,7 @@ Total to 1.0: 256 packages planned in Phases 0 to 6, and about 110 estimated in 
 | 6.29b | todo |  |  |
 | 6.30 | todo |  |  |
 | 6.30b | todo |  |  |
-| 6.31 | todo |  |  |
+| 6.31 | done | 22 October 2026 | [#300](https://github.com/loombridge/beatlayer/pull/300); the browser's database on disk holds the index, the tags and the tag groups, the Tag Editor (Cmd+Shift+E) and Quick Tags put tags on the selected items, and `#` searches by tag ([browser tags](specs/browser-tags.md) R1 to R17) |
 | 6.32 | todo |  |  |
 | 6.32b | todo |  |  |
 | 6.33 | todo |  |  |

@@ -31,7 +31,6 @@ pub enum MenuKind {
 
 /// The two menus and which one is open.
 pub(super) struct ContextMenus {
-    keymap: Keymap,
     platform: Platform,
     kind: MenuKind,
 }
@@ -39,7 +38,6 @@ pub(super) struct ContextMenus {
 impl ContextMenus {
     pub fn new() -> Self {
         Self {
-            keymap: Keymap::live12(),
             platform: Platform::current(),
             kind: MenuKind::default(),
         }
@@ -84,6 +82,8 @@ impl ContextMenus {
     /// rows menus.md records for those states (C-CLIP-ARR-025, C-CLIP-ARR-026,
     /// C-TIME-019, C-TIME-020).
     pub fn show(&self, ui: &mut Ui, shell: &Shell, events: &mut Vec<UiEvent>) {
+        // The keymap in use, so the menu shows the keys in use (R10).
+        let keymap = Keymap::from_data(shell.keymap().clone());
         let state = selection_menu(shell);
         let menu = match self.kind {
             MenuKind::Clip if audio_selected(shell) => {
@@ -122,8 +122,7 @@ impl ContextMenus {
                     }
                 });
             } else {
-                let response =
-                    crate::menus::item(ui, item, shell, &self.keymap, self.platform, events);
+                let response = crate::menus::item(ui, item, shell, &keymap, self.platform, events);
                 crate::menus::take_focus_first(ui, &response);
             }
         }

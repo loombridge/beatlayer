@@ -308,6 +308,46 @@ pub(super) const FIXTURES: &[Fixture] = &[
         about: "The drum loop in a 60 BPM song, Preserve 1/32, Loop Back-and-Forth.",
         build: beats_thirtysecond_backandforth_60,
     },
+    Fixture {
+        name: "complex-60",
+        about: "A one-bar tone warped at 120 BPM in Complex, in a 60 BPM song: the frequency-domain stretcher reads the file at half its speed (warp-modes R21 to R24).",
+        build: complex_60,
+    },
+    Fixture {
+        name: "complex-90",
+        about: "The same tone in a 90 BPM song, in Complex.",
+        build: complex_90,
+    },
+    Fixture {
+        name: "complex-180",
+        about: "The same tone in a 180 BPM song, in Complex.",
+        build: complex_180,
+    },
+    Fixture {
+        name: "complex-240",
+        about: "The same tone in a 240 BPM song, in Complex.",
+        build: complex_240,
+    },
+    Fixture {
+        name: "complex-pro-60",
+        about: "The same tone in a 60 BPM song, in Complex Pro at Formants 100 % and Envelope 128.",
+        build: complex_pro_60,
+    },
+    Fixture {
+        name: "complex-pro-90",
+        about: "The same tone in a 90 BPM song, in Complex Pro.",
+        build: complex_pro_90,
+    },
+    Fixture {
+        name: "complex-pro-180",
+        about: "The same tone in a 180 BPM song, in Complex Pro.",
+        build: complex_pro_180,
+    },
+    Fixture {
+        name: "complex-pro-240",
+        about: "The same tone in a 240 BPM song, in Complex Pro.",
+        build: complex_pro_240,
+    },
 ];
 
 /// A song under construction.
@@ -1473,4 +1513,78 @@ beats_fixtures! {
     beats_thirtysecond_off_60, ThirtySecond, LoopOff;
     beats_thirtysecond_forward_60, ThirtySecond, LoopForward;
     beats_thirtysecond_backandforth_60, ThirtySecond, LoopBackAndForth;
+}
+
+/// Spec: warp-modes R21 to R24. A one-bar tone (a sweep from 220 to 880 Hz)
+/// warped at 120 BPM in Complex or Complex Pro, in a song at `song_bpm`, at
+/// Complex Pro's default Formants and Envelope.
+fn complex(song_bpm: f64, pro: bool) -> Scene {
+    let mut song = Song::new();
+    song.apply(Command::SetTempo {
+        tempo: TempoMap::constant(bpm(song_bpm)),
+    });
+    let bar = Ticks::WHOLE;
+    // One bar at 120 BPM is two seconds.
+    let frames = 96_000;
+    let file = song.file(
+        "tone.wav",
+        48_000,
+        &[chirp(frames, 48_000, 220.0, 880.0, 0.0625)],
+    );
+    let track = song.track(TrackKind::Audio, "Tone", None);
+    let audio = AudioData {
+        warp: true,
+        warp_markers: vec![
+            WarpMarker {
+                time: 0.0,
+                beat: Ticks::ZERO,
+            },
+            WarpMarker {
+                time: frames as f64 / 48_000.0,
+                beat: bar,
+            },
+        ],
+        tempo: Some(120.0),
+        warp_mode: if pro {
+            WarpMode::ComplexPro
+        } else {
+            WarpMode::Complex
+        },
+        ..AudioData::new(file)
+    };
+    song.audio_clip(track, Ticks::ZERO, bar, audio);
+    let seconds = song.to_last_clip();
+    song.finish(seconds)
+}
+
+fn complex_60() -> Scene {
+    complex(60.0, false)
+}
+
+fn complex_90() -> Scene {
+    complex(90.0, false)
+}
+
+fn complex_180() -> Scene {
+    complex(180.0, false)
+}
+
+fn complex_240() -> Scene {
+    complex(240.0, false)
+}
+
+fn complex_pro_60() -> Scene {
+    complex(60.0, true)
+}
+
+fn complex_pro_90() -> Scene {
+    complex(90.0, true)
+}
+
+fn complex_pro_180() -> Scene {
+    complex(180.0, true)
+}
+
+fn complex_pro_240() -> Scene {
+    complex(240.0, true)
 }

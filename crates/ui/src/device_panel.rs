@@ -144,6 +144,7 @@ struct Drag {
 /// `device.set_param` invocations. `display` is what the device's display
 /// shows now, if its type draws one. `played` gives the base and the played
 /// value of a parameter while a clip modulates it.
+#[expect(clippy::too_many_arguments, reason = "the panel's inputs")]
 pub fn show(
     ui: &mut Ui,
     theme: &Theme,
@@ -151,6 +152,7 @@ pub fn show(
     display: Option<&DeviceDisplay>,
     body: Rect,
     played: &dyn Fn(ParamId) -> Option<(f64, f64)>,
+    renaming: &mut Option<crate::articulation_map::Renaming>,
     events: &mut Vec<UiEvent>,
 ) {
     let Some(panel) = frame.panel.as_ref() else {
@@ -234,10 +236,23 @@ pub fn show(
                 events,
             );
         }
+        // Spec: articulation-map R15. The Articulation Map's list shows
+        // every articulation, the current one lit.
+        let list = crate::articulation_map::is_list(&name);
+        let current = display
+            .and_then(|display| display.reading("Articulation"))
+            .map_or(0, |reading| reading.value.max(1.0) as usize - 1);
+        if list && !panel.articulations.is_empty() {
+            crate::articulation_map::cell(ui, theme, frame, current, rect, renaming, events);
+        }
+        // Spec: articulation-map R15. The list reads as its rows.
+        let rows = list.then(|| crate::articulation_map::list_text(&panel.articulations, current));
         ui.ctx().accesskit_node_builder(id, |node| {
             node.set_role(Role::Image);
             node.set_label(name);
-            if let Some(display) = shown {
+            if let Some(rows) = rows {
+                node.set_value(rows);
+            } else if let Some(display) = shown {
                 node.set_value(display.text());
             }
         });
@@ -276,6 +291,16 @@ pub fn show(
                 .plugin
                 .then(|| panel.knobs.get(index).copied().unwrap_or(index)),
             configured: &panel.configured,
+            // Spec: articulation-map R6. The Articulation control reads
+            // the articulation's name.
+            text: (param == bl_devices::articulation_map::ARTICULATION
+                && !panel.articulations.is_empty())
+            .then(|| {
+                display
+                    .and_then(|display| display.reading("Name"))
+                    .map(|reading| reading.text.clone())
+            })
+            .flatten(),
         };
         match widget {
             Widget::Knob => control.knob(ui, theme, events),
@@ -455,6 +480,10 @@ struct Control<'a> {
     /// The parameters a plug-in device's panel is configured to show, in
     /// order: what a knob's right-click menu offers. Empty otherwise.
     configured: &'a [ConfiguredParam],
+    /// The value the control shows, when it reads something else than its
+    /// number (the Articulation Map's Articulation control reads the
+    /// articulation's name).
+    text: Option<String>,
 }
 
 impl Control<'_> {
@@ -601,7 +630,7 @@ impl Control<'_> {
     fn describe(&self, ui: &Ui, response: &Response, role: Role) {
         let d = self.descriptor;
         let text = modulated_text(
-            d.format(self.shown()),
+            self.text.clone().unwrap_or_else(|| d.format(self.shown())),
             self.modulated.map(|(_, played)| d.format(played)),
         );
         response.widget_info(|| WidgetInfo::slider(true, self.value, &d.name));
@@ -737,7 +766,9 @@ impl Control<'_> {
         painter.text(
             field.center(),
             Align2::CENTER_CENTER,
-            self.descriptor.format(self.value),
+            self.text
+                .clone()
+                .unwrap_or_else(|| self.descriptor.format(self.value)),
             theme.small_font(),
             c.text.0,
         );

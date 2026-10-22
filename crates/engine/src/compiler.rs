@@ -34,6 +34,7 @@ use crate::session::FollowTable;
 use crate::session::{SceneMaps, SceneOverride};
 use crate::sidechain::{self, SidechainKey};
 use crate::sources::{ClipSources, Loaded, Loader};
+use crate::warped::PoolSpec;
 use crate::zones::{self, ChainSelector, ZoneFilter};
 
 /// What the audio thread needs after an edit: a new program if the edit
@@ -88,8 +89,10 @@ const LONG_LAYER_SECONDS: u64 = 10;
 enum Identity {
     /// A device. Its media is part of what it is (WP-2.16): a device whose
     /// sample changed is a new node, and one the set keeps gets its audio
-    /// sent again.
-    Device(DeviceKind, Vec<Option<ContentHash>>),
+    /// sent again. An external device's latency is part of it too (WP-5.35):
+    /// its node holds a delay line of that many frames, so a new latency
+    /// makes a new node.
+    Device(DeviceKind, Vec<Option<ContentHash>>, u32),
     Player,
     MidiPlayer,
     Mixer,
@@ -169,6 +172,10 @@ pub struct Compiler {
     scene_override: SceneOverride,
     layout: BTreeMap<NodeKey, Placed>,
     sources: ClipSources,
+    /// The stretcher pool each track's player holds, by track (WP-4.6, R5,
+    /// R21): what the last list it was sent left it with, so a list that
+    /// still fits carries none and the player keeps it.
+    pool_specs: BTreeMap<TrackId, PoolSpec>,
     /// The long layers being read in the background (WP-5.13, R23), by
     /// media, so an edit that sends the layers again shares them rather
     /// than reading each file again. A sample goes when no node holds it.
@@ -227,6 +234,7 @@ impl Compiler {
             scene_override: SceneOverride::default(),
             layout: BTreeMap::new(),
             sources: ClipSources::default(),
+            pool_specs: BTreeMap::new(),
             progressive: BTreeMap::new(),
             modulator_rows: crate::modbus::ModRows::default(),
             displays: Displays::default(),
@@ -444,6 +452,19 @@ impl Compiler {
                     self.gc.data(crate::modbus::Shape(shape)),
                 ));
             }
+            // Spec: articulation-map R14. An Articulation Map's list reaches
+            // its node as node data, so a change to it reaches the playing
+            // device without a new program.
+            if let (Change::Modified, Some(before), Some(after)) =
+                (change, old.device(id), document.device(id))
+                && before.articulations != after.articulations
+            {
+                let list = bl_model::ArticulationList::of(&after.articulations);
+                update.data.push((
+                    NodeKey::Device(id),
+                    self.gc.data(crate::node::Articulations(list)),
+                ));
+            }
         }
         for track in document.tracks() {
             let id = track.id();
@@ -642,6 +663,7 @@ impl Compiler {
     ) {
         let loop_start = self.loop_start_frame(document);
         let previous = previous.and_then(|last| last.track(track.id()));
+        let pool = self.pool_specs.get(&track.id()).copied();
         let built = ClipList::build(
             track,
             previous,
@@ -649,9 +671,11 @@ impl Compiler {
             self.config.sample_rate,
             self.config.channels,
             loop_start,
+            pool,
             &mut self.sources,
             self.registry.media(),
         );
+        self.pool_specs.insert(track.id(), built.pool);
         update.missing.extend(built.missing);
         update.missing.sort_unstable();
         update.missing.dedup();
@@ -910,6 +934,14 @@ impl Compiler {
             output_bases.insert(output.device, (kept, ports));
             kept += ports;
         }
+        // Spec: external-devices R18. An external effect sends its signal to
+        // the interface's outputs, in a buffer of its own that the engine
+        // mixes into them.
+        for (slot, channel) in &build.external_effects {
+            build.slots[*slot as usize].external_out = Some(kept);
+            build.slots[*slot as usize].external_to = Some(*channel);
+            kept += 1;
+        }
         for (to, at, output) in output_taps {
             let task = build.tasks[task_of[&to] as usize];
             let slot = build.device_slots.get(&output.device).copied();
@@ -1070,6 +1102,7 @@ impl Compiler {
             output: task_of[&document.main_id()],
             cue: cue_out.map(|out| out.task),
             ext_outs,
+            external_effects: build.external_effects,
             tempo,
             time_signatures,
             base_tempo,
@@ -1142,6 +1175,11 @@ impl Compiler {
             |track| document.track(track).is_some() && !build.new_players.contains(&track),
             |clip| document.clip_track(clip).is_some(),
         );
+        // A track that went, or whose player is new and so holds nothing,
+        // keeps no pool spec: the next list it is sent builds its pool.
+        self.pool_specs.retain(|track, _| {
+            document.track(*track).is_some() && !build.new_players.contains(track)
+        });
         // A new player gets its track's clips if it has any, in the
         // Arrangement or in a Session slot; a player that migrated keeps its
         // own unless they changed, or the tempo map moved them.
@@ -1260,6 +1298,7 @@ impl Compiler {
         self.original = None;
         self.layout.clear();
         self.sources.reset();
+        self.pool_specs.clear();
     }
 
     /// The slot of the route that carries `edge` into `to`: made with the
@@ -1537,7 +1576,20 @@ impl Compiler {
                 continue;
             }
             let key = NodeKey::Device(device.id);
-            let identity = Identity::Device(device.kind.clone(), device.media.clone());
+            // Spec: external-devices R13, R20. An external device reports
+            // the interface's round trip and its Hardware Latency, which
+            // delay compensation lines the rest of the set up with. An
+            // external effect's node holds a delay line of that many frames
+            // (R19), so the latency is part of the node's identity.
+            let external_latency = device.external.as_ref().map_or(0, |external| {
+                self.config.round_trip_latency.saturating_add(
+                    external
+                        .hardware_latency
+                        .frames(self.config.sample_rate.hz()),
+                )
+            });
+            let identity =
+                Identity::Device(device.kind.clone(), device.media.clone(), external_latency);
             let (node, latency) = match self.previous(key, &identity) {
                 Some(from) => (Err(from), self.previous_latency(key, &identity)),
                 None => match self.registry.create(device, &config) {
@@ -1571,21 +1623,21 @@ impl Compiler {
                     }
                 },
             };
-            let mut latency = latency;
-            // Spec: external-devices R13. An external instrument reports the
-            // interface's round trip and its Hardware Latency, which delay
-            // compensation lines the rest of the set up with.
-            if let Some(external) = &device.external {
-                latency = self.config.round_trip_latency.saturating_add(
-                    external
-                        .hardware_latency
-                        .frames(self.config.sample_rate.hz()),
-                );
-            }
+            let latency = if device.external.is_some() {
+                external_latency
+            } else {
+                latency
+            };
             let slot = claim(build, key, identity, !device.enabled, latency, node);
             build.device_slots.insert(device.id, slot);
             if let Some(external) = &device.external {
                 build.slots[slot as usize].external = Some(external.audio_from);
+                // Spec: external-devices R18, R19. An external effect sends
+                // its signal to the interface's outputs, in a buffer of its
+                // own that the engine mixes into them.
+                if let Some(audio_to) = external.audio_to {
+                    build.external_effects.push((slot, audio_to));
+                }
             }
             // Spec: modulation R20. A modulator works its rows out before
             // any task runs.
@@ -1875,6 +1927,8 @@ fn claim(
         delay: 0,
         modulator: ModKind::None,
         external: None,
+        external_to: None,
+        external_out: None,
         outputs: Span::default(),
     });
     build.layout.insert(
@@ -1946,6 +2000,9 @@ struct Build {
     /// The length in frames of each delay line the program needs, in the
     /// order the inputs and players name them (WP-2.11).
     delays: Vec<u32>,
+    /// The external effects in the program, with their slots and the
+    /// interface's outputs they send to (WP-5.35).
+    external_effects: Vec<(u32, bl_model::Channel)>,
 }
 
 /// The key of the route that carries `edge`.

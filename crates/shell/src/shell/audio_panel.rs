@@ -169,7 +169,7 @@ impl Shell {
     /// and pitch, and its warp markers only if the new file is exactly as
     /// long as the old one; otherwise it takes the settings a new clip of
     /// the file gets (warping R27).
-    fn replaced_audio(
+    pub(super) fn replaced_audio(
         &self,
         id: &str,
         clip: ClipId,

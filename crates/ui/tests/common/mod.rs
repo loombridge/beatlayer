@@ -214,9 +214,17 @@ impl Harness {
         // As the app does: the keys go to a value being typed as to a text
         // field, and the frame draws what the engine last published.
         let text_focused = self.ctx.text_edit_focused() || self.main.is_typing();
-        let invocations =
+        let invocations = if self.window == Window::Settings && self.settings.recording() {
+            // The keys being recorded on the Shortcuts page are the
+            // person's, not the app's (the custom shortcuts spec, R8).
+            self.settings
+                .take_recorded_key(&mut input, &self.shell)
+                .into_iter()
+                .collect()
+        } else {
             self.dispatcher
-                .take_bound_keys(&mut input, &self.keymap, &self.shell, text_focused);
+                .take_bound_keys(&mut input, &self.keymap, &self.shell, text_focused)
+        };
         self.advance(BLOCKS_PER_FRAME);
         self.engine = self.shell.poll_engine();
         if self.window == Window::Settings {

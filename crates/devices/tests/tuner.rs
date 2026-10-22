@@ -22,6 +22,7 @@ fn make_node(params: &[(ParamId, f64)], max_frames: usize) -> NativeNode<Tuner> 
     let desc = tuner_type();
     let dev = device(&desc, params);
     let config = NodeConfig {
+        round_trip_latency: 0,
         sample_rate: RATE,
         max_frames,
         channels: 2,
@@ -232,6 +233,7 @@ fn a_96_khz_stream_reads_its_pitch_within_one_cent() {
     let desc = tuner_type();
     let dev = device(&desc, &[(REFERENCE, 440.0)]);
     let config = NodeConfig {
+        round_trip_latency: 0,
         sample_rate: rate,
         max_frames: 4096,
         channels: 2,

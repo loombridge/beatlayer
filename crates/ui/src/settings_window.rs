@@ -16,6 +16,7 @@ use bl_shell::audio::{
     AudioDevices, AudioStatus, COMPENSATION_LIMIT_MS, DeviceListing, TONE_MAX_DBFS, TONE_MAX_HZ,
     TONE_MIN_DBFS, TONE_MIN_HZ,
 };
+use bl_shell::keymap::Origin;
 use bl_shell::midi_io_commands as midi_ids;
 use bl_shell::settings::{
     DefaultWarpMode, LoopWarpShortSamples, SessionAutomationTracks, SettingsPage, ThemeChoice,
@@ -23,13 +24,113 @@ use bl_shell::settings::{
 };
 use bl_shell::{Invocation, Shell, agent, assistant, commands as ids};
 use egui::accesskit::Role;
-use egui::{Align2, CentralPanel, Frame, Id, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
+use egui::{
+    Align2, CentralPanel, Frame, Id, Key, RawInput, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2,
+};
 use serde_json::{Value, json};
 
+use crate::keymap::{Platform, binding_text, is_modifier, mods_from_egui};
 use crate::layout::SettingsLayout;
 use crate::main_window::{UiEvent, sample_rate_text};
 use crate::theme::Theme;
 use crate::widgets::{Choice, NO_LEDS, chooser, number_box, switch};
+
+/// The commands a key can run, by the context each belongs to, as the
+/// Shortcuts page lists them (R7).
+fn shortcut_rows(shell: &Shell, platform: Platform) -> Vec<ShortcutRow> {
+    let state = shell.keymap_state();
+    let mut rows: Vec<ShortcutRow> = Vec::new();
+    // Where each command's row is, so the rows are built in one pass.
+    let mut at: std::collections::BTreeMap<(String, String), usize> =
+        std::collections::BTreeMap::new();
+    for shortcut in &state.shortcuts {
+        let (keys, origin) = match platform {
+            Platform::Mac => (&shortcut.mac.keys, shortcut.mac.origin),
+            Platform::Other => (&shortcut.win.keys, shortcut.win.origin),
+        };
+        for command in &shortcut.commands {
+            let label = shell
+                .registry()
+                .get(command)
+                .map_or_else(|| command.clone(), |spec| spec.label.to_string());
+            let key = (command.clone(), shortcut.context.clone());
+            match at.get(&key).map(|index| &mut rows[*index]) {
+                Some(row) => {
+                    for key in keys {
+                        if !row.keys.contains(key) {
+                            row.keys.push(key.clone());
+                        }
+                    }
+                    row.own = row.own || origin == Origin::User;
+                    row.changed = row.changed || origin != Origin::Live;
+                }
+                None => {
+                    at.insert(key, rows.len());
+                    rows.push(ShortcutRow {
+                        command: command.clone(),
+                        label,
+                        context: shortcut.context.clone(),
+                        keys: keys.clone(),
+                        own: origin == Origin::User,
+                        changed: origin != Origin::Live,
+                    });
+                }
+            }
+        }
+    }
+    // The commands a menu item runs, which the keymap gives no keys: a
+    // person can give them keys (R2).
+    for menu in bl_shell::menus::menu_bar(bl_shell::menus::MenuPlatform::current()) {
+        for item in menu.walk() {
+            let bl_shell::menus::Action::Command(id) = &item.action else {
+                continue;
+            };
+            let id = *id;
+            if rows.iter().any(|row| row.command == id) {
+                continue;
+            }
+            let spec = shell.registry().get(id);
+            let context = spec
+                .and_then(|spec| spec.contexts.first())
+                .map_or_else(|| "global".to_owned(), |context| context.id().to_owned());
+            rows.push(ShortcutRow {
+                command: id.to_owned(),
+                label: spec.map_or_else(|| id.to_owned(), |spec| spec.label.to_string()),
+                context,
+                keys: Vec::new(),
+                own: false,
+                changed: false,
+            });
+        }
+    }
+    rows
+}
+
+/// Whether a row matches the search, as the command search matches it:
+/// every word typed starts a word of the label, or is in the command's
+/// description (R7).
+fn matches_search(row: &ShortcutRow, shell: &Shell, search: &str) -> bool {
+    let words: Vec<String> = search
+        .split_whitespace()
+        .map(|word| word.to_lowercase())
+        .collect();
+    if words.is_empty() {
+        return true;
+    }
+    let label: Vec<String> = row
+        .label
+        .split_whitespace()
+        .map(|word| word.to_lowercase())
+        .collect();
+    let description = shell
+        .registry()
+        .get(&row.command)
+        .map(|spec| spec.description.to_lowercase())
+        .unwrap_or_default();
+    words.iter().all(|word| {
+        label.iter().any(|part| part.starts_with(word)) || description.contains(word.as_str())
+    })
+}
 
 /// The Settings window's state between frames.
 #[derive(Clone, Debug)]
@@ -46,6 +147,63 @@ pub struct SettingsUi {
     /// stores it (WP-2.23, part 4). It's cleared once stored and never
     /// echoed back from the shell.
     assistant_key: String,
+    /// The Shortcuts page's state: the search text, the command whose keys
+    /// are being recorded, and the questions the page asks (the custom
+    /// shortcuts spec, R7 to R10).
+    shortcuts: ShortcutsPage,
+}
+
+/// The Shortcuts page's state between frames.
+#[derive(Clone, Debug, Default)]
+pub struct ShortcutsPage {
+    /// The text in the search field, which narrows the list (R7).
+    pub search: String,
+    /// The command whose keys are being recorded (R8).
+    pub recording: Option<Recording>,
+    /// The question about keys that already run another command (R9).
+    pub conflict: Option<Conflict>,
+    /// Whether the question about resetting every shortcut is asked (R10).
+    pub ask_reset_all: bool,
+}
+
+/// The command whose keys are being recorded.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Recording {
+    /// The command's ID.
+    pub command: String,
+    /// The context it runs in.
+    pub context: String,
+}
+
+/// The keys that already run another command, and the question about them.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Conflict {
+    /// The command being recorded.
+    pub command: String,
+    /// The context it runs in.
+    pub context: String,
+    /// The keys pressed.
+    pub keys: Vec<String>,
+    /// The command the keys already run.
+    pub other: String,
+    /// The context the other command runs in.
+    pub other_context: String,
+}
+
+/// A command a key can run, as the Shortcuts page lists it (R7).
+struct ShortcutRow {
+    /// The command's ID.
+    command: String,
+    /// The command's label.
+    label: String,
+    /// The context it runs in.
+    context: String,
+    /// Its keys on this platform.
+    keys: Vec<String>,
+    /// Whether the keys are the person's own.
+    own: bool,
+    /// Whether the keys differ from Live's.
+    changed: bool,
 }
 
 impl Default for SettingsUi {
@@ -63,7 +221,78 @@ impl SettingsUi {
             stale: true,
             move_focus: None,
             assistant_key: String::new(),
+            shortcuts: ShortcutsPage::default(),
         }
+    }
+
+    /// Whether the Shortcuts page is recording a command's keys, so the
+    /// keys it takes are the person's and run nothing (R8).
+    #[must_use]
+    pub fn recording(&self) -> bool {
+        self.shortcuts.recording.is_some()
+    }
+
+    /// Takes the key press that ends a recording, and returns the
+    /// command it binds. The keys that already run another command are
+    /// asked about first (R9), and nothing is saved until the person
+    /// chooses (R9, R11).
+    pub fn take_recorded_key(&mut self, input: &mut RawInput, shell: &Shell) -> Option<Invocation> {
+        let recording = self.shortcuts.recording.clone()?;
+        let platform = Platform::current();
+        let mut pressed = None;
+        let mut events = Vec::new();
+        for event in input.events.drain(..) {
+            match event {
+                egui::Event::Key {
+                    key,
+                    pressed: true,
+                    repeat: false,
+                    modifiers,
+                    ..
+                } if pressed.is_none() && !is_modifier(key) => {
+                    if key == Key::Escape {
+                        // Esc stops the recording and changes nothing (R8).
+                        self.shortcuts.recording = None;
+                    } else if key != Key::Tab {
+                        pressed = Some((key, modifiers));
+                    }
+                }
+                // The keys being recorded are the person's, so they reach
+                // nothing else. Tab still moves the focus.
+                egui::Event::Key { key: Key::Tab, .. } => events.push(event),
+                egui::Event::Key { .. } => {}
+                other => events.push(other),
+            }
+        }
+        input.events = events;
+        let (key, modifiers) = pressed?;
+        let binding = binding_text(key, mods_from_egui(modifiers, platform), platform);
+        let chords = bl_shell::keymap::parse_binding(&binding, platform).unwrap_or_default();
+        if let Some((other, other_context)) =
+            shell
+                .keymap()
+                .conflict(&chords, &recording.context, &recording.command, platform)
+        {
+            self.shortcuts.conflict = Some(Conflict {
+                command: recording.command,
+                context: recording.context,
+                keys: vec![binding],
+                other,
+                other_context,
+            });
+            self.shortcuts.recording = None;
+            return None;
+        }
+        self.shortcuts.recording = None;
+        Some(Invocation::new(
+            ids::KEYMAP_BIND,
+            json!({
+                "command": recording.command,
+                "keys": [binding],
+                "platform": platform.id(),
+                "context": recording.context,
+            }),
+        ))
     }
 
     /// Carries out an effect that moves the keyboard focus in this window
@@ -120,6 +349,9 @@ impl SettingsUi {
                 SettingsPage::DisplayInput => {
                     display_page(ui, shell, theme, &mut rows, &mut events);
                 }
+                SettingsPage::Shortcuts => {
+                    self.shortcuts_page(ui, shell, theme, &layout, &mut events);
+                }
                 SettingsPage::ThemeColors => theme_page(ui, shell, theme, &mut rows, &mut events),
                 SettingsPage::RecordWarpLaunch => {
                     record_warp_launch_page(ui, shell, theme, &mut rows, &mut events);
@@ -156,6 +388,260 @@ impl SettingsUi {
             self.stale = true;
         }
         events
+    }
+
+    /// The Shortcuts page (the custom shortcuts spec, R7 to R13): every
+    /// command a key can run, its context and its keys, and the ways to
+    /// change them.
+    fn shortcuts_page(
+        &mut self,
+        ui: &mut Ui,
+        shell: &Shell,
+        theme: &Theme,
+        layout: &SettingsLayout,
+        events: &mut Vec<UiEvent>,
+    ) {
+        let platform = Platform::current();
+        let top = layout.first_page.top();
+        // The search field, which narrows the list by the label (R7).
+        ui.painter().text(
+            pos2(layout.label_x, top + 9.0),
+            Align2::LEFT_CENTER,
+            "Search",
+            theme.font(),
+            theme.colors.text_dim.0,
+        );
+        let field = Rect::from_min_size(pos2(layout.control_x, top), vec2(194.0, 18.0));
+        let scope = egui::UiBuilder::new().max_rect(field);
+        ui.scope_builder(scope, |ui| {
+            let mut search = self.shortcuts.search.clone();
+            let response = ui.add_sized(
+                [194.0, 18.0],
+                egui::TextEdit::singleline(&mut search).hint_text("Command"),
+            );
+            if response.changed() {
+                self.shortcuts.search = search;
+            }
+        });
+        // The list, by the menu or context each command belongs to.
+        let rows = shortcut_rows(shell, platform);
+        let shown: Vec<&ShortcutRow> = rows
+            .iter()
+            .filter(|row| matches_search(row, shell, &self.shortcuts.search))
+            .collect();
+        let list = Rect::from_min_max(
+            pos2(layout.page.left(), top + 24.0),
+            pos2(layout.page.right(), layout.page.bottom() - 26.0),
+        );
+        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(list));
+        egui::ScrollArea::vertical()
+            .id_salt(child.id().with("shortcuts"))
+            .auto_shrink([false, false])
+            .show(&mut child, |ui| {
+                for row in shown {
+                    self.shortcut_row(ui, theme, layout, row, events);
+                }
+            });
+        // Reset All, at the page's foot, which asks first (R10).
+        let foot = Rect::from_min_size(
+            pos2(layout.control_x, layout.page.bottom() - 24.0),
+            vec2(108.0, 18.0),
+        );
+        let scope = egui::UiBuilder::new().max_rect(foot);
+        ui.scope_builder(scope, |ui| {
+            if ui
+                .add_sized([108.0, 18.0], egui::Button::new("Reset All"))
+                .clicked()
+            {
+                self.shortcuts.ask_reset_all = true;
+            }
+        });
+        self.shortcuts_questions(ui, shell, events);
+    }
+
+    /// One command's row: its label, its keys, and the ways to change
+    /// them (R8 and R10).
+    fn shortcut_row(
+        &mut self,
+        ui: &mut Ui,
+        theme: &Theme,
+        layout: &SettingsLayout,
+        row: &ShortcutRow,
+        events: &mut Vec<UiEvent>,
+    ) {
+        let platform = Platform::current();
+        // The row: the command's label, its keys, and the ways to change
+        // them, in Live's columns (L-SET-003).
+        let rect = Rect::from_min_size(pos2(layout.label_x, ui.cursor().min.y), vec2(392.0, 18.0));
+        let scope = egui::UiBuilder::new()
+            .max_rect(rect)
+            .layout(egui::Layout::left_to_right(egui::Align::Center));
+        ui.scope_builder(scope, |ui| {
+            // The row itself, for assistive technology: the command's
+            // label, its context and its keys (R12).
+            let response = ui.interact(
+                rect,
+                Id::new(("shortcut-row", &row.command, &row.context)),
+                Sense::hover(),
+            );
+            ui.ctx().accesskit_node_builder(response.id, |node| {
+                node.set_role(Role::Row);
+                node.set_label(row.label.clone());
+                node.set_value(format!("{}: {}", row.context, row.keys.join(", ")));
+            });
+            let label_rect = Rect::from_min_size(rect.left_top(), vec2(196.0, 18.0));
+            ui.put(label_rect, egui::Label::new(&row.label).truncate());
+            // The keys, which the person clicks to record new ones (R8).
+            let recording = self.shortcuts.recording.as_ref().is_some_and(|recording| {
+                recording.command == row.command && recording.context == row.context
+            });
+            let text = if recording {
+                "Press keys".to_owned()
+            } else {
+                row.keys.join(", ")
+            };
+            let keys_rect =
+                Rect::from_min_size(pos2(rect.left() + 200.0, rect.top()), vec2(84.0, 18.0));
+            let keys = ui.put(keys_rect, egui::Button::new(text.clone()));
+            ui.ctx().accesskit_node_builder(keys.id, |node| {
+                node.set_label(format!("{} keys", row.label));
+                node.set_value(text);
+            });
+            if keys.clicked() {
+                self.shortcuts.recording = Some(Recording {
+                    command: row.command.clone(),
+                    context: row.context.clone(),
+                });
+                self.shortcuts.conflict = None;
+            }
+            if row.own {
+                ui.painter().rect_stroke(
+                    keys.rect,
+                    0.0,
+                    Stroke::new(1.0, theme.colors.accent.0),
+                    StrokeKind::Inside,
+                );
+            }
+            // Remove: takes the shortcut away, whether it is Live's or the
+            // person's own (R8).
+            if !row.keys.is_empty() {
+                let remove_rect =
+                    Rect::from_min_size(pos2(rect.left() + 288.0, rect.top()), vec2(50.0, 18.0));
+                let remove = ui.put(remove_rect, egui::Button::new("Remove"));
+                ui.ctx().accesskit_node_builder(remove.id, |node| {
+                    node.set_label(format!("Remove {}'s keys", row.label));
+                });
+                if remove.clicked() {
+                    events.push(UiEvent::Invoke(Invocation::new(
+                        ids::KEYMAP_UNBIND,
+                        json!({
+                            "command": row.command,
+                            "keys": row.keys,
+                            "platform": platform.id(),
+                        }),
+                    )));
+                }
+            }
+            // Reset: gives the command Live's own keys back (R10).
+            if row.changed {
+                let reset_rect =
+                    Rect::from_min_size(pos2(rect.left() + 342.0, rect.top()), vec2(50.0, 18.0));
+                let reset = ui.put(reset_rect, egui::Button::new("Reset"));
+                ui.ctx().accesskit_node_builder(reset.id, |node| {
+                    node.set_label(format!("Reset {}'s keys", row.label));
+                });
+                if reset.clicked() {
+                    events.push(UiEvent::Invoke(Invocation::new(
+                        ids::KEYMAP_RESET,
+                        json!({ "command": row.command }),
+                    )));
+                }
+            }
+        });
+        ui.advance_cursor_after_rect(rect);
+    }
+
+    /// The questions the Shortcuts page asks: about keys that already run
+    /// another command (R9), and about resetting every shortcut (R10).
+    fn shortcuts_questions(&mut self, ui: &mut Ui, shell: &Shell, events: &mut Vec<UiEvent>) {
+        let platform = Platform::current();
+        if let Some(conflict) = self.shortcuts.conflict.clone() {
+            let mut open = true;
+            egui::Window::new("Replace the shortcut?")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                .open(&mut open)
+                .show(ui.ctx(), |ui| {
+                    let question = ui.label(format!(
+                        "{} already runs {} in {}.",
+                        conflict.keys.join(", "),
+                        conflict.other,
+                        conflict.other_context
+                    ));
+                    // The question is read as a dialog (R12).
+                    ui.ctx().accesskit_node_builder(question.id, |node| {
+                        node.set_label(format!(
+                            "{} already runs {} in {}.",
+                            conflict.keys.join(", "),
+                            conflict.other,
+                            conflict.other_context
+                        ));
+                    });
+                    ui.horizontal(|ui| {
+                        if ui.button("Replace").clicked() {
+                            events.push(UiEvent::Invoke(Invocation::new(
+                                ids::KEYMAP_BIND,
+                                json!({
+                                    "command": conflict.command,
+                                    "keys": conflict.keys,
+                                    "platform": platform.id(),
+                                    "context": conflict.context,
+                                    "replace": true,
+                                }),
+                            )));
+                            self.shortcuts.conflict = None;
+                        }
+                        if ui.button("Cancel").clicked() {
+                            self.shortcuts.conflict = None;
+                        }
+                    });
+                });
+            if !open {
+                self.shortcuts.conflict = None;
+            }
+        }
+        if self.shortcuts.ask_reset_all {
+            let mut open = true;
+            egui::Window::new("Reset every shortcut?")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                .open(&mut open)
+                .show(ui.ctx(), |ui| {
+                    let question = ui.label("Every shortcut goes back to Live's own keys.");
+                    // The question is read as a dialog (R12).
+                    ui.ctx().accesskit_node_builder(question.id, |node| {
+                        node.set_label("Every shortcut goes back to Live's own keys.");
+                    });
+                    ui.horizontal(|ui| {
+                        if ui.button("Reset").clicked() {
+                            events.push(UiEvent::Invoke(Invocation::new(
+                                ids::KEYMAP_RESET,
+                                json!({}),
+                            )));
+                            self.shortcuts.ask_reset_all = false;
+                        }
+                        if ui.button("Cancel").clicked() {
+                            self.shortcuts.ask_reset_all = false;
+                        }
+                    });
+                });
+            if !open {
+                self.shortcuts.ask_reset_all = false;
+            }
+        }
+        let _ = shell;
     }
 
     fn audio_page(

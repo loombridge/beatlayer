@@ -1,6 +1,6 @@
 # Default bindings of the document's commands
 
-- **Status:** partial (R1 to R7 implemented as registry data, the key handling that acts on them coming with the UI packages; R8 is WP-6.43's)
+- **Status:** partial (R1 to R7 implemented as registry data, the key handling that acts on them coming with the UI packages; R8 is implemented with WP-6.43)
 - **Work packages:** WP-0.14; WP-6.43 (R8, with [custom-shortcuts.md](custom-shortcuts.md))
 - **Parity-matrix row:** Interface: Keyboard shortcuts, macOS and Windows, including held (momentary) shortcuts
 - **Checked against:** Live 12.4.3, through the UI parity reference recorded on 10 October 2026
@@ -41,4 +41,4 @@ Every row of the UI parity reference cited here rests on the manual section it n
 |---|---|---|
 | R1 to R7 | `crates/model/tests/command_registry.rs`, `bindings_follow_the_spec` | unit |
 | R1 to R6 | `xtask/src/commands.rs`, `the_repository_reference_is_in_sync`: every bound shortcut exists in the reference and applies globally or in one of the command's contexts, and no two commands share a shortcut in a context | unit |
-| R8 | to be written in WP-6.43 | |
+| R8 | `crates/shell/tests/keymap.rs`, `with_no_file_the_keymap_is_lives` | unit |

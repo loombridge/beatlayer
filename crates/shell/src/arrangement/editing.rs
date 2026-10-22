@@ -67,6 +67,10 @@ pub struct Clipboard {
     pub tracks: Vec<(usize, Vec<Clip>)>,
     /// How long the material is.
     pub length: Ticks,
+    /// Where the material starts in the song, so a bounce can render the
+    /// source as it is when the material is pasted (the freeze and bounce
+    /// spec, R25).
+    pub start: Ticks,
     /// The tracks it was copied from, in order, to paste onto when no
     /// track is selected.
     pub source: Vec<TrackId>,
@@ -169,7 +173,7 @@ fn clear_moved(
 
 /// Puts new clips on tracks, each replacing what it covers, and returns
 /// their IDs. Each clip's own ID is replaced with a new one.
-fn place(
+pub(crate) fn place(
     editor: &mut Editor,
     placements: Vec<(TrackId, Vec<Clip>)>,
 ) -> Result<Vec<ClipId>, EditFailure> {
@@ -403,6 +407,7 @@ fn clipboard_of(doc: &Document, target: &Target) -> Clipboard {
     Clipboard {
         tracks,
         length: end - start,
+        start,
         source: by_track.iter().map(|(track, _)| *track).collect(),
     }
 }

@@ -1,6 +1,6 @@
 # Articulation Map, a MIDI effect
 
-- **Status:** draft
+- **Status:** implemented (every rule below has a passing test)
 - **Work packages:** WP-6.47 (R1 to R20). The note path between devices it sits on is WP-5.30's ([device-chains.md](device-chains.md) R36), with WP-5.44's channel messages ([device-framework.md](device-framework.md) R39)
 - **Parity-matrix row:** Devices: MIDI effects (Beatlayer's own device); [the improvements](../05-improvements.md), IMP-32 (the articulation map)
 - **Checked against:** the Live 12 reference manual (online edition), read 20 October 2026, chapter 30 "Live MIDI Effect Reference" and chapter 23 "Working with Instruments and Effects"; the Live 12 release notes, 12.0 to 12.4.6
@@ -62,23 +62,23 @@ This spec covers the device: its list of articulations, how the current one is c
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1 | to be written in WP-6.47 | |
-| R2 | to be written in WP-6.47 | |
-| R3 | to be written in WP-6.47 | |
-| R4 | to be written in WP-6.47 | |
-| R5 | to be written in WP-6.47 | |
-| R6 | to be written in WP-6.47 | |
-| R7 | to be written in WP-6.47 | |
-| R8 | to be written in WP-6.47 | |
-| R9 | to be written in WP-6.47 | |
-| R10 | to be written in WP-6.47 | |
-| R11 | to be written in WP-6.47 | |
-| R12 | to be written in WP-6.47 | |
-| R13 | to be written in WP-6.47 | |
-| R14 | to be written in WP-6.47 | |
-| R15 | to be written in WP-6.47 | |
-| R16 | to be written in WP-6.47 | |
-| R17 | to be written in WP-6.47 | |
-| R18 | to be written in WP-6.47 | |
-| R19 | to be written in WP-6.47 | |
-| R20 | to be written in WP-6.47 | |
+| R1 | `crates/devices/tests/articulation_map.rs`, `the_device_sends_on_its_frame_at_any_block_size`; `crates/shell/tests/articulation_map.rs`, `the_list_is_edited_one_undo_step_at_a_time` | unit, headless |
+| R2 | `crates/model/src/articulation.rs`, `a_list_of_one_articulation_is_sound`; `crates/shell/tests/articulation_map.rs`, `the_list_is_edited_one_undo_step_at_a_time` | unit, headless |
+| R3 | `crates/model/src/articulation.rs`, `two_articulations_with_the_same_key_are_refused`, `two_articulations_with_overlapping_controller_ranges_are_refused`; `crates/shell/tests/articulation_map.rs`, `a_list_that_breaks_the_rules_is_refused` | unit, headless |
+| R4 | `crates/model/src/articulation.rs`, `values_outside_their_ranges_are_refused`; `crates/devices/tests/articulation_map.rs`, `a_trigger_sends_its_outputs_before_the_notes_on_the_same_frame` | unit |
+| R5 | `crates/model/src/articulation.rs`, `values_outside_their_ranges_are_refused`; `crates/devices/tests/articulation_map.rs`, `a_note_held_across_a_change_ends_on_its_own_channel` | unit |
+| R6 | `crates/devices/tests/articulation_map.rs`, `the_articulation_control_makes_its_articulation_current`, `an_automated_articulation_lane_switches_when_its_value_reaches_the_articulation` | unit |
+| R7 | `crates/devices/tests/articulation_map.rs`, `a_trigger_sends_its_outputs_before_the_notes_on_the_same_frame` | unit |
+| R8 | `crates/devices/tests/articulation_map.rs`, `pass_triggers_lets_the_trigger_through` | unit |
+| R9 | `crates/devices/tests/articulation_map.rs`, `a_trigger_sends_its_outputs_before_the_notes_on_the_same_frame` | unit |
+| R10 | `crates/devices/tests/articulation_map.rs`, `a_note_held_across_a_change_ends_on_its_own_channel` | unit |
+| R11 | `crates/devices/tests/articulation_map.rs`, `a_repeated_key_output_ends_the_earlier_one_first` | unit |
+| R12 | `crates/devices/tests/articulation_map.rs`, `resend_on_start_sends_the_outputs_again_when_the_transport_plays` | unit |
+| R13 | `crates/devices/tests/articulation_map.rs`, `a_device_switched_off_ends_its_sounding_keyswitch` | unit |
+| R14 | `crates/devices/tests/articulation_map.rs`, `the_device_sends_on_its_frame_at_any_block_size`; `rtsan/tests/midi_effects.rs`, `the_articulation_map_passes_under_rtsan` | unit, headless |
+| R15 | `crates/ui/tests/articulation_map.rs`, `a_click_on_a_rows_number_makes_that_articulation_current`, `a_rows_learn_button_lights_while_it_is_armed` | UI script |
+| R16 | `crates/shell/tests/articulation_map.rs`, `the_list_is_edited_one_undo_step_at_a_time`, `the_list_is_saved_with_the_set_and_in_the_presets`; `crates/project/src/preset.rs`, `a_preset_keeps_an_articulation_maps_list` | headless |
+| R17 | `crates/shell/tests/articulation_map.rs`, `the_display_reads_the_current_articulation` | headless |
+| R18 | `crates/cli/tests/agent.rs`, `an_agent_builds_an_articulation_map_by_command_and_reads_it_back`; `crates/shell/tests/articulation_map.rs`, `the_list_reads_back_through_the_command_and_the_query_tool` | headless |
+| R19 | `crates/shell/tests/articulation_map.rs`, `the_list_is_edited_one_undo_step_at_a_time` | headless |
+| R20 | `crates/project/src/format.rs`, `a_set_with_a_broken_articulation_list_does_not_load`; `crates/model/src/articulation.rs`, `an_empty_or_long_list_is_refused` | unit |

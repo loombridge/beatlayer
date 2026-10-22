@@ -202,6 +202,7 @@ fn run(
     let (engine, processor) = Engine::start(EngineConfig::new(RATE, BLOCK), registry).unwrap();
     let heard = Heard::new((seconds as usize + 4) * 48_000);
     let backend = NullBackend::with_options(NullOptions {
+        dropout_after: None,
         pacing: Pacing::RealTime,
         frame_limit: None,
         channels: 2,

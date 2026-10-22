@@ -396,6 +396,11 @@ pub struct NodeConfig {
     pub max_frames: usize,
     /// Channels in every buffer.
     pub channels: usize,
+    /// The frames an external device's sound takes to come back through
+    /// the interface (WP-5.35): an external effect delays its own dry
+    /// signal by this much and its Hardware Latency, so the dry and the
+    /// returning signal line up.
+    pub round_trip_latency: u32,
 }
 
 /// The transport as a block starts.
@@ -431,6 +436,13 @@ impl fmt::Debug for NodeData {
         f.write_str("NodeData")
     }
 }
+
+/// An Articulation Map's articulations as node data (the articulation map
+/// spec, R14): sent to the device when its list changes, so the change
+/// reaches the playing device without a new program. The list is of a fixed
+/// size, made with the node, so nothing on the audio thread allocates.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Articulations(pub bl_model::ArticulationList);
 
 /// A node: a device, a track's mixer, or anything else that processes audio
 /// in a program.
@@ -547,6 +559,10 @@ pub struct Block<'a> {
     /// input channels it is set to, planar with the block's channels and
     /// stride (WP-5.34). `None` for every other device.
     pub(crate) external: Option<&'a [f32]>,
+    /// Where an external effect writes the signal it sends to the audio
+    /// interface's outputs (WP-5.35): planar with the block's channels and
+    /// stride. `None` for every other device.
+    pub(crate) external_out: Option<&'a mut [f32]>,
     /// Where a device with extra audio outputs past its main one writes
     /// them (WP-5.45): one buffer per output, in the order the device
     /// declares them, each planar with the block's channels and stride, at
@@ -621,6 +637,7 @@ impl<'a> Block<'a> {
             signatures: &DEFAULT_SIGNATURES,
             sidechain: None,
             external: None,
+            external_out: None,
             outputs: None,
             notes: &[],
             notes_out: None,
@@ -718,6 +735,26 @@ impl<'a> Block<'a> {
         );
         Self {
             external: Some(external),
+            ..self
+        }
+    }
+
+    /// The same block with the buffer an external effect writes the signal
+    /// it sends to the interface's outputs into: planar, with the block's
+    /// channels and stride. For tests of nodes outside a program.
+    ///
+    /// # Panities
+    ///
+    /// If `external_out` is too short.
+    #[must_use]
+    pub fn with_external_out(self, external_out: &'a mut [f32]) -> Self {
+        assert!(
+            self.channels == 0
+                || external_out.len() >= (self.channels - 1) * self.stride + self.frames,
+            "the external output is shorter than the block"
+        );
+        Self {
+            external_out: Some(external_out),
             ..self
         }
     }
@@ -875,6 +912,29 @@ impl<'a> Block<'a> {
         assert!(index < self.channels, "channel {index} out of range");
         let start = index * self.stride;
         self.external.map(|data| &data[start..start + self.frames])
+    }
+
+    /// The block's samples on `channel`, and the buffer an external effect
+    /// writes the signal it sends to the audio interface's outputs into
+    /// (WP-5.35): planar, with the block's channels and stride. The
+    /// second is `None` for a device that isn't an external effect.
+    ///
+    /// # Panics
+    ///
+    /// If `channel` isn't less than [`channels`](Self::channels).
+    pub fn channel_with_external_out(
+        &mut self,
+        channel: usize,
+    ) -> (&mut [f32], Option<&mut [f32]>) {
+        assert!(channel < self.channels, "channel {channel} out of range");
+        let start = channel * self.stride;
+        let frames = self.frames;
+        let data = &mut self.data[start..start + frames];
+        let out = self
+            .external_out
+            .as_deref_mut()
+            .map(|data| &mut data[start..start + frames]);
+        (data, out)
     }
 
     /// Where a device with extra audio outputs writes one of them

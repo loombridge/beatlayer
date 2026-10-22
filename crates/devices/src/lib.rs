@@ -25,6 +25,7 @@
 
 pub mod alignment_delay;
 pub mod arpeggiator;
+pub mod articulation_map;
 pub mod auto_filter;
 pub mod auto_pan_tremolo;
 pub mod beat_repeat;
@@ -46,6 +47,7 @@ pub mod gate;
 pub mod gate_mod;
 pub mod grain_delay;
 pub mod hardware;
+pub mod hardware_effect;
 pub mod hold;
 pub mod kit;
 pub mod kitbag;
@@ -107,6 +109,7 @@ pub use framework::{Audio, Modulation, NativeDevice, NativeNode, ParamBank, add}
 pub use gate::{GATE, Shutter, gate_type};
 pub use grain_delay::{GRAIN_DELAY, grain_delay_type};
 pub use hardware::{HARDWARE_INSTRUMENT, hardware_instrument_type};
+pub use hardware_effect::{HARDWARE_EFFECT, hardware_effect_type};
 pub use hold::{HOLD, hold_type};
 pub use kit::{KitFactory, KitHost};
 pub use kitbag::{KITBAG, Kitbag, kitbag_type};
@@ -253,7 +256,9 @@ pub fn register(registry: &mut Registry) {
     midi_cc::register(registry);
     midi_mpe::register(registry);
     midi_monitor::register(registry);
+    articulation_map::register(registry);
     hardware::register(registry);
+    hardware_effect::register(registry);
     degrade::register(registry);
     crusher::register(registry);
     wax::register(registry);

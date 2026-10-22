@@ -10,7 +10,7 @@
 //! commands make go through the document's own commands, each command one
 //! undo step named as Live 12.4.6 names it.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use bl_engine::DeviceType;
@@ -25,7 +25,8 @@ use bl_project::preset::{self, Preset};
 use bl_project::rack_preset::Saved;
 use bl_shell_spec::arrangement as view_ids;
 use bl_shell_spec::devices::{
-    self as ids, AddDeviceArgs, AddPresetArgs, ChainAdded, ChainArgs, ChainRow, ChainSelect,
+    self as ids, AddDeviceArgs, AddPresetArgs, ArticulationLearn, ArticulationLearnArgs,
+    ArticulationList, ArticulationListArgs, ChainAdded, ChainArgs, ChainRow, ChainSelect,
     CreateChainArgs, DeleteChainsArgs, DeviceAdded, DeviceArgs, DeviceFrame, DeviceListEntry,
     DevicePanel, DeviceParameters, DeviceViewState, DropChainOnTrackArgs, ExpandDeviceArgs,
     ExternalSection, FloatingWindow, FloatingWindows, FoldDeviceArgs, GroupArgs, Grouped, HotSwap,
@@ -56,6 +57,17 @@ pub use drum::PadSample;
 
 mod macros;
 
+/// An Articulation Map's row that is learning its trigger (the articulation
+/// map spec, R15): the row, and how many events its node had heard when the
+/// button was lit, so the next one is the trigger.
+#[derive(Clone, Copy, Debug)]
+pub struct Learn {
+    /// The row, counted from 0.
+    pub row: u8,
+    /// The number of events the device's node had heard.
+    pub events: u64,
+}
+
 /// What the Device View shows besides the set: the selected device, the
 /// folded devices, the clipboard, and hot-swapping; and the device types
 /// the host offers, whose descriptions the generic UI draws (WP-2.5).
@@ -85,6 +97,10 @@ pub struct DeviceView {
     sidechains_shown: BTreeSet<DeviceId>,
     /// The lit Map button, if one is (WP-5.10).
     armed: Option<(DeviceId, u8)>,
+    /// The Articulation Map whose row is learning its trigger (the
+    /// articulation map spec, R15): the row, and how many events its node
+    /// had heard when the button was lit.
+    learning: BTreeMap<DeviceId, Learn>,
     /// The rack whose Map mode is on, if one is (WP-5.4): view state, never
     /// saved and never an undo step.
     map_mode: Option<DeviceId>,
@@ -397,6 +413,8 @@ impl DeviceView {
                 .take(description.layout.slot_count() as usize)
                 .map(|&key| bl_midi_io::note_name(key))
                 .collect(),
+            articulations: device.articulations.clone(),
+            learning: self.learning.get(&device.id).map(|learn| learn.row),
         })
     }
 
@@ -479,6 +497,8 @@ impl DeviceView {
             selected_slot: 0,
             loaded_slots: Vec::new(),
             slot_keys: Vec::new(),
+            articulations: Vec::new(),
+            learning: None,
         }
     }
 
@@ -693,6 +713,57 @@ impl DeviceView {
     #[must_use]
     pub fn armed(&self) -> Option<(DeviceId, u8)> {
         self.armed
+    }
+
+    /// How many events the Articulation Map `device`'s node has heard, as
+    /// its display data counts them.
+    fn events_of(&self, device: DeviceId) -> u64 {
+        self.displays
+            .get(&device)
+            .and_then(|data| data.values.get(bl_devices::articulation_map::OFF_EVENTS))
+            .map_or(0, |count| *count as u64)
+    }
+
+    /// The rows learning their trigger, and the trigger each has learned.
+    ///
+    /// The Articulation Map's node counts the note-ons and control changes
+    /// it hears and publishes the last one; a row whose Learn button is lit
+    /// takes the next one as its trigger.
+    pub fn learned_triggers(&self) -> Vec<(DeviceId, u8, bl_model::ArticulationTrigger)> {
+        use bl_devices::articulation_map::{EVENT_NOTE, OFF_EVENTS, OFF_KEY, OFF_KIND, OFF_VALUE};
+        let mut learned = Vec::new();
+        for (device, learn) in &self.learning {
+            let Some(data) = self.displays.get(device) else {
+                continue;
+            };
+            let values = &data.values;
+            if values.len() < bl_devices::articulation_map::DISPLAY_LEN {
+                continue;
+            }
+            let count = values[OFF_EVENTS] as u64;
+            if count <= learn.events {
+                continue;
+            }
+            let key = values[OFF_KEY].round() as u8;
+            let value = values[OFF_VALUE].round().clamp(0.0, 127.0) as u8;
+            let trigger = if values[OFF_KIND] == EVENT_NOTE {
+                bl_model::ArticulationTrigger::Key { key }
+            } else {
+                bl_model::ArticulationTrigger::Controller {
+                    controller: key,
+                    lowest: value,
+                    highest: value,
+                }
+            };
+            learned.push((*device, learn.row, trigger));
+        }
+        learned
+    }
+
+    /// Forgets the row learning its trigger, as the Learn button going out
+    /// does.
+    pub fn stop_learning(&mut self, device: DeviceId) {
+        self.learning.remove(&device);
     }
 
     /// What a modulator's panel shows beside its parameters.
@@ -1333,6 +1404,14 @@ impl DeviceView {
                 port: external.port.clone(),
                 channel: external.channel,
                 audio_from: external.audio_from.label(),
+                // Spec: external-devices R17. The External Audio Effect
+                // sends its signal to the interface's outputs and hears it
+                // back: it has an Audio To and no MIDI To.
+                audio_to: external.audio_to.map(|channel| channel.label()),
+                output: self
+                    .types
+                    .iter()
+                    .any(|t| t.kind == d.kind && t.external_output),
                 hardware_latency: external.hardware_latency,
             }),
             midi_sidechain: d
@@ -1378,19 +1457,29 @@ impl DeviceView {
         };
         let view = self.display_view(device);
         let data = self.displays.get(&device.id).map(|d| d.values.as_slice());
-        let mut display = self
-            .description(&device.kind)
-            .and_then(|description| {
-                bl_devices::display_for_view(
-                    device_type,
-                    device.id,
-                    description,
-                    &device.params,
-                    data,
-                    view.as_deref(),
-                )
-            })
-            .unwrap_or_else(|| empty_display(device.id));
+        let mut display = if device.is_articulation_map() {
+            // Spec: articulation-map R17. The current articulation's number
+            // and name.
+            bl_devices::articulation_map::display(
+                device.id,
+                &device.params,
+                data,
+                &device.articulations,
+            )
+        } else {
+            self.description(&device.kind)
+                .and_then(|description| {
+                    bl_devices::display_for_view(
+                        device_type,
+                        device.id,
+                        description,
+                        &device.params,
+                        data,
+                        view.as_deref(),
+                    )
+                })
+                .unwrap_or_else(|| empty_display(device.id))
+        };
         display.view = view;
         display
     }
@@ -2248,6 +2337,67 @@ impl DeviceView {
                 outcome.value = to_value(&self.parameters(current));
                 return Ok(outcome);
             }
+            ids::ARTICULATION_LIST => {
+                let ArticulationListArgs { device } = parse(args)?;
+                let device = self.target(editor.document(), device)?;
+                let current = editor.document().device(device).expect("the target exists");
+                if !current.is_articulation_map() {
+                    return Err(DeviceError::InvalidArgs(format!(
+                        "{device} isn't an Articulation Map"
+                    )));
+                }
+                outcome.value = to_value(&ArticulationList {
+                    device,
+                    articulations: current.articulations.clone(),
+                });
+                return Ok(outcome);
+            }
+            ids::ARTICULATION_LEARN => {
+                let ArticulationLearnArgs { device, index } = parse(args)?;
+                let device = self.target(editor.document(), device)?;
+                let current = editor.document().device(device).expect("the target exists");
+                if !current.is_articulation_map() {
+                    return Err(DeviceError::InvalidArgs(format!(
+                        "{device} isn't an Articulation Map"
+                    )));
+                }
+                let row = match index {
+                    Some(index) => {
+                        if usize::from(index) >= current.articulations.len() {
+                            return Err(DeviceError::InvalidArgs(
+                                "there is no articulation at that place in the list".to_owned(),
+                            ));
+                        }
+                        Some(index)
+                    }
+                    None => None,
+                };
+                // Clicking a lit button again puts it out.
+                let lit = self
+                    .learning
+                    .get(&device)
+                    .is_some_and(|learn| Some(learn.row) == row);
+                let learning = match (row, lit) {
+                    (Some(row), false) => Some(Learn {
+                        row,
+                        events: self.events_of(device),
+                    }),
+                    _ => None,
+                };
+                match learning {
+                    Some(learn) => {
+                        self.learning.insert(device, learn);
+                    }
+                    None => {
+                        self.learning.remove(&device);
+                    }
+                }
+                outcome.value = to_value(&ArticulationLearn {
+                    device,
+                    index: learning.map(|learn| learn.row),
+                });
+                return Ok(outcome);
+            }
             ids::LOAD_PRESET => {
                 let LoadPresetArgs { device, path } = parse(args)?;
                 let device = self.target(editor.document(), device)?;
@@ -2459,12 +2609,13 @@ impl DeviceView {
                 index,
                 device,
             })?;
-            if let Some((params, name, shape)) = state {
+            if let Some((params, name, shape, articulations)) = state {
                 editor.apply(Command::SetDeviceState {
                     device: id,
                     params,
                     name,
                     shape,
+                    articulations,
                 })?;
             }
             map_inner_copies(editor, &pairs)
@@ -2511,6 +2662,7 @@ impl DeviceView {
                 self.sanitize(&args.device.kind, preset.params),
                 preset::preset_name(&path),
                 preset.shape,
+                preset.articulations,
             )
         });
         Ready {
@@ -2564,12 +2716,13 @@ impl DeviceView {
                     index,
                     device,
                 })?;
-                if let Some((params, name, shape)) = state {
+                if let Some((params, name, shape, articulations)) = state {
                     editor.apply(Command::SetDeviceState {
                         device: id,
                         params,
                         name,
                         shape,
+                        articulations,
                     })?;
                 }
                 map_inner_copies(editor, &pairs)
@@ -3018,12 +3171,15 @@ impl DeviceView {
                     chain.receive = bl_model::Receive::Note(note);
                 }
                 editor.apply(Command::AddChain { rack, index, chain })?;
-                if let (Some(device), Some((params, name, shape))) = (device_id, state) {
+                if let (Some(device), Some((params, name, shape, articulations))) =
+                    (device_id, state)
+                {
                     editor.apply(Command::SetDeviceState {
                         device,
                         params,
                         name,
                         shape,
+                        articulations,
                     })?;
                 }
                 if let Some(device) = move_device {
@@ -3239,6 +3395,12 @@ fn new_device(id: DeviceId, args: &AddDeviceArgs, types: &[DeviceType]) -> Devic
     if known.is_some_and(|t| t.external) {
         device = device.with_external();
     }
+    // Spec: external-devices R17. The External Audio Effect sends its signal
+    // to the interface's outputs and hears it back: it starts with an Audio
+    // To.
+    if known.is_some_and(|t| t.external_output) {
+        device = device.with_external_output();
+    }
     if args.device.midi_sidechain {
         device = device.with_midi_sidechain();
     }
@@ -3282,6 +3444,7 @@ fn load_preset(
             params: view.sanitize(&loaded.kind, loaded.params),
             name: preset::preset_name(path),
             shape: loaded.shape,
+            articulations: loaded.articulations,
         })
         .map(|_| ())
         .map_err(|e| DeviceError::Failed(e.to_string()))

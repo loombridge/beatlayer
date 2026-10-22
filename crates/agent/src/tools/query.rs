@@ -483,6 +483,11 @@ impl View<'_> {
                 value["shape"] = json!(shape);
             }
         }
+        // Spec: articulation-map R18. An Articulation Map's articulations,
+        // which `articulation.list` gives too.
+        if device.is_articulation_map() {
+            value["articulations"] = json!(device.articulations);
+        }
         if device.can_compare() {
             // Spec: device-compare R11.
             let pairs = |params: &bl_model::OrdMap<bl_model::ParamId, f64>| {

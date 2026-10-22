@@ -30,8 +30,8 @@ use bl_model::WarpMode as ClipWarpMode;
 use bl_model::{AudioData, BeatsSettings, Clip, Preserve as ClipPreserve, TransientLoopMode};
 use bl_stretch::beats::{self, Loop, Plan, Preserve, Segment};
 use bl_stretch::{
-    Beats, Interpolation, Piece, RePitch, Request, Texture, Tones, WarpMap, WarpMode, WarpTable,
-    Window, window_frames,
+    Beats, Complex, Interpolation, Piece, RePitch, Request, Texture, Tones, WarpMap, WarpMode,
+    WarpTable, Window, grain_window_frames, stretch_window_frames,
 };
 
 use crate::clip_source::WINDOW_FRAMES as NARROW_WINDOW;
@@ -40,12 +40,14 @@ use crate::clip_source::WINDOW_FRAMES as NARROW_WINDOW;
 /// interpolator's reach, so a point a jump lands on is cued that far early.
 pub(crate) const CUE_BACK: u64 = 264;
 
-/// The file frames a mode's reads need at `rate`: the widest any mode's
-/// window reaches for a grain mode (Tones and Texture, R18 and R19), the
-/// narrow one for the rest.
+/// The file frames a mode's reads need at `rate`: a grain mode's own window
+/// (Tones and Texture, R18 and R19), the frequency-domain modes' read-ahead
+/// (Complex and Complex Pro, R21, R24), the narrow one for the rest. Each mode
+/// pays for its own reach.
 pub(crate) fn window_of(mode: ClipWarpMode, rate: f64) -> usize {
     match mode {
-        ClipWarpMode::Tones | ClipWarpMode::Texture => window_frames(rate),
+        ClipWarpMode::Tones | ClipWarpMode::Texture => grain_window_frames(rate),
+        ClipWarpMode::Complex | ClipWarpMode::ComplexPro => stretch_window_frames(rate),
         _ => NARROW_WINDOW,
     }
 }
@@ -96,6 +98,8 @@ pub(crate) struct Playing {
     pub(crate) high_quality: bool,
     pub(crate) tones: bl_model::TonesSettings,
     pub(crate) texture: bl_model::TextureSettings,
+    /// Complex Pro's Formants and Envelope (R22, R23); Complex ignores them.
+    pub(crate) complex_pro: bl_model::ComplexProSettings,
     pub(crate) clip_id: u64,
     /// The clip's pitch ratio (R25): 1 where it isn't transposed. Every mode
     /// but Re-Pitch takes it on its own path (R26); Re-Pitch ignores it
@@ -967,10 +971,77 @@ pub(crate) struct Changing {
     pub(crate) fade: crate::mixer::Ramp,
 }
 
+/// A track's Complex and Complex Pro stretchers (R5, R21): one pool per mode,
+/// sized by the most of the track's clips that can sound at once, made with
+/// the track's clip list off the audio thread, and handed to the player with
+/// it, so a fresh player adopts the pool rather than building one. A clip
+/// plays through the stretcher of its own mode at its lane, so two of the
+/// track's clips that can sound at once never share one (R6).
+pub(crate) struct Stretchers {
+    complex: Box<[Complex]>,
+    complex_pro: Box<[Complex]>,
+}
+
+impl Stretchers {
+    /// Pools of `lanes` stretchers for each mode some clip of the track uses;
+    /// a mode no clip uses gets no stretcher at all, so a track that doesn't
+    /// sound through the library pays nothing for it.
+    pub(crate) fn new(channels: usize, rate: f64, lanes: usize, complex: bool, pro: bool) -> Self {
+        let pool = |used: bool, pro: bool| -> Box<[Complex]> {
+            if used {
+                (0..lanes)
+                    .map(|_| Complex::new(channels, rate, pro))
+                    .collect()
+            } else {
+                Box::new([])
+            }
+        };
+        Self {
+            complex: pool(complex, false),
+            complex_pro: pool(pro, true),
+        }
+    }
+
+    /// The Complex stretcher for a clip in `lane`.
+    fn complex(&mut self, lane: usize) -> &mut Complex {
+        &mut self.complex[lane]
+    }
+
+    /// The Complex Pro stretcher for a clip in `lane`.
+    fn complex_pro(&mut self, lane: usize) -> &mut Complex {
+        &mut self.complex_pro[lane]
+    }
+}
+
+/// What a track's stretcher pool holds (WP-4.6, R5, R21): how many lanes, and
+/// which of the frequency-domain modes. The compiler keeps this per track, so
+/// it knows what the player already has: a list whose needs that pool still
+/// meets carries no pool of its own, and the player keeps the one it has,
+/// which is what spares a parameter drag (Formants, gain) the cost of making
+/// the stretchers again.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PoolSpec {
+    /// How many lanes the pool has, one per clip that can sound at once.
+    pub(crate) lanes: usize,
+    /// Whether it holds Complex stretchers.
+    pub(crate) complex: bool,
+    /// Whether it holds Complex Pro stretchers.
+    pub(crate) pro: bool,
+}
+
+impl PoolSpec {
+    /// Whether a pool of this shape serves a list that needs `needs`: it does
+    /// while it has at least the lanes and every mode the list asks for.
+    pub(crate) fn covers(self, needs: Self) -> bool {
+        self.lanes >= needs.lanes && (!needs.complex || self.complex) && (!needs.pro || self.pro)
+    }
+}
+
 /// The player's room for warped playback: the positions of a run and what the
 /// mode rendered, both planar and made when the player was. The window of the
 /// file around the run comes with the clip list ([`WindowBuf`]), since how
-/// wide it must be is the clips' business.
+/// wide it must be is the clips' business, and so do the Complex and Complex
+/// Pro stretchers ([`Stretchers`]).
 pub(crate) struct WarpScratch {
     channels: usize,
     max_frames: usize,
@@ -1047,6 +1118,8 @@ impl WarpScratch {
         plan: Option<&Plan>,
         past: Option<&Past>,
         history: Option<&mut History>,
+        stretchers: &mut Stretchers,
+        lane: usize,
     ) -> (usize, bool) {
         // Spec: warp-modes R8. A clip the new list says was playing something
         // else crossfades from it, from this block's first frame.
@@ -1073,6 +1146,8 @@ impl WarpScratch {
             plan,
             history,
             Out::New,
+            stretchers,
+            lane,
         );
         let (Some(mut fade), Some(past)) = (fade.take(), past) else {
             return (n, sound);
@@ -1096,6 +1171,8 @@ impl WarpScratch {
             launched.is_none().then(|| past.warped.plan()),
             None,
             Out::Previous,
+            stretchers,
+            lane,
         );
         let channels = self.channels;
         let max_frames = self.max_frames;
@@ -1138,6 +1215,8 @@ impl WarpScratch {
         plan: Option<&Plan>,
         history: Option<&mut History>,
         out: Out,
+        stretchers: &mut Stretchers,
+        lane: usize,
     ) -> (usize, bool) {
         let want = want.min(self.max_frames);
         let fill = positions.fill(first, &mut self.positions[..want]);
@@ -1180,20 +1259,38 @@ impl WarpScratch {
                     texture.set_flux(playing.texture.flux);
                     texture
                 }
-                _ => repitch,
+                ClipWarpMode::Complex => stretchers.complex(lane),
+                ClipWarpMode::ComplexPro => {
+                    let pro = stretchers.complex_pro(lane);
+                    pro.set_formants(playing.complex_pro.formants);
+                    pro.set_envelope(playing.complex_pro.envelope);
+                    pro
+                }
+                ClipWarpMode::RePitch => repitch,
             }
         };
         let plan = plan.unwrap_or(&EMPTY_PLAN);
         // Spec: warp-modes R10, R20, R26. A mode that takes the clip's
         // pitch reads the file at the ratio, so its run isn't the neutral
         // one; Re-Pitch and the modes that have not landed yet ignore the
-        // clip's pitch, and keep the neutral run.
+        // clip's pitch, and keep the neutral run. The frequency-domain modes
+        // are never neutral, and read their own latency either side however
+        // steady the run is (R21, R24).
         let takes_pitch = !playing.warp
             || matches!(
                 playing.mode,
-                ClipWarpMode::Beats | ClipWarpMode::Tones | ClipWarpMode::Texture
+                ClipWarpMode::Beats
+                    | ClipWarpMode::Tones
+                    | ClipWarpMode::Texture
+                    | ClipWarpMode::Complex
+                    | ClipWarpMode::ComplexPro
             );
-        let neutral = fill.neutral && !(takes_pitch && playing.pitch != 1.0);
+        let neutral = fill.neutral
+            && !(takes_pitch && playing.pitch != 1.0)
+            && !matches!(
+                playing.mode,
+                ClipWarpMode::Complex | ClipWarpMode::ComplexPro
+            );
         let (request, lo, len) = loop {
             let run = &all[..n];
             let request = Request {
@@ -1204,6 +1301,7 @@ impl WarpScratch {
                 high_quality: playing.high_quality,
                 beats: plan,
                 pitch: playing.pitch,
+                clip: playing.clip_id,
             };
             let (before, after) = mode.reach(&request);
             // The window holds every position the run reads, whichever way it

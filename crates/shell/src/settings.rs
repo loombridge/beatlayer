@@ -16,6 +16,8 @@ pub use bl_shell_spec::settings::{
     zoom_percent, zoom_step,
 };
 
+use crate::keymap::UserKeymap;
+
 use crate::agent::AgentSettings;
 use crate::assistant::{AssistantPanelPrefs, AssistantSettings};
 use crate::audio::{AudioSettings, ToneSettings};
@@ -187,6 +189,46 @@ pub const PLUGIN_SCAN_FILE: &str = "plugin-scan.json";
 /// directory: the index of the places' files, the tags and tag groups, and
 /// the items that carry them.
 pub const BROWSER_DATABASE_FILE: &str = "browser.db";
+/// The file name of the person's own keymap, inside the config directory,
+/// beside the preferences (R1).
+pub const KEYMAP_FILE: &str = "keymap.toml";
+
+/// Reads the person's own keymap from `dir`, or an empty keymap when the
+/// file isn't there: without the file, the keymap is Live's exactly (R1).
+///
+/// # Errors
+///
+/// A message if the file exists but can't be read or parsed; the caller
+/// shows it and carries on with Live's keymap.
+pub fn load_keymap(dir: &Path) -> Result<UserKeymap, String> {
+    let path = dir.join(KEYMAP_FILE);
+    match std::fs::read_to_string(&path) {
+        Ok(text) => UserKeymap::parse(&text)
+            .map_err(|e| format!("couldn't read the keymap in {}: {e}", path.display())),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(UserKeymap::default()),
+        Err(e) => Err(format!(
+            "couldn't read the keymap in {}: {e}",
+            path.display()
+        )),
+    }
+}
+
+/// Writes the person's own keymap to `dir`, creating it if needed. The
+/// file is written beside its final name and renamed into place, so a
+/// crash never leaves half a file.
+///
+/// # Errors
+///
+/// A message if the directory or file can't be written.
+pub fn save_keymap(dir: &Path, keymap: &UserKeymap) -> Result<(), String> {
+    std::fs::create_dir_all(dir).map_err(|e| format!("couldn't create {}: {e}", dir.display()))?;
+    let path = dir.join(KEYMAP_FILE);
+    let temporary = dir.join(format!(".{KEYMAP_FILE}.tmp"));
+    std::fs::write(&temporary, keymap.to_file())
+        .map_err(|e| format!("couldn't write {}: {e}", temporary.display()))?;
+    std::fs::rename(&temporary, &path)
+        .map_err(|e| format!("couldn't write {}: {e}", path.display()))
+}
 
 impl Preferences {
     /// Reads preferences from `dir`, or the defaults if there are none.

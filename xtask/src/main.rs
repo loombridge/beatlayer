@@ -40,7 +40,7 @@ Tasks:
                  (with --check, fail instead of writing if shortcuts.md is out of date)
   commands       Check the command registry and regenerate the command reference
                  (with --check, fail instead of writing if commands.md is out of date)
-  keymap         Regenerate crates/ui/keymaps/live12.toml from shortcuts.toml and the
+  keymap         Regenerate crates/shell-spec/keymaps/live12.toml from shortcuts.toml and the
                  command registry (with --check, fail instead if it's out of date)
   deny-selftest  Prove that deny.toml still rejects an incompatible licence
   private-terms  Fail if a tracked file contains a word listed in .git/info/private-terms

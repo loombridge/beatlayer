@@ -970,11 +970,13 @@ dependencies = [
  "bl-commands",
  "bl-core",
  "bl-model",
+ "libc",
  "proptest",
  "ruzstd",
  "schemars",
  "serde",
  "serde_json",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1028,6 +1030,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "toml",
 ]
 
 [[package]]

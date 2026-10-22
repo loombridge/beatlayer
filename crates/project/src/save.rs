@@ -14,7 +14,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::error::{LoadError, SaveError};
 use crate::folder::{ProjectFolder, SET_EXTENSION};
@@ -575,6 +575,46 @@ pub(crate) struct BackupStamp {
     n: u32,
 }
 
+/// A backup of a set: the file, and when it was made.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Backup {
+    /// Where the backup is.
+    pub path: PathBuf,
+    /// When it was made, in UTC, as `YYYY-MM-DD HHMMSS`.
+    pub stamp: String,
+    /// When it was made, for a stamp that names a time.
+    pub time: Option<SystemTime>,
+    /// Which backup of that second it is: the first is 1.
+    pub n: u32,
+}
+
+/// The backups of the set `stem` in the folder `dir` (a project's `Backup`
+/// folder), newest first. Files that aren't the set's backups are left out.
+#[must_use]
+pub fn backups(dir: &Path, stem: &str) -> Vec<Backup> {
+    let Ok(listing) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut found: Vec<Backup> = listing
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let stamp = parse_backup_name(stem, &name)?;
+            Some(Backup {
+                path: entry.path(),
+                time: stamp_time(&stamp.stamp),
+                stamp: stamp.stamp,
+                n: stamp.n,
+            })
+        })
+        .collect();
+    // The stamps order oldest first: the time, then which backup of that
+    // second it is.
+    found.sort_by(|left, right| left.stamp.cmp(&right.stamp).then(left.n.cmp(&right.n)));
+    found.reverse();
+    found
+}
+
 /// A backup's file name: `<stem> [YYYY-MM-DD HHMMSS].blset`, with ` <n>`
 /// after the time for the second and later backups in the same second.
 pub(crate) fn backup_name(stem: &str, stamp: &str, n: u32) -> String {
@@ -634,6 +674,86 @@ pub fn utc_stamp(time: SystemTime) -> String {
     )
 }
 
+/// A time as `YYYY-MM-DD HHMMSS` in the computer's own time zone, which is
+/// where a backup's time is shown (file-management R18). Times before 1970
+/// count as 1970.
+#[must_use]
+pub fn local_stamp(time: SystemTime) -> String {
+    let Some((year, month, day, hour, minute, second)) = local_time(time) else {
+        return utc_stamp(time);
+    };
+    format!("{year:04}-{month:02}-{day:02} {hour:02}{minute:02}{second:02}")
+}
+
+/// The broken-down local time of an instant: the year, month, day, hour,
+/// minute and second, as the computer's time zone has them.
+#[cfg(unix)]
+fn local_time(time: SystemTime) -> Option<(i64, u32, u32, u32, u32, u32)> {
+    let seconds = time.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    let seconds = libc::time_t::try_from(seconds).ok()?;
+    // SAFETY: `tm` is a plain structure of integers, so zero is a valid
+    // value for it.
+    let mut local: libc::tm = unsafe { std::mem::zeroed() };
+    // SAFETY: `localtime_r` writes the broken-down local time into the `tm`
+    // it is given, and reads the `time_t` it is given. Both outlive the
+    // call, and it returns null when it can't answer.
+    let broken = unsafe { libc::localtime_r(&seconds, &mut local) };
+    if broken.is_null() {
+        return None;
+    }
+    Some((
+        i64::from(local.tm_year) + 1900,
+        u32::try_from(local.tm_mon).ok()?.checked_add(1)?,
+        u32::try_from(local.tm_mday).ok()?,
+        u32::try_from(local.tm_hour).ok()?,
+        u32::try_from(local.tm_min).ok()?,
+        u32::try_from(local.tm_sec).ok()?,
+    ))
+}
+
+/// The broken-down local time of an instant: the year, month, day, hour,
+/// minute and second, as the computer's time zone has them.
+#[cfg(windows)]
+fn local_time(time: SystemTime) -> Option<(i64, u32, u32, u32, u32, u32)> {
+    use windows_sys::Win32::Foundation::{FILETIME, SYSTEMTIME};
+    use windows_sys::Win32::Storage::FileSystem::FileTimeToLocalFileTime;
+    use windows_sys::Win32::System::Time::FileTimeToSystemTime;
+
+    let seconds = time.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    // A Windows time counts 100-nanosecond intervals from 1601, and the
+    // standard library counts seconds from 1970: the two are 11,644,473,600
+    // seconds apart.
+    const SINCE_1601: u64 = 11_644_473_600 * 10_000_000;
+    let ticks = SINCE_1601.checked_add(seconds.checked_mul(10_000_000)?)?;
+    let utc = FILETIME {
+        dwLowDateTime: u32::try_from(ticks & u64::from(u32::MAX)).ok()?,
+        dwHighDateTime: u32::try_from(ticks >> 32).ok()?,
+    };
+    // SAFETY: `FILETIME` is a plain structure of integers, so zero is a
+    // valid value for it.
+    let mut local: FILETIME = unsafe { std::mem::zeroed() };
+    // SAFETY: both functions write into the structures they are given,
+    // which outlive the calls.
+    unsafe {
+        FileTimeToLocalFileTime(&utc, &mut local);
+    }
+    // SAFETY: `SYSTEMTIME` is a plain structure of integers, so zero is a
+    // valid value for it.
+    let mut broken: SYSTEMTIME = unsafe { std::mem::zeroed() };
+    // SAFETY: as above.
+    unsafe {
+        FileTimeToSystemTime(&local, &mut broken);
+    }
+    Some((
+        i64::from(broken.wYear),
+        u32::from(broken.wMonth),
+        u32::from(broken.wDay),
+        u32::from(broken.wHour),
+        u32::from(broken.wMinute),
+        u32::from(broken.wSecond),
+    ))
+}
+
 /// A time in RFC 3339 form in UTC, to the second: `YYYY-MM-DDTHH:MM:SSZ`.
 /// Times before 1970 count as 1970.
 pub(crate) fn utc_rfc3339(time: SystemTime) -> String {
@@ -641,6 +761,34 @@ pub(crate) fn utc_rfc3339(time: SystemTime) -> String {
     let (date, clock) = stamp.split_at(10);
     let clock = clock.trim_start();
     format!("{date}T{}:{}:{}Z", &clock[..2], &clock[2..4], &clock[4..6])
+}
+
+/// The instant a `YYYY-MM-DD HHMMSS` stamp names, in UTC. `None` for a
+/// stamp that names no time.
+#[must_use]
+pub fn stamp_time(stamp: &str) -> Option<SystemTime> {
+    let (date, clock) = stamp.split_once(' ')?;
+    let mut parts = date.split('-');
+    let year = parts.next()?.parse::<i64>().ok()?;
+    let month = parts.next()?.parse::<i64>().ok()?;
+    let day = parts.next()?.parse::<i64>().ok()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    if clock.len() != 6 || !clock.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    let hour = clock[0..2].parse::<i64>().ok()?;
+    let minute = clock[2..4].parse::<i64>().ok()?;
+    let second = clock[4..6].parse::<i64>().ok()?;
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return None;
+    }
+    let days = days_from_civil(year, month as u32, day as u32);
+    let seconds = days
+        .checked_mul(86_400)
+        .and_then(|days| days.checked_add(hour * 3_600 + minute * 60 + second))?;
+    Some(UNIX_EPOCH + Duration::from_secs(seconds.unsigned_abs()))
 }
 
 /// The proleptic Gregorian date `days` after 1 January 1970, by Howard
@@ -666,6 +814,19 @@ fn civil_from_days(days: i64) -> (i64, u32, u32) {
         u32::try_from(month).unwrap_or(1),
         u32::try_from(day).unwrap_or(1),
     )
+}
+
+/// The number of days from 1 January 1970 to a date in the proleptic
+/// Gregorian calendar, by Howard Hinnant's `days_from_civil` algorithm
+/// (public domain).
+fn days_from_civil(year: i64, month: u32, day: u32) -> i64 {
+    let year = year - i64::from(month <= 2);
+    let era = year.div_euclid(400);
+    let year_of_era = year.rem_euclid(400);
+    let month = i64::from(month);
+    let day_of_year = (153 * (month + if month > 2 { -3 } else { 9 }) + 2) / 5 + i64::from(day) - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    era * 146_097 + day_of_era - 719_468
 }
 
 #[cfg(test)]
@@ -733,6 +894,58 @@ mod tests {
             .collect();
         names.sort();
         names
+    }
+
+    #[test]
+    fn a_local_stamp_is_the_time_in_the_computers_own_time_zone() {
+        let now = at(NOW);
+        let utc = stamp_time(&utc_stamp(now)).expect("the UTC stamp names a time");
+        let local = stamp_time(&local_stamp(now)).expect("the local stamp names a time");
+        let difference = local
+            .duration_since(utc)
+            .or_else(|_| utc.duration_since(local))
+            .expect("one is after the other")
+            .as_secs();
+        assert!(
+            difference < 14 * 3_600,
+            "the local time is the same moment, in the computer's own time zone: {}",
+            local_stamp(now)
+        );
+    }
+
+    #[test]
+    fn the_backups_are_listed_newest_first() {
+        let dir = TestDir::new("backups");
+        let backup = dir.0.join("Backup");
+        std::fs::create_dir_all(&backup).unwrap();
+        for name in [
+            "Song [2026-10-10 143012].blset",
+            "Song [2026-10-10 143012 2].blset",
+            "Song [2026-10-10 143013].blset",
+            "Other [2026-10-10 143014].blset",
+        ] {
+            std::fs::write(backup.join(name), b"").unwrap();
+        }
+        let listed: Vec<String> = backups(&backup, "Song")
+            .into_iter()
+            .map(|backup| {
+                backup
+                    .path
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect();
+        assert_eq!(
+            listed,
+            [
+                "Song [2026-10-10 143013].blset",
+                "Song [2026-10-10 143012 2].blset",
+                "Song [2026-10-10 143012].blset",
+            ],
+            "the newest is first, and the second backup of a second is before the first"
+        );
     }
 
     #[test]

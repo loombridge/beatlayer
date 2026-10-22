@@ -11,7 +11,7 @@ use bl_engine::session as engine_session;
 use bl_engine::transport as engine_transport;
 use bl_media::MediaStore;
 use bl_model::{
-    AudioData, AutomationTarget, ChangeSet, Clip, ClipData, ContentHash, Editor, Input,
+    AudioData, AutomationTarget, ChangeSet, Clip, ClipData, Command, ContentHash, Editor, Input,
     LaunchSettings, TakeClip, TakeLane, TrackId, TrackKind, registry as model,
 };
 use bl_project::ProjectFolder;
@@ -38,10 +38,10 @@ use crate::clip_view::{self, ClipView};
 use crate::commands::{
     self as ids, ClipEnvelopeArgs, ClipTabArgs, DefaultLaunchModeArgs,
     DefaultLaunchQuantizationArgs, DefaultSetArgs, DefaultWarpModeArgs, FileReport, FoldNotesArgs,
-    LaneArgs, LoopWarpShortSamplesArgs, PathArgs, RecordSessionAutomationInArgs, RelinkArgs,
-    SampleEditorArgs, SampleEditorResult, SaveAsArgs, SetResult, SettingsArgs, SwitchArgs,
-    SwitchResult, TemplateArgs, TemporaryFolderArgs, TemporaryFolderResult, TestToneArgs,
-    TestToneState, ThemeArgs, ViewResult, ViewState, ZoomArgs,
+    LaneArgs, LoopWarpShortSamplesArgs, PathArgs, RecordSessionAutomationInArgs, SampleEditorArgs,
+    SampleEditorResult, SaveAsArgs, SetResult, SettingsArgs, SwitchArgs, SwitchResult,
+    TemplateArgs, TemporaryFolderArgs, TemporaryFolderResult, TestToneArgs, TestToneState,
+    ThemeArgs, ViewResult, ViewState, ZoomArgs,
 };
 use crate::devices::{self, DeviceError, DeviceView};
 use crate::files::{ProjectFiles, SetStore, new_set_from};
@@ -63,11 +63,13 @@ use bl_plugin_host::vst3::Vst3Host;
 use bl_shell_spec::arrangement as view_ids;
 use bl_shell_spec::audio_editing as audio_ids;
 use bl_shell_spec::autosampler as autosampler_ids;
+use bl_shell_spec::bounce as bounce_ids;
 use bl_shell_spec::browser as browser_ids;
 use bl_shell_spec::capture_midi as capture_ids;
 use bl_shell_spec::devices as device_ids;
 use bl_shell_spec::editing as edit_ids;
 use bl_shell_spec::export as export_ids;
+use bl_shell_spec::file_manager as file_manager_ids;
 use bl_shell_spec::freeze as freeze_ids;
 use bl_shell_spec::midi_files as midi_ids;
 use bl_shell_spec::midi_io as midi_io_ids;
@@ -94,8 +96,11 @@ use bl_shell_spec::transport::{RecordedFileReport, RecordingReport, RunningRecor
 pub(crate) mod audio_editing;
 mod audio_panel;
 pub mod autosample;
+mod bounce;
 mod capture;
+mod file_manager;
 mod freeze;
+mod keymap;
 mod multisampler;
 mod plugin_list;
 mod processed_files;
@@ -106,6 +111,8 @@ mod session_recording;
 mod slice;
 mod stems;
 mod warping;
+
+use file_manager::FileManager;
 
 /// The argument a key in a range (F1 to F8) adds to a toggling mixer
 /// command for the track it numbers, counting the mixer's columns from 1;
@@ -249,6 +256,9 @@ pub enum Effect {
     /// Ask for a program, then run `settings.set_sample_editor` with it
     /// (WP-4.10b).
     PickSampleEditor,
+    /// Ask for a folder, then run `file_manager.set_search_folder` with it
+    /// (file-management R14).
+    PickSearchFolder,
     /// Ask where to save the set's plug-in list, then run
     /// `plugin.export_list` there (IMP-29, WP-6.41).
     PickPluginListPath {
@@ -393,6 +403,14 @@ pub struct Shell {
     midi_lit: [Option<std::time::Instant>; 2],
     /// The chord a Chord device's Learn is hearing.
     chord_learn: crate::chord_learn::ChordLearn,
+    /// The keymap in use: Live 12's shortcuts with the person's own layered
+    /// over them (the custom-shortcuts spec, R3).
+    keymap: crate::keymap::Keymap,
+    /// The person's own shortcuts, as `keymap.toml` holds them.
+    user_keymap: crate::keymap::UserKeymap,
+    /// The number of times the keymap changed, so a host knows to rebuild
+    /// the keymap it matches keys against.
+    keymap_revision: u64,
     prefs: Preferences,
     config_dir: Option<PathBuf>,
     main_view: MainView,
@@ -454,6 +472,10 @@ pub struct Shell {
     /// What the Clip View shows (WP-2.3): whether it's open, Draw Mode, and
     /// the notes selected in its MIDI Note Editor.
     clip_view: ClipView,
+    /// The File Manager (WP-6.63): whether it shows, which files it shows,
+    /// and the Automatic Search's switches. View state, never part of the
+    /// set, like the browser's.
+    file_manager: FileManager,
     /// The list of the set's plug-ins (IMP-29, WP-6.41): whether it shows
     /// in the detail area's place, and whether Show Only Missing is on.
     plugin_list: plugin_list::PluginList,
@@ -915,6 +937,9 @@ impl Shell {
             midi_seen: (0, 0),
             midi_lit: [None; 2],
             chord_learn: crate::chord_learn::ChordLearn::default(),
+            keymap: crate::keymap::Keymap::live12(),
+            user_keymap: crate::keymap::UserKeymap::default(),
+            keymap_revision: 0,
             settings_open: false,
             prefs,
             config_dir,
@@ -944,6 +969,7 @@ impl Shell {
             assistant_stop_flag: Arc::default(),
             arrangement: ArrangementView::new(),
             clip_view: ClipView::default(),
+            file_manager: FileManager::default(),
             plugin_list: plugin_list::PluginList::default(),
             document_revision: 0,
             clipboard: None,
@@ -996,6 +1022,7 @@ impl Shell {
         shell.agent_tokens_in_file = !agent::StoredTokens::of(&shell.prefs.agent).is_empty();
         shell.give_agents_tokens();
         shell.publish_plugins();
+        shell.load_user_keymap();
         shell
     }
 
@@ -4110,18 +4137,42 @@ impl Shell {
             .map(|library| library.join("Templates"))
     }
 
+    /// The Automatic Search's switches as they are unless asked otherwise
+    /// (file-management R14): the set's project folder and the User
+    /// Library are searched.
+    fn default_search() -> bl_shell_spec::file_manager::Search {
+        bl_shell_spec::file_manager::Search {
+            folder: None,
+            project: true,
+            library: true,
+            candidates: Vec::new(),
+        }
+    }
+
     /// Searches for the open set's missing or changed files and relinks them
-    /// (WP-2.25, file-management R6): the set's project folder, the User
-    /// Library, the folders the files were last in, and `extra`, each with
-    /// its subfolders. Returns how many were relinked, and re-points the
-    /// set's media table at them.
-    fn relink_missing(&mut self, extra: &[PathBuf]) -> usize {
+    /// (WP-2.25, file-management R6 and R14): the places the search is
+    /// switched on for, each with its subfolders, and the folders the files
+    /// were last in. A file with one candidate is relinked to it; a file
+    /// with several keeps its row, and the person chooses. Returns how many
+    /// were relinked, and the candidates the others have.
+    fn relink_missing(
+        &mut self,
+        extra: &[PathBuf],
+        search: &bl_shell_spec::file_manager::Search,
+    ) -> (usize, Vec<bl_shell_spec::file_manager::Candidate>) {
         let mut folders: Vec<PathBuf> = Vec::new();
-        if let Some(folder) = self.set_path.as_deref().and_then(Path::parent) {
+        if search.project
+            && let Some(folder) = self.set_path.as_deref().and_then(Path::parent)
+        {
             folders.push(folder.to_path_buf());
         }
-        if let Some(library) = self.browser_view.user_library() {
+        if search.library
+            && let Some(library) = self.browser_view.user_library()
+        {
             folders.push(library.to_path_buf());
+        }
+        if let Some(folder) = &search.folder {
+            folders.push(PathBuf::from(folder));
         }
         for entry in self.media.entries() {
             if let Some(folder) = entry.path.parent() {
@@ -4132,13 +4183,33 @@ impl Shell {
         // Keep each folder once, in the order the search should try them.
         let mut seen = std::collections::HashSet::new();
         folders.retain(|folder| seen.insert(folder.clone()));
-        let Ok(found) = self.media.relink_missing(&folders) else {
-            return 0;
+        let Ok(candidates) = self.media.relink_candidates(&folders) else {
+            return (0, Vec::new());
         };
-        let found: Vec<(bl_model::ContentHash, PathBuf)> = found
-            .into_iter()
-            .map(|(hash, path)| (bl_model::ContentHash(*hash.as_bytes()), path))
-            .collect();
+        let mut found = Vec::new();
+        let mut several = Vec::new();
+        for (hash, paths) in candidates {
+            if paths.len() == 1 {
+                self.media.relocate(hash, &paths[0]);
+                found.push((bl_model::ContentHash(*hash.as_bytes()), paths[0].clone()));
+            } else {
+                several.push(bl_shell_spec::file_manager::Candidate {
+                    hash: hash
+                        .as_bytes()
+                        .iter()
+                        .map(|byte| format!("{byte:02x}"))
+                        .collect(),
+                    name: paths
+                        .first()
+                        .and_then(|path| path.file_name())
+                        .map_or_else(String::new, |name| name.to_string_lossy().into_owned()),
+                    paths: paths
+                        .iter()
+                        .map(|path| path.to_string_lossy().into_owned())
+                        .collect(),
+                });
+            }
+        }
         self.store.relink(&found);
         // A relinked file's failed analysis is made again (R20).
         for (hash, _) in &found {
@@ -4149,7 +4220,7 @@ impl Shell {
             self.analysed.remove(&hash);
         }
         self.start_analyses();
-        found.len()
+        (found.len(), several)
     }
 
     /// Runs a browser command and carries out what it asks of the rest of
@@ -4255,6 +4326,7 @@ impl Shell {
             && (model::handles(id)
                 || audio_ids::handles(id)
                 || freeze_ids::handles(id)
+                || bounce_ids::handles(id)
                 || edit_ids::handles(id)
                 || device_ids::handles(id)
                 || multisampler_ids::handles(id)
@@ -4567,6 +4639,25 @@ impl Shell {
             // nodes published, which the device displays draw. Not a
             // revision either.
             self.audio.displays_into(self.devices.displays_mut());
+            // Spec: articulation-map R15. A row whose Learn button is lit
+            // takes the next note-on or control change the device hears as
+            // its trigger, which is one undo step.
+            for (device, row, trigger) in self.devices.learned_triggers() {
+                self.devices.stop_learning(device);
+                self.edit(|editor| {
+                    // The list may have changed while the button was lit,
+                    // and then the row is gone: the trigger is dropped
+                    // rather than ending the shell.
+                    let _ = editor.apply(Command::SetArticulation {
+                        device,
+                        index: row,
+                        name: None,
+                        trigger: Some(trigger),
+                        outputs: None,
+                        channel: None,
+                    });
+                });
+            }
         }
         // Spec: drum-racks R20. With Auto Select on, a drum rack's chain
         // list selects each chain a note reaches.
@@ -5404,10 +5495,17 @@ impl Shell {
 
     /// Whether a submenu opens now: Arrangement Track Controls is disabled
     /// while the Session View is in front (observed in Live 12.4.6; the
-    /// mixer view spec, R12).
+    /// mixer view spec, R12), and the set's backups are disabled while the
+    /// set has none (file-management R18).
     #[must_use]
     pub fn can_open_submenu(&self, row: &str) -> bool {
-        !(row == "M-VIEW-033" && self.main_view == MainView::Session)
+        if row == "M-VIEW-033" && self.main_view == MainView::Session {
+            return false;
+        }
+        if row == "M-FILE-008" {
+            return !self.backups().is_empty();
+        }
+        true
     }
 
     /// The label a menu shows for a command now: Undo and Redo name the step
@@ -5558,6 +5656,9 @@ impl Shell {
         }
         if freeze_ids::handles(id) {
             return self.can_freeze(id, args);
+        }
+        if bounce_ids::handles(id) {
+            return self.can_bounce(id, args);
         }
         if audio_ids::handles(id) {
             // Spec: audio-clip-editing R28. The menus' enabled states.
@@ -6192,6 +6293,12 @@ impl Shell {
             }
             ids::SETTINGS_SET_SAMPLE_EDITOR if !has("path") => {
                 self.effects.push(Effect::PickSampleEditor);
+                Ok(Value::Null)
+            }
+            file_manager_ids::SET_SEARCH_FOLDER if !has("folder") => {
+                // Spec: file-management R14. The Set Folder… button asks the
+                // person for the folder the search looks in.
+                self.effects.push(Effect::PickSearchFolder);
                 Ok(Value::Null)
             }
             _ if self.is_sample_key(id, &args) => {
@@ -6843,6 +6950,7 @@ impl Shell {
             && (model::handles(id)
                 || audio_ids::handles(id)
                 || freeze_ids::handles(id)
+                || bounce_ids::handles(id)
                 || edit_ids::handles(id)
                 || note_ids::handles(id)
                 || device_ids::handles(id)
@@ -6866,6 +6974,9 @@ impl Shell {
         }
         if freeze_ids::handles(id) {
             return self.run_freeze(id, args);
+        }
+        if bounce_ids::handles(id) {
+            return self.run_bounce(id, args);
         }
         if edit_ids::handles(id) {
             let before = self.editor.document().clone();
@@ -7333,6 +7444,11 @@ impl Shell {
             return self.run_tracks(id, args);
         }
         if browser_ids::handles(id) {
+            // Spec: file-management R11, R14. A file armed for hot-swapping
+            // is replaced by the file the browser has chosen.
+            if id == browser_ids::LOAD_SELECTED && self.file_manager.hot_swap.is_some() {
+                return self.hot_swap_selected(id);
+            }
             return self.run_browser(id, args);
         }
         if perception_ids::handles(id) {
@@ -7401,6 +7517,13 @@ impl Shell {
         }
         if midi_io_ids::handles(id) {
             return self.run_midi_io(id, args);
+        }
+        if file_manager_ids::handles(id) {
+            // Spec: file-management R10 to R17. The File Manager's own
+            // commands.
+            let result = self.run_file_manager(id, args);
+            self.touch();
+            return result;
         }
         if !ids::handles(id) {
             return Err(ShellError::UnknownCommand(id.to_owned()));
@@ -7905,9 +8028,12 @@ impl Shell {
                     self.media
                         .add_reference(bl_media::ContentHash::from_bytes(hash.0), path, size);
                 }
-                // Spec: file-management R6. Files that moved are found
-                // again by content, so the set opens able to play them.
-                let relinked = self.relink_missing(&[]);
+                // Spec: file-management R6, R14. Files that moved are found
+                // again by content, so the set opens able to play them: a
+                // file with one candidate is relinked to it, and a file with
+                // several waits for the person to choose.
+                let (relinked, candidates) = self.relink_missing(&[], &Self::default_search());
+                self.file_manager.search.candidates = candidates;
                 if relinked > 0 {
                     self.message = Some(Message {
                         text: format!(
@@ -8056,7 +8182,30 @@ impl Shell {
                 }))
             }
             ids::SET_COLLECT_ALL => {
-                Self::args::<NoArgs>(id, args)?;
+                // Spec: file-management R4, R15, R16. The groups to collect
+                // from, and the project to collect for.
+                let crate::commands::CollectArgs { groups, project } = Self::args(id, args)?;
+                let library = self.browser_view.user_library();
+                let groups = if groups.is_empty() {
+                    vec![
+                        file_manager_ids::ExternalGroup::OtherProject,
+                        file_manager_ids::ExternalGroup::UserLibrary,
+                        file_manager_ids::ExternalGroup::Elsewhere,
+                    ]
+                } else {
+                    groups
+                };
+                if let Some(project) = project {
+                    let folder = PathBuf::from(project);
+                    let files = self
+                        .collect_project(&folder, &groups, library)
+                        .map_err(failed)?;
+                    return Ok(to_value(&FileReport {
+                        path: Some(folder.to_string_lossy().into_owned()),
+                        files,
+                        candidates: Vec::new(),
+                    }));
+                }
                 let path = self.set_path.clone().ok_or_else(|| {
                     unavailable(
                         "the set has never been saved; use `set.save_as` to give it a project \
@@ -8075,24 +8224,44 @@ impl Shell {
                 self.store
                     .set_multisampler_views(self.devices.multisampler_views().clone());
                 self.store.set_folds(self.clip_view.folds().clone());
-                let files = self.store.collect().map_err(failed)?;
+                let files = self
+                    .store
+                    .collect_groups(&groups, library)
+                    .map_err(failed)?;
                 let warnings = self.store.save(&path, &self.editor).map_err(failed)?;
                 self.saved_as(path.clone(), &warnings);
                 Ok(to_value(&FileReport {
                     path: Some(path.to_string_lossy().into_owned()),
                     files,
+                    candidates: Vec::new(),
                 }))
             }
             ids::SET_RELINK_MISSING => {
-                let RelinkArgs { folders } = Self::args(id, args)?;
+                // Spec: file-management R14. The places the search is
+                // switched on for, and the folders it is given.
+                let crate::commands::RelinkArgs {
+                    folders,
+                    project,
+                    library,
+                    folder,
+                } = Self::args(id, args)?;
                 let extra: Vec<PathBuf> = folders.iter().map(PathBuf::from).collect();
-                let files = self.relink_missing(&extra);
+                let search = bl_shell_spec::file_manager::Search {
+                    folder: folder.clone(),
+                    project: project.unwrap_or(true),
+                    library: library.unwrap_or(true),
+                    candidates: Vec::new(),
+                };
+                let (files, candidates) = self.relink_missing(&extra, &search);
+                self.file_manager.search = search.clone();
+                self.file_manager.search.candidates = candidates.clone();
                 Ok(to_value(&FileReport {
                     path: self
                         .set_path
                         .as_ref()
                         .map(|path| path.to_string_lossy().into_owned()),
                     files,
+                    candidates,
                 }))
             }
             ids::APP_QUIT => {
@@ -8193,6 +8362,12 @@ impl Shell {
                 // Spec: plugin-list R1, R3. View state only.
                 Self::args::<NoArgs>(id, args)?;
                 self.plugin_list.toggle();
+                // Spec: file-management R10. The File Manager and the list of
+                // the set's plug-ins take the same place: showing either
+                // hides the other.
+                if self.plugin_list.visible() {
+                    self.file_manager.open = false;
+                }
                 self.touch();
                 Ok(to_value(&self.plugin_list.state()))
             }
@@ -8381,6 +8556,30 @@ impl Shell {
                 self.save_preferences();
                 self.touch();
                 Ok(to_value(&SwitchResult { on }))
+            }
+            ids::KEYMAP_STATE => {
+                Self::args::<NoArgs>(id, args)?;
+                Ok(to_value(&self.keymap_state()))
+            }
+            ids::KEYMAP_BIND => {
+                let bind: crate::keymap::BindArgs = Self::args(id, args)?;
+                self.bind_keys(id, &bind)?;
+                Ok(to_value(&self.keymap_result()))
+            }
+            ids::KEYMAP_UNBIND => {
+                let crate::keymap::UnbindArgs {
+                    shortcut,
+                    command,
+                    keys,
+                    platform,
+                } = Self::args(id, args)?;
+                self.unbind_keys(id, shortcut.as_deref(), command.as_deref(), &keys, platform)?;
+                Ok(to_value(&self.keymap_result()))
+            }
+            ids::KEYMAP_RESET => {
+                let crate::keymap::ResetArgs { command } = Self::args(id, args)?;
+                self.reset_keys(command.as_deref());
+                Ok(to_value(&self.keymap_result()))
             }
             ids::FOCUS_TOGGLE_TAB_NAVIGATION => {
                 Self::args::<NoArgs>(id, args)?;

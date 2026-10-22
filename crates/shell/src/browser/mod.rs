@@ -2026,7 +2026,7 @@ impl BrowserView {
     }
 
     /// The selected audio files, in the content pane's order.
-    fn selected_audio(&self) -> Vec<PathBuf> {
+    pub(crate) fn selected_audio(&self) -> Vec<PathBuf> {
         let mut files: Vec<(Option<usize>, PathBuf)> = self
             .selected
             .iter()

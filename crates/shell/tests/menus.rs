@@ -64,7 +64,11 @@ fn every_item_reaches_a_command_or_is_pending() {
                     Action::Pending(Some(id)) => {
                         assert!(shortcuts.contains(&format!("id = \"{id}\"")), "{id}");
                     }
-                    Action::Submenu => assert!(!item.items.is_empty(), "{}", item.row),
+                    Action::Submenu => assert!(
+                        !item.items.is_empty() || bl_shell::menus::DYNAMIC_ROWS.contains(&item.row),
+                        "{}",
+                        item.row
+                    ),
                     Action::Pending(None)
                     | Action::System(_)
                     | Action::Omitted(_)
@@ -141,6 +145,12 @@ fn every_shell_command_is_on_a_menu_or_a_control() {
         commands::VIEW_SET_PLUGIN_LIST_ONLY_MISSING,
         // A query for agents, like `transport.state`.
         commands::VIEW_STATE,
+        // The Shortcuts page's buttons (the custom shortcuts spec, R8 and
+        // R10), and the query for agents.
+        commands::KEYMAP_BIND,
+        commands::KEYMAP_UNBIND,
+        commands::KEYMAP_RESET,
+        commands::KEYMAP_STATE,
         // The File & Folder page's Sample Editor row (the sample editor
         // spec, R16), the Audio Utilities panel's Edit button (R16), and the
         // file dropped on the Clip View that replaces a clip's sample (R18).

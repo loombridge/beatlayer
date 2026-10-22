@@ -3333,6 +3333,8 @@ impl DeviceViewUi {
         row: &ChainRow,
         events: &mut Vec<UiEvent>,
     ) {
+        // The keymap in use, so the menu shows the keys in use (R10).
+        let keymap = crate::keymap::Keymap::from_data(shell.keymap().clone());
         let mut contexts = vec![bl_commands::Context::RackChains];
         contexts.extend(shell.active_contexts());
         for item in bl_shell::menus::shown(&self.chain_menu) {
@@ -3345,15 +3347,8 @@ impl DeviceViewUi {
                 self.chain_palette(ui, theme, row, events);
                 continue;
             }
-            let response = crate::menus::item_in(
-                ui,
-                item,
-                shell,
-                &self.keymap,
-                self.platform,
-                &contexts,
-                events,
-            );
+            let response =
+                crate::menus::item_in(ui, item, shell, &keymap, self.platform, &contexts, events);
             let response = match context_menus::pending_package(item.row) {
                 Some(package) => {
                     let text = format!("Not built yet: arrives with {package}.");

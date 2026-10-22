@@ -226,6 +226,11 @@ pub(crate) fn place(
     for (track, clips) in placements {
         for mut clip in clips {
             clip.id = editor.new_id();
+            // Spec: grooves R3, R5. A copy keeps its groove while the pool
+            // still holds it; one deleted since the copy leaves it none.
+            clip.groove = clip
+                .groove
+                .filter(|groove| editor.document().settings().grooves.get(*groove).is_some());
             clear(editor, track, clip.start, clip.end(), &placed)?;
             placed.insert(clip.id);
             created.push(clip.id);

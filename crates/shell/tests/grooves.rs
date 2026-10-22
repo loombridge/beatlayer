@@ -659,11 +659,18 @@ fn a_new_midi_clip_takes_the_auto_load_groove_and_a_copy_keeps_its_own() {
         )
         .unwrap();
     assert_eq!(clip(&shell, raw).groove, None);
+    // A copy on the clipboard whose groove is deleted pastes with none.
+    shell
+        .run("arrangement.select_clips", json!({ "clips": [first] }))
+        .unwrap();
+    shell.run("arrangement.copy", json!({})).unwrap();
     // Deleting the auto-load groove leaves none, and nothing is auto-loaded.
     shell
         .run("groove.delete", json!({ "groove": swing }))
         .unwrap();
     assert_eq!(insert(&mut shell, scenes[2]).groove, None);
+    shell.run("arrangement.paste", json!({})).unwrap();
+    assert!(copies(&shell).iter().all(Option::is_none));
 }
 
 /// The generated drum loop's audio on an audio track, warped, with its

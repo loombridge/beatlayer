@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use bl_core::time::{Frames, SampleRate, TempoMap, Ticks};
 use bl_model::{
-    Clip, ClipData, ClipId, GroovePlay, GroovePool, Note, SceneId, Track, TrackId, clip_seed,
+    Clip, ClipData, ClipId, GroovePlay, GroovePool, Note, SceneId, Track, TrackId, clip_seed, noise,
 };
 
 use crate::midi_controllers::{PlacedController, Sounding, Stretch, play_pressure};
@@ -516,6 +516,18 @@ fn process_clip_segment(
         if note_on_frame < from_frame || note_on_frame >= to_frame {
             continue;
         }
+
+        // Spec: grooves R15. A groove can reorder notes, so a grooved clip's
+        // chance and deviation draw from the note itself, not from the order
+        // the block meets them in, and a render is the same at any block size.
+        let mut own;
+        let rng: &mut Rng = if clip.groove.is_some() {
+            let key = ((note.start.get() as u64) << 8) | u64::from(note.key);
+            own = Rng::new(noise(clip_seed(clip.id), pass, !key).to_bits());
+            &mut own
+        } else {
+            &mut *rng
+        };
 
         // Probability check
         if note.probability < 1.0 && (note.probability <= 0.0 || rng.next_f64() > note.probability)

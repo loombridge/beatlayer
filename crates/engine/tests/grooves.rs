@@ -351,6 +351,32 @@ fn every_block_size_plays_the_same_notes() {
 }
 
 #[test]
+fn chance_and_deviation_on_regrooved_chords_are_the_same_at_every_block_size() {
+    // Spec: grooves R8, R15. Random pulls a chord's notes apart, so the block
+    // meets them in a different order at each size.
+    let chords: Vec<Note> = sixteenths()
+        .into_iter()
+        .flat_map(|note| {
+            [60, 64, 67].map(|key| {
+                let mut note = Note::new(key, note.start, note.length, 90);
+                note.probability = 0.5;
+                note.velocity_deviation = 30;
+                note
+            })
+        })
+        .collect();
+    let mut renders = Vec::new();
+    for block in [1, 64, 512, 4096] {
+        let mut song = grooved(chords.clone(), 1, false, |groove| groove.random = 100.0);
+        renders.push(song.play(BAR, block));
+    }
+    assert!(!renders[0].is_empty() && renders[0].len() < 48);
+    for render in &renders[1..] {
+        assert_eq!(render, &renders[0]);
+    }
+}
+
+#[test]
 fn a_clip_without_a_groove_plays_as_before() {
     // Spec: grooves R14
     let mut song = grooved(sixteenths(), 1, false, |_| {});

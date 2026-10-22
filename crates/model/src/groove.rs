@@ -278,8 +278,8 @@ struct Line {
 pub struct GroovePlay {
     base: f64,
     length: f64,
-    /// The lines of one repeat of the groove.
-    lines: Vec<Line>,
+    /// The groove's notes, by position: each position and velocity.
+    notes: Vec<(f64, u8)>,
     /// The mean velocity of the groove's notes.
     mean: f64,
     quantize: f64,
@@ -295,32 +295,12 @@ impl GroovePlay {
     pub fn new(groove: &Groove, global_amount: f64) -> Self {
         let base = groove.base.ticks().get() as f64;
         let length = groove.length.get().max(1) as f64;
-        let per_repeat = (length / base).ceil().max(1.0) as usize;
-        let lines = (0..per_repeat)
-            .map(|j| {
-                let at = j as f64 * base;
-                // The nearest groove note, round the groove's circle, if one
-                // lies within half a Base step of the line.
-                let nearest = groove
-                    .notes
-                    .iter()
-                    .map(|note| {
-                        let d = note.position.get() as f64 - at;
-                        (d - length * (d / length).round(), note.velocity)
-                    })
-                    .min_by(|a, b| a.0.abs().total_cmp(&b.0.abs()));
-                match nearest {
-                    Some((offset, velocity)) if offset.abs() <= base / 2.0 + 1e-9 => Line {
-                        offset,
-                        velocity: Some(velocity),
-                    },
-                    _ => Line {
-                        offset: 0.0,
-                        velocity: None,
-                    },
-                }
-            })
+        let mut notes: Vec<(f64, u8)> = groove
+            .notes
+            .iter()
+            .map(|note| (note.position.get() as f64, note.velocity))
             .collect();
+        notes.sort_by(|a, b| a.0.total_cmp(&b.0));
         let mean = if groove.notes.is_empty() {
             0.0
         } else {
@@ -335,7 +315,7 @@ impl GroovePlay {
         Self {
             base,
             length,
-            lines,
+            notes,
             mean,
             quantize: groove.quantize / 100.0,
             timing: groove.timing / 100.0 * amount,
@@ -369,31 +349,54 @@ impl GroovePlay {
         self.quantize != 0.0
     }
 
-    fn per_repeat(&self) -> i64 {
-        self.lines.len() as i64
-    }
-
     /// The position of grid line `n`, in ticks from the start of the
-    /// contents: line 0 is there, and the lines repeat every groove length.
+    /// contents: the Base's lines, counted from there (R6).
     #[must_use]
     pub fn line_position(&self, n: i64) -> f64 {
-        let m = self.per_repeat();
-        n.div_euclid(m) as f64 * self.length + n.rem_euclid(m) as f64 * self.base
+        n as f64 * self.base
     }
 
+    /// Line `n`'s offset and groove velocity (R6): the groove note nearest
+    /// it, round the groove's circle, if one lies within half a Base step.
     fn line(&self, n: i64) -> Line {
-        self.lines[n.rem_euclid(self.per_repeat()) as usize]
+        let none = Line {
+            offset: 0.0,
+            velocity: None,
+        };
+        let (Some(&first), Some(&last)) = (self.notes.first(), self.notes.last()) else {
+            return none;
+        };
+        let at = self.line_position(n).rem_euclid(self.length);
+        let i = self.notes.partition_point(|note| note.0 < at);
+        let after = self
+            .notes
+            .get(i)
+            .copied()
+            .unwrap_or((first.0 + self.length, first.1));
+        let before = i
+            .checked_sub(1)
+            .map_or((last.0 - self.length, last.1), |j| self.notes[j]);
+        let (position, velocity) = if at - before.0 <= after.0 - at {
+            before
+        } else {
+            after
+        };
+        let offset = position - at;
+        if offset.abs() <= self.base / 2.0 + 1e-9 {
+            Line {
+                offset,
+                velocity: Some(velocity),
+            }
+        } else {
+            none
+        }
     }
 
     /// The last line at or before `p`.
     #[must_use]
     pub fn line_at_or_before(&self, p: f64) -> i64 {
-        let m = self.per_repeat();
-        let repeat = (p / self.length).floor();
-        let within = p - repeat * self.length;
-        let j = ((within / self.base).floor() as i64).clamp(0, m - 1);
-        let mut n = repeat as i64 * m + j;
-        // Rounding at a repeat's edge can leave a line too far either way.
+        let mut n = (p / self.base).floor() as i64;
+        // Rounding can leave a line too far either way.
         while self.line_position(n) > p {
             n -= 1;
         }
@@ -796,6 +799,33 @@ mod tests {
         assert_eq!(play.line(0).offset, 0.0);
         assert_eq!(play.line(1).offset, step / 2.0);
         assert_eq!(play.line(1).velocity, Some(80));
+    }
+
+    #[test]
+    fn the_lines_stay_on_the_base_grid_when_the_length_is_not_whole_steps() {
+        let step = GrooveBase::Sixteenth.ticks();
+        let length = step * 4 + Ticks(step.get() / 6);
+        let note = GrooveNote {
+            position: Ticks::ZERO,
+            velocity: 100,
+        };
+        let mut groove = Groove::new(id(1), "Odd".to_owned(), length, vec![note]);
+        groove.random = 100.0;
+        let play = GroovePlay::new(&groove, 100.0);
+        let s = step.get() as f64;
+        for n in 0..40 {
+            assert_eq!(play.line_position(n), n as f64 * s);
+            assert_eq!(play.line_at_or_before(n as f64 * s + 1.0), n);
+        }
+        // Lines a step apart keep their order under Random (R12).
+        let transients = MovedTransients::new(&play, Vec::new());
+        let pass = AudioPass::new(&play, &transients, (0.0, s * 40.0), 3, 0);
+        let mut last = -1.0;
+        for i in 0..=400 {
+            let y = pass.map(f64::from(i) * s / 10.0);
+            assert!(y >= last, "{i}: {y} before {last}");
+            last = y;
+        }
     }
 
     #[test]

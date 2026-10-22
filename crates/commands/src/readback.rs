@@ -127,9 +127,6 @@ const TAGS: &str = "the browser's tags are read with `browser.tags`, which is `e
 /// gives.
 const FILE_MANAGER: &str = "the File Manager's state is read with `file_manager.state`, which \
                              is `external` because it lists files outside the project";
-/// Why Save Continuously has nothing to read.
-const CONTINUOUS: &str = "the app doesn't host the autosave service yet, so no read command \
-                          reports Save Continuously; the command's own result does";
 /// Why a command that writes a file has nothing to read.
 const FILE: &str = "writes a file outside the set; the set doesn't change";
 /// Why a token has nothing to read.
@@ -186,16 +183,22 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("audio.configure", read("audio.status", "settings")),
     ("audio.set_test_tone", read("audio.status", "test_tone")),
     ("audio.toggle_engine", read("audio.status", "engine_on")),
-    ("keymap.bind", read("keymap.state", "shortcuts")),
-    ("keymap.reset", read("keymap.state", "shortcuts")),
-    ("keymap.unbind", read("keymap.state", "shortcuts")),
+    ("automation.cut", query(Track, "automation")),
     ("automation.delete", query(Track, "automation")),
+    ("automation.delete_range", query(Track, "automation")),
+    ("automation.duplicate", query(Track, "automation")),
+    ("automation.move_breakpoints", query(Track, "automation")),
+    ("automation.paste", query(Track, "automation")),
     ("automation.delete_breakpoint", query(Track, "automation")),
     ("automation.move_breakpoint", query(Track, "automation")),
     ("automation.re_enable", query(Track, "automation")),
     ("automation.re_enable_for", query(Track, "automation")),
     ("automation.set_breakpoint", query(Track, "automation")),
     ("automation.set_curve", query(Track, "automation")),
+    ("automation.set_envelope", query(Track, "automation")),
+    ("keymap.bind", read("keymap.state", "shortcuts")),
+    ("keymap.reset", read("keymap.state", "shortcuts")),
+    ("keymap.unbind", read("keymap.state", "shortcuts")),
     ("browser.add_folder", nothing(BROWSER)),
     ("browser.add_tag", nothing(TAGS)),
     ("browser.add_tag_group", nothing(TAGS)),
@@ -417,6 +420,7 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("export.realtime.cancel", read("export.realtime.status", "phase")),
     ("export.realtime.restart", read("export.realtime.status", "phase")),
     ("export.realtime.skip", read("export.realtime.status", "phase")),
+    ("export.start", read("export.status", "export")),
     ("midi.export_clip", nothing(FILE)),
     ("midi.capture", query(Track, "slots")),
     ("midi.import_file", query(Track, "clips")),
@@ -442,6 +446,7 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("mixer.set_send_tap", query(Track, "mixer.tap")),
     ("mixer.set_solo", query(Track, "mixer.solo")),
     ("mixer.set_solo_in_place", query(Song, "settings.solo_in_place")),
+    ("song.set_lock_envelopes", query(Song, "settings.lock_envelopes")),
     ("mixer.set_cue_mode", query(Song, "settings.cue_mode")),
     ("mixer.set_cue_volume", query(Song, "settings.cue_volume")),
     ("mixer.set_volume", query(Track, "mixer.volume")),
@@ -551,7 +556,7 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("set.save_copy", nothing(FILE)),
     ("set.save_as_template", nothing(FILE)),
     ("settings.set_auto_hide_plug_in_windows", read("settings.state", "auto_hide_plug_in_windows")),
-    ("settings.set_continuous_save", nothing(CONTINUOUS)),
+    ("settings.set_continuous_save", read("settings.state", "file_folder.save_continuously")),
     ("settings.set_auto_warp_long_samples", read("settings.state", "warp.auto_warp_long_samples")),
     ("settings.set_default_warp_mode", read("settings.state", "warp.default_warp_mode")),
     ("settings.set_loop_warp_short_samples", read("settings.state", "warp.loop_warp_short_samples")),
@@ -565,7 +570,14 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("settings.set_select_next_scene_on_launch", read("settings.state", "launch.select_next_scene_on_launch")),
     ("settings.set_select_on_launch", read("settings.state", "launch.select_on_launch")),
     ("settings.set_start_recording_on_scene_launch", read("settings.state", "launch.start_recording_on_scene_launch")),
-    ("settings.set_theme", read("settings.state", "theme")),
+    ("settings.set_theme", read("settings.state", "theme_colors.theme")),
+    ("settings.set_appearance", read("settings.state", "theme_colors.appearance")),
+    ("settings.set_tone", read("settings.state", "theme_colors.tone")),
+    ("settings.set_high_contrast", read("settings.state", "theme_colors.high_contrast")),
+    ("settings.set_grid_line_intensity", read("settings.state", "theme_colors.grid_line_intensity")),
+    ("settings.set_brightness", read("settings.state", "theme_colors.brightness")),
+    ("settings.set_color_intensity", read("settings.state", "theme_colors.color_intensity")),
+    ("settings.set_color_hue", read("settings.state", "theme_colors.color_hue")),
     ("settings.set_warp_recorded_audio", read("settings.state", "warp_recorded_audio")),
     ("slot.set_stop_button", query(Track, "removed_stop_buttons")),
     ("song.delete_tempo_breakpoint", query(Song, "settings.tempo")),

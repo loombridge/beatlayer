@@ -37,6 +37,13 @@ pub struct McpArgs {
     /// JSON either way.
     #[arg(long, default_value = "json", value_parser = parse_result_format)]
     pub result_format: ResultFormat,
+
+    /// A recovery folder to journal the set's edits in, so a crash can be
+    /// recovered from (WP-6.62, the crash-recovery spec, R26). Without it,
+    /// the session journals nothing and leaves nothing in the app's own
+    /// recovery folder.
+    #[arg(long)]
+    pub recovery_dir: Option<PathBuf>,
 }
 
 fn parse_result_format(name: &str) -> Result<ResultFormat, String> {
@@ -54,6 +61,13 @@ fn parse_result_format(name: &str) -> Result<ResultFormat, String> {
 /// A message if the set doesn't open or standard input or output fails.
 pub fn run(args: &McpArgs) -> Outcome {
     let mut shell = Shell::headless();
+    if let Some(dir) = &args.recovery_dir {
+        // Spec: crash-recovery R26. The session journals the set's edits
+        // in the folder it was given, and nowhere else.
+        shell
+            .use_recovery(dir.clone())
+            .map_err(|error| format!("crash recovery isn't running: {error}"))?;
+    }
     if let Some(set) = &args.set {
         shell
             .run(ids::SET_OPEN, json!({ "path": set.to_string_lossy() }))

@@ -707,6 +707,7 @@ impl Shell {
         // and it is unsaved, so `set.save` makes the backup its current
         // version.
         self.editor = editor;
+        self.editor_replaced();
         self.dirty = true;
         self.message = None;
         self.arrangement.reset();

@@ -13,7 +13,9 @@ use bl_ui::main_window::{MainWindowUi, UiEvent};
 use bl_ui::settings_window::SettingsUi;
 use bl_ui::theme::{Theme, fonts};
 use egui::accesskit::{self, Role};
-use egui::{Context, Event, FullOutput, Id, Modifiers, PointerButton, Pos2, RawInput, Rect, vec2};
+use egui::{
+    Color32, Context, Event, FullOutput, Id, Modifiers, PointerButton, Pos2, RawInput, Rect, vec2,
+};
 
 /// Which window a harness draws.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -67,6 +69,9 @@ pub struct Harness {
     /// the app's windows do.
     pub zoom: f32,
     pub events: Vec<UiEvent>,
+    /// The effects the shell asked the platform for, which the harness has
+    /// no platform to carry out: the save dialog Export asks for, say.
+    pub effects: Vec<Effect>,
     /// Whether the window draws Live's title bar itself, as on macOS (D22).
     pub title_bar: bool,
     /// The transport the engine had published when the last frame began,
@@ -108,11 +113,21 @@ impl Harness {
         harness
     }
 
+    /// A harness whose shell journals the open set's edits in `dir`, as
+    /// the app does at start-up (WP-6.62, the crash-recovery spec, R21),
+    /// and which offers the sets a crash left.
+    pub fn with_recovery(window: Window, dir: std::path::PathBuf) -> Self {
+        let mut shell = Shell::headless();
+        shell.start_audio();
+        shell.use_recovery(dir).unwrap();
+        Self::with_shell(window, shell)
+    }
+
     fn with_shell(window: Window, shell: Shell) -> Self {
         let ctx = Context::default();
         ctx.set_fonts(fonts());
         ctx.enable_accesskit();
-        let theme = Theme::builtin(shell.theme());
+        let theme = Theme::of(&shell);
         theme.apply(&ctx);
         let zoom = shell.zoom();
         apply_zoom(&ctx, zoom);
@@ -139,6 +154,7 @@ impl Harness {
             size,
             zoom,
             events: Vec::new(),
+            effects: Vec::new(),
             title_bar: false,
             engine: bl_shell::audio::EngineTransport::default(),
             menu_bar: None,
@@ -213,6 +229,9 @@ impl Harness {
             dropped_files: std::mem::take(&mut self.dropped),
             ..Default::default()
         };
+        // Spec: view-options R1. The middle button pans the area under the
+        // pointer, so egui never sees it.
+        bl_ui::middle::take(&mut input, &self.ctx);
         // As the app does: the keys go to a value being typed as to a text
         // field, and the frame draws what the engine last published.
         let text_focused = self.ctx.text_edit_focused() || self.main.is_typing();
@@ -287,6 +306,7 @@ impl Harness {
                 UiEvent::FocusTrack(track) => self.shell.set_focused_track(*track),
                 UiEvent::FocusValue(focused) => self.shell.set_value_focused(*focused),
                 UiEvent::StatusHint(hint) => self.shell.set_hint(hint.clone()),
+                UiEvent::SearchRun(index) => self.shell.search_run_row(*index),
                 UiEvent::ArrangementViewport { width, height } => {
                     self.shell.set_arrangement_viewport(*width, *height);
                 }
@@ -300,6 +320,7 @@ impl Harness {
             self.events.push(event);
         }
         for effect in self.shell.take_effects() {
+            self.effects.push(effect.clone());
             match self.window {
                 Window::Main => self.main.apply_effect(&self.ctx, &effect),
                 Window::Settings => self.settings.apply_effect(&effect),
@@ -398,6 +419,29 @@ impl Harness {
         }])
     }
 
+    /// A drag with the middle mouse button held: Live pans the area under
+    /// the pointer with it (view-options R1).
+    pub fn middle_drag(&mut self, from: Pos2, to: Pos2) {
+        self.frame(vec![Event::PointerMoved(from)]);
+        self.frame(vec![Event::PointerButton {
+            pos: from,
+            button: PointerButton::Middle,
+            pressed: true,
+            modifiers: Modifiers::NONE,
+        }]);
+        for step in 1..=4 {
+            let t = step as f32 / 4.0;
+            self.frame(vec![Event::PointerMoved(from + (to - from) * t)]);
+        }
+        self.frame(vec![Event::PointerButton {
+            pos: to,
+            button: PointerButton::Middle,
+            pressed: false,
+            modifiers: Modifiers::NONE,
+        }]);
+        self.settle();
+    }
+
     /// A key press and release with modifiers.
     pub fn key(&mut self, key: egui::Key, modifiers: Modifiers) -> FullOutput {
         self.frame(vec![Event::Key {
@@ -437,4 +481,24 @@ pub fn command() -> Modifiers {
         } else {
             Modifiers::CTRL
         }
+}
+
+/// Every rectangle a frame paints, and the colour it fills it with.
+pub fn painted_rects(output: &FullOutput) -> Vec<(Rect, Color32)> {
+    fn walk(shape: &egui::Shape, out: &mut Vec<(Rect, Color32)>) {
+        match shape {
+            egui::Shape::Rect(rect) => out.push((rect.rect, rect.fill)),
+            egui::Shape::Vec(shapes) => {
+                for shape in shapes {
+                    walk(shape, out);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    for clipped in &output.shapes {
+        walk(&clipped.shape, &mut out);
+    }
+    out
 }

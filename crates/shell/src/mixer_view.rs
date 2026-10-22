@@ -407,7 +407,7 @@ pub fn max_scroll(columns: usize) -> f64 {
 /// from 1 in this order, as the Arrangement's headers are.
 #[must_use]
 pub fn columns(doc: &Document, arrangement: &ArrangementView) -> Vec<TrackId> {
-    shown_tracks(doc, |id| arrangement.is_folded(id))
+    shown_tracks(doc, arrangement)
         .map(|(id, _, _)| id)
         .collect()
 }

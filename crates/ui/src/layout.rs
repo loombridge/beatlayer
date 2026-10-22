@@ -1030,6 +1030,38 @@ pub fn tag_editor_rect(browser: Rect) -> Rect {
     )
 }
 
+/// The search field's width (command palette R2; Beatlayer's own size).
+pub const SEARCH_WIDTH: f32 = 480.0;
+
+/// The height of the search field's top row: the scope buttons, the text and
+/// Show Only Matches.
+pub const SEARCH_HEADER: f32 = 30.0;
+
+/// A row of the search field's list.
+pub const SEARCH_ROW: f32 = 22.0;
+
+/// The most rows the search field's list shows before it scrolls.
+pub const SEARCH_ROWS: usize = 12;
+
+/// The gap between the main view's top edge and the search field.
+const SEARCH_GAP: f32 = 4.0;
+
+/// Where the search field sits (command palette R2, R14; IMP-16 in
+/// layout.md): centred at the main view's top edge, 480 points wide, its
+/// list under its top row, which `rows` rows of at most 12 fill.
+#[must_use]
+pub fn search_field_rect(main_view: Rect, rows: usize) -> Rect {
+    let list = rows.min(SEARCH_ROWS) as f32 * SEARCH_ROW;
+    let width = SEARCH_WIDTH.min(main_view.width());
+    Rect::from_min_size(
+        pos2(
+            main_view.center().x - width / 2.0,
+            main_view.top() + SEARCH_GAP,
+        ),
+        vec2(width, SEARCH_HEADER + list),
+    )
+}
+
 /// The Arrangement View's track header column (L-ARR-006): 294 points at
 /// the right of the main view, whatever the window's width; the lanes take
 /// the rest.

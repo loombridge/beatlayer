@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-656 commands in 41 areas.
+666 commands in 42 areas.
 
 ## Permission classes
 
@@ -517,6 +517,16 @@ Each command has:
 | [`scene.set_follow_actions`](#sceneset_follow_actions) | Set Scene Follow Actions | `edit` |  |  |
 | [`scene.set_tempo`](#sceneset_tempo) | Set Scene Tempo | `edit` |  |  |
 | [`scene.set_time_signature`](#sceneset_time_signature) | Set Scene Time Signature | `edit` |  |  |
+| [`search.close`](#searchclose) | Close Search | `read` |  |  |
+| [`search.commands`](#searchcommands) | Find Commands | `read` |  |  |
+| [`search.next`](#searchnext) | Search Next | `read` |  |  |
+| [`search.open`](#searchopen) | Search Commands | `read` | `Cmd+Shift+P`; `Cmd+Shift+O` | `Ctrl+Shift+P`; `Ctrl+Shift+O` |
+| [`search.previous`](#searchprevious) | Search Previous | `read` |  |  |
+| [`search.set_only_matches`](#searchset_only_matches) | Show Only Matches | `read` |  |  |
+| [`search.set_scope`](#searchset_scope) | Set Search Scope | `read` |  |  |
+| [`search.set_text`](#searchset_text) | Type in Search | `read` |  |  |
+| [`search.state`](#searchstate) | Search State | `read` |  |  |
+| [`search.tracks`](#searchtracks) | Find Tracks | `read` |  |  |
 | [`session.back_to_arrangement`](#sessionback_to_arrangement) | Back to Arrangement | `read` | `F10` | `F10` |
 | [`session.back_to_arrangement_track`](#sessionback_to_arrangement_track) | Back to Arrangement (Track) | `read` |  |  |
 | [`session.capture_and_insert_scene`](#sessioncapture_and_insert_scene) | Capture and Insert Scene | `edit` | `Cmd+Shift+I` | `Ctrl+Shift+I` |
@@ -9395,6 +9405,157 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+### Area `search`
+
+#### `search.close`
+
+**Close Search**. Permission: `read`. Contexts: `global`, `text-field`.
+
+Closes the search field, removes the track outlines and shows every track again. Changes nothing in the set.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`SearchState`](#searchstate).
+
+#### `search.commands`
+
+**Find Commands**. Permission: `read`. Contexts: `global`.
+
+The rows the Commands scope lists for `text`, in the order it lists them: every command a menu item, a context-menu item or a shortcut runs, once, with the arguments that item fixes, its label, the menu or context it belongs to, the keys bound to it now and whether it can run now. A word matches when it starts a word of the label or the menu, or appears in the command's description; rows that can't run now come last. Works with the field closed, and runs nothing: run a row by running its `command` with its `args`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `text` | string | yes | What was typed. |
+
+Result: [`CommandRows`](#commandrows).
+
+#### `search.next`
+
+**Search Next**. Permission: `read`. Contexts: `global`, `text-field`.
+
+In the Tracks scope, selects the next matching track after the selected one in display order (the first when none is selected, wrapping from the last), as clicking its title bar would, and scrolls the view in front to it, unfolding any group that holds it: Return in the field. In the Commands scope, moves the highlight down a row, wrapping. Changes nothing in the set.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`SearchState`](#searchstate).
+
+#### `search.open`
+
+**Search Commands**. Permission: `read`. Contexts: `global`, `text-field`.
+
+Opens the search field over the main view with the text empty, on the Commands scope (`commands`: the commands a menu item, a context-menu item or a shortcut runs) or the Tracks scope (`tracks`: tracks found by their name or by the name of a device on them). Help > Search Commands... and Cmd-Shift-P (Ctrl-Shift-P) open the first; Navigate > Find Track and Cmd-Shift-O (Ctrl-Shift-O) the second. With the field open it switches the scope and keeps the text. The field is view state: it isn't saved in the set and it isn't an undo step.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-MENU-007 | `Cmd+Shift+P` | `Ctrl+Shift+P` | `global` | Open the command search | fixes `scope` = `"commands"` |
+| S-FOCUS-015 | `Cmd+Shift+O` | `Ctrl+Shift+O` | `global` | Open the track search | fixes `scope` = `"tracks"` |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `scope` | [`SearchScope`](#searchscope) | yes | `commands` or `tracks`. |
+
+Result: [`SearchState`](#searchstate).
+
+#### `search.previous`
+
+**Search Previous**. Permission: `read`. Contexts: `global`, `text-field`.
+
+The reverse of `search.next`: in the Tracks scope, selects the previous matching track (Shift-Return in the field); in the Commands scope, moves the highlight up a row, wrapping. Changes nothing in the set.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`SearchState`](#searchstate).
+
+#### `search.set_only_matches`
+
+**Show Only Matches**. Permission: `read`. Contexts: `global`, `text-field`.
+
+Switches Show Only Matches in the Tracks scope. While it's on and the text matches a track, the Arrangement's lanes, the Session View's columns and both mixers show only the matching tracks, the groups that hold them unfolded, and Main. The other tracks play, record and take edits as before. It's view state that ends with the search: it is off each time the field opens.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean | yes | Whether the setting is on. |
+
+Result: [`SearchState`](#searchstate).
+
+#### `search.set_scope`
+
+**Set Search Scope**. Permission: `read`. Contexts: `global`, `text-field`.
+
+Switches the open search field to the Commands or the Tracks scope and keeps its text. Changes nothing in the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `scope` | [`SearchScope`](#searchscope) | yes | `commands` or `tracks`. |
+
+Result: [`SearchState`](#searchstate).
+
+#### `search.set_text`
+
+**Type in Search**. Permission: `read`. Contexts: `global`, `text-field`.
+
+Sets the text of the open search field, as typing does. The Commands scope then lists the rows `search.commands` gives for it, with the first highlighted; the Tracks scope outlines the tracks `search.tracks` gives. Changes nothing in the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `text` | string | yes | What was typed. |
+
+Result: [`SearchState`](#searchstate).
+
+#### `search.state`
+
+**Search State**. Permission: `read`. Contexts: `global`.
+
+What the search field shows: whether it is open, its scope, its text, the highlighted row, whether Show Only Matches is on, and the rows it lists, each with its command ID and the arguments it fixes, or its track ID.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`SearchState`](#searchstate).
+
+#### `search.tracks`
+
+**Find Tracks**. Permission: `read`. Contexts: `global`.
+
+The tracks the Tracks scope lists for `text`, in display order: those with the text, ignoring case, in their name or in the name or own name of a device on them at any depth, plug-ins included. Each row says whether the track's name matched and which device did. Works with the field closed, and changes nothing.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `text` | string | yes | What was typed. |
+
+Result: [`TrackRows`](#trackrows).
+
 ### Area `session`
 
 #### `session.back_to_arrangement`
@@ -17112,6 +17273,97 @@ What `view.close_plug_in_windows` returns: how many editor windows it closed.
   },
   "required": [
     "closed"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `CommandRow`
+
+A row the Commands scope lists (R4 and R5).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `command` | string | yes | The command the row runs, by its ID. |
+| `label` | string | yes | The item's label as the menu shows it, or the shortcut's action. |
+| `menu` | string | yes | The menu or context the row belongs to, such as `Edit` or `View ▸ Mixer Controls`. |
+| `available` | boolean | yes | Whether it can run now (R7). |
+| `args` | object | no | The arguments the row fixes. |
+| `keys` | array of string | no | The keys the keymap binds to it now, as the shortcut reference writes them. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A row the Commands scope lists (R4 and R5).",
+  "properties": {
+    "args": {
+      "additionalProperties": true,
+      "description": "The arguments the row fixes.",
+      "type": "object"
+    },
+    "available": {
+      "description": "Whether it can run now (R7).",
+      "type": "boolean"
+    },
+    "command": {
+      "description": "The command the row runs, by its ID.",
+      "type": "string"
+    },
+    "keys": {
+      "description": "The keys the keymap binds to it now, as the shortcut reference writes them.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "label": {
+      "description": "The item's label as the menu shows it, or the shortcut's action.",
+      "type": "string"
+    },
+    "menu": {
+      "description": "The menu or context the row belongs to, such as `Edit` or `View ▸ Mixer Controls`.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "command",
+    "label",
+    "menu",
+    "available"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `CommandRows`
+
+What `search.commands` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `rows` | array of [`CommandRow`](#commandrow) | yes | The rows, in the order the list shows them. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `search.commands` returns.",
+  "properties": {
+    "rows": {
+      "description": "The rows, in the order the list shows them.",
+      "items": {
+        "$ref": "#/$defs/CommandRow"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "rows"
   ],
   "type": "object"
 }
@@ -31335,6 +31587,111 @@ The Automatic Search's switches and folder (R14).
 
 </details>
 
+### `SearchScope`
+
+What the search field looks for (R2).
+
+One of:
+
+- `"commands"`: The commands a menu item, a context-menu item or a shortcut runs.
+- `"tracks"`: The tracks whose name, or a device's name, matches.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What the search field looks for (R2).",
+  "oneOf": [
+    {
+      "const": "commands",
+      "description": "The commands a menu item, a context-menu item or a shortcut runs.",
+      "type": "string"
+    },
+    {
+      "const": "tracks",
+      "description": "The tracks whose name, or a device's name, matches.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `SearchState`
+
+What the search field shows (R15).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `open` | boolean | yes | Whether the field is open. |
+| `scope` | [`SearchScope`](#searchscope) | yes | Its scope. |
+| `text` | string | yes | The text in it. |
+| `only_matches` | boolean | yes | Whether Show Only Matches is on. |
+| `commands` | array of [`CommandRow`](#commandrow) | yes | The rows of the Commands scope, empty in the other. |
+| `tracks` | array of [`TrackRow`](#trackrow) | yes | The rows of the Tracks scope, empty in the other. |
+| `highlight` | integer or null | no | The index of the highlighted row in `commands`, or of the selected track in `tracks`. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What the search field shows (R15).",
+  "properties": {
+    "commands": {
+      "description": "The rows of the Commands scope, empty in the other.",
+      "items": {
+        "$ref": "#/$defs/CommandRow"
+      },
+      "type": "array"
+    },
+    "highlight": {
+      "description": "The index of the highlighted row in `commands`, or of the selected track in `tracks`.",
+      "format": "uint",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "only_matches": {
+      "description": "Whether Show Only Matches is on.",
+      "type": "boolean"
+    },
+    "open": {
+      "description": "Whether the field is open.",
+      "type": "boolean"
+    },
+    "scope": {
+      "$ref": "#/$defs/SearchScope",
+      "description": "Its scope."
+    },
+    "text": {
+      "description": "The text in it.",
+      "type": "string"
+    },
+    "tracks": {
+      "description": "The rows of the Tracks scope, empty in the other.",
+      "items": {
+        "$ref": "#/$defs/TrackRow"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "open",
+    "scope",
+    "text",
+    "only_matches",
+    "commands",
+    "tracks"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `Section`
 
 A sidebar section.
@@ -34250,6 +34607,85 @@ A track, by ID and name.
   "required": [
     "id",
     "name"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `TrackRow`
+
+A track the Tracks scope lists (R9).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track. |
+| `name` | string | yes | Its name. |
+| `by_name` | boolean | yes | Whether the track's own name matched. |
+| `device` | string or null | no | The name of a device on it that matched, when one did. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A track the Tracks scope lists (R9).",
+  "properties": {
+    "by_name": {
+      "description": "Whether the track's own name matched.",
+      "type": "boolean"
+    },
+    "device": {
+      "description": "The name of a device on it that matched, when one did.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "name": {
+      "description": "Its name.",
+      "type": "string"
+    },
+    "track": {
+      "$ref": "#/$defs/TrackId",
+      "description": "The track."
+    }
+  },
+  "required": [
+    "track",
+    "name",
+    "by_name"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `TrackRows`
+
+What `search.tracks` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `rows` | array of [`TrackRow`](#trackrow) | yes | The matching tracks, in display order. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `search.tracks` returns.",
+  "properties": {
+    "rows": {
+      "description": "The matching tracks, in display order.",
+      "items": {
+        "$ref": "#/$defs/TrackRow"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "rows"
   ],
   "type": "object"
 }

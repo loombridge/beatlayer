@@ -64,6 +64,8 @@
 //!   (`clip.crop`, `arrangement.consolidate*`, WP-4.13).
 //! - [`audio_panel`]: the Audio Utilities panel's own commands
 //!   (`clip.edit_sample`, `clip.replace_sample`, WP-4.10b).
+//! - [`search`]: the search field's commands (`search.*`, WP-6.42): command
+//!   search and track search.
 //!
 //! `cargo xtask` checks the commands, lists them in the command reference, and
 //! builds the keymap from this crate, so none of its tasks links an audio
@@ -103,6 +105,7 @@ pub mod perception;
 pub mod plugins;
 pub mod sample_editor;
 pub mod scales;
+pub mod search;
 pub mod session_launch;
 pub mod session_record;
 pub mod session_view;
@@ -157,5 +160,6 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     bounce::register(registry)?;
     slice::register(registry)?;
     warping::register(registry)?;
-    scales::register(registry)
+    scales::register(registry)?;
+    search::register(registry)
 }

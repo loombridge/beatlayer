@@ -1846,6 +1846,9 @@ fn paths() -> BTreeMap<&'static str, Path> {
         key,
     };
     let clip_view = LaterView("the Clip View (milestone M2)");
+    let groove_pool = LaterView(
+        "the Groove Pool, the Clip View's groove controls and the browser's Grooves label (WP-6.20)",
+    );
     // The Clip View's note editing (WP-2.3): the pointer reaches each of
     // these — a click, a marquee, and drags in the note editor — and their
     // keys (shortcuts.md, `note-editor` and `note-selection`) come with a
@@ -1960,6 +1963,22 @@ fn paths() -> BTreeMap<&'static str, Path> {
             "clip.set_scale",
             main(a_clip_selected, control_bar, "Scale Mode", Key::Enter),
         ),
+        // Grooves (WP-6.19): the Groove Pool, the Clip View's groove controls
+        // and the browser's Grooves label come with WP-6.20; until then
+        // agents reach these.
+        ("clip.set_groove", Exception(groove_pool)),
+        ("groove.add", Exception(groove_pool)),
+        ("groove.commit", Exception(groove_pool)),
+        ("groove.delete", Exception(groove_pool)),
+        ("groove.extract", Exception(groove_pool)),
+        ("groove.load", Exception(groove_pool)),
+        ("groove.pool", Exception(Query)),
+        ("groove.rename", Exception(groove_pool)),
+        ("groove.save", Exception(groove_pool)),
+        ("groove.set", Exception(groove_pool)),
+        ("groove.set_auto_load", Exception(groove_pool)),
+        ("groove.set_global_amount", Exception(groove_pool)),
+        ("groove.to_clip", Exception(groove_pool)),
         ("transport.set_recording", Exception(recording)),
         ("transport.stop_recording", Exception(recording)),
         // Tempo breakpoints and time-signature markers (WP-2.20): the

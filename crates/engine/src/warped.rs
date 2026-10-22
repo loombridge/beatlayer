@@ -683,8 +683,7 @@ impl Contents {
                 &mut segments,
                 (tick, stop),
                 beat,
-                preserve,
-                media.transients,
+                (preserve, media.transients),
                 &frame_of,
                 view.as_ref(),
             );
@@ -727,8 +726,7 @@ impl Contents {
         segments: &mut Vec<Segment>,
         (from, to): (i64, i64),
         beat: f64,
-        preserve: Preserve,
-        transients: &[f64],
+        (preserve, transients): (Preserve, &[f64]),
         frame_of: &dyn Fn(i64) -> f64,
         view: Option<&AudioPass<'_>>,
     ) {

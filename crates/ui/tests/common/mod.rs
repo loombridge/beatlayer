@@ -34,6 +34,8 @@ pub struct Node {
     pub label: String,
     pub value: String,
     pub description: String,
+    /// The node's state, as a screen reader reads it (undo history R12).
+    pub state: String,
     pub disabled: bool,
     /// Whether it's selected, for items that can be (WP-1.8b).
     pub selected: Option<bool>,
@@ -336,6 +338,7 @@ impl Harness {
                 label: node.label().unwrap_or_default().to_owned(),
                 value: node.value().unwrap_or_default().to_owned(),
                 description: node.description().unwrap_or_default().to_owned(),
+                state: node.state_description().unwrap_or_default().to_owned(),
                 disabled: node.is_disabled(),
                 selected: node.is_selected(),
                 toggled: node

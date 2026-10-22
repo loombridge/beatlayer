@@ -661,9 +661,9 @@ Total to 1.0: 256 packages planned in Phases 0 to 6, and about 110 estimated in 
 | 6.22 | todo |  |  |
 | 6.22b | todo |  |  |
 | 6.23 | todo |  |  |
-| 6.24 | todo |  |  |
+| 6.24 | done | 22 October 2026 | [#314](https://github.com/loombridge/beatlayer/pull/314); locators in the Arrangement's scrub area, the song start time, and playing from the scrub area on the global launch quantisation ([time editing](specs/time-editing.md) R1 to R13) |
 | 6.24b | todo |  |  |
-| 6.25 | todo |  |  |
+| 6.25 | done | 22 October 2026 | [#305](https://github.com/loombridge/beatlayer/pull/305); a time selection in the Arrangement's automation lanes names the lanes it covers, the breakpoints it covers and a segment drag move as one undo step each, Cut, Copy, Paste, Duplicate and Delete act on the selected lanes' envelopes and a copied shape pastes onto another parameter, and Lock Envelopes keeps the tracks' envelopes where they are while clip edits carry them over the clips' spans when it's off ([automation editing](specs/automation-editing.md) R1 to R10) |
 | 6.25b | todo |  |  |
 | 6.25c | todo |  |  |
 | 6.26 | todo |  |  |

@@ -1,6 +1,6 @@
 # Transport: play, stop, continue, the insert marker, and the Arrangement loop
 
-- **Status:** partial (R1 to R20 each have a passing test; R21 and R22 are WP-6.24's, R23 WP-6.59's)
+- **Status:** partial (R1 to R22 each have a passing test; R23 WP-6.59's)
 - **Work packages:** WP-1.5 (R1 to R20); WP-6.24 (the song start time and the quantised locate that locators and the scrub area use, R21 and R22); WP-6.59 (the scrub area's held loop, R23)
 - **Parity-matrix row:** Views and workflow: Arrangement View; Control Bar
 - **Checked against:** the Live 12 reference manual, read 10 October 2026, and for R21 to R23 the online edition, read 20 October 2026; and the UI parity reference's observations of Live 12.4.3 (10 October 2026)
@@ -75,8 +75,8 @@ This spec covers the Arrangement's transport. It leaves to other specs and packa
 | R17 | `crates/model/tests/command_registry.rs`, `bad_requests_change_nothing`; `crates/model/src/document.rs`, `the_loop_is_part_of_the_set_and_saved_when_it_isnt_the_default` | unit |
 | R18 | `crates/model/src/document.rs`, `a_new_sets_loop_is_four_bars_from_the_start_and_off` | unit |
 | R20 | `crates/engine/tests/transport.rs`, `the_published_playhead_follows_every_block`; `crates/engine/tests/playhead.rs`, `the_ui_thread_sees_the_playhead_the_engine_played` (a real-time audio thread and a reader thread) | unit, real-time |
-| R21 | to be written in WP-6.24 | |
-| R22 | to be written in WP-6.24 | |
+| R21 | `crates/engine/tests/transport.rs`, `play_starts_from_the_song_start_time_and_play_from_marker_ignores_it` | unit |
+| R22 | `crates/engine/tests/transport.rs`, `a_quantised_locate_waits_for_the_next_line_and_jumps_there` (at blocks of 1, 64, 512 and 4,096), `a_second_quantised_locate_before_the_line_replaces_the_first`, `a_quantised_locate_with_no_quantisation_jumps_at_once`, `a_quantised_locate_while_stopped_locates_at_once`, `a_stop_abandons_a_jump_waiting_for_a_line`, `a_locate_replaces_a_jump_waiting_for_a_line`; `rtsan/tests/transport.rs`, `the_transport_passes_under_rtsan` | unit, real-time |
 | R23 | to be written in WP-6.59 | |
 
 Scheduled transport commands (D17's commands at a bar and beat) act on their song frames too: `crates/engine/tests/transport.rs`, `scheduled_transport_commands_act_on_their_song_frames`. Agents drive the same commands through the agent API (WP-1.15), on the engine's queue: `crates/cli/tests/agent.rs`, `an_agent_plays_locates_and_stops_the_transport_on_exact_samples` (play, locate, continue, and stop, with a scheduled jump and stop, every frame against a model of these rules at three block sizes). The real-time rules hold throughout: every engine test runs its blocks under the allocation trap, and `rtsan/tests/transport.rs` runs the transport under RealtimeSanitizer.

@@ -1,6 +1,6 @@
 # Locators and time editing: locators, the song start time, the scrub area, Insert Silence, the …Time commands, and time-signature changes
 
-- **Status:** draft
+- **Status:** partial (WP-6.24 builds R1 to R13, each with a passing test; R14 to R24 are WP-6.24b's, R25 to R28 WP-6.59's, and R29 to R36 WP-6.61's)
 - **Work packages:** WP-6.24 (locators, launching from them and from the scrub area, and the song start time: R1 to R13); WP-6.24b (Insert Silence and the Cut, Copy, Paste, Duplicate and Delete Time commands, and Shift with an edit command: R14 to R24). WP-6.59 (the scrub area's press-and-hold loop, Shift-click scrubbing and Permanent Scrub Areas: R25 to R28); WP-6.61 (the time-signature lane, Add and Insert Time Signature Change, editing markers, the Control Bar's signature fields over changes, and the fragmentary-bar commands: R29 to R36). The arranger track's sections, which these commands move too, are [arranger-track.md](arranger-track.md)'s (WP-6.45); whether clip edits carry automation is [automation-editing.md](automation-editing.md)'s (Lock Envelopes, WP-6.25)
 - **Parity-matrix row:** Other: Locators, Copy Time, insert and delete time; Other: Tempo automation and time-signature changes (the time-signature lane and fragmentary bars); Views and workflow: Arrangement View (the scrub area)
 - **Checked against:** the Live 12 reference manual (online edition), read 20 October 2026; the Live 12 release notes, 12.1.5, 12.2 and 12.4; the UI parity reference's rows L-ARR-003, L-ARR-004, L-ARR-010, L-SET-010, M-CREATE-017, C-TIME-024, I-CLICK-013, I-CLICK-014, M-CREATE-005, M-CREATE-016, M-EDIT-018 to M-EDIT-025, C-TIME-018, C-TIME-022, C-TIME-023, I-CLICK-012, I-CLICK-018, I-DRAG-020, I-FOCUS-004, and shortcuts S-ARR-014 to S-ARR-019, S-EDIT-015 and S-A11Y-001
@@ -86,19 +86,19 @@ This spec covers locators, the song start time, the scrub area's click, and the 
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1 | to be written in WP-6.24 | |
-| R2 | to be written in WP-6.24 | |
-| R3 | to be written in WP-6.24 | |
-| R4 | to be written in WP-6.24 | |
-| R5 | to be written in WP-6.24 | |
-| R6 | to be written in WP-6.24 | |
-| R7 | to be written in WP-6.24 | |
-| R8 | to be written in WP-6.24 | |
-| R9 | to be written in WP-6.24 | |
-| R10 | to be written in WP-6.24 | |
-| R11 | to be written in WP-6.24 | |
-| R12 | to be written in WP-6.24 | |
-| R13 | to be written in WP-6.24 | |
+| R1 | `crates/cli/tests/older_sets.rs`, `a_set_saved_before_locators_loads_with_none`, `the_locators_and_the_song_start_time_are_saved_and_load_again` | unit |
+| R2 | `crates/ui/tests/locator.rs`, `clicking_a_locator_selects_it_and_draws_its_name`; `crates/ui/tests/accessibility.rs`, `every_part_reaches_assistive_technology` | UI script, accessibility |
+| R3 | `crates/shell/tests/locator.rs`, `a_locator_is_added_named_and_selected_in_one_undo_step`, `a_locator_is_added_at_the_insert_marker_while_the_song_is_stopped`, `the_button_places_a_locator_on_the_nearest_line_while_the_song_plays`; `crates/ui/tests/locator.rs`, `the_set_locator_button_adds_a_locator_and_reads_delete_while_one_is_selected`, `the_scrub_areas_menu_adds_a_locator`, `the_scrub_areas_add_locator_adds_one_where_it_was_right_clicked`; `crates/ui/tests/accessibility.rs`, `the_screen_reader_follows_the_keyboard_focus` | unit, UI script |
+| R4 | `crates/shell/tests/locator.rs`, `a_locator_is_deleted_in_one_undo_step_and_clears_the_song_start_time`; `crates/ui/tests/locator.rs`, `the_set_locator_button_adds_a_locator_and_reads_delete_while_one_is_selected`, `the_create_menus_item_reads_delete_while_a_locator_is_selected` | unit, UI script |
+| R5 | `crates/shell/tests/locator.rs`, `the_jumps_are_refused_without_an_engine`; `crates/ui/tests/locator.rs`, `clicking_a_locator_selects_it_and_draws_its_name`, `double_clicking_a_locator_selects_it_and_asks_to_play_from_it`; `crates/engine/tests/transport.rs`, `a_quantised_locate_waits_for_the_next_line_and_jumps_there` | unit, UI script |
+| R6 | `crates/shell/tests/locator.rs`, `previous_and_next_jump_across_both_ends`, `next_stops_at_the_end_of_the_last_clip`, `the_jumps_are_refused_without_an_engine` | unit |
+| R7 | `crates/shell/tests/locator.rs`, `a_locator_is_renamed_and_moved_in_one_undo_step_each`, `moving_a_locator_onto_another_changes_nothing`; `crates/ui/tests/locator.rs`, `dragging_a_locator_moves_it_in_one_undo_step`, `escaping_a_locator_drag_leaves_it_where_it_was` | unit, UI script |
+| R8 | `crates/shell/tests/locator.rs`, `a_locator_is_renamed_and_moved_in_one_undo_step_each`, `an_empty_name_keeps_the_old_one`, `the_info_text_is_stored_on_the_locator`; `crates/ui/tests/locator.rs`, `cmd_r_renames_the_selected_locator_in_place` | unit, UI script |
+| R9 | `crates/shell/tests/locator.rs`, `loop_to_next_locator_sets_the_brace_and_switches_the_loop_on`; `crates/ui/tests/locator.rs`, `a_locators_menu_has_the_rows_live_shows` | unit, UI script |
+| R10 | `crates/shell/tests/locator.rs`, `the_song_start_time_follows_its_locator_and_the_brace`, `a_locator_is_deleted_in_one_undo_step_and_clears_the_song_start_time`; `crates/ui/tests/locator.rs`, `the_loop_braces_menu_sets_the_song_start_time`; `crates/engine/tests/transport.rs`, `play_starts_from_the_song_start_time_and_play_from_marker_ignores_it`; `crates/cli/tests/older_sets.rs`, `the_locators_and_the_song_start_time_are_saved_and_load_again` | unit, UI script |
+| R11 | `crates/ui/tests/locator.rs`, `the_scrub_area_click_plays_from_the_clicked_point` | UI script |
+| R12 | `crates/ui/tests/locator.rs`, `option_right_stops_at_a_locator`; `crates/ui/tests/accessibility.rs`, `tab_runs_through_the_arrangement_and_the_neighbour_keys_to_the_next_track` | UI script |
+| R13 | `crates/shell/tests/locator.rs`, `every_locator_command_is_registered_with_its_class`, `the_selection_reports_the_selected_locators`; `crates/model/tests/command_registry.rs`, `every_command_runs_by_id`, `schemas_match_what_commands_serialise`; `crates/agent/tests/readback.rs` | unit |
 | R14 | to be written in WP-6.24b | |
 | R15 | to be written in WP-6.24b | |
 | R16 | to be written in WP-6.24b | |

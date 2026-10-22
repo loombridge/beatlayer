@@ -14,6 +14,7 @@ use std::collections::BTreeMap;
 
 use bl_core::time::Ticks;
 use bl_model::{AudioData, Clip, ClipData, ClipId, Command, TrackId};
+use bl_shell::arrangement_commands::ArrangementState;
 use bl_shell::files::factory_default_set;
 use bl_shell::menus::{Action, MenuPlatform, menu_bar};
 use bl_shell::mixer_view::MixerOf;
@@ -346,8 +347,9 @@ fn the_screen_reader_follows_the_keyboard_focus() {
     assert_eq!(kick.label(), Some("Kick"));
     assert_eq!(kick.is_selected(), Some(true));
 
-    // Tab: the selected track's title bar, then its controls, each read
-    // as the focused control itself.
+    // Tab: the locator buttons, then the selected track's title bar, then
+    // its controls, each read as the focused control itself (the
+    // accessibility spec, R10).
     h.shell
         .run(
             "arrangement.select_tracks",
@@ -355,6 +357,21 @@ fn the_screen_reader_follows_the_keyboard_focus() {
         )
         .unwrap();
     tab_navigation_on(&mut h);
+    let output = press(&mut h, Key::Tab, Modifiers::NONE);
+    assert_eq!(focused_id(&h), Some(bl_ui::arrangement::set_locator_id()));
+    assert_eq!(focused_label(&output), "Set Locator");
+    press(&mut h, Key::Tab, Modifiers::NONE);
+    assert_eq!(
+        focused_id(&h),
+        Some(bl_ui::arrangement::previous_locator_id())
+    );
+    press(&mut h, Key::Tab, Modifiers::NONE);
+    assert_eq!(focused_id(&h), Some(bl_ui::arrangement::next_locator_id()));
+    press(&mut h, Key::Tab, Modifiers::NONE);
+    assert_eq!(
+        focused_id(&h),
+        Some(bl_ui::arrangement::automation_mode_id())
+    );
     let output = press(&mut h, Key::Tab, Modifiers::NONE);
     assert_eq!(focused_id(&h), Some(title_id(tracks[2])));
     assert_eq!(focused_label(&output), "3 Audio");
@@ -458,9 +475,15 @@ fn tab_runs_through_the_arrangement_and_the_neighbour_keys_to_the_next_track() {
     let in_out = |slot| control_id(Place::Header, tracks[2], slot, 0);
     let returns: Vec<TrackId> = h.shell.editor().document().returns().collect();
     // Live's order (12.4.6), without the controls Beatlayer doesn't have
-    // yet: the selected track's header (its In/Out choosers, its mixer
-    // column, its sends), then Optimize Height and Width.
+    // yet: the locator buttons and Automation Mode above the track
+    // headers, then the selected track's header (its In/Out choosers, its
+    // mixer column, its sends), then Lock Envelopes, the control above the
+    // headers (accessibility R10), then Optimize Height and Width.
     let expected = [
+        bl_ui::arrangement::set_locator_id(),
+        bl_ui::arrangement::previous_locator_id(),
+        bl_ui::arrangement::next_locator_id(),
+        bl_ui::arrangement::automation_mode_id(),
         title_id(tracks[2]),
         in_out(Slot::InputType),
         in_out(Slot::InputChannel),
@@ -474,6 +497,7 @@ fn tab_runs_through_the_arrangement_and_the_neighbour_keys_to_the_next_track() {
         pan_id(Place::Header, tracks[2]),
         send_id(Place::Header, tracks[2], returns[0]),
         send_id(Place::Header, tracks[2], returns[1]),
+        bl_ui::arrangement::lock_envelopes_id(),
         bl_ui::arrangement::optimize_height_id(),
         bl_ui::arrangement::optimize_width_id(),
     ];
@@ -481,9 +505,9 @@ fn tab_runs_through_the_arrangement_and_the_neighbour_keys_to_the_next_track() {
         press(&mut h, Key::Tab, Modifiers::NONE);
         assert_eq!(focused_id(&h), Some(want));
     }
-    // Wrap Tab Navigation is on: round to the title bar.
+    // Wrap Tab Navigation is on: round to Set Locator.
     press(&mut h, Key::Tab, Modifiers::NONE);
-    assert_eq!(focused_id(&h), Some(title_id(tracks[2])));
+    assert_eq!(focused_id(&h), Some(bl_ui::arrangement::set_locator_id()));
     press(&mut h, Key::Tab, Modifiers::SHIFT);
     assert_eq!(
         focused_id(&h),
@@ -498,7 +522,7 @@ fn tab_runs_through_the_arrangement_and_the_neighbour_keys_to_the_next_track() {
         focused_id(&h),
         Some(bl_ui::arrangement::optimize_width_id())
     );
-    for _ in 0..4 {
+    for _ in 0..5 {
         press(&mut h, Key::Tab, Modifiers::SHIFT);
     }
     assert_eq!(focused_id(&h), Some(pan_id(Place::Header, tracks[2])));
@@ -517,7 +541,7 @@ fn tab_runs_through_the_arrangement_and_the_neighbour_keys_to_the_next_track() {
     assert_eq!(h.shell.arrangement().selected_tracks(), [tracks[2]]);
 
     // From the volume field, which takes typed values, the keys move too.
-    for _ in 0..10 {
+    for _ in 0..14 {
         press(&mut h, Key::Tab, Modifiers::NONE);
     }
     assert_eq!(
@@ -535,6 +559,46 @@ fn tab_runs_through_the_arrangement_and_the_neighbour_keys_to_the_next_track() {
 
 fn peak_id(place: Place, track: TrackId) -> Id {
     Id::new(("mixer-peak", place, track))
+}
+
+// Spec: accessibility R10; time-editing R3, R12.
+#[test]
+fn a_new_locator_takes_the_keyboard_focus_and_delete_removes_the_reached_one() {
+    let (mut h, _, _) = set();
+    tab_navigation_on(&mut h);
+    h.shell
+        .run("locator.add", json!({ "at": 2_822_400 }))
+        .unwrap();
+    h.settle();
+    let locator = h.shell.editor().document().locators()[0].id;
+    // A new locator takes the keyboard focus (time-editing R3).
+    assert_eq!(
+        focused_id(&h),
+        Some(bl_ui::arrangement::locator_id(locator))
+    );
+    // Tab reaching a locator selects it (time-editing R12).
+    h.shell
+        .run("locator.select", json!({ "locators": [] }))
+        .unwrap();
+    h.settle();
+    // Backwards from the locator to Set Locator, then forwards to it again.
+    for _ in 0..3 {
+        press(&mut h, Key::Tab, Modifiers::SHIFT);
+    }
+    assert_eq!(focused_id(&h), Some(bl_ui::arrangement::set_locator_id()));
+    for _ in 0..3 {
+        press(&mut h, Key::Tab, Modifiers::NONE);
+    }
+    assert_eq!(
+        focused_id(&h),
+        Some(bl_ui::arrangement::locator_id(locator))
+    );
+    let state: ArrangementState =
+        serde_json::from_value(h.shell.run("arrangement.state", json!({})).unwrap()).unwrap();
+    assert_eq!(state.selected_locators, vec![locator]);
+    // Delete deletes the reached locator (time-editing R4, R12).
+    press(&mut h, Key::Delete, Modifiers::NONE);
+    assert!(h.shell.editor().document().locators().is_empty());
 }
 
 // Spec: arrangement-view R24; accessibility R4.
@@ -564,10 +628,19 @@ fn the_hidden_track_controls_leave_the_tab_order() {
     }
     h.settle();
     let expected = [
+        // Spec: accessibility R10. The controls above the track headers
+        // come first.
+        bl_ui::arrangement::set_locator_id(),
+        bl_ui::arrangement::previous_locator_id(),
+        bl_ui::arrangement::next_locator_id(),
+        bl_ui::arrangement::automation_mode_id(),
         title_id(tracks[2]),
         header(Switch::Activator),
         header(Switch::Solo),
         header(Switch::Arm),
+        // The Lock Envelopes switch, the control above the headers
+        // (accessibility R10), is a Tab stop whatever the header shows.
+        bl_ui::arrangement::lock_envelopes_id(),
         bl_ui::arrangement::optimize_height_id(),
         bl_ui::arrangement::optimize_width_id(),
     ];
@@ -738,8 +811,9 @@ fn outline_view_in_focus_outlines_the_focused_area_and_control_until_switched_of
             json!({ "tracks": [tracks[2]] }),
         )
         .unwrap();
-    // The title bar, the five In/Out controls, then the activator.
-    for _ in 0..7 {
+    // The locator buttons and Automation Mode, the title bar, the five
+    // In/Out controls, then the activator.
+    for _ in 0..11 {
         press(&mut h, Key::Tab, Modifiers::NONE);
     }
     let output = h.settle();
@@ -968,6 +1042,16 @@ fn the_navigate_and_options_menus_reach_their_commands() {
     assert_eq!(menu_item(&h, "M-OPT-025").checked, Some(false));
     h.shell.invoke("edit.undo", json!({})).unwrap();
     assert!(h.shell.editor().document().settings().solo_in_place);
+    // Options ▸ Lock Envelopes switches the set's setting, one undo step
+    // (automation-editing R8).
+    let lock = menu_item(&h, "M-OPT-026");
+    assert_eq!((lock.enabled, lock.checked), (true, Some(false)));
+    let invocation = lock.invocation.unwrap();
+    h.shell.invoke(&invocation.id, invocation.args).unwrap();
+    assert!(h.shell.editor().document().settings().lock_envelopes);
+    assert_eq!(menu_item(&h, "M-OPT-026").checked, Some(true));
+    h.shell.invoke("edit.undo", json!({})).unwrap();
+    assert!(!h.shell.editor().document().settings().lock_envelopes);
 }
 
 /// How a command is reached without a pointer, when it has no key and no
@@ -1101,6 +1185,18 @@ fn a_midi_port(h: &mut Harness) {
     let test = bl_midi_io::TestBackend::new();
     test.add_port(bl_midi_io::Direction::Input, "Keys");
     h.shell.use_midi_backend(Box::new(test));
+}
+
+/// The Arrangement View has the keyboard.
+fn arrangement_view(h: &mut Harness) {
+    h.key(Key::Num2, Modifiers::ALT);
+}
+
+/// A locator is selected, so the Set Locator button reads Delete Locator.
+fn a_locator(h: &mut Harness) {
+    h.shell
+        .run("locator.add", json!({ "at": 2_822_400 }))
+        .unwrap();
 }
 
 fn arrangement_track_3(h: &mut Harness) {
@@ -1789,6 +1885,14 @@ fn paths() -> BTreeMap<&'static str, Path> {
         "the Arrangement's editing keys run it: paste, Delete, Left and Right, and Enter then \
          Left or Right (arrangement-editing R12)",
     );
+    // The Arrangement's automation lanes (WP-6.25): the edit keys with
+    // Option (Alt on Windows) apply to the envelopes (S-EDIT-016), and the
+    // lane's own gestures reach the rest.
+    let envelope_edit = Equivalent(
+        "the Arrangement's automation lane: the edit keys with Option (Alt on Windows) apply to \
+         the envelopes (S-EDIT-016), and the lane's gestures move and select their breakpoints \
+         (automation-editing R2 to R4)",
+    );
     // The browser's tags (browser-tags R10 to R16): the Tag Editor and
     // Quick Tags reach them.
     let tag_editor = Equivalent(
@@ -1811,6 +1915,14 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("browser.tag_items", Exception(tag_editor)),
         ("browser.show_quick_tags", Exception(quick_tags)),
         // The Control Bar's transport (control-bar-transport R11).
+        ("automation.copy", Exception(envelope_edit)),
+        ("automation.cut", Exception(envelope_edit)),
+        ("automation.delete_range", Exception(envelope_edit)),
+        ("automation.duplicate", Exception(envelope_edit)),
+        ("automation.move_breakpoints", Exception(envelope_edit)),
+        ("automation.paste", Exception(envelope_edit)),
+        ("automation.select_segment", Exception(envelope_edit)),
+        ("automation.set_envelope", Exception(envelope_edit)),
         (
             "transport.play",
             main(nothing, control_bar, "Play", Key::Enter),
@@ -1931,6 +2043,131 @@ fn paths() -> BTreeMap<&'static str, Path> {
         (
             "browser.search",
             main(nothing, browser_search, "Search Field", Key::K),
+        ),
+        // The Arrangement's locator buttons (time-editing R3, R4, R6).
+        (
+            "locator.add",
+            main(nothing, arrangement_view, "Set Locator", Key::Enter),
+        ),
+        (
+            "locator.delete",
+            main(a_locator, arrangement_view, "Delete Locator", Key::Enter),
+        ),
+        // The jumps between the locators need the audio engine, so the
+        // buttons that run them are named instead (time-editing R6, R13).
+        (
+            "locator.jump",
+            Exception(Equivalent(
+                "clicking a locator jumps to it, and the locators are in the Arrangement's Tab \
+                 order, where Enter jumps to the one reached (the time editing spec, R5 and R12)",
+            )),
+        ),
+        (
+            "locator.jump_previous",
+            Exception(Equivalent(
+                "the Previous Locator button, which the keyboard reaches with Tab; the jump \
+                 needs the audio engine (the time editing spec, R6 and R13)",
+            )),
+        ),
+        (
+            "locator.jump_next",
+            Exception(Equivalent(
+                "the Next Locator button, which the keyboard reaches with Tab; the jump needs \
+                 the audio engine (the time editing spec, R6 and R13)",
+            )),
+        ),
+        (
+            "locator.select",
+            Exception(Equivalent(
+                "clicking a locator selects it, and Tab reaches the locators in the \
+                 Arrangement's Tab order (the time editing spec, R5 and R12)",
+            )),
+        ),
+        (
+            "locator.move",
+            Exception(Equivalent(
+                "the arrow keys move the selected locators one grid step, and dragging one \
+                 moves it (the time editing spec, R7)",
+            )),
+        ),
+        (
+            "locator.loop_to_next",
+            Exception(Equivalent(
+                "a locator's context menu, which the pointer opens (the time editing spec, R9)",
+            )),
+        ),
+        (
+            "song.set_start_time",
+            Exception(Equivalent(
+                "a locator's and the loop brace's context menus, which the pointer open (the \
+                 time editing spec, R10)",
+            )),
+        ),
+        (
+            "locator.rename",
+            Exception(Equivalent(
+                "Cmd-R and Edit ▸ Rename while a locator is selected, which the Arrangement's \
+                 keyboard runs directly (the time editing spec, R8)",
+            )),
+        ),
+        (
+            "locator.set_info_text",
+            Exception(Gap(
+                "the user's own info text has no person's path until WP-6.58 (T276) builds Edit \
+                 Info Text",
+            )),
+        ),
+        // The document's own locator commands (the time editing spec, R1 to
+        // R13): the shell's locator.* commands run them, and agents reach
+        // them through the agent API.
+        (
+            "song.add_locator",
+            Exception(Equivalent(
+                "the shell's locator.add, which the Set Locator button, Create ▸ Add Locator and \
+                 a click in the scrub area run (the time editing spec, R3 and R13)",
+            )),
+        ),
+        (
+            "song.delete_locator",
+            Exception(Equivalent(
+                "the shell's locator.delete, which the Delete Locator button and the Delete key \
+                 run (the time editing spec, R4 and R13)",
+            )),
+        ),
+        (
+            "song.move_locator",
+            Exception(Equivalent(
+                "the shell's locator.move, which dragging a locator and the arrow keys run (the \
+                 time editing spec, R7 and R13)",
+            )),
+        ),
+        (
+            "song.rename_locator",
+            Exception(Equivalent(
+                "the shell's locator.rename, which Cmd-R and Edit ▸ Rename run (the time editing \
+                 spec, R8 and R13)",
+            )),
+        ),
+        (
+            "song.set_locator_info_text",
+            Exception(Equivalent(
+                "the shell's locator.set_info_text, which waits on the same gap (the time \
+                 editing spec, R8 and R13)",
+            )),
+        ),
+        (
+            "song.loop_to_next_locator",
+            Exception(Equivalent(
+                "the shell's locator.loop_to_next, which a locator's context menu runs (the time \
+                 editing spec, R9 and R13)",
+            )),
+        ),
+        (
+            "song.set_start",
+            Exception(Equivalent(
+                "the shell's song.set_start_time, which a locator's and the loop brace's context \
+                 menus run (the time editing spec, R10 and R13)",
+            )),
         ),
         // The Settings window's controls (Tab, then Enter or Up and Down).
         (
@@ -4106,6 +4343,7 @@ fn every_m1_command_is_reachable_from_the_keyboard() {
             "device.snap_layer_markers",
             "device.sort_layers",
             "export.audio",
+            "locator.set_info_text",
             "rack.set_macro_info_text",
             "track.move",
         ],

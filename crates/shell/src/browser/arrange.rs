@@ -176,6 +176,7 @@ pub fn add_files(
         .collect::<Result<Vec<_>, _>>()?;
 
     let mut result = AddResult::default();
+    let before = editor.document().clone();
     let applied = editor.transact(UNDO_LABEL, |editor| {
         // The track each file goes on: the target (or one new track) for
         // all of them, or with `spread` a track each.
@@ -235,6 +236,8 @@ pub fn add_files(
             });
             at = at.saturating_add(length);
         }
+        // Spec: audio-clips R26. Clips the drop left meeting are crossfaded.
+        crate::arrangement::fades::settle(editor, &before, edge_fades)?;
         Ok::<_, bl_model::EditError>(())
     });
     applied.map_err(|e| AddError::Failed(e.to_string()))?;

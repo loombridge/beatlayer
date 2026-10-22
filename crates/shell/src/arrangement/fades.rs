@@ -12,8 +12,8 @@ use std::collections::BTreeSet;
 
 use bl_core::time::Ticks;
 use bl_model::{
-    AudioData, ChangeSet, Clip, ClipData, ClipId, Command, Document, EDGE_FADE_SECONDS, Editor,
-    TrackId, crossfades,
+    AudioData, ChangeSet, Clip, ClipData, ClipId, Command, Document, EDGE_FADE_SECONDS, EditError,
+    Editor, TrackId, crossfades,
 };
 use bl_shell_spec::editing::Edge;
 
@@ -63,7 +63,7 @@ fn set_edge_fade(
     clip: ClipId,
     edge: Edge,
     length: f64,
-) -> Result<(), EditFailure> {
+) -> Result<(), EditError> {
     let Some(data) = editor.document().clip(clip).and_then(audio).cloned() else {
         return Ok(());
     };
@@ -87,7 +87,7 @@ fn set_edge_fade(
             Edge::Start => (0.0, data.fade_out),
             Edge::End => (data.fade_in, 0.0),
         };
-        apply(editor, command(fade_in, fade_out))?;
+        editor.apply(command(fade_in, fade_out))?;
     }
     Ok(())
 }
@@ -100,12 +100,12 @@ fn set_edge_fade(
 ///
 /// # Errors
 ///
-/// [`EditFailure`] if the document refuses a step.
+/// [`EditError`] if the document refuses a step.
 pub(crate) fn settle(
     editor: &mut Editor,
     before: &Document,
     edge_fades: bool,
-) -> Result<(), EditFailure> {
+) -> Result<(), EditError> {
     let changed: BTreeSet<ClipId> = ChangeSet::between(before, editor.document())
         .clips
         .into_keys()

@@ -44,10 +44,19 @@ fn model(scene: &Scene) -> Vec<f32> {
             let start = tempo.ticks_to_frames(clip.start, SAMPLE_RATE).get();
             let end = tempo.ticks_to_frames(clip.end(), SAMPLE_RATE).get();
             let (fade_in, fade_out) = (frames(audio.fade_in), frames(audio.fade_out));
-            for song in start..end {
-                let elapsed = (song - start) as u64;
+            // R24: a crossfade has the clip play on past its edges, over the
+            // frames its fades reach.
+            let (before, after) = (frames(audio.fade_in_before), frames(audio.fade_out_after));
+            let (in_power, out_power) = (
+                4f64.powf(-audio.fade_in_curve),
+                4f64.powf(-audio.fade_out_curve),
+            );
+            for song in (start - before as i64)..(end + after as i64) {
+                let elapsed = song - start;
                 // R3, R4: the frame of the file.
-                let linear = frames(audio.start) + elapsed;
+                let Ok(linear) = u64::try_from(frames(audio.start) as i64 + elapsed) else {
+                    continue;
+                };
                 let position = if audio.looping {
                     let (from, to) = (
                         frames(audio.loop_start),
@@ -63,14 +72,19 @@ fn model(scene: &Scene) -> Vec<f32> {
                 } else {
                     continue;
                 };
-                // R5, R6: the gain, and straight-line fades from the edges.
+                // R5, R6, R23: the gain, and fades from the edges, straight
+                // lines unless the curve says otherwise.
                 let mut fade = 1.0f64;
-                if elapsed < fade_in {
-                    fade = elapsed as f64 / fade_in as f64;
+                let (rising, falling) = (fade_in + before, fade_out + after);
+                let into = elapsed + before as i64;
+                if rising > 0 && into < rising as i64 {
+                    let x = into.max(0) as f64 / rising as f64;
+                    fade = if in_power == 1.0 { x } else { x.powf(in_power) };
                 }
-                let left = (end - song) as u64;
-                if left < fade_out {
-                    fade = fade.min(left as f64 / fade_out as f64);
+                let left = end + after as i64 - song;
+                if falling > 0 && left < falling as i64 {
+                    let x = left.max(0) as f64 / falling as f64;
+                    fade = fade.min(if out_power == 1.0 { x } else { x.powf(out_power) });
                 }
                 for c in 0..2 {
                     let channel = file.channel(c.min(file.channel_count() - 1)).unwrap();
@@ -265,5 +279,105 @@ fn overlapping_clips_on_two_tracks_add_to_the_bit() {
         "{} {}",
         peak(0),
         peak(1)
+    );
+}
+
+// Spec: audio-clips R23, R24, R31
+#[test]
+fn a_crossfade_plays_both_clips_across_its_span_by_the_curve_law() {
+    let (scene, render) = matches_the_model("clip-crossfade");
+    let tempo = &scene.document().settings().tempo;
+    let beat = bl_core::time::Ticks::QUARTER;
+    let boundary = tempo.ticks_to_frames(beat * 3, SAMPLE_RATE).get() as usize;
+    let sine = |hz: &str| {
+        let file = scene
+            .files
+            .iter()
+            .find(|f| f.name == format!("sine-{hz}.wav"))
+            .unwrap();
+        scene.media.get(file.hash).unwrap().channel(0).unwrap()
+    };
+    let (low, high) = (sine("440"), sine("660"));
+    // 80 ms (3,840 frames) before the boundary and 120 ms (5,760) after.
+    let (from, to) = (boundary - 3_840, boundary + 5_760);
+    // Before the span only the first sine plays, and from its end only the
+    // second; the second's file is read from a second in.
+    assert_eq!(left(&render, from - 1), low[from - 1]);
+    assert_eq!(left(&render, from), low[from]);
+    assert_eq!(left(&render, to), high[48_000 + (to - boundary)]);
+    // Inside it both do: the first clip plays on past its end and the second
+    // from before its start, which neither's own edges would give.
+    for frame in [from + 1, boundary - 1, boundary, boundary + 1, to - 1] {
+        let sum = |gain_low: f64, gain_high: f64| {
+            (f64::from(low[frame]) * gain_low) as f32 + (f64::from(high[48_000 + frame - boundary]) * gain_high) as f32
+        };
+        let x = (frame - from) as f64 / (to - from) as f64;
+        let p = 4f64.powf(-0.25);
+        assert_eq!(
+            left(&render, frame).to_bits(),
+            sum((1.0 - x).powf(p), x.powf(p)).to_bits(),
+            "frame {frame}"
+        );
+    }
+    assert_ne!(left(&render, boundary - 1), low[boundary - 1], "the second clip is heard");
+    assert_ne!(
+        left(&render, boundary + 1),
+        high[48_000 + 1],
+        "the first clip is still heard"
+    );
+}
+
+// Spec: audio-clips R24, R26. The two parts of a split clip, crossfaded 2 ms
+// either side as Create Fades on Clip Edges leaves them, play the whole
+// clip to under -120 dBFS, across a tempo ramp.
+#[test]
+fn the_crossfaded_parts_of_a_split_clip_null_against_the_whole() {
+    let fixture = fixture("clip-split-crossfade").expect("the fixture exists");
+    let scene = fixture.scene();
+    let parts = fixture.render();
+    assert!(parts.problems().is_empty(), "{:?}", parts.problems());
+    let mut editor = fixture.scene().editor;
+    let track = editor.document().top_level().next().unwrap();
+    let mut clips: Vec<_> = editor.document().track(track).unwrap().clips().cloned().collect();
+    clips.sort_by_key(|c| c.start);
+    let [left_part, right_part] = &clips[..] else {
+        panic!("the clip is in two parts");
+    };
+    // The whole: the left part with its length run on to the right part's end
+    // and no fades.
+    let ClipData::Audio(audio) = &left_part.data else {
+        panic!("audio");
+    };
+    editor
+        .apply(Command::DeleteClip {
+            clip: right_part.id,
+        })
+        .unwrap();
+    editor
+        .apply(Command::SetClipLength {
+            clip: left_part.id,
+            length: right_part.end() - left_part.start,
+        })
+        .unwrap();
+    editor
+        .apply(Command::SetClipData {
+            clip: left_part.id,
+            data: ClipData::Audio(bl_model::AudioData {
+                fade_out: 0.0,
+                fade_out_after: 0.0,
+                ..audio.clone()
+            }),
+        })
+        .unwrap();
+    let whole = render_song(&editor, &scene.media, scene.frames);
+    assert_eq!(whole.len(), parts.samples.len());
+    let worst = whole
+        .iter()
+        .zip(&parts.samples)
+        .map(|(a, b)| (a - b).abs())
+        .fold(0.0f32, f32::max);
+    assert!(
+        whole.iter().any(|&s| s != 0.0) && worst < 1e-6,
+        "off by {worst}"
     );
 }

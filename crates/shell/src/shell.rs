@@ -5223,6 +5223,7 @@ impl Shell {
                     .map(|(track, ..)| *track)
                     .chain(midi.iter().map(|take| take.track))
                     .collect();
+                let before = self.editor.document().clone();
                 self.editor.transact(label, |editor| {
                     for (track, hash, path, _) in &imported {
                         let id = editor.new_id();
@@ -5252,7 +5253,10 @@ impl Shell {
                         })?;
                     }
                     crate::recording::place_midi(editor, &midi, take, rate, overdub, &mut placed)?;
-                    crate::session_capture::place(editor, &watch, &runs, &armed, end)
+                    crate::session_capture::place(editor, &watch, &runs, &armed, end)?;
+                    // Spec: audio-clips R26. A take that meets a clip
+                    // already there is crossfaded with it.
+                    crate::arrangement::fades::settle(editor, &before, edge_fades)
                 })
             }
             Some(_) => {

@@ -698,6 +698,50 @@ fn quantize_and_quantize_settings_are_bound_in_the_sample_editor() {
     assert_eq!(entry_002.status, Status::Bound);
 }
 
+// Spec: piano-roll R23 to R31 (WP-6.53).
+#[test]
+fn the_note_editors_keys_are_all_handled() {
+    // Every key the note editor reads, and every key the Edit menu's
+    // clipboard items run, is bound to a command or read by the note
+    // editor itself.
+    let keymap = Keymap::live12();
+    for id in [
+        "S-NOTE-001",
+        "S-NOTE-002",
+        "S-NOTE-017",
+        "S-NOTE-018",
+        "S-NOTE-019",
+        "S-NOTE-020",
+        "S-NOTE-042",
+        "S-NOTE-043",
+        "S-NOTE-045",
+        "S-NOTE-046",
+        "S-A11Y-004",
+        "S-A11Y-005",
+        "S-A11Y-006",
+        "S-A11Y-007",
+        "S-A11Y-008",
+        "S-A11Y-009",
+        "S-A11Y-010",
+        "S-A11Y-011",
+        "S-EDIT-001",
+        "S-EDIT-002",
+        "S-EDIT-003",
+        "S-EDIT-004",
+        "S-EDIT-005",
+        "S-EDIT-009",
+    ] {
+        let entry = keymap
+            .entry_for(id)
+            .unwrap_or_else(|| panic!("{id} is in the keymap"));
+        assert!(
+            matches!(entry.status, Status::Bound | Status::Widget(_)),
+            "{id} is handled: {:?}",
+            entry.status
+        );
+    }
+}
+
 #[test]
 fn the_tags_shortcuts_reach_their_commands() {
     // Spec: browser-tags R10 and R14.

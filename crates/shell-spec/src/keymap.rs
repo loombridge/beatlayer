@@ -413,7 +413,8 @@ impl Keymap {
 
     /// The command a key press runs, given the contexts that apply,
     /// narrowest first: the first context in which a bound shortcut with
-    /// these keys runs a command decides.
+    /// these keys runs a command decides. A context whose focused control
+    /// reads the key itself decides too, and no wider context acts on it.
     #[must_use]
     pub fn resolve(
         &self,
@@ -429,6 +430,10 @@ impl Keymap {
     /// decides, and the first one at all if none does. Two shortcuts that
     /// share keys in one context, such as Hide Chains and Fold on Minus,
     /// then each act where the other can't.
+    ///
+    /// A shortcut the focused control reads itself (a `widget` row) stops
+    /// the search: the note editor's Home moves its own insert marker, not
+    /// the transport's (piano-roll R23).
     #[must_use]
     pub fn resolve_with(
         &self,
@@ -440,7 +445,20 @@ impl Keymap {
     ) -> Option<Hit<'_>> {
         for &context in contexts {
             let mut first = None;
+            let mut widget = false;
             for entry in &self.entries {
+                if let Status::Widget(_) = entry.status {
+                    // The focused control reads this key itself.
+                    if entry.context == context.id()
+                        && entry
+                            .chords(platform)
+                            .iter()
+                            .any(|chord| chord.matches(key, mods))
+                    {
+                        widget = true;
+                    }
+                    continue;
+                }
                 if entry.status != Status::Bound {
                     continue;
                 }
@@ -470,6 +488,11 @@ impl Keymap {
             }
             if first.is_some() {
                 return first;
+            }
+            if widget {
+                // The focused control reads the key, so no wider context
+                // runs a command for it.
+                return None;
             }
         }
         None
@@ -1377,5 +1400,31 @@ mod tests {
         assert_eq!(spelling("A"), "A");
         assert_eq!(key("Menu"), None);
         assert_eq!(key("Shift+click"), None);
+    }
+
+    #[test]
+    fn a_focused_controls_key_wins_over_a_wider_contexts() {
+        // Spec: piano-roll R23. The note editor reads Home itself, so the
+        // transport's Home, which moves the song's insert marker, doesn't
+        // run there as well.
+        let keymap = Keymap::live12();
+        let note_editor = [
+            Context::ClipView,
+            Context::NoteEditor,
+            Context::NoteSelection,
+            Context::Global,
+        ];
+        assert!(
+            keymap
+                .resolve(Platform::Mac, "Home", Mods::default(), &note_editor)
+                .is_none(),
+            "the note editor's Home is its own"
+        );
+        // The transport's Home still runs where the note editor isn't.
+        let arrangement = [Context::Arrangement, Context::Global];
+        let hit = keymap
+            .resolve(Platform::Mac, "Home", Mods::default(), &arrangement)
+            .expect("the transport's Home still runs");
+        assert_eq!(hit.command.id, "transport.locate");
     }
 }

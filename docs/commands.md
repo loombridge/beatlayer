@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-614 commands in 40 areas.
+618 commands in 40 areas.
 
 ## Permission classes
 
@@ -242,11 +242,11 @@ Each command has:
 | [`clip_view.quantize_settings`](#clip_viewquantize_settings) | Quantize Settings | `read` | `Cmd+Shift+U` | `Ctrl+Shift+U` |
 | [`clip_view.sample_editor`](#clip_viewsample_editor) | Sample Editor State | `read` |  |  |
 | [`clip_view.sample_view`](#clip_viewsample_view) | Zoom Sample Editor | `read` | `Z`; `X`; `W`; `H` | `Z`; `X`; `W`; `H` |
-| [`clip_view.select_notes`](#clip_viewselect_notes) | Select Notes | `read` |  |  |
-| [`clip_view.select_time`](#clip_viewselect_time) | Select Sample Editor Time | `read` |  |  |
+| [`clip_view.select_notes`](#clip_viewselect_notes) | Select Notes | `read` | `Cmd+A`; `Cmd+A` | `Ctrl+A`; `Ctrl+A` |
+| [`clip_view.select_time`](#clip_viewselect_time) | Select Time | `read` |  |  |
 | [`clip_view.select_transients`](#clip_viewselect_transients) | Select Transients | `read` |  |  |
 | [`clip_view.select_warp_markers`](#clip_viewselect_warp_markers) | Select Warp Markers | `read` |  |  |
-| [`clip_view.set_insert_marker`](#clip_viewset_insert_marker) | Set Sample Editor Insert Marker | `read` |  |  |
+| [`clip_view.set_insert_marker`](#clip_viewset_insert_marker) | Set Insert Marker | `read` |  |  |
 | [`device.add`](#deviceadd) | Add Device | `edit` |  |  |
 | [`device.add_layers`](#deviceadd_layers) | Add Samples | `external` |  |  |
 | [`device.add_preset`](#deviceadd_preset) | Add Preset | `external` |  |  |
@@ -416,8 +416,12 @@ Each command has:
 | [`modulator.set_shape`](#modulatorset_shape) | Edit Shape | `edit` |  |  |
 | [`modulator.unmap`](#modulatorunmap) | Unmap Modulator | `edit` |  |  |
 | [`note.add`](#noteadd) | Add Note | `edit` |  |  |
-| [`note.delete`](#notedelete) | Delete Notes | `destructive` |  |  |
+| [`note.copy`](#notecopy) | Copy Notes | `read` | `Cmd+C` | `Ctrl+C` |
+| [`note.cut`](#notecut) | Cut Notes | `destructive` | `Cmd+X` | `Ctrl+X` |
+| [`note.delete`](#notedelete) | Delete Notes | `destructive` | `Delete` | `Delete` |
+| [`note.duplicate`](#noteduplicate) | Duplicate Notes | `edit` | `Cmd+D` | `Ctrl+D` |
 | [`note.move`](#notemove) | Move Notes | `edit` |  |  |
+| [`note.paste`](#notepaste) | Paste Notes | `edit` | `Cmd+V` | `Ctrl+V` |
 | [`note.quantize`](#notequantize) | Quantize | `edit` | `Cmd+U` | `Ctrl+U` |
 | [`note.ramp_value`](#noteramp_value) | Ramp Note Values | `edit` |  |  |
 | [`note.resize`](#noteresize) | Resize Notes | `edit` |  |  |
@@ -4410,7 +4414,7 @@ Result: [`ChangeSet`](#changeset).
 
 #### `clip_view.quantize_settings`
 
-**Quantize Settings**. Permission: `read`. Contexts: `clip-view`, `note-editor`, `note-selection`, `sample-editor`.
+**Quantize Settings**. Permission: `read`. Contexts: `note-editor`, `note-selection`, `sample-editor`.
 
 Reads or changes the Clip View's Quantize settings, the values `note.quantize`, `clip.quantize_audio` and Cmd-U use when their arguments leave them out: `grid`, the spacing between the quantise grid's lines in ticks (positive; left unset, it follows the note or sample editor's editing grid), `target`, whether quantise moves note starts or note ends, and `amount`, how far each note moves toward its grid line as a percentage from 0 to 100. Fields left out keep their values, and the result reports all of them. The settings belong to the view, like Draw Mode: changing them changes nothing in the set and is no undo step.
 
@@ -4471,27 +4475,34 @@ Result: [`SampleEditorState`](#sampleeditorstate).
 
 #### `clip_view.select_notes`
 
-**Select Notes**. Permission: `read`. Contexts: `clip-view`, `note-editor`, `note-selection`.
+**Select Notes**. Permission: `read`. Contexts: `note-editor`, `note-selection`.
 
-Selects notes in the Clip View's MIDI Note Editor, as clicking a note or dragging a marquee over them does: `replace` selects only these, `toggle` adds or removes each (Cmd-click, Ctrl-click on Windows). Notes are named by their place in the clip's notes in order, by start and then pitch, so place 0 has the earliest start, and of notes that start together the lowest pitch. Selecting is never an undo step and changes nothing in the set.
+Selects notes in the Clip View's MIDI Note Editor, as clicking a note or dragging a marquee over them does: `replace` selects only these, `toggle` adds or removes each (Cmd-click, Ctrl-click on Windows). Notes are named by their place in the clip's notes in order, by start and then pitch, so place 0 has the earliest start, and of notes that start together the lowest pitch. With no notes named, `select` chooses them instead: `nearest` (the note whose start is nearest the insert marker), `previous` and `next` (the previous or next note in the clip's order), `same_pitch_previous` and `same_pitch_next` (the previous or next note at the selected note's pitch), `all` (every note in the clip's span, as Cmd-A does), or `key` (every note at a pitch, as clicking a key in the piano ruler does). `add` adds to the selection instead of replacing it, as Shift with the note-jump keys does. Selecting is never an undo step and changes nothing in the set.
 
-Default keys: none.
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-NOTE-001 | `Cmd+A` | `Ctrl+A` | `note-editor` | Select all notes | fixes `select` = `"all"` |
+| S-EDIT-009 | `Cmd+A` | `Ctrl+A` | `global` | Select everything in the focused view | fixes `select` = `"all"` |
 
 Arguments:
 
 | Name | Type | Required | Description |
 |---|---|---|---|
-| `notes` | array of integer, at least 0 | yes | The notes, by their place in the clip's notes in order (by start, then pitch). Empty with `replace` clears the selection. |
+| `add` | boolean | no | Add to the selection instead of replacing it, as Shift with the note-jump keys does. |
 | `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows (the Arrangement's selected clip). |
 | `mode` | [`NoteSelectMode`](#noteselectmode) | no | How to change the selection; `replace` if left out. |
+| `notes` | array of integer, at least 0 | no | The notes, by their place in the clip's notes in order (by start, then pitch). Empty with `replace` clears the selection, and empty with `select` chooses the notes `select` names. |
+| `select` | [`NoteSelection`](#noteselection) or null | no | What to select when `notes` is empty: the notes the keyboard reaches (Option with the arrows), every note in the clip's span (Cmd-A), or the notes at a pitch (a key in the piano ruler). |
 
 Result: [`ClipViewState`](#clipviewstate).
 
 #### `clip_view.select_time`
 
-**Select Sample Editor Time**. Permission: `read`. Contexts: `clip-view`, `sample-editor`.
+**Select Time**. Permission: `read`. Contexts: `clip-view`, `sample-editor`, `note-editor`, `note-selection`.
 
-Makes a time selection in the Sample Editor from `start` to `end`, in seconds in the file or, with `ticks`, in ticks of a warped clip's contents; with neither the selection is cleared. Dragging across the waveform runs this. Insert Warp Marker and Delete Warp Marker with a time selection act on the transients in it, and Z zooms to it. Never an undo step, and changes nothing in the set.
+Makes a time selection in the editor from `start` to `end`, in seconds in the file or, with `ticks`, in ticks of a warped clip's contents; with neither the selection is cleared. Dragging across the waveform runs this. In the MIDI Note Editor `start` and `end` are ticks of the clip's contents, and the selection is drawn across the note area and the lanes. Never an undo step, and changes nothing in the set.
 
 Default keys: none.
 
@@ -4545,9 +4556,9 @@ Result: [`SampleEditorState`](#sampleeditorstate).
 
 #### `clip_view.set_insert_marker`
 
-**Set Sample Editor Insert Marker**. Permission: `read`. Contexts: `clip-view`, `sample-editor`.
+**Set Insert Marker**. Permission: `read`. Contexts: `clip-view`, `sample-editor`, `note-editor`, `note-selection`.
 
-Puts the Sample Editor's insert marker, the point Insert Warp Marker (Cmd+I) and Insert Transient (Cmd+Shift+I) act at, at a `time` in the file in seconds or at a `beat` of a warped clip's contents in ticks from its 1.1.1; with neither it is taken away. Clicking the waveform runs this, on the nearest grid line while snapping is on. Never an undo step, and changes nothing in the set.
+Puts the editor's insert marker, the point the editor's commands act at, at a `time` in the file in seconds or at a `beat` of a warped clip's contents in ticks from its 1.1.1; with neither it is taken away. Clicking the waveform runs this, on the nearest grid line while snapping is on. In the MIDI Note Editor the marker is a `beat` of the clip's contents in ticks from their beginning, and it stays inside the clip's span. Never an undo step, and changes nothing in the set.
 
 Default keys: none.
 
@@ -7515,7 +7526,7 @@ Result: [`ChangeSet`](#changeset).
 
 #### `note.add`
 
-**Add Note**. Permission: `edit`. Contexts: `clip-view`, `note-editor`, `note-selection`.
+**Add Note**. Permission: `edit`. Contexts: `note-editor`, `note-selection`.
 
 Adds a note to a MIDI clip: pitch `key` (0 to 127; 60 is middle C), starting `start` ticks from the beginning of the clip's contents, lasting `length` ticks, with `velocity` (1 to 127; 100 unless given). With Draw Mode on, clicking the note area runs this for a note one grid step long. The new note is selected afterwards, and the edit is one undo step.
 
@@ -7533,13 +7544,59 @@ Arguments:
 
 Result: [`NoteEditResult`](#noteeditresult).
 
+#### `note.copy`
+
+**Copy Notes**. Permission: `read`. Contexts: `note-editor`, `note-selection`.
+
+Copies notes (`notes`, or the selected notes, or with none selected the notes that start inside the time selection) to the note clipboard, keeping their pitches, values and their places in time from the earliest of them. The note clipboard is apart from the Arrangement's clip clipboard. Copy changes nothing in the set.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-EDIT-002 | `Cmd+C` | `Ctrl+C` | `global` | Copy | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows (the Arrangement's selected clip). |
+| `notes` | array or null | no | The notes, by their place in the clip's notes in order (by start, then pitch). Left out, the selected notes, or with none selected the notes that start inside the time selection. |
+
+Result: [`NoteClipboardState`](#noteclipboardstate).
+
+#### `note.cut`
+
+**Cut Notes**. Permission: `destructive`. Contexts: `note-editor`, `note-selection`.
+
+Copies notes to the note clipboard, as `note.copy` does, then deletes them, as `note.delete` does. Cmd-X (Ctrl-X) runs this on the selected notes, or with none selected the notes in the time selection. Because it removes the person's work, an agent asks first.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-EDIT-001 | `Cmd+X` | `Ctrl+X` | `global` | Cut | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows (the Arrangement's selected clip). |
+| `notes` | array or null | no | The notes, by their place in the clip's notes in order (by start, then pitch). Left out, the selected notes, or with none selected the notes that start inside the time selection. |
+
+Result: [`NoteEditResult`](#noteeditresult).
+
 #### `note.delete`
 
-**Delete Notes**. Permission: `destructive`. Contexts: `clip-view`, `note-editor`, `note-selection`.
+**Delete Notes**. Permission: `destructive`. Contexts: `note-editor`, `note-selection`.
 
-Deletes notes (`notes`, or the selected notes) from a MIDI clip. With Draw Mode on, clicking a note runs this. Because it removes the person's work, an agent asks first. The edit is one undo step.
+Deletes notes (`notes`, or the selected notes) from a MIDI clip. With Draw Mode on, clicking a note runs this. Delete (S-EDIT-005) runs it on the selected notes, or with none selected the notes in the time selection. Because it removes the person's work, an agent asks first. The edit is one undo step.
 
-Default keys: none.
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-EDIT-005 | `Delete` | `Delete` | `global` | Delete | runs it |
 
 Arguments:
 
@@ -7550,11 +7607,32 @@ Arguments:
 
 Result: [`NoteEditResult`](#noteeditresult).
 
+#### `note.duplicate`
+
+**Duplicate Notes**. Permission: `edit`. Contexts: `note-editor`, `note-selection`.
+
+Puts a copy of notes (`notes`, or the selected notes, or with none selected the notes that start inside the time selection) straight after the time selection, selects the copy and moves the time selection onto it, so running it again lays down another. Cmd-D (Ctrl-D) runs this.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-EDIT-004 | `Cmd+D` | `Ctrl+D` | `global` | Duplicate | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows (the Arrangement's selected clip). |
+| `notes` | array or null | no | The notes, by their place in the clip's notes in order (by start, then pitch). Left out, the selected notes, or with none selected the notes that start inside the time selection. |
+
+Result: [`NoteEditResult`](#noteeditresult).
+
 #### `note.move`
 
-**Move Notes**. Permission: `edit`. Contexts: `clip-view`, `note-editor`, `note-selection`.
+**Move Notes**. Permission: `edit`. Contexts: `note-editor`, `note-selection`.
 
-Moves notes (`notes`, or the selected notes) in time by `by` ticks and in pitch by `semitones`, as dragging them in the note editor does; dragging right and left runs it with `semitones` 0, and up and down snap the pitch. Nothing moves if any note would start before the clip's contents or leave the range of MIDI keys 0 to 127. The moved notes stay selected, and the whole drag is one undo step.
+Moves notes (`notes`, or the selected notes) in time by `by` ticks and in pitch by `semitones`, as dragging them in the note editor does; dragging right and left runs it with `semitones` 0, and up and down snap the pitch. Nothing moves if any note would start before the clip's contents or leave the range of MIDI keys 0 to 127. With `copy` the notes are copied where they would have gone and the originals stay, as Option-dragging a note does. The moved notes stay selected, and the whole drag is one undo step.
 
 Default keys: none.
 
@@ -7564,14 +7642,36 @@ Arguments:
 |---|---|---|---|
 | `by` | [`Ticks`](#ticks) or null | no | How far to move them in time, in ticks; negative is earlier. Give `by` or `semitones`, or both. |
 | `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows (the Arrangement's selected clip). |
+| `copy` | boolean or null | no | Copy them instead of moving them, as Option-dragging a note does: the copies land where the notes would have gone and the originals stay. |
 | `notes` | array or null | no | The notes, by their place in the clip's notes in order (by start, then pitch). Left out, the selected notes. |
 | `semitones` | integer or null | no | How far to move them in pitch, in semitones; negative is lower. |
 
 Result: [`NoteEditResult`](#noteeditresult).
 
+#### `note.paste`
+
+**Paste Notes**. Permission: `edit`. Contexts: `note-editor`, `note-selection`.
+
+Puts the note clipboard's notes into the clip at `at`, in ticks from the beginning of the clip's contents, or at the insert marker, or at the time selection's start, with their pitches, values and spacing, and selects them. It fails, changing nothing, if there is nothing on the clipboard. Cmd-V (Ctrl-V) runs this.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-EDIT-003 | `Cmd+V` | `Ctrl+V` | `global` | Paste | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `at` | [`Ticks`](#ticks) or null | no | Where to paste, in ticks from the beginning of the clip's contents. Left out, the insert marker, or the time selection's start. |
+| `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows (the Arrangement's selected clip). |
+
+Result: [`NoteEditResult`](#noteeditresult).
+
 #### `note.quantize`
 
-**Quantize**. Permission: `edit`. Contexts: `clip-view`, `note-editor`, `note-selection`.
+**Quantize**. Permission: `edit`. Contexts: `note-editor`, `note-selection`.
 
 Quantises notes (`notes`, or the selected notes) to `grid`: each note moves `amount` percent of the way from its start (or its end, with `target` `note_end`) to the nearest grid line, so 100 percent lands it on the line and 50 percent halves its distance to it. The lines are laid out from each bar's start, as the note editor's grid is, and a spacing of whole bars counts bars from 1.1.1. `grid`, `target`, and `amount` left out use the Clip View's Quantize settings (`clip_view.quantize_settings`), which follow the note editor's editing grid until a grid is set. Quantising is one undo step, and the quantised notes stay selected.
 
@@ -7595,7 +7695,7 @@ Result: [`NoteEditResult`](#noteeditresult).
 
 #### `note.ramp_value`
 
-**Ramp Note Values**. Permission: `edit`. Contexts: `clip-view`, `note-editor`, `note-selection`.
+**Ramp Note Values**. Permission: `edit`. Contexts: `note-editor`, `note-selection`.
 
 Sets one value of notes (`notes`, or the selected notes) as a ramp, as dragging across several notes in the Clip View's lane does: the first note in the clip's order takes `from`, the last takes `to`, and those between take values evenly spaced between them (whole numbers for the whole-number fields). `field` takes the same fields and ranges as `note.set_value`; nothing changes if `from` or `to` is out of range. One note takes `from`. The edited notes stay selected, and the whole drag is one undo step.
 
@@ -7615,7 +7715,7 @@ Result: [`NoteEditResult`](#noteeditresult).
 
 #### `note.resize`
 
-**Resize Notes**. Permission: `edit`. Contexts: `clip-view`, `note-editor`, `note-selection`.
+**Resize Notes**. Permission: `edit`. Contexts: `note-editor`, `note-selection`.
 
 Moves notes' ends (`notes`, or the selected notes) by `by` ticks, as dragging a note's end in the note editor does: a positive `by` makes them longer, a negative one shorter, and every note keeps at least one tick of length. A note's start doesn't move. The resized notes stay selected, and the whole drag is one undo step.
 
@@ -7633,7 +7733,7 @@ Result: [`NoteEditResult`](#noteeditresult).
 
 #### `note.set_value`
 
-**Set Note Value**. Permission: `edit`. Contexts: `clip-view`, `note-editor`, `note-selection`.
+**Set Note Value**. Permission: `edit`. Contexts: `note-editor`, `note-selection`.
 
 Sets one value of notes (`notes`, or the selected notes) to `value`, as dragging a note's stem in the Clip View's lane does: `field` is `velocity` (whole numbers 1 to 127), `release_velocity` (whole numbers 1 to 127), `chance` (0 to 1), or `velocity_deviation` (whole numbers -127 to 127). Nothing changes if `value` is outside the field's range. The edited notes stay selected, and the whole drag is one undo step.
 
@@ -11651,8 +11751,11 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`modulator.set_shape`](#modulatorset_shape) | the query tool's `device` | `shape` |
 | [`modulator.unmap`](#modulatorunmap) | the query tool's `device` | `mappings` |
 | [`note.add`](#noteadd) | the query tool's `clip` | `data.midi.notes` |
+| [`note.cut`](#notecut) | the query tool's `clip` | `data.midi.notes` |
 | [`note.delete`](#notedelete) | the query tool's `clip` | `data.midi.notes` |
+| [`note.duplicate`](#noteduplicate) | the query tool's `clip` | `data.midi.notes` |
 | [`note.move`](#notemove) | the query tool's `clip` | `data.midi.notes` |
+| [`note.paste`](#notepaste) | the query tool's `clip` | `data.midi.notes` |
 | [`note.quantize`](#notequantize) | the query tool's `clip` | `data.midi.notes` |
 | [`note.ramp_value`](#noteramp_value) | the query tool's `clip` | `data.midi.notes` |
 | [`note.resize`](#noteresize) | the query tool's `clip` | `data.midi.notes` |
@@ -16021,7 +16124,7 @@ What `clip.transients` returns.
 
 ### `ClipViewState`
 
-What the Clip View shows: which clip it is editing, the notes selected in it, the lane's setting, and the tab with the envelope it shows.
+What the Clip View shows: which clip it is editing, the notes selected in it, its insert marker and time selection, the lane's setting, and the tab with the envelope it shows.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -16029,6 +16132,8 @@ What the Clip View shows: which clip it is editing, the notes selected in it, th
 | `draw_mode` | boolean | yes | Whether Draw Mode is on (B): clicking the note area adds a note, and clicking a note removes it. |
 | `clip` | [`ClipId`](#clipid) or null | yes | The clip the note editor shows; `null` when none does. |
 | `selected` | array of integer, at least 0 | yes | The selected notes, by their place in the clip's notes in order (by start, then pitch). |
+| `insert_marker` | [`Ticks`](#ticks) or null | yes | The insert marker, in ticks from the beginning of the clip's contents; `null` when there is none. |
+| `time_selection` | array or null | yes | The time selection's start and end, in ticks from the beginning of the clip's contents; `null` when there is none. |
 | `lane` | [`NoteField`](#notefield) | yes | Which value the lane under the note editor shows and edits. |
 | `folded` | boolean | yes | Whether the note editor shows only the rows that hold notes (Fold, F). |
 | `tab` | [`ClipTab`](#cliptab) | yes | The tab the Clip View shows. |
@@ -16038,7 +16143,7 @@ What the Clip View shows: which clip it is editing, the notes selected in it, th
 
 ```json
 {
-  "description": "What the Clip View shows: which clip it is editing, the notes selected in it, the lane's setting, and the tab with the envelope it shows.",
+  "description": "What the Clip View shows: which clip it is editing, the notes selected in it, its insert marker and time selection, the lane's setting, and the tab with the envelope it shows.",
   "properties": {
     "clip": {
       "anyOf": [
@@ -16070,6 +16175,17 @@ What the Clip View shows: which clip it is editing, the notes selected in it, th
       "description": "Whether the note editor shows only the rows that hold notes (Fold, F).",
       "type": "boolean"
     },
+    "insert_marker": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Ticks"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The insert marker, in ticks from the beginning of the clip's contents; `null` when there is none."
+    },
     "lane": {
       "$ref": "#/$defs/NoteField",
       "description": "Which value the lane under the note editor shows and edits."
@@ -16087,6 +16203,23 @@ What the Clip View shows: which clip it is editing, the notes selected in it, th
       "$ref": "#/$defs/ClipTab",
       "description": "The tab the Clip View shows."
     },
+    "time_selection": {
+      "description": "The time selection's start and end, in ticks from the beginning of the clip's contents; `null` when there is none.",
+      "maxItems": 2,
+      "minItems": 2,
+      "prefixItems": [
+        {
+          "$ref": "#/$defs/Ticks"
+        },
+        {
+          "$ref": "#/$defs/Ticks"
+        }
+      ],
+      "type": [
+        "array",
+        "null"
+      ]
+    },
     "visible": {
       "description": "Whether the Clip View shows in the detail area.",
       "type": "boolean"
@@ -16097,6 +16230,8 @@ What the Clip View shows: which clip it is editing, the notes selected in it, th
     "draw_mode",
     "clip",
     "selected",
+    "insert_marker",
+    "time_selection",
     "lane",
     "folded",
     "tab",
@@ -25396,6 +25531,42 @@ A note in a MIDI clip.
 
 </details>
 
+### `NoteClipboardState`
+
+What the note clipboard holds, as `note.copy` reports it.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `notes` | integer, at least 0 | yes | How many notes it holds. |
+| `length` | [`Ticks`](#ticks) | yes | How long they last, from the earliest of them. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What the note clipboard holds, as `note.copy` reports it.",
+  "properties": {
+    "length": {
+      "$ref": "#/$defs/Ticks",
+      "description": "How long they last, from the earliest of them."
+    },
+    "notes": {
+      "description": "How many notes it holds.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "notes",
+    "length"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `NoteEditResult`
 
 What a note edit did, and what's selected afterwards.
@@ -25513,6 +25684,78 @@ One of:
       "const": "toggle",
       "description": "Select each note that isn't selected and deselect each that is.",
       "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `NoteSelection`
+
+What to select in the note editor: `nearest` (the note whose start is nearest the insert marker), `previous` and `next` (the previous or next note in the clip's order), `same_pitch_previous` and `same_pitch_next` (the previous or next note at the selected note's pitch), `all` (every note in the clip's span), or `key` (every note at a pitch, as clicking a key in the piano ruler does).
+
+One of:
+
+- `"nearest"`: The note whose start is nearest the insert marker.
+- `"previous"`: The previous note in the clip's order.
+- `"next"`: The next note in the clip's order.
+- `"same_pitch_previous"`: The previous note at the selected note's pitch.
+- `"same_pitch_next"`: The next note at the selected note's pitch.
+- `"all"`: Every note in the clip's span.
+- an object with `key` (integer from 0 to 255): Every note at a pitch, as clicking a key in the piano ruler does.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What to select in the note editor: `nearest` (the note whose start is nearest the insert marker), `previous` and `next` (the previous or next note in the clip's order), `same_pitch_previous` and `same_pitch_next` (the previous or next note at the selected note's pitch), `all` (every note in the clip's span), or `key` (every note at a pitch, as clicking a key in the piano ruler does).",
+  "oneOf": [
+    {
+      "const": "nearest",
+      "description": "The note whose start is nearest the insert marker.",
+      "type": "string"
+    },
+    {
+      "const": "previous",
+      "description": "The previous note in the clip's order.",
+      "type": "string"
+    },
+    {
+      "const": "next",
+      "description": "The next note in the clip's order.",
+      "type": "string"
+    },
+    {
+      "const": "same_pitch_previous",
+      "description": "The previous note at the selected note's pitch.",
+      "type": "string"
+    },
+    {
+      "const": "same_pitch_next",
+      "description": "The next note at the selected note's pitch.",
+      "type": "string"
+    },
+    {
+      "const": "all",
+      "description": "Every note in the clip's span.",
+      "type": "string"
+    },
+    {
+      "additionalProperties": false,
+      "description": "Every note at a pitch, as clicking a key in the piano ruler does.",
+      "properties": {
+        "key": {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "key"
+      ],
+      "type": "object"
     }
   ]
 }

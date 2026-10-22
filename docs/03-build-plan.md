@@ -701,7 +701,7 @@ Total to 1.0: 256 packages planned in Phases 0 to 6, and about 110 estimated in 
 | 6.50 | todo |  | Waits on IMP-37's acceptance |
 | 6.51 | todo |  |  |
 | 6.52 | todo |  |  |
-| 6.53 | todo |  |  |
+| 6.53 | done | 22 October 2026 | [#302](https://github.com/loombridge/beatlayer/pull/302); the MIDI Note Editor's insert marker and time selection, its keyboard selection and moves, Shift-click and the piano ruler's keys, the note clipboard with Option-drag copies, and the editor's context menus ([the spec](specs/piano-roll.md) R23 to R31) |
 | 6.54 | todo |  |  |
 | 6.55 | todo |  |  |
 | 6.56 | todo |  |  |

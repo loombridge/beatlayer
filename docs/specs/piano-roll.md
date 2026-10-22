@@ -1,6 +1,6 @@
 # The MIDI Note Editor in the Clip View: drawing, selecting, moving, resizing, velocities, folding, quantising, transposing, and the loop region
 
-- **Status:** partial (R1 to R13 and R16 to R22 have passing tests; R14 and R15 are withdrawn; R23 to R31 are WP-6.53's, R32 to R42 WP-6.54's, and R43 and R44 WP-6.49b's)
+- **Status:** implemented (R1 to R13 and R16 to R31 have passing tests; R14 and R15 are withdrawn; R32 to R44 come with WP-6.54 and WP-6.49b)
 - **Work packages:** WP-2.3, parts 1, 2, and 3; part 3 adds quantise, transpose, and the clip's loop region on top of the first two; WP-3.16 adds the tabs (R22) and the Session clip (R1); WP-6.53 adds the insert marker, the time selection, selecting and moving notes from the keyboard, and the note clipboard (R23 to R31); WP-6.54 adds the editor's zoom, scroll and Follow keys and gestures, the clip markers from the keys and the Edit menu, and the …Time commands and Crop to Time Selection inside a clip (R32 to R42); WP-6.49b adds the notes' colour by velocity and panning with the middle mouse button (R43, R44). The Quantize Settings item is [midi-transformations.md](midi-transformations.md) R21's (WP-6.12). The lanes' values, deactivating notes, probability groups, splitting, chopping, joining and stretching notes are [note-editing.md](note-editing.md)'s (WP-6.1 to WP-6.3); the note filters and Invert Selection [find-and-select-notes.md](find-and-select-notes.md)'s (WP-6.4); the Preview switch and step recording [step-recording.md](step-recording.md)'s (WP-6.5); several clips in one editor [multi-clip-editing.md](multi-clip-editing.md)'s (WP-6.6)
 - **Parity-matrix row:** MIDI editing: Draw, select, move, resize, velocity lane, fold, quantise, transpose, loop region
 - **Checked against:** the UI parity reference recorded from Live 12.4.3 on macOS on 10 October 2026 (layout.md's Clip View rows, L-CLIP-010 to L-CLIP-019, and shortcuts.toml's `note-editor` rows, S-NOTE-001 to 044), the Live 12 reference manual as published that day through those rows (its sections on the velocity and chance editors, 10.5.12, and on Fold, 10.6), and the specs named below; R23 to R44 against the Live 12 reference manual (online edition), read 20 October 2026, and the Live 12 release notes, 12.0, 12.0.5 and 12.1
@@ -126,15 +126,15 @@ This spec covers drawing, selecting, moving, resizing, Fold, quantise, transpose
 | R20 | `crates/ui/tests/clip_view.rs`, `the_arrow_keys_transpose_the_selection_a_semitone_or_an_octave`, `transposing_past_the_top_key_is_refused_and_changes_nothing`; `crates/agent/tests/tools.rs`, `an_agent_quantises_and_transposes_notes_by_command` | UI script, agent |
 | R21 | `crates/ui/tests/clip_view.rs`, `dragging_the_loop_brace_edits_the_clip_in_one_step`, `dragging_the_start_marker_edits_the_clips_region_in_one_step`; `crates/engine/tests/midi_clips.rs`, `clip_region_and_loop_edits_play_back_as_edited` | UI script, engine |
 | R22 | `crates/shell/tests/clip_view_tabs.rs`, `the_tab_commands_show_and_cycle_the_clip_views_tabs`, `the_envelopes_tab_swaps_the_note_editors_keys_for_the_envelope_editors`; `crates/ui/tests/clip_envelope.rs`, `the_tab_keys_show_and_cycle_the_tabs`, `the_tabs_are_accessible_and_clicking_one_shows_it` | unit, UI script |
-| R23 | to be written in WP-6.53 | |
-| R24 | to be written in WP-6.53 | |
-| R25 | to be written in WP-6.53 | |
-| R26 | to be written in WP-6.53 | |
-| R27 | to be written in WP-6.53 | |
-| R28 | to be written in WP-6.53 | |
-| R29 | to be written in WP-6.53 | |
-| R30 | to be written in WP-6.53 | |
-| R31 | to be written in WP-6.53 | |
+| R23 | `crates/shell/tests/clip_view.rs`, `the_insert_marker_and_the_time_selection_are_view_state`; `crates/ui/tests/clip_view.rs`, `a_click_places_the_insert_marker_and_the_arrows_move_it` | unit, UI script |
+| R24 | `crates/shell/tests/clip_view.rs`, `the_insert_marker_and_the_time_selection_are_view_state`; `crates/ui/tests/clip_view.rs`, `the_marquee_and_the_keys_make_the_time_selection` | unit, UI script |
+| R25 | `crates/shell/tests/clip_view.rs`, `the_keyboard_selects_the_notes_the_spec_says`; `crates/ui/tests/clip_view.rs`, `the_keyboard_selects_the_notes` | unit, UI script |
+| R26 | `crates/shell/tests/clip_view.rs`, `the_keyboard_selects_the_notes_the_spec_says`; `crates/ui/tests/clip_view.rs`, `shift_clicking_and_the_piano_ruler_select_the_notes` | unit, UI script |
+| R27 | `crates/ui/tests/clip_view.rs`, `the_arrows_move_and_lengthen_the_selection` | UI script |
+| R28 | `crates/shell/tests/clip_view.rs`, `the_note_clipboard_copies_cuts_pastes_and_duplicates`; `crates/agent/tests/tools.rs`, `an_agent_copies_pastes_and_duplicates_notes_by_command` | unit, agent |
+| R29 | `crates/shell/tests/clip_view.rs`, `copying_a_note_by_dragging_leaves_the_original`; `crates/ui/tests/clip_view.rs`, `option_dragging_a_note_copies_it` | unit, UI script |
+| R30 | `crates/shell-spec/src/context_menus.rs`, `the_menus_follow_lives_rows_and_separators_in_order`, `the_note_editor_menus_name_their_later_packages`; `crates/ui/tests/clip_view.rs`, `the_context_menu_lists_the_items_in_order` | unit, UI script |
+| R31 | `crates/shell/tests/clip_view.rs`, `note_edits_are_registered_with_their_classes`, `the_insert_marker_and_the_time_selection_are_view_state`; `crates/agent/tests/tools.rs`, `an_agent_copies_pastes_and_duplicates_notes_by_command` | unit, agent |
 | R32 | to be written in WP-6.54 | |
 | R33 | to be written in WP-6.54 | |
 | R34 | to be written in WP-6.54 | |

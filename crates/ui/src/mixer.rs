@@ -256,6 +256,22 @@ impl MixerUi {
         let sections = sections(shell);
         let shown = shell.mixer_view().of(MixerOf::Session).shown;
         let layout = SessionLayout::compute(rect, shown.then_some(sections));
+        // Spec: command-palette R11. With the Session mixer hidden, the
+        // grid's columns scroll to a track the search field selected.
+        if !shown && let Some((MixerOf::Session, track)) = self.reveal {
+            self.reveal = None;
+            let columns = shell.mixer_columns();
+            let columns_layout = MixerLayout::compute(
+                layout.slots,
+                &folds(shell, &columns).columns,
+                shell.shown_returns().len(),
+                sections,
+                shell.mixer_view().of(MixerOf::Session).scroll as f32,
+            );
+            if let Some(index) = columns.iter().position(|c| *c == track) {
+                scroll_into_view(&columns_layout, index, MixerOf::Session, events);
+            }
+        }
         let painter = ui.painter_at(rect);
         painter.rect_filled(rect, 0.0, theme.colors.panel.0);
         title_bars(
@@ -292,7 +308,7 @@ impl MixerUi {
     ) {
         let doc = shell.editor().document();
         let columns = shell.mixer_columns();
-        let returns: Vec<TrackId> = doc.returns().collect();
+        let returns: Vec<TrackId> = shell.shown_returns();
         let sections = sections(shell);
         let scroll = shell.mixer_view().of(of).scroll as f32;
         let folds = folds(shell, &columns);
@@ -483,6 +499,14 @@ impl MixerUi {
             }
         }
         self.scroll(&ui, sections_area, of, events);
+        // Spec: view-options R1, mixer-view R23. A middle-button drag pans
+        // the mixer's columns sideways, as the wheel scrolls them.
+        if let Some(delta) = crate::middle::pan(&ui, sections_area) {
+            events.push(UiEvent::Invoke(Invocation::new(
+                ids::SCROLL,
+                json!({ "view": of, "x": -delta.x }),
+            )));
+        }
         self.focus(shell, &layout, &columns, of, events);
         // A chain dropped out of the mixer's tracks (drum racks spec, R23,
         // R24).
@@ -684,7 +708,7 @@ fn title_bars(
 ) {
     let doc = shell.editor().document();
     let columns = shell.mixer_columns();
-    let returns: Vec<TrackId> = doc.returns().collect();
+    let returns: Vec<TrackId> = shell.shown_returns();
     let scroll = shell.mixer_view().of(of).scroll as f32;
     let folds = folds(shell, &columns);
     let layout = MixerLayout::compute(row, &folds.columns, returns.len(), sections(shell), scroll);
@@ -713,6 +737,9 @@ fn title_bars(
             0.0,
             title_colour(theme, track, t.kind()).gamma_multiply(0.82),
         );
+        // Spec: command-palette R10. The tracks the search field finds are
+        // outlined.
+        crate::search_field::outline(ui, shell, theme, track, bar);
         // The fold button for the track's rack, at the bar's right.
         let fold = folds.racks.iter().find(|r| r.track == track).map(|r| {
             (

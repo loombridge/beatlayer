@@ -9,7 +9,7 @@ use bl_commands::{Context, Permission};
 use bl_model::{Editor, TrackId};
 use bl_shell::audio::AudioHost;
 use bl_shell::files::{ProjectFiles, SetStore};
-use bl_shell::settings::{Preferences, SettingsPage, ThemeChoice};
+use bl_shell::settings::{Appearance, Preferences, SettingsPage};
 use bl_shell::{Area, Effect, Invocation, MainView, Shell, ShellError, WindowKind};
 use serde_json::json;
 
@@ -622,7 +622,7 @@ fn the_settings_window_has_its_own_contexts_and_pages() {
     shell
         .run("settings.set_theme", json!({ "theme": "light" }))
         .unwrap();
-    assert_eq!(shell.theme(), ThemeChoice::Light);
+    assert_eq!(shell.appearance(), Appearance::Light);
 
     shell.invoke("window.close", json!({})).unwrap();
     assert!(!shell.settings_open());
@@ -651,7 +651,7 @@ fn preferences_are_saved_and_read_back() {
         .unwrap();
     shell.run("view.zoom_in", json!({})).unwrap();
     let prefs = Preferences::load(&dir).unwrap();
-    assert_eq!(prefs.theme, ThemeChoice::Light);
+    assert_eq!(prefs.appearance, Appearance::Light);
     assert_eq!(prefs.audio.buffer_size, Some(512));
     assert_eq!(prefs.audio.driver.as_deref(), Some("null"));
     assert_eq!(prefs.zoom, Some(1.1));
@@ -880,4 +880,131 @@ fn delete_and_rename_from_a_key_or_menu_act_on_the_selected_tracks() {
         .unwrap();
     assert!(!shell.can_invoke("track.delete", &json!({})));
     assert!(!shell.can_invoke("track.rename", &json!({})));
+}
+
+// Spec: themes R1, R3, R7, R12.
+#[test]
+fn the_theme_and_customization_commands_set_and_read_back_and_touch_no_set() {
+    let mut shell = Shell::headless();
+    let state =
+        |shell: &mut Shell| shell.run("settings.state", json!({})).unwrap()["theme_colors"].clone();
+    let before = state(&mut shell);
+    assert_eq!(before["theme"], "Beatlayer");
+    assert_eq!(before["appearance"], "dark");
+    assert_eq!(before["tone"], "neutral");
+    assert_eq!(before["high_contrast"], false);
+    assert_eq!(
+        [
+            before["grid_line_intensity"].as_i64(),
+            before["brightness"].as_i64(),
+            before["color_intensity"].as_i64(),
+            before["color_hue"].as_i64()
+        ],
+        [Some(100), Some(0), Some(100), Some(0)]
+    );
+    for (command, args, field, value) in [
+        (
+            "settings.set_appearance",
+            json!({ "appearance": "light" }),
+            "appearance",
+            json!("light"),
+        ),
+        (
+            "settings.set_tone",
+            json!({ "tone": "cool" }),
+            "tone",
+            json!("cool"),
+        ),
+        (
+            "settings.set_high_contrast",
+            json!({ "on": true }),
+            "high_contrast",
+            json!(true),
+        ),
+        (
+            "settings.set_grid_line_intensity",
+            json!({ "percent": 35 }),
+            "grid_line_intensity",
+            json!(35),
+        ),
+        (
+            "settings.set_brightness",
+            json!({ "value": -12 }),
+            "brightness",
+            json!(-12),
+        ),
+        (
+            "settings.set_color_intensity",
+            json!({ "percent": 140 }),
+            "color_intensity",
+            json!(140),
+        ),
+        (
+            "settings.set_color_hue",
+            json!({ "degrees": 65 }),
+            "color_hue",
+            json!(65),
+        ),
+    ] {
+        shell.run(command, args).unwrap();
+        assert_eq!(state(&mut shell)[field], value, "{command}");
+    }
+    assert!(!shell.is_dirty(), "a preference isn't part of the set");
+    assert!(!shell.editor().can_undo(), "and isn't an undo step");
+    // Out of range is refused, and an unknown theme is named in the refusal.
+    shell.invoke("app.settings", json!({})).unwrap();
+    assert!(!shell.can_invoke("settings.set_brightness", &json!({ "value": 51 })));
+    assert!(!shell.can_invoke("settings.set_color_hue", &json!({ "degrees": 181 })));
+    assert!(shell.can_invoke("settings.set_color_hue", &json!({ "degrees": -180 })));
+    let refused = shell
+        .run("settings.set_theme", json!({ "theme": "Nope" }))
+        .unwrap_err();
+    assert!(refused.to_string().contains("Beatlayer"), "{refused}");
+    // The values `dark` and `light` set the Appearance (R12).
+    shell
+        .run("settings.set_theme", json!({ "theme": "dark" }))
+        .unwrap();
+    assert_eq!(state(&mut shell)["appearance"], "dark");
+    assert_eq!(state(&mut shell)["theme"], "Beatlayer");
+}
+
+// Spec: themes R3.
+#[test]
+fn follow_system_draws_the_systems_mode_as_it_changes() {
+    let mut shell = Shell::headless();
+    shell
+        .run(
+            "settings.set_appearance",
+            json!({ "appearance": "follow-system" }),
+        )
+        .unwrap();
+    for dark in [false, true, false] {
+        shell.set_system_dark(dark);
+        assert_eq!(shell.theme_dark(), dark);
+        let state = shell.run("settings.state", json!({})).unwrap();
+        assert_eq!(
+            state["theme_colors"]["drawn_appearance"],
+            if dark { "dark" } else { "light" }
+        );
+        assert_eq!(state["theme_colors"]["appearance"], "follow-system");
+    }
+    // Light and Dark ignore the system.
+    shell
+        .run("settings.set_appearance", json!({ "appearance": "dark" }))
+        .unwrap();
+    assert!(shell.theme_dark());
+}
+
+// Spec: themes R11.
+#[test]
+fn preferences_saved_before_the_page_keep_their_look() {
+    let light: Preferences =
+        serde_json::from_str(r#"{"theme": "light", "tab_navigation": true}"#).unwrap();
+    assert_eq!(light.appearance, Appearance::Light);
+    assert_eq!(light.look, Default::default());
+    let dark: Preferences = serde_json::from_str(r#"{"theme": "dark"}"#).unwrap();
+    assert_eq!(dark.appearance, Appearance::Dark);
+    let saved = serde_json::to_value(&light).unwrap();
+    assert_eq!(saved["appearance"], "light");
+    assert!(saved.get("theme").is_none());
 }

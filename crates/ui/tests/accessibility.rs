@@ -477,8 +477,8 @@ fn tab_runs_through_the_arrangement_and_the_neighbour_keys_to_the_next_track() {
     // Live's order (12.4.6), without the controls Beatlayer doesn't have
     // yet: the locator buttons and Automation Mode above the track
     // headers, then the selected track's header (its In/Out choosers, its
-    // mixer column, its sends), then Optimize Height and Width (the
-    // accessibility spec, R10).
+    // mixer column, its sends), then Lock Envelopes, the control above the
+    // headers (accessibility R10), then Optimize Height and Width.
     let expected = [
         bl_ui::arrangement::set_locator_id(),
         bl_ui::arrangement::previous_locator_id(),
@@ -497,6 +497,7 @@ fn tab_runs_through_the_arrangement_and_the_neighbour_keys_to_the_next_track() {
         pan_id(Place::Header, tracks[2]),
         send_id(Place::Header, tracks[2], returns[0]),
         send_id(Place::Header, tracks[2], returns[1]),
+        bl_ui::arrangement::lock_envelopes_id(),
         bl_ui::arrangement::optimize_height_id(),
         bl_ui::arrangement::optimize_width_id(),
     ];
@@ -521,7 +522,7 @@ fn tab_runs_through_the_arrangement_and_the_neighbour_keys_to_the_next_track() {
         focused_id(&h),
         Some(bl_ui::arrangement::optimize_width_id())
     );
-    for _ in 0..4 {
+    for _ in 0..5 {
         press(&mut h, Key::Tab, Modifiers::SHIFT);
     }
     assert_eq!(focused_id(&h), Some(pan_id(Place::Header, tracks[2])));
@@ -637,6 +638,9 @@ fn the_hidden_track_controls_leave_the_tab_order() {
         header(Switch::Activator),
         header(Switch::Solo),
         header(Switch::Arm),
+        // The Lock Envelopes switch, the control above the headers
+        // (accessibility R10), is a Tab stop whatever the header shows.
+        bl_ui::arrangement::lock_envelopes_id(),
         bl_ui::arrangement::optimize_height_id(),
         bl_ui::arrangement::optimize_width_id(),
     ];
@@ -1038,6 +1042,16 @@ fn the_navigate_and_options_menus_reach_their_commands() {
     assert_eq!(menu_item(&h, "M-OPT-025").checked, Some(false));
     h.shell.invoke("edit.undo", json!({})).unwrap();
     assert!(h.shell.editor().document().settings().solo_in_place);
+    // Options ▸ Lock Envelopes switches the set's setting, one undo step
+    // (automation-editing R8).
+    let lock = menu_item(&h, "M-OPT-026");
+    assert_eq!((lock.enabled, lock.checked), (true, Some(false)));
+    let invocation = lock.invocation.unwrap();
+    h.shell.invoke(&invocation.id, invocation.args).unwrap();
+    assert!(h.shell.editor().document().settings().lock_envelopes);
+    assert_eq!(menu_item(&h, "M-OPT-026").checked, Some(true));
+    h.shell.invoke("edit.undo", json!({})).unwrap();
+    assert!(!h.shell.editor().document().settings().lock_envelopes);
 }
 
 /// How a command is reached without a pointer, when it has no key and no
@@ -1084,6 +1098,12 @@ enum Reason {
 }
 
 fn nothing(_: &mut Harness) {}
+
+/// A second theme for the Theme chooser to step to (themes R2).
+fn a_second_theme(h: &mut Harness) {
+    h.shell
+        .set_themes(vec!["Beatlayer".to_owned(), "Other".to_owned()]);
+}
 
 /// The Shortcuts page, narrowed to Duplicate Track Without Clips, with a
 /// key of the person's own on it (the custom shortcuts spec, R8).
@@ -1690,6 +1710,20 @@ fn device_view(h: &mut Harness) {
     });
 }
 
+/// The search field, open on its Commands scope.
+fn search_commands(h: &mut Harness) {
+    h.shell
+        .run("search.open", json!({ "scope": "commands" }))
+        .unwrap();
+}
+
+/// The search field, open on its Tracks scope.
+fn search_tracks(h: &mut Harness) {
+    h.shell
+        .run("search.open", json!({ "scope": "tracks" }))
+        .unwrap();
+}
+
 /// The list of the set's plug-ins, open in the detail area, with the
 /// keyboard in it (IMP-29, WP-6.41).
 fn plugin_list(h: &mut Harness) {
@@ -1871,6 +1905,14 @@ fn paths() -> BTreeMap<&'static str, Path> {
         "the Arrangement's editing keys run it: paste, Delete, Left and Right, and Enter then \
          Left or Right (arrangement-editing R12)",
     );
+    // The Arrangement's automation lanes (WP-6.25): the edit keys with
+    // Option (Alt on Windows) apply to the envelopes (S-EDIT-016), and the
+    // lane's own gestures reach the rest.
+    let envelope_edit = Equivalent(
+        "the Arrangement's automation lane: the edit keys with Option (Alt on Windows) apply to \
+         the envelopes (S-EDIT-016), and the lane's gestures move and select their breakpoints \
+         (automation-editing R2 to R4)",
+    );
     // The browser's tags (browser-tags R10 to R16): the Tag Editor and
     // Quick Tags reach them.
     let tag_editor = Equivalent(
@@ -1893,6 +1935,14 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("browser.tag_items", Exception(tag_editor)),
         ("browser.show_quick_tags", Exception(quick_tags)),
         // The Control Bar's transport (control-bar-transport R11).
+        ("automation.copy", Exception(envelope_edit)),
+        ("automation.cut", Exception(envelope_edit)),
+        ("automation.delete_range", Exception(envelope_edit)),
+        ("automation.duplicate", Exception(envelope_edit)),
+        ("automation.move_breakpoints", Exception(envelope_edit)),
+        ("automation.paste", Exception(envelope_edit)),
+        ("automation.select_segment", Exception(envelope_edit)),
+        ("automation.set_envelope", Exception(envelope_edit)),
         (
             "transport.play",
             main(nothing, control_bar, "Play", Key::Enter),
@@ -2233,7 +2283,35 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ),
         (
             "settings.set_theme",
-            settings("theme-colors", nothing, "Theme", Key::ArrowDown),
+            settings("theme-colors", a_second_theme, "Theme", Key::ArrowDown),
+        ),
+        (
+            "settings.set_appearance",
+            settings("theme-colors", nothing, "Appearance", Key::ArrowDown),
+        ),
+        (
+            "settings.set_tone",
+            settings("theme-colors", nothing, "Tone", Key::ArrowDown),
+        ),
+        (
+            "settings.set_high_contrast",
+            settings("theme-colors", nothing, "High Contrast", Key::Enter),
+        ),
+        (
+            "settings.set_grid_line_intensity",
+            settings("theme-colors", nothing, "Grid Line Intensity", Key::ArrowUp),
+        ),
+        (
+            "settings.set_brightness",
+            settings("theme-colors", nothing, "Brightness", Key::ArrowUp),
+        ),
+        (
+            "settings.set_color_intensity",
+            settings("theme-colors", nothing, "Color Intensity", Key::ArrowUp),
+        ),
+        (
+            "settings.set_color_hue",
+            settings("theme-colors", nothing, "Color Hue", Key::ArrowUp),
         ),
         (
             "settings.set_create_fades_on_clip_edges",
@@ -2884,6 +2962,40 @@ fn paths() -> BTreeMap<&'static str, Path> {
             "view.set_plugin_list_only_missing",
             main(nothing, plugin_list, "Show Only Missing", Key::Enter),
         ),
+        // The search field (WP-6.42): Tab reaches its scope buttons and Show
+        // Only Matches, and Enter presses them; the text, the arrows, Return
+        // and Esc act on it from the keyboard.
+        (
+            "search.set_scope",
+            main(search_commands, nothing, "Tracks", Key::Enter),
+        ),
+        (
+            "search.set_only_matches",
+            main(search_tracks, nothing, "Show Only Matches", Key::Enter),
+        ),
+        (
+            "search.set_text",
+            Exception(Equivalent("typing in the search field")),
+        ),
+        (
+            "search.next",
+            Exception(Equivalent(
+                "Down in the search field's Commands scope, Return in its Tracks scope",
+            )),
+        ),
+        (
+            "search.previous",
+            Exception(Equivalent(
+                "Up in the search field's Commands scope, Shift-Return in its Tracks scope",
+            )),
+        ),
+        (
+            "search.close",
+            Exception(Equivalent("Esc in the search field")),
+        ),
+        ("search.state", Exception(Query)),
+        ("search.commands", Exception(Query)),
+        ("search.tracks", Exception(Query)),
         // The Device View (WP-2.4): Enter on a title bar's controls.
         (
             "device.select",

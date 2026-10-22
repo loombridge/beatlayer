@@ -18,6 +18,9 @@
 //!   moving, copying, resizing, splitting, deleting, and duplicating clips,
 //!   and the clipboard; [`context_menus`], the clip and time-selection
 //!   menus that reach them.
+//! - [`automation`]: the Arrangement's automation editing commands
+//!   (WP-6.25): moving the breakpoints of an envelope, the clipboard of
+//!   envelope shapes, and the edit commands that act on them.
 //! - [`locator`]: the Arrangement's locators (WP-6.24): adding, deleting,
 //!   moving, renaming and describing them, looping to the next one, the
 //!   song start time, and the jumps between them.
@@ -61,6 +64,8 @@
 //!   (`clip.crop`, `arrangement.consolidate*`, WP-4.13).
 //! - [`audio_panel`]: the Audio Utilities panel's own commands
 //!   (`clip.edit_sample`, `clip.replace_sample`, WP-4.10b).
+//! - [`search`]: the search field's commands (`search.*`, WP-6.42): command
+//!   search and track search.
 //!
 //! `cargo xtask` checks the commands, lists them in the command reference, and
 //! builds the keymap from this crate, so none of its tasks links an audio
@@ -73,6 +78,7 @@ pub mod assistant;
 pub mod audio;
 pub mod audio_editing;
 pub mod audio_panel;
+pub mod automation;
 pub mod autosampler;
 pub mod bounce;
 pub mod browser;
@@ -99,6 +105,7 @@ pub mod perception;
 pub mod plugins;
 pub mod sample_editor;
 pub mod scales;
+pub mod search;
 pub mod session_launch;
 pub mod session_record;
 pub mod session_view;
@@ -122,6 +129,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     commands::register(registry)?;
     arrangement::register(registry)?;
     editing::register(registry)?;
+    automation::register(registry)?;
     locator::register(registry)?;
     notes::register(registry)?;
     transport::register(registry)?;
@@ -152,5 +160,6 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     bounce::register(registry)?;
     slice::register(registry)?;
     warping::register(registry)?;
-    scales::register(registry)
+    scales::register(registry)?;
+    search::register(registry)
 }

@@ -61,6 +61,37 @@ fn song(client: &mut Client<InProcess>) -> Value {
 }
 
 #[test]
+fn save_continuously_leaves_a_set_with_a_file_clean() {
+    // Spec: crash-recovery R25.
+    let scratch = Scratch::new("continuous");
+    let recovery = scratch.path("Recovery");
+    let set = scratch.path("Song Project").join("Song.blset");
+    let mut file = bl_project::SetFile::new(&set);
+    file.save(&Project::new()).unwrap();
+    let mut shell = Shell::headless();
+    shell.use_recovery(recovery).unwrap();
+    shell
+        .run("set.open", json!({ "path": set.to_string_lossy() }))
+        .unwrap();
+    let mut client = Client::new(InProcess::new(Agent::headless(true), shell));
+    client.initialize("test-agent").unwrap();
+    // An edit leaves the set with unsaved changes.
+    run(
+        &mut client,
+        "track.create",
+        json!({ "id": {"$new": "T"}, "kind": "midi", "name": "T", "index": 0 }),
+    );
+    assert_eq!(song(&mut client)["set"]["unsaved_changes"], true);
+    // With Save Continuously on, it has none.
+    run(
+        &mut client,
+        "settings.set_continuous_save",
+        json!({ "on": true }),
+    );
+    assert_eq!(song(&mut client)["set"]["unsaved_changes"], false);
+}
+
+#[test]
 fn an_agent_recovers_a_set_a_crash_left() {
     // Spec: crash-recovery R2, R3, R26.
     let scratch = Scratch::new("recover");

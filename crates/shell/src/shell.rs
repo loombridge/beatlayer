@@ -8702,6 +8702,9 @@ impl Shell {
                     // Spec: crash-recovery R6. The changes are gone, so
                     // nothing is offered at the next launch.
                     self.close_journal();
+                    // The set is still open, so its later edits are
+                    // journalled from now on.
+                    self.begin_journal();
                 }
                 Ok(self.set_result())
             }

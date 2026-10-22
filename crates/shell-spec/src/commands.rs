@@ -28,6 +28,10 @@ pub const SET_SAVE: &str = "set.save";
 pub const SET_SAVE_AS: &str = "set.save_as";
 /// `set.discard_changes`: throw away the set's unsaved changes.
 pub const SET_DISCARD_CHANGES: &str = "set.discard_changes";
+/// `set.later_recovery`: close the recovery prompt, leaving the sets it
+/// listed to be offered at the next launch (WP-6.62, the crash-recovery
+/// spec, R22).
+pub const SET_LATER_RECOVERY: &str = "set.later_recovery";
 /// `set.save_as_default`: save the set as the default set a new set starts
 /// from.
 pub const SET_SAVE_AS_DEFAULT: &str = "set.save_as_default";
@@ -177,6 +181,9 @@ pub const SETTINGS_SET_START_RECORDING_ON_SCENE_LAUNCH: &str =
 /// recordings write automation for (WP-3.12).
 pub const SETTINGS_SET_RECORD_SESSION_AUTOMATION_IN: &str =
     "settings.set_record_session_automation_in";
+/// `settings.set_automation_record_mode`: choose the mode an Arrangement
+/// recording writes control moves in (WP-6.46).
+pub const SETTINGS_SET_AUTOMATION_RECORD_MODE: &str = "settings.set_automation_record_mode";
 /// `settings.set_auto_hide_plug_in_windows`: switch Auto-Hide Plug-In
 /// Windows (WP-2.5b).
 pub const SETTINGS_SET_AUTO_HIDE_PLUG_IN_WINDOWS: &str = "settings.set_auto_hide_plug_in_windows";
@@ -208,6 +215,7 @@ pub const IDS: &[&str] = &[
     SET_SAVE,
     SET_SAVE_AS,
     SET_DISCARD_CHANGES,
+    SET_LATER_RECOVERY,
     SET_SAVE_AS_DEFAULT,
     SET_SAVE_AS_TEMPLATE,
     SET_COLLECT_ALL,
@@ -268,6 +276,7 @@ pub const IDS: &[&str] = &[
     SETTINGS_SET_SELECT_NEXT_SCENE_ON_LAUNCH,
     SETTINGS_SET_START_RECORDING_ON_SCENE_LAUNCH,
     SETTINGS_SET_RECORD_SESSION_AUTOMATION_IN,
+    SETTINGS_SET_AUTOMATION_RECORD_MODE,
     SETTINGS_SET_AUTO_HIDE_PLUG_IN_WINDOWS,
     SETTINGS_SET_OUTLINE_VIEW_IN_FOCUS,
     AUDIO_DEVICES,
@@ -479,6 +488,14 @@ pub struct RecordSessionAutomationInArgs {
     pub tracks: crate::settings::SessionAutomationTracks,
 }
 
+/// Arguments of `settings.set_automation_record_mode`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AutomationRecordModeArgs {
+    /// `touch`, `latch` or `write`.
+    pub mode: crate::settings::AutomationRecordMode,
+}
+
 /// Arguments of `settings.set_default_launch_quantization`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -577,6 +594,13 @@ pub struct SetResult {
     pub path: Option<String>,
     /// The set's name, as the title bar shows it.
     pub name: String,
+}
+
+/// What `set.later_recovery` returns: the recovery prompt's state.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RecoveryPrompt {
+    /// Whether the prompt is still open.
+    pub open: bool,
 }
 
 /// Arguments of `view.toggle_plug_in_windows`.
@@ -794,6 +818,17 @@ fn specs() -> Vec<CommandSpec> {
             .context(Global)
             .args::<NoArgs>()
             .result::<SetResult>(),
+        CommandSpec::new(SET_LATER_RECOVERY, "Later Recovery")
+            .description(
+                "Closes the recovery prompt the app shows at launch, leaving every set it \
+                 listed to be offered again at the next launch: nothing is recovered and \
+                 nothing is thrown away. The prompt's Later button runs it, and Esc does the \
+                 same. Changes nothing in the set.",
+            )
+            .permission(Permission::Read)
+            .context(Global)
+            .args::<NoArgs>()
+            .result::<RecoveryPrompt>(),
         CommandSpec::new(SET_SAVE_AS_DEFAULT, "Save Beatlayer Set As Default Set...")
             .description(
                 "Saves the open set as the default set, which every new set starts from, as \
@@ -1533,6 +1568,23 @@ fn specs() -> Vec<CommandSpec> {
         .permission(Permission::Edit)
         .context(Settings)
         .args::<RecordSessionAutomationInArgs>()
+        .result::<()>(),
+        CommandSpec::new(
+            SETTINGS_SET_AUTOMATION_RECORD_MODE,
+            "Automation Record Mode",
+        )
+        .description(
+            "Chooses the mode an Arrangement recording writes control moves in, the one \
+                 the Control Bar's Automation Arm button's context menu chooses: `touch` \
+                 (the default, Live's) writes a control's values while it is held, `latch` \
+                 holds the last value a control was moved to until the recording stops, and \
+                 `write` writes a moved control's envelope from where the recording started. \
+                 A Session recording is unaffected. The mode is kept for the next start, and \
+                 isn't part of the set or an undo step.",
+        )
+        .permission(Permission::Edit)
+        .context(Settings)
+        .args::<AutomationRecordModeArgs>()
         .result::<()>(),
         CommandSpec::new(SETTINGS_SET_SELECT_ON_LAUNCH, "Select on Launch")
             .description(

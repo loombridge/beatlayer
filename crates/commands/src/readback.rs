@@ -127,9 +127,6 @@ const TAGS: &str = "the browser's tags are read with `browser.tags`, which is `e
 /// gives.
 const FILE_MANAGER: &str = "the File Manager's state is read with `file_manager.state`, which \
                              is `external` because it lists files outside the project";
-/// Why Save Continuously has nothing to read.
-const CONTINUOUS: &str = "the app doesn't host the autosave service yet, so no read command \
-                          reports Save Continuously; the command's own result does";
 /// Why a command that writes a file has nothing to read.
 const FILE: &str = "writes a file outside the set; the set doesn't change";
 /// Why a token has nothing to read.
@@ -427,6 +424,7 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("export.realtime.cancel", read("export.realtime.status", "phase")),
     ("export.realtime.restart", read("export.realtime.status", "phase")),
     ("export.realtime.skip", read("export.realtime.status", "phase")),
+    ("export.start", read("export.status", "export")),
     ("midi.export_clip", nothing(FILE)),
     ("midi.capture", query(Track, "slots")),
     ("midi.import_file", query(Track, "clips")),
@@ -562,7 +560,7 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("set.save_copy", nothing(FILE)),
     ("set.save_as_template", nothing(FILE)),
     ("settings.set_auto_hide_plug_in_windows", read("settings.state", "auto_hide_plug_in_windows")),
-    ("settings.set_continuous_save", nothing(CONTINUOUS)),
+    ("settings.set_continuous_save", read("settings.state", "file_folder.save_continuously")),
     ("settings.set_auto_warp_long_samples", read("settings.state", "warp.auto_warp_long_samples")),
     ("settings.set_default_warp_mode", read("settings.state", "warp.default_warp_mode")),
     ("settings.set_loop_warp_short_samples", read("settings.state", "warp.loop_warp_short_samples")),
@@ -573,6 +571,7 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("settings.set_default_launch_mode", read("settings.state", "launch.default_mode")),
     ("settings.set_default_launch_quantization", read("settings.state", "launch.default_quantization")),
     ("settings.set_record_session_automation_in", read("settings.state", "record_session_automation_in")),
+    ("settings.set_automation_record_mode", read("settings.state", "automation_record_mode")),
     ("settings.set_select_next_scene_on_launch", read("settings.state", "launch.select_next_scene_on_launch")),
     ("settings.set_select_on_launch", read("settings.state", "launch.select_on_launch")),
     ("settings.set_start_recording_on_scene_launch", read("settings.state", "launch.start_recording_on_scene_launch")),

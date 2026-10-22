@@ -199,6 +199,11 @@ pub struct ArrangementView {
     /// have picked one; `None` hides that track's lane. A track with no
     /// entry shows its volume.
     automation_lanes: BTreeMap<TrackId, Option<AutomationTarget>>,
+    /// Whether the return tracks' rows scroll with the tracks (IMP-01, the
+    /// arrangement view spec R18): they come after the drop area under the
+    /// last track, and only Main stays pinned. Off in a new install, so
+    /// they stay pinned, as in Live.
+    returns_scroll: bool,
     /// The segment selected in each track's automation lane: the parameter
     /// it shows and the breakpoint the segment starts at (the automation
     /// editing spec, R4).
@@ -210,6 +215,10 @@ pub struct ArrangementView {
     show_volume: bool,
     /// Whether the return tracks' rows show in the lanes (WP-6.64).
     show_return_tracks: bool,
+    /// The tracks the search field's Show Only Matches keeps while it hides
+    /// the others (WP-6.42): the matches and the groups that hold them.
+    /// View state, kept up to date by the shell.
+    search_keep: Option<BTreeSet<TrackId>>,
 }
 
 impl Default for ArrangementView {
@@ -253,21 +262,38 @@ impl ArrangementView {
             automation_mode: false,
             automation_arm: false,
             automation_lanes: BTreeMap::new(),
+            returns_scroll: false,
             automation_segment: BTreeMap::new(),
             show_in_out: true,
             show_volume: true,
             show_return_tracks: true,
+            search_keep: None,
         }
     }
 
     /// Goes back to a new set's view, as a new or opened set shows, keeping
-    /// the window's size and the transport.
+    /// the window's size, the transport, and the application setting the
+    /// return tracks scroll with the tracks.
     pub fn reset(&mut self) {
         *self = Self {
             viewport: self.viewport,
             transport: self.transport,
+            returns_scroll: self.returns_scroll,
             ..Self::new()
         };
+    }
+
+    /// Whether the return tracks' rows scroll with the tracks (IMP-01, the
+    /// arrangement view spec R18).
+    #[must_use]
+    pub fn returns_scroll(&self) -> bool {
+        self.returns_scroll
+    }
+
+    /// Sets whether the return tracks' rows scroll with the tracks, as the
+    /// application setting the preferences keep does.
+    pub fn set_returns_scroll(&mut self, on: bool) {
+        self.returns_scroll = on;
     }
 
     /// Records the size of the lanes' scrolling area, as the window lays it
@@ -411,6 +437,24 @@ impl ArrangementView {
     #[must_use]
     pub fn show_return_tracks(&self) -> bool {
         self.show_return_tracks
+    }
+
+    /// The pinned rows under the scrolling ones: the return tracks while
+    /// they stay pinned (R18) and [`rows::pinned_tracks`] keeps them, then
+    /// Main.
+    pub fn pinned_tracks<'a>(&'a self, doc: &'a Document) -> impl Iterator<Item = TrackId> + 'a {
+        rows::pinned_tracks(doc, self)
+            .filter(move |id| !self.returns_scroll || *id == doc.main_id())
+    }
+
+    /// The return tracks' rows that scroll with the tracks, after the drop
+    /// area (R18): the ones [`rows::pinned_tracks`] would pin, and none
+    /// while they stay pinned.
+    pub fn scrolling_returns<'a>(
+        &'a self,
+        doc: &'a Document,
+    ) -> impl Iterator<Item = TrackId> + 'a {
+        rows::pinned_tracks(doc, self).filter(move |id| self.returns_scroll && *id != doc.main_id())
     }
 
     /// The parameter a track's automation lane shows: the choosers' last
@@ -561,6 +605,38 @@ impl ArrangementView {
         self.folded.contains(&track)
     }
 
+    /// Whether a group shows folded now: folded, and not opened by Show Only
+    /// Matches to show the matches it holds (command-palette R12).
+    #[must_use]
+    pub fn is_folded_in(&self, doc: &Document, track: TrackId) -> bool {
+        self.is_folded(track)
+            && !self.search_keep.as_ref().is_some_and(|keep| {
+                doc.track(track)
+                    .is_some_and(|t| t.children().any(|child| keep.contains(&child)))
+            })
+    }
+
+    /// Whether Show Only Matches leaves `track` showing: always, while it's
+    /// off.
+    #[must_use]
+    pub fn search_keeps(&self, track: TrackId) -> bool {
+        self.search_keep
+            .as_ref()
+            .is_none_or(|keep| keep.contains(&track))
+    }
+
+    /// The tracks Show Only Matches keeps, while it hides the others.
+    #[must_use]
+    pub fn search_keep(&self) -> Option<&BTreeSet<TrackId>> {
+        self.search_keep.as_ref()
+    }
+
+    /// Hides every track but these (Show Only Matches), or with `None`
+    /// shows them all again, each group folded as it was.
+    pub fn set_search_keep(&mut self, keep: Option<BTreeSet<TrackId>>) {
+        self.search_keep = keep;
+    }
+
     /// Unfolds `track` if it was folded.
     pub fn unfold(&mut self, track: TrackId) {
         self.folded.remove(&track);
@@ -580,7 +656,7 @@ impl ArrangementView {
     /// those inside a folded group, each at the height it shows at.
     pub fn rows_into(&self, doc: &Document, out: &mut Vec<Row>) {
         out.clear();
-        let shown = rows::shown_tracks(doc, |id| self.is_folded(id));
+        let shown = rows::shown_tracks(doc, self);
         let mut top = 0.0;
         for (track, kind, depth) in shown {
             // Spec: arrangement-view R23: with the return tracks hidden,
@@ -588,7 +664,7 @@ impl ArrangementView {
             if !self.show_return_tracks && kind == TrackKind::Return {
                 continue;
             }
-            let folded = self.is_folded(track);
+            let folded = self.is_folded_in(doc, track);
             let height = if folded {
                 FOLDED_HEIGHT
             } else {
@@ -629,22 +705,25 @@ impl ArrangementView {
         rows
     }
 
-    /// How tall the scrolling part's content is: the rows and the drop area
-    /// under them.
+    /// How tall the scrolling part's content is: the rows, the drop area
+    /// under them, and the return tracks' rows when they scroll with the
+    /// tracks (the arrangement view spec, R18).
     #[must_use]
-    pub fn content_height(&self, rows: &[Row]) -> f32 {
+    pub fn content_height(&self, doc: &Document, rows: &[Row]) -> f32 {
         let bottom = rows.last().map_or(0.0, Row::bottom);
+        // The return tracks' rows, each at the height its pinned row has.
+        let returns = self.scrolling_returns(doc).count() as f32 * FOLDED_HEIGHT;
         if self.optimize_height {
-            bottom
+            bottom + returns
         } else {
-            bottom + DROP_AREA
+            bottom + DROP_AREA + returns
         }
     }
 
     /// The farthest the lanes scroll down.
     #[must_use]
-    pub fn max_scroll_y(&self, rows: &[Row]) -> f64 {
-        f64::from((self.content_height(rows) - self.viewport.height).max(0.0))
+    pub fn max_scroll_y(&self, doc: &Document, rows: &[Row]) -> f64 {
+        f64::from((self.content_height(doc, rows) - self.viewport.height).max(0.0))
     }
 
     /// Where the arrangement ends, for the views of the whole arrangement:
@@ -700,7 +779,7 @@ impl ArrangementView {
 
     fn clamp_scroll(&mut self, doc: &Document) {
         let rows = self.rows(doc);
-        self.scroll_y = self.scroll_y.clamp(0.0, self.max_scroll_y(&rows));
+        self.scroll_y = self.scroll_y.clamp(0.0, self.max_scroll_y(doc, &rows));
     }
 
     /// Zooms by `factor` around `anchor`.
@@ -762,7 +841,7 @@ impl ArrangementView {
             } else if bottom > self.scroll_y + height {
                 self.scroll_y = (bottom - height).min(top);
             }
-            self.scroll_y = self.scroll_y.clamp(0.0, self.max_scroll_y(&rows));
+            self.scroll_y = self.scroll_y.clamp(0.0, self.max_scroll_y(doc, &rows));
         }
     }
 
@@ -891,7 +970,7 @@ impl ArrangementView {
                 }
                 if y != 0.0 {
                     let rows = self.rows(doc);
-                    self.scroll_y = (self.scroll_y + y).clamp(0.0, self.max_scroll_y(&rows));
+                    self.scroll_y = (self.scroll_y + y).clamp(0.0, self.max_scroll_y(doc, &rows));
                 }
             }
             ids::SHOW_TRACK => {

@@ -54,6 +54,7 @@ pub fn sections(shell: &Shell) -> Sections {
         returns: view.return_tracks(),
         track_options: view.track_options(),
         performance_impact: view.performance_impact(),
+        return_tracks_scroll: view.return_tracks_scroll(),
     }
 }
 
@@ -256,6 +257,22 @@ impl MixerUi {
         let sections = sections(shell);
         let shown = shell.mixer_view().of(MixerOf::Session).shown;
         let layout = SessionLayout::compute(rect, shown.then_some(sections));
+        // Spec: command-palette R11. With the Session mixer hidden, the
+        // grid's columns scroll to a track the search field selected.
+        if !shown && let Some((MixerOf::Session, track)) = self.reveal {
+            self.reveal = None;
+            let columns = shell.mixer_columns();
+            let columns_layout = MixerLayout::compute(
+                layout.slots,
+                &folds(shell, &columns).columns,
+                shell.shown_returns().len(),
+                sections,
+                shell.mixer_view().of(MixerOf::Session).scroll as f32,
+            );
+            if let Some(index) = columns.iter().position(|c| *c == track) {
+                scroll_into_view(&columns_layout, index, MixerOf::Session, events);
+            }
+        }
         let painter = ui.painter_at(rect);
         painter.rect_filled(rect, 0.0, theme.colors.panel.0);
         title_bars(
@@ -292,7 +309,7 @@ impl MixerUi {
     ) {
         let doc = shell.editor().document();
         let columns = shell.mixer_columns();
-        let returns: Vec<TrackId> = doc.returns().collect();
+        let returns: Vec<TrackId> = shell.shown_returns();
         let sections = sections(shell);
         let scroll = shell.mixer_view().of(of).scroll as f32;
         let folds = folds(shell, &columns);
@@ -355,11 +372,7 @@ impl MixerUi {
             let Some(t) = doc.track(track) else {
                 continue;
             };
-            let clip = if column.kind == ColumnKind::Track {
-                column.rect.intersect(layout.tracks)
-            } else {
-                column.rect
-            };
+            let clip = layout.clip_of(column.kind, column.rect);
             let mut column_ui = ui.new_child(egui::UiBuilder::new().max_rect(clip));
             column_ui.set_clip_rect(clip.intersect(area));
             // The column itself takes the keyboard focus Navigate ▸ Mixer
@@ -692,7 +705,7 @@ fn title_bars(
 ) {
     let doc = shell.editor().document();
     let columns = shell.mixer_columns();
-    let returns: Vec<TrackId> = doc.returns().collect();
+    let returns: Vec<TrackId> = shell.shown_returns();
     let scroll = shell.mixer_view().of(of).scroll as f32;
     let folds = folds(shell, &columns);
     let layout = MixerLayout::compute(row, &folds.columns, returns.len(), sections(shell), scroll);
@@ -709,18 +722,16 @@ fn title_bars(
         let Some(t) = doc.track(track) else {
             continue;
         };
-        let bar = column.rect.shrink2(vec2(0.5, 0.0));
-        let bar = if column.kind == ColumnKind::Track {
-            bar.intersect(layout.tracks)
-        } else {
-            bar
-        };
+        let bar = layout.clip_of(column.kind, column.rect.shrink2(vec2(0.5, 0.0)));
         let painter = ui.painter_at(bar);
         painter.rect_filled(
             bar,
             0.0,
             title_colour(theme, track, t.kind()).gamma_multiply(0.82),
         );
+        // Spec: command-palette R10. The tracks the search field finds are
+        // outlined.
+        crate::search_field::outline(ui, shell, theme, track, bar);
         // The fold button for the track's rack, at the bar's right.
         let fold = folds.racks.iter().find(|r| r.track == track).map(|r| {
             (

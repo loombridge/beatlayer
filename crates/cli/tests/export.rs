@@ -98,6 +98,8 @@ fn job(path: PathBuf, file_type: FileType, bit_depth: BitDepth, frames: u64) -> 
         replace: false,
         render_as_loop: false,
         block: export::BLOCK,
+        mono: false,
+        mp3: false,
     }
 }
 
@@ -1153,6 +1155,153 @@ fn an_mp3_export_decodes_within_the_lossy_tolerance() {
     let snr = band_snr_db(&reference, &decoded, channels, rate, 15_000.0);
     println!("an MP3 export of eight stems: {snr:.1} dB below 15 kHz (limit 65)");
     assert!(snr >= 65.0, "{snr:.1} dB below 15 kHz");
+}
+
+/// The eight stems with the first panned hard left and the second hard
+/// right, so the render's two channels differ.
+fn panned_stems(seconds: f64) -> (Editor, MediaMap) {
+    let (mut editor, media) = eight_stems(seconds);
+    let tracks: Vec<_> = editor.document().top_level().collect();
+    for (track, pan) in [(tracks[0], -1.0), (tracks[1], 1.0)] {
+        editor.apply(Edit::SetPan { track, pan }).unwrap();
+    }
+    (editor, media)
+}
+
+/// Spec: export R12, R33 (WP-6.71). Convert to Mono writes one channel, the
+/// average of the render's two, to the bit at 32 bits, before Normalize.
+#[test]
+fn convert_to_mono_writes_the_average_of_the_two_channels_to_the_bit() {
+    let temp = TempDir::new("mono");
+    let (editor, media) = panned_stems(1.0);
+    let media: Arc<dyn MediaLibrary> = Arc::new(media);
+    let frames = 48_000;
+
+    let stereo_path = temp.0.join("stereo.wav");
+    run(
+        editor.document(),
+        media.clone(),
+        &job(
+            stereo_path.clone(),
+            FileType::Wav,
+            BitDepth::Float32,
+            frames,
+        ),
+    );
+    let (_, channels, stereo) = decode(&stereo_path);
+    assert_eq!(channels, 2);
+    assert!(
+        stereo.chunks(2).any(|frame| frame[0] != frame[1]),
+        "the render's channels differ"
+    );
+
+    let mono_path = temp.0.join("mono.wav");
+    let mut mono = job(mono_path.clone(), FileType::Wav, BitDepth::Float32, frames);
+    mono.mono = true;
+    let report = run(editor.document(), media.clone(), &mono);
+    assert_eq!((report.channels, report.frames), (1, frames));
+    let (_, channels, averaged) = decode(&mono_path);
+    assert_eq!(channels, 1);
+    assert_eq!(averaged.len(), stereo.len() / 2);
+    for (n, (&mixed, frame)) in averaged.iter().zip(stereo.chunks(2)).enumerate() {
+        let want = (frame[0] + frame[1]) / 2.0;
+        assert_eq!(mixed.to_bits(), want.to_bits(), "frame {n}");
+    }
+
+    // Every file type takes it, and Normalize works on the mono render.
+    for file_type in [FileType::Aiff, FileType::Flac, FileType::Mp3] {
+        let path = temp.0.join(format!("mono.{}", file_type.extension()));
+        let mut mono = job(path.clone(), file_type, BitDepth::Int24, frames);
+        mono.mono = true;
+        mono.normalize = file_type != FileType::Mp3;
+        run(editor.document(), media.clone(), &mono);
+        let (_, channels, samples) = decode(&path);
+        assert_eq!(channels, 1, "{file_type:?}");
+        if mono.normalize {
+            let peak = samples.iter().fold(0.0f32, |peak, s| peak.max(s.abs()));
+            assert!(peak > 0.999, "{file_type:?} peaks at {peak}");
+        }
+        if file_type == FileType::Mp3 {
+            // Encoded as one channel, not read as pairs: the frames of the
+            // WAV, and the signal.
+            assert_eq!(samples.len(), averaged.len());
+            let snr = band_snr_db(&averaged, &samples, 1, 48_000, 15_000.0);
+            assert!(snr >= 65.0, "{snr:.1} dB below 15 kHz");
+        }
+    }
+}
+
+/// Spec: export R37 (WP-6.71). Encode MP3 writes the MP3 beside the file
+/// from the same render: it decodes within the lossy tolerance of the file.
+/// A file of either name that exists refuses the export before anything is
+/// written, and cancelling leaves neither.
+#[test]
+fn encode_mp3_writes_both_files_from_one_render() {
+    let temp = TempDir::new("both");
+    let (editor, media) = eight_stems(1.0);
+    let media: Arc<dyn MediaLibrary> = Arc::new(media);
+    let frames = 48_000;
+
+    let path = temp.0.join("stems.wav");
+    let mut both = job(path.clone(), FileType::Wav, BitDepth::Float32, frames);
+    both.mp3 = true;
+    // A file at the MP3's name refuses the export; nothing is written.
+    let mp3 = temp.0.join("stems.mp3");
+    fs::write(&mp3, b"in the way").unwrap();
+    let error = export::export(
+        editor.document(),
+        media.clone(),
+        bl_shell::export::Hosts::default(),
+        &both,
+        &AtomicBool::new(false),
+        &mut |_| {},
+    )
+    .unwrap_err();
+    assert_eq!(error, ExportError::Exists(mp3.clone()));
+    assert_eq!(temp.names(), BTreeSet::from(["stems.mp3".to_owned()]));
+    fs::remove_file(&mp3).unwrap();
+
+    // Cancelled, neither file is left, with Normalize or without.
+    for normalize in [false, true] {
+        let mut cancelled = both.clone();
+        cancelled.normalize = normalize;
+        let cancel = AtomicBool::new(false);
+        let result = export::export(
+            editor.document(),
+            media.clone(),
+            bl_shell::export::Hosts::default(),
+            &cancelled,
+            &cancel,
+            &mut |done| {
+                if done >= 0.4 {
+                    cancel.store(true, Ordering::Relaxed);
+                }
+            },
+        );
+        assert_eq!(result, Err(ExportError::Cancelled));
+        assert!(temp.names().is_empty(), "{:?}", temp.names());
+    }
+
+    let report = run(editor.document(), media.clone(), &both);
+    assert_eq!(report.frames, frames);
+    assert_eq!(
+        temp.names(),
+        BTreeSet::from(["stems.mp3".to_owned(), "stems.wav".to_owned()])
+    );
+    let (rate, channels, reference) = decode(&path);
+    let (mp3_rate, mp3_channels, decoded) = decode(&mp3);
+    assert_eq!((mp3_rate, mp3_channels), (rate, channels));
+    assert_eq!(decoded.len(), reference.len());
+    let snr = band_snr_db(&reference, &decoded, channels, rate, 15_000.0);
+    assert!(snr >= 65.0, "{snr:.1} dB below 15 kHz");
+    // The file is what it is without the MP3.
+    let alone = temp.0.join("alone.wav");
+    run(
+        editor.document(),
+        media,
+        &job(alone.clone(), FileType::Wav, BitDepth::Float32, frames),
+    );
+    assert_eq!(fs::read(&alone).unwrap(), fs::read(&path).unwrap());
 }
 
 fn bl_cli(args: &[&str]) -> Output {

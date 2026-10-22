@@ -1,6 +1,6 @@
 # Crash recovery and Save Continuously
 
-- **Status:** partial (R11, the switch in Settings, waits on the Settings window's File & Folder page; R12 to R20 are WP-6.39's and R21 to R28 WP-6.62's; every other rule has a passing test, in the library the app uses)
+- **Status:** partial (R1 to R11, R21 to R28 each have a passing test; R12 to R20 are WP-6.39's)
 - **Work packages:** WP-1.11 (the journal, crash recovery, the Save Continuously option, and their commands: R1 to R11). The recovery prompt and the switch in the Settings window are the app shell's to draw (WP-1.7 and the Settings pages after it). WP-6.62 puts the service in the app: the shell journals every edit, the recovery prompt at launch, and the Save Continuously switch (R21 to R28). WP-6.39 builds the save history, which lists the save points and saved versions and restores them (R12 to R20).
 - **Parity-matrix row:** Files and export: Crash recovery; (Beatlayer only) Save Continuously
 - **Checked against:** the Live 12 reference manual (online edition) and the Live 12 release notes, read on 10 October 2026; for R12 to R28, the manual's chapter 5 again and the Live 12 release notes, read 20 October 2026, and the UI parity reference's menus.md (M-FILE-008, M-VIEW-008) and layout.md (L-WIN-008, L-OTH-001) rows.
@@ -78,7 +78,7 @@ This spec covers when edits reach the disk, when a set is offered, what recoveri
 | R8 | `crates/project/tests/crash_recovery.rs`, `with_save_continuously_a_killed_session_reopens_at_its_last_edit`, `with_save_continuously_every_journalled_edit_is_saved`; `crates/project/src/autosave.rs`, `saving_retires_the_journal_and_continuous_save_commits` | integration, unit |
 | R9 | `crates/project/src/journal.rs`, `committed_entries_are_save_points`; `crates/project/src/autosave.rs`, `saving_retires_the_journal_and_continuous_save_commits` | unit |
 | R10 | `crates/project/src/autosave.rs`, `saving_retires_the_journal_and_continuous_save_commits` | unit |
-| R11 | None yet: the File & Folder page isn't built. `crates/project/src/registry.rs`, `every_command_is_registered_and_complete` covers the command. | |
+| R11 | `crates/ui/tests/recovery.rs`, `the_file_and_folder_switch_turns_save_continuously_on`; `crates/project/src/registry.rs`, `every_command_is_registered_and_complete` covers the command. | UI script |
 | R12 | to be written in WP-6.39 | |
 | R13 | to be written in WP-6.39 | |
 | R14 | to be written in WP-6.39 | |
@@ -88,14 +88,14 @@ This spec covers when edits reach the disk, when a set is offered, what recoveri
 | R18 | to be written in WP-6.39 | |
 | R19 | to be written in WP-6.39 | |
 | R20 | to be written in WP-6.39 | |
-| R21 | to be written in WP-6.62 | |
-| R22 | to be written in WP-6.62 | |
-| R23 | to be written in WP-6.62 | |
-| R24 | to be written in WP-6.62 | |
-| R25 | to be written in WP-6.62 | |
-| R26 | to be written in WP-6.62 | |
-| R27 | to be written in WP-6.62 | |
-| R28 | to be written in WP-6.62 | |
+| R21 | `crates/shell/tests/recovery.rs`, `a_killed_session_is_offered_and_recovered` (the shell journals the set's edits) | integration |
+| R22 | `crates/ui/tests/recovery.rs`, `the_recovery_prompt_lists_the_crashed_sets_newest_first`, `recovering_from_the_prompt_opens_the_set`, `esc_is_later_and_keeps_the_set_for_the_next_launch` | UI script |
+| R23 | `crates/ui/tests/recovery.rs`, `the_recovery_prompt_lists_the_crashed_sets_newest_first` (the tree), `esc_is_later_and_keeps_the_set_for_the_next_launch` (Esc) | UI script |
+| R24 | `crates/ui/tests/recovery.rs`, `the_file_and_folder_switch_turns_save_continuously_on` | UI script |
+| R25 | `crates/shell/tests/recovery.rs`, `save_continuously_leaves_a_set_with_a_file_clean` | integration |
+| R26 | `crates/agent/tests/recovery.rs`, `an_agent_recovers_a_set_a_crash_left`; `crates/shell/tests/recovery.rs`, `discarding_a_recovery_leaves_nothing_to_offer` | integration |
+| R27 | `crates/shell/tests/recovery.rs`, `a_read_only_recovery_folder_says_so_once_and_the_set_still_edits` | integration |
+| R28 | `crates/shell/tests/recovery.rs`, `a_killed_session_is_offered_and_recovered` | integration |
 
 ## Beatlayer's own choices
 

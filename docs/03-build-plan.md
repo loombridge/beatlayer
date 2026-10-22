@@ -685,15 +685,15 @@ Total to 1.0: 256 packages planned in Phases 0 to 6, and about 110 estimated in 
 | 6.36b | todo |  |  |
 | 6.37 | todo |  |  |
 | 6.37b | todo |  |  |
-| 6.38 | todo |  |  |
+| 6.38 | done | 22 October 2026 | [#310](https://github.com/loombridge/beatlayer/pull/310); View ▸ Return Tracks Scroll with Tracks (`mixer_view.return_tracks_scroll`, off by default and kept in the preferences) puts the returns after the drop area in the Session View's grid, both mixers and the Arrangement's lanes, scrolling with the tracks, with only Main pinned |
 | 6.39 | todo |  |  |
 | 6.40 | todo |  |  |
 | 6.41 | done | 21 October 2026 | [#288](https://github.com/loombridge/beatlayer/pull/288); the set's plug-ins listed in the detail area's place, with each device's preset name, the tracks it is on, the missing ones marked, and a tab-separated text export ([plug-in list](specs/plugin-list.md) R1 to R11); IMP-29's acceptance is still open |
-| 6.42 | todo |  | Waits on IMP-16 and IMP-18's acceptance |
+| 6.42 | done | 22 October 2026 | [#321](https://github.com/loombridge/beatlayer/pull/321); one search field over the main view with a Commands scope built from the menus, context menus and keymap and a Tracks scope that outlines matches and hides the rest with Show Only Matches ([command search](specs/command-palette.md) R1 to R16); IMP-16 and IMP-18's acceptance is still open |
 | 6.43 | done | 21 October 2026 | [#290](https://github.com/loombridge/beatlayer/pull/290); a person gives commands their own keys in `keymap.toml` beside the preferences, layered over Live's, and the Shortcuts page in Settings records them, asks before taking a key from another command, and gives Live's keys back ([custom shortcuts](specs/custom-shortcuts.md)) |
 | 6.44 | todo |  | Waits on IMP-21's acceptance |
 | 6.45 | todo |  | Waits on IMP-22's acceptance |
-| 6.46 | todo |  | Waits on IMP-23's acceptance |
+| 6.46 | done | 22 October 2026 | [#324](https://github.com/loombridge/beatlayer/pull/324); Touch, Latch and Write recording modes on the Automation Arm button's context menu, kept between launches by `settings.set_automation_record_mode` and read back by `settings.state` and `transport.state`, with Latch and Write holds carried over the loop's wrap ([automation](specs/automation.md) R18 to R23) |
 | 6.47 | done | 22 October 2026 | [#292](https://github.com/loombridge/beatlayer/pull/292); the Articulation Map, a MIDI effect, holds up to 32 named articulations, each with a trigger and the keyswitches, controllers and channel it sends, and the list is edited by command, saved with the set and in the device's presets, and read back ([articulation map](specs/articulation-map.md) R1 to R20); IMP-32's acceptance is still open |
 | 6.48 | todo |  | Waits on IMP-33's acceptance |
 | 6.49 | todo |  | Waits on IMP-34, IMP-35 and IMP-36's acceptance |
@@ -710,7 +710,7 @@ Total to 1.0: 256 packages planned in Phases 0 to 6, and about 110 estimated in 
 | 6.59 | todo |  |  |
 | 6.60 | todo |  |  |
 | 6.61 | todo |  |  |
-| 6.62 | todo |  |  |
+| 6.62 | done | 22 October 2026 | [#319](https://github.com/loombridge/beatlayer/pull/319); the shell journals every finished edit from start-up, the recovery prompt at launch with Recover, Discard and Later, the Save Continuously switch on File & Folder read back by `settings.state`, and `bl-cli mcp --recovery-dir` ([crash-recovery](specs/crash-recovery.md) R21 to R28) |
 | 6.63 | done | 22 October 2026 | [#294](https://github.com/loombridge/beatlayer/pull/294); the File Manager in the detail area's place, listing the set's files, the missing ones, the external ones and the unused ones, with the search's switches, Collect and Save, the set's backups and Save a Copy... ([file management](specs/file-management.md) R10 to R21) |
 | 6.64 | done | 22 October 2026 | [#306](https://github.com/loombridge/beatlayer/pull/306); View ▸ Arrangement Track Controls' In/Out, Volume and Return Tracks hide their parts of every track header, and the mixers' own sections stay as they are ([arrangement view](specs/arrangement-view.md) R20 to R24) |
 | 6.65 | todo |  |  |
@@ -719,5 +719,5 @@ Total to 1.0: 256 packages planned in Phases 0 to 6, and about 110 estimated in 
 | 6.68 | todo |  |  |
 | 6.69 | todo |  |  |
 | 6.70 | todo |  |  |
-| 6.71 | todo |  |  |
+| 6.71 | done | 22 October 2026 | [#320](https://github.com/loombridge/beatlayer/pull/320); the Export Audio/Video dialog on ⇧⌘R and the File menu, with a progress window and Cancel, exports on a worker thread, and Convert to Mono, Encode MP3 beside a PCM file and Create Analysis File ([export](specs/export.md) R28 to R45) |
 | 6.72 | todo |  |  |

@@ -492,6 +492,39 @@ pub enum SessionAutomationTracks {
     AllTracks,
 }
 
+/// The mode an Arrangement recording writes its control moves in (the
+/// automation spec, R18): Touch, Live's; Latch; and Write (IMP-23). The
+/// names are Beatlayer's own.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AutomationRecordMode {
+    /// Touch, Live's mode: a control writes its values while it is held.
+    #[default]
+    Touch,
+    /// Latch: the last value a control was moved to holds until the
+    /// recording stops.
+    Latch,
+    /// Write: a control's envelope is written from where the recording
+    /// started.
+    Write,
+}
+
+impl AutomationRecordMode {
+    /// Every mode, in the order the Automation Arm button's context menu
+    /// lists them.
+    pub const ALL: [Self; 3] = [Self::Touch, Self::Latch, Self::Write];
+
+    /// The mode's name in the Automation Arm button's context menu.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Touch => "Touch",
+            Self::Latch => "Latch",
+            Self::Write => "Write",
+        }
+    }
+}
+
 /// The Agents page's settings. The server's token and each allowed agent's
 /// are never reported, only whether the server has one.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -516,6 +549,10 @@ pub struct FileFolderSettings {
     /// The sample editor the Edit button in the Clip View's Audio Utilities
     /// panel opens a clip's file in: its path, empty when none is named.
     pub sample_editor: String,
+    /// Save Continuously: whether every finished edit of a set that has a
+    /// file is saved within a second, as `settings.set_continuous_save`
+    /// sets it.
+    pub save_continuously: bool,
 }
 
 /// What `settings.state` returns: the Settings window's preferences by
@@ -551,6 +588,10 @@ pub struct SettingsState {
     /// Record, Warp & Launch: Record Session automation in, as
     /// `settings.set_record_session_automation_in` sets it.
     pub record_session_automation_in: SessionAutomationTracks,
+    /// The mode an Arrangement recording writes control moves in, as
+    /// `settings.set_automation_record_mode` sets it (the automation spec,
+    /// R18).
+    pub automation_record_mode: AutomationRecordMode,
     /// File & Folder: the Temporary Folder, as `settings.set_temporary_folder`
     /// sets it.
     pub file_folder: FileFolderSettings,
@@ -581,8 +622,12 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                  Input (zoom, Outline View in Focus, the Tab key settings), the audio device \
                  settings with Driver Error Compensation and the test tone (`audio.configure`, \
                  `audio.set_test_tone`), the MIDI ports and computer keyboard (`midi.set_port`), \
-                 Create Fades on Clip Edges, Warp Recorded Audio, the Launch section, Auto-Hide Plug-In Windows, the plug-ins the Browser hides and prefers \
-                 (`plugin.settings`), the agent server and the \
+                 Create Fades on Clip Edges, Warp Recorded Audio, the Launch section, the \
+                 automation recording mode (`settings.set_automation_record_mode`), the File & \
+                 Folder page's Temporary Folder, sample editor and Save Continuously \
+                 (`settings.set_temporary_folder`, `settings.set_sample_editor` and \
+                 `settings.set_continuous_save`), Auto-Hide Plug-In Windows, the plug-ins the \
+                 Browser hides and prefers (`plugin.settings`), the agent server and the \
                  assistant. The server's and the agents' tokens and the assistant's API key are \
                  never reported, only whether one is stored. Preferences aren't saved with the \
                  set. Changes nothing. Use it to check a `settings.set_*` command took effect.",

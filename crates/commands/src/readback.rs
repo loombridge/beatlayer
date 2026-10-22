@@ -420,6 +420,7 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("export.realtime.cancel", read("export.realtime.status", "phase")),
     ("export.realtime.restart", read("export.realtime.status", "phase")),
     ("export.realtime.skip", read("export.realtime.status", "phase")),
+    ("export.start", read("export.status", "export")),
     ("midi.export_clip", nothing(FILE)),
     ("midi.capture", query(Track, "slots")),
     ("midi.import_file", query(Track, "clips")),

@@ -67,37 +67,38 @@ The test of R8 walks the whole registry. A command is reached by a key, a menu i
 
 **Without a key of their own**: `mixer.set_crossfader` and `mixer.set_crossfade_assign`. Their controls are reached with the pointer, and the keyboard reaches them too (Tab to an A or B button and Enter assigns or releases, and Main's crossfader is a slider) ([mixer-view](mixer-view.md) R15, R16; WP-3.17).
 
+**The Export Audio/Video dialog** (WP-6.71): its controls (`export.set_choices`, `export.start`, `export.close_dialog`) and the export's progress window (`export.cancel`) are in the Tab order, and Return and Esc act in them ([export](export.md) R28, R45).
+
 **Gaps in M1** (each needs another package's work):
 
-1. `export.audio`: the Export Audio/Video dialog isn't built yet ([export](export.md) R16), so ⇧⌘R does nothing yet.
-2. `track.move`: moving tracks with Cmd and the arrows (S-TRACK-012) isn't bound.
-3. `device.load_sample`: loading a sample into the sampler has no key or menu item yet ([sampler](sampler.md) R11); dropping the file on the sampler's Device View frame is the only way.
+1. `track.move`: moving tracks with Cmd and the arrows (S-TRACK-012) isn't bound.
+2. `device.load_sample`: loading a sample into the sampler has no key or menu item yet ([sampler](sampler.md) R11); dropping the file on the sampler's Device View frame is the only way.
 
 **Gaps in the multisampler** ([multisampler](multisampler.md), WP-5.13; its header buttons, layer rows and Sample tab fields are in the Device View's Tab order, so `device.set_multisampler_view`, `device.hot_swap_layer`, `device.select_layers`, `device.set_layer` and `device.set_layer_options` are reached with the keyboard):
 
-4. `device.add_layers`: adding samples is a drop of files on the zone editor (R3); the keyboard has no way to name files yet.
-5. `device.set_layer_zone`: dragging a zone's edge, body or fade has no keyboard form yet (R10).
-6. `device.snap_layer_markers`: the loop marker's context menu isn't opened from the keyboard (R20).
-7. `device.delete_layers`, `device.duplicate_layers`, `device.rename_layer`, `device.sort_layers`, `device.distribute_layers` and `device.normalize_layers`: the layer list's context menu isn't opened from the keyboard (R11); the Delete key deletes the selected device.
-8. `device.move_layers`: no control moves layers by hand yet; the list's sorts reorder it (R11).
+3. `device.add_layers`: adding samples is a drop of files on the zone editor (R3); the keyboard has no way to name files yet.
+4. `device.set_layer_zone`: dragging a zone's edge, body or fade has no keyboard form yet (R10).
+5. `device.snap_layer_markers`: the loop marker's context menu isn't opened from the keyboard (R20).
+6. `device.delete_layers`, `device.duplicate_layers`, `device.rename_layer`, `device.sort_layers`, `device.distribute_layers` and `device.normalize_layers`: the layer list's context menu isn't opened from the keyboard (R11); the Delete key deletes the selected device.
+7. `device.move_layers`: no control moves layers by hand yet; the list's sorts reorder it (R11).
 
 **Gaps in sample editing** ([multisampler](multisampler.md), WP-5.15):
 
-9. `device.edit_sample`, `device.crop_sample` and `device.reverse_sample`: the sample display's context menu isn't opened from the keyboard (R55, R59).
-10. `device.audition_sample`: a click on the sample display has no keyboard form yet (R54).
-11. `device.convert`: the device's title bar menu isn't opened from the keyboard (R62).
+8. `device.edit_sample`, `device.crop_sample` and `device.reverse_sample`: the sample display's context menu isn't opened from the keyboard (R55, R59).
+9. `device.audition_sample`: a click on the sample display has no keyboard form yet (R54).
+10. `device.convert`: the device's title bar menu isn't opened from the keyboard (R62).
 
 **Gaps in rack presets** ([racks](racks.md), WP-5.8):
 
-12. `chain.save_preset`: a chain's row is saved by dragging it into the browser (R46), which has no keyboard form yet.
+11. `chain.save_preset`: a chain's row is saved by dragging it into the browser (R46), which has no keyboard form yet.
 
 **Gaps in macros** ([macros](macros.md), WP-5.4):
 
-13. `rack.set_macro_info_text`: a macro's info text has no menu item yet; M-EDIT-025 (Edit Info Text) adds it.
+12. `rack.set_macro_info_text`: a macro's info text has no menu item yet; M-EDIT-025 (Edit Info Text) adds it.
 
 **Gaps in the autosampler** ([multisampler](multisampler.md), WP-5.16):
 
-14. `device.autosample_open`: the device's title bar menu isn't opened from the keyboard (R64).
+13. `device.autosample_open`: the device's title bar menu isn't opened from the keyboard (R64).
 
 ## Tests
 

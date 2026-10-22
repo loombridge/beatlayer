@@ -78,6 +78,7 @@ pub mod clip_view;
 pub mod dawproject;
 pub mod devices;
 pub mod export;
+pub mod export_dialog;
 pub mod files;
 pub mod midi;
 pub mod midi_files;
@@ -185,6 +186,6 @@ pub use bl_shell_spec::{
 /// The autosampler's progress (WP-5.16).
 pub use shell::autosample::Status as AutosampleStatus;
 pub use shell::{
-    Area, Effect, GesturePhase, Invocation, KEY_TRACK_NUMBER, MainView, Message, Shell, ShellError,
-    TransientList, WindowKind,
+    Area, Effect, ExportPrefs, GesturePhase, Invocation, KEY_TRACK_NUMBER, MainView, Message,
+    Shell, ShellError, TransientList, WindowKind,
 };

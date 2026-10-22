@@ -11,7 +11,6 @@
 //! dropout found while it runs starts it again, unless Auto-Restart is
 //! off, when the dropouts are listed instead.
 
-use std::path::Path;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -428,7 +427,9 @@ pub fn render(
                 // Spec: external-devices R23. A render that stops leaves no
                 // file behind: its partial file is deleted.
                 for (_, job) in outputs {
-                    let _ = std::fs::remove_file(export::hidden_beside(&job.path, "partial"));
+                    for partial in job.partials() {
+                        let _ = std::fs::remove_file(partial);
+                    }
                     let _ = std::fs::remove_file(export::hidden_beside(&job.path, "render"));
                 }
                 session.set_state(Phase::Idle, 0.0, attempt);
@@ -481,12 +482,13 @@ fn play(
         captured.push(Arc::new(AtomicU64::new(0)));
     }
     for (_, job) in outputs.iter() {
-        let spec = export::encode_spec(job)?;
-        let partial = export::hidden_beside(&job.path, "partial");
+        let targets = export::targets(job)?;
         let scratch = export::hidden_beside(&job.path, "render");
-        let out = export::open(job, (partial.as_path(), scratch.as_path()), spec)?;
+        let out = export::open(job, &scratch, &targets)?;
+        // Spec: export R33. Convert to Mono makes the file one channel.
+        let channels = usize::from(targets[0].1.channels);
         let converter = if job.sample_rate < rate {
-            Some(Downsampler::new(rate, job.sample_rate, CHANNELS, frames)?)
+            Some(Downsampler::new(rate, job.sample_rate, channels, frames)?)
         } else {
             None
         };
@@ -643,8 +645,8 @@ fn write_output(
     done: Arc<AtomicBool>,
 ) -> Result<Report, ExportError> {
     let began = Instant::now();
-    let spec = export::encode_spec(&job)?;
-    let partial = export::hidden_beside(&job.path, "partial");
+    let targets = export::targets(&job)?;
+    let channels = usize::from(targets[0].1.channels);
     let scratch = export::hidden_beside(&job.path, "render");
     let mut peak = 0.0f32;
     let mut frames = 0u64;
@@ -667,29 +669,35 @@ fn write_output(
         // half frame waits here for the rest.
         let whole = samples.len() - samples.len() % CHANNELS;
         if whole > 0 {
-            let whole = &samples[..whole];
-            for sample in whole {
+            let mixed;
+            let block = if job.mono {
+                mixed = export::downmix(&samples[..whole], CHANNELS);
+                &mixed[..]
+            } else {
+                &samples[..whole]
+            };
+            for sample in block {
                 if sample.is_finite() {
                     peak = peak.max(sample.abs());
                 }
             }
-            frames += (whole.len() / CHANNELS) as u64;
+            frames += (block.len() / channels) as u64;
             match converter.as_mut() {
                 Some(converter) => {
                     let mut written = Vec::new();
-                    converter.push(whole, &mut |out| {
+                    converter.push(block, &mut |out| {
                         written.extend_from_slice(out);
                         Ok(())
                     })?;
-                    staged += (written.len() / CHANNELS) as u64;
+                    staged += (written.len() / channels) as u64;
                     export::write(&mut out, &written)?;
                 }
                 None => {
-                    staged += (whole.len() / CHANNELS) as u64;
-                    export::write(&mut out, whole)?;
+                    staged += (block.len() / channels) as u64;
+                    export::write(&mut out, block)?;
                 }
             }
-            samples.drain(..whole.len());
+            samples.drain(..whole);
         } else if !done.load(Ordering::Relaxed) {
             // Nothing to write for now: the writer waits for more.
             thread::sleep(POLL);
@@ -704,16 +712,15 @@ fn write_output(
             written.extend_from_slice(out);
             Ok(())
         })?;
-        staged += (written.len() / CHANNELS) as u64;
+        staged += (written.len() / channels) as u64;
         export::write(&mut out, &written)?;
     }
-    // The normalise pass, or the writer itself.
-    let (writer, gain, peak) = match out {
-        export::Out::Writer(writer) => (writer, 1.0, peak),
+    // The normalise pass, or the writers themselves.
+    let (writers, gain, peak) = match out {
+        export::Out::Writers(writers) => (writers, 1.0, peak),
         out @ export::Out::Scratch(_, _) => export::finish(
             out,
-            spec,
-            partial.as_path(),
+            &targets,
             scratch.as_path(),
             &mut [],
             staged,
@@ -723,13 +730,15 @@ fn write_output(
             &mut |_| {},
         )?,
     };
-    let failed = |what: &Path, error: &dyn std::fmt::Display| {
-        ExportError::Failed(format!("{}: {error}", what.display()))
-    };
-    let written = writer.finish().map_err(|error| failed(&partial, &error))?;
+    let mut written = 0;
+    for (writer, (partial, _)) in writers.into_iter().zip(&targets) {
+        written = writer
+            .finish()
+            .map_err(|error| ExportError::Failed(format!("{}: {error}", partial.display())))?;
+    }
     Ok(Report {
         frames: written,
-        channels: CHANNELS as u16,
+        channels: channels as u16,
         render_rate: job.engine_rate,
         rendered_frames: frames,
         peak,

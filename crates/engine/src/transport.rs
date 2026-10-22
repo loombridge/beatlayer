@@ -108,7 +108,10 @@ pub fn command_from_args(id: &str, args: Value) -> Result<TransportCommand, RunE
             Ok(command)
         }
         Action::Locate => {
-            let LocateArgs { position, quantized } = serde_json::from_value(args).map_err(invalid)?;
+            let LocateArgs {
+                position,
+                quantized,
+            } = serde_json::from_value(args).map_err(invalid)?;
             Ok(if quantized {
                 TransportCommand::QuantizedLocate(position)
             } else {

@@ -579,11 +579,7 @@ fn the_locators_and_the_song_start_time_are_saved_and_load_again() {
     let locator = editor.new_id();
     editor
         .apply(Command::AddLocator {
-            locator: bl_model::Locator::new(
-                locator,
-                Ticks::WHOLE * 2,
-                "Intro".to_owned(),
-            ),
+            locator: bl_model::Locator::new(locator, Ticks::WHOLE * 2, "Intro".to_owned()),
         })
         .unwrap();
     editor
@@ -605,8 +601,5 @@ fn the_locators_and_the_song_start_time_are_saved_and_load_again() {
     let (loaded, _) = decode_json(&saved, &LoadOptions::default()).unwrap();
     assert_eq!(loaded.document.locators().len(), 1);
     assert_eq!(loaded.document.locators()[0].name, "Intro");
-    assert_eq!(
-        loaded.document.song_start_ticks(),
-        Some(Ticks::WHOLE * 2)
-    );
+    assert_eq!(loaded.document.song_start_ticks(), Some(Ticks::WHOLE * 2));
 }

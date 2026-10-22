@@ -14,6 +14,7 @@ use std::collections::BTreeMap;
 
 use bl_core::time::Ticks;
 use bl_model::{AudioData, Clip, ClipData, ClipId, Command, TrackId};
+use bl_shell::arrangement_commands::ArrangementState;
 use bl_shell::files::factory_default_set;
 use bl_shell::menus::{Action, MenuPlatform, menu_bar};
 use bl_shell::mixer_view::MixerOf;
@@ -359,12 +360,18 @@ fn the_screen_reader_follows_the_keyboard_focus() {
     let output = press(&mut h, Key::Tab, Modifiers::NONE);
     assert_eq!(focused_id(&h), Some(bl_ui::arrangement::set_locator_id()));
     assert_eq!(focused_label(&output), "Set Locator");
-    let output = press(&mut h, Key::Tab, Modifiers::NONE);
-    assert_eq!(focused_id(&h), Some(bl_ui::arrangement::previous_locator_id()));
-    let output = press(&mut h, Key::Tab, Modifiers::NONE);
+    press(&mut h, Key::Tab, Modifiers::NONE);
+    assert_eq!(
+        focused_id(&h),
+        Some(bl_ui::arrangement::previous_locator_id())
+    );
+    press(&mut h, Key::Tab, Modifiers::NONE);
     assert_eq!(focused_id(&h), Some(bl_ui::arrangement::next_locator_id()));
-    let output = press(&mut h, Key::Tab, Modifiers::NONE);
-    assert_eq!(focused_id(&h), Some(bl_ui::arrangement::automation_mode_id()));
+    press(&mut h, Key::Tab, Modifiers::NONE);
+    assert_eq!(
+        focused_id(&h),
+        Some(bl_ui::arrangement::automation_mode_id())
+    );
     let output = press(&mut h, Key::Tab, Modifiers::NONE);
     assert_eq!(focused_id(&h), Some(title_id(tracks[2])));
     assert_eq!(focused_label(&output), "3 Audio");
@@ -499,10 +506,7 @@ fn tab_runs_through_the_arrangement_and_the_neighbour_keys_to_the_next_track() {
     }
     // Wrap Tab Navigation is on: round to Set Locator.
     press(&mut h, Key::Tab, Modifiers::NONE);
-    assert_eq!(
-        focused_id(&h),
-        Some(bl_ui::arrangement::set_locator_id())
-    );
+    assert_eq!(focused_id(&h), Some(bl_ui::arrangement::set_locator_id()));
     press(&mut h, Key::Tab, Modifiers::SHIFT);
     assert_eq!(
         focused_id(&h),
@@ -554,6 +558,46 @@ fn tab_runs_through_the_arrangement_and_the_neighbour_keys_to_the_next_track() {
 
 fn peak_id(place: Place, track: TrackId) -> Id {
     Id::new(("mixer-peak", place, track))
+}
+
+// Spec: accessibility R10; time-editing R3, R12.
+#[test]
+fn a_new_locator_takes_the_keyboard_focus_and_delete_removes_the_reached_one() {
+    let (mut h, _, _) = set();
+    tab_navigation_on(&mut h);
+    h.shell
+        .run("locator.add", json!({ "at": 2_822_400 }))
+        .unwrap();
+    h.settle();
+    let locator = h.shell.editor().document().locators()[0].id;
+    // A new locator takes the keyboard focus (time-editing R3).
+    assert_eq!(
+        focused_id(&h),
+        Some(bl_ui::arrangement::locator_id(locator))
+    );
+    // Tab reaching a locator selects it (time-editing R12).
+    h.shell
+        .run("locator.select", json!({ "locators": [] }))
+        .unwrap();
+    h.settle();
+    // Backwards from the locator to Set Locator, then forwards to it again.
+    for _ in 0..3 {
+        press(&mut h, Key::Tab, Modifiers::SHIFT);
+    }
+    assert_eq!(focused_id(&h), Some(bl_ui::arrangement::set_locator_id()));
+    for _ in 0..3 {
+        press(&mut h, Key::Tab, Modifiers::NONE);
+    }
+    assert_eq!(
+        focused_id(&h),
+        Some(bl_ui::arrangement::locator_id(locator))
+    );
+    let state: ArrangementState =
+        serde_json::from_value(h.shell.run("arrangement.state", json!({})).unwrap()).unwrap();
+    assert_eq!(state.selected_locators, vec![locator]);
+    // Delete deletes the reached locator (time-editing R4, R12).
+    press(&mut h, Key::Delete, Modifiers::NONE);
+    assert!(h.shell.editor().document().locators().is_empty());
 }
 
 // Spec: accessibility R4.
@@ -1849,56 +1893,115 @@ fn paths() -> BTreeMap<&'static str, Path> {
             Exception(Equivalent(
                 "clicking a locator jumps to it, and the locators are in the Arrangement's Tab \
                  order, where Enter jumps to the one reached (the time editing spec, R5 and R12)",
-            ),
-        )),
+            )),
+        ),
         (
             "locator.jump_previous",
             Exception(Equivalent(
                 "the Previous Locator button, which the keyboard reaches with Tab; the jump \
                  needs the audio engine (the time editing spec, R6 and R13)",
-            ),
-        )),
+            )),
+        ),
         (
             "locator.jump_next",
             Exception(Equivalent(
                 "the Next Locator button, which the keyboard reaches with Tab; the jump needs \
                  the audio engine (the time editing spec, R6 and R13)",
-            ),
-        )),
+            )),
+        ),
         (
             "locator.select",
             Exception(Equivalent(
                 "clicking a locator selects it, and Tab reaches the locators in the \
                  Arrangement's Tab order (the time editing spec, R5 and R12)",
-            ),
-        )),
+            )),
+        ),
         (
             "locator.move",
             Exception(Equivalent(
                 "the arrow keys move the selected locators one grid step, and dragging one \
                  moves it (the time editing spec, R7)",
-            ),
-        )),
+            )),
+        ),
         (
             "locator.loop_to_next",
             Exception(Equivalent(
                 "a locator's context menu, which the pointer opens (the time editing spec, R9)",
-            ),
-        )),
+            )),
+        ),
         (
             "song.set_start_time",
             Exception(Equivalent(
                 "a locator's and the loop brace's context menus, which the pointer open (the \
                  time editing spec, R10)",
-            ),
-        )),
+            )),
+        ),
+        (
+            "locator.rename",
+            Exception(Equivalent(
+                "Cmd-R and Edit ▸ Rename while a locator is selected, which the Arrangement's \
+                 keyboard runs directly (the time editing spec, R8)",
+            )),
+        ),
         (
             "locator.set_info_text",
             Exception(Gap(
                 "the user's own info text has no person's path until WP-6.58 (T276) builds Edit \
                  Info Text",
-            ),
-        )),
+            )),
+        ),
+        // The document's own locator commands (the time editing spec, R1 to
+        // R13): the shell's locator.* commands run them, and agents reach
+        // them through the agent API.
+        (
+            "song.add_locator",
+            Exception(Equivalent(
+                "the shell's locator.add, which the Set Locator button, Create ▸ Add Locator and \
+                 a click in the scrub area run (the time editing spec, R3 and R13)",
+            )),
+        ),
+        (
+            "song.delete_locator",
+            Exception(Equivalent(
+                "the shell's locator.delete, which the Delete Locator button and the Delete key \
+                 run (the time editing spec, R4 and R13)",
+            )),
+        ),
+        (
+            "song.move_locator",
+            Exception(Equivalent(
+                "the shell's locator.move, which dragging a locator and the arrow keys run (the \
+                 time editing spec, R7 and R13)",
+            )),
+        ),
+        (
+            "song.rename_locator",
+            Exception(Equivalent(
+                "the shell's locator.rename, which Cmd-R and Edit ▸ Rename run (the time editing \
+                 spec, R8 and R13)",
+            )),
+        ),
+        (
+            "song.set_locator_info_text",
+            Exception(Equivalent(
+                "the shell's locator.set_info_text, which waits on the same gap (the time \
+                 editing spec, R8 and R13)",
+            )),
+        ),
+        (
+            "song.loop_to_next_locator",
+            Exception(Equivalent(
+                "the shell's locator.loop_to_next, which a locator's context menu runs (the time \
+                 editing spec, R9 and R13)",
+            )),
+        ),
+        (
+            "song.set_start",
+            Exception(Equivalent(
+                "the shell's song.set_start_time, which a locator's and the loop brace's context \
+                 menus run (the time editing spec, R10 and R13)",
+            )),
+        ),
         // The Settings window's controls (Tab, then Enter or Up and Down).
         (
             "agent.set_server",

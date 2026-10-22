@@ -65,8 +65,6 @@ pub fn handles(id: &str) -> bool {
     IDS.contains(&id)
 }
 
-
-
 /// Arguments of `locator.add`.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -245,7 +243,6 @@ fn specs() -> Vec<CommandSpec> {
             )
             .permission(Permission::Edit)
             .context(Arrangement)
-            .binding("S-EDIT-008")
             .args::<RenameLocatorArgs>()
             .result::<LocatorResult>(),
         CommandSpec::new(SET_INFO_TEXT, "Set Locator Info Text")

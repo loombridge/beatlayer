@@ -24,10 +24,10 @@ use crate::external::{ExternalPort, HardwareLatency};
 use crate::follow::FollowPatch;
 use crate::ids::{ChainId, ClipId, ContentHash, DeviceId, LocatorId, ParamId, SceneId, TrackId};
 use crate::launch::{ClipLaunch, LaunchMode, LaunchQuantization};
-use crate::locator::{Locator, SongStart, next_locator_name};
 use crate::layers::{
     Distribution, Layer, LayerId, LayerSettings, LayerSort, LayerZone, Layers, Zone, ZoneKind,
 };
+use crate::locator::{Locator, SongStart, next_locator_name};
 use crate::metronome::{CountIn, MetronomeRhythm, MetronomeSound};
 use crate::rack::{
     CHAIN_COLOURS, Chain, ChainSend, MACRO_STEPS_MAX, MACRO_STEPS_MIN, MACROS, Macro, MacroMapping,
@@ -6310,7 +6310,9 @@ impl Document {
             locator.name = next_locator_name(&self.settings.locators);
         }
         self.settings.locators.push(locator);
-        self.settings.locators.sort_by_key(|locator| locator.position);
+        self.settings
+            .locators
+            .sort_by_key(|locator| locator.position);
         Ok(())
     }
 
@@ -6355,7 +6357,9 @@ impl Document {
             .find(|locator| locator.id == id)
             .expect("just found the locator");
         locator.position = to;
-        self.settings.locators.sort_by_key(|locator| locator.position);
+        self.settings
+            .locators
+            .sort_by_key(|locator| locator.position);
         Ok(())
     }
 
@@ -6393,9 +6397,7 @@ impl Document {
     /// Sets the loop brace from a locator to the next one and switches the
     /// loop on.
     fn loop_to_next_locator(&mut self, id: LocatorId) -> Result<(), ModelError> {
-        let locator = self
-            .locator(id)
-            .ok_or(ModelError::NoSuchLocator(id))?;
+        let locator = self.locator(id).ok_or(ModelError::NoSuchLocator(id))?;
         let start = locator.position;
         let next = self
             .settings

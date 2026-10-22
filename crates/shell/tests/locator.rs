@@ -6,12 +6,14 @@ use bl_commands::Permission;
 use bl_core::time::Ticks;
 use std::path::{Path, PathBuf};
 
+use bl_audio_io::NullControl;
 use bl_model::{Editor, LocatorId};
 use bl_shell::arrangement_commands::ArrangementState;
 use bl_shell::audio::AudioHost;
 use bl_shell::files::{SetStore, factory_default_set};
 use bl_shell::locator_commands as ids;
 use bl_shell::settings::Preferences;
+use bl_shell::testing;
 use bl_shell::{Shell, ShellError};
 use serde_json::{Value, json};
 
@@ -80,7 +82,7 @@ fn steps(shell: &Shell) -> usize {
 
 #[test]
 fn every_locator_command_is_registered_with_its_class() {
-    let mut shell = shell();
+    let shell = shell();
     for (id, permission) in [
         (ids::ADD, Permission::Edit),
         (ids::DELETE, Permission::Destructive),
@@ -138,7 +140,11 @@ fn a_locator_is_deleted_in_one_undo_step_and_clears_the_song_start_time() {
     let mut shell = shell();
     run(&mut shell, ids::ADD, json!({ "at": "2.1.1" }));
     let locator = locators(&shell)[0].0;
-    run(&mut shell, ids::SET_START_TIME, json!({ "locator": locator }));
+    run(
+        &mut shell,
+        ids::SET_START_TIME,
+        json!({ "locator": locator }),
+    );
     assert!(shell.editor().document().settings().song_start.is_some());
     let before = steps(&shell);
     run(&mut shell, ids::DELETE, json!({ "locators": [locator] }));
@@ -216,7 +222,11 @@ fn loop_to_next_locator_sets_the_brace_and_switches_the_loop_on() {
     run(&mut shell, ids::ADD, json!({ "at": "2.1.1" }));
     run(&mut shell, ids::ADD, json!({ "at": "5.1.1" }));
     let held = locators(&shell);
-    run(&mut shell, ids::LOOP_TO_NEXT, json!({ "locator": held[0].0 }));
+    run(
+        &mut shell,
+        ids::LOOP_TO_NEXT,
+        json!({ "locator": held[0].0 }),
+    );
     let brace = shell.editor().document().settings().arrangement_loop;
     assert_eq!(brace.start, Ticks(BAR));
     assert_eq!(brace.length, Ticks(3 * BAR));
@@ -233,7 +243,11 @@ fn the_song_start_time_follows_its_locator_and_the_brace() {
     let mut shell = shell();
     run(&mut shell, ids::ADD, json!({ "at": "2.1.1" }));
     let locator = locators(&shell)[0].0;
-    run(&mut shell, ids::SET_START_TIME, json!({ "locator": locator }));
+    run(
+        &mut shell,
+        ids::SET_START_TIME,
+        json!({ "locator": locator }),
+    );
     assert_eq!(
         shell.editor().document().song_start_ticks(),
         Some(Ticks(BAR))
@@ -249,7 +263,11 @@ fn the_song_start_time_follows_its_locator_and_the_brace() {
         Some(Ticks(4 * BAR))
     );
     // The loop brace's start, too.
-    run(&mut shell, ids::SET_START_TIME, json!({ "loop_brace": true }));
+    run(
+        &mut shell,
+        ids::SET_START_TIME,
+        json!({ "loop_brace": true }),
+    );
     let brace = shell.editor().document().settings().arrangement_loop;
     assert_eq!(
         shell.editor().document().song_start_ticks(),
@@ -266,7 +284,10 @@ fn the_jumps_are_refused_without_an_engine() {
     run(&mut shell, ids::ADD, json!({ "at": "2.1.1" }));
     for id in [ids::JUMP, ids::JUMP_PREVIOUS, ids::JUMP_NEXT] {
         let error = shell.run(id, json!({})).unwrap_err();
-        assert!(matches!(error, ShellError::Unavailable { .. }), "{id}: {error}");
+        assert!(
+            matches!(error, ShellError::Unavailable { .. }),
+            "{id}: {error}"
+        );
     }
 }
 
@@ -294,7 +315,12 @@ fn the_info_text_is_stored_on_the_locator() {
         json!({ "locator": locator, "info_text": "The chorus" }),
     );
     assert_eq!(
-        shell.editor().document().locator(locator).unwrap().info_text,
+        shell
+            .editor()
+            .document()
+            .locator(locator)
+            .unwrap()
+            .info_text,
         "The chorus"
     );
 }
@@ -309,4 +335,103 @@ fn a_locator_is_added_at_the_insert_marker_while_the_song_is_stopped() {
     );
     run(&mut shell, ids::ADD, json!({}));
     assert_eq!(locators(&shell)[0].1, Ticks(BAR + Ticks::QUARTER.get()));
+}
+
+/// A shell playing through the null device, paced by hand (T199), with the
+/// control that runs its blocks.
+fn playing_shell() -> (Shell, NullControl) {
+    let (mut shell, control) = testing::rig();
+    shell.start_audio();
+    assert!(shell.audio().engine_running(), "{:?}", shell.audio());
+    (shell, control)
+}
+
+#[test]
+fn the_button_places_a_locator_on_the_nearest_line_while_the_song_plays() {
+    // Spec: time-editing R3. While the song plays, the Set Locator button
+    // puts one on the nearest line of the global launch quantisation. The
+    // null device is paced by hand, so the playhead lands on the same
+    // frames however busy the machine is.
+    let (mut shell, control) = playing_shell();
+    run(
+        &mut shell,
+        "session.set_quantization",
+        json!({ "quantization": "1_bar" }),
+    );
+    run(&mut shell, "transport.play", json!({}));
+    testing::advance(&control, &mut shell, 1_500);
+    let playing = shell.poll_engine();
+    assert!(playing.playing, "{playing:?}");
+    run(&mut shell, ids::ADD, json!({}));
+    let at = locators(&shell)[0].1;
+    let bar = Ticks(BAR);
+    assert_eq!(at % bar, Ticks::ZERO, "a locator lands on a bar line");
+    assert!(
+        at <= playing.position && playing.position < at + bar,
+        "on the bar the playhead is in: {at:?} against {:?}",
+        playing.position
+    );
+}
+
+#[test]
+fn previous_and_next_jump_across_both_ends() {
+    // Spec: time-editing R6. Stopped, the jumps move the insert marker to
+    // the nearest locator before or after it.
+    let (mut shell, _control) = playing_shell();
+    // The locators are at 3.1.1 and 5.1.1, bars being one-based, so
+    // 2 * BAR and 4 * BAR.
+    run(&mut shell, ids::ADD, json!({ "at": "3.1.1" }));
+    run(&mut shell, ids::ADD, json!({ "at": "5.1.1" }));
+    run(
+        &mut shell,
+        "arrangement.set_insert_marker",
+        json!({ "at": 3 * BAR }),
+    );
+    run(&mut shell, ids::JUMP_PREVIOUS, json!({}));
+    assert_eq!(view(&mut shell).insert_marker, Ticks(2 * BAR));
+    run(&mut shell, ids::JUMP_NEXT, json!({}));
+    assert_eq!(view(&mut shell).insert_marker, Ticks(4 * BAR));
+    // At the first locator, Previous goes to 1.1.1; past the last, Next
+    // goes to the Arrangement's end, which is 1.1.1 in a set with no clips.
+    run(
+        &mut shell,
+        "arrangement.set_insert_marker",
+        json!({ "at": 2 * BAR }),
+    );
+    run(&mut shell, ids::JUMP_PREVIOUS, json!({}));
+    assert_eq!(view(&mut shell).insert_marker, Ticks::ZERO);
+    run(
+        &mut shell,
+        "arrangement.set_insert_marker",
+        json!({ "at": 4 * BAR }),
+    );
+    run(&mut shell, ids::JUMP_NEXT, json!({}));
+    assert_eq!(view(&mut shell).insert_marker, Ticks::ZERO);
+}
+
+#[test]
+fn next_stops_at_the_end_of_the_last_clip() {
+    // Spec: time-editing R6. With no locator after it, Next jumps to the
+    // Arrangement's end, the end of its last clip on any track.
+    let (mut shell, _control) = playing_shell();
+    let track = shell
+        .editor()
+        .document()
+        .top_level()
+        .next()
+        .expect("the factory set has a track");
+    let clip = bl_model::Clip::new(
+        shell.new_id(),
+        Ticks(BAR),
+        Ticks(BAR * 2),
+        bl_model::ClipData::Midi(bl_model::MidiData::default()),
+    );
+    let end = clip.end();
+    shell
+        .run("clip.create", json!({ "track": track, "clip": clip }))
+        .unwrap();
+    // The locator is at 1.1.1, the only one, so it has none after it.
+    run(&mut shell, ids::ADD, json!({ "at": "1.1.1" }));
+    run(&mut shell, ids::JUMP_NEXT, json!({}));
+    assert_eq!(view(&mut shell).insert_marker, end);
 }

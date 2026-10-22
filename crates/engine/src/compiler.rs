@@ -1242,7 +1242,10 @@ impl Compiler {
         }) {
             commands.push(TransportCommand::SetLoop(loop_region(document)));
         }
-        if old.as_ref().is_none_or(|old| old.song_start_ticks() != document.song_start_ticks()) {
+        if old
+            .as_ref()
+            .is_none_or(|old| old.song_start_ticks() != document.song_start_ticks())
+        {
             commands.push(TransportCommand::SetSongStart(document.song_start_ticks()));
         }
         if old.as_ref().is_none_or(|old| punch(old) != punch(document)) {

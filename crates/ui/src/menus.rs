@@ -78,7 +78,10 @@ pub fn item_state_in(
                 .find_map(|shortcut| keymap.command_for(shortcut, contexts))
                 .map_or_else(
                     || inert(chord),
-                    |command| resolved(&command.id, Value::Object(command.args.clone()), chord),
+                    |command| {
+                        let id = shell.menu_command(&command.id);
+                        resolved(id, Value::Object(command.args.clone()), chord)
+                    },
                 )
         }
         Action::Choice(id, args) => {

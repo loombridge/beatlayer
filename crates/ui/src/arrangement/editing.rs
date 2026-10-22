@@ -529,7 +529,8 @@ impl ClipGestures {
     /// directions, which the keymap's one-command-per-shortcut can't say):
     /// Left and Right nudge the selected clips or move the insert marker
     /// (S-ARR-028), Option-Left and Option-Right (Alt) move the insert
-    /// marker to the previous or next clip edge (S-A11Y-001), Shift with an
+    /// marker to the previous or next clip edge or locator (S-A11Y-001),
+    /// Shift with an
     /// arrow extends the selection (S-A11Y-002), and Enter starts a
     /// keyboard resize of the selected clips' ends (S-ARR-004). Esc
     /// cancels a drag or a keyboard resize.
@@ -612,6 +613,7 @@ impl ClipGestures {
         let locators = lanes.view.selected_locators().to_vec();
         if !locators.is_empty() {
             let step = lanes.view.grid_ticks(lanes.doc);
+            let mut moved = false;
             for (key, later) in [(Key::ArrowLeft, false), (Key::ArrowRight, true)] {
                 if pressed(key, false, false) {
                     let first = locators[0];
@@ -625,9 +627,14 @@ impl ClipGestures {
                         locator_ids::MOVE,
                         json!({ "locator": first, "to": to.max(Ticks::ZERO) }),
                     );
+                    moved = true;
                 }
             }
-            return;
+            // Option-Left and Option-Right still move the insert marker
+            // (the time editing spec, R12).
+            if moved {
+                return;
+            }
         }
         if !title_bars {
             for (key, direction) in [(Key::ArrowLeft, "left"), (Key::ArrowRight, "right")] {
@@ -739,8 +746,7 @@ fn next_edge(lanes: &Lanes<'_>, from: Ticks, later: bool) -> Option<Ticks> {
         .flat_map(|t| t.clips().flat_map(|c| [c.start, c.end()]));
     // Spec: time-editing R12. Option-Left and Option-Right stop at the
     // locators as well as at the clip edges.
-    let edges = edges
-        .chain(doc.locators().iter().map(|locator| locator.position));
+    let edges = edges.chain(doc.locators().iter().map(|locator| locator.position));
     if later {
         edges.filter(|at| *at > from).min()
     } else {

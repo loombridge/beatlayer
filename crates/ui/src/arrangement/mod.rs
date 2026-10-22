@@ -187,6 +187,9 @@ pub struct ArrangementUi {
     /// The locator being dragged in the scrub area, if a drag is under way
     /// (WP-6.24).
     locator_drag: Option<bl_model::LocatorId>,
+    /// The locators the last frame drew, so a new one can take the focus
+    /// (WP-6.24; time-editing R3).
+    locators_drawn: Vec<bl_model::LocatorId>,
     /// Where the last frame put the Arrangement's mixer, while it shows
     /// (WP-1.9).
     mixer: Option<Rect>,
@@ -297,6 +300,7 @@ impl ArrangementUi {
             track_menus: TrackMenus::default(),
             playhead: None,
             locator_drag: None,
+            locators_drawn: Vec::new(),
             mixer: None,
             described: Vec::new(),
             lanes: None,
@@ -1076,6 +1080,7 @@ impl ArrangementUi {
         });
     }
 
+    #[expect(clippy::too_many_arguments, reason = "the frame's inputs")]
     fn ruler_input(
         &mut self,
         ui: &mut Ui,
@@ -1086,6 +1091,14 @@ impl ArrangementUi {
         horizontal: Horizontal,
         events: &mut Vec<UiEvent>,
     ) {
+        // Esc abandons a locator drag, as it does a clip drag; egui ends the
+        // drag on it too (the time editing spec, R7).
+        if ui.input(|i| i.key_pressed(Key::Escape)) && self.locator_drag.take().is_some() {
+            events.push(UiEvent::Gesture {
+                phase: GesturePhase::Cancel,
+                invocation: None,
+            });
+        }
         let ruler = layout.beat_ruler;
         let at = |pos: Pos2| horizontal.at(f64::from(pos.x - ruler.left()));
         let response = ui.interact(ruler, beat_ruler_id(), Sense::click_and_drag());
@@ -1152,21 +1165,37 @@ impl ArrangementUi {
             let response = ui.interact(rect, id, Sense::click_and_drag());
             if response.secondary_clicked() {
                 // Spec: time-editing R9, R10. A locator's own menu.
-                invoke(events, locator_ids::SELECT, json!({ "locators": [locator.id] }));
+                invoke(
+                    events,
+                    locator_ids::SELECT,
+                    json!({ "locators": [locator.id] }),
+                );
                 self.menus.open_scrub(Some(locator.id));
-                response.context_menu(|ui| self.menus.show(ui, shell, events));
             } else if response.double_clicked() {
                 // Spec: time-editing R5. Double-clicking a locator while
                 // stopped selects it and starts playback from it.
-                invoke(events, locator_ids::SELECT, json!({ "locators": [locator.id] }));
+                invoke(
+                    events,
+                    locator_ids::SELECT,
+                    json!({ "locators": [locator.id] }),
+                );
                 invoke(events, locator_ids::JUMP, json!({ "locator": locator.id }));
-                invoke(events, "transport.play_from_insert_marker", json!({}));
+                if !view.transport().playing {
+                    invoke(events, "transport.play_from_insert_marker", json!({}));
+                }
             } else if response.clicked() {
                 // Spec: time-editing R5. Clicking a locator selects it
                 // alone and jumps to it.
-                invoke(events, locator_ids::SELECT, json!({ "locators": [locator.id] }));
+                invoke(
+                    events,
+                    locator_ids::SELECT,
+                    json!({ "locators": [locator.id] }),
+                );
                 invoke(events, locator_ids::JUMP, json!({ "locator": locator.id }));
             }
+            // The menu must be drawn every frame it is open, not only the
+            // frame it opened.
+            response.context_menu(|ui| self.menus.show(ui, shell, events));
             let name = locator.name.clone();
             response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, &name));
             ui.ctx().accesskit_node_builder(id, |node| {
@@ -1186,6 +1215,22 @@ impl ArrangementUi {
                 bl_shell::Area::MainView,
                 crate::focus::ABOVE_LOCATORS,
             );
+            // Spec: time-editing R3, R12, accessibility R10. A new locator
+            // takes the keyboard focus, and Tab reaching a locator selects
+            // it.
+            if shell.tab_navigation()
+                && !self.locators_drawn.contains(&locator.id)
+                && view.is_locator_selected(locator.id)
+            {
+                response.request_focus();
+            }
+            if response.has_focus() && !view.is_locator_selected(locator.id) {
+                invoke(
+                    events,
+                    locator_ids::SELECT,
+                    json!({ "locators": [locator.id] }),
+                );
+            }
             // Spec: time-editing R7. Dragging a locator moves it, and the
             // whole drag is one undo step.
             if response.drag_started() {
@@ -1211,19 +1256,32 @@ impl ArrangementUi {
                 });
             }
         }
+        // The locators this frame drew, so the next frame can tell a new
+        // one and give it the focus (time-editing R3).
+        self.locators_drawn = doc.locators().iter().map(|locator| locator.id).collect();
         if scrub.double_clicked() {
             // Spec: time-editing R5. Double-clicking a locator while stopped
             // selects it and starts playback from it.
             if let Some(locator) = pointer.and_then(locator_at) {
-                invoke(events, locator_ids::SELECT, json!({ "locators": [locator] }));
+                invoke(
+                    events,
+                    locator_ids::SELECT,
+                    json!({ "locators": [locator] }),
+                );
                 invoke(events, locator_ids::JUMP, json!({ "locator": locator }));
-                invoke(events, "transport.play_from_insert_marker", json!({}));
+                if !view.transport().playing {
+                    invoke(events, "transport.play_from_insert_marker", json!({}));
+                }
             }
         } else if scrub.clicked() {
             if let Some(locator) = pointer.and_then(locator_at) {
                 // Spec: time-editing R5. Clicking a locator selects it
                 // alone and jumps to it.
-                invoke(events, locator_ids::SELECT, json!({ "locators": [locator] }));
+                invoke(
+                    events,
+                    locator_ids::SELECT,
+                    json!({ "locators": [locator] }),
+                );
                 invoke(events, locator_ids::JUMP, json!({ "locator": locator }));
             } else {
                 // Spec: time-editing R11. Clicking the scrub area away from
@@ -1715,11 +1773,17 @@ impl ArrangementUi {
             && shell.focused_window() == bl_shell::WindowKind::Main
             && !ui.ctx().text_edit_focused()
             && ui.ctx().memory(|m| {
-                // The view, or a track's title bar in its Tab order, has
-                // the keyboard: the arrows move the selection.
+                // The view, a track's title bar in its Tab order, or a
+                // locator, has the keyboard: the arrows move the selection.
                 m.focused().is_none_or(|id| {
                     id == main_view_id()
                         || self.rows.iter().any(|r| headers::title_id(r.track) == id)
+                        || shell
+                            .editor()
+                            .document()
+                            .locators()
+                            .iter()
+                            .any(|locator| locator_id(locator.id) == id)
                 })
             });
         if !focused {
@@ -1814,7 +1878,11 @@ impl ArrangementUi {
                 i.events.iter().any(|event| {
                     matches!(
                         event,
-                        egui::Event::Key { key: Key::Delete, pressed: true, .. }
+                        egui::Event::Key {
+                            key: Key::Delete,
+                            pressed: true,
+                            ..
+                        }
                     )
                 })
             })

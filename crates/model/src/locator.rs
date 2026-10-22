@@ -125,9 +125,10 @@ mod tests {
         })
         .unwrap();
         let mut saved = serde_json::to_value(&doc).unwrap();
-        saved["settings"]["locators"].as_array_mut().unwrap().push(
-            serde_json::json!({ "id": 101, "position": 2_822_400, "name": "2" }),
-        );
+        saved["settings"]["locators"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({ "id": 101, "position": 2_822_400, "name": "2" }));
         assert!(serde_json::from_value::<Document>(saved).is_err());
     }
 
@@ -135,11 +136,12 @@ mod tests {
     fn a_locator_before_the_start_doesnt_load() {
         let mut doc = song();
         let id = LocatorId(bl_core::id::Id::new(100).unwrap());
-        assert!(doc
-            .apply(&Command::AddLocator {
+        assert!(
+            doc.apply(&Command::AddLocator {
                 locator: Locator::new(id, Ticks(-1), "1".to_owned()),
             })
-            .is_err());
+            .is_err()
+        );
         // The command is refused, so the set never holds one.
         assert!(doc.locators().is_empty());
     }

@@ -289,10 +289,10 @@ impl TryFrom<DocumentRepr> for Document {
         };
         // A song start time that names a locator the set doesn't hold is
         // cleared: the locator it follows is gone.
-        if let Some(SongStart::Locator(id)) = document.settings.song_start {
-            if document.locator(id).is_none() {
-                document.settings.song_start = None;
-            }
+        if let Some(SongStart::Locator(id)) = document.settings.song_start
+            && document.locator(id).is_none()
+        {
+            document.settings.song_start = None;
         }
         // Slots name their scenes, which may be the defaults just made.
         for track in document.tracks.values() {

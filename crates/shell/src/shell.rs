@@ -69,9 +69,9 @@ use bl_shell_spec::devices as device_ids;
 use bl_shell_spec::editing as edit_ids;
 use bl_shell_spec::export as export_ids;
 use bl_shell_spec::freeze as freeze_ids;
+use bl_shell_spec::locator as locator_ids;
 use bl_shell_spec::midi_files as midi_ids;
 use bl_shell_spec::midi_io as midi_io_ids;
-use bl_shell_spec::locator as locator_ids;
 use bl_shell_spec::mixer_view as mixer_ids;
 use bl_shell_spec::multisampler as multisampler_ids;
 use bl_shell_spec::notes::{self as note_ids, ClipTab};
@@ -5348,7 +5348,8 @@ impl Shell {
             // Spec: time-editing R10. The loop brace's menu item is ticked
             // while the song starts at the brace's start.
             locator_ids::SET_START_TIME if args["loop_brace"].as_bool() == Some(true) => Some(
-                self.editor.document().settings().song_start == Some(bl_model::SongStart::LoopBrace),
+                self.editor.document().settings().song_start
+                    == Some(bl_model::SongStart::LoopBrace),
             ),
             _ => None,
         }
@@ -5363,8 +5364,10 @@ impl Shell {
             // the song starts at that locator.
             locator_ids::SET_START_TIME => {
                 let selected = self.arrangement.selected_locators().first().copied();
-                Some(self.editor.document().settings().song_start
-                    == selected.map(bl_model::SongStart::Locator))
+                Some(
+                    self.editor.document().settings().song_start
+                        == selected.map(bl_model::SongStart::Locator),
+                )
             }
             ids::VIEW_FULL_SCREEN => Some(self.full_screen),
             ids::VIEW_TOGGLE_BROWSER => Some(self.browser),
@@ -5432,10 +5435,17 @@ impl Shell {
     /// Delete Locator and deletes while a locator is selected (the time
     /// editing spec, R4).
     pub fn menu_command<'a>(&self, id: &'a str) -> &'a str {
-        if id == locator_ids::ADD && !self.arrangement.selected_locators().is_empty() {
-            locator_ids::DELETE
-        } else {
-            id
+        if self.arrangement.selected_locators().is_empty() {
+            return id;
+        }
+        match id {
+            // Spec: time-editing R4. Create ▸ Add Locator reads Delete
+            // Locator and deletes while a locator is selected.
+            locator_ids::ADD => locator_ids::DELETE,
+            // Spec: time-editing R8. Edit ▸ Rename renames the selected
+            // locator.
+            "clip.rename" => locator_ids::RENAME,
+            _ => id,
         }
     }
 

@@ -155,6 +155,15 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("locator.move", query(Song, "settings.locators")),
     ("locator.rename", query(Song, "settings.locators")),
     ("locator.set_info_text", query(Song, "settings.locators")),
+    // The document's own locator commands (WP-6.24), which the shell's
+    // `locator.*` commands, the UI, and the keys run.
+    ("song.add_locator", query(Song, "settings.locators")),
+    ("song.delete_locator", query(Song, "settings.locators")),
+    ("song.loop_to_next_locator", query(Song, "settings.arrangement_loop")),
+    ("song.move_locator", query(Song, "settings.locators")),
+    ("song.rename_locator", query(Song, "settings.locators")),
+    ("song.set_locator_info_text", query(Song, "settings.locators")),
+    ("song.set_start", query(Song, "settings.song_start")),
     ("assistant.set_base_url", read("settings.state", "assistant.base_url")),
     ("assistant.set_key", read("settings.state", "assistant.key_set")),
     ("assistant.set_model", read("settings.state", "assistant.model")),

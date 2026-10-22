@@ -7,10 +7,14 @@ mod common;
 use bl_core::time::Ticks;
 use bl_shell::arrangement_commands::ArrangementState;
 use bl_shell::locator_commands as ids;
+use bl_shell::menus::{MenuPlatform, menu_bar};
+use bl_ui::keymap::Platform;
 use bl_ui::layout::ArrangementLayout;
+use bl_ui::main_window::UiEvent;
+use bl_ui::menus::item_state;
 use common::{Harness, Window};
 use egui::accesskit::Role;
-use egui::{Event, FullOutput, Modifiers, PointerButton, Pos2, pos2};
+use egui::{Event, FullOutput, Key, Modifiers, PointerButton, Pos2, pos2};
 use serde_json::json;
 
 const BAR: i64 = Ticks::WHOLE.get();
@@ -94,14 +98,14 @@ fn the_set_locator_button_adds_a_locator_and_reads_delete_while_one_is_selected(
 fn clicking_a_locator_selects_it_and_draws_its_name() {
     // Spec: time-editing R2, R5.
     let mut h = Harness::with_title_bar(Window::Main);
-    h.shell
-        .run(ids::ADD, json!({ "at": 2 * BAR }))
-        .unwrap();
+    h.shell.run(ids::ADD, json!({ "at": 2 * BAR })).unwrap();
     h.settle();
     let layout = layout(&h);
     let x = layout.scrub.left()
-        + (h.shell.arrangement().horizontal(h.shell.editor().document()).x(Ticks(2 * BAR))
-            as f32);
+        + (h.shell
+            .arrangement()
+            .horizontal(h.shell.editor().document())
+            .x(Ticks(2 * BAR)) as f32);
     h.click(pos2(x, layout.scrub.center().y));
     h.settle();
     let locator = locators(&h)[0].0;
@@ -116,12 +120,13 @@ fn clicking_a_locator_selects_it_and_draws_its_name() {
 fn dragging_a_locator_moves_it_in_one_undo_step() {
     // Spec: time-editing R7, R13.
     let mut h = Harness::with_title_bar(Window::Main);
-    h.shell
-        .run(ids::ADD, json!({ "at": 2 * BAR }))
-        .unwrap();
+    h.shell.run(ids::ADD, json!({ "at": 2 * BAR })).unwrap();
     h.settle();
     let layout = layout(&h);
-    let horizontal = h.shell.arrangement().horizontal(h.shell.editor().document());
+    let horizontal = h
+        .shell
+        .arrangement()
+        .horizontal(h.shell.editor().document());
     let x = layout.scrub.left() + (horizontal.x(Ticks(2 * BAR)) as f32);
     let y = layout.scrub.center().y;
     let before = steps(&h);
@@ -145,7 +150,6 @@ fn dragging_a_locator_moves_it_in_one_undo_step() {
         modifiers: Modifiers::NONE,
     }]);
     h.settle();
-    println!("EVENTS: {:?}", h.events);
     assert_eq!(steps(&h), before + 1);
     assert_ne!(locators(&h)[0].1, Ticks(2 * BAR));
 }
@@ -169,7 +173,10 @@ fn the_scrub_areas_menu_adds_a_locator() {
     let mut h = Harness::with_title_bar(Window::Main);
     h.settle();
     let layout = layout(&h);
-    right_click(&mut h, pos2(layout.scrub.left() + 100.0, layout.scrub.center().y));
+    right_click(
+        &mut h,
+        pos2(layout.scrub.left() + 100.0, layout.scrub.center().y),
+    );
     let nodes = Harness::nodes(&h.settle());
     assert!(
         nodes.iter().any(|node| node.label == "Add Locator"),
@@ -181,12 +188,13 @@ fn the_scrub_areas_menu_adds_a_locator() {
 fn a_locators_menu_has_the_rows_live_shows() {
     // Spec: time-editing R9, R10 (C-TIME-023, C-TIME-025).
     let mut h = Harness::with_title_bar(Window::Main);
-    h.shell
-        .run(ids::ADD, json!({ "at": 2 * BAR }))
-        .unwrap();
+    h.shell.run(ids::ADD, json!({ "at": 2 * BAR })).unwrap();
     h.settle();
     let layout = layout(&h);
-    let horizontal = h.shell.arrangement().horizontal(h.shell.editor().document());
+    let horizontal = h
+        .shell
+        .arrangement()
+        .horizontal(h.shell.editor().document());
     let x = layout.scrub.left() + (horizontal.x(Ticks(2 * BAR)) as f32);
     right_click(&mut h, pos2(x, layout.scrub.center().y));
     let nodes = Harness::nodes(&h.settle());
@@ -208,13 +216,150 @@ fn the_loop_braces_menu_sets_the_song_start_time() {
     let mut h = Harness::with_title_bar(Window::Main);
     h.settle();
     let layout = layout(&h);
-    let horizontal = h.shell.arrangement().horizontal(h.shell.editor().document());
+    let horizontal = h
+        .shell
+        .arrangement()
+        .horizontal(h.shell.editor().document());
     let x = layout.beat_ruler.left()
         + (horizontal.x(h.shell.arrangement().transport().loop_start) as f32);
     right_click(&mut h, pos2(x + 4.0, layout.beat_ruler.bottom() - 3.0));
     let nodes = Harness::nodes(&h.settle());
     assert!(
-        nodes.iter().any(|node| node.label == "Set Song Start Time Here"),
+        nodes
+            .iter()
+            .any(|node| node.label == "Set Song Start Time Here"),
         "the loop brace's menu has Set Song Start Time Here"
     );
+}
+
+/// Two clicks in quick succession, as a double-click.
+fn double_click(h: &mut Harness, at: Pos2) {
+    // Long enough after any earlier click that egui doesn't pair them.
+    h.time += 1.0;
+    h.frame(vec![Event::PointerMoved(at)]);
+    for _ in 0..2 {
+        for pressed in [true, false] {
+            h.frame(vec![Event::PointerButton {
+                pos: at,
+                button: PointerButton::Primary,
+                pressed,
+                modifiers: Modifiers::NONE,
+            }]);
+        }
+    }
+    h.settle();
+}
+
+/// The state of the menu item `row`.
+fn menu_item(h: &Harness, row: &str) -> bl_ui::menus::ItemState {
+    let menus = menu_bar(MenuPlatform::current());
+    let item = menus
+        .iter()
+        .flat_map(bl_shell::menus::Menu::walk)
+        .find(|item| item.row == row)
+        .unwrap();
+    item_state(item, &h.shell, &h.keymap, Platform::current())
+}
+
+/// The x of the locator at `bar`, in the scrub area's coordinates.
+fn locator_x(h: &Harness, layout: &ArrangementLayout, bar: i64) -> f32 {
+    let horizontal = h
+        .shell
+        .arrangement()
+        .horizontal(h.shell.editor().document());
+    layout.scrub.left() + (horizontal.x(Ticks(bar * BAR)) as f32)
+}
+
+#[test]
+fn escaping_a_locator_drag_leaves_it_where_it_was() {
+    // Spec: time-editing R7, R13.
+    let mut h = Harness::with_title_bar(Window::Main);
+    h.shell.run(ids::ADD, json!({ "at": 2 * BAR })).unwrap();
+    h.settle();
+    let layout = layout(&h);
+    let x = locator_x(&h, &layout, 2);
+    let y = layout.scrub.center().y;
+    let before = steps(&h);
+    h.frame(vec![
+        Event::PointerMoved(pos2(x, y)),
+        Event::PointerButton {
+            pos: pos2(x, y),
+            button: PointerButton::Primary,
+            pressed: true,
+            modifiers: Modifiers::NONE,
+        },
+    ]);
+    for step in 1..=6 {
+        h.frame(vec![Event::PointerMoved(pos2(x + step as f32 * 10.0, y))]);
+    }
+    // Esc abandons the drag.
+    h.key(Key::Escape, Modifiers::NONE);
+    h.frame(vec![Event::PointerButton {
+        pos: pos2(x + 60.0, y),
+        button: PointerButton::Primary,
+        pressed: false,
+        modifiers: Modifiers::NONE,
+    }]);
+    h.settle();
+    assert_eq!(locators(&h)[0].1, Ticks(2 * BAR), "the locator stayed put");
+    assert_eq!(steps(&h), before, "a cancelled drag is no undo step");
+}
+
+#[test]
+fn double_clicking_a_locator_selects_it_and_asks_to_play_from_it() {
+    // Spec: time-editing R5.
+    let mut h = Harness::with_title_bar(Window::Main);
+    h.shell.run(ids::ADD, json!({ "at": 2 * BAR })).unwrap();
+    h.settle();
+    let layout = layout(&h);
+    let x = locator_x(&h, &layout, 2);
+    h.take_events();
+    double_click(&mut h, pos2(x, layout.scrub.center().y));
+    let locator = locators(&h)[0].0;
+    assert_eq!(state(&mut h).selected_locators, vec![locator]);
+    let asked: Vec<&str> = h
+        .events
+        .iter()
+        .filter_map(|event| match event {
+            UiEvent::Invoke(invocation) => Some(invocation.id.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert!(asked.contains(&ids::JUMP), "the double-click jumps to it");
+    assert!(
+        asked.contains(&"transport.play_from_insert_marker"),
+        "and starts playback from it"
+    );
+}
+
+#[test]
+fn option_right_stops_at_a_locator() {
+    // Spec: time-editing R12; arrangement-editing R20.
+    let mut h = Harness::with_title_bar(Window::Main);
+    h.shell.run(ids::ADD, json!({ "at": 3 * BAR })).unwrap();
+    h.settle();
+    let layout = layout(&h);
+    // Focus the Arrangement with the insert marker at 1.1.1.
+    h.click(pos2(layout.lanes.left() + 1.0, layout.lanes.center().y));
+    h.settle();
+    assert_eq!(state(&mut h).insert_marker, Ticks::ZERO);
+    h.take_events();
+    h.key(Key::ArrowRight, Modifiers::ALT);
+    assert_eq!(
+        state(&mut h).insert_marker,
+        Ticks(3 * BAR),
+        "Option-Right stops at the locator"
+    );
+}
+
+#[test]
+fn the_create_menus_item_reads_delete_while_a_locator_is_selected() {
+    // Spec: time-editing R4 (M-CREATE-016).
+    let mut h = Harness::with_title_bar(Window::Main);
+    h.settle();
+    assert_eq!(menu_item(&h, "M-CREATE-016").label, "Add Locator");
+    assert!(menu_item(&h, "M-CREATE-016").enabled);
+    h.shell.run(ids::ADD, json!({ "at": 2 * BAR })).unwrap();
+    h.settle();
+    assert_eq!(menu_item(&h, "M-CREATE-016").label, "Delete Locator");
 }

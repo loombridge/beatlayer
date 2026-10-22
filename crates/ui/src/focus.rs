@@ -271,9 +271,8 @@ impl Order {
             Group::View => 0,
         });
         let mut scope: Vec<Id> = above.iter().map(|entry| entry.id).collect();
-        scope.extend(
-            track.map_or_else(Vec::new, |track| self.track_controls(Place::Header, track)),
-        );
+        scope
+            .extend(track.map_or_else(Vec::new, |track| self.track_controls(Place::Header, track)));
         scope.extend(
             self.entries
                 .iter()

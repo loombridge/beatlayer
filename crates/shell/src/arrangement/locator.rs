@@ -61,7 +61,9 @@ pub fn run(
             let AddLocatorArgs { at } = parse(args)?;
             let doc = editor.document();
             let position = match at {
-                Some(position) => position.resolve(&doc.settings().time_signatures).map_err(invalid)?,
+                Some(position) => position
+                    .resolve(&doc.settings().time_signatures)
+                    .map_err(invalid)?,
                 None => placement(doc, view, launch, engine.as_deref_mut()),
             };
             // Two locators never share a position: adding one where another
@@ -135,7 +137,9 @@ pub fn run(
                 };
                 moves.push((*other, Ticks(locator.position.get() + delta)));
             }
-            apply(editor, label(ids::MOVE), |editor| move_locators(editor, &moves))?;
+            apply(editor, label(ids::MOVE), |editor| {
+                move_locators(editor, &moves)
+            })?;
             Ok(to_value(&result(view, true)))
         }
         ids::RENAME => {
@@ -230,7 +234,8 @@ pub fn run(
                     let mut all = selected.clone();
                     all.extend(locators.iter().copied());
                     all.sort_by_key(|locator| {
-                        doc.locator(*locator).map_or(0, |locator| locator.position.get())
+                        doc.locator(*locator)
+                            .map_or(0, |locator| locator.position.get())
                     });
                     selected = all;
                 }
@@ -261,8 +266,18 @@ pub fn run(
         ids::JUMP_PREVIOUS | ids::JUMP_NEXT => {
             let doc = editor.document();
             let later = id == ids::JUMP_NEXT;
+            // The position the jump is measured from: the playhead while the
+            // song plays, the insert marker while it's stopped (the time
+            // editing spec, R6).
             let position = match engine.as_deref_mut() {
-                Some(engine) => engine.transport_state().position,
+                Some(engine) => {
+                    let transport = engine.transport_state();
+                    if transport.playing {
+                        transport.position
+                    } else {
+                        transport.insert_marker
+                    }
+                }
                 None => Ticks::ZERO,
             };
             let target = if later {
@@ -280,8 +295,14 @@ pub fn run(
             let target = match target {
                 Some(position) => position,
                 // With no locator before it, Previous jumps to 1.1.1; with
-                // none after it, Next jumps to the arrangement's end.
-                None if later => view.arrangement_end(doc),
+                // none after it, Next jumps to the Arrangement's end, the
+                // end of its last clip on any track, or 1.1.1 when it has
+                // none (the time editing spec, R6).
+                None if later => doc
+                    .tracks()
+                    .flat_map(|track| track.clips().map(bl_model::Clip::end))
+                    .max()
+                    .unwrap_or(Ticks::ZERO),
                 None => Ticks::ZERO,
             };
             jump(engine, view, target)?;
@@ -338,9 +359,9 @@ fn placement(
     doc: &Document,
     view: &ArrangementView,
     launch: &LaunchSettings,
-    mut engine: Option<&mut AudioHost>,
+    engine: Option<&mut AudioHost>,
 ) -> Ticks {
-    let Some(engine) = engine.as_deref_mut() else {
+    let Some(engine) = engine else {
         return view
             .time_selection()
             .map_or(view.insert_marker(), |(start, _)| start)
@@ -366,11 +387,11 @@ fn placement(
 /// next line of the global launch quantisation; while it is stopped, the
 /// insert marker moves there (the time editing spec, R5).
 fn jump(
-    mut engine: Option<&mut AudioHost>,
+    engine: Option<&mut AudioHost>,
     view: &mut ArrangementView,
     position: Ticks,
 ) -> Result<(), EditFailure> {
-    let Some(engine) = engine.as_deref_mut() else {
+    let Some(engine) = engine else {
         return Err(unavailable("the jump needs the audio engine"));
     };
     if let Some(reason) = engine.engine_refusal() {
@@ -404,10 +425,7 @@ fn move_locators(editor: &mut Editor, moves: &[(LocatorId, Ticks)]) -> Result<()
                 waiting.push((locator, to));
                 continue;
             }
-            editor.apply(Command::MoveLocator {
-                locator,
-                to,
-            })?;
+            editor.apply(Command::MoveLocator { locator, to })?;
             moved = true;
         }
         if !moved {

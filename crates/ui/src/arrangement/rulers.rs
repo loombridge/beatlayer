@@ -182,10 +182,7 @@ pub fn scrub_area(
         } else {
             theme.colors.text_dim.0
         };
-        let marker = Rect::from_min_max(
-            pos2(x - 4.0, rect.top()),
-            pos2(x + 4.0, rect.bottom()),
-        );
+        let marker = Rect::from_min_max(pos2(x - 4.0, rect.top()), pos2(x + 4.0, rect.bottom()));
         painter.rect_filled(marker, 0.0, colour);
         painter.text(
             pos2(x + 6.0, rect.center().y),

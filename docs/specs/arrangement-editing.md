@@ -1,6 +1,6 @@
 # Arrangement editing: selecting, moving, resizing, splitting, and the clipboard
 
-- **Status:** partial (R1 to R19 each have a passing test; R20 is WP-6.24's and WP-6.24b's, and R21 to R23 WP-6.60's)
+- **Status:** partial (R1 to R19 each have a passing test; R20's locator half is WP-6.24's and its …Time half WP-6.24b's, and R21 to R23 WP-6.60's)
 - **Work packages:** WP-1.8b (this spec, R1 to R18); WP-6.25 (clip edits carrying automation, R19); WP-6.24 and WP-6.24b (locators among the insert marker's stops, and Shift with an edit command, R20); WP-6.60 (snapping to clip edges, locators and time-signature changes, R21 to R23); building on WP-1.8a ([arrangement-view](arrangement-view.md)); WP-1.4 plays clips, and WP-1.4b moves an audio clip's Start marker when it's trimmed or split (R16); WP-1.5 the loop brace and the transport ([transport](transport.md)); fades are WP-1.4's
 - **Parity-matrix row:** Views and workflow: Arrangement View; Editing: Split, Crop, Crop to Time Selection (split); Interface placement and key bindings
 - **Checked against:** Live 12.4.3, through the UI parity reference recorded on 10 October 2026, and the Live 12 reference manual as published that day
@@ -80,7 +80,7 @@ This spec covers what WP-1.8b builds. The view itself, the insert marker, the gr
 | R17 | `crates/shell-spec/src/context_menus.rs`, `the_menus_follow_lives_rows_and_separators_in_order`; `crates/ui/tests/editing.rs`, `context_menus_reach_the_edits_and_the_grid` | unit, UI script |
 | R18 | `crates/shell/tests/editing.rs`, `loop_selection_sets_the_brace_and_select_loop_selects_it`; `crates/ui/tests/editing.rs`, `cmd_l_loops_the_selection_and_cmd_shift_l_selects_the_loop` | unit, UI script |
 | R19 | `moving_a_clip_carries_its_automation_with_it` | `bl-shell` |
-| R20 | to be written in WP-6.24 and WP-6.24b | |
+| R20 | `crates/ui/tests/locator.rs`, `option_right_stops_at_a_locator` (the locators); `crates/ui/tests/editing.rs`, `arrows_nudge_jump_to_clip_edges_and_extend` (the clip edges); the …Time half is WP-6.24b's | UI script |
 | R21 | to be written in WP-6.60 | |
 | R22 | to be written in WP-6.60 | |
 | R23 | to be written in WP-6.60 | |

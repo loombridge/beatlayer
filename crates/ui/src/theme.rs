@@ -75,6 +75,8 @@ pub struct Colours {
     pub insert_marker: Colour,
     pub loop_on: Colour,
     pub loop_off: Colour,
+    /// The locator that holds the song start time (WP-6.24).
+    pub song_start: Colour,
     pub time_selection: Colour,
     pub clip_text: Colour,
     pub waveform: Colour,

@@ -3953,7 +3953,7 @@ milestone = "M1"
 mac = ["Option+Left", "Option+Right"]
 win = ["Ctrl+Left", "Ctrl+Right"]
 status = "widget"
-handler = "the Arrangement View: Option-Left and Option-Right (Alt) move the insert marker to the previous or next clip edge (`arrangement.set_insert_marker`)"
+handler = "the Arrangement View: Option-Left and Option-Right (Alt) move the insert marker to the previous or next clip edge or locator (`arrangement.set_insert_marker`)"
 
 [[shortcut]]
 id = "S-A11Y-002"

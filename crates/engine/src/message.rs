@@ -69,8 +69,11 @@ impl ParamEvent {
 /// ([`Sender::transport_at`](crate::Sender::transport_at)).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TransportCommand {
-    /// Plays from the insert marker. While playing, starts again from it.
+    /// Plays from the insert marker, or from the song's start time when it
+    /// has one. While playing, starts again from it.
     Play,
+    /// Plays from the insert marker, whatever the song's start time is.
+    PlayFromInsertMarker,
     /// While playing, stops, keeping the song position for
     /// [`Continue`](Self::Continue). While stopped, returns the insert
     /// marker and the song position to 1.1.1 (tick 0), as a second press of
@@ -86,6 +89,11 @@ pub enum TransportCommand {
     /// while stopped, the song position stays where playback stopped. A
     /// position before 1.1.1 is taken as 1.1.1.
     Locate(Ticks),
+    /// Moves the insert marker as [`Locate`](Self::Locate) does, but while
+    /// the song plays the jump waits for the next line of the global launch
+    /// quantisation, and lands on that line's exact frame (the transport
+    /// spec, R22). A second one before the line replaces the first.
+    QuantizedLocate(Ticks),
     /// Moves the insert marker to the song position.
     InsertMarkerToPlayhead,
     /// Moves the insert marker and nothing else: playback, if the song
@@ -96,6 +104,9 @@ pub enum TransportCommand {
     SetInsertMarker(Ticks),
     /// Sets the Arrangement loop, or switches it off with `None`.
     SetLoop(Option<LoopRegion>),
+    /// Sets where the song starts, or clears it with `None` (the transport
+    /// spec, R21).
+    SetSongStart(Option<Ticks>),
     /// Sets the metronome settings (WP-2.15).
     SetMetronome(bl_model::MetronomeSettings),
     /// Sets whether the transport is recording.

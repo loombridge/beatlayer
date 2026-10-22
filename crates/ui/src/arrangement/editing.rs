@@ -18,6 +18,7 @@ use bl_shell::arrangement::rows::{Row, first_row_at};
 use bl_shell::arrangement::{ArrangementView, Horizontal};
 use bl_shell::arrangement_commands as view_ids;
 use bl_shell::editing_commands::{self as ids, Edge};
+use bl_shell::locator_commands as locator_ids;
 use bl_shell::{GesturePhase, Invocation};
 use egui::{CursorIcon, Key, Modifiers, Pos2, Rect};
 use serde_json::{Value, json};
@@ -528,7 +529,8 @@ impl ClipGestures {
     /// directions, which the keymap's one-command-per-shortcut can't say):
     /// Left and Right nudge the selected clips or move the insert marker
     /// (S-ARR-028), Option-Left and Option-Right (Alt) move the insert
-    /// marker to the previous or next clip edge (S-A11Y-001), Shift with an
+    /// marker to the previous or next clip edge or locator (S-A11Y-001),
+    /// Shift with an
     /// arrow extends the selection (S-A11Y-002), and Enter starts a
     /// keyboard resize of the selected clips' ends (S-ARR-004). Esc
     /// cancels a drag or a keyboard resize.
@@ -606,6 +608,34 @@ impl ClipGestures {
             return;
         }
 
+        // Spec: time-editing R7. While locators are selected, Left and
+        // Right move them one grid step.
+        let locators = lanes.view.selected_locators().to_vec();
+        if !locators.is_empty() {
+            let step = lanes.view.grid_ticks(lanes.doc);
+            let mut moved = false;
+            for (key, later) in [(Key::ArrowLeft, false), (Key::ArrowRight, true)] {
+                if pressed(key, false, false) {
+                    let first = locators[0];
+                    let at = lanes
+                        .doc
+                        .locator(first)
+                        .map_or(Ticks::ZERO, |locator| locator.position);
+                    let to = if later { at + step } else { at - step };
+                    invoke(
+                        events,
+                        locator_ids::MOVE,
+                        json!({ "locator": first, "to": to.max(Ticks::ZERO) }),
+                    );
+                    moved = true;
+                }
+            }
+            // Option-Left and Option-Right still move the insert marker
+            // (the time editing spec, R12).
+            if moved {
+                return;
+            }
+        }
         if !title_bars {
             for (key, direction) in [(Key::ArrowLeft, "left"), (Key::ArrowRight, "right")] {
                 if pressed(key, false, false) {
@@ -714,6 +744,9 @@ fn next_edge(lanes: &Lanes<'_>, from: Ticks, later: bool) -> Option<Ticks> {
         .iter()
         .filter_map(|t| doc.track(*t))
         .flat_map(|t| t.clips().flat_map(|c| [c.start, c.end()]));
+    // Spec: time-editing R12. Option-Left and Option-Right stop at the
+    // locators as well as at the clip edges.
+    let edges = edges.chain(doc.locators().iter().map(|locator| locator.position));
     if later {
         edges.filter(|at| *at > from).min()
     } else {

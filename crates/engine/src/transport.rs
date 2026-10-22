@@ -51,6 +51,12 @@ pub struct LocateArgs {
     /// The new insert marker, in ticks from 1.1.1. A position before 1.1.1
     /// is taken as 1.1.1.
     pub position: Ticks,
+    /// Whether the jump waits for the next line of the global launch
+    /// quantisation while the song plays, as a locator's jump and a click in
+    /// the scrub area do (the transport spec, R22). With it off, or with
+    /// the quantisation off or None, the jump happens at once.
+    #[serde(default)]
+    pub quantized: bool,
 }
 
 /// The arguments of `transport.set_recording`.
@@ -102,8 +108,15 @@ pub fn command_from_args(id: &str, args: Value) -> Result<TransportCommand, RunE
             Ok(command)
         }
         Action::Locate => {
-            let LocateArgs { position } = serde_json::from_value(args).map_err(invalid)?;
-            Ok(TransportCommand::Locate(position))
+            let LocateArgs {
+                position,
+                quantized,
+            } = serde_json::from_value(args).map_err(invalid)?;
+            Ok(if quantized {
+                TransportCommand::QuantizedLocate(position)
+            } else {
+                TransportCommand::Locate(position)
+            })
         }
         Action::SetRecording => {
             let SetRecordingArgs { recording } = serde_json::from_value(args).map_err(invalid)?;
@@ -204,9 +217,11 @@ const ENTRIES: &[Entry] = &[
         contexts: &[Global],
         keys: &[],
         description: "Starts playback from the insert marker, as the Control Bar's Play button \
-            does; while the song plays, starts it again from the insert marker. Set the insert \
-            marker first with `transport.locate`. With the Arrangement loop on, playback that \
-            reaches the loop's end goes on from its start. It changes nothing in the project.",
+            does; while the song plays, starts it again from the insert marker. When the song \
+            has a song start time (the transport spec, R21), it starts from that instead and \
+            leaves the insert marker where it is. Set the insert marker first with \
+            `transport.locate`. With the Arrangement loop on, playback that reaches the loop's \
+            end goes on from its start. It changes nothing in the project.",
     },
     Entry {
         id: "transport.stop",
@@ -242,13 +257,13 @@ const ENTRIES: &[Entry] = &[
     },
     Entry {
         id: "transport.play_from_insert_marker",
-        action: Action::Run(TransportCommand::Play),
+        action: Action::Run(TransportCommand::PlayFromInsertMarker),
         label: "Play From Insert Marker",
         contexts: &[Global, Arrangement],
         keys: &[("S-ARR-032", None)],
-        description: "Starts playback from the insert marker. Until the arrangement has time \
-            selections, this does what `transport.play` does. It changes nothing in the \
-            project.",
+        description: "Starts playback from the insert marker, even when the song has a song \
+            start time (the transport spec, R21). Until the arrangement has time selections, \
+            this does what `transport.play` does. It changes nothing in the project.",
     },
     Entry {
         id: "transport.locate",
@@ -260,9 +275,13 @@ const ENTRIES: &[Entry] = &[
             from the start of the arrangement (705,600 to the quarter note, so bar 2 of a 4/4 \
             song is 2,822,400), as typing into the Control Bar's Arrangement Position fields \
             does. While the song plays, playback jumps there at once; while it's stopped, \
-            `transport.continue` still resumes where playback stopped. Position 0 returns to \
-            1.1.1, as the Home key and Return Play Position to 1.1.1 do. A position before 0 \
-            is taken as 0. It changes nothing in the project.",
+            `transport.continue` still resumes where playback stopped. With `quantized` set, \
+            the jump waits while the song plays for the next line of the global launch \
+            quantisation and lands on that line's exact frame, as a locator's jump and a click \
+            in the scrub area do (the transport spec, R22); with the quantisation off or None, \
+            it jumps at once. Position 0 returns to 1.1.1, as the Home key and Return Play \
+            Position to 1.1.1 do. A position before 0 is taken as 0. It changes nothing in the \
+            project.",
     },
     Entry {
         id: "transport.return_to_start",

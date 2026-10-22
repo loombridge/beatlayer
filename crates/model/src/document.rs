@@ -8,7 +8,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::clip::{Clip, ClipData};
 use crate::device::Device;
-use crate::ids::{ChainId, ClipId, DeviceId, SceneId, TrackId};
+use crate::ids::{ChainId, ClipId, DeviceId, LocatorId, SceneId, TrackId};
+use crate::locator::{Locator, SongStart};
 use crate::metronome::MetronomeSettings;
 use crate::rack::Chain;
 use crate::scale::Scale;
@@ -91,6 +92,15 @@ pub struct Settings {
     /// R8). Off in a new set, and in a set saved before it.
     #[serde(default, skip_serializing_if = "is_off")]
     pub lock_envelopes: bool,
+    /// The song's locators: the markers in the Arrangement's scrub area
+    /// (WP-6.24). A set saved before locators has none and loads with none;
+    /// a set with none doesn't write them, so its saved form is unchanged.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub locators: Vec<Locator>,
+    /// Where the song starts: a locator or the loop brace's start (WP-6.24).
+    /// A set saved before the song start time has none and loads with none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub song_start: Option<SongStart>,
     /// The set's current scale (WP-6.7): its Scale Mode switch, its root and
     /// its scale name, which the Control Bar's scale controls show and which
     /// a new clip takes. Off, at C, in Major, in a new set, and not written
@@ -119,6 +129,8 @@ impl Default for Settings {
             delay_compensation: true,
             reduced_latency_monitoring: false,
             lock_envelopes: false,
+            locators: Vec::new(),
+            song_start: None,
             scale: Scale::default(),
         }
     }
@@ -515,6 +527,32 @@ impl Document {
         self.scenes.iter().position(|scene| scene.id == id)
     }
 
+    /// The song's locators, in time order.
+    #[must_use]
+    pub fn locators(&self) -> &[Locator] {
+        &self.settings.locators
+    }
+
+    /// The locator with this ID.
+    #[must_use]
+    pub fn locator(&self, id: LocatorId) -> Option<&Locator> {
+        self.settings
+            .locators
+            .iter()
+            .find(|locator| locator.id == id)
+    }
+
+    /// Where the song starts, in ticks: its locator's position, or the loop
+    /// brace's start. `None` when the song has no song start time, or when
+    /// the locator it named is gone.
+    #[must_use]
+    pub fn song_start_ticks(&self) -> Option<Ticks> {
+        match self.settings.song_start? {
+            SongStart::Locator(id) => self.locator(id).map(|locator| locator.position),
+            SongStart::LoopBrace => Some(self.settings.arrangement_loop.start),
+        }
+    }
+
     /// How many scenes there are.
     #[must_use]
     pub fn scene_count(&self) -> usize {
@@ -701,6 +739,11 @@ impl Document {
             || self.index.device_track.contains_key(&DeviceId(id))
             || self.index.chain_track.contains_key(&ChainId(id))
             || self.scenes.iter().any(|scene| scene.id.0 == id)
+            || self
+                .settings
+                .locators
+                .iter()
+                .any(|locator| locator.id.0 == id)
     }
 
     /// The largest ID of any track, clip, device, or scene.
@@ -711,7 +754,13 @@ impl Document {
         let device = self.index.device_track.get_max().map(|(id, _)| id.0);
         let chain = self.index.chain_track.get_max().map(|(id, _)| id.0);
         let scene = self.scenes.iter().map(|scene| scene.id.0).max();
-        [track, clip, device, chain, scene]
+        let locator = self
+            .settings
+            .locators
+            .iter()
+            .map(|locator| locator.id.0)
+            .max();
+        [track, clip, device, chain, scene, locator]
             .into_iter()
             .flatten()
             .max()

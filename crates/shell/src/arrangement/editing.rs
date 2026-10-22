@@ -158,15 +158,15 @@ fn fits(doc: &Document, track: TrackId, data: &ClipData) -> bool {
     })
 }
 
-fn invalid(message: impl Into<String>) -> EditFailure {
+pub(crate) fn invalid(message: impl Into<String>) -> EditFailure {
     EditFailure::InvalidArgs(message.into())
 }
 
-fn unavailable(reason: impl Into<String>) -> EditFailure {
+pub(crate) fn unavailable(reason: impl Into<String>) -> EditFailure {
     EditFailure::Unavailable(reason.into())
 }
 
-fn refused(reason: impl Into<String>) -> EditFailure {
+pub(crate) fn refused(reason: impl Into<String>) -> EditFailure {
     EditFailure::Refused(reason.into())
 }
 

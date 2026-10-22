@@ -486,7 +486,7 @@ const CREATE: &[Row] = &[
         Cmd(crate::stems::OPEN),
     ),
     SEPARATOR,
-    ("M-CREATE-016", "Add Locator", Pending(None)),
+    ("M-CREATE-016", "Add Locator", Cmd(crate::locator::ADD)),
     ("M-CREATE-017", "Add Time Signature Change", Pending(None)),
     SEPARATOR,
     ("M-CREATE-018", "Import Audio/MIDI File...", Pending(None)),

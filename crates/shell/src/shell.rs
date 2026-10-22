@@ -6811,8 +6811,15 @@ impl Shell {
         let start = self.editor.document().clone();
         let mut results = Vec::with_capacity(steps.len());
         for (index, (id, args)) in steps.iter().enumerate() {
+            let shown = self.shown_clip();
             match self.run_document_edit(id, args.clone()) {
-                Ok(changes) => results.push(json!({ "command": id, "result": changes })),
+                Ok(changes) => {
+                    // Spec: scales R10. A change to the shown clip's scale
+                    // changes the current scale with it, however the change
+                    // was made.
+                    self.follow_shown_scale(id, shown);
+                    results.push(json!({ "command": id, "result": changes }))
+                }
                 Err(error) => {
                     self.editor.cancel().ok();
                     return Err(ShellError::Failed {
@@ -6956,7 +6963,31 @@ impl Shell {
     pub fn prepare_edit(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
         self.check_warp_files(id, &args)?;
         let args = self.prepare_device_role(id, args)?;
+        let args = self.prepare_scale_clips(id, args)?;
         self.prepare_warping(id, args)
+    }
+
+    /// Spec: scales R5. `clip.set_scale` names the clips it sets; left out,
+    /// it sets the selected ones.
+    fn prepare_scale_clips(&self, id: &str, mut args: Value) -> Result<Value, ShellError> {
+        if id != scales_ids::SET_CLIP_SCALE {
+            return Ok(args);
+        }
+        let Some(object) = args.as_object_mut() else {
+            return Ok(args);
+        };
+        if object.contains_key("clips") {
+            return Ok(args);
+        }
+        let clips = self.scale_targets();
+        if clips.is_empty() {
+            return Err(ShellError::Unavailable {
+                command: id.to_owned(),
+                reason: "no clip is selected".to_owned(),
+            });
+        }
+        object.insert("clips".to_owned(), json!(clips));
+        Ok(args)
     }
 
     /// Spec: device-chains R2, R3, and IMP-24. A device may take the

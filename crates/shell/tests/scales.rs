@@ -104,6 +104,52 @@ fn a_change_to_the_shown_clip_s_scale_changes_the_current_scale() {
     assert_eq!(current(&shell), Scale::new(9, ScaleName::Minor));
 }
 
+// Spec: scales R10, R12.
+#[test]
+fn an_agent_s_scale_change_changes_the_current_scale() {
+    let (mut shell, _track, clip) = shell_with_a_clip();
+    shell
+        .run("arrangement.select_clips", json!({ "clips": [clip] }))
+        .unwrap();
+    // The agent's path, which runs its steps through the registry rather
+    // than through `Shell::run`.
+    shell
+        .run_document_edits(
+            bl_model::Maker::Agent("test".to_owned()),
+            "agent step",
+            &[(
+                "clip.set_scale".to_owned(),
+                json!({ "clips": [clip], "enabled": true, "root": 2, "name": "dorian" }),
+            )],
+        )
+        .unwrap();
+    assert_eq!(
+        current(&shell),
+        Scale::new(2, ScaleName::Dorian),
+        "the current scale follows the shown clip's scale, however it changed"
+    );
+}
+
+// Spec: scales R5.
+#[test]
+fn a_clip_set_scale_without_clips_sets_the_selected_ones() {
+    let (mut shell, _track, clip) = shell_with_a_clip();
+    shell
+        .run("arrangement.select_clips", json!({ "clips": [clip] }))
+        .unwrap();
+    shell
+        .run(
+            "clip.set_scale",
+            json!({ "enabled": true, "root": 2, "name": "dorian" }),
+        )
+        .unwrap();
+    assert_eq!(
+        scale_of(&shell, clip),
+        Scale::new(2, ScaleName::Dorian),
+        "the selected clip's scale is set"
+    );
+}
+
 // Spec: scales R7, R9.
 #[test]
 fn every_clip_making_command_takes_the_current_scale() {

@@ -4965,10 +4965,13 @@ impl Document {
         check_extent(clip.start, clip.length)?;
         check_clip(clip)?;
         self.check_clip_envelopes(track, clip)?;
-        // Spec: scales R7. A clip made from nothing takes the set's
-        // current scale.
+        // Spec: scales R7. A clip made from nothing takes the set's current
+        // scale. A caller that named a scale keeps it, so the field the
+        // command reference lists isn't silently dropped.
         let mut clip = clip.clone();
-        clip.scale = self.settings.scale;
+        if clip.scale.is_default() {
+            clip.scale = self.settings.scale;
+        }
         let id = clip.id;
         self.track_mut(track)?.clips.insert(id, Shared::new(clip));
         self.index.clip_track.insert(id, track);
@@ -5221,10 +5224,13 @@ impl Document {
         if target.slot(scene).is_some() {
             return Err(ModelError::SlotOccupied { track, scene });
         }
-        // Spec: scales R7. A clip made from nothing takes the set's
-        // current scale.
+        // Spec: scales R7. A clip made from nothing takes the set's current
+        // scale. A caller that named a scale keeps it, so the field the
+        // command reference lists isn't silently dropped.
         let mut clip = clip.clone();
-        clip.scale = self.settings.scale;
+        if clip.scale.is_default() {
+            clip.scale = self.settings.scale;
+        }
         let id = clip.id;
         self.track_mut(track)?
             .slots

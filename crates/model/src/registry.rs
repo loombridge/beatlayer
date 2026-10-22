@@ -1391,7 +1391,8 @@ const ENTRIES: &[Entry] = &[
         keys: &[],
         description: "Sets a clip's scale: whether its Scale Mode is on (`enabled`), its root \
             note (`root`, 0 is C and 11 is B) and its scale (`name`, one of the names \
-            `song.scales` reads). It leaves the values it isn't given as they were, and it is \
+            `song.scales` reads). `clips` names the clips to set; left out, the selected ones \
+            are set. It leaves the values it isn't given as they were, and it is \
             one undo step, named \"Change Clip Scale\", however many clips it sets. A scale the \
             list doesn't hold, or a root outside C to B, is refused and nothing changes. A \
             clip's scale never changes what it plays: it tells the rest of the set which keys \

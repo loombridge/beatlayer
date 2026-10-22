@@ -240,6 +240,41 @@ fn a_new_clip_takes_the_set_s_current_scale() {
 }
 
 #[test]
+fn a_clip_created_with_a_scale_keeps_it() {
+    // Spec: scales R7, R13. The command reference lists a clip's scale as
+    // a field a caller may name, so `clip.create` keeps the one it is
+    // given rather than the set's current scale.
+    let (mut editor, track, _) = song();
+    editor
+        .apply(Command::SetScale {
+            enabled: Some(true),
+            root: Some(9),
+            name: Some("mixolydian".to_owned()),
+        })
+        .unwrap();
+    let clip: ClipId = editor.new_id();
+    editor
+        .apply(Command::CreateClip {
+            track,
+            clip: Clip {
+                scale: Scale::new(4, ScaleName::Minor),
+                ..Clip::new(
+                    clip,
+                    Ticks::ZERO,
+                    Ticks::WHOLE,
+                    ClipData::Midi(MidiData::default()),
+                )
+            },
+        })
+        .unwrap();
+    assert_eq!(
+        editor.document().clip(clip).unwrap().scale,
+        Scale::new(4, ScaleName::Minor),
+        "the scale the caller named is kept"
+    );
+}
+
+#[test]
 fn the_set_s_current_scale_is_saved_and_loaded_back() {
     // Spec: scales R8, R9
     let (mut editor, _, _) = song();

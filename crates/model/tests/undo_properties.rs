@@ -1227,6 +1227,47 @@ proptest! {
         prop_assert_eq!(editor.commit(), Err(EditError::NoTransaction));
         undo_and_redo_all(&mut editor, &versions)?;
     }
+
+    /// Spec: undo-history R6, R7. A jump back over several steps and
+    /// forward again gives back each version exactly, and records no step
+    /// of its own.
+    #[test]
+    fn a_jump_gives_back_each_version(
+        ops in prop::collection::vec(op(), 1..=200),
+        jumps in prop::collection::vec(any::<u16>(), 1..=20),
+    ) {
+        let mut editor = starting_song();
+        let mut versions = vec![editor.document().clone()];
+        for op in &ops {
+            let before = editor.document().clone();
+            let command = op.command(&mut editor);
+            let result = editor.apply(command);
+            if let Some(changes) = check_applied(&before, result, &editor)?
+                && !changes.is_empty()
+            {
+                versions.push(editor.document().clone());
+            }
+        }
+        let steps = versions.len() - 1;
+        // The jump is no step of its own: the history keeps every step.
+        let listed = editor.history().len();
+        prop_assert_eq!(listed, steps);
+
+        for jump in jumps {
+            let index = usize::from(jump) % (steps + 1);
+            editor
+                .go_to_step(index)
+                .map_err(|e| TestCaseError::fail(e.to_string()))?;
+            prop_assert_eq!(editor.document(), &versions[index]);
+            prop_assert_eq!(editor.history().len(), listed);
+        }
+        // And forward again, to the end.
+        editor
+            .go_to_step(steps)
+            .map_err(|e| TestCaseError::fail(e.to_string()))?;
+        prop_assert_eq!(editor.document(), versions.last().unwrap());
+        prop_assert_eq!(editor.history().len(), listed);
+    }
 }
 
 /// Most generated commands succeed, so the properties test real edits rather

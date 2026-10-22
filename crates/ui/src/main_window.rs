@@ -124,9 +124,12 @@ pub struct MainWindowUi {
     clip_view: crate::clip_view::ClipViewUi,
     /// The list of the set's plug-ins (IMP-29, WP-6.41).
     plugin_list: crate::plugin_list::PluginListUi,
-    /// The keymap, read the first time something shows a key from it (the
-    /// Info View, the Mixer Config Menu's items).
+    /// The keymap in use, read the first time something shows a key from it
+    /// (the Info View, the Mixer Config Menu's items), and read again when
+    /// the person's own shortcuts change (R10).
     keymap: Option<crate::keymap::Keymap>,
+    /// The shell's keymap revision the keymap was read at.
+    keymap_revision: u64,
     /// What the Info View last showed, for headless reads (WP-2.24).
     info: InfoViewContent,
     /// Whether a value was being typed into a track header's volume field
@@ -146,6 +149,10 @@ pub struct MainWindowUi {
     /// The assistant's pane (WP-2.23, part 3): the prompt being typed and a
     /// drag on its edge.
     assistant: crate::assistant_panel::AssistantPanelUi,
+    /// The Undo History panel (WP-6.28): the row the keyboard has moved to.
+    undo_history: crate::undo_history_panel::UndoHistoryPanelUi,
+    /// The File Manager's switches (WP-6.63).
+    file_manager: crate::file_manager::FileManagerUi,
 }
 
 /// A move of the keyboard focus asked for by `focus.next`,
@@ -215,6 +222,8 @@ impl MainWindowUi {
             clip_view: crate::clip_view::ClipViewUi::default(),
             plugin_list: crate::plugin_list::PluginListUi::default(),
             keymap: None,
+            file_manager: crate::file_manager::FileManagerUi::default(),
+            keymap_revision: 0,
             info: InfoViewContent::default(),
             mixer_typing: false,
             menu_open: false,
@@ -222,6 +231,7 @@ impl MainWindowUi {
             device_titles: Vec::new(),
             chain_names: Vec::new(),
             assistant: crate::assistant_panel::AssistantPanelUi::default(),
+            undo_history: crate::undo_history_panel::UndoHistoryPanelUi::default(),
         }
     }
 
@@ -413,11 +423,15 @@ impl MainWindowUi {
             let assistant = shell
                 .assistant_docked_width()
                 .map(|width| self.assistant.drag_width().unwrap_or(width));
-            let layout = ShellLayout::compute_with_assistant(
+            let undo_history = shell
+                .undo_history_open()
+                .then_some(crate::layout::UNDO_HISTORY_WIDTH);
+            let layout = ShellLayout::compute_with_panes(
                 area.size(),
                 shell.browser_visible(),
                 shell.info_view_visible(),
                 assistant,
+                undo_history,
             )
             .translate(area.min.to_vec2());
             self.track_area_clicks(ctx, &layout, &mut events);
@@ -460,7 +474,19 @@ impl MainWindowUi {
             // under the pointer are known by the time it reads them.
             self.status_bar(ui, shell, theme, &layout, &mut events);
             self.info_view(ui, theme, shell, layout.info_view);
-            if shell.plugin_list().visible() {
+            if shell.file_manager_open() {
+                // Spec: file-management R10. The File Manager takes the
+                // detail area's place, in front of the Clip or Device View,
+                // and the list of the set's plug-ins gives way to it.
+                crate::file_manager::show(
+                    ui,
+                    shell,
+                    theme,
+                    layout.device_view,
+                    &mut self.file_manager,
+                    &mut events,
+                );
+            } else if shell.plugin_list().visible() {
                 // Spec: plugin-list R1. The list of the set's plug-ins takes
                 // the detail area's place, where the File Manager opens
                 // (L-OTH-002), in front of the Clip or Device View.
@@ -489,6 +515,7 @@ impl MainWindowUi {
             if !shell.plugin_list().visible()
                 && !shell.clip_view().visible()
                 && shell.scene_view_scene().is_none()
+                && !shell.file_manager_open()
             {
                 // Spec: multisampler R1. The zone editor sits above the
                 // Device View.
@@ -507,6 +534,11 @@ impl MainWindowUi {
             if let Some(pane) = layout.assistant {
                 self.assistant
                     .show(ui, shell, theme, pane, true, &mut events);
+            }
+            if let Some(pane) = layout.undo_history {
+                self.undo_history.show(ui, shell, theme, pane, &mut events);
+            } else {
+                self.undo_history.hide(&mut events);
             }
             outline_focused_area(ui, shell, theme, &layout);
             self.drawn = Some(layout);
@@ -724,6 +756,7 @@ impl MainWindowUi {
             (Area::Detail, Some(layout.detail)),
             (Area::StatusBar, Some(layout.status_bar)),
             (Area::Assistant, layout.assistant),
+            (Area::UndoHistory, layout.undo_history),
         ];
         if let Some((area, _)) = areas
             .iter()
@@ -944,9 +977,8 @@ impl MainWindowUi {
     /// The Mixer Config Menu (L-STAT-008): the Mixer Controls choices, as
     /// View ▸ Mixer Controls has them (the mixer view spec, R12).
     fn mixer_menu(&mut self, response: &egui::Response, shell: &Shell, events: &mut Vec<UiEvent>) {
-        let keymap = self
-            .keymap
-            .get_or_insert_with(crate::keymap::Keymap::live12);
+        let keymap =
+            crate::keymap::keymap_in_use(&mut self.keymap, &mut self.keymap_revision, shell);
         let platform = crate::keymap::Platform::current();
         let menus = bl_shell::menus::menu_bar(bl_shell::menus::MenuPlatform::current());
         let Some(controls) = menus
@@ -1100,9 +1132,8 @@ impl MainWindowUi {
         // (L-INFO-002, I-FOCUS-012): the control's name, the help text of
         // the command it runs, and its key on a separate line; nothing
         // while the pointer is over empty space.
-        let keymap = self
-            .keymap
-            .get_or_insert_with(crate::keymap::Keymap::live12);
+        let keymap =
+            crate::keymap::keymap_in_use(&mut self.keymap, &mut self.keymap_revision, shell);
         self.info = info_content(self.hovered, shell, keymap);
         if self.info.title.is_empty() {
             return;
@@ -1249,6 +1280,7 @@ fn outline_focused_area(ui: &Ui, shell: &Shell, theme: &Theme, layout: &ShellLay
         Area::Detail => Some(layout.detail),
         Area::StatusBar => Some(layout.status_bar),
         Area::Assistant => layout.assistant,
+        Area::UndoHistory => layout.undo_history,
     };
     if let Some(rect) = rect {
         ui.painter().rect_stroke(
@@ -1500,10 +1532,23 @@ fn look(element: Element, shell: &Shell) -> Look {
                 text: Some(hint.to_owned()),
                 ..Look::default()
             },
-            (None, None) => Look {
-                text: Some(String::new()),
-                ..Look::default()
-            },
+            // Spec: file-management R12. The Status Bar says how many of
+            // the set's files are missing, until none is.
+            (None, None) => {
+                let missing = shell.missing_files();
+                Look {
+                    text: Some(if missing == 0 {
+                        String::new()
+                    } else {
+                        format!(
+                            "{missing} file{} missing: click to open the File Manager",
+                            if missing == 1 { " is" } else { "s are" }
+                        )
+                    }),
+                    on: missing > 0,
+                    ..Look::default()
+                }
+            }
         },
         _ => Look::default(),
     }
@@ -1573,7 +1618,16 @@ fn click(element: Element, shell: &Shell) -> Option<Invocation> {
         Element::ArrangementView if shell.main_view() != MainView::Arrangement => Some(
             Invocation::new(ids::VIEW_TOGGLE_SESSION_ARRANGEMENT, json!({})),
         ),
-        Element::Message => shell.message().and_then(|m| m.action.clone()),
+        // Spec: file-management R12. A click on the missing-files message
+        // shows the File Manager's Manage Set view.
+        Element::Message => shell.message().and_then(|m| m.action.clone()).or_else(|| {
+            (shell.missing_files() > 0).then(|| {
+                Invocation::new(
+                    "view.toggle_file_manager",
+                    json!({ "view": "set", "open": true }),
+                )
+            })
+        }),
         // Play, Stop, and the Loop switch (WP-1.18).
         _ => control_bar::click(element, shell),
     }

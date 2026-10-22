@@ -1,6 +1,6 @@
 # Freeze and bounce: Freeze Track, Bounce Track in Place, Bounce to New Track, Bounce Group, and Paste Bounced Audio
 
-- **Status:** partial (freezing and unfreezing, WP-4.14; the bounces, WP-4.15, aren't built)
+- **Status:** implemented (freezing and unfreezing, WP-4.14; the bounces, WP-4.15)
 - **Work packages:** WP-4.14 (Freeze Track and unfreezing, with group and return tracks, IMP-19: R1 to R17, and R27 to R29 for freezing), WP-4.15 (the bounces and Paste Bounced Audio, with mono bounces, IMP-10 and rule G3: R18 to R26, and R27 to R29 for bouncing); WP-6.21 (take lanes in freezes and bounces, R30)
 - **Parity-matrix row:** Audio clips and warping: Freeze Track; Bounce Track in Place, Bounce to New Track, Bounce Group, Paste Bounced Audio
 - **Checked against:** the Live 12 reference manual (online edition), read 17 October 2026, and the UI parity reference's observations of Live 12.4.3 on macOS (10 October 2026)
@@ -56,7 +56,7 @@ This spec covers what each command renders, what it does to the tracks and clips
 
 **Bouncing (WP-4.15)**
 
-- **R18.** A track's bounce is taken where its freeze is (R2 to R4): Post FX, with the clip envelopes on its devices and its device automation in the audio, its mixer left out (S3). Arrangement clips each take their span of one render of the lane, and a clip's tail, the sound that goes on after its end where no clip is (R3's bounds), becomes part of its bounced clip, which grows to hold it, up to the next clip's start (Beatlayer's own). Session clips render as R4 renders them. A frozen track bounces its frozen audio without rendering again. (S1, S2, S3)
+- **R18.** A track's bounce is taken where its freeze is (R2 to R4): Post FX, with the clip envelopes on its devices and its device automation in the audio, its mixer left out (S3). Arrangement clips each take their span of one render of the lane, and a clip's tail, the sound that goes on after its end where no clip is (R3's bounds), becomes part of its bounced clip, which grows to hold it, up to the next clip's start (Beatlayer's own). Session clips render as R4 renders them. A frozen track bounces its frozen audio: the render plays the frozen files, so the bounce holds the same audio, without the tails its freeze held (Beatlayer's own). (S1, S2, S3)
 - **R19.** Bounced files go into `Samples/Processed/Bounce/` (or the Temporary Folder), named `<track label> Bounce [<stamp>].wav`, with audio clip editing R2 to R6's rules. Each bounced clip plays warped as a frozen clip does (R6), so at the tempo it was bounced at, the new track gives the frames the source gave through the same mixer settings, to the bit. (S3, S10)
 - **R20.** A bounce's channels follow the bounce commands' `channels` argument: `auto`, the default, writes one channel when the render's two channels are equal at every frame and two otherwise (rule G3); `mono` writes one channel, the mean of the two; `stereo` writes two, a mono render's in both. The menu items and keys bounce with `auto`. (S7)
 - **R21.** Bounce Track in Place (M-EDIT-029, C-TRACK-008, C-SLOT-002, C-CLIP-SES-011, C-CLIP-ARR-014, C-TIME-009) replaces each selected audio or MIDI track with a new audio track in its place, in both views: no devices; the track's name with " (Bounce)" after it and its colour; its volume, pan, sends, Track Activator, solo, output routing, and mixer automation. Each of its Arrangement clips becomes an audio clip at its place and each Session clip one in its slot, with its launch settings, named after it with " (Bounce)" after the name, or "(Bounce)" for an unnamed clip. A MIDI track with neither an instrument nor an audio effect makes no audio, and bouncing it is refused. (S3)
@@ -97,16 +97,16 @@ This spec covers what each command renders, what it does to the tracks and clips
 | R15 | `crates/shell/tests/freeze.rs`, `a_frozen_return_renders_what_is_sent_to_it` (the render's content; playing it in time isn't tested) | shell test |
 | R16 | not yet tested | shell test |
 | R17 | not yet tested | shell test |
-| R18 | `crates/shell/tests/bounce.rs`, `a_bounce_is_taken_where_a_freeze_is_and_keeps_its_tails` | shell test |
-| R19 | `crates/cli/tests/bounce_goldens.rs`, `a_bounced_track_nulls_against_its_source` (Bounce in Place, to New Track, and Paste Bounced Audio) | golden render |
+| R18 | `crates/shell/tests/bounce.rs`, `a_bounce_is_taken_where_a_freeze_is`, `a_bounce_keeps_its_tails` | shell test |
+| R19 | `crates/shell/tests/bounce.rs`, `a_bounced_track_nulls_against_its_source` (Bounce in Place, to New Track, and Paste Bounced Audio) | shell test |
 | R20 | `crates/shell/tests/bounce.rs`, `a_mono_source_bounces_to_mono_and_the_channels_argument_overrides_it` | shell test |
 | R21 | `crates/shell/tests/bounce.rs`, `bounce_in_place_replaces_the_track_keeping_its_mixer_in_both_views` | shell test |
 | R22 | `crates/shell/tests/bounce.rs`, `bounce_to_new_track_makes_a_track_per_source_and_switches_the_source_off` | shell test |
-| R23 | `crates/cli/tests/bounce_goldens.rs`, `a_group_bounce_holds_its_returns_and_not_mains_devices` | golden render |
-| R24 | `crates/shell/tests/bounce.rs`, `bounce_group_to_new_track_switches_the_groups_material_off` | shell test |
-| R25 | `crates/shell/tests/bounce.rs`, `paste_bounced_audio_renders_the_source_as_it_is_now`, `paste_bounced_audio_turns_an_empty_midi_track_into_an_audio_track` | shell test |
-| R26 | `crates/model/tests/command_registry.rs`, `every_command_is_complete`; `crates/agent/tests/permissions.rs`, `bounce_in_place_asks_first_and_paste_bounced_audio_over_clips_asks`; `crates/cli/tests/agent_bounce.rs`, `an_agent_bounces_a_track_in_place_and_undoes_it` | unit, agent test |
-| R27 | `crates/shell/tests/freeze.rs`, `a_frozen_track_nulls_against_its_live_output` | shell test |
-| R28 | `xtask/src/keymap.rs` (S-TRACK-017 bound) | shell test |
-| R29 | not yet tested | shell test |
+| R23 | `crates/shell/tests/bounce.rs`, `a_group_bounce_replaces_the_group_and_its_tracks`, `a_group_bounce_holds_its_returns_and_not_mains_devices` | shell test |
+| R24 | `crates/shell/tests/bounce.rs`, `bounce_group_to_new_track_switches_the_groups_material_off`, `a_groups_clips_bounce_as_one_track` | shell test |
+| R25 | `crates/shell/tests/bounce.rs`, `paste_bounced_audio_renders_the_source_as_it_is_now`, `paste_bounced_audio_turns_an_empty_midi_track_into_an_audio_track`, `a_paste_over_a_clip_on_a_later_destination_asks_first` | shell test |
+| R26 | `crates/model/tests/command_registry.rs`, `every_command_is_complete`; `crates/cli/tests/agent_bounce.rs`, `an_agent_bounces_a_track_in_place_and_undoes_it`, `a_bounce_in_place_asks_first`, `a_paste_of_bounced_audio_over_clips_asks_first` | unit, agent test |
+| R27 | `crates/shell/tests/bounce.rs`, `a_bounced_track_nulls_against_its_source` | shell test |
+| R28 | `xtask/src/keymap.rs` (S-BOUNCE-001 and S-BOUNCE-002 bound) | shell test |
+| R29 | `crates/cli/tests/agent_bounce.rs`, `an_agent_bounces_a_track_in_place_and_undoes_it` | shell test |
 | R30 | to be written in WP-6.21 | shell test |

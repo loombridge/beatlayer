@@ -975,6 +975,32 @@ enum Reason {
 
 fn nothing(_: &mut Harness) {}
 
+/// The Shortcuts page, narrowed to Duplicate Track Without Clips, with a
+/// key of the person's own on it (the custom shortcuts spec, R8).
+fn a_bound_shortcut(h: &mut Harness) {
+    let (platform, keys) = if cfg!(target_os = "macos") {
+        ("mac", "Cmd+Option+D")
+    } else {
+        ("win", "Ctrl+Alt+D")
+    };
+    h.shell
+        .run(
+            "keymap.bind",
+            json!({
+                "command": "track.duplicate_without_clips",
+                "keys": [keys],
+                "platform": platform,
+                "context": "global",
+            }),
+        )
+        .unwrap();
+    // The search field, narrowed to the command.
+    h.click(egui::Pos2::new(400.0, 20.0));
+    h.frame(vec![egui::Event::Text(
+        "Duplicate Track Without Clips".to_owned(),
+    )]);
+}
+
 /// A Session clip on the first MIDI track, selected, with the Clip View on
 /// its Envelopes tab showing Pan (WP-3.16).
 fn envelopes_tab(h: &mut Harness) {
@@ -2012,6 +2038,34 @@ fn paths() -> BTreeMap<&'static str, Path> {
             "midi.set_port",
             settings("tempo-midi", a_midi_port, "In: Keys Track", Key::Enter),
         ),
+        // The Shortcuts page (the custom shortcuts spec, R8 and R10): the
+        // Remove and Reset buttons.
+        (
+            "keymap.unbind",
+            settings(
+                "shortcuts",
+                a_bound_shortcut,
+                "Remove Duplicate Track Without Clips's keys",
+                Key::Enter,
+            ),
+        ),
+        (
+            "keymap.reset",
+            settings(
+                "shortcuts",
+                a_bound_shortcut,
+                "Reset Duplicate Track Without Clips's keys",
+                Key::Enter,
+            ),
+        ),
+        (
+            "keymap.bind",
+            Exception(Equivalent(
+                "the Shortcuts page's keys cell takes the key press that becomes the shortcut, so \
+                 the command's keyboard path is the shortcut itself (the custom shortcuts spec, \
+                 R8)",
+            )),
+        ),
         // Queries.
         ("arrangement.state", Exception(Query)),
         ("browser.state", Exception(Query)),
@@ -2024,6 +2078,35 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("audio.devices", Exception(Query)),
         ("midi.ports", Exception(Query)),
         ("set.list_recoverable", Exception(Query)),
+        // The File Manager (WP-6.63): its own rows and buttons reach
+        // these, and its views open from the File and View menus.
+        ("file_manager.state", Exception(Query)),
+        ("set.backups", Exception(Query)),
+        (
+            "file_manager.replace_file",
+            Exception(Equivalent("the File Manager's rows (WP-6.63)")),
+        ),
+        (
+            "file_manager.hot_swap",
+            Exception(Equivalent("the File Manager's rows (WP-6.63)")),
+        ),
+        (
+            "file_manager.edit_file",
+            Exception(Equivalent("the File Manager's rows (WP-6.63)")),
+        ),
+        (
+            "file_manager.delete_unused",
+            Exception(Equivalent("the File Manager's rows (WP-6.63)")),
+        ),
+        (
+            "file_manager.set_search_folder",
+            Exception(Equivalent("the File Manager's rows (WP-6.63)")),
+        ),
+        (
+            "set.open_backup",
+            Exception(Equivalent("File ▸ Open Beatlayer Set Backups (WP-6.63)")),
+        ),
+        ("keymap.state", Exception(Query)),
         // Agent perception (WP-1.16): how an agent hears and sees the set,
         // which a person does with their own ears and eyes.
         (
@@ -2268,6 +2351,13 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ),
         ("clip.create", Exception(editing)),
         (
+            "edit.go_to_step",
+            Exception(Equivalent(
+                "the Undo History panel's rows: click one, or move to it with the arrow keys \
+                 and press Enter (undo history R6, R8)",
+            )),
+        ),
+        (
             "track.add_take_lane",
             Exception(LaterView(
                 "the take lanes' view and comping (milestone M6); loop recording makes the lanes",
@@ -2327,6 +2417,21 @@ fn paths() -> BTreeMap<&'static str, Path> {
             "track.clear_frozen",
             Exception(Equivalent(
                 "track.unfreeze, the same item read as Unfreeze Track (freeze-and-bounce R10, R13)",
+            )),
+        ),
+        // The bounces' document-level commands (WP-4.15): the three bounce
+        // commands are the ones a person and an agent run, from the menus
+        // and the keys, and they apply these.
+        (
+            "track.set_bounced",
+            Exception(Equivalent(
+                "track.bounce_in_place, from the Edit menu and the track and clip menus (freeze-and-bounce R21, R26)",
+            )),
+        ),
+        (
+            "track.create_bounced_track",
+            Exception(Equivalent(
+                "track.bounce_to_new_track, from the Edit menu, the clip and slot menus, and Cmd-B (freeze-and-bounce R22, R26)",
             )),
         ),
         (
@@ -2509,6 +2614,41 @@ fn paths() -> BTreeMap<&'static str, Path> {
             )),
         ),
         ("device.set_param", Exception(device_params)),
+        // The Articulation Map's list (WP-6.47; the articulation map spec,
+        // R15): its rows are reached by the pointer, and the buttons that
+        // would add, delete and move an articulation are not built; the
+        // spec leaves the panel's own buttons open, so agents reach them.
+        (
+            "articulation.add",
+            Exception(LaterView(
+                "the Articulation Map's list's own button for adding an articulation",
+            )),
+        ),
+        (
+            "articulation.delete",
+            Exception(LaterView(
+                "the Articulation Map's list's own button for deleting an articulation",
+            )),
+        ),
+        (
+            "articulation.move",
+            Exception(LaterView(
+                "the Articulation Map's list's own button for moving an articulation",
+            )),
+        ),
+        (
+            "articulation.set",
+            Exception(Equivalent(
+                "a double-click on a row's name in the Articulation Map's list",
+            )),
+        ),
+        ("articulation.list", Exception(Query)),
+        (
+            "articulation.learn",
+            Exception(Equivalent(
+                "the Learn button in the Articulation Map's list",
+            )),
+        ),
         // Racks (WP-5.1): Group and Ungroup are on Cmd-G and Cmd-Shift-G;
         // the rack's chain list and its controls arrive with the Device
         // View's rack (WP-5.2), until then agents reach them.

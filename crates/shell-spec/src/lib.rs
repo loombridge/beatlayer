@@ -7,6 +7,8 @@
 //!   types.
 //! - [`menus`]: the menu bar in Live's order, each item tied to the command
 //!   it runs.
+//! - [`keymap`]: Live 12's shortcuts as data, and the person's own
+//!   shortcuts layered over them (IMP-17).
 //! - [`audio`] and [`settings`]: the data those commands take and return.
 //! - [`agent`]: the agent server's settings and commands (WP-1.15).
 //! - [`arrangement`]: the Arrangement View's view commands (WP-1.8a): zoom,
@@ -38,6 +40,10 @@
 //!   (`transport.state`), and the IDs of the transport's commands, which
 //!   `bl-engine` and `bl-model` register (WP-1.18).
 //! - [`export`]: exporting audio (`export.audio`, WP-1.12).
+//! - [`file_manager`]: the File Manager's commands (WP-6.63): showing it,
+//!   what it lists, replacing a file, and the set's backups and copies.
+//! - [`bounce`]: bouncing tracks and pasting bounced audio (`track.bounce_*`,
+//!   WP-4.15).
 //! - [`midi_files`]: importing and exporting Standard MIDI Files
 //!   (`midi.import_file`, `midi.export_clip`, WP-2.21).
 //! - [`midi_io`]: MIDI ports and the computer MIDI keyboard (`midi.ports`,
@@ -65,6 +71,7 @@ pub mod audio;
 pub mod audio_editing;
 pub mod audio_panel;
 pub mod autosampler;
+pub mod bounce;
 pub mod browser;
 pub mod capture_midi;
 pub mod commands;
@@ -73,7 +80,9 @@ pub mod dawproject;
 pub mod devices;
 pub mod editing;
 pub mod export;
+pub mod file_manager;
 pub mod freeze;
+pub mod keymap;
 pub mod menus;
 pub mod midi_files;
 pub mod midi_io;
@@ -113,6 +122,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     mixer_view::register(registry)?;
     browser::register(registry)?;
     export::register(registry)?;
+    file_manager::register(registry)?;
     midi_files::register(registry)?;
     dawproject::register(registry)?;
     midi_io::register(registry)?;
@@ -133,6 +143,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     audio_editing::register(registry)?;
     audio_panel::register(registry)?;
     freeze::register(registry)?;
+    bounce::register(registry)?;
     slice::register(registry)?;
     warping::register(registry)
 }

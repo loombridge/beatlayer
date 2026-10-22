@@ -28,6 +28,7 @@ type PresetState = (
     bl_model::OrdMap<bl_model::ParamId, f64>,
     String,
     Option<Vec<bl_model::modulator::ShapePoint>>,
+    Option<Vec<bl_model::Articulation>>,
 );
 
 /// The notes the pad view can start at: the last group of sixteen.
@@ -594,7 +595,12 @@ impl DeviceView {
                     let params = self.sanitize(&loaded.kind, loaded.params);
                     Some((
                         new,
-                        Some((params, bl_project::preset::preset_name(&path), loaded.shape)),
+                        Some((
+                            params,
+                            bl_project::preset::preset_name(&path),
+                            loaded.shape,
+                            loaded.articulations,
+                        )),
                     ))
                 }
                 (None, None) => None,
@@ -917,12 +923,13 @@ impl DeviceView {
                             index,
                             device,
                         })?;
-                        if let Some((params, name, shape)) = state {
+                        if let Some((params, name, shape, articulations)) = state {
                             editor.apply(Command::SetDeviceState {
                                 device: id,
                                 params,
                                 name,
                                 shape,
+                                articulations,
                             })?;
                         }
                     }

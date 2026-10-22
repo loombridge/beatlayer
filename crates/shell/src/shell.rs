@@ -6292,10 +6292,7 @@ impl Shell {
         // in the freeze, but a lane can't be auditioned on it and nothing is
         // copied from one to the main lane.
         let doc = self.editor.document();
-        let lane_track = |args: &Value| {
-            let lane = args
-                .get("lane")
-                .or_else(|| args.get("lanes").and_then(|lanes| lanes.get(0)))?;
+        let lane_track = |lane: &Value| {
             let lane = serde_json::from_value::<bl_model::TakeLaneId>(lane.clone()).ok()?;
             doc.take_lane_track(lane)
         };
@@ -6304,9 +6301,15 @@ impl Shell {
         };
         match id {
             "take_lane.set_audition" if args.get("on").and_then(Value::as_bool) == Some(true) => {
-                return frozen(lane_track(args));
+                return frozen(args.get("lane").and_then(lane_track));
             }
-            comping_ids::COPY_TO_MAIN_LANE => return frozen(lane_track(args)),
+            // It copies from one lane on each track it names.
+            comping_ids::COPY_TO_MAIN_LANE => {
+                return args
+                    .get("lanes")
+                    .and_then(Value::as_array)
+                    .and_then(|lanes| lanes.iter().find_map(|lane| frozen(lane_track(lane))));
+            }
             comping_ids::REPLACE_WITH_TAKE => {
                 return frozen(
                     args.get("track")

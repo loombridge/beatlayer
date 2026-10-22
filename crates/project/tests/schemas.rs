@@ -664,4 +664,14 @@ fn a_schema_7_set_with_take_lanes_opens_with_ids_for_its_lanes_and_passes() {
     let (again, info) = decode_json(&saved, &LoadOptions::default()).unwrap();
     assert_eq!(info.schema, SCHEMA_VERSION);
     assert_eq!(again.document, project.document);
+
+    // An allocator behind the document, which the loader allows, doesn't
+    // hand the passes IDs the set already uses.
+    value["ids"] = json!(1);
+    let (behind, _) = decode_json(
+        &serde_json::to_vec(&value).unwrap(),
+        &LoadOptions::default(),
+    )
+    .unwrap();
+    behind.document.check_invariants().unwrap();
 }

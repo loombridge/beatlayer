@@ -514,6 +514,7 @@ fn a_frozen_track_refuses_the_audition_and_the_copy_but_not_the_lanes_edits() {
     let mut s = song();
     let main = s.main_clip(2, 9, 0, 4);
     let lane = s.lane(2, 1, 0, 4, 0.0);
+    let unfrozen = s.lane(3, 2, 0, 4, 0.0);
     let on_lane = s.doc().take_lane(lane).unwrap().clips[0].id;
     s.shell
         .run(
@@ -531,6 +532,12 @@ fn a_frozen_track_refuses_the_audition_and_the_copy_but_not_the_lanes_edits() {
     let error = s.refused(
         "take_lane.copy_to_main_lane",
         json!({ "lanes": [lane], "start": 0, "end": BAR }),
+    );
+    assert!(error.to_string().contains("frozen"), "{error}");
+    // A frozen track among several is refused too, wherever it's listed.
+    let error = s.refused(
+        "take_lane.copy_to_main_lane",
+        json!({ "lanes": [unfrozen, lane], "start": 0, "end": BAR }),
     );
     assert!(error.to_string().contains("frozen"), "{error}");
     s.refused(

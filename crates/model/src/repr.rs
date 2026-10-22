@@ -317,7 +317,11 @@ impl TryFrom<DocumentRepr> for Document {
             document.check_routing(id)?;
             document.check_automation(id)?;
             let track = document.track_ref(id)?;
-            for clip in track.clips().chain(track.slots().map(|(_, clip)| clip)) {
+            for clip in track
+                .clips()
+                .chain(track.slots().map(|(_, clip)| clip))
+                .chain(track.take_lanes().flat_map(|lane| lane.clips.iter()))
+            {
                 document.check_clip_envelopes(id, clip)?;
             }
         }

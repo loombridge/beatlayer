@@ -295,14 +295,32 @@ fn fold_clip(clip: &mut Map<String, Value>, tempo: &TempoMap) -> Result<(), Stri
 
 /// Version 7 to 8 (WP-6.21): a take lane held recorded passes, which had no
 /// ID, and had no ID itself. Version 8's lane has an ID and holds full
-/// clips. Each lane and each pass is given the next ID the set's allocator
-/// would issue, in saved order, and the allocator moves past them, so older
+/// clips. Each lane and each pass is given the next ID after both the set's
+/// allocator and its largest ID (the loader allows an allocator behind the
+/// document), in saved order, and the allocator moves past them, so older
 /// sets play as they did.
 fn passes_become_clips(mut value: Value) -> Result<Value, String> {
+    fn largest_id(value: &Value) -> u64 {
+        match value {
+            Value::Object(map) => map
+                .iter()
+                .map(|(key, v)| match (key.as_str(), v.as_u64()) {
+                    ("id", Some(id)) => id,
+                    _ => largest_id(v),
+                })
+                .max()
+                .unwrap_or(0),
+            Value::Array(items) => items.iter().map(largest_id).max().unwrap_or(0),
+            _ => 0,
+        }
+    }
     let mut next = value
         .get("ids")
         .and_then(Value::as_u64)
         .ok_or("the set has no ID allocator")?;
+    if let Some(document) = value.get("document") {
+        next = next.max(largest_id(document).saturating_add(1));
+    }
     let document = value
         .get_mut("document")
         .and_then(Value::as_object_mut)

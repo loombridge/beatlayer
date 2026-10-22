@@ -1096,7 +1096,7 @@ fn an_auditioned_take_lane_plays_in_place_of_the_main_lane_with_no_program() {
         // An edit of the main lane during the audition isn't heard...
         rig.apply(Command::SetClipGain {
             clip: main,
-            gain: 0.5,
+            gain: 0.25,
         });
         assert!(
             play_block(&mut rig).iter().all(|&s| s == 0.25),
@@ -1107,8 +1107,8 @@ fn an_auditioned_take_lane_plays_in_place_of_the_main_lane_with_no_program() {
         let synced = rig.apply(Command::SetAudition { lane, on: false });
         assert!(!synced.program, "block {block}");
         assert!(
-            play_block(&mut rig).iter().all(|&s| s == 0.25),
-            "block {block}: 0.5 at -6 dB"
+            play_block(&mut rig).iter().all(|&s| s == 0.125),
+            "block {block}: 0.5 at -12 dB"
         );
         assert_eq!(
             rig.monitor.state().swaps,

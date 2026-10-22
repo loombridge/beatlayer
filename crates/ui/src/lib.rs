@@ -81,4 +81,5 @@ pub mod slice_dialog;
 pub mod stems_dialog;
 pub mod theme;
 pub mod track_menu;
+pub mod undo_history_panel;
 pub mod widgets;

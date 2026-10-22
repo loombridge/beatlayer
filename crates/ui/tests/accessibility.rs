@@ -2351,6 +2351,13 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ),
         ("clip.create", Exception(editing)),
         (
+            "edit.go_to_step",
+            Exception(Equivalent(
+                "the Undo History panel's rows: click one, or move to it with the arrow keys \
+                 and press Enter (undo history R6, R8)",
+            )),
+        ),
+        (
             "track.add_take_lane",
             Exception(LaterView(
                 "the take lanes' view and comping (milestone M6); loop recording makes the lanes",

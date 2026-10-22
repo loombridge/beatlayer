@@ -228,6 +228,29 @@ fn with_automation_arm_off_nothing_is_recorded() {
     assert!(points(&clip).is_empty());
 }
 
+// Spec: automation R22
+#[test]
+fn a_session_recording_writes_the_same_whatever_the_mode() {
+    let mut envelopes = Vec::new();
+    for mode in ["touch", "latch", "write"] {
+        let (mut shell, control) = rig();
+        let keys = midi_track(&mut shell, true);
+        let scene = scenes(&shell)[0];
+        shell
+            .run(
+                "settings.set_automation_record_mode",
+                json!({ "mode": mode }),
+            )
+            .unwrap();
+        arm_automation(&mut shell);
+        let clip = record_with_move(&control, &mut shell, keys, scene, 0.25);
+        envelopes.push(points(&clip));
+    }
+    assert!(!envelopes[0].is_empty(), "the move was recorded");
+    assert_eq!(envelopes[0], envelopes[1], "Latch writes what Touch writes");
+    assert_eq!(envelopes[1], envelopes[2], "Write writes what Touch writes");
+}
+
 // Spec: session-automation R2, R4, R11
 #[test]
 fn a_move_during_an_overdub_goes_into_the_playing_clip_as_a_step_of_its_own() {

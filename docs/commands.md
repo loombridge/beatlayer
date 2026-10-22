@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-599 commands in 40 areas.
+600 commands in 40 areas.
 
 ## Permission classes
 
@@ -390,6 +390,7 @@ Each command has:
 | [`mixer_view.in_out`](#mixer_viewin_out) | Mixer In/Out | `read` | `Cmd+Option+I` | `Ctrl+Alt+I` |
 | [`mixer_view.performance_impact`](#mixer_viewperformance_impact) | Performance Impact | `read` |  |  |
 | [`mixer_view.return_tracks`](#mixer_viewreturn_tracks) | Return Tracks | `read` | `Cmd+Option+R` | `Ctrl+Alt+R` |
+| [`mixer_view.return_tracks_scroll`](#mixer_viewreturn_tracks_scroll) | Return Tracks Scroll with Tracks | `read` |  |  |
 | [`mixer_view.scene_tempo`](#mixer_viewscene_tempo) | Scene Tempo and Time Signature | `read` |  |  |
 | [`mixer_view.scroll`](#mixer_viewscroll) | Scroll Mixer | `read` |  |  |
 | [`mixer_view.sends`](#mixer_viewsends) | Mixer Sends | `read` | `Cmd+Option+S` | `Ctrl+Alt+S` |
@@ -7068,6 +7069,22 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `shown` | boolean or null | no | Show it (true) or hide it (false); switches it if left out. |
+
+Result: [`MixerViewState`](#mixerviewstate).
+
+#### `mixer_view.return_tracks_scroll`
+
+**Return Tracks Scroll with Tracks**. Permission: `read`. Contexts: `global`.
+
+Scrolls the return tracks with the other tracks, in the Session View's grid, in the Arrangement View's lanes and in both mixers, as View > Mixer Controls > Return Tracks Scroll with Tracks does: the returns come after the drop area and only Main stays pinned at the right. Off in a new install, so the returns stay pinned, as in Live. It is an application setting, kept between launches and not saved with the set. Switches unless `on` says which. Changes only the view.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean or null | no | Scroll the return tracks with the tracks (true) or pin them (false); switches it if left out. |
 
 Result: [`MixerViewState`](#mixerviewstate).
 
@@ -24194,6 +24211,7 @@ What `mixer_view.state` and the other view commands return.
 | `crossfader` | boolean | yes | Whether the Crossfader section shows: the tracks' A and B assign buttons and Main's crossfader. Hidden in a new set. |
 | `scene_tempo` | boolean | yes | Whether the Session View's Main column shows the scenes' tempo and time signature fields (View > Scene Tempo and Time Signature). Hidden in a new set. |
 | `return_tracks` | boolean | yes | Whether the return tracks' columns show. |
+| `return_tracks_scroll` | boolean | yes | Whether the return tracks scroll with the tracks (IMP-01, the mixer view spec R21): they come after the drop area and only Main stays pinned. Off in a new install, so the returns stay pinned, as in Live. |
 | `track_options` | boolean | yes | Whether the tracks' Track Options sections show (track delay and Keep Monitoring Latency). Shown only while this shows; hidden in a new set. |
 | `performance_impact` | boolean | yes | Whether the Performance Impact section shows: under each strip, the six segments that light up from the left with the track's share of the set's processing time. Hidden in a new set. |
 | `performance_impact_values` | array of [`TrackImpact`](#trackimpact) | yes | Each track's Performance Impact, as the engine last published it: the track, how many of its six segments are lit, and its share of the set's processing time (the mixer spec, R31). |
@@ -24257,6 +24275,10 @@ What `mixer_view.state` and the other view commands return.
       "description": "Whether the return tracks' columns show.",
       "type": "boolean"
     },
+    "return_tracks_scroll": {
+      "description": "Whether the return tracks scroll with the tracks (IMP-01, the mixer view spec R21): they come after the drop area and only Main stays pinned. Off in a new install, so the returns stay pinned, as in Live.",
+      "type": "boolean"
+    },
     "scene_tempo": {
       "description": "Whether the Session View's Main column shows the scenes' tempo and time signature fields (View > Scene Tempo and Time Signature). Hidden in a new set.",
       "type": "boolean"
@@ -24287,6 +24309,7 @@ What `mixer_view.state` and the other view commands return.
     "crossfader",
     "scene_tempo",
     "return_tracks",
+    "return_tracks_scroll",
     "track_options",
     "performance_impact",
     "performance_impact_values",

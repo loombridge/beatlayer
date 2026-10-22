@@ -1067,7 +1067,7 @@ fn menu_item(h: &Harness, row: &str) -> bl_ui::menus::ItemState {
     item_state(item, &h.shell, &h.keymap, Platform::current())
 }
 
-const MIXER_CONTROLS: [&str; 7] = [
+const MIXER_CONTROLS: [&str; 8] = [
     "In/Out",
     "Sends",
     "Volume",
@@ -1075,6 +1075,7 @@ const MIXER_CONTROLS: [&str; 7] = [
     "Crossfader",
     "Performance Impact",
     "Return Tracks",
+    "Return Tracks Scroll with Tracks",
 ];
 
 // Spec: mixer-view R11, R12.
@@ -1097,7 +1098,8 @@ fn the_status_bar_toggle_and_its_menu_show_and_hide_the_mixer() {
         let label = label.trim_start_matches("✔ ");
         MIXER_CONTROLS
             .iter()
-            .find(|name| label.starts_with(**name))
+            .filter(|name| label.starts_with(**name))
+            .max_by_key(|name| name.len())
             .copied()
     };
     let mut items: Vec<(f32, &str, bool)> = nodes
@@ -1210,12 +1212,20 @@ fn the_view_menu_and_keys_show_and_hide_the_mixer_and_its_sections() {
             "Crossfader",
             "Performance Impact",
             "—",
-            "Return Tracks"
+            "Return Tracks",
+            "Return Tracks Scroll with Tracks"
         ]
     );
     assert_eq!(
         shape("M-VIEW-033"),
-        ["In/Out", "Volume", "Track Options", "—", "Return Tracks"]
+        [
+            "In/Out",
+            "Volume",
+            "Track Options",
+            "—",
+            "Return Tracks",
+            "Return Tracks Scroll with Tracks"
+        ]
     );
     // Arrangement Track Controls is disabled while the Session View is in
     // front.
@@ -2628,4 +2638,76 @@ fn a_drum_chain_and_a_return_chain_drag_out_of_the_mixer() {
         1,
         "the return chain's devices came along"
     );
+}
+
+// Spec: mixer-view R21, R22.
+#[test]
+fn the_return_tracks_scroll_with_the_tracks_when_the_switch_is_on() {
+    let mut h = session();
+    // Forty return tracks.
+    for _ in 0..38 {
+        h.shell
+            .invoke("track.create", json!({ "kind": "return" }))
+            .unwrap();
+    }
+    h.settle();
+    h.shell
+        .invoke(ids::RETURN_TRACKS_SCROLL, json!({ "on": true }))
+        .unwrap();
+    h.settle();
+    let nodes = tree(&mut h);
+    // A column is a group named for its track.
+    let column = |name: &str| {
+        inside(&nodes, "Session Mixer", name)
+            .filter(|n| n.role == Role::Group)
+            .map(rect_of)
+    };
+    // The returns come after the tracks and the drop area, and Main stays
+    // at the right edge.
+    let main = column("Main").unwrap();
+    assert_eq!((main.left(), main.right()), (1487.0, 1591.0));
+    let a = column("A Return").unwrap();
+    let track = column("4 Audio").unwrap();
+    assert!(
+        a.left() > track.right(),
+        "the returns come after the tracks"
+    );
+    // Only the columns in view are built (R17).
+    assert!(
+        column("AN Return").is_none(),
+        "the last return is out of view"
+    );
+    // Scrolling moves the returns with the tracks, and reaches the last
+    // return.
+    h.shell
+        .invoke(ids::SCROLL, json!({ "view": "session", "x": 10000.0 }))
+        .unwrap();
+    h.settle();
+    let nodes = tree(&mut h);
+    let group = |name: &str| {
+        inside(&nodes, "Session Mixer", name)
+            .filter(|n| n.role == Role::Group)
+            .map(rect_of)
+    };
+    let last = group("AN Return").unwrap();
+    assert_eq!(
+        last.right(),
+        1487.0,
+        "the last return ends where Main starts"
+    );
+    assert!(group("1 MIDI").is_none(), "the tracks are out of view");
+    let main = group("Main").unwrap();
+    assert_eq!((main.left(), main.right()), (1487.0, 1591.0));
+    // With the switch off, the returns are pinned at the right again.
+    h.shell
+        .invoke(ids::RETURN_TRACKS_SCROLL, json!({ "on": false }))
+        .unwrap();
+    h.settle();
+    let nodes = tree(&mut h);
+    let main = rect_of(
+        inside(&nodes, "Session Mixer", "Main")
+            .filter(|n| n.role == Role::Group)
+            .unwrap(),
+    );
+    assert_eq!((main.left(), main.right()), (1487.0, 1591.0));
 }

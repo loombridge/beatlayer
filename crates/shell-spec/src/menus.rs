@@ -35,8 +35,9 @@ use crate::file_manager::{SET_SAVE_COPY, VIEW_TOGGLE_FILE_MANAGER};
 use crate::mixer_view::{
     CROSSFADER as MIXER_CROSSFADER, FOCUS as MIXER_FOCUS, IN_OUT as MIXER_IN_OUT,
     PERFORMANCE_IMPACT as MIXER_PERFORMANCE_IMPACT, RETURN_TRACKS as MIXER_RETURN_TRACKS,
-    SCENE_TEMPO as MIXER_SCENE_TEMPO, SENDS as MIXER_SENDS, TOGGLE as MIXER_TOGGLE,
-    TRACK_OPTIONS as MIXER_TRACK_OPTIONS, VOLUME as MIXER_VOLUME,
+    RETURN_TRACKS_SCROLL as MIXER_RETURN_TRACKS_SCROLL, SCENE_TEMPO as MIXER_SCENE_TEMPO,
+    SENDS as MIXER_SENDS, TOGGLE as MIXER_TOGGLE, TRACK_OPTIONS as MIXER_TRACK_OPTIONS,
+    VOLUME as MIXER_VOLUME,
 };
 
 /// The platform a menu bar is for: macOS has an application menu; Windows
@@ -110,6 +111,12 @@ pub const D24: &str = "D24";
 /// next to Duplicate: an improvement, so not a row of menus.md, which
 /// records Live's menus.
 pub const IMP_12: &str = "IMP-12";
+
+/// The row of Beatlayer's own Return Tracks Scroll with Tracks (IMP-01),
+/// straight after Return Tracks in the Mixer Controls submenu and in the
+/// Arrangement Track Controls submenu: an improvement, so not one of
+/// menus.md's Live rows, though the reference names it IMP-01.
+pub const IMP_01: &str = "IMP-01";
 
 /// The row of Beatlayer's own Close All Plug-in Windows (IMP-25), after
 /// Plug-In Windows: an improvement, so not a row of menus.md.
@@ -633,12 +640,23 @@ const VIEW: &[Row] = &[
     ),
     ("M-VIEW-032-sep2", "", Action::Separator),
     ("M-VIEW-032g", "Return Tracks", Cmd(MIXER_RETURN_TRACKS)),
+    // IMP-01's switch, straight after Return Tracks, with no key.
+    (
+        IMP_01,
+        "Return Tracks Scroll with Tracks",
+        Cmd(MIXER_RETURN_TRACKS_SCROLL),
+    ),
     ("M-VIEW-033", "Arrangement Track Controls", Submenu),
     ("M-VIEW-033a", "In/Out", Pending(None)),
     ("M-VIEW-033b", "Volume", Pending(None)),
     ("M-VIEW-033c", "Track Options", Cmd(MIXER_TRACK_OPTIONS)),
     ("M-VIEW-033-sep1", "", Action::Separator),
     ("M-VIEW-033d", "Return Tracks", Pending(None)),
+    (
+        IMP_01,
+        "Return Tracks Scroll with Tracks",
+        Cmd(MIXER_RETURN_TRACKS_SCROLL),
+    ),
     SEPARATOR,
     ("M-VIEW-034", "Overview", Key(&["S-VIEW-011"])),
     (
@@ -853,6 +871,7 @@ const HELP: &[Row] = &[
 /// Builds items from rows, nesting each submenu's rows under it.
 pub(crate) fn items(rows: &[Row]) -> Vec<MenuItem> {
     let mut out: Vec<MenuItem> = Vec::new();
+    let mut previous = "";
     for &(row, label, action) in rows {
         let item = MenuItem {
             row,
@@ -860,13 +879,21 @@ pub(crate) fn items(rows: &[Row]) -> Vec<MenuItem> {
             action,
             items: Vec::new(),
         };
+        // A row joins the submenu above it when its ID starts with the
+        // submenu's, and so does one of Beatlayer's own rows, which the
+        // reference names with its improvement's ID, when the row above it
+        // was one of the submenu's.
+        let joins = |submenu: &str| {
+            row.starts_with(submenu) || (!row.starts_with("M-") && previous.starts_with(submenu))
+        };
         let parent = out
             .last_mut()
-            .filter(|last| last.action == Submenu && !row.is_empty() && row.starts_with(last.row));
+            .filter(|last| last.action == Submenu && !row.is_empty() && joins(last.row));
         match parent {
             Some(parent) => parent.items.push(item),
             None => out.push(item),
         }
+        previous = row;
     }
     out
 }

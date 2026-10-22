@@ -31,7 +31,7 @@ use std::sync::mpsc::Receiver;
 use bl_core::time::Ticks;
 use bl_media::PeakEvent;
 use bl_model::{Document, TrackId, TrackKind};
-use bl_shell::arrangement::rows::{Row, rows_between};
+use bl_shell::arrangement::rows::{DROP_AREA, FOLDED_HEIGHT, Row, rows_between};
 use bl_shell::arrangement::{ArrangementView, Horizontal};
 use bl_shell::arrangement_commands as ids;
 use bl_shell::{Invocation, Shell};
@@ -325,7 +325,20 @@ impl ArrangementUi {
     ) {
         let doc = shell.editor().document();
         let view = shell.arrangement();
-        let pinned: Vec<TrackId> = bl_shell::arrangement::rows::pinned_tracks(doc).collect();
+        // With the return tracks scrolling with the tracks (IMP-01), their
+        // rows come after the drop area in the scrolling part of the lanes
+        // and only Main stays pinned (the arrangement view spec, R18).
+        let returns_scroll = shell.mixer_view().return_tracks_scroll();
+        let pinned: Vec<TrackId> = if returns_scroll {
+            vec![doc.main_id()]
+        } else {
+            bl_shell::arrangement::rows::pinned_tracks(doc).collect()
+        };
+        let returns: Vec<TrackId> = if returns_scroll {
+            doc.returns().collect()
+        } else {
+            Vec::new()
+        };
         // With its mixer showing, the view splits (WP-1.9; L-ARR-018).
         let layout = if shell
             .mixer_view()
@@ -539,7 +552,9 @@ impl ArrangementUi {
         }
 
         // The headers.
-        self.headers(ui, shell, theme, &layout, scroll_y, &pinned, events);
+        self.headers(
+            ui, shell, theme, &layout, scroll_y, &pinned, &returns, events,
+        );
         self.header_controls(ui, view, theme, &layout, events);
         // Over the pinned rows' lanes, in the lanes' lower right corner.
         self.grid_indicator(ui, view, doc, theme, layout.grid_indicator);
@@ -922,7 +937,7 @@ impl ArrangementUi {
         let x0 = strip.left() + (range.start.get() as f64 / overview_tpp) as f32;
         let x1 = strip.left() + (range.end.get() as f64 / overview_tpp) as f32;
         // The outline round the part in view, rows included.
-        let content = view.content_height(&self.rows).max(1.0);
+        let content = view.content_height(doc, &self.rows).max(1.0);
         let scroll = view.scroll_y() as f32;
         let y0 = strip.top() + strip.height() * (scroll / content).clamp(0.0, 1.0);
         let y1 =
@@ -1153,6 +1168,7 @@ impl ArrangementUi {
         layout: &ArrangementLayout,
         scroll_y: f32,
         pinned: &[TrackId],
+        returns: &[TrackId],
         events: &mut Vec<UiEvent>,
     ) {
         let view = shell.arrangement();
@@ -1216,6 +1232,60 @@ impl ArrangementUi {
                 );
             }
         }
+        // The return tracks' rows, after the drop area under the last
+        // track, scrolling with the tracks (the arrangement view spec, R18).
+        if !returns.is_empty() {
+            let gap = if view.optimize_height() {
+                0.0
+            } else {
+                DROP_AREA
+            };
+            let first =
+                layout.lanes.top() + self.rows.last().map_or(0.0, Row::bottom) + gap - scroll_y;
+            for (index, id) in returns.iter().enumerate() {
+                let Some(track) = doc.track(*id) else {
+                    continue;
+                };
+                let top = first + FOLDED_HEIGHT * index as f32;
+                if top > layout.lanes.bottom() || top + FOLDED_HEIGHT < layout.lanes.top() {
+                    continue;
+                }
+                let lane = Rect::from_min_max(
+                    pos2(layout.lanes.left(), top),
+                    pos2(layout.lanes.right(), top + FOLDED_HEIGHT),
+                );
+                ui.painter_at(lane)
+                    .rect_filled(lane, 0.0, theme.colors.lane.0);
+                ui.painter_at(lane).line_segment(
+                    [lane.left_bottom(), lane.right_bottom()],
+                    Stroke::new(1.0, theme.colors.lane_line.0),
+                );
+                let is_selected = selected.contains(id);
+                headers::header(
+                    ui,
+                    theme,
+                    &Header {
+                        shell,
+                        track,
+                        rect: Rect::from_min_max(
+                            pos2(layout.headers.left(), top),
+                            pos2(layout.headers.right(), top + FOLDED_HEIGHT),
+                        ),
+                        activator: char::from(b'A' + (index % 26) as u8).to_string(),
+                        colour: scene::track_colour(theme, *id),
+                        folded: true,
+                        selected: is_selected,
+                        title_selected: is_selected && title_bars,
+                        foldable: false,
+                        resizable: false,
+                        menus: &self.track_menus,
+                        keys: keys && selected.first() == Some(id),
+                    },
+                    &[],
+                    events,
+                );
+            }
+        }
         // The returns and Main, pinned under the lanes (L-ARR-014).
         for (index, id) in pinned.iter().enumerate() {
             let Some(track) = doc.track(*id) else {
@@ -1240,7 +1310,9 @@ impl ArrangementUi {
                         pos2(layout.pinned_headers.left(), row.top()),
                         row.max,
                     ),
-                    activator: char::from(b'A' + (index % 26) as u8).to_string(),
+                    // Main keeps the letter it had with the returns
+                    // pinned under it.
+                    activator: char::from(b'A' + ((index + returns.len()) % 26) as u8).to_string(),
                     colour: if track.kind() == TrackKind::Main {
                         theme.colors.control_pressed.0
                     } else {

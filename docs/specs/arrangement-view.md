@@ -1,6 +1,6 @@
 # The Arrangement View: layout, navigation, Follow, and the editing grid
 
-- **Status:** partial (R1 to R17 each have a passing test; R18 to R24 are Phase 6's)
+- **Status:** partial (R1 to R18 each have a passing test; R19 to R24 are Phase 6's)
 - **Work packages:** WP-1.8a (this spec); WP-1.8b adds editing (clip selection, moving, resizing, splitting, the rest of the selection gestures: [arrangement-editing](arrangement-editing.md)); WP-1.5 the transport behind the playhead, the loop brace, and the scrub area; WP-1.6 and WP-1.9 the mixer controls in the track headers. In Phase 6: WP-6.38 (R18: the return tracks scrolling with the tracks, IMP-01), WP-6.49b (R19: panning with the middle button), WP-6.64 (R20 to R24: hiding the Arrangement Track Controls' In/Out, Volume and Return Tracks)
 - **Parity-matrix row:** Views and workflow: Arrangement View; Interface placement and key bindings; [the improvements](../05-improvements.md), IMP-01 (return tracks scrolling with tracks)
 - **Checked against:** Live 12.4.3, through the UI parity reference recorded on 10 October 2026, and the Live 12 reference manual as published that day; for R18 to R24, the manual (online edition) and the Live 12 release notes, read 20 October 2026
@@ -92,7 +92,7 @@ This spec covers what WP-1.8a builds: the view, navigation, Follow, the grid, tr
 | R15 | `crates/shell/tests/arrangement.rs`, `the_insert_marker_and_selection_are_view_state`; `crates/ui/tests/arrangement.rs`, `keys_run_the_view_commands`; `crates/ui/tests/keymap.rs`, `keys_resolve_to_commands_in_their_contexts` | unit, UI script |
 | R16 | `crates/shell/tests/arrangement.rs`, `every_view_command_is_registered_read_only_and_reachable`; `crates/shell-spec/src/arrangement.rs`, `every_listed_id_is_registered_and_complete`; `cargo xtask commands` | unit |
 | R17 | `crates/ui/tests/arrangement.rs`, `only_visible_clips_are_built_each_frame`; `cargo run --release -p bl-ui --example arrangement_bench` (CPU and GPU time per frame) | UI script, measurement |
-| R18 | to be written in WP-6.38 | |
+| R18 | `crates/ui/tests/arrangement.rs`, `the_return_tracks_rows_scroll_with_the_tracks_when_the_switch_is_on` | UI script |
 | R19 | to be written in WP-6.49b | |
 | R20 | to be written in WP-6.64 | |
 | R21 | to be written in WP-6.64 | |

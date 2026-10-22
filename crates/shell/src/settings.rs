@@ -68,6 +68,11 @@ pub struct Preferences {
     pub assistant_always: BTreeSet<String>,
     /// The browser's places and preview (WP-1.10).
     pub browser: crate::browser::BrowserPrefs,
+    /// Whether the return tracks scroll with the tracks (IMP-01, the mixer
+    /// view spec R21): an application setting, kept between launches and
+    /// not saved with the set. Off in a new install, so the returns stay
+    /// pinned, as in Live.
+    pub return_tracks_scroll: bool,
     /// Create Fades on Clip Edges (Record, Warp & Launch, L-SET-018): new
     /// audio clips get 4 ms fades at their edges (WP-1.4b; the audio clips
     /// spec, R7 and R22). On by default, as observed in Live 12.4.6, and on

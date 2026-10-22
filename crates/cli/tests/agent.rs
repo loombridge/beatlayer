@@ -5573,3 +5573,36 @@ fn an_agent_builds_an_articulation_map_by_command_and_reads_it_back() {
     assert_eq!(found["articulations"][1]["name"], "Staccato");
     assert_eq!(found["articulations"][1]["trigger"]["key"], 36);
 }
+
+// Spec: mixer-view R21. An agent switches the return tracks scrolling with
+// the tracks, and reads the switch back in the mixers' state.
+#[test]
+fn an_agent_scrolls_the_return_tracks_with_the_tracks_and_reads_it_back() {
+    let mut client = Client::new(InProcess::new(Agent::headless(false), Shell::headless()));
+    client.initialize("mixer").unwrap();
+    let run = |client: &mut Client<InProcess>, command: &str, args: Value| {
+        let out = call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": command, "args": args }] }),
+        );
+        out["results"][0]["result"].clone()
+    };
+    // Off in a new install, so the returns stay pinned, as in Live.
+    let state = run(&mut client, "mixer_view.state", json!({}));
+    assert_eq!(state["return_tracks_scroll"], false);
+    // The switch, by command ID.
+    let on = run(
+        &mut client,
+        "mixer_view.return_tracks_scroll",
+        json!({ "on": true }),
+    );
+    assert_eq!(on["return_tracks_scroll"], true);
+    let state = run(&mut client, "mixer_view.state", json!({}));
+    assert_eq!(state["return_tracks_scroll"], true);
+    // It switches, and reads back.
+    let off = run(&mut client, "mixer_view.return_tracks_scroll", json!({}));
+    assert_eq!(off["return_tracks_scroll"], false);
+    let state = run(&mut client, "mixer_view.state", json!({}));
+    assert_eq!(state["return_tracks_scroll"], false);
+}

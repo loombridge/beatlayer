@@ -189,7 +189,8 @@ pub mod unmeasured {
 /// The meter's width (observed: 11 points, as L-ARR-006's meter column).
 pub const METER_WIDTH: f32 = 11.0;
 
-/// Which sections show (View ▸ Mixer Controls).
+/// Which sections show (View ▸ Mixer Controls), and whether the return
+/// tracks scroll with the tracks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Sections {
     /// In/Out.
@@ -210,6 +211,10 @@ pub struct Sections {
     /// that light up with the track's share of the set's processing time.
     /// Hidden by default (observed).
     pub performance_impact: bool,
+    /// Whether the return tracks scroll with the tracks (IMP-01, the mixer
+    /// view spec R21). Off in a new install, so they stay pinned, as in
+    /// Live.
+    pub return_tracks_scroll: bool,
 }
 
 impl Sections {
@@ -222,6 +227,7 @@ impl Sections {
         returns: true,
         track_options: false,
         performance_impact: false,
+        return_tracks_scroll: false,
     };
 
     /// The height of the sections that show, stacked, with the colour strip
@@ -344,6 +350,9 @@ pub struct MixerLayout {
     pub colour: (f32, f32),
     /// How far the track columns are scrolled, within what the set allows.
     pub scroll: f32,
+    /// Whether the return tracks scroll with the tracks (IMP-01, the mixer
+    /// view spec R22).
+    pub returns_scroll: bool,
 }
 
 impl MixerLayout {
@@ -354,6 +363,10 @@ impl MixerLayout {
     /// The sections stack up from the area's bottom: the colour strip, then
     /// the strip, Sends, and In/Out above it; any that don't fit are cut at
     /// the area's top.
+    ///
+    /// With the return tracks scrolling with the tracks (IMP-01, the mixer
+    /// view spec R22), the returns come after the drop area and scroll with
+    /// the track columns, and only Main stays pinned at the right.
     #[must_use]
     pub fn compute(
         area: Rect,
@@ -364,23 +377,36 @@ impl MixerLayout {
     ) -> Self {
         let main_rect = Rect::from_min_max(pos2(area.right() - MAIN_COLUMN, area.top()), area.max);
         let shown_returns = if sections.returns { returns } else { 0 };
-        let returns_left = main_rect.left() - COLUMN_WIDTH * shown_returns as f32;
-        let returns: Vec<Column> = (0..shown_returns)
-            .map(|index| Column {
-                kind: ColumnKind::Return,
-                index,
-                rect: Rect::from_min_max(
-                    pos2(returns_left + COLUMN_WIDTH * index as f32, area.top()),
-                    pos2(
-                        returns_left + COLUMN_WIDTH * (index + 1) as f32,
-                        area.bottom(),
-                    ),
-                ),
-            })
-            .collect();
-        let track_area =
-            Rect::from_min_max(area.min, pos2(returns_left.max(area.left()), area.bottom()));
-        let content = COLUMN_WIDTH * tracks.len() as f32;
+        let tracks_width = COLUMN_WIDTH * tracks.len() as f32;
+        let returns_width = COLUMN_WIDTH * shown_returns as f32;
+        // With no return tracks showing, there is nothing to scroll with
+        // them, and the layout is the one with the returns pinned.
+        let scrolling = sections.return_tracks_scroll && shown_returns > 0;
+        // The columns scroll in the area from the mixer's left to Main
+        // when the returns scroll with them, and to the first return when
+        // they stay pinned at the right.
+        let track_area = if scrolling {
+            Rect::from_min_max(area.min, pos2(main_rect.left(), area.bottom()))
+        } else {
+            let returns_left = main_rect.left() - returns_width;
+            Rect::from_min_max(area.min, pos2(returns_left.max(area.left()), area.bottom()))
+        };
+        // The drop area keeps its place between the last track and the
+        // first return: the space left over when everything fits, and at
+        // least one column when the returns scroll (R22).
+        let drop_width = if scrolling {
+            (track_area.width() - tracks_width - returns_width).max(COLUMN_WIDTH)
+        } else {
+            (track_area.width() - tracks_width).max(0.0)
+        };
+        // What the columns scroll over: the tracks alone when the returns
+        // stay pinned, and the tracks, the drop area and the returns when
+        // they scroll with them.
+        let content = if scrolling {
+            tracks_width + drop_width + returns_width
+        } else {
+            tracks_width
+        };
         let max_scroll = (content - track_area.width()).max(0.0);
         let scroll = scroll.clamp(0.0, max_scroll);
         let first = (scroll / COLUMN_WIDTH).floor() as usize;
@@ -412,13 +438,49 @@ impl MixerLayout {
             })
             .take_while(|column| column.rect.left() < track_area.right())
             .collect();
-        let tracks_end = track_area.left() + content - scroll;
-        let drop_area = (tracks_end < track_area.right()).then(|| {
-            Rect::from_min_max(
-                pos2(tracks_end.max(track_area.left()), area.top()),
-                track_area.max,
-            )
-        });
+        // The returns: pinned at the right of the tracks, or after the drop
+        // area, scrolling with them.
+        let returns_left = if scrolling {
+            track_area.left() + tracks_width + drop_width - scroll
+        } else {
+            main_rect.left() - returns_width
+        };
+        let returns: Vec<Column> = (0..shown_returns)
+            .map(|index| Column {
+                kind: ColumnKind::Return,
+                index,
+                rect: Rect::from_min_max(
+                    pos2(returns_left + COLUMN_WIDTH * index as f32, area.top()),
+                    pos2(
+                        returns_left + COLUMN_WIDTH * (index + 1) as f32,
+                        area.bottom(),
+                    ),
+                ),
+            })
+            .filter(|column| {
+                !scrolling
+                    || (column.rect.right() > track_area.left()
+                        && column.rect.left() < track_area.right())
+            })
+            .collect();
+        let tracks_end = track_area.left() + tracks_width - scroll;
+        let drop_area = if scrolling {
+            // The drop area's own width, cut to the area the columns
+            // scroll in.
+            let rect = Rect::from_min_max(
+                pos2(tracks_end, area.top()),
+                pos2(tracks_end + drop_width, area.bottom()),
+            );
+            let visible = rect.intersect(track_area);
+            (visible.width() > 0.0).then_some(visible)
+        } else {
+            (tracks_end < track_area.right()).then(|| {
+                Rect::from_min_max(
+                    pos2(tracks_end.max(track_area.left()), area.top()),
+                    track_area.max,
+                )
+            })
+        };
 
         let colour = (area.bottom() - COLOUR_STRIP, area.bottom());
         let mut bottom = colour.0;
@@ -459,6 +521,20 @@ impl MixerLayout {
             strip,
             colour,
             scroll,
+            returns_scroll: scrolling,
+        }
+    }
+
+    /// The part of a column that shows: its own rectangle, cut to the
+    /// area the columns scroll in, except Main's, which is pinned at the
+    /// right (the mixer view spec, R22).
+    #[must_use]
+    pub fn clip_of(&self, kind: ColumnKind, rect: Rect) -> Rect {
+        match kind {
+            ColumnKind::Main => rect,
+            ColumnKind::Track => rect.intersect(self.tracks),
+            _ if self.returns_scroll => rect.intersect(self.tracks),
+            _ => rect,
         }
     }
 
@@ -955,6 +1031,77 @@ mod tests {
         let alone = MixerLayout::compute(session.mixer.unwrap(), &tracks(4), 2, no_returns, 0.0);
         assert!(alone.returns.is_empty());
         assert_eq!(alone.tracks.right(), 1487.0);
+    }
+
+    // Spec: mixer-view R21, R22.
+    #[test]
+    fn the_return_tracks_scroll_with_the_tracks_when_the_switch_is_on() {
+        let view = main_view();
+        let session = SessionLayout::compute(view, Some(Sections::DEFAULT));
+        let area = session.mixer.unwrap();
+        let scrolling = Sections {
+            return_tracks_scroll: true,
+            ..Sections::DEFAULT
+        };
+        // With everything fitting, the layout is the one with the returns
+        // pinned (R22).
+        let pinned = MixerLayout::compute(area, &tracks(4), 2, Sections::DEFAULT, 0.0);
+        let same = MixerLayout::compute(area, &tracks(4), 2, scrolling, 0.0);
+        assert_eq!(same.columns, pinned.columns);
+        assert_eq!(same.returns, pinned.returns);
+        assert_eq!(same.drop_area, pinned.drop_area);
+        assert_eq!(same.main, pinned.main);
+        assert_eq!(same.scroll, 0.0, "everything fits");
+        // With 40 returns, the returns come after the drop area and scroll
+        // with the tracks, and only Main stays pinned.
+        let many = MixerLayout::compute(area, &tracks(4), 40, scrolling, 0.0);
+        assert_eq!(
+            (many.main.rect.left(), many.main.rect.right()),
+            (1487.0, 1591.0)
+        );
+        let drop = many.drop_area.unwrap();
+        assert!(drop.width() >= COLUMN_WIDTH, "{}", drop.width());
+        assert_eq!(many.returns[0].rect.left(), drop.right());
+        // Only the columns in view are built (R17).
+        assert!(
+            many.returns.last().unwrap().rect.left() < many.tracks.right(),
+            "the returns in view"
+        );
+        // Scrolling moves the returns with the tracks.
+        let scrolled = MixerLayout::compute(area, &tracks(4), 40, scrolling, 188.0);
+        assert_eq!(
+            scrolled.returns[0].rect.left(),
+            many.returns[0].rect.left() - 188.0
+        );
+        let column_of = |layout: &MixerLayout, index: usize| {
+            layout
+                .columns
+                .iter()
+                .find(|c| c.index == index)
+                .expect("the column in view")
+                .rect
+                .left()
+        };
+        assert_eq!(column_of(&scrolled, 2), column_of(&many, 2) - 188.0);
+        // The scroll reaches the last return, which ends where Main starts.
+        let end = MixerLayout::compute(area, &tracks(4), 40, scrolling, 1e9);
+        assert_eq!(end.returns.last().unwrap().index, 39);
+        assert_eq!(end.returns.last().unwrap().rect.right(), 1487.0);
+        // With the switch off, the returns stay pinned at the right, as in
+        // Live, and the ones that don't fit run off to the left.
+        let off = MixerLayout::compute(area, &tracks(4), 40, Sections::DEFAULT, 0.0);
+        assert_eq!(off.returns[39].rect.right(), 1487.0);
+        assert!(off.returns[0].rect.left() < many.tracks.left());
+        // With the returns hidden, there is nothing to scroll with them,
+        // and the tracks scroll as they do with the switch off.
+        let hidden = Sections {
+            returns: false,
+            ..scrolling
+        };
+        let alone = MixerLayout::compute(area, &tracks(200), 40, hidden, 940.0);
+        assert_eq!(alone.columns[0].index, 10);
+        assert!(alone.columns.len() <= 13);
+        assert!(alone.returns.is_empty());
     }
 
     // Spec: mixer-view R1.

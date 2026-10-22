@@ -54,6 +54,7 @@ pub fn sections(shell: &Shell) -> Sections {
         returns: view.return_tracks(),
         track_options: view.track_options(),
         performance_impact: view.performance_impact(),
+        return_tracks_scroll: view.return_tracks_scroll(),
     }
 }
 
@@ -355,11 +356,7 @@ impl MixerUi {
             let Some(t) = doc.track(track) else {
                 continue;
             };
-            let clip = if column.kind == ColumnKind::Track {
-                column.rect.intersect(layout.tracks)
-            } else {
-                column.rect
-            };
+            let clip = layout.clip_of(column.kind, column.rect);
             let mut column_ui = ui.new_child(egui::UiBuilder::new().max_rect(clip));
             column_ui.set_clip_rect(clip.intersect(area));
             // The column itself takes the keyboard focus Navigate ▸ Mixer
@@ -701,12 +698,7 @@ fn title_bars(
         let Some(t) = doc.track(track) else {
             continue;
         };
-        let bar = column.rect.shrink2(vec2(0.5, 0.0));
-        let bar = if column.kind == ColumnKind::Track {
-            bar.intersect(layout.tracks)
-        } else {
-            bar
-        };
+        let bar = layout.clip_of(column.kind, column.rect.shrink2(vec2(0.5, 0.0)));
         let painter = ui.painter_at(bar);
         painter.rect_filled(
             bar,

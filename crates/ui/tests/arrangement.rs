@@ -759,3 +759,81 @@ fn a_warped_clip_is_drawn_through_its_warp_map() {
         "{right} against {expected}"
     );
 }
+
+// Spec: arrangement-view R18.
+#[test]
+fn the_return_tracks_rows_scroll_with_the_tracks_when_the_switch_is_on() {
+    let mut h = Harness::with_title_bar(Window::Main);
+    h.settle();
+    h.shell
+        .invoke(
+            bl_shell::mixer_view_commands::RETURN_TRACKS_SCROLL,
+            json!({ "on": true }),
+        )
+        .unwrap();
+    h.settle();
+    let nodes = Harness::nodes(&h.settle());
+    let header = |name: &str| header_of(&nodes, name);
+    // The returns' rows are in the lanes, after the drop area under the
+    // last track, and Main stays pinned under them.
+    let a = header("A Return").expect("the first return's row");
+    let b = header("B Return").expect("the second return's row");
+    let main = header("Main").expect("Main");
+    assert!(a.bottom() <= b.top(), "the returns' rows follow each other");
+    assert!(b.bottom() <= main.top(), "Main stays pinned under them");
+    assert_eq!(a.height(), main.height(), "the height of a pinned row");
+    let tracks: Vec<Rect> = nodes
+        .iter()
+        .filter(|n| n.role == Role::RowHeader)
+        .filter(|n| !n.label.ends_with("Return") && n.label != "Main")
+        .map(rect_of)
+        .collect();
+    let last = tracks.iter().fold(Rect::ZERO, |acc, r| acc.union(*r));
+    // The drop area (44 points) under the last track; a row's header is a
+    // point shorter than the row, which has a line under it.
+    let gap = a.top() - last.bottom();
+    assert!((44.0..=45.0).contains(&gap), "the drop area: {gap}");
+    // With more tracks than fit, the lanes scroll as far as the last
+    // return.
+    for _ in 0..3 {
+        h.shell
+            .invoke("track.create", json!({ "kind": "audio" }))
+            .unwrap();
+    }
+    h.settle();
+    let nodes = Harness::nodes(&h.settle());
+    assert!(
+        !nodes
+            .iter()
+            .any(|n| n.role == Role::RowHeader && n.label == "A Return"),
+        "the returns' rows are below the last track"
+    );
+    wheel(
+        &mut h,
+        pos2(600.0, 400.0),
+        vec2(0.0, -400.0),
+        Modifiers::NONE,
+    );
+    let nodes = Harness::nodes(&h.settle());
+    let a = header_of(&nodes, "A Return").expect("the first return's row");
+    let main = header_of(&nodes, "Main").expect("Main");
+    assert!(a.bottom() <= main.top(), "Main stays pinned under them");
+    assert_eq!(a.height(), main.height(), "the height of a pinned row");
+}
+
+/// The row header named `name` in a frame's tree.
+fn header_of(nodes: &[common::Node], name: &str) -> Option<Rect> {
+    nodes
+        .iter()
+        .find(|n| n.role == Role::RowHeader && n.label == name)
+        .map(rect_of)
+}
+
+/// The rectangle a node's bounds describe.
+fn rect_of(node: &common::Node) -> Rect {
+    let b = node.bounds.expect("a node with bounds");
+    Rect::from_min_max(
+        pos2(b.x0 as f32, b.y0 as f32),
+        pos2(b.x1 as f32, b.y1 as f32),
+    )
+}

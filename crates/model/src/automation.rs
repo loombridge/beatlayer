@@ -451,6 +451,127 @@ impl Envelope {
         self.points.remove(index);
         Ok(())
     }
+
+    /// The shape of the envelope over the span from `start` to `end`: the
+    /// breakpoints inside it, at positions from `start`, with the values at
+    /// the span's edges where the envelope has them.
+    ///
+    /// The values are the envelope's own. A caller that copies between
+    /// parameters turns them into positions on the parameter's travel
+    /// (the automation editing spec, R5).
+    #[must_use]
+    pub fn shape_in(&self, start: Ticks, end: Ticks) -> Vec<Breakpoint> {
+        let mut out = Vec::new();
+        if end < start {
+            return out;
+        }
+        match self.point(start) {
+            Some(point) => out.push(Breakpoint {
+                at: Ticks::ZERO,
+                value: point.value,
+                bend: point.bend,
+            }),
+            None => {
+                if let Some(value) = self.value_at(start) {
+                    out.push(Breakpoint {
+                        at: Ticks::ZERO,
+                        value,
+                        bend: 0.0,
+                    });
+                }
+            }
+        }
+        for point in self.points() {
+            if point.at > start && point.at < end {
+                out.push(Breakpoint {
+                    at: point.at - start,
+                    value: point.value,
+                    bend: point.bend,
+                });
+            }
+        }
+        if let Some(value) = self.value_at(end) {
+            // The bend of a breakpoint at the span's end shapes the segment
+            // after it, which is outside the span.
+            out.push(Breakpoint {
+                at: end - start,
+                value,
+                bend: 0.0,
+            });
+        }
+        out
+    }
+
+    /// Removes the envelope over the span from `start` to `end`: the
+    /// breakpoints inside it go, and the envelope's values at the span's
+    /// edges are kept with a breakpoint at each, so the envelope runs
+    /// straight across the span and is unchanged outside it (the automation
+    /// editing spec, R5).
+    pub fn remove_span(&mut self, start: Ticks, end: Ticks) {
+        if end <= start {
+            return;
+        }
+        let value_at_start = self.value_at(start);
+        let value_at_end = self.value_at(end);
+        self.points
+            .retain(|point| point.at < start || point.at >= end);
+        if let Some(value) = value_at_start {
+            let at = start;
+            match self.points.binary_search_by_key(&at, |point| point.at) {
+                // The breakpoint at the span's start bends the segment
+                // across it, which is now straight.
+                Ok(index) => self.points[index].bend = 0.0,
+                Err(index) => self.points.insert(
+                    index,
+                    Breakpoint {
+                        at,
+                        value,
+                        bend: 0.0,
+                    },
+                ),
+            }
+        }
+        if let Some(value) = value_at_end
+            && self.point(end).is_none()
+        {
+            let index = self.points.partition_point(|point| point.at < end);
+            self.points.insert(
+                index,
+                Breakpoint {
+                    at: end,
+                    value,
+                    bend: 0.0,
+                },
+            );
+        }
+    }
+
+    /// Writes `points` over the span from `start` to `end`, replacing the
+    /// envelope there: the breakpoints inside the span go, and the ones
+    /// given are put in their place, at positions from `start`. The
+    /// envelope outside the span is unchanged, and a breakpoint already at
+    /// `end` keeps its bend, which shapes the segment after the span.
+    pub fn write_span(&mut self, start: Ticks, end: Ticks, points: &[Breakpoint]) {
+        if end < start {
+            return;
+        }
+        self.points
+            .retain(|point| point.at < start || point.at >= end);
+        for point in points {
+            let at = start + point.at;
+            match self.points.binary_search_by_key(&at, |point| point.at) {
+                Ok(index) => self.points[index].value = point.value,
+                Err(index) => self.points.insert(
+                    index,
+                    Breakpoint {
+                        at,
+                        value: point.value,
+                        bend: point.bend,
+                    },
+                ),
+            }
+        }
+    }
 }
 
 /// A parameter's automation: its envelope, and whether the envelope drives
@@ -705,6 +826,132 @@ mod tests {
             })
         );
         assert!(Envelope::from_points(vec![point(Ticks::ZERO, 1.0, f64::NAN)]).is_err());
+    }
+
+    // Spec: automation-editing R5.
+    #[test]
+    fn a_span_keeps_the_values_at_its_edges_and_runs_straight_across_it() {
+        let mut envelope = Envelope::default();
+        envelope.set(Ticks::ZERO, 0.0);
+        envelope.set(Ticks::WHOLE, 1.0);
+        envelope.set(Ticks::WHOLE * 2, 0.0);
+        envelope.set(Ticks::WHOLE * 3, 0.5);
+        envelope.set_bend(Ticks::WHOLE, -1.0).unwrap();
+        envelope.remove_span(Ticks::WHOLE, Ticks::WHOLE * 2);
+        assert_eq!(
+            envelope.points().collect::<Vec<_>>(),
+            vec![
+                Breakpoint {
+                    at: Ticks::ZERO,
+                    value: 0.0,
+                    bend: 0.0
+                },
+                // The value at the span's start is kept, and the segment
+                // across the span is straight.
+                Breakpoint {
+                    at: Ticks::WHOLE,
+                    value: 1.0,
+                    bend: 0.0
+                },
+                // The value at the span's end is kept, and the envelope
+                // after it is as it was.
+                Breakpoint {
+                    at: Ticks::WHOLE * 2,
+                    value: 0.0,
+                    bend: 0.0
+                },
+                Breakpoint {
+                    at: Ticks::WHOLE * 3,
+                    value: 0.5,
+                    bend: 0.0
+                },
+            ]
+        );
+        // The envelope outside the span is unchanged: it holds 0.0 at 1.1.1
+        // and 0.5 at the end.
+        assert_eq!(envelope.value_at(Ticks::ZERO), Some(0.0));
+        assert_eq!(envelope.value_at(Ticks::WHOLE * 3), Some(0.5));
+    }
+
+    // Spec: automation-editing R5.
+    #[test]
+    fn a_shape_over_a_span_holds_the_edges_the_values_there_and_the_bends_inside() {
+        let mut envelope = Envelope::default();
+        envelope.set(Ticks::ZERO, 0.0);
+        envelope.set(Ticks::WHOLE, 1.0);
+        envelope.set(Ticks::WHOLE * 2, 0.5);
+        envelope.set(Ticks::WHOLE * 3, 0.25);
+        envelope.set_bend(Ticks::WHOLE, -0.5).unwrap();
+        let shape = envelope.shape_in(Ticks::WHOLE, Ticks::WHOLE * 3);
+        assert_eq!(
+            shape,
+            vec![
+                Breakpoint {
+                    at: Ticks::ZERO,
+                    value: 1.0,
+                    bend: -0.5
+                },
+                Breakpoint {
+                    at: Ticks::WHOLE,
+                    value: 0.5,
+                    bend: 0.0
+                },
+                // The bend of a breakpoint at the span's end shapes the
+                // segment after it, so it isn't carried.
+                Breakpoint {
+                    at: Ticks::WHOLE * 2,
+                    value: 0.25,
+                    bend: 0.0
+                },
+            ]
+        );
+    }
+
+    // Spec: automation-editing R5.
+    #[test]
+    fn writing_a_shape_over_a_span_replaces_the_envelope_there_and_leaves_the_rest() {
+        let mut envelope = Envelope::default();
+        envelope.set(Ticks::ZERO, 0.0);
+        envelope.set(Ticks::WHOLE, 1.0);
+        envelope.set(Ticks::WHOLE * 2, 0.5);
+        let shape = vec![
+            Breakpoint {
+                at: Ticks::ZERO,
+                value: 0.25,
+                bend: 0.0,
+            },
+            Breakpoint {
+                at: Ticks::WHOLE / 2,
+                value: 0.75,
+                bend: 0.0,
+            },
+        ];
+        envelope.write_span(Ticks::WHOLE, Ticks::WHOLE * 2, &shape);
+        assert_eq!(
+            envelope.points().collect::<Vec<_>>(),
+            vec![
+                Breakpoint {
+                    at: Ticks::ZERO,
+                    value: 0.0,
+                    bend: 0.0
+                },
+                Breakpoint {
+                    at: Ticks::WHOLE,
+                    value: 0.25,
+                    bend: 0.0
+                },
+                Breakpoint {
+                    at: Ticks::WHOLE + Ticks::WHOLE / 2,
+                    value: 0.75,
+                    bend: 0.0
+                },
+                Breakpoint {
+                    at: Ticks::WHOLE * 2,
+                    value: 0.5,
+                    bend: 0.0
+                },
+            ]
+        );
     }
 
     #[test]

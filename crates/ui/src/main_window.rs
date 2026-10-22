@@ -345,6 +345,11 @@ impl MainWindowUi {
                 self.devices.start_variation_rename(*rack, *index);
             }
             Effect::RenameTrack(track) => crate::track_menu::start_rename(ctx, *track),
+            Effect::RenameLocator(locator) => {
+                // Spec: time-editing R8. Rename types the name in the
+                // scrub area.
+                crate::arrangement::start_rename(ctx, *locator);
+            }
             Effect::MoveFocus {
                 backwards,
                 neighbor,

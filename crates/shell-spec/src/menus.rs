@@ -486,7 +486,7 @@ const CREATE: &[Row] = &[
         Cmd(crate::stems::OPEN),
     ),
     SEPARATOR,
-    ("M-CREATE-016", "Add Locator", Pending(None)),
+    ("M-CREATE-016", "Add Locator", Cmd(crate::locator::ADD)),
     ("M-CREATE-017", "Add Time Signature Change", Pending(None)),
     SEPARATOR,
     ("M-CREATE-018", "Import Audio/MIDI File...", Pending(None)),
@@ -803,7 +803,11 @@ const OPTIONS: &[Row] = &[
     // `bl-model`'s switch, which the shell turns to the other state.
     ("M-OPT-025", "Solo in Place", Cmd("mixer.set_solo_in_place")),
     SEPARATOR,
-    ("M-OPT-026", "Lock Envelopes", Pending(None)),
+    (
+        "M-OPT-026",
+        "Lock Envelopes",
+        Cmd("song.set_lock_envelopes"),
+    ),
     (
         "M-OPT-027",
         "MIDI Arrangement Overdub",

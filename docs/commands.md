@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-649 commands in 41 areas.
+656 commands in 41 areas.
 
 ## Permission classes
 
@@ -572,13 +572,19 @@ Each command has:
 | [`set.save_copy`](#setsave_copy) | Save a Copy... | `external` |  |  |
 | [`settings.next_page`](#settingsnext_page) | Next Settings Page | `read` | `Option+Tab` | `Ctrl+Tab` |
 | [`settings.previous_page`](#settingsprevious_page) | Previous Settings Page | `read` | `Option+Shift+Tab` | `Ctrl+Shift+Tab` |
+| [`settings.set_appearance`](#settingsset_appearance) | Appearance | `edit` |  |  |
 | [`settings.set_auto_hide_plug_in_windows`](#settingsset_auto_hide_plug_in_windows) | Auto-Hide Plug-In Windows | `edit` |  |  |
 | [`settings.set_auto_warp_long_samples`](#settingsset_auto_warp_long_samples) | Auto-Warp Long Samples | `edit` |  |  |
+| [`settings.set_brightness`](#settingsset_brightness) | Brightness | `edit` |  |  |
+| [`settings.set_color_hue`](#settingsset_color_hue) | Color Hue | `edit` |  |  |
+| [`settings.set_color_intensity`](#settingsset_color_intensity) | Color Intensity | `edit` |  |  |
 | [`settings.set_continuous_save`](#settingsset_continuous_save) | Save Continuously | `edit` |  |  |
 | [`settings.set_create_fades_on_clip_edges`](#settingsset_create_fades_on_clip_edges) | Create Fades on Clip Edges | `edit` |  |  |
 | [`settings.set_default_launch_mode`](#settingsset_default_launch_mode) | Default Launch Mode | `edit` |  |  |
 | [`settings.set_default_launch_quantization`](#settingsset_default_launch_quantization) | Default Launch Quantization | `edit` |  |  |
 | [`settings.set_default_warp_mode`](#settingsset_default_warp_mode) | Default Warp Mode | `edit` |  |  |
+| [`settings.set_grid_line_intensity`](#settingsset_grid_line_intensity) | Grid Line Intensity | `edit` |  |  |
+| [`settings.set_high_contrast`](#settingsset_high_contrast) | High Contrast | `edit` |  |  |
 | [`settings.set_loop_warp_short_samples`](#settingsset_loop_warp_short_samples) | Loop/Warp Short Samples | `edit` |  |  |
 | [`settings.set_outline_view_in_focus`](#settingsset_outline_view_in_focus) | Outline View in Focus | `edit` |  |  |
 | [`settings.set_record_session_automation_in`](#settingsset_record_session_automation_in) | Record Session Automation in | `edit` |  |  |
@@ -588,6 +594,7 @@ Each command has:
 | [`settings.set_start_recording_on_scene_launch`](#settingsset_start_recording_on_scene_launch) | Start Recording on Scene Launch | `edit` |  |  |
 | [`settings.set_temporary_folder`](#settingsset_temporary_folder) | Temporary Folder | `edit` |  |  |
 | [`settings.set_theme`](#settingsset_theme) | Theme | `edit` |  |  |
+| [`settings.set_tone`](#settingsset_tone) | Tone | `edit` |  |  |
 | [`settings.set_warp_recorded_audio`](#settingsset_warp_recorded_audio) | Warp Recorded Audio | `edit` |  |  |
 | [`settings.state`](#settingsstate) | Settings State | `read` |  |  |
 | [`slot.set_stop_button`](#slotset_stop_button) | Add Stop Button | `edit` | `Cmd+E` | `Ctrl+E` |
@@ -10289,6 +10296,22 @@ Arguments: none (send `{}`).
 
 Result: nothing (`null`).
 
+#### `settings.set_appearance`
+
+**Appearance**. Permission: `edit`. Contexts: `settings`.
+
+Draws the theme in its light or dark colours, or follows the operating system's mode while Beatlayer runs (`follow-system`); a new install draws dark. Kept for the next start; changes nothing in the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `appearance` | [`Appearance`](#appearance) | yes | `light`, `dark` or `follow-system`. |
+
+Result: nothing (`null`).
+
 #### `settings.set_auto_hide_plug_in_windows`
 
 **Auto-Hide Plug-In Windows**. Permission: `edit`. Contexts: `settings`.
@@ -10320,6 +10343,54 @@ Arguments:
 | `on` | boolean | yes | Whether the setting is on. |
 
 Result: [`SwitchResult`](#switchresult).
+
+#### `settings.set_brightness`
+
+**Brightness**. Permission: `edit`. Contexts: `settings`.
+
+Adds points of lightness to every background colour, from -50 to 50; 0 is the default. Chromatic colours and the track palette don't change. Kept for the next start; changes nothing in the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `value` | integer from -50 to 50 | yes | Points of lightness added to the backgrounds, from -50 to 50. |
+
+Result: nothing (`null`).
+
+#### `settings.set_color_hue`
+
+**Color Hue**. Permission: `edit`. Contexts: `settings`.
+
+Turns the hue of the interface's chromatic colours by this many degrees, from -180 to 180 in steps of 5; 0 is the default. Backgrounds and the track palette don't change. Kept for the next start; changes nothing in the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `degrees` | integer from -180 to 180 | yes | Degrees the interface's colours are turned, from -180 to 180. |
+
+Result: nothing (`null`).
+
+#### `settings.set_color_intensity`
+
+**Color Intensity**. Permission: `edit`. Contexts: `settings`.
+
+Multiplies the chroma of the interface's chromatic colours, from 0 to 200 percent in steps of 5; 100 is the default. Backgrounds and the track palette don't change. Kept for the next start; changes nothing in the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `percent` | integer from 0 to 200 | yes | A whole percentage from 0 to 200, in steps of 5. |
+
+Result: nothing (`null`).
 
 #### `settings.set_continuous_save`
 
@@ -10398,6 +10469,38 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `mode` | [`DefaultWarpMode`](#defaultwarpmode) | yes | The warp mode a new warped clip takes. |
+
+Result: nothing (`null`).
+
+#### `settings.set_grid_line_intensity`
+
+**Grid Line Intensity**. Permission: `edit`. Contexts: `settings`.
+
+Sets how strong the grid lines of the Arrangement, the Clip View's editors and the automation lanes are, from 0 to 200 percent in steps of 5; 100, the default, draws the theme's grid colour, 0 shows no line. Kept for the next start; changes nothing in the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `percent` | integer from 0 to 200 | yes | A whole percentage from 0 to 200, in steps of 5. |
+
+Result: nothing (`null`).
+
+#### `settings.set_high_contrast`
+
+**High Contrast**. Permission: `edit`. Contexts: `settings`.
+
+Switches High Contrast, off in a new install. On, text stands at a contrast ratio of at least 7:1 against its background, dimmed text at 4.5:1, and separators, outlines and the focus ring at 3:1, whatever the other Theme & Colors settings are. Kept for the next start; changes nothing in the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean | yes | Whether the setting is on. |
 
 Result: nothing (`null`).
 
@@ -10533,7 +10636,7 @@ Result: [`TemporaryFolderResult`](#temporaryfolderresult).
 
 **Theme**. Permission: `edit`. Contexts: `settings`.
 
-Chooses Beatlayer's dark or light theme, which every window uses straight away. The choice is kept for the next start. Changes nothing in the set.
+Chooses the theme every window draws, by its name: Beatlayer, or a theme from the User Library's Themes folder; `settings.state` lists them in `theme_colors.themes`. `dark` and `light`, which earlier versions took, set the Appearance instead. The choice is kept for the next start, and a theme that can't be read is drawn as Beatlayer. Changes nothing in the set.
 
 Default keys: none.
 
@@ -10541,7 +10644,23 @@ Arguments:
 
 | Name | Type | Required | Description |
 |---|---|---|---|
-| `theme` | [`ThemeChoice`](#themechoice) | yes | The theme. |
+| `theme` | string | yes | A theme's name, as `settings.state`'s `theme_colors.themes` lists it. `dark` and `light`, which earlier versions took, set the Appearance instead. |
+
+Result: nothing (`null`).
+
+#### `settings.set_tone`
+
+**Tone**. Permission: `edit`. Contexts: `settings`.
+
+Tints the theme's neutral colours warm or cool, or leaves them as the theme gives them (`neutral`, the default); the chromatic colours aren't toned. Kept for the next start; changes nothing in the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `tone` | [`Tone`](#tone) | yes | `neutral`, `warm` or `cool`. |
 
 Result: nothing (`null`).
 
@@ -10565,7 +10684,7 @@ Result: [`SwitchResult`](#switchresult).
 
 **Settings State**. Permission: `read`. Contexts: `global`.
 
-Reports every preference the Settings window shows with a value, by page, in the form its own command takes it: the theme (`settings.set_theme`), Display & Input (zoom, Outline View in Focus, the Tab key settings), the audio device settings with Driver Error Compensation and the test tone (`audio.configure`, `audio.set_test_tone`), the MIDI ports and computer keyboard (`midi.set_port`), Create Fades on Clip Edges, Warp Recorded Audio, the Launch section, the File & Folder page's Temporary Folder, sample editor and Save Continuously (`settings.set_temporary_folder`, `settings.set_sample_editor` and `settings.set_continuous_save`), Auto-Hide Plug-In Windows, the plug-ins the Browser hides and prefers (`plugin.settings`), the agent server and the assistant. The server's and the agents' tokens and the assistant's API key are never reported, only whether one is stored. Preferences aren't saved with the set. Changes nothing. Use it to check a `settings.set_*` command took effect.
+Reports every preference the Settings window shows with a value, by page, in the form its own command takes it: Theme & Colors (`settings.set_theme`), Display & Input (zoom, Outline View in Focus, the Tab key settings), the audio device settings with Driver Error Compensation and the test tone (`audio.configure`, `audio.set_test_tone`), the MIDI ports and computer keyboard (`midi.set_port`), Create Fades on Clip Edges, Warp Recorded Audio, the Launch section, the File & Folder page's Temporary Folder, sample editor and Save Continuously (`settings.set_temporary_folder`, `settings.set_sample_editor` and `settings.set_continuous_save`), Auto-Hide Plug-In Windows, the plug-ins the Browser hides and prefers (`plugin.settings`), the agent server and the assistant. The server's and the agents' tokens and the assistant's API key are never reported, only whether one is stored. Preferences aren't saved with the set. Changes nothing. Use it to check a `settings.set_*` command took effect.
 
 Default keys: none.
 
@@ -12397,13 +12516,19 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`set.recover`](#setrecover) | the query tool's `song` | `set.path` |
 | [`set.save`](#setsave) | the query tool's `song` | `set.unsaved_changes` |
 | [`set.save_as`](#setsave_as) | the query tool's `song` | `set.path` |
+| [`settings.set_appearance`](#settingsset_appearance) | `settings.state` | `theme_colors.appearance` |
 | [`settings.set_auto_hide_plug_in_windows`](#settingsset_auto_hide_plug_in_windows) | `settings.state` | `auto_hide_plug_in_windows` |
 | [`settings.set_auto_warp_long_samples`](#settingsset_auto_warp_long_samples) | `settings.state` | `warp.auto_warp_long_samples` |
+| [`settings.set_brightness`](#settingsset_brightness) | `settings.state` | `theme_colors.brightness` |
+| [`settings.set_color_hue`](#settingsset_color_hue) | `settings.state` | `theme_colors.color_hue` |
+| [`settings.set_color_intensity`](#settingsset_color_intensity) | `settings.state` | `theme_colors.color_intensity` |
 | [`settings.set_continuous_save`](#settingsset_continuous_save) | `settings.state` | `file_folder.save_continuously` |
 | [`settings.set_create_fades_on_clip_edges`](#settingsset_create_fades_on_clip_edges) | `settings.state` | `create_fades_on_clip_edges` |
 | [`settings.set_default_launch_mode`](#settingsset_default_launch_mode) | `settings.state` | `launch.default_mode` |
 | [`settings.set_default_launch_quantization`](#settingsset_default_launch_quantization) | `settings.state` | `launch.default_quantization` |
 | [`settings.set_default_warp_mode`](#settingsset_default_warp_mode) | `settings.state` | `warp.default_warp_mode` |
+| [`settings.set_grid_line_intensity`](#settingsset_grid_line_intensity) | `settings.state` | `theme_colors.grid_line_intensity` |
+| [`settings.set_high_contrast`](#settingsset_high_contrast) | `settings.state` | `theme_colors.high_contrast` |
 | [`settings.set_loop_warp_short_samples`](#settingsset_loop_warp_short_samples) | `settings.state` | `warp.loop_warp_short_samples` |
 | [`settings.set_outline_view_in_focus`](#settingsset_outline_view_in_focus) | `settings.state` | `display_input.outline_view_in_focus` |
 | [`settings.set_record_session_automation_in`](#settingsset_record_session_automation_in) | `settings.state` | `record_session_automation_in` |
@@ -12412,7 +12537,8 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`settings.set_select_on_launch`](#settingsset_select_on_launch) | `settings.state` | `launch.select_on_launch` |
 | [`settings.set_start_recording_on_scene_launch`](#settingsset_start_recording_on_scene_launch) | `settings.state` | `launch.start_recording_on_scene_launch` |
 | [`settings.set_temporary_folder`](#settingsset_temporary_folder) | `settings.state` | `file_folder.temporary_folder` |
-| [`settings.set_theme`](#settingsset_theme) | `settings.state` | `theme` |
+| [`settings.set_theme`](#settingsset_theme) | `settings.state` | `theme_colors.theme` |
+| [`settings.set_tone`](#settingsset_tone) | `settings.state` | `theme_colors.tone` |
 | [`settings.set_warp_recorded_audio`](#settingsset_warp_recorded_audio) | `settings.state` | `warp_recorded_audio` |
 | [`slot.set_stop_button`](#slotset_stop_button) | the query tool's `track` | `removed_stop_buttons` |
 | [`song.add_locator`](#songadd_locator) | the query tool's `song` | `settings.locators` |
@@ -12862,6 +12988,43 @@ What `perception.analyze` returns. A measure not asked for is null.
     "transients"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `Appearance`
+
+Which of a theme's two sets of colours is drawn (themes R3).
+
+One of:
+
+- `"light"`: Dark text on light panels.
+- `"dark"`: Light text on dark panels, the default.
+- `"follow-system"`: The operating system's mode, light or dark, as it changes.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Which of a theme's two sets of colours is drawn (themes R3).",
+  "oneOf": [
+    {
+      "const": "light",
+      "description": "Dark text on light panels.",
+      "type": "string"
+    },
+    {
+      "const": "dark",
+      "description": "Light text on dark panels, the default.",
+      "type": "string"
+    },
+    {
+      "const": "follow-system",
+      "description": "The operating system's mode, light or dark, as it changes.",
+      "type": "string"
+    }
+  ]
 }
 ```
 
@@ -31715,7 +31878,7 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
 |---|---|---|---|
 | `page` | [`SettingsPage`](#settingspage) | yes | The page the Settings window shows, or showed last. |
 | `display_input` | [`DisplayInputSettings`](#displayinputsettings) | yes | Display & Input. |
-| `theme` | [`ThemeChoice`](#themechoice) | yes | Theme & Colors: the theme, as `settings.set_theme` takes it. |
+| `theme_colors` | [`ThemeColorsSettings`](#themecolorssettings) | yes | Theme & Colors: the Theme and Customization sections, as the `settings.set_theme` to `settings.set_color_hue` commands set them. |
 | `audio` | [`AudioPageSettings`](#audiopagesettings) | yes | Audio. |
 | `tempo_midi` | [`MidiPortsResult`](#midiportsresult) | yes | Tempo & MIDI: the MIDI ports' switches and the computer MIDI keyboard, the same as `midi.ports` reports. |
 | `create_fades_on_clip_edges` | boolean | yes | Record, Warp & Launch: Create Fades on Clip Edges, as `settings.set_create_fades_on_clip_edges` sets it. |
@@ -31783,9 +31946,9 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
       "$ref": "#/$defs/MidiPortsResult",
       "description": "Tempo & MIDI: the MIDI ports' switches and the computer MIDI keyboard, the same as `midi.ports` reports."
     },
-    "theme": {
-      "$ref": "#/$defs/ThemeChoice",
-      "description": "Theme & Colors: the theme, as `settings.set_theme` takes it."
+    "theme_colors": {
+      "$ref": "#/$defs/ThemeColorsSettings",
+      "description": "Theme & Colors: the Theme and Customization sections, as the `settings.set_theme` to `settings.set_color_hue` commands set them."
     },
     "warp": {
       "$ref": "#/$defs/WarpPrefs",
@@ -31799,7 +31962,7 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
   "required": [
     "page",
     "display_input",
-    "theme",
+    "theme_colors",
     "audio",
     "tempo_midi",
     "create_fades_on_clip_edges",
@@ -33466,32 +33629,105 @@ Changes to Texture's controls.
 
 </details>
 
-### `ThemeChoice`
+### `ThemeColorsSettings`
 
-Beatlayer's two themes.
+Theme & Colors in `settings.state` (themes R12).
 
-One of:
-
-- `"dark"`: Light text on dark panels, the default.
-- `"light"`: Dark text on light panels.
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `theme` | string | yes | The chosen theme's name. |
+| `tone` | [`Tone`](#tone) | yes | Tone. |
+| `high_contrast` | boolean | yes | High Contrast. |
+| `grid_line_intensity` | integer from -32768 to 32767 | yes | Grid Line Intensity, in percent. |
+| `brightness` | integer from -32768 to 32767 | yes | Brightness. |
+| `color_intensity` | integer from -32768 to 32767 | yes | Color Intensity, in percent. |
+| `color_hue` | integer from -32768 to 32767 | yes | Color Hue, in degrees. |
+| `appearance` | [`Appearance`](#appearance) | yes | The Appearance chosen. |
+| `drawn_appearance` | [`Appearance`](#appearance) | yes | The appearance drawn now, `light` or `dark`: Follow System resolved. |
+| `themes` | array of string | yes | The themes the Theme chooser offers, in its order. |
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "Beatlayer's two themes.",
-  "oneOf": [
-    {
-      "const": "dark",
-      "description": "Light text on dark panels, the default.",
+  "description": "Theme & Colors in `settings.state` (themes R12).",
+  "properties": {
+    "appearance": {
+      "$ref": "#/$defs/Appearance",
+      "description": "The Appearance chosen."
+    },
+    "brightness": {
+      "default": 0,
+      "description": "Brightness.",
+      "format": "int16",
+      "maximum": 32767,
+      "minimum": -32768,
+      "type": "integer"
+    },
+    "color_hue": {
+      "default": 0,
+      "description": "Color Hue, in degrees.",
+      "format": "int16",
+      "maximum": 32767,
+      "minimum": -32768,
+      "type": "integer"
+    },
+    "color_intensity": {
+      "default": 100,
+      "description": "Color Intensity, in percent.",
+      "format": "int16",
+      "maximum": 32767,
+      "minimum": -32768,
+      "type": "integer"
+    },
+    "drawn_appearance": {
+      "$ref": "#/$defs/Appearance",
+      "description": "The appearance drawn now, `light` or `dark`: Follow System resolved."
+    },
+    "grid_line_intensity": {
+      "default": 100,
+      "description": "Grid Line Intensity, in percent.",
+      "format": "int16",
+      "maximum": 32767,
+      "minimum": -32768,
+      "type": "integer"
+    },
+    "high_contrast": {
+      "default": false,
+      "description": "High Contrast.",
+      "type": "boolean"
+    },
+    "theme": {
+      "default": "Beatlayer",
+      "description": "The chosen theme's name.",
       "type": "string"
     },
-    {
-      "const": "light",
-      "description": "Dark text on light panels.",
-      "type": "string"
+    "themes": {
+      "description": "The themes the Theme chooser offers, in its order.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "tone": {
+      "$ref": "#/$defs/Tone",
+      "default": "neutral",
+      "description": "Tone."
     }
-  ]
+  },
+  "required": [
+    "theme",
+    "tone",
+    "high_contrast",
+    "grid_line_intensity",
+    "brightness",
+    "color_intensity",
+    "color_hue",
+    "appearance",
+    "drawn_appearance",
+    "themes"
+  ],
+  "type": "object"
 }
 ```
 
@@ -33641,6 +33877,43 @@ Type: array of [`TimeSignatureChange`](#timesignaturechange), at least 1.
   },
   "minItems": 1,
   "type": "array"
+}
+```
+
+</details>
+
+### `Tone`
+
+How a theme's neutral colours are tinted (themes R4).
+
+One of:
+
+- `"neutral"`: The theme's neutral colours as its file gives them.
+- `"warm"`: Tinted towards the hue 60°.
+- `"cool"`: Tinted towards the hue 250°.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "How a theme's neutral colours are tinted (themes R4).",
+  "oneOf": [
+    {
+      "const": "neutral",
+      "description": "The theme's neutral colours as its file gives them.",
+      "type": "string"
+    },
+    {
+      "const": "warm",
+      "description": "Tinted towards the hue 60°.",
+      "type": "string"
+    },
+    {
+      "const": "cool",
+      "description": "Tinted towards the hue 250°.",
+      "type": "string"
+    }
+  ]
 }
 ```
 

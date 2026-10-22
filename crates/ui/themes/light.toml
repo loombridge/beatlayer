@@ -1,6 +1,6 @@
 # Beatlayer's light theme: the same tokens as dark.toml.
 
-name = "Light"
+name = "Beatlayer"
 dark = false
 
 [colors]
@@ -10,10 +10,10 @@ bar = "#dde1e6"
 control = "#d2d7de"
 control_hover = "#c3c9d1"
 control_pressed = "#b3bac4"
-accent = "#11877a"
+accent = "#0e766b"
 accent_text = "#f2fffd"
 record = "#c9302c"
-error_text = "#b3261e"
+error_text = "#9f1f18"
 text = "#1c2026"
 text_dim = "#55606c"
 pending = "#9aa3ad"

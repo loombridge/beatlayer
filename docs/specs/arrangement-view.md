@@ -93,7 +93,7 @@ This spec covers what WP-1.8a builds: the view, navigation, Follow, the grid, tr
 | R16 | `crates/shell/tests/arrangement.rs`, `every_view_command_is_registered_read_only_and_reachable`; `crates/shell-spec/src/arrangement.rs`, `every_listed_id_is_registered_and_complete`; `cargo xtask commands` | unit |
 | R17 | `crates/ui/tests/arrangement.rs`, `only_visible_clips_are_built_each_frame`; `cargo run --release -p bl-ui --example arrangement_bench` (CPU and GPU time per frame) | UI script, measurement |
 | R18 | to be written in WP-6.38 | |
-| R19 | to be written in WP-6.49b | |
+| R19 | `crates/ui/tests/arrangement.rs`, `the_middle_button_pans_the_lanes` | UI script |
 | R20 | `crates/shell/tests/arrangement.rs`, `the_track_controls_are_view_state`; `crates/ui/tests/mixer.rs`, `the_view_menu_and_keys_show_and_hide_the_mixer_and_its_sections`; `crates/shell-spec/src/arrangement.rs`, `every_listed_id_is_registered_and_complete`; `cargo xtask commands` | unit, UI script |
 | R21 | `crates/ui/tests/arrangement.rs`, `the_track_controls_hide_their_parts` | UI script |
 | R22 | `crates/ui/tests/arrangement.rs`, `the_track_controls_hide_their_parts` | UI script |

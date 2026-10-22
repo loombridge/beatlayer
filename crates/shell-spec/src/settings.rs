@@ -195,26 +195,123 @@ pub fn zoom_step(percent: u16, steps: i32) -> u16 {
     percent
 }
 
-/// Beatlayer's two themes.
+/// The bundled theme's name (themes R2).
+pub const BUNDLED_THEME: &str = "Beatlayer";
+
+/// Which of a theme's two sets of colours is drawn (themes R3).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
-pub enum ThemeChoice {
+pub enum Appearance {
+    /// Dark text on light panels.
+    Light,
     /// Light text on dark panels, the default.
     #[default]
     Dark,
-    /// Dark text on light panels.
-    Light,
+    /// The operating system's mode, light or dark, as it changes.
+    FollowSystem,
 }
 
-impl ThemeChoice {
-    /// The theme's name in the Settings window.
+impl Appearance {
+    /// Every appearance, in the chooser's order.
+    pub const ALL: [Self; 3] = [Self::Light, Self::Dark, Self::FollowSystem];
+
+    /// The appearance's name in the Settings window.
     #[must_use]
     pub const fn label(self) -> &'static str {
         match self {
-            Self::Dark => "Dark",
             Self::Light => "Light",
+            Self::Dark => "Dark",
+            Self::FollowSystem => "Follow System",
         }
     }
+}
+
+/// How a theme's neutral colours are tinted (themes R4).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum Tone {
+    /// The theme's neutral colours as its file gives them.
+    #[default]
+    Neutral,
+    /// Tinted towards the hue 60°.
+    Warm,
+    /// Tinted towards the hue 250°.
+    Cool,
+}
+
+impl Tone {
+    /// Every tone, in the chooser's order.
+    pub const ALL: [Self; 3] = [Self::Neutral, Self::Warm, Self::Cool];
+
+    /// The tone's name in the Settings window.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Neutral => "Neutral",
+            Self::Warm => "Warm",
+            Self::Cool => "Cool",
+        }
+    }
+}
+
+/// The ranges of the Customization number boxes: smallest, largest, step
+/// and the value of a new install (themes R7).
+pub const GRID_LINE_INTENSITY: (i16, i16, i16, i16) = (0, 200, 5, 100);
+/// Brightness, in points of CIELAB lightness.
+pub const BRIGHTNESS: (i16, i16, i16, i16) = (-50, 50, 1, 0);
+/// Color Intensity, in percent.
+pub const COLOR_INTENSITY: (i16, i16, i16, i16) = (0, 200, 5, 100);
+/// Color Hue, in degrees.
+pub const COLOR_HUE: (i16, i16, i16, i16) = (-180, 180, 5, 0);
+
+/// What the Theme & Colors page's Theme and Customization sections set
+/// besides the appearance: the preferences the colour pipeline reads
+/// (themes R1, R4, R5, R7).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
+pub struct ThemeLook {
+    /// The chosen theme's name.
+    pub theme: String,
+    /// Tone.
+    pub tone: Tone,
+    /// High Contrast.
+    pub high_contrast: bool,
+    /// Grid Line Intensity, in percent.
+    pub grid_line_intensity: i16,
+    /// Brightness.
+    pub brightness: i16,
+    /// Color Intensity, in percent.
+    pub color_intensity: i16,
+    /// Color Hue, in degrees.
+    pub color_hue: i16,
+}
+
+impl Default for ThemeLook {
+    fn default() -> Self {
+        Self {
+            theme: BUNDLED_THEME.to_owned(),
+            tone: Tone::Neutral,
+            high_contrast: false,
+            grid_line_intensity: GRID_LINE_INTENSITY.3,
+            brightness: BRIGHTNESS.3,
+            color_intensity: COLOR_INTENSITY.3,
+            color_hue: COLOR_HUE.3,
+        }
+    }
+}
+
+/// Theme & Colors in `settings.state` (themes R12).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ThemeColorsSettings {
+    /// The Theme, Tone, High Contrast and Customization settings.
+    #[serde(flatten)]
+    pub look: ThemeLook,
+    /// The Appearance chosen.
+    pub appearance: Appearance,
+    /// The appearance drawn now, `light` or `dark`: Follow System resolved.
+    pub drawn_appearance: Appearance,
+    /// The themes the Theme chooser offers, in its order.
+    pub themes: Vec<String>,
 }
 
 /// The Display & Input page's settings.
@@ -433,8 +530,9 @@ pub struct SettingsState {
     pub page: SettingsPage,
     /// Display & Input.
     pub display_input: DisplayInputSettings,
-    /// Theme & Colors: the theme, as `settings.set_theme` takes it.
-    pub theme: ThemeChoice,
+    /// Theme & Colors: the Theme and Customization sections, as the
+    /// `settings.set_theme` to `settings.set_color_hue` commands set them.
+    pub theme_colors: ThemeColorsSettings,
     /// Audio.
     pub audio: AudioPageSettings,
     /// Tempo & MIDI: the MIDI ports' switches and the computer MIDI
@@ -483,7 +581,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
         CommandSpec::new(STATE, "Settings State")
             .description(
                 "Reports every preference the Settings window shows with a value, by page, in \
-                 the form its own command takes it: the theme (`settings.set_theme`), Display & \
+                 the form its own command takes it: Theme & Colors (`settings.set_theme`), Display & \
                  Input (zoom, Outline View in Focus, the Tab key settings), the audio device \
                  settings with Driver Error Compensation and the test tone (`audio.configure`, \
                  `audio.set_test_tone`), the MIDI ports and computer keyboard (`midi.set_port`), \

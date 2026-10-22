@@ -20,8 +20,9 @@ use bl_shell::audio::{
 use bl_shell::keymap::Origin;
 use bl_shell::midi_io_commands as midi_ids;
 use bl_shell::settings::{
-    DefaultWarpMode, LoopWarpShortSamples, SessionAutomationTracks, SettingsPage, ThemeChoice,
-    ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT, zoom_step,
+    Appearance, BRIGHTNESS, COLOR_HUE, COLOR_INTENSITY, DefaultWarpMode, GRID_LINE_INTENSITY,
+    LoopWarpShortSamples, SessionAutomationTracks, SettingsPage, Tone, ZOOM_MAX_PERCENT,
+    ZOOM_MIN_PERCENT, zoom_step,
 };
 use bl_shell::{Invocation, Shell, agent, assistant, commands as ids};
 use egui::accesskit::Role;
@@ -1494,6 +1495,9 @@ fn push_button(
     pressed
 }
 
+/// Theme & Colors (L-SET-011): the Theme and Customization sections
+/// (themes R1, R2, R3, R4, R5, R7, R13); the Track and Clip Colors section
+/// comes with the colours of tracks, clips and scenes (WP-6.30b).
 fn theme_page(
     ui: &mut Ui,
     shell: &Shell,
@@ -1501,36 +1505,140 @@ fn theme_page(
     rows: &mut Rows<'_>,
     events: &mut Vec<UiEvent>,
 ) {
+    fn choices<T: Clone>(items: impl IntoIterator<Item = (String, T)>) -> Vec<Choice<T>> {
+        items
+            .into_iter()
+            .map(|(label, value)| Choice {
+                label,
+                value,
+                leds: NO_LEDS,
+            })
+            .collect()
+    }
+    let look = shell.look();
     rows.heading(ui, "Theme");
-    let choices: Vec<Choice<ThemeChoice>> = [ThemeChoice::Dark, ThemeChoice::Light]
-        .into_iter()
-        .map(|t| Choice {
-            label: t.label().to_owned(),
-            value: t,
-            leds: NO_LEDS,
-        })
-        .collect();
     let rect = rows.row(ui, "Theme", SettingsLayout::CHOOSER);
-    if let Some(choice) = chooser(
+    let themes = choices(shell.themes().iter().map(|t| (t.clone(), t.clone())));
+    if let Some(name) = chooser(
         ui,
         theme,
         "theme",
         "Theme",
         rect,
-        &choices,
-        Some(&shell.theme()),
+        &themes,
+        Some(&look.theme),
         true,
     ) {
         events.push(UiEvent::Invoke(Invocation::new(
             ids::SETTINGS_SET_THEME,
-            json!({ "theme": choice }),
+            json!({ "theme": name }),
         )));
     }
-    rows.note(
+    let rect = rows.row(ui, "Appearance", SettingsLayout::CHOOSER);
+    let appearances = choices(Appearance::ALL.map(|a| (a.label().to_owned(), a)));
+    if let Some(appearance) = chooser(
         ui,
-        "Beatlayer's own dark and light themes. More of the Theme & Colors settings come in \
-         milestone M6.",
-    );
+        theme,
+        "appearance",
+        "Appearance",
+        rect,
+        &appearances,
+        Some(&shell.appearance()),
+        true,
+    ) {
+        events.push(UiEvent::Invoke(Invocation::new(
+            ids::SETTINGS_SET_APPEARANCE,
+            json!({ "appearance": appearance }),
+        )));
+    }
+    let rect = rows.row(ui, "Tone", SettingsLayout::CHOOSER);
+    let tones = choices(Tone::ALL.map(|t| (t.label().to_owned(), t)));
+    if let Some(tone) = chooser(
+        ui,
+        theme,
+        "tone",
+        "Tone",
+        rect,
+        &tones,
+        Some(&look.tone),
+        true,
+    ) {
+        events.push(UiEvent::Invoke(Invocation::new(
+            ids::SETTINGS_SET_TONE,
+            json!({ "tone": tone }),
+        )));
+    }
+    let rect = rows.row(ui, "High Contrast", SettingsLayout::SWITCH);
+    if let Some(on) = switch(
+        ui,
+        theme,
+        "high-contrast",
+        "High Contrast",
+        rect,
+        look.high_contrast,
+    ) {
+        events.push(UiEvent::Invoke(Invocation::new(
+            ids::SETTINGS_SET_HIGH_CONTRAST,
+            json!({ "on": on }),
+        )));
+    }
+    rows.heading(ui, "Customization");
+    // Each box: its label, command, argument, value, range with step, and
+    // the unit its value is shown with.
+    type Range = (i16, i16, i16, i16);
+    let boxes: [(&str, &str, &str, i16, Range, &str); 4] = [
+        (
+            "Grid Line Intensity",
+            ids::SETTINGS_SET_GRID_LINE_INTENSITY,
+            "percent",
+            look.grid_line_intensity,
+            GRID_LINE_INTENSITY,
+            " %",
+        ),
+        (
+            "Brightness",
+            ids::SETTINGS_SET_BRIGHTNESS,
+            "value",
+            look.brightness,
+            BRIGHTNESS,
+            "",
+        ),
+        (
+            "Color Intensity",
+            ids::SETTINGS_SET_COLOR_INTENSITY,
+            "percent",
+            look.color_intensity,
+            COLOR_INTENSITY,
+            " %",
+        ),
+        (
+            "Color Hue",
+            ids::SETTINGS_SET_COLOR_HUE,
+            "degrees",
+            look.color_hue,
+            COLOR_HUE,
+            "°",
+        ),
+    ];
+    for (label, command, argument, value, (min, max, step, _), unit) in boxes {
+        let rect = rows.row(ui, label, SettingsLayout::NUMBER);
+        if let Some(next) = number_box(
+            ui,
+            theme,
+            command,
+            label,
+            rect,
+            f64::from(value),
+            (f64::from(min), f64::from(max)),
+            &|value, steps| value + f64::from(steps) * f64::from(step),
+            &format!("{value}{unit}"),
+        ) {
+            events.push(UiEvent::Invoke(Invocation::new(
+                command,
+                json!({ argument: next as i16 }),
+            )));
+        }
+    }
 }
 
 /// File & Folder (L-SET-015): the Sample Editor and Temporary Folder rows,

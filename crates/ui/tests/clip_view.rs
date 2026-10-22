@@ -1109,15 +1109,13 @@ fn the_piano_rulers_menu_lists_its_items_and_their_packages() {
     let at = n.key_at(60);
     let nodes = right_click(&mut n, at);
     assert!(!menu_item(&nodes, "Deactivate Note(s)").disabled);
-    for (label, package) in [("Note spelling", "WP-6.7b")] {
-        let node = menu_item(&nodes, label);
-        assert!(node.disabled, "{label} waits");
-        assert!(
-            node.description.contains(package),
-            "{label} names {package}: {:?}",
-            node.description
-        );
-    }
+    let node = menu_item(&nodes, "Note spelling");
+    assert!(node.disabled, "Note spelling waits");
+    assert!(
+        node.description.contains("WP-6.7b"),
+        "Note spelling names WP-6.7b: {:?}",
+        node.description
+    );
 }
 
 #[test]

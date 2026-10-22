@@ -23,9 +23,13 @@
 //! the selected notes by a semitone, and with Shift by an octave
 //! (S-A11Y-008, S-A11Y-009), running `note.move`.
 //!
+//! Under the note area sit the expression lanes and the footer
+//! ([`crate::note_lanes`]): the Velocity, Chance and Release Velocity lanes,
+//! whose markers and controls run the same value commands.
+//!
 //! Nothing here owns the state: whether the view shows, Draw Mode, the note
-//! selection, and the Quantize settings are the shell's. Only the vertical
-//! scroll and the drags under way live here.
+//! selection, the lanes shown and the Quantize settings are the shell's. Only
+//! the vertical scroll, the lanes' heights and the drags under way live here.
 
 use bl_commands::Context;
 use bl_core::time::Ticks;

@@ -306,12 +306,6 @@ struct FooterDrag {
     last: f64,
 }
 
-/// A divider between lanes being dragged: the lane under it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct Divider {
-    lane: NoteField,
-}
-
 /// The lanes' own view state: their heights, the drags under way, the
 /// lane that holds the keyboard, and a number being typed.
 #[derive(Clone, Debug, PartialEq)]
@@ -319,7 +313,8 @@ pub struct LaneUi {
     heights: [f32; 3],
     drag: Option<LaneDrag>,
     footer_drag: Option<FooterDrag>,
-    divider: Option<Divider>,
+    /// Whether a divider between lanes is being dragged.
+    divider: bool,
     /// The lane whose marker was clicked last, which has the keyboard until
     /// the note area is clicked (R16).
     focus: Option<NoteField>,
@@ -332,7 +327,7 @@ impl Default for LaneUi {
             heights: [LANE_HEIGHT; 3],
             drag: None,
             footer_drag: None,
-            divider: None,
+            divider: false,
             focus: None,
             typed: None,
         }
@@ -565,7 +560,7 @@ impl LaneUi {
     pub fn reset(&mut self) {
         self.drag = None;
         self.footer_drag = None;
-        self.divider = None;
+        self.divider = false;
         self.focus = None;
         self.typed = None;
     }
@@ -741,8 +736,8 @@ impl LaneUi {
         let active = shell.clip_view().lane();
         // A lane dragged to nothing hides when the drag ends, though the
         // divider that was dragged has gone with the lane's height.
-        if self.divider.is_some() && !ui.input(|i| i.pointer.any_down()) {
-            self.divider = None;
+        if self.divider && !ui.input(|i| i.pointer.any_down()) {
+            self.divider = false;
             self.settle_heights(frame, events);
         }
         let shown_count = frame.layout.lanes.len();
@@ -764,7 +759,7 @@ impl LaneUi {
                 ui.ctx().set_cursor_icon(CursorIcon::ResizeVertical);
             }
             if split.drag_started() {
-                self.divider = Some(Divider { lane: field });
+                self.divider = true;
             }
             if split.dragged() {
                 let dy = split.drag_delta().y;

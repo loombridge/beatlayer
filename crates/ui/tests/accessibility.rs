@@ -2330,6 +2330,19 @@ fn paths() -> BTreeMap<&'static str, Path> {
             settings("file-folder", nothing, "Browse", Key::Enter),
         ),
         (
+            "settings.set_collect_files_on_export",
+            settings(
+                "library",
+                nothing,
+                "Collect Files on Export",
+                Key::ArrowDown,
+            ),
+        ),
+        (
+            "settings.set_user_library",
+            settings("library", nothing, "Browse", Key::Enter),
+        ),
+        (
             "settings.set_warp_recorded_audio",
             settings(
                 "record-warp-launch",
@@ -3143,6 +3156,19 @@ fn paths() -> BTreeMap<&'static str, Path> {
             "chain.save_preset",
             Exception(Gap(
                 "a drag of the chain's row into the browser has no keyboard form yet (racks R46)",
+            )),
+        ),
+        (
+            "clip.save_file",
+            Exception(Gap(
+                "a drag of a clip into the browser has no keyboard form yet (clip files R3)",
+            )),
+        ),
+        (
+            "browser.rename_file",
+            Exception(Equivalent(
+                "typing in the saved clip's name field in the browser's list: Enter renames \
+                 the file, Esc keeps its name (clip files R4)",
             )),
         ),
         (
@@ -4455,6 +4481,7 @@ fn every_m1_command_is_reachable_from_the_keyboard() {
         gaps,
         [
             "chain.save_preset",
+            "clip.save_file",
             "device.add_layers",
             "device.add_slice",
             "device.audition_sample",

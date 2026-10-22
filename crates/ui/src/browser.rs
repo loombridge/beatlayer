@@ -15,11 +15,12 @@
 use std::path::Path;
 
 use bl_core::time::Ticks;
+use bl_model::ClipId;
 use bl_shell::browser::drop::{DropTarget, drop_target_on};
 use bl_shell::browser::listing::file_kind;
 use bl_shell::browser_commands::{
-    self as ids, Item, ItemKind, Label, LabelInfo, Part, Section, TagEditorRow, TagEditorRowKind,
-    TagState,
+    self as ids, ClipFileKind, Item, ItemKind, Label, LabelInfo, Part, Section, TagEditorRow,
+    TagEditorRowKind, TagState,
 };
 use bl_shell::{Area, Invocation, MainView, Shell, WindowKind};
 use egui::accesskit::Role;
@@ -161,6 +162,105 @@ pub struct BrowserDrag {
     pub plugin: Option<String>,
 }
 
+/// Where a clip dragged out of the Arrangement or the Session View is saved
+/// if it is released over the browser (clip files R3).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ClipDropTarget {
+    /// A folder's row, or a place's label (its folder).
+    Folder(String),
+    /// The Clips label: the User Library's `Clips` folder.
+    Clips,
+}
+
+/// A save that waits for the person's answer to Collect Files on Export's
+/// Ask (file management R8).
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct AskCopy {
+    clip: ClipId,
+    folder: Option<String>,
+}
+
+fn clip_drag_id() -> Id {
+    Id::new("browser-clip-drag")
+}
+
+fn clip_target_id() -> Id {
+    Id::new("browser-clip-target")
+}
+
+fn ask_copy_id() -> Id {
+    Id::new("browser-ask-copy")
+}
+
+/// A clip is being dragged out of the Arrangement or the Session View: the
+/// browser notes which folder row or label is under the pointer, for
+/// [`end_clip_drag`] to read.
+pub fn begin_clip_drag(ctx: &egui::Context) {
+    ctx.data_mut(|data| {
+        data.insert_temp(clip_drag_id(), true);
+        data.insert_temp(clip_target_id(), None::<ClipDropTarget>);
+    });
+}
+
+/// The clip drag ended: where the pointer was over the browser, if it was.
+pub fn end_clip_drag(ctx: &egui::Context) -> Option<ClipDropTarget> {
+    ctx.data_mut(|data| {
+        data.remove::<bool>(clip_drag_id());
+        data.get_temp::<Option<ClipDropTarget>>(clip_target_id())
+            .flatten()
+    })
+}
+
+/// Saves `clip` as a clip file at `target` (clip files R3): at once, or, with
+/// Collect Files on Export on Ask and audio to copy, once the person has
+/// answered.
+pub fn save_clip(
+    ctx: &egui::Context,
+    shell: &Shell,
+    clip: ClipId,
+    target: &ClipDropTarget,
+    events: &mut Vec<UiEvent>,
+) {
+    let folder = match target {
+        ClipDropTarget::Folder(path) => Some(path.clone()),
+        ClipDropTarget::Clips => None,
+    };
+    if shell.clip_save_asks(clip, folder.as_deref().map(Path::new)) {
+        ctx.data_mut(|data| data.insert_temp(ask_copy_id(), AskCopy { clip, folder }));
+        return;
+    }
+    let mut args = json!({ "clip": clip });
+    if let Some(folder) = folder {
+        args["folder"] = json!(folder);
+    }
+    invoke(events, "clip.save_file", args);
+}
+
+/// While a clip is dragged, outlines `rect` and notes `target` when the
+/// pointer is over it.
+fn note_clip_target(ui: &Ui, theme: &Theme, rect: Rect, target: ClipDropTarget) {
+    let ctx = ui.ctx();
+    if !ctx
+        .data(|data| data.get_temp::<bool>(clip_drag_id()))
+        .unwrap_or(false)
+    {
+        return;
+    }
+    let Some(pointer) = ui.input(|i| i.pointer.hover_pos()) else {
+        return;
+    };
+    if !rect.contains(pointer) || !ui.clip_rect().contains(pointer) {
+        return;
+    }
+    ui.painter().rect_stroke(
+        rect,
+        0.0,
+        Stroke::new(2.0, theme.colors.accent.0),
+        StrokeKind::Inside,
+    );
+    ctx.data_mut(|data| data.insert_temp(clip_target_id(), Some(target)));
+}
+
 /// What a drag of presets or devices from the browser carries (the racks
 /// spec, R43): preset files' paths and the IDs of devices the labels list,
 /// for the Device View to load.
@@ -263,6 +363,10 @@ pub struct BrowserUi {
     /// The group the Status Bar shows for the Quick Tag under the pointer
     /// (spec: browser-tags R13).
     quick_tag_hint: Option<String>,
+    /// The text of the name being edited after a clip was saved (clip files
+    /// R4), and the file it is for.
+    rename: String,
+    rename_for: Option<String>,
 }
 
 /// The text after the last `#` in the search field, when a `#` term is
@@ -314,6 +418,17 @@ impl BrowserUi {
         events: &mut Vec<UiEvent>,
     ) {
         let view = shell.browser_view();
+        // Spec: clip files R3. While a clip is dragged, the rows and labels
+        // under the pointer say where it would be saved.
+        if ui
+            .ctx()
+            .data(|data| data.get_temp::<bool>(clip_drag_id()))
+            .unwrap_or(false)
+        {
+            ui.ctx()
+                .data_mut(|data| data.insert_temp(clip_target_id(), None::<ClipDropTarget>));
+        }
+        self.ask_copy_dialog(ui.ctx(), theme, events);
         let layout = BrowserLayout::compute_with(column, view.quick_tags_shown());
         let region = Id::new("region-browser");
         let _ = ui.interact(column, region, Sense::hover());
@@ -714,6 +829,15 @@ impl BrowserUi {
             (Label::UserLibrary, _) => drop_chains(ui, theme, rect, "", events),
             (label, Some(path)) if label.is_place() => {
                 drop_chains(ui, theme, rect, path, events);
+            }
+            _ => {}
+        }
+        // Spec: clip files R3. A clip dropped on a place's label is saved in
+        // its folder, and on the Clips label in the User Library's `Clips`.
+        match (&info.label, &info.path) {
+            (Label::Clips, _) => note_clip_target(ui, theme, rect, ClipDropTarget::Clips),
+            (label, Some(path)) if label.is_place() => {
+                note_clip_target(ui, theme, rect, ClipDropTarget::Folder(path.clone()));
             }
             _ => {}
         }
@@ -1701,6 +1825,102 @@ impl BrowserUi {
         );
     }
 
+    /// Collect Files on Export's Ask (file management R8): Copy, Don't Copy
+    /// and Cancel for a clip being saved.
+    fn ask_copy_dialog(&mut self, ctx: &egui::Context, theme: &Theme, events: &mut Vec<UiEvent>) {
+        let Some(ask) = ctx.data(|data| data.get_temp::<AskCopy>(ask_copy_id())) else {
+            return;
+        };
+        let mut answer = None;
+        egui::Window::new("Collect Files on Export")
+            .id(Id::new("browser-ask-copy-window"))
+            .collapsible(false)
+            .resizable(false)
+            .anchor(Align2::CENTER_CENTER, vec2(0.0, 0.0))
+            .show(ctx, |ui| {
+                ui.label(
+                    "Copy the audio files this clip uses into the project the clip file is saved in?",
+                );
+                ui.horizontal(|ui| {
+                    for (label, copy) in [("Copy", Some(true)), ("Don't Copy", Some(false)), ("Cancel", None)] {
+                        let button = ui.button(label);
+                        if button.clicked() {
+                            answer = Some(copy);
+                        }
+                    }
+                });
+            });
+        let _ = theme;
+        if let Some(copy) = answer {
+            ctx.data_mut(|data| data.remove::<AskCopy>(ask_copy_id()));
+            if let Some(copy) = copy {
+                let mut args = json!({ "clip": ask.clip, "copy": copy });
+                if let Some(folder) = ask.folder {
+                    args["folder"] = json!(folder);
+                }
+                invoke(events, "clip.save_file", args);
+            }
+        }
+    }
+
+    /// The text field a saved clip's name is edited in (clip files R4):
+    /// Enter renames the file, Esc keeps its name. Returns the field's
+    /// rectangle.
+    fn rename_field(
+        &mut self,
+        ui: &mut Ui,
+        theme: &Theme,
+        row: Rect,
+        left: f32,
+        item: &Item,
+        events: &mut Vec<UiEvent>,
+    ) -> Rect {
+        let first = self.rename_for.as_deref() != Some(item.path.as_str());
+        if first {
+            self.rename_for = Some(item.path.clone());
+            self.rename = Path::new(&item.path)
+                .file_stem()
+                .map(|stem| stem.to_string_lossy().into_owned())
+                .unwrap_or_default();
+        }
+        let rect = Rect::from_min_max(
+            pos2(left, row.top() + 1.0),
+            pos2((row.right() - 4.0).max(left + 40.0), row.bottom() - 1.0),
+        );
+        let id = Id::new("browser-rename-field");
+        let edit = egui::TextEdit::singleline(&mut self.rename)
+            .id(id)
+            .font(theme.small_font())
+            .margin(vec2(2.0, 0.0));
+        let response = ui.put(rect, edit);
+        ui.ctx().accesskit_node_builder(response.id, |node| {
+            node.set_label("Name".to_owned());
+        });
+        if first {
+            response.request_focus();
+            let len = self.rename.chars().count();
+            if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), id) {
+                state
+                    .cursor
+                    .set_char_range(Some(egui::text::CCursorRange::two(
+                        egui::text::CCursor::new(0),
+                        egui::text::CCursor::new(len),
+                    )));
+                state.store(ui.ctx(), id);
+            }
+        }
+        // Enter and Esc both end the edit and take the field's focus.
+        if response.lost_focus() && !first {
+            if ui.input(|i| i.key_pressed(Key::Enter)) {
+                invoke(events, ids::RENAME_FILE, json!({ "name": self.rename }));
+            } else {
+                invoke(events, ids::RENAME_FILE, json!({}));
+            }
+            self.rename_for = None;
+        }
+        rect
+    }
+
     #[expect(clippy::too_many_arguments, reason = "the row's inputs")]
     fn item_row(
         &mut self,
@@ -1734,6 +1954,7 @@ impl BrowserUi {
                 ink,
             ),
             ItemKind::Audio | ItemKind::Sfz => glyph(&painter, mark, Glyph::Wave, ink),
+            ItemKind::Clip => glyph(&painter, mark, Glyph::Clip, ink),
             ItemKind::Set => glyph(&painter, mark, Glyph::Set, ink),
             ItemKind::Preset => glyph(&painter, mark, Glyph::Preset, ink),
             ItemKind::Plugin | ItemKind::Device => glyph(&painter, mark, Glyph::Plugin, ink),
@@ -1762,13 +1983,19 @@ impl BrowserUi {
             );
             name_left = badge.right() + 6.0;
         }
-        let name = painter.text(
-            pos2(name_left, rect.center().y),
-            Align2::LEFT_CENTER,
-            &item.name,
-            theme.small_font(),
-            text_colour,
-        );
+        // Spec: clip files R4. A saved clip's name is open for editing.
+        let renaming = view.renaming() == Some(Path::new(&item.path));
+        let name = if renaming {
+            self.rename_field(ui, theme, rect, name_left, item, events)
+        } else {
+            painter.text(
+                pos2(name_left, rect.center().y),
+                Align2::LEFT_CENTER,
+                &item.name,
+                theme.small_font(),
+                text_colour,
+            )
+        };
         if let Some(folder) = &item.folder {
             // Search results name their folder at the right, in the room
             // the name leaves, showing the folder's end when it's long.
@@ -1786,6 +2013,7 @@ impl BrowserUi {
 
         if item.kind == ItemKind::Folder {
             drop_chains(ui, theme, rect, &item.path, events);
+            note_clip_target(ui, theme, rect, ClipDropTarget::Folder(item.path.clone()));
             // Spec: file-management R10, C-BROWSER-014. A project folder's
             // context menu has Manage Project, which shows the File
             // Manager at that project.
@@ -1816,6 +2044,13 @@ impl BrowserUi {
                     json!({ "path": item.path, "keep_others": command(modifiers) }),
                 ),
                 ItemKind::Audio => invoke(events, ids::LOAD_SELECTED, json!({})),
+                // Spec: clip files R10. A clip file places its clip.
+                ItemKind::Clip => {
+                    if !selected {
+                        invoke(events, ids::SELECT, json!({ "paths": [item.path] }));
+                    }
+                    invoke(events, ids::LOAD_SELECTED, json!({}));
+                }
                 // Spec: multisampler R47. An SFZ instrument loads as a
                 // multisampler.
                 ItemKind::Sfz => {
@@ -1875,7 +2110,11 @@ impl BrowserUi {
             } else {
                 let (loadable, mut audio): (Vec<String>, Vec<String>) =
                     paths.into_iter().partition(|p| is_loadable(p));
-                audio.retain(|p| is_audio(p) || is_sfz(p));
+                audio.retain(|p| is_audio(p) || is_sfz(p) || is_clip(p));
+                // Clip files go together or not at all (clip files R7).
+                if audio.iter().any(|p| is_clip(p)) {
+                    audio.retain(|p| is_clip(p));
+                }
                 if !audio.is_empty() {
                     DragAndDrop::set_payload(
                         ui.ctx(),
@@ -1931,6 +2170,11 @@ impl BrowserUi {
                 }
             }
             ItemKind::Audio => "audio file",
+            ItemKind::Clip => match item.clip_kind {
+                Some(ClipFileKind::Audio) => "audio clip file",
+                Some(ClipFileKind::Midi) => "MIDI clip file",
+                None => "clip file",
+            },
             ItemKind::Sfz => "SFZ instrument",
             ItemKind::Set => "Beatlayer set",
             ItemKind::Preset => "Beatlayer device preset",
@@ -2325,7 +2569,9 @@ impl BrowserUi {
                         invoke(events, ids::SELECT, json!({ "paths": [child.path] }));
                     }
                 }
-                ItemKind::Audio => invoke(events, ids::PREVIEW, json!({ "path": item.path })),
+                ItemKind::Audio | ItemKind::Clip => {
+                    invoke(events, ids::PREVIEW, json!({ "path": item.path }));
+                }
                 ItemKind::Sfz
                 | ItemKind::Set
                 | ItemKind::Preset
@@ -2373,7 +2619,7 @@ impl BrowserUi {
                 .dropped_files
                 .iter()
                 .map(|file| file.path().to_string_lossy().into_owned())
-                .filter(|path| is_audio(path) || is_sfz(path))
+                .filter(|path| is_audio(path) || is_sfz(path) || is_clip(path))
                 .collect();
             (
                 dropped,
@@ -2413,7 +2659,15 @@ impl BrowserUi {
             || !dropped.is_empty() && dropped.iter().all(|path| is_sfz(path)),
             |drag| drag.paths.iter().all(|path| is_sfz(path)),
         );
-        let kind = if sfz_drag {
+        // A clip file goes on a track of its clip's kind (clip files R7).
+        let first_clip = payload
+            .as_ref()
+            .map(|drag| drag.paths.as_slice())
+            .unwrap_or(&dropped)
+            .iter()
+            .find(|path| is_clip(path))
+            .and_then(|path| bl_shell::browser::listing::clip_kind(Path::new(path)));
+        let kind = if sfz_drag || first_clip == Some(ClipFileKind::Midi) {
             bl_model::TrackKind::Midi
         } else {
             bl_model::TrackKind::Audio
@@ -2474,7 +2728,12 @@ impl BrowserUi {
                 }
                 return;
             }
-            let paths: Vec<String> = paths.iter().filter(|p| is_audio(p)).cloned().collect();
+            let clips = paths.iter().any(|p| is_clip(p));
+            let paths: Vec<String> = paths
+                .iter()
+                .filter(|p| if clips { is_clip(p) } else { is_audio(p) })
+                .cloned()
+                .collect();
             if paths.is_empty() {
                 return;
             }
@@ -2634,6 +2893,14 @@ fn is_audio(path: &str) -> bool {
         == Some(ItemKind::Audio)
 }
 
+/// Whether `path` names a clip file.
+pub(crate) fn is_clip(path: &str) -> bool {
+    Path::new(path)
+        .file_name()
+        .and_then(|n| file_kind(&n.to_string_lossy()))
+        == Some(ItemKind::Clip)
+}
+
 /// Whether `path` names an SFZ instrument, which a MIDI track or the drop
 /// area takes (multisampler R47).
 pub(crate) fn is_sfz(path: &str) -> bool {
@@ -2676,6 +2943,7 @@ enum Glyph {
     Set,
     Preset,
     Plugin,
+    Clip,
     Speaker,
 }
 
@@ -2728,6 +2996,17 @@ fn glyph(painter: &egui::Painter, rect: Rect, glyph: Glyph, colour: Color32) {
             // a plug-in is a box in the chain.
             painter.rect_filled(
                 Rect::from_center_size(c, vec2(s * 1.4, s * 1.4)),
+                1.0,
+                colour,
+            );
+        }
+        Glyph::Clip => {
+            // Beatlayer's own mark for a clip file: a clip's body and its
+            // title bar.
+            let body = Rect::from_center_size(c, vec2(s * 2.0, s * 1.5));
+            painter.rect_stroke(body, 1.0, Stroke::new(1.0, colour), StrokeKind::Inside);
+            painter.rect_filled(
+                Rect::from_min_size(body.min, vec2(body.width(), s * 0.5)),
                 1.0,
                 colour,
             );

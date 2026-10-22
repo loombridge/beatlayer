@@ -49,6 +49,9 @@ pub struct Loaded {
     /// sample of each of [`OVERVIEW_POINTS`] stretches, every channel
     /// together.
     pub overview: Vec<[f32; 2]>,
+    /// For a clip file, the audio clip it holds: the preview plays through
+    /// its warp settings, markers, loop and start and end (clip files R13).
+    pub clip: Option<Box<bl_model::AudioData>>,
 }
 
 /// How many stretches a preview's waveform overview has.
@@ -82,6 +85,9 @@ struct Request {
     id: u64,
     path: PathBuf,
     rate: u32,
+    /// Set for a clip file: the folders to search for its audio if it isn't
+    /// where the file says.
+    clip_search: Option<Vec<PathBuf>>,
 }
 
 /// The preview decoder: a thread that decodes the newest request.
@@ -119,6 +125,31 @@ impl Loader {
     ///
     /// If the decoding thread can't start.
     pub fn request(&mut self, path: &Path, rate: u32) -> Result<u64, String> {
+        self.send(path, rate, None)
+    }
+
+    /// Asks for the audio clip in the clip file `path` and the audio it
+    /// plays, decoded at `rate`, searching `search` for the audio if it moved
+    /// (clip files R13, R14); returns the request's ID.
+    ///
+    /// # Errors
+    ///
+    /// If the decoding thread can't start.
+    pub fn request_clip(
+        &mut self,
+        path: &Path,
+        rate: u32,
+        search: Vec<PathBuf>,
+    ) -> Result<u64, String> {
+        self.send(path, rate, Some(search))
+    }
+
+    fn send(
+        &mut self,
+        path: &Path,
+        rate: u32,
+        clip_search: Option<Vec<PathBuf>>,
+    ) -> Result<u64, String> {
         if self.requests.is_none() {
             let (sender, receiver) = mpsc::channel::<Request>();
             let (results, results_receiver) = mpsc::channel();
@@ -130,7 +161,15 @@ impl Loader {
                         while let Ok(newer) = receiver.try_recv() {
                             request = newer;
                         }
-                        let result = decode(&request.path, request.rate);
+                        let (result, clip) = match &request.clip_search {
+                            Some(search) => {
+                                match decode_clip(&request.path, request.rate, search) {
+                                    Ok((data, clip)) => (Ok(data), Some(clip)),
+                                    Err(error) => (Err(error), None),
+                                }
+                            }
+                            None => (decode(&request.path, request.rate), None),
+                        };
                         let overview = result
                             .as_ref()
                             .map(|data| overview(data, OVERVIEW_POINTS))
@@ -140,6 +179,7 @@ impl Loader {
                             path: request.path,
                             result,
                             overview,
+                            clip,
                         };
                         if results.send(loaded).is_err() {
                             return;
@@ -156,6 +196,7 @@ impl Loader {
             id: self.next,
             path: path.to_path_buf(),
             rate,
+            clip_search,
         };
         self.requests
             .as_ref()
@@ -172,6 +213,65 @@ impl Loader {
             .map(|results| results.try_iter().collect())
             .unwrap_or_default()
     }
+}
+
+/// The part of `data` from `start` seconds to `end` seconds (the end of the
+/// audio when `None`): an unwarped audio clip file's preview plays this once
+/// (clip files R13). The audio itself if the part would be empty.
+#[must_use]
+pub fn trim(data: &SampleData, start: f64, end: Option<f64>) -> SampleData {
+    let rate = f64::from(data.sample_rate());
+    let frames = data.frames();
+    let from = ((start.max(0.0) * rate) as usize).min(frames);
+    let to = end.map_or(frames, |end| {
+        ((end.max(0.0) * rate) as usize).clamp(from, frames)
+    });
+    let planes: Vec<Vec<f32>> = data.channels().map(|c| c[from..to].to_vec()).collect();
+    SampleData::new(data.sample_rate(), planes).unwrap_or_else(|_| data.clone())
+}
+
+/// Reads the clip file at `path` and decodes the audio its audio clip plays at
+/// `rate` (clip files R13).
+///
+/// # Errors
+///
+/// A message if the file can't be read, holds a MIDI clip, or its audio is
+/// missing or can't be decoded.
+pub fn decode_clip(
+    path: &Path,
+    rate: u32,
+    search: &[PathBuf],
+) -> Result<(SampleData, Box<bl_model::AudioData>), String> {
+    let file = bl_project::clip_file::ClipFile::load(path)
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+    let bl_model::ClipData::Audio(audio) = file.clip.data else {
+        return Err(
+            "this clip file holds a MIDI clip, and MIDI clips don't preview yet".to_owned(),
+        );
+    };
+    let folder = path.parent().unwrap_or_else(|| Path::new("."));
+    let reference = file.media.get(&audio.media);
+    let source = reference
+        .and_then(|r| {
+            r.path
+                .resolve(folder)
+                .filter(|p| crate::clip_files::holds(p, r.size, audio.media))
+        })
+        .or_else(|| {
+            let size = reference?.size;
+            let mut folders = vec![folder.to_owned()];
+            folders.extend(search.iter().cloned());
+            bl_media::MediaStore::new()
+                .find_by_content(
+                    &[(bl_media::ContentHash::from_bytes(audio.media.0), size)],
+                    &folders,
+                )
+                .into_iter()
+                .next()
+                .map(|(_, found)| found)
+        })
+        .ok_or_else(|| "the audio this clip plays is missing".to_owned())?;
+    Ok((decode(&source, rate)?, Box::new(audio)))
 }
 
 /// Decodes up to [`MAX_PREVIEW_SECONDS`] of a file and converts it to

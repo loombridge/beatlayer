@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-678 commands in 42 areas.
+682 commands in 42 areas.
 
 ## Permission classes
 
@@ -135,6 +135,7 @@ Each command has:
 | [`browser.open_place`](#browseropen_place) | Open Browser Label | `external` |  |  |
 | [`browser.preview`](#browserpreview) | Preview | `external` |  |  |
 | [`browser.remove_folder`](#browserremove_folder) | Remove from Sidebar | `edit` |  |  |
+| [`browser.rename_file`](#browserrename_file) | Rename Browser File | `external` |  |  |
 | [`browser.rename_tag`](#browserrename_tag) | Rename Browser Tag | `edit` |  |  |
 | [`browser.reset_tag_order`](#browserreset_tag_order) | Reset Browser Tag Order | `edit` |  |  |
 | [`browser.scrub_preview`](#browserscrub_preview) | Scrub Preview | `external` |  |  |
@@ -210,6 +211,7 @@ Each command has:
 | [`clip.reverse`](#clipreverse) | Reverse Clip | `edit` |  |  |
 | [`clip.reverse_file`](#clipreverse_file) | Reverse Clip | `edit` |  |  |
 | [`clip.save_default`](#clipsave_default) | Save Default Clip | `external` |  |  |
+| [`clip.save_file`](#clipsave_file) | Save Clip as File | `external` |  |  |
 | [`clip.scale_tempo`](#clipscale_tempo) | Scale Clip Tempo | `edit` |  |  |
 | [`clip.set_1_1_1_here`](#clipset_1_1_1_here) | Set 1.1.1 Here | `edit` |  |  |
 | [`clip.set_data`](#clipset_data) | Replace Clip Contents | `edit` |  |  |
@@ -597,6 +599,7 @@ Each command has:
 | [`settings.set_auto_warp_long_samples`](#settingsset_auto_warp_long_samples) | Auto-Warp Long Samples | `edit` |  |  |
 | [`settings.set_automation_record_mode`](#settingsset_automation_record_mode) | Automation Record Mode | `edit` |  |  |
 | [`settings.set_brightness`](#settingsset_brightness) | Brightness | `edit` |  |  |
+| [`settings.set_collect_files_on_export`](#settingsset_collect_files_on_export) | Collect Files on Export | `edit` |  |  |
 | [`settings.set_color_hue`](#settingsset_color_hue) | Color Hue | `edit` |  |  |
 | [`settings.set_color_intensity`](#settingsset_color_intensity) | Color Intensity | `edit` |  |  |
 | [`settings.set_continuous_save`](#settingsset_continuous_save) | Save Continuously | `edit` |  |  |
@@ -616,6 +619,7 @@ Each command has:
 | [`settings.set_temporary_folder`](#settingsset_temporary_folder) | Temporary Folder | `edit` |  |  |
 | [`settings.set_theme`](#settingsset_theme) | Theme | `edit` |  |  |
 | [`settings.set_tone`](#settingsset_tone) | Tone | `edit` |  |  |
+| [`settings.set_user_library`](#settingsset_user_library) | User Library | `edit` |  |  |
 | [`settings.set_warp_recorded_audio`](#settingsset_warp_recorded_audio) | Warp Recorded Audio | `edit` |  |  |
 | [`settings.state`](#settingsstate) | Settings State | `read` |  |  |
 | [`slot.set_stop_button`](#slotset_stop_button) | Add Stop Button | `edit` | `Cmd+E` | `Ctrl+E` |
@@ -2588,6 +2592,23 @@ Arguments:
 
 Result: [`BrowserState`](#browserstate).
 
+#### `browser.rename_file`
+
+**Rename Browser File**. Permission: `external`. Contexts: `browser`.
+
+Renames the file whose name is open for editing in the browser (or the file at `path`) to `name`, keeping its extension, as typing a name and pressing Enter does after a clip is saved. A name another file in the folder has is refused. Without a `name` the name is kept and editing ends, as Esc does. Renames a file outside the project.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `name` | string or null | no | The new name, without the extension. Left out (or `null`), the name is kept and editing ends, as Esc does. |
+| `path` | string or null | no | The file to rename. Left out, the file whose name is open for editing. |
+
+Result: [`BrowserState`](#browserstate).
+
 #### `browser.rename_tag`
 
 **Rename Browser Tag**. Permission: `edit`. Contexts: `global`, `browser`.
@@ -3935,6 +3956,25 @@ Arguments:
 | `clip` | [`ClipId`](#clipid) | yes | The audio clip. |
 
 Result: [`SavedDefaults`](#saveddefaults).
+
+#### `clip.save_file`
+
+**Save Clip as File**. Permission: `external`. Contexts: `arrangement`, `browser`, `session`.
+
+Saves a clip from the Arrangement or a Session slot as a clip file (`.blclip`) in `folder` (the User Library's `Clips` folder if left out), as dragging the clip onto a folder in the browser does. The file keeps the clip as the set saves it (its notes or its warp markers, envelopes and launch settings) and the devices of its track with their state. It is named `name`, the clip's name, or its track's when the clip has none, with " 2", " 3" added for a name already taken, and written whole or not at all. The audio the clip and the devices play is copied into the `Samples/Imported` folder of the project the file lands in or left where it is, as Collect Files on Export says (`settings.state`'s `library.collect_files_on_export`); under Ask, `copy` answers for the person and leaving it out refuses the command. The new row is selected with its name open for editing (`browser.state`'s `renaming`; `browser.rename_file` finishes it). Changes nothing in the set. Writes files outside the project.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The clip to save: one in the Arrangement or in a Session slot. |
+| `copy` | boolean or null | no | Answers Collect Files on Export when it is set to Ask: `true` copies the audio files the clip and its track's devices play, `false` leaves the clip file naming them where they are. Under Always and Never it is ignored; under Ask, leaving it out refuses the command. |
+| `folder` | string or null | no | The folder to save it in. Left out, the User Library's `Clips` folder. |
+| `name` | string or null | no | The file's name, without the extension. Left out, the clip's name, or its track's when the clip has none. A name already taken in the folder gets " 2", " 3" and so on. |
+
+Result: [`SaveClipFileResult`](#saveclipfileresult).
 
 #### `clip.scale_tempo`
 
@@ -9863,7 +9903,7 @@ Result: [`ChangeSet`](#changeset).
 
 **Drop Files into a Slot**. Permission: `external`. Contexts: `session`.
 
-Puts audio files dropped from the browser, Finder, or Explorer into the Session slot at `track` and `scene`, as dropping them on a slot does: one after another down that track's scenes, or, with `spread` (Cmd, Ctrl on Windows and Linux, held while dropping), across the tracks at `scene`. Each target slot must be empty. Each file becomes a Session clip of its length, starting at the clip's beginning. One undo step. Reads the files, outside the project, and registers them so the set keeps them.
+Puts audio files dropped from the browser, Finder, or Explorer into the Session slot at `track` and `scene`, as dropping them on a slot does: one after another down that track's scenes, or, with `spread` (Cmd, Ctrl on Windows and Linux, held while dropping), across the tracks at `scene`. Each target slot must be empty. Each file becomes a Session clip of its length, starting at the clip's beginning. One undo step. Reads the files, outside the project, and registers them so the set keeps them. Clip files (`.blclip`) are placed as clips: in an empty slot on a track of their kind, bringing the track's devices when it has no clips and no devices; with no `track` (the Session's drop area), each on a new track of its kind in the scene, named after the file, with its devices; with `spread`, each on a track of its own across the tracks at `scene`. A track of the other kind, a group, return or Main track, and a slot holding a clip take none, and the command is refused.
 
 Default keys: none.
 
@@ -9872,9 +9912,9 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `paths` | array of string | yes | The files' paths, in the order dropped. |
-| `track` | [`TrackId`](#trackid) | yes | The track whose slot they go in. |
 | `scene` | [`SceneId`](#sceneid) | yes | The scene whose slot the first one goes in. |
 | `spread` | boolean | no | With the command modifier (Cmd, Ctrl on Windows and Linux) held, spread them across the tracks instead of down the scenes. |
+| `track` | [`TrackId`](#trackid) or null | no | The track whose slot they go in. Left out, the Session's drop area: clip files make a new track of their kind each, in the scene (audio files need a track). |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -10728,6 +10768,22 @@ Arguments:
 
 Result: nothing (`null`).
 
+#### `settings.set_collect_files_on_export`
+
+**Collect Files on Export**. Permission: `edit`. Contexts: `settings`.
+
+Chooses Collect Files on Export on the Settings window's Library page: what happens to the audio files a clip or a set uses when it is saved to the browser as a clip file or a set. `always` (a new install's choice) copies every such file that isn't already in the saved file's project into its `Samples/Imported` folder; `never` copies none, and the saved file names each file where it is; `ask` asks first, with Copy, Don't Copy and Cancel, and the commands that save to the browser refuse to run under it without their `copy` argument, so an agent asks the person first. Collect All and Save and device presets don't follow it. The setting is kept for the next start, and isn't part of the set or an undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `mode` | [`CollectFiles`](#collectfiles) | yes | `always`, `never` or `ask`. |
+
+Result: nothing (`null`).
+
 #### `settings.set_color_hue`
 
 **Color Hue**. Permission: `edit`. Contexts: `settings`.
@@ -11031,6 +11087,22 @@ Arguments:
 | `tone` | [`Tone`](#tone) | yes | `neutral`, `warm` or `cool`. |
 
 Result: nothing (`null`).
+
+#### `settings.set_user_library`
+
+**User Library**. Permission: `edit`. Contexts: `settings`.
+
+Chooses the User Library's folder on the Settings window's Library page. `path` is an absolute path, or `null` for the default. The folder becomes the User Library at once: its starting folders (Clips, Defaults, Grooves, Presets, Samples, Tunings) are made in it if it has none, and it is indexed in the background. Nothing is moved from the folder before. Run by a person from the Browse button without a `path`, it asks for a folder. The setting is kept for the next start, and isn't part of the set or an undo step. The result's `path` is the User Library in use afterwards.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `path` | string or null | no | The folder's absolute path, or `null` for the default: a `User Library` folder in a Beatlayer folder in the Music folder (the Documents folder on Windows). |
+
+Result: [`UserLibraryResult`](#userlibraryresult).
 
 #### `settings.set_warp_recorded_audio`
 
@@ -12913,6 +12985,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`settings.set_auto_warp_long_samples`](#settingsset_auto_warp_long_samples) | `settings.state` | `warp.auto_warp_long_samples` |
 | [`settings.set_automation_record_mode`](#settingsset_automation_record_mode) | `settings.state` | `automation_record_mode` |
 | [`settings.set_brightness`](#settingsset_brightness) | `settings.state` | `theme_colors.brightness` |
+| [`settings.set_collect_files_on_export`](#settingsset_collect_files_on_export) | `settings.state` | `library.collect_files_on_export` |
 | [`settings.set_color_hue`](#settingsset_color_hue) | `settings.state` | `theme_colors.color_hue` |
 | [`settings.set_color_intensity`](#settingsset_color_intensity) | `settings.state` | `theme_colors.color_intensity` |
 | [`settings.set_continuous_save`](#settingsset_continuous_save) | `settings.state` | `file_folder.save_continuously` |
@@ -12932,6 +13005,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`settings.set_temporary_folder`](#settingsset_temporary_folder) | `settings.state` | `file_folder.temporary_folder` |
 | [`settings.set_theme`](#settingsset_theme) | `settings.state` | `theme_colors.theme` |
 | [`settings.set_tone`](#settingsset_tone) | `settings.state` | `theme_colors.tone` |
+| [`settings.set_user_library`](#settingsset_user_library) | `settings.state` | `library.user_library` |
 | [`settings.set_warp_recorded_audio`](#settingsset_warp_recorded_audio) | `settings.state` | `warp_recorded_audio` |
 | [`slot.set_stop_button`](#slotset_stop_button) | the query tool's `track` | `removed_stop_buttons` |
 | [`song.add_locator`](#songadd_locator) | the query tool's `song` | `settings.locators` |
@@ -13006,6 +13080,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`browser.open_place`](#browseropen_place) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.preview`](#browserpreview) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.remove_folder`](#browserremove_folder) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
+| [`browser.rename_file`](#browserrename_file) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.rename_tag`](#browserrename_tag) | the browser's tags are read with `browser.tags`, which is `external` because it lists files outside the project |
 | [`browser.reset_tag_order`](#browserreset_tag_order) | the browser's tags are read with `browser.tags`, which is `external` because it lists files outside the project |
 | [`browser.scrub_preview`](#browserscrub_preview) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
@@ -13019,6 +13094,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`browser.tag_items`](#browsertag_items) | the browser's tags are read with `browser.tags`, which is `external` because it lists files outside the project |
 | [`browser.tags`](#browsertags) | a query of its own: it reads the tags, and is `external` for the files it lists |
 | [`chain.save_preset`](#chainsave_preset) | writes a file outside the set; the set doesn't change |
+| [`clip.save_file`](#clipsave_file) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`device.autosample_cancel`](#deviceautosample_cancel) | it stops a running autosample |
 | [`device.save_default_preset`](#devicesave_default_preset) | writes a file outside the set; the set doesn't change |
 | [`device.save_preset`](#devicesave_preset) | writes a file outside the set; the set doesn't change |
@@ -15718,6 +15794,7 @@ What the browser shows: most browser commands return it.
 | `tag_editor` | boolean | yes | Whether the Tag Editor is open beside the content pane. |
 | `quick_tags` | boolean | yes | Whether Quick Tags shows at the content pane's bottom. |
 | `note` | string or null | no | What the content pane says when it has no rows, such as which package fills an empty Library label. |
+| `renaming` | string or null | no | The file whose name is open for editing, after `clip.save_file` saved it: `browser.rename_file` gives it its new name. |
 
 <details><summary>JSON Schema</summary>
 
@@ -15760,6 +15837,13 @@ What the browser shows: most browser commands return it.
     "quick_tags": {
       "description": "Whether Quick Tags shows at the content pane's bottom.",
       "type": "boolean"
+    },
+    "renaming": {
+      "description": "The file whose name is open for editing, after `clip.save_file` saved it: `browser.rename_file` gives it its new name.",
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "rows": {
       "description": "Rows of the content pane, from `first_row`: the label's contents, with open folders' contents under them, or the search results.",
@@ -17148,6 +17232,37 @@ An envelope a clip carries for a parameter of its track: the parameter it modula
 
 </details>
 
+### `ClipFileKind`
+
+What a clip file holds.
+
+One of:
+
+- `"audio"`: An audio clip.
+- `"midi"`: A MIDI clip.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a clip file holds.",
+  "oneOf": [
+    {
+      "const": "audio",
+      "description": "An audio clip.",
+      "type": "string"
+    },
+    {
+      "const": "midi",
+      "description": "A MIDI clip.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `ClipId`
 
 The ID of a clip: a positive integer, unique within the project and never reused.
@@ -17565,6 +17680,43 @@ What `view.close_plug_in_windows` returns: how many editor windows it closed.
     "closed"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `CollectFiles`
+
+What happens to the audio files a clip or a set uses when it is saved to the browser (file-management R7): Collect Files on Export.
+
+One of:
+
+- `"always"`: Copy the files into the saved file's project. A new install's choice.
+- `"never"`: Copy nothing: the saved file names each file where it is.
+- `"ask"`: Ask first, with Copy, Don't Copy and Cancel.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What happens to the audio files a clip or a set uses when it is saved to the browser (file-management R7): Collect Files on Export.",
+  "oneOf": [
+    {
+      "const": "always",
+      "description": "Copy the files into the saved file's project. A new install's choice.",
+      "type": "string"
+    },
+    {
+      "const": "never",
+      "description": "Copy nothing: the saved file names each file where it is.",
+      "type": "string"
+    },
+    {
+      "const": "ask",
+      "description": "Ask first, with Copy, Don't Copy and Cancel.",
+      "type": "string"
+    }
+  ]
 }
 ```
 
@@ -23217,6 +23369,7 @@ One row of the content pane.
 | `kind` | [`ItemKind`](#itemkind) | yes | What it is. |
 | `depth` | integer from 0 to 65535 | yes | How deep it's indented: 0 at the top of the list. |
 | `open` | boolean | yes | For a folder, whether it's open. |
+| `clip_kind` | [`ClipFileKind`](#clipfilekind) or null | no | For a clip file, what it holds; `null` when its first bytes don't say (a damaged file), which placing refuses (clip files R6). |
 | `folder` | string or null | no | In search results, the folder it's in, relative to its place. |
 | `format` | [`PluginFormat`](#pluginformat) or null | no | For a plug-in, its format, which the row's badge shows (the plug-in scanning spec, R11). |
 
@@ -23226,6 +23379,17 @@ One row of the content pane.
 {
   "description": "One row of the content pane.",
   "properties": {
+    "clip_kind": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ClipFileKind"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "For a clip file, what it holds; `null` when its first bytes don't say (a damaged file), which placing refuses (clip files R6)."
+    },
     "depth": {
       "description": "How deep it's indented: 0 at the top of the list.",
       "format": "uint16",
@@ -23295,6 +23459,7 @@ One of:
 - `"preset"`: A Beatlayer device preset, which loads into the device being hot-swapped (WP-2.4).
 - `"plugin"`: A plug-in the scanner found (WP-2.9).
 - `"device"`: One of Beatlayer's own devices, listed under a device label (the Modulators label, WP-5.10); its path is the device type's ID.
+- `"clip"`: A clip file (WP-6.34); the row's `clip_kind` says whether it holds an audio clip or a MIDI clip.
 
 <details><summary>JSON Schema</summary>
 
@@ -23335,6 +23500,11 @@ One of:
     {
       "const": "device",
       "description": "One of Beatlayer's own devices, listed under a device label (the Modulators label, WP-5.10); its path is the device type's ID.",
+      "type": "string"
+    },
+    {
+      "const": "clip",
+      "description": "A clip file (WP-6.34); the row's `clip_kind` says whether it holds an audio clip or a MIDI clip.",
       "type": "string"
     }
   ]
@@ -24974,6 +25144,40 @@ Sample peak and RMS level.
     "rms_dbfs",
     "crest_factor_db",
     "channels"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `LibrarySettings`
+
+The Library page's settings (L-SET-016).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `collect_files_on_export` | [`CollectFiles`](#collectfiles) | yes | Collect Files on Export, as `settings.set_collect_files_on_export` sets it. |
+| `user_library` | string | yes | The User Library's folder, as `settings.set_user_library` sets it; empty when there is none. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The Library page's settings (L-SET-016).",
+  "properties": {
+    "collect_files_on_export": {
+      "$ref": "#/$defs/CollectFiles",
+      "description": "Collect Files on Export, as `settings.set_collect_files_on_export` sets it."
+    },
+    "user_library": {
+      "description": "The User Library's folder, as `settings.set_user_library` sets it; empty when there is none.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "collect_files_on_export",
+    "user_library"
   ],
   "type": "object"
 }
@@ -31739,6 +31943,54 @@ One of:
 
 </details>
 
+### `SaveClipFileResult`
+
+What `clip.save_file` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | The clip file's path. |
+| `name` | string | yes | Its name, without the extension. |
+| `kind` | [`ClipFileKind`](#clipfilekind) | yes | Whether it holds an audio clip or a MIDI clip. |
+| `copied` | integer, at least 0 | yes | How many audio files were copied beside it. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `clip.save_file` returns.",
+  "properties": {
+    "copied": {
+      "description": "How many audio files were copied beside it.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "kind": {
+      "$ref": "#/$defs/ClipFileKind",
+      "description": "Whether it holds an audio clip or a MIDI clip."
+    },
+    "name": {
+      "description": "Its name, without the extension.",
+      "type": "string"
+    },
+    "path": {
+      "description": "The clip file's path.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "path",
+    "name",
+    "kind",
+    "copied"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `SavedCopy`
 
 What `set.save_copy` returns.
@@ -32887,6 +33139,7 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
 | `record_session_automation_in` | [`SessionAutomationTracks`](#sessionautomationtracks) | yes | Record, Warp & Launch: Record Session automation in, as `settings.set_record_session_automation_in` sets it. |
 | `automation_record_mode` | [`AutomationRecordMode`](#automationrecordmode) | yes | The mode an Arrangement recording writes control moves in, as `settings.set_automation_record_mode` sets it (the automation spec, R18). |
 | `file_folder` | [`FileFolderSettings`](#filefoldersettings) | yes | File & Folder: the Temporary Folder, as `settings.set_temporary_folder` sets it. |
+| `library` | [`LibrarySettings`](#librarysettings) | yes | Library: Collect Files on Export and the User Library's folder. |
 | `auto_hide_plug_in_windows` | boolean | yes | Plug-Ins: Auto-Hide Plug-In Windows, as `settings.set_auto_hide_plug_in_windows` sets it. |
 | `plug_ins` | [`PluginSettings`](#pluginsettings) | yes | Plug-Ins: how the Browser shows plug-ins, as `plugin.settings` sets it. |
 | `agents` | [`AgentsPageSettings`](#agentspagesettings) | yes | Agents. |
@@ -32934,6 +33187,10 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
       "$ref": "#/$defs/LaunchPrefs",
       "description": "Record, Warp & Launch: the Launch section, as the `settings.set_default_launch_*`, `settings.set_select_on_launch`, `settings.set_select_next_scene_on_launch` and `settings.set_start_recording_on_scene_launch` commands set it."
     },
+    "library": {
+      "$ref": "#/$defs/LibrarySettings",
+      "description": "Library: Collect Files on Export and the User Library's folder."
+    },
     "page": {
       "$ref": "#/$defs/SettingsPage",
       "description": "The page the Settings window shows, or showed last."
@@ -32976,6 +33233,7 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
     "record_session_automation_in",
     "automation_record_mode",
     "file_folder",
+    "library",
     "auto_hide_plug_in_windows",
     "plug_ins",
     "agents",
@@ -36006,6 +36264,34 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `UserLibraryResult`
+
+What `settings.set_user_library` returns: the User Library in use afterwards.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | The User Library's path; empty when there is none. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `settings.set_user_library` returns: the User Library in use afterwards.",
+  "properties": {
+    "path": {
+      "description": "The User Library's path; empty when there is none.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "path"
+  ],
+  "type": "object"
 }
 ```
 

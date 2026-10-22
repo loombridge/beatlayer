@@ -412,9 +412,11 @@ mod tests {
         out
     }
 
-    // Spec: warp-modes R2
+    // Spec: warp-modes R2, R21. The two modes work in the spectral blocks
+    // R21 records: Complex in 240 ms blocks 10 ms apart, Complex Pro in
+    // 360 ms blocks 10 ms apart.
     #[test]
-    fn the_two_modes_take_the_librarys_own_and_a_finer_configuration() {
+    fn the_two_modes_take_the_blocks_the_measurements_chose() {
         let complex = Complex::new(1, 48_000.0, false);
         let pro = Complex::new(1, 48_000.0, true);
         assert_eq!(

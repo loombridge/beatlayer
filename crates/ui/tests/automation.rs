@@ -10,8 +10,9 @@ mod common;
 use bl_core::time::Ticks;
 use bl_model::{AutomationTarget, Breakpoint, Document, MixerParam, TrackId};
 use bl_shell::device_commands::DeviceAdded;
+use bl_shell::settings::AutomationRecordMode;
 use bl_ui::arrangement::automation::{AutomationDevice, control_choices, device_choices};
-use bl_ui::layout::Element;
+use bl_ui::layout::{Element, REFERENCE, ShellLayout};
 use bl_ui::main_window::UiEvent;
 use bl_ui::{control_bar, main_window};
 use common::Harness;
@@ -22,6 +23,34 @@ use serde_json::json;
 /// The accesskit ID an element's node has.
 fn element_id(element: Element) -> egui::Id {
     main_window::element_id(element)
+}
+
+/// A right-click at `at`, which opens a context menu.
+fn right_click(h: &mut Harness, at: Pos2) -> egui::FullOutput {
+    h.frame(vec![Event::PointerMoved(at)]);
+    h.frame(vec![Event::PointerButton {
+        pos: at,
+        button: PointerButton::Secondary,
+        pressed: true,
+        modifiers: Modifiers::NONE,
+    }]);
+    h.frame(vec![Event::PointerButton {
+        pos: at,
+        button: PointerButton::Secondary,
+        pressed: false,
+        modifiers: Modifiers::NONE,
+    }]);
+    h.settle()
+}
+
+/// The middle of the node labelled `label`.
+fn centre_of(nodes: &[common::Node], label: &str) -> Pos2 {
+    let node = nodes
+        .iter()
+        .rfind(|n| n.label == label && n.bounds.is_some())
+        .unwrap_or_else(|| panic!("no node labelled {label:?}"));
+    let b = node.bounds.unwrap();
+    pos2(((b.x0 + b.x1) / 2.0) as f32, ((b.y0 + b.y1) / 2.0) as f32)
 }
 
 // Spec: automation R5
@@ -102,6 +131,38 @@ fn the_automation_arm_button_switches_the_arm() {
     h.accesskit(element_id(Element::AutomationArm), Action::Click);
     h.settle();
     assert!(!h.shell.arrangement().automation_arm());
+}
+
+// Spec: automation R18
+#[test]
+fn the_automation_arm_button_has_a_menu_of_the_recording_modes() {
+    let mut h = Harness::new(common::Window::Main);
+    h.settle();
+    let at = ShellLayout::compute(REFERENCE, true, true)
+        .rect(Element::AutomationArm)
+        .center();
+
+    // Right-clicking the Automation Arm button opens its context menu: the
+    // three modes, with the current one ticked.
+    let output = right_click(&mut h, at);
+    let nodes = Harness::nodes(&output);
+    for label in ["✔ Touch", "Latch", "Write"] {
+        assert!(
+            nodes.iter().any(|n| n.label == label),
+            "no {label:?} in the menu"
+        );
+    }
+
+    // Choosing Latch runs the command, and the menu ticks it next time.
+    h.click(centre_of(&nodes, "Latch"));
+    h.settle();
+    assert_eq!(
+        h.shell.automation_record_mode(),
+        AutomationRecordMode::Latch
+    );
+    let output = right_click(&mut h, at);
+    let nodes = Harness::nodes(&output);
+    assert!(nodes.iter().any(|n| n.label == "✔ Latch"));
 }
 
 const BAR: i64 = Ticks::WHOLE.get();

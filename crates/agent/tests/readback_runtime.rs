@@ -187,6 +187,11 @@ fn each_settings_command_reads_back_from_settings_state() {
     );
     assert_eq!(before["display_input"]["outline_view_in_focus"], true);
     assert_eq!(before["display_input"]["zoom_percent"], 100);
+    assert_eq!(before["automation_record_mode"], "touch");
+    assert_eq!(
+        transport_state(&mut client)["automation_record_mode"],
+        "touch"
+    );
     assert_eq!(
         before["audio"]["device"]["driver_error_compensation_ms"],
         0.0
@@ -251,6 +256,11 @@ fn each_settings_command_reads_back_from_settings_state() {
         &mut client,
         "settings.set_auto_hide_plug_in_windows",
         json!({ "on": false }),
+    );
+    run(
+        &mut client,
+        "settings.set_automation_record_mode",
+        json!({ "mode": "latch" }),
     );
     run(
         &mut client,
@@ -338,6 +348,11 @@ fn each_settings_command_reads_back_from_settings_state() {
     assert_eq!(state["audio"]["tone"]["volume_db"], -20.0);
     assert_eq!(state["audio"]["tone"]["frequency_hz"], 880.0);
     assert_eq!(state["tempo_midi"]["keyboard"]["on"], true);
+    assert_eq!(state["automation_record_mode"], "latch");
+    assert_eq!(
+        transport_state(&mut client)["automation_record_mode"],
+        "latch"
+    );
 }
 
 #[test]

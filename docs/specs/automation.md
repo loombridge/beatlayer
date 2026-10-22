@@ -1,6 +1,6 @@
 # Automation: envelopes, breakpoints, and playback
 
-- **Status:** partial (all three parts of WP-2.12 are in: the model and the engine, the arrangement's lanes, choosers, and edits, and recording with Automation Arm; R1 to R17 each have a passing test; R18 to R23, the Latch and Write modes, are WP-6.46's; R24 to R33, several lanes per track and Snap Automation to Grid, are WP-6.57's)
+- **Status:** partial (all three parts of WP-2.12 are in: the model and the engine, the arrangement's lanes, choosers, and edits, and recording with Automation Arm; R1 to R23 each have a passing test; R24 to R33, several lanes per track and Snap Automation to Grid, are WP-6.57's)
 - **Work packages:** WP-2.12 (this spec, both parts: the model and the engine, and the arrangement's lanes and editing: R1 to R17); WP-6.46 (the Latch and Write recording modes, IMP-23: R18 to R23); WP-6.57 (the main automation lane, several lanes per track, the lane headers' buttons and menu, the choosers' LEDs and filter, and Snap Automation to Grid: R24 to R33). The Main track's Song Tempo envelope is WP-2.20's ([musical time](musical-time.md)); clip envelopes come with Session view (M3); selections, the edit commands on envelopes, Lock Envelopes, shapes, stretch and skew, Simplify Envelope and the keys are [automation-editing.md](automation-editing.md)'s (WP-6.25, WP-6.25b, WP-6.26).
 - **Parity-matrix row:** Automation and modulation: Arrangement automation lanes, several per track, Re-Enable Automation; curved segments; [the improvements](../05-improvements.md), IMP-23 (Latch and Write automation modes)
 - **Checked against:** Live 12.4.6, through the UI parity reference recorded on 10 and 11 October 2026, and the Live 12 reference manual as published (chapter 25, "Automation and Editing Envelopes", and Live Concepts 3.18); for R18 to R33, the online edition, read 20 October 2026 (sections 25.1, 25.2.1, 25.5 and 25.5.2), with the Live 12 release notes, 12.2
@@ -90,12 +90,12 @@ This spec covers automation in the document, in the engine, and in the Arrangeme
 | R14 | `crates/ui/tests/automation.rs`, `the_lane_choosers_list_automatable_parameters` | UI script |
 | R15 | `crates/ui/tests/automation.rs`, `clicking_a_breakpoint_deletes_it`, `clicking_a_segment_adds_a_breakpoint`, `double_clicking_off_a_segment_adds_a_breakpoint_at_the_clicked_value`, `dragging_a_breakpoint_moves_its_position_and_value_in_one_undo_step`, `option_dragging_a_segment_curves_it_in_one_undo_step`, `option_double_clicking_a_segment_straightens_it`; `crates/model/src/command.rs`, `moving_a_breakpoint_can_change_its_value` | UI script, unit |
 | R17 | `crates/model/src/automation.rs`, `a_touch_replaces_the_old_points_it_covers_and_the_old_envelope_resumes_at_its_end`; `crates/shell/tests/automation_record.rs`, `moves_during_recording_land_at_their_positions_and_undo_as_one_step`, `with_automation_arm_off_nothing_is_recorded`, `a_released_control_hands_the_parameter_back_to_its_old_envelope`; `crates/ui/tests/automation.rs`, `the_automation_arm_button_switches_the_arm` | unit, headless, UI script |
-| R18 | to be written in WP-6.46 | |
-| R19 | to be written in WP-6.46 | |
-| R20 | to be written in WP-6.46 | |
-| R21 | to be written in WP-6.46 | |
-| R22 | to be written in WP-6.46 | |
-| R23 | to be written in WP-6.46 | |
+| R18 | `crates/shell/tests/automation_record.rs`, `the_mode_is_kept_between_launches`; `crates/ui/tests/automation.rs`, `the_automation_arm_button_has_a_menu_of_the_recording_modes`; `crates/agent/tests/readback_runtime.rs`, `each_settings_command_reads_back_from_settings_state`; `crates/model/tests/command_registry.rs`, `every_command_runs_by_id` | headless, UI script, through the agent API |
+| R19 | `crates/shell/tests/automation_record.rs`, `in_latch_a_released_control_holds_its_value_to_the_stop`, `in_latch_the_old_envelope_resumes_a_tick_after_the_stop` | headless |
+| R20 | `crates/shell/tests/automation_record.rs`, `in_write_a_moved_control_is_written_from_where_the_recording_started` | headless |
+| R21 | `crates/shell/tests/automation_record.rs`, `a_latch_touch_carries_on_over_the_loops_wrap` | headless |
+| R22 | `crates/shell/tests/session_automation.rs`, `a_session_recording_writes_the_same_whatever_the_mode`; `crates/shell/tests/automation_record.rs`, `moves_during_recording_land_at_their_positions_and_undo_as_one_step` | headless |
+| R23 | `crates/shell/tests/automation_record.rs`, `moves_during_recording_land_at_their_positions_and_undo_as_one_step`, `a_released_control_hands_the_parameter_back_to_its_old_envelope` | headless |
 | R24 | to be written in WP-6.57 | |
 | R25 | to be written in WP-6.57 | |
 | R26 | to be written in WP-6.57 | |

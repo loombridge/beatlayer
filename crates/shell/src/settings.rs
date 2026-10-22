@@ -11,9 +11,9 @@ use bl_model::PluginFormat;
 
 pub use bl_shell_spec::midi_io::PortDirection;
 pub use bl_shell_spec::settings::{
-    DefaultWarpMode, LaunchPrefs, LoopWarpShortSamples, SessionAutomationTracks, SettingsPage,
-    ThemeChoice, WarpPrefs, ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT, ZOOM_STEPS, zoom_factor,
-    zoom_percent, zoom_step,
+    AutomationRecordMode, DefaultWarpMode, LaunchPrefs, LoopWarpShortSamples,
+    SessionAutomationTracks, SettingsPage, ThemeChoice, WarpPrefs, ZOOM_MAX_PERCENT,
+    ZOOM_MIN_PERCENT, ZOOM_STEPS, zoom_factor, zoom_percent, zoom_step,
 };
 
 use crate::keymap::UserKeymap;
@@ -89,6 +89,10 @@ pub struct Preferences {
     /// Record Session automation in (Record, Warp & Launch, L-SET-018;
     /// WP-3.12): Armed Tracks, as observed in Live 12.4.3.
     pub record_session_automation_in: SessionAutomationTracks,
+    /// The mode an Arrangement recording writes control moves in (the
+    /// automation spec, R18): Touch, Latch or Write. It's kept between
+    /// launches, and isn't part of the set.
+    pub automation_record_mode: AutomationRecordMode,
     /// Auto-Hide Plug-In Windows (Plug-Ins, Plug-In Windows, L-SET-017):
     /// a floating device's window or a plug-in's editor hides while
     /// another track is selected and comes back with its track (WP-2.5b),

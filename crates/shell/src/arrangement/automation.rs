@@ -547,6 +547,10 @@ fn result(
 
 /// The shape of each lane's envelope over a span, with the values as
 /// positions on the parameter's travel.
+///
+/// Every lane gets an entry, empty where it has no envelope, so a paste
+/// writes each shape into the lane it was copied from (the automation
+/// editing spec, R5).
 fn copy(
     doc: &Document,
     devices: &DeviceView,
@@ -556,7 +560,13 @@ fn copy(
 ) -> EnvelopeClipboard {
     let shapes = lanes
         .iter()
-        .filter_map(|(track, target)| shape_of(doc, devices, *track, *target, start, end))
+        .map(|(track, target)| {
+            shape_of(doc, devices, *track, *target, start, end).unwrap_or(EnvelopeShape {
+                track: *track,
+                target: *target,
+                points: Vec::new(),
+            })
+        })
         .collect();
     EnvelopeClipboard {
         lanes: shapes,

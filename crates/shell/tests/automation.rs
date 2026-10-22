@@ -212,6 +212,41 @@ fn copying_an_envelope_and_pasting_it_onto_another_parameter_keeps_its_shape() {
     assert!(envelope.len() >= 5, "{envelope:?}");
 }
 
+// Spec: automation-editing R5. A selected lane with no envelope keeps its
+// place on the clipboard, so a paste writes each shape into the lane it was
+// copied from.
+#[test]
+fn a_lane_with_no_envelope_keeps_its_place_on_the_clipboard() {
+    let mut song = song();
+    let pan = json!({
+        "type": "automation",
+        "track": song.track,
+        "target": { "type": "mixer", "param": "pan" },
+    });
+    let lanes = json!([pan, song.lane()]);
+    song.run(
+        view_ids::SELECT_TIME,
+        json!({ "start": Ticks(BAR), "end": Ticks(BAR * 2), "lanes": lanes }),
+    );
+    let state: EnvelopeClipboardState =
+        serde_json::from_value(song.run(ids::COPY, json!({}))).unwrap();
+    assert_eq!(state.lanes, 2, "both lanes keep their place");
+    song.run(ids::PASTE, json!({ "lanes": lanes, "at": Ticks(BAR * 8) }));
+    // The volume shape went to the volume lane, at bar 9.
+    let envelope = song.envelope();
+    assert!(envelope.iter().any(|(bar, _)| *bar == 8), "{envelope:?}");
+    // The pan lane had no envelope, and still has none.
+    assert!(
+        song.doc()
+            .track(song.track)
+            .unwrap()
+            .automation_for(&AutomationTarget::Mixer {
+                param: MixerParam::Pan
+            })
+            .is_none()
+    );
+}
+
 // Spec: automation-editing R2.
 #[test]
 fn moving_several_breakpoints_moves_them_all_as_one() {

@@ -14,9 +14,14 @@ use egui::accesskit::Role;
 use egui::{Key, Modifiers, Pos2};
 use serde_json::json;
 
-/// The Undo History's key: Cmd+Option+Z (S-VIEW-021).
+/// The Undo History's key: Cmd+Option+Z on macOS, Ctrl+Alt+Z on Windows
+/// and Linux (S-VIEW-021).
 fn history_key() -> Modifiers {
-    Modifiers::COMMAND | Modifiers::MAC_CMD | Modifiers::ALT
+    if cfg!(target_os = "macos") {
+        Modifiers::COMMAND | Modifiers::MAC_CMD | Modifiers::ALT
+    } else {
+        Modifiers::CTRL | Modifiers::ALT
+    }
 }
 
 /// A shell with a MIDI track and two edits, so the history has rows.

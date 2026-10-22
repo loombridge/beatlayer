@@ -90,6 +90,41 @@ pub struct TrackData {
     pub children: Vec<TrackData>,
 }
 
+/// Whole tracks on the clipboard (R14, R15): what they hold, and what is
+/// needed to paste them into another set (the set exchange spec, R5 to R7).
+#[derive(Clone, Debug, PartialEq)]
+pub struct CopiedTracks {
+    /// The tracks.
+    pub tracks: Vec<TrackData>,
+    /// The return tracks of the set they came from, in order.
+    pub returns: Vec<TrackId>,
+    /// Which set they came from, as the shell counts its sets.
+    pub set: u64,
+    /// The media table entries of the files they play: the hash, the path
+    /// on disk and the size (R15).
+    pub media: Vec<(bl_model::ContentHash, std::path::PathBuf, u64)>,
+}
+
+impl TrackData {
+    /// Whether this track or one inside it plays the file with `hash`:
+    /// through a clip, a take lane, its frozen audio or a device's sample.
+    #[must_use]
+    pub fn plays(&self, hash: &bl_model::ContentHash) -> bool {
+        // shortcut: finds the hash in the saved text of what the track holds,
+        // since the model has no walk over every place a file is named;
+        // replace it with one when a second caller needs it.
+        let held = serde_json::to_string(&(
+            &self.devices,
+            &self.clips,
+            &self.slots,
+            &self.take_lanes,
+            &self.frozen,
+        ))
+        .unwrap_or_default();
+        held.contains(&hash.to_string()) || self.children.iter().any(|child| child.plays(hash))
+    }
+}
+
 /// What a track holds, as data: the copy the clipboard keeps and the
 /// duplicate is made from (R13).
 #[must_use]
@@ -139,6 +174,10 @@ struct Copies {
     devices: Vec<(DeviceId, DeviceId)>,
     chains: Vec<(ChainId, ChainId)>,
     clips: Vec<(ClipId, ClipId)>,
+    /// The return tracks of the set the tracks came from, when they are
+    /// pasted into another set: IDs are counters in each set, so an ID the
+    /// tracks name means nothing in this one (the set exchange spec, R6).
+    foreign: Option<Vec<TrackId>>,
 }
 
 impl Copies {
@@ -161,27 +200,63 @@ impl Copies {
     fn clip(&self, id: ClipId) -> Option<ClipId> {
         self.clips.iter().find(|(o, _)| *o == id).map(|(_, c)| *c)
     }
+
+    /// Whether the tracks are pasted into another set than they came from.
+    fn is_foreign(&self) -> bool {
+        self.foreign.is_some()
+    }
+
+    /// The copy of a device, or the device itself when it's still in the
+    /// set the copy is made in.
+    fn device_or_same(&self, doc: &Document, id: DeviceId) -> Option<DeviceId> {
+        self.device(id)
+            .or_else(|| (!self.is_foreign() && doc.device(id).is_some()).then_some(id))
+    }
+
+    /// The copy of a chain, or the chain itself when it's still in the set
+    /// the copy is made in.
+    fn chain_or_same(&self, doc: &Document, id: ChainId) -> Option<ChainId> {
+        self.chain(id)
+            .or_else(|| (!self.is_foreign() && doc.chain(id).is_some()).then_some(id))
+    }
 }
 
 /// Where a reference to a track goes in a copy: the copy when the track was
-/// copied too, the same track when the set still has it, and nothing when
-/// the set has neither (the set exchange spec, R6).
+/// copied too, the same track when the copy is made in the set it came from
+/// and the set still has it, and nothing otherwise (the set exchange spec,
+/// R6).
 fn settle_track(copies: &Copies, doc: &Document, track: TrackId) -> Option<TrackId> {
     copies
         .track(track)
-        .or_else(|| doc.track(track).map(|_| track))
+        .or_else(|| (!copies.is_foreign() && doc.track(track).is_some()).then_some(track))
 }
 
-/// Where a send goes in a copy: the same return track when the set has it,
-/// the return at the same place when it doesn't, and nothing when the set
-/// has no return there (the set exchange spec, R6).
-fn settle_send(editor: &Editor, send: &SendTo) -> Option<TrackId> {
-    let doc = editor.document();
-    if doc.track(send.to).is_some() {
-        return Some(send.to);
+/// Where a reference to a return track goes in a copy: the copy when it was
+/// copied too, and then the same return track when the set still has it
+/// (or, in another set, the return at the same place among the returns),
+/// the return at `position` when it doesn't, and nothing when the set has
+/// no return there (the set exchange spec, R6).
+fn settle_return(
+    copies: &Copies,
+    doc: &Document,
+    to: TrackId,
+    position: Option<usize>,
+) -> Option<TrackId> {
+    let mut returns = doc.returns();
+    match &copies.foreign {
+        Some(source) => copies
+            .track(to)
+            .or_else(|| returns.nth(source.iter().position(|&r| r == to)?)),
+        None => copies
+            .track(to)
+            .or_else(|| doc.track(to).map(|_| to))
+            .or_else(|| returns.nth(position?)),
     }
-    let returns: Vec<TrackId> = doc.returns().collect();
-    returns.get(send.position).copied()
+}
+
+/// Where a send goes in a copy (the set exchange spec, R6).
+fn settle_send(copies: &Copies, editor: &Editor, send: &SendTo) -> Option<TrackId> {
+    settle_return(copies, editor.document(), send.to, Some(send.position))
 }
 
 /// Where a track's input goes in a copy: the copy of the track it names
@@ -198,14 +273,12 @@ fn settle_input(copies: &Copies, doc: &Document, input: &Input) -> Option<Input>
         } => Some(Input::Track {
             track: settle_track(copies, doc, *track)?,
             tap: *tap,
-            chain: chain.and_then(|chain| {
-                copies
-                    .chain(chain)
-                    .or_else(|| doc.chain(chain).map(|_| chain))
-            }),
-            output: output.map(|output| bl_model::DeviceOutput {
-                device: copies.device(output.device).unwrap_or(output.device),
-                output: output.output,
+            chain: chain.and_then(|chain| copies.chain_or_same(doc, chain)),
+            output: output.and_then(|output| {
+                Some(bl_model::DeviceOutput {
+                    device: copies.device_or_same(doc, output.device)?,
+                    output: output.output,
+                })
             }),
         }),
         other => Some(other.clone()),
@@ -225,8 +298,8 @@ fn settle_output(copies: &Copies, doc: &Document, output: &Output) -> Option<Out
 }
 
 /// Where an automation target goes in a copy: the copy of the device or
-/// chain it names, and nothing when the set has neither (the set exchange
-/// spec, R6).
+/// chain it names, and nothing when it wasn't copied and is in another set
+/// (the set exchange spec, R6).
 fn settle_target(
     copies: &Copies,
     doc: &Document,
@@ -235,18 +308,20 @@ fn settle_target(
     match target {
         AutomationTarget::Mixer { param } => Some(AutomationTarget::Mixer { param: *param }),
         // A send's envelope follows the send, which keeps its return track.
-        AutomationTarget::Send { to } => doc.track(*to).map(|_| AutomationTarget::Send { to: *to }),
+        AutomationTarget::Send { to } => {
+            settle_return(copies, doc, *to, None).map(|to| AutomationTarget::Send { to })
+        }
         AutomationTarget::Device { device, param } => Some(AutomationTarget::Device {
-            device: copies.device(*device).unwrap_or(*device),
+            device: copies.device_or_same(doc, *device)?,
             param: *param,
         }),
         AutomationTarget::Chain { chain, param } => Some(AutomationTarget::Chain {
-            chain: copies.chain(*chain).unwrap_or(*chain),
+            chain: copies.chain_or_same(doc, *chain)?,
             param: *param,
         }),
         AutomationTarget::ChainSend { chain, to } => Some(AutomationTarget::ChainSend {
-            chain: copies.chain(*chain).unwrap_or(*chain),
-            to: copies.chain(*to).unwrap_or(*to),
+            chain: copies.chain_or_same(doc, *chain)?,
+            to: copies.chain_or_same(doc, *to)?,
         }),
         AutomationTarget::MidiCc { .. }
         | AutomationTarget::MidiPitchBend
@@ -362,26 +437,25 @@ fn create(
     Ok(id)
 }
 
-/// Points a clip's envelopes at the copies of the devices they drive, and
-/// drops the ones whose device the set doesn't have.
+/// Points a clip's envelopes at the copies of the devices and returns they
+/// drive, and drops the ones whose device or return the copy has no match
+/// for.
 fn remap_clip(clip: &mut Clip, copies: &Copies, doc: &Document) {
-    clip.envelopes.retain(|envelope| match envelope.target {
-        AutomationTarget::Device { device, .. } => {
-            copies.device(device).is_some() || doc.device(device).is_some()
-        }
-        AutomationTarget::Send { to } => doc.track(to).is_some(),
-        _ => true,
+    clip.envelopes.retain_mut(|envelope| {
+        let target = match envelope.target {
+            AutomationTarget::Device { device, param } => copies
+                .device_or_same(doc, device)
+                .map(|device| AutomationTarget::Device { device, param }),
+            AutomationTarget::Send { to } => {
+                settle_return(copies, doc, to, None).map(|to| AutomationTarget::Send { to })
+            }
+            other => Some(other),
+        };
+        target.is_some_and(|target| {
+            envelope.target = target;
+            true
+        })
     });
-    for envelope in &mut clip.envelopes {
-        if let AutomationTarget::Device { device, param } = envelope.target
-            && let Some(copy) = copies.device(device)
-        {
-            envelope.target = AutomationTarget::Device {
-                device: copy,
-                param,
-            };
-        }
-    }
 }
 
 /// Gives a copy everything that names other objects: its mixer, its sends,
@@ -458,7 +532,7 @@ fn finish(editor: &mut Editor, data: &TrackData, copies: &Copies) -> Result<(), 
         })?;
     }
     for send in &data.sends {
-        let Some(to) = settle_send(editor, send) else {
+        let Some(to) = settle_send(copies, editor, send) else {
             continue;
         };
         editor.apply(Command::SetSend {
@@ -583,37 +657,39 @@ fn finish(editor: &mut Editor, data: &TrackData, copies: &Copies) -> Result<(), 
     Ok(())
 }
 
-/// Points a copy's modulator mappings at the copies of their targets (the
-/// modulation spec, R19): a mapping whose target was copied too goes to
-/// the copy, and one whose target wasn't isn't copied.
-fn map_copies(editor: &mut Editor, copies: &Copies) -> Result<(), EditError> {
+/// Points the copies' modulator mappings at the copies of their targets
+/// (the modulation spec, R19): a mapping whose target was copied too goes
+/// to the copy, and one whose target wasn't isn't copied. The mappings are
+/// those of the devices in `data`.
+fn map_copies(editor: &mut Editor, data: &[TrackData], copies: &Copies) -> Result<(), EditError> {
     use bl_model::modulator::ModTarget;
-    for &(original, copy) in &copies.devices {
-        let mappings = editor
-            .document()
-            .device(original)
-            .map(|d| d.mappings.clone())
-            .unwrap_or_default();
-        for mapping in mappings {
-            let target = match mapping.target {
-                ModTarget::Mixer { track, param } => copies
-                    .track(track)
-                    .map(|track| ModTarget::Mixer { track, param }),
-                ModTarget::Send { track, to } => copies
-                    .track(track)
-                    .map(|track| ModTarget::Send { track, to }),
-                ModTarget::Device { device, param } => copies
-                    .device(device)
-                    .map(|device| ModTarget::Device { device, param }),
+    for track in data {
+        for device in track.devices.iter().flat_map(Device::walk) {
+            let Some(copy) = copies.device(device.id) else {
+                continue;
             };
-            if let Some(target) = target {
-                editor.apply(Command::MapModulator {
-                    device: copy,
-                    slot: mapping.slot,
-                    target,
-                })?;
+            for mapping in &device.mappings {
+                let target = match mapping.target {
+                    ModTarget::Mixer { track, param } => copies
+                        .track(track)
+                        .map(|track| ModTarget::Mixer { track, param }),
+                    ModTarget::Send { track, to } => copies
+                        .track(track)
+                        .map(|track| ModTarget::Send { track, to }),
+                    ModTarget::Device { device, param } => copies
+                        .device(device)
+                        .map(|device| ModTarget::Device { device, param }),
+                };
+                if let Some(target) = target {
+                    editor.apply(Command::MapModulator {
+                        device: copy,
+                        slot: mapping.slot,
+                        target,
+                    })?;
+                }
             }
         }
+        map_copies(editor, &track.children, copies)?;
     }
     Ok(())
 }
@@ -640,6 +716,7 @@ pub fn duplicate_tracks(
     editor
         .transact(label, |editor| {
             let mut ids = Copies::default();
+            let mut data = Vec::new();
             // The last first, so each original's place stays where it was.
             for &original in originals.iter().rev() {
                 let doc = editor.document();
@@ -657,21 +734,20 @@ pub fn duplicate_tracks(
                     .iter()
                     .position(|&t| t == original)
                     .map_or(0, |i| i + 1);
-                let Some(data) = snapshot(doc, original) else {
+                let Some(track) = snapshot(doc, original) else {
                     continue;
                 };
-                let copy = create(editor, &data, parent, index, &mut ids)?;
+                let copy = create(editor, &track, parent, index, &mut ids)?;
                 renames.push((copy, original));
                 copies.push(copy);
+                data.push(track);
             }
             // Everything that names the copies, now that they are all there.
-            for &original in &originals {
-                let Some(data) = snapshot(editor.document(), original) else {
-                    continue;
-                };
-                finish(editor, &data, &ids)?;
+            data.reverse();
+            for track in &data {
+                finish(editor, track, &ids)?;
             }
-            map_copies(editor, &ids)?;
+            map_copies(editor, &data, &ids)?;
             for (copy, original) in &renames {
                 rename_like(editor, *copy, *original)?;
             }
@@ -700,6 +776,9 @@ pub struct Place {
 /// tracks hold under new IDs (R13). The copies are made in two passes: the
 /// tracks, their devices and their clips first, then everything that names
 /// them, so a reference to a track copied later still finds its copy.
+/// `source_returns` is the return tracks of the set the tracks came from
+/// when that isn't this one, and the references the copies make to tracks
+/// not copied are then settled by place, not by ID.
 ///
 /// # Errors
 ///
@@ -708,12 +787,16 @@ pub fn copy_tracks(
     editor: &mut Editor,
     data: &[TrackData],
     place: Place,
+    source_returns: Option<Vec<TrackId>>,
     label: &'static str,
 ) -> Result<Vec<TrackId>, String> {
     if data.is_empty() {
         return Err("there's nothing on the clipboard to paste".to_owned());
     }
-    let mut ids = Copies::default();
+    let mut ids = Copies {
+        foreign: source_returns,
+        ..Copies::default()
+    };
     let mut copies = Vec::with_capacity(data.len());
     let mut index = place.index;
     let mut returns = place.returns;
@@ -736,7 +819,7 @@ pub fn copy_tracks(
             for track in data {
                 finish(editor, track, &ids)?;
             }
-            map_copies(editor, &ids)?;
+            map_copies(editor, data, &ids)?;
             Ok::<_, EditError>(())
         })
         .map_err(|e| e.to_string())?;

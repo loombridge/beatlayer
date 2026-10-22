@@ -119,7 +119,7 @@ pub enum Clipboard {
     /// material's start.
     Material(Material),
     /// Whole tracks, with everything they hold.
-    Tracks(Vec<crate::tracks::TrackData>),
+    Tracks(crate::tracks::CopiedTracks),
 }
 
 impl Clipboard {

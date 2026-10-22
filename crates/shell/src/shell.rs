@@ -3954,11 +3954,25 @@ impl Shell {
                 reason: "there's no track to copy".to_owned(),
             });
         }
-        let data: Vec<crate::tracks::TrackData> = originals
+        let doc = self.editor.document();
+        let tracks: Vec<crate::tracks::TrackData> = originals
             .iter()
-            .filter_map(|&track| crate::tracks::snapshot(self.editor.document(), track))
+            .filter_map(|&track| crate::tracks::snapshot(doc, track))
             .collect();
-        self.clipboard = Some(Clipboard::Tracks(data));
+        // The files the tracks play go with them (R15; the set exchange
+        // spec, R7), for a paste into a set that doesn't list them.
+        let media = self
+            .store
+            .media_files()
+            .into_iter()
+            .filter(|(hash, ..)| tracks.iter().any(|track| track.plays(hash)))
+            .collect();
+        self.clipboard = Some(Clipboard::Tracks(crate::tracks::CopiedTracks {
+            tracks,
+            returns: doc.returns().collect(),
+            set: self.editor_generation,
+            media,
+        }));
         Ok(originals)
     }
 
@@ -3979,7 +3993,7 @@ impl Shell {
     fn paste_tracks(
         &mut self,
         id: &str,
-        data: &[crate::tracks::TrackData],
+        copied: &crate::tracks::CopiedTracks,
         after: Option<TrackId>,
     ) -> Result<Vec<TrackId>, ShellError> {
         let doc = self.editor.document();
@@ -4026,12 +4040,30 @@ impl Shell {
                 returns: returns.len(),
             },
         };
-        crate::tracks::copy_tracks(&mut self.editor, data, place, track_ids::PASTE_STEP).map_err(
-            |reason| ShellError::Unavailable {
-                command: id.to_owned(),
-                reason,
-            },
+        // Tracks from another set: their files join this set's media table
+        // (R15), and the IDs they name mean nothing here (R15; the set
+        // exchange spec, R6).
+        let source_returns = (copied.set != self.editor_generation).then(|| copied.returns.clone());
+        if source_returns.is_some() {
+            for (hash, path, size) in &copied.media {
+                self.store.add_media(*hash, path, *size);
+                let hash = bl_media::ContentHash::from_bytes(hash.0);
+                if self.media.entry(hash).is_none() {
+                    let _ = self.media.import(path);
+                }
+            }
+        }
+        crate::tracks::copy_tracks(
+            &mut self.editor,
+            &copied.tracks,
+            place,
+            source_returns,
+            track_ids::PASTE_STEP,
         )
+        .map_err(|reason| ShellError::Unavailable {
+            command: id.to_owned(),
+            reason,
+        })
     }
 
     /// Runs a track command that needs the shell: Duplicate Track Without
@@ -4099,27 +4131,16 @@ impl Shell {
                         reason: "there's nothing on the clipboard to paste".to_owned(),
                     });
                 };
-                let Clipboard::Tracks(data) = clipboard else {
-                    // The Arrangement's material: paste it as
-                    // `arrangement.paste` does.
-                    let before = self.editor.document().clone();
-                    let result = editing::run(
-                        edit_ids::PASTE,
-                        json!({ "track": track }),
-                        &mut self.editor,
-                        &mut self.arrangement,
-                        &mut self.clipboard,
-                    )
-                    .map_err(|failure| edit_error(id, failure))?;
-                    if *self.editor.document() != before {
-                        self.dirty = true;
-                        self.document_changed();
-                    }
-                    self.touch();
-                    return Ok(result);
+                let Clipboard::Tracks(copied) = clipboard else {
+                    return Err(ShellError::Unavailable {
+                        command: id.to_owned(),
+                        reason: "the clipboard holds Arrangement material; paste it with \
+                                 arrangement.paste"
+                            .to_owned(),
+                    });
                 };
                 let after = track.or_else(|| self.last_selected_track());
-                let copies = self.paste_tracks(id, &data, after)?;
+                let copies = self.paste_tracks(id, &copied, after)?;
                 self.select_tracks(&copies);
                 self.dirty = true;
                 self.document_changed();
@@ -6521,7 +6542,7 @@ impl Shell {
                     .clipboard
                     .as_ref()
                     .is_some_and(|clipboard| match clipboard {
-                        Clipboard::Tracks(data) => !data.is_empty(),
+                        Clipboard::Tracks(copied) => !copied.tracks.is_empty(),
                         Clipboard::Material(_) => false,
                     });
             }

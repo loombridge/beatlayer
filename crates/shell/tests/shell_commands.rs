@@ -1010,10 +1010,12 @@ fn tracks_paste_into_another_set_and_settle_their_references() {
     let tracks = whole_tracks(&shell);
     let audio = tracks[2];
     let returns: Vec<TrackId> = shell.editor().document().returns().collect();
+    // A send to the second return: an ID the new set will hold for another
+    // object.
     shell
         .run(
             "mixer.set_send",
-            json!({ "track": audio, "to": returns[0], "level": 0.5 }),
+            json!({ "track": audio, "to": returns[1], "level": 0.5 }),
         )
         .unwrap();
     shell
@@ -1024,8 +1026,15 @@ fn tracks_paste_into_another_set_and_settle_their_references() {
         .unwrap();
     shell.run("track.copy", json!({})).unwrap();
 
-    // A new set: the clipboard still holds the track (R15).
+    // A new set, which isn't the first one: its first return is gone, so
+    // the first set's second return has the first one's ID here, at the
+    // first place. The clipboard still holds the track (R15).
     shell.run("set.new", json!({})).unwrap();
+    shell.edit(|editor| {
+        editor
+            .apply(bl_model::Command::DeleteTrack { track: returns[0] })
+            .unwrap();
+    });
     let before = whole_tracks(&shell).len();
     shell.run("track.paste", json!({})).unwrap();
     let doc = shell.editor().document();
@@ -1035,17 +1044,11 @@ fn tracks_paste_into_another_set_and_settle_their_references() {
         "the track was pasted"
     );
     let pasted = doc.top_level().last().expect("the track was pasted");
-    assert_eq!(
-        doc.track(pasted).unwrap().name(),
-        "3 Audio",
-        "it kept its name"
-    );
-    // The send goes to the new set's return at the same place (set
-    // exchange R6).
-    let sends: Vec<(TrackId, f64)> = doc.track(pasted).unwrap().sends().collect();
-    assert_eq!(sends.len(), 1);
-    assert_eq!(sends[0].0, doc.returns().next().unwrap());
-    assert_eq!(sends[0].1, 0.5);
+    let pasted = doc.track(pasted).unwrap();
+    assert_eq!(pasted.name(), "3 Audio", "it kept its name");
+    // The send goes to the return at the same place, and there is none
+    // at the second place; it isn't sent to whatever has the same ID.
+    assert_eq!(pasted.sends().count(), 0);
     assert_eq!(shell.editor().undo_history().next(), Some("Paste Track(s)"));
 }
 

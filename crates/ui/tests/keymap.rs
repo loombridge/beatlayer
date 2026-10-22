@@ -779,6 +779,8 @@ fn the_track_headers_keys_reach_the_track_commands() {
     let keymap = Keymap::live12();
     let headers = [Context::TrackHeaders, Context::Arrangement, Context::Global];
     let arrangement = [Context::Arrangement, Context::Global];
+    // The Session View has no title-bar keys (R16: track headers only).
+    let session = [Context::Session, Context::Global];
     let resolve = |platform, key, m, contexts: &[Context]| {
         keymap
             .resolve(platform, key, m, contexts)
@@ -803,6 +805,11 @@ fn the_track_headers_keys_reach_the_track_commands() {
                 resolve(platform, key, cmd, &arrangement).as_deref(),
                 Some(edit),
                 "{platform:?}: {edit}"
+            );
+            assert_ne!(
+                resolve(platform, key, cmd, &session).as_deref(),
+                Some(command),
+                "{platform:?}: {command} is not bound in the Session View"
             );
         }
     }

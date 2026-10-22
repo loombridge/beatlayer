@@ -191,3 +191,61 @@ fn a_frozen_tracks_copy_keeps_its_frozen_audio() {
     let copy_render = render(&mut shell, &scratch.path("frozen-copy.wav"));
     assert!(!copy_render.is_empty(), "the copy rendered");
 }
+
+// Spec: track-context-menu R15; set-exchange R7 (the files of pasted
+// tracks go into the other set's media table)
+#[test]
+fn tracks_pasted_into_another_set_bring_their_files() {
+    let scratch = Scratch::new("media");
+    let mut shell = new_shell(&scratch);
+    let track = audio_track(&shell);
+    let file = scratch.path("tone.wav");
+    wav(&file, 1.0);
+    place(&mut shell, track, &file, 0);
+    let hash = match &shell
+        .editor()
+        .document()
+        .track(track)
+        .unwrap()
+        .clips()
+        .next()
+        .unwrap()
+        .data
+    {
+        bl_model::ClipData::Audio(audio) => audio.media,
+        bl_model::ClipData::Midi(_) => unreachable!("an audio clip"),
+    };
+    shell
+        .run(
+            "arrangement.select_tracks",
+            json!({ "tracks": [track], "title_bars": true }),
+        )
+        .unwrap();
+    shell.run("track.copy", json!({})).unwrap();
+
+    shell.run("set.new", json!({})).unwrap();
+    shell.run("track.paste", json!({})).unwrap();
+    let saved = shell
+        .run(
+            "set.save_as",
+            json!({ "path": scratch.path("Song.blset").display().to_string() }),
+        )
+        .unwrap();
+    let song = PathBuf::from(saved["path"].as_str().unwrap());
+    let saved = bl_project::load(&song).unwrap().0;
+    assert!(
+        saved.media.iter().any(|entry| entry.hash == hash),
+        "the saved set lists the pasted clip's file"
+    );
+
+    // The reopened set finds the file.
+    let mut reopened = new_shell(&scratch);
+    reopened
+        .run("set.open", json!({ "path": song.display().to_string() }))
+        .unwrap();
+    let status = reopened
+        .media_store()
+        .check(bl_media::ContentHash::from_bytes(hash.0))
+        .unwrap();
+    assert_eq!(status, bl_media::MediaStatus::Available);
+}

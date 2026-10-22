@@ -256,9 +256,9 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                  when it is in one, or after the last track when none is selected. Each paste \
                  makes new copies, and the tracks pasted are selected afterwards. One undo \
                  step, named Paste Track(s). References to tracks that are not in the set are \
-                 settled as a set added from another set settles them. With the \
-                 Arrangement's material on the clipboard, that is pasted instead, as \
-                 `arrangement.paste` does.",
+                 settled as a set added from another set settles them. The files the tracks \
+                 play go into the set's media table. With the Arrangement's material on the \
+                 clipboard it is unavailable: that is pasted with `arrangement.paste`.",
             )
             .permission(Permission::Edit)
             .contexts([TrackHeaders, Session])

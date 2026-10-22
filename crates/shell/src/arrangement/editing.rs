@@ -61,7 +61,7 @@ impl From<bl_model::EditError> for EditFailure {
 /// Material copied from the Arrangement, for pasting: each track's clips,
 /// placed from the material's start.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct Clipboard {
+pub struct Material {
     /// Each track's clips, with the track's distance from the first in the
     /// track list. A clip's `start` counts from the material's start.
     pub tracks: Vec<(usize, Vec<Clip>)>,
@@ -76,7 +76,7 @@ pub struct Clipboard {
     pub source: Vec<TrackId>,
 }
 
-impl Clipboard {
+impl Material {
     /// What it holds, as `arrangement.copy` reports it.
     #[must_use]
     pub fn state(&self) -> ClipboardState {
@@ -84,6 +84,29 @@ impl Clipboard {
             clips: self.tracks.iter().map(|(_, clips)| clips.len()).sum(),
             tracks: self.tracks.len(),
             length: self.length,
+        }
+    }
+}
+
+/// What the clipboard holds: the Arrangement's material, or whole tracks
+/// copied from the track headers (the track context menu spec, R14).
+/// Whichever was copied last is what it holds.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Clipboard {
+    /// The Arrangement's material: each track's clips, placed from the
+    /// material's start.
+    Material(Material),
+    /// Whole tracks, with everything they hold.
+    Tracks(Vec<crate::tracks::TrackData>),
+}
+
+impl Clipboard {
+    /// The Arrangement's material, if the clipboard holds it.
+    #[must_use]
+    pub fn material(&self) -> Option<&Material> {
+        match self {
+            Self::Material(material) => Some(material),
+            Self::Tracks(_) => None,
         }
     }
 }
@@ -383,7 +406,7 @@ pub(crate) fn material(
 }
 
 /// The clipboard holding a target's material.
-fn clipboard_of(doc: &Document, target: &Target) -> Clipboard {
+fn clipboard_of(doc: &Document, target: &Target) -> Material {
     let lanes = lanes(doc);
     let (by_track, start, end) = material(doc, target);
     let first = by_track
@@ -404,7 +427,7 @@ fn clipboard_of(doc: &Document, target: &Target) -> Clipboard {
             (distance, clips)
         })
         .collect();
-    Clipboard {
+    Material {
         tracks,
         length: end - start,
         start,
@@ -636,7 +659,7 @@ pub fn can_run(
             given("clips") || given("start") || has_selection
         }
         ids::PASTE => {
-            clipboard.is_some_and(|c| !c.tracks.is_empty())
+            clipboard.is_some_and(|c| c.material().is_some_and(|m| !m.tracks.is_empty()))
                 && (given("track") || !view.selected.is_empty() || !lanes(doc).is_empty())
         }
         _ => false,
@@ -1072,7 +1095,7 @@ pub fn run(
             let target = target(doc, view, parse(args)?)?;
             let copied = clipboard_of(doc, &target);
             let state = copied.state();
-            *clipboard = Some(copied);
+            *clipboard = Some(Clipboard::Material(copied));
             Ok(to_value(&state))
         }
         ids::CUT => {
@@ -1080,13 +1103,17 @@ pub fn run(
             let copied = clipboard_of(doc, &target);
             let (_, recorded) =
                 transaction(editor, "Cut", |editor| delete_target(editor, &target))?;
-            *clipboard = Some(copied);
+            *clipboard = Some(Clipboard::Material(copied));
             view.selected_clips.clear();
             Ok(to_value(&result(doc, editor, view, recorded)))
         }
         ids::PASTE => {
             let PasteArgs { at, track } = parse(args)?;
-            let Some(copied) = clipboard.as_ref().filter(|c| !c.tracks.is_empty()) else {
+            let Some(copied) = clipboard
+                .as_ref()
+                .and_then(Clipboard::material)
+                .filter(|c| !c.tracks.is_empty())
+            else {
                 return Err(unavailable("there's nothing on the clipboard to paste"));
             };
             let at = match at {

@@ -881,3 +881,229 @@ fn delete_and_rename_from_a_key_or_menu_act_on_the_selected_tracks() {
     assert!(!shell.can_invoke("track.delete", &json!({})));
     assert!(!shell.can_invoke("track.rename", &json!({})));
 }
+
+/// The tracks of the shell's set, and the IDs of the ones the tests name.
+fn whole_tracks(shell: &Shell) -> Vec<TrackId> {
+    shell.editor().document().top_level().collect()
+}
+
+#[test]
+fn duplicating_a_track_copies_it_with_everything_it_holds() {
+    // Spec: track-context-menu R12, R13.
+    let mut shell = Shell::headless();
+    let tracks = whole_tracks(&shell);
+    let audio = tracks[2];
+    shell
+        .run(
+            "arrangement.select_tracks",
+            json!({ "tracks": [audio], "title_bars": true }),
+        )
+        .unwrap();
+    let result = shell.run("track.duplicate", json!({})).unwrap();
+    let copies: Vec<TrackId> = serde_json::from_value(result["tracks"].clone()).unwrap();
+    assert_eq!(copies.len(), 1);
+    let doc = shell.editor().document();
+    let copy = doc.track(copies[0]).unwrap();
+    assert_eq!(copy.kind(), doc.track(audio).unwrap().kind());
+    assert_eq!(copy.name(), "4 Audio", "named for its place");
+    assert_ne!(copies[0], audio, "the copy has its own ID");
+    // The copy is straight after its track, and selected.
+    let order = doc.track_order();
+    assert_eq!(order[3], copies[0]);
+    assert_eq!(shell.arrangement().selected_tracks(), [copies[0]]);
+    assert_eq!(
+        shell.editor().undo_history().next(),
+        Some("Duplicate Track(s)")
+    );
+    // One undo step: undoing gives the set back.
+    shell.run("edit.undo", json!({})).unwrap();
+    assert_eq!(shell.editor().document().track_count(), 7);
+}
+
+#[test]
+fn copying_and_cutting_tracks_moves_through_the_clipboard() {
+    // Spec: track-context-menu R14.
+    let mut shell = Shell::headless();
+    let tracks = whole_tracks(&shell);
+    let audio = tracks[2];
+    shell
+        .run(
+            "arrangement.select_tracks",
+            json!({ "tracks": [audio], "title_bars": true }),
+        )
+        .unwrap();
+    // Copy changes nothing in the set, and is never an undo step.
+    let steps = shell.editor().undo_history().count();
+    let result = shell.run("track.copy", json!({})).unwrap();
+    let copied: Vec<TrackId> = serde_json::from_value(result["tracks"].clone()).unwrap();
+    assert_eq!(copied, [audio]);
+    assert_eq!(shell.editor().undo_history().count(), steps);
+    assert!(shell.editor().document().track(audio).is_some());
+
+    // Paste puts the copy after the last selected track, and selects it.
+    let result = shell.run("track.paste", json!({})).unwrap();
+    let pasted: Vec<TrackId> = serde_json::from_value(result["tracks"].clone()).unwrap();
+    assert_eq!(pasted.len(), 1);
+    assert_ne!(pasted[0], audio, "the paste has its own ID");
+    let doc = shell.editor().document();
+    assert_eq!(doc.track_order()[3], pasted[0]);
+    assert_eq!(shell.arrangement().selected_tracks(), [pasted[0]]);
+    assert_eq!(shell.editor().undo_history().next(), Some("Paste Track(s)"));
+
+    // Cut copies the track and deletes it, as one undo step.
+    shell
+        .run(
+            "arrangement.select_tracks",
+            json!({ "tracks": [audio], "title_bars": true }),
+        )
+        .unwrap();
+    shell.run("track.cut", json!({})).unwrap();
+    assert!(shell.editor().document().track(audio).is_none());
+    assert_eq!(shell.editor().undo_history().next(), Some("Cut Track(s)"));
+    // The clipboard still holds the track, so it pastes into the set again.
+    let result = shell.run("track.paste", json!({})).unwrap();
+    let pasted: Vec<TrackId> = serde_json::from_value(result["tracks"].clone()).unwrap();
+    assert_eq!(pasted.len(), 1);
+    assert!(shell.editor().document().track(pasted[0]).is_some());
+}
+
+#[test]
+fn a_pasted_track_keeps_its_clips_devices_and_automation() {
+    // Spec: track-context-menu R13, R14.
+    let mut shell = Shell::headless();
+    let tracks = whole_tracks(&shell);
+    let audio = tracks[2];
+    let clip: bl_model::ClipId = shell.edit(|editor| editor.new_id());
+    shell
+        .run(
+            "clip.create",
+            json!({ "track": audio, "clip": {
+                "id": clip, "name": "", "start": 0, "length": 960_000, "mute": false,
+                "data": { "audio": { "media": "11".repeat(32) } } } }),
+        )
+        .unwrap();
+    shell
+        .run(
+            "arrangement.select_tracks",
+            json!({ "tracks": [audio], "title_bars": true }),
+        )
+        .unwrap();
+    shell.run("track.copy", json!({})).unwrap();
+    let result = shell.run("track.paste", json!({})).unwrap();
+    let pasted: Vec<TrackId> = serde_json::from_value(result["tracks"].clone()).unwrap();
+    let doc = shell.editor().document();
+    let original = doc.track(audio).unwrap();
+    let copy = doc.track(pasted[0]).unwrap();
+    assert_eq!(copy.clips().count(), original.clips().count());
+    assert_eq!(copy.devices().count(), original.devices().count());
+    assert_ne!(
+        copy.clips().next().map(|c| c.id),
+        original.clips().next().map(|c| c.id),
+        "the clip has a new ID"
+    );
+}
+
+#[test]
+fn tracks_paste_into_another_set_and_settle_their_references() {
+    // Spec: track-context-menu R15; set-exchange R6.
+    let mut shell = Shell::headless();
+    let tracks = whole_tracks(&shell);
+    let audio = tracks[2];
+    let returns: Vec<TrackId> = shell.editor().document().returns().collect();
+    shell
+        .run(
+            "mixer.set_send",
+            json!({ "track": audio, "to": returns[0], "level": 0.5 }),
+        )
+        .unwrap();
+    shell
+        .run(
+            "arrangement.select_tracks",
+            json!({ "tracks": [audio], "title_bars": true }),
+        )
+        .unwrap();
+    shell.run("track.copy", json!({})).unwrap();
+
+    // A new set: the clipboard still holds the track (R15).
+    shell.run("set.new", json!({})).unwrap();
+    let before = whole_tracks(&shell).len();
+    shell.run("track.paste", json!({})).unwrap();
+    let doc = shell.editor().document();
+    assert_eq!(
+        whole_tracks(&shell).len(),
+        before + 1,
+        "the track was pasted"
+    );
+    let pasted = doc.top_level().last().expect("the track was pasted");
+    assert_eq!(
+        doc.track(pasted).unwrap().name(),
+        "3 Audio",
+        "it kept its name"
+    );
+    // The send goes to the new set's return at the same place (set
+    // exchange R6).
+    let sends: Vec<(TrackId, f64)> = doc.track(pasted).unwrap().sends().collect();
+    assert_eq!(sends.len(), 1);
+    assert_eq!(sends[0].0, doc.returns().next().unwrap());
+    assert_eq!(sends[0].1, 0.5);
+    assert_eq!(shell.editor().undo_history().next(), Some("Paste Track(s)"));
+}
+
+/// A folder in the system's temporary folder, removed when dropped.
+struct TempDir(PathBuf);
+
+impl TempDir {
+    fn new(name: &str) -> Self {
+        let path = std::env::temp_dir().join(format!(
+            "bl-shell-tracks-{name}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&path).unwrap();
+        Self(path)
+    }
+
+    fn arg(&self, relative: &str) -> String {
+        self.0.join(relative).to_string_lossy().into_owned()
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+#[test]
+fn a_duplicated_track_saves_and_loads_back_whole() {
+    // Spec: track-context-menu R12, R13.
+    let dir = TempDir::new("duplicate");
+    let mut shell = Shell::headless();
+    let audio = whole_tracks(&shell)[2];
+    shell
+        .run(
+            "arrangement.select_tracks",
+            json!({ "tracks": [audio], "title_bars": true }),
+        )
+        .unwrap();
+    shell.run("track.duplicate", json!({})).unwrap();
+    let copy = shell.arrangement().selected_tracks()[0];
+
+    // The set saves and opens again with the copy in it.
+    shell
+        .run("set.save_as", json!({ "path": dir.arg("Tango.blset") }))
+        .unwrap();
+    let mut other = Shell::headless();
+    other
+        .run(
+            "set.open",
+            json!({ "path": dir.arg("Tango Project/Tango.blset") }),
+        )
+        .unwrap();
+    let doc = other.editor().document();
+    assert!(doc.track(copy).is_some(), "the copy came back");
+    assert_eq!(doc.track(copy).unwrap().name(), "4 Audio");
+}

@@ -22,7 +22,7 @@ use serde_json::Value;
 
 use super::freeze::{frames_to_ticks, prepared_track, render_doc, seconds_between};
 use super::*;
-use crate::arrangement::editing::{self, Target};
+use crate::arrangement::editing::{self, Clipboard, Target};
 use crate::arrangement::placing;
 use crate::processed::{Kind, Request, Written};
 
@@ -87,6 +87,7 @@ impl Shell {
                 };
                 self.clipboard
                     .as_ref()
+                    .and_then(Clipboard::material)
                     .is_some_and(|copied| !copied.tracks.is_empty())
                     && self.paste_destination(&args).is_ok()
             }
@@ -700,6 +701,7 @@ impl Shell {
         let Some(copied) = self
             .clipboard
             .as_ref()
+            .and_then(Clipboard::material)
             .filter(|copied| !copied.tracks.is_empty())
         else {
             return Err(unavailable(id, "there's nothing on the clipboard to paste"));

@@ -5635,3 +5635,73 @@ fn an_agent_builds_an_articulation_map_by_command_and_reads_it_back() {
     assert_eq!(found["articulations"][1]["name"], "Staccato");
     assert_eq!(found["articulations"][1]["trigger"]["key"], 36);
 }
+
+// Spec: track-context-menu R16 (the commands by ID, and what they read back)
+#[test]
+fn an_agent_duplicates_copies_and_pastes_whole_tracks_and_reads_them_back() {
+    let shell = Shell::headless();
+    let mut client = Client::new(InProcess::new(Agent::headless(true), shell));
+    client.initialize("track-agent").unwrap();
+    let tracks = default_tracks(&mut client);
+    let audio = tracks[2];
+
+    // The track is selected, so the commands act on it.
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "arrangement.select_tracks",
+                               "args": { "tracks": [audio] } }] }),
+    );
+
+    // Duplicate: the copy is named, and the command says which track it is.
+    let reply = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "track.duplicate", "args": {} }] }),
+    );
+    let copies: Vec<u64> = reply["results"][0]["result"]["tracks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|track| track.as_u64().unwrap())
+        .collect();
+    assert_eq!(copies.len(), 1);
+
+    // The copy reads back in the song's tracks.
+    let song = call(&mut client, "query", json!({ "path": "song" }));
+    let ids: Vec<u64> = song["tracks"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|track| track["id"].as_u64().unwrap())
+        .collect();
+    assert!(ids.contains(&copies[0]), "the copy is in the song");
+
+    // Copy and paste: the paste makes a new copy, and it reads back too.
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "track.copy", "args": {} }] }),
+    );
+    let reply = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "track.paste", "args": {} }] }),
+    );
+    let pasted: Vec<u64> = reply["results"][0]["result"]["tracks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|track| track.as_u64().unwrap())
+        .collect();
+    assert_eq!(pasted.len(), 1);
+    assert_ne!(pasted[0], copies[0], "each paste makes a new copy");
+    let song = call(&mut client, "query", json!({ "path": "song" }));
+    let ids: Vec<u64> = song["tracks"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|track| track["id"].as_u64().unwrap())
+        .collect();
+    assert!(ids.contains(&pasted[0]), "the pasted track is in the song");
+}

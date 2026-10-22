@@ -319,7 +319,7 @@ fn paste_bounced(args: &Value, registered: Permission, scene: Scene<'_>) -> Call
     let Ok(args) = serde_json::from_value::<PasteBouncedAudioArgs>(args.clone()) else {
         return unchanged;
     };
-    let Some(clipboard) = scene.clipboard else {
+    let Some(clipboard) = scene.clipboard.as_ref().and_then(Clipboard::material) else {
         return unchanged;
     };
     if clipboard.tracks.is_empty() {

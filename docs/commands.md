@@ -11510,7 +11510,7 @@ Result: [`ChangeSet`](#changeset).
 
 #### `track.copy`
 
-**Copy Track(s)**. Permission: `read`. Contexts: `track-headers`, `session`.
+**Copy Track(s)**. Permission: `read`. Contexts: `track-headers`.
 
 Copies the selected tracks (`tracks`, or the tracks named) to the clipboard, with everything they hold under new IDs, and changes nothing in the set. The clipboard holds whichever was copied last, these tracks or the Arrangement's material. Copying is never an undo step.
 
@@ -11574,7 +11574,7 @@ Result: [`ChangeSet`](#changeset).
 
 #### `track.cut`
 
-**Cut Track(s)**. Permission: `destructive`. Contexts: `track-headers`, `session`.
+**Cut Track(s)**. Permission: `destructive`. Contexts: `track-headers`.
 
 Copies the selected tracks (`tracks`, or the tracks named) to the clipboard, with everything they hold under new IDs, and deletes them as Delete does, as one undo step named Cut Track(s). The clipboard holds whichever was copied last, these tracks or the Arrangement's material.
 
@@ -11614,7 +11614,7 @@ Result: [`ChangeSet`](#changeset).
 
 #### `track.duplicate`
 
-**Duplicate Track(s)**. Permission: `edit`. Contexts: `track-headers`, `session`.
+**Duplicate Track(s)**. Permission: `edit`. Contexts: `track-headers`.
 
 Duplicates the selected tracks (`tracks`, or the tracks named), each straight after itself, with everything it holds: its name (the next number where the name starts with the track's number), colour, mixer, sends, routing, devices with their states and sidechains, its Arrangement clips, take lanes and Session clips, its automation and clip envelopes, and its frozen state, all under new IDs. A reference between tracks copied together points at the copies; a reference to a track not copied stays as it is. The copies become the selected tracks. One undo step, named Duplicate Track(s). Main can't be duplicated.
 
@@ -11708,7 +11708,7 @@ Result: [`ChangeSet`](#changeset).
 
 #### `track.paste`
 
-**Paste Track(s)**. Permission: `edit`. Contexts: `track-headers`, `session`.
+**Paste Track(s)**. Permission: `edit`. Contexts: `track-headers`.
 
 Pastes the tracks on the clipboard, with everything they hold under new IDs, straight after the last selected track, at its level and inside its group when it is in one, or after the last track when none is selected. Each paste makes new copies, and the tracks pasted are selected afterwards. One undo step, named Paste Track(s). References to tracks that are not in the set are settled as a set added from another set settles them. The files the tracks play go into the set's media table. With the Arrangement's material on the clipboard it is unavailable: that is pasted with `arrangement.paste`.
 

@@ -215,7 +215,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                  duplicated.",
             )
             .permission(Permission::Edit)
-            .contexts([TrackHeaders, Session])
+            .contexts([TrackHeaders])
             .binding("S-EDIT-004")
             .args::<DuplicateTracksArgs>()
             .result::<TracksDuplicated>(),
@@ -229,7 +229,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                  material. Copying is never an undo step.",
             )
             .permission(Permission::Read)
-            .contexts([TrackHeaders, Session])
+            .contexts([TrackHeaders])
             .binding("S-EDIT-002")
             .args::<DuplicateTracksArgs>()
             .result::<TracksCopied>(),
@@ -243,7 +243,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                  last, these tracks or the Arrangement's material.",
             )
             .permission(Permission::Destructive)
-            .contexts([TrackHeaders, Session])
+            .contexts([TrackHeaders])
             .binding("S-EDIT-001")
             .args::<DuplicateTracksArgs>()
             .result::<TracksCopied>(),
@@ -261,7 +261,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                  clipboard it is unavailable: that is pasted with `arrangement.paste`.",
             )
             .permission(Permission::Edit)
-            .contexts([TrackHeaders, Session])
+            .contexts([TrackHeaders])
             .binding("S-EDIT-003")
             .args::<PasteTracksArgs>()
             .result::<TracksCopied>(),

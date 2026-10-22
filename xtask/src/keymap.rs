@@ -97,6 +97,10 @@ const WIDGET: &[(&str, &str)] = &[
          (`focus.browser`, `browser.select`)",
     ),
     (
+        "S-BRW-015",
+        "the browser's Quick Tags: Cmd-E (Ctrl-E) moves the keyboard focus to the Add field",
+    ),
+    (
         "S-A11Y-015",
         "the browser's list: Shift-Up and Shift-Down extend the selection (`browser.select`)",
     ),

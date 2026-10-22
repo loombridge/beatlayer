@@ -6,6 +6,10 @@
 //!
 //! - [`listing`]: which files a folder shows, and in what order.
 //! - [`index`]: the background index that search reads.
+//! - [`db`]: the browser's database on disk: the index, the tags, and the
+//!   items that carry them.
+//! - [`tags`]: the tag groups, the tags in them, and the items that carry
+//!   them.
 //! - [`places`]: the User Library's place and starting folders.
 //! - [`preview`]: decoding previews in the background.
 //! - [`arrange`]: putting files into the Arrangement.
@@ -14,13 +18,16 @@
 //! The behaviour is in the browser spec.
 
 pub mod arrange;
+pub mod db;
 pub mod drop;
+pub mod hash;
 pub mod index;
 pub mod listing;
 pub mod places;
 pub mod preview;
+pub mod tags;
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
@@ -30,19 +37,25 @@ use bl_media::MediaStore;
 use bl_model::{Editor, TrackId};
 pub use bl_shell_spec::browser::Part;
 use bl_shell_spec::browser::{
-    self as ids, AddToArrangementArgs, BrowserState, FocusArgs, FolderArgs, IndexState, Item,
-    ItemKind, Label, LabelInfo, MAX_PREVIEW_VOLUME, OpenFolderArgs, OpenPlaceArgs, PreviewArgs,
-    PreviewState, ScrubPreviewArgs, SearchArgs, Section, SelectArgs, SetPreviewArgs, SetRawArgs,
-    ShowFileArgs, StateArgs,
+    self as ids, AddTagArgs, AddTagGroupArgs, AddToArrangementArgs, BrowserState, DeleteTagArgs,
+    FocusArgs, FolderArgs, IndexState, Item, ItemKind, ItemTag, Label, LabelInfo,
+    MAX_PREVIEW_VOLUME, MoveTagArgs, OpenFolderArgs, OpenPlaceArgs, PreviewArgs, PreviewState,
+    QuickTag, RenameTagArgs, ScrubPreviewArgs, SearchArgs, Section, SelectArgs, SetPreviewArgs,
+    SetRawArgs, ShowFileArgs, ShowQuickTagsArgs, ShowTagEditorArgs, StateArgs, TagEditorRow,
+    TagEditorRowKind, TagGroupInfo, TagInfo, TagItemsArgs, TagSource, TagState, TaggedItem,
+    TagsArgs, TagsState,
 };
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use self::arrange::{AddError, MediaFile};
+use self::db::{Db, FileOp, FileRow};
+use self::hash::{Hashed, Hasher};
 use self::index::{Index, Scope, Snapshot};
 use self::listing::{Entry, file_kind};
 use self::preview::{Loader, MediaSamples};
+use self::tags::{Source, TagStore};
 use crate::audio::AudioHost;
 use bl_plugin_host::scan::ScannedPlugin;
 
@@ -92,6 +105,12 @@ pub struct BrowserPrefs {
     pub preview_volume: f64,
     /// The Raw switch in the preview strip (WP-4.18; spec: browser R18).
     pub raw: bool,
+    /// Whether the Tag Editor is open beside the content pane (spec:
+    /// browser-tags R10).
+    pub tag_editor: bool,
+    /// Whether Quick Tags shows at the content pane's bottom (spec:
+    /// browser-tags R13). On in a new install.
+    pub quick_tags: bool,
 }
 
 impl Default for BrowserPrefs {
@@ -102,6 +121,8 @@ impl Default for BrowserPrefs {
             preview: true,
             preview_volume: 1.0,
             raw: false,
+            tag_editor: false,
+            quick_tags: true,
         }
     }
 }
@@ -132,6 +153,8 @@ pub struct Outcome {
     pub show_browser: bool,
     /// Whether the keyboard focus moves to the browser.
     pub focus: bool,
+    /// What the Status Bar says, if anything.
+    pub message: Option<String>,
 }
 
 /// What a browser command works with besides the browser.
@@ -228,6 +251,41 @@ pub struct BrowserView {
     /// The plug-ins the scanner found (WP-2.9), already filtered by the
     /// hidden and format preferences; the Plug-Ins label lists them.
     plugins: Vec<ScannedPlugin>,
+    /// The tag groups, the tags in them, and the items that carry them
+    /// (spec: browser-tags R6 to R9).
+    tags: TagStore,
+    /// The browser's database on disk, when there is one (spec:
+    /// browser-tags R1).
+    db: Option<Db>,
+    /// The index as the database holds it, so only the files that changed
+    /// are written again.
+    saved_files: HashMap<String, FileRow>,
+    /// The files the database holds, before the walk brings them up to
+    /// date.
+    db_files: Vec<FileRow>,
+    /// The content hashes of the files that carry a tag, so a file moved
+    /// outside Beatlayer keeps them (spec: browser-tags R5).
+    tagged_files: HashMap<String, TaggedFile>,
+    /// The files whose hash has been asked for and hasn't come back yet.
+    pending_hashes: HashSet<String>,
+    /// The thread that hashes files.
+    hasher: Hasher,
+    /// Whether the Tag Editor is open.
+    tag_editor: bool,
+    /// Whether Quick Tags shows.
+    quick_tags: bool,
+    /// What the Status Bar says, if anything.
+    message: Option<String>,
+}
+
+/// A tagged file's size and content hash, so the tags pass to the same
+/// content found at a new path (spec: browser-tags R5).
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct TaggedFile {
+    /// Its length in bytes.
+    size: u64,
+    /// Its BLAKE3 hash, as hex.
+    hash: String,
 }
 
 /// A device the browser lists under a Library label (spec: racks R43,
@@ -396,6 +454,16 @@ impl BrowserView {
             focus_requests: 0,
             waker,
             plugins: Vec::new(),
+            tags: TagStore::new(),
+            db: None,
+            saved_files: HashMap::new(),
+            db_files: Vec::new(),
+            tagged_files: HashMap::new(),
+            pending_hashes: HashSet::new(),
+            hasher: Hasher::new(),
+            tag_editor: prefs.tag_editor,
+            quick_tags: prefs.quick_tags,
+            message: None,
         };
         view.user_library.clone_from(&prefs.user_library);
         view.places_changed();
@@ -413,9 +481,634 @@ impl BrowserView {
     /// format preferences.
     pub fn set_plugins(&mut self, plugins: Vec<ScannedPlugin>) {
         self.plugins = plugins;
+        // Beatlayer gives each plug-in's vendor a tag in the Creator group
+        // (spec: browser-tags R7).
+        let mut ops = Vec::new();
+        if let Some(creator) = self.tags.group_id("Creator") {
+            let mut vendors: Vec<String> = self
+                .plugins
+                .iter()
+                .filter_map(vendor_of)
+                .map(str::to_owned)
+                .collect();
+            vendors.sort_by_key(|v| v.to_lowercase());
+            vendors.dedup();
+            for vendor in vendors {
+                if !self.tags.find(&format!("Creator|{vendor}")).is_empty() {
+                    continue;
+                }
+                if let Ok((_, tag_ops)) = self.tags.add_builtin_tag(&vendor, creator) {
+                    ops.extend(tag_ops);
+                }
+            }
+        }
+        self.save_tags(ops);
         if self.label == Label::PlugIns {
             self.rebuild();
         }
+    }
+
+    /// Opens the browser's database (spec: browser-tags R1): the index of
+    /// the places' files, the tags, and the items that carry them. What it
+    /// holds is there from the first frame; the background walk brings it
+    /// up to date afterwards.
+    pub fn open_database(&mut self, path: PathBuf) {
+        let db = Db::open(path);
+        let loaded = db.load();
+        if let Some(damaged) = db.damaged() {
+            self.message = Some(damaged.to_owned());
+        }
+        // The file is open before anything is written to it.
+        self.db = Some(db);
+        // The tags the file holds, and the ones Beatlayer gives.
+        let ops = self.tags.load(loaded.groups, loaded.tags, loaded.item_tags);
+        // The files the file holds, so search finds them from the first
+        // frame.
+        self.db_files = loaded.files.clone();
+        // The files that carried a tag keep their hash, so a file moved
+        // outside Beatlayer finds them again (spec: browser-tags R5).
+        for row in &loaded.files {
+            if let Some(hash) = &row.hash {
+                self.tagged_files.insert(
+                    row.path.clone(),
+                    TaggedFile {
+                        size: row.size,
+                        hash: hash.clone(),
+                    },
+                );
+            }
+        }
+        self.saved_files = loaded
+            .files
+            .iter()
+            .map(|row| (row.path.clone(), row.clone()))
+            .collect();
+        self.adopt_index();
+        self.save_tags(ops);
+    }
+
+    /// Takes the index the database holds as the browser's, so search finds
+    /// what was indexed before from the first frame (spec: browser-tags
+    /// R1). The background walk replaces it when it finishes.
+    fn adopt_index(&mut self) {
+        if self.db_files.is_empty() {
+            return;
+        }
+        let roots: Vec<PathBuf> = self.roots().into_iter().map(|(_, path)| path).collect();
+        if roots.is_empty() {
+            return;
+        }
+        let snapshot = Snapshot::from_rows(roots, &self.db_files);
+        self.index.adopt(snapshot);
+    }
+
+    /// Writes everything that's waiting for the database, and waits for it,
+    /// for tests and for the app's last moments.
+    pub fn flush_database(&self) {
+        if let Some(db) = &self.db {
+            db.flush();
+        }
+    }
+
+    /// The content hash of a file that carries a tag, once it's known
+    /// (spec: browser-tags R5).
+    #[must_use]
+    pub fn tagged_file_hash(&self, key: &str) -> Option<&str> {
+        self.tagged_files
+            .get(key)
+            .map(|tagged| tagged.hash.as_str())
+            .filter(|hash| !hash.is_empty())
+    }
+
+    /// The message the Status Bar shows, if the browser has one (spec:
+    /// browser-tags R3).
+    #[must_use]
+    pub fn message(&self) -> Option<&str> {
+        self.message.as_deref()
+    }
+
+    /// Takes the message the Status Bar should show.
+    pub fn take_message(&mut self) -> Option<String> {
+        self.message.take()
+    }
+
+    /// Reads the tags the database holds and adds the ones this store
+    /// doesn't know, so a second Beatlayer on the same configuration folder
+    /// is known (spec: browser-tags R3).
+    fn reload_tags(&mut self) {
+        let Some(db) = &self.db else {
+            return;
+        };
+        let (groups, tags, _) = db.load_tags();
+        self.tags.merge(groups, tags);
+    }
+
+    /// Writes the changes to the tags to the database.
+    fn save_tags(&mut self, ops: Vec<db::TagOp>) {
+        if ops.is_empty() {
+            return;
+        }
+        if let Some(db) = &self.db {
+            db.save_tags(ops);
+        }
+    }
+
+    /// The key an item's tags are kept under (spec: browser-tags R5): a
+    /// file or folder by its path, a plug-in by its format and identifier,
+    /// and a device or rack by its row's ID.
+    fn tag_key(&self, row: &str) -> String {
+        if let Some(plugin) = self.plugin(Path::new(row)) {
+            return plugin.key();
+        }
+        row.to_owned()
+    }
+
+    /// The selected items' keys.
+    fn selected_keys(&self) -> Vec<String> {
+        self.selected
+            .iter()
+            .map(|path| self.tag_key(&path.to_string_lossy()))
+            .collect()
+    }
+
+    /// The tag Beatlayer gives a plug-in's format.
+    fn format_tag(format: bl_model::PluginFormat) -> &'static str {
+        match format {
+            bl_model::PluginFormat::Clap => "CLAP",
+            bl_model::PluginFormat::Vst3 => "VST3",
+            bl_model::PluginFormat::AudioUnit => "AUv2",
+            bl_model::PluginFormat::Lv2 => "LV2",
+        }
+    }
+
+    /// The tag Beatlayer gives what goes in a chain (spec: browser-tags
+    /// R7).
+    fn role_tag(role: bl_model::DeviceRole) -> &'static str {
+        match role {
+            bl_model::DeviceRole::Instrument => "Instrument",
+            bl_model::DeviceRole::AudioEffect => "Audio Effect",
+            bl_model::DeviceRole::MidiEffect => "MIDI Effect",
+        }
+    }
+
+    /// The tags Beatlayer gives an item, from what it knows of it (spec:
+    /// browser-tags R7).
+    fn builtin_tags(&self, key: &str) -> Vec<i64> {
+        let mut names: Vec<String> = Vec::new();
+        if let Some(plugin) = self.plugins.iter().find(|p| p.key() == key) {
+            names.push("Content|Plug-In".to_owned());
+            names.push(format!("Format|{}", Self::format_tag(plugin.format)));
+            if let Some(vendor) = vendor_of(plugin) {
+                names.push(format!("Creator|{vendor}"));
+            }
+            names.push(format!("Devices|{}", Self::role_tag(plugin.role)));
+        } else if let Some(device) = device_by_id(key) {
+            names.push("Content|Device".to_owned());
+            names.push(format!("Devices|{}", Self::role_tag(device.role)));
+        } else {
+            let path = Path::new(key);
+            let Some(name) = path.file_name().map(|n| n.to_string_lossy().into_owned()) else {
+                return Vec::new();
+            };
+            match file_kind(&name) {
+                Some(ItemKind::Audio) => names.push("Content|Sample".to_owned()),
+                Some(ItemKind::Preset) => names.push("Content|Preset".to_owned()),
+                Some(ItemKind::Set) => {
+                    if self.is_backup_set(path) {
+                        names.push("Content|Backup Set".to_owned());
+                    } else {
+                        names.push("Content|Set".to_owned());
+                    }
+                }
+                _ => {}
+            }
+        }
+        names
+            .iter()
+            .filter_map(|name| self.tags.find(name).first().copied())
+            .collect()
+    }
+
+    /// Whether a set file is in a project's Backup folder, which makes it a
+    /// backup set and not a set (spec: browser-tags R7).
+    fn is_backup_set(&self, path: &Path) -> bool {
+        let Some(parent) = path.parent() else {
+            return false;
+        };
+        if parent.file_name().map(|n| n.to_string_lossy()) != Some("Backup".into()) {
+            return false;
+        }
+        let Some(grandparent) = parent.parent() else {
+            return false;
+        };
+        self.roots()
+            .iter()
+            .any(|(_, root)| root.as_path() == grandparent)
+    }
+
+    /// The tags an item carries, and where each comes from (spec:
+    /// browser-tags R9 and R16).
+    fn carried_tags(&self, key: &str) -> Vec<(i64, Source)> {
+        let mut carried: Vec<(i64, Source)> = Vec::new();
+        let push = |id: i64, source: Source, carried: &mut Vec<(i64, Source)>| {
+            if !carried.iter().any(|(other, _)| *other == id) {
+                carried.push((id, source));
+            }
+        };
+        for id in self.tags.item_tags(key) {
+            push(id, Source::Own, &mut carried);
+        }
+        // A folder's tags count for what's inside it, at any depth.
+        let path = Path::new(key);
+        let mut folder = path.parent();
+        let mut depth = 0;
+        while let Some(dir) = folder {
+            for id in self.tags.item_tags(&dir.to_string_lossy()) {
+                push(id, Source::Folder, &mut carried);
+            }
+            folder = dir.parent();
+            depth += 1;
+            if depth > 32 {
+                break;
+            }
+        }
+        for id in self.builtin_tags(key) {
+            push(id, Source::Beatlayer, &mut carried);
+        }
+        carried
+    }
+
+    /// Whether an item carries every one of these tags (spec: browser-tags
+    /// R15).
+    fn carries_all(&self, key: &str, tags: &[i64]) -> bool {
+        if tags.is_empty() {
+            return true;
+        }
+        let carried = self.carried_tags(key);
+        tags.iter()
+            .all(|tag| carried.iter().any(|(id, _)| id == tag))
+    }
+
+    /// How a tag sits on the selection (spec: browser-tags R11).
+    fn tag_state(&self, tag: i64, keys: &[String]) -> TagState {
+        if keys.is_empty() {
+            return TagState::None;
+        }
+        let mut own = 0;
+        let mut fixed = 0;
+        for key in keys {
+            match self
+                .carried_tags(key)
+                .iter()
+                .find(|(id, _)| *id == tag)
+                .map(|(_, source)| *source)
+            {
+                Some(Source::Own) => own += 1,
+                Some(_) => fixed += 1,
+                None => {}
+            }
+        }
+        if own + fixed == 0 {
+            TagState::None
+        } else if own + fixed == keys.len() {
+            if fixed > 0 {
+                TagState::Fixed
+            } else {
+                TagState::All
+            }
+        } else {
+            TagState::Some
+        }
+    }
+
+    /// Whether the Tag Editor is open beside the content pane (spec:
+    /// browser-tags R10).
+    #[must_use]
+    pub fn tag_editor(&self) -> bool {
+        self.tag_editor
+    }
+
+    /// Whether Quick Tags shows at the content pane's bottom (spec:
+    /// browser-tags R13).
+    #[must_use]
+    pub fn quick_tags_shown(&self) -> bool {
+        self.quick_tags
+    }
+
+    /// The tag groups' names, in order.
+    #[must_use]
+    pub fn tag_groups(&self) -> Vec<String> {
+        self.tags
+            .groups()
+            .into_iter()
+            .map(|group| group.name.clone())
+            .collect()
+    }
+
+    /// The tags' full names, in order.
+    #[must_use]
+    pub fn tag_names(&self) -> Vec<String> {
+        self.tags
+            .all_tags()
+            .into_iter()
+            .map(|tag| self.tags.full_name(tag.id))
+            .collect()
+    }
+
+    /// The tags and tag groups, and what the named items carry (spec:
+    /// browser-tags R16).
+    fn tags_state(&self, items: &[String]) -> TagsState {
+        let groups = self
+            .tags
+            .groups()
+            .into_iter()
+            .map(|group| TagGroupInfo {
+                name: group.name.clone(),
+                builtin: group.builtin,
+                tags: self
+                    .tags
+                    .tags_in(group.id)
+                    .into_iter()
+                    .map(|tag| self.tag_info(tag.id))
+                    .collect(),
+            })
+            .collect();
+        let items = items
+            .iter()
+            .map(|item| {
+                let key = self.tag_key(item);
+                TaggedItem {
+                    item: key.clone(),
+                    tags: self
+                        .carried_tags(&key)
+                        .into_iter()
+                        .map(|(id, source)| ItemTag {
+                            tag: self.tags.full_name(id),
+                            source: match source {
+                                Source::Own => TagSource::Own,
+                                Source::Folder => TagSource::Folder,
+                                Source::Beatlayer => TagSource::Beatlayer,
+                            },
+                        })
+                        .collect(),
+                }
+            })
+            .collect();
+        TagsState { groups, items }
+    }
+
+    /// A tag, as `browser.tags` reports it.
+    fn tag_info(&self, id: i64) -> TagInfo {
+        let Some(tag) = self.tags.tag(id) else {
+            return TagInfo {
+                name: String::new(),
+                full_name: String::new(),
+                builtin: false,
+                position: 0,
+                subtags: Vec::new(),
+            };
+        };
+        TagInfo {
+            name: tag.name.clone(),
+            full_name: self.tags.full_name(id),
+            builtin: tag.builtin,
+            position: tag.position,
+            subtags: self
+                .tags
+                .subtags(id)
+                .into_iter()
+                .map(|sub| self.tag_info(sub.id))
+                .collect(),
+        }
+    }
+
+    /// The Tag Editor's rows, in the order it shows them (spec:
+    /// browser-tags R11 and R12). The list holds every row; which are on
+    /// screen is the UI's business, so it builds only those.
+    pub fn tag_editor_rows(&self) -> Vec<TagEditorRow> {
+        let keys = self.selected_keys();
+        let mut rows = Vec::new();
+        for group in self.tags.groups() {
+            let mut marked = false;
+            for tag in self.tags.tags_in(group.id) {
+                if self.tag_state(tag.id, &keys) != TagState::None {
+                    marked = true;
+                }
+                for sub in self.tags.subtags(tag.id) {
+                    if self.tag_state(sub.id, &keys) != TagState::None {
+                        marked = true;
+                    }
+                }
+            }
+            rows.push(TagEditorRow {
+                kind: TagEditorRowKind::Group,
+                name: group.name.clone(),
+                full_name: None,
+                depth: 0,
+                state: TagState::None,
+                builtin: group.builtin,
+                has_subtags: !self.tags.tags_in(group.id).is_empty(),
+                marked,
+            });
+            for tag in self.tags.tags_in(group.id) {
+                self.tag_editor_row(&mut rows, tag.id, 1, &keys);
+            }
+            rows.push(TagEditorRow {
+                kind: TagEditorRowKind::AddTag,
+                name: "Add Tag…".to_owned(),
+                full_name: None,
+                depth: 1,
+                state: TagState::None,
+                builtin: false,
+                has_subtags: false,
+                marked: false,
+            });
+        }
+        rows.push(TagEditorRow {
+            kind: TagEditorRowKind::AddGroup,
+            name: "Add Group…".to_owned(),
+            full_name: None,
+            depth: 0,
+            state: TagState::None,
+            builtin: false,
+            has_subtags: false,
+            marked: false,
+        });
+        rows
+    }
+
+    /// A tag's row in the Tag Editor, and its subtags' rows.
+    fn tag_editor_row(&self, rows: &mut Vec<TagEditorRow>, id: i64, depth: u16, keys: &[String]) {
+        let Some(tag) = self.tags.tag(id) else {
+            return;
+        };
+        let subtags = self.tags.subtags(id);
+        let state = self.tag_state(id, keys);
+        let marked = state != TagState::None
+            || subtags
+                .iter()
+                .any(|sub| self.tag_state(sub.id, keys) != TagState::None);
+        rows.push(TagEditorRow {
+            kind: TagEditorRowKind::Tag,
+            name: tag.name.clone(),
+            full_name: Some(self.tags.full_name(id)),
+            depth,
+            state,
+            builtin: tag.builtin,
+            has_subtags: !subtags.is_empty(),
+            marked,
+        });
+        for sub in subtags {
+            self.tag_editor_row(rows, sub.id, depth + 1, keys);
+        }
+    }
+
+    /// Quick Tags' rows: the tags the selected items carry (spec:
+    /// browser-tags R13).
+    pub fn quick_tags(&self) -> Vec<QuickTag> {
+        let keys = self.selected_keys();
+        let mut tags: Vec<(i64, bool, bool)> = Vec::new();
+        for key in &keys {
+            for (id, source) in self.carried_tags(key) {
+                match tags.iter_mut().find(|(other, _, _)| *other == id) {
+                    Some((_, all, removable)) => {
+                        *all = *all && source == Source::Own;
+                        *removable = *removable && source == Source::Own;
+                    }
+                    None => tags.push((id, source == Source::Own, source == Source::Own)),
+                }
+            }
+        }
+        let mut tags: Vec<QuickTag> = tags
+            .into_iter()
+            .filter_map(|(id, all, removable)| {
+                let tag = self.tags.tag(id)?;
+                let group = self.tags.group(tag.group)?;
+                Some(QuickTag {
+                    name: tag.name.clone(),
+                    full_name: self.tags.full_name(id),
+                    group: group.name.clone(),
+                    all,
+                    removable,
+                })
+            })
+            .collect();
+        // In alphabetical order, as Live shows them.
+        tags.sort_by(|a, b| {
+            a.name
+                .to_lowercase()
+                .cmp(&b.name.to_lowercase())
+                .then_with(|| a.full_name.cmp(&b.full_name))
+        });
+        tags
+    }
+
+    /// The tags whose names hold what's typed, by full name, those searched
+    /// recently first (spec: browser-tags R14 and R15).
+    pub fn tag_suggestions(&self, text: &str) -> Vec<String> {
+        let text = text.trim().to_lowercase();
+        let recent = self.tags.recent();
+        let mut found: Vec<(usize, usize, String)> = Vec::new();
+        for (index, tag) in self.tags.all_tags().into_iter().enumerate() {
+            let full = self.tags.full_name(tag.id);
+            if !text.is_empty() && !full.to_lowercase().contains(&text) {
+                continue;
+            }
+            let rank = recent
+                .iter()
+                .position(|&id| id == tag.id)
+                .unwrap_or(recent.len());
+            found.push((rank, index, full));
+        }
+        found.sort_by_key(|(rank, index, _)| (*rank, *index));
+        found.into_iter().map(|(_, _, full)| full).collect()
+    }
+
+    /// The tags the search field's `#` terms name, and the terms that name
+    /// no tag (spec: browser-tags R15).
+    fn search_terms(&self) -> (Vec<String>, Vec<i64>, Vec<String>) {
+        let mut words = Vec::new();
+        let mut tags = Vec::new();
+        let mut missing = Vec::new();
+        for word in self.search.split_whitespace() {
+            let Some(name) = word.strip_prefix('#') else {
+                words.push(word.to_lowercase());
+                continue;
+            };
+            let found = self.tags.find(name);
+            if found.is_empty() {
+                missing.push(name.to_owned());
+                words.push(name.to_lowercase());
+            } else {
+                for tag in found {
+                    if !tags.contains(&tag) {
+                        tags.push(tag);
+                    }
+                }
+            }
+        }
+        (words, tags, missing)
+    }
+
+    /// What the Status Bar says about the search field's `#` terms (spec:
+    /// browser-tags R15).
+    #[must_use]
+    pub fn search_message(&self) -> Option<String> {
+        let (_, _, missing) = self.search_terms();
+        let first = missing.first()?;
+        Some(format!(
+            "No tag is called \u{201c}{first}\u{201d}. It's been searched as text."
+        ))
+    }
+
+    /// The keys of the items that carry every one of these tags, folders'
+    /// tags reaching what's inside them (spec: browser-tags R9 and R15).
+    /// Several tags must all be carried: the sets are intersected.
+    fn items_with_tags(&self, tags: &[i64]) -> HashSet<String> {
+        let mut all: Option<HashSet<String>> = None;
+        for tag in tags {
+            let carried = self.items_with_tag(*tag);
+            all = Some(match all {
+                Some(previous) => previous.intersection(&carried).cloned().collect(),
+                None => carried,
+            });
+        }
+        all.unwrap_or_default()
+    }
+
+    /// The keys of the items that carry a tag, a folder's tag reaching
+    /// what's inside it, at any depth (spec: browser-tags R9).
+    fn items_with_tag(&self, tag: i64) -> HashSet<String> {
+        let mut keys: HashSet<String> = self.tags.items_with_tag(tag).into_iter().collect();
+        if keys.is_empty() {
+            return keys;
+        }
+        let snapshot = self.index.snapshot();
+        for index in 0..snapshot.len() as u32 {
+            let path = snapshot.path(index);
+            let mut folder = path.parent();
+            while let Some(dir) = folder {
+                if keys.contains(&dir.to_string_lossy().into_owned()) {
+                    keys.insert(path.to_string_lossy().into_owned());
+                    break;
+                }
+                folder = dir.parent();
+            }
+        }
+        keys
+    }
+
+    /// The rows the search finds (spec: browser R9 and browser-tags R15).
+    fn search_hits(&self, snapshot: &Arc<Snapshot>, scope: Scope, audio_only: bool) -> Vec<u32> {
+        let (words, tags, _) = self.search_terms();
+        let hits = snapshot.search(&words.join(" "), scope, audio_only);
+        if tags.is_empty() {
+            return hits;
+        }
+        let keys = self.items_with_tags(&tags);
+        hits.into_iter()
+            .filter(|&hit| keys.contains(&snapshot.path(hit).to_string_lossy().into_owned()))
+            .collect()
     }
 
     /// The preferences to keep.
@@ -427,6 +1120,8 @@ impl BrowserView {
             preview: self.preview_on,
             preview_volume: self.preview_volume,
             raw: self.raw,
+            tag_editor: self.tag_editor,
+            quick_tags: self.quick_tags,
         }
     }
 
@@ -587,6 +1282,9 @@ impl BrowserView {
             self.label = Label::All;
         }
         self.listings.clear();
+        // The database's index is what's shown until the walk brings it up
+        // to date (spec: browser-tags R1).
+        self.adopt_index();
         self.rebuild();
     }
 
@@ -646,12 +1344,14 @@ impl BrowserView {
     fn rebuild(&mut self) {
         self.note = None;
         let label = self.label.clone();
+        let (_, tags, _) = self.search_terms();
         if !label_devices(&label).is_empty() {
             // Spec: modulation R12, racks R43. These labels list devices.
             let query = self.search.trim().to_ascii_lowercase();
             let items: Vec<Item> = label_devices(&label)
                 .into_iter()
                 .filter(|d| query.is_empty() || d.name.to_ascii_lowercase().contains(&query))
+                .filter(|d| self.carries_all(&d.id, &tags))
                 .map(|d| Item {
                     path: d.id,
                     name: d.name,
@@ -673,7 +1373,14 @@ impl BrowserView {
             return;
         }
         if label == Label::PlugIns {
-            self.rows = Rows::Items(self.plugin_rows());
+            let items = self.plugin_rows();
+            let items = items
+                .into_iter()
+                .filter(|item| {
+                    tags.is_empty() || self.carries_all(&self.tag_key(&item.path), &tags)
+                })
+                .collect();
+            self.rows = Rows::Items(items);
             self.cursor = self.selected.last().and_then(|path| self.position_of(path));
             return;
         }
@@ -681,7 +1388,7 @@ impl BrowserView {
             match self.scope(&label) {
                 Some((scope, audio_only)) => {
                     let snapshot = Arc::clone(self.index.snapshot());
-                    let hits = snapshot.search(&self.search, scope, audio_only);
+                    let hits = self.search_hits(&snapshot, scope, audio_only);
                     if hits.is_empty() {
                         self.note = Some(if self.index.indexing() {
                             "Indexing the places\u{2026}".to_owned()
@@ -1026,6 +1733,8 @@ impl BrowserView {
                 .collect(),
             preview: self.preview_state(audio),
             index: self.index_state(),
+            tag_editor: self.tag_editor,
+            quick_tags: self.quick_tags,
         }
     }
 
@@ -1050,6 +1759,15 @@ impl BrowserView {
             self.indexing = indexing;
             self.index.poll();
             self.rebuild();
+            polled.changed = true;
+            if !indexing {
+                // The walk is done: the database catches up with what
+                // changed on disk.
+                self.save_index();
+            }
+        }
+        for hashed in self.hasher.poll() {
+            self.hash_ready(hashed);
             polled.changed = true;
         }
         for loaded in self.loader.poll() {
@@ -1386,7 +2104,16 @@ impl BrowserView {
                     self.label = label;
                 }
                 self.search = query;
+                // The tags a `#` term names come first among the next
+                // suggestions, most recent first (spec: browser-tags R15).
+                let (_, searched, _) = self.search_terms();
+                for tag in searched {
+                    self.tags.note_searched(tag);
+                }
                 self.rebuild();
+                // A `#` term that names no tag is searched as text, and
+                // the Status Bar says so (spec: browser-tags R15).
+                outcome.message = self.search_message();
                 outcome.value = state(self, ctx.audio);
             }
             ids::FOCUS_SEARCH => {
@@ -1708,9 +2435,373 @@ impl BrowserView {
                 let args: AddToArrangementArgs = parse(args)?;
                 self.add(&args, ctx, &mut outcome)?;
             }
+            ids::TAGS => {
+                let TagsArgs { items } = parse(args)?;
+                let items = items.unwrap_or_default();
+                outcome.value = to_value(&self.tags_state(&items));
+            }
+            ids::TAG_ITEMS => {
+                self.reload_tags();
+                let TagItemsArgs {
+                    items,
+                    tags,
+                    attach,
+                } = parse(args)?;
+                let attach = attach.unwrap_or(true);
+                let mut wanted: Vec<i64> = Vec::new();
+                for name in &tags {
+                    let found = self.tags.find(name);
+                    if found.is_empty() {
+                        return Err(BrowserError::InvalidArgs(format!(
+                            "there's no tag called {name}"
+                        )));
+                    }
+                    wanted.extend(found);
+                }
+                // Beatlayer's own tags and a folder's can't be taken off
+                // (spec: browser-tags R11). Every item is checked before
+                // any is changed, so a refused command changes nothing.
+                if !attach {
+                    for item in &items {
+                        let key = self.tag_key(item);
+                        for &tag in &wanted {
+                            let fixed = self
+                                .carried_tags(&key)
+                                .iter()
+                                .any(|(id, source)| *id == tag && *source != Source::Own);
+                            if fixed {
+                                return Err(BrowserError::Unavailable(format!(
+                                    "{} can't be taken off {}: Beatlayer gives it, or it comes \
+                                     from a folder",
+                                    self.tags.full_name(tag),
+                                    key
+                                )));
+                            }
+                        }
+                    }
+                }
+                let mut ops = Vec::new();
+                for item in &items {
+                    let key = self.tag_key(item);
+                    let mut carried = self.tags.item_tags(&key);
+                    for &tag in &wanted {
+                        if attach {
+                            if !carried.contains(&tag) {
+                                carried.push(tag);
+                            }
+                        } else {
+                            carried.retain(|&id| id != tag);
+                        }
+                    }
+                    carried.sort_unstable();
+                    ops.extend(self.tags.set_item_tags(&key, carried));
+                }
+                self.save_tags(ops);
+                self.hash_tagged_files(&items);
+                outcome.value = to_value(&self.tags_state(&items));
+                self.rebuild();
+            }
+            ids::ADD_TAG => {
+                self.reload_tags();
+                let AddTagArgs {
+                    name,
+                    group,
+                    parent,
+                } = parse(args)?;
+                let parent_id = match &parent {
+                    Some(parent) => Some(self.tag_id(parent)?),
+                    None => None,
+                };
+                let group_id = match &group {
+                    Some(group) => self.tags.group_id(group).ok_or_else(|| {
+                        BrowserError::InvalidArgs(format!("there's no group called {group}"))
+                    })?,
+                    None => match parent_id {
+                        Some(parent) => {
+                            self.tags.tag(parent).map(|tag| tag.group).ok_or_else(|| {
+                                BrowserError::InvalidArgs("there's no such tag".to_owned())
+                            })?
+                        }
+                        None => self
+                            .tags
+                            .groups()
+                            .first()
+                            .map(|group| group.id)
+                            .ok_or_else(|| {
+                                BrowserError::Unavailable("there are no tag groups".to_owned())
+                            })?,
+                    },
+                };
+                let (_, ops) = self
+                    .tags
+                    .add_tag(&name, group_id, parent_id)
+                    .map_err(BrowserError::InvalidArgs)?;
+                self.save_tags(ops);
+                outcome.value = to_value(&self.tags_state(&[]));
+            }
+            ids::ADD_TAG_GROUP => {
+                self.reload_tags();
+                let AddTagGroupArgs { name } = parse(args)?;
+                let (_, ops) = self
+                    .tags
+                    .add_group(&name)
+                    .map_err(BrowserError::InvalidArgs)?;
+                self.save_tags(ops);
+                outcome.value = to_value(&self.tags_state(&[]));
+            }
+            ids::RENAME_TAG => {
+                self.reload_tags();
+                let RenameTagArgs { tag, group, name } = parse(args)?;
+                let ops = match (tag, group) {
+                    (Some(tag), None) => {
+                        let id = self.tag_id(&tag)?;
+                        self.tags
+                            .rename_tag(id, &name)
+                            .map_err(BrowserError::InvalidArgs)?
+                    }
+                    (None, Some(group)) => {
+                        let id = self.tags.group_id(&group).ok_or_else(|| {
+                            BrowserError::InvalidArgs(format!("there's no group called {group}"))
+                        })?;
+                        self.tags
+                            .rename_group(id, &name)
+                            .map_err(BrowserError::InvalidArgs)?
+                    }
+                    _ => {
+                        return Err(BrowserError::InvalidArgs(
+                            "give `tag` or `group`, not both".to_owned(),
+                        ));
+                    }
+                };
+                self.save_tags(ops);
+                outcome.value = to_value(&self.tags_state(&[]));
+            }
+            ids::MOVE_TAG => {
+                self.reload_tags();
+                let MoveTagArgs {
+                    tag,
+                    group,
+                    position,
+                } = parse(args)?;
+                let ops = match (tag, group) {
+                    (Some(tag), None) => {
+                        let id = self.tag_id(&tag)?;
+                        self.tags
+                            .move_tag(id, position)
+                            .map_err(BrowserError::InvalidArgs)?
+                    }
+                    (None, Some(group)) => {
+                        let id = self.tags.group_id(&group).ok_or_else(|| {
+                            BrowserError::InvalidArgs(format!("there's no group called {group}"))
+                        })?;
+                        self.tags
+                            .move_group(id, position)
+                            .map_err(BrowserError::InvalidArgs)?
+                    }
+                    _ => {
+                        return Err(BrowserError::InvalidArgs(
+                            "give `tag` or `group`, not both".to_owned(),
+                        ));
+                    }
+                };
+                self.save_tags(ops);
+                outcome.value = to_value(&self.tags_state(&[]));
+            }
+            ids::RESET_TAG_ORDER => {
+                self.reload_tags();
+                parse::<bl_commands::NoArgs>(args)?;
+                let ops = self.tags.reset_order();
+                self.save_tags(ops);
+                outcome.value = to_value(&self.tags_state(&[]));
+            }
+            ids::DELETE_TAG => {
+                self.reload_tags();
+                let DeleteTagArgs { tag, group } = parse(args)?;
+                let ops = match (tag, group) {
+                    (Some(tag), None) => {
+                        let id = self.tag_id(&tag)?;
+                        self.tags
+                            .delete_tag(id)
+                            .map_err(BrowserError::InvalidArgs)?
+                    }
+                    (None, Some(group)) => {
+                        let id = self.tags.group_id(&group).ok_or_else(|| {
+                            BrowserError::InvalidArgs(format!("there's no group called {group}"))
+                        })?;
+                        self.tags
+                            .delete_group(id)
+                            .map_err(BrowserError::InvalidArgs)?
+                    }
+                    _ => {
+                        return Err(BrowserError::InvalidArgs(
+                            "give `tag` or `group`, not both".to_owned(),
+                        ));
+                    }
+                };
+                self.save_tags(ops);
+                outcome.value = to_value(&self.tags_state(&[]));
+                self.rebuild();
+            }
+            ids::SHOW_TAG_EDITOR => {
+                let ShowTagEditorArgs { show } = parse(args)?;
+                self.tag_editor = show.unwrap_or(!self.tag_editor);
+                outcome.prefs_changed = true;
+                outcome.value = json!({ "tag_editor": self.tag_editor });
+            }
+            ids::SHOW_QUICK_TAGS => {
+                let ShowQuickTagsArgs { show } = parse(args)?;
+                self.quick_tags = show.unwrap_or(!self.quick_tags);
+                outcome.prefs_changed = true;
+                outcome.value = json!({ "quick_tags": self.quick_tags });
+            }
             _ => return Err(BrowserError::InvalidArgs(format!("no command is `{id}`"))),
         }
         Ok(outcome)
+    }
+
+    /// The tag a name names: its full name, or its own name.
+    fn tag_id(&self, name: &str) -> Result<i64, BrowserError> {
+        self.tags
+            .find(name)
+            .first()
+            .copied()
+            .ok_or_else(|| BrowserError::InvalidArgs(format!("there's no tag called {name}")))
+    }
+
+    /// Keeps the size and content hash of a file that carries a tag, so
+    /// its tags pass to the same content found at a new path (spec:
+    /// browser-tags R5).
+    fn hash_tagged_files(&mut self, items: &[String]) {
+        for item in items {
+            let key = self.tag_key(item);
+            let path = PathBuf::from(&key);
+            if !path.is_file() {
+                continue;
+            }
+            let size = std::fs::metadata(&path).map(|meta| meta.len()).unwrap_or(0);
+            let known = self
+                .tagged_files
+                .get(&key)
+                .is_some_and(|tagged| tagged.size == size && !tagged.hash.is_empty());
+            if !known {
+                self.tagged_files.insert(
+                    key.clone(),
+                    TaggedFile {
+                        size,
+                        hash: self
+                            .tagged_files
+                            .get(&key)
+                            .map(|tagged| tagged.hash.clone())
+                            .unwrap_or_default(),
+                    },
+                );
+            }
+            if self.pending_hashes.insert(key.clone())
+                && self
+                    .tagged_files
+                    .get(&key)
+                    .is_some_and(|tagged| tagged.hash.is_empty())
+            {
+                self.hasher.request(&path);
+            }
+        }
+    }
+
+    /// A file's hash has come back: keep it, and give a tagged file that
+    /// moved outside Beatlayer its tags (spec: browser-tags R5).
+    fn hash_ready(&mut self, hashed: Hashed) {
+        let path = hashed.path.to_string_lossy().into_owned();
+        self.pending_hashes.remove(&path);
+        let Ok(hash) = hashed.hash else {
+            return;
+        };
+        if let Some(tagged) = self.tagged_files.get_mut(&path)
+            && tagged.hash.is_empty()
+        {
+            tagged.hash = hash.clone();
+            if let Some(db) = &self.db {
+                db.save_files(vec![FileOp::Hash {
+                    path: path.clone(),
+                    hash: hash.clone(),
+                }]);
+            }
+        }
+        self.rehome(&path, &hash);
+    }
+
+    /// The tags of a file that moved outside Beatlayer pass to the file
+    /// with the same content (spec: browser-tags R5).
+    fn rehome(&mut self, path: &str, hash: &str) {
+        let orphans: Vec<String> = self
+            .tagged_files
+            .iter()
+            .filter(|(old, tagged)| {
+                tagged.hash == hash && *old != path && !self.saved_files.contains_key(*old)
+            })
+            .map(|(old, _)| old.clone())
+            .collect();
+        for old in orphans {
+            let tags = self.tags.item_tags(&old);
+            if tags.is_empty() {
+                continue;
+            }
+            let mut ops = self.tags.set_item_tags(path, tags);
+            ops.extend(self.tags.set_item_tags(&old, Vec::new()));
+            self.save_tags(ops);
+            if let Some(tagged) = self.tagged_files.remove(&old) {
+                self.tagged_files.insert(path.to_owned(), tagged);
+            }
+        }
+    }
+
+    /// Writes the index to the database, the files that changed only
+    /// (spec: browser-tags R1).
+    fn save_index(&mut self) {
+        let Some(db) = &self.db else {
+            return;
+        };
+        let rows = self.index.snapshot().file_rows();
+        let mut ops = Vec::new();
+        let mut saved = HashMap::with_capacity(rows.len());
+        for row in rows {
+            let path = row.path.clone();
+            saved.insert(path.clone(), row.clone());
+            let unchanged = self.saved_files.get(&path).is_some_and(|old| {
+                old.size == row.size
+                    && old.modified == row.modified
+                    && old.kind == row.kind
+                    && old.place == row.place
+            });
+            if !unchanged {
+                ops.push(FileOp::Upsert(row));
+            }
+        }
+        for path in self.saved_files.keys() {
+            if !saved.contains_key(path) {
+                ops.push(FileOp::Delete(path.clone()));
+            }
+        }
+        self.saved_files = saved;
+        db.save_files(ops);
+        // A tagged file that isn't there any more: its tags pass to the
+        // same content, if it turns up (spec: browser-tags R5).
+        let orphans: Vec<(String, u64)> = self
+            .tagged_files
+            .iter()
+            .filter(|(old, tagged)| !tagged.hash.is_empty() && !self.saved_files.contains_key(*old))
+            .map(|(old, tagged)| (old.clone(), tagged.size))
+            .collect();
+        for (_, size) in orphans {
+            for index in self.index.snapshot().with_size(size) {
+                let path = self.index.snapshot().path(index);
+                if self
+                    .pending_hashes
+                    .insert(path.to_string_lossy().into_owned())
+                {
+                    self.hasher.request(&path);
+                }
+            }
+        }
     }
 
     fn add(

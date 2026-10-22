@@ -118,6 +118,10 @@ use Object::{Clip, Device, Scene, Song, Track};
 /// Why the Browser's commands read back through nothing a read command gives.
 const BROWSER: &str = "the Browser's state is read with `browser.state`, which is `external` \
                        because it lists files outside the project";
+/// Why the browser's tag commands read back through nothing a read command
+/// gives.
+const TAGS: &str = "the browser's tags are read with `browser.tags`, which is `external` because \
+                    it lists files outside the project";
 /// Why the File Manager's commands read back through nothing a read command
 /// gives.
 const FILE_MANAGER: &str = "the File Manager's state is read with `file_manager.state`, which \
@@ -177,18 +181,32 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("automation.set_breakpoint", query(Track, "automation")),
     ("automation.set_curve", query(Track, "automation")),
     ("browser.add_folder", nothing(BROWSER)),
+    ("browser.add_tag", nothing(TAGS)),
+    ("browser.add_tag_group", nothing(TAGS)),
     ("browser.add_to_arrangement", query(Track, "clips")),
+    ("browser.delete_tag", nothing(TAGS)),
     ("browser.load_selected", query(Track, "clips")),
+    ("browser.move_tag", nothing(TAGS)),
     ("browser.open_folder", nothing(BROWSER)),
     ("browser.open_place", nothing(BROWSER)),
     ("browser.preview", nothing(BROWSER)),
     ("browser.remove_folder", nothing(BROWSER)),
+    ("browser.rename_tag", nothing(TAGS)),
+    ("browser.reset_tag_order", nothing(TAGS)),
     ("browser.scrub_preview", nothing(BROWSER)),
     ("browser.search", nothing(BROWSER)),
     ("browser.select", nothing(BROWSER)),
     ("browser.set_preview", nothing(BROWSER)),
     ("browser.set_raw", nothing(BROWSER)),
     ("browser.show_file", nothing(BROWSER)),
+    ("browser.show_quick_tags", nothing(BROWSER)),
+    ("browser.tag_items", nothing(TAGS)),
+    (
+        "browser.tags",
+        nothing(
+            "a query of its own: it reads the tags, and is `external` for the files it lists",
+        ),
+    ),
     (
         "browser.state",
         nothing(

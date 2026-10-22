@@ -27,6 +27,7 @@
 
 use std::collections::BTreeMap;
 use std::num::NonZeroU32;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, atomic::AtomicBool, mpsc};
 use std::time::{Duration, Instant};
 
@@ -414,6 +415,17 @@ struct PendingCapture {
     redrawn: Instant,
 }
 
+/// Where the app keeps the journal of the open set's edits, so a crash
+/// can be recovered from (WP-6.62, the crash-recovery spec, R21): the
+/// recovery folder in the user's application data, or one in the config
+/// directory the app was given.
+fn recovery_dir(args: &Args) -> Option<PathBuf> {
+    match &args.config_dir {
+        Some(dir) => Some(dir.join("Recovery")),
+        None => bl_project::autosave::default_recovery_dir(),
+    }
+}
+
 /// Runs the app until it quits.
 pub fn run(args: Args) -> Result<(), String> {
     let config_dir = args.config_dir.clone().or_else(default_config_dir);
@@ -458,6 +470,14 @@ pub fn run(args: Args) -> Result<(), String> {
         shell.set_message(error, true);
     }
     if !args.benchmark_scene {
+        // Spec: crash-recovery R21. The app journals the open set's edits
+        // in the recovery folder in the user's application data, and offers
+        // the sets a crash left.
+        if let Some(dir) = recovery_dir(&args)
+            && let Err(error) = shell.use_recovery(dir)
+        {
+            shell.set_message(format!("Crash recovery isn't running: {error}"), true);
+        }
         open_user_library(&mut shell, &args);
     }
     if let Some(set) = &args.set {

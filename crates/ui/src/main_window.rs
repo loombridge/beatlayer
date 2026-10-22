@@ -594,6 +594,9 @@ impl MainWindowUi {
         // window while it's open.
         crate::autosampler::show(ctx, shell, theme, &mut events);
         crate::slice_dialog::show(ctx, shell, theme, &mut events);
+        // Spec: crash-recovery R22. The recovery prompt sits over the
+        // window while there are sets a crash left to offer.
+        crate::recovery_dialog::show(ctx, shell, theme, &mut events);
         self.mixer_typing = crate::mixer::is_typing(ctx) || crate::track_menu::is_renaming(ctx);
         // An open menu, or a dialog, keeps the keys.
         self.menu_open = egui::Popup::is_any_open(ctx)

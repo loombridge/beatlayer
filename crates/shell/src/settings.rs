@@ -71,6 +71,9 @@ pub struct Preferences {
     /// destructive or external command it calls doesn't ask again
     /// (WP-2.23, part 4).
     pub assistant_always: BTreeSet<String>,
+    /// What the Export Audio/Video dialog keeps: its choices and the folder
+    /// of the last export (WP-6.71; the export spec, R39).
+    pub export: crate::ExportPrefs,
     /// The browser's places and preview (WP-1.10).
     pub browser: crate::browser::BrowserPrefs,
     /// Whether the return tracks scroll with the tracks (IMP-01, the mixer

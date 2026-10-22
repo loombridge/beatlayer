@@ -22,6 +22,7 @@ use serde_json::{Map, Value, json};
 use super::{
     Ctx, ToolOutcome, args, class_names, done, failed, question_line, step, tool_definition,
 };
+use crate::server::{Deferred, ExportCall};
 
 pub(crate) const NAME: &str = "run";
 
@@ -330,6 +331,26 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
             "note": "Nothing changed. IDs shown for $new names are examples; a real run issues \
                      its own.",
         }));
+    }
+
+    // Spec: export R44. In the app an export runs on its own thread and the
+    // call waits for it, so the progress window draws and `export.status`
+    // and `export.cancel` answer meanwhile; headless, it runs to its end.
+    if ctx.view_capture && ready.len() == 1 && ready[0].id == bl_shell::export_commands::AUDIO {
+        let step = &ready[0];
+        return match ctx.shell.start_export(step.args.clone()) {
+            Ok(()) => {
+                ctx.session.refs = names;
+                ToolOutcome::Defer(Deferred::Export(ExportCall {
+                    asked_first: step.call.class().asks_first() && ctx.confirmed,
+                    ids: new_ids,
+                }))
+            }
+            Err(error) => failed(format!(
+                "command 1 (`{}`): {error}. Nothing changed.",
+                step.id
+            )),
+        };
     }
 
     // Run them.

@@ -1710,6 +1710,20 @@ fn device_view(h: &mut Harness) {
     });
 }
 
+/// The search field, open on its Commands scope.
+fn search_commands(h: &mut Harness) {
+    h.shell
+        .run("search.open", json!({ "scope": "commands" }))
+        .unwrap();
+}
+
+/// The search field, open on its Tracks scope.
+fn search_tracks(h: &mut Harness) {
+    h.shell
+        .run("search.open", json!({ "scope": "tracks" }))
+        .unwrap();
+}
+
 /// The list of the set's plug-ins, open in the detail area, with the
 /// keyboard in it (IMP-29, WP-6.41).
 fn plugin_list(h: &mut Harness) {
@@ -2939,6 +2953,40 @@ fn paths() -> BTreeMap<&'static str, Path> {
             "view.set_plugin_list_only_missing",
             main(nothing, plugin_list, "Show Only Missing", Key::Enter),
         ),
+        // The search field (WP-6.42): Tab reaches its scope buttons and Show
+        // Only Matches, and Enter presses them; the text, the arrows, Return
+        // and Esc act on it from the keyboard.
+        (
+            "search.set_scope",
+            main(search_commands, nothing, "Tracks", Key::Enter),
+        ),
+        (
+            "search.set_only_matches",
+            main(search_tracks, nothing, "Show Only Matches", Key::Enter),
+        ),
+        (
+            "search.set_text",
+            Exception(Equivalent("typing in the search field")),
+        ),
+        (
+            "search.next",
+            Exception(Equivalent(
+                "Down in the search field's Commands scope, Return in its Tracks scope",
+            )),
+        ),
+        (
+            "search.previous",
+            Exception(Equivalent(
+                "Up in the search field's Commands scope, Shift-Return in its Tracks scope",
+            )),
+        ),
+        (
+            "search.close",
+            Exception(Equivalent("Esc in the search field")),
+        ),
+        ("search.state", Exception(Query)),
+        ("search.commands", Exception(Query)),
+        ("search.tracks", Exception(Query)),
         // The Device View (WP-2.4): Enter on a title bar's controls.
         (
             "device.select",
@@ -4133,13 +4181,47 @@ fn paths() -> BTreeMap<&'static str, Path> {
                 "the Slice to New MIDI Track dialog's Cancel, or Esc",
             )),
         ),
-        // Gaps.
+        // The Export Audio/Video dialog (WP-6.71): the keyboard reaches each
+        // of its controls with Tab, Return presses Export, Esc closes it.
         (
             "export.audio",
-            Exception(Gap(
-                "the Export Audio/Video dialog, which waits on observing Live (export R16)",
+            Exception(Equivalent(
+                "the Export Audio/Video dialog's Export button, which Tab reaches and Return \
+                 presses; it asks for the file and runs `export.start`",
             )),
         ),
+        (
+            "export.start",
+            Exception(Equivalent(
+                "the Export Audio/Video dialog's Export button, which Tab reaches and Return \
+                 presses",
+            )),
+        ),
+        (
+            "export.set_choices",
+            Exception(Equivalent(
+                "the Export Audio/Video dialog's controls, which Tab reaches",
+            )),
+        ),
+        (
+            "export.close_dialog",
+            Exception(Equivalent(
+                "the Export Audio/Video dialog's Cancel, which Tab reaches, or Esc",
+            )),
+        ),
+        (
+            "export.cancel",
+            Exception(Equivalent(
+                "the export's progress window's Cancel, which Tab reaches, or Esc",
+            )),
+        ),
+        (
+            "export.status",
+            Exception(Equivalent(
+                "the dialog and the progress window, which draw what it reads",
+            )),
+        ),
+        // Gaps.
         (
             "track.move",
             Exception(Gap(
@@ -4366,7 +4448,6 @@ fn every_m1_command_is_reachable_from_the_keyboard() {
             "device.set_layer_zone",
             "device.snap_layer_markers",
             "device.sort_layers",
-            "export.audio",
             "locator.set_info_text",
             "rack.set_macro_info_text",
             "set.discard_recovery",

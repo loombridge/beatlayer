@@ -211,6 +211,10 @@ pub struct ArrangementView {
     show_volume: bool,
     /// Whether the return tracks' rows show in the lanes (WP-6.64).
     show_return_tracks: bool,
+    /// The tracks the search field's Show Only Matches keeps while it hides
+    /// the others (WP-6.42): the matches and the groups that hold them.
+    /// View state, kept up to date by the shell.
+    search_keep: Option<BTreeSet<TrackId>>,
 }
 
 impl Default for ArrangementView {
@@ -258,6 +262,7 @@ impl ArrangementView {
             show_in_out: true,
             show_volume: true,
             show_return_tracks: true,
+            search_keep: None,
         }
     }
 
@@ -430,16 +435,21 @@ impl ArrangementView {
     }
 
     /// The pinned rows under the scrolling ones: the return tracks while
-    /// they show and stay pinned (R23, R18), then Main.
-    pub fn pinned_tracks<'a>(&self, doc: &'a Document) -> impl Iterator<Item = TrackId> + 'a {
-        rows::pinned_tracks(doc, self.show_return_tracks && !self.returns_scroll)
+    /// they stay pinned (R18) and [`rows::pinned_tracks`] keeps them, then
+    /// Main.
+    pub fn pinned_tracks<'a>(&'a self, doc: &'a Document) -> impl Iterator<Item = TrackId> + 'a {
+        rows::pinned_tracks(doc, self)
+            .filter(move |id| !self.returns_scroll || *id == doc.main_id())
     }
 
     /// The return tracks' rows that scroll with the tracks, after the drop
-    /// area (R18): none while they stay pinned or are hidden (R23).
-    pub fn scrolling_returns<'a>(&self, doc: &'a Document) -> impl Iterator<Item = TrackId> + 'a {
-        let scrolling = self.show_return_tracks && self.returns_scroll;
-        doc.returns().filter(move |_| scrolling)
+    /// area (R18): the ones [`rows::pinned_tracks`] would pin, and none
+    /// while they stay pinned.
+    pub fn scrolling_returns<'a>(
+        &'a self,
+        doc: &'a Document,
+    ) -> impl Iterator<Item = TrackId> + 'a {
+        rows::pinned_tracks(doc, self).filter(move |id| self.returns_scroll && *id != doc.main_id())
     }
 
     /// The parameter a track's automation lane shows: the choosers' last
@@ -590,6 +600,38 @@ impl ArrangementView {
         self.folded.contains(&track)
     }
 
+    /// Whether a group shows folded now: folded, and not opened by Show Only
+    /// Matches to show the matches it holds (command-palette R12).
+    #[must_use]
+    pub fn is_folded_in(&self, doc: &Document, track: TrackId) -> bool {
+        self.is_folded(track)
+            && !self.search_keep.as_ref().is_some_and(|keep| {
+                doc.track(track)
+                    .is_some_and(|t| t.children().any(|child| keep.contains(&child)))
+            })
+    }
+
+    /// Whether Show Only Matches leaves `track` showing: always, while it's
+    /// off.
+    #[must_use]
+    pub fn search_keeps(&self, track: TrackId) -> bool {
+        self.search_keep
+            .as_ref()
+            .is_none_or(|keep| keep.contains(&track))
+    }
+
+    /// The tracks Show Only Matches keeps, while it hides the others.
+    #[must_use]
+    pub fn search_keep(&self) -> Option<&BTreeSet<TrackId>> {
+        self.search_keep.as_ref()
+    }
+
+    /// Hides every track but these (Show Only Matches), or with `None`
+    /// shows them all again, each group folded as it was.
+    pub fn set_search_keep(&mut self, keep: Option<BTreeSet<TrackId>>) {
+        self.search_keep = keep;
+    }
+
     /// Unfolds `track` if it was folded.
     pub fn unfold(&mut self, track: TrackId) {
         self.folded.remove(&track);
@@ -609,7 +651,7 @@ impl ArrangementView {
     /// those inside a folded group, each at the height it shows at.
     pub fn rows_into(&self, doc: &Document, out: &mut Vec<Row>) {
         out.clear();
-        let shown = rows::shown_tracks(doc, |id| self.is_folded(id));
+        let shown = rows::shown_tracks(doc, self);
         let mut top = 0.0;
         for (track, kind, depth) in shown {
             // Spec: arrangement-view R23: with the return tracks hidden,
@@ -617,7 +659,7 @@ impl ArrangementView {
             if !self.show_return_tracks && kind == TrackKind::Return {
                 continue;
             }
-            let folded = self.is_folded(track);
+            let folded = self.is_folded_in(doc, track);
             let height = if folded {
                 FOLDED_HEIGHT
             } else {

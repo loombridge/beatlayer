@@ -1619,7 +1619,11 @@ impl ArrangementUi {
                             pos2(layout.headers.left(), top),
                             pos2(layout.headers.right(), top + FOLDED_HEIGHT),
                         ),
-                        activator: char::from(b'A' + (index % 26) as u8).to_string(),
+                        activator: char::from(
+                            b'A' + (doc.returns().position(|r| r == *id).unwrap_or(index) % 26)
+                                as u8,
+                        )
+                        .to_string(),
                         colour: scene::track_colour(theme, *id),
                         folded: true,
                         selected: is_selected,
@@ -1654,11 +1658,7 @@ impl ArrangementUi {
             // A return's own letter, and Main's after the returns
             // (L-ARR-006), which keep their places while the return tracks
             // are hidden (R23).
-            let letter = if *id == doc.main_id() {
-                return_count
-            } else {
-                index
-            } % 26;
+            let letter = doc.returns().position(|r| r == *id).unwrap_or(return_count) % 26;
             headers::header(
                 ui,
                 theme,

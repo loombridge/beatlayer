@@ -147,6 +147,9 @@ pub fn header(
             StrokeKind::Inside,
         );
     }
+    // Spec: command-palette R10. The tracks the search field finds are
+    // outlined.
+    crate::search_field::outline(ui, shell, theme, id, title);
     painter.line_segment(
         [rect.left_bottom(), rect.right_bottom()],
         Stroke::new(1.0, colors.lane_line.0),

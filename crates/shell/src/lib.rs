@@ -91,6 +91,7 @@ pub mod realtime;
 pub mod recording;
 pub mod routing;
 pub mod sample_editor;
+pub mod scales;
 pub mod scene_fields;
 mod session_capture;
 pub mod session_view;
@@ -151,6 +152,8 @@ pub use bl_shell_spec::plugins as plugin_commands;
 /// The Sample Editor's view command IDs and their argument and result types
 /// (WP-4.10).
 pub use bl_shell_spec::sample_editor as sample_editor_commands;
+/// The scale commands' IDs and the scale list's result (WP-6.7).
+pub use bl_shell_spec::scales as scales_commands;
 /// The Session View's launch quantisation command IDs and their argument and
 /// result types (WP-3.2).
 pub use bl_shell_spec::session_launch as session_launch_commands;

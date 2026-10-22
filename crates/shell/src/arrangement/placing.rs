@@ -44,7 +44,12 @@ pub fn split_off(editor: &mut Editor, clip: ClipId, at: Ticks) -> Result<ClipId,
         clip,
         length: at - original.start,
     })?;
+    // Spec: scales R7. A split keeps the clip's scale.
+    let scale = original.scale;
     editor.apply(Command::CreateClip { track, clip: right })?;
+    if scale != editor.document().settings().scale {
+        editor.apply(scale.command(vec![id]))?;
+    }
     Ok(id)
 }
 

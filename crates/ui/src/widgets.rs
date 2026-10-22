@@ -30,6 +30,9 @@ pub struct Look {
     /// Whether a live element can't be used now: it is drawn quieter and
     /// assistive technology reads it as disabled.
     pub disabled: bool,
+    /// Whether a switch is only partly on, which the Scale Mode switch
+    /// shows where the selected clips differ (the scales spec, R6).
+    pub mixed: bool,
 }
 
 /// Draws an element of the Control Bar or Status Bar at `rect` and returns
@@ -95,6 +98,12 @@ fn paint(
             face.gamma_multiply(0.55)
         };
         painter.rect_filled(rect, corner, face);
+    }
+    // Spec: scales R6. A partly filled switch: the top half of it in the
+    // accent colour, where the selected clips differ.
+    if look.mixed && placement.kind == Kind::Switch {
+        let half = Rect::from_min_max(rect.left_top(), pos2(rect.right(), rect.center().y));
+        painter.rect_filled(half, corner, c.accent.0);
     }
     let ink = if !live || look.disabled {
         c.pending.0

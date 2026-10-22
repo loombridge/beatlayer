@@ -54,6 +54,7 @@ impl Object {
                 "tempo.bpm_at_start",
                 "tempo.segments",
                 "time_signature_at_start",
+                "scale",
                 "counts.tracks",
                 "counts.clips",
                 "counts.devices",
@@ -262,6 +263,7 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("clip.set_legato", query(Clip, "launch.legato")),
     ("clip.set_loop", query(Clip, "data.audio.loop_start")),
     ("clip.set_loop_enabled", query(Clip, "data.audio.looping")),
+    ("clip.set_scale", query(Clip, "scale")),
     ("clip.set_midi_loop", query(Clip, "data.midi.loop_start")),
     ("clip.set_midi_region", query(Clip, "data.midi.start")),
     ("clip.set_mute", query(Clip, "mute")),
@@ -562,6 +564,7 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("song.delete_time_signature_change", query(Song, "settings.time_signatures")),
     ("song.move_tempo_breakpoint", query(Song, "settings.tempo")),
     ("song.move_time_signature_change", query(Song, "settings.time_signatures")),
+    ("song.set_scale", query(Song, "scale")),
     ("song.set_tempo", query(Song, "settings.tempo")),
     (
         "song.unfollow_tempo_automation",

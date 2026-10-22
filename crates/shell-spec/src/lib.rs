@@ -98,6 +98,7 @@ pub mod pads;
 pub mod perception;
 pub mod plugins;
 pub mod sample_editor;
+pub mod scales;
 pub mod session_launch;
 pub mod session_record;
 pub mod session_view;
@@ -150,5 +151,6 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     freeze::register(registry)?;
     bounce::register(registry)?;
     slice::register(registry)?;
-    warping::register(registry)
+    warping::register(registry)?;
+    scales::register(registry)
 }

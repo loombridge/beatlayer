@@ -34,6 +34,7 @@ use crate::rack::{
     MacroStyle, MacroTarget, RackKind, Receive, macro_number,
 };
 use crate::sample_edits::{SampleEdit, SampleRange};
+use crate::scale::{Scale, ScaleName};
 use crate::scene::{SCENE_TEMPO_MAX, SCENE_TEMPO_MIN, Scene};
 use crate::shared::Shared;
 use crate::track::{
@@ -2291,6 +2292,36 @@ pub enum Command {
         /// Whether it's left out.
         excluded: bool,
     },
+    /// Sets a clip's scale (the scales spec, R5): its Scale Mode switch, its
+    /// root and its scale name. It leaves the values it isn't given as they
+    /// were, and it is one undo step however many clips it sets.
+    SetClipScale {
+        /// The clips.
+        clips: Vec<ClipId>,
+        /// Whether the clips' Scale Mode is on.
+        #[serde(default)]
+        enabled: Option<bool>,
+        /// The root note: 0 (C) to 11 (B).
+        #[serde(default)]
+        root: Option<u8>,
+        /// The scale's name, from the scale list.
+        #[serde(default)]
+        name: Option<String>,
+    },
+    /// Sets the set's current scale (the scales spec, R9): its Scale Mode
+    /// switch, its root and its scale name, which the Control Bar's scale
+    /// controls show and the clips made next take.
+    SetScale {
+        /// Whether the set's Scale Mode is on.
+        #[serde(default)]
+        enabled: Option<bool>,
+        /// The root note: 0 (C) to 11 (B).
+        #[serde(default)]
+        root: Option<u8>,
+        /// The scale's name, from the scale list.
+        #[serde(default)]
+        name: Option<String>,
+    },
 }
 
 impl Command {
@@ -2573,6 +2604,10 @@ impl Command {
             Self::DeleteVariation { .. } => "Delete Macro Variation",
             Self::SetMacroVariationExcluded { .. } => "Exclude Macro from Variations",
             Self::SetMappedValue { .. } => "Change parameter",
+            // Spec: scales R5, R12. Live's undo names for the scale edits
+            // are to observe; Beatlayer's name the edit.
+            Self::SetClipScale { .. } => "Change Clip Scale",
+            Self::SetScale { .. } => "Change Scale",
         }
     }
 
@@ -3220,6 +3255,37 @@ impl Document {
                 if self.clip_ref(*clip)?.mute != *mute {
                     self.clip_mut(*clip)?.mute = *mute;
                 }
+                Ok(())
+            }
+            // Spec: scales R5. A scale name the list doesn't hold, or a
+            // root outside C to B, is refused, and nothing changes.
+            Command::SetClipScale {
+                clips,
+                enabled,
+                root,
+                name,
+            } => {
+                let mut scales = Vec::with_capacity(clips.len());
+                for clip in clips {
+                    let current = self.clip_ref(*clip)?.scale;
+                    scales.push((*clip, scaled(current, *enabled, *root, name.as_deref())?));
+                }
+                for (clip, next) in scales {
+                    if self.clip_ref(clip)?.scale != next {
+                        self.clip_mut(clip)?.scale = next;
+                    }
+                }
+                Ok(())
+            }
+            // Spec: scales R9, R12. The set's current scale, which the
+            // Control Bar's scale controls show and a new clip takes.
+            Command::SetScale {
+                enabled,
+                root,
+                name,
+            } => {
+                let current = self.settings.scale;
+                self.settings.scale = scaled(current, *enabled, *root, name.as_deref())?;
                 Ok(())
             }
             Command::SetClipLaunchMode { clip, mode } => {
@@ -4941,10 +5007,16 @@ impl Document {
         check_extent(clip.start, clip.length)?;
         check_clip(clip)?;
         self.check_clip_envelopes(track, clip)?;
-        self.track_mut(track)?
-            .clips
-            .insert(clip.id, Shared::new(clip.clone()));
-        self.index.clip_track.insert(clip.id, track);
+        // Spec: scales R7. A clip made from nothing takes the set's current
+        // scale. A caller that named a scale keeps it, so the field the
+        // command reference lists isn't silently dropped.
+        let mut clip = clip.clone();
+        if clip.scale.is_default() {
+            clip.scale = self.settings.scale;
+        }
+        let id = clip.id;
+        self.track_mut(track)?.clips.insert(id, Shared::new(clip));
+        self.index.clip_track.insert(id, track);
         Ok(())
     }
 
@@ -5194,10 +5266,18 @@ impl Document {
         if target.slot(scene).is_some() {
             return Err(ModelError::SlotOccupied { track, scene });
         }
+        // Spec: scales R7. A clip made from nothing takes the set's current
+        // scale. A caller that named a scale keeps it, so the field the
+        // command reference lists isn't silently dropped.
+        let mut clip = clip.clone();
+        if clip.scale.is_default() {
+            clip.scale = self.settings.scale;
+        }
+        let id = clip.id;
         self.track_mut(track)?
             .slots
-            .insert(scene, Shared::new(clip.clone()));
-        self.index.clip_track.insert(clip.id, track);
+            .insert(scene, Shared::new(clip));
+        self.index.clip_track.insert(id, track);
         Ok(())
     }
 
@@ -6911,6 +6991,39 @@ fn check_macro_number(number: u8) -> Result<(), ModelError> {
             "a rack's macros are numbered 1 to 16",
         ))
     }
+}
+
+/// The scale a command's arguments give over `scale`: the values it gives
+/// replace the ones it has, and the ones it doesn't give stay as they were
+/// (the scales spec, R5). A root outside C to B, or a name the scale list
+/// doesn't hold, is refused.
+fn scaled(
+    scale: Scale,
+    enabled: Option<bool>,
+    root: Option<u8>,
+    name: Option<&str>,
+) -> Result<Scale, ModelError> {
+    let root = match root {
+        Some(root) if root > 11 => {
+            return Err(ModelError::InvalidValue {
+                what: "root note",
+                value: f64::from(root),
+            });
+        }
+        Some(root) => root,
+        None => scale.root,
+    };
+    let name = match name {
+        Some(name) => ScaleName::parse(name).ok_or(ModelError::InvalidInput(
+            "the scale's name is not one of the scale list's names",
+        ))?,
+        None => scale.name,
+    };
+    Ok(Scale {
+        enabled: enabled.unwrap_or(scale.enabled),
+        root,
+        name,
+    })
 }
 
 /// The next number from a SplitMix64 generator, from 0 (inclusive) to 1

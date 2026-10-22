@@ -645,6 +645,7 @@ impl Shell {
             data: ClipData::Midi(data),
             envelopes: Vec::new(),
             launch: bl_model::ClipLaunch::default(),
+            scale: bl_model::Scale::default(),
         };
         self.editor.begin(STEP);
         let outcome = (|| -> Result<(), ShellError> {

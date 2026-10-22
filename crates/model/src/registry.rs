@@ -316,6 +316,20 @@ const ENTRIES: &[Entry] = &[
             where they sit in bars.",
     },
     Entry {
+        id: "song.set_scale",
+        action: Action::Apply("set_scale"),
+        label: "Set Scale",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Sets the set's current scale: whether its Scale Mode is on (`enabled`), its \
+            root note (`root`, 0 is C and 11 is B) and its scale (`name`, one of the names \
+            `song.scales` reads). It leaves the values it isn't given as they were. The current \
+            scale is what the Control Bar's scale controls show, what the clips made next take, \
+            and what a device or a tool reads where no clip plays. It is one undo step, named \
+            \"Change Scale\", and the set is saved with it.",
+    },
+    Entry {
         id: "song.set_time_signatures",
         action: Action::Apply("set_time_signatures"),
         label: "Set Time Signatures",
@@ -1397,6 +1411,22 @@ const ENTRIES: &[Entry] = &[
             and 0 is silence (-inf dB). Use it to balance one clip against others on its \
             track; to change the whole track, use `mixer.set_volume`. The value must be \
             finite and at least 0.",
+    },
+    Entry {
+        id: "clip.set_scale",
+        action: Action::Apply("set_clip_scale"),
+        label: "Set Clip Scale",
+        permission: Permission::Edit,
+        contexts: &[Global, ClipView],
+        keys: &[],
+        description: "Sets a clip's scale: whether its Scale Mode is on (`enabled`), its root \
+            note (`root`, 0 is C and 11 is B) and its scale (`name`, one of the names \
+            `song.scales` reads). `clips` names the clips to set; left out, the selected ones \
+            are set. It leaves the values it isn't given as they were, and it is \
+            one undo step, named \"Change Clip Scale\", however many clips it sets. A scale the \
+            list doesn't hold, or a root outside C to B, is refused and nothing changes. A \
+            clip's scale never changes what it plays: it tells the rest of the set which keys \
+            belong.",
     },
     Entry {
         id: "clip.set_fades",

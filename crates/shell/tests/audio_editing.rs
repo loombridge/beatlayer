@@ -389,6 +389,50 @@ fn consolidate_makes_one_clip_per_track_over_the_range() {
     assert!(shell.editor().document().clip(source_clip).is_some());
 }
 
+// Spec: scales R7. A consolidated clip takes the scale of the first clip it
+// was made from, not the set's current scale.
+#[test]
+fn a_consolidated_clip_keeps_its_first_source_s_scale() {
+    let scratch = Scratch::new("consolidate-scale");
+    let mut shell = new_shell(&scratch);
+    let _song = saved(&scratch, &mut shell);
+    let track = track(&shell, TrackKind::Audio);
+    let source = scratch.path("Tone.wav");
+    wav(&source, 2.0, 2, 0.5);
+    let source_clip = place(&mut shell, track, &source, 0);
+    // The source is in E Minor and the set's current scale is C Major, so
+    // the consolidation has to keep the source's.
+    shell
+        .run(
+            "clip.set_scale",
+            json!({ "clips": [source_clip], "enabled": true, "root": 4, "name": "minor" }),
+        )
+        .unwrap();
+    shell
+        .run(
+            "song.set_scale",
+            json!({ "enabled": true, "root": 0, "name": "major" }),
+        )
+        .unwrap();
+    let value = shell
+        .run(
+            ids::CONSOLIDATE,
+            json!({ "tracks": [track], "start": 0, "end": 705_600 }),
+        )
+        .unwrap();
+    let made: ConsolidateResult = serde_json::from_value(value).unwrap();
+    assert_eq!(
+        shell
+            .editor()
+            .document()
+            .clip(made.created[0])
+            .unwrap()
+            .scale,
+        bl_model::Scale::new(4, bl_model::ScaleName::Minor),
+        "the consolidated clip keeps its first source's scale"
+    );
+}
+
 // Spec: audio-clip-editing R20.
 #[test]
 fn a_mono_source_consolidates_to_a_mono_file() {

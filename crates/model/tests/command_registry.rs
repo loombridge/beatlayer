@@ -54,7 +54,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        218,
+        220,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
              the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
              routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -84,8 +84,8 @@ fn every_document_command_is_registered() {
              overwrite_variation, rename_variation, duplicate_variation, \
              delete_variation and set_macro_variation_excluded, WP-4.7 the two \
              for a clip's pitch and its reversal, WP-5.33 set_device_role, WP-5.4b \
-             set_macro_style, and WP-4.15 the two for bouncing a track in place and to a new \
-             track"
+             set_macro_style, WP-4.15 the two for bouncing a track in place and to a new \
+             track, and WP-6.7 the two for the scales: set_clip_scale and set_scale"
     );
 
     for op in &ops {
@@ -604,6 +604,17 @@ fn every_command_runs_by_id() {
         })
         .unwrap();
     agent.run("clip.set_gain", json!({ "clip": loop_clip, "gain": 0.5 }));
+    // Spec: scales R5, R9.
+    let changes = agent.run(
+        "clip.set_scale",
+        json!({ "clips": [loop_clip], "enabled": true, "root": 2, "name": "dorian" }),
+    );
+    assert!(changes.clips.contains_key(&loop_clip));
+    let changes = agent.run(
+        "song.set_scale",
+        json!({ "enabled": true, "root": 5, "name": "minor" }),
+    );
+    assert!(changes.settings);
     agent.run(
         "clip.set_fades",
         json!({ "clip": loop_clip, "fade_in": 0.004, "fade_out": 0.25 }),
@@ -3644,6 +3655,24 @@ fn schemas_match_what_commands_serialise() {
                 rack,
                 macro_number: 1,
                 excluded: true,
+            },
+        ),
+        // Spec: scales R5, R9.
+        (
+            "clip.set_scale",
+            Command::SetClipScale {
+                clips: vec![clip],
+                enabled: Some(true),
+                root: Some(2),
+                name: Some("dorian".to_owned()),
+            },
+        ),
+        (
+            "song.set_scale",
+            Command::SetScale {
+                enabled: Some(true),
+                root: Some(5),
+                name: Some("minor".to_owned()),
             },
         ),
     ];

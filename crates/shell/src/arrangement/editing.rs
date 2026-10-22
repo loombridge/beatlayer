@@ -229,7 +229,14 @@ pub(crate) fn place(
             clear(editor, track, clip.start, clip.end(), &placed)?;
             placed.insert(clip.id);
             created.push(clip.id);
+            // Spec: scales R7. A copy keeps its source's scale, which the
+            // clip takes the set's current scale when it is made.
+            let scale = clip.scale;
+            let id = clip.id;
             apply(editor, Command::CreateClip { track, clip })?;
+            if scale != editor.document().settings().scale {
+                apply(editor, scale.command(vec![id]))?;
+            }
         }
     }
     Ok(created)

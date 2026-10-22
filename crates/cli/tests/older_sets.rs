@@ -189,6 +189,50 @@ fn sets_from_before_racks_load_unchanged() {
     );
 }
 
+// Spec: scales R8
+#[test]
+fn a_set_saved_before_the_scales_loads_unchanged() {
+    let mut editor = Editor::new();
+    let track = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: track,
+            kind: TrackKind::Midi,
+            name: "Keys".to_owned(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    let clip = midi_clip(&mut editor, track);
+    let project = Project {
+        document: editor.document().clone(),
+        ids: editor.ids(),
+        media: Media::default(),
+        windows: bl_model::DeviceWindows::new(),
+        rack_views: bl_model::RackViewMap::new(),
+        folds: bl_model::ClipFolds::new(),
+        launch: bl_model::LaunchSettings::default(),
+        multisamplers: bl_model::MultisamplerViews::new(),
+    };
+    let saved = encode_json(&project, 1).unwrap();
+    let value: Value = serde_json::from_slice(&saved).unwrap();
+    let written = &value["document"]["tracks"][0]["clips"][0];
+    assert!(written.get("scale").is_none(), "{written}");
+    assert!(
+        value["document"]["settings"].get("scale").is_none(),
+        "the set's scale isn't written either"
+    );
+    let (loaded, _) = decode_json(&saved, &LoadOptions::default()).unwrap();
+    assert_eq!(loaded.document, project.document);
+    assert_eq!(
+        loaded.document.clip(clip).unwrap().scale,
+        bl_model::Scale::default(),
+        "every clip is off, at C, in Major"
+    );
+    assert_eq!(loaded.document.settings().scale, bl_model::Scale::default());
+    assert_eq!(encode_json(&loaded, 1).unwrap(), saved);
+}
+
 /// A one-bar MIDI clip, on the track from the start of the song.
 fn midi_clip(editor: &mut Editor, track: bl_model::TrackId) -> bl_model::ClipId {
     let clip = editor.new_id();

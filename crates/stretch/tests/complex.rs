@@ -30,6 +30,7 @@ fn play(
             neutral: false,
             high_quality: true,
             beats: &empty,
+            transient_envelope: 100.0,
             pitch,
             clip: 1,
         };
@@ -438,6 +439,7 @@ fn a_located_complex_clip_plays_from_the_point_at_the_right_level() {
             neutral: false,
             high_quality: true,
             beats: &empty,
+            transient_envelope: 100.0,
             pitch: 1.0,
             clip: 1,
         };

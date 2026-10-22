@@ -27,13 +27,16 @@ use bl_core::time::{SampleRate, TempoMap, Ticks};
 use bl_media::SampleData;
 use bl_media::stream::{AudioSource, PlanarMut, Transition};
 use bl_model::WarpMode as ClipWarpMode;
-use bl_model::{AudioData, BeatsSettings, Clip, Preserve as ClipPreserve, TransientLoopMode};
+use bl_model::{
+    AudioData, BeatsSettings, Clip, ClipParam, Preserve as ClipPreserve, TransientLoopMode,
+};
 use bl_stretch::beats::{self, Loop, Plan, Preserve, Segment};
 use bl_stretch::{
     Beats, Complex, Interpolation, Piece, RePitch, Request, Texture, Tones, WarpMap, WarpMode,
     WarpTable, Window, grain_window_frames, stretch_window_frames,
 };
 
+use crate::clip_sound::ClipSound;
 use crate::clip_source::WINDOW_FRAMES as NARROW_WINDOW;
 
 /// How many file frames before a position a warped clip may read: the widest
@@ -82,6 +85,9 @@ const MAX_RUNS: usize = 1 << 20;
 /// a plan of a million segments is not worth the memory.
 const MAX_SEGMENT_RUNS: usize = 4_096;
 
+/// Ticks in a sixteenth note, the unit of Sample Offset (R30).
+const SIXTEENTH: i64 = Ticks::WHOLE.get() / 16;
+
 /// How far, in file frames, a table's straight pieces may stray from the
 /// exact position at their middles, where a smooth curve strays most (the
 /// warping spec, R12 allows a hundredth of a frame).
@@ -108,6 +114,25 @@ pub(crate) struct Playing {
     /// Whether the clip is warped: an unwarped one reads its file at the
     /// pitch ratio instead of through a mode (R27).
     pub(crate) warp: bool,
+    /// Beats' Transient Envelope, 0 to 100 (R16).
+    pub(crate) transient_envelope: f64,
+}
+
+impl Playing {
+    /// How `audio`, clip `clip_id`, plays with its settings as they stand.
+    pub(crate) fn of(clip_id: u64, audio: &AudioData) -> Self {
+        Self {
+            mode: audio.warp_mode,
+            high_quality: audio.high_quality,
+            tones: audio.warp_settings.tones,
+            texture: audio.warp_settings.texture,
+            complex_pro: audio.warp_settings.complex_pro,
+            clip_id,
+            pitch: audio.pitch_ratio(),
+            warp: audio.warp,
+            transient_envelope: f64::from(audio.warp_settings.beats.transient_envelope),
+        }
+    }
 }
 
 /// A warped clip's contents, in beats of the clip: where it starts, ends and
@@ -171,6 +196,10 @@ pub(crate) struct Warped {
 /// What a Beats plan needs of the clip's media: the file's transients and,
 /// where the loop turns must be found, its audio.
 pub(crate) struct BeatsMedia<'a> {
+    /// What moves the clip's settings (R29, R31), where something does: Beats
+    /// reads its pitch ratio and its Sample Offset where each segment begins,
+    /// and its Preserve and Transient Loop Mode where the clip does.
+    pub(crate) sound: Option<&'a ClipSound>,
     /// The clip's transients in seconds into its file, its own edits applied
     /// (the warping spec, R23).
     pub(crate) transients: &'a [f64],
@@ -209,7 +238,19 @@ impl Warped {
             loop_end,
         };
         let plan = if audio.warp_mode == ClipWarpMode::Beats {
-            Arc::new(contents.plan(clip, tempo, r, audio.warp_settings.beats, media))
+            // Spec: warp-modes R29. Preserve and Transient Loop Mode, which
+            // shape the whole plan, take the value they have where the clip
+            // begins.
+            let mut settings = audio.warp_settings.beats;
+            if let Some(sound) = media.sound {
+                let begins = tempo.ticks_to_frames(clip.start, rate).get();
+                settings.preserve =
+                    ClipPreserve::from_index(sound.value(ClipParam::Preserve, begins));
+                settings.transient_loop_mode = TransientLoopMode::from_index(
+                    sound.value(ClipParam::TransientLoopMode, begins),
+                );
+            }
+            Arc::new(contents.plan(clip, tempo, r, settings, media))
         } else {
             Arc::new(Plan::default())
         };
@@ -223,7 +264,7 @@ impl Warped {
             warped.table = if warped.plan.is_empty() {
                 warped.tabulate(clip, tempo, r)
             } else {
-                warped.beats_table(clip, tempo, r, audio.pitch_ratio())
+                warped.beats_table(clip, tempo, r, audio.pitch_ratio(), media.sound)
             };
         }
         Some(warped)
@@ -311,10 +352,19 @@ impl Warped {
 
     /// The table of a Beats clip: its plan's stretches (R14 to R17), read at
     /// the clip's pitch ratio (R17).
-    fn beats_table(&self, clip: &Clip, tempo: &TempoMap, r: f64, pitch: f64) -> WarpTable {
+    fn beats_table(
+        &self,
+        clip: &Clip,
+        tempo: &TempoMap,
+        r: f64,
+        pitch: f64,
+        sound: Option<&ClipSound>,
+    ) -> WarpTable {
+        // Spec: warp-modes R17, R29. Each segment reads at the ratio the clip
+        // has where it begins.
         let mut pieces: Vec<Piece> = self
             .plan
-            .stretches(pitch)
+            .stretches_by(|segment| sound.map_or(pitch, |s| s.pitch_at(segment.frame)))
             .into_iter()
             .map(|stretch| Piece {
                 frame: stretch.frame,
@@ -570,6 +620,11 @@ impl Contents {
                 preserve,
                 media.transients,
                 &frame_of,
+                &|frame| {
+                    media.sound.map_or(0.0, |sound| {
+                        sound.value(ClipParam::SampleOffset, frame) * SIXTEENTH as f64
+                    })
+                },
             );
             if stop >= end {
                 break;
@@ -613,6 +668,7 @@ impl Contents {
         preserve: Preserve,
         transients: &[f64],
         frame_of: &dyn Fn(i64) -> f64,
+        offset: &dyn Fn(i64) -> f64,
     ) {
         let ticks = (to - from) as f64;
         if ticks <= 0.0 {
@@ -639,8 +695,11 @@ impl Contents {
         lines.push(to);
         for pair in lines.windows(2) {
             let (a, b) = (pair[0], pair[1]);
-            let position = self.position(beat + (a - from) as f64);
-            let end = self.position(beat + (b - from) as f64);
+            // Spec: warp-modes R30. Sample Offset moves where the segment
+            // is taken from, as it is where the segment begins.
+            let moved = offset(frame_of(a).round() as i64);
+            let position = self.position(beat + (a - from) as f64 + moved);
+            let end = self.position(beat + (b - from) as f64 + moved);
             segments.push(Segment {
                 frame: frame_of(a).round() as i64,
                 until: frame_of(b).round() as i64,
@@ -1300,6 +1359,7 @@ impl WarpScratch {
                 neutral,
                 high_quality: playing.high_quality,
                 beats: plan,
+                transient_envelope: playing.transient_envelope,
                 pitch: playing.pitch,
                 clip: playing.clip_id,
             };
@@ -1415,6 +1475,7 @@ mod tests {
     /// What a Beats clip's plan asks of the media: nothing in these tests.
     fn media() -> BeatsMedia<'static> {
         BeatsMedia {
+            sound: None,
             transients: &[],
             samples: &|| None,
         }

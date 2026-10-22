@@ -58,6 +58,9 @@ pub struct Request<'a> {
     /// A Beats clip's segments and envelope (R14 to R17); empty in every
     /// other mode.
     pub beats: &'a Plan,
+    /// The Transient Envelope this run plays (R16), 0 to 100: the plan's own
+    /// unless the clip's setting is moving.
+    pub transient_envelope: f64,
     /// The pitch ratio (R20). 1.0 where untransposed.
     pub pitch: f64,
     /// The clip whose frames these are, by its ID: a mode that keeps state
@@ -171,7 +174,9 @@ impl WarpMode for Beats {
         for c in 0..window.channels {
             let channel = &mut out[c * stride..c * stride + request.positions.len()];
             for (i, frame) in channel.iter_mut().enumerate() {
-                let level = request.beats.level(request.first + i as i64);
+                let level = request
+                    .beats
+                    .level_with(request.first + i as i64, request.transient_envelope);
                 if level != 1.0 {
                     *frame = (*frame as f64 * level) as f32;
                 }
@@ -228,6 +233,7 @@ mod tests {
             neutral: false,
             high_quality: false,
             beats: &Plan::default(),
+            transient_envelope: 100.0,
             pitch: 1.0,
             clip: 1,
         };
@@ -245,6 +251,7 @@ mod tests {
                 neutral: false,
                 high_quality,
                 beats: &Plan::default(),
+                transient_envelope: 100.0,
                 pitch: 1.0,
                 clip: 1,
             };
@@ -274,6 +281,7 @@ mod tests {
             neutral: true,
             high_quality: true,
             beats: &Plan::default(),
+            transient_envelope: 100.0,
             pitch: 1.0,
             clip: 1,
         };

@@ -25,8 +25,11 @@ fn travel_of<'a>(
 ) -> Option<(Travel<'a>, f64)> {
     let track = document.track(track)?;
     Some(match *target {
-        // A MIDI controller sends messages; it modulates no parameter.
-        AutomationTarget::MidiCc { .. }
+        // A MIDI controller sends messages; it modulates no parameter. A
+        // clip setting's envelope is on its own scale (the warp modes spec,
+        // R29), not a device's modulation travel.
+        AutomationTarget::Clip { .. }
+        | AutomationTarget::MidiCc { .. }
         | AutomationTarget::MidiPitchBend
         | AutomationTarget::MidiChannelPressure => return None,
         AutomationTarget::Mixer {

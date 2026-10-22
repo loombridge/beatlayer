@@ -29,9 +29,9 @@ use bl_engine::{
     Action, MediaMap, NodeKey, ParamValue, ScheduledCommand, SessionCommand, TransportCommand,
 };
 use bl_model::{
-    AudioData, Clip, ClipData, ClipId, Command, ContentHash, CrossfadeAssign, Device, DeviceId,
-    DeviceKind, Editor, ParamId, Preserve, SendTap, TrackId, TrackKind, TransientLoopMode,
-    WarpMarker, WarpMode,
+    AudioData, AutomationTarget, Clip, ClipData, ClipId, ClipParam, Command, ContentHash,
+    CrossfadeAssign, Device, DeviceId, DeviceKind, Editor, EnvelopeKind, ParamId, Preserve,
+    SendTap, TrackId, TrackKind, TransientLoopMode, WarpMarker, WarpMode,
 };
 
 use super::{Fixture, MediaFile, SAMPLE_RATE, Scene};
@@ -347,6 +347,25 @@ pub(super) const FIXTURES: &[Fixture] = &[
         name: "complex-pro-240",
         about: "The same tone in a 240 BPM song, in Complex Pro.",
         build: complex_pro_240,
+    },
+    Fixture {
+        name: "automated-formants",
+        about: "A vowel transposed up five semitones in Complex Pro, the track's automation of \
+                Formants falling from 100 % to 0 over the bar (warp-modes R31, R33).",
+        build: automated_formants,
+    },
+    Fixture {
+        name: "transposition-envelope-beats",
+        about: "The drum loop in Beats, a Transposition clip envelope rising from 0 to 12 \
+                semitones over the bar, each segment read at the ratio it begins with \
+                (warp-modes R17, R29).",
+        build: transposition_envelope_beats,
+    },
+    Fixture {
+        name: "transposition-envelope-tones",
+        about: "The sweep in Tones, a Transposition clip envelope rising from 0 to 7 \
+                semitones over the bar (warp-modes R20, R29).",
+        build: transposition_envelope_tones,
     },
 ];
 
@@ -1587,4 +1606,135 @@ fn complex_pro_180() -> Scene {
 
 fn complex_pro_240() -> Scene {
     complex(240.0, true)
+}
+
+/// A vowel at `f0` Hz: the harmonics of a buzz weighted by two resonances,
+/// as an open "a" has them (formants near 700 and 1,220 Hz), scaled to a peak
+/// of -24 dBFS or so. Made with `libm`'s sine, so it is the same to the bit
+/// on every platform.
+fn vowel(frames: usize, rate: u32, f0: f64) -> Vec<f32> {
+    let weight = |hz: f64| {
+        let bump = |centre: f64, width: f64| 1.0 / (1.0 + ((hz - centre) / width).powi(2));
+        bump(700.0, 130.0) + 0.6 * bump(1_220.0, 90.0)
+    };
+    let harmonics: Vec<(f64, f64)> = (1..)
+        .map(|k| f64::from(k) * f0)
+        .take_while(|hz| *hz < 4_000.0)
+        .map(|hz| (hz, weight(hz)))
+        .collect();
+    let samples: Vec<f64> = (0..frames)
+        .map(|i| {
+            let t = i as f64 / f64::from(rate);
+            harmonics
+                .iter()
+                .map(|&(hz, gain)| gain * libm::sin(hz * t * std::f64::consts::TAU))
+                .sum()
+        })
+        .collect();
+    let peak = samples.iter().fold(0.0f64, |peak, s| peak.max(s.abs()));
+    samples.iter().map(|s| (s / peak * 0.0625) as f32).collect()
+}
+
+/// A warped one-bar clip of `file` (`frames` long, at 120 BPM) in `mode`, at
+/// 120 BPM, with the clip's id.
+fn bar_clip(
+    song: &mut Song,
+    file: ContentHash,
+    frames: usize,
+    mode: WarpMode,
+) -> (TrackId, ClipId) {
+    song.apply(Command::SetTempo {
+        tempo: TempoMap::constant(bpm(120.0)),
+    });
+    let track = song.track(TrackKind::Audio, "Audio", None);
+    let audio = AudioData {
+        warp: true,
+        warp_markers: vec![
+            WarpMarker {
+                time: 0.0,
+                beat: Ticks::ZERO,
+            },
+            WarpMarker {
+                time: frames as f64 / 48_000.0,
+                beat: Ticks::WHOLE,
+            },
+        ],
+        tempo: Some(120.0),
+        warp_mode: mode,
+        ..AudioData::new(file)
+    };
+    let clip = song.audio_clip(track, Ticks::ZERO, Ticks::WHOLE, audio);
+    (track, clip)
+}
+
+/// Spec: warp-modes R31, R33. A vowel a fourth up in Complex Pro, the
+/// track's automation of Formants taking it from 100 % to 0 over the bar.
+fn automated_formants() -> Scene {
+    let mut song = Song::new();
+    let frames = 96_000;
+    let file = song.file("vowel.wav", 48_000, &[vowel(frames, 48_000, 110.0)]);
+    let (track, clip) = bar_clip(&mut song, file, frames, WarpMode::ComplexPro);
+    song.apply(Command::SetClipPitch {
+        clip,
+        transpose: Some(5),
+        detune: None,
+    });
+    for (at, value) in [(Ticks::ZERO, 100.0), (Ticks::WHOLE, 0.0)] {
+        song.apply(Command::SetAutomationBreakpoint {
+            track,
+            target: AutomationTarget::Clip {
+                param: ClipParam::Formants,
+            },
+            at,
+            value,
+        });
+    }
+    let seconds = song.to_last_clip();
+    song.finish(seconds)
+}
+
+/// A Transposition clip envelope rising from 0 to `semitones` over the bar.
+fn transposition_ramp(song: &mut Song, clip: ClipId, semitones: f64) {
+    for (at, value) in [(Ticks::ZERO, 0.0), (Ticks::WHOLE, semitones)] {
+        song.apply(Command::SetClipEnvelopeBreakpoint {
+            clip,
+            target: AutomationTarget::Clip {
+                param: ClipParam::Transpose,
+            },
+            kind: EnvelopeKind::Modulation,
+            at,
+            value,
+        });
+    }
+}
+
+/// Spec: warp-modes R17, R29. The drum loop in Beats under a Transposition
+/// envelope: each segment is read at the ratio the envelope has where it
+/// begins.
+fn transposition_envelope_beats() -> Scene {
+    let mut song = Song::new();
+    let bar = drum_bar();
+    let file = song.file("drums.wav", 48_000, &[bar]);
+    song.media
+        .set_transients(file, (0..8).map(|n| f64::from(n) * 0.25).collect());
+    let (_, clip) = bar_clip(&mut song, file, 96_000, WarpMode::Beats);
+    transposition_ramp(&mut song, clip, 12.0);
+    let seconds = song.to_last_clip();
+    song.finish(seconds)
+}
+
+/// Spec: warp-modes R20, R29. A sweep in Tones under a Transposition
+/// envelope.
+fn transposition_envelope_tones() -> Scene {
+    let mut song = Song::new();
+    let frames = 96_000;
+    let file = song.file(
+        "tone.wav",
+        48_000,
+        &[chirp(frames, 48_000, 220.0, 880.0, 0.0625)],
+    );
+    let (_, clip) = bar_clip(&mut song, file, frames, WarpMode::Tones);
+    transposition_ramp(&mut song, clip, 7.0);
+    let seconds = song.to_last_clip();
+    song.finish(seconds)
 }

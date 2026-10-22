@@ -8,11 +8,12 @@
 use egui::{Color32, FontData, FontDefinitions, FontFamily, FontId, Visuals};
 use serde::Deserialize;
 
-use bl_shell::settings::ThemeChoice;
-
 /// The bundled UI typeface: Inter Regular 3.019, under OFL-1.1
 /// (`fonts/README.md`).
 pub const UI_FONT: &[u8] = include_bytes!("../fonts/inter/Inter-Regular.ttf");
+
+/// The colours in a theme's track palette (themes R9).
+const TRACK_COLOURS: usize = 14;
 
 const DARK: &str = include_str!("../themes/dark.toml");
 const LIGHT: &str = include_str!("../themes/light.toml");
@@ -95,6 +96,9 @@ pub struct Colours {
     /// The tint of every parameter a lit Map button can map, and of the lit
     /// button (WP-5.10).
     pub mapping: Colour,
+    /// The outline of the tracks the search field finds, in the Arrangement,
+    /// the Session View and the mixers (WP-6.42).
+    pub search: Colour,
     /// Track and clip colours, assigned to new tracks in turn.
     pub track_palette: Vec<Colour>,
 }
@@ -134,17 +138,27 @@ impl Theme {
     ///
     /// A message if the file isn't a valid theme.
     pub fn parse(text: &str) -> Result<Self, String> {
-        toml::from_str(text).map_err(|e| format!("not a valid theme: {e}"))
+        let theme: Self = toml::from_str(text).map_err(|e| format!("not a valid theme: {e}"))?;
+        match theme.colors.track_palette.len() {
+            TRACK_COLOURS => Ok(theme),
+            n => Err(format!(
+                "not a valid theme: the track palette has {n} colours, not {TRACK_COLOURS}"
+            )),
+        }
     }
 
-    /// The built-in theme for a choice.
+    /// The bundled theme, Beatlayer, in its dark or light colours.
     #[must_use]
-    pub fn builtin(choice: ThemeChoice) -> Self {
-        let text = match choice {
-            ThemeChoice::Dark => DARK,
-            ThemeChoice::Light => LIGHT,
-        };
-        Self::parse(text).expect("the built-in themes are valid")
+    pub fn bundled(dark: bool) -> Self {
+        Self::parse(if dark { DARK } else { LIGHT }).expect("the bundled themes are valid")
+    }
+
+    /// What the shell's Theme & Colors settings draw, from the bundled
+    /// theme alone; the app reads the User Library's themes too
+    /// ([`crate::theme_library::ThemeLibrary`]).
+    #[must_use]
+    pub fn of(shell: &bl_shell::Shell) -> Self {
+        crate::theme_library::ThemeLibrary::bundled().resolve(shell.look(), shell.theme_dark())
     }
 
     /// A token's colour.
@@ -204,6 +218,13 @@ impl Theme {
 
     /// Applies the theme and the bundled typeface to an egui context.
     pub fn apply(&self, ctx: &egui::Context) {
+        // Pin egui's own theme to this one's, so the system's mode changing
+        // doesn't swap in egui's default colours (themes R3).
+        ctx.set_theme(if self.dark {
+            egui::Theme::Dark
+        } else {
+            egui::Theme::Light
+        });
         ctx.set_visuals(self.visuals());
         ctx.all_styles_mut(|style| {
             for (text_style, font) in &mut style.text_styles {
@@ -254,8 +275,8 @@ mod tests {
 
     #[test]
     fn both_themes_parse_and_differ() {
-        let dark = Theme::builtin(ThemeChoice::Dark);
-        let light = Theme::builtin(ThemeChoice::Light);
+        let dark = Theme::bundled(true);
+        let light = Theme::bundled(false);
         assert!(dark.dark && !light.dark);
         assert_ne!(dark.colors.panel, light.colors.panel);
     }

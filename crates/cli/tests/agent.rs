@@ -1623,6 +1623,116 @@ fn an_agent_binds_keys_and_reads_them_back() {
     assert!(client.into_transport().finish().unwrap().success());
 }
 
+/// An agent searches the commands and the tracks by command ID, and reads
+/// what a person would see: the rows for a text, the tracks found by a name,
+/// by a renamed device's own name inside a nested rack, and by a plug-in's
+/// name. Both are read commands, so a cautious agent runs them without
+/// asking (WP-6.42; the command palette spec, R15 and R16).
+#[test]
+fn an_agent_searches_commands_and_tracks_by_id() {
+    use bl_model::{Chain, ChainId, Device, DeviceId, DeviceKind, PluginFormat, RackKind};
+
+    let mut shell = Shell::headless();
+    let tracks: Vec<TrackId> = shell.editor().document().top_level().collect();
+    shell
+        .run(
+            "track.rename",
+            json!({ "track": tracks[0], "name": "Lead Vocal" }),
+        )
+        .unwrap();
+    shell.edit(|editor| {
+        let rack: DeviceId = editor.new_id();
+        editor
+            .apply(Edit::InsertDevice {
+                track: tracks[1],
+                index: 0,
+                device: Device::rack(rack, RackKind::AudioEffect),
+            })
+            .unwrap();
+        let chain: ChainId = editor.new_id();
+        editor
+            .apply(Edit::AddChain {
+                rack,
+                index: 0,
+                chain: Chain::new(chain, "Chain"),
+            })
+            .unwrap();
+        let inside: DeviceId = editor.new_id();
+        let plug_in = |id, name: &str| {
+            Device::new(
+                id,
+                name,
+                DeviceKind::Plugin {
+                    format: PluginFormat::Clap,
+                    plugin_id: format!("beatlayer.tests.{name}"),
+                },
+            )
+        };
+        editor
+            .apply(Edit::InsertChainDevice {
+                chain,
+                index: 0,
+                device: plug_in(inside, "Auto Filter"),
+            })
+            .unwrap();
+        editor
+            .apply(Edit::RenameDevice {
+                device: inside,
+                name: "Wobble".to_owned(),
+            })
+            .unwrap();
+        let synth: DeviceId = editor.new_id();
+        editor
+            .apply(Edit::InsertDevice {
+                track: tracks[2],
+                index: 0,
+                device: plug_in(synth, "Cool Synth"),
+            })
+            .unwrap();
+    });
+    let mut client = Client::new(InProcess::new(Agent::headless(false), shell));
+    let search = |client: &mut Client<InProcess>, command: &str, text: &str| {
+        let reply = call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": command, "args": { "text": text } }] }),
+        );
+        reply["results"][0]["result"]["rows"].clone()
+    };
+
+    let rows = search(&mut client, "search.commands", "insert midi track");
+    assert_eq!(rows[0]["command"], "track.create", "{rows}");
+    assert_eq!(rows[0]["args"], json!({ "kind": "midi" }), "{rows}");
+    assert_eq!(rows[0]["label"], "Insert MIDI Track");
+    let dup = search(&mut client, "search.commands", "dup");
+    let labels: Vec<&str> = dup
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["label"].as_str().unwrap())
+        .collect();
+    assert!(
+        labels.contains(&"Duplicate Track Without Clips"),
+        "{labels:?}"
+    );
+
+    let by_name = search(&mut client, "search.tracks", "vocal");
+    assert_eq!(by_name[0]["track"], json!(tracks[0]), "{by_name}");
+    assert_eq!(by_name.as_array().unwrap().len(), 1);
+    for text in ["auto filter", "wobble"] {
+        let by_device = search(&mut client, "search.tracks", text);
+        assert_eq!(
+            by_device[0]["track"],
+            json!(tracks[1]),
+            "{text}: {by_device}"
+        );
+        assert_eq!(by_device.as_array().unwrap().len(), 1);
+    }
+    let by_plug_in = search(&mut client, "search.tracks", "cool synth");
+    assert_eq!(by_plug_in[0]["track"], json!(tracks[2]), "{by_plug_in}");
+    assert_eq!(by_plug_in[0]["device"], "Cool Synth");
+}
+
 #[test]
 fn an_autonomous_agent_can_quit_bl_cli_mcp() {
     let mut client = bl_cli_mcp(&["--autonomous"]);
@@ -5634,4 +5744,37 @@ fn an_agent_builds_an_articulation_map_by_command_and_reads_it_back() {
     );
     assert_eq!(found["articulations"][1]["name"], "Staccato");
     assert_eq!(found["articulations"][1]["trigger"]["key"], 36);
+}
+
+// Spec: mixer-view R21. An agent switches the return tracks scrolling with
+// the tracks, and reads the switch back in the mixers' state.
+#[test]
+fn an_agent_scrolls_the_return_tracks_with_the_tracks_and_reads_it_back() {
+    let mut client = Client::new(InProcess::new(Agent::headless(false), Shell::headless()));
+    client.initialize("mixer").unwrap();
+    let run = |client: &mut Client<InProcess>, command: &str, args: Value| {
+        let out = call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": command, "args": args }] }),
+        );
+        out["results"][0]["result"].clone()
+    };
+    // Off in a new install, so the returns stay pinned, as in Live.
+    let state = run(&mut client, "mixer_view.state", json!({}));
+    assert_eq!(state["return_tracks_scroll"], false);
+    // The switch, by command ID.
+    let on = run(
+        &mut client,
+        "mixer_view.return_tracks_scroll",
+        json!({ "on": true }),
+    );
+    assert_eq!(on["return_tracks_scroll"], true);
+    let state = run(&mut client, "mixer_view.state", json!({}));
+    assert_eq!(state["return_tracks_scroll"], true);
+    // It switches, and reads back.
+    let off = run(&mut client, "mixer_view.return_tracks_scroll", json!({}));
+    assert_eq!(off["return_tracks_scroll"], false);
+    let state = run(&mut client, "mixer_view.state", json!({}));
+    assert_eq!(state["return_tracks_scroll"], false);
 }

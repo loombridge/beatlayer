@@ -1,6 +1,6 @@
 # Command search and track search
 
-- **Status:** draft
+- **Status:** implemented (every rule below has a passing test; the choices the spec leaves to the maintainer, such as the item's name and place, the keys, where the field draws, what the Commands scope lists, an empty field, Show Only Matches and what Find Track matches, are the drafts the rules describe, and the decisions on them are still open)
 - **Work packages:** WP-6.42 (R1 to R16: the search field, its Commands scope and its Tracks scope)
 - **Parity-matrix row:** none (Beatlayer's own); [the improvements](../05-improvements.md), IMP-16 (command palette) and IMP-18 (track search)
 - **Checked against:** the Live 12 reference manual (online edition), read 20 October 2026; the Live 12 release notes, 12.0 to 12.4.6; the UI parity reference's [menus.md](../ui-parity/menus.md) (Help, Navigate) and [shortcuts.toml](../ui-parity/shortcuts.toml)
@@ -59,19 +59,19 @@ This spec covers the field, what each scope lists and matches, what Return does,
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1 | to be written in WP-6.42 | |
-| R2 | to be written in WP-6.42 | |
-| R3 | to be written in WP-6.42 | |
-| R4 | to be written in WP-6.42 | |
-| R5 | to be written in WP-6.42 | |
-| R6 | to be written in WP-6.42 | |
-| R7 | to be written in WP-6.42 | |
-| R8 | to be written in WP-6.42 | |
-| R9 | to be written in WP-6.42 | |
-| R10 | to be written in WP-6.42 | |
-| R11 | to be written in WP-6.42 | |
-| R12 | to be written in WP-6.42 | |
-| R13 | to be written in WP-6.42 | |
-| R14 | to be written in WP-6.42 | |
-| R15 | to be written in WP-6.42 | |
-| R16 | to be written in WP-6.42 | |
+| R1 | `crates/ui/tests/search_field.rs`, `the_key_opens_the_field_from_every_part_of_the_window`; `crates/shell/tests/search.rs`, `a_row_shows_the_keymap_s_keys`; `crates/shell/tests/menus.rs`, `every_item_reaches_a_command_or_is_pending` | UI script, unit |
+| R2 | `crates/ui/tests/search_field.rs`, `the_field_keeps_its_place_at_every_zoom`, `typing_and_return_run_a_command_as_one_undo_step_and_close_the_field` | UI script |
+| R3 | `crates/ui/tests/search_field.rs`, `closing_the_field_gives_the_keyboard_back`, `the_arrows_a_click_and_escape`; `crates/shell/tests/search.rs`, `the_field_opens_types_switches_and_closes_without_touching_the_set` | UI script, unit |
+| R4 | `crates/shell/tests/search.rs`, `every_menu_command_and_every_bound_shortcut_is_one_row`, `the_rows_fix_their_arguments_and_leave_out_what_needs_a_value` | unit |
+| R5 | `crates/shell/tests/search.rs`, `a_row_shows_the_keymap_s_keys`; `crates/ui/tests/search_field.rs`, `the_info_view_describes_the_highlighted_row` | unit, UI script |
+| R6 | `crates/shell/src/search.rs`, `labels_come_before_menus_and_menus_before_descriptions`, `every_word_must_match_and_nothing_typed_lists_nothing`; `crates/shell/tests/search.rs`, `a_few_letters_find_and_rank_commands` | unit |
+| R7 | `crates/shell/src/search.rs`, `rows_that_cant_run_come_last`; `crates/shell/tests/search.rs`, `an_unavailable_row_runs_nothing_and_says_so`; `crates/ui/tests/search_field.rs`, `an_unavailable_row_does_nothing_and_says_so` | unit, UI script |
+| R8 | `crates/shell/tests/search.rs`, `return_runs_the_highlighted_row_as_one_undo_step_and_closes_the_field`; `crates/ui/tests/search_field.rs`, `typing_and_return_run_a_command_as_one_undo_step_and_close_the_field`, `the_arrows_a_click_and_escape` | unit, UI script |
+| R9 | `crates/shell/tests/search.rs`, `tracks_are_found_by_name_device_and_plug_in`; `crates/cli/tests/agent.rs`, `an_agent_searches_commands_and_tracks_by_id` | unit, agent API |
+| R10 | `crates/shell/tests/search.rs`, `the_outlines_follow_the_text_the_scope_and_the_set`; `crates/ui/tests/search_field.rs`, `the_matches_are_outlined_in_every_view` | unit, UI script |
+| R11 | `crates/shell/tests/search.rs`, `return_walks_the_matches_and_opens_a_folded_group`; `crates/ui/tests/search_field.rs`, `the_tracks_scope_walks_the_matches_with_return`, `return_scrolls_the_session_view_to_the_track` | unit, UI script |
+| R12 | `crates/shell/tests/search.rs`, `show_only_matches_hides_the_others_until_the_search_ends`, `hidden_tracks_still_play`; `crates/ui/tests/search_field.rs`, `show_only_matches_hides_the_others_in_both_views` | unit, UI script |
+| R13 | `crates/ui/tests/search_field.rs`, `assistive_technology_reads_the_field_the_scopes_and_the_rows`, `tab_reaches_the_scope_buttons_and_the_switch` | UI script |
+| R14 | `crates/ui/tests/search_field.rs`, `the_field_keeps_its_place_at_every_zoom` | UI script |
+| R15 | `crates/shell/tests/search.rs`, `the_field_opens_types_switches_and_closes_without_touching_the_set`, `return_walks_the_matches_and_opens_a_folded_group`; `crates/cli/tests/agent.rs`, `an_agent_searches_commands_and_tracks_by_id` | unit, agent API |
+| R16 | `crates/cli/tests/agent.rs`, `an_agent_searches_commands_and_tracks_by_id`; `crates/shell/tests/search.rs`, `a_few_letters_find_and_rank_commands` | agent API, unit |

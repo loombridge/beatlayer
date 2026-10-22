@@ -69,6 +69,9 @@ pub struct Harness {
     /// the app's windows do.
     pub zoom: f32,
     pub events: Vec<UiEvent>,
+    /// The effects the shell asked the platform for, which the harness has
+    /// no platform to carry out: the save dialog Export asks for, say.
+    pub effects: Vec<Effect>,
     /// Whether the window draws Live's title bar itself, as on macOS (D22).
     pub title_bar: bool,
     /// The transport the engine had published when the last frame began,
@@ -110,11 +113,21 @@ impl Harness {
         harness
     }
 
+    /// A harness whose shell journals the open set's edits in `dir`, as
+    /// the app does at start-up (WP-6.62, the crash-recovery spec, R21),
+    /// and which offers the sets a crash left.
+    pub fn with_recovery(window: Window, dir: std::path::PathBuf) -> Self {
+        let mut shell = Shell::headless();
+        shell.start_audio();
+        shell.use_recovery(dir).unwrap();
+        Self::with_shell(window, shell)
+    }
+
     fn with_shell(window: Window, shell: Shell) -> Self {
         let ctx = Context::default();
         ctx.set_fonts(fonts());
         ctx.enable_accesskit();
-        let theme = Theme::builtin(shell.theme());
+        let theme = Theme::of(&shell);
         theme.apply(&ctx);
         let zoom = shell.zoom();
         apply_zoom(&ctx, zoom);
@@ -141,6 +154,7 @@ impl Harness {
             size,
             zoom,
             events: Vec::new(),
+            effects: Vec::new(),
             title_bar: false,
             engine: bl_shell::audio::EngineTransport::default(),
             menu_bar: None,
@@ -292,6 +306,7 @@ impl Harness {
                 UiEvent::FocusTrack(track) => self.shell.set_focused_track(*track),
                 UiEvent::FocusValue(focused) => self.shell.set_value_focused(*focused),
                 UiEvent::StatusHint(hint) => self.shell.set_hint(hint.clone()),
+                UiEvent::SearchRun(index) => self.shell.search_run_row(*index),
                 UiEvent::ArrangementViewport { width, height } => {
                     self.shell.set_arrangement_viewport(*width, *height);
                 }
@@ -305,6 +320,7 @@ impl Harness {
             self.events.push(event);
         }
         for effect in self.shell.take_effects() {
+            self.effects.push(effect.clone());
             match self.window {
                 Window::Main => self.main.apply_effect(&self.ctx, &effect),
                 Window::Settings => self.settings.apply_effect(&effect),

@@ -17,6 +17,9 @@ bl-devices.workspace = true
 bl-model.workspace = true
 bl-engine.workspace = true
 bl-shell.workspace = true
+# The recovery prompt lists the sets a crash left (WP-6.62, the
+# crash-recovery spec, R22).
+bl-project.workspace = true
 # Waveform peaks for the Arrangement View (WP-1.8a): the layout the shader
 # reads, and the background cache that builds them.
 bl-media.workspace = true

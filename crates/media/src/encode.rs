@@ -867,9 +867,16 @@ impl Mp3Writer {
         self.out.clear();
         self.out
             .reserve(mp3lame_encoder::max_required_buffer_size(frames));
-        self.encoder
-            .encode_to_vec(mp3lame_encoder::InterleavedPcm(samples), &mut self.out)
-            .map_err(|error| error.to_string())?;
+        // LAME reads interleaved samples as pairs, so one channel goes in
+        // as a mono buffer.
+        if self.channels == 1 {
+            self.encoder
+                .encode_to_vec(mp3lame_encoder::MonoPcm(samples), &mut self.out)
+        } else {
+            self.encoder
+                .encode_to_vec(mp3lame_encoder::InterleavedPcm(samples), &mut self.out)
+        }
+        .map_err(|error| error.to_string())?;
         self.file
             .write_all(&self.out)
             .map_err(|error| error.to_string())
@@ -1287,6 +1294,37 @@ mod tests {
             Err(MediaError::Encode(_))
         ));
         assert!(!temp.0.join("three.mp3").exists());
+    }
+
+    /// Spec: export R23, R33. One channel is encoded as one: the file
+    /// decodes to the mono frames written, and holds the signal.
+    #[test]
+    fn a_mono_mp3_decodes_to_the_frames_written() {
+        let temp = TempDir::new("mp3-mono");
+        // An odd number of frames, so a buffer read as pairs would be seen.
+        let samples: Vec<f32> = (0..48_011).map(|n| (n as f32 * 0.05).sin() * 0.5).collect();
+        let path = temp.0.join("mono.mp3");
+        let spec = EncodeSpec {
+            file_type: FileType::Mp3,
+            bit_depth: BitDepth::Int24,
+            dither: Dither::None,
+            sample_rate: 48_000,
+            channels: 1,
+        };
+        let mut writer = AudioWriter::create(&path, spec).unwrap();
+        for chunk in samples.chunks(777) {
+            writer.write(chunk).unwrap();
+        }
+        assert_eq!(writer.finish().unwrap(), 48_011);
+        let decoded = Decoder::open(&path).unwrap().decode_to_end().unwrap();
+        assert_eq!((decoded.channel_count(), decoded.frames()), (1, 48_011));
+        // The signal is there, not a stereo reading of it: the middle of
+        // the decode follows the input.
+        let heard = decoded.channel(0).unwrap();
+        let worst = (10_000..30_000)
+            .map(|n| (heard[n] - samples[n]).abs())
+            .fold(0.0f32, f32::max);
+        assert!(worst < 0.05, "{worst}");
     }
 
     #[test]

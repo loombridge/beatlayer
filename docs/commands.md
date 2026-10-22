@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-661 commands in 42 areas.
+687 commands in 43 areas.
 
 ## Permission classes
 
@@ -353,11 +353,17 @@ Each command has:
 | [`edit.redo`](#editredo) | Redo | `edit` | `Cmd+Shift+Z` | `Ctrl+Y` |
 | [`edit.undo`](#editundo) | Undo | `edit` | `Cmd+Z` | `Ctrl+Z` |
 | [`export.audio`](#exportaudio) | Export Audio | `external` |  |  |
+| [`export.cancel`](#exportcancel) | Cancel Export | `read` |  |  |
+| [`export.close_dialog`](#exportclose_dialog) | Close Export Dialog | `read` |  |  |
+| [`export.open_dialog`](#exportopen_dialog) | Export Audio/Video... | `read` | `Cmd+Shift+R` | `Ctrl+Shift+R` |
 | [`export.realtime.auto_restart`](#exportrealtimeauto_restart) | Set Auto-Restart on Drop-Outs | `edit` |  |  |
 | [`export.realtime.cancel`](#exportrealtimecancel) | Cancel Real-time Rendering | `edit` |  |  |
 | [`export.realtime.restart`](#exportrealtimerestart) | Restart Real-time Rendering | `edit` |  |  |
 | [`export.realtime.skip`](#exportrealtimeskip) | Skip Real-time Rendering Wait | `edit` |  |  |
 | [`export.realtime.status`](#exportrealtimestatus) | Real-time Rendering Status | `read` |  |  |
+| [`export.set_choices`](#exportset_choices) | Set Export Dialog Choices | `read` |  |  |
+| [`export.start`](#exportstart) | Export | `external` |  |  |
+| [`export.status`](#exportstatus) | Export Status | `read` |  |  |
 | [`file_manager.delete_unused`](#file_managerdelete_unused) | Delete Unused Files | `destructive` |  |  |
 | [`file_manager.edit_file`](#file_manageredit_file) | Edit File | `external` |  |  |
 | [`file_manager.hot_swap`](#file_managerhot_swap) | Hot-Swap File | `edit` |  |  |
@@ -435,6 +441,7 @@ Each command has:
 | [`mixer_view.in_out`](#mixer_viewin_out) | Mixer In/Out | `read` | `Cmd+Option+I` | `Ctrl+Alt+I` |
 | [`mixer_view.performance_impact`](#mixer_viewperformance_impact) | Performance Impact | `read` |  |  |
 | [`mixer_view.return_tracks`](#mixer_viewreturn_tracks) | Return Tracks | `read` | `Cmd+Option+R` | `Ctrl+Alt+R` |
+| [`mixer_view.return_tracks_scroll`](#mixer_viewreturn_tracks_scroll) | Return Tracks Scroll with Tracks | `read` |  |  |
 | [`mixer_view.scene_tempo`](#mixer_viewscene_tempo) | Scene Tempo and Time Signature | `read` |  |  |
 | [`mixer_view.scroll`](#mixer_viewscroll) | Scroll Mixer | `read` |  |  |
 | [`mixer_view.sends`](#mixer_viewsends) | Mixer Sends | `read` | `Cmd+Option+S` | `Ctrl+Alt+S` |
@@ -530,6 +537,16 @@ Each command has:
 | [`scene.set_follow_actions`](#sceneset_follow_actions) | Set Scene Follow Actions | `edit` |  |  |
 | [`scene.set_tempo`](#sceneset_tempo) | Set Scene Tempo | `edit` |  |  |
 | [`scene.set_time_signature`](#sceneset_time_signature) | Set Scene Time Signature | `edit` |  |  |
+| [`search.close`](#searchclose) | Close Search | `read` |  |  |
+| [`search.commands`](#searchcommands) | Find Commands | `read` |  |  |
+| [`search.next`](#searchnext) | Search Next | `read` |  |  |
+| [`search.open`](#searchopen) | Search Commands | `read` | `Cmd+Shift+P`; `Cmd+Shift+O` | `Ctrl+Shift+P`; `Ctrl+Shift+O` |
+| [`search.previous`](#searchprevious) | Search Previous | `read` |  |  |
+| [`search.set_only_matches`](#searchset_only_matches) | Show Only Matches | `read` |  |  |
+| [`search.set_scope`](#searchset_scope) | Set Search Scope | `read` |  |  |
+| [`search.set_text`](#searchset_text) | Type in Search | `read` |  |  |
+| [`search.state`](#searchstate) | Search State | `read` |  |  |
+| [`search.tracks`](#searchtracks) | Find Tracks | `read` |  |  |
 | [`session.back_to_arrangement`](#sessionback_to_arrangement) | Back to Arrangement | `read` | `F10` | `F10` |
 | [`session.back_to_arrangement_track`](#sessionback_to_arrangement_track) | Back to Arrangement (Track) | `read` |  |  |
 | [`session.capture_and_insert_scene`](#sessioncapture_and_insert_scene) | Capture and Insert Scene | `edit` | `Cmd+Shift+I` | `Ctrl+Shift+I` |
@@ -571,6 +588,7 @@ Each command has:
 | [`set.discard_recovery`](#setdiscard_recovery) | Discard Recovery | `destructive` |  |  |
 | [`set.import_dawproject`](#setimport_dawproject) | Import DAWproject File | `external` |  |  |
 | [`set.import_report`](#setimport_report) | DAWproject Import Report | `read` |  |  |
+| [`set.later_recovery`](#setlater_recovery) | Later Recovery | `read` |  |  |
 | [`set.list_recoverable`](#setlist_recoverable) | List Recoverable Sets | `read` |  |  |
 | [`set.new`](#setnew) | New Beatlayer Set | `destructive` | `Cmd+N` | `Ctrl+N` |
 | [`set.open`](#setopen) | Open Beatlayer Set... | `external` | `Cmd+O` | `Ctrl+O` |
@@ -584,13 +602,20 @@ Each command has:
 | [`set.save_copy`](#setsave_copy) | Save a Copy... | `external` |  |  |
 | [`settings.next_page`](#settingsnext_page) | Next Settings Page | `read` | `Option+Tab` | `Ctrl+Tab` |
 | [`settings.previous_page`](#settingsprevious_page) | Previous Settings Page | `read` | `Option+Shift+Tab` | `Ctrl+Shift+Tab` |
+| [`settings.set_appearance`](#settingsset_appearance) | Appearance | `edit` |  |  |
 | [`settings.set_auto_hide_plug_in_windows`](#settingsset_auto_hide_plug_in_windows) | Auto-Hide Plug-In Windows | `edit` |  |  |
 | [`settings.set_auto_warp_long_samples`](#settingsset_auto_warp_long_samples) | Auto-Warp Long Samples | `edit` |  |  |
+| [`settings.set_automation_record_mode`](#settingsset_automation_record_mode) | Automation Record Mode | `edit` |  |  |
+| [`settings.set_brightness`](#settingsset_brightness) | Brightness | `edit` |  |  |
+| [`settings.set_color_hue`](#settingsset_color_hue) | Color Hue | `edit` |  |  |
+| [`settings.set_color_intensity`](#settingsset_color_intensity) | Color Intensity | `edit` |  |  |
 | [`settings.set_continuous_save`](#settingsset_continuous_save) | Save Continuously | `edit` |  |  |
 | [`settings.set_create_fades_on_clip_edges`](#settingsset_create_fades_on_clip_edges) | Create Fades on Clip Edges | `edit` |  |  |
 | [`settings.set_default_launch_mode`](#settingsset_default_launch_mode) | Default Launch Mode | `edit` |  |  |
 | [`settings.set_default_launch_quantization`](#settingsset_default_launch_quantization) | Default Launch Quantization | `edit` |  |  |
 | [`settings.set_default_warp_mode`](#settingsset_default_warp_mode) | Default Warp Mode | `edit` |  |  |
+| [`settings.set_grid_line_intensity`](#settingsset_grid_line_intensity) | Grid Line Intensity | `edit` |  |  |
+| [`settings.set_high_contrast`](#settingsset_high_contrast) | High Contrast | `edit` |  |  |
 | [`settings.set_loop_warp_short_samples`](#settingsset_loop_warp_short_samples) | Loop/Warp Short Samples | `edit` |  |  |
 | [`settings.set_outline_view_in_focus`](#settingsset_outline_view_in_focus) | Outline View in Focus | `edit` |  |  |
 | [`settings.set_record_session_automation_in`](#settingsset_record_session_automation_in) | Record Session Automation in | `edit` |  |  |
@@ -600,6 +625,7 @@ Each command has:
 | [`settings.set_start_recording_on_scene_launch`](#settingsset_start_recording_on_scene_launch) | Start Recording on Scene Launch | `edit` |  |  |
 | [`settings.set_temporary_folder`](#settingsset_temporary_folder) | Temporary Folder | `edit` |  |  |
 | [`settings.set_theme`](#settingsset_theme) | Theme | `edit` |  |  |
+| [`settings.set_tone`](#settingsset_tone) | Tone | `edit` |  |  |
 | [`settings.set_warp_recorded_audio`](#settingsset_warp_recorded_audio) | Warp Recorded Audio | `edit` |  |  |
 | [`settings.state`](#settingsstate) | Settings State | `read` |  |  |
 | [`slot.set_stop_button`](#slotset_stop_button) | Add Stop Button | `edit` | `Cmd+E` | `Ctrl+E` |
@@ -6516,7 +6542,7 @@ Result: [`ChangeSet`](#changeset).
 
 **Export Audio**. Permission: `external`. Contexts: `global`.
 
-Renders the set's Main output (what you hear) or individual tracks to audio files, offline and faster than real time, as the File menu's Export Audio/Video does. `path` is the file to write; `bit_depth` (16, 24, or 32) and `sample_rate` are required. `rendered_track` chooses `main` (the default), `all_tracks`, `selected_tracks`, or a single track `{ "track": <id> }`. With an individual track, `include_return_and_main_effects` includes return tracks and Main devices (unavailable for `main`). Multi-track exports write one file per track beside `path`. The file type follows the extension (`.wav`, `.aif`/`.aiff`, `.flac`, `.mp3`; FLAC holds 16 or 24 bits only) or `file_type`. MP3 writes 320 kbps CBR at one of MP3's sample rates, and ignores `bit_depth` and `dither`. `render_as_loop` adds the tail the song leaves after the range's end onto the file's start, so the file loops without a cut tail. The range is `start` and `length` if given, otherwise the Arrangement's time selection, otherwise the whole set from 1.1.1 to the end of the last clip; it plays straight through, without the Arrangement loop. Below 32 bits, `dither` adds `triangular` noise unless told `rectangular` or `none`. `normalize` brings the highest peak to 0 dBFS. A rate below the engine's is rendered at the engine's and converted down. Files are written under temporary names and appear only when complete. Existing files are refused unless `replace` is true. Playback stops first, and plug-in devices render through the plug-ins the engine plays, lent to the export and handed back afterwards. An export whose path runs through external hardware renders in real time, on the running engine, after waiting `wait_seconds` seconds (10 unless given) so the hardware's sound dies away; `auto_restart` (on unless told otherwise) starts it again when a dropout spoils it, up to `max_attempts` times, and with it off the dropouts are listed. Changes nothing in the set.
+Renders the set's Main output (what you hear) or individual tracks to audio files, offline and faster than real time, as the File menu's Export Audio/Video does. `path` is the file to write. `bit_depth` (16, 24, or 32) is 24 and `sample_rate` the engine's rate when left out. `rendered_track` chooses `main` (the default), `all_tracks`, `selected_tracks`, or a single track `{ "track": <id> }`. With an individual track, `include_return_and_main_effects` includes return tracks and Main devices (unavailable for `main`). Multi-track exports write one file per track beside `path`. The file type follows the extension (`.wav`, `.aif`/`.aiff`, `.flac`, `.mp3`; FLAC holds 16 or 24 bits only) or `file_type`. MP3 writes 320 kbps CBR at one of MP3's sample rates, and ignores `bit_depth` and `dither`; `encode_mp3` also writes an MP3 of the same render beside a PCM file. `convert_to_mono` makes each file one channel, the average of left and right, before `normalize` and dither. `create_analysis_file` builds each written file's peaks and analysis into the caches, by the file's content hash, so importing it needs no analysis. The call returns when the export ends; only one export runs at a time, and `export.status` and `export.cancel` read and stop it. `render_as_loop` adds the tail the song leaves after the range's end onto the file's start, so the file loops without a cut tail. The range is `start` and `length` if given, otherwise the Arrangement's time selection, otherwise the whole set from 1.1.1 to the end of the last clip; it plays straight through, without the Arrangement loop. Below 32 bits, `dither` adds `triangular` noise unless told `rectangular` or `none`. `normalize` brings the highest peak to 0 dBFS. A rate below the engine's is rendered at the engine's and converted down. Files are written under temporary names and appear only when complete. Existing files are refused unless `replace` is true. Playback stops first, and plug-in devices render through the plug-ins the engine plays, lent to the export and handed back afterwards. An export whose path runs through external hardware renders in real time, on the running engine, after waiting `wait_seconds` seconds (10 unless given) so the hardware's sound dies away; `auto_restart` (on unless told otherwise) starts it again when a dropout spoils it, up to `max_attempts` times, and with it off the dropouts are listed. Changes nothing in the set.
 
 Default keys: none.
 
@@ -6525,10 +6551,12 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `path` | string | yes | The file to write, absolute or relative to the app's working directory, such as `/Music/Mix.wav`. Its folder must exist. |
-| `bit_depth` | one of `16`, `24`, `32` | yes | Bits per sample: 16 or 24 (integers), or 32 (floating point; WAV and AIFF only). MP3 has no bit depth, so it ignores this. |
-| `sample_rate` | integer from 8000 to 384000 | yes | The file's sample rate in hertz, from 8,000 to 384,000, such as 44100 or 48000. MP3 holds 8,000, 11,025, 12,000, 16,000, 22,050, 24,000, 32,000, 44,100, or 48,000 Hz. |
 | `auto_restart` | boolean or null | no | Whether the render starts again when a dropout spoils it: on unless told otherwise. With it off, the render carries on and the dropouts are listed. |
+| `bit_depth` | one of `16`, `24`, `32` | no | Bits per sample: 16 or 24 (integers), or 32 (floating point; WAV and AIFF only). Left out, 24. MP3 has no bit depth, so it ignores this. |
+| `convert_to_mono` | boolean | no | Convert to Mono: each file holds one channel, the average of the render's left and right, taken before Normalize and dither. An MP3 is written mono too. |
+| `create_analysis_file` | boolean | no | Create Analysis File: once a file is written, build its peaks and its analysis (transients, tempo and beats) and keep them by the file's content hash, where an imported file's are kept, so the file brought into a set needs no analysis. Nothing is written beside the file. |
 | `dither` | [`Dither`](#dither) or null | no | The dither below 32 bits. Left out, `triangular`. MP3 ignores it. |
+| `encode_mp3` | boolean | no | Encode MP3: also write an MP3 of the same render, 320 kbps, beside each PCM file with its name and `.mp3`. With `file_type` `mp3` the MP3 is the only file. |
 | `file_type` | [`FileType`](#filetype) or null | no | The file type. Left out, the path's extension decides: `.wav`; `.aif` or `.aiff`; `.flac`; `.mp3`. Given, it must agree with the extension. |
 | `include_return_and_main_effects` | boolean | no | Include return and Main effects when rendering individual tracks. Unavailable (refused) when `rendered_track` is `main`. |
 | `length` | [`Ticks`](#ticks) or null | no | How long the range is, in ticks (705,600 to the quarter note). Left out, to the end of the time selection, or without one to the end of the set's last clip. |
@@ -6537,10 +6565,51 @@ Arguments:
 | `render_as_loop` | boolean | no | Render as Loop: the song goes on past the range's end as if Stop were pressed there, until the output has stayed below -120 dBFS for 100 ms or 60 s have passed, and that tail is added onto the file's start, wrapping round if it's longer than the range. The file is still exactly the range long. Off unless given. |
 | `rendered_track` | [`RenderedTrack`](#renderedtrack) or null | no | Which track(s) to render: `main` (the default), `all_tracks`, `selected_tracks`, or a single track `{ "track": <id> }`. |
 | `replace` | boolean | no | Replace a file already at `path`. Without it, an existing file is left alone and the export refused. |
+| `sample_rate` | integer or null | no | The file's sample rate in hertz, from 8,000 to 384,000, such as 44100 or 48000. Left out, the engine's rate. MP3 holds 8,000, 11,025, 12,000, 16,000, 22,050, 24,000, 32,000, 44,100, or 48,000 Hz. |
 | `start` | [`Position`](#position) or null | no | Where the range starts. Left out, the start of the Arrangement's time selection, or 1.1.1 without one. |
 | `wait_seconds` | integer or null | no | How long the render waits before it starts, in seconds, so the hardware's last sound dies away: 10 unless given, and longer if the seconds are given. |
 
 Result: [`ExportResult`](#exportresult).
+
+#### `export.cancel`
+
+**Cancel Export**. Permission: `read`. Contexts: `global`.
+
+Stops the export under way, as the progress window's Cancel does. It leaves no file behind, and the destination is as it was. Changes nothing in the set.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`ExportStatus`](#exportstatus).
+
+#### `export.close_dialog`
+
+**Close Export Dialog**. Permission: `read`. Contexts: `global`.
+
+Closes the Export Audio/Video dialog without exporting, as Cancel and Esc do. Changes nothing in the set.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`ExportStatus`](#exportstatus).
+
+#### `export.open_dialog`
+
+**Export Audio/Video...**. Permission: `read`. Contexts: `global`.
+
+Opens the Export Audio/Video dialog, a modal window over the main window, with the choices it kept from the last export (a new install's defaults the first time), and Render Start and Render Length set to the Arrangement's time selection or else the whole set. Call it again with the dialog open after a cancelled save dialog to go on. Returns what `export.status` does. Changes nothing in the set.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-FILE-007 | `Cmd+Shift+R` | `Ctrl+Shift+R` | `global` | Open the audio and video export dialog | runs it |
+
+Arguments: none (send `{}`).
+
+Result: [`ExportStatus`](#exportstatus).
 
 #### `export.realtime.auto_restart`
 
@@ -6605,6 +6674,64 @@ Default keys: none.
 Arguments: none (send `{}`).
 
 Result: [`RealtimeStatus`](#realtimestatus).
+
+#### `export.set_choices`
+
+**Set Export Dialog Choices**. Permission: `read`. Contexts: `global`.
+
+Changes the Export Audio/Video dialog's controls, the ones given and no others, with the dialog open: Rendered Track, Include Return and Main Effects, Render as Loop, Convert to Mono, Normalize, Create Analysis File, Sample Rate, Encode PCM, File Type, Bit Depth, Dither Options, Encode MP3, and Render Start and Render Length. Choosing FLAC with 32 bits chosen sets 24. The choices are the dialog's own until Export sends them: nothing in the set changes and there is no undo step. Returns what `export.status` does.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `bit_depth` | one of `16`, `24`, `32` | no | Bit Depth: 16, 24 or 32. |
+| `convert_to_mono` | boolean or null | no | Convert to Mono. |
+| `create_analysis_file` | boolean or null | no | Create Analysis File. |
+| `dither` | [`Dither`](#dither) or null | no | Dither Options. |
+| `encode_mp3` | boolean or null | no | Encode MP3. |
+| `encode_pcm` | boolean or null | no | Encode PCM. |
+| `file_type` | [`FileType`](#filetype) or null | no | File Type: `wav`, `aiff` or `flac`. |
+| `include_return_and_main_effects` | boolean or null | no | Include Return and Main Effects. |
+| `length` | [`Ticks`](#ticks) or null | no | Render Length, in ticks. |
+| `normalize` | boolean or null | no | Normalize. |
+| `render_as_loop` | boolean or null | no | Render as Loop. |
+| `rendered_track` | [`RenderedTrack`](#renderedtrack) or null | no | Rendered Track. |
+| `sample_rate` | integer or null | no | Sample Rate: one of 22050, 32000, 44100, 48000, 88200, 96000, 176400 and 192000. |
+| `start` | [`Position`](#position) or null | no | Render Start. |
+
+Result: [`ExportStatus`](#exportstatus).
+
+#### `export.start`
+
+**Export**. Permission: `external`. Contexts: `global`.
+
+Exports with the open dialog's choices, as its Export button does. Without `path` the person is asked where to save the file, in a save dialog, and the export starts once they choose; with `path` it starts at once, writing the files `export.audio` would write with the same choices. It returns at once, and the export goes on in the background: read its share with `export.status` and stop it with `export.cancel`. One export runs at a time. The files are written outside the project. Changes nothing in the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `path` | string or null | no | The file to write. Left out, the person is asked where, in a save dialog, and the export starts once they choose. |
+| `replace` | boolean | no | Replace the files already there. |
+
+Result: [`ExportStatus`](#exportstatus).
+
+#### `export.status`
+
+**Export Status**. Permission: `read`. Contexts: `global`.
+
+Whether the Export Audio/Video dialog is open and its choices (each control, Render Start and Render Length, the controls that are disabled and why, and whether Export is enabled), and the export under way if one is: its files and the share rendered, from 0 to 1, across them.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`ExportStatus`](#exportstatus).
 
 ### Area `file_manager`
 
@@ -7898,6 +8025,22 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `shown` | boolean or null | no | Show it (true) or hide it (false); switches it if left out. |
+
+Result: [`MixerViewState`](#mixerviewstate).
+
+#### `mixer_view.return_tracks_scroll`
+
+**Return Tracks Scroll with Tracks**. Permission: `read`. Contexts: `global`.
+
+Scrolls the return tracks with the other tracks, in the Session View's grid, in the Arrangement View's lanes and in both mixers, as View > Mixer Controls > Return Tracks Scroll with Tracks does: the returns come after the drop area and only Main stays pinned at the right. Off in a new install, so the returns stay pinned, as in Live. It is an application setting, kept between launches and not saved with the set. Switches unless `on` says which. Changes only the view.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean or null | no | Scroll the return tracks with the tracks (true) or pin them (false); switches it if left out. |
 
 Result: [`MixerViewState`](#mixerviewstate).
 
@@ -9621,6 +9764,157 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+### Area `search`
+
+#### `search.close`
+
+**Close Search**. Permission: `read`. Contexts: `global`, `text-field`.
+
+Closes the search field, removes the track outlines and shows every track again. Changes nothing in the set.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`SearchState`](#searchstate).
+
+#### `search.commands`
+
+**Find Commands**. Permission: `read`. Contexts: `global`.
+
+The rows the Commands scope lists for `text`, in the order it lists them: every command a menu item, a context-menu item or a shortcut runs, once, with the arguments that item fixes, its label, the menu or context it belongs to, the keys bound to it now and whether it can run now. A word matches when it starts a word of the label or the menu, or appears in the command's description; rows that can't run now come last. Works with the field closed, and runs nothing: run a row by running its `command` with its `args`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `text` | string | yes | What was typed. |
+
+Result: [`CommandRows`](#commandrows).
+
+#### `search.next`
+
+**Search Next**. Permission: `read`. Contexts: `global`, `text-field`.
+
+In the Tracks scope, selects the next matching track after the selected one in display order (the first when none is selected, wrapping from the last), as clicking its title bar would, and scrolls the view in front to it, unfolding any group that holds it: Return in the field. In the Commands scope, moves the highlight down a row, wrapping. Changes nothing in the set.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`SearchState`](#searchstate).
+
+#### `search.open`
+
+**Search Commands**. Permission: `read`. Contexts: `global`, `text-field`.
+
+Opens the search field over the main view with the text empty, on the Commands scope (`commands`: the commands a menu item, a context-menu item or a shortcut runs) or the Tracks scope (`tracks`: tracks found by their name or by the name of a device on them). Help > Search Commands... and Cmd-Shift-P (Ctrl-Shift-P) open the first; Navigate > Find Track and Cmd-Shift-O (Ctrl-Shift-O) the second. With the field open it switches the scope and keeps the text. The field is view state: it isn't saved in the set and it isn't an undo step.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-MENU-007 | `Cmd+Shift+P` | `Ctrl+Shift+P` | `global` | Open the command search | fixes `scope` = `"commands"` |
+| S-FOCUS-015 | `Cmd+Shift+O` | `Ctrl+Shift+O` | `global` | Open the track search | fixes `scope` = `"tracks"` |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `scope` | [`SearchScope`](#searchscope) | yes | `commands` or `tracks`. |
+
+Result: [`SearchState`](#searchstate).
+
+#### `search.previous`
+
+**Search Previous**. Permission: `read`. Contexts: `global`, `text-field`.
+
+The reverse of `search.next`: in the Tracks scope, selects the previous matching track (Shift-Return in the field); in the Commands scope, moves the highlight up a row, wrapping. Changes nothing in the set.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`SearchState`](#searchstate).
+
+#### `search.set_only_matches`
+
+**Show Only Matches**. Permission: `read`. Contexts: `global`, `text-field`.
+
+Switches Show Only Matches in the Tracks scope. While it's on and the text matches a track, the Arrangement's lanes, the Session View's columns and both mixers show only the matching tracks, the groups that hold them unfolded, and Main. The other tracks play, record and take edits as before. It's view state that ends with the search: it is off each time the field opens.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean | yes | Whether the setting is on. |
+
+Result: [`SearchState`](#searchstate).
+
+#### `search.set_scope`
+
+**Set Search Scope**. Permission: `read`. Contexts: `global`, `text-field`.
+
+Switches the open search field to the Commands or the Tracks scope and keeps its text. Changes nothing in the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `scope` | [`SearchScope`](#searchscope) | yes | `commands` or `tracks`. |
+
+Result: [`SearchState`](#searchstate).
+
+#### `search.set_text`
+
+**Type in Search**. Permission: `read`. Contexts: `global`, `text-field`.
+
+Sets the text of the open search field, as typing does. The Commands scope then lists the rows `search.commands` gives for it, with the first highlighted; the Tracks scope outlines the tracks `search.tracks` gives. Changes nothing in the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `text` | string | yes | What was typed. |
+
+Result: [`SearchState`](#searchstate).
+
+#### `search.state`
+
+**Search State**. Permission: `read`. Contexts: `global`.
+
+What the search field shows: whether it is open, its scope, its text, the highlighted row, whether Show Only Matches is on, and the rows it lists, each with its command ID and the arguments it fixes, or its track ID.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`SearchState`](#searchstate).
+
+#### `search.tracks`
+
+**Find Tracks**. Permission: `read`. Contexts: `global`.
+
+The tracks the Tracks scope lists for `text`, in display order: those with the text, ignoring case, in their name or in the name or own name of a device on them at any depth, plug-ins included. Each row says whether the track's name matched and which device did. Works with the field closed, and changes nothing.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `text` | string | yes | What was typed. |
+
+Result: [`TrackRows`](#trackrows).
+
 ### Area `session`
 
 #### `session.back_to_arrangement`
@@ -10293,6 +10587,18 @@ Arguments: none (send `{}`).
 
 Result: [`ImportReport`](#importreport).
 
+#### `set.later_recovery`
+
+**Later Recovery**. Permission: `read`. Contexts: `global`.
+
+Closes the recovery prompt the app shows at launch, leaving every set it listed to be offered again at the next launch: nothing is recovered and nothing is thrown away. The prompt's Later button runs it, and Esc does the same. Changes nothing in the set.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`RecoveryPrompt`](#recoveryprompt).
+
 #### `set.list_recoverable`
 
 **List Recoverable Sets**. Permission: `read`. Contexts: `global`.
@@ -10510,6 +10816,22 @@ Arguments: none (send `{}`).
 
 Result: nothing (`null`).
 
+#### `settings.set_appearance`
+
+**Appearance**. Permission: `edit`. Contexts: `settings`.
+
+Draws the theme in its light or dark colours, or follows the operating system's mode while Beatlayer runs (`follow-system`); a new install draws dark. Kept for the next start; changes nothing in the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `appearance` | [`Appearance`](#appearance) | yes | `light`, `dark` or `follow-system`. |
+
+Result: nothing (`null`).
+
 #### `settings.set_auto_hide_plug_in_windows`
 
 **Auto-Hide Plug-In Windows**. Permission: `edit`. Contexts: `settings`.
@@ -10541,6 +10863,70 @@ Arguments:
 | `on` | boolean | yes | Whether the setting is on. |
 
 Result: [`SwitchResult`](#switchresult).
+
+#### `settings.set_automation_record_mode`
+
+**Automation Record Mode**. Permission: `edit`. Contexts: `settings`.
+
+Chooses the mode an Arrangement recording writes control moves in, the one the Control Bar's Automation Arm button's context menu chooses: `touch` (the default, Live's) writes a control's values while it is held, `latch` holds the last value a control was moved to until the recording stops, and `write` writes a moved control's envelope from where the recording started. A Session recording is unaffected. The mode is kept for the next start, and isn't part of the set or an undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `mode` | [`AutomationRecordMode`](#automationrecordmode) | yes | `touch`, `latch` or `write`. |
+
+Result: nothing (`null`).
+
+#### `settings.set_brightness`
+
+**Brightness**. Permission: `edit`. Contexts: `settings`.
+
+Adds points of lightness to every background colour, from -50 to 50; 0 is the default. Chromatic colours and the track palette don't change. Kept for the next start; changes nothing in the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `value` | integer from -50 to 50 | yes | Points of lightness added to the backgrounds, from -50 to 50. |
+
+Result: nothing (`null`).
+
+#### `settings.set_color_hue`
+
+**Color Hue**. Permission: `edit`. Contexts: `settings`.
+
+Turns the hue of the interface's chromatic colours by this many degrees, from -180 to 180 in steps of 5; 0 is the default. Backgrounds and the track palette don't change. Kept for the next start; changes nothing in the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `degrees` | integer from -180 to 180 | yes | Degrees the interface's colours are turned, from -180 to 180. |
+
+Result: nothing (`null`).
+
+#### `settings.set_color_intensity`
+
+**Color Intensity**. Permission: `edit`. Contexts: `settings`.
+
+Multiplies the chroma of the interface's chromatic colours, from 0 to 200 percent in steps of 5; 100 is the default. Backgrounds and the track palette don't change. Kept for the next start; changes nothing in the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `percent` | integer from 0 to 200 | yes | A whole percentage from 0 to 200, in steps of 5. |
+
+Result: nothing (`null`).
 
 #### `settings.set_continuous_save`
 
@@ -10619,6 +11005,38 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `mode` | [`DefaultWarpMode`](#defaultwarpmode) | yes | The warp mode a new warped clip takes. |
+
+Result: nothing (`null`).
+
+#### `settings.set_grid_line_intensity`
+
+**Grid Line Intensity**. Permission: `edit`. Contexts: `settings`.
+
+Sets how strong the grid lines of the Arrangement, the Clip View's editors and the automation lanes are, from 0 to 200 percent in steps of 5; 100, the default, draws the theme's grid colour, 0 shows no line. Kept for the next start; changes nothing in the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `percent` | integer from 0 to 200 | yes | A whole percentage from 0 to 200, in steps of 5. |
+
+Result: nothing (`null`).
+
+#### `settings.set_high_contrast`
+
+**High Contrast**. Permission: `edit`. Contexts: `settings`.
+
+Switches High Contrast, off in a new install. On, text stands at a contrast ratio of at least 7:1 against its background, dimmed text at 4.5:1, and separators, outlines and the focus ring at 3:1, whatever the other Theme & Colors settings are. Kept for the next start; changes nothing in the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean | yes | Whether the setting is on. |
 
 Result: nothing (`null`).
 
@@ -10754,7 +11172,7 @@ Result: [`TemporaryFolderResult`](#temporaryfolderresult).
 
 **Theme**. Permission: `edit`. Contexts: `settings`.
 
-Chooses Beatlayer's dark or light theme, which every window uses straight away. The choice is kept for the next start. Changes nothing in the set.
+Chooses the theme every window draws, by its name: Beatlayer, or a theme from the User Library's Themes folder; `settings.state` lists them in `theme_colors.themes`. `dark` and `light`, which earlier versions took, set the Appearance instead. The choice is kept for the next start, and a theme that can't be read is drawn as Beatlayer. Changes nothing in the set.
 
 Default keys: none.
 
@@ -10762,7 +11180,23 @@ Arguments:
 
 | Name | Type | Required | Description |
 |---|---|---|---|
-| `theme` | [`ThemeChoice`](#themechoice) | yes | The theme. |
+| `theme` | string | yes | A theme's name, as `settings.state`'s `theme_colors.themes` lists it. `dark` and `light`, which earlier versions took, set the Appearance instead. |
+
+Result: nothing (`null`).
+
+#### `settings.set_tone`
+
+**Tone**. Permission: `edit`. Contexts: `settings`.
+
+Tints the theme's neutral colours warm or cool, or leaves them as the theme gives them (`neutral`, the default); the chromatic colours aren't toned. Kept for the next start; changes nothing in the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `tone` | [`Tone`](#tone) | yes | `neutral`, `warm` or `cool`. |
 
 Result: nothing (`null`).
 
@@ -10786,7 +11220,7 @@ Result: [`SwitchResult`](#switchresult).
 
 **Settings State**. Permission: `read`. Contexts: `global`.
 
-Reports every preference the Settings window shows with a value, by page, in the form its own command takes it: the theme (`settings.set_theme`), Display & Input (zoom, Outline View in Focus, the Tab key settings), the audio device settings with Driver Error Compensation and the test tone (`audio.configure`, `audio.set_test_tone`), the MIDI ports and computer keyboard (`midi.set_port`), Create Fades on Clip Edges, Warp Recorded Audio, the Launch section, Auto-Hide Plug-In Windows, the plug-ins the Browser hides and prefers (`plugin.settings`), the agent server and the assistant. The server's and the agents' tokens and the assistant's API key are never reported, only whether one is stored. Preferences aren't saved with the set. Changes nothing. Use it to check a `settings.set_*` command took effect.
+Reports every preference the Settings window shows with a value, by page, in the form its own command takes it: Theme & Colors (`settings.set_theme`), Display & Input (zoom, Outline View in Focus, the Tab key settings), the audio device settings with Driver Error Compensation and the test tone (`audio.configure`, `audio.set_test_tone`), the MIDI ports and computer keyboard (`midi.set_port`), Create Fades on Clip Edges, Warp Recorded Audio, the Launch section, the automation recording mode (`settings.set_automation_record_mode`), the File & Folder page's Temporary Folder, sample editor and Save Continuously (`settings.set_temporary_folder`, `settings.set_sample_editor` and `settings.set_continuous_save`), Auto-Hide Plug-In Windows, the plug-ins the Browser hides and prefers (`plugin.settings`), the agent server and the assistant. The server's and the agents' tokens and the assistant's API key are never reported, only whether one is stored. Preferences aren't saved with the set. Changes nothing. Use it to check a `settings.set_*` command took effect.
 
 Default keys: none.
 
@@ -11868,7 +12302,7 @@ Result: nothing (`null`).
 
 **Transport Status**. Permission: `read`. Contexts: `global`.
 
-Reports what the Control Bar's transport section shows: whether the song plays, the play position and the insert marker (in ticks from 1.1.1, and the Arrangement Position fields' bar.beat.sixteenth), the Arrangement loop's start, length, and switch, the tempo, and the time signature, the metronome, Arrangement Record and whether a take is running or the count-in is sounding, Punch-In and Punch-Out, MIDI Arrangement Overdub, Automation Arm, the recording under way (its armed tracks and dropped frames) and what the last recording came to, and whether the audio engine runs so the transport can play. Every `transport.set_*` setting reads back here. Changes nothing. Use it to check where the song is before and after `transport.play`, `transport.stop`, `transport.locate`, or `transport.set_loop`.
+Reports what the Control Bar's transport section shows: whether the song plays, the play position and the insert marker (in ticks from 1.1.1, and the Arrangement Position fields' bar.beat.sixteenth), the Arrangement loop's start, length, and switch, the tempo, and the time signature, the metronome, Arrangement Record and whether a take is running or the count-in is sounding, Punch-In and Punch-Out, MIDI Arrangement Overdub, Automation Arm and the mode an Arrangement recording writes control moves in, the recording under way (its armed tracks and dropped frames) and what the last recording came to, and whether the audio engine runs so the transport can play. Every `transport.set_*` setting reads back here. Changes nothing. Use it to check where the song is before and after `transport.play`, `transport.stop`, `transport.locate`, or `transport.set_loop`.
 
 Default keys: none.
 
@@ -12492,6 +12926,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`export.realtime.cancel`](#exportrealtimecancel) | `export.realtime.status` | `phase` |
 | [`export.realtime.restart`](#exportrealtimerestart) | `export.realtime.status` | `phase` |
 | [`export.realtime.skip`](#exportrealtimeskip) | `export.realtime.status` | `phase` |
+| [`export.start`](#exportstart) | `export.status` | `export` |
 | [`file_manager.edit_file`](#file_manageredit_file) | the query tool's `clip` | `data.audio.media` |
 | [`file_manager.replace_file`](#file_managerreplace_file) | the query tool's `clip` | `data.audio.media` |
 | [`groove.add`](#grooveadd) | the query tool's `song` | `settings.grooves` |
@@ -12629,12 +13064,20 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`set.recover`](#setrecover) | the query tool's `song` | `set.path` |
 | [`set.save`](#setsave) | the query tool's `song` | `set.unsaved_changes` |
 | [`set.save_as`](#setsave_as) | the query tool's `song` | `set.path` |
+| [`settings.set_appearance`](#settingsset_appearance) | `settings.state` | `theme_colors.appearance` |
 | [`settings.set_auto_hide_plug_in_windows`](#settingsset_auto_hide_plug_in_windows) | `settings.state` | `auto_hide_plug_in_windows` |
 | [`settings.set_auto_warp_long_samples`](#settingsset_auto_warp_long_samples) | `settings.state` | `warp.auto_warp_long_samples` |
+| [`settings.set_automation_record_mode`](#settingsset_automation_record_mode) | `settings.state` | `automation_record_mode` |
+| [`settings.set_brightness`](#settingsset_brightness) | `settings.state` | `theme_colors.brightness` |
+| [`settings.set_color_hue`](#settingsset_color_hue) | `settings.state` | `theme_colors.color_hue` |
+| [`settings.set_color_intensity`](#settingsset_color_intensity) | `settings.state` | `theme_colors.color_intensity` |
+| [`settings.set_continuous_save`](#settingsset_continuous_save) | `settings.state` | `file_folder.save_continuously` |
 | [`settings.set_create_fades_on_clip_edges`](#settingsset_create_fades_on_clip_edges) | `settings.state` | `create_fades_on_clip_edges` |
 | [`settings.set_default_launch_mode`](#settingsset_default_launch_mode) | `settings.state` | `launch.default_mode` |
 | [`settings.set_default_launch_quantization`](#settingsset_default_launch_quantization) | `settings.state` | `launch.default_quantization` |
 | [`settings.set_default_warp_mode`](#settingsset_default_warp_mode) | `settings.state` | `warp.default_warp_mode` |
+| [`settings.set_grid_line_intensity`](#settingsset_grid_line_intensity) | `settings.state` | `theme_colors.grid_line_intensity` |
+| [`settings.set_high_contrast`](#settingsset_high_contrast) | `settings.state` | `theme_colors.high_contrast` |
 | [`settings.set_loop_warp_short_samples`](#settingsset_loop_warp_short_samples) | `settings.state` | `warp.loop_warp_short_samples` |
 | [`settings.set_outline_view_in_focus`](#settingsset_outline_view_in_focus) | `settings.state` | `display_input.outline_view_in_focus` |
 | [`settings.set_record_session_automation_in`](#settingsset_record_session_automation_in) | `settings.state` | `record_session_automation_in` |
@@ -12643,7 +13086,8 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`settings.set_select_on_launch`](#settingsset_select_on_launch) | `settings.state` | `launch.select_on_launch` |
 | [`settings.set_start_recording_on_scene_launch`](#settingsset_start_recording_on_scene_launch) | `settings.state` | `launch.start_recording_on_scene_launch` |
 | [`settings.set_temporary_folder`](#settingsset_temporary_folder) | `settings.state` | `file_folder.temporary_folder` |
-| [`settings.set_theme`](#settingsset_theme) | `settings.state` | `theme` |
+| [`settings.set_theme`](#settingsset_theme) | `settings.state` | `theme_colors.theme` |
+| [`settings.set_tone`](#settingsset_tone) | `settings.state` | `theme_colors.tone` |
 | [`settings.set_warp_recorded_audio`](#settingsset_warp_recorded_audio) | `settings.state` | `warp_recorded_audio` |
 | [`slot.set_stop_button`](#slotset_stop_button) | the query tool's `track` | `removed_stop_buttons` |
 | [`song.add_locator`](#songadd_locator) | the query tool's `song` | `settings.locators` |
@@ -12747,7 +13191,6 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`set.save_as_default`](#setsave_as_default) | writes a file outside the set; the set doesn't change |
 | [`set.save_as_template`](#setsave_as_template) | writes a file outside the set; the set doesn't change |
 | [`set.save_copy`](#setsave_copy) | writes a file outside the set; the set doesn't change |
-| [`settings.set_continuous_save`](#settingsset_continuous_save) | the app doesn't host the autosave service yet, so no read command reports Save Continuously; the command's own result does |
 
 ## Types
 
@@ -13095,6 +13538,43 @@ What `perception.analyze` returns. A measure not asked for is null.
     "transients"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `Appearance`
+
+Which of a theme's two sets of colours is drawn (themes R3).
+
+One of:
+
+- `"light"`: Dark text on light panels.
+- `"dark"`: Light text on dark panels, the default.
+- `"follow-system"`: The operating system's mode, light or dark, as it changes.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Which of a theme's two sets of colours is drawn (themes R3).",
+  "oneOf": [
+    {
+      "const": "light",
+      "description": "Dark text on light panels.",
+      "type": "string"
+    },
+    {
+      "const": "dark",
+      "description": "Light text on dark panels, the default.",
+      "type": "string"
+    },
+    {
+      "const": "follow-system",
+      "description": "The operating system's mode, light or dark, as it changes.",
+      "type": "string"
+    }
+  ]
 }
 ```
 
@@ -14393,6 +14873,43 @@ One track's automation lane and the parameter it shows, as `arrangement.show_aut
     "target"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `AutomationRecordMode`
+
+The mode an Arrangement recording writes its control moves in (the automation spec, R18): Touch, Live's; Latch; and Write (IMP-23). The names are Beatlayer's own.
+
+One of:
+
+- `"touch"`: Touch, Live's mode: a control writes its values while it is held.
+- `"latch"`: Latch: the last value a control was moved to holds until the recording stops.
+- `"write"`: Write: a control's envelope is written from where the recording started.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The mode an Arrangement recording writes its control moves in (the automation spec, R18): Touch, Live's; Latch; and Write (IMP-23). The names are Beatlayer's own.",
+  "oneOf": [
+    {
+      "const": "touch",
+      "description": "Touch, Live's mode: a control writes its values while it is held.",
+      "type": "string"
+    },
+    {
+      "const": "latch",
+      "description": "Latch: the last value a control was moved to holds until the recording stops.",
+      "type": "string"
+    },
+    {
+      "const": "write",
+      "description": "Write: a control's envelope is written from where the recording started.",
+      "type": "string"
+    }
+  ]
 }
 ```
 
@@ -17201,6 +17718,97 @@ What `view.close_plug_in_windows` returns: how many editor windows it closed.
 
 </details>
 
+### `CommandRow`
+
+A row the Commands scope lists (R4 and R5).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `command` | string | yes | The command the row runs, by its ID. |
+| `label` | string | yes | The item's label as the menu shows it, or the shortcut's action. |
+| `menu` | string | yes | The menu or context the row belongs to, such as `Edit` or `View ▸ Mixer Controls`. |
+| `available` | boolean | yes | Whether it can run now (R7). |
+| `args` | object | no | The arguments the row fixes. |
+| `keys` | array of string | no | The keys the keymap binds to it now, as the shortcut reference writes them. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A row the Commands scope lists (R4 and R5).",
+  "properties": {
+    "args": {
+      "additionalProperties": true,
+      "description": "The arguments the row fixes.",
+      "type": "object"
+    },
+    "available": {
+      "description": "Whether it can run now (R7).",
+      "type": "boolean"
+    },
+    "command": {
+      "description": "The command the row runs, by its ID.",
+      "type": "string"
+    },
+    "keys": {
+      "description": "The keys the keymap binds to it now, as the shortcut reference writes them.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "label": {
+      "description": "The item's label as the menu shows it, or the shortcut's action.",
+      "type": "string"
+    },
+    "menu": {
+      "description": "The menu or context the row belongs to, such as `Edit` or `View ▸ Mixer Controls`.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "command",
+    "label",
+    "menu",
+    "available"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `CommandRows`
+
+What `search.commands` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `rows` | array of [`CommandRow`](#commandrow) | yes | The rows, in the order the list shows them. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `search.commands` returns.",
+  "properties": {
+    "rows": {
+      "description": "The rows, in the order the list shows them.",
+      "items": {
+        "$ref": "#/$defs/CommandRow"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "rows"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `ComplexProSettings`
 
 Complex Pro's controls.
@@ -19430,6 +20038,40 @@ One of:
 
 </details>
 
+### `Disabled`
+
+A control the dialog draws disabled, and why (R30 to R38, R45).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `control` | string | yes | The control, by its label. |
+| `reason` | string | yes | The reason the dialog gives. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A control the dialog draws disabled, and why (R30 to R38, R45).",
+  "properties": {
+    "control": {
+      "description": "The control, by its label.",
+      "type": "string"
+    },
+    "reason": {
+      "description": "The reason the dialog gives.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "control",
+    "reason"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `DiscardedRecovery`
 
 What `set.discard_recovery` returns.
@@ -20353,6 +20995,183 @@ One of:
 
 </details>
 
+### `ExportChoices`
+
+The Export Audio/Video dialog's controls, as the export spec's R29 to R37 list them, with a new install's values as their defaults. Render Start and Render Length aren't here: they're the dialog's alone (R39). The Video section has no choices, since it is drawn disabled (R38).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `rendered_track` | [`RenderedTrack`](#renderedtrack) | yes | Rendered Track. |
+| `include_return_and_main_effects` | boolean | yes | Include Return and Main Effects. |
+| `render_as_loop` | boolean | yes | Render as Loop. |
+| `convert_to_mono` | boolean | yes | Convert to Mono. |
+| `normalize` | boolean | yes | Normalize. |
+| `create_analysis_file` | boolean | yes | Create Analysis File. |
+| `sample_rate` | integer or null | yes | Sample Rate; none in a new install, when it shows the engine's rate if the list holds it, and 48,000 Hz otherwise (R35). |
+| `encode_pcm` | boolean | yes | Encode PCM. |
+| `file_type` | [`FileType`](#filetype) | yes | File Type: WAV, AIFF or FLAC (MP3 is Encode MP3's). |
+| `bit_depth` | integer from 0 to 255 | yes | Bit Depth. |
+| `dither` | [`Dither`](#dither) | yes | Dither Options. |
+| `encode_mp3` | boolean | yes | Encode MP3. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The Export Audio/Video dialog's controls, as the export spec's R29 to R37 list them, with a new install's values as their defaults. Render Start and Render Length aren't here: they're the dialog's alone (R39). The Video section has no choices, since it is drawn disabled (R38).",
+  "properties": {
+    "bit_depth": {
+      "default": 24,
+      "description": "Bit Depth.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "convert_to_mono": {
+      "default": false,
+      "description": "Convert to Mono.",
+      "type": "boolean"
+    },
+    "create_analysis_file": {
+      "default": false,
+      "description": "Create Analysis File.",
+      "type": "boolean"
+    },
+    "dither": {
+      "$ref": "#/$defs/Dither",
+      "default": "triangular",
+      "description": "Dither Options."
+    },
+    "encode_mp3": {
+      "default": false,
+      "description": "Encode MP3.",
+      "type": "boolean"
+    },
+    "encode_pcm": {
+      "default": true,
+      "description": "Encode PCM.",
+      "type": "boolean"
+    },
+    "file_type": {
+      "$ref": "#/$defs/FileType",
+      "default": "wav",
+      "description": "File Type: WAV, AIFF or FLAC (MP3 is Encode MP3's)."
+    },
+    "include_return_and_main_effects": {
+      "default": false,
+      "description": "Include Return and Main Effects.",
+      "type": "boolean"
+    },
+    "normalize": {
+      "default": false,
+      "description": "Normalize.",
+      "type": "boolean"
+    },
+    "render_as_loop": {
+      "default": false,
+      "description": "Render as Loop.",
+      "type": "boolean"
+    },
+    "rendered_track": {
+      "$ref": "#/$defs/RenderedTrack",
+      "default": "main",
+      "description": "Rendered Track."
+    },
+    "sample_rate": {
+      "default": null,
+      "description": "Sample Rate; none in a new install, when it shows the engine's rate if the list holds it, and 48,000 Hz otherwise (R35).",
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "rendered_track",
+    "include_return_and_main_effects",
+    "render_as_loop",
+    "convert_to_mono",
+    "normalize",
+    "create_analysis_file",
+    "sample_rate",
+    "encode_pcm",
+    "file_type",
+    "bit_depth",
+    "dither",
+    "encode_mp3"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ExportDialogStatus`
+
+The open dialog, as `export.status` reports it (R44).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `choices` | [`ExportChoices`](#exportchoices) | yes | The controls, with Sample Rate as shown. |
+| `start` | [`Ticks`](#ticks) | yes | Render Start, in ticks from 1.1.1. |
+| `length` | [`Ticks`](#ticks) | yes | Render Length, in ticks. |
+| `can_export` | boolean | yes | Whether Export is enabled. |
+| `disabled` | array of [`Disabled`](#disabled) | yes | The controls drawn disabled, with their reasons. |
+| `reason` | string or null | no | Why Export is disabled. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The open dialog, as `export.status` reports it (R44).",
+  "properties": {
+    "can_export": {
+      "description": "Whether Export is enabled.",
+      "type": "boolean"
+    },
+    "choices": {
+      "$ref": "#/$defs/ExportChoices",
+      "description": "The controls, with Sample Rate as shown."
+    },
+    "disabled": {
+      "description": "The controls drawn disabled, with their reasons.",
+      "items": {
+        "$ref": "#/$defs/Disabled"
+      },
+      "type": "array"
+    },
+    "length": {
+      "$ref": "#/$defs/Ticks",
+      "description": "Render Length, in ticks."
+    },
+    "reason": {
+      "description": "Why Export is disabled.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "start": {
+      "$ref": "#/$defs/Ticks",
+      "description": "Render Start, in ticks from 1.1.1."
+    }
+  },
+  "required": [
+    "choices",
+    "start",
+    "length",
+    "can_export",
+    "disabled"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `ExportResult`
 
 What `export.audio` returns.
@@ -20533,6 +21352,54 @@ What `export.audio` returns.
     "missing_media",
     "real_time",
     "attempts"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ExportStatus`
+
+What `export.status` returns (R44).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `dialog` | [`ExportDialogStatus`](#exportdialogstatus) or null | yes | The dialog, while it's open. |
+| `export` | [`RunningStatus`](#runningstatus) or null | yes | The export under way, if one is. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `export.status` returns (R44).",
+  "properties": {
+    "dialog": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ExportDialogStatus"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The dialog, while it's open."
+    },
+    "export": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RunningStatus"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The export under way, if one is."
+    }
+  },
+  "required": [
+    "dialog",
+    "export"
   ],
   "type": "object"
 }
@@ -20940,6 +21807,7 @@ File & Folder's settings in `settings.state`.
 |---|---|---|---|
 | `temporary_folder` | string | yes | The Temporary Folder in use: the setting, or the default. |
 | `sample_editor` | string | yes | The sample editor the Edit button in the Clip View's Audio Utilities panel opens a clip's file in: its path, empty when none is named. |
+| `save_continuously` | boolean | yes | Save Continuously: whether every finished edit of a set that has a file is saved within a second, as `settings.set_continuous_save` sets it. |
 
 <details><summary>JSON Schema</summary>
 
@@ -20951,6 +21819,10 @@ File & Folder's settings in `settings.state`.
       "description": "The sample editor the Edit button in the Clip View's Audio Utilities panel opens a clip's file in: its path, empty when none is named.",
       "type": "string"
     },
+    "save_continuously": {
+      "description": "Save Continuously: whether every finished edit of a set that has a file is saved within a second, as `settings.set_continuous_save` sets it.",
+      "type": "boolean"
+    },
     "temporary_folder": {
       "description": "The Temporary Folder in use: the setting, or the default.",
       "type": "string"
@@ -20958,7 +21830,8 @@ File & Folder's settings in `settings.state`.
   },
   "required": [
     "temporary_folder",
-    "sample_editor"
+    "sample_editor",
+    "save_continuously"
   ],
   "type": "object"
 }
@@ -26369,6 +27242,7 @@ What `mixer_view.state` and the other view commands return.
 | `crossfader` | boolean | yes | Whether the Crossfader section shows: the tracks' A and B assign buttons and Main's crossfader. Hidden in a new set. |
 | `scene_tempo` | boolean | yes | Whether the Session View's Main column shows the scenes' tempo and time signature fields (View > Scene Tempo and Time Signature). Hidden in a new set. |
 | `return_tracks` | boolean | yes | Whether the return tracks' columns show. |
+| `return_tracks_scroll` | boolean | yes | Whether the return tracks scroll with the tracks (IMP-01, the mixer view spec R21): they come after the drop area and only Main stays pinned. Off in a new install, so the returns stay pinned, as in Live. |
 | `track_options` | boolean | yes | Whether the tracks' Track Options sections show (track delay and Keep Monitoring Latency). Shown only while this shows; hidden in a new set. |
 | `performance_impact` | boolean | yes | Whether the Performance Impact section shows: under each strip, the six segments that light up from the left with the track's share of the set's processing time. Hidden in a new set. |
 | `performance_impact_values` | array of [`TrackImpact`](#trackimpact) | yes | Each track's Performance Impact, as the engine last published it: the track, how many of its six segments are lit, and its share of the set's processing time (the mixer spec, R31). |
@@ -26432,6 +27306,10 @@ What `mixer_view.state` and the other view commands return.
       "description": "Whether the return tracks' columns show.",
       "type": "boolean"
     },
+    "return_tracks_scroll": {
+      "description": "Whether the return tracks scroll with the tracks (IMP-01, the mixer view spec R21): they come after the drop area and only Main stays pinned. Off in a new install, so the returns stay pinned, as in Live.",
+      "type": "boolean"
+    },
     "scene_tempo": {
       "description": "Whether the Session View's Main column shows the scenes' tempo and time signature fields (View > Scene Tempo and Time Signature). Hidden in a new set.",
       "type": "boolean"
@@ -26462,6 +27340,7 @@ What `mixer_view.state` and the other view commands return.
     "crossfader",
     "scene_tempo",
     "return_tracks",
+    "return_tracks_scroll",
     "track_options",
     "performance_impact",
     "performance_impact_values",
@@ -30315,6 +31194,34 @@ What `set.recover` returns.
 
 </details>
 
+### `RecoveryPrompt`
+
+What `set.later_recovery` returns: the recovery prompt's state.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `open` | boolean | yes | Whether the prompt is still open. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `set.later_recovery` returns: the recovery prompt's state.",
+  "properties": {
+    "open": {
+      "description": "Whether the prompt is still open.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "open"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `ReleaseMode`
 
 What a note's end does while a sustain loop is on (R18).
@@ -30832,6 +31739,44 @@ The recording under way, in `transport.state`.
     "armed_tracks",
     "dropped_frames",
     "session_slots"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `RunningStatus`
+
+The export under way (R41, R44).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `files` | array of string | yes | The files it writes. |
+| `progress` | number | yes | How much is rendered across every file, from 0 to 1. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The export under way (R41, R44).",
+  "properties": {
+    "files": {
+      "description": "The files it writes.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "progress": {
+      "description": "How much is rendered across every file, from 0 to 1.",
+      "format": "double",
+      "type": "number"
+    }
+  },
+  "required": [
+    "files",
+    "progress"
   ],
   "type": "object"
 }
@@ -31888,6 +32833,111 @@ The Automatic Search's switches and folder (R14).
 
 </details>
 
+### `SearchScope`
+
+What the search field looks for (R2).
+
+One of:
+
+- `"commands"`: The commands a menu item, a context-menu item or a shortcut runs.
+- `"tracks"`: The tracks whose name, or a device's name, matches.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What the search field looks for (R2).",
+  "oneOf": [
+    {
+      "const": "commands",
+      "description": "The commands a menu item, a context-menu item or a shortcut runs.",
+      "type": "string"
+    },
+    {
+      "const": "tracks",
+      "description": "The tracks whose name, or a device's name, matches.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `SearchState`
+
+What the search field shows (R15).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `open` | boolean | yes | Whether the field is open. |
+| `scope` | [`SearchScope`](#searchscope) | yes | Its scope. |
+| `text` | string | yes | The text in it. |
+| `only_matches` | boolean | yes | Whether Show Only Matches is on. |
+| `commands` | array of [`CommandRow`](#commandrow) | yes | The rows of the Commands scope, empty in the other. |
+| `tracks` | array of [`TrackRow`](#trackrow) | yes | The rows of the Tracks scope, empty in the other. |
+| `highlight` | integer or null | no | The index of the highlighted row in `commands`, or of the selected track in `tracks`. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What the search field shows (R15).",
+  "properties": {
+    "commands": {
+      "description": "The rows of the Commands scope, empty in the other.",
+      "items": {
+        "$ref": "#/$defs/CommandRow"
+      },
+      "type": "array"
+    },
+    "highlight": {
+      "description": "The index of the highlighted row in `commands`, or of the selected track in `tracks`.",
+      "format": "uint",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "only_matches": {
+      "description": "Whether Show Only Matches is on.",
+      "type": "boolean"
+    },
+    "open": {
+      "description": "Whether the field is open.",
+      "type": "boolean"
+    },
+    "scope": {
+      "$ref": "#/$defs/SearchScope",
+      "description": "Its scope."
+    },
+    "text": {
+      "description": "The text in it.",
+      "type": "string"
+    },
+    "tracks": {
+      "description": "The rows of the Tracks scope, empty in the other.",
+      "items": {
+        "$ref": "#/$defs/TrackRow"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "open",
+    "scope",
+    "text",
+    "only_matches",
+    "commands",
+    "tracks"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `Section`
 
 A sidebar section.
@@ -32431,7 +33481,7 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
 |---|---|---|---|
 | `page` | [`SettingsPage`](#settingspage) | yes | The page the Settings window shows, or showed last. |
 | `display_input` | [`DisplayInputSettings`](#displayinputsettings) | yes | Display & Input. |
-| `theme` | [`ThemeChoice`](#themechoice) | yes | Theme & Colors: the theme, as `settings.set_theme` takes it. |
+| `theme_colors` | [`ThemeColorsSettings`](#themecolorssettings) | yes | Theme & Colors: the Theme and Customization sections, as the `settings.set_theme` to `settings.set_color_hue` commands set them. |
 | `audio` | [`AudioPageSettings`](#audiopagesettings) | yes | Audio. |
 | `tempo_midi` | [`MidiPortsResult`](#midiportsresult) | yes | Tempo & MIDI: the MIDI ports' switches and the computer MIDI keyboard, the same as `midi.ports` reports. |
 | `create_fades_on_clip_edges` | boolean | yes | Record, Warp & Launch: Create Fades on Clip Edges, as `settings.set_create_fades_on_clip_edges` sets it. |
@@ -32439,6 +33489,7 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
 | `warp` | [`WarpPrefs`](#warpprefs) | yes | Record, Warp & Launch: Loop/Warp Short Samples, Auto-Warp Long Samples and Default Warp Mode. |
 | `launch` | [`LaunchPrefs`](#launchprefs) | yes | Record, Warp & Launch: the Launch section, as the `settings.set_default_launch_*`, `settings.set_select_on_launch`, `settings.set_select_next_scene_on_launch` and `settings.set_start_recording_on_scene_launch` commands set it. |
 | `record_session_automation_in` | [`SessionAutomationTracks`](#sessionautomationtracks) | yes | Record, Warp & Launch: Record Session automation in, as `settings.set_record_session_automation_in` sets it. |
+| `automation_record_mode` | [`AutomationRecordMode`](#automationrecordmode) | yes | The mode an Arrangement recording writes control moves in, as `settings.set_automation_record_mode` sets it (the automation spec, R18). |
 | `file_folder` | [`FileFolderSettings`](#filefoldersettings) | yes | File & Folder: the Temporary Folder, as `settings.set_temporary_folder` sets it. |
 | `auto_hide_plug_in_windows` | boolean | yes | Plug-Ins: Auto-Hide Plug-In Windows, as `settings.set_auto_hide_plug_in_windows` sets it. |
 | `plug_ins` | [`PluginSettings`](#pluginsettings) | yes | Plug-Ins: how the Browser shows plug-ins, as `plugin.settings` sets it. |
@@ -32466,6 +33517,10 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
     "auto_hide_plug_in_windows": {
       "description": "Plug-Ins: Auto-Hide Plug-In Windows, as `settings.set_auto_hide_plug_in_windows` sets it.",
       "type": "boolean"
+    },
+    "automation_record_mode": {
+      "$ref": "#/$defs/AutomationRecordMode",
+      "description": "The mode an Arrangement recording writes control moves in, as `settings.set_automation_record_mode` sets it (the automation spec, R18)."
     },
     "create_fades_on_clip_edges": {
       "description": "Record, Warp & Launch: Create Fades on Clip Edges, as `settings.set_create_fades_on_clip_edges` sets it.",
@@ -32499,9 +33554,9 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
       "$ref": "#/$defs/MidiPortsResult",
       "description": "Tempo & MIDI: the MIDI ports' switches and the computer MIDI keyboard, the same as `midi.ports` reports."
     },
-    "theme": {
-      "$ref": "#/$defs/ThemeChoice",
-      "description": "Theme & Colors: the theme, as `settings.set_theme` takes it."
+    "theme_colors": {
+      "$ref": "#/$defs/ThemeColorsSettings",
+      "description": "Theme & Colors: the Theme and Customization sections, as the `settings.set_theme` to `settings.set_color_hue` commands set them."
     },
     "warp": {
       "$ref": "#/$defs/WarpPrefs",
@@ -32515,7 +33570,7 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
   "required": [
     "page",
     "display_input",
-    "theme",
+    "theme_colors",
     "audio",
     "tempo_midi",
     "create_fades_on_clip_edges",
@@ -32523,6 +33578,7 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
     "warp",
     "launch",
     "record_session_automation_in",
+    "automation_record_mode",
     "file_folder",
     "auto_hide_plug_in_windows",
     "plug_ins",
@@ -34182,32 +35238,105 @@ Changes to Texture's controls.
 
 </details>
 
-### `ThemeChoice`
+### `ThemeColorsSettings`
 
-Beatlayer's two themes.
+Theme & Colors in `settings.state` (themes R12).
 
-One of:
-
-- `"dark"`: Light text on dark panels, the default.
-- `"light"`: Dark text on light panels.
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `theme` | string | yes | The chosen theme's name. |
+| `tone` | [`Tone`](#tone) | yes | Tone. |
+| `high_contrast` | boolean | yes | High Contrast. |
+| `grid_line_intensity` | integer from -32768 to 32767 | yes | Grid Line Intensity, in percent. |
+| `brightness` | integer from -32768 to 32767 | yes | Brightness. |
+| `color_intensity` | integer from -32768 to 32767 | yes | Color Intensity, in percent. |
+| `color_hue` | integer from -32768 to 32767 | yes | Color Hue, in degrees. |
+| `appearance` | [`Appearance`](#appearance) | yes | The Appearance chosen. |
+| `drawn_appearance` | [`Appearance`](#appearance) | yes | The appearance drawn now, `light` or `dark`: Follow System resolved. |
+| `themes` | array of string | yes | The themes the Theme chooser offers, in its order. |
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "Beatlayer's two themes.",
-  "oneOf": [
-    {
-      "const": "dark",
-      "description": "Light text on dark panels, the default.",
+  "description": "Theme & Colors in `settings.state` (themes R12).",
+  "properties": {
+    "appearance": {
+      "$ref": "#/$defs/Appearance",
+      "description": "The Appearance chosen."
+    },
+    "brightness": {
+      "default": 0,
+      "description": "Brightness.",
+      "format": "int16",
+      "maximum": 32767,
+      "minimum": -32768,
+      "type": "integer"
+    },
+    "color_hue": {
+      "default": 0,
+      "description": "Color Hue, in degrees.",
+      "format": "int16",
+      "maximum": 32767,
+      "minimum": -32768,
+      "type": "integer"
+    },
+    "color_intensity": {
+      "default": 100,
+      "description": "Color Intensity, in percent.",
+      "format": "int16",
+      "maximum": 32767,
+      "minimum": -32768,
+      "type": "integer"
+    },
+    "drawn_appearance": {
+      "$ref": "#/$defs/Appearance",
+      "description": "The appearance drawn now, `light` or `dark`: Follow System resolved."
+    },
+    "grid_line_intensity": {
+      "default": 100,
+      "description": "Grid Line Intensity, in percent.",
+      "format": "int16",
+      "maximum": 32767,
+      "minimum": -32768,
+      "type": "integer"
+    },
+    "high_contrast": {
+      "default": false,
+      "description": "High Contrast.",
+      "type": "boolean"
+    },
+    "theme": {
+      "default": "Beatlayer",
+      "description": "The chosen theme's name.",
       "type": "string"
     },
-    {
-      "const": "light",
-      "description": "Dark text on light panels.",
-      "type": "string"
+    "themes": {
+      "description": "The themes the Theme chooser offers, in its order.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "tone": {
+      "$ref": "#/$defs/Tone",
+      "default": "neutral",
+      "description": "Tone."
     }
-  ]
+  },
+  "required": [
+    "theme",
+    "tone",
+    "high_contrast",
+    "grid_line_intensity",
+    "brightness",
+    "color_intensity",
+    "color_hue",
+    "appearance",
+    "drawn_appearance",
+    "themes"
+  ],
+  "type": "object"
 }
 ```
 
@@ -34357,6 +35486,43 @@ Type: array of [`TimeSignatureChange`](#timesignaturechange), at least 1.
   },
   "minItems": 1,
   "type": "array"
+}
+```
+
+</details>
+
+### `Tone`
+
+How a theme's neutral colours are tinted (themes R4).
+
+One of:
+
+- `"neutral"`: The theme's neutral colours as its file gives them.
+- `"warm"`: Tinted towards the hue 60°.
+- `"cool"`: Tinted towards the hue 250°.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "How a theme's neutral colours are tinted (themes R4).",
+  "oneOf": [
+    {
+      "const": "neutral",
+      "description": "The theme's neutral colours as its file gives them.",
+      "type": "string"
+    },
+    {
+      "const": "warm",
+      "description": "Tinted towards the hue 60°.",
+      "type": "string"
+    },
+    {
+      "const": "cool",
+      "description": "Tinted towards the hue 250°.",
+      "type": "string"
+    }
+  ]
 }
 ```
 
@@ -34700,6 +35866,85 @@ A track, by ID and name.
 
 </details>
 
+### `TrackRow`
+
+A track the Tracks scope lists (R9).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track. |
+| `name` | string | yes | Its name. |
+| `by_name` | boolean | yes | Whether the track's own name matched. |
+| `device` | string or null | no | The name of a device on it that matched, when one did. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A track the Tracks scope lists (R9).",
+  "properties": {
+    "by_name": {
+      "description": "Whether the track's own name matched.",
+      "type": "boolean"
+    },
+    "device": {
+      "description": "The name of a device on it that matched, when one did.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "name": {
+      "description": "Its name.",
+      "type": "string"
+    },
+    "track": {
+      "$ref": "#/$defs/TrackId",
+      "description": "The track."
+    }
+  },
+  "required": [
+    "track",
+    "name",
+    "by_name"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `TrackRows`
+
+What `search.tracks` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `rows` | array of [`TrackRow`](#trackrow) | yes | The matching tracks, in display order. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `search.tracks` returns.",
+  "properties": {
+    "rows": {
+      "description": "The matching tracks, in display order.",
+      "items": {
+        "$ref": "#/$defs/TrackRow"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "rows"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `TracksDuplicated`
 
 What `track.duplicate_without_clips` returns.
@@ -34948,6 +36193,7 @@ What `transport.state` returns: the transport and the Control Bar's transport se
 | `punch_out` | boolean | yes | Whether Punch-Out is on. |
 | `midi_overdub` | boolean | yes | Whether MIDI Arrangement Overdub is on. |
 | `automation_arm` | boolean | yes | Whether Automation Arm is on (view state, not saved with the set). |
+| `automation_record_mode` | [`AutomationRecordMode`](#automationrecordmode) | yes | The mode an Arrangement recording writes control moves in, as `settings.set_automation_record_mode` sets it (the automation spec, R18). |
 | `recording` | [`RunningRecording`](#runningrecording) or null | yes | The recording under way, from the moment recording starts until its clips are made; null when none is. |
 | `last_recording` | [`RecordingReport`](#recordingreport) or null | yes | What the last recording that ended came to; null until one has ended in this session. |
 | `capture_midi_ready` | boolean | yes | Whether Capture MIDI has notes to bring back: a monitoring MIDI track was played since the last capture or recording, so `midi.capture` runs and the Control Bar's button and Create menu item are enabled. |
@@ -34969,6 +36215,10 @@ What `transport.state` returns: the transport and the Control Bar's transport se
     "automation_arm": {
       "description": "Whether Automation Arm is on (view state, not saved with the set).",
       "type": "boolean"
+    },
+    "automation_record_mode": {
+      "$ref": "#/$defs/AutomationRecordMode",
+      "description": "The mode an Arrangement recording writes control moves in, as `settings.set_automation_record_mode` sets it (the automation spec, R18)."
     },
     "capture_midi_ready": {
       "default": false,
@@ -35098,6 +36348,7 @@ What `transport.state` returns: the transport and the Control Bar's transport se
     "punch_out",
     "midi_overdub",
     "automation_arm",
+    "automation_record_mode",
     "recording",
     "last_recording",
     "capture_midi_ready"

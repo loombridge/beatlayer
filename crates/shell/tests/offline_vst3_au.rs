@@ -507,6 +507,8 @@ fn a_cancelled_export_gives_every_plugin_back() {
                 replace: false,
                 render_as_loop: false,
                 block: export::BLOCK,
+                mono: false,
+                mp3: false,
             },
             &cancel,
             &mut |_| cancel.store(true, Relaxed),

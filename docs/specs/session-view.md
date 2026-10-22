@@ -1,6 +1,6 @@
 # Session View: clip slots and scenes
 
-- **Status:** partial (R1 to R33 implemented; R34 and R35 are Phase 6's)
+- **Status:** implemented (every rule has a passing test)
 - **Work packages:** WP-3.1, WP-3.7, WP-3.6, WP-3.5, WP-3.8, WP-3.16 (R33); WP-6.38 (R34: the return tracks scrolling with the tracks, IMP-01); WP-6.49b (R35: panning with the middle button)
 - **Parity-matrix row:** Views and workflow: Session View; Clips and launching; [the improvements](../05-improvements.md), IMP-01 (return tracks scrolling with tracks)
 - **Checked against:** the Live 12 reference manual, chapter 7 "Session View", read 15 October 2026, and Live 12.4.3 on macOS, observed on 15 October 2026; for R34 and R35, the manual's chapter 18 and the Live 12 release notes, read 20 October 2026.
@@ -104,8 +104,8 @@ This spec covers the grid's structure in the document, the scenes, the clips in 
 | R31 | `crates/ui/tests/session_view.rs`, `clicking_a_launch_triangle_queues_a_clip_and_a_stop_button_drops_it`, `the_stop_square_a_stop_button_and_stop_all_clips_stop_the_grid`, `a_scene_launch_button_launches_the_scene`, `back_to_arrangement_lights_while_a_clip_plays_over_the_arrangement`, `the_launch_buttons_reach_accesskit_with_their_track_and_scene` | UI script |
 | R32 | `crates/ui/tests/session_view.rs`, `enter_launches_the_selected_clip_and_scene`; `crates/shell/tests/session_launch.rs`, `launch_selected_launches_the_selection_and_agents_launch_and_stop_by_id` | UI script, shell test |
 | R33 | `crates/shell/tests/clip_view_tabs.rs`, `the_clip_view_follows_the_clip_most_recently_selected_in_either_view` | unit |
-| R34 | to be written in WP-6.38 | |
-| R35 | to be written in WP-6.49b | |
+| R34 | `crates/ui/tests/session_view.rs`, `the_return_tracks_scroll_with_the_tracks_in_the_grid` | UI script |
+| R35 | `crates/ui/tests/session_view.rs`, `the_middle_button_pans_the_grid` | UI script |
 ## Not built yet
 
 - The Arrangement's per-track and scrub-area Back to Arrangement buttons (L-ARR-007, L-ARR-019) aren't drawn yet; F10, both commands and the Main column's button (R25) work, and `Shell::session_over` gives the buttons their state.

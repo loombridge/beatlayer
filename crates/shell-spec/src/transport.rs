@@ -135,6 +135,10 @@ pub struct TransportState {
     pub midi_overdub: bool,
     /// Whether Automation Arm is on (view state, not saved with the set).
     pub automation_arm: bool,
+    /// The mode an Arrangement recording writes control moves in, as
+    /// `settings.set_automation_record_mode` sets it (the automation spec,
+    /// R18).
+    pub automation_record_mode: crate::settings::AutomationRecordMode,
     /// The recording under way, from the moment recording starts until its
     /// clips are made; null when none is.
     pub recording: Option<RunningRecording>,
@@ -208,7 +212,8 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                  Arrangement Position fields' bar.beat.sixteenth), the Arrangement loop's start, \
                  length, and switch, the tempo, and the time signature, the metronome, \
                  Arrangement Record and whether a take is running or the count-in is \
-                 sounding, Punch-In and Punch-Out, MIDI Arrangement Overdub, Automation Arm, \
+                 sounding, Punch-In and Punch-Out, MIDI Arrangement Overdub, Automation Arm and \
+                 the mode an Arrangement recording writes control moves in, \
                  the recording under way (its armed tracks and dropped frames) and what the \
                  last recording came to, and whether the audio engine runs so the transport \
                  can play. Every `transport.set_*` setting reads back here. Changes nothing. Use it to check where \

@@ -16,6 +16,8 @@ use bl_model::{
     LaunchSettings, TakeClip, TakeLane, TrackId, TrackKind, registry as model,
 };
 use bl_project::ProjectFolder;
+use bl_project::autosave::{Autosave, Recoverable, Recovered};
+use bl_project::registry as recovery_ids;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
@@ -26,6 +28,7 @@ use crate::agent::{
     self as agent, AgentServerState, AgentServerStatus, AgentSettings, AutonomousArgs, ClientArgs,
     SetServerArgs,
 };
+use crate::arrangement::automation::{self as automation, EnvelopeClipboard};
 use crate::arrangement::editing::{self, Clipboard, EditFailure};
 use crate::arrangement::{ArrangementView, TransportView, ViewError, Viewport};
 use crate::assistant::{
@@ -37,13 +40,14 @@ use crate::auto_warp;
 use crate::browser::{self, BrowserError, BrowserView, Waker};
 use crate::clip_view::{self, ClipView};
 use crate::commands::{
-    self as ids, ClipEnvelopeArgs, ClipTabArgs, DefaultLaunchModeArgs,
+    self as ids, AutomationRecordModeArgs, ClipEnvelopeArgs, ClipTabArgs, DefaultLaunchModeArgs,
     DefaultLaunchQuantizationArgs, DefaultSetArgs, DefaultWarpModeArgs, FileReport, FoldNotesArgs,
     LaneArgs, LoopWarpShortSamplesArgs, PathArgs, RecordSessionAutomationInArgs, SampleEditorArgs,
     SampleEditorResult, SaveAsArgs, SetResult, SettingsArgs, SwitchArgs, SwitchResult,
     TemplateArgs, TemporaryFolderArgs, TemporaryFolderResult, TestToneArgs, TestToneState,
     ThemeArgs, ViewResult, ViewState, ZoomArgs,
 };
+use crate::commands::{AppearanceArgs, BrightnessArgs, HueArgs, PercentArgs, ToneArgs};
 use crate::devices::{self, DeviceError, DeviceView};
 use crate::files::{ProjectFiles, SetStore, new_set_from};
 use crate::midi::MidiHost;
@@ -53,8 +57,8 @@ use crate::permission::CallPermission;
 use crate::sample_editor;
 use crate::session_view::{SessionView, SessionViewError};
 use crate::settings::{
-    OnByDefault, Preferences, SettingsPage, ThemeChoice, WarpPrefs, ZOOM_MAX_PERCENT,
-    ZOOM_MIN_PERCENT, zoom_factor, zoom_percent, zoom_step,
+    Appearance, BUNDLED_THEME, OnByDefault, Preferences, SettingsPage, ThemeLook, WarpPrefs,
+    ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT, zoom_factor, zoom_percent, zoom_step,
 };
 use bl_devices::KitHost;
 use bl_plugin_host::au::AuHost;
@@ -63,6 +67,7 @@ use bl_plugin_host::scan::Scanner;
 use bl_plugin_host::vst3::Vst3Host;
 use bl_shell_spec::arrangement as view_ids;
 use bl_shell_spec::audio_editing as audio_ids;
+use bl_shell_spec::automation as automation_ids;
 use bl_shell_spec::autosampler as autosampler_ids;
 use bl_shell_spec::bounce as bounce_ids;
 use bl_shell_spec::browser as browser_ids;
@@ -73,6 +78,7 @@ use bl_shell_spec::editing as edit_ids;
 use bl_shell_spec::export as export_ids;
 use bl_shell_spec::file_manager as file_manager_ids;
 use bl_shell_spec::freeze as freeze_ids;
+use bl_shell_spec::locator as locator_ids;
 use bl_shell_spec::midi_files as midi_ids;
 use bl_shell_spec::midi_io as midi_io_ids;
 use bl_shell_spec::mixer_view as mixer_ids;
@@ -83,12 +89,13 @@ use bl_shell_spec::perception as perception_ids;
 use bl_shell_spec::plugins as plugin_ids;
 use bl_shell_spec::sample_editor as sample_ids;
 use bl_shell_spec::scales as scales_ids;
+use bl_shell_spec::search as search_ids;
 use bl_shell_spec::session_launch as session_launch_ids;
 use bl_shell_spec::session_record as session_record_ids;
 use bl_shell_spec::session_view as session_ids;
 use bl_shell_spec::settings::{
     AgentsPageSettings, AudioPageSettings, DisplayInputSettings, FileFolderSettings, LaunchPrefs,
-    STATE as SETTINGS_STATE, SettingsState,
+    STATE as SETTINGS_STATE, SettingsState, ThemeColorsSettings,
 };
 use bl_shell_spec::slice as slice_ids;
 use bl_shell_spec::stems as stems_ids;
@@ -101,6 +108,8 @@ mod audio_panel;
 pub mod autosample;
 mod bounce;
 mod capture;
+mod export_dialog;
+pub use export_dialog::ExportPrefs;
 mod file_manager;
 mod freeze;
 mod keymap;
@@ -110,6 +119,7 @@ mod processed_files;
 mod sample_edits;
 mod sample_keys;
 pub use sample_keys::TransientList;
+mod search;
 mod session_recording;
 mod slice;
 mod stems;
@@ -184,6 +194,9 @@ const DELAY_COMPENSATION: &str = "mixer.set_delay_compensation";
 /// `mixer.set_reduced_latency_monitoring`, which Options ▸ Reduced Latency
 /// When Monitoring runs as a switch (M-OPT-009).
 const REDUCED_LATENCY_MONITORING: &str = "mixer.set_reduced_latency_monitoring";
+/// `song.set_lock_envelopes`, which Options ▸ Lock Envelopes runs as a
+/// switch (M-OPT-026).
+const LOCK_ENVELOPES: &str = "song.set_lock_envelopes";
 
 /// A command and its arguments, kept to run later (after a dialog).
 #[derive(Clone, Debug, PartialEq)]
@@ -227,6 +240,16 @@ pub enum Effect {
     PickSavePath {
         /// What to run after the save.
         then: Option<Invocation>,
+    },
+    /// Ask where to write the Export Audio/Video dialog's file, in a save
+    /// dialog that suggests `file_name`, then run `export.start` with the
+    /// path; cancelling goes back to the Export dialog (the export spec,
+    /// R40).
+    PickExportPath {
+        /// The suggested name: the set's, with the file type's extension.
+        file_name: String,
+        /// The folder the dialog opens in, if there is one.
+        folder: Option<PathBuf>,
     },
     /// Quit.
     Quit,
@@ -285,6 +308,10 @@ pub enum Effect {
     /// Start renaming a track in its title bar, where the person types the
     /// new name; Return runs `track.rename` with it (WP-4.22).
     RenameTrack(TrackId),
+    /// Start renaming a locator in the Arrangement's scrub area, where the
+    /// person types the new name; Return runs `locator.rename` with it
+    /// (WP-6.24; the time editing spec, R8).
+    RenameLocator(bl_model::LocatorId),
 }
 
 /// Where a gesture that edits the set is (WP-1.8b): see [`Shell::gesture`].
@@ -400,6 +427,24 @@ pub struct Shell {
     /// made is open (R12).
     import_report: Option<bl_shell_spec::dawproject::ImportReport>,
     dirty: bool,
+    /// The crash-recovery service (WP-6.62, the crash-recovery spec R21):
+    /// it journals the open set's edits, and holds the sets a crash left.
+    /// `None` when the shell runs without a recovery folder.
+    autosave: Option<Autosave>,
+    /// The label the last journalled edit went under, so an edit the
+    /// undo history doesn't name keeps one.
+    journal_label: String,
+    /// The last problem with the journal, and the Status Bar's message
+    /// about it (the crash-recovery spec, R27).
+    recovery_error: Option<String>,
+    recovery_message: Option<String>,
+    /// Whether the recovery prompt was deferred (Later), so it doesn't come
+    /// back this session (the crash-recovery spec, R22).
+    recovery_deferred: bool,
+    /// A number that changes when the set is replaced, so the journal
+    /// doesn't hold the new set as an edit of the old one (the
+    /// crash-recovery spec, R2).
+    editor_generation: u64,
     store: Box<dyn SetStore>,
     audio: AudioHost,
     /// The MIDI ports and the computer MIDI keyboard (WP-2.2).
@@ -431,6 +476,11 @@ pub struct Shell {
     info_view: bool,
     full_screen: bool,
     settings_open: bool,
+    /// The themes the Theme chooser offers, which the host reads from the
+    /// theme files (themes R2, R9), and whether the operating system is in
+    /// its dark mode, which Follow System draws (themes R3).
+    themes: Vec<String>,
+    system_dark: bool,
     focused_window: WindowKind,
     focused_area: Area,
     /// The track whose control has the keyboard focus (WP-1.14).
@@ -490,6 +540,8 @@ pub struct Shell {
     /// and the Automatic Search's switches. View state, never part of the
     /// set, like the browser's.
     file_manager: FileManager,
+    /// The search field (WP-6.42): view state, never saved.
+    search: crate::search::Field,
     /// The list of the set's plug-ins (IMP-29, WP-6.41): whether it shows
     /// in the detail area's place, and whether Show Only Missing is on.
     plugin_list: plugin_list::PluginList,
@@ -505,6 +557,8 @@ pub struct Shell {
     processed: Vec<processed_files::Pending>,
     /// Stem separation's download, separation, and dialog (IMP-11).
     stems: stems::StemsState,
+    /// The Export Audio/Video dialog and the export under way (WP-6.71).
+    export: export_dialog::ExportState,
     /// The autosampler at work (WP-5.16, IMP-27).
     autosample: Option<autosample::Job>,
     /// The autosampler's dialog, open for an instrument.
@@ -522,6 +576,11 @@ pub struct Shell {
     analysis_options: bl_analysis::cache::AnalysisOptions,
     /// The analysis cache, made when first used.
     analysis: Option<bl_analysis::cache::AnalysisCache>,
+    /// How the peaks of the files an export writes are kept (WP-6.71, R34):
+    /// in memory only until the app says otherwise.
+    peak_options: bl_media::PeakCacheOptions,
+    /// The peak cache for those files, made when first used.
+    peaks: Option<bl_media::PeakCache>,
     /// The files whose analysis has been started this session.
     analysed: std::collections::HashSet<bl_media::ContentHash>,
     /// The files opened in the external sample editor, and the content they
@@ -531,6 +590,9 @@ pub struct Shell {
     /// The Arrangement's clipboard (WP-1.8b), kept across sets as Live
     /// keeps it, and never part of a set.
     clipboard: Option<Clipboard>,
+    /// The clipboard of copied envelope shapes (WP-6.25), kept across sets
+    /// as Live keeps it, and never part of a set.
+    envelope_clipboard: Option<EnvelopeClipboard>,
     /// A gesture that edits the set, under way (WP-1.8b).
     edit_gesture: Option<Gesture>,
     /// The engine's insert marker when the shell last looked, so a move of
@@ -676,6 +738,27 @@ fn edit_error(id: &str, failure: EditFailure) -> ShellError {
             command: id.to_owned(),
             message,
         },
+    }
+}
+
+/// The automation editing command an Arrangement editing command runs as,
+/// when the time selection is in automation lanes (the automation editing
+/// spec, R5).
+fn automation_command(id: &str, view: &ArrangementView) -> Option<&'static str> {
+    let in_lanes = view
+        .time_selection_lanes()
+        .iter()
+        .any(|lane| lane.target().is_some());
+    if !in_lanes {
+        return None;
+    }
+    match id {
+        edit_ids::COPY => Some(automation_ids::COPY),
+        edit_ids::CUT => Some(automation_ids::CUT),
+        edit_ids::PASTE => Some(automation_ids::PASTE),
+        edit_ids::DUPLICATE => Some(automation_ids::DUPLICATE),
+        edit_ids::DELETE => Some(automation_ids::DELETE_RANGE),
+        _ => None,
     }
 }
 
@@ -873,6 +956,9 @@ impl Shell {
         let mut registry = Registry::new();
         model::register(&mut registry).expect("the document's command IDs are unique");
         crate::register(&mut registry).expect("the shell's command IDs are unique");
+        // The recovery commands (WP-6.62, the crash-recovery spec, R26),
+        // which run against the app's own recovery.
+        recovery_ids::register(&mut registry).expect("the recovery command IDs are unique");
         // The transport's commands (WP-1.5), which the shell sends to the
         // engine it plays the set through (WP-1.18).
         engine_transport::register(&mut registry).expect("the transport's command IDs are unique");
@@ -938,6 +1024,7 @@ impl Shell {
             media,
             processed: Vec::new(),
             stems: stems::StemsState::default(),
+            export: export_dialog::ExportState::default(),
             autosample: None,
             autosample_dialog: None,
             autosample_result_value: None,
@@ -945,6 +1032,8 @@ impl Shell {
             auditioning: None,
             analysis_options: bl_analysis::cache::AnalysisOptions::memory_only(),
             analysis: None,
+            peak_options: bl_media::PeakCacheOptions::memory_only(),
+            peaks: None,
             analysed: std::collections::HashSet::new(),
             editing: Vec::new(),
             registry,
@@ -954,6 +1043,12 @@ impl Shell {
             pending_name: None,
             import_report: None,
             dirty: false,
+            autosave: None,
+            journal_label: String::new(),
+            recovery_error: None,
+            recovery_message: None,
+            recovery_deferred: false,
+            editor_generation: 0,
             store,
             audio,
             midi,
@@ -965,6 +1060,8 @@ impl Shell {
             user_keymap: crate::keymap::UserKeymap::default(),
             keymap_revision: 0,
             settings_open: false,
+            themes: vec![BUNDLED_THEME.to_owned()],
+            system_dark: true,
             prefs,
             config_dir,
             main_view: MainView::Arrangement,
@@ -995,9 +1092,11 @@ impl Shell {
             arrangement: ArrangementView::new(),
             clip_view: ClipView::default(),
             file_manager: FileManager::default(),
+            search: crate::search::Field::default(),
             plugin_list: plugin_list::PluginList::default(),
             document_revision: 0,
             clipboard: None,
+            envelope_clipboard: None,
             edit_gesture: None,
             au,
             seen_insert_marker: None,
@@ -1050,6 +1149,15 @@ impl Shell {
         shell.give_agents_tokens();
         shell.publish_plugins();
         shell.load_user_keymap();
+        // Spec: mixer-view R21. The return tracks scroll with the tracks as
+        // the application setting says, in the mixers and in the
+        // Arrangement's lanes.
+        shell
+            .mixer
+            .set_return_tracks_scroll(shell.prefs.return_tracks_scroll);
+        shell
+            .arrangement
+            .set_returns_scroll(shell.prefs.return_tracks_scroll);
         shell
     }
 
@@ -1260,6 +1368,98 @@ impl Shell {
         shell
     }
 
+    /// Runs one of the recovery commands against the app's own recovery
+    /// (the crash-recovery spec, R26): `set.list_recoverable`,
+    /// `set.recover`, `set.discard_recovery` and
+    /// `settings.set_continuous_save`.
+    fn run_recovery(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        if id == recovery_ids::SET_CONTINUOUS_SAVE {
+            let args: recovery_ids::ContinuousSaveArgs =
+                serde_json::from_value(args).map_err(|error| ShellError::InvalidArgs {
+                    command: id.to_owned(),
+                    message: error.to_string(),
+                })?;
+            self.prefs.save_continuously = args.on;
+            self.save_preferences();
+            if let Some(autosave) = self.autosave.as_mut() {
+                autosave.set_continuous(args.on);
+            }
+            return Ok(to_value(&recovery_ids::ContinuousSave { on: args.on }));
+        }
+        let ran = {
+            let Some(autosave) = self.autosave.as_mut() else {
+                return Err(ShellError::Unavailable {
+                    command: id.to_owned(),
+                    reason: "crash recovery isn't running in this session".to_owned(),
+                });
+            };
+            recovery_ids::run(autosave, id, args).map_err(|error| ShellError::Failed {
+                command: id.to_owned(),
+                message: error.to_string(),
+            })?
+        };
+        if let Some(recovered) = ran.recovered {
+            self.open_recovered(recovered);
+        }
+        Ok(ran.result)
+    }
+
+    /// Opens a recovered set in place of the open one (the crash-recovery
+    /// spec, R3): as it was after its last journalled edit, unsaved, with
+    /// an empty undo history.
+    fn open_recovered(&mut self, recovered: Recovered) {
+        let Recovered { set, project, .. } = recovered;
+        self.set_replaced();
+        self.editor = project.editor();
+        self.set_path = set.as_ref().map(|set| set.path().to_owned());
+        // Discard Changes goes back to the set file, or, for a set never
+        // saved, to the set a new one starts from.
+        self.saved = new_set_from(
+            self.set_path
+                .as_deref()
+                .or(self.prefs.default_set.as_deref()),
+        );
+        self.dirty = true;
+        self.store.adopt(set, project);
+        // The views saved beside the song, and its files, as `set.open`
+        // takes them.
+        self.devices.set_windows(self.store.windows());
+        self.devices.set_rack_views(self.store.rack_views());
+        self.devices
+            .set_multisampler_views(self.store.multisampler_views());
+        self.clip_view.set_folds(self.store.folds());
+        for (hash, path, size) in self.store.media_files() {
+            self.media
+                .add_reference(bl_media::ContentHash::from_bytes(hash.0), path, size);
+        }
+        self.arrangement.reset();
+        self.clip_view.forget_selection();
+        self.mixer.reset();
+        self.session.reset();
+        self.new_set_transport();
+        self.document_changed();
+        self.set_file_changed();
+        self.touch();
+    }
+
+    /// Tells the journal the set was saved, so it retires it: the set file
+    /// holds every edit (the crash-recovery spec, R6).
+    fn journal_saved(&mut self) {
+        let set = self.store.set_file().cloned();
+        if let (Some(autosave), Some(set)) = (self.autosave.as_mut(), set.as_ref()) {
+            autosave.saved(set);
+        }
+    }
+
+    /// Closes the journal: the set was saved, or its changes were thrown
+    /// away, so nothing is offered at the next launch (the crash-recovery
+    /// spec, R6).
+    fn close_journal(&mut self) {
+        if let Some(autosave) = self.autosave.as_mut() {
+            let _ = autosave.close_set();
+        }
+    }
+
     /// Opens the audio device, if the engine is on. A failure shows in the
     /// Status Bar with a way to the Audio settings.
     pub fn start_audio(&mut self) {
@@ -1267,6 +1467,137 @@ impl Shell {
             self.audio_failed(&error);
         }
         self.touch();
+    }
+
+    /// Runs crash recovery in `dir` (WP-6.62, the crash-recovery spec R21):
+    /// the open set's edits are journalled there, and the sets a crash left
+    /// are offered at the next launch. The app calls it at start-up; a
+    /// headless run with a recovery folder of its own calls it too.
+    ///
+    /// # Errors
+    ///
+    /// A message saying why the recovery folder couldn't be used. The shell
+    /// goes on working without it.
+    pub fn use_recovery(&mut self, dir: PathBuf) -> Result<(), String> {
+        let mut autosave = Autosave::start(&dir).map_err(|error| error.to_string())?;
+        autosave.set_continuous(self.prefs.save_continuously);
+        self.autosave = Some(autosave);
+        self.recovery_error = None;
+        self.begin_journal();
+        self.check_recovery();
+        Ok(())
+    }
+
+    /// The sets a crash left unsaved, newest first (the crash-recovery
+    /// spec, R2). They are offered at the next launch.
+    #[must_use]
+    pub fn recovery_offers(&self) -> Vec<Recoverable> {
+        self.autosave
+            .as_ref()
+            .map_or_else(Vec::new, Autosave::offers)
+    }
+
+    /// Whether the recovery prompt is open: there is something to offer,
+    /// and it hasn't been deferred (the crash-recovery spec, R22).
+    #[must_use]
+    pub fn recovery_prompt_open(&self) -> bool {
+        !self.recovery_deferred && !self.recovery_offers().is_empty()
+    }
+
+    /// Whether Save Continuously is on (the crash-recovery spec, R8).
+    #[must_use]
+    pub fn save_continuously(&self) -> bool {
+        self.prefs.save_continuously
+    }
+
+    /// Starts the journal for the open set, so that its edits are kept for
+    /// recovery (the crash-recovery spec, R21).
+    fn begin_journal(&mut self) {
+        let Some(autosave) = self.autosave.as_mut() else {
+            return;
+        };
+        let set = self.store.set_file().cloned();
+        if let Err(error) = autosave.begin(set.as_ref()) {
+            self.recovery_error = Some(error.to_string());
+        }
+    }
+
+    /// Journals the open set after a finished edit, so that the set can be
+    /// recovered after a crash (the crash-recovery spec, R1 and R21).
+    /// `label` names the edit as the undo history does; without one, the
+    /// newest undo step's name is used.
+    fn journal_edit(&mut self, label: Option<&str>) {
+        if self.editor.in_transaction() {
+            // The edit isn't finished: the transaction is still open.
+            return;
+        }
+        if self.autosave.is_none() {
+            return;
+        }
+        let label = label
+            .map(str::to_owned)
+            .or_else(|| self.editor.undo_history().next().map(str::to_owned))
+            .unwrap_or_else(|| self.journal_label.clone());
+        self.journal_label = label.clone();
+        let project = self.store.project(&self.editor);
+        if let Some(autosave) = self.autosave.as_mut() {
+            autosave.edited(&project, label);
+        }
+        self.check_recovery();
+    }
+
+    /// Waits until every edit of the open set is on disk (the crash-recovery
+    /// spec, R1). The app doesn't need it: the journal is written within a
+    /// second on a thread of its own. A test that kills the app uses it, so
+    /// that the edit it made is on disk before the kill.
+    pub fn flush_recovery(&self) -> Result<(), String> {
+        let Some(autosave) = self.autosave.as_ref() else {
+            return Ok(());
+        };
+        autosave.flush().map_err(|error| error.to_string())
+    }
+
+    /// Tells the Status Bar about the journal when it can't be written, once
+    /// (the crash-recovery spec, R27). The app goes on working, and the
+    /// message goes when a write succeeds.
+    fn check_recovery(&mut self) {
+        let problem = self.recovery_problem();
+        self.recovery_error = problem;
+        let Some(problem) = self.recovery_error.clone() else {
+            if let Some(message) = self.recovery_message.take()
+                && self
+                    .message
+                    .as_ref()
+                    .is_some_and(|shown| shown.text == message)
+            {
+                self.clear_message();
+            }
+            return;
+        };
+        let message = format!("Edits aren't being kept for recovery: {problem}");
+        self.recovery_message = Some(message.clone());
+        // The message says once, and stays until a write succeeds. Another
+        // message in the Status Bar keeps its place until there is room.
+        if self.message.is_none() {
+            self.set_message(message, true);
+        }
+    }
+
+    /// What's wrong with the journal now, if anything: the last write's
+    /// error, or the reason the session couldn't start.
+    fn recovery_problem(&mut self) -> Option<String> {
+        let autosave = self.autosave.as_mut()?;
+        if let Some(error) = autosave.status().error {
+            return Some(error);
+        }
+        if autosave.status().session.is_none() {
+            // The session never started: try again, so a folder that is
+            // writable now is used (the crash-recovery spec, R27).
+            if let Err(error) = autosave.retry() {
+                return Some(error.to_string());
+            }
+        }
+        autosave.status().error
     }
 
     fn audio_failed(&mut self, error: &str) {
@@ -1313,6 +1644,8 @@ impl Shell {
         if !ChangeSet::between(&before, self.editor.document()).is_empty() {
             self.dirty = true;
             self.document_changed();
+            // Spec: crash-recovery R1. The finished edit is journalled.
+            self.journal_edit(None);
         }
         self.touch();
         result
@@ -1896,6 +2229,15 @@ impl Shell {
         self.dirty
     }
 
+    /// Whether the set has changes that aren't saved (the crash-recovery
+    /// spec, R25): with Save Continuously on, a set that has a file has
+    /// none, because every finished edit of it is committed within a
+    /// second. A set that has never been saved still has some.
+    #[must_use]
+    pub fn unsaved_changes(&self) -> bool {
+        self.dirty && !(self.prefs.save_continuously && self.set_path.is_some())
+    }
+
     /// The main view in front.
     #[must_use]
     pub fn main_view(&self) -> MainView {
@@ -1974,6 +2316,13 @@ impl Shell {
         self.prefs.record_session_automation_in
     }
 
+    /// The mode an Arrangement recording writes control moves in (the
+    /// automation spec, R18): Touch, Latch or Write.
+    #[must_use]
+    pub fn automation_record_mode(&self) -> crate::settings::AutomationRecordMode {
+        self.prefs.automation_record_mode
+    }
+
     /// Whether Warp recorded audio is on (IMP-02). Clips have no warp fields
     /// yet, so recorded clips play unwarped either way.
     #[must_use]
@@ -2015,7 +2364,16 @@ impl Shell {
                 use_tab_key_to_move_focus: self.tab_navigation(),
                 wrap_tab_navigation: self.wrap_navigation(),
             },
-            theme: self.prefs.theme,
+            theme_colors: ThemeColorsSettings {
+                look: self.prefs.look.clone(),
+                appearance: self.prefs.appearance,
+                drawn_appearance: if self.theme_dark() {
+                    Appearance::Dark
+                } else {
+                    Appearance::Light
+                },
+                themes: self.themes.clone(),
+            },
             audio: AudioPageSettings {
                 device: self.audio.settings().clone(),
                 tone: self.audio.tone(),
@@ -2027,9 +2385,11 @@ impl Shell {
             file_folder: FileFolderSettings {
                 temporary_folder: self.temporary_folder().to_string_lossy().into_owned(),
                 sample_editor: self.sample_editor().unwrap_or_default(),
+                save_continuously: self.save_continuously(),
             },
             launch: self.prefs.launch,
             record_session_automation_in: self.prefs.record_session_automation_in,
+            automation_record_mode: self.prefs.automation_record_mode,
             auto_hide_plug_in_windows: self.auto_hide_plug_in_windows(),
             plug_ins: self.plugin_settings(),
             agents: AgentsPageSettings {
@@ -2043,10 +2403,55 @@ impl Shell {
         }
     }
 
-    /// The theme in use.
+    /// The Appearance chosen (themes R3).
     #[must_use]
-    pub fn theme(&self) -> ThemeChoice {
-        self.prefs.theme
+    pub fn appearance(&self) -> Appearance {
+        self.prefs.appearance
+    }
+
+    /// The theme, tone, high contrast and Customization chosen (themes R1).
+    #[must_use]
+    pub fn look(&self) -> &ThemeLook {
+        &self.prefs.look
+    }
+
+    /// Whether the dark colours are drawn now: Follow System resolved
+    /// (themes R3).
+    #[must_use]
+    pub fn theme_dark(&self) -> bool {
+        match self.prefs.appearance {
+            Appearance::Light => false,
+            Appearance::Dark => true,
+            Appearance::FollowSystem => self.system_dark,
+        }
+    }
+
+    /// Tells the shell the operating system's mode changed; the host calls
+    /// it at start and on winit's theme event (themes R3).
+    pub fn set_system_dark(&mut self, dark: bool) {
+        self.system_dark = dark;
+    }
+
+    /// The User Library's `Themes` folder, where theme files are read
+    /// from (themes R9), if the User Library is known.
+    #[must_use]
+    pub fn themes_folder(&self) -> Option<PathBuf> {
+        self.browser_view
+            .user_library()
+            .map(|library| library.join("Themes"))
+    }
+
+    /// The themes the Theme chooser offers, Beatlayer first.
+    #[must_use]
+    pub fn themes(&self) -> &[String] {
+        &self.themes
+    }
+
+    /// Replaces the list of themes the chooser offers (themes R2); the
+    /// host calls it after reading the theme files.
+    pub fn set_themes(&mut self, names: Vec<String>) {
+        self.themes = names;
+        self.touch();
     }
 
     /// Whether Tab moves the keyboard focus in the main window.
@@ -2434,6 +2839,7 @@ impl Shell {
     /// Lets go of the plug-ins of the set being replaced (WP-2.6): the new
     /// set's plug-in devices load their plug-ins from their saved state.
     fn set_replaced(&mut self) {
+        self.editor_replaced();
         // What a DAWproject import said about the set that's gone (R11, R12).
         self.pending_name = None;
         self.import_report = None;
@@ -2451,6 +2857,12 @@ impl Shell {
         self.au.clear();
         self.vst3.clear();
         self.kit.clear();
+    }
+
+    /// Notes that the editor was replaced, so the journal doesn't hold the
+    /// new set as an edit of the old one (the crash-recovery spec, R2).
+    fn editor_replaced(&mut self) {
+        self.editor_generation = self.editor_generation.wrapping_add(1);
     }
 
     /// Whether `id` is a device command the registry holds: a plug-in's
@@ -4286,6 +4698,9 @@ impl Shell {
             self.set_message(message, true);
         }
         let mut changed = polled.changed | self.poll_processed() | self.poll_stems();
+        // Spec: export R41. The export on its thread: its share moves the
+        // progress window, and its end lands in the Status Bar.
+        changed |= self.poll_export();
         // Spec: multisampler R73. The autosampler makes one sample at a
         // time, so the dialog sees its progress and Cancel stops it.
         self.poll_autosample();
@@ -4557,6 +4972,13 @@ impl Shell {
         self.clipboard.as_ref()
     }
 
+    /// The clipboard of copied envelope shapes, if anything has been
+    /// copied (WP-6.25).
+    #[must_use]
+    pub fn envelope_clipboard(&self) -> Option<&EnvelopeClipboard> {
+        self.envelope_clipboard.as_ref()
+    }
+
     /// Whether a gesture that edits the set is under way.
     #[must_use]
     pub fn gesture_open(&self) -> bool {
@@ -4608,11 +5030,15 @@ impl Shell {
         if !labelled || self.edit_gesture.is_some() {
             return self.run(id, args);
         }
-        self.editor.begin_by(maker, label);
+        let name: std::borrow::Cow<'static, str> = label.into();
+        self.editor.begin_by(maker, name.clone());
         let result = self.run(id, args);
         if result.is_ok() {
             if self.editor.commit().unwrap_or(false) {
                 self.dirty = true;
+                // Spec: crash-recovery R1. The step is journalled under the
+                // name the undo history gives it.
+                self.journal_edit(Some(&name));
             }
         } else {
             self.editor.cancel().ok();
@@ -4685,8 +5111,10 @@ impl Shell {
         let mut outcome = Ok(Value::Null);
         if let Some(invocation) = invocation {
             if !edit_ids::handles(&invocation.id)
+                && !locator_ids::handles(&invocation.id)
                 && !note_ids::handles(&invocation.id)
                 && !is_automation_edit(&invocation.id)
+                && !automation_ids::handles(&invocation.id)
                 && !clip_marker_command(&invocation.id)
                 && !arrangement_clip_command(&invocation.id)
             {
@@ -4704,6 +5132,9 @@ impl Shell {
             && self.editor.commit().unwrap_or(false)
         {
             self.dirty = true;
+            // Spec: crash-recovery R1. The gesture's transaction is
+            // journalled as the one edit it was.
+            self.journal_edit(None);
         }
         self.document_changed();
         self.touch();
@@ -4713,6 +5144,10 @@ impl Shell {
     fn gesture_step(&mut self, invocation: &Invocation) -> Result<Value, ShellError> {
         let label = if note_ids::handles(&invocation.id) {
             clip_view::label(&invocation.id)
+        } else if automation_ids::handles(&invocation.id) {
+            automation::label(&invocation.id)
+        } else if locator_ids::handles(&invocation.id) {
+            crate::arrangement::locator::label(&invocation.id)
         } else if is_automation_edit(&invocation.id) {
             automation_label(&invocation.id)
         } else if clip_marker_command(&invocation.id) || arrangement_clip_command(&invocation.id) {
@@ -4747,10 +5182,13 @@ impl Shell {
             }
         }
         self.editor.begin(label);
+        let launch = self.launch_settings();
         let run = |editor: &mut Editor,
                    arrangement: &mut ArrangementView,
                    clip_view: &mut ClipView,
                    clipboard: &mut Option<Clipboard>,
+                   envelope_clipboard: &mut Option<EnvelopeClipboard>,
+                   devices: &DeviceView,
                    invocation: &Invocation| {
             if clip_marker_command(&invocation.id) || arrangement_clip_command(&invocation.id) {
                 // The document's own clip commands, run per frame like the
@@ -4766,6 +5204,17 @@ impl Shell {
                     clip_view,
                     arrangement,
                 )
+            } else if automation_ids::handles(&invocation.id) {
+                // Spec: automation-editing R2. A drag that moves several
+                // breakpoints of an envelope at once.
+                automation::run(
+                    &invocation.id,
+                    invocation.args.clone(),
+                    editor,
+                    arrangement,
+                    envelope_clipboard,
+                    devices,
+                )
             } else if is_automation_edit(&invocation.id) {
                 // WP-2.12: a drag on an automation lane moves, curves, or
                 // deletes breakpoints, as one undo step.
@@ -4774,6 +5223,16 @@ impl Shell {
                     .map_err(|error| {
                         crate::arrangement::editing::EditFailure::Refused(error.to_string())
                     })
+            } else if locator_ids::handles(&invocation.id) {
+                // The locators' own commands (WP-6.24).
+                crate::arrangement::locator::run(
+                    &invocation.id,
+                    invocation.args.clone(),
+                    editor,
+                    arrangement,
+                    &launch,
+                    None,
+                )
             } else {
                 editing::run(
                     &invocation.id,
@@ -4803,6 +5262,8 @@ impl Shell {
                 &mut self.arrangement,
                 &mut self.clip_view,
                 &mut self.clipboard,
+                &mut self.envelope_clipboard,
+                &self.devices,
                 step,
             );
             if result.is_err() {
@@ -5249,7 +5710,22 @@ impl Shell {
     fn poll_automation_record(&mut self, engine: &EngineTransport) {
         let recording = engine.recording && engine.playing;
         let was = std::mem::replace(&mut self.automation_recording, recording);
-        if recording || !was {
+        if recording {
+            if !was {
+                // The recording starts: the take learns the mode and where
+                // it began (automation R18 to R21).
+                let document = self.editor.document();
+                let settings = document.settings();
+                self.automation_take.start(
+                    self.prefs.automation_record_mode,
+                    crate::automation_record::take_start(document, engine.position),
+                    settings.arrangement_loop.start,
+                );
+            }
+            self.automation_take.advance(engine.position);
+            return;
+        }
+        if !was {
             return;
         }
         let take = std::mem::take(&mut self.automation_take);
@@ -5622,7 +6098,11 @@ impl Shell {
     pub fn end_gesture(&mut self) {
         if self.gesture {
             self.gesture = false;
-            let _ = self.editor.commit();
+            if self.editor.commit().unwrap_or(false) {
+                // Spec: crash-recovery R1. The gesture's transaction is
+                // journalled as the one edit it was.
+                self.journal_edit(None);
+            }
             self.touch();
         }
         // The control a drag moved is let go (automation R17).
@@ -5665,6 +6145,13 @@ impl Shell {
             WindowKind::Device(_) => vec![Context::DeviceView, Context::Global],
             WindowKind::Main => {
                 let mut contexts = Vec::with_capacity(3);
+                // Spec: crash-recovery R23. While the recovery prompt is
+                // open, it has the keyboard: the main window's own keys
+                // don't run, so Tab moves between the prompt's buttons and
+                // Esc closes it.
+                if self.recovery_prompt_open() {
+                    return contexts;
+                }
                 match self.focused_area {
                     Area::MainView => match self.main_view {
                         MainView::Arrangement => {
@@ -5731,6 +6218,12 @@ impl Shell {
     pub fn choice_state(&self, id: &str, args: &Value) -> Option<bool> {
         match id {
             CUE_MODE => Some(self.editor.document().cue_active() == args["enabled"].as_bool()?),
+            // Spec: time-editing R10. The loop brace's menu item is ticked
+            // while the song starts at the brace's start.
+            locator_ids::SET_START_TIME if args["loop_brace"].as_bool() == Some(true) => Some(
+                self.editor.document().settings().song_start
+                    == Some(bl_model::SongStart::LoopBrace),
+            ),
             _ => None,
         }
     }
@@ -5740,6 +6233,15 @@ impl Shell {
     #[must_use]
     pub fn switch_state(&self, id: &str) -> Option<bool> {
         match id {
+            // Spec: time-editing R10. A locator's menu item is ticked while
+            // the song starts at that locator.
+            locator_ids::SET_START_TIME => {
+                let selected = self.arrangement.selected_locators().first().copied();
+                Some(
+                    self.editor.document().settings().song_start
+                        == selected.map(bl_model::SongStart::Locator),
+                )
+            }
             ids::VIEW_FULL_SCREEN => Some(self.full_screen),
             ids::VIEW_TOGGLE_BROWSER => Some(self.browser),
             ids::VIEW_TOGGLE_CLIP_VIEW => Some(self.clip_view.visible()),
@@ -5762,6 +6264,7 @@ impl Shell {
             REDUCED_LATENCY_MONITORING => {
                 Some(self.editor.document().settings().reduced_latency_monitoring)
             }
+            LOCK_ENVELOPES => Some(self.editor.document().settings().lock_envelopes),
             "transport.set_metronome_enabled" => {
                 Some(self.editor.document().settings().metronome.enabled)
             }
@@ -5809,8 +6312,30 @@ impl Shell {
     /// The label a menu shows for a command now: Undo and Redo name the step
     /// they act on, or say there's nothing (M-EDIT-001, M-EDIT-002).
     #[must_use]
+    /// The command a menu item runs: the one its row names, or the one
+    /// that fits the state, such as Create ▸ Add Locator, which reads
+    /// Delete Locator and deletes while a locator is selected (the time
+    /// editing spec, R4).
+    pub fn menu_command<'a>(&self, id: &'a str) -> &'a str {
+        if self.arrangement.selected_locators().is_empty() {
+            return id;
+        }
+        match id {
+            // Spec: time-editing R4. Create ▸ Add Locator reads Delete
+            // Locator and deletes while a locator is selected.
+            locator_ids::ADD => locator_ids::DELETE,
+            // Spec: time-editing R8. Edit ▸ Rename renames the selected
+            // locator.
+            "clip.rename" => locator_ids::RENAME,
+            _ => id,
+        }
+    }
+
     pub fn dynamic_label(&self, id: &str) -> Option<String> {
         match id {
+            // Spec: time-editing R4. The Create menu's Add Locator reads
+            // Delete Locator while a locator is selected.
+            locator_ids::DELETE => Some("Delete Locator".to_owned()),
             model::UNDO => Some(self.editor.undo_history().next().map_or_else(
                 || "Nothing to Undo".to_owned(),
                 |step| format!("Undo {step}"),
@@ -6002,7 +6527,7 @@ impl Shell {
             }
             ids::APP_HIDE => return cfg!(target_os = "macos"),
             ids::SET_OPEN | ids::SET_SAVE | ids::SET_SAVE_AS | ids::APP_SETTINGS => return true,
-            ids::SET_DISCARD_CHANGES => return self.dirty,
+            ids::SET_DISCARD_CHANGES => return self.unsaved_changes(),
             // Options ▸ Reduced Latency When Monitoring is available only
             // while Delay Compensation is on (the delay-compensation spec,
             // R8).
@@ -6011,12 +6536,20 @@ impl Shell {
             }
             ids::FOCUS_NEXT_NEIGHBOR => return self.has_neighbor(false),
             ids::FOCUS_PREVIOUS_NEIGHBOR => return self.has_neighbor(true),
+            // Spec: time-editing R8. Cmd-R renames the selected locators
+            // while there are any.
+            "clip.rename" => return self.arrangement.selected_locators().is_empty(),
             // Zoom In and Zoom Out stop at the zoom's ends (interface-zoom
             // R3).
             ids::VIEW_ZOOM_IN => return self.zoom_percent() < ZOOM_MAX_PERCENT,
             ids::VIEW_ZOOM_OUT => return self.zoom_percent() > ZOOM_MIN_PERCENT,
-            // A person's Zoom setting always names a percentage in range.
-            ids::VIEW_SET_ZOOM => {
+            // A person's Zoom setting always names a percentage in range, as
+            // the Customization settings do (themes R7).
+            ids::VIEW_SET_ZOOM
+            | ids::SETTINGS_SET_GRID_LINE_INTENSITY
+            | ids::SETTINGS_SET_BRIGHTNESS
+            | ids::SETTINGS_SET_COLOR_INTENSITY
+            | ids::SETTINGS_SET_COLOR_HUE => {
                 return spec
                     .args
                     .as_ref()
@@ -6047,6 +6580,9 @@ impl Shell {
         }
         if stems_ids::handles(id) {
             return self.can_stems(id, args);
+        }
+        if export_ids::handles(id) {
+            return self.can_export(id);
         }
         if autosampler_ids::handles(id) {
             return self.can_autosampler(id, args);
@@ -6203,6 +6739,9 @@ impl Shell {
                 .args
                 .as_ref()
                 .is_some_and(|schema| bl_commands::validate(schema, &args).is_ok())
+                // Spec: time-editing R4. The Delete key deletes the
+                // selected locators while there are any.
+                && !(id == edit_ids::DELETE && !self.arrangement.selected_locators().is_empty())
                 && editing::can_run(
                     id,
                     &args,
@@ -6263,6 +6802,31 @@ impl Shell {
                 .as_ref()
                 .is_some_and(|schema| bl_commands::validate(schema, &args).is_ok())
                 && self.arrangement.can_run(id, &args, self.editor.document());
+        }
+        if locator_ids::handles(id) {
+            let args = if args.is_null() {
+                json!({})
+            } else {
+                args.clone()
+            };
+            if !spec
+                .args
+                .as_ref()
+                .is_some_and(|schema| bl_commands::validate(schema, &args).is_ok())
+            {
+                return false;
+            }
+            return match id {
+                locator_ids::DELETE => {
+                    args.get("locators").is_some()
+                        || !self.arrangement.selected_locators().is_empty()
+                }
+                // Spec: time-editing R13. The jumps need the engine.
+                locator_ids::JUMP | locator_ids::JUMP_PREVIOUS | locator_ids::JUMP_NEXT => {
+                    self.audio.engine_running()
+                }
+                _ => true,
+            };
         }
         if mixer_ids::handles(id) {
             let args = if args.is_null() {
@@ -6418,6 +6982,12 @@ impl Shell {
             let on = self.editor.document().settings().midi_overdub;
             fields.insert("enabled".to_owned(), json!(!on));
         }
+        if id == LOCK_ENVELOPES && !fields.contains_key("enabled") {
+            // Spec: automation-editing R8. Options ▸ Lock Envelopes switches
+            // the setting to the other state.
+            let on = self.editor.document().settings().lock_envelopes;
+            fields.insert("enabled".to_owned(), json!(!on));
+        }
         if id == SOLO_IN_PLACE && !fields.contains_key("enabled") {
             // Spec: accessibility R9. Options ▸ Solo in Place switches the
             // setting to the other state.
@@ -6556,6 +7126,23 @@ impl Shell {
             })
     }
 
+    /// The locator Rename reaches: the one `args` names, else the first
+    /// selected.
+    fn renamable_locator(&self, args: &Value) -> Option<bl_model::LocatorId> {
+        let named: Option<Vec<bl_model::LocatorId>> = args
+            .get("locators")
+            .and_then(|v| serde_json::from_value(v.clone()).ok());
+        named
+            .and_then(|mut locators| {
+                if locators.is_empty() {
+                    None
+                } else {
+                    Some(locators.remove(0))
+                }
+            })
+            .or_else(|| self.arrangement.selected_locators().first().copied())
+    }
+
     /// Runs a command as a person asked for it, from a menu, a key, or a
     /// control: fills in arguments the person didn't give, asks before
     /// losing unsaved changes, and asks for a file where one is needed (as
@@ -6575,14 +7162,14 @@ impl Shell {
     fn invoke_inner(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
         let has = |key: &str| args.get(key).is_some();
         match id {
-            ids::SET_NEW | ids::APP_QUIT if self.dirty => {
+            ids::SET_NEW | ids::APP_QUIT if self.unsaved_changes() => {
                 self.effects.push(Effect::ConfirmDiscard {
                     then: Invocation::new(id, args),
                 });
                 Ok(Value::Null)
             }
             ids::SET_OPEN if !has("path") => {
-                if self.dirty {
+                if self.unsaved_changes() {
                     self.effects.push(Effect::ConfirmDiscard {
                         then: Invocation::new(id, args),
                     });
@@ -6593,7 +7180,7 @@ impl Shell {
                 }
                 Ok(Value::Null)
             }
-            ids::SET_OPEN if self.dirty => {
+            ids::SET_OPEN if self.unsaved_changes() => {
                 self.effects.push(Effect::ConfirmDiscard {
                     then: Invocation::new(id, args),
                 });
@@ -6673,6 +7260,19 @@ impl Shell {
                         reason: "select a track first".to_owned(),
                     })?;
                 self.effects.push(Effect::RenameTrack(track));
+                self.touch();
+                Ok(Value::Null)
+            }
+            locator_ids::RENAME if !has("name") => {
+                // Spec: time-editing R8. Cmd-R and Edit ▸ Rename type the
+                // new name in the scrub area.
+                let locator =
+                    self.renamable_locator(&args)
+                        .ok_or_else(|| ShellError::Unavailable {
+                            command: id.to_owned(),
+                            reason: "select a locator first".to_owned(),
+                        })?;
+                self.effects.push(Effect::RenameLocator(locator));
                 self.touch();
                 Ok(Value::Null)
             }
@@ -6760,7 +7360,7 @@ impl Shell {
                 let args = self.filled_args(id, args)?;
                 self.run(id, args)
             }
-            SOLO_IN_PLACE if !has("enabled") => {
+            SOLO_IN_PLACE | LOCK_ENVELOPES if !has("enabled") => {
                 let args = self.filled_args(id, args)?;
                 self.run(id, args)
             }
@@ -6840,14 +7440,29 @@ impl Shell {
         let arranged = self.arrangement.selected_clips().to_vec();
         let slot = self.selected_slot_clip();
         let shown = self.shown_clip();
+        let revision = self.document_revision;
+        let generation = self.editor_generation;
         let result = self.run_command(id, args);
+        if self.search.open && !search_ids::handles(id) {
+            // Spec: command-palette R7, R10. The rows' availability and the
+            // outlines follow the set as it changes.
+            self.refresh_search();
+        }
         if result.is_ok() {
             self.follow_clip_selection(id, &arranged, slot);
             // Spec: scales R10. Selecting a clip makes its scale the
             // current scale, and a change to that clip's scale changes it
             // with it.
             self.follow_shown_scale(id, shown);
+            if self.document_revision != revision && self.editor_generation == generation {
+                // Spec: crash-recovery R1. The finished edit is journalled,
+                // so the set can be recovered after a crash.
+                self.journal_edit(None);
+            }
         }
+        // Spec: crash-recovery R27. The Status Bar says when the journal
+        // can't be written.
+        self.check_recovery();
         result
     }
 
@@ -7054,6 +7669,9 @@ impl Shell {
         if changed {
             self.dirty = true;
             self.document_changed();
+            // Spec: crash-recovery R1. The batch is journalled as the one
+            // edit it was.
+            self.journal_edit(Some(label));
         }
         self.touch();
         Ok((results, changed))
@@ -7352,7 +7970,33 @@ impl Shell {
         Ok(())
     }
 
+    /// Runs an automation editing command, on the lanes the selection
+    /// covers (the automation editing spec, R5, R7).
+    fn run_automation(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        let before = self.editor.document().clone();
+        let result = automation::run(
+            id,
+            args,
+            &mut self.editor,
+            &mut self.arrangement,
+            &mut self.envelope_clipboard,
+            &self.devices,
+        )
+        .map_err(|failure| edit_error(id, failure));
+        if *self.editor.document() != before {
+            self.dirty = true;
+            self.document_changed();
+        }
+        self.touch();
+        result
+    }
+
     fn run_command(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        if recovery_ids::handles(id) {
+            // Spec: crash-recovery R26. The recovery commands run against
+            // the app's own recovery.
+            return self.run_recovery(id, args);
+        }
         if let Some(track) = self.frozen_blocks(id, &args) {
             return Err(ShellError::Unavailable {
                 command: id.to_owned(),
@@ -7395,6 +8039,12 @@ impl Shell {
             return self.run_bounce(id, args);
         }
         if edit_ids::handles(id) {
+            // Spec: automation-editing R5. With the time selection in
+            // automation lanes, the edit commands act on the envelopes
+            // alone, and the clips stay as they are.
+            if let Some(automation_id) = automation_command(id, &self.arrangement) {
+                return self.run_automation(automation_id, args);
+            }
             let before = self.editor.document().clone();
             let result = editing::run(
                 id,
@@ -7402,6 +8052,30 @@ impl Shell {
                 &mut self.editor,
                 &mut self.arrangement,
                 &mut self.clipboard,
+            )
+            .map_err(|failure| edit_error(id, failure));
+            if *self.editor.document() != before {
+                self.dirty = true;
+                self.document_changed();
+            }
+            self.touch();
+            return result;
+        }
+        if automation_ids::handles(id) {
+            return self.run_automation(id, args);
+        }
+        if locator_ids::handles(id) {
+            // Spec: time-editing R1 to R13. The locators are part of the
+            // set, and the jumps between them need the engine.
+            let before = self.editor.document().clone();
+            let launch = self.launch_settings();
+            let result = crate::arrangement::locator::run(
+                id,
+                args,
+                &mut self.editor,
+                &mut self.arrangement,
+                &launch,
+                Some(&mut self.audio),
             )
             .map_err(|failure| edit_error(id, failure));
             if *self.editor.document() != before {
@@ -7465,6 +8139,20 @@ impl Shell {
                 .flatten()
                 .map(|command| {
                     crate::automation_record::moved_all(self.editor.document(), &command)
+                        .into_iter()
+                        .map(|(track, target, value)| {
+                            // The value the control had before the move, which
+                            // Write starts the envelope from (automation R20).
+                            let before = crate::modulation::control_value(
+                                self.editor.document(),
+                                &self.devices,
+                                track,
+                                &target,
+                            )
+                            .unwrap_or(value);
+                            (track, target, before, value)
+                        })
+                        .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
             // Spec: session-automation R1. With Automation Arm on and a
@@ -7495,12 +8183,13 @@ impl Shell {
             if sample_edit_command(id) {
                 self.clip_view.sample_follow(true);
             }
-            for (track, target, value) in moved {
+            for (track, target, before, value) in moved {
                 self.automation_take.write(
                     track,
                     target,
                     self.arrangement.transport().position,
                     value,
+                    before,
                 );
             }
             for (track, target, before, value) in session_moved {
@@ -7674,6 +8363,15 @@ impl Shell {
                 self.focused_window = WindowKind::Main;
                 self.focused_area = Area::MainView;
                 self.effects.push(Effect::FocusArea(Area::MainView));
+            }
+            if result.is_ok() && id == mixer_ids::RETURN_TRACKS_SCROLL {
+                // Spec: mixer-view R21. The switch is an application
+                // setting, kept between launches, and the Arrangement's
+                // lanes follow it.
+                let on = self.mixer.return_tracks_scroll();
+                self.prefs.return_tracks_scroll = on;
+                self.arrangement.set_returns_scroll(on);
+                self.save_preferences();
             }
             if id != mixer_ids::STATE {
                 self.touch();
@@ -7899,40 +8597,17 @@ impl Shell {
             return self.run_slice(id, args);
         }
         if export_ids::handles(id) {
-            if id != export_ids::AUDIO {
+            return match id {
+                export_ids::AUDIO => self.run_export_audio(args),
                 // Spec: external-devices R23. The real-time render's
                 // dialog: its buttons set the session's flags.
-                return self.run_realtime(id, args);
-            }
-            // Spec: export R15. The set, its media, the Arrangement's time
-            // selection, and the engine's rate; the export changes none.
-            let engine_rate = self.engine_rate();
-            let args = Self::args(id, args)?;
-            // Spec: offline-plugin-renders R7. Export stops the song first,
-            // as Live does, and borrows the engine's plug-ins (R1).
-            if self.audio.transport_state().playing {
-                let _ = self.audio.send_transport(bl_engine::TransportCommand::Stop);
-            }
-            let media: Arc<dyn bl_engine::MediaLibrary> = self.media.clone();
-            // The plug-in hosts, without borrowing the whole shell: the
-            // export may render in real time, which needs the audio host.
-            let hosts = bl_plugin_host::Hosts {
-                clap: Some(&self.plugins),
-                vst3: Some(&self.vst3),
-                au: Some(&self.au),
+                export_ids::REALTIME_STATUS
+                | export_ids::REALTIME_RESTART
+                | export_ids::REALTIME_SKIP
+                | export_ids::REALTIME_CANCEL
+                | export_ids::REALTIME_AUTO_RESTART => self.run_realtime(id, args),
+                _ => self.run_export_dialog(id, args),
             };
-            return crate::export::run_command(
-                self.editor.document(),
-                media,
-                hosts,
-                self.arrangement.time_selection(),
-                self.arrangement.selected_tracks(),
-                engine_rate,
-                &args,
-                Some(&mut self.audio),
-                &self.realtime,
-            )
-            .map(|result| to_value(&result));
         }
         if midi_ids::handles(id) {
             return self.run_midi_files(id, args);
@@ -7949,6 +8624,10 @@ impl Shell {
             let result = self.run_file_manager(id, args);
             self.touch();
             return result;
+        }
+        if search_ids::handles(id) {
+            // Spec: command-palette R15, R16. The search field's commands.
+            return self.run_search(id, args);
         }
         if !ids::handles(id) {
             return Err(ShellError::UnknownCommand(id.to_owned()));
@@ -8503,11 +9182,15 @@ impl Shell {
                 self.new_set_transport();
                 self.document_changed();
                 self.set_file_changed();
+                // Spec: crash-recovery R21. The new set is journalled from
+                // the start, and the set that was open keeps its unsaved
+                // edits for recovery (R7).
+                self.begin_journal();
                 Ok(self.set_result())
             }
             ids::SET_OPEN => {
                 let PathArgs { path } = Self::args(id, args)?;
-                if self.dirty {
+                if self.unsaved_changes() {
                     return Err(unavailable(
                         "the set has unsaved changes; save them with `set.save` or \
                          `set.save_as`, or throw them away with `set.discard_changes`, first",
@@ -8559,6 +9242,9 @@ impl Shell {
                 self.new_set_transport();
                 self.document_changed();
                 self.set_file_changed();
+                // Spec: crash-recovery R21. The opened set is journalled
+                // from the start.
+                self.begin_journal();
                 Ok(self.set_result())
             }
             ids::SET_SAVE => {
@@ -8622,8 +9308,23 @@ impl Shell {
                     self.gesture = false;
                     self.dirty = false;
                     self.document_changed();
+                    // Spec: crash-recovery R6. The changes are gone, so
+                    // nothing is offered at the next launch.
+                    self.close_journal();
+                    // The set is still open, so its later edits are
+                    // journalled from now on.
+                    self.begin_journal();
                 }
                 Ok(self.set_result())
+            }
+            ids::SET_LATER_RECOVERY => {
+                // Spec: crash-recovery R22. The prompt closes; every set it
+                // listed is still offered at the next launch.
+                Self::args::<NoArgs>(id, args)?;
+                self.recovery_deferred = true;
+                Ok(to_value(&ids::RecoveryPrompt {
+                    open: self.recovery_prompt_open(),
+                }))
             }
             ids::SET_SAVE_AS_DEFAULT => {
                 // Spec: file-management R2. The open set becomes the one a
@@ -8780,6 +9481,9 @@ impl Shell {
                 Self::args::<NoArgs>(id, args)?;
                 self.audio.set_test_tone(false);
                 self.save_preferences();
+                // Spec: crash-recovery R21. The set is closed, so nothing
+                // is offered at the next launch.
+                self.close_journal();
                 self.effects.push(Effect::Quit);
                 Ok(Value::Null)
             }
@@ -9122,7 +9826,65 @@ impl Shell {
             }
             ids::SETTINGS_SET_THEME => {
                 let ThemeArgs { theme } = Self::args(id, args)?;
-                self.prefs.theme = theme;
+                match theme.as_str() {
+                    // What earlier versions took (themes R12).
+                    "dark" => self.prefs.appearance = Appearance::Dark,
+                    "light" => self.prefs.appearance = Appearance::Light,
+                    name if self.themes.iter().any(|t| t == name) => {
+                        self.prefs.look.theme = theme;
+                    }
+                    _ => {
+                        return Err(ShellError::InvalidArgs {
+                            command: id.to_owned(),
+                            message: format!(
+                                "there is no theme `{theme}`; the themes are {}",
+                                self.themes.join(", ")
+                            ),
+                        });
+                    }
+                }
+                self.save_preferences();
+                Ok(Value::Null)
+            }
+            ids::SETTINGS_SET_APPEARANCE => {
+                let AppearanceArgs { appearance } = Self::args(id, args)?;
+                self.prefs.appearance = appearance;
+                self.save_preferences();
+                Ok(Value::Null)
+            }
+            ids::SETTINGS_SET_TONE => {
+                let ToneArgs { tone } = Self::args(id, args)?;
+                self.prefs.look.tone = tone;
+                self.save_preferences();
+                Ok(Value::Null)
+            }
+            ids::SETTINGS_SET_HIGH_CONTRAST => {
+                let SwitchArgs { on } = Self::args(id, args)?;
+                self.prefs.look.high_contrast = on;
+                self.save_preferences();
+                Ok(Value::Null)
+            }
+            ids::SETTINGS_SET_GRID_LINE_INTENSITY => {
+                let PercentArgs { percent } = Self::args(id, args)?;
+                self.prefs.look.grid_line_intensity = percent.clamp(0, 200);
+                self.save_preferences();
+                Ok(Value::Null)
+            }
+            ids::SETTINGS_SET_BRIGHTNESS => {
+                let BrightnessArgs { value } = Self::args(id, args)?;
+                self.prefs.look.brightness = value.clamp(-50, 50);
+                self.save_preferences();
+                Ok(Value::Null)
+            }
+            ids::SETTINGS_SET_COLOR_INTENSITY => {
+                let PercentArgs { percent } = Self::args(id, args)?;
+                self.prefs.look.color_intensity = percent.clamp(0, 200);
+                self.save_preferences();
+                Ok(Value::Null)
+            }
+            ids::SETTINGS_SET_COLOR_HUE => {
+                let HueArgs { degrees } = Self::args(id, args)?;
+                self.prefs.look.color_hue = degrees.clamp(-180, 180);
                 self.save_preferences();
                 Ok(Value::Null)
             }
@@ -9215,6 +9977,12 @@ impl Shell {
             ids::SETTINGS_SET_RECORD_SESSION_AUTOMATION_IN => {
                 let RecordSessionAutomationInArgs { tracks } = Self::args(id, args)?;
                 self.prefs.record_session_automation_in = tracks;
+                self.save_preferences();
+                Ok(Value::Null)
+            }
+            ids::SETTINGS_SET_AUTOMATION_RECORD_MODE => {
+                let AutomationRecordModeArgs { mode } = Self::args(id, args)?;
+                self.prefs.automation_record_mode = mode;
                 self.save_preferences();
                 Ok(Value::Null)
             }
@@ -9496,6 +10264,9 @@ impl Shell {
         self.set_path = Some(path);
         self.set_file_changed();
         self.dirty = false;
+        // Spec: crash-recovery R6. The save holds every edit, so the
+        // journal retires.
+        self.journal_saved();
         self.message = (!warnings.is_empty()).then(|| Message {
             text: format!("The set was saved, but: {}", warnings.join("; ")),
             error: false,

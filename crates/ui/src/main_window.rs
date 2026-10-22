@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use bl_model::{CountIn, MetronomeRhythm, MetronomeSound};
 use bl_shell::midi_io_commands as midi_ids;
+use bl_shell::settings::AutomationRecordMode;
 use bl_shell::{
     Area, Effect, GesturePhase, Invocation, MainView, Shell, commands as ids, transport_commands,
 };
@@ -73,6 +74,9 @@ pub enum UiEvent {
     /// as a drum rack's pad (`Some`), or left it (`None`), for
     /// [`Shell::set_hint`] (WP-5.6).
     StatusHint(Option<String>),
+    /// The person chose row `n` of the search field's list (WP-6.42): the
+    /// host passes it to [`Shell::search_run_row`].
+    SearchRun(usize),
 }
 
 /// What the Info View is showing: the control under the pointer, the
@@ -153,6 +157,8 @@ pub struct MainWindowUi {
     undo_history: crate::undo_history_panel::UndoHistoryPanelUi,
     /// The File Manager's switches (WP-6.63).
     file_manager: crate::file_manager::FileManagerUi,
+    /// The search field (WP-6.42).
+    search_field: crate::search_field::SearchFieldUi,
 }
 
 /// A move of the keyboard focus asked for by `focus.next`,
@@ -223,6 +229,7 @@ impl MainWindowUi {
             plugin_list: crate::plugin_list::PluginListUi::default(),
             keymap: None,
             file_manager: crate::file_manager::FileManagerUi::default(),
+            search_field: crate::search_field::SearchFieldUi::default(),
             keymap_revision: 0,
             info: InfoViewContent::default(),
             mixer_typing: false,
@@ -290,6 +297,12 @@ impl MainWindowUi {
         &self.browser
     }
 
+    /// The Device View, to read what it drew.
+    #[must_use]
+    pub fn devices(&self) -> &crate::device_view::DeviceViewUi {
+        &self.devices
+    }
+
     /// Whether a value is being typed into a Control Bar field: while it
     /// is, key presses go to the field rather than to shortcuts, as they do
     /// to a text field (the control bar transport spec, R10). The same while
@@ -301,6 +314,7 @@ impl MainWindowUi {
             || self.mixer_typing
             || self.menu_open
             || self.devices.is_typing()
+            || self.search_field.is_open()
     }
 
     /// The Arrangement View, to give it a peak source or read what it drew.
@@ -344,6 +358,11 @@ impl MainWindowUi {
                 self.devices.start_variation_rename(*rack, *index);
             }
             Effect::RenameTrack(track) => crate::track_menu::start_rename(ctx, *track),
+            Effect::RenameLocator(locator) => {
+                // Spec: time-editing R8. Rename types the name in the
+                // scrub area.
+                crate::arrangement::start_rename(ctx, *locator);
+            }
             Effect::MoveFocus {
                 backwards,
                 neighbor,
@@ -551,6 +570,13 @@ impl MainWindowUi {
                 self.undo_history.hide(&mut events);
             }
             outline_focused_area(ui, shell, theme, &layout);
+            // Spec: command-palette R2. The search field sits above every
+            // pane, at the main view's top.
+            self.search_field
+                .show(ui, shell, theme, layout.main_view, &mut events);
+            if let Some(track) = self.search_field.revealed(shell) {
+                self.mixer.reveal(shell.front_mixer(), track);
+            }
             self.drawn = Some(layout);
         });
         // Spec: stem-separation R1. Separate Stems' dialog sits over the
@@ -560,14 +586,23 @@ impl MainWindowUi {
         // over the window while a render that runs through external
         // hardware is under way.
         crate::realtime_dialog::show(ctx, shell, theme, &mut events);
+        // Spec: export R28, R41. The Export Audio/Video dialog sits over the
+        // window while it's open, and the progress window while an export
+        // runs.
+        crate::export_dialog::show(ctx, shell, theme, &mut events);
         // Spec: multisampler R64. The autosampler's dialog sits over the
         // window while it's open.
         crate::autosampler::show(ctx, shell, theme, &mut events);
         crate::slice_dialog::show(ctx, shell, theme, &mut events);
+        // Spec: crash-recovery R22. The recovery prompt sits over the
+        // window while there are sets a crash left to offer.
+        crate::recovery_dialog::show(ctx, shell, theme, &mut events);
         self.mixer_typing = crate::mixer::is_typing(ctx) || crate::track_menu::is_renaming(ctx);
         // An open menu, or a dialog, keeps the keys.
         self.menu_open = egui::Popup::is_any_open(ctx)
             || shell.stems_dialog().is_some()
+            || shell.export_dialog().is_some()
+            || shell.export_running()
             || shell.autosampler_dialog().is_some()
             || shell.slice_dialog().is_some();
         // The track whose control has the focus, for the neighbour items'
@@ -609,6 +644,14 @@ impl MainWindowUi {
         use crate::focus::Neighbor;
         if egui::Popup::is_any_open(ctx) {
             // An open menu keeps the keyboard.
+            return;
+        }
+        if self.search_field.is_open() {
+            // Spec: command-palette R13. Tab moves round the search field's
+            // controls and stays in the field.
+            if let Some(id) = self.search_field.tab(ctx, step.backwards) {
+                focus_on(ctx, id, events);
+            }
             return;
         }
         let focused = ctx.memory(egui::Memory::focused);
@@ -759,6 +802,10 @@ impl MainWindowUi {
         }) else {
             return;
         };
+        // A click in the search field isn't a click in the pane under it.
+        if self.search_field.contains(pos) {
+            return;
+        }
         let areas = [
             (Area::ControlBar, Some(layout.control_bar)),
             (Area::Browser, layout.browser),
@@ -836,6 +883,13 @@ impl MainWindowUi {
                     Self::metronome_menu_content(ui, shell, events);
                 });
             }
+            if *el == Element::AutomationArm {
+                // Spec: automation R18. The Automation Arm button's context
+                // menu chooses the recording's mode.
+                response.context_menu(|ui| {
+                    Self::automation_arm_menu_content(ui, shell, events);
+                });
+            }
             if *el == Element::MetronomeMenu {
                 Self::metronome_menu(&response, shell, events);
             }
@@ -892,6 +946,25 @@ impl MainWindowUi {
                 control_bar::UNFOLLOW_TEMPO_AUTOMATION,
                 serde_json::json!({}),
             )));
+        }
+    }
+
+    /// The Automation Arm button's context menu (automation R18): the
+    /// recording's mode, the current one ticked.
+    fn automation_arm_menu_content(ui: &mut Ui, shell: &Shell, events: &mut Vec<UiEvent>) {
+        let mode = shell.automation_record_mode();
+        for choice in AutomationRecordMode::ALL {
+            let mut text = choice.label().to_owned();
+            if choice == mode {
+                text = format!("✔ {text}");
+            }
+            if ui.button(text).clicked() {
+                events.push(UiEvent::Invoke(Invocation::new(
+                    ids::SETTINGS_SET_AUTOMATION_RECORD_MODE,
+                    json!({ "mode": choice }),
+                )));
+                ui.close();
+            }
         }
     }
 
@@ -1158,7 +1231,8 @@ impl MainWindowUi {
         // while the pointer is over empty space.
         let keymap =
             crate::keymap::keymap_in_use(&mut self.keymap, &mut self.keymap_revision, shell);
-        self.info = info_content(self.hovered, shell, keymap);
+        self.info = crate::search_field::info(shell)
+            .unwrap_or_else(|| info_content(self.hovered, shell, keymap));
         if self.info.title.is_empty() {
             return;
         }

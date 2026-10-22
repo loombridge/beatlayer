@@ -11,6 +11,7 @@
 mod common;
 
 use bl_model::{SceneId, TrackId};
+use bl_shell::mixer_view::MixerOf;
 use bl_ui::layout::mixer::{MixerLayout, SceneRow, Sections, SessionLayout, TrackColumn};
 use bl_ui::layout::{REFERENCE, ShellLayout, TITLE_BAR};
 use bl_ui::session_view::slot_id;
@@ -743,4 +744,115 @@ fn the_launch_buttons_reach_accesskit_with_their_track_and_scene() {
     let nodes = common::Harness::nodes(&h.settle());
     let follow = common::Harness::node(&nodes, "Enable Follow Actions Globally");
     assert_eq!(follow.toggled, Some(false));
+}
+
+/// Where a frame paints a text, its centre, walking the frame's shapes.
+fn painted_text(output: &egui::FullOutput, text: &str) -> Option<f32> {
+    fn walk(shape: &egui::Shape, text: &str, out: &mut Option<f32>) {
+        match shape {
+            egui::Shape::Text(t) => {
+                if t.galley.job.text == text {
+                    *out = Some(t.pos.x + t.galley.size().x / 2.0);
+                }
+            }
+            egui::Shape::Vec(shapes) => {
+                for shape in shapes {
+                    walk(shape, text, out);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut found = None;
+    for clipped in &output.shapes {
+        walk(&clipped.shape, text, &mut found);
+    }
+    found
+}
+
+// Spec: session-view R34.
+#[test]
+fn the_return_tracks_scroll_with_the_tracks_in_the_grid() {
+    let mut h = harness();
+    for _ in 0..38 {
+        h.shell
+            .invoke("track.create", json!({ "kind": "return" }))
+            .unwrap();
+    }
+    h.settle();
+    // With the switch off, the returns are pinned at the right and the
+    // drop area has nowhere to be.
+    let output = h.settle();
+    assert!(painted_text(&output, "Drop Files and Devices Here").is_none());
+    h.shell
+        .invoke(
+            bl_shell::mixer_view_commands::RETURN_TRACKS_SCROLL,
+            json!({ "on": true }),
+        )
+        .unwrap();
+    h.settle();
+    let output = h.settle();
+    let session = SessionLayout::compute(view_rect(), Some(Sections::DEFAULT));
+    let columns = h.shell.mixer_columns();
+    let returns: Vec<TrackId> = h.shell.editor().document().returns().collect();
+    let layout = MixerLayout::compute(
+        session.slots,
+        &vec![TrackColumn::track(); columns.len()],
+        returns.len(),
+        Sections {
+            return_tracks_scroll: true,
+            ..Sections::DEFAULT
+        },
+        0.0,
+    );
+    // The drop area is between the tracks and the returns, at least a
+    // column wide, and the grid paints its text in it.
+    let drop = layout.drop_area.expect("the drop area");
+    assert!(drop.width() >= 94.0, "{}", drop.width());
+    let at = painted_text(&output, "Drop Files and Devices Here").expect("the drop area's text");
+    assert_eq!(at, drop.center().x);
+    // The returns come after the drop area, and Main stays at the right.
+    assert_eq!(layout.returns[0].rect.left(), drop.right());
+    assert_eq!(
+        (layout.main.rect.left(), layout.main.rect.right()),
+        (1487.0, 1591.0)
+    );
+}
+
+// Spec: view-options R1, session-view R35.
+#[test]
+fn the_middle_button_pans_the_grid() {
+    let mut h = harness();
+    // Room to pan: the grid is scrolled down and to the right first.
+    h.shell
+        .run("session.scroll", json!({ "y": 100.0 }))
+        .unwrap();
+    h.shell
+        .run(
+            "mixer_view.scroll",
+            json!({ "view": "session", "x": 200.0 }),
+        )
+        .unwrap();
+    h.settle();
+    let g = Grid::new(&h);
+    let over = g.session.slots.center();
+    let before = state(&h);
+    // A middle-button drag of 100 points right and 50 down pans the grid
+    // with the pointer.
+    h.middle_drag(over, over + vec2(100.0, 50.0));
+    let after = state(&h);
+    assert!(
+        (after.scroll_y - before.scroll_y + 50.0).abs() < 0.5,
+        "the scenes moved 50 points down: {}",
+        after.scroll_y - before.scroll_y
+    );
+    let scroll = h.shell.mixer_view().of(MixerOf::Session).scroll;
+    assert!(
+        (scroll - 100.0).abs() < 0.5,
+        "the columns moved 100 points right: {scroll}"
+    );
+    // Nothing else changed: no selection, no launch, no undo step.
+    assert_eq!(before.slots, after.slots);
+    assert_eq!(before.scenes, after.scenes);
+    assert!(!h.shell.editor().can_undo(), "not an undo step");
 }

@@ -32,12 +32,14 @@ use crate::commands::{
     VIEW_ZOOM_IN, VIEW_ZOOM_OUT, VIEW_ZOOM_RESET, WINDOW_CLOSE,
 };
 use crate::devices::COMPARE_COPY;
+use crate::export::OPEN_DIALOG as EXPORT_OPEN_DIALOG;
 use crate::file_manager::{SET_SAVE_COPY, VIEW_TOGGLE_FILE_MANAGER};
 use crate::mixer_view::{
     CROSSFADER as MIXER_CROSSFADER, FOCUS as MIXER_FOCUS, IN_OUT as MIXER_IN_OUT,
     PERFORMANCE_IMPACT as MIXER_PERFORMANCE_IMPACT, RETURN_TRACKS as MIXER_RETURN_TRACKS,
-    SCENE_TEMPO as MIXER_SCENE_TEMPO, SENDS as MIXER_SENDS, TOGGLE as MIXER_TOGGLE,
-    TRACK_OPTIONS as MIXER_TRACK_OPTIONS, VOLUME as MIXER_VOLUME,
+    RETURN_TRACKS_SCROLL as MIXER_RETURN_TRACKS_SCROLL, SCENE_TEMPO as MIXER_SCENE_TEMPO,
+    SENDS as MIXER_SENDS, TOGGLE as MIXER_TOGGLE, TRACK_OPTIONS as MIXER_TRACK_OPTIONS,
+    VOLUME as MIXER_VOLUME,
 };
 
 /// The platform a menu bar is for: macOS has an application menu; Windows
@@ -112,6 +114,12 @@ pub const D24: &str = "D24";
 /// records Live's menus.
 pub const IMP_12: &str = "IMP-12";
 
+/// The row of Beatlayer's own Return Tracks Scroll with Tracks (IMP-01),
+/// straight after Return Tracks in the Mixer Controls submenu and in the
+/// Arrangement Track Controls submenu: an improvement, so not one of
+/// menus.md's Live rows, though the reference names it IMP-01.
+pub const IMP_01: &str = "IMP-01";
+
 /// The row of Beatlayer's own Close All Plug-in Windows (IMP-25), after
 /// Plug-In Windows: an improvement, so not a row of menus.md.
 pub const IMP_25_CLOSE_WINDOWS: &str = "IMP-25-close-windows";
@@ -119,6 +127,15 @@ pub const IMP_25_CLOSE_WINDOWS: &str = "IMP-25-close-windows";
 /// The row of Beatlayer's own Manage Plug-Ins (IMP-29), after Manage
 /// Files: an improvement, so not a row of menus.md.
 pub const IMP_29: &str = "IMP-29";
+
+/// The rows of Beatlayer's own Search Commands… (IMP-16) at the top of Help,
+/// with the separator after it, and Find Track (IMP-18) after Next Neighbor:
+/// improvements, so not rows of menus.md, which records Live's menus.
+pub const IMP_16: &str = "IMP-16";
+/// See [`IMP_16`].
+pub const IMP_16_SEPARATOR: &str = "IMP-16-separator";
+/// See [`IMP_16`].
+pub const IMP_18: &str = "IMP-18";
 
 /// The rows of the Create menu's Sample Editor items, which menus.md's note
 /// under the Create menu names but gives no rows (WP-4.10).
@@ -291,7 +308,7 @@ const FILE: &[Row] = &[
     (
         "M-FILE-015",
         "Export Audio/Video...",
-        Pending(Some("S-FILE-007")),
+        Cmd(EXPORT_OPEN_DIALOG),
     ),
     (
         "M-FILE-016",
@@ -486,7 +503,7 @@ const CREATE: &[Row] = &[
         Cmd(crate::stems::OPEN),
     ),
     SEPARATOR,
-    ("M-CREATE-016", "Add Locator", Pending(None)),
+    ("M-CREATE-016", "Add Locator", Cmd(crate::locator::ADD)),
     ("M-CREATE-017", "Add Time Signature Change", Pending(None)),
     SEPARATOR,
     ("M-CREATE-018", "Import Audio/MIDI File...", Pending(None)),
@@ -634,12 +651,23 @@ const VIEW: &[Row] = &[
     ),
     ("M-VIEW-032-sep2", "", Action::Separator),
     ("M-VIEW-032g", "Return Tracks", Cmd(MIXER_RETURN_TRACKS)),
+    // IMP-01's switch, straight after Return Tracks, with no key.
+    (
+        IMP_01,
+        "Return Tracks Scroll with Tracks",
+        Cmd(MIXER_RETURN_TRACKS_SCROLL),
+    ),
     ("M-VIEW-033", "Arrangement Track Controls", Submenu),
     ("M-VIEW-033a", "In/Out", Cmd(SHOW_IN_OUT)),
     ("M-VIEW-033b", "Volume", Cmd(SHOW_VOLUME)),
     ("M-VIEW-033c", "Track Options", Cmd(MIXER_TRACK_OPTIONS)),
     ("M-VIEW-033-sep1", "", Action::Separator),
     ("M-VIEW-033d", "Return Tracks", Cmd(SHOW_RETURN_TRACKS)),
+    (
+        IMP_01,
+        "Return Tracks Scroll with Tracks",
+        Cmd(MIXER_RETURN_TRACKS_SCROLL),
+    ),
     SEPARATOR,
     ("M-VIEW-034", "Overview", Key(&["S-VIEW-011"])),
     (
@@ -693,6 +721,7 @@ const NAVIGATE: &[Row] = &[
         Cmd(FOCUS_PREVIOUS_NEIGHBOR),
     ),
     ("M-NAV-015", "Next Neighbor", Cmd(FOCUS_NEXT_NEIGHBOR)),
+    (IMP_18, "Find Track", Key(&["S-FOCUS-015"])),
     SEPARATOR,
     ("M-NAV-016", "Browser History Back", Key(&["S-BRW-011"])),
     ("M-NAV-017", "Browser History Forward", Key(&["S-BRW-012"])),
@@ -803,7 +832,11 @@ const OPTIONS: &[Row] = &[
     // `bl-model`'s switch, which the shell turns to the other state.
     ("M-OPT-025", "Solo in Place", Cmd("mixer.set_solo_in_place")),
     SEPARATOR,
-    ("M-OPT-026", "Lock Envelopes", Pending(None)),
+    (
+        "M-OPT-026",
+        "Lock Envelopes",
+        Cmd("song.set_lock_envelopes"),
+    ),
     (
         "M-OPT-027",
         "MIDI Arrangement Overdub",
@@ -820,6 +853,8 @@ const OPTIONS: &[Row] = &[
 ];
 
 const HELP: &[Row] = &[
+    (IMP_16, "Search Commands…", Key(&["S-MENU-007"])),
+    (IMP_16_SEPARATOR, "", Action::Separator),
     ("M-HELP-001", "Learn View", Key(&["S-VIEW-018"])),
     (
         "M-HELP-002",
@@ -854,6 +889,7 @@ const HELP: &[Row] = &[
 /// Builds items from rows, nesting each submenu's rows under it.
 pub(crate) fn items(rows: &[Row]) -> Vec<MenuItem> {
     let mut out: Vec<MenuItem> = Vec::new();
+    let mut previous = "";
     for &(row, label, action) in rows {
         let item = MenuItem {
             row,
@@ -861,13 +897,21 @@ pub(crate) fn items(rows: &[Row]) -> Vec<MenuItem> {
             action,
             items: Vec::new(),
         };
+        // A row joins the submenu above it when its ID starts with the
+        // submenu's, and so does IMP-01's row, which the reference names
+        // with its improvement's ID, when the row above it was one of the
+        // submenu's.
+        let joins = |submenu: &str| {
+            row.starts_with(submenu) || (row == IMP_01 && previous.starts_with(submenu))
+        };
         let parent = out
             .last_mut()
-            .filter(|last| last.action == Submenu && !row.is_empty() && row.starts_with(last.row));
+            .filter(|last| last.action == Submenu && !row.is_empty() && joins(last.row));
         match parent {
             Some(parent) => parent.items.push(item),
             None => out.push(item),
         }
+        previous = row;
     }
     out
 }

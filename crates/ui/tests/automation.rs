@@ -10,8 +10,9 @@ mod common;
 use bl_core::time::Ticks;
 use bl_model::{AutomationTarget, Breakpoint, Document, MixerParam, TrackId};
 use bl_shell::device_commands::DeviceAdded;
+use bl_shell::settings::AutomationRecordMode;
 use bl_ui::arrangement::automation::{AutomationDevice, control_choices, device_choices};
-use bl_ui::layout::Element;
+use bl_ui::layout::{Element, REFERENCE, ShellLayout};
 use bl_ui::main_window::UiEvent;
 use bl_ui::{control_bar, main_window};
 use common::Harness;
@@ -22,6 +23,34 @@ use serde_json::json;
 /// The accesskit ID an element's node has.
 fn element_id(element: Element) -> egui::Id {
     main_window::element_id(element)
+}
+
+/// A right-click at `at`, which opens a context menu.
+fn right_click(h: &mut Harness, at: Pos2) -> egui::FullOutput {
+    h.frame(vec![Event::PointerMoved(at)]);
+    h.frame(vec![Event::PointerButton {
+        pos: at,
+        button: PointerButton::Secondary,
+        pressed: true,
+        modifiers: Modifiers::NONE,
+    }]);
+    h.frame(vec![Event::PointerButton {
+        pos: at,
+        button: PointerButton::Secondary,
+        pressed: false,
+        modifiers: Modifiers::NONE,
+    }]);
+    h.settle()
+}
+
+/// The middle of the node labelled `label`.
+fn centre_of(nodes: &[common::Node], label: &str) -> Pos2 {
+    let node = nodes
+        .iter()
+        .rfind(|n| n.label == label && n.bounds.is_some())
+        .unwrap_or_else(|| panic!("no node labelled {label:?}"));
+    let b = node.bounds.unwrap();
+    pos2(((b.x0 + b.x1) / 2.0) as f32, ((b.y0 + b.y1) / 2.0) as f32)
 }
 
 // Spec: automation R5
@@ -102,6 +131,38 @@ fn the_automation_arm_button_switches_the_arm() {
     h.accesskit(element_id(Element::AutomationArm), Action::Click);
     h.settle();
     assert!(!h.shell.arrangement().automation_arm());
+}
+
+// Spec: automation R18
+#[test]
+fn the_automation_arm_button_has_a_menu_of_the_recording_modes() {
+    let mut h = Harness::new(common::Window::Main);
+    h.settle();
+    let at = ShellLayout::compute(REFERENCE, true, true)
+        .rect(Element::AutomationArm)
+        .center();
+
+    // Right-clicking the Automation Arm button opens its context menu: the
+    // three modes, with the current one ticked.
+    let output = right_click(&mut h, at);
+    let nodes = Harness::nodes(&output);
+    for label in ["✔ Touch", "Latch", "Write"] {
+        assert!(
+            nodes.iter().any(|n| n.label == label),
+            "no {label:?} in the menu"
+        );
+    }
+
+    // Choosing Latch runs the command, and the menu ticks it next time.
+    h.click(centre_of(&nodes, "Latch"));
+    h.settle();
+    assert_eq!(
+        h.shell.automation_record_mode(),
+        AutomationRecordMode::Latch
+    );
+    let output = right_click(&mut h, at);
+    let nodes = Harness::nodes(&output);
+    assert!(nodes.iter().any(|n| n.label == "✔ Latch"));
 }
 
 const BAR: i64 = Ticks::WHOLE.get();
@@ -452,7 +513,9 @@ fn double_clicking_off_a_segment_adds_a_breakpoint_at_the_clicked_value() {
     );
 }
 
-// Spec: automation R13 (S3)
+// Spec: automation R13 (S3), automation-editing R3. The drag runs
+// `automation.move_breakpoints`, which moves a breakpoint past a neighbour
+// by removing it.
 #[test]
 fn dragging_a_breakpoint_moves_its_position_and_value_in_one_undo_step() {
     let mut s = set();
@@ -462,7 +525,7 @@ fn dragging_a_breakpoint_moves_its_position_and_value_in_one_undo_step() {
     drag(&mut s.h, from, to, Modifiers::NONE);
     let commands = s.commands();
     assert!(
-        commands.contains(&"automation.move_breakpoint".to_owned()),
+        commands.contains(&"automation.move_breakpoints".to_owned()),
         "{commands:?}"
     );
     let points = s.points();
@@ -473,6 +536,279 @@ fn dragging_a_breakpoint_moves_its_position_and_value_in_one_undo_step() {
         "{points:?}"
     );
     assert_eq!(s.steps(), before + 1, "the drag is one undo step");
+}
+
+// Spec: automation-editing R2. Dragging a selected breakpoint moves every
+// selected breakpoint by the same time and the same share of the travel, as
+// one undo step.
+#[test]
+fn dragging_selected_breakpoints_moves_them_all_in_one_undo_step() {
+    let mut s = set();
+    // A breakpoint in the middle, so the time selection covers two of them.
+    s.h.shell
+        .run(
+            "automation.set_breakpoint",
+            json!({ "track": s.track, "target": pan_json(), "at": BAR, "value": 0.0 }),
+        )
+        .unwrap();
+    s.h.shell
+        .run(
+            "arrangement.select_time",
+            json!({
+                "start": 0,
+                "end": BAR * 2,
+                "lanes": [{ "type": "automation", "track": s.track, "target": pan_json() }],
+            }),
+        )
+        .unwrap();
+    s.h.settle();
+    let before = s.steps();
+    let from = pos2(s.x(Ticks::ZERO), s.y(-0.8));
+    let to = pos2(s.x(Ticks::ZERO) + 20.0, s.y(-0.4));
+    drag(&mut s.h, from, to, Modifiers::NONE);
+    let commands = s.commands();
+    assert!(
+        commands.contains(&"automation.move_breakpoints".to_owned()),
+        "{commands:?}"
+    );
+    let points = s.points();
+    assert_eq!(points.len(), 3, "{points:?}");
+    let kept = points
+        .iter()
+        .find(|point| point.at == Ticks(BAR * 2))
+        .expect("the breakpoint outside the selection stays");
+    assert!((kept.value - 0.8).abs() < 0.001, "{points:?}");
+    let moved: Vec<&Breakpoint> = points
+        .iter()
+        .filter(|point| point.at != Ticks(BAR * 2))
+        .collect();
+    assert!(
+        moved.iter().all(|point| point.value > -0.8),
+        "both selected breakpoints went up the travel: {points:?}"
+    );
+    assert!(
+        moved.iter().any(|point| point.at > Ticks(BAR)),
+        "the second selected breakpoint moved in time too: {points:?}"
+    );
+    assert_eq!(s.steps(), before + 1, "the drag is one undo step");
+}
+
+// Spec: automation-editing R2, R3. Shift keeps a breakpoint drag to the axis
+// it started along; a vertical drag changes the value and leaves the time.
+#[test]
+fn shift_keeps_a_breakpoint_drag_to_one_axis() {
+    let mut s = set();
+    let before = s.steps();
+    let from = pos2(s.x(Ticks::ZERO), s.y(-0.8));
+    let to = pos2(from.x + 2.0, s.y(-0.4));
+    drag(&mut s.h, from, to, Modifiers::SHIFT);
+    let points = s.points();
+    let point = points
+        .iter()
+        .find(|point| point.at == Ticks::ZERO)
+        .unwrap_or_else(|| panic!("the breakpoint stays in time: {points:?}"));
+    assert!(
+        point.value > -0.75,
+        "the breakpoint moved up the travel: {points:?}"
+    );
+    assert_eq!(s.steps(), before + 1, "the drag is one undo step");
+}
+
+// Spec: automation-editing R4. Dragging a segment inside the time selection
+// adds breakpoints at the selection's edges and moves the stretch between
+// them, as one undo step.
+#[test]
+fn dragging_a_segment_inside_a_time_selection_adds_breakpoints_at_its_edges() {
+    let mut s = set();
+    s.h.shell
+        .run(
+            "arrangement.select_time",
+            json!({
+                "start": 0,
+                "end": BAR,
+                "lanes": [{ "type": "automation", "track": s.track, "target": pan_json() }],
+            }),
+        )
+        .unwrap();
+    s.h.settle();
+    let before = s.steps();
+    let at = pos2(s.x(Ticks(BAR / 2)), s.y(-0.4));
+    let to = pos2(at.x + 20.0, at.y - 20.0);
+    drag(&mut s.h, at, to, Modifiers::NONE);
+    let commands = s.commands();
+    assert!(
+        commands.contains(&"automation.move_breakpoints".to_owned()),
+        "{commands:?}"
+    );
+    let points = s.points();
+    assert_eq!(
+        points.len(),
+        3,
+        "the selection's edge gained a breakpoint: {points:?}"
+    );
+    assert!(
+        points.iter().any(|point| point.at == Ticks(BAR * 2)),
+        "the envelope outside the selection stays: {points:?}"
+    );
+    assert_eq!(s.steps(), before + 1, "the drag is one undo step");
+}
+
+// Spec: automation-editing R6. Option (Alt) with an edit key applies it to
+// the automation lanes shown under the selection's tracks.
+#[test]
+fn option_with_an_edit_key_acts_on_the_shown_automation_lanes() {
+    let mut s = set();
+    s.h.shell
+        .run(
+            "arrangement.select_time",
+            json!({ "start": 0, "end": BAR, "tracks": [s.track] }),
+        )
+        .unwrap();
+    s.h.settle();
+    s.h.key(
+        Key::C,
+        Modifiers {
+            alt: true,
+            command: true,
+            ..Modifiers::NONE
+        },
+    );
+    s.h.settle();
+    let commands = s.commands();
+    assert!(
+        commands.contains(&"automation.copy".to_owned()),
+        "{commands:?}"
+    );
+    assert!(
+        s.h.shell.envelope_clipboard().is_some(),
+        "the envelope was copied, not the clips"
+    );
+}
+
+// Spec: automation-editing R4. Shift-clicking a segment selects its two
+// breakpoints, and dragging the selected segment moves them, as one undo
+// step.
+#[test]
+fn dragging_a_selected_segment_moves_it_in_one_undo_step() {
+    let mut s = set();
+    // The middle of the two-bar segment: the pan is 0 there.
+    let at = pos2(s.x(Ticks(BAR)), s.y(0.0));
+    click(&mut s.h, at, Modifiers::SHIFT);
+    let commands = s.commands();
+    assert!(
+        commands.contains(&"automation.select_segment".to_owned()),
+        "{commands:?}"
+    );
+    let before = s.steps();
+    let to = pos2(at.x + 40.0, at.y - 20.0);
+    drag(&mut s.h, at, to, Modifiers::NONE);
+    let commands = s.commands();
+    assert!(
+        commands.contains(&"automation.move_breakpoints".to_owned()),
+        "{commands:?}"
+    );
+    let points = s.points();
+    assert_eq!(points.len(), 2, "{points:?}");
+    assert!(
+        points
+            .iter()
+            .all(|point| point.at != Ticks::ZERO && point.at != Ticks(BAR * 2)),
+        "both of the segment's breakpoints moved: {points:?}"
+    );
+    assert_eq!(s.steps(), before + 1, "the drag is one undo step");
+}
+
+// Spec: automation-editing R2. Esc during a drag puts the envelope back and
+// records nothing.
+#[test]
+fn esc_cancels_an_automation_drag() {
+    let mut s = set();
+    let before = s.doc().clone();
+    let steps = s.steps();
+    let from = pos2(s.x(Ticks::ZERO), s.y(-0.8));
+    let to = pos2(s.x(Ticks(BAR / 2)), s.y(0.5));
+    let held = Event::ModifiersChanged(Modifiers::NONE);
+    s.h.frame(vec![held.clone(), Event::PointerMoved(from)]);
+    s.h.frame(vec![
+        held.clone(),
+        Event::PointerButton {
+            pos: from,
+            button: PointerButton::Primary,
+            pressed: true,
+            modifiers: Modifiers::NONE,
+        },
+    ]);
+    s.h.frame(vec![held.clone(), Event::PointerMoved(to)]);
+    assert!(s.h.shell.gesture_open(), "the drag is under way");
+    s.h.key(Key::Escape, Modifiers::NONE);
+    s.h.frame(vec![
+        held.clone(),
+        Event::PointerButton {
+            pos: to,
+            button: PointerButton::Primary,
+            pressed: false,
+            modifiers: Modifiers::NONE,
+        },
+    ]);
+    s.h.frame(vec![Event::ModifiersChanged(Modifiers::NONE)]);
+    s.h.settle();
+    assert_eq!(*s.doc(), before, "the envelope is back");
+    assert!(!s.h.shell.gesture_open());
+    assert_eq!(s.steps(), steps, "nothing is recorded");
+}
+
+// Spec: accessibility R10, automation-editing R8. The Lock Envelopes
+// switch above the track headers is live, and in the Tab order.
+#[test]
+fn the_lock_envelopes_switch_is_in_the_tab_order() {
+    let mut h = Harness::new(common::Window::Main);
+    let output = h.settle();
+    let nodes = Harness::nodes(&output);
+    let node = Harness::node(&nodes, "Lock Envelopes");
+    assert!(!node.disabled, "it can be pressed");
+    assert_eq!(node.toggled, Some(false), "it is off in a new set");
+    // Pressing it, as a screen reader does, switches the setting on.
+    h.accesskit(bl_ui::arrangement::lock_envelopes_id(), Action::Click);
+    h.settle();
+    assert!(h.shell.editor().document().settings().lock_envelopes);
+}
+
+// Spec: automation-editing R6. Option (Alt on Windows) with an edit
+// command applies it to the automation lanes under the tracks of the time
+// selection (S-EDIT-016).
+#[test]
+fn the_edit_keys_in_an_automation_lane_act_on_the_envelopes() {
+    let mut s = set();
+    // The time selection is in the track's automation lane.
+    s.h.shell
+        .run(
+            "arrangement.select_time",
+            json!({
+                "start": 0,
+                "end": BAR,
+                "lanes": [{
+                    "type": "automation",
+                    "track": s.track,
+                    "target": pan_json(),
+                }],
+            }),
+        )
+        .unwrap();
+    s.h.settle();
+    s.h.key(
+        Key::C,
+        Modifiers {
+            alt: true,
+            command: true,
+            ..Modifiers::NONE
+        },
+    );
+    s.h.settle();
+    let commands = s.commands();
+    assert!(
+        commands.contains(&"automation.copy".to_owned()),
+        "{commands:?}"
+    );
 }
 
 // Spec: automation R13 (S-ENV-003)

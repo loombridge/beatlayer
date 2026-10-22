@@ -63,6 +63,17 @@ struct LoopFrames {
     end: Frames,
 }
 
+/// A jump waiting for the next line of the global launch quantisation (the
+/// transport spec, R22): the frame the playhead waits for, and where it goes
+/// when it gets there.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct PendingLocate {
+    /// The frame the jump waits for: the next line's frame.
+    frame: Frames,
+    /// Where the playhead goes when the frame comes.
+    to: Frames,
+}
+
 /// [`Punch`] in song frames, under the running program's tempo map.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct PunchFrames {
@@ -258,6 +269,12 @@ pub struct Processor {
     loop_region: Option<LoopRegion>,
     /// `loop_region` in frames, if it's at least a frame long.
     loop_frames: Option<LoopFrames>,
+    /// Where the song starts, when it has a song start time (the transport
+    /// spec, R21).
+    song_start: Option<Ticks>,
+    /// A jump waiting for the next line of the global launch quantisation
+    /// (the transport spec, R22).
+    pending_locate: Option<PendingLocate>,
     /// Where recording punches in and out (WP-2.13).
     punch: Punch,
     /// `punch` in frames.
@@ -337,6 +354,8 @@ impl Processor {
             insert_marker: Ticks::ZERO,
             loop_region: None,
             loop_frames: None,
+            song_start: None,
+            pending_locate: None,
             punch: Punch::default(),
             punch_frames: PunchFrames::default(),
             recording: false,
@@ -537,6 +556,9 @@ impl Processor {
         let mut done = 0;
         while done < frames {
             self.apply_due_transport(done);
+            // Spec: transport R22. A jump waiting for the next line of the
+            // global launch quantisation.
+            self.apply_due_locate();
             self.apply_due_session();
             self.session.playback(&mut self.session_playback);
             self.fire_due(done);
@@ -927,10 +949,15 @@ impl Processor {
     /// (the transport spec).
     fn transport(&mut self, command: TransportCommand) {
         match command {
-            // Spec: transport R1, R11
-            TransportCommand::Play => self.play_from_insert_marker(),
+            // Spec: transport R1, R11, R21
+            TransportCommand::Play => self.play(),
+            // Spec: transport R10, R21
+            TransportCommand::PlayFromInsertMarker => self.play_from_marker(),
             // Spec: transport R3, R4
             TransportCommand::Stop => {
+                // Spec: transport R22. A jump waiting for a line is
+                // abandoned when the transport stops.
+                self.pending_locate = None;
                 self.metronome.stop();
                 // Spec: routing R11; WP-2.13. Stop ends the take, as Live's
                 // Stop ends a recording.
@@ -948,16 +975,22 @@ impl Processor {
             // Spec: transport R5
             TransportCommand::PlayStop => {
                 if self.playing {
+                    // Spec: transport R22. A jump waiting for a line is
+                    // abandoned when the transport stops.
+                    self.pending_locate = None;
                     self.playing = false;
                     self.release_midi();
                     self.metronome.stop();
                     self.end_recordings();
                 } else {
-                    self.play_from_insert_marker();
+                    self.play();
                 }
             }
             // Spec: transport R7, R12
             TransportCommand::Locate(ticks) => {
+                // Spec: transport R22. A jump waiting for a line is
+                // replaced by this one.
+                self.pending_locate = None;
                 self.insert_marker = ticks.max(Ticks::ZERO);
                 if self.playing {
                     self.position = self.frames_at(self.insert_marker);
@@ -965,6 +998,14 @@ impl Processor {
                     // Playback jumps away from the take; it ends here
                     // (WP-2.13).
                     self.end_recordings();
+                }
+            }
+            // Spec: transport R22
+            TransportCommand::QuantizedLocate(ticks) => {
+                let target = ticks.max(Ticks::ZERO);
+                self.insert_marker = target;
+                if self.playing {
+                    self.quantized_locate(target);
                 }
             }
             // Spec: transport R9
@@ -981,6 +1022,10 @@ impl Processor {
             TransportCommand::SetLoop(region) => {
                 self.loop_region = region;
                 self.update_loop_frames();
+            }
+            // Spec: transport R21
+            TransportCommand::SetSongStart(start) => {
+                self.song_start = start;
             }
             TransportCommand::SetMetronome(settings) => self.metronome.set_settings(settings),
             TransportCommand::SetPunch(punch) => {
@@ -1059,15 +1104,70 @@ impl Processor {
         self.plan = None;
     }
 
-    fn play_from_insert_marker(&mut self) {
+    /// Starts playback: from the song's start time when it has one, and
+    /// from the insert marker otherwise (the transport spec, R21).
+    fn play(&mut self) {
+        let start = self.song_start.unwrap_or(self.insert_marker);
+        self.start_playing_at(start);
+    }
+
+    /// Starts playback from the insert marker, whatever the song's start
+    /// time is (the transport spec, R10 and R21).
+    fn play_from_marker(&mut self) {
+        let start = self.insert_marker;
+        self.start_playing_at(start);
+    }
+
+    fn start_playing_at(&mut self, start: Ticks) {
+        // Spec: transport R22. A jump waiting for a line is abandoned when
+        // the song starts again somewhere else.
+        self.pending_locate = None;
         let (tempo, sigs) = match &self.program {
             Some(p) => (&p.get().tempo, &p.get().time_signatures),
             None => (&self.fallback_tempo, &self.fallback_time_signatures),
         };
         self.metronome
-            .start_count_in(self.config.sample_rate, tempo, sigs, self.insert_marker);
-        self.position = self.frames_at(self.insert_marker);
+            .start_count_in(self.config.sample_rate, tempo, sigs, start);
+        self.position = self.frames_at(start);
         self.playing = true;
+    }
+
+    /// A jump that waits for the next line of the global launch quantisation
+    /// (the transport spec, R22): the playhead goes on to that line and
+    /// jumps to `target` on its exact frame. With the quantisation off or
+    /// None, the jump happens at once.
+    fn quantized_locate(&mut self, target: Ticks) {
+        let rate = self.config.sample_rate;
+        let playhead = self.tempo().frames_to_ticks(self.position, rate);
+        let signatures = match &self.program {
+            Some(program) => &program.get().time_signatures,
+            None => &self.fallback_time_signatures,
+        };
+        let line = self.session.settings().next_line(playhead, signatures);
+        let frame = self.frames_at(line);
+        let to = self.frames_at(target);
+        if frame <= self.position {
+            self.position = to;
+            self.metronome.stop();
+            self.end_recordings();
+        } else {
+            self.pending_locate = Some(PendingLocate { frame, to });
+        }
+    }
+
+    /// Applies a jump waiting for the next line of the global launch
+    /// quantisation, once the playhead reaches that line (the transport
+    /// spec, R22).
+    fn apply_due_locate(&mut self) {
+        if let Some(pending) = self.pending_locate
+            && self.playing
+            && self.position >= pending.frame
+        {
+            self.pending_locate = None;
+            self.position = pending.to;
+            self.metronome.stop();
+            self.end_recordings();
+        }
     }
 
     /// Works out the loop's and the punch points' frames from their ticks,
@@ -1168,7 +1268,7 @@ impl Processor {
         let was_playing = self.playing;
         self.metronome.set_recording(true);
         if !was_playing {
-            self.play_from_insert_marker();
+            self.play_from_marker();
         }
         let playhead = Self::playhead(
             self.program.as_ref().map(Program::get),
@@ -1239,7 +1339,7 @@ impl Processor {
             // Spec: launch-quantisation R5. A launch with the transport
             // stopped starts it at once, from the Arrangement position, and
             // the clip starts with it.
-            self.play_from_insert_marker();
+            self.play_from_marker();
         }
         let playhead = Self::playhead(
             self.program.as_ref().map(Program::get),
@@ -1292,7 +1392,7 @@ impl Processor {
         }
         let was_playing = self.playing;
         if holds_a_clip && !was_playing {
-            self.play_from_insert_marker();
+            self.play_from_marker();
         }
         let slots = self
             .program
@@ -1590,6 +1690,11 @@ impl Processor {
         // Spec: transport R13
         if let Some(region) = self.loop_frames {
             song(region.end);
+        }
+        // Spec: transport R22. A jump waiting for the next line of the
+        // global launch quantisation lands on that line's frame.
+        if let Some(pending) = self.pending_locate {
+            song(pending.frame);
         }
         // Spec: recording R6. A part of a block lies wholly inside the punch
         // points or wholly outside them, so the take starts and ends on the

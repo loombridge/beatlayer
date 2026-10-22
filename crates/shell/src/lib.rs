@@ -51,6 +51,8 @@
 //!   and the changes plug-ins make themselves as undo steps. The CLAP host
 //!   itself is `bl-plugin-host`'s; [`Shell::poll`] runs its main-thread
 //!   work.
+//! - [`search`]: the search field (WP-6.42, IMP-16 and IMP-18): command search
+//!   and track search, which the `search.*` commands drive.
 //! - [`tracks`]: Duplicate Track Without Clips (WP-2.19b, IMP-12), which
 //!   `track.duplicate_without_clips` runs.
 //! - [`transport`]: the Control Bar's transport section: what its fields
@@ -76,6 +78,7 @@ pub mod clip_view;
 pub mod dawproject;
 pub mod devices;
 pub mod export;
+pub mod export_dialog;
 pub mod files;
 pub mod midi;
 pub mod midi_files;
@@ -93,6 +96,7 @@ pub mod routing;
 pub mod sample_editor;
 pub mod scales;
 pub mod scene_fields;
+pub mod search;
 mod session_capture;
 pub mod session_view;
 pub mod settings;
@@ -110,6 +114,9 @@ pub use bl_shell_spec::arrangement as arrangement_commands;
 /// The Audio Utilities panel's command IDs and their argument and result
 /// types (WP-4.10b).
 pub use bl_shell_spec::audio_panel as audio_panel_commands;
+/// The automation editing command IDs and their argument and result types
+/// (WP-6.25).
+pub use bl_shell_spec::automation as automation_commands;
 /// The autosampler's command IDs and its argument and result types
 /// (WP-5.16).
 pub use bl_shell_spec::autosampler as autosampler_commands;
@@ -128,6 +135,9 @@ pub use bl_shell_spec::export as export_commands;
 /// The File Manager's command IDs and their argument and result types
 /// (WP-6.63).
 pub use bl_shell_spec::file_manager as file_manager_commands;
+/// The Arrangement's locator command IDs and their argument and result
+/// types (WP-6.24).
+pub use bl_shell_spec::locator as locator_commands;
 /// The MIDI ports' and the computer MIDI keyboard's command IDs and their
 /// argument and result types (WP-2.2).
 pub use bl_shell_spec::midi_io as midi_io_commands;
@@ -151,6 +161,9 @@ pub use bl_shell_spec::plugins as plugin_commands;
 pub use bl_shell_spec::sample_editor as sample_editor_commands;
 /// The scale commands' IDs and the scale list's result (WP-6.7).
 pub use bl_shell_spec::scales as scales_commands;
+/// The search field's command IDs and their argument and result types
+/// (WP-6.42).
+pub use bl_shell_spec::search as search_commands;
 /// The Session View's launch quantisation command IDs and their argument and
 /// result types (WP-3.2).
 pub use bl_shell_spec::session_launch as session_launch_commands;
@@ -173,6 +186,6 @@ pub use bl_shell_spec::{
 /// The autosampler's progress (WP-5.16).
 pub use shell::autosample::Status as AutosampleStatus;
 pub use shell::{
-    Area, Effect, GesturePhase, Invocation, KEY_TRACK_NUMBER, MainView, Message, Shell, ShellError,
-    TransientList, WindowKind,
+    Area, Effect, ExportPrefs, GesturePhase, Invocation, KEY_TRACK_NUMBER, MainView, Message,
+    Shell, ShellError, TransientList, WindowKind,
 };

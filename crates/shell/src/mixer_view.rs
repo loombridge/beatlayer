@@ -11,12 +11,12 @@ use bl_model::{Device, DeviceId, Document, RackKind, TrackId};
 use serde_json::Value;
 
 pub use bl_shell_spec::mixer_view::{
-    COLUMN_WIDTH, ChainStrip, MixerOf, MixerViewState, RackFold, ScrollArgs, SectionArgs,
-    ToggleArgs, TrackGainReduction, TrackImpact, ViewMixerState, impact_segments,
+    COLUMN_WIDTH, ChainStrip, MixerOf, MixerViewState, RackFold, ScrollArgs, ScrollReturnsArgs,
+    SectionArgs, ToggleArgs, TrackGainReduction, TrackImpact, ViewMixerState, impact_segments,
 };
 use bl_shell_spec::mixer_view::{
-    CROSSFADER, FOCUS, FOLD_CHAINS, IN_OUT, PERFORMANCE_IMPACT, RETURN_TRACKS, SCENE_TEMPO, SCROLL,
-    SENDS, STATE, TOGGLE, TRACK_OPTIONS, VOLUME,
+    CROSSFADER, FOCUS, FOLD_CHAINS, IN_OUT, PERFORMANCE_IMPACT, RETURN_TRACKS,
+    RETURN_TRACKS_SCROLL, SCENE_TEMPO, SCROLL, SENDS, STATE, TOGGLE, TRACK_OPTIONS, VOLUME,
 };
 
 use crate::arrangement::ArrangementView;
@@ -40,6 +40,10 @@ pub struct MixerView {
     crossfader: bool,
     scene_tempo: bool,
     return_tracks: bool,
+    /// Whether the return tracks scroll with the tracks (IMP-01, the mixer
+    /// view spec R21). Off in a new install, so they stay pinned, as in
+    /// Live.
+    return_tracks_scroll: bool,
     track_options: bool,
     performance_impact: bool,
     /// The racks whose chains are folded out as strips in the mixers (racks
@@ -78,6 +82,7 @@ impl MixerView {
             crossfader: false,
             scene_tempo: false,
             return_tracks: true,
+            return_tracks_scroll: false,
             track_options: false,
             performance_impact: false,
             folded: BTreeSet::new(),
@@ -85,10 +90,12 @@ impl MixerView {
         }
     }
 
-    /// Back to a new set's mixers, keeping the focus count.
+    /// Back to a new set's mixers, keeping the focus count and the
+    /// application setting the return tracks scroll with the tracks.
     pub fn reset(&mut self) {
         *self = Self {
             focus_requests: self.focus_requests,
+            return_tracks_scroll: self.return_tracks_scroll,
             ..Self::new()
         };
     }
@@ -146,6 +153,19 @@ impl MixerView {
         self.return_tracks
     }
 
+    /// Whether the return tracks scroll with the tracks (IMP-01, the mixer
+    /// view spec R21).
+    #[must_use]
+    pub fn return_tracks_scroll(&self) -> bool {
+        self.return_tracks_scroll
+    }
+
+    /// Sets whether the return tracks scroll with the tracks, as the
+    /// application setting the preferences keep does.
+    pub fn set_return_tracks_scroll(&mut self, on: bool) {
+        self.return_tracks_scroll = on;
+    }
+
     /// Whether the tracks' Track Options sections show.
     #[must_use]
     pub fn track_options(&self) -> bool {
@@ -178,6 +198,7 @@ impl MixerView {
             crossfader: self.crossfader,
             scene_tempo: self.scene_tempo,
             return_tracks: self.return_tracks,
+            return_tracks_scroll: self.return_tracks_scroll,
             track_options: self.track_options,
             performance_impact: self.performance_impact,
             performance_impact_values: Vec::new(),
@@ -266,6 +287,7 @@ impl MixerView {
             CROSSFADER => Some(self.crossfader),
             SCENE_TEMPO => Some(self.scene_tempo),
             RETURN_TRACKS => Some(self.return_tracks),
+            RETURN_TRACKS_SCROLL => Some(self.return_tracks_scroll),
             TRACK_OPTIONS => Some(self.track_options),
             PERFORMANCE_IMPACT => Some(self.performance_impact),
             _ => None,
@@ -318,6 +340,10 @@ impl MixerView {
                 };
                 *section = shown.unwrap_or(!*section);
             }
+            RETURN_TRACKS_SCROLL => {
+                let ScrollReturnsArgs { on } = serde_json::from_value(args).map_err(parse_error)?;
+                self.return_tracks_scroll = on.unwrap_or(!self.return_tracks_scroll);
+            }
             SCROLL => {
                 let ScrollArgs { view, x } = serde_json::from_value(args).map_err(parse_error)?;
                 if !x.is_finite() {
@@ -327,8 +353,9 @@ impl MixerView {
                 }
                 let columns =
                     columns(doc, arrangement).len() + self.folds(doc, arrangement).1.len();
+                let max = max_scroll(columns, doc.returns().count(), self.return_tracks_scroll);
                 let mixer = self.of_mut(view.unwrap_or(front));
-                mixer.scroll = (mixer.scroll + x).clamp(0.0, max_scroll(columns));
+                mixer.scroll = (mixer.scroll + x).clamp(0.0, max);
             }
             FOCUS => {
                 let _: bl_commands::NoArgs = serde_json::from_value(args).map_err(parse_error)?;
@@ -370,7 +397,8 @@ impl MixerView {
     /// The chain strips count as columns of their own (racks spec, R27).
     pub fn clamp_scroll(&mut self, doc: &Document, arrangement: &ArrangementView) {
         let (_, chains) = self.folds(doc, arrangement);
-        let max = max_scroll(columns(doc, arrangement).len() + chains.len());
+        let columns = columns(doc, arrangement).len() + chains.len();
+        let max = max_scroll(columns, doc.returns().count(), self.return_tracks_scroll);
         for mixer in [&mut self.session, &mut self.arrangement] {
             mixer.scroll = mixer.scroll.min(max);
         }
@@ -395,10 +423,16 @@ pub fn chains_fold(rack: &Device) -> bool {
 }
 
 /// The furthest a mixer of `columns` track columns scrolls: until its last
-/// track's column is the first in view.
+/// track's column is the first in view. With the return tracks scrolling
+/// with the tracks (IMP-01), the returns are columns of their own in the
+/// scroll, so the scroll reaches the last return.
 #[must_use]
-pub fn max_scroll(columns: usize) -> f64 {
-    columns.saturating_sub(1) as f64 * f64::from(COLUMN_WIDTH)
+pub fn max_scroll(columns: usize, returns: usize, returns_scroll: bool) -> f64 {
+    if returns_scroll {
+        (columns + returns) as f64 * f64::from(COLUMN_WIDTH)
+    } else {
+        columns.saturating_sub(1) as f64 * f64::from(COLUMN_WIDTH)
+    }
 }
 
 /// The tracks with a column in the mixers, left to right: every track but
@@ -407,7 +441,7 @@ pub fn max_scroll(columns: usize) -> f64 {
 /// from 1 in this order, as the Arrangement's headers are.
 #[must_use]
 pub fn columns(doc: &Document, arrangement: &ArrangementView) -> Vec<TrackId> {
-    shown_tracks(doc, |id| arrangement.is_folded(id))
+    shown_tracks(doc, arrangement)
         .map(|(id, _, _)| id)
         .collect()
 }

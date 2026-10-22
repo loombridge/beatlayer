@@ -566,3 +566,125 @@ fn an_older_looped_clip_keeps_its_loop() {
         .unwrap();
     editor.apply(enabled(true)).unwrap();
 }
+
+// Spec: automation-editing R8. Lock Envelopes is saved with the set, and a
+// set saved before it has none and loads with it off.
+#[test]
+fn an_older_set_loads_with_lock_envelopes_off() {
+    let mut editor = Editor::new();
+    let track = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: track,
+            kind: TrackKind::Audio,
+            name: "Audio".to_owned(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    let project = Project::from_editor(&editor, Media::default());
+    let saved: Value = serde_json::from_slice(&encode_json(&project, 1).unwrap()).unwrap();
+    assert!(
+        saved["document"]["settings"]
+            .get("lock_envelopes")
+            .is_none(),
+        "a set saved before Lock Envelopes has no such field"
+    );
+
+    let (loaded, _) = decode_json(
+        &serde_json::to_vec(&saved).unwrap(),
+        &LoadOptions::default(),
+    )
+    .unwrap();
+    assert!(!loaded.document.settings().lock_envelopes);
+
+    // A set saved with it on keeps it.
+    editor
+        .apply(Command::SetLockEnvelopes { enabled: true })
+        .unwrap();
+    let project = Project::from_editor(&editor, Media::default());
+    let (loaded, _) =
+        decode_json(&encode_json(&project, 1).unwrap(), &LoadOptions::default()).unwrap();
+    assert!(loaded.document.settings().lock_envelopes);
+}
+
+/// A set saved before locators existed loads with none (the time editing
+/// spec, R1).
+#[test]
+fn a_set_saved_before_locators_loads_with_none() {
+    let mut editor = Editor::new();
+    let track = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: track,
+            kind: TrackKind::Audio,
+            name: "Audio".to_owned(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    let project = Project {
+        document: editor.document().clone(),
+        ids: editor.ids(),
+        media: Media::default(),
+        windows: bl_model::DeviceWindows::new(),
+        rack_views: bl_model::RackViewMap::new(),
+        folds: bl_model::ClipFolds::new(),
+        launch: bl_model::LaunchSettings::default(),
+        multisamplers: bl_model::MultisamplerViews::new(),
+    };
+    let saved = encode_json(&project, 1).unwrap();
+    let value: Value = serde_json::from_slice(&saved).unwrap();
+    assert!(
+        value["document"]["settings"].get("locators").is_none(),
+        "a set saved before locators writes none"
+    );
+    assert!(value["document"]["settings"].get("song_start").is_none());
+    let (loaded, _) = decode_json(&saved, &LoadOptions::default()).unwrap();
+    assert!(loaded.document.locators().is_empty());
+    assert!(loaded.document.song_start_ticks().is_none());
+    loaded.document.check_invariants().unwrap();
+}
+
+/// The locators and the song start time are saved with the set and load
+/// again (the time editing spec, R1 and R10).
+#[test]
+fn the_locators_and_the_song_start_time_are_saved_and_load_again() {
+    let mut editor = Editor::new();
+    let track = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: track,
+            kind: TrackKind::Audio,
+            name: "Audio".to_owned(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    let locator = editor.new_id();
+    editor
+        .apply(Command::AddLocator {
+            locator: bl_model::Locator::new(locator, Ticks::WHOLE * 2, "Intro".to_owned()),
+        })
+        .unwrap();
+    editor
+        .apply(Command::SetSongStart {
+            start: Some(bl_model::SongStart::Locator(locator)),
+        })
+        .unwrap();
+    let project = Project {
+        document: editor.document().clone(),
+        ids: editor.ids(),
+        media: Media::default(),
+        windows: bl_model::DeviceWindows::new(),
+        rack_views: bl_model::RackViewMap::new(),
+        folds: bl_model::ClipFolds::new(),
+        launch: bl_model::LaunchSettings::default(),
+        multisamplers: bl_model::MultisamplerViews::new(),
+    };
+    let saved = encode_json(&project, 1).unwrap();
+    let (loaded, _) = decode_json(&saved, &LoadOptions::default()).unwrap();
+    assert_eq!(loaded.document.locators().len(), 1);
+    assert_eq!(loaded.document.locators()[0].name, "Intro");
+    assert_eq!(loaded.document.song_start_ticks(), Some(Ticks::WHOLE * 2));
+}

@@ -11,8 +11,11 @@ mod common;
 
 use bl_commands::Registry;
 use bl_core::time::{Bpm, Frames, TempoMap, Ticks};
-use bl_engine::{Action, LoopRegion, ScheduledCommand, TransportCommand, When, testing, transport};
-use bl_model::{Command, TrackKind};
+use bl_engine::{
+    Action, LoopRegion, ScheduledCommand, SessionCommand, TransportCommand, When, testing,
+    transport,
+};
+use bl_model::{Command, LaunchQuantization, LaunchSettings, TrackKind};
 use common::{RATE, Rig, device, track};
 use serde_json::json;
 
@@ -78,6 +81,45 @@ fn play_starts_from_the_insert_marker_on_its_exact_frame_at_any_block_size() {
         assert!(state.playing);
         assert_eq!(state.insert_marker, marker);
         assert_eq!(state.position, Frames(first + 7_655));
+    }
+}
+
+#[test]
+fn play_starts_from_the_song_start_time_and_play_from_marker_ignores_it() {
+    let tempo = TempoMap::constant(bpm(97.0));
+    // 4.2.3: three bars, a beat, and two sixteenths in.
+    let start = BAR * 3 + BEAT + Ticks::SIXTEENTH * 2;
+    let first = frames(&tempo, start);
+    // 2.2.1: the insert marker, where Play From Insert Marker plays from.
+    let marker = BAR + BEAT;
+    for block in [1, 100, 4096] {
+        let mut rig = rig(4096, Some(tempo.clone()));
+        rig.sender.transport(TransportCommand::Locate(marker));
+        rig.sender
+            .transport(TransportCommand::SetSongStart(Some(start)));
+        rig.sender
+            .transport_at(TransportCommand::Play, When::Frame(12_345));
+        let out = rig.render(20_000, block);
+        // Spec: transport R21. Play starts from the song start time, and
+        // the insert marker stays where it was.
+        stopped(&out, 0..12_345);
+        plays_from(&out, 12_345..20_000, first);
+        let state = rig.monitor.state();
+        assert!(state.playing);
+        assert_eq!(state.insert_marker, marker);
+    }
+    // Play From Insert Marker plays from the marker whatever the song start
+    // time is (the transport spec, R10 and R21).
+    for block in [1, 4096] {
+        let mut rig = rig(4096, Some(tempo.clone()));
+        rig.sender.transport(TransportCommand::Locate(marker));
+        rig.sender
+            .transport(TransportCommand::SetSongStart(Some(start)));
+        rig.sender
+            .transport_at(TransportCommand::PlayFromInsertMarker, When::Frame(12_345));
+        let out = rig.render(20_000, block);
+        stopped(&out, 0..12_345);
+        plays_from(&out, 12_345..20_000, frames(&tempo, marker));
     }
 }
 
@@ -670,4 +712,179 @@ fn the_bindings_follow_the_spec() {
     ] {
         assert_eq!(bindings(id), Vec::<String>::new(), "{id}");
     }
+}
+
+/// A rig with the global launch quantisation set.
+fn rig_with_quantization(
+    max_frames: usize,
+    tempo: TempoMap,
+    quantization: LaunchQuantization,
+) -> Rig {
+    let mut rig = rig(max_frames, Some(tempo));
+    rig.sender
+        .session(SessionCommand::SetQuantization(LaunchSettings {
+            quantization,
+            enabled: true,
+            ..LaunchSettings::default()
+        }));
+    rig
+}
+
+/// The frame the output jumps at, and the position it jumps to.
+fn jump(out: &[f32]) -> (usize, i64) {
+    for i in 1..out.len() {
+        if out[i] != out[i - 1] + 1.0 {
+            return (i, out[i] as i64);
+        }
+    }
+    panic!("the output never jumps");
+}
+
+#[test]
+fn a_quantised_locate_waits_for_the_next_line_and_jumps_there() {
+    let tempo = TempoMap::constant(bpm(120.0));
+    let bar = frames(&tempo, BAR);
+    let quarter = frames(&tempo, BEAT);
+    for block in [1, 64, 512, 4096] {
+        for (quantization, line) in [
+            (LaunchQuantization::Bar, bar),
+            (LaunchQuantization::Quarter, quarter),
+        ] {
+            let mut rig = rig_with_quantization(4096, tempo.clone(), quantization);
+            rig.sender.transport(TransportCommand::Play);
+            // Play into the middle of the song, so the next line is ahead.
+            let mut out: Vec<f32> = Vec::new();
+            while out.len() < (bar / 2) as usize {
+                rig.block(block);
+                out.extend_from_slice(&rig.last());
+            }
+            let target = BAR * 5;
+            rig.sender
+                .transport(TransportCommand::QuantizedLocate(target));
+            while out.len() < (bar / 2 + bar * 2) as usize {
+                rig.block(block);
+                out.extend_from_slice(&rig.last());
+            }
+            // The jump lands on the next line of the global launch
+            // quantisation, exactly, and goes to the target.
+            let (at, to) = jump(&out);
+            assert_eq!(to, frames(&tempo, target), "block {block}");
+            let landed = out[at - 1] as i64 + 1;
+            assert_eq!(landed % line, 0, "block {block}: landed at {landed}");
+            assert!(landed > bar / 2, "block {block}: the jump was early");
+        }
+    }
+}
+
+#[test]
+fn a_second_quantised_locate_before_the_line_replaces_the_first() {
+    let tempo = TempoMap::constant(bpm(120.0));
+    let bar = frames(&tempo, BAR);
+    let mut rig = rig_with_quantization(4096, tempo.clone(), LaunchQuantization::Bar);
+    rig.sender.transport(TransportCommand::Play);
+    let mut out: Vec<f32> = Vec::new();
+    while out.len() < (bar / 2) as usize {
+        rig.block(64);
+        out.extend_from_slice(&rig.last());
+    }
+    rig.sender
+        .transport(TransportCommand::QuantizedLocate(BAR * 5));
+    rig.sender
+        .transport(TransportCommand::QuantizedLocate(BAR * 7));
+    while out.len() < (bar / 2 + bar * 2) as usize {
+        rig.block(64);
+        out.extend_from_slice(&rig.last());
+    }
+    let (_, to) = jump(&out);
+    assert_eq!(to, frames(&tempo, BAR * 7));
+}
+
+#[test]
+fn a_quantised_locate_with_no_quantisation_jumps_at_once() {
+    let tempo = TempoMap::constant(bpm(120.0));
+    let bar = frames(&tempo, BAR);
+    let mut rig = rig_with_quantization(4096, tempo.clone(), LaunchQuantization::None);
+    rig.sender.transport(TransportCommand::Play);
+    let mut out: Vec<f32> = Vec::new();
+    while out.len() < (bar / 2) as usize {
+        rig.block(64);
+        out.extend_from_slice(&rig.last());
+    }
+    let target = BAR * 5;
+    rig.sender
+        .transport(TransportCommand::QuantizedLocate(target));
+    while out.len() < (bar / 2 + 4096) as usize {
+        rig.block(64);
+        out.extend_from_slice(&rig.last());
+    }
+    // The jump happens at once, not on a line.
+    let (at, to) = jump(&out);
+    assert_eq!(to, frames(&tempo, target));
+    assert!((out[at - 1] as i64 + 1) % bar != 0, "it waited for a line");
+}
+
+#[test]
+fn a_quantised_locate_while_stopped_locates_at_once() {
+    let tempo = TempoMap::constant(bpm(120.0));
+    let mut rig = rig_with_quantization(4096, tempo.clone(), LaunchQuantization::Bar);
+    let target = BAR * 5;
+    rig.sender
+        .transport(TransportCommand::QuantizedLocate(target));
+    rig.sender.transport(TransportCommand::Play);
+    let out = rig.render(4096, 64);
+    plays_from(&out, 0..1024, frames(&tempo, target));
+}
+
+#[test]
+fn a_stop_abandons_a_jump_waiting_for_a_line() {
+    // Spec: transport R22. A jump waiting for a line is abandoned when the
+    // transport stops, so the song doesn't jump on its own later.
+    let tempo = TempoMap::constant(bpm(120.0));
+    let bar = frames(&tempo, BAR);
+    let mut rig = rig_with_quantization(4096, tempo.clone(), LaunchQuantization::Bar);
+    rig.sender.transport(TransportCommand::Play);
+    let mut out: Vec<f32> = Vec::new();
+    while out.len() < (bar * 2) as usize {
+        rig.block(64);
+        out.extend_from_slice(&rig.last());
+    }
+    // A jump back to the first bar, waiting for the next line.
+    rig.sender
+        .transport(TransportCommand::QuantizedLocate(Ticks::ZERO));
+    rig.sender.transport(TransportCommand::Stop);
+    rig.sender.transport(TransportCommand::Play);
+    let mut after: Vec<f32> = Vec::new();
+    while after.len() < (bar * 4) as usize {
+        rig.block(64);
+        after.extend_from_slice(&rig.last());
+    }
+    // The song plays on from the insert marker, which the jump set to the
+    // first bar, and doesn't jump again on the line it was waiting for.
+    plays_from(&after, 0..after.len(), frames(&tempo, Ticks::ZERO));
+}
+
+#[test]
+fn a_locate_replaces_a_jump_waiting_for_a_line() {
+    // Spec: transport R22. A plain locate replaces a jump waiting for a
+    // line, so the song doesn't jump again on the line.
+    let tempo = TempoMap::constant(bpm(120.0));
+    let bar = frames(&tempo, BAR);
+    let mut rig = rig_with_quantization(4096, tempo.clone(), LaunchQuantization::Bar);
+    rig.sender.transport(TransportCommand::Play);
+    let mut out: Vec<f32> = Vec::new();
+    while out.len() < (bar * 2) as usize {
+        rig.block(64);
+        out.extend_from_slice(&rig.last());
+    }
+    // A jump to the fifth bar, waiting for the next line.
+    rig.sender
+        .transport(TransportCommand::QuantizedLocate(BAR * 5));
+    // A plain locate goes to the fourth bar at once and replaces it.
+    rig.sender.transport(TransportCommand::Locate(BAR * 4));
+    let mut after: Vec<f32> = Vec::new();
+    while after.len() < (bar * 2) as usize {
+        rig.block(64);
+        after.extend_from_slice(&rig.last());
+    }
+    plays_from(&after, 0..after.len(), frames(&tempo, BAR * 4));
 }

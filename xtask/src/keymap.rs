@@ -56,6 +56,19 @@ const SYSTEM: &[(&str, &str)] = &[
 /// its key means.
 const WIDGET: &[(&str, &str)] = &[
     (
+        "S-EDIT-016",
+        "the Arrangement's automation lane: the edit keys with Option (Alt on Windows) held \
+         apply to the envelopes (the automation editing spec, R6)",
+    ),
+    (
+        "S-ENV-002",
+        "the drag on an automation lane moves the breakpoint's value in finer steps",
+    ),
+    (
+        "S-ENV-006",
+        "the drag on an automation lane ignores the grid while the key is held",
+    ),
+    (
         "S-SET-003",
         "the focused Settings chooser steps to the next or previous choice",
     ),
@@ -149,7 +162,7 @@ const WIDGET: &[(&str, &str)] = &[
     (
         "S-A11Y-001",
         "the Arrangement View: Option-Left and Option-Right (Alt) move the insert marker to \
-         the previous or next clip edge (`arrangement.set_insert_marker`)",
+         the previous or next clip edge or locator (`arrangement.set_insert_marker`)",
     ),
     (
         "S-A11Y-002",
@@ -362,7 +375,6 @@ const WIDGET: &[(&str, &str)] = &[
 /// no command and no package here, or if this names WP-1.7 itself.
 const OWNERS: &[(&str, &str)] = &[
     ("S-VIEW-011", "WP-1.8a"),
-    ("S-FILE-007", "WP-6.71"),
     ("S-EDIT-012", "WP-1.8b"),
     ("S-ENV-004", "WP-6.51"),
     ("S-ARR-008", "WP-6.51"),

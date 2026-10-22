@@ -11,9 +11,10 @@ use bl_model::PluginFormat;
 
 pub use bl_shell_spec::midi_io::PortDirection;
 pub use bl_shell_spec::settings::{
-    DefaultWarpMode, LaunchPrefs, LoopWarpShortSamples, SessionAutomationTracks, SettingsPage,
-    ThemeChoice, WarpPrefs, ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT, ZOOM_STEPS, zoom_factor,
-    zoom_percent, zoom_step,
+    Appearance, AutomationRecordMode, BRIGHTNESS, BUNDLED_THEME, COLOR_HUE, COLOR_INTENSITY,
+    DefaultWarpMode, GRID_LINE_INTENSITY, LaunchPrefs, LoopWarpShortSamples,
+    SessionAutomationTracks, SettingsPage, ThemeLook, Tone, WarpPrefs, ZOOM_MAX_PERCENT,
+    ZOOM_MIN_PERCENT, ZOOM_STEPS, zoom_factor, zoom_percent, zoom_step,
 };
 
 use crate::keymap::UserKeymap;
@@ -31,8 +32,12 @@ pub struct Preferences {
     /// The test tone's level and frequency (the Audio page's Tone Volume and
     /// Tone Frequency, D23).
     pub tone: ToneSettings,
-    /// The theme.
-    pub theme: ThemeChoice,
+    /// Appearance (themes R3). Preferences saved before the Theme & Colors
+    /// page called it `theme` and held `dark` or `light` (R11).
+    #[serde(alias = "theme")]
+    pub appearance: Appearance,
+    /// The theme, tone, high contrast and Customization (themes R1).
+    pub look: ThemeLook,
     /// Whether Tab moves the keyboard focus in the main window.
     pub tab_navigation: bool,
     /// Wrap Tab Navigation (Navigate ▸ Wrap Keyboard Navigation): Tab and
@@ -66,8 +71,16 @@ pub struct Preferences {
     /// destructive or external command it calls doesn't ask again
     /// (WP-2.23, part 4).
     pub assistant_always: BTreeSet<String>,
+    /// What the Export Audio/Video dialog keeps: its choices and the folder
+    /// of the last export (WP-6.71; the export spec, R39).
+    pub export: crate::ExportPrefs,
     /// The browser's places and preview (WP-1.10).
     pub browser: crate::browser::BrowserPrefs,
+    /// Whether the return tracks scroll with the tracks (IMP-01, the mixer
+    /// view spec R21): an application setting, kept between launches and
+    /// not saved with the set. Off in a new install, so the returns stay
+    /// pinned, as in Live.
+    pub return_tracks_scroll: bool,
     /// Create Fades on Clip Edges (Record, Warp & Launch, L-SET-018): new
     /// audio clips get 4 ms fades at their edges (WP-1.4b; the audio clips
     /// spec, R7 and R22). On by default, as observed in Live 12.4.6, and on
@@ -89,6 +102,10 @@ pub struct Preferences {
     /// Record Session automation in (Record, Warp & Launch, L-SET-018;
     /// WP-3.12): Armed Tracks, as observed in Live 12.4.3.
     pub record_session_automation_in: SessionAutomationTracks,
+    /// The mode an Arrangement recording writes control moves in (the
+    /// automation spec, R18): Touch, Latch or Write. It's kept between
+    /// launches, and isn't part of the set.
+    pub automation_record_mode: AutomationRecordMode,
     /// Auto-Hide Plug-In Windows (Plug-Ins, Plug-In Windows, L-SET-017):
     /// a floating device's window or a plug-in's editor hides while
     /// another track is selected and comes back with its track (WP-2.5b),
@@ -131,6 +148,11 @@ pub struct Preferences {
     /// argument. `None` names no editor, so Edit opens the File & Folder
     /// page instead.
     pub sample_editor: Option<String>,
+    /// Save Continuously (File & Folder, L-SET-015): whether every finished
+    /// edit of a set that has a file is saved within a second (WP-6.62, the
+    /// crash-recovery spec, R8 and R24). Off in a new install, as Live has
+    /// no such mode.
+    pub save_continuously: bool,
     /// The saved default set (File ▸ Save Beatlayer Set As Default Set),
     /// which a new set starts from (WP-2.25). `None` uses the factory
     /// default set.
@@ -305,7 +327,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(Preferences::load(&dir).unwrap(), Preferences::default());
         let mut prefs = Preferences {
-            theme: ThemeChoice::Light,
+            appearance: Appearance::Light,
             tab_navigation: true,
             zoom: Some(1.25),
             window_size: Some((1600.0, 977.0)),

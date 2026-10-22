@@ -152,7 +152,22 @@ fn each_transport_setting_reads_back_from_transport_state() {
 fn each_settings_command_reads_back_from_settings_state() {
     let mut client = client();
     let before = settings_state(&mut client);
-    assert_eq!(before["theme"], "dark");
+    // Spec: themes R1 to R7, R12. What a new install has.
+    assert_eq!(
+        before["theme_colors"],
+        json!({
+            "theme": "Beatlayer",
+            "tone": "neutral",
+            "high_contrast": false,
+            "grid_line_intensity": 100,
+            "brightness": 0,
+            "color_intensity": 100,
+            "color_hue": 0,
+            "appearance": "dark",
+            "drawn_appearance": "dark",
+            "themes": ["Beatlayer"],
+        })
+    );
     assert_eq!(before["create_fades_on_clip_edges"], true);
     assert_eq!(before["warp_recorded_audio"], true);
     assert_eq!(before["auto_hide_plug_in_windows"], true);
@@ -187,15 +202,57 @@ fn each_settings_command_reads_back_from_settings_state() {
     );
     assert_eq!(before["display_input"]["outline_view_in_focus"], true);
     assert_eq!(before["display_input"]["zoom_percent"], 100);
+    assert_eq!(before["automation_record_mode"], "touch");
+    assert_eq!(
+        transport_state(&mut client)["automation_record_mode"],
+        "touch"
+    );
     assert_eq!(
         before["audio"]["device"]["driver_error_compensation_ms"],
         0.0
     );
 
+    // `light`, which earlier agents send, sets the Appearance (R12).
     run(
         &mut client,
         "settings.set_theme",
         json!({ "theme": "light" }),
+    );
+    run(
+        &mut client,
+        "settings.set_theme",
+        json!({ "theme": "Beatlayer" }),
+    );
+    run(
+        &mut client,
+        "settings.set_appearance",
+        json!({ "appearance": "follow-system" }),
+    );
+    run(&mut client, "settings.set_tone", json!({ "tone": "warm" }));
+    run(
+        &mut client,
+        "settings.set_high_contrast",
+        json!({ "on": true }),
+    );
+    run(
+        &mut client,
+        "settings.set_grid_line_intensity",
+        json!({ "percent": 150 }),
+    );
+    run(
+        &mut client,
+        "settings.set_brightness",
+        json!({ "value": -20 }),
+    );
+    run(
+        &mut client,
+        "settings.set_color_intensity",
+        json!({ "percent": 50 }),
+    );
+    run(
+        &mut client,
+        "settings.set_color_hue",
+        json!({ "degrees": -90 }),
     );
     run(
         &mut client,
@@ -254,6 +311,11 @@ fn each_settings_command_reads_back_from_settings_state() {
     );
     run(
         &mut client,
+        "settings.set_automation_record_mode",
+        json!({ "mode": "latch" }),
+    );
+    run(
+        &mut client,
         "plugin.settings",
         json!({
             "hidden": ["vst3/example"],
@@ -289,7 +351,21 @@ fn each_settings_command_reads_back_from_settings_state() {
     );
 
     let state = settings_state(&mut client);
-    assert_eq!(state["theme"], "light");
+    assert_eq!(
+        state["theme_colors"],
+        json!({
+            "theme": "Beatlayer",
+            "tone": "warm",
+            "high_contrast": true,
+            "grid_line_intensity": 150,
+            "brightness": -20,
+            "color_intensity": 50,
+            "color_hue": -90,
+            "appearance": "follow-system",
+            "drawn_appearance": "dark",
+            "themes": ["Beatlayer"],
+        })
+    );
     assert_eq!(state["create_fades_on_clip_edges"], false);
     assert_eq!(state["warp_recorded_audio"], false);
     assert_eq!(state["auto_hide_plug_in_windows"], false);
@@ -338,6 +414,11 @@ fn each_settings_command_reads_back_from_settings_state() {
     assert_eq!(state["audio"]["tone"]["volume_db"], -20.0);
     assert_eq!(state["audio"]["tone"]["frequency_hz"], 880.0);
     assert_eq!(state["tempo_midi"]["keyboard"]["on"], true);
+    assert_eq!(state["automation_record_mode"], "latch");
+    assert_eq!(
+        transport_state(&mut client)["automation_record_mode"],
+        "latch"
+    );
 }
 
 #[test]

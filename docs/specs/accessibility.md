@@ -1,6 +1,6 @@
 # Keyboard and screen readers: the baseline for every M1 view
 
-- **Status:** partial (R1 to R9 each have a passing headless test; R10 is WP-6.24's and WP-6.25's)
+- **Status:** partial (R1 to R9 each have a passing headless test; R10's locator half is WP-6.24's, and Lock Envelopes' place in the Tab order is WP-6.25's)
 - **Work packages:** WP-1.14 (this spec, R1 to R9); WP-6.24 (the locator buttons, the locators and Automation Mode in the Arrangement's Tab order, R10) and WP-6.25 (Lock Envelopes in it, R10). Editing envelopes from the keyboard is [automation-editing.md](automation-editing.md)'s (WP-6.26). It builds on the keyboard paths each M1 package gave its own view: the app shell's areas and Settings keys ([app-shell](app-shell.md) R5, R11, R12), the Arrangement's keys ([arrangement-view](arrangement-view.md), [arrangement-editing](arrangement-editing.md) R12), the browser's ([browser](browser.md) R5, R17), the Control Bar's fields ([control-bar-transport](control-bar-transport.md) R8 to R11), and the mixer's ([mixer-view](mixer-view.md) R13, R15)
 - **Parity-matrix row:** Views and workflow: Keyboard navigation (focus, area jumps, held shortcuts); Screen readers (VoiceOver, NVDA, Narrator)
 - **Checked against:** Live 12.4.6 on macOS, observed on 11 October 2026 (the defaults, the Tab orders, the neighbour items, the names, and Outline View in Focus), the Live 12 reference manual as published that day (chapter 41, and section 2.3.1), and the UI parity reference recorded in Live 12.4.3 on 10 October 2026
@@ -51,7 +51,7 @@ This spec covers the baseline across the M1 views: what the tree gives a screen 
 
 The test of R8 walks the whole registry. A command is reached by a key, a menu item, or a keyboard-reachable control, or it's listed here. The test fails for any command that is neither, and for one listed here that has since gained a path.
 
-**Controls the keyboard reaches** (each checked by tabbing to it and pressing its key): Play, Stop, and Arrangement Loop in the Control Bar (`transport.play`, `transport.stop`, `transport.set_loop_enabled`); a track's Solo and Arm Recording (`mixer.solo_exclusive`, `mixer.arm_exclusive`); the browser's Search Field (`browser.search`); and in the Settings window Agent Server, New Token, each agent's Autonomous switch, Forget, and New Token (`agent.set_server`, `agent.new_token`, `agent.set_autonomous`, `agent.forget_client`, `agent.new_client_token`), Buffer Size and the Audio page's other choosers (`audio.configure`), Test Tone (`audio.set_test_tone`), Theme (`settings.set_theme`), Create Fades on Clip Edges, Auto-Hide Plug-In Windows (`settings.set_auto_hide_plug_in_windows`, WP-2.5b), Outline View in Focus, and Zoom; and in the assistant pane (D24), reached with Tab once the pane has the focus, Float Assistant (`assistant.toggle_floating`), Stop Assistant (`assistant.stop`, while a turn runs), the pane's width edge with Left and Right (`assistant.set_panel_width`), and the prompt field, which sends with Enter or its Send button (`assistant.send`, listed in the test as an equivalent path: sending needs a message, so no one key does it).
+**Controls the keyboard reaches** (each checked by tabbing to it and pressing its key): Play, Stop, and Arrangement Loop in the Control Bar (`transport.play`, `transport.stop`, `transport.set_loop_enabled`); a track's Solo and Arm Recording (`mixer.solo_exclusive`, `mixer.arm_exclusive`); the browser's Search Field (`browser.search`); and in the Settings window Agent Server, New Token, each agent's Autonomous switch, Forget, and New Token (`agent.set_server`, `agent.new_token`, `agent.set_autonomous`, `agent.forget_client`, `agent.new_client_token`), Buffer Size and the Audio page's other choosers (`audio.configure`), Test Tone (`audio.set_test_tone`), Theme (`settings.set_theme`), Create Fades on Clip Edges, Auto-Hide Plug-In Windows (`settings.set_auto_hide_plug_in_windows`, WP-2.5b), Outline View in Focus, and Zoom; the File & Folder page's Save Continuously switch (`settings.set_continuous_save`, the crash-recovery spec R24); the recovery prompt's Recover, Discard and Later buttons (`set.recover`, `set.discard_recovery` and `set.later_recovery`, the crash-recovery spec R23); and in the assistant pane (D24), reached with Tab once the pane has the focus, Float Assistant (`assistant.toggle_floating`), Stop Assistant (`assistant.stop`, while a turn runs), the pane's width edge with Left and Right (`assistant.set_panel_width`), and the prompt field, which sends with Enter or its Send button (`assistant.send`, listed in the test as an equivalent path: sending needs a message, so no one key does it).
 
 **The Shortcuts page's own commands** (the custom shortcuts spec, R8 and R10): `keymap.unbind` and `keymap.reset` are the page's Remove and Reset buttons, which the keyboard reaches with Tab and Enter; `keymap.bind` takes the key press that becomes the shortcut, so its keyboard path is the shortcut itself, and `keymap.state` is a query for agents.
 
@@ -67,39 +67,38 @@ The test of R8 walks the whole registry. A command is reached by a key, a menu i
 
 **Without a key of their own**: `mixer.set_crossfader` and `mixer.set_crossfade_assign`. Their controls are reached with the pointer, and the keyboard reaches them too (Tab to an A or B button and Enter assigns or releases, and Main's crossfader is a slider) ([mixer-view](mixer-view.md) R15, R16; WP-3.17).
 
+**The Export Audio/Video dialog** (WP-6.71): its controls (`export.set_choices`, `export.start`, `export.close_dialog`) and the export's progress window (`export.cancel`) are in the Tab order, and Return and Esc act in them ([export](export.md) R28, R45).
+
 **Gaps in M1** (each needs another package's work):
 
-1. `export.audio`: the Export Audio/Video dialog isn't built yet ([export](export.md) R16), so ⇧⌘R does nothing yet.
-2. `track.move`: moving tracks with Cmd and the arrows (S-TRACK-012) isn't bound.
-3. `set.recover` and `set.discard_recovery`: the app doesn't show the recovery prompt at launch yet ([crash-recovery](crash-recovery.md)).
-4. `settings.set_continuous_save`: the Save Continuously switch on File & Folder isn't drawn yet ([crash-recovery](crash-recovery.md) R11).
-5. `device.load_sample`: loading a sample into the sampler has no key or menu item yet ([sampler](sampler.md) R11); dropping the file on the sampler's Device View frame is the only way.
+1. `track.move`: moving tracks with Cmd and the arrows (S-TRACK-012) isn't bound.
+2. `device.load_sample`: loading a sample into the sampler has no key or menu item yet ([sampler](sampler.md) R11); dropping the file on the sampler's Device View frame is the only way.
 
 **Gaps in the multisampler** ([multisampler](multisampler.md), WP-5.13; its header buttons, layer rows and Sample tab fields are in the Device View's Tab order, so `device.set_multisampler_view`, `device.hot_swap_layer`, `device.select_layers`, `device.set_layer` and `device.set_layer_options` are reached with the keyboard):
 
-6. `device.add_layers`: adding samples is a drop of files on the zone editor (R3); the keyboard has no way to name files yet.
-7. `device.set_layer_zone`: dragging a zone's edge, body or fade has no keyboard form yet (R10).
-8. `device.snap_layer_markers`: the loop marker's context menu isn't opened from the keyboard (R20).
-9. `device.delete_layers`, `device.duplicate_layers`, `device.rename_layer`, `device.sort_layers`, `device.distribute_layers` and `device.normalize_layers`: the layer list's context menu isn't opened from the keyboard (R11); the Delete key deletes the selected device.
-10. `device.move_layers`: no control moves layers by hand yet; the list's sorts reorder it (R11).
+3. `device.add_layers`: adding samples is a drop of files on the zone editor (R3); the keyboard has no way to name files yet.
+4. `device.set_layer_zone`: dragging a zone's edge, body or fade has no keyboard form yet (R10).
+5. `device.snap_layer_markers`: the loop marker's context menu isn't opened from the keyboard (R20).
+6. `device.delete_layers`, `device.duplicate_layers`, `device.rename_layer`, `device.sort_layers`, `device.distribute_layers` and `device.normalize_layers`: the layer list's context menu isn't opened from the keyboard (R11); the Delete key deletes the selected device.
+7. `device.move_layers`: no control moves layers by hand yet; the list's sorts reorder it (R11).
 
 **Gaps in sample editing** ([multisampler](multisampler.md), WP-5.15):
 
-11. `device.edit_sample`, `device.crop_sample` and `device.reverse_sample`: the sample display's context menu isn't opened from the keyboard (R55, R59).
-12. `device.audition_sample`: a click on the sample display has no keyboard form yet (R54).
-13. `device.convert`: the device's title bar menu isn't opened from the keyboard (R62).
+8. `device.edit_sample`, `device.crop_sample` and `device.reverse_sample`: the sample display's context menu isn't opened from the keyboard (R55, R59).
+9. `device.audition_sample`: a click on the sample display has no keyboard form yet (R54).
+10. `device.convert`: the device's title bar menu isn't opened from the keyboard (R62).
 
 **Gaps in rack presets** ([racks](racks.md), WP-5.8):
 
-14. `chain.save_preset`: a chain's row is saved by dragging it into the browser (R46), which has no keyboard form yet.
+11. `chain.save_preset`: a chain's row is saved by dragging it into the browser (R46), which has no keyboard form yet.
 
 **Gaps in macros** ([macros](macros.md), WP-5.4):
 
-15. `rack.set_macro_info_text`: a macro's info text has no menu item yet; M-EDIT-025 (Edit Info Text) adds it.
+12. `rack.set_macro_info_text`: a macro's info text has no menu item yet; M-EDIT-025 (Edit Info Text) adds it.
 
 **Gaps in the autosampler** ([multisampler](multisampler.md), WP-5.16):
 
-16. `device.autosample_open`: the device's title bar menu isn't opened from the keyboard (R64).
+13. `device.autosample_open`: the device's title bar menu isn't opened from the keyboard (R64).
 
 ## Tests
 
@@ -114,7 +113,7 @@ The test of R8 walks the whole registry. A command is reached by a key, a menu i
 | R7 | `crates/ui/tests/accessibility.rs`, `outline_view_in_focus_outlines_the_focused_area_and_control_until_switched_off` | UI script (drawn shapes) |
 | R8 | `crates/ui/tests/accessibility.rs`, `every_m1_command_is_reachable_from_the_keyboard` (prints the table with `--nocapture`), `the_reachability_test_fails_for_a_command_with_no_keyboard_path`, `the_keys_open_the_arrangement_s_context_menus`, `the_keys_open_a_sidebar_place_s_context_menu`; `crates/ui/tests/track_menu.rs`, `the_keys_open_the_selected_title_bar_s_menu`, `the_keys_open_a_session_column_s_title_menu`; `crates/shell/tests/menus.rs`, `every_shell_command_is_on_a_menu_or_a_control` | UI script, unit |
 | R9 | `crates/ui/tests/accessibility.rs`, `the_navigate_and_options_menus_reach_their_commands`; `crates/shell-spec/src/menus.rs`, `every_menu_row_and_separator_is_in_the_model_in_order` | UI script, unit |
-| R10 | to be written in WP-6.24 and WP-6.25 | |
+| R10 | `crates/ui/tests/accessibility.rs`, `the_screen_reader_follows_the_keyboard_focus`, `tab_runs_through_the_arrangement_and_the_neighbour_keys_to_the_next_track`, `outline_view_in_focus_outlines_the_focused_area_and_control_until_switched_off`; `crates/ui/tests/automation.rs`, `the_lock_envelopes_switch_is_in_the_tab_order` (Lock Envelopes, WP-6.25's); the Set Locator, Previous Locator, Next Locator and Automation Mode controls | headless UI |
 
 ## Screen readers: the manual test
 
@@ -124,19 +123,19 @@ The tests above read the tree AccessKit hands the platform; whether each platfor
 
 **VoiceOver (macOS 26):** turn VoiceOver on (Cmd-F5).
 
-1. Press Option-2. VoiceOver reads "Arrangement View".
-2. Press Down three times. It reads "1 MIDI", "2 MIDI", "3 Audio" (row headers), each with "Audio track 3" or the like as its description.
-3. Press Cmd-A, which selects every clip. It reads "Kick", its bars ("3.1.1 to 7.1.1", or wherever it landed), and that it's selected.
-4. Press Up, then Down, so 3 Audio is the selected track, then Tab. It reads "3 Audio" (the title bar). Tab again: "Track Activator, on", "Solo, off", "Arm Recording, off", "Track Volume, 0.0 dB, slider", "Track Pan, C, slider", then Optimize Height and Optimize Width, then round to "3 Audio".
-5. On Track Volume, press Down twice. It reads "-1.0 dB", "-2.0 dB". Press Delete: "0.0 dB". Adjust it with VoiceOver's own slider commands: each step changes it by 1 dB, and VoiceOver reads the new value.
-6. Press Option-Tab. It reads 4 Audio's "Track Volume", and 3 Audio stays selected. Option-Shift-Tab: back to 3 Audio's. Navigate ▸ Next Neighbor does the same.
-7. Press Esc. Focus returns to the Arrangement; VoiceOver reads "3 Audio".
-8. Press Option-Shift-M (Navigate ▸ Mixer). It reads "3 Audio" (the mixer column, a group). Tab: "Peak Level", "Track Pan", "Track Activator", "Solo", "Arm Recording", "Track Volume", then round to "3 Audio". Then show the Session View (its view selector, or View ▸ Toggle Arrangement/Session View), select 3 Audio's strip, and Tab: the same strip order; Esc from Track Volume reads "3 Audio".
-9. Press Option-0. It reads the Control Bar's first control. Tab through it; each control is read with its name and value (Tempo "120.00", the position fields, Play, Stop, Arrangement Loop).
-10. Press Cmd-F. It reads "Search Field". Type "kick": the results follow. Tab: the sidebar; Tab: the list; Down: each file's name and kind.
-11. Open the menu bar (VO-M) and the Navigate menu: each item and its key is read; Next Neighbor is enabled now that Tab moves the focus.
-12. With the clip selected and the Arrangement focused, press VO-Shift-M: if VoiceOver opens Beatlayer's clip menu, Up and Down read its items. (AccessKit doesn't pass VoiceOver's menu action on yet; the key Beatlayer reads, Ctrl-Option-Shift-M, works with VoiceOver off.)
-13. Cmd-, then Tab through Settings ▸ Display & Input: "Outline View in Focus, On", "Use Tab Key to Move Focus, On" (switched on for the test), "Wrap Tab Navigation, On"; the pending rows read their values (Follow System, Scroll, Show, On).
+-1. Press Option-2. VoiceOver reads "Arrangement View".
+0. Press Down three times. It reads "1 MIDI", "2 MIDI", "3 Audio" (row headers), each with "Audio track 3" or the like as its description.
+1. Press Cmd-A, which selects every clip. It reads "Kick", its bars ("3.1.1 to 7.1.1", or wherever it landed), and that it's selected.
+2. Press Up, then Down, so 3 Audio is the selected track, then Tab. It reads "3 Audio" (the title bar). Tab again: "Track Activator, on", "Solo, off", "Arm Recording, off", "Track Volume, 0.0 dB, slider", "Track Pan, C, slider", then Optimize Height and Optimize Width, then round to "3 Audio".
+3. On Track Volume, press Down twice. It reads "-1.0 dB", "-2.0 dB". Press Delete: "0.0 dB". Adjust it with VoiceOver's own slider commands: each step changes it by 1 dB, and VoiceOver reads the new value.
+4. Press Option-Tab. It reads 4 Audio's "Track Volume", and 3 Audio stays selected. Option-Shift-Tab: back to 3 Audio's. Navigate ▸ Next Neighbor does the same.
+5. Press Esc. Focus returns to the Arrangement; VoiceOver reads "3 Audio".
+6. Press Option-Shift-M (Navigate ▸ Mixer). It reads "3 Audio" (the mixer column, a group). Tab: "Peak Level", "Track Pan", "Track Activator", "Solo", "Arm Recording", "Track Volume", then round to "3 Audio". Then show the Session View (its view selector, or View ▸ Toggle Arrangement/Session View), select 3 Audio's strip, and Tab: the same strip order; Esc from Track Volume reads "3 Audio".
+7. Press Option-0. It reads the Control Bar's first control. Tab through it; each control is read with its name and value (Tempo "120.00", the position fields, Play, Stop, Arrangement Loop).
+8. Press Cmd-F. It reads "Search Field". Type "kick": the results follow. Tab: the sidebar; Tab: the list; Down: each file's name and kind.
+9. Open the menu bar (VO-M) and the Navigate menu: each item and its key is read; Next Neighbor is enabled now that Tab moves the focus.
+10. With the clip selected and the Arrangement focused, press VO-Shift-M: if VoiceOver opens Beatlayer's clip menu, Up and Down read its items. (AccessKit doesn't pass VoiceOver's menu action on yet; the key Beatlayer reads, Ctrl-Option-Shift-M, works with VoiceOver off.)
+11. Cmd-, then Tab through Settings ▸ Display & Input: "Outline View in Focus, On", "Use Tab Key to Move Focus, On" (switched on for the test), "Wrap Tab Navigation, On"; the pending rows read their values (Follow System, Scroll, Show, On).
 
 **NVDA (Windows 11):** start NVDA (Ctrl-Alt-N). Repeat steps 1 to 10 and 13 with Alt for Option and Ctrl for Cmd (Alt-2, Ctrl-Tab for Option-Tab, Alt-Shift-M, Alt-0, Ctrl-F, Ctrl-,), in focus mode (NVDA-Space if browse mode turns on). In step 5, NVDA's own slider adjustment (if it offers one in focus mode) steps it by 1 dB; the arrows do too. Step 11: Alt-N opens the Navigate menu (Windows' own menu bar); NVDA reads each item. Step 12: Shift-F10 opens the clip's menu with its first item read.
 

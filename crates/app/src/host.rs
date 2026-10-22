@@ -27,6 +27,7 @@
 
 use std::collections::BTreeMap;
 use std::num::NonZeroU32;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, atomic::AtomicBool, mpsc};
 use std::time::{Duration, Instant};
 
@@ -37,7 +38,7 @@ use bl_shell::audio::AudioHost;
 use bl_shell::files::ProjectFiles;
 use bl_shell::menus::{Menu, MenuPlatform, menu_bar};
 use bl_shell::perception_commands::View;
-use bl_shell::settings::{Preferences, ThemeChoice, default_config_dir};
+use bl_shell::settings::{Preferences, SettingsPage, ThemeLook, default_config_dir};
 use bl_shell::{Effect, Invocation, Shell, WindowKind, commands as ids};
 use bl_ui::assistant_panel::AssistantPanelUi;
 use bl_ui::device_view::DeviceViewUi;
@@ -47,6 +48,7 @@ use bl_ui::layout::{TITLE_BAR, apply_zoom, fit_main_window, follow_zoom, setting
 use bl_ui::main_window::{DrawnMenuBar, MainWindowUi, UiEvent};
 use bl_ui::settings_window::SettingsUi;
 use bl_ui::theme::{Theme, fonts};
+use bl_ui::theme_library::ThemeLibrary;
 use egui::{ViewportId, ViewportInfo};
 use egui_wgpu::winit::Painter;
 use egui_wgpu::{
@@ -327,8 +329,14 @@ struct Surface {
 struct Host {
     args: Args,
     shell: Shell,
-    theme_choice: ThemeChoice,
+    /// The themes found, and the theme drawn with the settings (and the
+    /// appearance, `true` for dark) it was made from (themes R8).
+    library: ThemeLibrary,
     theme: Theme,
+    drawn: (ThemeLook, bool),
+    /// Whether the Theme & Colors page was showing, so opening it reads the
+    /// theme files again (themes R9).
+    on_theme_page: bool,
     keymap: Keymap,
     /// The shell's keymap revision the keymap was built at, so a change
     /// rebuilds it and the native menu (the custom-shortcuts spec, R10).
@@ -407,6 +415,17 @@ struct PendingCapture {
     redrawn: Instant,
 }
 
+/// Where the app keeps the journal of the open set's edits, so a crash
+/// can be recovered from (WP-6.62, the crash-recovery spec, R21): the
+/// recovery folder in the user's application data, or one in the config
+/// directory the app was given.
+fn recovery_dir(args: &Args) -> Option<PathBuf> {
+    match &args.config_dir {
+        Some(dir) => Some(dir.join("Recovery")),
+        None => bl_project::autosave::default_recovery_dir(),
+    }
+}
+
 /// Runs the app until it quits.
 pub fn run(args: Args) -> Result<(), String> {
     let config_dir = args.config_dir.clone().or_else(default_config_dir);
@@ -445,11 +464,20 @@ pub fn run(args: Args) -> Result<(), String> {
     }
     // The files' analyses are kept beside the peaks (WP-4.3).
     shell.use_platform_analysis_cache();
+    shell.use_platform_peak_cache();
     shell.start_audio();
     if let Some(error) = prefs_error {
         shell.set_message(error, true);
     }
     if !args.benchmark_scene {
+        // Spec: crash-recovery R21. The app journals the open set's edits
+        // in the recovery folder in the user's application data, and offers
+        // the sets a crash left.
+        if let Some(dir) = recovery_dir(&args)
+            && let Err(error) = shell.use_recovery(dir)
+        {
+            shell.set_message(format!("Crash recovery isn't running: {error}"), true);
+        }
         open_user_library(&mut shell, &args);
     }
     if let Some(set) = &args.set {
@@ -497,7 +525,9 @@ pub fn run(args: Args) -> Result<(), String> {
         }));
     }
 
-    let theme_choice = shell.theme();
+    let mut library = ThemeLibrary::bundled();
+    library.refresh(&mut shell);
+    let drawn = (shell.look().clone(), shell.theme_dark());
     let platform = Platform::current();
     let menus = menu_bar(MenuPlatform::current());
     let (job_sender, job_receiver) = mpsc::channel::<RenderJob>();
@@ -526,8 +556,10 @@ pub fn run(args: Args) -> Result<(), String> {
     let mut host = Host {
         args,
         shell,
-        theme_choice,
-        theme: Theme::builtin(theme_choice),
+        theme: library.resolve(&drawn.0, drawn.1),
+        library,
+        drawn,
+        on_theme_page: false,
         keymap,
         keymap_revision,
         platform,
@@ -861,6 +893,18 @@ impl Host {
         }
     }
 
+    /// Makes the theme again if the Theme & Colors settings or the system's
+    /// mode changed since it was made. Returns whether it did.
+    fn sync_theme(&mut self) -> bool {
+        let drawn = (self.shell.look().clone(), self.shell.theme_dark());
+        if drawn == self.drawn {
+            return false;
+        }
+        self.theme = self.library.resolve(&drawn.0, drawn.1);
+        self.drawn = drawn;
+        true
+    }
+
     /// Every open window's surface.
     fn surfaces(&self) -> impl Iterator<Item = &Surface> {
         [&self.main, &self.settings, &self.assistant]
@@ -1043,6 +1087,10 @@ impl Host {
         }
         egui_winit::update_viewport_info(&mut surface.info, &surface.ctx, &surface.window, false);
         let mut input = surface.state.take_egui_input(&surface.window);
+        // Spec: view-options R1. The middle button pans the area under the
+        // pointer, so egui never sees it: it clicks nothing and selects
+        // nothing.
+        bl_ui::middle::take(&mut input, &surface.ctx);
         input
             .viewports
             .insert(ViewportId::ROOT, surface.info.clone());
@@ -1176,6 +1224,7 @@ impl Host {
                 UiEvent::FocusTrack(track) => self.shell.set_focused_track(track),
                 UiEvent::FocusValue(focused) => self.shell.set_value_focused(focused),
                 UiEvent::StatusHint(hint) => self.shell.set_hint(hint),
+                UiEvent::SearchRun(index) => self.shell.search_run_row(index),
                 UiEvent::ArrangementViewport { width, height } => {
                     self.shell.set_arrangement_viewport(width, height);
                 }
@@ -1212,11 +1261,19 @@ impl Host {
                 self.effect(effect, event_loop);
             }
         }
-        if self.shell.theme() != self.theme_choice {
-            self.theme_choice = self.shell.theme();
-            self.theme = Theme::builtin(self.theme_choice);
+        let on_theme_page =
+            self.shell.settings_open() && self.shell.settings_page() == SettingsPage::ThemeColors;
+        if on_theme_page && !self.on_theme_page {
+            self.library.refresh(&mut self.shell);
+            // A theme file may have changed under the same name: make the
+            // theme again.
+            self.drawn.0.theme.clear();
+        }
+        self.on_theme_page = on_theme_page;
+        if self.sync_theme() {
             for surface in self.surfaces() {
                 self.theme.apply(&surface.ctx);
+                surface.window.request_redraw();
             }
         }
         // The interface zoom (interface-zoom R1, R4, R7, R8): the main
@@ -1262,6 +1319,9 @@ impl Host {
         self.sync_agent_server();
         self.take_captures();
         self.take_renders();
+        // Spec: export R44. An agent's `export.audio` waits for the export on
+        // its thread, and gets its answer once it ends.
+        self.agent.sync_export(&mut self.shell);
         self.resume_agents();
         self.agent.sync_engine(&mut self.shell);
         if self.shown_revision != Some(self.shell.revision()) {
@@ -1278,6 +1338,58 @@ impl Host {
             if let Some(main) = &self.main {
                 main.window.set_title(&self.shell.set_name());
             }
+        }
+    }
+
+    /// Export's save dialog (the export spec, R40): the person chooses where
+    /// the file goes, and one question lists the other files the export
+    /// writes that exist already (declining returns to the save dialog).
+    /// Cancelling goes back to the Export dialog with its choices.
+    fn pick_export_path(&mut self, file_name: &str, folder: Option<&std::path::Path>) {
+        loop {
+            let mut dialog = rfd::FileDialog::new()
+                .set_title("Export Audio/Video")
+                .set_file_name(file_name);
+            if let Some(folder) = folder {
+                dialog = dialog.set_directory(folder);
+            }
+            if let Some(main) = &self.main {
+                dialog = dialog.set_parent(main.window.as_ref());
+            }
+            let Some(path) = dialog.save_file() else {
+                self.invoke(&Invocation::new(
+                    bl_shell::export_commands::OPEN_DIALOG,
+                    json!({}),
+                ));
+                return;
+            };
+            let others = self.shell.export_conflicts(&path);
+            if !others.is_empty() {
+                let list: Vec<String> = others
+                    .iter()
+                    .filter_map(|file| file.file_name())
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .collect();
+                let answer = rfd::MessageDialog::new()
+                    .set_level(rfd::MessageLevel::Warning)
+                    .set_title("Beatlayer")
+                    .set_description(format!(
+                        "These files exist already:\n{}\n\nReplace them?",
+                        list.join("\n")
+                    ))
+                    .set_buttons(rfd::MessageButtons::YesNo)
+                    .show();
+                if answer != rfd::MessageDialogResult::Yes {
+                    continue;
+                }
+            }
+            // The save dialog asked about the file itself.
+            let replace = path.exists() || !others.is_empty();
+            self.invoke(&Invocation::new(
+                bl_shell::export_commands::START,
+                json!({ "path": path.to_string_lossy(), "replace": replace }),
+            ));
+            return;
         }
     }
 
@@ -1335,6 +1447,8 @@ impl Host {
                 }
                 self.shell.save_preferences();
                 self.cancel_renders();
+                // An export under way removes its partial files first.
+                self.shell.stop_export();
                 self.agent.set_view_capture(false);
                 self.quitting = true;
                 event_loop.exit();
@@ -1428,6 +1542,9 @@ impl Host {
                     ));
                 }
             }
+            Effect::PickExportPath { file_name, folder } => {
+                self.pick_export_path(&file_name, folder.as_deref());
+            }
             Effect::OpenSettings => self.open_settings_window(event_loop),
             Effect::CloseSettings => {
                 self.settings = None;
@@ -1445,7 +1562,8 @@ impl Host {
             | Effect::RenameChain(_)
             | Effect::RenameMacro(_, _)
             | Effect::RenameVariation(_, _)
-            | Effect::RenameTrack(_) => {
+            | Effect::RenameTrack(_)
+            | Effect::RenameLocator(_) => {
                 if let Some(main) = &self.main {
                     self.main_ui.apply_effect(&main.ctx, &effect);
                     main.window.request_redraw();
@@ -1863,6 +1981,12 @@ impl ApplicationHandler<UserEvent> for Host {
             event_loop.exit();
             return;
         }
+        // Follow System starts from the system's mode (themes R3).
+        if let Some(theme) = self.main.as_ref().and_then(|main| main.window.theme()) {
+            self.shell
+                .set_system_dark(theme == winit::window::Theme::Dark);
+            self.after_commands(event_loop);
+        }
         // Agents can capture views now there's a window (WP-1.16).
         self.agent.set_view_capture(true);
         if self.args.open_settings {
@@ -1934,6 +2058,12 @@ impl ApplicationHandler<UserEvent> for Host {
                         self.record_device_frame(device, &window);
                     }
                 }
+            }
+            // Follow System (themes R3).
+            WindowEvent::ThemeChanged(theme) => {
+                self.shell
+                    .set_system_dark(theme == winit::window::Theme::Dark);
+                self.after_commands(event_loop);
             }
             WindowEvent::Focused(true) => {
                 self.shell.set_focused_window(kind);

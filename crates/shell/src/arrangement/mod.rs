@@ -10,18 +10,20 @@
 //! edits that act on it are in [`editing`] (WP-1.8b), whose behaviour is in
 //! the arrangement editing spec.
 
+pub mod automation;
 pub mod editing;
 pub mod grid;
+pub mod locator;
 pub mod placing;
 pub mod rows;
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use bl_core::time::{Ticks, TimeSignature};
-use bl_model::{AutomationTarget, ClipId, Document, MixerParam, TrackId, TrackKind};
+use bl_model::{AutomationTarget, ClipId, Document, LocatorId, MixerParam, TrackId, TrackKind};
 use bl_shell_spec::arrangement::{
     self as ids, ArrangementState, AutomationLane, FoldArgs, FoldGroupsArgs, FollowArgs,
-    InsertMarkerArgs, ScrollArgs, SelectTimeArgs, SelectTracksArgs, SetGridArgs,
+    InsertMarkerArgs, Lane, ScrollArgs, SelectTimeArgs, SelectTracksArgs, SetGridArgs,
     ShowAutomationArgs, ShowRangeArgs, ShowTrackArgs, SwitchArgs, TimeRange, TrackHeightArgs,
     ZoomArgs,
 };
@@ -171,8 +173,13 @@ pub struct ArrangementView {
     selected: Vec<TrackId>,
     /// The selected clips (WP-1.8b): see [`editing`].
     selected_clips: Vec<ClipId>,
+    /// The selected locators (WP-6.24): see [`locator`].
+    selected_locators: Vec<LocatorId>,
     title_bars: bool,
     time_selection: Option<(Ticks, Ticks)>,
+    /// The lanes the time selection covers: each a track's own lane or its
+    /// automation lane (the automation editing spec, R1).
+    time_selection_lanes: Vec<Lane>,
     history: Vec<Saved>,
     /// The view `arrangement.zoom_to_selection` last left, so running it
     /// again straight away goes back.
@@ -188,6 +195,15 @@ pub struct ArrangementView {
     /// have picked one; `None` hides that track's lane. A track with no
     /// entry shows its volume.
     automation_lanes: BTreeMap<TrackId, Option<AutomationTarget>>,
+    /// Whether the return tracks' rows scroll with the tracks (IMP-01, the
+    /// arrangement view spec R18): they come after the drop area under the
+    /// last track, and only Main stays pinned. Off in a new install, so
+    /// they stay pinned, as in Live.
+    returns_scroll: bool,
+    /// The segment selected in each track's automation lane: the parameter
+    /// it shows and the breakpoint the segment starts at (the automation
+    /// editing spec, R4).
+    automation_segment: BTreeMap<TrackId, (AutomationTarget, Ticks)>,
     /// Whether the track headers show their In/Out column (WP-6.64).
     show_in_out: bool,
     /// Whether the track headers show their volume, pan, and sends
@@ -195,6 +211,10 @@ pub struct ArrangementView {
     show_volume: bool,
     /// Whether the return tracks' rows show in the lanes (WP-6.64).
     show_return_tracks: bool,
+    /// The tracks the search field's Show Only Matches keeps while it hides
+    /// the others (WP-6.42): the matches and the groups that hold them.
+    /// View state, kept up to date by the shell.
+    search_keep: Option<BTreeSet<TrackId>>,
 }
 
 impl Default for ArrangementView {
@@ -227,28 +247,48 @@ impl ArrangementView {
             insert_marker: Ticks::ZERO,
             selected: Vec::new(),
             selected_clips: Vec::new(),
+            selected_locators: Vec::new(),
             title_bars: false,
             time_selection: None,
+            time_selection_lanes: Vec::new(),
             history: Vec::new(),
             zoomed_to_selection: None,
             transport: TransportView::default(),
             automation_mode: false,
             automation_arm: false,
             automation_lanes: BTreeMap::new(),
+            returns_scroll: false,
+            automation_segment: BTreeMap::new(),
             show_in_out: true,
             show_volume: true,
             show_return_tracks: true,
+            search_keep: None,
         }
     }
 
     /// Goes back to a new set's view, as a new or opened set shows, keeping
-    /// the window's size and the transport.
+    /// the window's size, the transport, and the application setting the
+    /// return tracks scroll with the tracks.
     pub fn reset(&mut self) {
         *self = Self {
             viewport: self.viewport,
             transport: self.transport,
+            returns_scroll: self.returns_scroll,
             ..Self::new()
         };
+    }
+
+    /// Whether the return tracks' rows scroll with the tracks (IMP-01, the
+    /// arrangement view spec R18).
+    #[must_use]
+    pub fn returns_scroll(&self) -> bool {
+        self.returns_scroll
+    }
+
+    /// Sets whether the return tracks' rows scroll with the tracks, as the
+    /// application setting the preferences keep does.
+    pub fn set_returns_scroll(&mut self, on: bool) {
+        self.returns_scroll = on;
     }
 
     /// Records the size of the lanes' scrolling area, as the window lays it
@@ -394,6 +434,24 @@ impl ArrangementView {
         self.show_return_tracks
     }
 
+    /// The pinned rows under the scrolling ones: the return tracks while
+    /// they stay pinned (R18) and [`rows::pinned_tracks`] keeps them, then
+    /// Main.
+    pub fn pinned_tracks<'a>(&'a self, doc: &'a Document) -> impl Iterator<Item = TrackId> + 'a {
+        rows::pinned_tracks(doc, self)
+            .filter(move |id| !self.returns_scroll || *id == doc.main_id())
+    }
+
+    /// The return tracks' rows that scroll with the tracks, after the drop
+    /// area (R18): the ones [`rows::pinned_tracks`] would pin, and none
+    /// while they stay pinned.
+    pub fn scrolling_returns<'a>(
+        &'a self,
+        doc: &'a Document,
+    ) -> impl Iterator<Item = TrackId> + 'a {
+        rows::pinned_tracks(doc, self).filter(move |id| self.returns_scroll && *id != doc.main_id())
+    }
+
     /// The parameter a track's automation lane shows: the choosers' last
     /// choice, or its volume by default. `None` draws no envelope, while
     /// the lane and its choosers stay.
@@ -405,6 +463,27 @@ impl ArrangementView {
             .unwrap_or(Some(AutomationTarget::Mixer {
                 param: MixerParam::Volume,
             }))
+    }
+
+    /// The segment selected in a track's automation lane: the parameter it
+    /// shows and the breakpoint the segment starts at (the automation
+    /// editing spec, R4).
+    #[must_use]
+    pub fn selected_segment(&self, track: TrackId) -> Option<(AutomationTarget, Ticks)> {
+        self.automation_segment.get(&track).copied()
+    }
+
+    /// Selects a segment in a track's automation lane, or clears it with
+    /// `at` `None` (the automation editing spec, R4).
+    pub fn select_segment(&mut self, track: TrackId, target: AutomationTarget, at: Option<Ticks>) {
+        match at {
+            Some(at) => {
+                self.automation_segment.insert(track, (target, at));
+            }
+            None => {
+                self.automation_segment.remove(&track);
+            }
+        }
     }
 
     /// How tall `track`'s automation lane is, in points: [`AUTOMATION_LANE_HEIGHT`]
@@ -477,10 +556,80 @@ impl ArrangementView {
         self.time_selection
     }
 
+    /// The lanes the time selection covers: each a track's own lane or its
+    /// automation lane (the automation editing spec, R1).
+    #[must_use]
+    pub fn time_selection_lanes(&self) -> &[Lane] {
+        &self.time_selection_lanes
+    }
+
+    /// The selected locators, in the order they were selected (WP-6.24).
+    #[must_use]
+    pub fn selected_locators(&self) -> &[LocatorId] {
+        &self.selected_locators
+    }
+
+    /// Whether a locator is selected.
+    #[must_use]
+    pub fn is_locator_selected(&self, locator: LocatorId) -> bool {
+        self.selected_locators.contains(&locator)
+    }
+
+    /// Selects locators, as clicking one does. An empty list clears the
+    /// locator selection and leaves the rest.
+    pub fn select_locators(&mut self, locators: Vec<LocatorId>) {
+        self.selected_locators = locators;
+    }
+
+    /// Drops selected locators the document no longer has.
+    pub fn forget_missing_locators(&mut self, doc: &Document) {
+        self.selected_locators
+            .retain(|id| doc.locator(*id).is_some());
+    }
+
+    /// Clears the clip selection and the time selection, as clicking a
+    /// locator does (the time editing spec, R5).
+    pub(crate) fn clear_clip_selection(&mut self) {
+        self.selected_clips.clear();
+        self.time_selection = None;
+    }
+
     /// Whether a track is folded.
     #[must_use]
     pub fn is_folded(&self, track: TrackId) -> bool {
         self.folded.contains(&track)
+    }
+
+    /// Whether a group shows folded now: folded, and not opened by Show Only
+    /// Matches to show the matches it holds (command-palette R12).
+    #[must_use]
+    pub fn is_folded_in(&self, doc: &Document, track: TrackId) -> bool {
+        self.is_folded(track)
+            && !self.search_keep.as_ref().is_some_and(|keep| {
+                doc.track(track)
+                    .is_some_and(|t| t.children().any(|child| keep.contains(&child)))
+            })
+    }
+
+    /// Whether Show Only Matches leaves `track` showing: always, while it's
+    /// off.
+    #[must_use]
+    pub fn search_keeps(&self, track: TrackId) -> bool {
+        self.search_keep
+            .as_ref()
+            .is_none_or(|keep| keep.contains(&track))
+    }
+
+    /// The tracks Show Only Matches keeps, while it hides the others.
+    #[must_use]
+    pub fn search_keep(&self) -> Option<&BTreeSet<TrackId>> {
+        self.search_keep.as_ref()
+    }
+
+    /// Hides every track but these (Show Only Matches), or with `None`
+    /// shows them all again, each group folded as it was.
+    pub fn set_search_keep(&mut self, keep: Option<BTreeSet<TrackId>>) {
+        self.search_keep = keep;
     }
 
     /// Unfolds `track` if it was folded.
@@ -502,7 +651,7 @@ impl ArrangementView {
     /// those inside a folded group, each at the height it shows at.
     pub fn rows_into(&self, doc: &Document, out: &mut Vec<Row>) {
         out.clear();
-        let shown = rows::shown_tracks(doc, |id| self.is_folded(id));
+        let shown = rows::shown_tracks(doc, self);
         let mut top = 0.0;
         for (track, kind, depth) in shown {
             // Spec: arrangement-view R23: with the return tracks hidden,
@@ -510,7 +659,7 @@ impl ArrangementView {
             if !self.show_return_tracks && kind == TrackKind::Return {
                 continue;
             }
-            let folded = self.is_folded(track);
+            let folded = self.is_folded_in(doc, track);
             let height = if folded {
                 FOLDED_HEIGHT
             } else {
@@ -551,22 +700,25 @@ impl ArrangementView {
         rows
     }
 
-    /// How tall the scrolling part's content is: the rows and the drop area
-    /// under them.
+    /// How tall the scrolling part's content is: the rows, the drop area
+    /// under them, and the return tracks' rows when they scroll with the
+    /// tracks (the arrangement view spec, R18).
     #[must_use]
-    pub fn content_height(&self, rows: &[Row]) -> f32 {
+    pub fn content_height(&self, doc: &Document, rows: &[Row]) -> f32 {
         let bottom = rows.last().map_or(0.0, Row::bottom);
+        // The return tracks' rows, each at the height its pinned row has.
+        let returns = self.scrolling_returns(doc).count() as f32 * FOLDED_HEIGHT;
         if self.optimize_height {
-            bottom
+            bottom + returns
         } else {
-            bottom + DROP_AREA
+            bottom + DROP_AREA + returns
         }
     }
 
     /// The farthest the lanes scroll down.
     #[must_use]
-    pub fn max_scroll_y(&self, rows: &[Row]) -> f64 {
-        f64::from((self.content_height(rows) - self.viewport.height).max(0.0))
+    pub fn max_scroll_y(&self, doc: &Document, rows: &[Row]) -> f64 {
+        f64::from((self.content_height(doc, rows) - self.viewport.height).max(0.0))
     }
 
     /// Where the arrangement ends, for the views of the whole arrangement:
@@ -622,7 +774,7 @@ impl ArrangementView {
 
     fn clamp_scroll(&mut self, doc: &Document) {
         let rows = self.rows(doc);
-        self.scroll_y = self.scroll_y.clamp(0.0, self.max_scroll_y(&rows));
+        self.scroll_y = self.scroll_y.clamp(0.0, self.max_scroll_y(doc, &rows));
     }
 
     /// Zooms by `factor` around `anchor`.
@@ -684,7 +836,7 @@ impl ArrangementView {
             } else if bottom > self.scroll_y + height {
                 self.scroll_y = (bottom - height).min(top);
             }
-            self.scroll_y = self.scroll_y.clamp(0.0, self.max_scroll_y(&rows));
+            self.scroll_y = self.scroll_y.clamp(0.0, self.max_scroll_y(doc, &rows));
         }
     }
 
@@ -710,6 +862,7 @@ impl ArrangementView {
     pub fn forget_missing_tracks(&mut self, doc: &Document) {
         self.selected.retain(|id| doc.track(*id).is_some());
         self.forget_missing_clips(doc);
+        self.forget_missing_locators(doc);
         self.folded.retain(|id| doc.track(*id).is_some());
         self.heights.retain(|id, _| doc.track(*id).is_some());
         self.automation_lanes
@@ -812,7 +965,7 @@ impl ArrangementView {
                 }
                 if y != 0.0 {
                     let rows = self.rows(doc);
-                    self.scroll_y = (self.scroll_y + y).clamp(0.0, self.max_scroll_y(&rows));
+                    self.scroll_y = (self.scroll_y + y).clamp(0.0, self.max_scroll_y(doc, &rows));
                 }
             }
             ids::SHOW_TRACK => {
@@ -949,6 +1102,9 @@ impl ArrangementView {
                 }
                 self.insert_marker = at;
                 self.time_selection = None;
+                // Spec: automation-editing R1. A selection with no lanes
+                // names no lane.
+                self.time_selection_lanes.clear();
                 // Spec: arrangement-editing R2.
                 self.selected_clips.clear();
                 // Spec: arrangement-view R10.
@@ -977,14 +1133,34 @@ impl ArrangementView {
                 }
             }
             ids::SELECT_TIME => {
-                let SelectTimeArgs { start, end, tracks } = parse(args)?;
-                if let Some(tracks) = tracks {
-                    self.selected = self.targets(doc, Some(tracks))?;
-                }
+                let SelectTimeArgs {
+                    start,
+                    end,
+                    tracks,
+                    lanes,
+                } = parse(args)?;
                 let (start, end) = if end < start {
                     (end, start)
                 } else {
                     (start, end)
+                };
+                if let Some(tracks) = tracks {
+                    self.selected = self.targets(doc, Some(tracks))?;
+                }
+                // Spec: automation-editing R1. The selection names the lanes
+                // it covers: each a track's own lane or its automation lane.
+                self.time_selection_lanes = match lanes {
+                    Some(lanes) => {
+                        let tracks: Vec<TrackId> = lanes.iter().map(Lane::track).collect();
+                        self.selected = self.targets(doc, Some(tracks))?;
+                        lanes
+                    }
+                    None => self
+                        .selected
+                        .iter()
+                        .copied()
+                        .map(|track| Lane::Track { track })
+                        .collect(),
                 };
                 self.time_selection = (end > start).then_some((start, end));
                 self.insert_marker = start;
@@ -1143,9 +1319,11 @@ impl ArrangementView {
             insert_marker: self.insert_marker,
             selected_tracks: self.selected.clone(),
             selected_clips: self.selected_clips.clone(),
+            selected_locators: self.selected_locators.clone(),
             time_selection: self
                 .time_selection
                 .map(|(start, end)| TimeRange { start, end }),
+            time_selection_lanes: self.time_selection_lanes.clone(),
             folded_tracks: self.folded.iter().copied().collect(),
             zoom_back_steps: self.history.len(),
             automation_mode: self.automation_mode,

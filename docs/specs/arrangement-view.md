@@ -1,6 +1,6 @@
 # The Arrangement View: layout, navigation, Follow, and the editing grid
 
-- **Status:** partial (R1 to R17 each have a passing test; R18 to R24 are Phase 6's)
+- **Status:** partial (R1 to R17 and R20 to R24 each have a passing test; R18 and R19 are Phase 6's)
 - **Work packages:** WP-1.8a (this spec); WP-1.8b adds editing (clip selection, moving, resizing, splitting, the rest of the selection gestures: [arrangement-editing](arrangement-editing.md)); WP-1.5 the transport behind the playhead, the loop brace, and the scrub area; WP-1.6 and WP-1.9 the mixer controls in the track headers. In Phase 6: WP-6.38 (R18: the return tracks scrolling with the tracks, IMP-01), WP-6.49b (R19: panning with the middle button), WP-6.64 (R20 to R24: hiding the Arrangement Track Controls' In/Out, Volume and Return Tracks)
 - **Parity-matrix row:** Views and workflow: Arrangement View; Interface placement and key bindings; [the improvements](../05-improvements.md), IMP-01 (return tracks scrolling with tracks)
 - **Checked against:** Live 12.4.3, through the UI parity reference recorded on 10 October 2026, and the Live 12 reference manual as published that day; for R18 to R24, the manual (online edition) and the Live 12 release notes, read 20 October 2026
@@ -94,11 +94,11 @@ This spec covers what WP-1.8a builds: the view, navigation, Follow, the grid, tr
 | R17 | `crates/ui/tests/arrangement.rs`, `only_visible_clips_are_built_each_frame`; `cargo run --release -p bl-ui --example arrangement_bench` (CPU and GPU time per frame) | UI script, measurement |
 | R18 | to be written in WP-6.38 | |
 | R19 | to be written in WP-6.49b | |
-| R20 | to be written in WP-6.64 | |
-| R21 | to be written in WP-6.64 | |
-| R22 | to be written in WP-6.64 | |
-| R23 | to be written in WP-6.64 | |
-| R24 | to be written in WP-6.64 | |
+| R20 | `crates/shell/tests/arrangement.rs`, `the_track_controls_are_view_state`; `crates/ui/tests/mixer.rs`, `the_view_menu_and_keys_show_and_hide_the_mixer_and_its_sections`; `crates/shell-spec/src/arrangement.rs`, `every_listed_id_is_registered_and_complete`; `cargo xtask commands` | unit, UI script |
+| R21 | `crates/ui/tests/arrangement.rs`, `the_track_controls_hide_their_parts` | UI script |
+| R22 | `crates/ui/tests/arrangement.rs`, `the_track_controls_hide_their_parts` | UI script |
+| R23 | `crates/ui/tests/arrangement.rs`, `the_track_controls_hide_their_parts` | UI script |
+| R24 | `crates/ui/tests/accessibility.rs`, `the_hidden_track_controls_leave_the_tab_order`; `crates/ui/tests/arrangement.rs`, `the_track_controls_hide_their_parts` | UI script |
 
 ## Not built yet
 

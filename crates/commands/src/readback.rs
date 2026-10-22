@@ -522,6 +522,7 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("set.collect_all_and_save", query(Song, "set.unsaved_changes")),
     ("set.discard_changes", query(Song, "set.unsaved_changes")),
     ("set.discard_recovery", nothing("deletes a recovery file outside the set")),
+    ("set.import_dawproject", query(Song, "set.name")),
     ("set.new", query(Song, "set.name")),
     ("set.open", query(Song, "set.path")),
     ("set.open_backup", query(Song, "set.unsaved_changes")),

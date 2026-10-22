@@ -594,8 +594,9 @@ impl SetStore for ProjectFiles {
 impl ProjectFiles {
     /// Moves each file the set wrote into the Temporary Folder into
     /// `Samples/Processed/<kind>/` of the project folder `project`, under a
-    /// free name, and points `added` at it. Returns where each came from, to
-    /// put back if the save fails.
+    /// free name, and points `added` at it. A file a DAWproject import
+    /// extracted goes to `Samples/Imported/` instead (the DAWproject spec,
+    /// R39). Returns where each came from, to put back if the save fails.
     fn move_processed(&mut self, project: &Path) -> Result<Vec<(ContentHash, PathBuf)>, String> {
         let Some(temporary) = self.temporary.clone() else {
             return Ok(Vec::new());
@@ -606,14 +607,21 @@ impl ProjectFiles {
             let Some(rest) = path.strip_prefix(&temporary).ok() else {
                 continue;
             };
-            // `<kind>/<name>`, as the shell writes them.
+            // `Imported/<...>/<name>`, as a DAWproject import writes them, or
+            // `<kind>/<name>`, as the shell writes the rest.
             let mut parts = rest.components();
-            let (Some(Component::Normal(kind)), Some(Component::Normal(name)), None) =
+            let folder = if rest.starts_with("Imported") {
+                project.imported()
+            } else if let (Some(Component::Normal(kind)), Some(Component::Normal(_)), None) =
                 (parts.next(), parts.next(), parts.next())
-            else {
+            {
+                project.processed(&kind.to_string_lossy())
+            } else {
                 continue;
             };
-            let folder = project.processed(&kind.to_string_lossy());
+            let Some(name) = rest.file_name() else {
+                continue;
+            };
             let placed = std::fs::create_dir_all(&folder)
                 .map_err(|e| format!("couldn't create {}: {e}", folder.display()))
                 .and_then(|()| free_import(&folder, &name.to_string_lossy()))

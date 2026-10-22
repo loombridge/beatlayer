@@ -1,0 +1,11 @@
+{
+  "application": "Fixture DAW 1.0",
+  "entries": [
+    {
+      "count": 1,
+      "did": "left out",
+      "what": "a repeated `id` (`t1`)",
+      "where": "in the project"
+    }
+  ]
+}

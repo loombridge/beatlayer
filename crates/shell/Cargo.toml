@@ -62,6 +62,11 @@ rusqlite = { version = "0.40.2", default-features = false, features = ["bundled"
 # opened at its rate: the version bl-engine uses.
 rtrb = "0.4.0"
 
+[target.'cfg(unix)'.dependencies]
+# How much room the filesystem has, for the DAWproject import's room check
+# (the DAWproject spec, R5). Already in the lock through the window system.
+rustix = { version = "1.1", default-features = false, features = ["std", "fs"] }
+
 [dev-dependencies]
 # The browser's database, so the tests can read it and check what it holds.
 rusqlite = { version = "0.40.2", default-features = false, features = ["bundled"] }

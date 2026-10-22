@@ -708,6 +708,7 @@ commands = [
   { id = "arrangement.cut", contexts = ["arrangement"] },
   { id = "chain.cut", contexts = ["rack-chains"] },
   { id = "device.cut", contexts = ["device-view"] },
+  { id = "note.cut", contexts = ["note-editor", "note-selection"] },
 ]
 
 [[shortcut]]
@@ -724,6 +725,7 @@ commands = [
   { id = "arrangement.copy", contexts = ["arrangement"] },
   { id = "chain.copy", contexts = ["rack-chains"] },
   { id = "device.copy", contexts = ["device-view"] },
+  { id = "note.copy", contexts = ["note-editor", "note-selection"] },
 ]
 
 [[shortcut]]
@@ -740,6 +742,7 @@ commands = [
   { id = "arrangement.paste", contexts = ["arrangement"] },
   { id = "chain.paste", contexts = ["rack-chains"] },
   { id = "device.paste", contexts = ["device-view"] },
+  { id = "note.paste", contexts = ["note-editor", "note-selection"] },
 ]
 
 [[shortcut]]
@@ -756,6 +759,7 @@ commands = [
   { id = "arrangement.duplicate", contexts = ["arrangement"] },
   { id = "chain.duplicate", contexts = ["rack-chains"] },
   { id = "device.duplicate", contexts = ["device-view"] },
+  { id = "note.duplicate", contexts = ["note-editor", "note-selection"] },
 ]
 
 [[shortcut]]
@@ -772,6 +776,7 @@ commands = [
   { id = "arrangement.delete", contexts = ["arrangement"] },
   { id = "chain.delete", contexts = ["rack-chains"] },
   { id = "device.remove", contexts = ["device-view"] },
+  { id = "note.delete", contexts = ["note-editor", "note-selection"] },
 ]
 
 [[shortcut]]
@@ -830,6 +835,7 @@ win = ["Ctrl+A"]
 status = "bound"
 commands = [
   { id = "arrangement.select_all", contexts = ["arrangement"] },
+  { id = "clip_view.select_notes", contexts = ["note-editor", "note-selection"], args = { select = "all" } },
 ]
 
 [[shortcut]]
@@ -1617,7 +1623,10 @@ trigger = "press"
 milestone = "M2"
 mac = ["Cmd+A"]
 win = ["Ctrl+A"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "clip_view.select_notes", contexts = ["note-editor"], args = { select = "all" } },
+]
 
 [[shortcut]]
 id = "S-NOTE-002"
@@ -1628,7 +1637,8 @@ trigger = "press"
 milestone = "M2"
 mac = ["Option+drag"]
 win = ["Ctrl+drag"]
-status = "pending"
+status = "widget"
+handler = "the Clip View's note editor: Option-dragging a note copies it (`note.move` with `copy`)"
 
 [[shortcut]]
 id = "S-NOTE-003"
@@ -1796,7 +1806,8 @@ trigger = "press"
 milestone = "M2"
 mac = ["Home", "Fn+Left"]
 win = ["Home"]
-status = "pending"
+status = "widget"
+handler = "the Clip View's note editor: Home moves the insert marker to the clip's start (`clip_view.set_insert_marker`)"
 
 [[shortcut]]
 id = "S-NOTE-018"
@@ -1807,7 +1818,8 @@ trigger = "press"
 milestone = "M2"
 mac = ["End", "Fn+Right"]
 win = ["End"]
-status = "pending"
+status = "widget"
+handler = "the Clip View's note editor: End moves the insert marker to the clip's end (`clip_view.set_insert_marker`)"
 
 [[shortcut]]
 id = "S-NOTE-019"
@@ -1818,7 +1830,8 @@ trigger = "press"
 milestone = "M2"
 mac = ["Option+Down", "Option+Up"]
 win = ["Alt+Down", "Alt+Up"]
-status = "pending"
+status = "widget"
+handler = "the Clip View's note editor: Option-Down and Option-Up select the note nearest the insert marker, and the previous or next note after that (`clip_view.select_notes`)"
 
 [[shortcut]]
 id = "S-NOTE-020"
@@ -1829,7 +1842,8 @@ trigger = "press"
 milestone = "M2"
 mac = ["Option+Left", "Option+Right"]
 win = ["Alt+Left", "Alt+Right"]
-status = "pending"
+status = "widget"
+handler = "the Clip View's note editor: Option-Left and Option-Right select the previous or next note of the same pitch (`clip_view.select_notes`)"
 
 [[shortcut]]
 id = "S-NOTE-021"
@@ -3017,7 +3031,10 @@ trigger = "press"
 milestone = "M4"
 mac = ["Cmd+B"]
 win = ["Ctrl+B"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "track.bounce_to_new_track", contexts = ["arrangement", "session", "track-headers"] },
+]
 
 [[shortcut]]
 id = "S-BOUNCE-002"
@@ -3028,7 +3045,10 @@ trigger = "press"
 milestone = "M4"
 mac = ["Cmd+Option+V"]
 win = ["Ctrl+Alt+V"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "track.paste_bounced_audio", contexts = ["arrangement"] },
+]
 
 [[shortcut]]
 id = "S-TRACK-001"
@@ -3598,7 +3618,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+Shift+E"]
 win = ["Ctrl+Shift+E"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "browser.show_tag_editor", contexts = ["browser"] },
+]
 
 [[shortcut]]
 id = "S-SWAP-001"
@@ -3962,7 +3985,8 @@ trigger = "press"
 milestone = "M2"
 mac = ["Shift+Left", "Shift+Right"]
 win = ["Shift+Left", "Shift+Right"]
-status = "pending"
+status = "widget"
+handler = "the Clip View's note editor: Shift-Left and Shift-Right select time, a grid step at a time (`clip_view.select_time`)"
 
 [[shortcut]]
 id = "S-A11Y-005"
@@ -3973,7 +3997,8 @@ trigger = "press"
 milestone = "M2"
 mac = ["Enter"]
 win = ["Enter"]
-status = "pending"
+status = "widget"
+handler = "the Clip View's note editor: Enter selects the notes that start inside the time selection (`clip_view.select_notes`)"
 
 [[shortcut]]
 id = "S-A11Y-006"
@@ -3984,7 +4009,8 @@ trigger = "press"
 milestone = "M2"
 mac = ["Option+Left", "Option+Right"]
 win = ["Ctrl+Left", "Ctrl+Right"]
-status = "pending"
+status = "widget"
+handler = "the Clip View's note editor: Option-Left and Option-Right (Ctrl on Windows) move the insert marker to the previous or next note edge (`clip_view.set_insert_marker`)"
 
 [[shortcut]]
 id = "S-A11Y-007"
@@ -3995,7 +4021,8 @@ trigger = "held"
 milestone = "M2"
 mac = ["Shift (with the note-jump keys)"]
 win = ["Shift (with the note-jump keys)"]
-status = "pending"
+status = "widget"
+handler = "the Clip View's note editor: Shift with the note-jump keys adds the note to the selection (`clip_view.select_notes`)"
 
 [[shortcut]]
 id = "S-A11Y-008"
@@ -4030,7 +4057,8 @@ trigger = "press"
 milestone = "M2"
 mac = ["Shift+Left", "Shift+Right"]
 win = ["Shift+Left", "Shift+Right"]
-status = "pending"
+status = "widget"
+handler = "the Clip View's note editor: Shift-Left and Shift-Right lengthen or shorten the selected notes by the grid (`note.resize`)"
 
 [[shortcut]]
 id = "S-A11Y-011"
@@ -4041,7 +4069,8 @@ trigger = "press"
 milestone = "M2"
 mac = ["Left", "Right"]
 win = ["Left", "Right"]
-status = "pending"
+status = "widget"
+handler = "the Clip View's note editor: Left and Right move the selected notes by the grid (`note.move`)"
 
 [[shortcut]]
 id = "S-A11Y-012"
@@ -4233,7 +4262,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+Option+Z"]
 win = ["Ctrl+Alt+Z"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "view.toggle_undo_history", contexts = ["global"] },
+]
 
 [[shortcut]]
 id = "S-NOTE-038"
@@ -4291,7 +4323,8 @@ trigger = "press"
 milestone = "M2"
 mac = ["Esc"]
 win = ["Esc"]
-status = "pending"
+status = "widget"
+handler = "the Clip View's note editor: Esc deselects the notes and clears the time selection (`clip_view.select_notes`, `clip_view.select_time`)"
 
 [[shortcut]]
 id = "S-NOTE-043"
@@ -4302,7 +4335,8 @@ trigger = "press"
 milestone = "M2"
 mac = ["Option+Shift+Down", "Option+Shift+Up"]
 win = ["Ctrl+Shift+Down", "Ctrl+Shift+Up"]
-status = "pending"
+status = "widget"
+handler = "the Clip View's note editor: Option-Shift-Down and Option-Shift-Up add the previous or next note to the selection (`clip_view.select_notes`)"
 
 [[shortcut]]
 id = "S-ARR-036"
@@ -4532,7 +4566,8 @@ trigger = "press"
 milestone = "M2"
 mac = ["Left", "Right"]
 win = ["Left", "Right"]
-status = "pending"
+status = "widget"
+handler = "the Clip View's note editor: Left and Right move the insert marker a grid step, or the selected notes (`clip_view.set_insert_marker`, `note.move`)"
 
 [[shortcut]]
 id = "S-NOTE-046"
@@ -4543,7 +4578,8 @@ trigger = "press"
 milestone = "M2"
 mac = ["Option+Shift+Left", "Option+Shift+Right"]
 win = ["Alt+Shift+Left", "Alt+Shift+Right"]
-status = "pending"
+status = "widget"
+handler = "the Clip View's note editor: Option-Shift-Left and Option-Shift-Right move the time selection's end to the next or previous note edge (`clip_view.select_time`)"
 
 [[shortcut]]
 id = "S-NOTE-047"
@@ -4697,7 +4733,8 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+E"]
 win = ["Ctrl+E"]
-status = "pending"
+status = "widget"
+handler = "the browser's Quick Tags: Cmd-E (Ctrl-E) moves the keyboard focus to the Add field"
 
 [[shortcut]]
 id = "S-MENU-007"

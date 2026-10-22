@@ -60,6 +60,9 @@ pub struct Preset {
     /// `None` for the default shape and for any other device. A preset
     /// holds no mappings.
     pub shape: Option<Vec<bl_model::modulator::ShapePoint>>,
+    /// An Articulation Map's articulations (the articulation map spec, R16),
+    /// in order; `None` for any other device.
+    pub articulations: Option<Vec<bl_model::Articulation>>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -72,6 +75,8 @@ struct File {
     params: Vec<(ParamId, f64)>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     shape: Option<Vec<bl_model::modulator::ShapePoint>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    articulations: Vec<bl_model::Articulation>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -137,6 +142,7 @@ impl Preset {
             device_name: device.own_name().to_owned(),
             params: device.params.clone(),
             shape: device.shape.clone(),
+            articulations: (!device.articulations.is_empty()).then(|| device.articulations.clone()),
         }
     }
 
@@ -176,6 +182,7 @@ impl Preset {
             },
             params: self.params.iter().map(|(&p, &v)| (p, v)).collect(),
             shape: self.shape.clone(),
+            articulations: self.articulations.clone().unwrap_or_default(),
         };
         let mut bytes = serde_json::to_vec_pretty(&file).unwrap_or_default();
         bytes.push(b'\n');
@@ -234,12 +241,20 @@ impl Preset {
         {
             device_name = now.to_owned();
         }
+        // Spec: articulation-map R20. A preset whose list breaks the rules
+        // doesn't load.
+        if !file.articulations.is_empty()
+            && let Err(why) = bl_model::articulation::check(&file.articulations)
+        {
+            return Err(PresetError::Invalid(why.to_owned()));
+        }
         Ok(Self {
             kind: file.device.kind,
             role: file.device.role,
             device_name,
             params,
             shape: file.shape,
+            articulations: (!file.articulations.is_empty()).then_some(file.articulations),
         })
     }
 
@@ -418,6 +433,41 @@ mod tests {
         assert_eq!(Preset::decode(&bytes).unwrap(), preset);
         let text = String::from_utf8(bytes).unwrap();
         assert!(text.contains("\"format\": \"beatlayer-preset\""), "{text}");
+    }
+
+    // Spec: articulation-map R16, R20. A preset keeps an Articulation Map's
+    // list, and one that breaks the rules doesn't load.
+    #[test]
+    fn a_preset_keeps_an_articulation_maps_list() {
+        let mut device = Device::new(
+            DeviceId(Id::new(9).unwrap()),
+            "Articulation Map",
+            DeviceKind::Native {
+                device_type: "beatlayer.articulation_map".to_owned(),
+            },
+        );
+        device.set_articulations(vec![bl_model::Articulation {
+            name: "Staccato".to_owned(),
+            trigger: bl_model::ArticulationTrigger::Key { key: 36 },
+            outputs: vec![bl_model::ArticulationOutput::Key {
+                key: 24,
+                velocity: 100,
+            }],
+            channel: Some(5),
+        }]);
+        let preset = Preset::of(&device);
+        let loaded = Preset::decode(&preset.encode()).unwrap();
+        assert_eq!(loaded.articulations, Some(device.articulations.clone()));
+        // A list with two articulations on the same key doesn't load.
+        let mut value: serde_json::Value = serde_json::from_slice(&preset.encode()).unwrap();
+        value["articulations"] = serde_json::json!([
+            { "name": "A", "trigger": { "kind": "key", "key": 36 } },
+            { "name": "B", "trigger": { "kind": "key", "key": 36 } },
+        ]);
+        assert!(matches!(
+            Preset::decode(&serde_json::to_vec(&value).unwrap()),
+            Err(PresetError::Invalid(_))
+        ));
     }
 
     // Spec: device-chains R16

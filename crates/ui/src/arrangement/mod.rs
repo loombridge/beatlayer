@@ -272,6 +272,43 @@ pub fn locator_id(locator: bl_model::LocatorId) -> Id {
     Id::new(("arrangement-locator", locator))
 }
 
+/// A locator being renamed in the scrub area, and the name being typed.
+#[derive(Clone, Debug)]
+struct Renaming {
+    /// The locator.
+    locator: bl_model::LocatorId,
+    /// The name being typed.
+    text: Option<String>,
+    /// Whether the field has the keyboard.
+    focused: bool,
+}
+
+/// Where the rename being typed is kept.
+fn renaming_id() -> Id {
+    Id::new("arrangement-locator-renaming")
+}
+
+/// Starts typing a new name for `locator` in the scrub area, as Cmd-R does
+/// (the time editing spec, R8).
+pub fn start_rename(ctx: &egui::Context, locator: bl_model::LocatorId) {
+    ctx.data_mut(|d| {
+        d.insert_temp(
+            renaming_id(),
+            Some(Renaming {
+                locator,
+                text: None,
+                focused: false,
+            }),
+        );
+    });
+}
+
+/// The locator being renamed, if a rename is under way.
+fn renaming(ctx: &egui::Context) -> Option<Renaming> {
+    ctx.data(|d| d.get_temp::<Option<Renaming>>(renaming_id()))
+        .flatten()
+}
+
 fn invoke(events: &mut Vec<UiEvent>, id: &str, args: Value) {
     events.push(UiEvent::Invoke(Invocation::new(id, args)));
 }
@@ -392,7 +429,10 @@ impl ArrangementUi {
     ) {
         let doc = shell.editor().document();
         let view = shell.arrangement();
-        let pinned: Vec<TrackId> = bl_shell::arrangement::rows::pinned_tracks(doc).collect();
+        // The pinned rows: the return tracks and Main, with the returns
+        // left out while they're hidden (arrangement-view R23).
+        let pinned: Vec<TrackId> =
+            bl_shell::arrangement::rows::pinned_tracks(doc, view.show_return_tracks()).collect();
         // With its mixer showing, the view splits (WP-1.9; L-ARR-018).
         let layout = if shell
             .mixer_view()
@@ -595,7 +635,7 @@ impl ArrangementUi {
             horizontal,
             theme,
         );
-        self.ruler_input(ui, shell, doc, view, &layout, horizontal, events);
+        self.ruler_input(ui, shell, doc, view, &layout, horizontal, theme, events);
 
         // The playhead, over the rulers and the lanes.
         let transport = view.transport();
@@ -1089,6 +1129,7 @@ impl ArrangementUi {
         view: &ArrangementView,
         layout: &ArrangementLayout,
         horizontal: Horizontal,
+        theme: &Theme,
         events: &mut Vec<UiEvent>,
     ) {
         // Esc abandons a locator drag, as it does a clip drag; egui ends the
@@ -1170,7 +1211,7 @@ impl ArrangementUi {
                     locator_ids::SELECT,
                     json!({ "locators": [locator.id] }),
                 );
-                self.menus.open_scrub(Some(locator.id));
+                self.menus.open_scrub(Some(locator.id), locator.position);
             } else if response.double_clicked() {
                 // Spec: time-editing R5. Double-clicking a locator while
                 // stopped selects it and starts playback from it.
@@ -1231,6 +1272,39 @@ impl ArrangementUi {
                     json!({ "locators": [locator.id] }),
                 );
             }
+            // Spec: time-editing R8. The name being typed, over the
+            // locator's name: Return keeps it and Esc drops it.
+            if let Some(mut renaming) = renaming(ui.ctx()).filter(|r| r.locator == locator.id) {
+                let text = renaming.text.get_or_insert_with(|| locator.name.clone());
+                let edit = ui.put(
+                    Rect::from_min_max(
+                        pos2(x + 6.0, layout.scrub.center().y - 9.0),
+                        pos2(x + 126.0, layout.scrub.center().y + 9.0),
+                    ),
+                    egui::TextEdit::singleline(text)
+                        .id(Id::new(("arrangement-locator-rename", locator.id)))
+                        .font(theme.small_font()),
+                );
+                if !renaming.focused {
+                    edit.request_focus();
+                    renaming.focused = true;
+                }
+                let (enter, escape) =
+                    ui.input(|i| (i.key_pressed(Key::Enter), i.key_pressed(Key::Escape)));
+                if edit.lost_focus() || enter || escape {
+                    if enter || (edit.lost_focus() && !escape) {
+                        events.push(UiEvent::Invoke(Invocation::new(
+                            locator_ids::RENAME,
+                            json!({ "locators": [locator.id], "name": text }),
+                        )));
+                    }
+                    ui.ctx()
+                        .data_mut(|d| d.insert_temp(renaming_id(), None::<Renaming>));
+                } else {
+                    ui.ctx()
+                        .data_mut(|d| d.insert_temp(renaming_id(), Some(renaming)));
+                }
+            }
             // Spec: time-editing R7. Dragging a locator moves it, and the
             // whole drag is one undo step.
             if response.drag_started() {
@@ -1285,12 +1359,12 @@ impl ArrangementUi {
                 invoke(events, locator_ids::JUMP, json!({ "locator": locator }));
             } else {
                 // Spec: time-editing R11. Clicking the scrub area away from
-                // a locator plays from that point, on the global launch
-                // quantisation's grid, and resumes Follow.
+                // a locator plays from that point, on the editing grid
+                // while snapping is on, and resumes Follow.
                 let Some(pos) = pointer else {
                     return;
                 };
-                let at = scrub_at(pos);
+                let at = view.snap(doc, scrub_at(pos));
                 invoke(events, ids::SET_INSERT_MARKER, json!({ "at": at }));
                 invoke(
                     events,
@@ -1306,7 +1380,11 @@ impl ArrangementUi {
         // The scrub area's own menu (C-TIME-022), away from a locator.
         let on_locator = pointer.and_then(locator_at).is_some();
         if scrub.secondary_clicked() && !on_locator {
-            self.menus.open_scrub(None);
+            // The Add Locator in it adds one where the area was
+            // right-clicked, on the editing grid (the time editing spec,
+            // R3).
+            let at = pointer.map_or(Ticks::ZERO, |pos| view.snap(doc, scrub_at(pos)));
+            self.menus.open_scrub(None, at);
         }
         if !on_locator {
             scrub.context_menu(|ui| self.menus.show(ui, shell, events));
@@ -1439,6 +1517,8 @@ impl ArrangementUi {
                     resizable: !view.optimize_height(),
                     menus: &self.track_menus,
                     keys: keys && selected.first() == Some(&row.track),
+                    show_in_out: view.show_in_out(),
+                    show_volume: view.show_volume(),
                 },
                 &self.every_track,
                 events,
@@ -1449,7 +1529,7 @@ impl ArrangementUi {
                 let lane = Rect::from_min_max(
                     pos2(column.left(), top + row.height),
                     pos2(
-                        column.left() + header_columns::TITLE.1,
+                        column.left() + header_columns::title_width(view.show_in_out()),
                         top + row.height + row.automation,
                     ),
                 );
@@ -1465,6 +1545,7 @@ impl ArrangementUi {
             }
         }
         // The returns and Main, pinned under the lanes (L-ARR-014).
+        let returns = doc.returns().count();
         for (index, id) in pinned.iter().enumerate() {
             let Some(track) = doc.track(*id) else {
                 continue;
@@ -1478,6 +1559,10 @@ impl ArrangementUi {
                 Stroke::new(1.0, theme.colors.lane_line.0),
             );
             let is_selected = selected.contains(id);
+            // A return's own letter, and Main's after the returns
+            // (L-ARR-006), which keep their places while the return tracks
+            // are hidden (R23).
+            let letter = if *id == doc.main_id() { returns } else { index } % 26;
             headers::header(
                 ui,
                 theme,
@@ -1488,7 +1573,7 @@ impl ArrangementUi {
                         pos2(layout.pinned_headers.left(), row.top()),
                         row.max,
                     ),
-                    activator: char::from(b'A' + (index % 26) as u8).to_string(),
+                    activator: char::from(b'A' + letter as u8).to_string(),
                     colour: if track.kind() == TrackKind::Main {
                         theme.colors.control_pressed.0
                     } else {
@@ -1501,6 +1586,8 @@ impl ArrangementUi {
                     resizable: false,
                     menus: &self.track_menus,
                     keys: keys && selected.first() == Some(id),
+                    show_in_out: view.show_in_out(),
+                    show_volume: view.show_volume(),
                 },
                 &[],
                 events,

@@ -21,7 +21,7 @@ use crate::slice::OPEN as SLICE_TO_MIDI;
 use crate::stems::OPEN as SEPARATE_STEMS;
 use crate::tracks::{DUPLICATE_WITHOUT_CLIPS, SET_DEVICES_ENABLED};
 
-use Action::{Choice, Command as Cmd, Pending, Shortcut as Key};
+use Action::{Choice, Command as Cmd, Pending, Shortcut as Key, Submenu};
 
 /// The model's command that colours a chain.
 const SET_CHAIN_COLOUR: &str = "chain.set_colour";
@@ -58,7 +58,11 @@ const CLIP: &[Row] = &[
     ("C-CLIP-ARR-012", "Loop Selection", Key(&["S-ARR-011"])),
     SEPARATOR,
     ("C-CLIP-ARR-013", "Freeze Track", Key(&["S-TRACK-017"])),
-    ("C-CLIP-ARR-014", "Bounce Track in Place", Pending(None)),
+    (
+        "C-CLIP-ARR-014",
+        "Bounce Track in Place",
+        Cmd("track.bounce_in_place"),
+    ),
     (
         "C-CLIP-ARR-015",
         "Bounce to New Track",
@@ -100,7 +104,11 @@ const TIME: &[Row] = &[
     ("C-TIME-007", "Loop Selection", Key(&["S-ARR-011"])),
     SEPARATOR,
     ("C-TIME-008", "Freeze Track", Key(&["S-TRACK-017"])),
-    ("C-TIME-009", "Bounce Track in Place", Pending(None)),
+    (
+        "C-TIME-009",
+        "Bounce Track in Place",
+        Cmd("track.bounce_in_place"),
+    ),
     ("C-TIME-010", "Bounce to New Track", Key(&["S-BOUNCE-001"])),
     ("C-TIME-011", "Paste Bounced Audio", Key(&["S-BOUNCE-002"])),
     SEPARATOR,
@@ -282,7 +290,11 @@ const TRACK: &[Row] = &[
     ("C-TRACK-006", "Edit Info Text", Pending(None)),
     SEPARATOR,
     ("C-TRACK-007", "Freeze Track", Key(&["S-TRACK-017"])),
-    ("C-TRACK-008", "Bounce Track in Place", Pending(None)),
+    (
+        "C-TRACK-008",
+        "Bounce Track in Place",
+        Cmd("track.bounce_in_place"),
+    ),
     SEPARATOR,
     ("C-TRACK-009", "Insert Audio Track", Key(&["S-TRACK-001"])),
     ("C-TRACK-010", "Insert MIDI Track", Key(&["S-TRACK-002"])),
@@ -322,7 +334,11 @@ fn track_extras(after: &str, state: TrackMenu) -> Vec<Row> {
     match after {
         "C-TRACK-008" => {
             if state.group {
-                rows.push(("C-TRACK-017c", "Bounce Group to New Track", Pending(None)));
+                rows.push((
+                    "C-TRACK-017c",
+                    "Bounce Group to New Track",
+                    Cmd("track.bounce_to_new_track"),
+                ));
             }
             if state.time_selection {
                 rows.push(("C-TRACK-020", "Crop Clip", Key(&["S-ARR-003"])));
@@ -384,6 +400,80 @@ pub fn track(state: TrackMenu) -> Vec<MenuItem> {
     items(&rows)
 }
 
+/// The menu a note or the empty grid in the MIDI Note Editor opens
+/// (C-NOTE), as the piano roll spec's R30 says. Live's order and
+/// separators weren't recorded, so the rows are the manual's and the release
+/// notes' in the order menus.md lists them.
+const NOTE: &[Row] = &[
+    ("C-NOTE-001", "Cut", Key(&["S-EDIT-001"])),
+    ("C-NOTE-002", "Copy", Key(&["S-EDIT-002"])),
+    ("C-NOTE-003", "Paste", Key(&["S-EDIT-003"])),
+    ("C-NOTE-004", "Duplicate", Key(&["S-EDIT-004"])),
+    ("C-NOTE-005", "Delete", Key(&["S-EDIT-005"])),
+    (
+        "C-NOTE-006",
+        "Invert Selection",
+        Pending(Some("S-NOTE-034")),
+    ),
+    (
+        "C-NOTE-007",
+        "Deactivate Note(s)",
+        Pending(Some("S-NOTE-041")),
+    ),
+    ("C-NOTE-008", "Group Notes", Pending(Some("S-NOTE-031"))),
+    ("C-NOTE-009", "Ungroup Notes", Pending(Some("S-NOTE-032"))),
+    ("C-NOTE-010", "Split Note(s)", Pending(Some("S-NOTE-003"))),
+    (
+        "C-NOTE-011",
+        "Chop Note(s) on Grid",
+        Pending(Some("S-NOTE-003")),
+    ),
+    ("C-NOTE-012", "Join Notes", Pending(Some("S-NOTE-007"))),
+    (
+        "C-NOTE-013",
+        "Fit to Time Range",
+        Pending(Some("S-NOTE-008")),
+    ),
+    ("C-NOTE-014", "Clip Markers", Submenu),
+    (
+        "C-NOTE-014a",
+        "Set Start Marker",
+        Pending(Some("S-LOOP-001")),
+    ),
+    ("C-NOTE-014b", "Set Loop Start", Pending(Some("S-LOOP-002"))),
+    ("C-NOTE-014c", "Set Loop End", Pending(Some("S-LOOP-003"))),
+    ("C-NOTE-014d", "Set End Marker", Pending(Some("S-LOOP-004"))),
+    ("C-NOTE-015", "Split Clip", Pending(Some("S-NOTE-036"))),
+    (
+        "C-NOTE-016",
+        "Highlight Scales",
+        Pending(Some("S-NOTE-035")),
+    ),
+];
+
+/// The menu a key in the MIDI Note Editor's piano ruler opens (C-KEYS).
+const KEYS: &[Row] = &[
+    (
+        "C-KEYS-001",
+        "Deactivate Note(s)",
+        Pending(Some("S-NOTE-041")),
+    ),
+    ("C-KEYS-002", "Note spelling", Pending(None)),
+];
+
+/// The menu a note or the empty grid in the MIDI Note Editor opens
+/// (C-NOTE).
+#[must_use]
+pub fn note() -> Vec<MenuItem> {
+    items(NOTE)
+}
+
+/// The menu a key in the MIDI Note Editor's piano ruler opens (C-KEYS).
+#[must_use]
+pub fn keys() -> Vec<MenuItem> {
+    items(KEYS)
+}
+
 /// The package or milestone that builds a context-menu item shown disabled
 /// for now, for the item to name.
 #[must_use]
@@ -392,7 +482,6 @@ pub fn pending_package(row: &str) -> Option<&'static str> {
         "C-DEVICE-005" | "C-CLIP-ARR-008" | "C-TRACK-006" | "R26-info" => {
             Some("WP-2.24 (the Info View)")
         }
-        "C-TRACK-008" | "C-TRACK-017c" => Some("WP-4.15 (Bounce Track in Place and Bounce Group)"),
         "C-TRACK-018a" | "C-TRACK-018b" => Some("Phase 6 (linked-track editing)"),
         "C-TRACK-019a" | "C-TRACK-019b" | "C-TRACK-019c" => {
             Some("Phase 6 (take lanes and comping)")
@@ -404,6 +493,17 @@ pub fn pending_package(row: &str) -> Option<&'static str> {
         "C-CLIP-ARR-027a" | "C-CLIP-ARR-027b" | "C-CLIP-ARR-027c" => {
             Some("Phase 9 (audio to MIDI, IMP-06)")
         }
+        // The MIDI Note Editor's own items (piano-roll R30).
+        "C-NOTE-006" => Some("WP-6.4 (Invert Selection and the note filters)"),
+        "C-NOTE-007" | "C-KEYS-001" => Some("WP-6.1 (the note values and deactivating notes)"),
+        "C-NOTE-008" | "C-NOTE-009" => Some("WP-6.2 (probability groups)"),
+        "C-NOTE-010" | "C-NOTE-011" | "C-NOTE-012" | "C-NOTE-013" | "C-NOTE-015" => {
+            Some("WP-6.3 (split, chop, join and fit notes)")
+        }
+        "C-NOTE-014" | "C-NOTE-014a" | "C-NOTE-014b" | "C-NOTE-014c" | "C-NOTE-014d" => {
+            Some("WP-6.54 (the clip markers from the keys)")
+        }
+        "C-NOTE-016" | "C-KEYS-002" => Some("WP-6.7b (the scales in the Clip View)"),
         _ => None,
     }
 }
@@ -727,6 +827,8 @@ mod tests {
             (arrangement_time(), "(C-TIME)"),
             (device(), "(C-DEVICE)"),
             (track(TrackMenu::default()), "(C-TRACK)"),
+            (note(), "(C-NOTE)"),
+            (keys(), "(C-KEYS)"),
         ] {
             let Some(theirs) = reference(heading) else {
                 return;
@@ -739,20 +841,45 @@ mod tests {
                     None => assert!(item.is_separator(), "{heading}: {}", item.row),
                     Some((id, label)) => {
                         assert_eq!(item.row, id);
-                        // The grid rows are rows of choices, named for
-                        // their kind.
-                        let grid = ADAPTIVE_GRID_ROWS.contains(&id.as_str())
-                            || FIXED_GRID_ROWS.contains(&id.as_str());
-                        let label = if grid {
+                        // A row of choices is named for its kind, and the
+                        // reference names the choices after the colon.
+                        let choices = ADAPTIVE_GRID_ROWS.contains(&id.as_str())
+                            || FIXED_GRID_ROWS.contains(&id.as_str())
+                            || id == "C-KEYS-002";
+                        let label = if choices {
                             label.split(':').next().unwrap()
                         } else {
                             label
                         };
                         let label = label.trim_end_matches(" choices");
+                        // The note editor's rows name their shortcut.
+                        let label = label.split(" (S-").next().unwrap();
+                        // A submenu's label ends with the arrow menus.md
+                        // writes, and what follows it.
+                        let label = label.split(" ▸").next().unwrap();
                         assert_eq!(item.label, label, "{id}");
                     }
                 }
             }
+        }
+    }
+
+    // Spec: piano-roll R30
+    #[test]
+    fn the_note_editor_menus_name_their_later_packages() {
+        for menu in [note(), keys()] {
+            for item in menu {
+                if matches!(item.action, Pending(_)) {
+                    assert!(pending_package(item.row).is_some(), "{}", item.row);
+                }
+            }
+        }
+        // The Clip Markers submenu's items wait for their package too.
+        let markers = note().into_iter().find(|i| i.row == "C-NOTE-014").unwrap();
+        assert_eq!(markers.items.len(), 4);
+        for item in markers.items {
+            assert!(matches!(item.action, Pending(_)), "{}", item.row);
+            assert!(pending_package(item.row).is_some(), "{}", item.row);
         }
     }
 }

@@ -19,8 +19,8 @@
 //! check them and list them in the command reference; `bl-shell` runs them
 //! by ID. The behaviour they follow is in the piano roll spec.
 
-use bl_commands::Context::{ClipView, NoteEditor, NoteSelection, SampleEditor};
-use bl_commands::{CommandSpec, Permission, RegisterError, Registry};
+use bl_commands::Context::{NoteEditor, NoteSelection as NoteSelectionContext, SampleEditor};
+use bl_commands::{Binding, CommandSpec, Permission, RegisterError, Registry};
 use bl_core::time::Ticks;
 use bl_model::{AutomationTarget, ClipId};
 use schemars::JsonSchema;
@@ -45,6 +45,14 @@ pub const QUANTIZE_SETTINGS: &str = "clip_view.quantize_settings";
 pub const SET_VALUE: &str = "note.set_value";
 /// `note.ramp_value`: spread evenly spaced values across notes.
 pub const RAMP_VALUE: &str = "note.ramp_value";
+/// `note.copy`: copy notes to the note clipboard.
+pub const COPY: &str = "note.copy";
+/// `note.cut`: copy notes to the note clipboard and delete them.
+pub const CUT: &str = "note.cut";
+/// `note.paste`: paste the note clipboard's notes into a clip.
+pub const PASTE: &str = "note.paste";
+/// `note.duplicate`: put a copy of the notes straight after them.
+pub const DUPLICATE: &str = "note.duplicate";
 
 /// Every command [`register`] adds, so a host knows which IDs to send to
 /// `bl-shell`'s `Shell::run`.
@@ -58,6 +66,10 @@ pub const IDS: &[&str] = &[
     QUANTIZE_SETTINGS,
     SET_VALUE,
     RAMP_VALUE,
+    COPY,
+    CUT,
+    PASTE,
+    DUPLICATE,
 ];
 
 /// Whether `id` is one of the Clip View's note-editing commands.
@@ -79,6 +91,36 @@ pub enum NoteSelectMode {
     Replace,
     /// Select each note that isn't selected and deselect each that is.
     Toggle,
+}
+
+/// What `clip_view.select_notes` selects when its arguments name no notes:
+/// the notes the keyboard reaches, and the ones a key in the piano ruler
+/// reaches.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[schemars(
+    description = "What to select in the note editor: `nearest` (the note whose start is nearest \
+                   the insert marker), `previous` and `next` (the previous or next note in the \
+                   clip's order), `same_pitch_previous` and `same_pitch_next` (the previous or \
+                   next note at the selected note's pitch), `all` (every note in the clip's \
+                   span), or `key` (every note at a pitch, as clicking a key in the piano ruler \
+                   does)."
+)]
+pub enum NoteSelection {
+    /// The note whose start is nearest the insert marker.
+    Nearest,
+    /// The previous note in the clip's order.
+    Previous,
+    /// The next note in the clip's order.
+    Next,
+    /// The previous note at the selected note's pitch.
+    SamePitchPrevious,
+    /// The next note at the selected note's pitch.
+    SamePitchNext,
+    /// Every note in the clip's span.
+    All,
+    /// Every note at a pitch, as clicking a key in the piano ruler does.
+    Key(u8),
 }
 
 /// The Clip View's tabs (layout.md, L-CLIP-010): which editor it shows for
@@ -207,7 +249,7 @@ pub struct RampValueArgs {
 }
 
 /// Arguments of `clip_view.select_notes`.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SelectNotesArgs {
     /// The MIDI clip. Left out, the one the Clip View shows (the
@@ -215,11 +257,66 @@ pub struct SelectNotesArgs {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clip: Option<ClipId>,
     /// The notes, by their place in the clip's notes in order (by start,
-    /// then pitch). Empty with `replace` clears the selection.
+    /// then pitch). Empty with `replace` clears the selection, and empty
+    /// with `select` chooses the notes `select` names.
+    #[serde(default)]
     pub notes: Vec<u32>,
     /// How to change the selection; `replace` if left out.
     #[serde(default)]
     pub mode: NoteSelectMode,
+    /// What to select when `notes` is empty: the notes the keyboard reaches
+    /// (Option with the arrows), every note in the clip's span (Cmd-A), or
+    /// the notes at a pitch (a key in the piano ruler).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub select: Option<NoteSelection>,
+    /// Add to the selection instead of replacing it, as Shift with the
+    /// note-jump keys does.
+    #[serde(default)]
+    pub add: bool,
+}
+
+/// Arguments of `note.copy` and `note.cut`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CopyNotesArgs {
+    /// The MIDI clip. Left out, the one the Clip View shows (the
+    /// Arrangement's selected clip).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<ClipId>,
+    /// The notes, by their place in the clip's notes in order (by start,
+    /// then pitch). Left out, the selected notes, or with none selected the
+    /// notes that start inside the time selection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<Vec<u32>>,
+}
+
+/// Arguments of `note.paste`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PasteNotesArgs {
+    /// The MIDI clip. Left out, the one the Clip View shows (the
+    /// Arrangement's selected clip).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<ClipId>,
+    /// Where to paste, in ticks from the beginning of the clip's contents.
+    /// Left out, the insert marker, or the time selection's start.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<Ticks>,
+}
+
+/// Arguments of `note.duplicate`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DuplicateNotesArgs {
+    /// The MIDI clip. Left out, the one the Clip View shows (the
+    /// Arrangement's selected clip).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<ClipId>,
+    /// The notes, by their place in the clip's notes in order (by start,
+    /// then pitch). Left out, the selected notes, or with none selected the
+    /// notes that start inside the time selection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<Vec<u32>>,
 }
 
 /// Arguments of `note.add`.
@@ -275,6 +372,11 @@ pub struct MoveNotesArgs {
     /// How far to move them in pitch, in semitones; negative is lower.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub semitones: Option<i32>,
+    /// Copy them instead of moving them, as Option-dragging a note does:
+    /// the copies land where the notes would have gone and the originals
+    /// stay.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub copy: Option<bool>,
 }
 
 /// Arguments of `note.resize`.
@@ -380,6 +482,15 @@ pub struct QuantizeSettingsArgs {
     pub amount: Option<u8>,
 }
 
+/// What the note clipboard holds, as `note.copy` reports it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct NoteClipboardState {
+    /// How many notes it holds.
+    pub notes: usize,
+    /// How long they last, from the earliest of them.
+    pub length: Ticks,
+}
+
 /// What a note edit did, and what's selected afterwards.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct NoteEditResult {
@@ -394,7 +505,8 @@ pub struct NoteEditResult {
 }
 
 /// What the Clip View shows: which clip it is editing, the notes selected in
-/// it, the lane's setting, and the tab with the envelope it shows.
+/// it, its insert marker and time selection, the lane's setting, and the tab
+/// with the envelope it shows.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ClipViewState {
     /// Whether the Clip View shows in the detail area.
@@ -407,6 +519,12 @@ pub struct ClipViewState {
     /// The selected notes, by their place in the clip's notes in order (by
     /// start, then pitch).
     pub selected: Vec<u32>,
+    /// The insert marker, in ticks from the beginning of the clip's
+    /// contents; `null` when there is none.
+    pub insert_marker: Option<Ticks>,
+    /// The time selection's start and end, in ticks from the beginning of
+    /// the clip's contents; `null` when there is none.
+    pub time_selection: Option<(Ticks, Ticks)>,
     /// Which value the lane under the note editor shows and edits.
     pub lane: NoteField,
     /// Whether the note editor shows only the rows that hold notes (Fold,
@@ -440,7 +558,7 @@ fn edit(
     CommandSpec::new(id, label)
         .description(description)
         .permission(permission)
-        .contexts([ClipView, NoteEditor, NoteSelection])
+        .contexts([NoteEditor, NoteSelectionContext])
         .result::<NoteEditResult>()
 }
 
@@ -453,10 +571,19 @@ fn specs() -> Vec<CommandSpec> {
                  adds or removes each (Cmd-click, Ctrl-click on Windows). Notes are named by \
                  their place in the clip's notes in order, by start and then pitch, so place \
                  0 has the earliest start, and of notes that start together the lowest pitch. \
-                 Selecting is never an undo step and changes nothing in the set.",
+                 With no notes named, `select` chooses them instead: `nearest` (the note whose \
+                 start is nearest the insert marker), `previous` and `next` (the previous or \
+                 next note in the clip's order), `same_pitch_previous` and `same_pitch_next` \
+                 (the previous or next note at the selected note's pitch), `all` (every note in \
+                 the clip's span, as Cmd-A does), or `key` (every note at a pitch, as clicking a \
+                 key in the piano ruler does). `add` adds to the selection instead of replacing \
+                 it, as Shift with the note-jump keys does. Selecting is never an undo step and \
+                 changes nothing in the set.",
             )
             .permission(Permission::Read)
-            .contexts([ClipView, NoteEditor, NoteSelection])
+            .contexts([NoteEditor, NoteSelectionContext])
+            .binding(Binding::new("S-NOTE-001").arg("select", "all"))
+            .binding(Binding::new("S-EDIT-009").arg("select", "all"))
             .args::<SelectNotesArgs>()
             .result::<ClipViewState>(),
         edit(
@@ -475,9 +602,11 @@ fn specs() -> Vec<CommandSpec> {
             "Delete Notes",
             Permission::Destructive,
             "Deletes notes (`notes`, or the selected notes) from a MIDI clip. With Draw Mode \
-             on, clicking a note runs this. Because it removes the person's work, an agent \
-             asks first. The edit is one undo step.",
+             on, clicking a note runs this. Delete (S-EDIT-005) runs it on the selected notes, \
+             or with none selected the notes in the time selection. Because it removes the \
+             person's work, an agent asks first. The edit is one undo step.",
         )
+        .binding("S-EDIT-005")
         .args::<DeleteNotesArgs>(),
         edit(
             MOVE_NOTES,
@@ -487,7 +616,9 @@ fn specs() -> Vec<CommandSpec> {
              by `semitones`, as dragging them in the note editor does; dragging right and left \
              runs it with `semitones` 0, and up and down snap the pitch. Nothing moves if any \
              note would start before the clip's contents or leave the range of MIDI keys 0 to \
-             127. The moved notes stay selected, and the whole drag is one undo step.",
+             127. With `copy` the notes are copied where they would have gone and the originals \
+             stay, as Option-dragging a note does. The moved notes stay selected, and the whole \
+             drag is one undo step.",
         )
         .args::<MoveNotesArgs>(),
         edit(
@@ -514,7 +645,7 @@ fn specs() -> Vec<CommandSpec> {
                  step, and the quantised notes stay selected.",
             )
             .permission(Permission::Edit)
-            .contexts([ClipView, NoteEditor, NoteSelection])
+            .contexts([NoteEditor, NoteSelectionContext])
             .binding("S-NOTE-011")
             .args::<QuantizeNotesArgs>()
             .result::<NoteEditResult>(),
@@ -530,7 +661,7 @@ fn specs() -> Vec<CommandSpec> {
                  Mode: changing them changes nothing in the set and is no undo step.",
             )
             .permission(Permission::Read)
-            .contexts([ClipView, NoteEditor, NoteSelection, SampleEditor])
+            .contexts([NoteEditor, NoteSelectionContext, SampleEditor])
             .binding("S-SAMPLE-002")
             .args::<QuantizeSettingsArgs>()
             .result::<QuantizeSettings>(),
@@ -560,6 +691,52 @@ fn specs() -> Vec<CommandSpec> {
              undo step.",
         )
         .args::<RampValueArgs>(),
+        CommandSpec::new(COPY, "Copy Notes")
+            .description(
+                "Copies notes (`notes`, or the selected notes, or with none selected the notes \
+                 that start inside the time selection) to the note clipboard, keeping their \
+                 pitches, values and their places in time from the earliest of them. The note \
+                 clipboard is apart from the Arrangement's clip clipboard. Copy changes nothing \
+                 in the set.",
+            )
+            .permission(Permission::Read)
+            .contexts([NoteEditor, NoteSelectionContext])
+            .binding("S-EDIT-002")
+            .args::<CopyNotesArgs>()
+            .result::<NoteClipboardState>(),
+        edit(
+            CUT,
+            "Cut Notes",
+            Permission::Destructive,
+            "Copies notes to the note clipboard, as `note.copy` does, then deletes them, as \
+             `note.delete` does. Cmd-X (Ctrl-X) runs this on the selected notes, or with none \
+             selected the notes in the time selection. Because it removes the person's work, an \
+             agent asks first.",
+        )
+        .binding("S-EDIT-001")
+        .args::<CopyNotesArgs>(),
+        edit(
+            PASTE,
+            "Paste Notes",
+            Permission::Edit,
+            "Puts the note clipboard's notes into the clip at `at`, in ticks from the beginning \
+             of the clip's contents, or at the insert marker, or at the time selection's start, \
+             with their pitches, values and spacing, and selects them. It fails, changing \
+             nothing, if there is nothing on the clipboard. Cmd-V (Ctrl-V) runs this.",
+        )
+        .binding("S-EDIT-003")
+        .args::<PasteNotesArgs>(),
+        edit(
+            DUPLICATE,
+            "Duplicate Notes",
+            Permission::Edit,
+            "Puts a copy of notes (`notes`, or the selected notes, or with none selected the \
+             notes that start inside the time selection) straight after the time selection, \
+             selects the copy and moves the time selection onto it, so running it again lays \
+             down another. Cmd-D (Ctrl-D) runs this.",
+        )
+        .binding("S-EDIT-004")
+        .args::<DuplicateNotesArgs>(),
     ]
 }
 
@@ -589,6 +766,29 @@ mod tests {
         assert_eq!(class(MOVE_NOTES), Some(Permission::Edit));
         assert_eq!(class(RESIZE_NOTES), Some(Permission::Edit));
         assert_eq!(class(QUANTIZE_NOTES), Some(Permission::Edit));
+        // The note clipboard: copying changes nothing, cutting removes work.
+        assert_eq!(class(COPY), Some(Permission::Read));
+        assert_eq!(class(CUT), Some(Permission::Destructive));
+        assert_eq!(class(PASTE), Some(Permission::Edit));
+        assert_eq!(class(DUPLICATE), Some(Permission::Edit));
+        // The Edit menu's clipboard rows run the note commands in the note
+        // editor (S-EDIT-001 to S-EDIT-005).
+        for (id, shortcut) in [
+            (CUT, "S-EDIT-001"),
+            (COPY, "S-EDIT-002"),
+            (PASTE, "S-EDIT-003"),
+            (DUPLICATE, "S-EDIT-004"),
+            (DELETE_NOTES, "S-EDIT-005"),
+        ] {
+            let bindings: Vec<&str> = registry
+                .get(id)
+                .unwrap()
+                .bindings
+                .iter()
+                .map(|binding| binding.shortcut.as_ref())
+                .collect();
+            assert_eq!(bindings, [shortcut], "{id}");
+        }
         // The Quantize settings are view state, like Draw Mode.
         assert_eq!(class(QUANTIZE_SETTINGS), Some(Permission::Read));
         // Cmd-U quantises the selected notes (S-NOTE-011).

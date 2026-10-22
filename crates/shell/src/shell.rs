@@ -1,5 +1,6 @@
 //! The shell's state and the one place every command runs: [`Shell`].
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -11,7 +12,7 @@ use bl_engine::session as engine_session;
 use bl_engine::transport as engine_transport;
 use bl_media::MediaStore;
 use bl_model::{
-    AudioData, AutomationTarget, ChangeSet, Clip, ClipData, ContentHash, Editor, Input,
+    AudioData, AutomationTarget, ChangeSet, Clip, ClipData, Command, ContentHash, Editor, Input,
     LaunchSettings, TakeClip, TakeLane, TrackId, TrackKind, registry as model,
 };
 use bl_project::ProjectFolder;
@@ -38,10 +39,10 @@ use crate::clip_view::{self, ClipView};
 use crate::commands::{
     self as ids, ClipEnvelopeArgs, ClipTabArgs, DefaultLaunchModeArgs,
     DefaultLaunchQuantizationArgs, DefaultSetArgs, DefaultWarpModeArgs, FileReport, FoldNotesArgs,
-    LaneArgs, LoopWarpShortSamplesArgs, PathArgs, RecordSessionAutomationInArgs, RelinkArgs,
-    SampleEditorArgs, SampleEditorResult, SaveAsArgs, SetResult, SettingsArgs, SwitchArgs,
-    SwitchResult, TemplateArgs, TemporaryFolderArgs, TemporaryFolderResult, TestToneArgs,
-    TestToneState, ThemeArgs, ViewResult, ViewState, ZoomArgs,
+    LaneArgs, LoopWarpShortSamplesArgs, PathArgs, RecordSessionAutomationInArgs, SampleEditorArgs,
+    SampleEditorResult, SaveAsArgs, SetResult, SettingsArgs, SwitchArgs, SwitchResult,
+    TemplateArgs, TemporaryFolderArgs, TemporaryFolderResult, TestToneArgs, TestToneState,
+    ThemeArgs, ViewResult, ViewState, ZoomArgs,
 };
 use crate::devices::{self, DeviceError, DeviceView};
 use crate::files::{ProjectFiles, SetStore, new_set_from};
@@ -63,11 +64,14 @@ use bl_plugin_host::vst3::Vst3Host;
 use bl_shell_spec::arrangement as view_ids;
 use bl_shell_spec::audio_editing as audio_ids;
 use bl_shell_spec::autosampler as autosampler_ids;
+use bl_shell_spec::bounce as bounce_ids;
 use bl_shell_spec::browser as browser_ids;
 use bl_shell_spec::capture_midi as capture_ids;
+use bl_shell_spec::dawproject as dawproject_ids;
 use bl_shell_spec::devices as device_ids;
 use bl_shell_spec::editing as edit_ids;
 use bl_shell_spec::export as export_ids;
+use bl_shell_spec::file_manager as file_manager_ids;
 use bl_shell_spec::freeze as freeze_ids;
 use bl_shell_spec::locator as locator_ids;
 use bl_shell_spec::midi_files as midi_ids;
@@ -79,6 +83,7 @@ use bl_shell_spec::pads as pad_ids;
 use bl_shell_spec::perception as perception_ids;
 use bl_shell_spec::plugins as plugin_ids;
 use bl_shell_spec::sample_editor as sample_ids;
+use bl_shell_spec::scales as scales_ids;
 use bl_shell_spec::session_launch as session_launch_ids;
 use bl_shell_spec::session_record as session_record_ids;
 use bl_shell_spec::session_view as session_ids;
@@ -95,8 +100,11 @@ use bl_shell_spec::transport::{RecordedFileReport, RecordingReport, RunningRecor
 pub(crate) mod audio_editing;
 mod audio_panel;
 pub mod autosample;
+mod bounce;
 mod capture;
+mod file_manager;
 mod freeze;
+mod keymap;
 mod multisampler;
 mod plugin_list;
 mod processed_files;
@@ -107,6 +115,8 @@ mod session_recording;
 mod slice;
 mod stems;
 mod warping;
+
+use file_manager::FileManager;
 
 /// The argument a key in a range (F1 to F8) adds to a toggling mixer
 /// command for the track it numbers, counting the mixer's columns from 1;
@@ -161,6 +171,8 @@ pub enum Area {
     StatusBar,
     /// The assistant's pane at the right edge (D24).
     Assistant,
+    /// The Undo History panel at the right edge (WP-6.28).
+    UndoHistory,
 }
 
 /// `mixer.set_solo_in_place`, which Options ▸ Solo in Place runs as a
@@ -250,6 +262,9 @@ pub enum Effect {
     /// Ask for a program, then run `settings.set_sample_editor` with it
     /// (WP-4.10b).
     PickSampleEditor,
+    /// Ask for a folder, then run `file_manager.set_search_folder` with it
+    /// (file-management R14).
+    PickSearchFolder,
     /// Ask where to save the set's plug-in list, then run
     /// `plugin.export_list` there (IMP-29, WP-6.41).
     PickPluginListPath {
@@ -271,6 +286,10 @@ pub enum Effect {
     /// Start renaming a track in its title bar, where the person types the
     /// new name; Return runs `track.rename` with it (WP-4.22).
     RenameTrack(TrackId),
+    /// Start renaming a locator in the Arrangement's scrub area, where the
+    /// person types the new name; Return runs `locator.rename` with it
+    /// (WP-6.24; the time editing spec, R8).
+    RenameLocator(bl_model::LocatorId),
 }
 
 /// Where a gesture that edits the set is (WP-1.8b): see [`Shell::gesture`].
@@ -379,6 +398,12 @@ pub struct Shell {
     /// set), which `set.discard_changes` goes back to.
     saved: Editor,
     set_path: Option<PathBuf>,
+    /// The name a set that has never been saved shows, until it is saved
+    /// (the DAWproject spec, R11).
+    pending_name: Option<String>,
+    /// The report of the last DAWproject import, while the set the import
+    /// made is open (R12).
+    import_report: Option<bl_shell_spec::dawproject::ImportReport>,
     dirty: bool,
     store: Box<dyn SetStore>,
     audio: AudioHost,
@@ -394,6 +419,14 @@ pub struct Shell {
     midi_lit: [Option<std::time::Instant>; 2],
     /// The chord a Chord device's Learn is hearing.
     chord_learn: crate::chord_learn::ChordLearn,
+    /// The keymap in use: Live 12's shortcuts with the person's own layered
+    /// over them (the custom-shortcuts spec, R3).
+    keymap: crate::keymap::Keymap,
+    /// The person's own shortcuts, as `keymap.toml` holds them.
+    user_keymap: crate::keymap::UserKeymap,
+    /// The number of times the keymap changed, so a host knows to rebuild
+    /// the keymap it matches keys against.
+    keymap_revision: u64,
     prefs: Preferences,
     config_dir: Option<PathBuf>,
     main_view: MainView,
@@ -450,11 +483,18 @@ pub struct Shell {
     /// The panel's Stop button, which the turn running looks at between
     /// calls.
     assistant_stop_flag: crate::assistant::StopFlag,
+    /// Whether the Undo History panel shows (WP-6.28): view state, never
+    /// part of the set, like the browser's.
+    undo_history_open: bool,
     /// What the Arrangement View shows (WP-1.8a).
     arrangement: ArrangementView,
     /// What the Clip View shows (WP-2.3): whether it's open, Draw Mode, and
     /// the notes selected in its MIDI Note Editor.
     clip_view: ClipView,
+    /// The File Manager (WP-6.63): whether it shows, which files it shows,
+    /// and the Automatic Search's switches. View state, never part of the
+    /// set, like the browser's.
+    file_manager: FileManager,
     /// The list of the set's plug-ins (IMP-29, WP-6.41): whether it shows
     /// in the detail area's place, and whether Show Only Missing is on.
     plugin_list: plugin_list::PluginList,
@@ -512,6 +552,14 @@ pub struct Shell {
     /// The Session slots' states the engine last published (WP-3.2), which
     /// the grid's launch buttons draw from.
     session_states: Vec<bl_engine::SlotStatus>,
+    /// The frames the Session slots that play launched on, as the shell
+    /// last saw them, so a clip that starts playing is told from one that
+    /// has been playing (the scales spec, R11).
+    launched: BTreeMap<(TrackId, bl_model::SceneId), Frames>,
+    /// The Arrangement clip the playhead was in, as the shell last saw it,
+    /// so the playhead entering a clip is told from its staying in one
+    /// (the scales spec, R11).
+    playing_clip: Option<bl_model::ClipId>,
     /// The tempo and time signature a launched scene put in place of the
     /// set's, as the engine last published them (WP-3.5).
     scene_override: bl_engine::SceneOverride,
@@ -851,7 +899,12 @@ impl Shell {
             midi_output,
             &prefs.midi,
         );
-        let browser_view = BrowserView::new(&prefs.browser, Waker::default());
+        let mut browser_view = BrowserView::new(&prefs.browser, Waker::default());
+        // Spec: browser-tags R1. The browser's database holds the index of
+        // the places' files, the tags, and the items that carry them.
+        if let Some(dir) = &config_dir {
+            browser_view.open_database(dir.join(crate::settings::BROWSER_DATABASE_FILE));
+        }
         audio.set_preview_gain(prefs.browser.preview_volume as f32);
         // Spec: file-management R1. A saved default set is what a new set
         // starts from; without one, the factory default set.
@@ -903,6 +956,8 @@ impl Shell {
             editor,
             saved,
             set_path: None,
+            pending_name: None,
+            import_report: None,
             dirty: false,
             store,
             audio,
@@ -911,6 +966,9 @@ impl Shell {
             midi_seen: (0, 0),
             midi_lit: [None; 2],
             chord_learn: crate::chord_learn::ChordLearn::default(),
+            keymap: crate::keymap::Keymap::live12(),
+            user_keymap: crate::keymap::UserKeymap::default(),
+            keymap_revision: 0,
             settings_open: false,
             prefs,
             config_dir,
@@ -938,8 +996,10 @@ impl Shell {
             assistant_open: false,
             assistant_conversation: Arc::default(),
             assistant_stop_flag: Arc::default(),
+            undo_history_open: false,
             arrangement: ArrangementView::new(),
             clip_view: ClipView::default(),
+            file_manager: FileManager::default(),
             plugin_list: plugin_list::PluginList::default(),
             document_revision: 0,
             clipboard: None,
@@ -950,6 +1010,8 @@ impl Shell {
             mixer: MixerView::new(),
             session: SessionView::new(),
             session_states: Vec::new(),
+            launched: BTreeMap::new(),
+            playing_clip: None,
             scene_override: bl_engine::SceneOverride::default(),
             last_launched: None,
             session_over: Vec::new(),
@@ -992,6 +1054,7 @@ impl Shell {
         shell.agent_tokens_in_file = !agent::StoredTokens::of(&shell.prefs.agent).is_empty();
         shell.give_agents_tokens();
         shell.publish_plugins();
+        shell.load_user_keymap();
         shell
     }
 
@@ -1434,6 +1497,42 @@ impl Shell {
         }
     }
 
+    /// Whether the Undo History panel shows (WP-6.28).
+    #[must_use]
+    pub fn undo_history_open(&self) -> bool {
+        self.undo_history_open
+    }
+
+    /// The Undo History panel's state, for the command's result.
+    #[must_use]
+    pub fn undo_history_state(&self) -> bl_shell_spec::commands::UndoHistoryState {
+        let editor = self.editor();
+        bl_shell_spec::commands::UndoHistoryState {
+            open: self.undo_history_open,
+            steps: editor.undo_history().len() + editor.redo_history().len(),
+            current: editor.current_index(),
+        }
+    }
+
+    /// The history's rows, from the top: the steps that can be redone
+    /// first, then the ones that can be undone.
+    #[must_use]
+    pub fn undo_history_rows(&self) -> Vec<bl_model::HistoryStep> {
+        self.editor.history()
+    }
+
+    /// The bottom row of the Undo History panel: the set's start, which no
+    /// step undoes. A set made new reads "New Beatlayer Set", and one
+    /// opened from a file "Open Beatlayer Set".
+    #[must_use]
+    pub fn set_start_label(&self) -> &'static str {
+        if self.set_path().is_some() {
+            "Open Beatlayer Set"
+        } else {
+            "New Beatlayer Set"
+        }
+    }
+
     /// The flag Stop sets, for a host that runs a turn while it also takes
     /// the person's clicks: setting it ends the turn between two calls, as
     /// `assistant.stop` does.
@@ -1470,7 +1569,8 @@ impl Shell {
     /// assistant loop closes with [`Shell::end_assistant_turn`]
     /// (WP-2.23, part 2).
     pub(crate) fn begin_assistant_turn(&mut self, label: &str) {
-        self.editor.begin(label.to_owned());
+        self.editor
+            .begin_by(bl_model::Maker::Assistant, label.to_owned());
     }
 
     /// Closes the turn's undo step, keeping whatever ran.
@@ -1765,7 +1865,11 @@ impl Shell {
             .as_deref()
             .and_then(Path::file_stem)
             .map_or_else(
-                || "Untitled".to_owned(),
+                || {
+                    self.pending_name
+                        .clone()
+                        .unwrap_or_else(|| "Untitled".to_owned())
+                },
                 |s| s.to_string_lossy().into_owned(),
             )
     }
@@ -2335,6 +2439,9 @@ impl Shell {
     /// Lets go of the plug-ins of the set being replaced (WP-2.6): the new
     /// set's plug-in devices load their plug-ins from their saved state.
     fn set_replaced(&mut self) {
+        // What a DAWproject import said about the set that's gone (R11, R12).
+        self.pending_name = None;
+        self.import_report = None;
         // A file still being written was for the set that's gone: its worker
         // deletes it when it finds nobody waiting (WP-4.20).
         self.processed.clear();
@@ -3984,6 +4091,11 @@ impl Shell {
         if let Some(error) = polled.error {
             self.set_message(error, true);
         }
+        // Spec: browser-tags R3. A database that couldn't be read is set
+        // aside and a new one is built; the Status Bar says so.
+        if let Some(message) = self.browser_view.take_message() {
+            self.set_message(message, true);
+        }
         let mut changed = polled.changed | self.poll_processed() | self.poll_stems();
         // Spec: multisampler R73. The autosampler makes one sample at a
         // time, so the dialog sees its progress and Cancel stops it.
@@ -4101,18 +4213,42 @@ impl Shell {
             .map(|library| library.join("Templates"))
     }
 
+    /// The Automatic Search's switches as they are unless asked otherwise
+    /// (file-management R14): the set's project folder and the User
+    /// Library are searched.
+    fn default_search() -> bl_shell_spec::file_manager::Search {
+        bl_shell_spec::file_manager::Search {
+            folder: None,
+            project: true,
+            library: true,
+            candidates: Vec::new(),
+        }
+    }
+
     /// Searches for the open set's missing or changed files and relinks them
-    /// (WP-2.25, file-management R6): the set's project folder, the User
-    /// Library, the folders the files were last in, and `extra`, each with
-    /// its subfolders. Returns how many were relinked, and re-points the
-    /// set's media table at them.
-    fn relink_missing(&mut self, extra: &[PathBuf]) -> usize {
+    /// (WP-2.25, file-management R6 and R14): the places the search is
+    /// switched on for, each with its subfolders, and the folders the files
+    /// were last in. A file with one candidate is relinked to it; a file
+    /// with several keeps its row, and the person chooses. Returns how many
+    /// were relinked, and the candidates the others have.
+    fn relink_missing(
+        &mut self,
+        extra: &[PathBuf],
+        search: &bl_shell_spec::file_manager::Search,
+    ) -> (usize, Vec<bl_shell_spec::file_manager::Candidate>) {
         let mut folders: Vec<PathBuf> = Vec::new();
-        if let Some(folder) = self.set_path.as_deref().and_then(Path::parent) {
+        if search.project
+            && let Some(folder) = self.set_path.as_deref().and_then(Path::parent)
+        {
             folders.push(folder.to_path_buf());
         }
-        if let Some(library) = self.browser_view.user_library() {
+        if search.library
+            && let Some(library) = self.browser_view.user_library()
+        {
             folders.push(library.to_path_buf());
+        }
+        if let Some(folder) = &search.folder {
+            folders.push(PathBuf::from(folder));
         }
         for entry in self.media.entries() {
             if let Some(folder) = entry.path.parent() {
@@ -4123,13 +4259,33 @@ impl Shell {
         // Keep each folder once, in the order the search should try them.
         let mut seen = std::collections::HashSet::new();
         folders.retain(|folder| seen.insert(folder.clone()));
-        let Ok(found) = self.media.relink_missing(&folders) else {
-            return 0;
+        let Ok(candidates) = self.media.relink_candidates(&folders) else {
+            return (0, Vec::new());
         };
-        let found: Vec<(bl_model::ContentHash, PathBuf)> = found
-            .into_iter()
-            .map(|(hash, path)| (bl_model::ContentHash(*hash.as_bytes()), path))
-            .collect();
+        let mut found = Vec::new();
+        let mut several = Vec::new();
+        for (hash, paths) in candidates {
+            if paths.len() == 1 {
+                self.media.relocate(hash, &paths[0]);
+                found.push((bl_model::ContentHash(*hash.as_bytes()), paths[0].clone()));
+            } else {
+                several.push(bl_shell_spec::file_manager::Candidate {
+                    hash: hash
+                        .as_bytes()
+                        .iter()
+                        .map(|byte| format!("{byte:02x}"))
+                        .collect(),
+                    name: paths
+                        .first()
+                        .and_then(|path| path.file_name())
+                        .map_or_else(String::new, |name| name.to_string_lossy().into_owned()),
+                    paths: paths
+                        .iter()
+                        .map(|path| path.to_string_lossy().into_owned())
+                        .collect(),
+                });
+            }
+        }
         self.store.relink(&found);
         // A relinked file's failed analysis is made again (R20).
         for (hash, _) in &found {
@@ -4140,7 +4296,7 @@ impl Shell {
             self.analysed.remove(&hash);
         }
         self.start_analyses();
-        found.len()
+        (found.len(), several)
     }
 
     /// Runs a browser command and carries out what it asks of the rest of
@@ -4192,6 +4348,9 @@ impl Shell {
         if outcome.show_browser {
             self.browser = true;
         }
+        if let Some(message) = outcome.message {
+            self.set_message(message, false);
+        }
         if outcome.focus {
             self.focused_window = WindowKind::Main;
             self.focused_area = Area::Browser;
@@ -4226,23 +4385,26 @@ impl Shell {
 
     /// Runs a command as [`Shell::run`] does, recording what it changes in
     /// the set as one undo step named `label`, such as an agent's edit
-    /// labelled with the agent's name. A command that changes nothing in
-    /// the set records nothing. Undo and redo can't be labelled, nor can a
-    /// command that replaces the set (opening or making one).
+    /// labelled with the agent's name, and made by `maker`, so the history
+    /// says who made it. A command that changes nothing in the set records
+    /// nothing. Undo and redo can't be labelled, nor can a command that
+    /// replaces the set (opening or making one).
     ///
     /// # Errors
     ///
     /// As [`Shell::run`]; the set is unchanged.
     pub fn run_labelled(
         &mut self,
+        maker: bl_model::Maker,
         label: impl Into<std::borrow::Cow<'static, str>>,
         id: &str,
         args: Value,
     ) -> Result<Value, ShellError> {
-        let labelled = !matches!(id, model::UNDO | model::REDO)
+        let labelled = !matches!(id, model::UNDO | model::REDO | model::GO_TO_STEP)
             && (model::handles(id)
                 || audio_ids::handles(id)
                 || freeze_ids::handles(id)
+                || bounce_ids::handles(id)
                 || edit_ids::handles(id)
                 || device_ids::handles(id)
                 || multisampler_ids::handles(id)
@@ -4257,7 +4419,7 @@ impl Shell {
         if !labelled || self.edit_gesture.is_some() {
             return self.run(id, args);
         }
-        self.editor.begin(label);
+        self.editor.begin_by(maker, label);
         let result = self.run(id, args);
         if result.is_ok() {
             if self.editor.commit().unwrap_or(false) {
@@ -4569,6 +4731,25 @@ impl Shell {
             // nodes published, which the device displays draw. Not a
             // revision either.
             self.audio.displays_into(self.devices.displays_mut());
+            // Spec: articulation-map R15. A row whose Learn button is lit
+            // takes the next note-on or control change the device hears as
+            // its trigger, which is one undo step.
+            for (device, row, trigger) in self.devices.learned_triggers() {
+                self.devices.stop_learning(device);
+                self.edit(|editor| {
+                    // The list may have changed while the button was lit,
+                    // and then the row is gone: the trigger is dropped
+                    // rather than ending the shell.
+                    let _ = editor.apply(Command::SetArticulation {
+                        device,
+                        index: row,
+                        name: None,
+                        trigger: Some(trigger),
+                        outputs: None,
+                        channel: None,
+                    });
+                });
+            }
         }
         // Spec: drum-racks R20. With Auto Select on, a drum rack's chain
         // list selects each chain a note reaches.
@@ -4582,6 +4763,9 @@ impl Shell {
         // Spec: launch-quantisation R10. The slots the engine is launching
         // or stopping, which the grid's launch buttons draw.
         self.audio.session_into(&mut self.session_states);
+        // Spec: scales R11. A clip that starts playing, and the clip the
+        // playhead enters, make their scale the current scale.
+        self.follow_playing_scale(&engine);
         // A drag in progress waits: its end is one change, not a split for
         // every frame of it.
         if self.recording.is_some()
@@ -4647,6 +4831,33 @@ impl Shell {
     #[must_use]
     pub fn playing(&self) -> bool {
         self.arrangement.transport().playing
+    }
+
+    /// Points the set's current scale at the clip that starts playing, and
+    /// at the Arrangement clip the playhead enters (the scales spec, R11).
+    /// It is no undo step, though the set is marked as changed.
+    fn follow_playing_scale(&mut self, engine: &EngineTransport) {
+        if !engine.playing {
+            self.launched.clear();
+            self.playing_clip = None;
+            return;
+        }
+        let doc = self.editor.document().clone();
+        let order = doc.track_order();
+        let (launches, launched) =
+            crate::scales::new_launches(&self.session_states, &self.launched);
+        self.launched = launched;
+        if let Some(scale) = crate::scales::launched_scale(&doc, &launches, &order) {
+            self.follow_scale(scale);
+            return;
+        }
+        let clip = crate::scales::arrangement_clip(&doc, engine.position, &self.session_over);
+        if clip != self.playing_clip {
+            self.playing_clip = clip;
+            if let Some(scale) = clip.and_then(|clip| doc.clip(clip)).map(|clip| clip.scale) {
+                self.follow_scale(scale);
+            }
+        }
     }
 
     /// The global launch quantisation and its enabled switch (WP-3.2), which
@@ -5326,7 +5537,7 @@ impl Shell {
                         }
                         contexts.push(Context::DeviceView);
                     }
-                    Area::ControlBar | Area::StatusBar | Area::Assistant => {}
+                    Area::ControlBar | Area::StatusBar | Area::Assistant | Area::UndoHistory => {}
                 }
                 if self.prefs.tab_navigation {
                     contexts.push(Context::TabFocus);
@@ -5381,6 +5592,7 @@ impl Shell {
             ),
             ids::VIEW_TOGGLE_INFO_VIEW => Some(self.info_view),
             assistant_ids::VIEW_TOGGLE_ASSISTANT => Some(self.assistant_open),
+            ids::VIEW_TOGGLE_UNDO_HISTORY => Some(self.undo_history_open),
             ids::VIEW_TOGGLE_PLUG_IN_WINDOWS => Some(self.plug_in_windows),
             ids::FOCUS_TOGGLE_TAB_NAVIGATION => Some(self.prefs.tab_navigation),
             ids::FOCUS_TOGGLE_WRAP_NAVIGATION => Some(self.prefs.wrap_navigation.0),
@@ -5421,10 +5633,17 @@ impl Shell {
 
     /// Whether a submenu opens now: Arrangement Track Controls is disabled
     /// while the Session View is in front (observed in Live 12.4.6; the
-    /// mixer view spec, R12).
+    /// mixer view spec, R12), and the set's backups are disabled while the
+    /// set has none (file-management R18).
     #[must_use]
     pub fn can_open_submenu(&self, row: &str) -> bool {
-        !(row == "M-VIEW-033" && self.main_view == MainView::Session)
+        if row == "M-VIEW-033" && self.main_view == MainView::Session {
+            return false;
+        }
+        if row == "M-FILE-008" {
+            return !self.backups().is_empty();
+        }
+        true
     }
 
     /// The label a menu shows for a command now: Undo and Redo name the step
@@ -5597,6 +5816,9 @@ impl Shell {
         }
         if freeze_ids::handles(id) {
             return self.can_freeze(id, args);
+        }
+        if bounce_ids::handles(id) {
+            return self.can_bounce(id, args);
         }
         if audio_ids::handles(id) {
             // Spec: audio-clip-editing R28. The menus' enabled states.
@@ -6201,6 +6423,23 @@ impl Shell {
             })
     }
 
+    /// The locator Rename reaches: the one `args` names, else the first
+    /// selected.
+    fn renamable_locator(&self, args: &Value) -> Option<bl_model::LocatorId> {
+        let named: Option<Vec<bl_model::LocatorId>> = args
+            .get("locators")
+            .and_then(|v| serde_json::from_value(v.clone()).ok());
+        named
+            .and_then(|mut locators| {
+                if locators.is_empty() {
+                    None
+                } else {
+                    Some(locators.remove(0))
+                }
+            })
+            .or_else(|| self.arrangement.selected_locators().first().copied())
+    }
+
     /// Runs a command as a person asked for it, from a menu, a key, or a
     /// control: fills in arguments the person didn't give, asks before
     /// losing unsaved changes, and asks for a file where one is needed (as
@@ -6264,6 +6503,12 @@ impl Shell {
                 self.effects.push(Effect::PickSampleEditor);
                 Ok(Value::Null)
             }
+            file_manager_ids::SET_SEARCH_FOLDER if !has("folder") => {
+                // Spec: file-management R14. The Set Folder… button asks the
+                // person for the folder the search looks in.
+                self.effects.push(Effect::PickSearchFolder);
+                Ok(Value::Null)
+            }
             _ if self.is_sample_key(id, &args) => {
                 // Spec: sample-editor R10. A key or a menu item acts on what
                 // the Sample Editor has selected.
@@ -6312,6 +6557,19 @@ impl Shell {
                         reason: "select a track first".to_owned(),
                     })?;
                 self.effects.push(Effect::RenameTrack(track));
+                self.touch();
+                Ok(Value::Null)
+            }
+            locator_ids::RENAME if !has("name") => {
+                // Spec: time-editing R8. Cmd-R and Edit ▸ Rename type the
+                // new name in the scrub area.
+                let locator =
+                    self.renamable_locator(&args)
+                        .ok_or_else(|| ShellError::Unavailable {
+                            command: id.to_owned(),
+                            reason: "select a locator first".to_owned(),
+                        })?;
+                self.effects.push(Effect::RenameLocator(locator));
                 self.touch();
                 Ok(Value::Null)
             }
@@ -6478,11 +6736,50 @@ impl Shell {
         self.poll_capture();
         let arranged = self.arrangement.selected_clips().to_vec();
         let slot = self.selected_slot_clip();
+        let shown = self.shown_clip();
         let result = self.run_command(id, args);
         if result.is_ok() {
             self.follow_clip_selection(id, &arranged, slot);
+            // Spec: scales R10. Selecting a clip makes its scale the
+            // current scale, and a change to that clip's scale changes it
+            // with it.
+            self.follow_shown_scale(id, shown);
         }
         result
+    }
+
+    /// The clip the Clip View shows: the Session clip most recently
+    /// selected, or else the Arrangement's first selected clip.
+    fn shown_clip(&self) -> Option<bl_model::ClipId> {
+        self.clip_view
+            .shown_any_clip(self.editor.document(), &self.arrangement)
+    }
+
+    /// Points the set's current scale at the clip the Clip View shows, when
+    /// the selection changed or the clip's own scale did (the scales spec,
+    /// R10). It is no undo step, though the set is marked as changed.
+    fn follow_shown_scale(&mut self, id: &str, shown: Option<bl_model::ClipId>) {
+        let now = self.shown_clip();
+        let changed = now != shown;
+        if !changed && id != scales_ids::SET_CLIP_SCALE {
+            return;
+        }
+        let Some(scale) = crate::scales::shown_scale(self.editor.document(), now) else {
+            return;
+        };
+        self.follow_scale(scale);
+    }
+
+    /// Points the set's current scale at `scale` (the scales spec, R10, R11
+    /// and R12): no undo step, though the set is marked as changed.
+    fn follow_scale(&mut self, scale: bl_model::Scale) {
+        if self.editor.document().settings().scale == scale {
+            return;
+        }
+        self.editor.follow_scale(scale);
+        self.dirty = true;
+        self.document_changed();
+        self.touch();
     }
 
     /// The clip in the Session slot selected first, if the slot holds one.
@@ -6492,6 +6789,26 @@ impl Shell {
             .document()
             .slot(slot.track, slot.scene)
             .map(|clip| clip.id)
+    }
+
+    /// The clips the Control Bar's scale controls change (the scales spec,
+    /// R12): the Arrangement's selected clips, or the Session slot's clip.
+    #[must_use]
+    pub fn scale_targets(&self) -> Vec<bl_model::ClipId> {
+        let arranged = self.arrangement.selected_clips();
+        if !arranged.is_empty() {
+            return arranged.to_vec();
+        }
+        self.selected_slot_clip().into_iter().collect()
+    }
+
+    /// What the Control Bar's scale controls show (the scales spec, R6): the
+    /// selected clips' scale, where every one of them has it, and the set's
+    /// current scale when no clip is selected.
+    #[must_use]
+    pub fn scale_display(&self) -> crate::scales::Display {
+        let targets = self.scale_targets();
+        crate::scales::display(self.editor.document(), &targets)
     }
 
     /// Points the Clip View at the clip most recently selected, in the
@@ -6595,22 +6912,31 @@ impl Shell {
     /// each with the macro law's follow-ups (macros spec, R6, R7, R11 and
     /// R13), as [`Shell::run`] does for one. The agent's `run` tool calls it
     /// for a batch of edits, so a macro moves the same way through the agent
-    /// API as through a gesture.
+    /// API as through a gesture. The step is made by `maker`, so the history
+    /// says who made it.
     ///
     /// # Errors
     ///
     /// [`ShellError`] saying which step failed and why; the set is unchanged.
     pub fn run_document_edits(
         &mut self,
+        maker: bl_model::Maker,
         label: &str,
         steps: &[(String, Value)],
     ) -> Result<(Vec<Value>, bool), ShellError> {
-        self.editor.begin(label.to_owned());
+        self.editor.begin_by(maker, label.to_owned());
         let start = self.editor.document().clone();
         let mut results = Vec::with_capacity(steps.len());
         for (index, (id, args)) in steps.iter().enumerate() {
+            let shown = self.shown_clip();
             match self.run_document_edit(id, args.clone()) {
-                Ok(changes) => results.push(json!({ "command": id, "result": changes })),
+                Ok(changes) => {
+                    // Spec: scales R10. A change to the shown clip's scale
+                    // changes the current scale with it, however the change
+                    // was made.
+                    self.follow_shown_scale(id, shown);
+                    results.push(json!({ "command": id, "result": changes }))
+                }
                 Err(error) => {
                     self.editor.cancel().ok();
                     return Err(ShellError::Failed {
@@ -6754,7 +7080,31 @@ impl Shell {
     pub fn prepare_edit(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
         self.check_warp_files(id, &args)?;
         let args = self.prepare_device_role(id, args)?;
+        let args = self.prepare_scale_clips(id, args)?;
         self.prepare_warping(id, args)
+    }
+
+    /// Spec: scales R5. `clip.set_scale` names the clips it sets; left out,
+    /// it sets the selected ones.
+    fn prepare_scale_clips(&self, id: &str, mut args: Value) -> Result<Value, ShellError> {
+        if id != scales_ids::SET_CLIP_SCALE {
+            return Ok(args);
+        }
+        let Some(object) = args.as_object_mut() else {
+            return Ok(args);
+        };
+        if object.contains_key("clips") {
+            return Ok(args);
+        }
+        let clips = self.scale_targets();
+        if clips.is_empty() {
+            return Err(ShellError::Unavailable {
+                command: id.to_owned(),
+                reason: "no clip is selected".to_owned(),
+            });
+        }
+        object.insert("clips".to_owned(), json!(clips));
+        Ok(args)
     }
 
     /// Spec: device-chains R2, R3, and IMP-24. A device may take the
@@ -6913,6 +7263,7 @@ impl Shell {
             && (model::handles(id)
                 || audio_ids::handles(id)
                 || freeze_ids::handles(id)
+                || bounce_ids::handles(id)
                 || edit_ids::handles(id)
                 || note_ids::handles(id)
                 || device_ids::handles(id)
@@ -6936,6 +7287,9 @@ impl Shell {
         }
         if freeze_ids::handles(id) {
             return self.run_freeze(id, args);
+        }
+        if bounce_ids::handles(id) {
+            return self.run_bounce(id, args);
         }
         if edit_ids::handles(id) {
             let before = self.editor.document().clone();
@@ -7154,6 +7508,12 @@ impl Shell {
             Self::args::<NoArgs>(id, args)?;
             let engine = self.poll_engine();
             return Ok(to_value(&crate::transport::state(self, engine)));
+        }
+        if scales_ids::handles(id) {
+            // Spec: scales R1, R13. The scale list, which the Scale Name
+            // chooser shows and an agent reads.
+            Self::args::<NoArgs>(id, args)?;
+            return Ok(to_value(&bl_shell_spec::scales::ScaleList::new()));
         }
         if view_ids::handles(id) {
             // Spec: clap-hosting R5 (WP-5.40). Choosing a plug-in parameter
@@ -7424,6 +7784,11 @@ impl Shell {
             return self.run_tracks(id, args);
         }
         if browser_ids::handles(id) {
+            // Spec: file-management R11, R14. A file armed for hot-swapping
+            // is replaced by the file the browser has chosen.
+            if id == browser_ids::LOAD_SELECTED && self.file_manager.hot_swap.is_some() {
+                return self.hot_swap_selected(id);
+            }
             return self.run_browser(id, args);
         }
         if perception_ids::handles(id) {
@@ -7490,8 +7855,18 @@ impl Shell {
         if midi_ids::handles(id) {
             return self.run_midi_files(id, args);
         }
+        if dawproject_ids::handles(id) {
+            return self.run_dawproject(id, args);
+        }
         if midi_io_ids::handles(id) {
             return self.run_midi_io(id, args);
+        }
+        if file_manager_ids::handles(id) {
+            // Spec: file-management R10 to R17. The File Manager's own
+            // commands.
+            let result = self.run_file_manager(id, args);
+            self.touch();
+            return result;
         }
         if !ids::handles(id) {
             return Err(ShellError::UnknownCommand(id.to_owned()));
@@ -7625,6 +8000,93 @@ impl Shell {
         };
         self.touch();
         Ok(result)
+    }
+
+    /// Runs a DAWproject command (WP-6.36): opening a `.dawproject` file as
+    /// a new set, or reading back the report of the last import.
+    ///
+    /// Spec: dawproject R10 to R12. The import is refused while the open
+    /// set has unsaved changes; the reading, the extracting and the building
+    /// run on a worker thread; the set changes only when the new set is
+    /// whole, and a failure leaves the open set as it was.
+    fn run_dawproject(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        let failed = |message: String| ShellError::Failed {
+            command: id.to_owned(),
+            message,
+        };
+        let unavailable = |reason: &str| ShellError::Unavailable {
+            command: id.to_owned(),
+            reason: reason.to_owned(),
+        };
+        match id {
+            dawproject_ids::IMPORT_DAWPROJECT => {
+                let args = Self::args::<dawproject_ids::ImportDawProjectArgs>(id, args)?;
+                if self.dirty {
+                    return Err(unavailable(
+                        "the set has unsaved changes; save them with `set.save` or \
+                         `set.save_as`, or throw them away with `set.discard_changes`, first",
+                    ));
+                }
+                let path = PathBuf::from(&args.path);
+                let folder = crate::dawproject::import_folder(&self.temporary_folder(), &path);
+                let warp_mode = crate::auto_warp::warp_mode(self.prefs.warp.default_warp_mode);
+                let mut job = crate::dawproject::Job::start(&path, &folder, warp_mode)
+                    .map_err(|error| failed(error.to_string()))?;
+                // An agent's call returns when the new set is open (R10).
+                let imported = loop {
+                    if let Some(result) = job.poll() {
+                        break result;
+                    }
+                    self.set_message(
+                        format!("Importing {} ({}%)", path.display(), job.percent()),
+                        false,
+                    );
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                };
+                let imported = imported.map_err(|error| {
+                    self.set_message(error.to_string(), true);
+                    failed(error.to_string())
+                })?;
+                // The set changes only when the new set is whole.
+                self.store.close();
+                for (hash, at, size) in &imported.media {
+                    self.store.add_media(*hash, at, *size);
+                    let hash = bl_media::ContentHash::from_bytes(hash.0);
+                    if self.media.entry(hash).is_none() {
+                        let _ = self.media.import(at);
+                    }
+                }
+                self.saved = snapshot(&imported.editor);
+                self.set_replaced();
+                self.editor = imported.editor;
+                self.set_path = None;
+                // Spec: dawproject R11. Until the set is first saved its
+                // name is the file's name without `.dawproject`.
+                self.pending_name = path
+                    .file_stem()
+                    .map(|stem| stem.to_string_lossy().into_owned());
+                self.dirty = false;
+                self.message = None;
+                self.arrangement.reset();
+                self.clip_view.forget_selection();
+                self.mixer.reset();
+                self.session.reset();
+                self.new_set_transport();
+                self.document_changed();
+                self.set_file_changed();
+                self.import_report = Some(imported.report.clone());
+                Ok(to_value(&dawproject_ids::ImportDawProjectResult {
+                    name: self.set_name(),
+                    report: imported.report,
+                }))
+            }
+            dawproject_ids::IMPORT_REPORT => {
+                Self::args::<NoArgs>(id, args)?;
+                let report = self.import_report.clone().unwrap_or_default();
+                Ok(to_value(&report))
+            }
+            _ => Err(ShellError::UnknownCommand(id.to_owned())),
+        }
     }
 
     /// Runs a Standard MIDI File command (WP-2.21): importing a file into the
@@ -7996,9 +8458,12 @@ impl Shell {
                     self.media
                         .add_reference(bl_media::ContentHash::from_bytes(hash.0), path, size);
                 }
-                // Spec: file-management R6. Files that moved are found
-                // again by content, so the set opens able to play them.
-                let relinked = self.relink_missing(&[]);
+                // Spec: file-management R6, R14. Files that moved are found
+                // again by content, so the set opens able to play them: a
+                // file with one candidate is relinked to it, and a file with
+                // several waits for the person to choose.
+                let (relinked, candidates) = self.relink_missing(&[], &Self::default_search());
+                self.file_manager.search.candidates = candidates;
                 if relinked > 0 {
                     self.message = Some(Message {
                         text: format!(
@@ -8147,7 +8612,30 @@ impl Shell {
                 }))
             }
             ids::SET_COLLECT_ALL => {
-                Self::args::<NoArgs>(id, args)?;
+                // Spec: file-management R4, R15, R16. The groups to collect
+                // from, and the project to collect for.
+                let crate::commands::CollectArgs { groups, project } = Self::args(id, args)?;
+                let library = self.browser_view.user_library();
+                let groups = if groups.is_empty() {
+                    vec![
+                        file_manager_ids::ExternalGroup::OtherProject,
+                        file_manager_ids::ExternalGroup::UserLibrary,
+                        file_manager_ids::ExternalGroup::Elsewhere,
+                    ]
+                } else {
+                    groups
+                };
+                if let Some(project) = project {
+                    let folder = PathBuf::from(project);
+                    let files = self
+                        .collect_project(&folder, &groups, library)
+                        .map_err(failed)?;
+                    return Ok(to_value(&FileReport {
+                        path: Some(folder.to_string_lossy().into_owned()),
+                        files,
+                        candidates: Vec::new(),
+                    }));
+                }
                 let path = self.set_path.clone().ok_or_else(|| {
                     unavailable(
                         "the set has never been saved; use `set.save_as` to give it a project \
@@ -8166,24 +8654,44 @@ impl Shell {
                 self.store
                     .set_multisampler_views(self.devices.multisampler_views().clone());
                 self.store.set_folds(self.clip_view.folds().clone());
-                let files = self.store.collect().map_err(failed)?;
+                let files = self
+                    .store
+                    .collect_groups(&groups, library)
+                    .map_err(failed)?;
                 let warnings = self.store.save(&path, &self.editor).map_err(failed)?;
                 self.saved_as(path.clone(), &warnings);
                 Ok(to_value(&FileReport {
                     path: Some(path.to_string_lossy().into_owned()),
                     files,
+                    candidates: Vec::new(),
                 }))
             }
             ids::SET_RELINK_MISSING => {
-                let RelinkArgs { folders } = Self::args(id, args)?;
+                // Spec: file-management R14. The places the search is
+                // switched on for, and the folders it is given.
+                let crate::commands::RelinkArgs {
+                    folders,
+                    project,
+                    library,
+                    folder,
+                } = Self::args(id, args)?;
                 let extra: Vec<PathBuf> = folders.iter().map(PathBuf::from).collect();
-                let files = self.relink_missing(&extra);
+                let search = bl_shell_spec::file_manager::Search {
+                    folder: folder.clone(),
+                    project: project.unwrap_or(true),
+                    library: library.unwrap_or(true),
+                    candidates: Vec::new(),
+                };
+                let (files, candidates) = self.relink_missing(&extra, &search);
+                self.file_manager.search = search.clone();
+                self.file_manager.search.candidates = candidates.clone();
                 Ok(to_value(&FileReport {
                     path: self
                         .set_path
                         .as_ref()
                         .map(|path| path.to_string_lossy().into_owned()),
                     files,
+                    candidates,
                 }))
             }
             ids::APP_QUIT => {
@@ -8284,6 +8792,12 @@ impl Shell {
                 // Spec: plugin-list R1, R3. View state only.
                 Self::args::<NoArgs>(id, args)?;
                 self.plugin_list.toggle();
+                // Spec: file-management R10. The File Manager and the list of
+                // the set's plug-ins take the same place: showing either
+                // hides the other.
+                if self.plugin_list.visible() {
+                    self.file_manager.open = false;
+                }
                 self.touch();
                 Ok(to_value(&self.plugin_list.state()))
             }
@@ -8392,8 +8906,17 @@ impl Shell {
                         .state(self.editor.document(), &self.arrangement),
                     plugin_list: self.plugin_list.state(),
                     assistant: self.assistant_panel_state(),
+                    undo_history: self.undo_history_open,
                     plug_in_windows: self.plug_in_windows,
                 }))
+            }
+            ids::VIEW_TOGGLE_UNDO_HISTORY => {
+                // Spec: undo-history R1, R3. The panel is view state: it
+                // isn't saved with the set and isn't an undo step.
+                Self::args::<NoArgs>(id, args)?;
+                self.undo_history_open = !self.undo_history_open;
+                self.touch();
+                Ok(to_value(&self.undo_history_state()))
             }
             ids::VIEW_TOGGLE_INFO_VIEW => {
                 Self::args::<NoArgs>(id, args)?;
@@ -8472,6 +8995,30 @@ impl Shell {
                 self.save_preferences();
                 self.touch();
                 Ok(to_value(&SwitchResult { on }))
+            }
+            ids::KEYMAP_STATE => {
+                Self::args::<NoArgs>(id, args)?;
+                Ok(to_value(&self.keymap_state()))
+            }
+            ids::KEYMAP_BIND => {
+                let bind: crate::keymap::BindArgs = Self::args(id, args)?;
+                self.bind_keys(id, &bind)?;
+                Ok(to_value(&self.keymap_result()))
+            }
+            ids::KEYMAP_UNBIND => {
+                let crate::keymap::UnbindArgs {
+                    shortcut,
+                    command,
+                    keys,
+                    platform,
+                } = Self::args(id, args)?;
+                self.unbind_keys(id, shortcut.as_deref(), command.as_deref(), &keys, platform)?;
+                Ok(to_value(&self.keymap_result()))
+            }
+            ids::KEYMAP_RESET => {
+                let crate::keymap::ResetArgs { command } = Self::args(id, args)?;
+                self.reset_keys(command.as_deref());
+                Ok(to_value(&self.keymap_result()))
             }
             ids::FOCUS_TOGGLE_TAB_NAVIGATION => {
                 Self::args::<NoArgs>(id, args)?;

@@ -73,6 +73,7 @@ pub mod browser;
 mod chord_learn;
 pub mod clip_defaults;
 pub mod clip_view;
+pub mod dawproject;
 pub mod devices;
 pub mod export;
 pub mod files;
@@ -90,6 +91,7 @@ pub mod realtime;
 pub mod recording;
 pub mod routing;
 pub mod sample_editor;
+pub mod scales;
 pub mod scene_fields;
 mod session_capture;
 pub mod session_view;
@@ -100,6 +102,8 @@ pub mod stems;
 pub mod testing;
 pub mod tracks;
 pub mod transport;
+/// Moving a file to the system's trash (WP-6.63).
+pub mod trash;
 
 /// The Arrangement View's command IDs and their argument and result types.
 pub use bl_shell_spec::arrangement as arrangement_commands;
@@ -121,6 +125,9 @@ pub use bl_shell_spec::devices as device_commands;
 pub use bl_shell_spec::editing as editing_commands;
 /// The export command's ID and its argument and result types (WP-1.12).
 pub use bl_shell_spec::export as export_commands;
+/// The File Manager's command IDs and their argument and result types
+/// (WP-6.63).
+pub use bl_shell_spec::file_manager as file_manager_commands;
 /// The Arrangement's locator command IDs and their argument and result
 /// types (WP-6.24).
 pub use bl_shell_spec::locator as locator_commands;
@@ -145,6 +152,8 @@ pub use bl_shell_spec::plugins as plugin_commands;
 /// The Sample Editor's view command IDs and their argument and result types
 /// (WP-4.10).
 pub use bl_shell_spec::sample_editor as sample_editor_commands;
+/// The scale commands' IDs and the scale list's result (WP-6.7).
+pub use bl_shell_spec::scales as scales_commands;
 /// The Session View's launch quantisation command IDs and their argument and
 /// result types (WP-3.2).
 pub use bl_shell_spec::session_launch as session_launch_commands;
@@ -161,7 +170,9 @@ pub use bl_shell_spec::tracks as track_commands;
 /// The transport's command IDs the shell's menus and controls run, and
 /// `transport.state`'s result.
 pub use bl_shell_spec::transport as transport_commands;
-pub use bl_shell_spec::{audio_editing, commands, context_menus, freeze, menus, register};
+pub use bl_shell_spec::{
+    audio_editing, bounce, commands, context_menus, freeze, keymap, menus, register,
+};
 /// The autosampler's progress (WP-5.16).
 pub use shell::autosample::Status as AutosampleStatus;
 pub use shell::{

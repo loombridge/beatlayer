@@ -12,6 +12,7 @@ use crate::ids::{ChainId, ClipId, DeviceId, LocatorId, SceneId, TrackId};
 use crate::locator::{Locator, SongStart};
 use crate::metronome::MetronomeSettings;
 use crate::rack::Chain;
+use crate::scale::Scale;
 use crate::scene::Scene;
 use crate::shared::Shared;
 use crate::track::{Track, TrackKind};
@@ -95,6 +96,12 @@ pub struct Settings {
     /// A set saved before the song start time has none and loads with none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub song_start: Option<SongStart>,
+    /// The set's current scale (WP-6.7): its Scale Mode switch, its root and
+    /// its scale name, which the Control Bar's scale controls show and which
+    /// a new clip takes. Off, at C, in Major, in a new set, and not written
+    /// then, so a set saved before the scales loads unchanged.
+    #[serde(default, skip_serializing_if = "Scale::is_default")]
+    pub scale: Scale,
 }
 
 impl Default for Settings {
@@ -118,6 +125,7 @@ impl Default for Settings {
             reduced_latency_monitoring: false,
             locators: Vec::new(),
             song_start: None,
+            scale: Scale::default(),
         }
     }
 }

@@ -955,6 +955,9 @@ impl Processor {
             TransportCommand::PlayFromInsertMarker => self.play_from_marker(),
             // Spec: transport R3, R4
             TransportCommand::Stop => {
+                // Spec: transport R22. A jump waiting for a line is
+                // abandoned when the transport stops.
+                self.pending_locate = None;
                 self.metronome.stop();
                 // Spec: routing R11; WP-2.13. Stop ends the take, as Live's
                 // Stop ends a recording.
@@ -972,6 +975,9 @@ impl Processor {
             // Spec: transport R5
             TransportCommand::PlayStop => {
                 if self.playing {
+                    // Spec: transport R22. A jump waiting for a line is
+                    // abandoned when the transport stops.
+                    self.pending_locate = None;
                     self.playing = false;
                     self.release_midi();
                     self.metronome.stop();
@@ -982,6 +988,9 @@ impl Processor {
             }
             // Spec: transport R7, R12
             TransportCommand::Locate(ticks) => {
+                // Spec: transport R22. A jump waiting for a line is
+                // replaced by this one.
+                self.pending_locate = None;
                 self.insert_marker = ticks.max(Ticks::ZERO);
                 if self.playing {
                     self.position = self.frames_at(self.insert_marker);
@@ -1110,6 +1119,9 @@ impl Processor {
     }
 
     fn start_playing_at(&mut self, start: Ticks) {
+        // Spec: transport R22. A jump waiting for a line is abandoned when
+        // the song starts again somewhere else.
+        self.pending_locate = None;
         let (tempo, sigs) = match &self.program {
             Some(p) => (&p.get().tempo, &p.get().time_signatures),
             None => (&self.fallback_tempo, &self.fallback_time_signatures),
@@ -1148,6 +1160,7 @@ impl Processor {
     /// spec, R22).
     fn apply_due_locate(&mut self) {
         if let Some(pending) = self.pending_locate
+            && self.playing
             && self.position >= pending.frame
         {
             self.pending_locate = None;

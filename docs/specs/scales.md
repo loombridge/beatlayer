@@ -1,6 +1,6 @@
 # Scales: each clip's scale, the set's current scale, scale-aware devices, and the scale in the MIDI Note Editor
 
-- **Status:** draft
+- **Status:** partial (R1 to R14 each have a passing test; R15 to R18, a device's current scale and its Use Current Scale switch, are WP-6.8's; R19 to R25, the Clip View's scale controls, the piano ruler, Highlight Scales, Fold to Scale and the note spelling, are WP-6.7b's)
 - **Work packages:** WP-6.7 (the scale list, each clip's scale, the set's current scale and the Control Bar's scale controls: R1 to R14), WP-6.7b (the scale in the Clip View: the Main Properties panel's scale controls, the piano ruler's scale keys, Highlight Scales, Fold to Scale and note spelling: R19 to R25), WP-6.8 (what every scale-aware device shares: its current scale, its Use Current Scale switch, held notes and per-note bends: R15 to R18; each device's own rules are in its spec). Tuning systems and their effect on scales are [tunings.md](tunings.md)'s; the Pitch and Time Utilities and the MIDI Tools that work in scale degrees are WP-6.12 to WP-6.16's; Find and Select Notes' Scale filter is WP-6.4's; editing several clips at once and Focus Mode are WP-6.6's
 - **Parity-matrix row:** MIDI editing: Scale Mode per clip, MIDI and audio; MIDI editing: Fold to scale, scale highlighting; Racks and device features: "Use Current Scale" on devices (the rules every device shares)
 - **Checked against:** the Live 12 reference manual (online edition), read 20 October 2026; the Live 12 release notes, 12.0, 12.0.5, 12.1, 12.1.10, 12.2 and 12.4; the UI parity reference rows L-CTRL-011, L-CLIP-003, L-CLIP-004, L-CLIP-010, L-CLIP-012, L-DEV-004, M-VIEW-040, M-OPT-019, C-NOTE, C-KEYS, S-NOTE-035 and S-NOTE-039
@@ -96,20 +96,20 @@ In the Clip View, the Main Properties panel holds the clip's scale controls. Wit
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1 | to be written in WP-6.7 | |
-| R2 | to be written in WP-6.7 | |
-| R3 | to be written in WP-6.7 | |
-| R4 | to be written in WP-6.7 | |
-| R5 | to be written in WP-6.7 | |
-| R6 | to be written in WP-6.7 | |
-| R7 | to be written in WP-6.7 | |
-| R8 | to be written in WP-6.7 | |
-| R9 | to be written in WP-6.7 | |
-| R10 | to be written in WP-6.7 | |
-| R11 | to be written in WP-6.7 | |
-| R12 | to be written in WP-6.7 | |
-| R13 | to be written in WP-6.7 | |
-| R14 | to be written in WP-6.7 | |
+| R1 | `crates/model/src/scale.rs`, `the_list_holds_sixteen_scales_in_order`; `crates/shell-spec/src/scales.rs`, `the_list_holds_every_scale_with_its_steps`; `crates/ui/tests/scales.rs`, `the_scale_name_chooser_lists_the_scale_list_and_sets_one` | unit |
+| R2 | `crates/model/src/scale.rs`, `a_key_in_the_scale_moves_by_degrees`, `a_key_outside_the_scale_keeps_its_distance`, `a_move_that_leaves_the_keyboard_is_refused`, `the_nearest_note_is_the_lower_of_two`, `a_scale_off_is_the_chromatic_one`, `moving_by_degrees_and_back_keeps_the_key_in_the_scale`, `the_chromatic_scale_moves_by_semitones`, `the_nearest_note_is_in_the_scale` | unit, property |
+| R3 | `crates/model/tests/scales.rs`, `every_kind_of_clip_carries_a_scale` | unit |
+| R4 | `crates/engine/tests/midi_clips.rs`, `a_clip_s_scale_doesnt_change_what_it_plays` | unit |
+| R5 | `crates/model/tests/scales.rs`, `a_clip_set_scale_is_one_undo_step`, `a_clip_set_scale_leaves_the_values_it_is_not_given`, `a_clip_set_scale_refuses_a_bad_name_or_root` | unit |
+| R6 | `crates/ui/tests/scales.rs`, `a_mixed_selection_shows_an_asterisk_and_a_partly_filled_switch`; `crates/model/tests/scales.rs`, `a_clip_set_scale_leaves_the_values_it_is_not_given` | unit |
+| R7 | `crates/model/tests/scales.rs`, `a_new_clip_takes_the_set_s_current_scale`, `a_clip_created_with_a_scale_keeps_it`; `crates/shell/tests/scales.rs`, `every_clip_making_command_takes_the_current_scale`, `a_clip_made_by_the_model_takes_the_current_scale`, `a_copy_keeps_its_source_s_scale`; `crates/shell/tests/recording.rs`, `a_recorded_clip_takes_the_current_scale`; `crates/shell/tests/session_recording.rs`, `a_session_recording_takes_the_current_scale`; `crates/shell/tests/capture_midi.rs`, `a_captured_clip_takes_the_current_scale`; `crates/shell/tests/midi_files.rs`, `an_imported_clip_takes_the_current_scale`; `crates/shell/tests/browser.rs`, `a_dropped_audio_file_takes_the_current_scale`; `crates/shell/tests/slice_to_midi.rs`, `a_sliced_track_s_clip_takes_the_current_scale`; `crates/shell/tests/audio_editing.rs`, `a_consolidated_clip_keeps_its_first_source_s_scale` | unit |
+| R8 | `crates/model/tests/scales.rs`, `the_set_s_current_scale_is_saved_and_loaded_back`, `a_set_saved_before_the_scales_loads_unchanged`, `an_unknown_saved_scale_name_loads_as_major`; `crates/cli/tests/older_sets.rs`, `a_set_saved_before_the_scales_loads_unchanged` | unit |
+| R9 | `crates/model/tests/scales.rs`, `the_set_s_current_scale_is_saved_and_loaded_back`; `crates/ui/tests/scales.rs`, `the_three_scale_controls_are_live_and_in_the_control_bar`, `the_root_note_chooser_lists_the_twelve_roots_and_sets_one`; `crates/ui/tests/layout.rs`, `each_control_starts_where_layout_md_measured_it` | unit |
+| R10 | `crates/shell/tests/scales.rs`, `selecting_a_clip_makes_its_scale_the_current_scale`, `a_change_to_the_shown_clip_s_scale_changes_the_current_scale`, `an_agent_s_scale_change_changes_the_current_scale` | unit |
+| R11 | `crates/shell/tests/scales.rs`, `a_launched_clip_makes_its_scale_the_current_scale`, `the_playhead_entering_a_clip_makes_its_scale_the_current_scale` | unit |
+| R12 | `crates/shell/tests/scales.rs`, `selecting_a_clip_makes_its_scale_the_current_scale`; `crates/model/tests/scales.rs`, `the_current_scale_following_a_selection_is_no_undo_step`; `crates/ui/tests/scales.rs`, `the_scale_mode_switch_changes_the_selected_clips_scale` | unit |
+| R13 | `crates/agent/tests/readback.rs`, `the_fixture_sets_a_non_default_value_of_every_saved_field`, `every_query_readback_the_command_table_names_is_in_a_real_full_result`; `crates/shell/tests/scales.rs`, `the_scale_list_is_read_by_its_id` | unit |
+| R14 | `crates/ui/tests/scales.rs`, `the_three_scale_controls_are_live_and_in_the_control_bar`, `the_scale_controls_take_the_keyboard_focus` | unit |
 | R15 | to be written in WP-6.8 | |
 | R16 | to be written in WP-6.8 | |
 | R17 | to be written in WP-6.8 | |

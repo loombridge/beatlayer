@@ -167,14 +167,19 @@ fn discovery_lists_areas_searches_and_describes_with_schemas() {
         ids,
         [
             "track.add_take_lane",
+            "track.bounce_in_place",
+            "track.bounce_to_new_track",
             "track.clear_frozen",
             "track.create",
+            "track.create_bounced_track",
             "track.delete",
             "track.duplicate_without_clips",
             "track.freeze",
             "track.group",
             "track.move",
+            "track.paste_bounced_audio",
             "track.rename",
+            "track.set_bounced",
             "track.set_devices_enabled",
             "track.set_frozen",
             "track.unfreeze",
@@ -1194,6 +1199,162 @@ fn an_agent_quantises_and_transposes_notes_by_command() {
     );
     assert_eq!(moved["undo_step"], "test-agent: Transpose down");
     assert_eq!(agent_notes(&mut client)[1].0, 108, "an octave down");
+}
+
+#[test]
+fn an_agent_copies_pastes_and_duplicates_notes_by_command() {
+    // Spec: piano-roll R28, R29, R31. The note clipboard's commands run by
+    // ID through the agent API, and the query tool reads the notes back.
+    // The agent is autonomous, so it may run the destructive Cut.
+    let mut client = headless(true);
+    let created = call(
+        &mut client,
+        "run",
+        json!({ "label": "A clip of notes", "commands": [
+            { "command": "track.create",
+              "args": { "id": {"$new": "notes"}, "kind": "midi", "name": "Notes",
+                        "index": 0 } },
+            { "command": "clip.create",
+              "args": { "track": {"$ref": "notes"},
+                        "clip": { "id": {"$new": "clip"}, "name": "Notes", "start": 0,
+                                  "length": 705_600, "mute": false,
+                                  "data": { "midi": { "notes": [
+                                      { "key": 60, "velocity": 100, "start": 0,
+                                        "length": 480 },
+                                      { "key": 120, "velocity": 100, "start": 500,
+                                        "length": 480 }
+                                  ] } } } } },
+        ] }),
+    );
+    let clip = created["ids"]["clip"].as_u64().unwrap();
+    // The Clip View shows the clip, so its notes can be selected.
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [
+            { "command": "arrangement.select_clips", "args": { "clips": [clip] } },
+        ] }),
+    );
+    // Select the notes, and copy them to the note clipboard. The view's
+    // commands run in a call of their own.
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [
+            { "command": "clip_view.select_notes",
+              "args": { "clip": clip, "notes": [0, 1] } },
+        ] }),
+    );
+    let copied = call(
+        &mut client,
+        "run",
+        json!({ "label": "Copy the notes", "commands": [
+            { "command": "note.copy", "args": { "clip": clip } },
+        ] }),
+    );
+    assert_eq!(copied["ran"], 1);
+    assert!(
+        copied["undo_step"].is_null(),
+        "copying changes nothing, so it records no step"
+    );
+    // The insert marker, and a paste at it.
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [
+            { "command": "clip_view.set_insert_marker",
+              "args": { "clip": clip, "beat": 600 } },
+        ] }),
+    );
+    // `view.state` reads the insert marker and the time selection back:
+    // placing the marker clears the selection.
+    let state = call(
+        &mut client,
+        "run",
+        json!({ "commands": [ { "command": "view.state" } ] }),
+    );
+    let view = &state["results"][0]["result"]["clip_view"];
+    assert_eq!(view["insert_marker"], 600);
+    assert!(
+        view["time_selection"].is_null(),
+        "placing the marker clears the time selection"
+    );
+    let pasted = call(
+        &mut client,
+        "run",
+        json!({ "label": "Paste the notes", "commands": [
+            { "command": "note.paste", "args": { "clip": clip } },
+        ] }),
+    );
+    assert_eq!(pasted["undo_step"], "test-agent: Paste the notes");
+    // The pasted notes become the time selection, as selecting notes does.
+    let state = call(
+        &mut client,
+        "run",
+        json!({ "commands": [ { "command": "view.state" } ] }),
+    );
+    assert_eq!(
+        state["results"][0]["result"]["clip_view"]["time_selection"],
+        json!([600, 1580])
+    );
+    // The query tool reads the notes back: the copies keep their pitches and
+    // their spacing.
+    let queried = call(
+        &mut client,
+        "query",
+        json!({ "id": clip, "detail": "full" }),
+    );
+    let notes = queried["content"]["notes"]["items"].as_array().unwrap();
+    assert_eq!(notes.len(), 4, "the pasted notes are there: {notes:?}");
+    assert_eq!(notes[2]["key"], 60, "the first copy keeps its pitch");
+    assert_eq!(notes[2]["start"], 600, "and starts at the insert marker");
+    assert_eq!(notes[3]["key"], 120, "the second copy keeps its pitch");
+    // A duplicate lays another copy straight after the time selection.
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [
+            { "command": "clip_view.select_notes",
+              "args": { "clip": clip, "notes": [0, 1] } },
+        ] }),
+    );
+    call(
+        &mut client,
+        "run",
+        json!({ "label": "Duplicate the notes", "commands": [
+            { "command": "note.duplicate", "args": { "clip": clip } },
+        ] }),
+    );
+    let queried = call(
+        &mut client,
+        "query",
+        json!({ "id": clip, "detail": "full" }),
+    );
+    let notes = queried["content"]["notes"]["items"].as_array().unwrap();
+    assert_eq!(notes.len(), 6, "and another one: {notes:?}");
+    // Cut copies the notes and deletes them.
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [
+            { "command": "clip_view.select_notes",
+              "args": { "clip": clip, "notes": [0, 1] } },
+        ] }),
+    );
+    call(
+        &mut client,
+        "run",
+        json!({ "label": "Cut the notes", "commands": [
+            { "command": "note.cut", "args": { "clip": clip } },
+        ] }),
+    );
+    let queried = call(
+        &mut client,
+        "query",
+        json!({ "id": clip, "detail": "full" }),
+    );
+    let notes = queried["content"]["notes"]["items"].as_array().unwrap();
+    assert_eq!(notes.len(), 4, "the cut notes are gone: {notes:?}");
 }
 
 /// The MIDI clips' notes, as (key, start) pairs by start then key.

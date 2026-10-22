@@ -23,11 +23,14 @@ use bl_model::{
     AutomationTarget, ClipData, ClipFolds, ClipId, Command, Document, Editor, MidiData, Note,
 };
 use bl_shell_spec::notes::{
-    self as ids, AddNoteArgs, ClipTab, ClipViewState, DeleteNotesArgs, MoveNotesArgs,
-    NoteEditResult, NoteField, NoteSelectMode, QuantizeNotesArgs, QuantizeSettings,
+    self as ids, AddNoteArgs, ClipTab, ClipViewState, CopyNotesArgs, DeleteNotesArgs,
+    DuplicateNotesArgs, MoveNotesArgs, NoteClipboardState, NoteEditResult, NoteField,
+    NoteSelectMode, NoteSelection, PasteNotesArgs, QuantizeNotesArgs, QuantizeSettings,
     QuantizeSettingsArgs, QuantizeTarget, RampValueArgs, ResizeNotesArgs, SelectNotesArgs,
     SetValueArgs,
 };
+use bl_shell_spec::sample_editor as sample_ids;
+use bl_shell_spec::sample_editor::{SelectTimeArgs, SetInsertMarkerArgs};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -70,6 +73,169 @@ pub fn notes_in_order(midi: &MidiData) -> Vec<Note> {
     let mut notes: Vec<Note> = midi.notes.iter().cloned().collect();
     notes.sort_by_key(|note| (note.start, note.key));
     notes
+}
+
+/// A clip's span of its contents, in ticks: the contents tick the editor
+/// shows at its left edge, and the one at its right edge (piano-roll R4).
+#[must_use]
+pub fn span(midi: &MidiData, length: Ticks) -> (Ticks, Ticks) {
+    (midi.start, midi.start + length)
+}
+
+/// The place of the note whose start is nearest `at`: the nearest start,
+/// and of the notes that start together the lowest pitch (piano-roll R25).
+fn nearest(ordered: &[Note], at: Ticks) -> Option<u32> {
+    let start = ordered
+        .iter()
+        .map(|note| (note.start - at).abs())
+        .min()
+        .and_then(|distance| {
+            ordered
+                .iter()
+                .find(|note| (note.start - at).abs() == distance)
+                .map(|note| note.start)
+        })?;
+    ordered
+        .iter()
+        .position(|note| note.start == start)
+        .and_then(|place| u32::try_from(place).ok())
+}
+
+/// The place of the note before or after `place` in the clip's order, at
+/// the same pitch or at any pitch (piano-roll R25).
+fn neighbour(ordered: &[Note], place: u32, same_pitch: bool, forward: bool) -> Option<u32> {
+    let note = ordered.get(place as usize)?;
+    let at = place as usize;
+    let found = if forward {
+        ordered
+            .iter()
+            .enumerate()
+            .skip(at + 1)
+            .find(|(_, other)| !same_pitch || other.key == note.key)
+    } else {
+        ordered
+            .iter()
+            .enumerate()
+            .take(at)
+            .rev()
+            .find(|(_, other)| !same_pitch || other.key == note.key)
+    };
+    found.map(|(place, _)| u32::try_from(place).unwrap_or(u32::MAX))
+}
+
+/// The place of the note the keyboard moves from: the last of the selected
+/// notes in the clip's order.
+fn current(selected: &[u32]) -> Option<u32> {
+    selected.iter().copied().max()
+}
+
+/// The notes `what` selects in `ordered`, as the keyboard and the piano
+/// ruler reach them (piano-roll R25, R26).
+fn select_by(
+    what: NoteSelection,
+    ordered: &[Note],
+    span: (Ticks, Ticks),
+    insert: Option<Ticks>,
+    selected: &[u32],
+    add: bool,
+) -> Vec<u32> {
+    let in_span = |note: &Note| note.start >= span.0 && note.start < span.1;
+    let places = |notes: Vec<usize>| {
+        notes
+            .into_iter()
+            .filter_map(|place| u32::try_from(place).ok())
+            .collect::<Vec<u32>>()
+    };
+    let chosen: Vec<u32> = match what {
+        NoteSelection::Nearest => nearest(ordered, insert.unwrap_or(span.0))
+            .into_iter()
+            .collect(),
+        NoteSelection::Previous => current(selected)
+            .and_then(|place| neighbour(ordered, place, false, false))
+            .into_iter()
+            .collect(),
+        NoteSelection::Next => current(selected)
+            .and_then(|place| neighbour(ordered, place, false, true))
+            .into_iter()
+            .collect(),
+        NoteSelection::SamePitchPrevious => current(selected)
+            .and_then(|place| neighbour(ordered, place, true, false))
+            .into_iter()
+            .collect(),
+        NoteSelection::SamePitchNext => current(selected)
+            .and_then(|place| neighbour(ordered, place, true, true))
+            .into_iter()
+            .collect(),
+        NoteSelection::All => places(
+            ordered
+                .iter()
+                .enumerate()
+                .filter(|(_, note)| in_span(note))
+                .map(|(place, _)| place)
+                .collect(),
+        ),
+        NoteSelection::Key(key) => places(
+            ordered
+                .iter()
+                .enumerate()
+                .filter(|(_, note)| note.key == key && in_span(note))
+                .map(|(place, _)| place)
+                .collect(),
+        ),
+    };
+    if !add {
+        // There's no such note to jump to: the selection stays.
+        if chosen.is_empty()
+            && matches!(
+                what,
+                NoteSelection::Nearest
+                    | NoteSelection::Previous
+                    | NoteSelection::Next
+                    | NoteSelection::SamePitchPrevious
+                    | NoteSelection::SamePitchNext
+            )
+        {
+            return selected.to_vec();
+        }
+        return chosen;
+    }
+    // A key in the piano ruler takes its notes out of the selection when
+    // they are all selected (piano-roll R26).
+    if let NoteSelection::Key(_) = what
+        && !chosen.is_empty()
+        && chosen.iter().all(|place| selected.contains(place))
+    {
+        return selected
+            .iter()
+            .copied()
+            .filter(|place| !chosen.contains(place))
+            .collect();
+    }
+    let mut out = selected.to_vec();
+    for place in chosen {
+        if !out.contains(&place) {
+            out.push(place);
+        }
+    }
+    out.sort_unstable();
+    out
+}
+
+/// The time selection the notes at `places` cover: from their earliest
+/// start to their latest end (piano-roll R24).
+fn span_of(doc: &Document, clip: ClipId, places: &[u32]) -> Option<(Ticks, Ticks)> {
+    let midi = match &doc.clip(clip)?.data {
+        ClipData::Midi(midi) => midi,
+        ClipData::Audio(_) => return None,
+    };
+    let ordered = notes_in_order(midi);
+    let notes: Vec<&Note> = places
+        .iter()
+        .filter_map(|place| ordered.get(*place as usize))
+        .collect();
+    let from = notes.iter().map(|note| note.start).min()?;
+    let to = notes.iter().map(|note| note.start + note.length).max()?;
+    Some((from, to))
 }
 
 /// The furthest a drag may move `notes`: in time, so no note starts before
@@ -144,9 +310,72 @@ fn set_note_value(note: &mut Note, field: NoteField, value: f64) {
     }
 }
 
+/// The notes on the note clipboard, apart from the Arrangement's clip
+/// clipboard: the notes themselves, with their starts counting from the
+/// earliest of them, so pasting them keeps their spacing.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct NoteClipboard {
+    /// The notes, with their starts counting from the earliest of them.
+    notes: Vec<Note>,
+}
+
+impl NoteClipboard {
+    /// The clipboard holding `notes`, with their starts counting from the
+    /// earliest of them.
+    fn of(notes: &[Note]) -> Self {
+        let earliest = notes
+            .iter()
+            .map(|note| note.start)
+            .min()
+            .unwrap_or(Ticks::ZERO);
+        let mut notes: Vec<Note> = notes.to_vec();
+        for note in &mut notes {
+            note.start -= earliest;
+        }
+        notes.sort_by_key(|note| (note.start, note.key));
+        Self { notes }
+    }
+
+    /// Whether it holds no notes.
+    fn is_empty(&self) -> bool {
+        self.notes.is_empty()
+    }
+
+    /// The notes to put into a clip at `at`: the copied notes, with the
+    /// earliest of them starting at `at`.
+    fn at(&self, at: Ticks) -> Vec<Note> {
+        self.notes
+            .iter()
+            .cloned()
+            .map(|mut note| {
+                note.start += at;
+                note
+            })
+            .collect()
+    }
+
+    /// How long the copied notes last, from the earliest of them.
+    fn length(&self) -> Ticks {
+        self.notes
+            .iter()
+            .map(|note| note.start + note.length)
+            .max()
+            .unwrap_or(Ticks::ZERO)
+    }
+
+    /// What it holds, as `note.copy` reports it.
+    fn state(&self) -> NoteClipboardState {
+        NoteClipboardState {
+            notes: self.notes.len(),
+            length: self.length(),
+        }
+    }
+}
+
 /// What the Clip View shows: whether it's open, Draw Mode, the lane's value,
 /// the folded editors, the notes selected in the clip its note editor shows
-/// (WP-2.3), and its Quantize settings.
+/// (WP-2.3), its insert marker and time selection, and its Quantize
+/// settings.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ClipView {
     /// Whether the Clip View shows in the detail area.
@@ -163,6 +392,18 @@ pub struct ClipView {
     /// clip.
     selected_clip: Option<ClipId>,
     selected: Vec<u32>,
+    /// The clip whose insert marker and time selection the editor holds;
+    /// they belong to the clip the editor shows.
+    marked_clip: Option<ClipId>,
+    /// The insert marker, in ticks from the beginning of the clip's
+    /// contents.
+    insert: Option<Ticks>,
+    /// The time selection, in ticks from the beginning of the clip's
+    /// contents.
+    time: Option<(Ticks, Ticks)>,
+    /// The notes on the note clipboard, apart from the Arrangement's clip
+    /// clipboard.
+    clipboard: NoteClipboard,
     /// What Quantize uses when its arguments leave them out. View state,
     /// like Draw Mode: not part of the set.
     quantize: QuantizeSettings,
@@ -396,6 +637,57 @@ impl ClipView {
         self.selected = places;
     }
 
+    /// The insert marker, in ticks from the beginning of the shown clip's
+    /// contents, when the editor holds one.
+    #[must_use]
+    pub fn insert_marker(&self, doc: &Document, arrangement: &ArrangementView) -> Option<Ticks> {
+        if self.marked_clip == self.shown_clip(doc, arrangement) {
+            self.insert
+        } else {
+            None
+        }
+    }
+
+    /// The time selection's start and end, in ticks from the beginning of
+    /// the shown clip's contents, when the editor holds one.
+    #[must_use]
+    pub fn time_selection(
+        &self,
+        doc: &Document,
+        arrangement: &ArrangementView,
+    ) -> Option<(Ticks, Ticks)> {
+        if self.marked_clip == self.shown_clip(doc, arrangement) {
+            self.time
+        } else {
+            None
+        }
+    }
+
+    /// Puts the insert marker at `at`, in ticks from the beginning of the
+    /// clip's contents, and takes the time selection away: moving the
+    /// marker clears it (piano-roll R24).
+    pub fn set_insert_marker(&mut self, clip: ClipId, at: Option<Ticks>) {
+        self.marked_clip = Some(clip);
+        self.insert = at;
+        if at.is_some() {
+            self.time = None;
+        }
+    }
+
+    /// Makes the time selection span `from` to `to`, in ticks from the
+    /// beginning of the clip's contents, or takes it away.
+    pub fn set_time_selection(&mut self, clip: ClipId, span: Option<(Ticks, Ticks)>) {
+        self.marked_clip = Some(clip);
+        self.time = span;
+    }
+
+    /// The notes on the note clipboard, apart from the Arrangement's clip
+    /// clipboard.
+    #[must_use]
+    pub fn note_clipboard(&self) -> &NoteClipboard {
+        &self.clipboard
+    }
+
     /// What the view shows, as a command reports it.
     #[must_use]
     pub fn state(&self, doc: &Document, arrangement: &ArrangementView) -> ClipViewState {
@@ -405,6 +697,8 @@ impl ClipView {
             draw_mode: self.draw_mode,
             clip,
             selected: self.selected_notes(doc, arrangement).to_vec(),
+            insert_marker: self.insert_marker(doc, arrangement),
+            time_selection: self.time_selection(doc, arrangement),
             lane: self.lane,
             folded: clip.is_some_and(|clip| self.is_folded(clip)),
             tab: self.tab,
@@ -416,6 +710,9 @@ impl ClipView {
     pub(crate) fn forget_selection(&mut self) {
         self.selected_clip = None;
         self.selected.clear();
+        self.marked_clip = None;
+        self.insert = None;
+        self.time = None;
         self.session_clip = None;
         self.envelope = None;
         self.sample = SampleView::default();
@@ -517,6 +814,74 @@ pub fn label(id: &str) -> &'static str {
     }
 }
 
+/// A tick of a MIDI clip's contents, from the number an argument gives.
+fn tick_of(value: f64) -> Result<Ticks, EditFailure> {
+    if !value.is_finite() {
+        return Err(invalid("a tick must be a whole number of ticks"));
+    }
+    Ok(Ticks(value.round() as i64))
+}
+
+/// Runs the Clip View's view commands for a MIDI clip: its insert marker
+/// and its time selection (`clip_view.set_insert_marker` and
+/// `clip_view.select_time`, which the Sample Editor's editor shares). The
+/// marker's place and the selection are ticks of the clip's contents
+/// (piano-roll R23, R24, R31).
+///
+/// # Errors
+///
+/// [`EditFailure`] saying why nothing changed.
+pub fn run_view(
+    id: &str,
+    args: Value,
+    doc: &Document,
+    view: &mut ClipView,
+    arrangement: &ArrangementView,
+) -> Result<Value, EditFailure> {
+    match id {
+        sample_ids::SET_INSERT_MARKER => {
+            let SetInsertMarkerArgs { clip, time, beat } = parse(args)?;
+            if time.is_some() && beat.is_some() {
+                return Err(invalid("give `time` or `beat`, not both"));
+            }
+            if time.is_some() {
+                return Err(invalid(
+                    "a MIDI clip's insert marker is a tick of its contents: give `beat`",
+                ));
+            }
+            let (clip, midi) = clip_and_data(doc, view, arrangement, clip)?;
+            let length = doc.clip(clip).map_or(Ticks::ZERO, |clip| clip.length);
+            let (from, to) = span(&midi, length);
+            // The marker stays inside the clip's span (piano-roll R23).
+            let at = beat.map(|beat| beat.clamp(from, to));
+            view.set_insert_marker(clip, at);
+            Ok(to_value(&view.state(doc, arrangement)))
+        }
+        sample_ids::SELECT_TIME => {
+            let SelectTimeArgs {
+                clip,
+                start,
+                end,
+                ticks: _,
+            } = parse(args)?;
+            let (clip, _) = clip_and_data(doc, view, arrangement, clip)?;
+            let span = match (start, end) {
+                (None, None) => None,
+                (Some(start), Some(end)) => {
+                    if start > end {
+                        return Err(invalid("`start` must be before `end`"));
+                    }
+                    Some((tick_of(start)?, tick_of(end)?))
+                }
+                _ => return Err(invalid("give both `start` and `end`, or neither")),
+            };
+            view.set_time_selection(clip, span);
+            Ok(to_value(&view.state(doc, arrangement)))
+        }
+        other => Err(invalid(format!("`{other}` isn't a Clip View command"))),
+    }
+}
+
 /// Runs a note command, as `Shell::run` does: an edit returns a
 /// [`NoteEditResult`], and a selection the view's state.
 ///
@@ -538,7 +903,13 @@ pub fn run(
     let doc = &before;
     match id {
         ids::SELECT_NOTES => {
-            let SelectNotesArgs { clip, notes, mode } = parse(args)?;
+            let SelectNotesArgs {
+                clip,
+                notes,
+                mode,
+                select,
+                add,
+            } = parse(args)?;
             let (clip, midi) = clip_and_data(doc, view, arrangement, clip)?;
             let ordered = notes_in_order(&midi);
             for place in &notes {
@@ -550,20 +921,39 @@ pub fn run(
                 }
             }
             let mut selected = view.selected_notes(doc, arrangement).to_vec();
-            match mode {
-                NoteSelectMode::Replace => selected = notes,
-                NoteSelectMode::Toggle => {
-                    for place in notes {
-                        match selected.iter().position(|p| *p == place) {
-                            Some(at) => {
-                                selected.remove(at);
+            match select {
+                // The notes the keyboard and the piano ruler reach
+                // (piano-roll R25, R26).
+                Some(what) => {
+                    let length = doc.clip(clip).map_or(Ticks::ZERO, |clip| clip.length);
+                    selected = select_by(
+                        what,
+                        &ordered,
+                        span(&midi, length),
+                        view.insert_marker(doc, arrangement),
+                        &selected,
+                        add,
+                    );
+                }
+                None => match mode {
+                    NoteSelectMode::Replace => selected = notes,
+                    NoteSelectMode::Toggle => {
+                        for place in notes {
+                            match selected.iter().position(|p| *p == place) {
+                                Some(at) => {
+                                    selected.remove(at);
+                                }
+                                None => selected.push(place),
                             }
-                            None => selected.push(place),
                         }
                     }
-                }
+                },
             }
-            view.select(clip, selected);
+            view.select(clip, selected.clone());
+            // The time selection follows the notes (piano-roll R24).
+            if let Some(span) = span_of(doc, clip, &selected) {
+                view.set_time_selection(clip, Some(span));
+            }
             Ok(to_value(&view.state(doc, arrangement)))
         }
         ids::ADD_NOTE => {
@@ -608,7 +998,10 @@ pub fn run(
             let DeleteNotesArgs { clip, notes } = parse(args)?;
             let (clip, midi) = clip_and_data(doc, view, arrangement, clip)?;
             let ordered = notes_in_order(&midi);
-            let places = places_or_selected(view, doc, arrangement, clip, notes, ordered.len())?;
+            // The notes to delete: those given, or the selected ones, or
+            // with none selected the notes in the time selection
+            // (piano-roll R28).
+            let places = copied_places(view, doc, arrangement, clip, &ordered, notes)?;
             let (_, recorded) = transaction(editor, "Delete notes", |editor| {
                 let mut keep = ordered.clone();
                 let mut at = places.clone();
@@ -631,21 +1024,32 @@ pub fn run(
                 notes,
                 by,
                 semitones,
+                copy,
             } = parse(args)?;
             let (clip, midi) = clip_and_data(doc, view, arrangement, clip)?;
             let ordered = notes_in_order(&midi);
             let places = places_or_selected(view, doc, arrangement, clip, notes, ordered.len())?;
             let by = by.unwrap_or_default();
             let semitones = semitones.unwrap_or(0);
+            let copy = copy.unwrap_or(false);
             let (after, recorded) = transaction(editor, "Move notes", |editor| {
                 let mut moved = ordered.clone();
                 let mut moved_notes = Vec::with_capacity(places.len());
                 for place in &places {
-                    let mut note = moved[*place as usize].clone();
-                    note.start = note_start(&note, by)?;
-                    note.key = note_key(&note, semitones)?;
-                    moved[*place as usize] = note.clone();
-                    moved_notes.push(note);
+                    let note = &ordered[*place as usize];
+                    let mut moved_note = note.clone();
+                    moved_note.start = note_start(note, by)?;
+                    moved_note.key = note_key(note, semitones)?;
+                    moved_notes.push(moved_note);
+                }
+                if copy {
+                    // The copies land where the notes would have gone, and
+                    // the originals stay (piano-roll R29).
+                    moved.extend(moved_notes.iter().cloned());
+                } else {
+                    for (place, note) in places.iter().zip(&moved_notes) {
+                        moved[*place as usize] = note.clone();
+                    }
                 }
                 moved.sort_by_key(|note| (note.start, note.key));
                 let places: Vec<u32> = moved_notes
@@ -656,6 +1060,10 @@ pub fn run(
                 Ok(places)
             })?;
             view.select(clip, after.clone());
+            // The time selection follows the notes (piano-roll R24, R27).
+            if let Some(span) = span_of(editor.document(), clip, &after) {
+                view.set_time_selection(clip, Some(span));
+            }
             Ok(to_value(&NoteEditResult {
                 notes: after.clone(),
                 selected: after,
@@ -685,6 +1093,10 @@ pub fn run(
                 Ok(places_after)
             })?;
             view.select(clip, after.clone());
+            // The time selection follows the notes (piano-roll R24, R27).
+            if let Some(span) = span_of(editor.document(), clip, &after) {
+                view.set_time_selection(clip, Some(span));
+            }
             Ok(to_value(&NoteEditResult {
                 notes: after.clone(),
                 selected: after,
@@ -812,8 +1224,152 @@ pub fn run(
                 undo_step: recorded,
             }))
         }
+        ids::COPY | ids::CUT => {
+            let CopyNotesArgs { clip, notes } = parse(args)?;
+            let (clip, midi) = clip_and_data(doc, view, arrangement, clip)?;
+            let ordered = notes_in_order(&midi);
+            let places = copied_places(view, doc, arrangement, clip, &ordered, notes)?;
+            let copied: Vec<Note> = places
+                .iter()
+                .filter_map(|place| ordered.get(*place as usize))
+                .cloned()
+                .collect();
+            view.clipboard = NoteClipboard::of(&copied);
+            let mut recorded = false;
+            if id == ids::CUT {
+                // Cut copies the notes and deletes them, as one undo step.
+                let (_, step) = transaction(editor, "Cut notes", |editor| {
+                    let mut keep = ordered.clone();
+                    let mut at = places.clone();
+                    at.sort_unstable();
+                    for place in at.iter().rev() {
+                        keep.remove(*place as usize);
+                    }
+                    set_notes(editor, clip, &midi, keep)
+                })?;
+                recorded = step;
+                view.select(clip, Vec::new());
+            }
+            if id == ids::COPY {
+                Ok(to_value(&view.clipboard.state()))
+            } else {
+                Ok(to_value(&NoteEditResult {
+                    notes: Vec::new(),
+                    selected: Vec::new(),
+                    undo_step: recorded,
+                }))
+            }
+        }
+        ids::PASTE => {
+            let PasteNotesArgs { clip, at } = parse(args)?;
+            let (clip, midi) = clip_and_data(doc, view, arrangement, clip)?;
+            if view.clipboard.is_empty() {
+                return Err(unavailable("there is nothing on the note clipboard"));
+            }
+            // The paste lands at the insert marker, or at the time
+            // selection's start (piano-roll R28).
+            let at = at
+                .or_else(|| view.insert_marker(doc, arrangement))
+                .or_else(|| view.time_selection(doc, arrangement).map(|(from, _)| from))
+                .ok_or_else(|| unavailable("there is no insert marker to paste at"))?;
+            let pasted = view.clipboard.at(at);
+            let (after, recorded) = transaction(editor, "Paste notes", |editor| {
+                let mut notes = notes_in_order(&midi);
+                notes.extend(pasted.iter().cloned());
+                notes.sort_by_key(|note| (note.start, note.key));
+                let places: Vec<u32> = pasted.iter().map(|note| place_of(&notes, note)).collect();
+                set_notes(editor, clip, &midi, notes)?;
+                Ok(places)
+            })?;
+            view.select(clip, after.clone());
+            if let Some(span) = span_of(editor.document(), clip, &after) {
+                view.set_time_selection(clip, Some(span));
+            }
+            Ok(to_value(&NoteEditResult {
+                notes: after.clone(),
+                selected: after,
+                undo_step: recorded,
+            }))
+        }
+        ids::DUPLICATE => {
+            let DuplicateNotesArgs { clip, notes } = parse(args)?;
+            let (clip, midi) = clip_and_data(doc, view, arrangement, clip)?;
+            let ordered = notes_in_order(&midi);
+            let places = copied_places(view, doc, arrangement, clip, &ordered, notes)?;
+            let copied: Vec<Note> = places
+                .iter()
+                .filter_map(|place| ordered.get(*place as usize))
+                .cloned()
+                .collect();
+            // The copy lands straight after the time selection, and the time
+            // selection moves onto it (piano-roll R28).
+            let own = (
+                copied
+                    .iter()
+                    .map(|note| note.start)
+                    .min()
+                    .unwrap_or(Ticks::ZERO),
+                copied
+                    .iter()
+                    .map(|note| note.start + note.length)
+                    .max()
+                    .unwrap_or(Ticks::ZERO),
+            );
+            let (_, to) = view.time_selection(doc, arrangement).unwrap_or(own);
+            let pasted = NoteClipboard::of(&copied).at(to);
+            let (after, recorded) = transaction(editor, "Duplicate notes", |editor| {
+                let mut notes = notes_in_order(&midi);
+                notes.extend(pasted.iter().cloned());
+                notes.sort_by_key(|note| (note.start, note.key));
+                let places: Vec<u32> = pasted.iter().map(|note| place_of(&notes, note)).collect();
+                set_notes(editor, clip, &midi, notes)?;
+                Ok(places)
+            })?;
+            view.select(clip, after.clone());
+            if let Some(span) = span_of(editor.document(), clip, &after) {
+                view.set_time_selection(clip, Some(span));
+            }
+            Ok(to_value(&NoteEditResult {
+                notes: after.clone(),
+                selected: after,
+                undo_step: recorded,
+            }))
+        }
         other => Err(invalid(format!("`{other}` isn't a note command"))),
     }
+}
+
+/// The notes the clipboard commands act on: those given, or the selected
+/// ones, or with none selected the notes that start inside the time
+/// selection (piano-roll R28).
+fn copied_places(
+    view: &ClipView,
+    doc: &Document,
+    arrangement: &ArrangementView,
+    clip: ClipId,
+    ordered: &[Note],
+    notes: Option<Vec<u32>>,
+) -> Result<Vec<u32>, EditFailure> {
+    if let Some(places) = notes {
+        return places_or_selected(view, doc, arrangement, clip, Some(places), ordered.len());
+    }
+    let selected = view.selected_notes(doc, arrangement);
+    if !selected.is_empty() {
+        return Ok(selected.to_vec());
+    }
+    let Some((from, to)) = view.time_selection(doc, arrangement) else {
+        return Err(unavailable("no notes are selected"));
+    };
+    let inside: Vec<u32> = ordered
+        .iter()
+        .enumerate()
+        .filter(|(_, note)| note.start >= from && note.start < to)
+        .map(|(place, _)| u32::try_from(place).unwrap_or(u32::MAX))
+        .collect();
+    if inside.is_empty() {
+        return Err(unavailable("no notes are selected"));
+    }
+    Ok(inside)
 }
 
 /// Checks a quantise grid: a spacing of ticks, always positive.

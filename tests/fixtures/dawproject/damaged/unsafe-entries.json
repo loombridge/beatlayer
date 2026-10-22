@@ -1,0 +1,23 @@
+{
+  "application": "Fixture DAW 1.0",
+  "entries": [
+    {
+      "count": 1,
+      "did": "left out",
+      "what": "the entry `/absolute.wav`",
+      "where": "in the container"
+    },
+    {
+      "count": 1,
+      "did": "left out",
+      "what": "the entry `C:\\drive.wav`",
+      "where": "in the container"
+    },
+    {
+      "count": 1,
+      "did": "left out",
+      "what": "the entry `audio/bzip2.wav`",
+      "where": "in the container"
+    }
+  ]
+}

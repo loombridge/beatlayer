@@ -76,9 +76,12 @@ pub fn shown_tracks<'a>(
     })
 }
 
-/// The pinned rows under the scrolling ones: the return tracks, then Main.
-pub fn pinned_tracks(doc: &Document) -> impl Iterator<Item = TrackId> + '_ {
-    doc.returns().chain(std::iter::once(doc.main_id()))
+/// The pinned rows under the scrolling ones: the return tracks, then Main,
+/// with the return tracks left out while they're hidden (arrangement-view
+/// R23).
+pub fn pinned_tracks(doc: &Document, show_returns: bool) -> impl Iterator<Item = TrackId> + '_ {
+    let returns = doc.returns().filter(move |_| show_returns);
+    returns.chain(std::iter::once(doc.main_id()))
 }
 
 /// The index of the first row whose bottom is below `y`, by binary search:

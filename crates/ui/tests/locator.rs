@@ -363,3 +363,51 @@ fn the_create_menus_item_reads_delete_while_a_locator_is_selected() {
     h.settle();
     assert_eq!(menu_item(&h, "M-CREATE-016").label, "Delete Locator");
 }
+
+#[test]
+fn cmd_r_renames_the_selected_locator_in_place() {
+    // Spec: time-editing R8. Cmd-R types the new name in the scrub area,
+    // and Return keeps it.
+    let mut h = Harness::with_title_bar(Window::Main);
+    h.shell.run(ids::ADD, json!({ "at": 2 * BAR })).unwrap();
+    h.settle();
+    let locator = locators(&h)[0].0;
+    h.shell
+        .run(ids::SELECT, json!({ "locators": [locator] }))
+        .unwrap();
+    h.settle();
+    h.key(Key::R, Modifiers::COMMAND);
+    h.settle();
+    h.frame(vec![Event::Text("Intro".to_owned())]);
+    h.key(Key::Enter, Modifiers::NONE);
+    h.settle();
+    let name = h.shell.editor().document().locators()[0].name.clone();
+    assert!(name.ends_with("Intro"), "the locator was renamed: {name}");
+}
+
+#[test]
+fn the_scrub_areas_add_locator_adds_one_where_it_was_right_clicked() {
+    // Spec: time-editing R3 (C-TIME-022).
+    let mut h = Harness::with_title_bar(Window::Main);
+    h.settle();
+    let layout = layout(&h);
+    let at = pos2(layout.scrub.left() + 100.0, layout.scrub.center().y);
+    right_click(&mut h, at);
+    let nodes = Harness::nodes(&h.settle());
+    let add = nodes
+        .iter()
+        .find(|node| node.label == "Add Locator")
+        .expect("the scrub area's menu has Add Locator");
+    let bounds = add.bounds.unwrap();
+    h.click(pos2(
+        ((bounds.x0 + bounds.x1) / 2.0) as f32,
+        ((bounds.y0 + bounds.y1) / 2.0) as f32,
+    ));
+    h.settle();
+    assert_eq!(locators(&h).len(), 1);
+    // The locator is where the area was right-clicked, on the editing grid.
+    let doc = h.shell.editor().document();
+    let horizontal = h.shell.arrangement().horizontal(doc);
+    let clicked = horizontal.at(f64::from(at.x - layout.scrub.left()));
+    assert_eq!(locators(&h)[0].1, h.shell.arrangement().snap(doc, clicked));
+}

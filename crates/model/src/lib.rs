@@ -57,9 +57,11 @@
 //!
 //! The rules taken from Live are in the tracks and undo spec.
 
+pub mod articulation;
 mod auto_warp;
 pub mod automation;
 pub mod base64;
+pub mod bounce;
 mod changes;
 mod clip;
 mod command;
@@ -86,12 +88,17 @@ pub mod registry;
 mod repr;
 mod routing;
 mod sample_edits;
+mod scale;
 mod scene;
 mod shared;
 mod track;
 mod warp;
 mod warp_settings;
 
+pub use articulation::{
+    ARTICULATION_MAP, Articulation, ArticulationOutput, ArticulationTrigger,
+    Entry as ArticulationEntry, List as ArticulationList, MAX_ARTICULATIONS, MAX_OUTPUTS,
+};
 pub use auto_warp::{
     ClipDefaults, ClipEdge, EVEN_LOOP_BARS, FileBeats, LOOP_BARS, WarpFrom, WarpPoint, loop_bpm,
     nearest_bars,
@@ -101,6 +108,7 @@ pub use automation::{
     envelope_value,
 };
 pub use bl_stretch::WarpMap;
+pub use bounce::{BouncedAutomation, BouncedTrack};
 pub use changes::{Change, ChangeSet};
 pub use clip::{
     AudioData, Clip, ClipData, ClipEnvelope, ClipFolds, EDGE_FADE_SECONDS, EnvelopeKind, MidiData,
@@ -114,7 +122,7 @@ pub use device::{
 pub use device_display::{DeviceDisplay, DisplayMarker, DisplayReading, DisplaySeries};
 pub use device_layout::DeviceLayout;
 pub use document::{ArrangementLoop, Document, MAX_CUE_VOLUME, Settings};
-pub use editor::{EditError, Editor};
+pub use editor::{EditError, Editor, HistoryStep, Maker};
 pub use error::ModelError;
 pub mod freeze;
 pub use external::{
@@ -150,6 +158,7 @@ pub use rack::{
 };
 pub use repr::{SavedSong, saved_schema};
 pub use sample_edits::{SampleEdit, SampleEditKind, SampleRange};
+pub use scale::{CHROMATIC, Scale, ScaleName};
 pub use scene::{DEFAULT_SCENE_COUNT, SCENE_TEMPO_MAX, SCENE_TEMPO_MIN, Scene};
 pub use track::{
     Channel, CrossfadeAssign, DeviceOutput, Input, MAX_TRACK_DELAY_MS, MAX_TRACK_DELAY_SAMPLES,

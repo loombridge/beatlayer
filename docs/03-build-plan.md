@@ -563,7 +563,7 @@ Total to 1.0: 256 packages planned in Phases 0 to 6, and about 110 estimated in 
 | 4.3 | done | 18 October 2026 | [#169](https://github.com/loombridge/beatlayer/pull/169); each audio file's transients found in the background and kept by content hash in an `Analysis` folder beside the peaks, a clip's transient edits saved with the set, `clip.transients` to read them, and markers over a range and pseudo-warp markers with `pin_neighbours`; [the spec](specs/warping.md) |
 | 4.4 | done | 19 October 2026 | [#220](https://github.com/loombridge/beatlayer/pull/220); Arrangement clips play Beats as segments at transients, warp markers or a grid, filled by Transient Loop Mode and shaped by Transient Envelope, neutral to the bit at the clip's tempo, with a 20 ms crossfade on a mode change; [the spec](specs/warp-modes.md) |
 | 4.5 | done | 20 October 2026 | [#240](https://github.com/loombridge/beatlayer/pull/240); Tones and Texture join the warp modes: Tones rebuilds a clip from overlapping grains spanning a whole number of the pitch periods a difference tracker finds around the read point, as near Grain Size as that allows and placed whole periods apart, and Texture from Grain Size-long crossfaded grains whose place and length Flux jitters from a generator seeded by the clip, each grain resampled by the pitch ratio a grain at a time, with Grain Size and Flux in the clip's warp settings; [the spec](specs/warp-modes.md) |
-| 4.6 | todo |  |  |
+| 4.6 | done | 22 October 2026 | [#273](https://github.com/loombridge/beatlayer/pull/273); Complex and Complex Pro join the warp modes, playing through the vendored Signalsmith Stretch: Complex in spectral blocks of 240 ms 10 ms apart, Complex Pro in blocks of 360 ms with Formants holding the formants where they were and Envelope placing the fundamental the formant analysis assumes; the stretchers are a pool per track, made off the audio thread and kept across a clip change, and the modes read the file ahead by the stretcher's own latency and report no latency; [the spec](specs/warp-modes.md) |
 | 4.7 | done | 21 October 2026 | [#276](https://github.com/loombridge/beatlayer/pull/276); a clip's Transpose (−48 to 48 semitones) and Detune (−50 to 50 cents) are saved with the clip and set by `clip.set_pitch` in one undo step, read back at `data.audio.transpose` and `data.audio.detune`, and every mode takes the pitch ratio on its own path, Re-Pitch ignoring it and an unwarped clip reading its file at it so its speed and its pitch move together; Reverse gives a clip a backwards copy of its file, written through the processed-file writer with its markers, loop brace and warp markers mirrored about the file, and reversing it again gives the original file back; in the Arrangement a time selection across several clips is reversed and mirrored within the selection, and R runs it; [the specs](specs/warp-modes.md) |
 | 4.8 | todo |  |  |
 | 4.9 | done | 18 October 2026 | [#184](https://github.com/loombridge/beatlayer/pull/184); a file's tempo and beats in its analysis, the three Warp/Fades settings, auto-warp of dropped and recorded clips, Set 1.1.1 Here, Warp From Here and Warp as Loop, and Save Default Clip writing a `.beatlayer-clip` file beside the sample; a drop still waits for the analysis rather than showing its place pending; [the spec](specs/warping.md) |
@@ -573,7 +573,7 @@ Total to 1.0: 256 packages planned in Phases 0 to 6, and about 110 estimated in 
 | 4.12 | done | 19 October 2026 | [#221](https://github.com/loombridge/beatlayer/pull/221); audio quantise: `clip.quantize_audio` moves each grid line's nearest transient's warp marker `amount` percent of the way to the line, one undo step, refusing unwarped clips, run by Cmd+U, the Sample Editor's context menu and Edit ▸ Quantize, with the quantise settings shared with the note editor (Cmd+Shift+U); [the spec](specs/warping.md) |
 | 4.13 | done | 19 October 2026 | [#233](https://github.com/loombridge/beatlayer/pull/233); Crop Clip writes an audio clip's region as a new file, rounded to whole frames so the clip plays to the bit, moving its markers, loop and warp map back, while a MIDI clip loses the notes outside its region and writes no file; Consolidate renders one clip per track before the track's devices and mixer, normalised with the clip gain making up for it, mono when its channels are equal, and warped to the beats it was rendered at; Consolidate Time to New Scene fills a new scene after the selected one, leaving the Arrangement as it was; [the spec](specs/audio-clip-editing.md) |
 | 4.14 | done | 21 October 2026 | [#268](https://github.com/loombridge/beatlayer/pull/268); Freeze Track renders the selected audio and MIDI tracks into `Samples/Processed/Freeze` and plays those files warped in Beats mode in place of their devices, Unfreeze Track restores the clips from the record the freeze kept, and the Freeze Track menu item and S-TRACK-017 run `track.freeze`; a group or return track freezes to one whole-Arrangement file, whose playback is still to come; [the spec](specs/freeze-and-bounce.md) |
-| 4.15 | todo |  |  |
+| 4.15 | done | 21 October 2026 | [#287](https://github.com/loombridge/beatlayer/pull/287); `track.bounce_in_place` replaces a track with an audio track holding its render, with no devices and its mixer kept, `track.bounce_to_new_track` makes that audio a new track after the source and switches the source material off, and `track.paste_bounced_audio` renders what Copy last put on the clipboard as it is at the moment of pasting and places it as Paste places clips; a group bounces as one track, after the group's mixer, with the returns its tracks feed; all three take a `channels` argument, so a mono source bounces to a mono file; the Edit menu's items and Cmd-B and Cmd+Option-V run them; [the spec](specs/freeze-and-bounce.md) |
 | 4.16 | done | 21 October 2026 | [#266](https://github.com/loombridge/beatlayer/pull/266); Slice to New MIDI Track: `clip.slice_to_midi_track` cuts an audio clip's region at a beat division, at its transients or at its warp markers into a new MIDI track after the clip's, holding a Drum Rack of one One-Shot sampler per slice or one sampler in Slice mode and a MIDI clip with one note per slice; the slicing dialog sits in the Create menu and the clip's menu, with the factory and the user's `Defaults/Slicing/` presets, and Preserve warped timing renders the clip's warped audio as Consolidate renders it; [the spec](specs/slice-to-midi.md) |
 | 4.17 | done | 17 October 2026 | [#112](https://github.com/loombridge/beatlayer/pull/112); `render_as_loop` on `export.audio` and `bl-cli export` renders the tail past the range's end and adds it onto the file's start, after conversion and before Normalize and dither; [the spec](specs/export.md) |
 | 4.18 | done | 19 October 2026 | [#222](https://github.com/loombridge/beatlayer/pull/222); tempo-synced browser preview: Raw-off previews warped through the map a new clip would get, looping on the song's beats and starting on the next bar while the transport runs, the kept Raw switch (`browser.set_raw`), scrubbing on launch quantisation (`browser.scrub_preview`), a heap-free warped preview voice; [the spec](specs/browser.md) |
@@ -638,7 +638,7 @@ Total to 1.0: 256 packages planned in Phases 0 to 6, and about 110 estimated in 
 | 6.4 | todo |  |  |
 | 6.5 | todo |  |  |
 | 6.6 | todo |  |  |
-| 6.7 | todo |  |  |
+| 6.7 | done | 22 October 2026 | [#299](https://github.com/loombridge/beatlayer/pull/299); each clip carries a scale and the set has a current scale, with the scale list, the `clip.set_scale`, `song.set_scale` and `song.scales` commands, and the Control Bar's scale controls ([the spec](specs/scales.md) R1 to R14) |
 | 6.7b | todo |  |  |
 | 6.8 | todo |  |  |
 | 6.9 | todo |  |  |
@@ -668,12 +668,12 @@ Total to 1.0: 256 packages planned in Phases 0 to 6, and about 110 estimated in 
 | 6.25c | todo |  |  |
 | 6.26 | todo |  |  |
 | 6.27 | todo |  |  |
-| 6.28 | todo |  |  |
+| 6.28 | done | 22 October 2026 | [#296](https://github.com/loombridge/beatlayer/pull/296); the Undo History panel lists the set's steps newest first in the Learn View's column, and a click or Enter on a row returns the set to that point in one jump that is no step of its own, with an agent's step marked with the agent's name ([undo history](specs/undo-history.md)) |
 | 6.29 | todo |  |  |
 | 6.29b | todo |  |  |
 | 6.30 | todo |  |  |
 | 6.30b | todo |  |  |
-| 6.31 | todo |  |  |
+| 6.31 | done | 22 October 2026 | [#300](https://github.com/loombridge/beatlayer/pull/300); the browser's database on disk holds the index, the tags and the tag groups, the Tag Editor (Cmd+Shift+E) and Quick Tags put tags on the selected items, and `#` searches by tag ([browser tags](specs/browser-tags.md) R1 to R17) |
 | 6.32 | todo |  |  |
 | 6.32b | todo |  |  |
 | 6.33 | todo |  |  |
@@ -690,18 +690,18 @@ Total to 1.0: 256 packages planned in Phases 0 to 6, and about 110 estimated in 
 | 6.40 | todo |  |  |
 | 6.41 | done | 21 October 2026 | [#288](https://github.com/loombridge/beatlayer/pull/288); the set's plug-ins listed in the detail area's place, with each device's preset name, the tracks it is on, the missing ones marked, and a tab-separated text export ([plug-in list](specs/plugin-list.md) R1 to R11); IMP-29's acceptance is still open |
 | 6.42 | todo |  | Waits on IMP-16 and IMP-18's acceptance |
-| 6.43 | todo |  | Waits on IMP-17's acceptance |
+| 6.43 | done | 21 October 2026 | [#290](https://github.com/loombridge/beatlayer/pull/290); a person gives commands their own keys in `keymap.toml` beside the preferences, layered over Live's, and the Shortcuts page in Settings records them, asks before taking a key from another command, and gives Live's keys back ([custom shortcuts](specs/custom-shortcuts.md)) |
 | 6.44 | todo |  | Waits on IMP-21's acceptance |
 | 6.45 | todo |  | Waits on IMP-22's acceptance |
 | 6.46 | todo |  | Waits on IMP-23's acceptance |
-| 6.47 | todo |  | Waits on IMP-32's acceptance |
+| 6.47 | done | 22 October 2026 | [#292](https://github.com/loombridge/beatlayer/pull/292); the Articulation Map, a MIDI effect, holds up to 32 named articulations, each with a trigger and the keyswitches, controllers and channel it sends, and the list is edited by command, saved with the set and in the device's presets, and read back ([articulation map](specs/articulation-map.md) R1 to R20); IMP-32's acceptance is still open |
 | 6.48 | todo |  | Waits on IMP-33's acceptance |
 | 6.49 | todo |  | Waits on IMP-34, IMP-35 and IMP-36's acceptance |
 | 6.49b | todo |  |  |
 | 6.50 | todo |  | Waits on IMP-37's acceptance |
 | 6.51 | todo |  |  |
 | 6.52 | todo |  |  |
-| 6.53 | todo |  |  |
+| 6.53 | done | 22 October 2026 | [#302](https://github.com/loombridge/beatlayer/pull/302); the MIDI Note Editor's insert marker and time selection, its keyboard selection and moves, Shift-click and the piano ruler's keys, the note clipboard with Option-drag copies, and the editor's context menus ([the spec](specs/piano-roll.md) R23 to R31) |
 | 6.54 | todo |  |  |
 | 6.55 | todo |  |  |
 | 6.56 | todo |  |  |
@@ -711,8 +711,8 @@ Total to 1.0: 256 packages planned in Phases 0 to 6, and about 110 estimated in 
 | 6.60 | todo |  |  |
 | 6.61 | todo |  |  |
 | 6.62 | todo |  |  |
-| 6.63 | todo |  |  |
-| 6.64 | todo |  |  |
+| 6.63 | done | 22 October 2026 | [#294](https://github.com/loombridge/beatlayer/pull/294); the File Manager in the detail area's place, listing the set's files, the missing ones, the external ones and the unused ones, with the search's switches, Collect and Save, the set's backups and Save a Copy... ([file management](specs/file-management.md) R10 to R21) |
+| 6.64 | done | 22 October 2026 | [#306](https://github.com/loombridge/beatlayer/pull/306); View ▸ Arrangement Track Controls' In/Out, Volume and Return Tracks hide their parts of every track header, and the mixers' own sections stay as they are ([arrangement view](specs/arrangement-view.md) R20 to R24) |
 | 6.65 | todo |  |  |
 | 6.66 | todo |  |  |
 | 6.67 | todo |  |  |

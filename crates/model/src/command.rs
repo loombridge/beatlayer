@@ -6,7 +6,7 @@ use bl_core::id::Id;
 use bl_core::time::{
     Bpm, TempoMap, TempoSegment, Ticks, TimeSignature, TimeSignatureChange, TimeSignatureMap,
 };
-use imbl::Vector;
+use imbl::{OrdMap, Vector};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -34,6 +34,7 @@ use crate::rack::{
     MacroStyle, MacroTarget, RackKind, Receive, macro_number,
 };
 use crate::sample_edits::{SampleEdit, SampleRange};
+use crate::scale::{Scale, ScaleName};
 use crate::scene::{SCENE_TEMPO_MAX, SCENE_TEMPO_MIN, Scene};
 use crate::shared::Shared;
 use crate::track::{
@@ -362,6 +363,26 @@ pub enum Command {
     UnfreezeTracks {
         /// The tracks to unfreeze.
         tracks: Vec<TrackId>,
+    },
+    /// Replaces a track with the audio track a bounce made (WP-4.15, R21,
+    /// R23). The track keeps its ID, so its colour and the routing that
+    /// points at it stay, and undoing the bounce gives the source track
+    /// back exactly, with every device's state.
+    BounceTrackInPlace {
+        /// The track that was bounced.
+        track: TrackId,
+        /// What the bounced track holds.
+        bounced: crate::bounce::BouncedTrack,
+    },
+    /// Makes a new audio track beside a bounced one (WP-4.15, R22, R24).
+    /// The new track goes directly after its source, in the same group.
+    BounceToNewTrack {
+        /// The track that was bounced.
+        source: TrackId,
+        /// The new track's ID.
+        track: TrackId,
+        /// What the new track holds.
+        bounced: crate::bounce::BouncedTrack,
     },
     /// Gives a scene a tempo to set when it is launched, from 20 to 999
     /// BPM, or switches it off with `None` (WP-3.5).
@@ -1472,6 +1493,11 @@ pub enum Command {
         /// a preset of one holds; `null` for the default shape.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         shape: Option<Vec<crate::modulator::ShapePoint>>,
+        /// An Articulation Map's articulations (the articulation map spec,
+        /// R16), which a preset of one holds; `null` to keep the ones the
+        /// device has.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        articulations: Option<Vec<crate::articulation::Articulation>>,
     },
     /// Floats a device in a window of its own, or docks it back in the
     /// Device View (IMP-14, WP-2.5b). Only native devices float.
@@ -1556,6 +1582,64 @@ pub enum Command {
         /// its place and output from 0 to 1 and the bend of the segment
         /// starting there, from −1 to 1.
         points: Vec<crate::modulator::ShapePoint>,
+    },
+    /// Adds an articulation to an Articulation Map's list (WP-6.47; the
+    /// articulation map spec, R16).
+    AddArticulation {
+        /// The device.
+        device: DeviceId,
+        /// Where in the list it goes, or `null` for the end.
+        #[serde(default)]
+        index: Option<u8>,
+        /// Its name. An empty name is the numbered one a new articulation
+        /// gets.
+        name: String,
+    },
+    /// Removes an articulation from an Articulation Map's list (the
+    /// articulation map spec, R16).
+    DeleteArticulation {
+        /// The device.
+        device: DeviceId,
+        /// Its place in the list, from 0.
+        index: u8,
+    },
+    /// Moves an articulation in an Articulation Map's list (the articulation
+    /// map spec, R16).
+    MoveArticulation {
+        /// The device.
+        device: DeviceId,
+        /// Its place in the list, from 0.
+        index: u8,
+        /// Where it goes: the articulation there takes its place, or it goes
+        /// last when `null`.
+        #[serde(default)]
+        to: Option<u8>,
+    },
+    /// Changes an articulation of an Articulation Map's list: its name, its
+    /// trigger, its outputs or its channel (the articulation map spec, R16).
+    /// What isn't given stays as it is.
+    SetArticulation {
+        /// The device.
+        device: DeviceId,
+        /// Its place in the list, from 0.
+        index: u8,
+        /// Its new name.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        /// Its new trigger.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        trigger: Option<crate::articulation::ArticulationTrigger>,
+        /// Its new outputs, in order.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        outputs: Option<Vec<crate::articulation::ArticulationOutput>>,
+        /// Its new channel: a channel from 1 to 16, or `null` for none, so
+        /// its notes keep the channel they come in on.
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            deserialize_with = "crate::articulation::double_option"
+        )]
+        channel: Option<Option<u8>>,
     },
     /// Sets the media a device plays, by content hash (WP-2.16): the
     /// sampler's sample, which the media store holds like a clip's audio.
@@ -2235,6 +2319,36 @@ pub enum Command {
         /// Whether it's left out.
         excluded: bool,
     },
+    /// Sets a clip's scale (the scales spec, R5): its Scale Mode switch, its
+    /// root and its scale name. It leaves the values it isn't given as they
+    /// were, and it is one undo step however many clips it sets.
+    SetClipScale {
+        /// The clips.
+        clips: Vec<ClipId>,
+        /// Whether the clips' Scale Mode is on.
+        #[serde(default)]
+        enabled: Option<bool>,
+        /// The root note: 0 (C) to 11 (B).
+        #[serde(default)]
+        root: Option<u8>,
+        /// The scale's name, from the scale list.
+        #[serde(default)]
+        name: Option<String>,
+    },
+    /// Sets the set's current scale (the scales spec, R9): its Scale Mode
+    /// switch, its root and its scale name, which the Control Bar's scale
+    /// controls show and the clips made next take.
+    SetScale {
+        /// Whether the set's Scale Mode is on.
+        #[serde(default)]
+        enabled: Option<bool>,
+        /// The root note: 0 (C) to 11 (B).
+        #[serde(default)]
+        root: Option<u8>,
+        /// The scale's name, from the scale list.
+        #[serde(default)]
+        name: Option<String>,
+    },
 }
 
 impl Command {
@@ -2275,6 +2389,8 @@ impl Command {
             Self::RenameTrack { .. } => "Rename track",
             Self::FreezeTracks { .. } => "Freeze tracks",
             Self::UnfreezeTracks { .. } => "Unfreeze tracks",
+            Self::BounceTrackInPlace { .. } => "Bounce track in place",
+            Self::BounceToNewTrack { .. } => "Bounce to new track",
             Self::SetVolume { .. } => "Change volume",
             Self::SetPan { .. } => "Change pan",
             Self::SetMute { .. } => "Mute track",
@@ -2420,6 +2536,11 @@ impl Command {
             Self::MapModulator { .. } => "Map Modulator",
             Self::UnmapModulator { .. } => "Unmap Modulator",
             Self::SetShape { .. } => "Edit Shape",
+            // WP-6.47: Beatlayer's own names.
+            Self::AddArticulation { .. } => "Add Articulation",
+            Self::DeleteArticulation { .. } => "Delete Articulation",
+            Self::MoveArticulation { .. } => "Move Articulation",
+            Self::SetArticulation { .. } => "Change Articulation",
             Self::SetDeviceSample { media: Some(_), .. } => "Load Sample",
             Self::SetDeviceSample { media: None, .. } => "Clear Sample",
             // WP-5.15b: Warp controls and slices.
@@ -2515,6 +2636,10 @@ impl Command {
             Self::DeleteVariation { .. } => "Delete Macro Variation",
             Self::SetMacroVariationExcluded { .. } => "Exclude Macro from Variations",
             Self::SetMappedValue { .. } => "Change parameter",
+            // Spec: scales R5, R12. Live's undo names for the scale edits
+            // are to observe; Beatlayer's name the edit.
+            Self::SetClipScale { .. } => "Change Clip Scale",
+            Self::SetScale { .. } => "Change Scale",
         }
     }
 
@@ -2555,6 +2680,14 @@ impl Command {
             Self::GroupDevices { rack, .. } => rack.ids(),
             Self::CreateScene { id, .. } => vec![id.0],
             Self::AddLocator { locator } => vec![locator.id.0],
+            Self::BounceTrackInPlace { bounced, .. } => {
+                bounced.clip_ids().iter().map(|clip| clip.0).collect()
+            }
+            Self::BounceToNewTrack { track, bounced, .. } => {
+                let mut ids = vec![track.0];
+                ids.extend(bounced.clip_ids().iter().map(|clip| clip.0));
+                ids
+            }
             Self::DuplicateScene { id, clips, .. } => {
                 let mut ids = vec![id.0];
                 ids.extend(clips.iter().map(|(_, copy)| copy.0));
@@ -2786,6 +2919,39 @@ impl Document {
                     held.frozen = None;
                 }
                 Ok(())
+            }
+            Command::BounceTrackInPlace { track, bounced } => {
+                // A group's tracks go with it (R23).
+                let children: Vec<TrackId> =
+                    self.track_ref(*track)?.children.iter().copied().collect();
+                for child in children {
+                    self.delete_track(child)?;
+                }
+                self.replace_with_bounced(*track, bounced.clone())
+            }
+            Command::BounceToNewTrack {
+                source,
+                track,
+                bounced,
+            } => {
+                // The new track goes directly after its source, in the same
+                // group (R22).
+                let parent = self.parent(*source);
+                let kind = self.track_ref(*source)?.kind;
+                if kind == TrackKind::Main || kind == TrackKind::Return {
+                    return Err(ModelError::MainTrack);
+                }
+                let list = self.containing_list(kind, parent)?;
+                let position = position_in(list, |id| *id == *source)
+                    .ok_or(ModelError::NoSuchTrack(*source))?;
+                self.create_track(
+                    *track,
+                    TrackKind::Audio,
+                    &bounced.name,
+                    parent,
+                    position + 1,
+                )?;
+                self.fill_bounced(*track, bounced.clone())
             }
             Command::SetVolume { track, volume } => {
                 self.check_not_held(crate::modulator::ModTarget::Mixer {
@@ -3115,6 +3281,37 @@ impl Document {
                 if self.clip_ref(*clip)?.mute != *mute {
                     self.clip_mut(*clip)?.mute = *mute;
                 }
+                Ok(())
+            }
+            // Spec: scales R5. A scale name the list doesn't hold, or a
+            // root outside C to B, is refused, and nothing changes.
+            Command::SetClipScale {
+                clips,
+                enabled,
+                root,
+                name,
+            } => {
+                let mut scales = Vec::with_capacity(clips.len());
+                for clip in clips {
+                    let current = self.clip_ref(*clip)?.scale;
+                    scales.push((*clip, scaled(current, *enabled, *root, name.as_deref())?));
+                }
+                for (clip, next) in scales {
+                    if self.clip_ref(clip)?.scale != next {
+                        self.clip_mut(clip)?.scale = next;
+                    }
+                }
+                Ok(())
+            }
+            // Spec: scales R9, R12. The set's current scale, which the
+            // Control Bar's scale controls show and a new clip takes.
+            Command::SetScale {
+                enabled,
+                root,
+                name,
+            } => {
+                let current = self.settings.scale;
+                self.settings.scale = scaled(current, *enabled, *root, name.as_deref())?;
                 Ok(())
             }
             Command::SetClipLaunchMode { clip, mode } => {
@@ -3539,10 +3736,14 @@ impl Document {
                 params,
                 name,
                 shape,
+                articulations,
             } => {
                 let mut loaded = self.device_ref(*device)?.clone();
                 loaded.set_both(params.clone());
                 loaded.shape.clone_from(shape);
+                if let Some(articulations) = articulations {
+                    loaded.set_articulations(articulations.clone());
+                }
                 loaded.set_name(name);
                 // The preset the device holds is the one its name names (the
                 // plug-in list spec, R5).
@@ -3619,6 +3820,32 @@ impl Document {
             } => self.map_modulator(*device, *slot, *target),
             Command::UnmapModulator { device, slot } => self.unmap_modulator(*device, *slot),
             Command::SetShape { device, points } => self.set_shape(*device, points),
+            Command::AddArticulation {
+                device,
+                index,
+                name,
+            } => self.add_articulation(*device, *index, name),
+            Command::DeleteArticulation { device, index } => {
+                self.delete_articulation(*device, *index)
+            }
+            Command::MoveArticulation { device, index, to } => {
+                self.move_articulation(*device, *index, *to)
+            }
+            Command::SetArticulation {
+                device,
+                index,
+                name,
+                trigger,
+                outputs,
+                channel,
+            } => self.set_articulation(
+                *device,
+                *index,
+                name.as_deref(),
+                *trigger,
+                outputs.as_deref(),
+                *channel,
+            ),
             Command::CompareSwitch { device } => {
                 if !self.device_ref(*device)?.can_compare() {
                     return Err(ModelError::NoCompare(*device));
@@ -4549,6 +4776,103 @@ impl Document {
         Ok(())
     }
 
+    /// Replaces a track's contents with the audio track a bounce made
+    /// (WP-4.15, R21, R23): the track keeps its place in the tree and its
+    /// ID, and loses its devices, its clips, and its take lanes.
+    fn replace_with_bounced(
+        &mut self,
+        id: TrackId,
+        bounced: crate::bounce::BouncedTrack,
+    ) -> Result<(), ModelError> {
+        let old: Vec<crate::ids::ClipId> = self
+            .track_ref(id)?
+            .clips
+            .keys()
+            .copied()
+            .chain(self.track_ref(id)?.slots.values().map(|clip| clip.id))
+            .collect();
+        for clip in old {
+            self.index.clip_track.remove(&clip);
+        }
+        {
+            let track = self.track_mut(id)?;
+            track.devices = Vector::new();
+            track.clips = OrdMap::new();
+            track.slots = OrdMap::new();
+            track.removed_stop_buttons = BTreeSet::new();
+            track.take_lanes = Vector::new();
+            track.automation = OrdMap::new();
+            track.frozen = None;
+            track.delay = TrackDelay::default();
+            track.keep_monitoring_latency = true;
+        }
+        self.fill_bounced(id, bounced)
+    }
+
+    /// Gives a track the contents of the audio track a bounce made
+    /// (WP-4.15, R21): its name, its mixer, its sends, its output routing,
+    /// its mixer automation, and its clips.
+    fn fill_bounced(
+        &mut self,
+        id: TrackId,
+        bounced: crate::bounce::BouncedTrack,
+    ) -> Result<(), ModelError> {
+        let crate::bounce::BouncedTrack {
+            name,
+            mixer,
+            sends,
+            output,
+            automation,
+            clips,
+            slots,
+        } = bounced;
+        for clip in &clips {
+            check_clip(clip)?;
+            check_extent(clip.start, clip.length)?;
+            self.check_fresh(clip.id.0)?;
+        }
+        for (_, clip) in &slots {
+            check_clip(clip)?;
+            check_extent(clip.start, clip.length)?;
+            self.check_fresh(clip.id.0)?;
+        }
+        let clip_ids: Vec<crate::ids::ClipId> = clips.iter().map(|clip| clip.id).collect();
+        let slot_ids: Vec<crate::ids::ClipId> = slots.iter().map(|(_, clip)| clip.id).collect();
+        {
+            let track = self.track_mut(id)?;
+            track.kind = TrackKind::Audio;
+            track.name = name;
+            track.mixer = mixer;
+            track.sends = sends.into_iter().collect();
+            track.routing = crate::track::Routing::new(TrackKind::Audio);
+            track.routing.output = output;
+            track.automation = automation
+                .into_iter()
+                .map(|entry| {
+                    (
+                        entry.target,
+                        crate::automation::Automation {
+                            envelope: entry.envelope,
+                            enabled: entry.enabled,
+                        },
+                    )
+                })
+                .collect();
+            track.clips = clips
+                .into_iter()
+                .map(|clip| (clip.id, Shared::new(clip)))
+                .collect();
+            track.slots = slots
+                .into_iter()
+                .map(|(scene, clip)| (scene, Shared::new(clip)))
+                .collect();
+        }
+        for clip in clip_ids.into_iter().chain(slot_ids) {
+            self.index.clip_track.insert(clip, id);
+        }
+        Ok(())
+    }
+
     fn delete_track(&mut self, id: TrackId) -> Result<(), ModelError> {
         let kind = self.track_ref(id)?.kind;
         if kind == TrackKind::Main {
@@ -4709,10 +5033,16 @@ impl Document {
         check_extent(clip.start, clip.length)?;
         check_clip(clip)?;
         self.check_clip_envelopes(track, clip)?;
-        self.track_mut(track)?
-            .clips
-            .insert(clip.id, Shared::new(clip.clone()));
-        self.index.clip_track.insert(clip.id, track);
+        // Spec: scales R7. A clip made from nothing takes the set's current
+        // scale. A caller that named a scale keeps it, so the field the
+        // command reference lists isn't silently dropped.
+        let mut clip = clip.clone();
+        if clip.scale.is_default() {
+            clip.scale = self.settings.scale;
+        }
+        let id = clip.id;
+        self.track_mut(track)?.clips.insert(id, Shared::new(clip));
+        self.index.clip_track.insert(id, track);
         Ok(())
     }
 
@@ -4962,10 +5292,18 @@ impl Document {
         if target.slot(scene).is_some() {
             return Err(ModelError::SlotOccupied { track, scene });
         }
+        // Spec: scales R7. A clip made from nothing takes the set's current
+        // scale. A caller that named a scale keeps it, so the field the
+        // command reference lists isn't silently dropped.
+        let mut clip = clip.clone();
+        if clip.scale.is_default() {
+            clip.scale = self.settings.scale;
+        }
+        let id = clip.id;
         self.track_mut(track)?
             .slots
-            .insert(scene, Shared::new(clip.clone()));
-        self.index.clip_track.insert(clip.id, track);
+            .insert(scene, Shared::new(clip));
+        self.index.clip_track.insert(id, track);
         Ok(())
     }
 
@@ -5669,6 +6007,15 @@ impl Document {
         device: &Device,
     ) -> Result<(), ModelError> {
         self.check_all_fresh(device.ids())?;
+        // Spec: articulation-map R2. A new Articulation Map holds one
+        // articulation, named "Articulation 1".
+        let mut device = device.clone();
+        if device.is_articulation_map() && device.articulations.is_empty() {
+            device.set_articulations(vec![crate::articulation::Articulation::new(
+                crate::articulation::FIRST_NAME,
+            )]);
+        }
+        let device = &device;
         check_device(device)?;
         let chain = &mut self.track_mut(track)?.devices;
         insert_at(chain, index, Shared::new(device.clone()))?;
@@ -6697,6 +7044,22 @@ impl Document {
         }
     }
 
+    /// The list a track is in now, to look at it.
+    fn containing_list(
+        &self,
+        kind: TrackKind,
+        parent: Option<TrackId>,
+    ) -> Result<&Vector<TrackId>, ModelError> {
+        match kind {
+            TrackKind::Main => Err(ModelError::MainTrack),
+            TrackKind::Return => Ok(&self.returns),
+            _ => match parent {
+                None => Ok(&self.top),
+                Some(parent) => Ok(&self.track_ref(parent)?.children),
+            },
+        }
+    }
+
     /// Checks that `parent` (if any) is a group that `track` can go in: not
     /// the track itself, nor a group inside it.
     fn check_can_hold(&self, track: TrackId, parent: Option<TrackId>) -> Result<(), ModelError> {
@@ -6783,6 +7146,39 @@ fn check_macro_number(number: u8) -> Result<(), ModelError> {
             "a rack's macros are numbered 1 to 16",
         ))
     }
+}
+
+/// The scale a command's arguments give over `scale`: the values it gives
+/// replace the ones it has, and the ones it doesn't give stay as they were
+/// (the scales spec, R5). A root outside C to B, or a name the scale list
+/// doesn't hold, is refused.
+fn scaled(
+    scale: Scale,
+    enabled: Option<bool>,
+    root: Option<u8>,
+    name: Option<&str>,
+) -> Result<Scale, ModelError> {
+    let root = match root {
+        Some(root) if root > 11 => {
+            return Err(ModelError::InvalidValue {
+                what: "root note",
+                value: f64::from(root),
+            });
+        }
+        Some(root) => root,
+        None => scale.root,
+    };
+    let name = match name {
+        Some(name) => ScaleName::parse(name).ok_or(ModelError::InvalidInput(
+            "the scale's name is not one of the scale list's names",
+        ))?,
+        None => scale.name,
+    };
+    Ok(Scale {
+        enabled: enabled.unwrap_or(scale.enabled),
+        root,
+        name,
+    })
 }
 
 /// The next number from a SplitMix64 generator, from 0 (inclusive) to 1
@@ -7076,6 +7472,12 @@ fn check_one_device(device: &Device) -> Result<(), ModelError> {
     crate::modulator::check_mappings(device)?;
     if let Some(shape) = &device.shape {
         crate::modulator::check_shape(shape)?;
+    }
+    // Spec: articulation-map R20. A saved device whose list is empty or
+    // holds more than 32 articulations, whose triggers break R3, or whose
+    // channel or values fall outside R3 to R5's ranges doesn't load.
+    if device.is_articulation_map() {
+        crate::articulation::check(&device.articulations).map_err(ModelError::InvalidInput)?;
     }
     if !device.can_compare() && (device.b_active || device.other_params.is_some()) {
         return Err(ModelError::NoCompare(device.id));
@@ -8995,6 +9397,7 @@ mod tests {
             params: params.clone(),
             name: "Warm".to_owned(),
             shape: None,
+            articulations: None,
         })
         .unwrap();
         let loaded = song.doc.device(device).unwrap();
@@ -9007,6 +9410,7 @@ mod tests {
                 params: bad,
                 name: String::new(),
                 shape: None,
+                articulations: None,
             }),
             ModelError::InvalidValue { .. }
         ));
@@ -11105,6 +11509,7 @@ mod tests {
             params: [(ParamId(2), 1.0)].into_iter().collect(),
             name: String::new(),
             shape: None,
+            articulations: None,
         })
         .unwrap();
         let d = song.doc.device(device).unwrap();

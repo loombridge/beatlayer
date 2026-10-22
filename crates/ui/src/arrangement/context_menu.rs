@@ -10,7 +10,7 @@ use bl_shell::Shell;
 use bl_shell::arrangement_commands::{self as view_ids, AdaptiveGrid, FixedGrid};
 use bl_shell::context_menus::{self, ADAPTIVE_GRID_ROWS, FIXED_GRID_ROWS, SelectionMenu};
 use bl_shell::editing_commands as ids;
-use bl_shell::menus::shown;
+use bl_shell::menus::{Action, shown};
 use egui::{Pos2, Ui};
 use serde_json::json;
 
@@ -37,17 +37,19 @@ pub enum MenuKind {
 
 /// The two menus and which one is open.
 pub(super) struct ContextMenus {
-    keymap: Keymap,
     platform: Platform,
     kind: MenuKind,
+    /// Where the scrub area was right-clicked, so its Add Locator adds one
+    /// there (the time editing spec, R3).
+    scrub_at: Option<bl_core::time::Ticks>,
 }
 
 impl ContextMenus {
     pub fn new() -> Self {
         Self {
-            keymap: Keymap::live12(),
             platform: Platform::current(),
             kind: MenuKind::default(),
+            scrub_at: None,
         }
     }
 
@@ -78,12 +80,13 @@ impl ContextMenus {
 
     /// A right-click in the scrub area: the locator's menu on a locator,
     /// and the scrub area's own menu elsewhere.
-    pub fn open_scrub(&mut self, locator: Option<bl_model::LocatorId>) {
+    pub fn open_scrub(&mut self, locator: Option<bl_model::LocatorId>, at: bl_core::time::Ticks) {
         self.kind = if locator.is_some() {
             MenuKind::Locator
         } else {
             MenuKind::Scrub
         };
+        self.scrub_at = Some(at);
     }
 
     /// A right-click on the loop brace.
@@ -105,6 +108,8 @@ impl ContextMenus {
     /// rows menus.md records for those states (C-CLIP-ARR-025, C-CLIP-ARR-026,
     /// C-TIME-019, C-TIME-020).
     pub fn show(&self, ui: &mut Ui, shell: &Shell, events: &mut Vec<UiEvent>) {
+        // The keymap in use, so the menu shows the keys in use (R10).
+        let keymap = Keymap::from_data(shell.keymap().clone());
         let state = selection_menu(shell);
         let menu = match self.kind {
             MenuKind::Clip if audio_selected(shell) => {
@@ -146,8 +151,28 @@ impl ContextMenus {
                     }
                 });
             } else {
-                let response =
-                    crate::menus::item(ui, item, shell, &self.keymap, self.platform, events);
+                // The scrub area's Add Locator adds one where the area was
+                // right-clicked (the time editing spec, R3).
+                let args = match (self.kind, item.action) {
+                    (MenuKind::Scrub, Action::Command(id))
+                        if id == bl_shell::locator_commands::ADD =>
+                    {
+                        self.scrub_at.map(|at| json!({ "at": at }))
+                    }
+                    _ => None,
+                };
+                let response = match args {
+                    Some(args) => crate::menus::item_with_args(
+                        ui,
+                        item,
+                        shell,
+                        &keymap,
+                        self.platform,
+                        events,
+                        args,
+                    ),
+                    None => crate::menus::item(ui, item, shell, &keymap, self.platform, events),
+                };
                 crate::menus::take_focus_first(ui, &response);
             }
         }

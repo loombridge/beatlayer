@@ -10,6 +10,10 @@ publish.workspace = true
 [dependencies]
 bl-dsp.workspace = true
 
+[build-dependencies]
+# Compiles the vendored Signalsmith Stretch C++ (see build.rs).
+cc = "1"
+
 [dev-dependencies]
 proptest = { version = "1.11", default-features = false, features = ["std"] }
 

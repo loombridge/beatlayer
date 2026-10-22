@@ -834,3 +834,57 @@ fn a_quantised_locate_while_stopped_locates_at_once() {
     let out = rig.render(4096, 64);
     plays_from(&out, 0..1024, frames(&tempo, target));
 }
+
+#[test]
+fn a_stop_abandons_a_jump_waiting_for_a_line() {
+    // Spec: transport R22. A jump waiting for a line is abandoned when the
+    // transport stops, so the song doesn't jump on its own later.
+    let tempo = TempoMap::constant(bpm(120.0));
+    let bar = frames(&tempo, BAR);
+    let mut rig = rig_with_quantization(4096, tempo.clone(), LaunchQuantization::Bar);
+    rig.sender.transport(TransportCommand::Play);
+    let mut out: Vec<f32> = Vec::new();
+    while out.len() < (bar * 2) as usize {
+        rig.block(64);
+        out.extend_from_slice(&rig.last());
+    }
+    // A jump back to the first bar, waiting for the next line.
+    rig.sender
+        .transport(TransportCommand::QuantizedLocate(Ticks::ZERO));
+    rig.sender.transport(TransportCommand::Stop);
+    rig.sender.transport(TransportCommand::Play);
+    let mut after: Vec<f32> = Vec::new();
+    while after.len() < (bar * 4) as usize {
+        rig.block(64);
+        after.extend_from_slice(&rig.last());
+    }
+    // The song plays on from the insert marker, which the jump set to the
+    // first bar, and doesn't jump again on the line it was waiting for.
+    plays_from(&after, 0..after.len(), frames(&tempo, Ticks::ZERO));
+}
+
+#[test]
+fn a_locate_replaces_a_jump_waiting_for_a_line() {
+    // Spec: transport R22. A plain locate replaces a jump waiting for a
+    // line, so the song doesn't jump again on the line.
+    let tempo = TempoMap::constant(bpm(120.0));
+    let bar = frames(&tempo, BAR);
+    let mut rig = rig_with_quantization(4096, tempo.clone(), LaunchQuantization::Bar);
+    rig.sender.transport(TransportCommand::Play);
+    let mut out: Vec<f32> = Vec::new();
+    while out.len() < (bar * 2) as usize {
+        rig.block(64);
+        out.extend_from_slice(&rig.last());
+    }
+    // A jump to the fifth bar, waiting for the next line.
+    rig.sender
+        .transport(TransportCommand::QuantizedLocate(BAR * 5));
+    // A plain locate goes to the fourth bar at once and replaces it.
+    rig.sender.transport(TransportCommand::Locate(BAR * 4));
+    let mut after: Vec<f32> = Vec::new();
+    while after.len() < (bar * 2) as usize {
+        rig.block(64);
+        after.extend_from_slice(&rig.last());
+    }
+    plays_from(&after, 0..after.len(), frames(&tempo, BAR * 4));
+}

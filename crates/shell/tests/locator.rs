@@ -199,6 +199,42 @@ fn an_empty_name_keeps_the_old_one() {
 }
 
 #[test]
+fn a_move_needs_the_position_it_goes_to() {
+    // The command moves a locator to a position; the keys pass the grid
+    // step Left and Right move.
+    let mut shell = shell();
+    run(&mut shell, ids::ADD, json!({ "at": "2.1.1" }));
+    let locator = locators(&shell)[0].0;
+    let error = shell
+        .run(ids::MOVE, json!({ "locator": locator }))
+        .unwrap_err();
+    assert!(matches!(error, ShellError::InvalidArgs { .. }), "{error}");
+    assert_eq!(locators(&shell)[0].1, Ticks(BAR), "it stayed put");
+}
+
+#[test]
+fn extending_the_selection_adds_the_locators_in_between() {
+    let mut shell = shell();
+    run(&mut shell, ids::ADD, json!({ "at": "2.1.1" }));
+    run(&mut shell, ids::ADD, json!({ "at": "3.1.1" }));
+    run(&mut shell, ids::ADD, json!({ "at": "4.1.1" }));
+    let held = locators(&shell);
+    // The first locator is selected; extending it with the third adds the
+    // one in between.
+    run(
+        &mut shell,
+        ids::SELECT,
+        json!({ "locators": [held[0].0], "mode": "replace" }),
+    );
+    run(
+        &mut shell,
+        ids::SELECT,
+        json!({ "locators": [held[2].0], "mode": "extend" }),
+    );
+    assert_eq!(view(&mut shell).selected_locators.len(), 3);
+}
+
+#[test]
 fn moving_a_locator_onto_another_changes_nothing() {
     let mut shell = shell();
     run(&mut shell, ids::ADD, json!({ "at": "2.1.1" }));
@@ -366,9 +402,10 @@ fn the_button_places_a_locator_on_the_nearest_line_while_the_song_plays() {
     let at = locators(&shell)[0].1;
     let bar = Ticks(BAR);
     assert_eq!(at % bar, Ticks::ZERO, "a locator lands on a bar line");
+    // The line nearest the playhead: within half a bar of it.
     assert!(
-        at <= playing.position && playing.position < at + bar,
-        "on the bar the playhead is in: {at:?} against {:?}",
+        (at - playing.position).abs() <= bar / 2,
+        "on the bar line nearest the playhead: {at:?} against {:?}",
         playing.position
     );
 }

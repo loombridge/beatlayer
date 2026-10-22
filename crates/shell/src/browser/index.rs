@@ -7,6 +7,11 @@
 //! search is one pass that keeps the order. The thread publishes a snapshot
 //! as it goes, so search sees what's indexed so far, and starts again when
 //! the places change.
+//!
+//! The database holds the same rows (spec: browser-tags R1), so the browser
+//! lists and searches what was indexed before from the first frame after a
+//! start, and a file that changed is told from its size and modification
+//! time.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -18,6 +23,7 @@ use std::time::{Duration, Instant};
 use bl_shell_spec::browser::ItemKind;
 
 use super::Waker;
+use super::db::{self, FileRow};
 use super::listing::{file_kind, is_hidden, natural_cmp};
 
 /// One folder or file in the index.
@@ -33,6 +39,10 @@ pub struct IndexEntry {
     pub kind: ItemKind,
     /// The place it's in, an index into the roots the index was built from.
     pub place: u16,
+    /// Its length in bytes, for a file.
+    pub size: u64,
+    /// When it changed, in seconds since the epoch.
+    pub modified: i64,
 }
 
 /// Which places a search covers.
@@ -71,9 +81,61 @@ impl Snapshot {
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_default();
-            builder.push(folder, name, kind, 0);
+            builder.push(folder, name, kind, 0, 0, 0);
         }
         builder.snapshot()
+    }
+
+    /// An index of the rows the database holds (spec: browser-tags R1), so
+    /// the browser searches what was indexed before from the first frame.
+    /// A row whose place isn't a root any more is left out.
+    #[must_use]
+    pub fn from_rows(roots: Vec<PathBuf>, rows: &[FileRow]) -> Self {
+        let mut builder = Builder::new(roots.clone());
+        for row in rows {
+            let Some(place) = roots
+                .iter()
+                .position(|root| root.to_string_lossy() == row.place)
+            else {
+                continue;
+            };
+            let path = PathBuf::from(&row.path);
+            let parent = path
+                .parent()
+                .map_or_else(|| PathBuf::from("/"), Path::to_path_buf);
+            let folder = builder.folder(parent);
+            let kind = db::kind_from_name(&row.kind).unwrap_or(ItemKind::Audio);
+            builder.push(
+                folder,
+                row.name.clone(),
+                kind,
+                u16::try_from(place).unwrap_or(u16::MAX),
+                row.size,
+                row.modified,
+            );
+        }
+        builder.snapshot()
+    }
+
+    /// The index's rows, as the database holds them.
+    #[must_use]
+    pub fn file_rows(&self) -> Vec<FileRow> {
+        self.entries
+            .iter()
+            .enumerate()
+            .map(|(index, entry)| FileRow {
+                path: self.path(index as u32).to_string_lossy().into_owned(),
+                name: entry.name.to_string(),
+                lower: entry.lower.to_string(),
+                kind: db::kind_name(entry.kind),
+                place: self.roots[usize::from(entry.place)]
+                    .to_string_lossy()
+                    .into_owned(),
+                size: entry.size,
+                modified: entry.modified,
+                hash: None,
+            })
+            .collect()
     }
 
     /// The roots it was built from, in order.
@@ -146,6 +208,18 @@ impl Snapshot {
             .collect()
     }
 
+    /// The items whose length is `size`, for finding a file that moved
+    /// (spec: browser-tags R5).
+    #[must_use]
+    pub fn with_size(&self, size: u64) -> Vec<u32> {
+        self.entries
+            .iter()
+            .enumerate()
+            .filter(|(_, entry)| entry.size == size && entry.kind != ItemKind::Folder)
+            .map(|(index, _)| index as u32)
+            .collect()
+    }
+
     /// Where `path` is among `hits`, if it's there.
     #[must_use]
     pub fn position_of(&self, hits: &[u32], path: &Path) -> Option<usize> {
@@ -196,7 +270,15 @@ impl Builder {
         u32::try_from(self.folders.len() - 1).unwrap_or(u32::MAX)
     }
 
-    fn push(&mut self, folder: u32, name: String, kind: ItemKind, place: u16) {
+    fn push(
+        &mut self,
+        folder: u32,
+        name: String,
+        kind: ItemKind,
+        place: u16,
+        size: u64,
+        modified: i64,
+    ) {
         if kind == ItemKind::Folder {
             self.folder_count += 1;
         } else {
@@ -208,6 +290,8 @@ impl Builder {
             name: name.into_boxed_str(),
             kind,
             place,
+            size,
+            modified,
         });
     }
 
@@ -291,6 +375,13 @@ impl Index {
             self.roots = roots;
             self.refresh();
         }
+    }
+
+    /// Takes the index the database holds as the current one, so search
+    /// finds what was indexed before from the first frame (spec:
+    /// browser-tags R1). The background walk replaces it when it finishes.
+    pub fn adopt(&mut self, snapshot: Snapshot) {
+        self.current = Arc::new(snapshot);
     }
 
     /// Indexes the places again.
@@ -446,12 +537,29 @@ fn walk(roots: &[PathBuf], requests: &Receiver<Request>, shared: &Shared, waker:
                 let Ok(kind) = entry.file_type() else {
                     continue;
                 };
+                // Its size and when it changed, so the database can tell a
+                // changed file from the one it holds (spec: browser-tags
+                // R1).
+                let (size, modified) = entry
+                    .metadata()
+                    .map(|meta| {
+                        (
+                            meta.len(),
+                            meta.modified()
+                                .ok()
+                                .and_then(|when| when.duration_since(std::time::UNIX_EPOCH).ok())
+                                .map_or(0, |since| {
+                                    i64::try_from(since.as_secs()).unwrap_or(i64::MAX)
+                                }),
+                        )
+                    })
+                    .unwrap_or((0, 0));
                 if kind.is_dir() {
                     let child = builder.add_folder(entry.path());
-                    builder.push(folder, name, ItemKind::Folder, place);
+                    builder.push(folder, name, ItemKind::Folder, place, size, modified);
                     stack.push(child);
                 } else if let Some(kind) = file_kind(&name) {
-                    builder.push(folder, name, kind, place);
+                    builder.push(folder, name, kind, place, size, modified);
                 }
             }
             if builder.entries.len() - published_items >= PUBLISH_ITEMS
@@ -508,6 +616,54 @@ mod tests {
         assert_eq!(
             snapshot.position_of(&hits, Path::new("/lib/Drums/Kick 808.wav")),
             Some(0)
+        );
+    }
+
+    // Spec: browser R10, browser-tags R2. The index the database holds is
+    // searched the same way, and answers as fast.
+    #[test]
+    fn a_search_of_100_000_names_keeps_up_against_the_database() {
+        let root = Path::new("/lib");
+        let words = ["kick", "snare", "hat", "pad", "bass", "vox", "loop", "fx"];
+        let rows: Vec<FileRow> = (0..100_000)
+            .map(|i| {
+                let name = format!("{} {} {i}.wav", words[i % 8], words[(i / 8) % 8]);
+                FileRow {
+                    path: format!("/lib/Folder {}/{name}", i % 500),
+                    lower: name.to_lowercase(),
+                    name,
+                    kind: db::kind_name(ItemKind::Audio),
+                    place: "/lib".to_owned(),
+                    size: 100,
+                    modified: 0,
+                    hash: None,
+                }
+            })
+            .collect();
+        let snapshot = Snapshot::from_rows(vec![root.to_path_buf()], &rows);
+        assert_eq!(snapshot.len(), 100_000);
+        let started = Instant::now();
+        for query in [
+            "k",
+            "ki",
+            "kic",
+            "kick",
+            "kick ",
+            "kick b",
+            "kick ba",
+            "kick bass",
+        ] {
+            let hits = snapshot.search(query, Scope::All, false);
+            assert!(!hits.is_empty(), "{query}");
+        }
+        let each = started.elapsed() / 8;
+        if std::env::var("BL_TEST_DEPTH").as_deref() == Ok("full") {
+            assert!(each < Duration::from_millis(250), "{each:?} a keystroke");
+        }
+        let expected = (0..100_000).filter(|i| i % 64 == 32 || i % 64 == 4).count();
+        assert_eq!(
+            snapshot.search("kick bass", Scope::All, false).len(),
+            expected
         );
     }
 

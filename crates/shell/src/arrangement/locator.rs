@@ -113,7 +113,6 @@ pub fn run(
                 return Err(unavailable("no locator is selected"));
             }
             let to = to
-                .ok_or_else(|| invalid("`to` says where the locator goes"))?
                 .resolve(&doc.settings().time_signatures)
                 .map_err(invalid)?
                 .max(Ticks::ZERO);
@@ -148,6 +147,9 @@ pub fn run(
             if targets.is_empty() {
                 return Err(unavailable("no locator is selected"));
             }
+            // With no name, the person types it in place; the shell asks
+            // the UI to start (the time editing spec, R8).
+            let name = name.ok_or_else(|| invalid("`name` says the new name"))?;
             apply(editor, label(ids::RENAME), |editor| {
                 for locator in &targets {
                     editor.apply(Command::RenameLocator {
@@ -231,8 +233,33 @@ pub fn run(
                     }
                 }
                 SelectMode::Extend => {
+                    // The locators between the first selected and the ones
+                    // named, in time order.
                     let mut all = selected.clone();
                     all.extend(locators.iter().copied());
+                    let mut positions: Vec<Ticks> = selected
+                        .iter()
+                        .filter_map(|id| doc.locator(*id))
+                        .map(|locator| locator.position)
+                        .collect();
+                    positions.extend(
+                        locators
+                            .iter()
+                            .filter_map(|id| doc.locator(*id))
+                            .map(|locator| locator.position),
+                    );
+                    if let (Some(first), Some(last)) =
+                        (positions.iter().min(), positions.iter().max())
+                    {
+                        for locator in doc.locators() {
+                            if locator.position >= *first
+                                && locator.position <= *last
+                                && !all.contains(&locator.id)
+                            {
+                                all.push(locator.id);
+                            }
+                        }
+                    }
                     all.sort_by_key(|locator| {
                         doc.locator(*locator)
                             .map_or(0, |locator| locator.position.get())

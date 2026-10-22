@@ -34,6 +34,8 @@ pub struct Node {
     pub label: String,
     pub value: String,
     pub description: String,
+    /// The node's state, as a screen reader reads it (undo history R12).
+    pub state: String,
     pub disabled: bool,
     /// Whether it's selected, for items that can be (WP-1.8b).
     pub selected: Option<bool>,
@@ -214,9 +216,17 @@ impl Harness {
         // As the app does: the keys go to a value being typed as to a text
         // field, and the frame draws what the engine last published.
         let text_focused = self.ctx.text_edit_focused() || self.main.is_typing();
-        let invocations =
+        let invocations = if self.window == Window::Settings && self.settings.recording() {
+            // The keys being recorded on the Shortcuts page are the
+            // person's, not the app's (the custom shortcuts spec, R8).
+            self.settings
+                .take_recorded_key(&mut input, &self.shell)
+                .into_iter()
+                .collect()
+        } else {
             self.dispatcher
-                .take_bound_keys(&mut input, &self.keymap, &self.shell, text_focused);
+                .take_bound_keys(&mut input, &self.keymap, &self.shell, text_focused)
+        };
         self.advance(BLOCKS_PER_FRAME);
         self.engine = self.shell.poll_engine();
         if self.window == Window::Settings {
@@ -328,6 +338,7 @@ impl Harness {
                 label: node.label().unwrap_or_default().to_owned(),
                 value: node.value().unwrap_or_default().to_owned(),
                 description: node.description().unwrap_or_default().to_owned(),
+                state: node.state_description().unwrap_or_default().to_owned(),
                 disabled: node.is_disabled(),
                 selected: node.is_selected(),
                 toggled: node

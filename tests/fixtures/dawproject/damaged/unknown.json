@@ -1,0 +1,17 @@
+{
+  "application": "Fixture DAW 1.0",
+  "entries": [
+    {
+      "count": 1,
+      "did": "left out",
+      "what": "the element `Wobble`",
+      "where": "in the project"
+    },
+    {
+      "count": 1,
+      "did": "left out",
+      "what": "the attribute `wobble`",
+      "where": "in the project"
+    }
+  ]
+}

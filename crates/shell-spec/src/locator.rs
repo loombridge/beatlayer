@@ -93,10 +93,9 @@ pub struct MoveLocatorArgs {
     /// The locator to move. Left out, the selected ones.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub locator: Option<LocatorId>,
-    /// Where it goes. Left out, it moves one step of the editing grid, as
-    /// Left and Right do.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub to: Option<Position>,
+    /// Where it goes: the position the locator moves to. The keys pass the
+    /// grid step Left and Right move.
+    pub to: Position,
 }
 
 /// Arguments of `locator.rename`.
@@ -106,8 +105,10 @@ pub struct RenameLocatorArgs {
     /// The locators to rename. Left out, the selected ones.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub locators: Option<Vec<LocatorId>>,
-    /// The new name. An empty name keeps the old one.
-    pub name: String,
+    /// The new name. An empty name keeps the old one. Left out, the name
+    /// is typed in place, as Cmd-R does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 /// Arguments of `locator.set_info_text`.
@@ -225,12 +226,13 @@ fn specs() -> Vec<CommandSpec> {
             .result::<LocatorResult>(),
         CommandSpec::new(MOVE, "Move Locator")
             .description(
-                "Moves a locator (`locator`, or the selected ones) to `to`, snapping to the \
-                 editing grid as a clip's start does, and moves every other selected locator \
-                 by the same distance. Left out, `to` moves the locators one step of the \
-                 editing grid, as Left and Right do. A locator can't go before 1.1.1, and a \
-                 move that would put two locators at one position changes nothing. Dragging a \
-                 locator runs this, and the whole drag is one undo step.",
+                "Moves a locator (`locator`, or the selected ones) to `to`, the position it \
+                 goes to, and moves every other selected locator by the same distance. The \
+                 keys pass the grid step Left and Right move, and a drag passes the position \
+                 the pointer is at, snapped to the editing grid as a clip's start does. A \
+                 locator can't go before 1.1.1, and a move that would put two locators at one \
+                 position changes nothing. Dragging a locator runs this, and the whole drag is \
+                 one undo step.",
             )
             .permission(Permission::Edit)
             .context(Arrangement)
@@ -239,7 +241,8 @@ fn specs() -> Vec<CommandSpec> {
         CommandSpec::new(RENAME, "Rename Locator")
             .description(
                 "Renames the locators (`locators`, or the selected ones), as Cmd-R (Ctrl-R) \
-                 and Edit > Rename do. An empty name keeps the old one.",
+                 and Edit > Rename do. The new name is `name`; an empty name keeps the old \
+                 one. Left out, the name is typed in place, as Cmd-R does.",
             )
             .permission(Permission::Edit)
             .context(Arrangement)

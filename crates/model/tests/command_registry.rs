@@ -54,7 +54,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        217,
+        225,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
              the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
              routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -82,7 +82,10 @@ fn every_document_command_is_registered() {
              for the macro variations: store_variation, launch_variation, \
              overwrite_variation, rename_variation, duplicate_variation, \
              delete_variation and set_macro_variation_excluded, WP-4.7 the two \
-             for a clip's pitch and its reversal, WP-5.33 set_device_role, and WP-6.24 seven for \
+             for a clip's pitch and its reversal, WP-5.33 set_device_role, WP-5.4b \
+             set_macro_style, WP-4.15 the two for bouncing a track in place and to a new \
+             track, WP-6.7 the two for the scales: set_clip_scale and set_scale, and \
+             WP-6.24 seven for \
              locators: add_locator, delete_locator, move_locator, rename_locator, \
              set_locator_info_text, loop_to_next_locator and set_song_start"
     );
@@ -102,7 +105,8 @@ fn every_document_command_is_registered() {
     }
     assert!(commands.contains(registry::UNDO));
     assert!(commands.contains(registry::REDO));
-    assert_eq!(commands.len(), ops.len() + 2);
+    assert!(commands.contains(registry::GO_TO_STEP));
+    assert_eq!(commands.len(), ops.len() + 3);
     assert!(commands.iter().all(|spec| registry::handles(&spec.id)));
     assert!(!registry::handles("transport.play"));
 }
@@ -192,6 +196,21 @@ fn every_command_runs_by_id() {
     assert_eq!(document.parent(bass), Some(group));
     assert_eq!(document.track(drums).unwrap().name(), "Break");
     assert_eq!(document.track(reverb).unwrap().kind(), TrackKind::Return);
+
+    // Bounces: a track in place, and a new track beside its source.
+    let bounced: TrackId = agent.new_id();
+    agent.run(
+        "track.set_bounced",
+        json!({ "track": drums, "bounced": { "name": "Drums (Bounce)" } }),
+    );
+    agent.run(
+        "track.create_bounced_track",
+        json!({ "source": bass, "track": bounced, "bounced": { "name": "Bass (Bounce)" } }),
+    );
+    let document = agent.editor.document();
+    assert_eq!(document.track(drums).unwrap().name(), "Drums (Bounce)");
+    assert_eq!(document.track(drums).unwrap().kind(), TrackKind::Audio);
+    assert_eq!(document.track(bounced).unwrap().name(), "Bass (Bounce)");
 
     // Mixer.
     agent.run("mixer.set_volume", json!({ "track": drums, "volume": 0.5 }));
@@ -587,6 +606,17 @@ fn every_command_runs_by_id() {
         })
         .unwrap();
     agent.run("clip.set_gain", json!({ "clip": loop_clip, "gain": 0.5 }));
+    // Spec: scales R5, R9.
+    let changes = agent.run(
+        "clip.set_scale",
+        json!({ "clips": [loop_clip], "enabled": true, "root": 2, "name": "dorian" }),
+    );
+    assert!(changes.clips.contains_key(&loop_clip));
+    let changes = agent.run(
+        "song.set_scale",
+        json!({ "enabled": true, "root": 5, "name": "minor" }),
+    );
+    assert!(changes.settings);
     agent.run(
         "clip.set_fades",
         json!({ "clip": loop_clip, "fade_in": 0.004, "fade_out": 0.25 }),
@@ -1300,6 +1330,35 @@ fn every_command_runs_by_id() {
     );
     agent.run("device.remove", json!({ "device": wave }));
 
+    // WP-6.47: an Articulation Map's list is edited by command.
+    let map: DeviceId = agent.new_id();
+    agent.run(
+        "device.insert",
+        json!({ "track": keys, "index": 0, "device": {
+            "id": map, "name": "Articulation Map", "enabled": true, "params": [],
+            "role": "midi_effect",
+            "kind": { "native": { "device_type": "beatlayer.articulation_map" } },
+        } }),
+    );
+    agent.run(
+        "articulation.add",
+        json!({ "device": map, "name": "Staccato" }),
+    );
+    agent.run(
+        "articulation.set",
+        json!({ "device": map, "index": 1,
+            "trigger": { "kind": "key", "key": 36 },
+            "outputs": [{ "kind": "key", "key": 24, "velocity": 100 }],
+            "channel": 5 }),
+    );
+    agent.run(
+        "articulation.move",
+        json!({ "device": map, "index": 1, "to": 0 }),
+    );
+    agent.run("articulation.delete", json!({ "device": map, "index": 0 }));
+    let list = &agent.editor.document().device(map).unwrap().articulations;
+    assert_eq!(list.len(), 1, "the list keeps one articulation");
+
     // A device with a sidechain input (WP-2.19b), listening to another
     // track.
     let duck: DeviceId = agent.new_id();
@@ -1996,8 +2055,18 @@ fn every_command_runs_by_id() {
     assert!(agent.editor.document().track(group).is_none());
     assert_eq!(agent.editor.undo_history().len(), steps);
 
+    // A jump to a row of the history returns the set to that point, and is
+    // no step of its own (undo history R6, R7).
+    let listed = agent.editor.history().len();
+    let end = agent.editor.document().clone();
+    agent.run(registry::GO_TO_STEP, json!({ "index": 1 }));
+    assert!(agent.editor.document().track(group).is_none());
+    assert_eq!(agent.editor.history().len(), listed);
+    agent.run(registry::GO_TO_STEP, json!({ "index": listed }));
+    assert_eq!(agent.editor.document(), &end);
+
     // One undo step per edit, labelled as the document labels it.
-    let edits = agent.ran.len() - 2;
+    let edits = agent.ran.len() - 3;
     assert!(steps >= edits, "{steps} steps for {edits} kinds of edit");
     assert_eq!(agent.editor.undo_history().next(), Some("Delete track"));
 
@@ -2171,6 +2240,21 @@ fn schemas_match_what_commands_serialise() {
             "track.set_frozen",
             Command::FreezeTracks {
                 frozen: vec![(track, bl_model::FrozenTrack::default())],
+            },
+        ),
+        (
+            "track.set_bounced",
+            Command::BounceTrackInPlace {
+                track,
+                bounced: bl_model::BouncedTrack::default(),
+            },
+        ),
+        (
+            "track.create_bounced_track",
+            Command::BounceToNewTrack {
+                source: track,
+                track: TrackId(fresh()),
+                bounced: bl_model::BouncedTrack::default(),
             },
         ),
         (
@@ -2856,6 +2940,7 @@ fn schemas_match_what_commands_serialise() {
         (
             "device.set_state",
             Command::SetDeviceState {
+                articulations: None,
                 device,
                 params: [(ParamId(4), 0.5)].into_iter().collect(),
                 name: "Warm Pad".to_owned(),
@@ -3112,6 +3197,40 @@ fn schemas_match_what_commands_serialise() {
         (
             "modulator.unmap",
             Command::UnmapModulator { device, slot: 3 },
+        ),
+        (
+            "articulation.add",
+            Command::AddArticulation {
+                device,
+                index: None,
+                name: "Staccato".to_owned(),
+            },
+        ),
+        (
+            "articulation.delete",
+            Command::DeleteArticulation { device, index: 0 },
+        ),
+        (
+            "articulation.move",
+            Command::MoveArticulation {
+                device,
+                index: 0,
+                to: Some(1),
+            },
+        ),
+        (
+            "articulation.set",
+            Command::SetArticulation {
+                device,
+                index: 0,
+                name: Some("Legato".to_owned()),
+                trigger: Some(bl_model::ArticulationTrigger::Key { key: 36 }),
+                outputs: Some(vec![bl_model::ArticulationOutput::Key {
+                    key: 24,
+                    velocity: 100,
+                }]),
+                channel: Some(Some(5)),
+            },
         ),
         (
             "modulator.set_shape",
@@ -3580,12 +3699,30 @@ fn schemas_match_what_commands_serialise() {
                 excluded: true,
             },
         ),
+        // Spec: scales R5, R9.
+        (
+            "clip.set_scale",
+            Command::SetClipScale {
+                clips: vec![clip],
+                enabled: Some(true),
+                root: Some(2),
+                name: Some("dorian".to_owned()),
+            },
+        ),
+        (
+            "song.set_scale",
+            Command::SetScale {
+                enabled: Some(true),
+                root: Some(5),
+                name: Some("minor".to_owned()),
+            },
+        ),
     ];
     let covered: BTreeSet<&str> = examples.iter().map(|(id, _)| *id).collect();
     let document_commands: BTreeSet<&str> = commands
         .iter()
         .map(|spec| spec.id.as_ref())
-        .filter(|id| *id != registry::UNDO && *id != registry::REDO)
+        .filter(|id| *id != registry::UNDO && *id != registry::REDO && *id != registry::GO_TO_STEP)
         .collect();
     assert_eq!(
         covered, document_commands,

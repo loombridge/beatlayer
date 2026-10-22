@@ -344,3 +344,45 @@ fn a_clip_is_silent_across_the_span_where_it_has_no_audio() {
     assert!((left[to - 1] - 0.5).abs() < 1e-6);
     assert!((left[to + 480] - 0.25).abs() < 1e-6);
 }
+
+// Spec: audio-clips R24, R25. A crossfade that reaches back exactly to the
+// start of the later clip's file still plays that clip over the whole span:
+// two clips of one level sum to that level, with no dip at the boundary.
+#[test]
+fn a_crossfade_that_reaches_the_files_start_plays_the_whole_span() {
+    let mut editor = Editor::new();
+    let a = track(&mut editor, TrackKind::Audio, None);
+    let tempo = editor.document().settings().tempo.clone();
+    let (start, length) = (Ticks::QUARTER, Ticks::QUARTER * 2);
+    let boundary = start + length;
+    let before = 0.01;
+    clip(&mut editor, a, start, length, AudioData::new(hash(1)));
+    clip(
+        &mut editor,
+        a,
+        boundary,
+        length,
+        AudioData {
+            start: before,
+            ..AudioData::new(hash(2))
+        },
+    );
+    editor
+        .apply(Command::SetCrossfade {
+            track: a,
+            boundary,
+            before,
+            after: 0.0,
+            curve: 0.0,
+        })
+        .unwrap();
+    let mut media = MediaMap::new();
+    media.insert(hash(1), steady(96_000, 0.5));
+    media.insert(hash(2), steady(96_000, 0.5));
+    let left = play(&editor, &media, 120_000, 64);
+    let to = frame_of(&tempo, boundary);
+    let span = (before * RATE.as_f64()) as usize;
+    for (frame, sample) in left.iter().enumerate().take(to + 10).skip(to - span + 2) {
+        assert!((sample - 0.5).abs() < 1e-3, "frame {frame}: {sample}");
+    }
+}

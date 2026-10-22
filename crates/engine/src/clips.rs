@@ -1016,7 +1016,11 @@ impl Reach {
         let mut extended = clip.clone();
         if self.before > 0.0 {
             let at = tempo.seconds_to_ticks(tempo.ticks_to_seconds(clip.start) - self.before);
-            if let Ok(earlier) = clip.with_start(Ticks(at.get() - REACH_MARGIN), tempo) {
+            // A span that reaches back to the start of the file has no room
+            // for the margin: take the earliest start the file allows.
+            if let Some(earlier) = (-REACH_MARGIN..=REACH_MARGIN)
+                .find_map(|margin| clip.with_start(Ticks(at.get() + margin), tempo).ok())
+            {
                 extended = earlier;
             }
         }

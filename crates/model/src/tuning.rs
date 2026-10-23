@@ -469,14 +469,13 @@ pub(crate) fn retune(
     let mut order: Vec<usize> = (0..all.len()).collect();
     order.sort_by_key(|&i| (all[i].key, all[i].start));
     let mut dead = vec![false; all.len()];
-    let mut last: Option<usize> = None;
+    // The notes still alive on the key at hand, in the order above.
+    let mut kept: Vec<usize> = Vec::new();
     for i in order {
-        // The note that came before on this key and is still alive.
-        while let Some(a) = last {
-            if all[a].key != all[i].key {
-                last = None;
-                break;
-            }
+        if kept.last().is_some_and(|&a| all[a].key != all[i].key) {
+            kept.clear();
+        }
+        while let Some(&a) = kept.last() {
             let overlap = all[a].start + all[a].length > all[i].start;
             if !overlap || !(moved[a] || moved[i]) {
                 break;
@@ -484,7 +483,7 @@ pub(crate) fn retune(
             if all[a].start == all[i].start {
                 if all[i].length > all[a].length {
                     dead[a] = true;
-                    last = (0..a).rev().find(|&j| !dead[j] && all[j].key == all[i].key);
+                    kept.pop();
                     continue;
                 }
                 dead[i] = true;
@@ -494,7 +493,7 @@ pub(crate) fn retune(
             break;
         }
         if !dead[i] {
-            last = Some(i);
+            kept.push(i);
         }
     }
     *notes = all
@@ -646,6 +645,29 @@ mod tests {
         let a = tuning.key_pitch(60).unwrap();
         let b = tuning.key_pitch(61).unwrap();
         assert_eq!(tuning.nearest_key((a + b) / 2.0 - 1e-9), Some(60));
+    }
+
+    #[test]
+    fn notes_that_land_on_one_key_out_of_order_never_get_a_negative_length() {
+        use bl_core::time::Ticks;
+        let q = Ticks::QUARTER;
+        let from = key_pitches(None);
+        // Every key moves to key 50.
+        let mut to = [None; 128];
+        to[50] = Some(61.0);
+        // Stored out of order: the later note first.
+        let mut notes: imbl::Vector<crate::Note> = [
+            crate::Note::new(62, q, q * 2, 100),
+            crate::Note::new(60, Ticks::ZERO, q, 100),
+            crate::Note::new(61, Ticks::ZERO, q * 2, 100),
+        ]
+        .into_iter()
+        .collect();
+        retune(&mut notes, &from, &to);
+        let got: Vec<_> = notes.iter().map(|n| (n.key, n.start, n.length)).collect();
+        // The shorter of the two at 0 is deleted, and the longer is
+        // shortened to end where the next starts.
+        assert_eq!(got, [(50, q, q * 2), (50, Ticks::ZERO, q)]);
     }
 
     #[test]

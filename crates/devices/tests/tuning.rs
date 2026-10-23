@@ -453,3 +453,30 @@ fn the_key_table_agrees_with_the_tuning() {
         assert!((table.pitch(key).unwrap() - wanted).abs() < 1e-12);
     }
 }
+
+// Spec: tunings R8, R18. A note already sounding on a key that a new range
+// leaves out still stops when it's let go.
+#[test]
+fn a_note_held_past_a_shortened_range_still_stops() {
+    let tuning = nineteen();
+    let short = tuning
+        .with_range(tuning.key_note(0), tuning.key_note(64))
+        .unwrap();
+    for (name, make, _) in instruments() {
+        let mut rig = make(512);
+        rig.tune(Some(&tuning));
+        let signal = rig.render_with(
+            96_000,
+            &[on(0, 70), (8_000, NoteKind::Off, 70)],
+            &[(4_000, Some(short.clone()))],
+        );
+        assert!(
+            signal[..4_000].iter().any(|s| s.abs() > 0.1),
+            "{name} plays"
+        );
+        assert!(
+            signal[90_000..].iter().all(|s| s.abs() < 1e-3),
+            "{name} stops"
+        );
+    }
+}

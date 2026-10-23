@@ -962,8 +962,9 @@ impl NativeDevice for PolySynth {
             if self.events.len() >= self.events.capacity() {
                 break;
             }
-            // Spec: polysynth R24. A key past a tuning's range plays nothing.
-            if self.synth.keys.pitch(note.key).is_none() {
+            // Spec: polysynth R24. A key past a tuning's range plays nothing;
+            // a note it already plays still gets its release.
+            if matches!(note.kind, NoteKind::On) && self.synth.keys.pitch(note.key).is_none() {
                 continue;
             }
             let which = Note {

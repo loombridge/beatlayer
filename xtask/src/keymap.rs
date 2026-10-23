@@ -367,6 +367,35 @@ const WIDGET: &[(&str, &str)] = &[
         "the Clip View's note editor: Left and Right move the selected notes by the grid \
          (`note.move`)",
     ),
+    // WP-6.3: the note editor reads the keys of the split and chop gestures
+    // itself, because each is one undo step across several presses or frames.
+    (
+        "S-NOTE-003",
+        "the Clip View's note editor: Cmd-E splits the notes the insert marker or the time \
+         selection's edges cross, or with notes selected chops them on the grid \
+         (`note.split`, `note.chop`)",
+    ),
+    (
+        "S-NOTE-004",
+        "the Clip View's note editor: Option-E (Ctrl-E) or Cmd-E held with a drag up or down \
+         chops the selected notes into more or fewer equal parts (`note.chop` with `parts`)",
+    ),
+    (
+        "S-NOTE-005",
+        "the Clip View's note editor: with Shift too, the drag chops by powers of two \
+         (`note.chop` with `parts`)",
+    ),
+    (
+        "S-NOTE-006",
+        "the Clip View's note editor: E held with a click or drag splits the notes the \
+         pointer crosses (`note.split`)",
+    ),
+    (
+        "S-NOTE-047",
+        "the Clip View's note editor: Cmd held after a chop, Up and Down chop into one part \
+         more or fewer, with Shift into the next or previous power of two (`note.chop` with \
+         `steps`)",
+    ),
     // WP-4.10: the Sample Editor reads its arrow keys itself, because each
     // shortcut has two keys that act differently and the keymap gives a
     // shortcut one command with one set of arguments; each runs a

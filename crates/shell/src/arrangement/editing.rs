@@ -892,6 +892,38 @@ impl ArrangementView {
         self.grid_step(doc).ticks.max(Ticks(1))
     }
 
+    /// `at` on the nearest grid line, whether snapping is on or not: where
+    /// holding Cmd (Ctrl on Windows) puts a split (note-editing R33).
+    #[must_use]
+    pub fn nearest_line(&self, doc: &Document, at: Ticks) -> Ticks {
+        super::grid::snap(&doc.settings().time_signatures, self.grid_step(doc), at)
+    }
+
+    /// The grid lines either side of `at`: the last one before it and the
+    /// first one after it, or `at` itself where there is none. A stretch
+    /// marker moves freely between them before it snaps (note-editing R43).
+    #[must_use]
+    pub fn lines_around(&self, doc: &Document, at: Ticks) -> (Ticks, Ticks) {
+        let step = self.grid_step(doc);
+        let reach = step.ticks.max(Ticks(1)) * 2;
+        let (mut before, mut after) = (at, at);
+        super::grid::lines(
+            &doc.settings().time_signatures,
+            step,
+            (at - reach).max(Ticks::ZERO),
+            at + reach,
+            64,
+            |line, _| {
+                if line < at {
+                    before = line;
+                } else if line > at && after == at {
+                    after = line;
+                }
+            },
+        );
+        (before, after)
+    }
+
     /// Where something dragged to `at` lands: on the nearest grid line while
     /// snapping is on, and freely while it's off. Holding Cmd (Alt on
     /// Windows) during the drag, `invert`, does the opposite (I-DRAG-021;

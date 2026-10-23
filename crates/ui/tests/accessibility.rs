@@ -3082,6 +3082,15 @@ fn paths() -> BTreeMap<&'static str, Path> {
         // note-selection keys (S-A11Y-010, S-A11Y-011), Delete
         // (S-EDIT-005) and Cmd-A (S-NOTE-001).
         ("note.ramp_value", Exception(note_editor)),
+        // The stretch markers are dragged (I-DRAG-040); Live has no key
+        // for stretching notes, so a keyboard path needs the maintainer's
+        // choice of keys.
+        (
+            "note.stretch",
+            Exception(LaterView(
+                "keys for the note stretch markers (Live has none; the choice is the maintainer's)",
+            )),
+        ),
         ("view.lane", Exception(note_editor)),
         // The expression lanes and the footer (WP-6.1): the pointer drags
         // the markers and uses the footer's controls and the Lane

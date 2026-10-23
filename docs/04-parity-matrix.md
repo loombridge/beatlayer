@@ -40,9 +40,9 @@ Each row's **Notes** name the work packages that build it ("Built in WP-1.8a, WP
 | Info View | M2 (help text), M6 (the user's own info text) | [Spec](specs/info-view.md). Built in WP-2.24, WP-6.58 |
 | Learn View (built-in lessons) | M10 | Part of the manual work |
 | Undo History panel | M6 | Undo itself from M0 ([spec](specs/undo-history.md)). Built in WP-6.28 |
-| Second window | M6 | [Spec](specs/second-window.md). Built in WP-6.29, WP-6.29b |
+| Second window | M6 | [Spec](specs/second-window.md). Built in WP-6.29; clips between the views come with WP-6.29b |
 | Tracks: cut, copy, paste and duplicate whole tracks with their clips, take lanes, devices and automation | M6 | [Spec](specs/track-context-menu.md). Built in WP-6.52 |
-| Interface zoom, per window | M1 | Global zoom from the first view; per-window zoom in M6. Built in WP-1.17 |
+| Interface zoom, per window | M1 | Global zoom from the first view; per-window zoom in M6. Built in WP-1.17, WP-6.29 |
 | Themes, light and dark, follow the OS, tone and contrast controls | M6 | Theme file from M1; Live's `.ask` themes aren't imported ([spec](specs/themes.md)). Built in WP-6.30 |
 | Track, clip and scene colours: the colour palette, Auto-Assign Track Colors, Assign Track Color to Clips and to Grouped Tracks and Clips | M6 | Beatlayer's own swatch colours ([spec](specs/themes.md)). Built in WP-6.30b |
 | Keyboard navigation (focus, area jumps, held shortcuts) | M1 onwards | Each view ships with its keyboard path; parity audit in M10. Tab and the neighbour keys by area and track, Wrap Tab Navigation, Outline View in Focus (off, as in Live 12.4.6), menus and context menus from the keyboard, and every command's keyboard path checked against the registry: WP-1.14 ([spec](specs/accessibility.md)). Built in WP-1.7, WP-1.14 |

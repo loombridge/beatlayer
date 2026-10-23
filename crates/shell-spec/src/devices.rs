@@ -1828,7 +1828,8 @@ fn specs() -> Vec<CommandSpec> {
         CommandSpec::new(SELECT, "Select Device")
             .description(
                 "Selects a device, as clicking its title bar does, or none with `null`. The \
-                 Device View's keys (Delete, Cmd-C, Cmd-D, Cmd-R) act on it. Selecting \
+                 Device View's keys (Delete, Cmd-C, Cmd-D, Cmd-R) act on it. A device that \
+                 floats in its own window also brings that window to the front. Selecting \
                  changes nothing in the set.",
             )
             .permission(Permission::Read)

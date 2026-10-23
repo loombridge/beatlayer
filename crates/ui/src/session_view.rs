@@ -23,7 +23,7 @@ use bl_shell::mixer_view::MixerOf;
 use bl_shell::mixer_view_commands as mixer_ids;
 use bl_shell::session_view_commands as ids;
 use bl_shell::session_view_commands::SessionViewState;
-use bl_shell::{Area, Invocation, Shell, WindowKind};
+use bl_shell::{Area, Invocation, Shell};
 use egui::accesskit::{self, Role};
 use egui::{
     Align2, Color32, Id, Key, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Ui, WidgetInfo,
@@ -751,8 +751,7 @@ impl GridUi {
         scenes: &[(SceneId, String)],
         events: &mut Vec<UiEvent>,
     ) {
-        self.focused = shell.focused_area() == Area::MainView
-            && shell.focused_window() == WindowKind::Main
+        self.focused = crate::window::has_focus(ui.ctx(), shell, Area::MainView)
             && !ui.ctx().text_edit_focused()
             && ui.ctx().memory(|m| {
                 m.focused().is_none_or(|id| {

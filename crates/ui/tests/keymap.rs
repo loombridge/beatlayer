@@ -70,6 +70,7 @@ const SHELL: &[&str] = &[
     "S-FILE-006",
     "S-FILE-009",
     "S-VIEW-001",
+    "S-VIEW-002",
     "S-VIEW-003",
     "S-VIEW-010",
     "S-BRW-002",
@@ -1153,6 +1154,40 @@ fn the_note_operations_keys_reach_their_commands() {
         &contexts,
     );
     assert!(plain.is_none(), "the note editor reads Cmd-E itself");
+}
+
+// Spec: second-window R1, R4, R8, R11. Cmd+Shift+W (Ctrl+Shift+W) opens and
+// closes the second window from any context, and Option+1 and Option+2 move
+// the focus to the main view in whichever window shows it.
+#[test]
+fn the_second_window_shortcut_reaches_its_command() {
+    let keymap = Keymap::live12();
+    let entry = keymap.entry_for("S-VIEW-002").unwrap();
+    assert_eq!(entry.status, Status::Bound);
+    assert_eq!(entry.commands.len(), 1);
+    assert_eq!(entry.commands[0].id, "view.toggle_second_window");
+    assert_eq!(entry.commands[0].contexts, &[Context::Global][..]);
+    for (platform, cmd, ctrl) in [(Platform::Mac, true, false), (Platform::Other, false, true)] {
+        let hit = keymap
+            .resolve(
+                platform,
+                Key::W,
+                mods(cmd, ctrl, false, true),
+                &[Context::Arrangement, Context::Global],
+            )
+            .expect("Cmd+Shift+W is bound");
+        assert_eq!(hit.command.id, "view.toggle_second_window");
+        // Plain Cmd+W stays Close Window.
+        let close = keymap
+            .resolve(
+                platform,
+                Key::W,
+                mods(cmd, ctrl, false, false),
+                &[Context::Global],
+            )
+            .expect("Cmd+W is bound");
+        assert_eq!(close.command.id, "window.close");
+    }
 }
 
 // Spec: detail-views R1, R2, R5, R6, R11, R14. The detail views' seven

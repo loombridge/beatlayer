@@ -41,6 +41,8 @@ pub const TRACK_OPTIONS: &str = "mixer_view.track_options";
 /// `mixer_view.performance_impact`: show or hide the Performance Impact
 /// section.
 pub const PERFORMANCE_IMPACT: &str = "mixer_view.performance_impact";
+/// `mixer_view.devices`: show or hide the Devices section (IMP-25).
+pub const DEVICES: &str = "mixer_view.devices";
 /// `mixer_view.scroll`: scroll a mixer's columns sideways.
 pub const SCROLL: &str = "mixer_view.scroll";
 /// `mixer_view.focus`: move the keyboard focus to the Arrangement's mixer.
@@ -63,6 +65,7 @@ pub const IDS: &[&str] = &[
     RETURN_TRACKS_SCROLL,
     TRACK_OPTIONS,
     PERFORMANCE_IMPACT,
+    DEVICES,
     SCROLL,
     FOCUS,
     FOLD_CHAINS,
@@ -147,6 +150,13 @@ pub struct MixerViewState {
     /// six segments that light up from the left with the track's share of
     /// the set's processing time. Hidden in a new set.
     pub performance_impact: bool,
+    /// Whether the Devices section shows: between In/Out and Sends, each
+    /// track's top-level devices with their activators (IMP-25, the mixer
+    /// view spec R24). Hidden in a new install; the devices and whether
+    /// each is on are the query tool's `track` devices with their
+    /// `enabled`.
+    #[serde(default)]
+    pub devices: bool,
     /// Each track's Performance Impact, as the engine last published it:
     /// the track, how many of its six segments are lit, and its share of
     /// the set's processing time (the mixer spec, R31).
@@ -322,7 +332,7 @@ fn specs() -> Vec<CommandSpec> {
             "Mixer View State",
             "Reports what the mixers show: whether the Session View's and the Arrangement \
              View's mixers are shown and how far each is scrolled, and which sections (In/Out, \
-             Sends, the volume strips, the return tracks, the Performance Impact) show. The \
+             Sends, the volume strips, the return tracks, the Performance Impact, the Devices) show. The \
              Performance Impact values are the engine's last, one entry per track: how many of \
              the six segments are lit and the track's share of the set's processing time. \
              Track values (volume, pan, the activator, Solo, Arm, routing, sends, the \
@@ -437,6 +447,18 @@ fn specs() -> Vec<CommandSpec> {
              left with the track's share of the set's processing time. Hidden in a new set. \
              Switches unless `shown` says which. Changes only the view; the shares themselves \
              are in `mixer_view.state`, as `performance_impact_values`.",
+        )
+        .context(Global)
+        .args::<SectionArgs>(),
+        view(
+            DEVICES,
+            "Mixer Devices",
+            "Shows or hides the mixers' Devices section, as View > Mixer Controls > Devices \
+             does: between In/Out and Sends, each track's top-level devices in chain order, \
+             each with its activator and name. A click on a name selects the device and shows \
+             the Device View; a click on an activator switches the device. Hidden in a new \
+             install. Switches unless `shown` says which. Changes only the view; the devices \
+             and whether each is on are in the query tool's `track` devices, as `enabled`.",
         )
         .context(Global)
         .args::<SectionArgs>(),

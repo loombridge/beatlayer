@@ -281,7 +281,10 @@ impl DeviceViewUi {
         let in_view = focused.is_some_and(|id| {
             id == overview_id(frame.id) || pads.pads.iter().any(|p| pad_id(frame.id, p.slot) == id)
         });
-        if !in_view || shell.focused_area() != Area::Detail || egui::Popup::is_any_open(ui.ctx()) {
+        if !in_view
+            || crate::window::focused_area(ui.ctx(), shell) != Area::Detail
+            || egui::Popup::is_any_open(ui.ctx())
+        {
             return;
         }
         for (key, sign) in [(Key::ArrowUp, 1), (Key::ArrowDown, -1)] {

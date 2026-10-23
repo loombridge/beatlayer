@@ -1,6 +1,6 @@
 # The second window: two main views at once, the detail views between windows, and clips between the Session and the Arrangement
 
-- **Status:** draft
+- **Status:** partial (R1 to R17 each have a passing test; R18 to R23 come with WP-6.29b)
 - **Work packages:** WP-6.29 (the second window: R1 to R17), WP-6.29b (clips between the Session and the Arrangement, by dragging in one window or between two, and by Copy and Paste: R18 to R23). Each window's own interface zoom is [interface-zoom.md](interface-zoom.md) R11 to R15; the detail area inside a window is [detail-views.md](detail-views.md)'s
 - **Parity-matrix row:** Views and workflow: Second window; Interface zoom, per window
 - **Checked against:** the Live 12 reference manual (online edition), read 20 October 2026; the Live 12 release notes, 12.0 and 12.1; the UI parity reference's rows L-WIN2-001 to L-WIN2-003, L-WIN-002, L-CTRL-001, L-CTRL-027, L-ARR-018, M-VIEW-002, M-FILE-004, S-VIEW-002, S-VIEW-003, S-VIEW-004, I-DROP-014, I-DROP-015 and I-FOCUS-010, recorded from Live 12.4.3 on macOS
@@ -74,23 +74,23 @@ This spec covers the second window, what it shows, the keyboard focus between th
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1 | to be written in WP-6.29 | |
-| R2 | to be written in WP-6.29 | |
-| R3 | to be written in WP-6.29 | |
-| R4 | to be written in WP-6.29 | |
-| R5 | to be written in WP-6.29 | |
-| R6 | to be written in WP-6.29 | |
-| R7 | to be written in WP-6.29 | |
-| R8 | to be written in WP-6.29 | |
-| R9 | to be written in WP-6.29 | |
-| R10 | to be written in WP-6.29 | |
-| R11 | to be written in WP-6.29 | |
-| R12 | to be written in WP-6.29 | |
-| R13 | to be written in WP-6.29 | |
-| R14 | to be written in WP-6.29 | |
-| R15 | to be written in WP-6.29 | |
-| R16 | to be written in WP-6.29 | |
-| R17 | to be written in WP-6.29 | |
+| R1 | `crates/shell/tests/second_window.rs`, `the_command_opens_and_closes_the_second_window_and_the_menu_item_is_ticked`, `close_window_closes_the_second_window_with_it_in_front`, `the_second_windows_zoom_and_frame_are_kept_between_launches`; `crates/ui/tests/second_window.rs`, `the_second_window_is_990_by_703_points_the_first_time`, `view_second_window_is_ticked_while_it_is_open_and_the_zoom_items_follow_the_window`, `closing_it_returns_the_views_and_the_main_window_keeps_its_view`; `crates/ui/tests/keymap.rs`, `the_second_window_shortcut_reaches_its_command` | unit, UI script; the app opens the window at the frame the preferences keep |
+| R2 | `crates/ui/tests/second_window.rs`, `it_lays_out_at_its_first_size_and_its_smallest_at_50_100_and_200_percent`, `it_has_no_assistant_toggle_and_no_info_view`; `crates/shell/tests/second_window.rs`, `each_window_has_its_own_browser_and_full_screen` | UI script |
+| R3 | `crates/ui/tests/second_window.rs`, `a_key_goes_to_the_window_in_front`, `clicks_in_the_second_window_run_their_commands_for_it` (one shell behind both windows: a change from one shows in the other's next frame) | UI script |
+| R4 | `crates/shell/tests/second_window.rs`, `the_second_window_shows_the_view_the_main_window_does_not`, `switching_views_changes_no_set_and_adds_no_undo_step`; `crates/ui/tests/second_window.rs`, `it_shows_the_other_main_view_and_a_click_on_a_selector_swaps_them` (Tab, the selector, and a click on the view a window shows) | unit, UI script |
+| R5 | `crates/shell/tests/second_window.rs`, `each_window_has_its_own_browser_and_full_screen`; `crates/app/src/capture.rs`, `a_view_is_captured_from_whichever_window_shows_it` | unit |
+| R6 | `crates/shell/tests/second_window.rs`, `the_second_window_shows_the_view_the_main_window_does_not` (the mixer follows the view: `Shell::mixer_of` reads the view each window shows); `crates/app/src/capture.rs`, `a_view_is_captured_from_whichever_window_shows_it` | unit |
+| R7 | `crates/shell/tests/second_window.rs`, `a_view_shown_by_its_toggle_opens_in_the_window_with_the_focus`, `the_clip_view_keeps_its_height_and_expansion_when_it_moves`; `crates/ui/tests/second_window.rs`, `clicks_in_the_second_window_run_their_commands_for_it` | unit, UI script |
+| R8 | `crates/shell/tests/second_window.rs`, `f12_moves_what_the_window_in_front_shows_to_the_other_window`; `crates/ui/tests/second_window.rs`, `a_key_goes_to_the_window_in_front` | unit, UI script |
+| R9 | `crates/shell/tests/second_window.rs`, `closing_the_second_window_brings_its_views_back_to_the_main_window`; `crates/ui/tests/second_window.rs`, `closing_it_returns_the_views_and_the_main_window_keeps_its_view` | unit, UI script |
+| R10 | `crates/shell/tests/second_window.rs`, `keys_run_what_the_keymap_binds_for_the_window_in_front`; `crates/ui/tests/second_window.rs`, `a_key_goes_to_the_window_in_front`, `only_the_window_in_front_outlines_its_focused_area` | unit, UI script |
+| R11 | `crates/shell/tests/second_window.rs`, `navigate_gives_the_focus_to_the_window_that_shows_the_view`, `navigate_to_a_detail_view_goes_to_the_window_that_shows_it`; `crates/ui/tests/second_window.rs`, `option_1_and_option_2_move_the_focus_between_the_windows` | unit, UI script |
+| R12 | `crates/shell/tests/second_window.rs`, `the_info_view_and_the_undo_history_stay_in_the_main_window`; `crates/ui/tests/second_window.rs`, `it_has_no_assistant_toggle_and_no_info_view` | unit, UI script |
+| R13 | `crates/shell/tests/second_window.rs`, `each_window_has_its_own_browser_and_full_screen` | unit; the app puts the window in full screen |
+| R14 | `crates/shell/tests/second_window.rs`, `a_set_keeps_the_main_view_and_the_second_window`, `a_saved_default_set_keeps_its_views`, `switching_views_changes_no_set_and_adds_no_undo_step`; `crates/cli/tests/older_sets.rs`, `a_set_saved_before_the_second_window_opens_in_the_arrangement_with_one_window`; `crates/project/tests/round_trip.rs` (the generated projects carry `window_views`) | unit, through real set files |
+| R15 | `crates/shell/tests/second_window.rs`, `view_state_reads_back_every_command`; `crates/agent/tests/readback_runtime.rs`, `view_state_reads_back_the_second_window`; `crates/app/src/capture.rs`, `a_view_is_captured_from_whichever_window_shows_it`; `cargo xtask commands` | unit, through the agent API |
+| R16 | `crates/ui/tests/second_window.rs`, `each_window_is_a_root_of_the_accessibility_tree_and_names_itself`, `only_the_window_in_front_outlines_its_focused_area` | UI script |
+| R17 | `crates/ui/tests/second_window.rs`, `it_lays_out_at_its_first_size_and_its_smallest_at_50_100_and_200_percent`, `the_control_bar_is_measured_from_the_windows_left_edge_like_the_main_windows`, `the_second_window_zooms_on_its_own` | unit, UI script |
 | R18 | to be written in WP-6.29b | |
 | R19 | to be written in WP-6.29b | |
 | R20 | to be written in WP-6.29b | |

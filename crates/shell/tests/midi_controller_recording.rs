@@ -200,7 +200,7 @@ fn a_session_recording_keeps_the_controllers_with_its_notes_in_one_undo_step() {
     };
     let pressure = &data.notes.iter().next().unwrap().pressure;
     assert_eq!(pressure.len(), 1);
-    assert_eq!(pressure[0].value, 90);
+    assert_eq!(pressure[0].value, 90.0);
     let held = values(&clip, cc(1));
     assert_eq!(held.first(), Some(&0.0), "rest before the first message");
     assert_eq!(held.last(), Some(&99.0), "the channel is dropped");

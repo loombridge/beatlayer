@@ -14,9 +14,13 @@ bl_rt::install_trap!();
 use std::sync::Arc;
 
 use bl_core::time::{Bpm, SampleRate, TempoMap, Ticks};
+use bl_engine::testing::{self, Probe};
 use bl_engine::{Collector, Compiler, EngineConfig, MediaMap, Registry, TransportCommand, channel};
 use bl_media::SampleData;
-use bl_model::{AudioData, Clip, ClipData, Command, ContentHash, Editor, TrackKind};
+use bl_model::{
+    AudioData, Breakpoint, Clip, ClipData, Command, ContentHash, Device, DeviceKind, Editor,
+    MidiData, Note, TrackKind,
+};
 
 // Without `--cfg lspk_rtsan` (`rtsan/.cargo/config.toml`), this doesn't build.
 const _: () = assert!(
@@ -268,4 +272,123 @@ fn crossfaded_clip_playback_passes_under_rtsan() {
     assert_eq!(state.counters.data_unrouted, 0);
     assert!(state.counters.data_delivered > 100);
     assert!(state.meter(track).is_some_and(|[left, _]| left > 0.0));
+}
+
+/// Notes with Pitch, Slide and Pressure envelopes (WP-6.17; the MPE spec, R5
+/// and R8): steps, slopes and curves played to a test instrument through
+/// looped and unlooped clips, with the notes edited, the clip moved, locates
+/// into the middle of notes and tempo changes while it plays.
+#[test]
+fn midi_clip_expressions_pass_under_rtsan() {
+    let config = EngineConfig::new(SampleRate::HZ_48000, 256);
+    let mut collector = Collector::new();
+    let mut compiler = Compiler::new(
+        config,
+        testing::registry(&Arc::new(Probe::default())),
+        collector.handle(),
+    );
+    let (mut sender, mut processor, _monitor) = channel(&config);
+
+    let mut editor = Editor::new();
+    let track = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: track,
+            kind: TrackKind::Midi,
+            name: String::new(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    let instrument = editor.new_id();
+    editor
+        .apply(Command::InsertDevice {
+            track,
+            index: 0,
+            device: Device::new(
+                instrument,
+                "",
+                DeviceKind::Native {
+                    device_type: testing::INSTRUMENT.to_owned(),
+                },
+            ),
+        })
+        .unwrap();
+    let point = |at: i64, value: f64, bend: f64| Breakpoint {
+        at: Ticks(at),
+        value,
+        bend,
+    };
+    let beat = Ticks::QUARTER.get();
+    let note = |key: u8, start: i64, length: i64| Note {
+        pitch: vec![
+            point(0, 0.0, 0.0),
+            point(length / 2, 12.0, 0.5),
+            point(length, -7.0, 0.0),
+        ],
+        slide: vec![
+            point(0, 10.0, 0.0),
+            point(length / 4 - 1, 10.0, 0.0),
+            point(length / 4, 100.0, 0.0),
+        ],
+        pressure: vec![point(length / 3, 64.0, -0.5)],
+        ..Note::new(key, Ticks(start), Ticks(length), 100)
+    };
+    let notes = [
+        note(60, 0, beat),
+        note(64, 0, 2 * beat),
+        note(67, beat / 2, 3 * beat),
+        note(72, 4 * beat, beat),
+    ];
+    let clip = editor.new_id();
+    let mut data = MidiData::new(notes);
+    data.looping = true;
+    data.loop_end = Some(Ticks(4 * beat));
+    editor
+        .apply(Command::CreateClip {
+            track,
+            clip: Clip::new(clip, Ticks::ZERO, Ticks(16 * beat), ClipData::Midi(data)),
+        })
+        .unwrap();
+    sender.send_update(compiler.sync(editor.document()));
+    assert!(sender.flush());
+    sender.transport(TransportCommand::Play);
+
+    for round in 0..2_000u64 {
+        let command = match round % 40 {
+            // Edit the notes, so each block's list is new.
+            0 => {
+                let mut changed = MidiData::new([
+                    note(60 + (round % 12) as u8, 0, beat),
+                    note(64, beat / 4, 2 * beat),
+                ]);
+                changed.looping = round % 80 == 0;
+                changed.loop_end = Some(Ticks(4 * beat));
+                Some(Command::SetClipData {
+                    clip,
+                    data: ClipData::Midi(changed),
+                })
+            }
+            20 => Some(Command::SetTempo {
+                tempo: TempoMap::constant(Bpm::new(90.0 + (round % 600) as f64 / 10.0).unwrap()),
+            }),
+            _ => None,
+        };
+        if let Some(command) = command {
+            editor.apply(command).unwrap();
+            sender.send_update(compiler.sync(editor.document()));
+        }
+        if round % 100 == 50 {
+            sender.transport(TransportCommand::Locate(Ticks(
+                beat / 3 * (round % 11) as i64,
+            )));
+        }
+        assert!(sender.flush());
+        bl_rt::rt_test!({
+            processor.process(if round % 3 == 0 { 64 } else { 256 });
+        });
+        if round % 50 == 0 {
+            collector.collect();
+        }
+    }
 }

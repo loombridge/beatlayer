@@ -1361,6 +1361,104 @@ fn an_agent_copies_pastes_and_duplicates_notes_by_command() {
     assert_eq!(notes.len(), 4, "the cut notes are gone: {notes:?}");
 }
 
+// Spec: mpe R3, R9. An agent sets a note's expression envelopes by command, in
+// one undo step labelled with its name; each bad argument is refused with the
+// reason and changes nothing; the query tool reads the envelopes back.
+#[test]
+fn an_agent_sets_a_notes_expression_envelopes_and_reads_them_back() {
+    let mut client = headless(false);
+    let created = call(
+        &mut client,
+        "run",
+        json!({ "label": "A clip of notes", "commands": [
+            { "command": "track.create",
+              "args": { "id": {"$new": "notes"}, "kind": "midi", "name": "Notes",
+                        "index": 0 } },
+            { "command": "clip.create",
+              "args": { "track": {"$ref": "notes"},
+                        "clip": { "id": {"$new": "clip"}, "name": "Notes", "start": 0,
+                                  "length": 705_600, "mute": false,
+                                  "data": { "midi": { "notes": [
+                                      { "key": 60, "velocity": 100, "start": 0,
+                                        "length": 480 }
+                                  ] } } } } },
+        ] }),
+    );
+    let clip = created["ids"]["clip"].as_u64().unwrap();
+    let steps = client.transport().shell.editor().undo_history().len();
+    let set = call(
+        &mut client,
+        "run",
+        json!({ "label": "Bend the note", "commands": [
+            { "command": "note.set_expression",
+              "args": { "clip": clip, "notes": [0], "envelope": "pitch",
+                        "breakpoints": [
+                            { "at": 0, "value": 0.0 },
+                            { "at": 240, "value": 12.0, "bend": 0.5 },
+                            { "at": 480, "value": -3.5 } ] } },
+        ] }),
+    );
+    assert_eq!(set["ran"], 1);
+    assert_eq!(set["undo_step"], "test-agent: Bend the note");
+    assert_eq!(
+        client.transport().shell.editor().undo_history().len(),
+        steps + 1,
+        "one undo step"
+    );
+    let queried = call(
+        &mut client,
+        "query",
+        json!({ "id": clip, "detail": "full" }),
+    );
+    let pitch = &queried["content"]["notes"]["items"][0]["pitch"];
+    assert_eq!(
+        *pitch,
+        json!([
+            { "at": 0, "value": 0.0 },
+            { "at": 240, "value": 12.0, "bend": 0.5 },
+            { "at": 480, "value": -3.5 }
+        ])
+    );
+    // Each bad argument is refused with its reason, and nothing changes.
+    let before = client.transport().shell.editor().document().clone();
+    for (args, reason) in [
+        (
+            json!({ "clip": clip, "notes": [0], "envelope": "slide",
+                    "breakpoints": [{ "at": 0, "value": 128.0 }] }),
+            "range",
+        ),
+        (
+            json!({ "clip": clip, "notes": [0], "envelope": "pressure",
+                    "breakpoints": [{ "at": 481, "value": 1.0 }] }),
+            "length",
+        ),
+        (
+            json!({ "clip": clip, "notes": [0], "envelope": "pitch",
+                    "breakpoints": [{ "at": 5, "value": 1.0 }, { "at": 5, "value": 2.0 }] }),
+            "none twice",
+        ),
+        (
+            json!({ "clip": clip, "notes": [0], "envelope": "pitch",
+                    "breakpoints": [{ "at": 0, "value": 1.0, "bend": 2.0 }] }),
+            "range",
+        ),
+        (
+            json!({ "clip": clip, "notes": [4], "envelope": "pitch", "breakpoints": [] }),
+            "note",
+        ),
+    ] {
+        let refused = client
+            .call(
+                "run",
+                json!({ "commands": [{ "command": "note.set_expression", "args": args }] }),
+            )
+            .unwrap();
+        assert!(refused.is_error, "{args}: {}", refused.text);
+        assert!(refused.text.contains(reason), "{args}: {}", refused.text);
+        assert_eq!(*client.transport().shell.editor().document(), before);
+    }
+}
+
 /// The MIDI clips' notes, as (key, start) pairs by start then key.
 fn agent_notes(client: &mut Client<InProcess>) -> Vec<(u8, i64)> {
     let document = client.transport().shell.editor().document();

@@ -16,6 +16,8 @@
 //! (WP-5.13) added a multisampler's layers and what its views show; a set
 //! saved before it opens with none. Version 7 (T197) renamed the native
 //! devices to Live's names; a set saved before it opens with the new names.
+//! Version 8 (WP-6.17) made a note's pressure an envelope of breakpoints; a
+//! set saved before it opens with each pressure point a step.
 //! `schema-0-fake.json` is an invented version 0, with a migration to
 //! version 1 defined below, to show the scaffold carries an old file through
 //! to the current model.
@@ -518,6 +520,7 @@ static FAKE_MIGRATIONS: &[Migration] = &[
     MIGRATIONS[3],
     MIGRATIONS[4],
     MIGRATIONS[5],
+    MIGRATIONS[6],
 ];
 
 /// The scaffold migrates an old file: the invented version 0 fixture loads

@@ -414,6 +414,116 @@ fn port_switches_and_the_keyboard_persist_across_restarts() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+// Spec: midi-io R3, R27. The MPE switch is off for a port seen for the first
+// time, set by `midi.set_port`, read back by `midi.ports`, and kept in the
+// preferences across a restart; MPE alone opens nothing, and an output has no
+// MPE switch.
+#[test]
+fn the_mpe_switch_persists_across_restarts_and_opens_nothing_by_itself() {
+    let dir = std::env::temp_dir().join(format!("bl-shell-mpe-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let start = |dir: &std::path::Path| {
+        let prefs = Preferences::load(dir).unwrap();
+        let test = TestBackend::new();
+        test.add_port(Direction::Input, "Roli");
+        test.add_port(Direction::Output, "Synth");
+        let mut shell = Shell::new(
+            prefs.clone(),
+            Some(dir.to_owned()),
+            AudioHost::null(prefs.audio),
+            Box::new(ProjectFiles::new()),
+        );
+        shell.use_midi_backend(Box::new(test.clone()));
+        (shell, test)
+    };
+    let (mut shell, _) = start(&dir);
+    let fresh = shell.run("midi.ports", json!({})).unwrap();
+    assert_eq!(fresh["ports"][0]["mpe"], false, "off when first seen");
+    let set = shell
+        .run(
+            "midi.set_port",
+            json!({ "direction": "input", "name": "Roli", "mpe": true }),
+        )
+        .unwrap();
+    assert_eq!(
+        (set["mpe"].clone(), set["track"].clone()),
+        (json!(true), json!(true))
+    );
+    // With Track off the port closes though MPE is on: MPE opens nothing.
+    let closed = shell
+        .run(
+            "midi.set_port",
+            json!({ "direction": "input", "name": "Roli", "track": false }),
+        )
+        .unwrap();
+    assert_eq!(
+        (closed["mpe"].clone(), closed["open"].clone()),
+        (json!(true), json!(false))
+    );
+    shell
+        .run(
+            "midi.set_port",
+            json!({ "direction": "input", "name": "Roli", "track": true }),
+        )
+        .unwrap();
+    let refused = shell.run(
+        "midi.set_port",
+        json!({ "direction": "output", "name": "Synth", "mpe": true }),
+    );
+    assert!(refused.is_err(), "an output has no MPE switch");
+    drop(shell);
+
+    let (mut shell, test) = start(&dir);
+    let back = shell.run("midi.ports", json!({})).unwrap();
+    assert_eq!(back["ports"][0]["mpe"], true, "kept in the preferences");
+    assert!(test.is_open(Direction::Input, "Roli"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// Spec: midi-io R28. A track whose input is a port with MPE on takes every
+// channel: the chooser reads All Channels and can't be changed, and the
+// channel it had stays for when MPE is off again.
+#[test]
+fn a_track_on_an_mpe_port_shows_all_channels_and_keeps_the_channel_it_chose() {
+    let mut rig = Rig::new();
+    let section = |rig: &Rig| match routing::in_out(
+        rig.shell.editor().document(),
+        rig.track,
+        &rig.shell.interface(),
+    )
+    .unwrap()
+    {
+        InOut::Clips { input_channel, .. } => input_channel,
+        other => panic!("{other:?}"),
+    };
+    rig.input(json!({ "type": "port", "name": "Keys A" }));
+    let channel = section(&rig).run_for("5").unwrap().clone();
+    rig.run(&channel.id, channel.args);
+    assert_eq!(section(&rig).text, "5");
+
+    rig.run(
+        "midi.set_port",
+        json!({ "direction": "input", "name": "Keys A", "mpe": true }),
+    );
+    let channel = section(&rig);
+    assert_eq!(channel.text, "All Channels");
+    assert!(!channel.enabled(), "MPE takes every channel");
+    let kept = rig.shell.editor().document().track(rig.track).unwrap();
+    assert_eq!(
+        kept.routing().channel,
+        Some(5),
+        "the choice stays in the set"
+    );
+
+    rig.run(
+        "midi.set_port",
+        json!({ "direction": "input", "name": "Keys A", "mpe": false }),
+    );
+    let channel = section(&rig);
+    assert_eq!(channel.text, "5");
+    assert!(channel.enabled());
+}
+
 // Spec: midi-io R6
 #[test]
 fn a_port_the_computer_doesnt_offer_is_refused() {

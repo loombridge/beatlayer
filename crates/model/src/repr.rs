@@ -13,7 +13,7 @@ use schemars::{JsonSchema, Schema, schema_for};
 use serde::{Deserialize, Serialize};
 
 use crate::automation::{AutomationTarget, Breakpoint, Envelope};
-use crate::clip::{Clip, TakeLane};
+use crate::clip::{Clip, ClipData, TakeLane};
 use crate::command::{
     check_chain, check_clip, check_clip_fits, check_crossfader, check_device, check_extent,
     check_mixer, check_send_level, check_take_lane,
@@ -446,16 +446,22 @@ impl Loader {
             track.devices.push_back(Shared::new(device));
         }
         check_chain(&track)?;
-        for clip in repr.clips {
+        for mut clip in repr.clips {
             self.claim(clip.id.0)?;
+            if let ClipData::Midi(midi) = &mut clip.data {
+                midi.drop_broken_expressions();
+            }
             check_clip_fits(&track, &clip.data)?;
             check_extent(clip.start, clip.length)?;
             check_clip(&clip)?;
             self.index.clip_track.insert(clip.id, id);
             track.clips.insert(clip.id, Shared::new(clip));
         }
-        for slot in repr.slots {
+        for mut slot in repr.slots {
             self.claim(slot.clip.id.0)?;
+            if let ClipData::Midi(midi) = &mut slot.clip.data {
+                midi.drop_broken_expressions();
+            }
             check_clip_fits(&track, &slot.clip.data)?;
             if slot.clip.start != Ticks::ZERO {
                 return Err(ModelError::SlotClipPosition(slot.clip.start));
@@ -1664,7 +1670,8 @@ mod tests {
     // Spec: midi-controller-data R7
     #[test]
     fn controller_envelopes_and_note_pressure_save_with_the_clip_and_load_back() {
-        use crate::clip::{MidiData, Note, PressurePoint};
+        use crate::Breakpoint;
+        use crate::clip::{MidiData, Note};
         let mut editor = Editor::new();
         let midi = editor.new_id();
         editor
@@ -1679,15 +1686,22 @@ mod tests {
         let clip = editor.new_id();
         let note = Note {
             pressure: vec![
-                PressurePoint {
+                Breakpoint {
                     at: Ticks::ZERO,
-                    value: 90,
+                    value: 90.0,
+                    bend: 0.0,
                 },
-                PressurePoint {
+                Breakpoint {
                     at: Ticks(500),
-                    value: 20,
+                    value: 20.0,
+                    bend: 0.25,
                 },
             ],
+            pitch: vec![Breakpoint {
+                at: Ticks(10),
+                value: -12.5,
+                bend: 0.0,
+            }],
             ..Note::new(60, Ticks::ZERO, Ticks::QUARTER, 100)
         };
         editor
@@ -1739,7 +1753,15 @@ mod tests {
         );
         assert_eq!(
             saved["data"]["midi"]["notes"][0]["pressure"],
-            json!([{ "at": 0, "value": 90 }, { "at": 500, "value": 20 }])
+            json!([{ "at": 0, "value": 90.0 }, { "at": 500, "value": 20.0, "bend": 0.25 }])
+        );
+        assert_eq!(
+            saved["data"]["midi"]["notes"][0]["pitch"],
+            json!([{ "at": 10, "value": -12.5 }])
+        );
+        assert!(
+            saved["data"]["midi"]["notes"][0].get("slide").is_none(),
+            "an envelope with no breakpoints isn't saved"
         );
         let loaded = load(value.clone()).unwrap();
         assert_eq!(loaded, doc);
@@ -1749,20 +1771,22 @@ mod tests {
         let mut old = value.clone();
         let entry = find_clip_mut(&mut old, clip);
         entry.as_object_mut().unwrap().remove("envelopes");
-        entry["data"]["midi"]["notes"][0]
-            .as_object_mut()
-            .unwrap()
-            .remove("pressure");
+        for key in ["pressure", "pitch"] {
+            entry["data"]["midi"]["notes"][0]
+                .as_object_mut()
+                .unwrap()
+                .remove(key);
+        }
         let back = load(old).unwrap();
         assert_eq!(back.clip(clip).unwrap().envelopes().count(), 0);
         let ClipData::Midi(data) = &back.clip(clip).unwrap().data else {
             panic!("a MIDI clip")
         };
-        assert!(data.notes[0].pressure.is_empty());
+        assert!(data.notes[0].pressure.is_empty() && data.notes[0].pitch.is_empty());
 
         // Bad data doesn't load: a controller number a clip can't hold, a
-        // value outside the controller's range, a controller on an audio
-        // clip, and pressure out of order, outside the note or too strong.
+        // value outside the controller's range, and a controller on an audio
+        // clip.
         let broken = |edit: &dyn Fn(&mut Value)| {
             let mut value = value.clone();
             edit(find_clip_mut(&mut value, clip));
@@ -1777,15 +1801,23 @@ mod tests {
             clip["envelopes"][0]["target"] = json!({ "type": "midi.channel_pressure" });
         });
         assert!(error.contains("out of range"), "{error}");
+        // Spec: mpe R9. An envelope that breaks R1 (out of order, outside
+        // the note, out of range, or bent too far) doesn't load, and its
+        // note loads without it and with its other envelopes.
         for bad in [
-            json!([{ "at": 500, "value": 20 }, { "at": 0, "value": 90 }]),
-            json!([{ "at": 5_000_000, "value": 20 }]),
-            json!([{ "at": 0, "value": 128 }]),
+            json!([{ "at": 500, "value": 20.0 }, { "at": 0, "value": 90.0 }]),
+            json!([{ "at": 5_000_000, "value": 20.0 }]),
+            json!([{ "at": 0, "value": 128.0 }]),
+            json!([{ "at": 0, "value": 1.0, "bend": 2.0 }]),
         ] {
-            let error = broken(&|clip| {
-                clip["data"]["midi"]["notes"][0]["pressure"] = bad.clone();
-            });
-            assert!(error.contains("note"), "{bad}: {error}");
+            let mut broken = value.clone();
+            find_clip_mut(&mut broken, clip)["data"]["midi"]["notes"][0]["pressure"] = bad.clone();
+            let back = load(broken).unwrap();
+            let ClipData::Midi(data) = &back.clip(clip).unwrap().data else {
+                panic!("a MIDI clip")
+            };
+            assert!(data.notes[0].pressure.is_empty(), "{bad}");
+            assert_eq!(data.notes[0].pitch.len(), 1, "the note keeps its pitch");
         }
         let (with_audio, [_, audio, _]) = song();
         let audio_clip = with_audio.track(audio).unwrap().clips().next().unwrap().id;

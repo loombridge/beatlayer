@@ -59,6 +59,7 @@ fn info(state: PortState) -> PortInfo {
         track: state.switches.track,
         sync: state.switches.sync,
         remote: state.switches.remote,
+        mpe: state.switches.mpe,
         present: state.present,
         open: state.open,
         error: state.error,
@@ -85,6 +86,7 @@ impl MidiHost {
                     track: port.track,
                     sync: port.sync,
                     remote: port.remote,
+                    mpe: port.mpe,
                 },
             );
         }
@@ -126,6 +128,7 @@ impl MidiHost {
                     track: switches.track,
                     sync: switches.sync,
                     remote: switches.remote,
+                    mpe: switches.mpe,
                 })
                 .collect(),
             keyboard_on: self.keyboard.is_on(),
@@ -168,6 +171,16 @@ impl MidiHost {
             .collect()
     }
 
+    /// The names of the input ports whose MPE switch is on.
+    #[must_use]
+    pub fn mpe_input_names(&self) -> Vec<String> {
+        self.ports()
+            .into_iter()
+            .filter(|p| p.direction == PortDirection::Input && p.mpe)
+            .map(|p| p.name)
+            .collect()
+    }
+
     /// The ports and the keyboard, as `midi.ports` returns them.
     #[must_use]
     pub fn report(&self) -> MidiPortsResult {
@@ -190,6 +203,7 @@ impl MidiHost {
         track: Option<bool>,
         sync: Option<bool>,
         remote: Option<bool>,
+        mpe: Option<bool>,
     ) -> Result<PortInfo, String> {
         let dir = direction(dir);
         let now = self
@@ -198,10 +212,17 @@ impl MidiHost {
             .filter(|p| p.present)
             .ok_or_else(|| format!("no MIDI {} port is called \"{name}\"", dir.label()))?
             .switches;
+        // Spec: midi-io R27. An output has no MPE switch.
+        if mpe.is_some() && dir == Direction::Output {
+            return Err(format!(
+                "the MIDI output port \"{name}\" has no MPE switch: a track sends MPE out through its MIDI To"
+            ));
+        }
         let switches = PortSwitches {
             track: track.unwrap_or(now.track),
             sync: sync.unwrap_or(now.sync),
             remote: remote.unwrap_or(now.remote),
+            mpe: mpe.unwrap_or(now.mpe),
         };
         self.ports
             .set_switches(dir, name, switches)

@@ -111,18 +111,21 @@ fn notes_played_with_the_transport_stopped_are_logged_on_their_exact_samples() {
         midi.captured(),
         vec![
             CapturedMidi {
+                mpe: bl_engine::mpe::MpeRole::Plain,
                 track,
                 clock: BLOCK as u64 + 70,
                 song: None,
                 message: controller,
             },
             CapturedMidi {
+                mpe: bl_engine::mpe::MpeRole::Plain,
                 track,
                 clock: 2 * BLOCK as u64 + 100,
                 song: None,
                 message: on,
             },
             CapturedMidi {
+                mpe: bl_engine::mpe::MpeRole::Plain,
                 track,
                 clock: 3 * BLOCK as u64 + 40,
                 song: None,
@@ -153,6 +156,7 @@ fn notes_played_while_the_song_plays_carry_their_song_frame() {
     assert_eq!(
         midi.captured(),
         vec![CapturedMidi {
+            mpe: bl_engine::mpe::MpeRole::Plain,
             track,
             clock: 2 * BLOCK as u64 + 30,
             song: Some(Frames(48_000 + 2 * BLOCK as i64 + 30)),

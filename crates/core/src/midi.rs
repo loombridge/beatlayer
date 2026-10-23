@@ -199,8 +199,23 @@ impl PortId {
 pub enum MidiSource {
     /// An input port, by its ID.
     Port(PortId),
+    /// An input port whose MPE switch is on (`docs/specs/midi-io.md`, R27),
+    /// by its ID: its messages are read as MPE.
+    MpePort(PortId),
     /// The computer MIDI keyboard.
     ComputerKeyboard,
+}
+
+impl MidiSource {
+    /// The port the message came from, MPE or not; `None` for the computer
+    /// keyboard.
+    #[must_use]
+    pub const fn port(self) -> Option<PortId> {
+        match self {
+            Self::Port(port) | Self::MpePort(port) => Some(port),
+            Self::ComputerKeyboard => None,
+        }
+    }
 }
 
 /// A message on its way from a MIDI input to the engine: where it came

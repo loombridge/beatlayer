@@ -29,6 +29,7 @@ use std::time::{Duration, SystemTime};
 use bl_core::midi::MidiMessage;
 use bl_core::time::{Frames, SampleRate, TempoMap, Ticks};
 use bl_engine::controller_take::{self, REST};
+use bl_engine::mpe::MpeRole;
 use bl_engine::{
     LaunchLog, MidiRecordTrack, RecordTrack, RecordedMidi, RecordingPlan, SessionEvent,
     SessionTarget, TakeBounds,
@@ -571,7 +572,9 @@ fn writer(path: &Path, channels: usize, rate: SampleRate) -> Result<AudioWriter,
 /// note-on on it again) ends it. A note still held when the take ends at
 /// `end` ends there; a note-off with no note held is ignored. Every note
 /// lasts at least a tick, and carries the polyphonic pressure its key was
-/// sent while it was held (the MIDI controller data spec, R11).
+/// sent while it was held (the MIDI controller data spec, R11). A note from
+/// an MPE port starts and ends by the ID the input gave it, and carries the
+/// pitch, slide and pressure it was sent, stepped (the MPE spec, R12).
 fn notes(messages: &[RecordedMidi], end: Frames, tempo: &TempoMap, rate: SampleRate) -> Vec<Note> {
     let ticks = |frames| tempo.frames_to_ticks(frames, rate);
     let finish = |key: u8, (from, velocity): (Frames, u8), to: Frames, release: u8| {
@@ -583,29 +586,67 @@ fn notes(messages: &[RecordedMidi], end: Frames, tempo: &TempoMap, rate: SampleR
         note
     };
     let mut held: [Option<(Frames, u8)>; 128] = [None; 128];
+    // The notes an MPE port holds, by ID, and the ID of every note made.
+    let mut mpe: Vec<(u32, u8, (Frames, u8))> = Vec::new();
+    let mut ids: Vec<Option<u32>> = Vec::new();
+    let mut heard: Vec<controller_take::Heard> = Vec::new();
     let mut notes = Vec::new();
-    for RecordedMidi { frame, message } in messages {
-        if !(message.is_note_on() || message.is_note_off()) {
-            continue;
-        }
-        let key = message.data1();
+    for RecordedMidi {
+        frame,
+        message,
+        mpe: role,
+    } in messages
+    {
         let on = message.is_note_on();
-        if let Some(note) = held[usize::from(key)].take() {
-            notes.push(finish(
-                key,
-                note,
-                *frame,
-                if on { 0 } else { message.data2() },
-            ));
-        }
-        if on {
-            held[usize::from(key)] = Some((*frame, message.data2()));
+        let release = if on { 0 } else { message.data2() };
+        match *role {
+            MpeRole::Expression {
+                id,
+                expression,
+                value,
+                ..
+            } => heard.push(controller_take::Heard {
+                id,
+                expression,
+                value: f64::from(value),
+                at: ticks(*frame),
+            }),
+            MpeRole::Note { id } => {
+                if let Some(at) = mpe.iter().position(|(held, ..)| *held == id) {
+                    let (_, key, note) = mpe.remove(at);
+                    notes.push(finish(key, note, *frame, release));
+                    ids.push(Some(id));
+                } else if on {
+                    mpe.push((id, message.data1(), (*frame, message.data2())));
+                }
+            }
+            MpeRole::Plain => {
+                if !(on || message.is_note_off()) {
+                    continue;
+                }
+                let key = message.data1();
+                if let Some(note) = held[usize::from(key)].take() {
+                    notes.push(finish(key, note, *frame, release));
+                    ids.push(None);
+                }
+                if on {
+                    held[usize::from(key)] = Some((*frame, message.data2()));
+                }
+            }
         }
     }
     for (key, note) in (0u8..).zip(held) {
-        notes.extend(note.map(|note| finish(key, note, end, 0)));
+        if let Some(note) = note {
+            notes.push(finish(key, note, end, 0));
+            ids.push(None);
+        }
+    }
+    for (id, key, note) in mpe {
+        notes.push(finish(key, note, end, 0));
+        ids.push(Some(id));
     }
     controller_take::give_pressure(&mut notes, &moves(messages, tempo, rate));
+    controller_take::give_expressions(&mut notes, &ids, &heard);
     notes
 }
 
@@ -617,7 +658,7 @@ fn moves(
 ) -> Vec<(Ticks, MidiMessage)> {
     messages
         .iter()
-        .filter(|m| controller_take::is_controller(&m.message))
+        .filter(|m| m.mpe == MpeRole::Plain && controller_take::is_controller(&m.message))
         .map(|m| (tempo.frames_to_ticks(m.frame, rate), m.message))
         .collect()
 }
@@ -786,10 +827,12 @@ pub fn overdub_passes(
         let Some((pass, at, limit)) = locate(data, length, note.start) else {
             continue;
         };
+        // Spec: mpe R4. A note cut at the end of its pass takes its
+        // envelopes' end there.
+        let length = note.length.min(limit - at).max(Ticks(1));
         passes.entry(pass).or_default().push(Note {
             start: at,
-            length: note.length.min(limit - at).max(Ticks(1)),
-            ..note
+            ..note.resized(length)
         });
     }
     passes
@@ -1045,6 +1088,7 @@ mod tests {
         RecordedMidi {
             frame: Frames(frame),
             message,
+            mpe: MpeRole::Plain,
         }
     }
 
@@ -1514,8 +1558,8 @@ mod tests {
         );
     }
 
-    // Spec: midi-controller-data R11 (S1). Polyphonic pressure is the held
-    // note's own pressure and makes no envelope; with no note held it is
+    // Spec: midi-controller-data R11 (S1); mpe R12. Polyphonic pressure is the
+    // held note's own pressure, stepped, and makes no envelope; with no note held it is
     // left out, and a take of nothing else makes no clip.
     #[test]
     fn polyphonic_pressure_becomes_the_pressure_of_the_note_held() {
@@ -1545,8 +1589,9 @@ mod tests {
                 .map(|p| (p.at, p.value))
                 .collect::<Vec<_>>(),
             vec![
-                (tick(30_000) - tick(24_000), 127),
-                (tick(36_000) - tick(24_000), 112)
+                (tick(30_000) - tick(24_000), 127.0),
+                (tick(36_000) - tick(24_000) - Ticks(1), 127.0),
+                (tick(36_000) - tick(24_000), 112.0)
             ]
         );
         assert_eq!(clip.envelopes().len(), 0);

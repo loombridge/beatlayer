@@ -19,7 +19,7 @@ use bl_model::{
     Clip, ClipData, ClipId, GroovePlay, GroovePool, Note, SceneId, Track, TrackId, clip_seed, noise,
 };
 
-use crate::midi_controllers::{PlacedController, Sounding, Stretch, play_pressure};
+use crate::midi_controllers::{PlacedController, Sounding, Stretch, play_expressions};
 use crate::node::{Block, Node, NodeConfig, NodeData, NodeEvent, NoteEvent, NoteKind, ParamValue};
 
 /// Simple deterministic xorshift64* pseudo-random number generator.
@@ -74,7 +74,7 @@ struct ActiveNote {
     release_velocity: u8,
     off_frame: i64,
     /// Where the note sits in its clip's note list, and where it started in
-    /// the song: what later blocks need to play its pressure (WP-2.29).
+    /// the song: what later blocks need to play its expressions (WP-2.29, WP-6.17).
     index: usize,
     song_start: Ticks,
 }
@@ -372,7 +372,7 @@ impl MidiClipPlayer {
         Self {
             clips: None,
             sounding: Vec::with_capacity(256),
-            scratch_notes: Vec::with_capacity(512),
+            scratch_notes: Vec::with_capacity(2048),
             messages: Vec::with_capacity(512),
             audible: true,
             last_position: None,
@@ -566,9 +566,9 @@ fn process_clip_segment(
             });
         }
 
-        // Spec: midi-controller-data R3. The pressure of the blocks after
-        // this one is played from `sounding`.
-        play_pressure(
+        // Spec: mpe R5. The expressions of the blocks after this one are
+        // played from `sounding`.
+        play_expressions(
             note,
             Sounding {
                 note_id,
@@ -701,8 +701,8 @@ impl Node for MidiClipPlayer {
             return;
         };
 
-        // Spec: midi-controller-data R3. The pressure of notes that began in
-        // an earlier block.
+        // Spec: mpe R5. The expressions of notes that began in an earlier
+        // block.
         let (rate, map) = (block.sample_rate(), block.tempo());
         for active in &self.sounding {
             let note = list
@@ -712,7 +712,7 @@ impl Node for MidiClipPlayer {
                 .and_then(|c| c.notes.get(active.index))
                 .filter(|n| n.key == active.key);
             if let Some(note) = note {
-                play_pressure(
+                play_expressions(
                     note,
                     Sounding {
                         note_id: active.note_id,

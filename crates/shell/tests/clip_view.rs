@@ -498,6 +498,7 @@ fn note_edits_are_registered_with_their_classes() {
     assert_eq!(class(ids::MOVE_NOTES), Some(Permission::Edit));
     assert_eq!(class(ids::RESIZE_NOTES), Some(Permission::Edit));
     assert_eq!(class(ids::SET_VALUE), Some(Permission::Edit));
+    assert_eq!(class(ids::SET_EXPRESSION), Some(Permission::Edit));
     assert_eq!(class(ids::RAMP_VALUE), Some(Permission::Edit));
     assert_eq!(class(ids::DELETE_NOTES), Some(Permission::Destructive));
     assert_eq!(class(ids::SELECT_NOTES), Some(Permission::Read));
@@ -1349,9 +1350,10 @@ fn with_pressure(note: Note, points: &[(i64, u8)]) -> Note {
     Note {
         pressure: points
             .iter()
-            .map(|(at, value)| bl_model::PressurePoint {
+            .map(|(at, value)| bl_model::Breakpoint {
                 at: Ticks(*at),
-                value: *value,
+                value: f64::from(*value),
+                bend: 0.0,
             })
             .collect(),
         ..note
@@ -1360,9 +1362,10 @@ fn with_pressure(note: Note, points: &[(i64, u8)]) -> Note {
 
 #[test]
 fn a_split_keeps_every_value_and_puts_pressure_in_its_part() {
-    // Spec: note-editing R33, R34, R35, R47. A split at a tick, at the
-    // insert marker and at a time selection's edges is one undo step, each
-    // part keeps the note's values, and the pressure goes with its part.
+    // Spec: note-editing R33, R34, R35, R47; mpe R4. A split at a tick, at
+    // the insert marker and at a time selection's edges is one undo step, each
+    // part keeps the note's values, and each part has the stretch of the
+    // pressure over its span, with the value there at both its ends.
     let held = Note {
         velocity: 90,
         release_velocity: 30,
@@ -1402,14 +1405,17 @@ fn a_split_keeps_every_value_and_puts_pressure_in_its_part() {
     }
     assert_eq!(
         parts[0].pressure,
-        with_pressure(song_note(0, 0, 1), &[(0, 10)]).pressure
+        with_pressure(song_note(0, 0, 1), &[(0, 10), (QUARTER, 20)]).pressure
     );
     assert_eq!(
         parts[1].pressure,
-        with_pressure(song_note(0, 0, 1), &[(0, 20)]).pressure,
-        "a point is counted from its part"
+        with_pressure(song_note(0, 0, 1), &[(0, 20), (QUARTER, 20)]).pressure,
+        "the value where it starts, held to where it ends"
     );
-    assert!(parts[2].pressure.is_empty());
+    assert_eq!(
+        parts[2].pressure,
+        with_pressure(song_note(0, 0, 1), &[(0, 20), (2 * QUARTER, 20)]).pressure
+    );
 
     // With no notes selected, the insert marker splits every note it
     // crosses.
@@ -1871,4 +1877,325 @@ fn split_clip_refuses_a_session_clip_and_no_time_selection() {
     let before = song.doc().clone();
     assert!(song.shell.run(ids::SPLIT_CLIP, json!({})).is_err());
     assert_eq!(*song.doc(), before);
+}
+
+fn point(at: i64, value: f64) -> bl_model::Breakpoint {
+    bl_model::Breakpoint {
+        at: Ticks(at),
+        value,
+        bend: 0.0,
+    }
+}
+
+/// A note carrying all three envelopes, for the edits that must keep them.
+fn expressive(key: u8, start: i64, length: i64) -> Note {
+    Note {
+        pitch: vec![point(0, 0.0), point(length / 2, 7.0)],
+        slide: vec![point(0, 20.0), point(length / 4, 90.0)],
+        pressure: vec![point(length / 2, 64.0)],
+        ..song_note(key, start, length)
+    }
+}
+
+// Spec: mpe R3. `note.set_expression` replaces one envelope of the notes it
+// names, or of the selected notes, in one undo step, and the clip query reads
+// the envelopes back.
+#[test]
+fn note_set_expression_replaces_one_envelope_in_one_undo_step() {
+    let mut song = song(vec![
+        song_note(60, 0, QUARTER),
+        song_note(64, QUARTER, QUARTER),
+    ]);
+    let breakpoints = json!([
+        { "at": 0, "value": -12.0 },
+        { "at": QUARTER / 2, "value": 12.5, "bend": 0.5 },
+        { "at": QUARTER, "value": 0.0 },
+    ]);
+    let result = song.one_step(
+        ids::SET_EXPRESSION,
+        json!({ "notes": [0], "envelope": "pitch", "breakpoints": breakpoints }),
+    );
+    assert_eq!(result.notes, [0]);
+    let notes = song.notes();
+    assert_eq!(
+        notes[0].pitch,
+        [
+            point(0, -12.0),
+            bl_model::Breakpoint {
+                bend: 0.5,
+                ..point(QUARTER / 2, 12.5)
+            },
+            point(QUARTER, 0.0)
+        ]
+    );
+    assert!(notes[0].slide.is_empty() && notes[0].pressure.is_empty());
+    assert!(!notes[1].has_expression(), "only the named note changed");
+    // The selected notes, when none are named; slide and pressure too.
+    song.view(ids::SELECT_NOTES, json!({ "notes": [0, 1] }));
+    song.one_step(
+        ids::SET_EXPRESSION,
+        json!({ "envelope": "slide", "breakpoints": [{ "at": 10, "value": 127.0 }] }),
+    );
+    song.one_step(
+        ids::SET_EXPRESSION,
+        json!({ "envelope": "pressure", "breakpoints": [{ "at": 0, "value": 0.0 }] }),
+    );
+    for note in song.notes() {
+        assert_eq!(note.slide, [point(10, 127.0)]);
+        assert_eq!(note.pressure, [point(0, 0.0)]);
+    }
+    // An empty list clears the envelope.
+    song.one_step(
+        ids::SET_EXPRESSION,
+        json!({ "envelope": "slide", "breakpoints": [] }),
+    );
+    assert!(song.notes().iter().all(|note| note.slide.is_empty()));
+    // The clip query reads them back.
+    let clip = song.doc().clip(song.clip).unwrap();
+    let saved = serde_json::to_value(clip).unwrap();
+    assert_eq!(
+        saved["data"]["midi"]["notes"][0]["pitch"][1],
+        json!({ "at": QUARTER / 2, "value": 12.5, "bend": 0.5 })
+    );
+}
+
+// Spec: mpe R3. Each bad argument is refused, and nothing changes.
+#[test]
+fn note_set_expression_refuses_each_bad_argument_without_a_change() {
+    let mut song = song(vec![expressive(60, 0, QUARTER)]);
+    let before = song.doc().clone();
+    let steps = song.steps();
+    let envelope = |name: &str, breakpoints: Value| json!({ "notes": [0], "envelope": name, "breakpoints": breakpoints });
+    for args in [
+        envelope("pitch", json!([{ "at": 0, "value": 48.5 }])),
+        envelope("pitch", json!([{ "at": 0, "value": -49.0 }])),
+        envelope("slide", json!([{ "at": 0, "value": 128.0 }])),
+        envelope("slide", json!([{ "at": 0, "value": -1.0 }])),
+        envelope("pressure", json!([{ "at": 0, "value": 127.5 }])),
+        envelope("pressure", json!([{ "at": -1, "value": 1.0 }])),
+        envelope("pressure", json!([{ "at": QUARTER + 1, "value": 1.0 }])),
+        envelope(
+            "pressure",
+            json!([{ "at": 5, "value": 1.0 }, { "at": 5, "value": 2.0 }]),
+        ),
+        envelope(
+            "pressure",
+            json!([{ "at": 9, "value": 1.0 }, { "at": 5, "value": 2.0 }]),
+        ),
+        envelope("pressure", json!([{ "at": 0, "value": 1.0, "bend": 1.5 }])),
+        envelope("tilt", json!([])),
+        json!({ "notes": [9], "envelope": "pitch", "breakpoints": [] }),
+        json!({ "notes": [0], "envelope": "pitch" }),
+    ] {
+        assert!(
+            song.shell.run(ids::SET_EXPRESSION, args.clone()).is_err(),
+            "{args}"
+        );
+        assert_eq!(*song.doc(), before, "{args}");
+        assert_eq!(song.steps(), steps, "{args}");
+    }
+    // Positions at both ends of the note are allowed.
+    song.edit(
+        ids::SET_EXPRESSION,
+        envelope(
+            "pressure",
+            json!([{ "at": 0, "value": 0.0 }, { "at": QUARTER, "value": 127.0 }]),
+        ),
+    );
+}
+
+// Spec: mpe R3. A clip that isn't MIDI is refused.
+#[test]
+fn note_set_expression_refuses_an_audio_clip() {
+    let mut song = song(vec![]);
+    let audio = song.shell.new_id();
+    let track = song
+        .doc()
+        .tracks()
+        .find(|track| track.kind() == bl_model::TrackKind::Audio)
+        .unwrap()
+        .id();
+    let clip = Clip::new(
+        audio,
+        Ticks::ZERO,
+        Ticks(BAR),
+        ClipData::Audio(bl_model::AudioData::new(bl_model::ContentHash([1; 32]))),
+    );
+    song.shell
+        .run("clip.create", json!({ "track": track, "clip": clip }))
+        .unwrap();
+    let before = song.doc().clone();
+    assert!(
+        song.shell
+            .run(
+                ids::SET_EXPRESSION,
+                json!({ "clip": audio, "notes": [0], "envelope": "pitch", "breakpoints": [] }),
+            )
+            .is_err()
+    );
+    assert_eq!(*song.doc(), before);
+}
+
+// Spec: mpe R4. Moving, transposing, nudging, copying by drag and
+// duplicating keep a note's envelopes unchanged, in the edit's own step.
+#[test]
+fn moves_transposes_nudges_and_copies_keep_the_envelopes() {
+    let note = expressive(60, 0, QUARTER);
+    let mut song = song(vec![note.clone()]);
+    song.one_step(
+        ids::MOVE_NOTES,
+        json!({ "notes": [0], "by": BAR, "semitones": 5 }),
+    );
+    let moved = song.notes()[0].clone();
+    assert_eq!((moved.start, moved.key), (Ticks(BAR), 65));
+    assert_eq!(
+        (&moved.pitch, &moved.slide, &moved.pressure),
+        (&note.pitch, &note.slide, &note.pressure),
+        "moving in time and pitch"
+    );
+    song.one_step(ids::MOVE_NOTES, json!({ "notes": [0], "by": -SIXTEENTH }));
+    assert_eq!(song.notes()[0].pitch, note.pitch, "a nudge");
+    song.one_step(
+        ids::MOVE_NOTES,
+        json!({ "notes": [0], "by": QUARTER, "copy": true }),
+    );
+    assert!(
+        song.notes()
+            .iter()
+            .all(|n| n.pitch == note.pitch && n.slide == note.slide),
+        "the copy has them too"
+    );
+    song.view(ids::SELECT_NOTES, json!({ "notes": [0] }));
+    song.one_step(ids::DUPLICATE, json!({ "clip": song.clip }));
+    let notes = song.notes();
+    assert_eq!(notes.len(), 3);
+    assert!(notes.iter().all(|n| n.pressure == note.pressure));
+}
+
+// Spec: mpe R4. The clipboard keeps them through copy, cut and paste.
+#[test]
+fn copy_cut_and_paste_keep_the_envelopes() {
+    let note = expressive(60, 0, QUARTER);
+    let mut song = song(vec![note.clone()]);
+    song.view(ids::SELECT_NOTES, json!({ "notes": [0] }));
+    song.shell
+        .run(ids::COPY, json!({ "clip": song.clip }))
+        .unwrap();
+    song.view(
+        "clip_view.set_insert_marker",
+        json!({ "clip": song.clip, "beat": 2 * QUARTER }),
+    );
+    song.one_step(ids::PASTE, json!({ "clip": song.clip }));
+    let notes = song.notes();
+    assert_eq!(notes.len(), 2);
+    assert_eq!(notes[1].start, Ticks(2 * QUARTER));
+    assert_eq!(notes[1].pitch, note.pitch);
+    assert_eq!(notes[1].slide, note.slide);
+    assert_eq!(notes[1].pressure, note.pressure);
+    song.view(ids::SELECT_NOTES, json!({ "notes": [0] }));
+    song.one_step(ids::CUT, json!({ "clip": song.clip }));
+    song.view(
+        "clip_view.set_insert_marker",
+        json!({ "clip": song.clip, "beat": 5 * QUARTER }),
+    );
+    song.one_step(ids::PASTE, json!({ "clip": song.clip }));
+    assert!(song.notes().iter().all(|n| n.pitch == note.pitch));
+}
+
+// Spec: mpe R4. Quantising a start keeps them; quantising an end, or
+// resizing, cuts or lengthens as shortening and lengthening do.
+#[test]
+fn quantising_and_resizing_cut_the_envelopes_at_the_new_end() {
+    let note = Note {
+        pitch: vec![point(0, 0.0), point(QUARTER, 12.0)],
+        ..song_note(60, 100, QUARTER)
+    };
+    let mut song = song(vec![note.clone()]);
+    // A start that moves keeps the envelope as it was.
+    song.one_step(
+        ids::QUANTIZE_NOTES,
+        json!({ "notes": [0], "grid": QUARTER }),
+    );
+    assert_eq!(song.notes()[0].start, Ticks(0));
+    assert_eq!(song.notes()[0].pitch, note.pitch);
+    // Shorter: what is past the new end goes, and the value there ends it.
+    song.one_step(
+        ids::RESIZE_NOTES,
+        json!({ "notes": [0], "by": -(QUARTER / 2) }),
+    );
+    let shorter = song.notes()[0].clone();
+    assert_eq!(shorter.length, Ticks(QUARTER / 2));
+    assert_eq!(shorter.pitch, [point(0, 0.0), point(QUARTER / 2, 6.0)]);
+    assert!(shorter.expressions_fit());
+    // Longer: the last value holds.
+    song.one_step(ids::RESIZE_NOTES, json!({ "notes": [0], "by": QUARTER }));
+    let longer = song.notes()[0].clone();
+    assert_eq!(longer.length, Ticks(QUARTER / 2 + QUARTER));
+    assert_eq!(longer.pitch, shorter.pitch);
+    // Quantising the end to a grid shortens the same way.
+    let mut quantised = self::song(vec![Note {
+        pitch: vec![point(0, 0.0), point(QUARTER + SIXTEENTH, 12.0)],
+        ..song_note(60, 0, QUARTER + SIXTEENTH)
+    }]);
+    quantised.one_step(
+        ids::QUANTIZE_NOTES,
+        json!({ "notes": [0], "grid": QUARTER, "target": "note_end" }),
+    );
+    let cut = quantised.notes()[0].clone();
+    assert_eq!(cut.length, Ticks(QUARTER));
+    assert_eq!(cut.pitch.last().unwrap().at, Ticks(QUARTER));
+    assert!(cut.expressions_fit());
+}
+
+// Spec: mpe R4. Split, chop, join and fit to time range follow it: a part has
+// the stretch of each envelope over its span, joining keeps each at its
+// place, and a stretch scales them.
+#[test]
+fn split_chop_join_and_stretch_carry_the_envelopes() {
+    let mut split = song(vec![Note {
+        pitch: vec![point(0, 0.0), point(4 * QUARTER, 12.0)],
+        ..song_note(60, 0, 4 * QUARTER)
+    }]);
+    split.one_step(ids::SPLIT, json!({ "notes": [0], "at": [2 * QUARTER] }));
+    let parts = split.notes();
+    assert_eq!(parts[0].pitch, [point(0, 0.0), point(2 * QUARTER, 6.0)]);
+    assert_eq!(parts[1].pitch, [point(0, 6.0), point(2 * QUARTER, 12.0)]);
+    assert!(parts.iter().all(Note::expressions_fit));
+
+    split.view(ids::SELECT_NOTES, json!({ "notes": [0, 1] }));
+    let joined = split.one_step(ids::JOIN, json!({}));
+    assert_eq!(joined.notes.len(), 1);
+    let whole = &split.notes()[0];
+    assert_eq!(whole.length, Ticks(4 * QUARTER));
+    assert_eq!(
+        whole.pitch.first().map(|p| (p.at, p.value)),
+        Some((Ticks(0), 0.0))
+    );
+    assert_eq!(
+        whole.pitch.last().map(|p| (p.at, p.value)),
+        Some((Ticks(4 * QUARTER), 12.0)),
+        "each part's envelope is at its place in the joined note"
+    );
+
+    let mut chop = song(vec![expressive(60, 0, 4 * QUARTER)]);
+    chop.one_step(ids::CHOP, json!({ "notes": [0], "parts": 2 }));
+    assert!(
+        chop.notes()
+            .iter()
+            .all(|n| n.pitch.len() >= 2 && n.expressions_fit())
+    );
+
+    let mut stretched = song(vec![expressive(60, 0, QUARTER)]);
+    stretched.view(ids::SELECT_NOTES, json!({ "notes": [0] }));
+    stretched.one_step(
+        ids::STRETCH,
+        json!({ "to": { "start": 0, "end": 2 * QUARTER } }),
+    );
+    let note = &stretched.notes()[0];
+    assert_eq!(note.length, Ticks(2 * QUARTER));
+    assert_eq!(
+        note.pitch,
+        [point(0, 0.0), point(QUARTER, 7.0)],
+        "positions scale"
+    );
 }

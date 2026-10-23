@@ -22,6 +22,9 @@ pub struct PortSwitches {
     /// An input controls Beatlayer through MIDI mapping; an output gets
     /// feedback for mapped controls (Phase 7).
     pub remote: bool,
+    /// An input's messages are read as MPE, each note on a channel of its
+    /// own (`docs/specs/midi-io.md`, R27); an output's has no meaning yet.
+    pub mpe: bool,
 }
 
 impl PortSwitches {
@@ -30,6 +33,7 @@ impl PortSwitches {
         track: false,
         sync: false,
         remote: false,
+        mpe: false,
     };
 
     /// Whether any switch is on, so the port is open (R4).
@@ -52,7 +56,7 @@ impl PortSwitches {
     }
 
     const fn bits(self) -> u8 {
-        self.track as u8 | (self.sync as u8) << 1 | (self.remote as u8) << 2
+        self.track as u8 | (self.sync as u8) << 1 | (self.remote as u8) << 2 | (self.mpe as u8) << 3
     }
 
     const fn from_bits(bits: u8) -> Self {
@@ -60,6 +64,7 @@ impl PortSwitches {
             track: bits & 1 != 0,
             sync: bits & 2 != 0,
             remote: bits & 4 != 0,
+            mpe: bits & 8 != 0,
         }
     }
 }
@@ -377,9 +382,14 @@ const fn is_sync(message: &MidiMessage) -> bool {
 /// The handler for an open input: it routes each message by the port's
 /// switches, on the MIDI system's thread.
 fn handler(name: &str, switches: Arc<AtomicU8>, sender: InputSender) -> InputHandler {
-    let source = MidiSource::Port(PortId::from_name(name));
+    let port = PortId::from_name(name);
     Box::new(move |time, bytes| {
         let on = PortSwitches::from_bits(switches.load(Relaxed));
+        let source = if on.mpe {
+            MidiSource::MpePort(port)
+        } else {
+            MidiSource::Port(port)
+        };
         let stats = sender.stats();
         let Some(message) = MidiMessage::from_bytes(bytes) else {
             stats.ignored.fetch_add(1, Relaxed);

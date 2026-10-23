@@ -979,3 +979,130 @@ fn the_grooves_are_saved_with_the_set_and_load_again() {
     assert_eq!(loaded.document.clip(clip).unwrap().groove, None);
     assert_eq!(loaded.document.settings().grooves.auto_load_groove, None);
 }
+
+/// What a test instrument on a track playing `document` heard in the first
+/// `frames` frames: the song frame, what, and the key.
+fn heard_by_the_instrument(
+    document: &Document,
+    frames: u64,
+) -> Vec<(i64, bl_engine::NoteKind, u8)> {
+    let probe = std::sync::Arc::new(bl_engine::testing::Probe::default());
+    let registry = bl_engine::testing::registry(&probe);
+    let mut offline = Offline::new(EngineConfig::new(SampleRate::HZ_48000, 256), registry);
+    offline.sync(document);
+    offline.sender().transport(TransportCommand::Play);
+    offline.render(frames, |_| {});
+    probe
+        .recorded_notes()
+        .into_iter()
+        .map(|n| (n.frame, n.event.kind, n.event.key))
+        .collect()
+}
+
+// Spec: mpe R2, midi-controller-data R2. A set saved with a note's pressure
+// as points (schema 7) opens with each point a breakpoint and a step before
+// each later one, and sends the same pressure frame for frame.
+#[test]
+fn a_set_saved_with_pressure_points_opens_and_sends_the_same_pressure() {
+    use bl_engine::{NoteExpression, NoteKind};
+    use bl_model::{Device, DeviceKind, MidiData, Note};
+
+    let beat = Ticks::QUARTER;
+    let mut editor = Editor::new();
+    let track = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: track,
+            kind: TrackKind::Midi,
+            name: "Keys".to_owned(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    let device = editor.new_id();
+    editor
+        .apply(Command::InsertDevice {
+            track,
+            index: 0,
+            device: Device::new(
+                device,
+                "",
+                DeviceKind::Native {
+                    device_type: bl_engine::testing::INSTRUMENT.to_owned(),
+                },
+            ),
+        })
+        .unwrap();
+    let clip = editor.new_id();
+    editor
+        .apply(Command::CreateClip {
+            track,
+            clip: Clip::new(
+                clip,
+                Ticks::ZERO,
+                beat * 8,
+                ClipData::Midi(MidiData::new([Note::new(62, beat, beat * 2, 100)])),
+            ),
+        })
+        .unwrap();
+    let project = Project {
+        document: editor.document().clone(),
+        ids: editor.ids(),
+        media: Media::default(),
+        windows: bl_model::DeviceWindows::new(),
+        rack_views: bl_model::RackViewMap::new(),
+        folds: bl_model::ClipFolds::new(),
+        launch: bl_model::LaunchSettings::default(),
+        multisamplers: bl_model::MultisamplerViews::new(),
+    };
+    // As version 7 saved it: two pressure points, whole-number values.
+    let mut saved: Value = serde_json::from_slice(&encode_json(&project, 1).unwrap()).unwrap();
+    saved["schema"] = json!(7);
+    let notes = &mut saved["document"]["tracks"][0]["clips"][0]["data"]["midi"]["notes"];
+    assert!(notes[0].get("pressure").is_none());
+    notes[0]["pressure"] = json!([
+        { "at": 0, "value": 127 },
+        { "at": beat.get() / 2, "value": 64 },
+    ]);
+    let (loaded, info) = decode_json(
+        &serde_json::to_vec(&saved).unwrap(),
+        &LoadOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(info.schema, 7);
+    loaded.document.check_invariants().unwrap();
+
+    // Each point is a breakpoint, with a step a tick before the second.
+    let ClipData::Midi(data) = &loaded.document.clip(clip).unwrap().data else {
+        unreachable!("a MIDI clip");
+    };
+    let pressure: Vec<(i64, f64)> = data.notes[0]
+        .pressure
+        .iter()
+        .map(|p| (p.at.get(), p.value))
+        .collect();
+    assert_eq!(
+        pressure,
+        [
+            (0, 127.0),
+            (beat.get() / 2 - 1, 127.0),
+            (beat.get() / 2, 64.0)
+        ]
+    );
+    // And it plays what it played: the pressure on the note's frame and the
+    // step half a beat on, then the note-off, frame for frame (a beat is
+    // 24,000 frames at 120 BPM and 48 kHz).
+    let pressure = |value: f32| NoteKind::Expression {
+        expression: NoteExpression::Pressure,
+        value,
+    };
+    assert_eq!(
+        heard_by_the_instrument(&loaded.document, 96_000),
+        [
+            (24_000, NoteKind::On, 62),
+            (24_000, pressure(1.0), 62),
+            (36_000, pressure(64.0 / 127.0), 62),
+            (72_000, NoteKind::Off, 62),
+        ]
+    );
+}

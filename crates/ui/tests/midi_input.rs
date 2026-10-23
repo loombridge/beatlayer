@@ -165,6 +165,41 @@ fn the_tempo_and_midi_page_lists_each_port_with_its_switches() {
     assert!(test.is_open(Direction::Output, "Synth"));
 }
 
+// Spec: midi-io R27. An input's row has a fourth switch, MPE, after Remote,
+// off for a port seen for the first time; clicking it sets it, and an output
+// has none.
+#[test]
+fn an_inputs_row_has_an_mpe_switch_after_remote_and_an_outputs_has_none() {
+    let mut h = Harness::new(Window::Settings);
+    let test = TestBackend::new();
+    test.add_port(Direction::Input, "Keys A");
+    test.add_port(Direction::Output, "Synth");
+    h.shell.use_midi_backend(Box::new(test.clone()));
+    h.shell
+        .run("app.settings", json!({ "page": SettingsPage::TempoMidi }))
+        .unwrap();
+    let nodes = Harness::nodes(&h.settle());
+    let mpe = Harness::node(&nodes, "In: Keys A MPE");
+    assert_eq!(mpe.toggled, Some(false), "off when first seen");
+    let remote = Harness::node(&nodes, "In: Keys A Remote");
+    assert!(
+        bounds(mpe).left() > bounds(remote).right(),
+        "after Remote in the row"
+    );
+    assert!(
+        nodes.iter().all(|node| node.label != "Out: Synth MPE"),
+        "an output has no MPE switch"
+    );
+    h.click(bounds(mpe).center());
+    let nodes = Harness::nodes(&h.settle());
+    assert_eq!(Harness::node(&nodes, "In: Keys A MPE").toggled, Some(true));
+    assert!(h.shell.midi().ports()[0].mpe);
+    assert!(
+        test.is_open(Direction::Input, "Keys A"),
+        "Track still holds it open"
+    );
+}
+
 // Spec: midi-io R21
 #[test]
 fn a_note_ends_when_the_window_loses_the_keyboard() {

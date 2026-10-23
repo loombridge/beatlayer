@@ -32,10 +32,11 @@ use std::time::{Duration, Instant};
 
 use bl_core::midi::{MidiInputEvent, MidiMessage, MidiOutputEvent, MidiSource, PortId};
 use bl_core::time::SampleRate;
-use bl_model::{DeviceId, Document, Input, MidiTo, TrackId, TrackKind};
+use bl_model::{DeviceId, Document, Expression, Input, MidiTo, TrackId, TrackKind};
 use rtrb::{Consumer, Producer};
 
 use crate::disjoint::Shared;
+use crate::mpe::{MpeReader, MpeRole};
 use crate::node::{NoteBuffer, NoteEvent, NoteExpression, NoteKind};
 use crate::program::Task;
 
@@ -66,7 +67,7 @@ pub const MIDI_OUT_PER_ROUTE: usize = 1024;
 const ORPHANS: usize = 256;
 
 /// A MIDI message at a frame of a block, on a track's input.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MidiEvent {
     /// The frame in the block where it lands. Always less than the block's
     /// length.
@@ -75,10 +76,14 @@ pub struct MidiEvent {
     pub message: MidiMessage,
     /// Where it came from.
     pub source: MidiSource,
+    /// What it is on the track's input: from an MPE port, a note of its own,
+    /// or one note's expression (the MPE spec, R11); otherwise
+    /// [`MpeRole::Plain`].
+    pub mpe: MpeRole,
 }
 
 /// What a MIDI track's input received in the last block.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TrackMidiInput<'a> {
     /// The messages that matched the track's input, in order of offset.
     pub events: &'a [MidiEvent],
@@ -137,9 +142,9 @@ struct Route {
     monitored: bool,
     /// This block's messages, reserved when the program is compiled.
     events: Vec<MidiEvent>,
-    /// The `(channel, key)` of every note the track's devices were sent an
-    /// on for and no off, room made for all 2,048.
-    held: Vec<(u8, u8)>,
+    /// The `(channel, key)` and note ID of every note the track's devices
+    /// were sent an on for and no off, room made for all 2,048.
+    held: Vec<(u8, u8, Option<u32>)>,
     /// Whether the held notes must end: the program replaced one whose
     /// route took something else or didn't monitor.
     release: bool,
@@ -154,13 +159,15 @@ impl Route {
         let source = match self.filter {
             Filter::All => true,
             Filter::Keyboard => event.source == MidiSource::ComputerKeyboard,
-            Filter::Port(port) => event.source == MidiSource::Port(port),
+            Filter::Port(port) => event.source.port() == Some(port),
             Filter::Nothing => false,
         };
+        // Spec: midi-io R28. An MPE port's messages come on every channel.
         source
-            && self
-                .channel
-                .is_none_or(|channel| event.message.channel() == Some(channel))
+            && (matches!(event.source, MidiSource::MpePort(_))
+                || self
+                    .channel
+                    .is_none_or(|channel| event.message.channel() == Some(channel)))
     }
 
     /// Adds a message in order of offset, after any at the same offset.
@@ -532,8 +539,10 @@ impl MidiRoutes {
         if route.release {
             // Spec: midi-io R26
             route.release = false;
-            for (channel, key) in route.held.drain(..) {
-                notes.insert(note(0, NoteKind::Off, channel, key, 0.0));
+            for (channel, key, id) in route.held.drain(..) {
+                let mut off = note(0, NoteKind::Off, channel, key, 0.0);
+                off.note_id = id;
+                notes.insert(off);
             }
         }
         if !route.monitored {
@@ -550,23 +559,63 @@ impl MidiRoutes {
                 event.message.data1(),
                 f32::from(event.message.data2()) / 127.0,
             );
-            if event.message.is_note_on() {
-                if !route.held.contains(&(channel, key)) {
-                    route.held.push((channel, key));
+            match event.mpe {
+                // Spec: mpe R11. An MPE port's note has an ID of its own, and
+                // its expressions name it.
+                MpeRole::Note { id } => {
+                    let id = Some(id);
+                    if event.message.is_note_on() {
+                        route.held.push((channel, key, id));
+                        let mut on = note(offset, NoteKind::On, channel, key, value);
+                        on.note_id = id;
+                        notes.insert(on);
+                    } else {
+                        route.held.retain(|held| held.2 != id);
+                        let mut off = note(offset, NoteKind::Off, channel, key, value);
+                        off.note_id = id;
+                        notes.insert(off);
+                    }
                 }
-                notes.insert(note(offset, NoteKind::On, channel, key, value));
-            } else if event.message.is_note_off() {
-                route.held.retain(|&held| held != (channel, key));
-                notes.insert(note(offset, NoteKind::Off, channel, key, value));
-            } else if event.message.status() & 0xF0 == 0xA0 {
-                let pressure = NoteKind::Expression {
-                    expression: NoteExpression::Pressure,
+                MpeRole::Expression {
+                    id,
+                    key,
+                    expression,
                     value,
-                };
-                notes.insert(note(offset, pressure, channel, key, 0.0));
-            } else if let Some(message) = NoteEvent::from_message(offset, &event.message) {
-                // Spec: device-framework R39
-                notes.insert(message);
+                } => {
+                    // Spec: mpe R6. A bend is a share of 48 semitones.
+                    let (expression, scale) = match expression {
+                        Expression::Pitch => (NoteExpression::Bend, 1.0 / 48.0),
+                        Expression::Slide => (NoteExpression::Slide, 1.0 / 127.0),
+                        Expression::Pressure => (NoteExpression::Pressure, 1.0 / 127.0),
+                    };
+                    let kind = NoteKind::Expression {
+                        expression,
+                        value: (value * scale).clamp(-1.0, 1.0),
+                    };
+                    let mut expressed = note(offset, kind, channel, key, 0.0);
+                    expressed.note_id = Some(id);
+                    notes.insert(expressed);
+                }
+                MpeRole::Plain => {
+                    if event.message.is_note_on() {
+                        if !route.held.iter().any(|h| (h.0, h.1) == (channel, key)) {
+                            route.held.push((channel, key, None));
+                        }
+                        notes.insert(note(offset, NoteKind::On, channel, key, value));
+                    } else if event.message.is_note_off() {
+                        route.held.retain(|held| (held.0, held.1) != (channel, key));
+                        notes.insert(note(offset, NoteKind::Off, channel, key, value));
+                    } else if event.message.status() & 0xF0 == 0xA0 {
+                        let pressure = NoteKind::Expression {
+                            expression: NoteExpression::Pressure,
+                            value,
+                        };
+                        notes.insert(note(offset, pressure, channel, key, 0.0));
+                    } else if let Some(message) = NoteEvent::from_message(offset, &event.message) {
+                        // Spec: device-framework R39
+                        notes.insert(message);
+                    }
+                }
             }
         }
     }
@@ -673,6 +722,8 @@ pub(crate) struct MidiIn {
     clock: BlockClock,
     /// What times are measured from: the first block's time.
     epoch: Option<Instant>,
+    /// Reads the messages of ports whose MPE switch is on (WP-6.17).
+    mpe: MpeReader,
     /// The previous block's filtered start, and when its callback ran.
     previous: Option<(f64, f64)>,
     pub(crate) counters: MidiCounters,
@@ -686,6 +737,7 @@ impl MidiIn {
             timing: None,
             clock: BlockClock::new(rate),
             epoch: None,
+            mpe: MpeReader::new(),
             previous: None,
             counters: MidiCounters::default(),
         }
@@ -779,16 +831,28 @@ impl MidiIn {
             } else {
                 (ahead.round() as u32).min(last)
             };
-            let placed = MidiEvent {
-                offset,
-                message: event.message,
-                source: event.source,
+            // Spec: mpe R10, R11. An MPE port's message is the notes and
+            // expressions it plays, which may be none.
+            let roles: &[MpeRole] = match event.source {
+                MidiSource::MpePort(port) if !event.message.is_system() => {
+                    self.mpe.read(port, &event.message)
+                }
+                _ => &[MpeRole::Plain],
             };
-            let mut matched = false;
+            let mut matched = roles.is_empty();
             if let Some(routes) = routes.as_deref_mut() {
                 for route in routes.routes.iter_mut() {
-                    if route.takes(&event) {
-                        matched = true;
+                    if !route.takes(&event) {
+                        continue;
+                    }
+                    matched = true;
+                    for &mpe in roles {
+                        let placed = MidiEvent {
+                            offset,
+                            message: event.message,
+                            source: event.source,
+                            mpe,
+                        };
                         if route.push(placed) {
                             self.counters.delivered += 1;
                         } else {

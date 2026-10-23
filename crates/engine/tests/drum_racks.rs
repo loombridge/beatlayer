@@ -26,6 +26,16 @@ const BEAT: i64 = 24_000;
 /// A MIDI track holding a drum rack of `drums` chains from note 36 with a
 /// test instrument in each, and a clip of `notes` as `(key, beat, beats)`.
 fn kit(size: usize, drums: usize, notes: &[(u8, i64, i64)]) -> (Rig, TrackId, Vec<ChainId>) {
+    let beat = Ticks(TICKS_PER_QUARTER);
+    let notes = notes
+        .iter()
+        .map(|&(key, at, length)| bl_model::Note::new(key, beat * at, beat * length, 100))
+        .collect();
+    kit_of(size, drums, notes)
+}
+
+/// The same with notes of the test's own making.
+fn kit_of(size: usize, drums: usize, notes: Vec<bl_model::Note>) -> (Rig, TrackId, Vec<ChainId>) {
     let mut rig = Rig::new(size.max(256));
     let midi = track(&mut rig.editor, TrackKind::Midi, None);
     let (_, chains, _) = drum_rack(&mut rig.editor, midi, drums, 0);
@@ -39,9 +49,6 @@ fn kit(size: usize, drums: usize, notes: &[(u8, i64, i64)]) -> (Rig, TrackId, Ve
         );
     }
     let beat = Ticks(TICKS_PER_QUARTER);
-    let notes = notes
-        .iter()
-        .map(|&(key, at, length)| bl_model::Note::new(key, beat * at, beat * length, 100));
     let clip = rig.editor.new_id();
     rig.editor
         .apply(Command::CreateClip {
@@ -526,5 +533,69 @@ fn a_return_chains_taps_carry_its_signal() {
                 "{tap}, block size {size}"
             );
         }
+    }
+}
+
+// Spec: drum-racks R29; mpe R7. A per-note expression reaches the chain its
+// note's note-on reached, at the key that chain played it on, with the note's
+// ID, and no other chain.
+#[test]
+fn a_bend_reaches_the_chain_the_note_reached_at_its_played_key_only() {
+    use bl_engine::NoteExpression;
+    let beat = Ticks(TICKS_PER_QUARTER);
+    let bend = |at: Ticks, value: f64| bl_model::Breakpoint {
+        at,
+        value,
+        bend: 0.0,
+    };
+    for size in SIZES {
+        let note = bl_model::Note {
+            pitch: vec![bend(Ticks::ZERO, 0.0), bend(beat / 2, 12.0)],
+            ..bl_model::Note::new(37, beat, beat * 2, 100)
+        };
+        let (mut rig, _, chains) = kit_of(size, 3, vec![note]);
+        let played = rig
+            .editor
+            .document()
+            .chain(chains[1])
+            .expect("the second pad")
+            .play;
+        assert_ne!(played, 37, "the chain plays the note at a key of its own");
+        rig.sender.transport(TransportCommand::Play);
+        let mut left = 4 * BEAT as usize;
+        while left > 0 {
+            let n = left.min(size);
+            rig.processor.process(n);
+            left -= n;
+        }
+        let got = rig.probe.recorded_notes();
+        // Every event the drum racks passed on is the second pad's, on the
+        // key it plays at: the note-on, the bend's starting value and its
+        // step, and the note-off, all with the one note ID.
+        assert!(got.iter().all(|n| n.event.key == played), "{size}: {got:?}");
+        let id = got[0].event.note_id;
+        assert!(id.is_some());
+        assert!(got.iter().all(|n| n.event.note_id == id));
+        let kinds: Vec<_> = got.iter().map(|n| n.event.kind).collect();
+        assert_eq!(kinds[0], NoteKind::On, "{size}");
+        assert_eq!(kinds.last(), Some(&NoteKind::Off), "{size}");
+        let bends = kinds
+            .iter()
+            .filter(|k| {
+                matches!(
+                    k,
+                    NoteKind::Expression {
+                        expression: NoteExpression::Bend,
+                        ..
+                    }
+                )
+            })
+            .count();
+        assert!(bends >= 2, "the bend arrived: {kinds:?}");
+        assert!(
+            got.iter()
+                .all(|n| n.event.kind != NoteKind::On || n.event.key == played),
+            "{size}"
+        );
     }
 }

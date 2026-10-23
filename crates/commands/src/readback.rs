@@ -488,6 +488,7 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("note.randomize", query(Clip, "data.midi.notes")),
     ("note.resize", query(Clip, "data.midi.notes")),
     ("note.set_value", query(Clip, "data.midi.notes")),
+    ("note.set_expression", query(Clip, "data.midi.notes")),
     ("note.split", query(Clip, "data.midi.notes")),
     ("note.split_clip", query(Track, "clips")),
     ("note.stretch", query(Clip, "data.midi.notes")),

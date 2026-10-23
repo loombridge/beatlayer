@@ -1052,8 +1052,7 @@ impl MidiData {
             .filter(|note| note.start >= from && note.start < to)
             .map(|note| Note {
                 start: note.start - from,
-                length: note.length.min(region - (note.start - from)),
-                ..note.clone()
+                ..note.resized(note.length.min(region - (note.start - from)))
             })
             .collect();
         Self {
@@ -1169,8 +1168,7 @@ pub fn consolidated_midi(
                 if length > Ticks::ZERO {
                     notes.push(Note {
                         start: at - start,
-                        length,
-                        ..note.clone()
+                        ..note.resized(length)
                     });
                 }
             }
@@ -1262,18 +1260,6 @@ fn entry<'a>(
     &mut merged[at].1
 }
 
-/// One point of a note's pressure (WP-2.29): from `at` after the note's
-/// start the note's key is pressed to `value`, until the next point.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct PressurePoint {
-    /// Where it takes effect, counted from the note's start: 0 or more and
-    /// before the note's length.
-    pub at: Ticks,
-    /// The pressure, from 0 to 127.
-    #[schemars(range(max = 127))]
-    pub value: u8,
-}
-
 /// A note in a MIDI clip.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Note {
@@ -1309,11 +1295,20 @@ pub struct Note {
     /// Whether the note is switched off, so it stays in place but doesn't play.
     #[serde(default, skip_serializing_if = "is_false")]
     pub mute: bool,
-    /// The note's own pressure, played as polyphonic pressure over its
-    /// length: points in order of `at`, none at the same place. A note with
-    /// none plays no pressure.
+    /// The note's own pitch bend in semitones from its key, from −48 to +48
+    /// (WP-6.17; the MPE spec, R1): breakpoints counted from the note's
+    /// start, in order of position with none at the same place. A note with
+    /// none bends nowhere.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub pressure: Vec<PressurePoint>,
+    pub pitch: Vec<Breakpoint>,
+    /// The finger's movement along the key, from 0 to 127, as `pitch` is
+    /// kept.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub slide: Vec<Breakpoint>,
+    /// The note's own pressure, from 0 to 127, as `pitch` is kept (the MIDI
+    /// controller data spec, R2). A note with none plays no pressure.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pressure: Vec<Breakpoint>,
 }
 
 impl Note {
@@ -1329,6 +1324,8 @@ impl Note {
             probability: 1.0,
             velocity_deviation: 0,
             mute: false,
+            pitch: Vec::new(),
+            slide: Vec::new(),
             pressure: Vec::new(),
         }
     }
@@ -1345,6 +1342,8 @@ impl Default for Note {
             probability: 1.0,
             velocity_deviation: 0,
             mute: false,
+            pitch: Vec::new(),
+            slide: Vec::new(),
             pressure: Vec::new(),
         }
     }
@@ -1353,6 +1352,46 @@ impl Default for Note {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Spec: mpe R4. A note cut where a clip is cropped or consolidated ends
+    // each envelope where it ends, holding the value there.
+    #[test]
+    fn a_crop_and_a_consolidation_end_a_cut_notes_envelopes_at_the_cut() {
+        let point = |at: i64, value: f64| Breakpoint {
+            at: Ticks(at),
+            value,
+            bend: 0.0,
+        };
+        let note = Note {
+            pitch: vec![point(0, 0.0), point(1000, 10.0)],
+            slide: vec![point(200, 50.0)],
+            ..Note::new(60, Ticks::ZERO, Ticks(1000), 100)
+        };
+        let data = MidiData::new([note.clone()]);
+        let cropped = data.cropped(Ticks::ZERO, Ticks(500));
+        let cut = &cropped.notes[0];
+        assert_eq!(cut.length, Ticks(500));
+        assert_eq!(cut.pitch, [point(0, 0.0), point(500, 5.0)]);
+        assert_eq!(cut.slide, [point(200, 50.0), point(500, 50.0)]);
+        assert!(cut.expressions_fit());
+        // A note that isn't cut keeps its envelopes as they were.
+        let whole = data.cropped(Ticks::ZERO, Ticks(2000));
+        assert_eq!(whole.notes[0].pitch, note.pitch);
+
+        let clip = Clip::new(
+            crate::ids::ClipId(bl_core::id::Id::new(1).unwrap()),
+            Ticks::ZERO,
+            Ticks(500),
+            ClipData::Midi(data),
+        );
+        let id = crate::ids::ClipId(bl_core::id::Id::new(2).unwrap());
+        let merged = consolidated_midi(id, String::new(), &[&clip], Ticks::ZERO, Ticks(500));
+        let ClipData::Midi(merged) = &merged.data else {
+            panic!("a MIDI clip");
+        };
+        assert_eq!(merged.notes[0].length, Ticks(500));
+        assert_eq!(merged.notes[0].pitch, [point(0, 0.0), point(500, 5.0)]);
+    }
 
     // Spec: warp-modes R25. A clip's pitch change is its Transpose plus its
     // Detune in semitones, each held to its range.

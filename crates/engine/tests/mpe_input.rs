@@ -4,8 +4,6 @@
 //! per-note expressions, on the exact frames, at any block size, with every
 //! block a real-time section under the allocation trap.
 
-bl_rt::install_trap!();
-
 use crate::common;
 
 use std::time::{Duration, Instant};

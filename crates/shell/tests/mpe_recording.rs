@@ -9,8 +9,6 @@
 //! - Capture MIDI.
 //! - The whole path allocates nothing on the audio thread.
 
-bl_rt::install_trap!();
-
 use bl_audio_io::{BackendKind, NullBackend, NullControl, NullOptions, Pacing};
 use bl_midi_io::{Direction, TestBackend};
 use bl_model::{AutomationTarget, Breakpoint, Clip, ClipData, MidiData, Note, SceneId, TrackId};

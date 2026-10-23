@@ -1455,6 +1455,7 @@ fn a_set_saved_with_pressure_points_opens_and_sends_the_same_pressure() {
         folds: bl_model::ClipFolds::new(),
         launch: bl_model::LaunchSettings::default(),
         multisamplers: bl_model::MultisamplerViews::new(),
+        window_views: bl_model::WindowViews::default(),
     };
     // As version 7 saved it: two pressure points, whole-number values.
     let mut saved: Value = serde_json::from_slice(&encode_json(&project, 1).unwrap()).unwrap();

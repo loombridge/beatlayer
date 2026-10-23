@@ -264,7 +264,11 @@ impl Media {
 fn used_hashes(document: &Document) -> BTreeSet<ContentHash> {
     document
         .tracks()
-        .flat_map(|track| track.clips())
+        .flat_map(|track| {
+            track
+                .clips()
+                .chain(track.take_lanes().flat_map(|lane| lane.clips.iter()))
+        })
         .filter_map(|clip| match &clip.data {
             ClipData::Audio(audio) => Some(audio.media),
             ClipData::Midi(_) => None,

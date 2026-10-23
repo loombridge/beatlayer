@@ -6,6 +6,7 @@ use imbl::ordmap::DiffItem;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::clip::Clip;
 use crate::document::Document;
 use crate::ids::{ClipId, DeviceId, SceneId, TrackId};
 use crate::track::Track;
@@ -112,6 +113,9 @@ impl ChangeSet {
         for clip in track.slots.values() {
             record(&mut self.clips, clip.id, change);
         }
+        for clip in track.take_lanes().flat_map(|lane| lane.clips.iter()) {
+            record(&mut self.clips, clip.id, change);
+        }
         for device in track.devices_deep() {
             record(&mut self.devices, device.id, change);
         }
@@ -145,6 +149,26 @@ impl ChangeSet {
                         record(&mut self.clips, before.id, Change::Modified);
                     }
                 }
+            }
+        }
+        if !old.take_lanes.ptr_eq(&new.take_lanes) {
+            let lane_clips = |track: &Track| -> BTreeMap<ClipId, Clip> {
+                track
+                    .take_lanes()
+                    .flat_map(|lane| lane.clips.iter())
+                    .map(|clip| (clip.id, clip.clone()))
+                    .collect()
+            };
+            let (before, after) = (lane_clips(old), lane_clips(new));
+            for (id, clip) in &before {
+                match after.get(id) {
+                    None => record(&mut self.clips, *id, Change::Removed),
+                    Some(now) if now != clip => record(&mut self.clips, *id, Change::Modified),
+                    Some(_) => {}
+                }
+            }
+            for id in after.keys().filter(|id| !before.contains_key(id)) {
+                record(&mut self.clips, *id, Change::Added);
             }
         }
         if !old.devices.ptr_eq(&new.devices) {

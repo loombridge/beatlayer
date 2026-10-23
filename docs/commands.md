@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-722 commands in 43 areas.
+735 commands in 44 areas.
 
 ## Permission classes
 
@@ -679,6 +679,19 @@ Each command has:
 | [`stems.open`](#stemsopen) | Separate Stems to New Audio Tracks | `read` |  |  |
 | [`stems.separate`](#stemsseparate) | Separate Stems | `edit` |  |  |
 | [`stems.status`](#stemsstatus) | Stem Separation Status | `read` |  |  |
+| [`take_lane.comp_sources`](#take_lanecomp_sources) | Comp Sources | `read` |  |  |
+| [`take_lane.copy_to_main_lane`](#take_lanecopy_to_main_lane) | Copy Selection to Main Lane | `edit` |  |  |
+| [`take_lane.create_clip`](#take_lanecreate_clip) | Create Clip on Take Lane | `edit` |  |  |
+| [`take_lane.delete`](#take_lanedelete) | Delete Take Lane(s) | `destructive` |  |  |
+| [`take_lane.delete_all`](#take_lanedelete_all) | Delete All Take Lanes | `destructive` |  |  |
+| [`take_lane.delete_unused`](#take_lanedelete_unused) | Delete All Unused Take Lanes | `destructive` |  |  |
+| [`take_lane.duplicate`](#take_laneduplicate) | Duplicate Take Lane(s) | `edit` |  |  |
+| [`take_lane.insert`](#take_laneinsert) | Insert Take Lane | `edit` |  |  |
+| [`take_lane.move`](#take_lanemove) | Move Take Lane(s) | `edit` |  |  |
+| [`take_lane.move_comp_edge`](#take_lanemove_comp_edge) | Move Comp Edge | `edit` |  |  |
+| [`take_lane.rename`](#take_lanerename) | Rename Take Lane | `edit` |  |  |
+| [`take_lane.replace_with_take`](#take_lanereplace_with_take) | Replace with Next or Previous Take | `edit` |  |  |
+| [`take_lane.set_audition`](#take_laneset_audition) | Audition Take Lane | `edit` |  |  |
 | [`track.add_take_lane`](#trackadd_take_lane) | Add Take Lane | `edit` |  |  |
 | [`track.bounce_in_place`](#trackbounce_in_place) | Bounce Track in Place | `destructive` |  |  |
 | [`track.bounce_to_new_track`](#trackbounce_to_new_track) | Bounce to New Track | `edit` | `Cmd+B` | `Ctrl+B` |
@@ -12147,13 +12160,13 @@ Arguments: none (send `{}`).
 
 Result: [`StemsStatus`](#stemsstatus).
 
-### Area `track`
+### Area `take_lane`
 
-#### `track.add_take_lane`
+#### `take_lane.comp_sources`
 
-**Add Take Lane**. Permission: `edit`. Contexts: `arrangement`.
+**Comp Sources**. Permission: `read`. Contexts: `arrangement`.
 
-Adds a take lane under an audio track's arrangement lane, after the lanes it has. `lane.name` names it and `lane.clips` are the recorded passes it holds, each with a `name`, a `start` and `length` in ticks (705,600 to the quarter note), and audio `data` as `clip.create` takes it. The track plays only its arrangement lane: loop recording adds a lane for every pass and copies the latest pass to the arrangement lane. Audio tracks only.
+Reports which take-lane material a track's main lane uses: a main-lane clip uses a take-lane clip over the stretch where both lie when they play the same thing there, the same data apart from the Start and End markers, the loop brace and the fades, with the same clip envelopes and the same contents at every point. A deactivated main-lane clip uses nothing. `stretches` lists each, and `unused_lanes` the take lanes none of whose material is used, which `take_lane.delete_unused` deletes.
 
 Default keys: none.
 
@@ -12161,8 +12174,232 @@ Arguments:
 
 | Name | Type | Required | Description |
 |---|---|---|---|
-| `track` | [`TrackId`](#trackid) | yes | The audio track. |
-| `lane` | [`TakeLane`](#takelane) | yes | The lane and its passes. |
+| `track` | [`TrackId`](#trackid) | yes | The audio or MIDI track. |
+
+Result: [`CompSourcesResult`](#compsourcesresult).
+
+#### `take_lane.copy_to_main_lane`
+
+**Copy Selection to Main Lane**. Permission: `edit`. Contexts: `arrangement`.
+
+Copies a take lane's material in `start`..`end` to its track's main lane, at the same place: each of the lane's clips the range reaches, cut at the range's edges as Split cuts, is copied under a new ID onto the main lane, where it replaces what it covers. Where the lane has no clip in the range, the main lane is left as it was. Of several `lanes` on one track, the last listed is copied from; lanes on several tracks each copy to their own track. The copies are independent of the take-lane clips. It is one undo step, an edit, and destructive as well when it replaces or shortens a main-lane clip. A frozen track refuses it.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `lanes` | array of [`TakeLaneId`](#takelaneid) | yes | The take lanes to copy from. Of those on one track, the last listed is copied from. |
+| `start` | [`Position`](#position) | yes | Where the range starts, in ticks or as `bar.beat.sixteenth` text. |
+| `end` | [`Position`](#position) | yes | Where the range ends, after `start`. |
+
+Result: [`CompResult`](#compresult).
+
+#### `take_lane.create_clip`
+
+**Create Clip on Take Lane**. Permission: `edit`. Contexts: `arrangement`.
+
+Puts a new clip on a take lane, at `clip.start` for `clip.length` ticks (705,600 to the quarter note), as `clip.create` puts one on a main lane: an audio clip on an audio track's lane and a MIDI clip on a MIDI track's. `clip.id` must be a new ID the project has issued for it. It does not clear what the lane holds there. The clip is then edited by its ID with the `clip.*` commands, as a main-lane clip is.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `lane` | [`TakeLaneId`](#takelaneid) | yes | The take lane. |
+| `clip` | [`Clip`](#clip) | yes | The clip, with a new ID. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `take_lane.delete`
+
+**Delete Take Lane(s)**. Permission: `destructive`. Contexts: `arrangement`.
+
+Deletes take lanes with their clips. The main lane is left as it was, and a deleted lane that was auditioned stops being. Undo restores them, but because it removes the person's work an agent asks first.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `lanes` | array of [`TakeLaneId`](#takelaneid) | yes | The take lanes. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `take_lane.delete_all`
+
+**Delete All Take Lanes**. Permission: `destructive`. Contexts: `arrangement`.
+
+Deletes every take lane of each of the audio or MIDI `tracks`, with their clips. The main lane is left as it was. Undo restores them, but because it removes the person's work an agent asks first.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `tracks` | array of [`TrackId`](#trackid) | yes | The audio or MIDI tracks. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `take_lane.delete_unused`
+
+**Delete All Unused Take Lanes**. Permission: `destructive`. Contexts: `arrangement`.
+
+Deletes each of the audio or MIDI `tracks`' take lanes none of whose material the main lane uses: a main-lane clip uses a take-lane clip over the stretch where both lie when they play the same thing there (`take_lane.comp_sources` lists what is used). The main lane is left as it was. Undo restores them, but because it removes the person's work an agent asks first.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `tracks` | array of [`TrackId`](#trackid) | yes | The audio or MIDI tracks. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `take_lane.duplicate`
+
+**Duplicate Take Lane(s)**. Permission: `edit`. Contexts: `arrangement`.
+
+Puts a copy of each of the take `lanes` directly after it, with its name and a copy of each of its clips under a new ID, in one undo step. The result's `lanes` are the copies' IDs.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `lanes` | array of [`TakeLaneId`](#takelaneid) | yes | The take lanes to copy. |
+
+Result: [`LanesResult`](#lanesresult).
+
+#### `take_lane.insert`
+
+**Insert Take Lane**. Permission: `edit`. Contexts: `arrangement`.
+
+Adds an empty take lane to each of the audio or MIDI `tracks` (left out, the selected tracks): directly after the take lane of that track listed in `after`, or after its last take lane. Each is named `Take N`, one more than the highest number of a lane of the track named `Take` and a number, `Take 1` on a track with none. All of them are one undo step. The result's `lanes` are the new lanes' IDs.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `after` | array of [`TakeLaneId`](#takelaneid) | no | Take lanes to add the new ones directly after, for the tracks they belong to. A track with none of them gets its new lane after its last take lane. |
+| `tracks` | array or null | no | The audio or MIDI tracks to add a take lane to. Left out, the selected tracks. |
+
+Result: [`LanesResult`](#lanesresult).
+
+#### `take_lane.move`
+
+**Move Take Lane(s)**. Permission: `edit`. Contexts: `arrangement`.
+
+Moves take lanes, which must all be on one track, to a new place among that track's take lanes, keeping their order: `index` counts from 0, the lane nearest the main lane, among the lanes that are not moved. The main lane stays first.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `lanes` | array of [`TakeLaneId`](#takelaneid) | yes | The take lanes. |
+| `index` | integer, at least 0 | yes | The place they take among the track's other take lanes, counted from 0 for the lane nearest the main lane. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `take_lane.move_comp_edge`
+
+**Move Comp Edge**. Permission: `edit`. Contexts: `arrangement`.
+
+Moves the boundary between two adjacent main-lane clips that each play a take-lane clip (`take_lane.comp_sources`) from `from` to `to`: the earlier clip's right edge and the later clip's left edge move together, each playing on what its take-lane clip plays there. The boundary goes no further than the growing clip's take-lane clip reaches, and leaves each clip at least a tick long. It is one undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The audio or MIDI track. |
+| `from` | [`Position`](#position) | yes | Where two adjacent main-lane clips meet now. |
+| `to` | [`Position`](#position) | yes | Where they should meet. |
+
+Result: [`CompResult`](#compresult).
+
+#### `take_lane.rename`
+
+**Rename Take Lane**. Permission: `edit`. Contexts: `arrangement`.
+
+Gives a take lane a new name. An empty name is refused.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `lane` | [`TakeLaneId`](#takelaneid) | yes | The take lane. |
+| `name` | string | yes | Its new name, which can't be empty. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `take_lane.replace_with_take`
+
+**Replace with Next or Previous Take**. Permission: `edit`. Contexts: `arrangement`.
+
+Replaces a track's main-lane material in `start`..`end` with the next take's (`direction` `next`, the take lane below) or the previous take's (`previous`, the one above), placed as `take_lane.copy_to_main_lane` places it, skipping take lanes with no clip in the range. With `lane` given, the selection is on that take lane and the next or previous take is counted from it; left out, the selection is on the main lane, and each main-lane clip's part of the range is counted from the take lane it uses (`take_lane.comp_sources`), a part that uses none from before the first take lane. A part with no take lane left in that direction is left as it was. It is one undo step, an edit, and destructive as well when it replaces or shortens a main-lane clip. A frozen track refuses it.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The audio or MIDI track whose main lane is changed. |
+| `start` | [`Position`](#position) | yes | Where the range starts, in ticks or as `bar.beat.sixteenth` text. |
+| `end` | [`Position`](#position) | yes | Where the range ends, after `start`. |
+| `direction` | [`TakeDirection`](#takedirection) | yes | Whether to take the next or the previous take. |
+| `lane` | [`TakeLaneId`](#takelaneid) or null | no | The take lane the selection is on, from which the next or previous take is counted. Left out, the selection is on the main lane, and each of its clips counts from the take lane it uses. |
+
+Result: [`CompResult`](#compresult).
+
+#### `take_lane.set_audition`
+
+**Audition Take Lane**. Permission: `edit`. Contexts: `arrangement`.
+
+Switches the audition of a take lane on or off. While a take lane is auditioned, its track plays that lane's clips in place of its main lane's, from the next block; a track has at most one, so switching one on switches off the one auditioned before. Session clips are unaffected. It is saved with the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `lane` | [`TakeLaneId`](#takelaneid) | yes | The take lane. |
+| `on` | boolean | yes | Whether it is auditioned. |
+
+Result: [`ChangeSet`](#changeset).
+
+### Area `track`
+
+#### `track.add_take_lane`
+
+**Add Take Lane**. Permission: `edit`. Contexts: `arrangement`.
+
+Adds a take lane under an audio or MIDI track's main lane, after the lanes it has, or at `index` among them (0 is the lane nearest the main lane). `lane.name` names it and `lane.clips` are the clips it holds, each with a `name`, a `start` and `length` in ticks (705,600 to the quarter note), and `data`: audio as `clip.create` takes it, or tagged `audio` or `midi`. The lane and its clips are given IDs when `id` is left out. A lane holds clips of its track's kind. The track plays only its main lane, or the take lane that is auditioned in its place (`take_lane.set_audition`); recording adds a lane for every take and copies the latest to the main lane. Read the lanes back with the query tool's `track` `take_lanes`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The audio or MIDI track. |
+| `lane` | [`NewTakeLane`](#newtakelane) | yes | The lane and its clips. |
+| `index` | integer or null | no | Where among the track's take lanes the new one goes, counted from 0 for the lane nearest the main lane. Left out, after the last. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -12459,6 +12696,7 @@ Arguments:
 |---|---|---|---|
 | `at` | [`Position`](#position) or null | no | Where the audio goes in the Arrangement. Left out, the time selection's start, or the insert marker. |
 | `channels` | [`Channels`](#channels) | no | How many channels the pasted file holds. |
+| `lane` | [`TakeLaneId`](#takelaneid) or null | no | The take lane to paste onto, of an audio track. The first source's audio goes on it, and each later source's on the take lane at the same place among the take lanes of the track it lands on, a lane being added where the track has none there. Left out, the main lane. |
 | `scene` | [`SceneId`](#sceneid) or null | no | The Session slot to paste into. Left out, the Arrangement. |
 | `track` | [`TrackId`](#trackid) or null | no | The track to paste onto. Left out, the selected track. |
 
@@ -13811,6 +14049,18 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`stems.cancel`](#stemscancel) | `stems.status` | `separation` |
 | [`stems.install`](#stemsinstall) | `stems.status` | `install` |
 | [`stems.separate`](#stemsseparate) | the query tool's `song` | `tracks` |
+| [`take_lane.copy_to_main_lane`](#take_lanecopy_to_main_lane) | the query tool's `track` | `clips` |
+| [`take_lane.create_clip`](#take_lanecreate_clip) | the query tool's `track` | `take_lanes` |
+| [`take_lane.delete`](#take_lanedelete) | the query tool's `track` | `take_lanes` |
+| [`take_lane.delete_all`](#take_lanedelete_all) | the query tool's `track` | `take_lanes` |
+| [`take_lane.delete_unused`](#take_lanedelete_unused) | the query tool's `track` | `take_lanes` |
+| [`take_lane.duplicate`](#take_laneduplicate) | the query tool's `track` | `take_lanes` |
+| [`take_lane.insert`](#take_laneinsert) | the query tool's `track` | `take_lanes` |
+| [`take_lane.move`](#take_lanemove) | the query tool's `track` | `take_lanes` |
+| [`take_lane.move_comp_edge`](#take_lanemove_comp_edge) | the query tool's `track` | `clips` |
+| [`take_lane.rename`](#take_lanerename) | the query tool's `track` | `take_lanes` |
+| [`take_lane.replace_with_take`](#take_lanereplace_with_take) | the query tool's `track` | `clips` |
+| [`take_lane.set_audition`](#take_laneset_audition) | the query tool's `track` | `audition` |
 | [`track.add_take_lane`](#trackadd_take_lane) | the query tool's `track` | `take_lanes` |
 | [`track.bounce_in_place`](#trackbounce_in_place) | the query tool's `song` | `tracks` |
 | [`track.bounce_to_new_track`](#trackbounce_to_new_track) | the query tool's `song` | `tracks` |
@@ -18811,6 +19061,83 @@ What `search.commands` returns.
   },
   "required": [
     "rows"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `CompResult`
+
+What the comp commands made on the main lane.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `created` | array of [`ClipId`](#clipid) | yes | The new main-lane clips. |
+| `undo_step` | boolean | yes | Whether the undo history gained a step. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What the comp commands made on the main lane.",
+  "properties": {
+    "created": {
+      "description": "The new main-lane clips.",
+      "items": {
+        "$ref": "#/$defs/ClipId"
+      },
+      "type": "array"
+    },
+    "undo_step": {
+      "description": "Whether the undo history gained a step.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "created",
+    "undo_step"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `CompSourcesResult`
+
+What `take_lane.comp_sources` reports.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `stretches` | array of [`UsedStretch`](#usedstretch) | yes | Each stretch of the main lane that plays take-lane material, in main-lane order. A stretch played by identical clips on several take lanes is listed once for each. |
+| `unused_lanes` | array of [`TakeLaneId`](#takelaneid) | yes | The take lanes none of whose material the main lane uses. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `take_lane.comp_sources` reports.",
+  "properties": {
+    "stretches": {
+      "description": "Each stretch of the main lane that plays take-lane material, in main-lane order. A stretch played by identical clips on several take lanes is listed once for each.",
+      "items": {
+        "$ref": "#/$defs/UsedStretch"
+      },
+      "type": "array"
+    },
+    "unused_lanes": {
+      "description": "The take lanes none of whose material the main lane uses.",
+      "items": {
+        "$ref": "#/$defs/TakeLaneId"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "stretches",
+    "unused_lanes"
   ],
   "type": "object"
 }
@@ -25848,6 +26175,37 @@ One of:
 
 </details>
 
+### `LanesResult`
+
+The take lanes `take_lane.insert` and `take_lane.duplicate` made.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `lanes` | array of [`TakeLaneId`](#takelaneid) | yes | The new take lanes, in the order of the tracks and lanes given. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The take lanes `take_lane.insert` and `take_lane.duplicate` made.",
+  "properties": {
+    "lanes": {
+      "description": "The new take lanes, in the order of the tracks and lanes given.",
+      "items": {
+        "$ref": "#/$defs/TakeLaneId"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "lanes"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `LaunchMode`
 
 How a Session clip's launch button behaves (the clip's Launch Mode, and the Default Launch Mode setting).
@@ -29148,6 +29506,55 @@ The device `device.add` adds.
   },
   "required": [
     "kind",
+    "name"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `NewTakeLane`
+
+A new take lane: its `name`, the `clips` it holds, and its `id`, issued when it's left out.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | The lane's name, such as `Take 1`. |
+| `clips` | array of [`TakeClip`](#takeclip) | no | The clips on the lane. |
+| `id` | [`TakeLaneId`](#takelaneid) or null | no | The lane's ID. Left out, the editor issues one. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A new take lane: its `name`, the `clips` it holds, and its `id`, issued when it's left out.",
+  "properties": {
+    "clips": {
+      "default": [],
+      "description": "The clips on the lane.",
+      "items": {
+        "$ref": "#/$defs/TakeClip"
+      },
+      "type": "array"
+    },
+    "id": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TakeLaneId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The lane's ID. Left out, the editor issues one."
+    },
+    "name": {
+      "description": "The lane's name, such as `Take 1`.",
+      "type": "string"
+    }
+  },
+  "required": [
     "name"
   ],
   "type": "object"
@@ -36311,36 +36718,48 @@ What `browser.tags` reports: the tag groups and their tags, and, for the items n
 
 ### `TakeClip`
 
-A recorded pass on a take lane: its `name`, `start` and `length` in ticks (705,600 to the quarter note), and the audio clip `data` it plays.
+A clip for a new take lane: its `name`, `start` and `length` in ticks (705,600 to the quarter note), and the `data` it plays, audio as `clip.create` takes it or tagged `audio` or `midi`. Its `id` is issued when it's left out.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `name` | string | yes | The pass's name, which may be empty. |
-| `start` | [`Ticks`](#ticks) | yes | Where the pass starts in the arrangement. Never negative. |
-| `length` | [`Ticks`](#ticks) | yes | How long the pass is. Always positive. |
-| `data` | [`AudioData`](#audiodata) | yes | The audio it plays. |
+| `name` | string | yes | The clip's name, which may be empty. |
+| `start` | [`Ticks`](#ticks) | yes | Where the clip starts in the arrangement. Never negative. |
+| `length` | [`Ticks`](#ticks) | yes | How long the clip is. Always positive. |
+| `data` | [`TakeClipData`](#takeclipdata) | yes | What it plays. |
+| `id` | [`ClipId`](#clipid) or null | no | The clip's ID. Left out, the editor issues one. |
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "A recorded pass on a take lane: its `name`, `start` and `length` in ticks (705,600 to the quarter note), and the audio clip `data` it plays.",
+  "description": "A clip for a new take lane: its `name`, `start` and `length` in ticks (705,600 to the quarter note), and the `data` it plays, audio as `clip.create` takes it or tagged `audio` or `midi`. Its `id` is issued when it's left out.",
   "properties": {
     "data": {
-      "$ref": "#/$defs/AudioData",
-      "description": "The audio it plays."
+      "$ref": "#/$defs/TakeClipData",
+      "description": "What it plays."
+    },
+    "id": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ClipId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The clip's ID. Left out, the editor issues one."
     },
     "length": {
       "$ref": "#/$defs/Ticks",
-      "description": "How long the pass is. Always positive."
+      "description": "How long the clip is. Always positive."
     },
     "name": {
-      "description": "The pass's name, which may be empty.",
+      "description": "The clip's name, which may be empty.",
       "type": "string"
     },
     "start": {
       "$ref": "#/$defs/Ticks",
-      "description": "Where the pass starts in the arrangement. Never negative."
+      "description": "Where the clip starts in the arrangement. Never negative."
     }
   },
   "required": [
@@ -36355,38 +36774,80 @@ A recorded pass on a take lane: its `name`, `start` and `length` in ticks (705,6
 
 </details>
 
-### `TakeLane`
+### `TakeClipData`
 
-A take lane under a track's main lane: its `name` and its `clips`.
+What a pass handed to `track.add_take_lane` plays: audio data as it was given before take lanes held clips (just the audio's fields), or a clip's data tagged `audio` or `midi`.
 
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `name` | string | yes | The lane's name, such as `Take 1`. |
-| `clips` | array of [`TakeClip`](#takeclip) | yes | The passes on the lane. |
+One of:
+
+- [`ClipData`](#clipdata): Audio or MIDI data, tagged as a clip's is.
+- [`AudioData`](#audiodata): Audio data without the tag.
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "A take lane under a track's main lane: its `name` and its `clips`.",
-  "properties": {
-    "clips": {
-      "description": "The passes on the lane.",
-      "items": {
-        "$ref": "#/$defs/TakeClip"
-      },
-      "type": "array"
+  "anyOf": [
+    {
+      "$ref": "#/$defs/ClipData",
+      "description": "Audio or MIDI data, tagged as a clip's is."
     },
-    "name": {
-      "description": "The lane's name, such as `Take 1`.",
+    {
+      "$ref": "#/$defs/AudioData",
+      "description": "Audio data without the tag."
+    }
+  ],
+  "description": "What a pass handed to `track.add_take_lane` plays: audio data as it was given before take lanes held clips (just the audio's fields), or a clip's data tagged `audio` or `midi`."
+}
+```
+
+</details>
+
+### `TakeDirection`
+
+Which way `take_lane.replace_with_take` goes.
+
+One of:
+
+- `"next"`: The next take, the one below.
+- `"previous"`: The previous take, the one above.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Which way `take_lane.replace_with_take` goes.",
+  "oneOf": [
+    {
+      "const": "next",
+      "description": "The next take, the one below.",
+      "type": "string"
+    },
+    {
+      "const": "previous",
+      "description": "The previous take, the one above.",
       "type": "string"
     }
-  },
-  "required": [
-    "name",
-    "clips"
-  ],
-  "type": "object"
+  ]
+}
+```
+
+</details>
+
+### `TakeLaneId`
+
+The ID of a take lane: a positive integer, unique within the project and never reused.
+
+Type: integer, at least 1.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The ID of a take lane: a positive integer, unique within the project and never reused.",
+  "format": "uint64",
+  "minimum": 1,
+  "type": "integer"
 }
 ```
 
@@ -38195,6 +38656,60 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `UsedStretch`
+
+A stretch of a main-lane clip that plays what a take-lane clip plays.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The main-lane clip. |
+| `lane` | [`TakeLaneId`](#takelaneid) | yes | The take lane of the clip it plays. |
+| `source` | [`ClipId`](#clipid) | yes | The take-lane clip. |
+| `start` | integer | yes | Where the stretch starts, in ticks. |
+| `end` | integer | yes | Where it ends, in ticks. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A stretch of a main-lane clip that plays what a take-lane clip plays.",
+  "properties": {
+    "clip": {
+      "$ref": "#/$defs/ClipId",
+      "description": "The main-lane clip."
+    },
+    "end": {
+      "description": "Where it ends, in ticks.",
+      "format": "int64",
+      "type": "integer"
+    },
+    "lane": {
+      "$ref": "#/$defs/TakeLaneId",
+      "description": "The take lane of the clip it plays."
+    },
+    "source": {
+      "$ref": "#/$defs/ClipId",
+      "description": "The take-lane clip."
+    },
+    "start": {
+      "description": "Where the stretch starts, in ticks.",
+      "format": "int64",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "clip",
+    "lane",
+    "source",
+    "start",
+    "end"
+  ],
+  "type": "object"
 }
 ```
 

@@ -7,7 +7,7 @@
 
 use bl_commands::Context::{Arrangement, Session, TrackHeaders};
 use bl_commands::{CommandSpec, Permission, RegisterError, Registry};
-use bl_model::{ClipId, SceneId, TrackId};
+use bl_model::{ClipId, SceneId, TakeLaneId, TrackId};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -97,6 +97,12 @@ pub struct PasteBouncedAudioArgs {
     /// The Session slot to paste into. Left out, the Arrangement.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scene: Option<SceneId>,
+    /// The take lane to paste onto, of an audio track. The first source's
+    /// audio goes on it, and each later source's on the take lane at the same
+    /// place among the take lanes of the track it lands on, a lane being
+    /// added where the track has none there. Left out, the main lane.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lane: Option<TakeLaneId>,
     /// Where the audio goes in the Arrangement. Left out, the time
     /// selection's start, or the insert marker.
     #[serde(default, skip_serializing_if = "Option::is_none")]

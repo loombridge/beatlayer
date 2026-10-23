@@ -280,11 +280,10 @@ impl Shell {
         let mut missing = Vec::new();
         for file in &wanted {
             let hash = bl_media::ContentHash::from_bytes(file.hash.0);
-            if self
-                .media
-                .entry(hash)
-                .is_some_and(|entry| entry.path.is_file())
-            {
+            // The store may know the file from another set this session; the
+            // open set's media table must still list it.
+            if let Some(entry) = self.media.entry(hash).filter(|e| e.path.is_file()) {
+                self.store.add_media(file.hash, &entry.path, entry.size);
                 continue;
             }
             let there = file

@@ -753,6 +753,36 @@ fn a_sample_missing_at_its_path_is_relinked_by_content() {
     assert_eq!(imported.tracks.len(), 1);
 }
 
+// Spec: set-exchange R7 (a file the media store already knows from another
+// set is still listed in the merged set's media table)
+#[test]
+fn a_file_known_from_another_set_is_saved_with_the_merge() {
+    let scratch = Scratch::new("known-media");
+    let source = source_set(&scratch, "Source");
+    let mut shell = shell_in(&scratch);
+    shell
+        .run("set.open", json!({ "path": text(&source.path) }))
+        .unwrap();
+    shell.run("set.new", json!({})).unwrap();
+    run::<Imported>(
+        &mut shell,
+        "set.import",
+        json!({ "path": text(&source.path), "tracks": [source.bass] }),
+    );
+    shell
+        .run(
+            "set.save_as",
+            json!({ "path": text(&scratch.path("Merged.blset")) }),
+        )
+        .unwrap();
+    let (project, _) = bl_project::load(&scratch.path("Merged Project/Merged.blset")).unwrap();
+    let hash = bl_media::ContentHash::of_file(&source.sample).unwrap();
+    assert!(
+        project.media.get(&ContentHash(*hash.as_bytes())).is_some(),
+        "the merged set lists the sample it plays"
+    );
+}
+
 // Spec: set-exchange R11, R13, R14 (tracks saved as a set hold the open set's
 // returns, tempo and scenes; the files are copied, so the new set stands
 // alone; the open set is untouched)

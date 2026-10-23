@@ -2091,7 +2091,9 @@ impl Shell {
         use bl_devices::midi_cc::{
             CC_CONTROL, DIALS, LEARN as CC_LEARN, cc_is_listed, cc_type_for, dial_cc, dial_value,
         };
-        use bl_devices::stack::{LEARN as CHORD_LEARN, STACK, shift};
+        use bl_devices::stack::{
+            LEARN as CHORD_LEARN, STACK, USE_SCALE as CHORD_USE_SCALE, learn, shift,
+        };
         use bl_model::{Command, DeviceId, DeviceKind, ParamId};
         let devices: Vec<(DeviceId, String)> = self
             .editor
@@ -2146,11 +2148,31 @@ impl Shell {
         }
         let mut changed = false;
         if !chords.is_empty()
-            && let Some(shifts) = self.chord_learn.listen_from(&heard)
+            && let Some(held) = self.chord_learn.listen_from(&heard)
         {
+            // Spec: midi-chord R17. A Chord counting degrees learns the
+            // degrees from the root to each key, in the current scale.
+            let set_scale = self.editor.document().settings().scale;
+            let shifts: Vec<(DeviceId, [i32; 6])> = chords
+                .iter()
+                .map(|device| {
+                    let degrees = self
+                        .editor
+                        .document()
+                        .device(*device)
+                        .and_then(|device| device.params.get(&CHORD_USE_SCALE).copied())
+                        .is_some_and(|on| on >= 0.5);
+                    let scale = if degrees {
+                        set_scale
+                    } else {
+                        bl_model::Scale::default()
+                    };
+                    (*device, learn(&held, &scale))
+                })
+                .collect();
             self.edit(|editor| {
                 editor.begin("Learn Chord");
-                for device in &chords {
+                for (device, shifts) in &shifts {
                     for (n, value) in shifts.iter().enumerate() {
                         editor
                             .apply(Command::SetDeviceParam {

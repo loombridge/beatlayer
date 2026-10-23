@@ -281,50 +281,131 @@ impl Scale {
     /// note below it does, so it keeps its distance above that note.
     ///
     /// `None` when the move would leave the keyboard, which is what a
-    /// device or a tool says what it does about.
+    /// device or a tool says what it does about. It allocates nothing, so a
+    /// device can call it on the audio thread.
     #[must_use]
     pub fn move_by(&self, key: u8, degrees: i32) -> Option<u8> {
-        let notes = self.extended_notes();
-        let below = notes
-            .iter()
-            .rposition(|note| *note <= i32::from(key))
-            .expect("the extended scale reaches below the keyboard");
-        let target = below.checked_add_signed(isize::try_from(degrees).ok()?)?;
-        let moved = notes.get(target)?;
-        let key = i32::from(key) + (moved - notes[below]);
-        // A move that leaves the keyboard is off it (the scales spec, R2).
-        if !(0..=127).contains(&key) {
-            return None;
-        }
-        Some(key as u8)
+        u8::try_from(self.move_off(key, degrees))
+            .ok()
+            .filter(|key| *key <= 127)
+    }
+
+    /// As [`move_by`](Self::move_by), but the key a move off the keyboard
+    /// would reach, below 0 or above 127, instead of `None`: what a device
+    /// that folds or limits such a key needs.
+    #[must_use]
+    pub fn move_off(&self, key: u8, degrees: i32) -> i32 {
+        let below = self.index_at_or_below(i32::from(key));
+        let moved = i64::from(key) + self.note_at(below + i64::from(degrees)) - self.note_at(below);
+        saturate(moved)
+    }
+
+    /// The key `degrees` degrees from the scale note at or below `key`,
+    /// which may be off the keyboard: where a device that builds notes in
+    /// the scale (Random, Chord) puts one made from a key outside it
+    /// (the devices' specs).
+    #[must_use]
+    pub fn land_off(&self, key: u8, degrees: i32) -> i32 {
+        let below = self.index_at_or_below(i32::from(key));
+        saturate(self.note_at(below + i64::from(degrees)))
+    }
+
+    /// How many degrees `to` is above `from`, a key outside the scale
+    /// counting as the scale note at or below it: what Learn sets a shift
+    /// to.
+    #[must_use]
+    pub fn degrees_between(&self, from: u8, to: u8) -> i32 {
+        saturate(self.index_at_or_below(i32::from(to)) - self.index_at_or_below(i32::from(from)))
     }
 
     /// The scale note nearest `key`: the one fewest semitones away, the
     /// lower of two equally near (the scales spec, R2).
     #[must_use]
     pub fn nearest(&self, key: u8) -> u8 {
-        let key = i32::from(key);
-        self.extended_notes()
-            .into_iter()
-            .filter(|note| (0..=127).contains(note))
-            .min_by_key(|note| ((note - key).abs(), *note))
-            .unwrap_or(0) as u8
+        let below = self.index_at_or_below(i32::from(key));
+        let (lower, upper) = (self.note_at(below), self.note_at(below + 1));
+        let key = i64::from(key);
+        let picked = if lower < 0 || (upper <= 127 && upper - key < key - lower) {
+            upper
+        } else {
+            lower
+        };
+        picked.clamp(0, 127) as u8
     }
 
-    /// The scale's notes from below the keyboard to above it, in order, so
-    /// a move that leaves the scale's range still has a note to land on and
-    /// can be refused for leaving the keyboard.
-    fn extended_notes(&self) -> Vec<i32> {
+    /// The per-note bend `bend` (from −1 to +1, ±48 semitones) of a note
+    /// on `from`, carried to the note `to` that a device moved it to: where
+    /// the bend would take `from` to the scale note some degrees away, the
+    /// result takes `to` to the scale note as many degrees from it, and
+    /// between two scale notes it moves in proportion, in semitones. A key
+    /// outside the scale bends as the scale note below it does (the scales
+    /// spec, R18). Allocates nothing.
+    #[must_use]
+    pub fn bend(&self, from: u8, to: u8, bend: f32) -> f32 {
+        if from == to || !self.enabled {
+            return bend;
+        }
+        let semitones = f64::from(bend) * BEND_RANGE;
+        let origin = self.index_at_or_below(i32::from(from));
+        let degrees = self.position(self.note_at(origin) as f64 + semitones) - origin as f64;
+        let arrival = self.index_at_or_below(i32::from(to));
+        let bent = self.pitch_at(arrival as f64 + degrees) - self.note_at(arrival) as f64;
+        (bent / BEND_RANGE).clamp(-1.0, 1.0) as f32
+    }
+
+    /// The note of the scale's `index`th place: indexes run over all the
+    /// integers, 0 the root in the octave of key 0 to 11, and the notes rise
+    /// with the index, below the keyboard and above it.
+    fn note_at(&self, index: i64) -> i64 {
         let steps = self.steps();
-        let root = i32::from(self.root % 12);
-        (-36i32..=156)
-            .filter(|key| {
-                let step = ((*key).rem_euclid(12) - root).rem_euclid(12);
-                steps.contains(&(step as u8))
-            })
-            .collect()
+        let count = steps.len() as i64;
+        i64::from(self.root % 12)
+            + 12 * index.div_euclid(count)
+            + i64::from(steps[index.rem_euclid(count) as usize])
+    }
+
+    /// The index of the highest scale note at or below `key`.
+    fn index_at_or_below(&self, key: i32) -> i64 {
+        let steps = self.steps();
+        let above = key - i32::from(self.root % 12);
+        let (octave, within) = (above.div_euclid(12), above.rem_euclid(12));
+        // Every list starts at the root, so a step is always found.
+        let place = steps
+            .iter()
+            .rposition(|step| i32::from(*step) <= within)
+            .unwrap_or(0);
+        i64::from(octave) * steps.len() as i64 + place as i64
+    }
+
+    /// Where the pitch `semitones` falls among the scale's notes, counted in
+    /// degrees from the index 0 note: a whole number on a scale note, and in
+    /// proportion between two.
+    fn position(&self, semitones: f64) -> f64 {
+        let below = self.index_at_or_below(semitones.floor() as i32);
+        let (lower, upper) = (self.note_at(below) as f64, self.note_at(below + 1) as f64);
+        below as f64 + (semitones - lower) / (upper - lower)
+    }
+
+    /// The pitch at `position` among the scale's notes: the inverse of
+    /// [`position`](Self::position).
+    fn pitch_at(&self, position: f64) -> f64 {
+        let below = position.floor();
+        let (lower, upper) = (
+            self.note_at(below as i64) as f64,
+            self.note_at(below as i64 + 1) as f64,
+        );
+        lower + (position - below) * (upper - lower)
     }
 }
+
+/// `value` as an `i32`, held at its ends.
+fn saturate(value: i64) -> i32 {
+    i32::try_from(value).unwrap_or(if value < 0 { i32::MIN } else { i32::MAX })
+}
+
+/// What a per-note bend of 1 means, in semitones: MPE's per-note range (the
+/// scales spec, R18).
+const BEND_RANGE: f64 = 48.0;
 
 impl Serialize for Scale {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
@@ -465,6 +546,34 @@ mod tests {
         assert_eq!(major.nearest(64), 64);
         assert_eq!(major.nearest(63), 62, "C#3 is nearer D3 than B2");
         assert_eq!(major.nearest(61), 60, "C#3 is nearer C3 than D3");
+    }
+
+    #[test]
+    fn a_bend_is_carried_in_degrees() {
+        // Spec: scales R18
+        let major = Scale::new(0, ScaleName::Major);
+        let semitones = |bend: f32| f64::from(bend) * 48.0;
+        // +2 semitones takes C3 to D3, a degree up; from E3 a degree up is F3.
+        assert!((semitones(major.bend(60, 64, 2.0 / 48.0)) - 1.0).abs() < 1e-6);
+        // Two degrees up from C3 is E3 (+4); two up from E3 is G3 (+3).
+        assert!((semitones(major.bend(60, 64, 4.0 / 48.0)) - 3.0).abs() < 1e-6);
+        // Down a degree from C3 is B2 (−1); from E3 it is D3 (−2).
+        assert!((semitones(major.bend(60, 64, -1.0 / 48.0)) + 2.0).abs() < 1e-6);
+        // Half way from C3 to D3 is half way from E3 to F3, in proportion.
+        assert!((semitones(major.bend(60, 64, 1.0 / 48.0)) - 0.5).abs() < 1e-6);
+        // A note that did not move, or a scale that is off, bends as it came.
+        assert_eq!(major.bend(60, 60, 0.25), 0.25);
+        assert_eq!(Scale::default().bend(60, 64, 0.25), 0.25);
+    }
+
+    #[test]
+    fn a_bend_of_a_key_outside_the_scale_follows_the_scale_note_below() {
+        // Spec: scales R18
+        let major = Scale::new(0, ScaleName::Major);
+        // C#3 bends as C3 does: +2 semitones is a degree; from F#3 (below it
+        // is F3, a degree up is G3) that is +2 semitones.
+        let bent = major.bend(61, 66, 2.0 / 48.0);
+        assert!((f64::from(bent) * 48.0 - 2.0).abs() < 1e-6);
     }
 
     #[test]

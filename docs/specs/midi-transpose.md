@@ -1,6 +1,6 @@
 # The transposing MIDI effect
 
-- **Status:** partial (R1 to R11 have passing tests; R12 to R14, Use Current Scale, are WP-6.8's)
+- **Status:** implemented (every rule below has a passing test)
 - **Work packages:** WP-5.30 (R1 to R11); WP-6.8 (Use Current Scale: R12 to R14; under a tuning the switch follows [tunings.md](tunings.md) R16). The framework it sits on is WP-2.5 ([the native device framework](device-framework.md)), with the note rules of R30 to R34; where a MIDI effect sits in a chain is [the device chains spec](device-chains.md)
 - **Parity-matrix row:** Devices: MIDI effects
 - **Checked against:** the Live 12 reference manual, chapter 30 "Live MIDI Effect Reference", section 30.5 "Pitch", read on 17 October 2026; for Use Current Scale, the same manual's chapter 3, section 3.13 "Scale Awareness", and chapter 30's introduction, read 20 October 2026, and the Live 12 release notes, 12.0 and 12.1.10
@@ -55,9 +55,9 @@ The device takes Live's name, Pitch; its look is the device framework's generic 
 | R9 | `crates/agent/tests/midi_effects.rs`, `an_agent_reaches_every_parameter_of_every_midi_effect` | MCP script |
 | R10 | `crates/devices/tests/rules.rs`, `every_parameter_is_automatable_to_the_frame`, `every_parameter_has_a_description`; every test in `crates/devices/tests/lift.rs` runs its blocks as real-time sections under the allocation trap; `rtsan/tests/midi_effects.rs` | real-time trap |
 | R11 | `crates/agent/tests/midi_effects.rs`, `an_agent_reaches_every_parameter_of_every_midi_effect` (both exist and read back) | MCP script |
-| R12 | to be written in WP-6.8 | |
-| R13 | to be written in WP-6.8 | |
-| R14 | to be written in WP-6.8 | |
+| R12 | `crates/devices/tests/lift.rs`, `use_current_scale_moves_notes_by_degrees`, `use_current_scale_holds_pitch_at_thirty_degrees`; `crates/devices/tests/scales.rs`, `a_device_s_scale_switches_on_the_frame_the_playhead_enters_a_clip`; `crates/ui/tests/device_view.rs`, `the_use_current_scale_switch_is_drawn_in_the_title_bar_and_not_the_panel` | real-time trap; unit |
+| R13 | `crates/devices/tests/lift.rs`, `the_window_takes_the_key_the_degrees_give` | real-time trap |
+| R14 | `crates/devices/tests/lift.rs`, `a_bend_is_carried_in_degrees`, `a_scale_change_while_a_note_is_held_does_not_move_it`; `crates/devices/tests/scales.rs`, `a_note_held_across_a_scale_change_ends_on_its_own_key` | real-time trap |
 
 ## Defaults, ranges and details
 

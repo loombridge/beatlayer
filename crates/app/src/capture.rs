@@ -22,37 +22,64 @@ use egui::{ColorImage, Rect};
 use egui_wgpu::wgpu;
 
 /// Which window shows `view`, if it's on screen now: the Settings window
-/// for `settings`, and the main window for the rest. Otherwise, why not,
-/// and the command that shows it.
+/// for `settings`, the whole-window and detail views from the main window,
+/// and the others from whichever of the main window and the second window
+/// shows them. Otherwise, why not, and the command that shows it.
 ///
 /// # Errors
 ///
 /// A message for the agent naming the view and how to show it.
 pub fn window_of(view: View, shell: &Shell, settings_open: bool) -> Result<WindowKind, String> {
-    let front = shell.main_view();
     let hidden = |what: &str, command: &str| {
         Err(format!(
             "the {what} isn't showing, so it can't be captured; `{command}` shows it, or \
              capture `window` to see what the person sees"
         ))
     };
+    // The window in front first, then the other, since a view shows in
+    // whichever window has it (second-window R15).
+    let front = shell.acting_window();
+    let windows = [
+        front,
+        if front == WindowKind::Main {
+            WindowKind::Second
+        } else {
+            WindowKind::Main
+        },
+    ];
+    let open = |window: &WindowKind| *window == WindowKind::Main || shell.second_window_open();
+    let showing = |wanted: MainView| {
+        let window = shell.window_showing(wanted);
+        (shell.main_view_of(window) == wanted).then_some(window)
+    };
     match view {
         View::Window | View::Detail => Ok(WindowKind::Main),
-        View::Arrangement if front != MainView::Arrangement => hidden(
-            "Arrangement View (the Session View is in front)",
-            ids::VIEW_TOGGLE_SESSION_ARRANGEMENT,
-        ),
-        View::Session if front != MainView::Session => hidden(
-            "Session View (the Arrangement View is in front)",
-            ids::VIEW_TOGGLE_SESSION_ARRANGEMENT,
-        ),
-        View::Arrangement | View::Session => Ok(WindowKind::Main),
-        View::Browser if !shell.browser_visible() => hidden("browser", ids::VIEW_TOGGLE_BROWSER),
-        View::Browser => Ok(WindowKind::Main),
-        View::Mixer if !shell.mixer_view().of(shell.front_mixer()).shown => {
-            hidden("mixer", bl_shell::mixer_view_commands::TOGGLE)
-        }
-        View::Mixer => Ok(WindowKind::Main),
+        View::Arrangement => showing(MainView::Arrangement).ok_or(()).or_else(|()| {
+            hidden(
+                "Arrangement View (the Session View is in front)",
+                ids::VIEW_TOGGLE_SESSION_ARRANGEMENT,
+            )
+        }),
+        View::Session => showing(MainView::Session).ok_or(()).or_else(|()| {
+            hidden(
+                "Session View (the Arrangement View is in front)",
+                ids::VIEW_TOGGLE_SESSION_ARRANGEMENT,
+            )
+        }),
+        View::Browser => windows
+            .iter()
+            .filter(|window| open(window))
+            .find(|window| shell.browser_of(**window))
+            .copied()
+            .ok_or(())
+            .or_else(|()| hidden("browser", ids::VIEW_TOGGLE_BROWSER)),
+        View::Mixer => windows
+            .iter()
+            .filter(|window| open(window))
+            .find(|window| shell.mixer_view().of(shell.mixer_of(**window)).shown)
+            .copied()
+            .ok_or(())
+            .or_else(|()| hidden("mixer", bl_shell::mixer_view_commands::TOGGLE)),
         View::Settings if !settings_open => hidden("Settings window", ids::APP_SETTINGS),
         View::Settings => Ok(WindowKind::Settings),
     }
@@ -70,12 +97,12 @@ pub fn region(view: View, shell: &Shell, main: &MainWindowUi) -> Result<Option<R
     }
     let layout = main
         .drawn_layout()
-        .ok_or("the main window hasn't been drawn yet")?;
+        .ok_or("the window hasn't been drawn yet")?;
     let rect = match view {
         View::Arrangement | View::Session => Some(layout.main_view),
         View::Browser => layout.browser,
         View::Detail => Some(layout.detail),
-        View::Mixer => match shell.main_view() {
+        View::Mixer => match shell.main_view_of(main.window()) {
             MainView::Arrangement => main.arrangement().mixer_rect(),
             MainView::Session => Some(layout.main_view),
         },
@@ -349,6 +376,80 @@ mod tests {
             output.textures_delta.clear();
         }
         main
+    }
+
+    /// The second window drawn once, as the app draws it, without a GPU.
+    fn drawn_second(shell: &Shell) -> MainWindowUi {
+        let ctx = egui::Context::default();
+        ctx.set_fonts(fonts());
+        let theme = Theme::of(shell);
+        theme.apply(&ctx);
+        let mut second = MainWindowUi::second();
+        for frame in 0..2 {
+            let input = RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(990.0, 680.0))),
+                time: Some(f64::from(frame) / 60.0),
+                ..Default::default()
+            };
+            let mut output = ctx.run_ui(input, |ui| {
+                second.show(ui, shell, &theme, false, None);
+            });
+            output.textures_delta.clear();
+        }
+        second
+    }
+
+    #[test]
+    fn a_view_is_captured_from_whichever_window_shows_it() {
+        // Spec: second-window R15.
+        let mut shell = Shell::headless();
+        shell
+            .run(ids::VIEW_TOGGLE_SECOND_WINDOW, serde_json::json!({}))
+            .unwrap();
+        // The Arrangement View is in the main window, the Session View in
+        // the second.
+        assert_eq!(
+            window_of(View::Arrangement, &shell, false),
+            Ok(WindowKind::Main)
+        );
+        assert_eq!(
+            window_of(View::Session, &shell, false),
+            Ok(WindowKind::Second)
+        );
+        let second = drawn_second(&shell);
+        let session = region(View::Session, &shell, &second).unwrap().unwrap();
+        assert!(session.right() <= 990.0, "{session:?}");
+        // Swapping the views swaps the windows they come from.
+        shell
+            .run(ids::VIEW_TOGGLE_SESSION_ARRANGEMENT, serde_json::json!({}))
+            .unwrap();
+        assert_eq!(
+            window_of(View::Session, &shell, false),
+            Ok(WindowKind::Main)
+        );
+        assert_eq!(
+            window_of(View::Arrangement, &shell, false),
+            Ok(WindowKind::Second)
+        );
+        // The browser is the second window's once the main window's is off
+        // and its own is on.
+        shell
+            .run(
+                ids::VIEW_TOGGLE_BROWSER,
+                serde_json::json!({ "window": "main" }),
+            )
+            .unwrap();
+        assert!(window_of(View::Browser, &shell, false).is_err());
+        shell
+            .run(
+                ids::VIEW_TOGGLE_BROWSER,
+                serde_json::json!({ "window": "second" }),
+            )
+            .unwrap();
+        assert_eq!(
+            window_of(View::Browser, &shell, false),
+            Ok(WindowKind::Second)
+        );
     }
 
     #[test]

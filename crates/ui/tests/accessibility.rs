@@ -4550,7 +4550,7 @@ fn reach(command_id: &str, path: &Path) -> Result<(), String> {
             h
         }
         Window::Settings => open_settings(page),
-        Window::Device(_) | Window::Assistant => {
+        Window::Device(_) | Window::Assistant | Window::Second => {
             unreachable!("no keyboard path starts in a floating window")
         }
     };

@@ -499,6 +499,73 @@ fn view_state_reads_back_the_detail_area() {
     assert_eq!(hidden["clip_view"], false);
 }
 
+/// The second window and the commands that act on one window, run by ID
+/// through the agent API, read back from `view.state`'s `second_window` and
+/// `focused_window` (the second-window spec, R15; interface-zoom R14).
+#[test]
+fn view_state_reads_back_the_second_window() {
+    let mut client = client();
+    let state = |client: &mut _| run(client, "view.state", json!({}));
+    let before = state(&mut client);
+    assert_eq!(before["second_window"]["open"], false);
+    assert_eq!(before["focused_window"], "main");
+
+    let opened = run(&mut client, "view.toggle_second_window", json!({}));
+    let after = state(&mut client);
+    assert_eq!(
+        opened, after["second_window"],
+        "the command returns the state"
+    );
+    assert_eq!(after["second_window"]["open"], true);
+    assert_eq!(after["second_window"]["main_view"], "session");
+    assert_eq!(after["second_window"]["browser"], false);
+    assert_eq!(after["second_window"]["detail"]["device_view"], false);
+    assert_eq!(after["focused_window"], "second");
+
+    for (command, args) in [
+        ("view.toggle_clip_view", json!({})),
+        ("view.toggle_device_view", json!({ "window": "second" })),
+        ("view.toggle_browser", json!({ "window": "second" })),
+        (
+            "view.set_detail_height",
+            json!({ "points": 150, "window": "second" }),
+        ),
+        (
+            "view.set_zoom",
+            json!({ "percent": 130, "window": "second" }),
+        ),
+        ("view.zoom_in", json!({ "window": "second" })),
+        ("view.full_screen", json!({ "window": "second" })),
+    ] {
+        run(&mut client, command, args);
+    }
+    let after = state(&mut client);
+    let second = &after["second_window"];
+    assert_eq!(second["detail"]["clip_view"], true);
+    assert_eq!(second["detail"]["device_view"], true);
+    assert_eq!(second["detail"]["clip_height"], 150.0);
+    assert_eq!(second["browser"], true);
+    assert_eq!(second["full_screen"], true);
+    assert!((second["zoom"].as_f64().unwrap() - 1.4).abs() < 1e-6);
+    assert_eq!(after["window"]["zoom"], 1.0, "the main window's own");
+    // The views left the main window.
+    assert_eq!(after["detail"]["device_view"], false);
+    assert_eq!(after["window"]["full_screen"], false);
+
+    // Swapping the views reads back in both windows.
+    run(&mut client, "view.toggle_session_arrangement", json!({}));
+    let swapped = state(&mut client);
+    assert_eq!(swapped["window"]["main_view"], "session");
+    assert_eq!(swapped["second_window"]["main_view"], "arrangement");
+
+    run(&mut client, "view.toggle_second_window", json!({}));
+    let closed = state(&mut client);
+    assert_eq!(closed["second_window"]["open"], false);
+    assert_eq!(closed["focused_window"], "main");
+    assert_eq!(closed["detail"]["clip_view"], true, "its views came back");
+    assert_eq!(closed["detail"]["device_view"], true);
+}
+
 /// Every transient edit is one undo step, run by ID, and reads back from
 /// `clip.transients` (the warping spec, R23 and R24).
 #[test]

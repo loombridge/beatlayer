@@ -99,6 +99,7 @@ mod shared;
 mod track;
 mod warp;
 mod warp_settings;
+mod window_views;
 
 pub use articulation::{
     ARTICULATION_MAP, Articulation, ArticulationOutput, ArticulationTrigger,
@@ -182,3 +183,4 @@ pub use warp_settings::{
     Preserve, TRANSPOSE_MAX, TRANSPOSE_MIN, TextureSettings, TextureUpdate, TonesSettings,
     TonesUpdate, TransientLoopMode, WarpMode, WarpSettings,
 };
+pub use window_views::WindowViews;

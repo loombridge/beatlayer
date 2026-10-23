@@ -436,6 +436,12 @@ impl Recipe {
             // WP-5.13: what each multisampler's views show saves beside the
             // song.
             multisamplers,
+            // WP-6.29: the main view and the second window save beside the
+            // song.
+            window_views: bl_model::WindowViews {
+                session: self.id_skip.is_multiple_of(3),
+                second_window: self.id_skip.is_multiple_of(2),
+            },
             // WP-3.2: the global launch quantisation and its switch save
             // beside the song.
             launch: bl_model::LaunchSettings {

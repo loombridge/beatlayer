@@ -101,6 +101,7 @@ fn a_version_1_set_with_split_audio_clips_loads_and_plays_as_it_did() {
         folds: bl_model::ClipFolds::new(),
         launch: bl_model::LaunchSettings::default(),
         multisamplers: bl_model::MultisamplerViews::new(),
+        window_views: bl_model::WindowViews::default(),
     };
     let mut saved: Value = serde_json::from_slice(&encode_json(&project, 1).unwrap()).unwrap();
     saved["schema"] = json!(1);
@@ -182,6 +183,7 @@ fn a_set_saved_before_crossfades_opens_with_the_same_fades_and_none_between_clip
         folds: bl_model::ClipFolds::new(),
         launch: bl_model::LaunchSettings::default(),
         multisamplers: bl_model::MultisamplerViews::new(),
+        window_views: bl_model::WindowViews::default(),
     };
     let saved: Value = serde_json::from_slice(&encode_json(&project, 1).unwrap()).unwrap();
     // The set holds nothing of curves or crossfades, as before.
@@ -259,6 +261,7 @@ fn sets_from_before_racks_load_unchanged() {
         folds: bl_model::ClipFolds::new(),
         launch: bl_model::LaunchSettings::default(),
         multisamplers: bl_model::MultisamplerViews::new(),
+        window_views: bl_model::WindowViews::default(),
     };
     // A device that isn't a rack saves no chains, so a set saved before
     // racks existed is what is saved now.
@@ -301,6 +304,7 @@ fn a_set_saved_before_the_scales_loads_unchanged() {
         folds: bl_model::ClipFolds::new(),
         launch: bl_model::LaunchSettings::default(),
         multisamplers: bl_model::MultisamplerViews::new(),
+        window_views: bl_model::WindowViews::default(),
     };
     let saved = encode_json(&project, 1).unwrap();
     let value: Value = serde_json::from_slice(&saved).unwrap();
@@ -365,6 +369,7 @@ fn a_set_saved_before_the_lanes_loads_unchanged_and_every_note_value_round_trips
         folds: bl_model::ClipFolds::new(),
         launch: bl_model::LaunchSettings::default(),
         multisamplers: bl_model::MultisamplerViews::new(),
+        window_views: bl_model::WindowViews::default(),
     };
     let saved = encode_json(&project, 1).unwrap();
     let value: Value = serde_json::from_slice(&saved).unwrap();
@@ -534,6 +539,7 @@ fn an_older_clip_envelope_renders_the_same() {
         folds: bl_model::ClipFolds::new(),
         launch: bl_model::LaunchSettings::default(),
         multisamplers: bl_model::MultisamplerViews::new(),
+        window_views: bl_model::WindowViews::default(),
     };
     let mut saved: Value = serde_json::from_slice(&encode_json(&project, 1).unwrap()).unwrap();
     saved["schema"] = json!(4);
@@ -595,6 +601,7 @@ fn a_set_without_b_loads_with_b_equal_to_a() {
         folds: bl_model::ClipFolds::new(),
         launch: bl_model::LaunchSettings::default(),
         multisamplers: bl_model::MultisamplerViews::new(),
+        window_views: bl_model::WindowViews::default(),
     };
     // A set from before the two states has neither field.
     let saved: Value = serde_json::from_slice(&encode_json(&project, 1).unwrap()).unwrap();
@@ -793,6 +800,7 @@ fn a_set_saved_before_locators_loads_with_none() {
         folds: bl_model::ClipFolds::new(),
         launch: bl_model::LaunchSettings::default(),
         multisamplers: bl_model::MultisamplerViews::new(),
+        window_views: bl_model::WindowViews::default(),
     };
     let saved = encode_json(&project, 1).unwrap();
     let value: Value = serde_json::from_slice(&saved).unwrap();
@@ -842,6 +850,7 @@ fn the_locators_and_the_song_start_time_are_saved_and_load_again() {
         folds: bl_model::ClipFolds::new(),
         launch: bl_model::LaunchSettings::default(),
         multisamplers: bl_model::MultisamplerViews::new(),
+        window_views: bl_model::WindowViews::default(),
     };
     let saved = encode_json(&project, 1).unwrap();
     let (loaded, _) = decode_json(&saved, &LoadOptions::default()).unwrap();
@@ -861,6 +870,7 @@ fn project_of(editor: &Editor) -> Project {
         folds: bl_model::ClipFolds::new(),
         launch: bl_model::LaunchSettings::default(),
         multisamplers: bl_model::MultisamplerViews::new(),
+        window_views: bl_model::WindowViews::default(),
     }
 }
 
@@ -1080,4 +1090,54 @@ fn a_version_7_set_with_take_lanes_loads_and_plays_as_it_did() {
         .apply(Command::SetAudition { lane, on: true })
         .unwrap();
     assert_ne!(render(audition.document()), expected);
+}
+
+/// A set saved before the second window existed opens in the Arrangement
+/// View with one window; a set that keeps its views writes them and reads
+/// them again, and one that keeps the defaults leaves them out (the second
+/// window spec, R14).
+#[test]
+fn a_set_saved_before_the_second_window_opens_in_the_arrangement_with_one_window() {
+    let (editor, _) = midi_clip_song();
+    let project = project_of(&editor);
+    let saved = encode_json(&project, 1).unwrap();
+    let value: Value = serde_json::from_slice(&saved).unwrap();
+    assert!(
+        value.get("window_views").is_none(),
+        "the default views are left out, so an older set reads the same"
+    );
+    let (loaded, _) = decode_json(&saved, &LoadOptions::default()).unwrap();
+    assert_eq!(loaded.window_views, bl_model::WindowViews::default());
+
+    // Opened in the shell, it shows the Arrangement View, one window.
+    let dir = std::env::temp_dir().join(format!("bl-cli-older-views-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("Older.blset");
+    std::fs::write(&path, bl_project::encode(&project, 1).unwrap()).unwrap();
+    let mut shell = bl_shell::Shell::headless();
+    shell
+        .run("view.toggle_session_arrangement", json!({}))
+        .unwrap();
+    shell.run("view.toggle_second_window", json!({})).unwrap();
+    shell
+        .run("set.open", json!({ "path": path.display().to_string() }))
+        .unwrap();
+    assert_eq!(shell.main_view(), bl_shell::MainView::Arrangement);
+    assert!(!shell.second_window_open());
+    assert!(!shell.is_dirty());
+
+    // A set that keeps its views writes them and reads them again.
+    let kept = project_of(&editor).with_window_views(bl_model::WindowViews {
+        session: true,
+        second_window: true,
+    });
+    let saved = encode_json(&kept, 2).unwrap();
+    let value: Value = serde_json::from_slice(&saved).unwrap();
+    assert_eq!(
+        value["window_views"],
+        json!({ "session": true, "second_window": true })
+    );
+    let (loaded, _) = decode_json(&saved, &LoadOptions::default()).unwrap();
+    assert_eq!(loaded.window_views, kept.window_views);
+    let _ = std::fs::remove_dir_all(&dir);
 }

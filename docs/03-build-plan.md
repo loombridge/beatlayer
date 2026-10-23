@@ -706,7 +706,7 @@ Total to 1.0: 293 packages planned in Phases 0 to 7, and about 95 estimated in P
 | 6.19 | done | 23 October 2026 | [#329](https://github.com/loombridge/beatlayer/pull/329); the Groove Pool, `.blgroove` files and a clip's groove, played on MIDI clips and warped audio clips (Base, Quantize, Timing, Random, Velocity and the Global Amount) as node data at any block size, with Commit, Extract, groove to clip and Auto Load Groove ([grooves](specs/grooves.md) R1 to R23) |
 | 6.20 | todo |  |  |
 | 6.21 | done | 23 October 2026 | [#332](https://github.com/loombridge/beatlayer/pull/332); take lanes with IDs of their own on audio and MIDI tracks, every Arrangement take placed on a take lane and copied to the main lane, auditioning a lane in the engine with no new program, the take-lane and comp commands with comp matching, and schema 8 with a migration for older take lanes ([comping](specs/comping.md) R1 to R14, R16 to R21 and R37, [recording](specs/recording.md) R16, [freeze and bounce](specs/freeze-and-bounce.md) R30) |
-| 6.22 | todo |  |  |
+| 6.22 | done | 24 October 2026 | [#364](https://github.com/loombridge/beatlayer/pull/364); take lanes drawn as rows with headers and an Audition Take Lane switch, Show Take Lanes, selecting and editing on take lanes, the take-lane keys and menus, and AccessKit nodes ([comping](specs/comping.md)). |
 | 6.22b | todo |  |  |
 | 6.23 | todo |  |  |
 | 6.24 | done | 22 October 2026 | [#314](https://github.com/loombridge/beatlayer/pull/314); locators in the Arrangement's scrub area, the song start time, and playing from the scrub area on the global launch quantisation ([time editing](specs/time-editing.md) R1 to R13) |

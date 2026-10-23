@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-731 commands in 44 areas.
+746 commands in 44 areas.
 
 ## Permission classes
 
@@ -129,23 +129,37 @@ Each command has:
 | [`automation.set_curve`](#automationset_curve) | Curve Automation Segment | `edit` |  |  |
 | [`automation.set_envelope`](#automationset_envelope) | Set Automation Envelope | `edit` |  |  |
 | [`browser.add_folder`](#browseradd_folder) | Add Folder to Browser... | `external` |  |  |
+| [`browser.add_label`](#browseradd_label) | Add Label | `edit` |  |  |
 | [`browser.add_tag`](#browseradd_tag) | Add Browser Tag | `edit` |  |  |
 | [`browser.add_tag_group`](#browseradd_tag_group) | Add Browser Tag Group | `edit` |  |  |
 | [`browser.add_to_arrangement`](#browseradd_to_arrangement) | Add Files to Arrangement | `external` |  |  |
+| [`browser.back`](#browserback) | Browser History Back | `external` | `Cmd+LeftBracket` | `Ctrl+LeftBracket` |
+| [`browser.clear_filters`](#browserclear_filters) | Clear Browser Filters | `external` |  |  |
 | [`browser.delete_tag`](#browserdelete_tag) | Delete Browser Tag | `destructive` |  |  |
+| [`browser.filter`](#browserfilter) | Filter Browser | `external` |  |  |
 | [`browser.focus_search`](#browserfocus_search) | Search in Browser | `read` | `Cmd+F` | `Ctrl+F` |
+| [`browser.forward`](#browserforward) | Browser History Forward | `external` | `Cmd+RightBracket` | `Ctrl+RightBracket` |
 | [`browser.load_selected`](#browserload_selected) | Load Selected Item | `external` | `Enter` | `Enter` |
+| [`browser.move_label`](#browsermove_label) | Move Label | `edit` |  |  |
 | [`browser.move_tag`](#browsermove_tag) | Move Browser Tag | `edit` |  |  |
 | [`browser.open_folder`](#browseropen_folder) | Open Folder | `external` |  |  |
 | [`browser.open_place`](#browseropen_place) | Open Browser Label | `external` |  |  |
 | [`browser.preview`](#browserpreview) | Preview | `external` |  |  |
 | [`browser.remove_folder`](#browserremove_folder) | Remove from Sidebar | `edit` |  |  |
+| [`browser.remove_label`](#browserremove_label) | Remove Label | `destructive` |  |  |
 | [`browser.rename_file`](#browserrename_file) | Rename Browser File | `external` |  |  |
+| [`browser.rename_label`](#browserrename_label) | Rename Label | `edit` | `Cmd+R` | `Ctrl+R` |
 | [`browser.rename_tag`](#browserrename_tag) | Rename Browser Tag | `edit` |  |  |
+| [`browser.reset_label_order`](#browserreset_label_order) | Reset Label Order | `edit` |  |  |
 | [`browser.reset_tag_order`](#browserreset_tag_order) | Reset Browser Tag Order | `edit` |  |  |
 | [`browser.scrub_preview`](#browserscrub_preview) | Scrub Preview | `external` |  |  |
 | [`browser.search`](#browsersearch) | Browser Search | `external` |  |  |
 | [`browser.select`](#browserselect) | Select in Browser | `external` |  |  |
+| [`browser.set_columns`](#browserset_columns) | Set Browser Columns | `edit` |  |  |
+| [`browser.set_filter_groups`](#browserset_filter_groups) | Set Filter Groups | `edit` |  |  |
+| [`browser.set_filter_view`](#browserset_filter_view) | Show Filter View | `edit` | `Cmd+Option+G` | `Ctrl+Alt+G` |
+| [`browser.set_label_icon`](#browserset_label_icon) | Choose Label Icon | `edit` |  |  |
+| [`browser.set_label_shown`](#browserset_label_shown) | Show Label in Sidebar | `edit` |  |  |
 | [`browser.set_preview`](#browserset_preview) | Browser File Preview | `edit` |  |  |
 | [`browser.set_raw`](#browserset_raw) | Raw Preview | `edit` |  |  |
 | [`browser.show_file`](#browsershow_file) | Show in Browser | `external` |  |  |
@@ -752,6 +766,7 @@ Each command has:
 | [`view.toggle_detail_area`](#viewtoggle_detail_area) | Hide Device View | `read` | `Cmd+Option+L` | `Ctrl+Alt+L` |
 | [`view.toggle_device_view`](#viewtoggle_device_view) | Device View | `read` | `Cmd+Option+4` | `Ctrl+Alt+4` |
 | [`view.toggle_file_manager`](#viewtoggle_file_manager) | File Manager | `read` |  |  |
+| [`view.toggle_full_height_browser`](#viewtoggle_full_height_browser) | Full-Height Browser | `edit` |  |  |
 | [`view.toggle_info_view`](#viewtoggle_info_view) | Info | `read` | `Shift+Slash` | `Shift+Slash` |
 | [`view.toggle_plug_in_windows`](#viewtoggle_plug_in_windows) | Plug-In Windows | `read` | `Cmd+Option+P` | `Ctrl+Alt+P` |
 | [`view.toggle_plugin_list`](#viewtoggle_plugin_list) | Plug-In List | `read` |  |  |
@@ -2554,6 +2569,18 @@ Arguments:
 
 Result: [`BrowserState`](#browserstate).
 
+#### `browser.add_label`
+
+**Add Label**. Permission: `edit`. Contexts: `global`, `browser`.
+
+Keeps what the browser shows as a saved label, as the Results bar's Add Label button does: the label it was made under, the search words and the selected tags. It goes at the end of the Library section, named after its words and tags, with its name open for editing (`browser.state`'s `renaming_label`); `browser.rename_label` finishes it. Choosing it lists what those words and tags find under that label now. Refused when there are no search words and no selected tags. Kept in the browser's database.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`BrowserState`](#browserstate).
+
 #### `browser.add_tag`
 
 **Add Browser Tag**. Permission: `edit`. Contexts: `global`, `browser`.
@@ -2607,11 +2634,27 @@ Arguments:
 
 Result: [`AddResult`](#addresult).
 
-#### `browser.delete_tag`
+#### `browser.back`
 
-**Delete Browser Tag**. Permission: `destructive`. Contexts: `global`, `browser`.
+**Browser History Back**. Permission: `external`. Contexts: `global`, `browser`.
 
-Deletes a tag or a group in the browser: `tag` for a tag, by its full name (`Format|CLAP`) or its own name, `group` for a group, by its name. Deleting a group deletes its tags. Beatlayer's own tags and groups can't be deleted. A deleted tag is gone from every item that carried it, and undo can't bring it back.
+Goes back one step in the browser's history, as Browse Back and Cmd-[ (Ctrl-[) do, showing that step's label, search words, selected tags, open folders and selection. A step is taken when the label changes, when the selected tags change, and when a search starts or its words change (changes in a row make one step); the history holds 100 steps and isn't kept between launches. Refused at the first step (`browser.state`'s `can_back`).
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-BRW-011 | `Cmd+LeftBracket` | `Ctrl+LeftBracket` | `browser` | Go back in the browser's history | runs it |
+
+Arguments: none (send `{}`).
+
+Result: [`BrowserState`](#browserstate).
+
+#### `browser.clear_filters`
+
+**Clear Browser Filters**. Permission: `external`. Contexts: `global`, `browser`, `browser-search`.
+
+Clears the selected filter tags and the search words (`words` and `tags`, both true if left out), as the Results bar's Clear button and Esc in the search field do. Changes nothing, but lists files outside the project.
 
 Default keys: none.
 
@@ -2619,10 +2662,45 @@ Arguments:
 
 | Name | Type | Required | Description |
 |---|---|---|---|
+| `tags` | boolean or null | no | Clear the selected tags. Left out, true. |
+| `words` | boolean or null | no | Clear the search words. Left out, true. |
+
+Result: [`BrowserState`](#browserstate).
+
+#### `browser.delete_tag`
+
+**Delete Browser Tag**. Permission: `destructive`. Contexts: `global`, `browser`.
+
+Deletes a tag or a group in the browser: `tag` for a tag, by its full name (`Format|CLAP`) or its own name, `group` for a group, by its name. Deleting a group deletes its tags. Beatlayer's own tags and groups can't be deleted. A deleted tag is gone from every item that carried it, and undo can't bring it back. When saved labels use the tag (or the group's tags) the command is refused, naming them, unless `confirm` is true; the labels then leave it out.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `confirm` | boolean | no | Delete although saved labels use the tag or the group's tags: they then leave it out. Otherwise the command is refused, naming them (spec: browser-tags R8). |
 | `group` | string or null | no | The group to delete, by its name. |
 | `tag` | string or null | no | The tag to delete, by its full name or its own name. |
 
 Result: [`TagsState`](#tagsstate).
+
+#### `browser.filter`
+
+**Filter Browser**. Permission: `external`. Contexts: `global`, `browser`.
+
+Selects filter tags, as clicking tag buttons in the Filter View does. Without `add`, each tag in `tags` becomes the only one selected in its group (a tag that is already the only one is cleared). With `add`, each tag is added to its group's selection, or taken out if it is in it already. The list then holds the items under the label that carry, for each group with a selection, at least one of its selected tags, and match every search word. Selected tags stay when another Library label is chosen. Changes nothing, but lists files outside the project.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `tags` | array of string | yes | The tags, by their full names or their own names. |
+| `add` | boolean | no | Add the tags to their groups' selections, or take a selected one out, as Cmd-click (Ctrl-click) does. Otherwise each tag is the only one selected in its group, and a tag that is already the only one is cleared. |
+
+Result: [`BrowserState`](#browserstate).
 
 #### `browser.focus_search`
 
@@ -2640,6 +2718,22 @@ Arguments: none (send `{}`).
 
 Result: nothing (`null`).
 
+#### `browser.forward`
+
+**Browser History Forward**. Permission: `external`. Contexts: `global`, `browser`.
+
+Goes forward one step in the browser's history, as Browse Forward and Cmd-] (Ctrl-]) do. Refused at the last step (`browser.state`'s `can_forward`).
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-BRW-012 | `Cmd+RightBracket` | `Ctrl+RightBracket` | `browser` | Go forward in the browser's history | runs it |
+
+Arguments: none (send `{}`).
+
+Result: [`BrowserState`](#browserstate).
+
 #### `browser.load_selected`
 
 **Load Selected Item**. Permission: `external`. Contexts: `browser`.
@@ -2655,6 +2749,23 @@ Default keys:
 Arguments: none (send `{}`).
 
 Result: [`AddResult`](#addresult).
+
+#### `browser.move_label`
+
+**Move Label**. Permission: `edit`. Contexts: `global`, `browser`, `browser-sidebar`.
+
+Moves a Library label or a saved label to `position` within the Library section, as dragging it does; All stays first, so 1 is the earliest place another label can take. Kept for the next start.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `label` | [`Label`](#label) | yes | The Library label or saved label to move. |
+| `position` | integer, at least 0 | yes | Where it goes in the Library section: 0 is the first place, which All keeps, so 1 is the first place anything else can take. |
+
+Result: [`BrowserState`](#browserstate).
 
 #### `browser.move_tag`
 
@@ -2740,6 +2851,22 @@ Arguments:
 
 Result: [`BrowserState`](#browserstate).
 
+#### `browser.remove_label`
+
+**Remove Label**. Permission: `destructive`. Contexts: `global`, `browser`, `browser-sidebar`.
+
+Deletes a saved label, as Remove in its context menu does. Nothing else is deleted: not the files, the tags or the search words it kept. It can't be brought back.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `label` | [`Label`](#label) | yes | The saved label to delete. |
+
+Result: [`BrowserState`](#browserstate).
+
 #### `browser.rename_file`
 
 **Rename Browser File**. Permission: `external`. Contexts: `browser`.
@@ -2754,6 +2881,27 @@ Arguments:
 |---|---|---|---|
 | `name` | string or null | no | The new name, without the extension. Left out (or `null`), the name is kept and editing ends, as Esc does. |
 | `path` | string or null | no | The file to rename. Left out, the file whose name is open for editing. |
+
+Result: [`BrowserState`](#browserstate).
+
+#### `browser.rename_label`
+
+**Rename Label**. Permission: `edit`. Contexts: `browser-sidebar`.
+
+Renames a saved label or a Library label, as Rename (Cmd-R) in its context menu does (`label`, or the chosen label). With `name`, the label has that name (empty gives a Library label its own name back). Without it, the name opens for editing, or, if it is open already, editing ends and the name is kept. A place's label (the User Library, Current Project, an added folder) takes its folder's name and isn't renamed. Kept for the next start.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-EDIT-008 | `Cmd+R` | `Ctrl+R` | `global` | Rename the selection | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `label` | [`Label`](#label) or null | no | The label to rename. Left out, the chosen label. |
+| `name` | string or null | no | The new name; empty gives a Library label its own name back. Left out, the label's name opens for editing, or, if it's open already, editing ends and the name is kept. |
 
 Result: [`BrowserState`](#browserstate).
 
@@ -2774,6 +2922,18 @@ Arguments:
 | `tag` | string or null | no | The tag to rename, by its full name or its own name. |
 
 Result: [`TagsState`](#tagsstate).
+
+#### `browser.reset_label_order`
+
+**Reset Label Order**. Permission: `edit`. Contexts: `global`, `browser`, `browser-sidebar`.
+
+Puts the Library labels back in their first order, the saved labels after them, as Reset Label Order in the Library heading's context menu does. Hidden labels stay hidden.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`BrowserState`](#browserstate).
 
 #### `browser.reset_tag_order`
 
@@ -2835,6 +2995,99 @@ Arguments:
 |---|---|---|---|
 | `paths` | array of string | yes | The items to select, by path, as rows of the content pane give them. Empty clears the selection. |
 | `add` | boolean | no | Add them to the selection instead of replacing it. |
+
+Result: [`BrowserState`](#browserstate).
+
+#### `browser.set_columns`
+
+**Set Browser Columns**. Permission: `edit`. Contexts: `global`, `browser`.
+
+Sets the content pane's columns: `shown`, the optional columns after Name (date_modified, size, kind, length, sample_rate, channels) in their order; `sort`, the column the list is sorted by, with `descending` to reverse it (folders stay first; ties go by name); and `file_extensions`, whether names show their extensions. Fields left out keep their values. Kept for the next start.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `descending` | boolean or null | no | Reverse the order. |
+| `file_extensions` | boolean or null | no | Show file extensions in names. |
+| `shown` | array or null | no | The optional columns shown, in their order after Name. |
+| `sort` | [`Column`](#column) or null | no | The column to sort by. |
+
+Result: [`BrowserState`](#browserstate).
+
+#### `browser.set_filter_groups`
+
+**Set Filter Groups**. Permission: `edit`. Contexts: `global`, `browser`.
+
+Chooses which filter groups a label shows in the Filter View (`label`, or the chosen one): `group` with `shown` true (the default) or false shows or hides that group; `show_all` shows every group; `reset` puts the label's groups back to the default ones. Give one of `group`, `show_all` and `reset`. Kept for the next start.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `group` | string or null | no | The group to show or hide, by its name. |
+| `label` | [`Label`](#label) or null | no | The label whose groups change. Left out, the chosen label. |
+| `reset` | boolean | no | Put the label's groups back to its default ones. |
+| `show_all` | boolean | no | Show every group. |
+| `shown` | boolean or null | no | Show (true) or hide (false) `group`. Left out, true. |
+
+Result: [`FilterViewState`](#filterviewstate).
+
+#### `browser.set_filter_view`
+
+**Show Filter View**. Permission: `edit`. Contexts: `global`, `browser`.
+
+Shows or hides the Filter View, the tag groups at the top of the browser's content pane, as Cmd-Option-G (Ctrl-Alt-G) and View > Show Filter View do. It shows in a new install. Left out, `show` toggles. Kept for the next start. Read the Filter View in `browser.state`'s `filter_view`.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-BRW-013 | `Cmd+Option+G` | `Ctrl+Alt+G` | `browser` | Show or hide the filter view | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `show` | boolean or null | no | Whether the Filter View shows. Left out, it toggles. |
+
+Result: [`FilterViewState`](#filterviewstate).
+
+#### `browser.set_label_icon`
+
+**Choose Label Icon**. Permission: `edit`. Contexts: `global`, `browser`, `browser-sidebar`.
+
+Gives a label one of Beatlayer's icons (`icon`: star, heart, circle, square, triangle, diamond, bolt, note, wave or cross), or takes it away (Reset Icon) when `icon` is left out. All, User Library and Current Project keep theirs. Kept for the next start.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `label` | [`Label`](#label) | yes | The label to give an icon. |
+| `icon` | string or null | no | One of [`LABEL_ICONS`]. Left out (or `null`), Reset Icon. |
+
+Result: [`BrowserState`](#browserstate).
+
+#### `browser.set_label_shown`
+
+**Show Label in Sidebar**. Permission: `edit`. Contexts: `global`, `browser`, `browser-sidebar`.
+
+Shows or hides a Library label or a saved label in the sidebar, as the check boxes in the Library section's Edit mode do. All can't be hidden. Hiding the chosen label chooses All. Kept for the next start.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `label` | [`Label`](#label) | yes | The Library label or saved label. |
+| `shown` | boolean | yes | Whether the sidebar shows it. |
 
 Result: [`BrowserState`](#browserstate).
 
@@ -13409,6 +13662,18 @@ Arguments:
 
 Result: [`FileManagerState`](#filemanagerstate).
 
+#### `view.toggle_full_height_browser`
+
+**Full-Height Browser**. Permission: `edit`. Contexts: `global`.
+
+Runs the browser column from under the Control Bar down to the Status Bar, instead of to the detail area's top; the Info View and the Clip or Device View stay open, under the main view to the browser's right. Calling it again puts the column back. Kept for the next start. Read in `view.state`'s `window.full_height_browser`. Changes nothing in the set.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`ViewResult`](#viewresult).
+
 #### `view.toggle_info_view`
 
 **Info**. Permission: `read`. Contexts: `global`.
@@ -14018,6 +14283,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`transport.set_punch_out`](#transportset_punch_out) | `transport.state` | `punch_out` |
 | [`transport.set_recording`](#transportset_recording) | `transport.state` | `recording` |
 | [`view.set_zoom`](#viewset_zoom) | `view.state` | `window.zoom` |
+| [`view.toggle_full_height_browser`](#viewtoggle_full_height_browser) | `view.state` | `window.full_height_browser` |
 | [`view.zoom_in`](#viewzoom_in) | `view.state` | `window.zoom` |
 | [`view.zoom_out`](#viewzoom_out) | `view.state` | `window.zoom` |
 | [`view.zoom_reset`](#viewzoom_reset) | `view.state` | `window.zoom` |
@@ -14030,20 +14296,34 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`agent.new_token`](#agentnew_token) | a new random token, which an agent is never told: the Settings window shows it to the person |
 | [`app.quit`](#appquit) | the app ends, so there is nothing left to read from |
 | [`browser.add_folder`](#browseradd_folder) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
+| [`browser.add_label`](#browseradd_label) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.add_tag`](#browseradd_tag) | the browser's tags are read with `browser.tags`, which is `external` because it lists files outside the project |
 | [`browser.add_tag_group`](#browseradd_tag_group) | the browser's tags are read with `browser.tags`, which is `external` because it lists files outside the project |
+| [`browser.back`](#browserback) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
+| [`browser.clear_filters`](#browserclear_filters) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.delete_tag`](#browserdelete_tag) | the browser's tags are read with `browser.tags`, which is `external` because it lists files outside the project |
+| [`browser.filter`](#browserfilter) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
+| [`browser.forward`](#browserforward) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
+| [`browser.move_label`](#browsermove_label) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.move_tag`](#browsermove_tag) | the browser's tags are read with `browser.tags`, which is `external` because it lists files outside the project |
 | [`browser.open_folder`](#browseropen_folder) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.open_place`](#browseropen_place) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.preview`](#browserpreview) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.remove_folder`](#browserremove_folder) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
+| [`browser.remove_label`](#browserremove_label) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.rename_file`](#browserrename_file) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
+| [`browser.rename_label`](#browserrename_label) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.rename_tag`](#browserrename_tag) | the browser's tags are read with `browser.tags`, which is `external` because it lists files outside the project |
+| [`browser.reset_label_order`](#browserreset_label_order) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.reset_tag_order`](#browserreset_tag_order) | the browser's tags are read with `browser.tags`, which is `external` because it lists files outside the project |
 | [`browser.scrub_preview`](#browserscrub_preview) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.search`](#browsersearch) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.select`](#browserselect) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
+| [`browser.set_columns`](#browserset_columns) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
+| [`browser.set_filter_groups`](#browserset_filter_groups) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
+| [`browser.set_filter_view`](#browserset_filter_view) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
+| [`browser.set_label_icon`](#browserset_label_icon) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
+| [`browser.set_label_shown`](#browserset_label_shown) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.set_preview`](#browserset_preview) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.set_raw`](#browserset_raw) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.show_file`](#browsershow_file) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
@@ -16813,8 +17093,14 @@ What the browser shows: most browser commands return it.
 | `index` | [`IndexState`](#indexstate) | yes | The index. |
 | `tag_editor` | boolean | yes | Whether the Tag Editor is open beside the content pane. |
 | `quick_tags` | boolean | yes | Whether Quick Tags shows at the content pane's bottom. |
+| `filter_view` | [`FilterViewState`](#filterviewstate) | yes | The Filter View: whether it shows, its groups under the chosen label, and the tags selected (spec: browser-tags R18 to R22). |
+| `saved_labels` | array of [`SavedLabelInfo`](#savedlabelinfo) | yes | The saved labels, in the order they were made (spec: browser-tags R24). |
+| `columns` | [`ColumnsState`](#columnsstate) | yes | The content pane's columns and sort (spec: browser-tags R27, R28). |
+| `can_back` | boolean | yes | Whether Browse Back can go back a step (spec: browser-tags R30). |
+| `can_forward` | boolean | yes | Whether Browse Forward can go forward a step. |
 | `note` | string or null | no | What the content pane says when it has no rows, such as which package fills an empty Library label. |
 | `renaming` | string or null | no | The file whose name is open for editing, after `clip.save_file` saved it: `browser.rename_file` gives it its new name. |
+| `renaming_label` | [`Label`](#label) or null | no | The label whose name is open for editing, after `browser.add_label` or `browser.rename_label` without a name. |
 
 <details><summary>JSON Schema</summary>
 
@@ -16822,6 +17108,22 @@ What the browser shows: most browser commands return it.
 {
   "description": "What the browser shows: most browser commands return it.",
   "properties": {
+    "can_back": {
+      "description": "Whether Browse Back can go back a step (spec: browser-tags R30).",
+      "type": "boolean"
+    },
+    "can_forward": {
+      "description": "Whether Browse Forward can go forward a step.",
+      "type": "boolean"
+    },
+    "columns": {
+      "$ref": "#/$defs/ColumnsState",
+      "description": "The content pane's columns and sort (spec: browser-tags R27, R28)."
+    },
+    "filter_view": {
+      "$ref": "#/$defs/FilterViewState",
+      "description": "The Filter View: whether it shows, its groups under the chosen label, and the tags selected (spec: browser-tags R18 to R22)."
+    },
     "first_row": {
       "description": "The index of the first row returned.",
       "format": "uint",
@@ -16865,10 +17167,29 @@ What the browser shows: most browser commands return it.
         "null"
       ]
     },
+    "renaming_label": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Label"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The label whose name is open for editing, after `browser.add_label` or `browser.rename_label` without a name."
+    },
     "rows": {
       "description": "Rows of the content pane, from `first_row`: the label's contents, with open folders' contents under them, or the search results.",
       "items": {
         "$ref": "#/$defs/Item"
+      },
+      "type": "array"
+    },
+    "saved_labels": {
+      "default": [],
+      "description": "The saved labels, in the order they were made (spec: browser-tags R24).",
+      "items": {
+        "$ref": "#/$defs/SavedLabelInfo"
       },
       "type": "array"
     },
@@ -16905,7 +17226,12 @@ What the browser shows: most browser commands return it.
     "preview",
     "index",
     "tag_editor",
-    "quick_tags"
+    "quick_tags",
+    "filter_view",
+    "saved_labels",
+    "columns",
+    "can_back",
+    "can_forward"
   ],
   "type": "object"
 }
@@ -18889,6 +19215,116 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `Column`
+
+A column of the content pane (spec: browser-tags R27). Name always shows, first.
+
+One of:
+
+- `"name"`: The item's name.
+- `"date_modified"`: When it changed.
+- `"size"`: Its size.
+- `"kind"`: What it is.
+- `"length"`: An audio file's length.
+- `"sample_rate"`: An audio file's sample rate.
+- `"channels"`: An audio file's channels.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A column of the content pane (spec: browser-tags R27). Name always shows, first.",
+  "oneOf": [
+    {
+      "const": "name",
+      "description": "The item's name.",
+      "type": "string"
+    },
+    {
+      "const": "date_modified",
+      "description": "When it changed.",
+      "type": "string"
+    },
+    {
+      "const": "size",
+      "description": "Its size.",
+      "type": "string"
+    },
+    {
+      "const": "kind",
+      "description": "What it is.",
+      "type": "string"
+    },
+    {
+      "const": "length",
+      "description": "An audio file's length.",
+      "type": "string"
+    },
+    {
+      "const": "sample_rate",
+      "description": "An audio file's sample rate.",
+      "type": "string"
+    },
+    {
+      "const": "channels",
+      "description": "An audio file's channels.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `ColumnsState`
+
+The content pane's columns, sort and file extensions (spec: browser-tags R27, R28).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `shown` | array of [`Column`](#column) | yes | The optional columns shown, in their order, after Name. |
+| `sort` | [`Column`](#column) | yes | The column the list is sorted by. |
+| `descending` | boolean | yes | Whether the order is reversed. |
+| `file_extensions` | boolean | yes | Whether names show their extensions. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The content pane's columns, sort and file extensions (spec: browser-tags R27, R28).",
+  "properties": {
+    "descending": {
+      "description": "Whether the order is reversed.",
+      "type": "boolean"
+    },
+    "file_extensions": {
+      "description": "Whether names show their extensions.",
+      "type": "boolean"
+    },
+    "shown": {
+      "description": "The optional columns shown, in their order, after Name.",
+      "items": {
+        "$ref": "#/$defs/Column"
+      },
+      "type": "array"
+    },
+    "sort": {
+      "$ref": "#/$defs/Column",
+      "description": "The column the list is sorted by."
+    }
+  },
+  "required": [
+    "shown",
+    "sort",
+    "descending",
+    "file_extensions"
+  ],
+  "type": "object"
 }
 ```
 
@@ -23564,6 +24000,172 @@ One of:
 
 </details>
 
+### `FilterGroup`
+
+A filter group as the Filter View shows it: its tags that some item under the label carries.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | The group's name. |
+| `tags` | array of [`FilterTag`](#filtertag) | yes | Its tag buttons, in the Tag Editor's order. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A filter group as the Filter View shows it: its tags that some item under the label carries.",
+  "properties": {
+    "name": {
+      "description": "The group's name.",
+      "type": "string"
+    },
+    "tags": {
+      "description": "Its tag buttons, in the Tag Editor's order.",
+      "items": {
+        "$ref": "#/$defs/FilterTag"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "name",
+    "tags"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `FilterGroupChoice`
+
+A group the chosen label can show, as the Filter View Menu lists it.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | The group's name. |
+| `shown` | boolean | yes | Whether the label shows it. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A group the chosen label can show, as the Filter View Menu lists it.",
+  "properties": {
+    "name": {
+      "description": "The group's name.",
+      "type": "string"
+    },
+    "shown": {
+      "description": "Whether the label shows it.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "name",
+    "shown"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `FilterTag`
+
+A tag button in the Filter View.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | What the button says: the tag's name, a subtag's with its tag's. |
+| `full_name` | string | yes | The tag's full name. |
+| `selected` | boolean | yes | Whether the tag is selected. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A tag button in the Filter View.",
+  "properties": {
+    "full_name": {
+      "description": "The tag's full name.",
+      "type": "string"
+    },
+    "name": {
+      "description": "What the button says: the tag's name, a subtag's with its tag's.",
+      "type": "string"
+    },
+    "selected": {
+      "description": "Whether the tag is selected.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "name",
+    "full_name",
+    "selected"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `FilterViewState`
+
+The Filter View (spec: browser-tags R18 to R22).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `shown` | boolean | yes | Whether the Filter View shows. |
+| `groups` | array of [`FilterGroup`](#filtergroup) | yes | The groups it shows under the chosen label that have tags to show. |
+| `menu` | array of [`FilterGroupChoice`](#filtergroupchoice) | yes | Every group the chosen label can show, with whether it shows. |
+| `selected` | array of string | yes | The selected tags' full names. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The Filter View (spec: browser-tags R18 to R22).",
+  "properties": {
+    "groups": {
+      "description": "The groups it shows under the chosen label that have tags to show.",
+      "items": {
+        "$ref": "#/$defs/FilterGroup"
+      },
+      "type": "array"
+    },
+    "menu": {
+      "description": "Every group the chosen label can show, with whether it shows.",
+      "items": {
+        "$ref": "#/$defs/FilterGroupChoice"
+      },
+      "type": "array"
+    },
+    "selected": {
+      "description": "The selected tags' full names.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "shown": {
+      "description": "Whether the Filter View shows.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "shown",
+    "groups",
+    "menu",
+    "selected"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `FixedGrid`
 
 A fixed grid's spacing, whatever the zoom: `eight_bars`, `four_bars`, `two_bars`, `one_bar`, or a note value from `half` to `thirty_second`.
@@ -25300,6 +25902,7 @@ One row of the content pane.
 | `depth` | integer from 0 to 65535 | yes | How deep it's indented: 0 at the top of the list. |
 | `open` | boolean | yes | For a folder, whether it's open. |
 | `clip_kind` | [`ClipFileKind`](#clipfilekind) or null | no | For a clip file, what it holds; `null` when its first bytes don't say (a damaged file), which placing refuses (clip files R6). |
+| `details` | [`ItemDetails`](#itemdetails) or null | no | What the optional columns show for it, left out while none shows (spec: browser-tags R27). |
 | `folder` | string or null | no | In search results, the folder it's in, relative to its place. |
 | `format` | [`PluginFormat`](#pluginformat) or null | no | For a plug-in, its format, which the row's badge shows (the plug-in scanning spec, R11). |
 
@@ -25326,6 +25929,17 @@ One row of the content pane.
       "maximum": 65535,
       "minimum": 0,
       "type": "integer"
+    },
+    "details": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ItemDetails"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "What the optional columns show for it, left out while none shows (spec: browser-tags R27)."
     },
     "folder": {
       "description": "In search results, the folder it's in, relative to its place.",
@@ -25370,6 +25984,83 @@ One row of the content pane.
     "depth",
     "open"
   ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ItemDetails`
+
+What an item's optional columns show (spec: browser-tags R27); a value the item doesn't have, such as a folder's length, is left out.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `channels` | integer or null | no | For an audio file, its number of channels. |
+| `kind` | string or null | no | What it is, in words: `Folder`, `Audio File`. |
+| `length_seconds` | number or null | no | For an audio file, how long it plays, in seconds. |
+| `modified` | integer or null | no | When it changed, in seconds since the epoch. |
+| `sample_rate` | integer or null | no | For an audio file, its sample rate in hertz. |
+| `size` | integer or null | no | Its size in bytes. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What an item's optional columns show (spec: browser-tags R27); a value the item doesn't have, such as a folder's length, is left out.",
+  "properties": {
+    "channels": {
+      "description": "For an audio file, its number of channels.",
+      "format": "uint16",
+      "maximum": 65535,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "kind": {
+      "description": "What it is, in words: `Folder`, `Audio File`.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "length_seconds": {
+      "description": "For an audio file, how long it plays, in seconds.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "modified": {
+      "description": "When it changed, in seconds since the epoch.",
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "sample_rate": {
+      "description": "For an audio file, its sample rate in hertz.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "size": {
+      "description": "Its size in bytes.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
   "type": "object"
 }
 ```
@@ -25814,7 +26505,7 @@ The keymap in use, as `keymap.state` reports it.
 
 ### `Label`
 
-A label in the browser's sidebar: `all`, a Library category (`sounds`, `drums`, `instruments`, `audio_effects`, `midi_effects`, `modulators`, `plug_ins`, `clips`, `samples`, `grooves`, `tunings`, `templates`), a place (`user_library`, `current_project`), or a folder added to Places, as `{"folder": "/its/path"}`.
+A label in the browser's sidebar: `all`, a Library category (`sounds`, `drums`, `instruments`, `audio_effects`, `midi_effects`, `modulators`, `plug_ins`, `clips`, `samples`, `grooves`, `tunings`, `templates`), a place (`user_library`, `current_project`), or a folder added to Places, as `{"folder": "/its/path"}`, or a saved label, as `{"saved": 3}`.
 
 One of:
 
@@ -25834,12 +26525,13 @@ One of:
 - `"user_library"`: The User Library folder.
 - `"current_project"`: The open set's project folder.
 - an object with `folder` (string): A folder the person added to Places, by its path.
+- an object with `saved` (integer): A saved label, by its ID (spec: browser-tags R24).
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "A label in the browser's sidebar: `all`, a Library category (`sounds`, `drums`, `instruments`, `audio_effects`, `midi_effects`, `modulators`, `plug_ins`, `clips`, `samples`, `grooves`, `tunings`, `templates`), a place (`user_library`, `current_project`), or a folder added to Places, as `{\"folder\": \"/its/path\"}`.",
+  "description": "A label in the browser's sidebar: `all`, a Library category (`sounds`, `drums`, `instruments`, `audio_effects`, `midi_effects`, `modulators`, `plug_ins`, `clips`, `samples`, `grooves`, `tunings`, `templates`), a place (`user_library`, `current_project`), or a folder added to Places, as `{\"folder\": \"/its/path\"}`, or a saved label, as `{\"saved\": 3}`.",
   "oneOf": [
     {
       "const": "all",
@@ -25928,6 +26620,20 @@ One of:
         "folder"
       ],
       "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "A saved label, by its ID (spec: browser-tags R24).",
+      "properties": {
+        "saved": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "saved"
+      ],
+      "type": "object"
     }
   ]
 }
@@ -25945,6 +26651,8 @@ A label as the sidebar lists it.
 | `name` | string | yes | Its name. |
 | `section` | [`Section`](#section) | yes | Its section. |
 | `available` | boolean | yes | Whether its folder can be read now (a place) or it has content (a Library label). A missing folder is listed greyed, as in Live. |
+| `shown` | boolean | yes | Whether the sidebar shows it: the person can hide Library labels and saved labels (spec: browser-tags R26). |
+| `icon` | string or null | no | The icon the person gave it, from [`LABEL_ICONS`] (spec: browser-tags R25). |
 | `path` | string or null | no | For a place, its folder; `null` for Current Project while the set has never been saved. |
 
 <details><summary>JSON Schema</summary>
@@ -25956,6 +26664,13 @@ A label as the sidebar lists it.
     "available": {
       "description": "Whether its folder can be read now (a place) or it has content (a Library label). A missing folder is listed greyed, as in Live.",
       "type": "boolean"
+    },
+    "icon": {
+      "description": "The icon the person gave it, from [`LABEL_ICONS`] (spec: browser-tags R25).",
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "label": {
       "$ref": "#/$defs/Label",
@@ -25975,13 +26690,19 @@ A label as the sidebar lists it.
     "section": {
       "$ref": "#/$defs/Section",
       "description": "Its section."
+    },
+    "shown": {
+      "default": true,
+      "description": "Whether the sidebar shows it: the person can hide Library labels and saved labels (spec: browser-tags R26).",
+      "type": "boolean"
     }
   },
   "required": [
     "label",
     "name",
     "section",
-    "available"
+    "available",
+    "shown"
   ],
   "type": "object"
 }
@@ -34113,6 +34834,69 @@ What `clip.save_default` and `clip.defaults` return.
 
 </details>
 
+### `SavedLabelInfo`
+
+A saved label (spec: browser-tags R24).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `label` | [`Label`](#label) | yes | The label, `{"saved": id}`. |
+| `name` | string | yes | Its name. |
+| `base` | [`Label`](#label) | yes | The label it was made under. |
+| `search` | string | yes | The search words it keeps. |
+| `tags` | array of string | yes | The tags it keeps, by their full names. |
+| `icon` | string or null | no | The icon it was given. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A saved label (spec: browser-tags R24).",
+  "properties": {
+    "base": {
+      "$ref": "#/$defs/Label",
+      "description": "The label it was made under."
+    },
+    "icon": {
+      "description": "The icon it was given.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "label": {
+      "$ref": "#/$defs/Label",
+      "description": "The label, `{\"saved\": id}`."
+    },
+    "name": {
+      "description": "Its name.",
+      "type": "string"
+    },
+    "search": {
+      "description": "The search words it keeps.",
+      "type": "string"
+    },
+    "tags": {
+      "description": "The tags it keeps, by their full names.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "label",
+    "name",
+    "base",
+    "search",
+    "tags"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `Scale`
 
 A scale: whether Scale Mode is on (`enabled`), the root note (0 is C, 11 is B), and the scale's `name`, from the scale list. A scale with `enabled` false is the chromatic scale, whose degree is a semitone.
@@ -38733,6 +39517,7 @@ What the view commands return: the window's view state afterwards.
 |---|---|---|---|
 | `main_view` | string | yes | The main view: `arrangement` or `session`. |
 | `browser` | boolean | yes | Whether the browser shows. |
+| `full_height_browser` | boolean | yes | Whether the browser runs down to the Status Bar (Full-Height Browser, spec: browser R26). |
 | `info_view` | boolean | yes | Whether the Info View shows. |
 | `full_screen` | boolean | yes | Whether the main window is in full-screen mode. |
 | `zoom` | number | yes | The interface zoom, where 1 is 100%. |
@@ -38745,6 +39530,11 @@ What the view commands return: the window's view state afterwards.
   "properties": {
     "browser": {
       "description": "Whether the browser shows.",
+      "type": "boolean"
+    },
+    "full_height_browser": {
+      "default": false,
+      "description": "Whether the browser runs down to the Status Bar (Full-Height Browser, spec: browser R26).",
       "type": "boolean"
     },
     "full_screen": {
@@ -38768,6 +39558,7 @@ What the view commands return: the window's view state afterwards.
   "required": [
     "main_view",
     "browser",
+    "full_height_browser",
     "info_view",
     "full_screen",
     "zoom"

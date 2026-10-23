@@ -58,6 +58,9 @@ pub const VIEW_STATE: &str = "view.state";
 pub const VIEW_FULL_SCREEN: &str = "view.full_screen";
 /// `view.toggle_browser`: show or hide the browser.
 pub const VIEW_TOGGLE_BROWSER: &str = "view.toggle_browser";
+/// Runs the browser down to the Status Bar, or back to the detail area's
+/// top (Full-Height Browser; spec: browser R26).
+pub const VIEW_TOGGLE_FULL_HEIGHT_BROWSER: &str = "view.toggle_full_height_browser";
 /// `view.toggle_clip_view`: show or hide the Clip View (WP-2.3).
 pub const VIEW_TOGGLE_CLIP_VIEW: &str = "view.toggle_clip_view";
 /// `view.toggle_device_view`: show or hide the Device View (WP-6.27).
@@ -257,6 +260,7 @@ pub const IDS: &[&str] = &[
     VIEW_STATE,
     VIEW_FULL_SCREEN,
     VIEW_TOGGLE_BROWSER,
+    VIEW_TOGGLE_FULL_HEIGHT_BROWSER,
     VIEW_TOGGLE_CLIP_VIEW,
     VIEW_TOGGLE_DEVICE_VIEW,
     VIEW_SHOW_DETAIL_VIEWS,
@@ -833,6 +837,10 @@ pub struct ViewResult {
     pub main_view: String,
     /// Whether the browser shows.
     pub browser: bool,
+    /// Whether the browser runs down to the Status Bar (Full-Height
+    /// Browser, spec: browser R26).
+    #[serde(default)]
+    pub full_height_browser: bool,
     /// Whether the Info View shows.
     pub info_view: bool,
     /// Whether the main window is in full-screen mode.
@@ -1136,6 +1144,18 @@ fn specs() -> Vec<CommandSpec> {
             .context(Global)
             .binding("S-VIEW-010")
             .binding("S-BRW-002")
+            .args::<NoArgs>()
+            .result::<ViewResult>(),
+        CommandSpec::new(VIEW_TOGGLE_FULL_HEIGHT_BROWSER, "Full-Height Browser")
+            .description(
+                "Runs the browser column from under the Control Bar down to the Status Bar, \
+                 instead of to the detail area's top; the Info View and the Clip or Device View \
+                 stay open, under the main view to the browser's right. Calling it again puts \
+                 the column back. Kept for the next start. Read in `view.state`'s \
+                 `window.full_height_browser`. Changes nothing in the set.",
+            )
+            .permission(Permission::Edit)
+            .context(Global)
             .args::<NoArgs>()
             .result::<ViewResult>(),
         CommandSpec::new(VIEW_STATE, "View State")

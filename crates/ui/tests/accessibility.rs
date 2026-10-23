@@ -439,16 +439,32 @@ fn tab_moves_within_the_focused_area_and_wraps_with_wrap_tab_navigation() {
     assert_eq!(seen[seen.len() - 2], last);
     assert_eq!(h.shell.focused_area(), Area::ControlBar);
 
-    // The browser: from the search field to the sidebar to the list, each
-    // part's keys applying as the shell moves its focus there.
+    // The browser: from the search field to the Filter View toggle and
+    // menu, the sidebar, the Filter View, then the content pane's header
+    // and list, each part's keys applying as the shell moves its focus
+    // there (browser-tags R23, I-FOCUS-007).
     press(&mut h, Key::F, command());
     assert_eq!(focused_id(&h), Some(bl_ui::browser::search_id()));
+    press(&mut h, Key::Tab, Modifiers::NONE);
+    assert_eq!(
+        focused_id(&h),
+        Some(bl_ui::browser::control_id("Show Filter View"))
+    );
+    press(&mut h, Key::Tab, Modifiers::NONE);
+    assert_eq!(
+        focused_id(&h),
+        Some(bl_ui::browser::control_id("Filter View Menu"))
+    );
     press(&mut h, Key::Tab, Modifiers::NONE);
     assert_eq!(focused_id(&h), Some(bl_ui::browser::sidebar_id()));
     assert_eq!(
         h.shell.browser_view().focus(),
         bl_shell::browser::Part::Sidebar
     );
+    press(&mut h, Key::Tab, Modifiers::NONE);
+    assert_eq!(focused_id(&h), Some(bl_ui::browser::filter_view_id()));
+    press(&mut h, Key::Tab, Modifiers::NONE);
+    assert_eq!(focused_id(&h), Some(bl_ui::browser::content_options_id()));
     press(&mut h, Key::Tab, Modifiers::NONE);
     assert_eq!(focused_id(&h), Some(bl_ui::browser::list_id()));
     assert_eq!(
@@ -1945,7 +1961,37 @@ fn paths() -> BTreeMap<&'static str, Path> {
         "the browser's Quick Tags: its Add\u{2026} field, its X, and its Create New Tag\u{2026} \
          item (the browser tags spec, R13 and R14)",
     );
+    // The browser's Filter View, saved labels, sidebar and columns
+    // (browser-tags R18 to R28): the Tab order reaches the Filter View's tag
+    // buttons, the Filter View Menu, the Results bar's buttons, the
+    // sidebar and the header row's Content Options button.
+    let filters = Equivalent(
+        "the browser's Filter View: its tag buttons (the arrow keys, Enter and Cmd-Enter), the \
+         Filter View Menu's group items, the Results bar's Clear and Add Label buttons, Esc and \
+         Cmd-F in the search field (the browser tags spec, R20 to R23)",
+    );
+    let labels = Equivalent(
+        "the browser's sidebar: the Library section's Edit mode and its check boxes, a label's \
+         context menu (Rename, also Cmd-R, Choose Icon, Remove), the Library heading's Reset \
+         Label Order item, and dragging a label (the browser tags spec, R24 to R26)",
+    );
+    let columns = Equivalent(
+        "the content pane's header row: the Content Options menu, a column's name sorting by it, \
+         and dragging a column's name (the browser tags spec, R27 and R28)",
+    );
     BTreeMap::from([
+        // The browser's Filter View, labels and columns (browser-tags R18
+        // to R28).
+        ("browser.add_label", Exception(filters)),
+        ("browser.clear_filters", Exception(filters)),
+        ("browser.filter", Exception(filters)),
+        ("browser.set_filter_groups", Exception(filters)),
+        ("browser.move_label", Exception(labels)),
+        ("browser.remove_label", Exception(labels)),
+        ("browser.reset_label_order", Exception(labels)),
+        ("browser.set_label_icon", Exception(labels)),
+        ("browser.set_label_shown", Exception(labels)),
+        ("browser.set_columns", Exception(columns)),
         // The browser's tags (browser-tags R10 to R16).
         ("browser.add_tag", Exception(tag_editor)),
         ("browser.add_tag_group", Exception(tag_editor)),

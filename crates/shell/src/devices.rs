@@ -197,6 +197,15 @@ pub struct Outcome {
     pub media: Vec<MediaFile>,
 }
 
+/// What is armed for hot-swapping, as [`DeviceView::hot_swap_targets`]
+/// gives it.
+pub type HotSwapTargets = (
+    Option<DeviceId>,
+    Option<ChainId>,
+    Option<(DeviceId, LayerId)>,
+    Option<(DeviceId, u8)>,
+);
+
 /// What a device command needs from the rest of the shell.
 pub struct Context<'a> {
     /// The set.
@@ -326,6 +335,18 @@ impl DeviceView {
     #[must_use]
     pub fn hot_swap_chain(&self) -> Option<ChainId> {
         self.hot_swap_chain
+    }
+
+    /// What is armed for hot-swapping: a device, a chain, a layer's sample,
+    /// a pad's. It differs from before when hot-swapping starts.
+    #[must_use]
+    pub fn hot_swap_targets(&self) -> HotSwapTargets {
+        (
+            self.hot_swap,
+            self.hot_swap_chain,
+            self.layer_hot_swap,
+            self.hot_swap_pad,
+        )
     }
 
     /// Whether the clipboard holds a device.

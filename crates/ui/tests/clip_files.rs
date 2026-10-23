@@ -22,8 +22,8 @@ use serde_json::{Value, json};
 
 const BAR: i64 = Ticks::WHOLE.get();
 
-/// The list's first row's top, in window coordinates (the browser's tests').
-const LIST_TOP: f32 = 103.0;
+/// The list's first row's top, in window coordinates (the browser's tests'): under the Filter View, which shows in a new install.
+const LIST_TOP: f32 = 227.0;
 
 /// A folder of its own under the system's temporary folder, removed when
 /// dropped.

@@ -1660,11 +1660,13 @@ impl ArrangementUi {
         // headers in order, for Shift-click (the comping spec, R26, R28).
         let mut names: Vec<Named> = Vec::new();
         let mut lane_order: Vec<bl_model::TakeLaneId> = Vec::new();
-        for row in &self.rows {
-            names.push(Named::Track(row.track));
-            for lane in view.take_lane_rows(doc, row) {
-                names.push(Named::Lane(lane.lane));
-                lane_order.push(lane.lane);
+        if self.rows.iter().any(|row| row.take > 0.0) {
+            for row in &self.rows {
+                names.push(Named::Track(row.track));
+                for lane in view.take_lane_rows(doc, row) {
+                    names.push(Named::Lane(lane.lane));
+                    lane_order.push(lane.lane);
+                }
             }
         }
         for (index, row) in self.rows[visible.clone()].iter().enumerate() {
@@ -2116,9 +2118,39 @@ impl ArrangementUi {
         if !enabled {
             return;
         }
+        // Spec: comping R30. Each take lane's row, named with its track and
+        // saying whether it's auditioned.
+        let lanes = layout.lanes;
+        let scroll_y = view.scroll_y() as f32;
+        for row in &self.rows {
+            for lane in view.take_lane_rows(doc, row) {
+                let top = lanes.top() + lane.top - scroll_y;
+                let rect = Rect::from_min_max(
+                    pos2(lanes.left(), top),
+                    pos2(lanes.right(), top + lane.height),
+                )
+                .intersect(lanes);
+                if rect.height() <= 0.0 {
+                    continue;
+                }
+                let (Some(held), Some(track)) = (doc.take_lane(lane.lane), doc.track(row.track))
+                else {
+                    continue;
+                };
+                let id = take_lanes::row_id(lane.lane);
+                let _ = ui.interact(rect, id, Sense::hover());
+                let label = format!("{}, take lane {}", track.name(), held.name);
+                let auditioned = track.audition() == Some(lane.lane);
+                ui.ctx().accesskit_node_builder(id, |node| {
+                    node.set_role(Role::Group);
+                    node.set_label(label.clone());
+                    node.set_value(if auditioned { "auditioned" } else { "" });
+                    node.set_selected(view.selection_take_lanes().contains(&lane.lane));
+                });
+            }
+        }
         // Clips big enough to point at, up to a limit, so a zoomed-out view
         // of thousands stays cheap.
-        let lanes = layout.lanes;
         for shown in self
             .shown
             .iter()

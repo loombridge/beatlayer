@@ -641,6 +641,34 @@ impl ClipGestures {
             let at = lanes.view.snap(lanes.doc, lanes.at(pos));
             let (from, row) = extend_from(lanes, at);
             let here = lanes.row_at(pos).or(row);
+            // Spec: comping R26. It takes in the take lanes between, as
+            // well as the tracks.
+            let flat = lane_rows(lanes);
+            let anchor = lanes
+                .view
+                .time_selection_lanes()
+                .iter()
+                .filter(|lane| !matches!(lane, Lane::Automation { .. }))
+                .filter_map(|lane| flat.iter().position(|held| held == lane))
+                .min()
+                .or_else(|| {
+                    row.and_then(|row| {
+                        let track = lanes.rows[row].track;
+                        flat.iter().position(|held| *held == Lane::Track { track })
+                    })
+                });
+            let clicked = lanes
+                .lane_at(pos)
+                .and_then(|lane| flat.iter().position(|held| *held == lane));
+            if let (Some(a), Some(b)) = (anchor, clicked) {
+                let (a, b) = (a.min(b), a.max(b));
+                invoke(
+                    events,
+                    view_ids::SELECT_TIME,
+                    json!({ "start": from, "end": at, "lanes": &flat[a..=b] }),
+                );
+                return true;
+            }
             invoke(
                 events,
                 view_ids::SELECT_TIME,
@@ -885,6 +913,25 @@ pub(super) fn extend_from(lanes: &Lanes<'_>, at: Ticks) -> (Ticks, Option<usize>
         .filter_map(|t| lanes.rows.iter().position(|r| r.track == *t))
         .min();
     (from, row)
+}
+
+/// Every lane the rows hold, top to bottom: each track's own lane, then its
+/// take lanes.
+fn lane_rows(lanes: &Lanes<'_>) -> Vec<Lane> {
+    let mut out = Vec::with_capacity(lanes.rows.len());
+    for row in lanes.rows {
+        out.push(Lane::Track { track: row.track });
+        out.extend(
+            lanes
+                .view
+                .take_lane_rows(lanes.doc, row)
+                .map(|lane| Lane::Take {
+                    track: row.track,
+                    lane: lane.lane,
+                }),
+        );
+    }
+    out
 }
 
 /// The tracks of the rows from `a` to `b`.

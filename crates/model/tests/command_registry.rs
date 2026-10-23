@@ -55,7 +55,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        243,
+        244,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
              the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
              routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -92,7 +92,7 @@ fn every_document_command_is_registered() {
              set_locator_info_text, loop_to_next_locator and set_song_start, WP-6.51 the \
              two for crossfades: set_crossfade and delete_crossfade, and WP-6.19 \
              seven for grooves: add_groove, delete_groove, rename_groove, set_groove, \
-             set_global_groove_amount, set_auto_load_groove and set_clip_groove"
+             set_global_groove_amount, set_auto_load_groove and set_clip_groove, and WP-6.22 move_clip_to_lane"
     );
 
     for op in &ops {
@@ -617,6 +617,10 @@ fn every_command_runs_by_id() {
         json!({ "clip": riff, "track": bass, "start": bar * 2 }),
     );
     agent.run("clip.move_by", json!({ "clips": [riff], "by": -quarter }));
+    agent.run(
+        "clip.move_to_lane",
+        json!({ "clip": riff, "track": bass, "start": bar * 2 - quarter }),
+    );
     agent.run(
         "clip.set_length",
         json!({ "clip": riff, "length": bar * 2 }),

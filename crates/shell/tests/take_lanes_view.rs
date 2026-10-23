@@ -898,3 +898,72 @@ fn view_state_follows_deleted_lanes() {
     assert_eq!(s.shell.arrangement().take_lane_height(one), 44.0);
     let _ = track;
 }
+
+// Spec: comping R26 (S13). With the Clip View or the Device View open,
+// selecting a take lane's header selects its clips, and the Clip View shows
+// a selected take-lane clip as it shows a main-lane one.
+#[test]
+fn selecting_a_header_selects_its_clips_and_the_clip_view_follows_them() {
+    let mut s = song();
+    let track = s.tracks[0];
+    let lane: TakeLaneId = s.shell.new_id();
+    s.shell
+        .run(
+            "track.add_take_lane",
+            json!({ "track": track, "lane": { "id": lane, "name": "Take 1", "clips": [] } }),
+        )
+        .unwrap();
+    let clip = Clip::new(
+        s.shell.new_id(),
+        Ticks::ZERO,
+        Ticks(2 * BAR),
+        ClipData::Midi(MidiData::default()),
+    );
+    let id = clip.id;
+    s.shell
+        .run(
+            "take_lane.create_clip",
+            json!({ "lane": lane, "clip": clip }),
+        )
+        .unwrap();
+    // A new session starts with the Device View alone: it is open.
+    s.view("arrangement.select_take_lanes", json!({ "lanes": [lane] }));
+    assert_eq!(s.state().selected_clips, [id]);
+    assert_eq!(
+        s.state().selected_take_lanes,
+        [lane],
+        "the headers stay selected"
+    );
+    let shown = s
+        .shell
+        .clip_view()
+        .shown_clip(s.doc(), s.shell.arrangement());
+    assert_eq!(shown, Some(id), "the Clip View shows the lane's clip");
+    // The headers still decide what Delete deletes.
+    s.one_step("arrangement.delete", json!({}));
+    assert!(s.doc().take_lane(lane).is_none());
+}
+
+// Spec: comping R27. A take-lane clip is copied or moved to a Session slot as
+// a main-lane clip is.
+#[test]
+fn a_take_lane_clip_goes_to_a_session_slot() {
+    let mut s = song();
+    let lane = s.lane(2, 1, 0, 2);
+    let clip = s.doc().take_lane(lane).unwrap().clips[0].id;
+    let scene = s.doc().scenes().next().unwrap().id;
+    let track = s.tracks[2];
+    s.one_step(
+        "session.copy_clip_to_slot",
+        json!({ "clip": clip, "track": track, "scene": scene }),
+    );
+    assert!(s.doc().slot(track, scene).is_some());
+    assert_eq!(s.on_lane(lane), [(0, 2)], "the take stays on its lane");
+    let second = s.doc().scenes().nth(1).unwrap().id;
+    s.one_step(
+        "clip.move_to_slot",
+        json!({ "clip": clip, "track": track, "scene": second }),
+    );
+    assert_eq!(s.doc().slot(track, second).map(|c| c.id), Some(clip));
+    assert_eq!(s.on_lane(lane), [], "moved out of the lane");
+}

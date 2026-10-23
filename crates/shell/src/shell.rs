@@ -6060,7 +6060,7 @@ impl Shell {
             .map(bl_model::Track::id)
             .collect();
         for track in grown {
-            self.arrangement.show_take_lanes_of(track);
+            self.arrangement.keep_take_lanes_shown(track);
         }
         if let Some(report) = &mut self.last_recording {
             report.clips_made = true;

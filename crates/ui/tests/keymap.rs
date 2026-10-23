@@ -374,8 +374,14 @@ fn every_take_lane_shortcut_is_bound() {
     for platform in [Platform::Mac, Platform::Other] {
         let none = mods(false, false, false, false);
         let (command, command_alt) = match platform {
-            Platform::Mac => (mods(true, false, false, false), mods(true, false, true, false)),
-            Platform::Other => (mods(false, true, false, false), mods(false, true, true, false)),
+            Platform::Mac => (
+                mods(true, false, false, false),
+                mods(true, false, true, false),
+            ),
+            Platform::Other => (
+                mods(false, true, false, false),
+                mods(false, true, true, false),
+            ),
         };
         let hit = |contexts: &[Context], key, m| {
             keymap
@@ -383,7 +389,9 @@ fn every_take_lane_shortcut_is_bound() {
                 .map(|hit| (hit.command.id.clone(), hit.command.args.len()))
         };
         assert_eq!(
-            hit(&arrangement, Key::U, command_alt).map(|h| h.0).as_deref(),
+            hit(&arrangement, Key::U, command_alt)
+                .map(|h| h.0)
+                .as_deref(),
             Some("arrangement.show_take_lanes"),
             "{platform:?}"
         );

@@ -217,6 +217,64 @@ fn only_visible_clips_are_built_each_frame() {
     assert_eq!(stats.clips, 5_000);
 }
 
+#[test]
+fn take_lanes_shown_on_the_benchmark_scene_stay_virtualised() {
+    // Spec: arrangement-view R17, comping R23. Every track gets two shown
+    // take lanes of ten clips each; the frame still builds only what's on
+    // screen and builds nothing when nothing changed.
+    let mut scene = benchmark::scene(200, 25, 4);
+    let tracks = scene.tracks.clone();
+    for track in &tracks {
+        for n in 0..2u8 {
+            let lane: bl_model::TakeLaneId = scene.editor.new_id();
+            scene
+                .editor
+                .apply(bl_model::Command::AddTakeLane {
+                    track: *track,
+                    lane: bl_model::NewTakeLane {
+                        id: Some(lane),
+                        name: format!("Take {}", n + 1),
+                        clips: Vec::new(),
+                    },
+                    index: None,
+                })
+                .unwrap();
+            for c in 0..10i64 {
+                let clip = bl_model::Clip::new(
+                    scene.editor.new_id(),
+                    Ticks::WHOLE * (c * 40),
+                    Ticks::WHOLE * 8,
+                    bl_model::ClipData::Audio(bl_model::AudioData::new(benchmark::media_hash(
+                        usize::from(n),
+                    ))),
+                );
+                scene
+                    .editor
+                    .apply(bl_model::Command::CreateTakeClip { lane, clip })
+                    .unwrap();
+            }
+        }
+    }
+    let mut h = with_scene(scene);
+    h.shell
+        .run(
+            "arrangement.show_take_lanes",
+            json!({ "tracks": tracks, "on": true }),
+        )
+        .unwrap();
+    h.settle();
+    let stats = h.main.arrangement().stats();
+    assert_eq!(stats.total_clips, 5_000 + 200 * 20);
+    assert!(
+        stats.rows <= 4,
+        "take lanes make the rows taller: {stats:?}"
+    );
+    assert!(stats.clips > 0 && stats.clips < 200, "{stats:?}");
+    // A frame where nothing in the lanes changed builds nothing.
+    h.frame(vec![Event::PointerMoved(pos2(10.0, 10.0))]);
+    assert!(!h.main.arrangement().stats().rebuilt);
+}
+
 /// A peak source whose peaks become ready, or go away, when the test says.
 #[derive(Clone, Default)]
 struct Switchable {

@@ -1572,7 +1572,8 @@ impl Host {
             | Effect::RenameMacro(_, _)
             | Effect::RenameVariation(_, _)
             | Effect::RenameTrack(_)
-            | Effect::RenameLocator(_) => {
+            | Effect::RenameLocator(_)
+            | Effect::RenameTakeLane(_) => {
                 if let Some(main) = &self.main {
                     self.main_ui.apply_effect(&main.ctx, &effect);
                     main.window.request_redraw();

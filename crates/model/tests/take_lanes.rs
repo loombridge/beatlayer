@@ -345,6 +345,52 @@ fn lanes_are_deleted_moved_and_auditioned_one_undo_step_each() {
 }
 
 // Spec: comping R8. Lanes of different tracks can't be moved together.
+// Spec: comping R27. A clip moves between a track's main lane and its take
+// lanes, out of wherever it sat, with its ID kept; the lane must be the
+// track's own, and the clip's kind the track's.
+#[test]
+fn a_clip_moves_between_the_main_lane_and_take_lanes() {
+    let (mut editor, audio, midi) = song();
+    let clip = audio_clip(&mut editor, 0, 2, 0.0);
+    let id = clip.id;
+    let one = lane(&mut editor, audio, "Take 1", vec![clip]);
+    let two = lane(&mut editor, audio, "Take 2", Vec::new());
+    let on = |editor: &Editor, lane: Option<TakeLaneId>, start: i64| Command::MoveClipToLane {
+        clip: id,
+        track: audio,
+        lane,
+        start: Ticks(start),
+    };
+    // To another lane, and to the main lane.
+    editor.apply(on(&editor, Some(two), BAR)).unwrap();
+    assert_eq!(editor.document().clip_lane(id), Some(two));
+    assert_eq!(editor.document().clip(id).unwrap().start, Ticks(BAR));
+    assert!(editor.document().take_lane(one).unwrap().clips.is_empty());
+    editor.apply(on(&editor, None, 0)).unwrap();
+    assert_eq!(editor.document().clip_lane(id), None);
+    assert_eq!(editor.document().clip_track(id), Some(audio));
+    assert!(editor.document().check_invariants().is_ok());
+    // Another track's lane, or the wrong kind, is refused and changes nothing.
+    let other = lane(&mut editor, midi, "Take 1", Vec::new());
+    let before = editor.document().clone();
+    assert!(editor.apply(on(&editor, Some(other), 0)).is_err());
+    assert!(
+        editor
+            .apply(Command::MoveClipToLane {
+                clip: id,
+                track: midi,
+                lane: Some(other),
+                start: Ticks::ZERO,
+            })
+            .is_err()
+    );
+    assert_eq!(*editor.document(), before);
+    // Undo puts it back where it was, on its lane.
+    editor.apply(on(&editor, Some(one), 0)).unwrap();
+    editor.undo().unwrap();
+    assert_eq!(editor.document().clip_lane(id), None);
+}
+
 #[test]
 fn lanes_of_two_tracks_are_not_moved_together() {
     let (mut editor, audio, midi) = song();

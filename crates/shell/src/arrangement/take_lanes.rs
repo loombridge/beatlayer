@@ -171,10 +171,16 @@ impl ArrangementView {
     }
 
     /// Shows `track`'s take lanes, leaving Automation Mode to do it (R24).
-    /// Inserting a take lane and recording one run it.
+    /// Show Take Lanes and Insert Take Lane run it.
     pub fn show_take_lanes_of(&mut self, track: TrackId) {
         self.shown_take_lanes.insert(track);
         self.automation_mode = false;
+    }
+
+    /// Marks `track`'s take lanes as shown, as a recording that added one
+    /// does (R13), leaving Automation Mode as it is: they show once it's off.
+    pub fn keep_take_lanes_shown(&mut self, track: TrackId) {
+        self.shown_take_lanes.insert(track);
     }
 
     /// Sets the height of take lanes, clamped as tracks' are (R28).

@@ -286,6 +286,17 @@ fn each_shown_take_lane_is_a_row_with_a_header_beside_it() {
         assert_eq!(switch.toggled, Some(false));
     }
     // The lane's clips are drawn as the main lane's are, in their own rows.
+    // Each row reaches assistive technology with its track's and its own
+    // name, and whether it is auditioned (R30).
+    for n in 1..=3 {
+        let row = nodes
+            .iter()
+            .find(|node| {
+                node.role == Role::Group && node.label == format!("3 Audio, take lane Take {n}")
+            })
+            .unwrap_or_else(|| panic!("no row node for Take {n}"));
+        assert_eq!(row.value, "");
+    }
     let clip_nodes = |nodes: &[Node]| {
         let mut values = nodes
             .iter()
@@ -856,4 +867,19 @@ fn the_edit_keys_act_on_time_selected_on_a_take_lane() {
     assert_eq!(s.on_lane(0), vec![(0, 2), (3, 4)]);
     assert_eq!(s.main_clips(), [(0, 8)]);
     assert_eq!(s.steps(), 2);
+}
+
+// Spec: comping R26. Shift-click extends the time selection over the take
+// lanes between, as well as the tracks.
+#[test]
+fn shift_click_extends_the_time_selection_over_lanes() {
+    let mut s = set();
+    s.show_lanes();
+    s.select(pos2(x(1.0), LANE_1.0 + 20.0), pos2(x(2.0), LANE_1.0 + 20.0));
+    s.click(pos2(x(5.5), LANE_3.0 + 30.0), Modifiers::SHIFT);
+    let state = s.state();
+    let time = state.time_selection.unwrap();
+    assert_eq!((time.start, time.end), (Ticks(BAR), Ticks(5 * BAR)));
+    assert_eq!(s.h.shell.arrangement().selection_take_lanes(), s.lanes);
+    assert_eq!(state.time_selection_lanes.len(), 3, "not the main lane");
 }

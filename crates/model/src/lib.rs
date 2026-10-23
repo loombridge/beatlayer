@@ -64,6 +64,7 @@ pub mod base64;
 pub mod bounce;
 mod changes;
 mod clip;
+mod clip_param;
 mod command;
 pub mod comp;
 mod device;
@@ -118,6 +119,7 @@ pub use clip::{
     MidiData, NewTakeLane, Note, PressurePoint, TakeClip, TakeClipData, TakeLane,
     consolidated_midi, crossfades, fade_power,
 };
+pub use clip_param::ClipParam;
 pub use command::Command;
 pub use device::{
     Device, DeviceKind, DeviceRole, DeviceWarp, DeviceWindows, MAX_MEDIA_SLOTS, MidiSidechain,

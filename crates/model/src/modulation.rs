@@ -220,8 +220,10 @@ impl Document {
                         AutomationTarget::Chain { .. } | AutomationTarget::ChainSend { .. } => {
                             old.clamp(-1.0, 1.0)
                         }
-                        // MIDI controllers came after relative modulation.
-                        AutomationTarget::MidiCc { .. }
+                        // MIDI controllers and clip settings came after
+                        // relative modulation.
+                        AutomationTarget::Clip { .. }
+                        | AutomationTarget::MidiCc { .. }
                         | AutomationTarget::MidiPitchBend
                         | AutomationTarget::MidiChannelPressure => old,
                     });

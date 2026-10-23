@@ -2478,7 +2478,7 @@ Result: [`AutomationResult`](#automationresult).
 
 **Set Automation Breakpoint**. Permission: `edit`. Contexts: `global`.
 
-Sets one of a track's automatable parameters at `at` on its envelope, adding a breakpoint there or replacing the value of the one that's there, as clicking or dragging a breakpoint on an automation lane does. `target` names the parameter: `{"type": "mixer", "param": "volume"}`, `{"type": "send", "to": <return track>}`, or `{"type": "device", "device": <device>, "param": <parameter>}`. A parameter with no envelope yet gets its first breakpoint and its envelope drives it from then on. Values are in the parameter's own units: volume as linear gain, pan from -1 to 1, the Track Activator 1 for muted, and a device parameter as the device's own value. `at` is 0 (1.1.1) or later. The value between two breakpoints follows the segment's shape: the straight line unless `automation.set_curve` bent it; before the first and after the last the nearest one's value holds.
+Sets one of a track's automatable parameters at `at` on its envelope, adding a breakpoint there or replacing the value of the one that's there, as clicking or dragging a breakpoint on an automation lane does. `target` names the parameter: `{"type": "mixer", "param": "volume"}`, `{"type": "send", "to": <return track>}`, or `{"type": "device", "device": <device>, "param": <parameter>}`, or, on an audio track, a sound setting of its audio clips: `{"type": "clip", "param": "formants"}` (`gain` as linear gain, `transpose` in semitones, `detune` in cents, `high_quality`, `sample_offset` in sixteenths, and the warp modes' controls), which drives that setting of every audio clip on the track as it plays. A parameter with no envelope yet gets its first breakpoint and its envelope drives it from then on. Values are in the parameter's own units: volume as linear gain, pan from -1 to 1, the Track Activator 1 for muted, and a device parameter as the device's own value. `at` is 0 (1.1.1) or later. The value between two breakpoints follows the segment's shape: the straight line unless `automation.set_curve` bent it; before the first and after the last the nearest one's value holds.
 
 Default keys: none.
 
@@ -4175,7 +4175,7 @@ Result: [`ChangeSet`](#changeset).
 
 **Add Envelope Breakpoint**. Permission: `edit`. Contexts: `clip-view`.
 
-Sets the value of one of a clip's envelopes at a position, adding a breakpoint there or replacing the one that's there, as clicking or dragging a breakpoint in the Envelopes tab does. `clip` is the clip, `target` the parameter of the clip's track the envelope modulates (a control of its mixer, one of its sends, or a parameter of a device in its chain), `at` the position in ticks from the beginning of the clip's contents, and `value` the value there, in the parameter's own units. A MIDI clip's `target` can instead be a MIDI controller (MIDI Ctrl in the Envelopes tab): `{"type": "midi.cc", "number": 1}` (a controller from 1 to 31 or 33 to 119, value 0 to 127), `{"type": "midi.pitch_bend"}` (-8192 to 8191, 0 at rest) or `{"type": "midi.channel_pressure"}` (0 to 127); the value is the message the clip sends to its track's devices while it plays, on any channel. A parameter with no clip envelope gets one, linked to the clip, with this breakpoint as its first.
+Sets the value of one of a clip's envelopes at a position, adding a breakpoint there or replacing the one that's there, as clicking or dragging a breakpoint in the Envelopes tab does. `clip` is the clip, `target` the parameter of the clip's track the envelope modulates (a control of its mixer, one of its sends, or a parameter of a device in its chain; an audio clip's can instead be one of its sound settings, `{"type": "clip", "param": "transpose"}`, whose value is a share from 0 to 100 for `gain` and otherwise an amount added to the setting, in its own units), `at` the position in ticks from the beginning of the clip's contents, and `value` the value there, in the parameter's own units. A MIDI clip's `target` can instead be a MIDI controller (MIDI Ctrl in the Envelopes tab): `{"type": "midi.cc", "number": 1}` (a controller from 1 to 31 or 33 to 119, value 0 to 127), `{"type": "midi.pitch_bend"}` (-8192 to 8191, 0 at rest) or `{"type": "midi.channel_pressure"}` (0 to 127); the value is the message the clip sends to its track's devices while it plays, on any channel. A parameter with no clip envelope gets one, linked to the clip, with this breakpoint as its first.
 
 Default keys: none.
 
@@ -15754,7 +15754,7 @@ What an automation editing command reports: what it changed in the set, and the 
 
 ### `AutomationTarget`
 
-Which parameter of the track an envelope drives: `mixer` with a `param`, `send` with the return track it feeds (`to`), `device` with the device and its `param`, `chain` with a rack's chain and its mixer `param`, or `chain_send` with a drum rack's chain and the return chain it sends to (`to`). A MIDI clip's envelope can instead name a MIDI controller: `midi.cc` with its `number` (1 to 31 or 33 to 119), `midi.pitch_bend` or `midi.channel_pressure`.
+Which parameter of the track an envelope drives: `mixer` with a `param`, `send` with the return track it feeds (`to`), `device` with the device and its `param`, `chain` with a rack's chain and its mixer `param`, or `chain_send` with a drum rack's chain and the return chain it sends to (`to`), or `clip` with a sound setting (`param`) of the track's audio clips (Gain, Transpose, Detune, HiQ and the warp modes' controls). A MIDI clip's envelope can instead name a MIDI controller: `midi.cc` with its `number` (1 to 31 or 33 to 119), `midi.pitch_bend` or `midi.channel_pressure`.
 
 One of:
 
@@ -15763,6 +15763,7 @@ One of:
 - an object with `type` = `"device"`, `device` ([`DeviceId`](#deviceid)), `param` ([`ParamId`](#paramid)): A parameter of a device in the track's chain.
 - an object with `type` = `"chain"`, `chain` ([`ChainId`](#chainid)), `param` ([`MixerParam`](#mixerparam)): A control of a rack chain's mixer (WP-5.1, G2): the chain's Volume, Pan, or Chain Activator (`mute`: 1 muted, 0 not).
 - an object with `type` = `"chain_send"`, `chain` ([`ChainId`](#chainid)), `to` ([`ChainId`](#chainid)): The level of a drum chain's send to a return chain of its rack (drum racks R6, G2).
+- an object with `type` = `"clip"`, `param` ([`ClipParam`](#clipparam)): A sound setting of the track's audio clips (WP-4.8, the warp modes spec R28): a track's envelope for it drives the setting of every audio clip on the track as it plays, and a clip's envelope modulates it.
 - an object with `type` = `"midi.cc"`, `number` (integer from 0 to 255): A continuous controller of a MIDI clip's MIDI Ctrl envelopes (WP-2.29), 1 to 31 or 33 to 119, from 0 to 127. Only a MIDI clip's envelope names it; a track has no automation for it.
 - an object with `type` = `"midi.pitch_bend"`: A MIDI clip's pitch bend envelope, from −8192 to 8191, 0 at rest.
 - an object with `type` = `"midi.channel_pressure"`: A MIDI clip's channel pressure envelope, from 0 to 127.
@@ -15771,7 +15772,7 @@ One of:
 
 ```json
 {
-  "description": "Which parameter of the track an envelope drives: `mixer` with a `param`, `send` with the return track it feeds (`to`), `device` with the device and its `param`, `chain` with a rack's chain and its mixer `param`, or `chain_send` with a drum rack's chain and the return chain it sends to (`to`). A MIDI clip's envelope can instead name a MIDI controller: `midi.cc` with its `number` (1 to 31 or 33 to 119), `midi.pitch_bend` or `midi.channel_pressure`.",
+  "description": "Which parameter of the track an envelope drives: `mixer` with a `param`, `send` with the return track it feeds (`to`), `device` with the device and its `param`, `chain` with a rack's chain and its mixer `param`, or `chain_send` with a drum rack's chain and the return chain it sends to (`to`), or `clip` with a sound setting (`param`) of the track's audio clips (Gain, Transpose, Detune, HiQ and the warp modes' controls). A MIDI clip's envelope can instead name a MIDI controller: `midi.cc` with its `number` (1 to 31 or 33 to 119), `midi.pitch_bend` or `midi.channel_pressure`.",
   "oneOf": [
     {
       "description": "A control of the track's mixer.",
@@ -15875,6 +15876,24 @@ One of:
         "type",
         "chain",
         "to"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A sound setting of the track's audio clips (WP-4.8, the warp modes spec R28): a track's envelope for it drives the setting of every audio clip on the track as it plays, and a clip's envelope modulates it.",
+      "properties": {
+        "param": {
+          "$ref": "#/$defs/ClipParam",
+          "description": "The setting."
+        },
+        "type": {
+          "const": "clip",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "param"
       ],
       "type": "object"
     },
@@ -18217,6 +18236,103 @@ A Session clip's own launch settings (the Clip View's Launch panel, WP-3.4). The
     }
   },
   "type": "object"
+}
+```
+
+</details>
+
+### `ClipParam`
+
+A sound setting of an audio clip: `gain` (linear, 1 is 0 dB), `transpose` (semitones), `sample_offset` (Beats only, in sixteenth notes, an envelope only), `detune` (cents), `high_quality` (the HiQ switch), `preserve`, `transient_loop_mode` and `transient_envelope` (Beats), `tones_grain_size`, `texture_grain_size` and `texture_flux`, `formants` and `complex_pro_envelope` (Complex Pro).
+
+One of:
+
+- `"gain"`: The clip's gain: a linear gain from silence (−∞ dB) to +24 dB.
+- `"transpose"`: Transpose, in semitones, −48 to 48.
+- `"sample_offset"`: Beats' Sample Offset (R30), in sixteenth notes, −8 to 8. It has no setting of its own: only an envelope or automation moves it.
+- `"detune"`: Detune, in cents, −50 to 50.
+- `"high_quality"`: The HiQ switch.
+- `"preserve"`: Beats' Preserve, by its place in the list.
+- `"transient_loop_mode"`: Beats' Transient Loop Mode, by its place in the list.
+- `"transient_envelope"`: Beats' Transient Envelope, 0 to 100.
+- `"tones_grain_size"`: Tones' Grain Size, in milliseconds.
+- `"texture_grain_size"`: Texture's Grain Size, in milliseconds.
+- `"texture_flux"`: Texture's Flux, in per cent.
+- `"formants"`: Complex Pro's Formants, in per cent.
+- `"complex_pro_envelope"`: Complex Pro's Envelope, 8 to 512.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A sound setting of an audio clip: `gain` (linear, 1 is 0 dB), `transpose` (semitones), `sample_offset` (Beats only, in sixteenth notes, an envelope only), `detune` (cents), `high_quality` (the HiQ switch), `preserve`, `transient_loop_mode` and `transient_envelope` (Beats), `tones_grain_size`, `texture_grain_size` and `texture_flux`, `formants` and `complex_pro_envelope` (Complex Pro).",
+  "oneOf": [
+    {
+      "const": "gain",
+      "description": "The clip's gain: a linear gain from silence (−∞ dB) to +24 dB.",
+      "type": "string"
+    },
+    {
+      "const": "transpose",
+      "description": "Transpose, in semitones, −48 to 48.",
+      "type": "string"
+    },
+    {
+      "const": "sample_offset",
+      "description": "Beats' Sample Offset (R30), in sixteenth notes, −8 to 8. It has no setting of its own: only an envelope or automation moves it.",
+      "type": "string"
+    },
+    {
+      "const": "detune",
+      "description": "Detune, in cents, −50 to 50.",
+      "type": "string"
+    },
+    {
+      "const": "high_quality",
+      "description": "The HiQ switch.",
+      "type": "string"
+    },
+    {
+      "const": "preserve",
+      "description": "Beats' Preserve, by its place in the list.",
+      "type": "string"
+    },
+    {
+      "const": "transient_loop_mode",
+      "description": "Beats' Transient Loop Mode, by its place in the list.",
+      "type": "string"
+    },
+    {
+      "const": "transient_envelope",
+      "description": "Beats' Transient Envelope, 0 to 100.",
+      "type": "string"
+    },
+    {
+      "const": "tones_grain_size",
+      "description": "Tones' Grain Size, in milliseconds.",
+      "type": "string"
+    },
+    {
+      "const": "texture_grain_size",
+      "description": "Texture's Grain Size, in milliseconds.",
+      "type": "string"
+    },
+    {
+      "const": "texture_flux",
+      "description": "Texture's Flux, in per cent.",
+      "type": "string"
+    },
+    {
+      "const": "formants",
+      "description": "Complex Pro's Formants, in per cent.",
+      "type": "string"
+    },
+    {
+      "const": "complex_pro_envelope",
+      "description": "Complex Pro's Envelope, 8 to 512.",
+      "type": "string"
+    }
+  ]
 }
 ```
 

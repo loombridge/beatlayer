@@ -8,7 +8,7 @@ mod common;
 use bl_core::time::Ticks;
 use bl_model::{AutomationTarget, ClipData, ClipId, MixerParam, SceneId};
 use bl_shell::note_commands::ClipTab;
-use bl_ui::arrangement::automation::{AutomationDevice, control_choices};
+use bl_ui::arrangement::automation::{AutomationDevice, clip_choices, control_choices};
 use bl_ui::clip_envelope::{axis_start, lane_rect};
 use bl_ui::clip_view::{tick_at, x_of_tick};
 use common::{Harness, Window};
@@ -568,4 +568,46 @@ fn midi_ctrl_lists_the_controllers_and_dots_the_ones_with_envelopes() {
         Harness::node(&nodes, "Envelope Control").value,
         "Pitch Bend"
     );
+}
+
+// Spec: warp-modes R29. An audio clip's "Clip" entry lists Gain,
+// Transposition and, in Beats, Sample Offset, then Detune, HiQ and the controls
+// of the clip's mode.
+#[test]
+fn an_audio_clips_clip_entry_lists_its_modes_controls() {
+    use bl_model::{AudioData, ContentHash, WarpMode};
+    let names = |warp_mode| -> Vec<String> {
+        let audio = AudioData {
+            warp_mode,
+            ..AudioData::new(ContentHash([0; 32]))
+        };
+        clip_choices(&audio)
+            .into_iter()
+            .map(|choice| choice.label)
+            .collect()
+    };
+    assert_eq!(
+        names(WarpMode::Beats),
+        [
+            "Gain",
+            "Transposition",
+            "Sample Offset",
+            "Detune",
+            "HiQ",
+            "Preserve",
+            "Transient Loop Mode",
+            "Transient Envelope"
+        ]
+    );
+    let common = ["Gain", "Transposition", "Detune", "HiQ"];
+    for (mode, extra) in [
+        (WarpMode::Tones, &["Grain Size"][..]),
+        (WarpMode::Texture, &["Grain Size", "Flux"]),
+        (WarpMode::ComplexPro, &["Formants", "Envelope"]),
+        (WarpMode::Complex, &[]),
+        (WarpMode::RePitch, &[]),
+    ] {
+        let want: Vec<&str> = common.iter().chain(extra).copied().collect();
+        assert_eq!(names(mode), want, "{mode:?}");
+    }
 }

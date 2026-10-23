@@ -19,6 +19,7 @@ use crate::clip::{
     AudioData, Clip, ClipData, ClipEnvelope, EnvelopeKind, MidiData, NewTakeLane, Note, TakeLane,
     clip_entry, crossfades,
 };
+use crate::clip_param::ClipParam;
 use crate::device::{Device, DeviceKind, DeviceRole};
 use crate::document::Document;
 use crate::error::ModelError;
@@ -6387,7 +6388,19 @@ impl Document {
         edit(&mut next);
         check_audio(&next)?;
         if next != *current {
+            // Spec: warp-modes R31. Moving a clip's setting by hand turns off
+            // the track's automation of it, as automation R5 says.
+            let moved: Vec<ClipParam> = ClipParam::ALL
+                .into_iter()
+                .filter(|param| param.base(&next) != param.base(current))
+                .collect();
             self.clip_mut(id)?.data = ClipData::Audio(next);
+            if !moved.is_empty() {
+                let track = self.track_mut(self.clip_owner(id)?)?;
+                for param in moved {
+                    track.override_target(&AutomationTarget::Clip { param });
+                }
+            }
         }
         Ok(())
     }
@@ -6448,6 +6461,9 @@ impl Document {
         clip: &Clip,
         target: AutomationTarget,
     ) -> Result<(), ModelError> {
+        if target.is_clip() && !clip.data.is_audio() {
+            return Err(ModelError::NotAudioClip(clip.id));
+        }
         if !target.is_midi() {
             return self.check_automation_target(track, target);
         }
@@ -6500,6 +6516,7 @@ impl Document {
         if kind == EnvelopeKind::Automation && target.is_midi() {
             return Err(ModelError::MidiControllerNotAParameter);
         }
+        check_clip_setting_kind(target, kind)?;
         self.check_envelope_kind(clip, kind)?;
         clip_entry(&mut self.clip_mut(clip)?.envelopes, target, kind)
             .envelope
@@ -6622,6 +6639,7 @@ impl Document {
         linked: bool,
     ) -> Result<(), ModelError> {
         self.check_clip_envelope_target(clip, target)?;
+        check_clip_setting_kind(target, kind)?;
         self.check_envelope_kind(clip, kind)?;
         clip_entry(&mut self.clip_mut(clip)?.envelopes, target, kind).linked = linked;
         Ok(())
@@ -7159,6 +7177,14 @@ impl Document {
                     return Err(ModelError::NotADrumChain(chain));
                 }
             }
+            // Spec: warp-modes R28, R31
+            AutomationTarget::Clip { .. } => {
+                check_kind(
+                    self.track_ref(track)?,
+                    |kind| kind == TrackKind::Audio,
+                    AUDIO,
+                )?;
+            }
             AutomationTarget::MidiCc { .. }
             | AutomationTarget::MidiPitchBend
             | AutomationTarget::MidiChannelPressure => {
@@ -7182,7 +7208,15 @@ impl Document {
         if at < Ticks::ZERO {
             return Err(ModelError::NegativePosition(at));
         }
-        check_value("automation value", value, value.is_finite())?;
+        // Spec: warp-modes R28. A clip setting's value is inside its range.
+        let in_range = match target {
+            AutomationTarget::Clip { param } => {
+                let descriptor = param.descriptor();
+                (descriptor.min()..=descriptor.max()).contains(&value)
+            }
+            _ => value.is_finite(),
+        };
+        check_value("automation value", value, in_range)?;
         self.check_automation_target(track, target)?;
         entry(&mut self.track_mut(track)?.automation, target)
             .envelope
@@ -7778,6 +7812,7 @@ impl Document {
 const NOT_MAIN: &str = "a track other than Main";
 const AUDIO_OR_MIDI: &str = "an audio or MIDI track";
 const SENDER: &str = "an audio, MIDI, or group track";
+const AUDIO: &str = "an audio track";
 const RETURN: &str = "a return track";
 
 fn check_kind(
@@ -7887,8 +7922,24 @@ pub(crate) fn check_clip_envelope_value(
 ) -> Result<(), ModelError> {
     let in_range = target
         .midi_range()
+        .or_else(|| target.clip_range())
         .map_or(value.is_finite(), |(min, max)| (min..=max).contains(&value));
     check_value("clip envelope value", value, in_range)
+}
+
+/// Refuses an Automation envelope for a clip sound setting: its envelopes
+/// modulate, and the track's automation drives the setting (the warp modes
+/// spec, R29 and R31).
+pub(crate) fn check_clip_setting_kind(
+    target: AutomationTarget,
+    kind: EnvelopeKind,
+) -> Result<(), ModelError> {
+    if kind == EnvelopeKind::Automation && target.is_clip() {
+        return Err(ModelError::InvalidInput(
+            "a clip setting's envelope only modulates; the track's automation drives the setting",
+        ));
+    }
+    Ok(())
 }
 
 /// The breakpoints that [`TempoMap::from_breakpoints`] rebuilds `tempo`

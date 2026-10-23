@@ -41,7 +41,7 @@ pub struct PlacedEnvelope {
 impl PlacedEnvelope {
     /// `envelope` placed under `tempo` at `rate`, with every point's frame
     /// shifted on by `shift` (the node's delay, WP-2.11).
-    fn placed(
+    pub(crate) fn placed(
         envelope: &bl_model::Envelope,
         tempo: &TempoMap,
         rate: SampleRate,
@@ -99,7 +99,7 @@ impl PlacedEnvelope {
 /// song time its clip plays, with the envelope's breakpoints placed in the
 /// frames the clip's contents reach their positions at. Its value is read
 /// frame by frame, the way a track envelope's is.
-struct PlacedClipEnvelope {
+pub(crate) struct PlacedClipEnvelope {
     /// The stretches the clip plays, in frame order, in song frames.
     segments: Vec<PlacedSegment>,
 }
@@ -118,7 +118,7 @@ impl PlacedClipEnvelope {
     /// frame shifted on by `shift` (the node's delay, WP-2.11), the way a
     /// track envelope is. `None` for a clip that plays nothing, or an
     /// envelope with no breakpoints: neither modulates anything.
-    fn placed(
+    pub(crate) fn placed(
         clip: &bl_model::Clip,
         envelope: &bl_model::ClipEnvelope,
         tempo: &TempoMap,
@@ -177,7 +177,7 @@ impl PlacedClipEnvelope {
     /// play. Reading allocates nothing and is the same whatever the block
     /// size: the value depends on the frame alone.
     // Spec: clip-envelopes R4
-    fn value_at(&self, frame: i64) -> Option<f64> {
+    pub(crate) fn value_at(&self, frame: i64) -> Option<f64> {
         let index = self
             .segments
             .partition_point(|segment| segment.first_frame <= frame);
@@ -1110,7 +1110,9 @@ pub fn target_node(track: TrackId, target: &AutomationTarget) -> Option<(NodeKey
         AutomationTarget::ChainSend { chain, to } => {
             (NodeKey::ChainSend { chain, to }, mixer::route::LEVEL)
         }
-        AutomationTarget::MidiCc { .. }
+        // A clip's setting is the clip player's, not a node's parameter.
+        AutomationTarget::Clip { .. }
+        | AutomationTarget::MidiCc { .. }
         | AutomationTarget::MidiPitchBend
         | AutomationTarget::MidiChannelPressure => return None,
     })

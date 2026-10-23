@@ -20,7 +20,8 @@
 use bl_core::time::Ticks;
 use bl_model::modulation::Travel;
 use bl_model::{
-    AutomationTarget, Breakpoint, Clip, ClipId, Document, Envelope, MidiData, MixerParam,
+    AutomationTarget, Breakpoint, Clip, ClipData, ClipId, ClipParam, Document, Envelope, MidiData,
+    MixerParam,
 };
 use bl_shell::{Area, GesturePhase, Invocation, Shell};
 use egui::{
@@ -31,8 +32,8 @@ use serde_json::{Value, json};
 
 use crate::arrangement::automation::{
     AutomationDevice, BREAKPOINT_GRAB, BREAKPOINT_SIZE, CURVE_PER_POINT, FINE_VALUE, SEGMENT_GRAB,
-    belongs_to, control_choices, default_target, device_choices, device_of, mark_controls,
-    mark_devices, target_label,
+    belongs_to, clip_choices, control_choices, default_target, device_choices, device_of,
+    mark_controls, mark_devices, target_label,
 };
 use crate::arrangement::editing::EditKeys;
 use crate::clip_view::{grid_rect, paint_grid_lines, tick_at, x_of_tick};
@@ -59,8 +60,9 @@ const GAP: f32 = 3.0;
 // Spec: modulation R9
 pub(crate) fn share_scale(target: AutomationTarget) -> LaneScale {
     // A MIDI controller is drawn on its own range, pitch bend centred
-    // (midi-controller-data R8).
-    if let Some((min, max)) = target.midi_range() {
+    // (midi-controller-data R8), and a clip's sound setting on its own
+    // (warp-modes R29).
+    if let Some((min, max)) = target.midi_range().or_else(|| target.clip_range()) {
         return LaneScale::Linear { min, max };
     }
     let travel = if is_level(target) {
@@ -70,6 +72,18 @@ pub(crate) fn share_scale(target: AutomationTarget) -> LaneScale {
     };
     let (min, max) = travel.clip_range();
     LaneScale::Linear { min, max }
+}
+
+/// Where an envelope for `target` modulates nothing: the top of a share (a
+/// level, or a clip's Gain), and zero for the rest.
+fn rest_of(target: AutomationTarget) -> f64 {
+    match target {
+        _ if is_level(target) => 1.0,
+        AutomationTarget::Clip {
+            param: ClipParam::Gain,
+        } => 100.0,
+        _ => 0.0,
+    }
 }
 
 /// Whether a parameter is a level, whose modulation is a share of its base.
@@ -338,8 +352,8 @@ impl EnvelopeEditor {
                 start,
                 length: clip.length,
                 scale: share_scale(target),
-                midi: target.is_midi(),
-                rest: if is_level(target) { 1.0 } else { 0.0 },
+                midi: target.is_midi() || target.is_clip(),
+                rest: rest_of(target),
                 envelope,
             };
             self.paint(ui, theme, &lane);
@@ -565,6 +579,18 @@ impl EnvelopeEditor {
         if let Some(mixer) = devices.first_mut() {
             mixer.label = "Mixer".to_owned();
         }
+        // An audio clip's sound settings come first (L-CLIP-017).
+        // Spec: warp-modes R29
+        if clip.data.is_audio() {
+            devices.insert(
+                0,
+                Choice {
+                    label: "Clip".to_owned(),
+                    value: AutomationDevice::Clip,
+                    leds: NO_LEDS,
+                },
+            );
+        }
         // A MIDI clip's controllers come first, before the Mixer.
         // Spec: midi-controller-data R8
         if !clip.data.is_audio() {
@@ -577,9 +603,12 @@ impl EnvelopeEditor {
                 },
             );
         }
-        let mut controls = device
-            .map(|device| control_choices(shell, doc, device))
-            .unwrap_or_default();
+        let mut controls = match (device, &clip.data) {
+            (Some(AutomationDevice::Clip), ClipData::Audio(audio)) => clip_choices(audio),
+            _ => device
+                .map(|device| control_choices(shell, doc, device))
+                .unwrap_or_default(),
+        };
         if let Some(track) = track {
             mark_devices(&mut devices, doc, track, theme);
             mark_controls(&mut controls, doc, track, theme);
@@ -588,7 +617,7 @@ impl EnvelopeEditor {
         // control that has one.
         let dot = |has: bool| [None, has.then_some(theme.colors.modulation.0)];
         for choice in &mut controls {
-            if choice.value.is_midi() {
+            if choice.value.is_midi() || choice.value.is_clip() {
                 choice.leds = dot(clip.envelope(&choice.value).is_some());
             }
         }
@@ -597,6 +626,12 @@ impl EnvelopeEditor {
             .find(|choice| choice.value == AutomationDevice::MidiCtrl)
         {
             midi.leds = dot(clip.envelopes().any(|envelope| envelope.target.is_midi()));
+        }
+        if let Some(settings) = devices
+            .iter_mut()
+            .find(|choice| choice.value == AutomationDevice::Clip)
+        {
+            settings.leds = dot(clip.envelopes().any(|envelope| envelope.target.is_clip()));
         }
         let current_control = frame
             .target

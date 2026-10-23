@@ -54,6 +54,7 @@ pub mod device_display;
 pub mod device_panel;
 pub mod device_view;
 pub mod drum_view;
+pub mod envelope_keys;
 pub mod export_dialog;
 pub mod external;
 pub mod file_manager;

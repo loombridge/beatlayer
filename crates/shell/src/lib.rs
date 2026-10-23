@@ -134,6 +134,9 @@ pub use bl_shell_spec::devices as device_commands;
 /// The Arrangement's editing command IDs and their argument and result
 /// types (WP-1.8b).
 pub use bl_shell_spec::editing as editing_commands;
+/// The envelope keys' command IDs and their argument and result types
+/// (WP-6.26).
+pub use bl_shell_spec::envelope_keys as envelope_commands;
 /// The export command's ID and its argument and result types (WP-1.12).
 pub use bl_shell_spec::export as export_commands;
 /// The File Manager's command IDs and their argument and result types

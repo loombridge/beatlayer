@@ -1118,6 +1118,15 @@ pub struct ClipViewState {
     /// Find and Select Notes: whether the filter bar shows, and every
     /// filter's settings, with which are on.
     pub filters: NoteFilters,
+    /// The Envelope Editor's insert marker, in ticks from the beginning of
+    /// the clip's contents (WP-6.26), which Left and Right move along the
+    /// envelope; `null` until it has been moved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub envelope_marker: Option<Ticks>,
+    /// The breakpoint selected in the Envelope Editor (WP-6.26), if any:
+    /// `clip.select_envelope_breakpoint` sets it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub envelope_breakpoint: Option<Ticks>,
 }
 
 /// Arguments of `clip_view.foreground`.

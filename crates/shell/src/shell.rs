@@ -79,6 +79,7 @@ use bl_shell_spec::comping as comping_ids;
 use bl_shell_spec::dawproject as dawproject_ids;
 use bl_shell_spec::devices as device_ids;
 use bl_shell_spec::editing as edit_ids;
+use bl_shell_spec::envelope_keys as envelope_key_ids;
 use bl_shell_spec::export as export_ids;
 use bl_shell_spec::file_manager as file_manager_ids;
 use bl_shell_spec::freeze as freeze_ids;
@@ -113,6 +114,7 @@ mod audio_panel;
 pub mod autosample;
 mod bounce;
 mod capture;
+mod envelope_keys;
 mod export_dialog;
 pub use export_dialog::ExportPrefs;
 mod file_manager;
@@ -619,6 +621,14 @@ pub struct Shell {
     envelope_clipboard: Option<EnvelopeClipboard>,
     /// A gesture that edits the set, under way (WP-1.8b).
     edit_gesture: Option<Gesture>,
+    /// The edit a breakpoint selected from the keyboard has open (WP-6.26):
+    /// the kind of envelope it is in and where the insert marker was. Its
+    /// changes are one undo step, held in the transaction `gesture` opens.
+    key_edit: Option<(bl_shell_spec::envelope_keys::EnvelopeKeys, Ticks)>,
+    /// Whether a control other than the Arrangement View, an automation lane
+    /// or the Envelope Editor holds the keyboard focus, so the envelope keys
+    /// give way to it (WP-6.26). The UI reports it.
+    envelope_control_focused: bool,
     /// The engine's insert marker when the shell last looked, so a move of
     /// it reaches the Arrangement View once (WP-1.18).
     seen_insert_marker: Option<Ticks>,
@@ -1134,6 +1144,8 @@ impl Shell {
             clipboard: None,
             envelope_clipboard: None,
             edit_gesture: None,
+            key_edit: None,
+            envelope_control_focused: false,
             au,
             seen_insert_marker: None,
             gesture: false,
@@ -2620,6 +2632,9 @@ impl Shell {
     /// Records which window has the keyboard focus.
     pub fn set_focused_window(&mut self, window: WindowKind) {
         if self.focused_window != window {
+            // Spec: automation-editing R23. The edit ends when the focus
+            // leaves.
+            self.end_key_edit();
             self.focused_window = window;
             if let WindowKind::Device(device) = window
                 && self.editor.document().device(device).is_some()
@@ -2636,11 +2651,32 @@ impl Shell {
     /// clicking in it does (I-FOCUS-001).
     pub fn set_focused_area(&mut self, area: Area) {
         if self.focused_area != area {
+            // Spec: automation-editing R23. The edit ends when the focus
+            // leaves.
+            self.end_key_edit();
             self.focused_area = area;
             // A device's value control lives in the detail area.
             self.value_focused &= area == Area::Detail;
             self.touch();
         }
+    }
+
+    /// Records whether a control other than the Arrangement View, an
+    /// automation lane or the Envelope Editor has the keyboard focus: while
+    /// one does, Enter, Esc, Delete and Tab are its own, not the envelope
+    /// keys' (WP-6.26).
+    pub fn set_envelope_control_focused(&mut self, focused: bool) {
+        if self.envelope_control_focused != focused {
+            self.envelope_control_focused = focused;
+            self.touch();
+        }
+    }
+
+    /// Whether a control other than the view or the envelope has the
+    /// keyboard focus.
+    #[must_use]
+    pub fn envelope_control_focused(&self) -> bool {
+        self.envelope_control_focused
     }
 
     /// Records whether a device's value control has the keyboard: while it
@@ -5151,7 +5187,9 @@ impl Shell {
     /// step when it ends, so an agent's edits wait until then (WP-1.15b).
     #[must_use]
     pub fn gesture_under_way(&self) -> bool {
-        self.edit_gesture.is_some() || self.gesture
+        // The edit a selected breakpoint opens isn't one: it can last
+        // minutes, and another command ends it (automation-editing R23).
+        self.edit_gesture.is_some() || (self.gesture && self.key_edit.is_none())
     }
 
     /// Runs a command as [`Shell::run`] does, recording what it changes in
@@ -5258,6 +5296,8 @@ impl Shell {
         phase: GesturePhase,
         invocation: Option<&Invocation>,
     ) -> Result<Value, ShellError> {
+        // A drag ends the edit a selected breakpoint opened, keeping it.
+        self.end_key_edit();
         if phase == GesturePhase::Cancel {
             if let Some(gesture) = self.edit_gesture.take() {
                 self.editor.cancel().ok();
@@ -5513,6 +5553,11 @@ impl Shell {
     pub fn poll_engine(&mut self) -> EngineTransport {
         let engine = self.audio.transport_state();
         self.poll_capture();
+        // Spec: automation-editing R23. A recording edits the set as it
+        // runs, so it ends the edit a selected breakpoint opened.
+        if self.recording.is_some() || self.session_run.is_some() {
+            self.end_key_edit();
+        }
         // WP-2.13. A recording's take reaches the shell with the engine's
         // state; the clips are made from it once the writer has finished.
         self.poll_recording(&engine);
@@ -6310,6 +6355,8 @@ impl Shell {
     /// named `label` (such as "Change tempo"). A gesture already open
     /// carries on.
     pub fn begin_gesture(&mut self, label: &str) {
+        // A drag on a value ends the edit a selected breakpoint opened.
+        self.end_key_edit();
         if !self.gesture {
             self.editor.begin(label.to_owned());
             self.gesture = true;
@@ -6382,6 +6429,14 @@ impl Shell {
                             if self.arrangement.title_bars_selected() {
                                 contexts.push(Context::TrackHeaders);
                             }
+                            // Spec: automation-editing R20. A selected
+                            // automation lane's keys come ahead of the
+                            // Arrangement's.
+                            if self.arrangement.keyboard_lane().is_some()
+                                && !self.envelope_control_focused
+                            {
+                                contexts.push(Context::Envelope);
+                            }
                             contexts.push(Context::Arrangement);
                         }
                         MainView::Session => contexts.push(Context::Session),
@@ -6402,7 +6457,9 @@ impl Shell {
                         }
                         contexts.push(Context::ClipView);
                         if self.clip_view.tab() == ClipTab::Envelopes {
-                            contexts.push(Context::Envelope);
+                            if !self.envelope_control_focused {
+                                contexts.push(Context::Envelope);
+                            }
                         } else if self
                             .clip_view
                             .shown_audio_clip(self.editor.document(), &self.arrangement)
@@ -6863,6 +6920,9 @@ impl Shell {
         }
         if !spec.contexts.iter().any(|context| active.contains(context)) {
             return false;
+        }
+        if envelope_key_ids::handles(id) {
+            return self.can_envelope_key(id);
         }
         if freeze_ids::handles(id) {
             return self.can_freeze(id, args);
@@ -7876,6 +7936,16 @@ impl Shell {
     /// new audio settings goes back to the previous ones.
     pub fn run(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
         self.poll_capture();
+        // Spec: automation-editing R23. The edit a selected breakpoint
+        // opens ends when another command edits the set.
+        if self.key_edit.is_some() && !self.keeps_key_edit(id) {
+            self.end_key_edit();
+        }
+        // Spec: automation-editing R24. After Undo or Redo, the breakpoint
+        // it restored is the focused one.
+        let history = matches!(id, model::UNDO | model::REDO)
+            .then(|| self.envelope_before_history())
+            .flatten();
         let arranged = self.arrangement.selected_clips().to_vec();
         let slot = self.selected_slot_clip();
         let slots = self.selected_slot_clips();
@@ -7883,6 +7953,10 @@ impl Shell {
         let revision = self.document_revision;
         let generation = self.editor_generation;
         let result = self.run_command(id, args);
+        self.sync_key_edit();
+        if result.is_ok() {
+            self.follow_restored_breakpoint(history);
+        }
         if self.search.open && !search_ids::handles(id) {
             // Spec: command-palette R7, R10. The rows' availability and the
             // outlines follow the set as it changes.
@@ -8568,6 +8642,9 @@ impl Shell {
         }
         if automation_ids::handles(id) {
             return self.run_automation(id, args);
+        }
+        if envelope_key_ids::handles(id) {
+            return self.run_envelope_keys(id, args);
         }
         if locator_ids::handles(id) {
             // Spec: time-editing R1 to R13. The locators are part of the
@@ -9900,6 +9977,7 @@ impl Shell {
                     self.set_replaced();
                     self.editor = snapshot(&self.saved);
                     self.gesture = false;
+                    self.key_edit = None;
                     self.dirty = false;
                     self.document_changed();
                     // Spec: crash-recovery R6. The changes are gone, so
@@ -10996,6 +11074,7 @@ impl Shell {
     /// on the editor it replaced.
     fn new_set_transport(&mut self) {
         self.gesture = false;
+        self.key_edit = None;
         self.audio.reset_transport();
         // Spec: launch-quantisation R1. The set's global quantisation, so
         // launching waits for the right grid (the engine defaults to it too,

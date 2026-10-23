@@ -69,6 +69,7 @@
 //!   (`clip.crop`, `arrangement.consolidate*`, WP-4.13).
 //! - [`audio_panel`]: the Audio Utilities panel's own commands
 //!   (`clip.edit_sample`, `clip.replace_sample`, WP-4.10b).
+//! - [`tunings`]: tuning systems (`tuning.load`, `tuning.state`, WP-6.9).
 //! - [`search`]: the search field's commands (`search.*`, WP-6.42): command
 //!   search and track search.
 //!
@@ -121,6 +122,7 @@ pub mod slice;
 pub mod stems;
 pub mod tracks;
 pub mod transport;
+pub mod tunings;
 pub mod warping;
 
 use bl_commands::{RegisterError, Registry};
@@ -170,5 +172,6 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     slice::register(registry)?;
     warping::register(registry)?;
     scales::register(registry)?;
+    tunings::register(registry)?;
     search::register(registry)
 }

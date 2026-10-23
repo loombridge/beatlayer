@@ -17,7 +17,7 @@ use bl_model::{
     LocatorId, MacroStyle, MacroTarget, MetronomeRhythm, MetronomeSound, MidiData, MidiTo,
     MixerParam, ModelError, Monitor, NewTakeLane, Note, Output, PanMode, ParamId, PluginFormat,
     Preserve, RackKind, SceneId, SendTap, SongStart, TakeClip, TakeClipData, TakeLaneId, Tap,
-    TonesUpdate, TrackDelay, TrackId, TrackKind, WarpFrom, WarpMode, WarpPoint,
+    TonesUpdate, TrackDelay, TrackId, TrackKind, Tuning, TuningNote, WarpFrom, WarpMode, WarpPoint,
 };
 use serde_json::{Value, json};
 
@@ -55,7 +55,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        244,
+        249,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
              the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
              routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -92,7 +92,9 @@ fn every_document_command_is_registered() {
              set_locator_info_text, loop_to_next_locator and set_song_start, WP-6.51 the \
              two for crossfades: set_crossfade and delete_crossfade, and WP-6.19 \
              seven for grooves: add_groove, delete_groove, rename_groove, set_groove, \
-             set_global_groove_amount, set_auto_load_groove and set_clip_groove"
+             set_global_groove_amount, set_auto_load_groove and set_clip_groove, and WP-6.9 \
+             five for tunings: set_tuning, remove_tuning, set_tuning_reference, \
+             set_tuning_range and set_tuning_bypass"
     );
 
     for op in &ops {
@@ -721,6 +723,29 @@ fn every_command_runs_by_id() {
         json!({ "enabled": true, "root": 5, "name": "minor" }),
     );
     assert!(changes.settings);
+    // Spec: tunings R2, R7, R8, R9, R14, R19.
+    let tuning = Tuning::new(
+        "19".into(),
+        String::new(),
+        (1..=19).map(|i| 1200.0 * f64::from(i) / 19.0).collect(),
+    )
+    .unwrap();
+    let changes = agent.run("tuning.set", json!({ "tuning": tuning, "retune": false }));
+    assert!(changes.settings);
+    agent.run(
+        "tuning.set_reference",
+        json!({ "octave": 3, "degree": 2, "frequency": 270.0 }),
+    );
+    agent.run(
+        "tuning.set_range",
+        json!({ "lowest": { "octave": -1, "degree": 10 } }),
+    );
+    let changes = agent.run(
+        "track.set_tuning_bypass",
+        json!({ "track": bass, "bypass": true }),
+    );
+    assert!(changes.tracks.contains_key(&bass));
+    agent.run("tuning.remove", json!({ "retune": true }));
     agent.run(
         "clip.set_fades",
         json!({ "clip": loop_clip, "fade_in": 0.004, "fade_out": 0.25 }),
@@ -4077,6 +4102,45 @@ fn schemas_match_what_commands_serialise() {
                 enabled: Some(true),
                 root: Some(5),
                 name: Some("minor".to_owned()),
+            },
+        ),
+        // Spec: tunings R2, R7, R8, R9, R14.
+        (
+            "tuning.set",
+            Command::SetTuning {
+                tuning: Tuning::new(
+                    "5".into(),
+                    "five".into(),
+                    vec![240.0, 480.0, 720.0, 960.0, 1200.0],
+                )
+                .unwrap(),
+                retune: true,
+            },
+        ),
+        ("tuning.remove", Command::RemoveTuning { retune: false }),
+        (
+            "tuning.set_reference",
+            Command::SetTuningReference {
+                octave: Some(4),
+                degree: Some(1),
+                frequency: Some(300.0),
+            },
+        ),
+        (
+            "tuning.set_range",
+            Command::SetTuningRange {
+                lowest: Some(TuningNote {
+                    octave: 0,
+                    degree: 2,
+                }),
+                highest: None,
+            },
+        ),
+        (
+            "track.set_tuning_bypass",
+            Command::SetTuningBypass {
+                track,
+                bypass: true,
             },
         ),
     ];

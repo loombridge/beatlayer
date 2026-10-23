@@ -641,7 +641,7 @@ Total to 1.0: 256 packages planned in Phases 0 to 6, and about 110 estimated in 
 | 6.7 | done | 22 October 2026 | [#299](https://github.com/loombridge/beatlayer/pull/299); each clip carries a scale and the set has a current scale, with the scale list, the `clip.set_scale`, `song.set_scale` and `song.scales` commands, and the Control Bar's scale controls ([the spec](specs/scales.md) R1 to R14) |
 | 6.7b | todo |  |  |
 | 6.8 | todo |  |  |
-| 6.9 | todo |  |  |
+| 6.9 | done | 23 October 2026 | [#353](https://github.com/loombridge/beatlayer/pull/353); a set holds one tuning read from a `.scl` file (or an `.ascl` file read as one), with its reference pitch, note range, per-track Bypass Tuning and Retune Set On Loading, and Drift, Simpler, Sampler and Drum Sampler play its keys within 0.1 cent at any block size; the `.ascl` extras and `tuning.save` wait on the decision about the ASCL specification |
 | 6.9b | todo |  |  |
 | 6.10 | todo |  |  |
 | 6.11 | todo |  |  |

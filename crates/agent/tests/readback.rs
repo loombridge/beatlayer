@@ -1384,3 +1384,60 @@ fn a_chains_zones_read_back() {
     let object = query(&mut client, json!({ "id": rack["id"] }));
     assert_eq!(object["chains"][0]["zones"], got["zones"]);
 }
+
+// Spec: note-editing R20. The note value commands run by ID through the agent
+// API, and the query tool reads each note's values back.
+#[test]
+fn the_note_value_commands_run_by_id_and_read_back() {
+    let mut client = open(&fixture(), "note-values");
+    let keys = query(
+        &mut client,
+        json!({ "path": "track \"Keys\"", "detail": "full" }),
+    );
+    let clip = keys["saved"]["clips"]["items"][0]["id"].clone();
+    let notes = |client: &mut Client<InProcess>| -> Vec<Value> {
+        let full = query(client, json!({ "id": clip, "detail": "full" }));
+        full["saved"]["data"]["midi"]["notes"]["items"]
+            .as_array()
+            .unwrap_or_else(|| panic!("the clip's notes: {full}"))
+            .clone()
+    };
+    let before = notes(&mut client);
+    assert_eq!(before.len(), 3);
+    let run = |client: &mut Client<InProcess>, label: &str, command: &str, args: Value| {
+        client
+            .call(
+                "run",
+                json!({ "label": label, "commands": [{ "command": command, "args": args }] }),
+            )
+            .unwrap()
+            .ok()
+            .unwrap_or_else(|error| panic!("{command}: {error}"))
+    };
+    run(
+        &mut client,
+        "Quieter",
+        "note.adjust_value",
+        json!({ "clip": clip, "notes": [0], "field": "velocity", "by": -10 }),
+    );
+    run(
+        &mut client,
+        "Deactivate",
+        "note.deactivate",
+        json!({ "clip": clip, "notes": [1] }),
+    );
+    run(
+        &mut client,
+        "Randomize",
+        "note.randomize",
+        json!({
+            "clip": clip, "notes": [2], "field": "release_velocity",
+            "amount": 20, "seed": 5
+        }),
+    );
+    let after = notes(&mut client);
+    assert_eq!(after[0]["velocity"], 80, "adjusted by -10");
+    assert_eq!(after[1]["mute"], true, "deactivated");
+    assert_ne!(after[2]["release_velocity"], before[2]["release_velocity"]);
+    assert_eq!(after[0]["mute"], before[0]["mute"], "the others untouched");
+}

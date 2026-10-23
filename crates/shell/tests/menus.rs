@@ -147,9 +147,12 @@ fn every_shell_command_is_on_a_menu_or_a_control() {
         // The MIDI Note Editor's lane and fold (WP-2.3): the View menu's
         // Fold to Notes reaches view.fold_notes through its key (M-VIEW-039,
         // S-NOTE-038), the lane header's own menu reaches view.lane
-        // (L-CLIP-014), and agents reach both.
+        // (L-CLIP-014), and agents reach both. The footer's Lane Selector,
+        // its Show/Hide All switch and the lane header's Swap Lane reach
+        // view.lanes (note-editing R1, R2).
         commands::VIEW_FOLD_NOTES,
         commands::VIEW_LANE,
+        commands::VIEW_LANES,
         // The Clip View's Envelopes tab (WP-3.16): the View menu's Content
         // Editor and Envelope Editor reach view.clip_tab through their keys
         // (M-VIEW-018, M-VIEW-019, S-CLIPMODE-003, S-CLIPMODE-004), and the

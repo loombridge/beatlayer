@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-696 commands in 43 areas.
+700 commands in 43 areas.
 
 ## Permission classes
 
@@ -462,14 +462,17 @@ Each command has:
 | [`modulator.set_shape`](#modulatorset_shape) | Edit Shape | `edit` |  |  |
 | [`modulator.unmap`](#modulatorunmap) | Unmap Modulator | `edit` |  |  |
 | [`note.add`](#noteadd) | Add Note | `edit` |  |  |
+| [`note.adjust_value`](#noteadjust_value) | Adjust Note Values | `edit` |  |  |
 | [`note.copy`](#notecopy) | Copy Notes | `read` | `Cmd+C` | `Ctrl+C` |
 | [`note.cut`](#notecut) | Cut Notes | `destructive` | `Cmd+X` | `Ctrl+X` |
+| [`note.deactivate`](#notedeactivate) | Deactivate Note(s) | `edit` | `0` | `0` |
 | [`note.delete`](#notedelete) | Delete Notes | `destructive` | `Delete` | `Delete` |
 | [`note.duplicate`](#noteduplicate) | Duplicate Notes | `edit` | `Cmd+D` | `Ctrl+D` |
 | [`note.move`](#notemove) | Move Notes | `edit` |  |  |
 | [`note.paste`](#notepaste) | Paste Notes | `edit` | `Cmd+V` | `Ctrl+V` |
 | [`note.quantize`](#notequantize) | Quantize | `edit` | `Cmd+U` | `Ctrl+U` |
 | [`note.ramp_value`](#noteramp_value) | Ramp Note Values | `edit` |  |  |
+| [`note.randomize`](#noterandomize) | Randomize Note Values | `edit` |  |  |
 | [`note.resize`](#noteresize) | Resize Notes | `edit` |  |  |
 | [`note.set_value`](#noteset_value) | Set Note Value | `edit` |  |  |
 | [`pad.delete`](#paddelete) | Delete Pad | `destructive` |  |  |
@@ -710,6 +713,7 @@ Each command has:
 | [`view.fold_notes`](#viewfold_notes) | Fold to Notes | `read` | `F` | `F` |
 | [`view.full_screen`](#viewfull_screen) | Full Screen | `read` | `Ctrl+Cmd+F` | `F11` |
 | [`view.lane`](#viewlane) | Note Editor Lane | `read` |  |  |
+| [`view.lanes`](#viewlanes) | Expression Lanes | `read` |  |  |
 | [`view.set_plugin_list_only_missing`](#viewset_plugin_list_only_missing) | Show Only Missing Plug-Ins | `read` |  |  |
 | [`view.set_zoom`](#viewset_zoom) | Zoom | `edit` |  |  |
 | [`view.state`](#viewstate) | View State | `read` |  |  |
@@ -8420,6 +8424,25 @@ Arguments:
 
 Result: [`NoteEditResult`](#noteeditresult).
 
+#### `note.adjust_value`
+
+**Adjust Note Values**. Permission: `edit`. Contexts: `note-editor`, `note-selection`.
+
+Changes one value of notes (`notes`, or the selected notes) by `by`, as the value keys and dragging a marker in an expression lane do: `field` is `velocity` or `release_velocity` (whole numbers, 1 to 127), `chance` (0 to 1; 0.1 is 10 %), or `velocity_deviation` (whole numbers, held to the room each note's velocity leaves: at most 127 less its velocity and at least 1 less). Each note is held within its range, so a change past an end brings it to that end, and a call that changes no note records no undo step. The edited notes stay selected, and the whole drag is one undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `field` | [`NoteField`](#notefield) | yes | Which value to change. |
+| `by` | number | yes | How much to add to each note's value; negative lowers it. Whole numbers for the whole-number fields; for `chance`, a fraction (0.1 is 10 %). |
+| `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows (the Arrangement's selected clip). |
+| `notes` | array or null | no | The notes, by their place in the clip's notes in order (by start, then pitch). Left out, the selected notes. |
+
+Result: [`NoteEditResult`](#noteeditresult).
+
 #### `note.copy`
 
 **Copy Notes**. Permission: `read`. Contexts: `note-editor`, `note-selection`.
@@ -8459,6 +8482,28 @@ Arguments:
 |---|---|---|---|
 | `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows (the Arrangement's selected clip). |
 | `notes` | array or null | no | The notes, by their place in the clip's notes in order (by start, then pitch). Left out, the selected notes, or with none selected the notes that start inside the time selection. |
+
+Result: [`NoteEditResult`](#noteeditresult).
+
+#### `note.deactivate`
+
+**Deactivate Note(s)**. Permission: `edit`. Contexts: `note-editor`, `note-selection`.
+
+Deactivates notes (`notes`, or the selected notes), as 0 does: a deactivated note keeps its place and values, is drawn grey and never plays. With `active` left out the notes are deactivated, or activated again when every one of them is deactivated already (the menu item then reads Activate Note(s)); `active` `true` or `false` sets them. The edit is one undo step, and the notes stay selected.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-NOTE-041 | `0` | `0` | `note-selection` | Deactivate the selected notes | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `active` | boolean or null | no | Whether the notes end up active (`true`) or deactivated (`false`). Left out, they are deactivated, or activated when every one of them is deactivated already. |
+| `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows (the Arrangement's selected clip). |
+| `notes` | array or null | no | The notes, by their place in the clip's notes in order (by start, then pitch). Left out, the selected notes. |
 
 Result: [`NoteEditResult`](#noteeditresult).
 
@@ -8573,7 +8618,7 @@ Result: [`NoteEditResult`](#noteeditresult).
 
 **Ramp Note Values**. Permission: `edit`. Contexts: `note-editor`, `note-selection`.
 
-Sets one value of notes (`notes`, or the selected notes) as a ramp, as dragging across several notes in the Clip View's lane does: the first note in the clip's order takes `from`, the last takes `to`, and those between take values evenly spaced between them (whole numbers for the whole-number fields). `field` takes the same fields and ranges as `note.set_value`; nothing changes if `from` or `to` is out of range. One note takes `from`. The edited notes stay selected, and the whole drag is one undo step.
+Sets one value of notes (`notes`, or the selected notes) as a ramp, as the footer's Ramp Start and Ramp End do: the first note by start takes `from`, the last takes `to`, and those between take values on a straight line between them by their start times, notes that start together taking the same value (whole numbers for the whole-number fields). `field` takes the same fields and ranges as `note.set_value`; nothing changes if `from` or `to` is out of range. One note takes `from`, and so do notes that all start together. The edited notes stay selected, and the whole edit is one undo step.
 
 Default keys: none.
 
@@ -8586,6 +8631,26 @@ Arguments:
 | `to` | number | yes | The value the last note takes. |
 | `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows (the Arrangement's selected clip). |
 | `notes` | array or null | no | The notes, by their place in the clip's notes in order (by start, then pitch). Left out, the selected notes. |
+
+Result: [`NoteEditResult`](#noteeditresult).
+
+#### `note.randomize`
+
+**Randomize Note Values**. Permission: `edit`. Contexts: `note-editor`, `note-selection`.
+
+Moves one value of notes (`notes`, or the selected notes, or with none selected every note in the clip's span) at random, as the footer's Randomize does: each note takes a value drawn evenly from its value less `amount` to its value plus `amount`, held within the field's range and whole for the velocities. `field` is `velocity`, `release_velocity` or `chance`; `amount` is in the field's own units, 0 to 127 or 0 to 1 for `chance`. The same `seed` with the same notes gives the same values, each note keeping its own draw so a larger `amount` moves it further the same way; left out, each call draws afresh. An `amount` of 0 changes nothing. The edit is one undo step, and the notes stay selected.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `field` | [`NoteField`](#notefield) | yes | Which value to randomise: `velocity`, `release_velocity` or `chance`. |
+| `amount` | number | yes | How far from its value each note may move, in the field's own units: 0 to 127 for the velocities, 0 to 1 for `chance` (0.25 is 25 %). |
+| `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows (the Arrangement's selected clip). |
+| `notes` | array or null | no | The notes, by their place in the clip's notes in order (by start, then pitch). Left out, the selected notes, or with none selected every note in the clip's span. |
+| `seed` | integer or null | no | Seeds the draw: the same seed with the same notes gives the same values. Left out, each call draws afresh. |
 
 Result: [`NoteEditResult`](#noteeditresult).
 
@@ -8611,7 +8676,7 @@ Result: [`NoteEditResult`](#noteeditresult).
 
 **Set Note Value**. Permission: `edit`. Contexts: `note-editor`, `note-selection`.
 
-Sets one value of notes (`notes`, or the selected notes) to `value`, as dragging a note's stem in the Clip View's lane does: `field` is `velocity` (whole numbers 1 to 127), `release_velocity` (whole numbers 1 to 127), `chance` (0 to 1), or `velocity_deviation` (whole numbers -127 to 127). Nothing changes if `value` is outside the field's range. The edited notes stay selected, and the whole drag is one undo step.
+Sets one value of notes (`notes`, or the selected notes) to `value`, or to each note's own entry of `values` (one for each note, in the order named), as typing a value or drawing across an expression lane does: `field` is `velocity` (whole numbers 1 to 127), `release_velocity` (whole numbers 1 to 127), `chance` (0 to 1), or `velocity_deviation` (whole numbers -127 to 127). Nothing changes if `value` is outside the field's range. A velocity deviation is held within the room each note's velocity leaves: at most 127 less its velocity and at least 1 less. The edited notes stay selected, and the whole drag is one undo step.
 
 Default keys: none.
 
@@ -8620,9 +8685,10 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `field` | [`NoteField`](#notefield) | yes | Which value to set. |
-| `value` | number | yes | The value, within the field's range. |
 | `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows (the Arrangement's selected clip). |
 | `notes` | array or null | no | The notes, by their place in the clip's notes in order (by start, then pitch). Left out, the selected notes. |
+| `value` | number or null | no | The value, within the field's range, for every one of the notes. Give this or `values`. |
+| `values` | array or null | no | One value for each of the notes, in the order they're named, each within the field's range: what drawing across a lane gives. Give this or `value`. |
 
 Result: [`NoteEditResult`](#noteeditresult).
 
@@ -12622,7 +12688,7 @@ Result: [`ViewResult`](#viewresult).
 
 **Note Editor Lane**. Permission: `read`. Contexts: `clip-view`, `note-editor`.
 
-Chooses which of a note's values the lane under the MIDI Note Editor shows and edits: `velocity` (the lane's default), `release_velocity`, `chance`, or `velocity_deviation`. Dragging a note's stem in the lane sets that value on that note, and dragging across several notes ramps it; the same edits are the `note.set_value` and `note.ramp_value` commands. Changes only the view, so it's no undo step and isn't saved with the set.
+Makes one of the MIDI Note Editor's expression lanes the active lane, whose controls the footer shows, and shows it: `velocity` (the default), `chance` or `release_velocity`; `velocity_deviation` is the Velocity lane, which shows it. Choosing a lane in the Lane Selector does the same. Changes only the view, so it's no undo step and isn't saved with the set.
 
 Default keys: none.
 
@@ -12631,6 +12697,26 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `lane` | [`NoteField`](#notefield) | yes | Which value the lane shows. |
+
+Result: [`ClipViewState`](#clipviewstate).
+
+#### `view.lanes`
+
+**Expression Lanes**. Permission: `read`. Contexts: `clip-view`, `note-editor`.
+
+Shows, hides and swaps the MIDI Note Editor's expression lanes (`velocity`, `chance`, `release_velocity`, always in that order from the top), and holds Randomize's amounts. With `lane`: `show` shows or hides it as the Lane Selector does (left out, it switches), `swap` hides it and shows in its place the first hidden lane after it, going round to the first (Swap Lane in the lane header's menu), and `amount` sets its Randomize amount, 0 to 127, or 0 to 100 (a percentage) for `chance`. `all` is the Show/Hide All Expression Editors switch: `false` hides every lane and `true` shows them again as they were. A new editor shows the Velocity lane alone, with every amount 0. Changes only the view, so it's no undo step and isn't saved with the set. The result is the Clip View's state, which lists the lanes shown.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `all` | boolean or null | no | The Show/Hide All Expression Editors switch: `false` hides every lane and `true` shows them again as they were; left out, nothing changes. |
+| `amount` | integer or null | no | With `lane`: set its Randomize amount, 0 to 127, or 0 to 100 (a percentage) for `chance`. |
+| `lane` | [`NoteField`](#notefield) or null | no | The lane the other fields but `all` act on: `velocity`, `chance` or `release_velocity` (`velocity_deviation` is the Velocity lane). |
+| `show` | boolean or null | no | With `lane`: show it (`true`) or hide it (`false`); left out, the Lane Selector's choice, which switches it. Showing a lane makes it the active lane. |
+| `swap` | boolean or null | no | With `lane`: hide it and show in its place the first hidden lane after it, going round to the first (the lane header's Swap Lane). |
 
 Result: [`ClipViewState`](#clipviewstate).
 
@@ -13159,13 +13245,16 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`modulator.set_shape`](#modulatorset_shape) | the query tool's `device` | `shape` |
 | [`modulator.unmap`](#modulatorunmap) | the query tool's `device` | `mappings` |
 | [`note.add`](#noteadd) | the query tool's `clip` | `data.midi.notes` |
+| [`note.adjust_value`](#noteadjust_value) | the query tool's `clip` | `data.midi.notes` |
 | [`note.cut`](#notecut) | the query tool's `clip` | `data.midi.notes` |
+| [`note.deactivate`](#notedeactivate) | the query tool's `clip` | `data.midi.notes` |
 | [`note.delete`](#notedelete) | the query tool's `clip` | `data.midi.notes` |
 | [`note.duplicate`](#noteduplicate) | the query tool's `clip` | `data.midi.notes` |
 | [`note.move`](#notemove) | the query tool's `clip` | `data.midi.notes` |
 | [`note.paste`](#notepaste) | the query tool's `clip` | `data.midi.notes` |
 | [`note.quantize`](#notequantize) | the query tool's `clip` | `data.midi.notes` |
 | [`note.ramp_value`](#noteramp_value) | the query tool's `clip` | `data.midi.notes` |
+| [`note.randomize`](#noterandomize) | the query tool's `clip` | `data.midi.notes` |
 | [`note.resize`](#noteresize) | the query tool's `clip` | `data.midi.notes` |
 | [`note.set_value`](#noteset_value) | the query tool's `clip` | `data.midi.notes` |
 | [`pad.delete`](#paddelete) | the query tool's `device` | `chains` |
@@ -17792,7 +17881,7 @@ What `clip.transients` returns.
 
 ### `ClipViewState`
 
-What the Clip View shows: which clip it is editing, the notes selected in it, its insert marker and time selection, the lane's setting, and the tab with the envelope it shows.
+What the Clip View shows: which clip it is editing, the notes selected in it, its insert marker and time selection, its expression lanes, and the tab with the envelope it shows.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -17802,7 +17891,10 @@ What the Clip View shows: which clip it is editing, the notes selected in it, it
 | `selected` | array of integer, at least 0 | yes | The selected notes, by their place in the clip's notes in order (by start, then pitch). |
 | `insert_marker` | [`Ticks`](#ticks) or null | yes | The insert marker, in ticks from the beginning of the clip's contents; `null` when there is none. |
 | `time_selection` | array or null | yes | The time selection's start and end, in ticks from the beginning of the clip's contents; `null` when there is none. |
-| `lane` | [`NoteField`](#notefield) | yes | Which value the lane under the note editor shows and edits. |
+| `lane` | [`NoteField`](#notefield) | yes | The active lane: `velocity`, `chance` or `release_velocity`, whose controls the footer shows. |
+| `lanes` | array of [`NoteField`](#notefield) | yes | The lanes shown under the note editor now, from the top: none while they are all hidden. |
+| `lanes_hidden` | boolean | yes | Whether the Show/Hide All Expression Editors switch has hidden every lane. |
+| `randomize` | [`RandomizeAmounts`](#randomizeamounts) | yes | The Randomize amounts of the three lanes. |
 | `folded` | boolean | yes | Whether the note editor shows only the rows that hold notes (Fold, F). |
 | `tab` | [`ClipTab`](#cliptab) | yes | The tab the Clip View shows. |
 | `envelope` | [`AutomationTarget`](#automationtarget) or null | yes | The parameter whose envelope the Envelopes tab shows; `null` when it shows none. |
@@ -17811,7 +17903,7 @@ What the Clip View shows: which clip it is editing, the notes selected in it, it
 
 ```json
 {
-  "description": "What the Clip View shows: which clip it is editing, the notes selected in it, its insert marker and time selection, the lane's setting, and the tab with the envelope it shows.",
+  "description": "What the Clip View shows: which clip it is editing, the notes selected in it, its insert marker and time selection, its expression lanes, and the tab with the envelope it shows.",
   "properties": {
     "clip": {
       "anyOf": [
@@ -17856,7 +17948,22 @@ What the Clip View shows: which clip it is editing, the notes selected in it, it
     },
     "lane": {
       "$ref": "#/$defs/NoteField",
-      "description": "Which value the lane under the note editor shows and edits."
+      "description": "The active lane: `velocity`, `chance` or `release_velocity`, whose controls the footer shows."
+    },
+    "lanes": {
+      "description": "The lanes shown under the note editor now, from the top: none while they are all hidden.",
+      "items": {
+        "$ref": "#/$defs/NoteField"
+      },
+      "type": "array"
+    },
+    "lanes_hidden": {
+      "description": "Whether the Show/Hide All Expression Editors switch has hidden every lane.",
+      "type": "boolean"
+    },
+    "randomize": {
+      "$ref": "#/$defs/RandomizeAmounts",
+      "description": "The Randomize amounts of the three lanes."
     },
     "selected": {
       "description": "The selected notes, by their place in the clip's notes in order (by start, then pitch).",
@@ -17901,6 +18008,9 @@ What the Clip View shows: which clip it is editing, the notes selected in it, it
     "insert_marker",
     "time_selection",
     "lane",
+    "lanes",
+    "lanes_hidden",
+    "randomize",
     "folded",
     "tab",
     "envelope"
@@ -31095,6 +31205,55 @@ Which views of a rack are shown: `macros` (the Macro Controls), `variations` (th
     "macros",
     "chain_list",
     "devices"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `RandomizeAmounts`
+
+The Randomize amount of each lane, which the footer's control holds (Spec: note-editing R13). A new editor has 0 for each.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `velocity` | integer from 0 to 255 | yes | The Velocity lane's, from 0 to 127. |
+| `chance` | integer from 0 to 255 | yes | The Chance lane's, a percentage from 0 to 100. |
+| `release_velocity` | integer from 0 to 255 | yes | The Release Velocity lane's, from 0 to 127. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The Randomize amount of each lane, which the footer's control holds (Spec: note-editing R13). A new editor has 0 for each.",
+  "properties": {
+    "chance": {
+      "description": "The Chance lane's, a percentage from 0 to 100.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "release_velocity": {
+      "description": "The Release Velocity lane's, from 0 to 127.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "velocity": {
+      "description": "The Velocity lane's, from 0 to 127.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "velocity",
+    "chance",
+    "release_velocity"
   ],
   "type": "object"
 }

@@ -23,9 +23,13 @@
 //! the selected notes by a semitone, and with Shift by an octave
 //! (S-A11Y-008, S-A11Y-009), running `note.move`.
 //!
+//! Under the note area sit the expression lanes and the footer
+//! ([`crate::note_lanes`]): the Velocity, Chance and Release Velocity lanes,
+//! whose markers and controls run the same value commands.
+//!
 //! Nothing here owns the state: whether the view shows, Draw Mode, the note
-//! selection, and the Quantize settings are the shell's. Only the vertical
-//! scroll and the drags under way live here.
+//! selection, the lanes shown and the Quantize settings are the shell's. Only
+//! the vertical scroll, the lanes' heights and the drags under way live here.
 
 use bl_commands::Context;
 use bl_core::time::Ticks;
@@ -34,7 +38,6 @@ use bl_model::{ClipData, ClipId, Document, MidiData, Note};
 use bl_shell::arrangement::ArrangementView;
 use bl_shell::arrangement_commands::{AdaptiveGrid, FixedGrid};
 use bl_shell::clip_view::{move_limits, notes_in_order, resize_limit, span};
-use bl_shell::commands::VIEW_LANE;
 use bl_shell::context_menus;
 use bl_shell::menus::{Action, MenuItem, shown};
 use bl_shell::note_commands as ids;
@@ -51,6 +54,7 @@ use crate::clip_envelope::{self, EnvelopeEditor};
 use crate::keymap::{Keymap, Platform};
 use crate::launch_panel;
 use crate::main_window::UiEvent;
+use crate::note_lanes::{self, Cancelled, LaneUi, NoteLayout};
 use crate::sample_editor::SampleEditorUi;
 use crate::theme::Theme;
 use crate::widgets::{self, Choice, NO_LEDS};
@@ -91,7 +95,7 @@ const BRACE: f32 = 6.0;
 /// Live's names.
 const DEFAULT_TOP: f32 = 60.0;
 /// How wide a note's stem in the lane is.
-const STEM_WIDTH: f32 = 3.0;
+pub(crate) const STEM_WIDTH: f32 = 3.0;
 
 /// The editor toolbar along the Clip View's top (L-CLIP-010): the Notes,
 /// Envelopes and MPE tabs, and the grid chooser.
@@ -467,17 +471,6 @@ fn note_rect_at(grid: Rect, start: Ticks, length: Ticks, y: f32, note: &Note) ->
     Rect::from_min_max(pos2(x0, y), pos2(x1.max(x0 + 2.0), y + KEY_HEIGHT))
 }
 
-/// A note's value of `field`, as the lane shows and edits it.
-#[must_use]
-fn note_value(note: &Note, field: NoteField) -> f64 {
-    match field {
-        NoteField::Velocity => f64::from(note.velocity),
-        NoteField::ReleaseVelocity => f64::from(note.release_velocity),
-        NoteField::Chance => note.probability,
-        NoteField::VelocityDeviation => f64::from(note.velocity_deviation),
-    }
-}
-
 /// Where a value of `field` sits in `lane`: the field's highest at the
 /// lane's top edge, its lowest at the bottom.
 #[must_use]
@@ -489,7 +482,7 @@ pub fn y_of_value(lane: Rect, field: NoteField, value: f64) -> f32 {
 
 /// The value of `field` at `y` in `lane`, clamped to the field's range.
 #[must_use]
-fn value_at(lane: Rect, field: NoteField, y: f32) -> f64 {
+pub(crate) fn value_at(lane: Rect, field: NoteField, y: f32) -> f64 {
     let (low, high) = field.range();
     let at = f64::from((lane.bottom() - y) / lane.height().max(1.0));
     (low + (high - low) * at).clamp(low, high)
@@ -498,14 +491,14 @@ fn value_at(lane: Rect, field: NoteField, y: f32) -> f64 {
 /// The value of `field` at `y` in `lane`, clamped to the field's range and
 /// whole for the whole-number fields, as their commands take it.
 #[must_use]
-fn lane_value(lane: Rect, field: NoteField, y: f32) -> f64 {
+pub(crate) fn lane_value(lane: Rect, field: NoteField, y: f32) -> f64 {
     let value = value_at(lane, field, y);
     if field.whole() { value.round() } else { value }
 }
 
 /// The lane's three height labels, top to bottom: the field's highest
 /// value, its middle, and its lowest (L-CLIP-014: 127, 64, 1).
-fn lane_labels(field: NoteField) -> [&'static str; 3] {
+pub(crate) fn lane_labels(field: NoteField) -> [&'static str; 3] {
     match field {
         NoteField::Velocity | NoteField::ReleaseVelocity => ["127", "64", "1"],
         NoteField::Chance => ["100%", "50%", "0%"],
@@ -516,35 +509,12 @@ fn lane_labels(field: NoteField) -> [&'static str; 3] {
 /// Where a note's stem starts, x, in `grid`: at the note's start, one point
 /// right of it, as the lane paints it.
 #[must_use]
-fn stem_x(grid: Rect, start: Ticks, length: Ticks, note: &Note) -> f32 {
+pub(crate) fn stem_x(grid: Rect, start: Ticks, length: Ticks, note: &Note) -> f32 {
     x_of_tick(grid, start, length, note.start) + 1.0
 }
 
-/// The notes whose stems a drag from `from_x` to `to_x` runs over, in the
-/// clip's note order.
-fn covered_notes(
-    grid: Rect,
-    start: Ticks,
-    length: Ticks,
-    notes: &[Note],
-    from_x: f32,
-    to_x: f32,
-) -> Vec<u32> {
-    let low = from_x.min(to_x) - STEM_WIDTH / 2.0;
-    let high = from_x.max(to_x) + STEM_WIDTH / 2.0;
-    notes
-        .iter()
-        .enumerate()
-        .filter(|(_, note)| {
-            let stem = stem_x(grid, start, length, note) + STEM_WIDTH / 2.0;
-            (low..=high).contains(&stem)
-        })
-        .map(|(place, _)| u32::try_from(place).unwrap_or(u32::MAX))
-        .collect()
-}
-
 /// A note's name as Live writes it: C3 is middle C (MIDI key 60).
-fn key_name(key: u8) -> String {
+pub(crate) fn key_name(key: u8) -> String {
     const NAMES: [&str; 12] = [
         "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
     ];
@@ -581,6 +551,22 @@ enum NoteDrag {
         /// Copy the notes instead of moving them, as Option-dragging a note
         /// does (S-NOTE-002, piano-roll R29).
         copy: bool,
+    },
+    /// A Cmd-drag that hasn't gone far enough to say which it is: moving
+    /// the notes off the grid when it runs along the note area, or changing
+    /// their velocity when it runs up or down (note-editing R17, piano-roll
+    /// R10).
+    Undecided {
+        press: Pos2,
+        moving: Box<NoteDrag>,
+        velocity: Box<NoteDrag>,
+    },
+    /// Dragging notes up or down with Cmd held: their velocity.
+    Velocity {
+        clip: ClipId,
+        places: Vec<u32>,
+        /// Where the press fell, y.
+        from: f32,
     },
     /// Dragging the notes' ends.
     Resize {
@@ -660,7 +646,7 @@ impl NoteMenus {
     /// Draws the open menu's items: the ones whose command is built run
     /// it, and the rest are drawn disabled and name their package.
     fn show(&self, ui: &mut Ui, shell: &Shell, menu: &[MenuItem], events: &mut Vec<UiEvent>) {
-        let contexts = shell.active_contexts();
+        let contexts = shell.note_menu_contexts();
         for item in shown(menu) {
             if item.is_separator() {
                 ui.separator();
@@ -829,7 +815,7 @@ fn notes_at(notes: &[Note], places: &[u32]) -> Vec<Note> {
         .collect()
 }
 
-fn gesture(events: &mut Vec<UiEvent>, phase: GesturePhase, id: &str, args: Value) {
+pub(crate) fn gesture(events: &mut Vec<UiEvent>, phase: GesturePhase, id: &str, args: Value) {
     events.push(UiEvent::Gesture {
         phase,
         invocation: Some(Invocation::new(id, args)),
@@ -961,15 +947,6 @@ fn toolbar(
     }
 }
 
-/// What a drag in the lane under the note area is doing (WP-2.3).
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct LaneDrag {
-    /// Where the press fell.
-    from: Pos2,
-    /// The value at the press's height, where a ramp starts.
-    value: f64,
-}
-
 /// The Clip View's own state: the vertical scroll, the lane's drag, the
 /// note drags, and the marquee.
 #[derive(Clone, Debug, PartialEq)]
@@ -987,8 +964,8 @@ pub struct ClipViewUi {
     drag: Option<NoteDrag>,
     /// The drag under way in the marker strip, if any.
     strip_drag: Option<StripDrag>,
-    /// The drag under way in the lane, if any.
-    lane_drag: Option<LaneDrag>,
+    /// The expression lanes' heights, drags and typed values (WP-6.1).
+    lanes: LaneUi,
     /// The marquee under way: where it began, and where it is now.
     marquee: Option<(Pos2, Pos2)>,
     /// The Envelopes tab's editor.
@@ -1008,7 +985,7 @@ impl Default for ClipViewUi {
             first: 0.0,
             drag: None,
             strip_drag: None,
-            lane_drag: None,
+            lanes: LaneUi::default(),
             marquee: None,
             envelope: EnvelopeEditor::default(),
             sample: SampleEditorUi::default(),
@@ -1022,6 +999,20 @@ impl ClipViewUi {
     #[must_use]
     pub fn sample_stats(&self) -> crate::sample_editor::Stats {
         self.sample.stats()
+    }
+
+    /// Whether a number is being typed into the lanes' footer or as a
+    /// velocity, so the keys go to it and not to shortcuts (note-editing
+    /// R14).
+    #[must_use]
+    pub fn is_typing(&self) -> bool {
+        self.lanes.is_typing()
+    }
+
+    /// The lanes' heights, for the layout the editor draws.
+    #[must_use]
+    pub fn lane_heights(&self, shown: &[NoteField]) -> Vec<(NoteField, f32)> {
+        self.lanes.heights(shown)
     }
 
     /// The key at the note area's top edge, while unfolded.
@@ -1076,7 +1067,7 @@ impl ClipViewUi {
             self.shown = None;
             self.drag = None;
             self.strip_drag = None;
-            self.lane_drag = None;
+            self.lanes.reset();
             self.marquee = None;
             self.envelope.reset();
             return;
@@ -1109,19 +1100,24 @@ impl ClipViewUi {
             self.first = 0.0;
             self.drag = None;
             self.strip_drag = None;
-            self.lane_drag = None;
+            self.lanes.reset();
             self.marquee = None;
             self.envelope.reset();
         }
-        let grid = grid_rect(rect);
+        let envelopes = shell.clip_view().tab() == ClipTab::Envelopes;
+        let shown = shell.clip_view().lanes().shown();
+        let layout = note_lanes::note_layout(rect, &self.lanes.heights(&shown));
+        let grid = if envelopes {
+            grid_rect(rect)
+        } else {
+            layout.grid
+        };
         let strip = strip_rect(rect);
         if grid.width() < 1.0 || grid.height() < KEY_HEIGHT || strip.height() < 1.0 {
             return;
         }
         toolbar(ui, shell, theme, rect, false, events);
-        if shell.clip_view().tab() == ClipTab::Envelopes
-            && let Some(value) = doc.clip(clip)
-        {
+        if envelopes && let Some(value) = doc.clip(clip) {
             let target = clip_envelope::shown_target(shell, doc, clip);
             let axis = match self.strip_drag {
                 Some(drag) if drag.part == StripPart::Start => drag.start,
@@ -1162,9 +1158,24 @@ impl ClipViewUi {
             Some(drag) if drag.part == StripPart::Start => drag.start,
             _ => midi.start,
         };
+        let face = doc.clip_track(clip).map_or(theme.colors.accent.0, |track| {
+            crate::arrangement::scene::track_colour(theme, track)
+        });
+        let hovered = Self::hovered_note(ui, &layout, &rows, &notes, axis, length);
+        let frame = note_lanes::Frame {
+            clip,
+            layout: &layout,
+            start: axis,
+            length,
+            notes: &notes,
+            selected: &selected,
+            face,
+            hovered,
+            step: shell.arrangement().grid_ticks(doc),
+            snap: shell.arrangement().grid().snap,
+        };
         self.paint(
-            ui, shell, theme, clip, strip, rect, grid, &rows, &midi, axis, length, &notes,
-            &selected,
+            ui, shell, theme, clip, strip, &frame, &rows, &midi, axis, length, &notes, &selected,
         );
         self.input(
             ui,
@@ -1173,7 +1184,7 @@ impl ClipViewUi {
             shell.arrangement(),
             strip,
             rect,
-            grid,
+            &frame,
             &rows,
             clip,
             &midi,
@@ -1183,6 +1194,24 @@ impl ClipViewUi {
             &selected,
             events,
         );
+        self.lanes.footer(ui, shell, theme, &frame, events);
+    }
+
+    /// The note the pointer marks: the one under it in the note area, or
+    /// whose marker it is over in a lane (note-editing R4).
+    fn hovered_note(
+        ui: &Ui,
+        layout: &NoteLayout,
+        rows: &KeyRows,
+        notes: &[Note],
+        start: Ticks,
+        length: Ticks,
+    ) -> Option<u32> {
+        let pos = ui.input(|i| i.pointer.hover_pos())?;
+        if layout.grid.contains(pos) {
+            return hit_note(layout.grid, start, length, rows, notes, pos).map(|(place, _)| place);
+        }
+        note_lanes::hovered_marker(layout, (start, length), notes, pos)
     }
 
     /// Shows an audio clip's editor: the Sample Editor under the Sample tab
@@ -1239,7 +1268,7 @@ impl ClipViewUi {
             self.shown = Some(clip);
             self.drag = None;
             self.strip_drag = None;
-            self.lane_drag = None;
+            self.lanes.reset();
             self.marquee = None;
             self.envelope.reset();
             self.sample.reset();
@@ -1278,8 +1307,7 @@ impl ClipViewUi {
         theme: &Theme,
         clip: ClipId,
         strip: Rect,
-        rect: Rect,
-        grid: Rect,
+        frame: &note_lanes::Frame<'_>,
         rows: &KeyRows,
         midi: &MidiData,
         axis: Ticks,
@@ -1290,6 +1318,7 @@ impl ClipViewUi {
         let painter = ui.painter();
         let colours = &theme.colors;
         let start = axis;
+        let grid = frame.layout.grid;
 
         self.paint_strip(painter, theme, strip, grid, midi, axis, length);
 
@@ -1333,7 +1362,6 @@ impl ClipViewUi {
         }
 
         // The clip's contents: the grid lines, then the notes over them.
-        let doc = shell.editor().document();
         paint_grid_lines(ui, shell, theme, grid, start, length);
         let px = (ui.ctx().pixels_per_point() * 0.5).max(0.5);
         for row in 0..rows.keys.len() {
@@ -1347,9 +1375,7 @@ impl ClipViewUi {
                 colours.lane_line.0,
             );
         }
-        let face = doc.clip_track(clip).map_or(colours.accent.0, |track| {
-            crate::arrangement::scene::track_colour(theme, track)
-        });
+        let face = frame.face;
         for (place, note) in notes.iter().enumerate() {
             let Some(y) = rows.y_of(grid, note.key) else {
                 continue;
@@ -1367,6 +1393,19 @@ impl ClipViewUi {
                 crate::theme::note_colour(face, note.velocity)
             };
             painter.rect_filled(rect, corner, colour);
+            // Spec: note-editing R4. A note that doesn't always play wears a
+            // corner triangle; the note the pointer marks is outlined.
+            if note_lanes::shows_corner(note, KEY_HEIGHT) {
+                note_lanes::paint_corner(painter, rect, colours.text.0);
+            }
+            if frame.hovered == Some(u32::try_from(place).unwrap_or(u32::MAX)) {
+                painter.rect_stroke(
+                    rect,
+                    corner,
+                    Stroke::new(1.0, colours.text.0),
+                    StrokeKind::Outside,
+                );
+            }
             if selected.contains(&u32::try_from(place).unwrap_or(u32::MAX)) {
                 // Spec: arrangement-editing R15's selection colour, as the
                 // Arrangement's selected clips wear.
@@ -1388,22 +1427,14 @@ impl ClipViewUi {
                 StrokeKind::Inside,
             );
         }
-        self.paint_lane(
-            ui,
-            theme,
-            rect,
-            grid,
-            start,
-            length,
-            notes,
-            selected,
-            face,
-            shell.clip_view().lane(),
-        );
+        self.lanes.paint(ui, shell, theme, frame);
         // Spec: piano-roll R23, R24. The time selection is drawn across the
         // note area and the lanes, and the insert marker is a line through
         // both.
-        let lane = lane_rect(rect);
+        let lane = Rect::from_min_max(
+            pos2(grid.left(), grid.top()),
+            pos2(grid.right(), frame.layout.footer.top()),
+        );
         let time = shell
             .clip_view()
             .time_selection(shell.editor().document(), shell.arrangement());
@@ -1542,73 +1573,7 @@ impl ClipViewUi {
         );
     }
 
-    /// Paints the lane under the note area: the shown value's stem for each
-    /// note, over the scale's labels (L-CLIP-014).
-    #[expect(clippy::too_many_arguments, reason = "the lane's whole layout")]
-    fn paint_lane(
-        &self,
-        ui: &Ui,
-        theme: &Theme,
-        view: Rect,
-        grid: Rect,
-        start: Ticks,
-        length: Ticks,
-        notes: &[Note],
-        selected: &[u32],
-        face: egui::Color32,
-        field: NoteField,
-    ) {
-        let painter = ui.painter();
-        let colours = &theme.colors;
-        let lane = lane_rect(view);
-        painter.rect_filled(lane, 0.0, colours.panel.0);
-        painter.line_segment(
-            [lane.left_top(), lane.right_top()],
-            Stroke::new(1.0, colours.lane_line.0),
-        );
-        // The lane's three heights, named in its left column: 127, 64 and 1
-        // for velocity (L-CLIP-014).
-        let (low, high) = field.range();
-        for (value, label) in [
-            (high, lane_labels(field)[0]),
-            ((low + high) / 2.0, lane_labels(field)[1]),
-            (low, lane_labels(field)[2]),
-        ] {
-            // The highest and lowest labels sit on the lane's edges, so
-            // they keep half a row inside it.
-            let y = y_of_value(lane, field, value).clamp(
-                lane.top() + KEY_HEIGHT / 2.0,
-                lane.bottom() - KEY_HEIGHT / 2.0,
-            );
-            painter.text(
-                pos2(grid.left() - 4.0, y),
-                Align2::RIGHT_CENTER,
-                label,
-                theme.small_font(),
-                colours.text_dim.0,
-            );
-        }
-        for (place, note) in notes.iter().enumerate() {
-            let x = stem_x(grid, start, length, note);
-            if x + STEM_WIDTH < grid.left() || x > grid.right() {
-                continue;
-            }
-            let top = y_of_value(lane, field, note_value(note, field));
-            let stem = Rect::from_min_max(pos2(x, top), pos2(x + STEM_WIDTH, lane.bottom()));
-            let chosen = selected.contains(&u32::try_from(place).unwrap_or(u32::MAX));
-            painter.rect_filled(
-                stem,
-                0.0,
-                if chosen {
-                    colours.time_selection.0
-                } else {
-                    face
-                },
-            );
-        }
-    }
-
-    /// The marker strip's, the note area's and the lane's clicks, drags, and
+    /// The marker strip's, the note area's and the lanes' clicks, drags, and
     /// wheel, and the note-selection keys.
     #[expect(clippy::too_many_arguments, reason = "the editor's whole input")]
     fn input(
@@ -1619,7 +1584,7 @@ impl ClipViewUi {
         arrangement: &ArrangementView,
         strip: Rect,
         view: Rect,
-        grid: Rect,
+        frame: &note_lanes::Frame<'_>,
         rows: &KeyRows,
         clip: ClipId,
         midi: &MidiData,
@@ -1629,6 +1594,7 @@ impl ClipViewUi {
         selected: &[u32],
         events: &mut Vec<UiEvent>,
     ) {
+        let grid = frame.layout.grid;
         // Spec: piano-roll R11. The marker strip's drags run the document's
         // clip commands, one gesture each.
         self.strip_input(
@@ -1651,9 +1617,12 @@ impl ClipViewUi {
         let keys = EditKeys::from(ui.input(|i| i.modifiers));
         let draw_mode = shell.clip_view().draw_mode();
         let start = axis;
-        let lane = lane_rect(view);
-        let field = shell.clip_view().lane();
         let hit = |pos: Pos2| hit_note(grid, start, length, rows, notes, pos);
+        // Spec: note-editing R16. A click or a drag in the note area gives
+        // the keyboard back from a lane.
+        if response.clicked() || response.drag_started() {
+            self.lanes.leave_focus();
+        }
 
         if response.drag_started()
             && let Some(press) = ui.input(|i| i.pointer.press_origin())
@@ -1685,10 +1654,9 @@ impl ClipViewUi {
                 Some((place, NoteZone::Body)) => {
                     let places = grabbed(shell, doc, arrangement, clip, place, events);
                     let note = &notes[place as usize];
-                    self.drag = Some(NoteDrag::Move {
+                    let moving = NoteDrag::Move {
                         clip,
                         limits: move_limits(&notes_at(notes, &places)),
-                        places,
                         start: note.start,
                         grab_key: rows
                             .key_at(grid, press.y)
@@ -1697,6 +1665,23 @@ impl ClipViewUi {
                         // Spec: piano-roll R29. Option-dragging a note
                         // copies it.
                         copy: keys.copy,
+                        places: places.clone(),
+                    };
+                    // Spec: note-editing R17. Cmd-dragging a note (Alt on
+                    // Windows) up or down changes its velocity, or every
+                    // selected note's.
+                    self.drag = Some(if keys.bypass {
+                        NoteDrag::Undecided {
+                            press,
+                            moving: Box::new(moving),
+                            velocity: Box::new(NoteDrag::Velocity {
+                                clip,
+                                places,
+                                from: press.y,
+                            }),
+                        }
+                    } else {
+                        moving
                     });
                 }
                 // Spec: piano-roll R6. Anywhere else a marquee selects.
@@ -1706,6 +1691,17 @@ impl ClipViewUi {
         let pointer = response
             .interact_pointer_pos()
             .or_else(|| ui.input(|i| i.pointer.interact_pos()));
+        if let (Some(NoteDrag::Undecided { press, .. }), Some(pos)) = (self.drag.as_ref(), pointer)
+            && (pos - *press).length() >= 3.0
+        {
+            let across = (pos - *press).x.abs() >= (pos - *press).y.abs();
+            if let Some(NoteDrag::Undecided {
+                moving, velocity, ..
+            }) = self.drag.take()
+            {
+                self.drag = Some(if across { *moving } else { *velocity });
+            }
+        }
         if response.dragged() {
             if let (Some(drag), Some(pos)) = (self.drag.as_ref(), pointer) {
                 let (id, args) =
@@ -1743,12 +1739,14 @@ impl ClipViewUi {
         }
         if ui.input(|i| i.key_pressed(Key::Escape)) {
             let note = self.drag.take().is_some();
-            let lane = self.lane_drag.take().is_some();
-            if note || lane {
+            let lanes = self.lanes.cancel();
+            if note || lanes == Cancelled::Gesture {
                 events.push(UiEvent::Gesture {
                     phase: GesturePhase::Cancel,
                     invocation: None,
                 });
+            } else if lanes == Cancelled::Typed {
+                // Spec: note-editing R14. Esc drops a number being typed.
             } else if shell.active_contexts().contains(&Context::NoteEditor) {
                 // Spec: piano-roll R24, R25. Esc deselects the notes and
                 // clears the time selection.
@@ -1889,74 +1887,24 @@ impl ClipViewUi {
         response.context_menu(|ui| {
             self.menus.show(ui, shell, &context_menus::note(), events);
         });
+        // Spec: note-editing R19. Right-clicking a key selects that key's
+        // notes first, so the menu's Deactivate Note(s) acts on them.
+        if keys_response.secondary_clicked()
+            && let Some(pos) = keys_response.interact_pointer_pos()
+            && let Some(key) = rows.key_at(grid, pos.y)
+        {
+            let key = key.round().clamp(0.0, 127.0) as u8;
+            events.push(UiEvent::Invoke(Invocation::new(
+                ids::SELECT_NOTES,
+                json!({ "clip": clip, "notes": [], "select": { "key": key } }),
+            )));
+        }
         keys_response.context_menu(|ui| {
             self.menus.show(ui, shell, &context_menus::keys(), events);
         });
-        // Spec: piano-roll. The lane under the note area: dragging sets a
-        // note's value, or draws a ramp across several. Its left column is
-        // the lane header, whose menu chooses the value.
-        let plot = Rect::from_min_max(pos2(grid.left(), lane.top()), lane.max);
-        let lane_response = ui.interact(
-            plot,
-            Id::new(("clip-view-lane", clip)),
-            Sense::click_and_drag(),
-        );
-        if lane_response.drag_started()
-            && let Some(press) = ui.input(|i| i.pointer.press_origin())
-        {
-            self.lane_drag = Some(LaneDrag {
-                from: press,
-                value: lane_value(lane, field, press.y),
-            });
-        }
-        if lane_response.dragged()
-            && let (Some(drag), Some(pos)) = (self.lane_drag, pointer)
-            && let Some((id, args)) =
-                drag.invocation(clip, grid, field, lane, start, length, notes, pos)
-        {
-            gesture(events, GesturePhase::Update, id, args);
-        }
-        if lane_response.drag_stopped() {
-            let last = match (self.lane_drag, pointer) {
-                (Some(drag), Some(pos)) => drag
-                    .invocation(clip, grid, field, lane, start, length, notes, pos)
-                    .map(|(id, args)| Invocation::new(id, args)),
-                _ => None,
-            };
-            if self.lane_drag.take().is_some() {
-                events.push(UiEvent::Gesture {
-                    phase: GesturePhase::Commit,
-                    invocation: last,
-                });
-            }
-        }
-        if let Some(hover) = lane_response.hover_pos()
-            && !covered_notes(grid, start, length, notes, hover.x, hover.x).is_empty()
-        {
-            ui.ctx().set_cursor_icon(CursorIcon::ResizeVertical);
-        }
-        // Spec: piano-roll; L-CLIP-014. The lane header's context menu
-        // chooses which of a note's values the lane shows.
-        let header = Rect::from_min_max(lane.min, pos2(grid.left(), lane.bottom()));
-        let header_response = ui.interact(
-            header,
-            Id::new(("clip-view-lane-header", clip)),
-            Sense::click(),
-        );
-        header_response.context_menu(|ui| {
-            for choice in NoteField::ALL {
-                let on = field == choice;
-                let response = ui.selectable_label(on, choice.name());
-                crate::menus::register_item(ui.ctx(), &response);
-                if response.clicked() {
-                    events.push(UiEvent::Invoke(Invocation::new(
-                        VIEW_LANE,
-                        json!({ "lane": choice }),
-                    )));
-                    ui.close();
-                }
-            }
-        });
+        // Spec: note-editing R1 to R9. The expression lanes under the note
+        // area.
+        self.lanes.input(ui, shell, frame, events);
         // The wheel scrolls the key track.
         if ui.rect_contains_pointer(grid) {
             let scroll = ui.input(|i| i.smooth_scroll_delta.y);
@@ -1988,7 +1936,7 @@ impl ClipViewUi {
             shell,
             doc,
             arrangement,
-            clip,
+            frame,
             length,
             midi,
             notes,
@@ -2007,13 +1955,39 @@ impl ClipViewUi {
         shell: &Shell,
         doc: &Document,
         arrangement: &ArrangementView,
-        clip: ClipId,
+        frame: &note_lanes::Frame<'_>,
         length: Ticks,
         midi: &MidiData,
         notes: &[Note],
         selected: &[u32],
         events: &mut Vec<UiEvent>,
     ) {
+        let clip = frame.clip;
+        let pressed: Vec<(Key, egui::Modifiers)> = ui.input(|i| {
+            i.events
+                .iter()
+                .filter_map(|event| match event {
+                    egui::Event::Key {
+                        key,
+                        pressed: true,
+                        repeat: false,
+                        modifiers,
+                        ..
+                    } => Some((*key, *modifiers)),
+                    _ => None,
+                })
+                .collect()
+        });
+        // Spec: note-editing R14. While a number is being typed, the keys go
+        // to it: digits (0 among them), Backspace and Enter.
+        let mut pressed = pressed.into_iter();
+        while self.lanes.is_typing() {
+            let Some((key, modifiers)) = pressed.next() else {
+                break;
+            };
+            self.lanes.type_key(shell, frame, key, modifiers, events);
+        }
+        let pressed: Vec<(Key, egui::Modifiers)> = pressed.collect();
         // The Clip View holds the detail area's keys (the shell's contexts
         // say which apply).
         if !shell.active_contexts().contains(&Context::NoteEditor) {
@@ -2047,22 +2021,13 @@ impl ClipViewUi {
                 json!({ "clip": clip, "notes": [], "select": what, "add": add }),
             )));
         };
-        let pressed: Vec<(Key, egui::Modifiers)> = ui.input(|i| {
-            i.events
-                .iter()
-                .filter_map(|event| match event {
-                    egui::Event::Key {
-                        key,
-                        pressed: true,
-                        repeat: false,
-                        modifiers,
-                        ..
-                    } => Some((*key, *modifiers)),
-                    _ => None,
-                })
-                .collect()
-        });
         for (key, modifiers) in pressed {
+            // Spec: note-editing R14. With notes selected and no number being
+            // typed, a digit from 1 to 9 starts a velocity; 0 deactivates
+            // them (S-NOTE-041), which the keymap runs.
+            if !selected.is_empty() && self.lanes.start_velocity(key, modifiers) {
+                continue;
+            }
             let shift = modifiers.shift;
             let alt = modifiers.alt;
             let ctrl = modifiers.ctrl;
@@ -2162,6 +2127,19 @@ impl ClipViewUi {
                     }
                 }
                 Key::ArrowUp | Key::ArrowDown => {
+                    // Spec: note-editing R15, R16. The value keys raise and
+                    // lower the selected notes' velocity, deviation, chance,
+                    // or the value of the lane that holds the keyboard.
+                    if !selected.is_empty()
+                        && let Some((field, by)) =
+                            self.lanes.value_key(key == Key::ArrowUp, modifiers, mac)
+                    {
+                        events.push(UiEvent::Invoke(Invocation::new(
+                            ids::ADJUST_VALUE,
+                            json!({ "clip": clip, "field": field, "by": by }),
+                        )));
+                        continue;
+                    }
                     // Spec: piano-roll R25. Option with the arrows selects
                     // the note nearest the insert marker, and the previous
                     // or next note after that.
@@ -2361,6 +2339,19 @@ impl NoteDrag {
                     }),
                 )
             }
+            Self::Undecided { moving, .. } => {
+                moving.invocation(arrangement, doc, keys, grid, rows, start, length, pos)
+            }
+            Self::Velocity { clip, places, from } => (
+                ids::ADJUST_VALUE,
+                json!({
+                    "clip": clip,
+                    "notes": places,
+                    "field": NoteField::Velocity,
+                    // One for each point dragged up (note-editing R17).
+                    "by": (*from - pos.y).round(),
+                }),
+            ),
             Self::Resize {
                 clip,
                 places,
@@ -2451,53 +2442,6 @@ impl StripDrag {
     }
 }
 
-impl LaneDrag {
-    /// The lane's command for the pointer at `pos`: the one note the drag
-    /// covers has its value set, and several take a ramp from where the
-    /// drag began (piano-roll R14). `None` when it covers no note.
-    #[expect(clippy::too_many_arguments, reason = "the lane's whole geometry")]
-    fn invocation(
-        &self,
-        clip: ClipId,
-        grid: Rect,
-        field: NoteField,
-        lane: Rect,
-        start: Ticks,
-        length: Ticks,
-        notes: &[Note],
-        pos: Pos2,
-    ) -> Option<(&'static str, Value)> {
-        let places = covered_notes(grid, start, length, notes, self.from.x, pos.x);
-        let value = lane_value(lane, field, pos.y);
-        match places.as_slice() {
-            [] => None,
-            [place] => Some((
-                ids::SET_VALUE,
-                json!({ "clip": clip, "notes": [place], "field": field, "value": value }),
-            )),
-            _ => {
-                // The ramp runs from where the drag began to the pointer:
-                // dragging leftwards ramps the other way.
-                let (from, to) = if pos.x >= self.from.x {
-                    (self.value, value)
-                } else {
-                    (value, self.value)
-                };
-                Some((
-                    ids::RAMP_VALUE,
-                    json!({
-                        "clip": clip,
-                        "notes": places,
-                        "field": field,
-                        "from": from,
-                        "to": to,
-                    }),
-                ))
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2532,29 +2476,5 @@ mod tests {
         assert_eq!(rows.keys, vec![64u8, 60]);
         assert_eq!(rows.y_of_row(grid(), 0), grid().top());
         assert_eq!(rows.y_of_row(grid(), 1), grid().top() + KEY_HEIGHT);
-    }
-
-    #[test]
-    fn a_drag_covers_every_stem_it_runs_over() {
-        // Spec: piano-roll R15. A note's stem is STEM_WIDTH wide, a point
-        // right of the note's start: a press anywhere on the stem covers the
-        // note, and one clear of every stem covers none.
-        let notes = [note(60, 0), note(64, 40)];
-        let (start, length) = (Ticks::ZERO, Ticks(80));
-        for (place, note) in notes.iter().enumerate() {
-            let left = stem_x(grid(), start, length, note);
-            for x in [left, left + STEM_WIDTH / 2.0, left + STEM_WIDTH] {
-                assert_eq!(
-                    covered_notes(grid(), start, length, &notes, x, x),
-                    [u32::try_from(place).unwrap()],
-                    "a press at {x}"
-                );
-            }
-            let clear = left - KEY_WIDTH;
-            assert!(
-                covered_notes(grid(), start, length, &notes, clear, clear).is_empty(),
-                "a press at {clear} covers nothing"
-            );
-        }
     }
 }

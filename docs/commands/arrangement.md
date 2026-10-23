@@ -717,7 +717,7 @@ Result: [`ArrangementState`](#arrangementstate).
 
 **Select Tracks**. Permission: `read`. Contexts: `arrangement`.
 
-Selects tracks in the Arrangement, replacing the selection or, with `add`, adding to it; with `title_bars`, their title bars, as clicking a title bar does, so the fold and grouped-track keys apply. Changes only the view.
+Selects tracks in the Arrangement, replacing the selection or, with `add`, adding to it; with `title_bars`, their title bars, as clicking a title bar does, so the fold and grouped-track keys apply; with `automation_lane` and one track, its automation lane, as Up and Down select it while Automation Mode is on, and the lane gets the keyboard. Changes only the view.
 
 Default keys: none.
 
@@ -727,6 +727,7 @@ Arguments:
 |---|---|---|---|
 | `tracks` | array of [`TrackId`](README.md#trackid) | yes | The tracks to select. Empty clears the track selection. |
 | `add` | boolean | no | Add them to the tracks already selected instead of replacing them. |
+| `automation_lane` | boolean | no | Select the track's automation lane, as Up and Down do through the lanes while Automation Mode is on (the automation editing spec, R20): the lane gets the keyboard. One track only. |
 | `title_bars` | boolean | no | Select their title bars, so the track-header shortcuts (fold, show and hide grouped tracks) apply, as clicking a title bar does. |
 
 Result: [`ArrangementState`](#arrangementstate).
@@ -774,7 +775,7 @@ Result: [`ArrangementState`](#arrangementstate).
 
 **Set Insert Marker**. Permission: `read`. Contexts: `arrangement`.
 
-Places the Arrangement's insert marker at `at` and, with `track`, selects that track, as clicking in a track's lane does; a click also snaps to the grid when Snap to Grid is on, and resumes Follow. Clears the time selection. Not an undo step; changes only the view.
+Places the Arrangement's insert marker at `at` and, with `track`, selects that track, as clicking in a track's lane does; a click also snaps to the grid when Snap to Grid is on, and resumes Follow. Clears the time selection. With `automation_lane`, the track's automation lane is selected too, as clicking its background does, and gets the keyboard. Not an undo step; changes only the view.
 
 Default keys: none.
 
@@ -783,6 +784,7 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `at` | [`Ticks`](README.md#ticks) | yes | Where to put it. It isn't snapped: snap first if you want the grid. |
+| `automation_lane` | boolean | no | Select the track's automation lane too, as clicking the lane's background does (the automation editing spec, R1): the lane gets the keyboard. |
 | `track` | [`TrackId`](README.md#trackid) or null | no | The track to select with it, as clicking a track's lane does. Left out, the selected tracks stay selected. |
 
 Result: [`ArrangementState`](#arrangementstate).

@@ -193,7 +193,7 @@ Result: [`ChangeSet`](README.md#changeset).
 
 **Move Focus to the Session View**. Permission: `read`. Contexts: `global`.
 
-Shows the Session View if the Arrangement View is in front, and moves the keyboard focus to it, as Navigate > Session View (Option-1, Alt-1) does, so its shortcuts apply. Changes only the view.
+Shows the Session View if the Arrangement View is in front, and moves the keyboard focus to it, as Navigate > Session View (Option-1, Alt-1) does, so its shortcuts apply. With the second window open, moves the focus to the window that shows the Session View and brings it to the front, without changing either window's view. Changes only the view.
 
 Default keys:
 

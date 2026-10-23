@@ -42,6 +42,7 @@ The commands, by the part of their ID before its first dot:
 - [`device`](device.md)
 - [`device_view`](device_view.md)
 - [`edit`](edit.md)
+- [`envelope`](envelope.md)
 - [`export`](export.md)
 - [`file_manager`](file_manager.md)
 - [`focus`](focus.md)
@@ -532,7 +533,9 @@ What the Arrangement View shows: every view command returns it.
 | `show_volume` | boolean | yes | Whether the track headers show their volume, pan, and sends. |
 | `show_return_tracks` | boolean | yes | Whether the return tracks' rows show in the lanes. |
 | `automation_lanes` | array of [`AutomationLane`](#automationlane) | no | The parameter each track's automation lane shows, for the tracks whose lane isn't showing the default (their volume): the choosers' choice. `target` `null` means the lane draws no envelope. |
+| `selected_breakpoint` | [`SelectedBreakpoint`](#selectedbreakpoint) or null | no | The breakpoint selected in that lane (WP-6.26), if any: `automation.select_breakpoint` sets it. |
 | `selected_fade` | [`FadeHandleState`](#fadehandlestate) or null | no | The selected fade handle (WP-6.51), if any: Delete deletes its fade. |
+| `selected_lane` | [`Lane`](#lane) or null | no | The automation lane that has the keyboard (WP-6.26): the one the last click, or Up and Down, selected, while Automation Mode is on. The keys of the automation editing spec's R20 to R26 act on its envelope. |
 | `time_selection_lanes` | array of [`Lane`](#lane) | no | The lanes the time selection covers: each a track's own lane or its automation lane (the automation editing spec, R1). Empty when the selection names no lane. |
 
 <details><summary>JSON Schema</summary>
@@ -596,6 +599,17 @@ What the Arrangement View shows: every view command returns it.
       "format": "double",
       "type": "number"
     },
+    "selected_breakpoint": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SelectedBreakpoint"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The breakpoint selected in that lane (WP-6.26), if any: `automation.select_breakpoint` sets it."
+    },
     "selected_clips": {
       "default": [],
       "description": "The selected clips (WP-1.8b), in the order they were selected. The editing commands act on these when there are any, and on the time selection otherwise.",
@@ -614,6 +628,17 @@ What the Arrangement View shows: every view command returns it.
         }
       ],
       "description": "The selected fade handle (WP-6.51), if any: Delete deletes its fade."
+    },
+    "selected_lane": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Lane"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The automation lane that has the keyboard (WP-6.26): the one the last click, or Up and Down, selected, while Automation Mode is on. The keys of the automation editing spec's R20 to R26 act on its envelope."
     },
     "selected_locators": {
       "default": [],
@@ -708,6 +733,49 @@ What the Arrangement View shows: every view command returns it.
     "show_return_tracks"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `ArrowKey`
+
+A direction a key points.
+
+One of:
+
+- `"left"`: Earlier in time.
+- `"right"`: Later in time.
+- `"up"`: A higher value.
+- `"down"`: A lower value.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A direction a key points.",
+  "oneOf": [
+    {
+      "const": "left",
+      "description": "Earlier in time.",
+      "type": "string"
+    },
+    {
+      "const": "right",
+      "description": "Later in time.",
+      "type": "string"
+    },
+    {
+      "const": "up",
+      "description": "A higher value.",
+      "type": "string"
+    },
+    {
+      "const": "down",
+      "description": "A lower value.",
+      "type": "string"
+    }
+  ]
 }
 ```
 
@@ -2821,8 +2889,14 @@ What the browser shows: most browser commands return it.
 | `index` | [`IndexState`](#indexstate) | yes | The index. |
 | `tag_editor` | boolean | yes | Whether the Tag Editor is open beside the content pane. |
 | `quick_tags` | boolean | yes | Whether Quick Tags shows at the content pane's bottom. |
+| `filter_view` | [`FilterViewState`](#filterviewstate) | yes | The Filter View: whether it shows, its groups under the chosen label, and the tags selected (spec: browser-tags R18 to R22). |
+| `saved_labels` | array of [`SavedLabelInfo`](#savedlabelinfo) | yes | The saved labels, in the order they were made (spec: browser-tags R24). |
+| `columns` | [`ColumnsState`](#columnsstate) | yes | The content pane's columns and sort (spec: browser-tags R27, R28). |
+| `can_back` | boolean | yes | Whether Browse Back can go back a step (spec: browser-tags R30). |
+| `can_forward` | boolean | yes | Whether Browse Forward can go forward a step. |
 | `note` | string or null | no | What the content pane says when it has no rows, such as which package fills an empty Library label. |
 | `renaming` | string or null | no | The file whose name is open for editing, after `clip.save_file` saved it: `browser.rename_file` gives it its new name. |
+| `renaming_label` | [`Label`](#label) or null | no | The label whose name is open for editing, after `browser.add_label` or `browser.rename_label` without a name. |
 
 <details><summary>JSON Schema</summary>
 
@@ -2830,6 +2904,22 @@ What the browser shows: most browser commands return it.
 {
   "description": "What the browser shows: most browser commands return it.",
   "properties": {
+    "can_back": {
+      "description": "Whether Browse Back can go back a step (spec: browser-tags R30).",
+      "type": "boolean"
+    },
+    "can_forward": {
+      "description": "Whether Browse Forward can go forward a step.",
+      "type": "boolean"
+    },
+    "columns": {
+      "$ref": "#/$defs/ColumnsState",
+      "description": "The content pane's columns and sort (spec: browser-tags R27, R28)."
+    },
+    "filter_view": {
+      "$ref": "#/$defs/FilterViewState",
+      "description": "The Filter View: whether it shows, its groups under the chosen label, and the tags selected (spec: browser-tags R18 to R22)."
+    },
     "first_row": {
       "description": "The index of the first row returned.",
       "format": "uint",
@@ -2873,10 +2963,29 @@ What the browser shows: most browser commands return it.
         "null"
       ]
     },
+    "renaming_label": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Label"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The label whose name is open for editing, after `browser.add_label` or `browser.rename_label` without a name."
+    },
     "rows": {
       "description": "Rows of the content pane, from `first_row`: the label's contents, with open folders' contents under them, or the search results.",
       "items": {
         "$ref": "#/$defs/Item"
+      },
+      "type": "array"
+    },
+    "saved_labels": {
+      "default": [],
+      "description": "The saved labels, in the order they were made (spec: browser-tags R24).",
+      "items": {
+        "$ref": "#/$defs/SavedLabelInfo"
       },
       "type": "array"
     },
@@ -2913,7 +3022,12 @@ What the browser shows: most browser commands return it.
     "preview",
     "index",
     "tag_editor",
-    "quick_tags"
+    "quick_tags",
+    "filter_view",
+    "saved_labels",
+    "columns",
+    "can_back",
+    "can_forward"
   ],
   "type": "object"
 }
@@ -3721,6 +3835,101 @@ A chain's zones, each `low`, `high` and the `fade_low` and `fade_high` values it
       "description": "The velocity zone."
     }
   },
+  "type": "object"
+}
+```
+
+</details>
+
+### `ChanceArgs`
+
+The Chance filter's controls in `clip_view.note_filters`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `invert` | boolean or null | no | Switches the filter's Invert. |
+| `max` | number or null | no | Max, 0 to 100 percent. Moving it past Min takes Min with it. |
+| `min` | number or null | no | Min, 0 to 100 percent. Moving it past Max takes Max with it. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "additionalProperties": false,
+  "description": "The Chance filter's controls in `clip_view.note_filters`.",
+  "properties": {
+    "invert": {
+      "description": "Switches the filter's Invert.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "max": {
+      "description": "Max, 0 to 100 percent. Moving it past Min takes Min with it.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "min": {
+      "description": "Min, 0 to 100 percent. Moving it past Max takes Max with it.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    }
+  },
+  "type": "object"
+}
+```
+
+</details>
+
+### `ChanceFilter`
+
+The Chance filter, in percent.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean | yes | Whether the filter is on. |
+| `invert` | boolean | yes | Whether it lets through the notes it would hold back. |
+| `min` | number | yes | The lowest chance let through, 0 to 100 percent. |
+| `max` | number | yes | The highest chance let through, 0 to 100 percent. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The Chance filter, in percent.",
+  "properties": {
+    "invert": {
+      "description": "Whether it lets through the notes it would hold back.",
+      "type": "boolean"
+    },
+    "max": {
+      "description": "The highest chance let through, 0 to 100 percent.",
+      "format": "double",
+      "type": "number"
+    },
+    "min": {
+      "description": "The lowest chance let through, 0 to 100 percent.",
+      "format": "double",
+      "type": "number"
+    },
+    "on": {
+      "description": "Whether the filter is on.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "on",
+    "invert",
+    "min",
+    "max"
+  ],
   "type": "object"
 }
 ```
@@ -4765,6 +4974,9 @@ What the Clip View shows: which clip it is editing, the notes selected in it, it
 | `tab` | [`ClipTab`](#cliptab) | yes | The tab the Clip View shows. |
 | `preview` | boolean | yes | Whether the Preview switch is on (Spec: step-recording R1): one switch for every MIDI clip's editor, kept between launches. |
 | `envelope` | [`AutomationTarget`](#automationtarget) or null | yes | The parameter whose envelope the Envelopes tab shows; `null` when it shows none. |
+| `filters` | [`NoteFilters`](#notefilters) | yes | Find and Select Notes: whether the filter bar shows, and every filter's settings, with which are on. |
+| `envelope_breakpoint` | [`Ticks`](#ticks) or null | no | The breakpoint selected in the Envelope Editor (WP-6.26), if any: `clip.select_envelope_breakpoint` sets it. |
+| `envelope_marker` | [`Ticks`](#ticks) or null | no | The Envelope Editor's insert marker, in ticks from the beginning of the clip's contents (WP-6.26), which Left and Right move along the envelope; `null` until it has been moved. |
 
 <details><summary>JSON Schema</summary>
 
@@ -4811,6 +5023,32 @@ What the Clip View shows: which clip it is editing, the notes selected in it, it
         }
       ],
       "description": "The parameter whose envelope the Envelopes tab shows; `null` when it shows none."
+    },
+    "envelope_breakpoint": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Ticks"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The breakpoint selected in the Envelope Editor (WP-6.26), if any: `clip.select_envelope_breakpoint` sets it."
+    },
+    "envelope_marker": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Ticks"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The Envelope Editor's insert marker, in ticks from the beginning of the clip's contents (WP-6.26), which Left and Right move along the envelope; `null` until it has been moved."
+    },
+    "filters": {
+      "$ref": "#/$defs/NoteFilters",
+      "description": "Find and Select Notes: whether the filter bar shows, and every filter's settings, with which are on."
     },
     "focus_mode": {
       "description": "Whether Focus Mode is on (Spec: multi-clip-editing R13).",
@@ -4914,7 +5152,8 @@ What the Clip View shows: which clip it is editing, the notes selected in it, it
     "folded",
     "tab",
     "preview",
-    "envelope"
+    "envelope",
+    "filters"
   ],
   "type": "object"
 }
@@ -5028,6 +5267,116 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `Column`
+
+A column of the content pane (spec: browser-tags R27). Name always shows, first.
+
+One of:
+
+- `"name"`: The item's name.
+- `"date_modified"`: When it changed.
+- `"size"`: Its size.
+- `"kind"`: What it is.
+- `"length"`: An audio file's length.
+- `"sample_rate"`: An audio file's sample rate.
+- `"channels"`: An audio file's channels.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A column of the content pane (spec: browser-tags R27). Name always shows, first.",
+  "oneOf": [
+    {
+      "const": "name",
+      "description": "The item's name.",
+      "type": "string"
+    },
+    {
+      "const": "date_modified",
+      "description": "When it changed.",
+      "type": "string"
+    },
+    {
+      "const": "size",
+      "description": "Its size.",
+      "type": "string"
+    },
+    {
+      "const": "kind",
+      "description": "What it is.",
+      "type": "string"
+    },
+    {
+      "const": "length",
+      "description": "An audio file's length.",
+      "type": "string"
+    },
+    {
+      "const": "sample_rate",
+      "description": "An audio file's sample rate.",
+      "type": "string"
+    },
+    {
+      "const": "channels",
+      "description": "An audio file's channels.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `ColumnsState`
+
+The content pane's columns, sort and file extensions (spec: browser-tags R27, R28).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `shown` | array of [`Column`](#column) | yes | The optional columns shown, in their order, after Name. |
+| `sort` | [`Column`](#column) | yes | The column the list is sorted by. |
+| `descending` | boolean | yes | Whether the order is reversed. |
+| `file_extensions` | boolean | yes | Whether names show their extensions. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The content pane's columns, sort and file extensions (spec: browser-tags R27, R28).",
+  "properties": {
+    "descending": {
+      "description": "Whether the order is reversed.",
+      "type": "boolean"
+    },
+    "file_extensions": {
+      "description": "Whether names show their extensions.",
+      "type": "boolean"
+    },
+    "shown": {
+      "description": "The optional columns shown, in their order, after Name.",
+      "items": {
+        "$ref": "#/$defs/Column"
+      },
+      "type": "array"
+    },
+    "sort": {
+      "$ref": "#/$defs/Column",
+      "description": "The column the list is sorted by."
+    }
+  },
+  "required": [
+    "shown",
+    "sort",
+    "descending",
+    "file_extensions"
+  ],
+  "type": "object"
 }
 ```
 
@@ -5275,6 +5624,111 @@ Changes to Complex Pro's controls.
       ]
     }
   },
+  "type": "object"
+}
+```
+
+</details>
+
+### `ConditionArgs`
+
+The Condition filter's controls in `clip_view.note_filters`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `active` | boolean or null | no | The Active switch. |
+| `chance` | boolean or null | no | The Chance switch. |
+| `invert` | boolean or null | no | Switches the filter's Invert. |
+| `velocity_deviation` | boolean or null | no | The Velocity Deviation switch. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "additionalProperties": false,
+  "description": "The Condition filter's controls in `clip_view.note_filters`.",
+  "properties": {
+    "active": {
+      "description": "The Active switch.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "chance": {
+      "description": "The Chance switch.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "invert": {
+      "description": "Switches the filter's Invert.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "velocity_deviation": {
+      "description": "The Velocity Deviation switch.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    }
+  },
+  "type": "object"
+}
+```
+
+</details>
+
+### `ConditionFilter`
+
+The Condition filter: a note must pass each switch that is on.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean | yes | Whether the filter is on. |
+| `invert` | boolean | yes | Whether it lets through the notes it would hold back. |
+| `active` | boolean | yes | Let through the notes that aren't deactivated. |
+| `chance` | boolean | yes | Let through the notes whose chance is below 100 percent. |
+| `velocity_deviation` | boolean | yes | Let through the notes whose velocity deviation isn't 0. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The Condition filter: a note must pass each switch that is on.",
+  "properties": {
+    "active": {
+      "description": "Let through the notes that aren't deactivated.",
+      "type": "boolean"
+    },
+    "chance": {
+      "description": "Let through the notes whose chance is below 100 percent.",
+      "type": "boolean"
+    },
+    "invert": {
+      "description": "Whether it lets through the notes it would hold back.",
+      "type": "boolean"
+    },
+    "on": {
+      "description": "Whether the filter is on.",
+      "type": "boolean"
+    },
+    "velocity_deviation": {
+      "description": "Let through the notes whose velocity deviation isn't 0.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "on",
+    "invert",
+    "active",
+    "chance",
+    "velocity_deviation"
+  ],
   "type": "object"
 }
 ```
@@ -5637,6 +6091,123 @@ What `device.convert` returns.
     "device",
     "to",
     "dropped"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `CountArgs`
+
+The Count filter's controls in `clip_view.note_filters`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `every` | integer or null | no | Every, 1 to 16. |
+| `invert` | boolean or null | no | Switches the filter's Invert. |
+| `offset` | integer or null | no | Offset, 0 to one less than Every. |
+| `quantized` | boolean or null | no | The Quantized switch. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "additionalProperties": false,
+  "description": "The Count filter's controls in `clip_view.note_filters`.",
+  "properties": {
+    "every": {
+      "description": "Every, 1 to 16.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "invert": {
+      "description": "Switches the filter's Invert.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "offset": {
+      "description": "Offset, 0 to one less than Every.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "quantized": {
+      "description": "The Quantized switch.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    }
+  },
+  "type": "object"
+}
+```
+
+</details>
+
+### `CountFilter`
+
+The Count filter.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean | yes | Whether the filter is on. |
+| `invert` | boolean | yes | Whether it lets through the notes it would hold back. |
+| `every` | integer from 0 to 255 | yes | Let through each nth note, chord or step, 1 to 16. |
+| `offset` | integer from 0 to 255 | yes | Where counting starts, 0 to one less than `every`. |
+| `quantized` | boolean | yes | Count the editing grid's steps instead of the notes. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The Count filter.",
+  "properties": {
+    "every": {
+      "description": "Let through each nth note, chord or step, 1 to 16.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "invert": {
+      "description": "Whether it lets through the notes it would hold back.",
+      "type": "boolean"
+    },
+    "offset": {
+      "description": "Where counting starts, 0 to one less than `every`.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "on": {
+      "description": "Whether the filter is on.",
+      "type": "boolean"
+    },
+    "quantized": {
+      "description": "Count the editing grid's steps instead of the notes.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "on",
+    "invert",
+    "every",
+    "offset",
+    "quantized"
   ],
   "type": "object"
 }
@@ -7710,6 +8281,7 @@ The Display & Input page's settings.
 | `outline_view_in_focus` | boolean | yes | Outline View in Focus, as `settings.set_outline_view_in_focus` sets it. |
 | `use_tab_key_to_move_focus` | boolean | yes | Use Tab Key to Move Focus, as `focus.toggle_tab_navigation` toggles it. |
 | `wrap_tab_navigation` | boolean | yes | Wrap Tab Navigation, as `focus.toggle_wrap_navigation` toggles it. |
+| `second_window_zoom_percent` | integer or null | no | The second window's zoom in percent, as `view.set_zoom` takes it with `window` set to `second`: only while the second window is open, when the page shows Second Window Zoom (interface-zoom R12). |
 
 <details><summary>JSON Schema</summary>
 
@@ -7720,6 +8292,16 @@ The Display & Input page's settings.
     "outline_view_in_focus": {
       "description": "Outline View in Focus, as `settings.set_outline_view_in_focus` sets it.",
       "type": "boolean"
+    },
+    "second_window_zoom_percent": {
+      "description": "The second window's zoom in percent, as `view.set_zoom` takes it with `window` set to `second`: only while the second window is open, when the page shows Second Window Zoom (interface-zoom R12).",
+      "format": "uint16",
+      "maximum": 65535,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
     },
     "use_tab_key_to_move_focus": {
       "description": "Use Tab Key to Move Focus, as `focus.toggle_tab_navigation` toggles it.",
@@ -8162,6 +8744,104 @@ A drum chain's row in the chain list (drum racks spec, R21).
 
 </details>
 
+### `DurationArgs`
+
+The Duration filter's controls in `clip_view.note_filters`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `invert` | boolean or null | no | Switches the filter's Invert. |
+| `max` | number or null | no | Max, in beats; `null` for the length of the clip's span. Moving it past Min takes Min with it. |
+| `min` | number or null | no | Min, in beats. Moving it past Max takes Max with it. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "additionalProperties": false,
+  "description": "The Duration filter's controls in `clip_view.note_filters`.",
+  "properties": {
+    "invert": {
+      "description": "Switches the filter's Invert.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "max": {
+      "description": "Max, in beats; `null` for the length of the clip's span. Moving it past Min takes Min with it.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "min": {
+      "description": "Min, in beats. Moving it past Max takes Max with it.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    }
+  },
+  "type": "object"
+}
+```
+
+</details>
+
+### `DurationFilter`
+
+The Duration filter, in beats of the clip's time signature.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean | yes | Whether the filter is on. |
+| `invert` | boolean | yes | Whether it lets through the notes it would hold back. |
+| `min` | number | yes | The shortest note let through, in beats. |
+| `max` | number or null | yes | The longest note let through, in beats. `null` is the length of the clip's span. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The Duration filter, in beats of the clip's time signature.",
+  "properties": {
+    "invert": {
+      "description": "Whether it lets through the notes it would hold back.",
+      "type": "boolean"
+    },
+    "max": {
+      "description": "The longest note let through, in beats. `null` is the length of the clip's span.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "min": {
+      "description": "The shortest note let through, in beats.",
+      "format": "double",
+      "type": "number"
+    },
+    "on": {
+      "description": "Whether the filter is on.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "on",
+    "invert",
+    "min",
+    "max"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `Edge`
 
 A clip's `start` (left) edge, which shows more or less of its beginning, or its `end` (right) edge.
@@ -8470,6 +9150,90 @@ What `automation.copy` put on the clipboard.
     "length"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `EnvelopeKeyState`
+
+What the envelope keys' commands report: the envelope they acted on, the insert marker, the selected breakpoint, and the envelope's value at the marker as its parameter reads.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `envelope` | [`EnvelopeKeys`](#envelopekeys) | yes | The envelope that has the keyboard. |
+| `marker` | [`Ticks`](#ticks) | yes | The insert marker, in ticks (from the beginning of the clip's contents in the Envelope Editor). |
+| `selected` | [`Ticks`](#ticks) or null | yes | The selected breakpoint's position, or `null` when none is selected. |
+| `value` | string | yes | The envelope's value at the insert marker, in the parameter's own units as its control shows it. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What the envelope keys' commands report: the envelope they acted on, the insert marker, the selected breakpoint, and the envelope's value at the marker as its parameter reads.",
+  "properties": {
+    "envelope": {
+      "$ref": "#/$defs/EnvelopeKeys",
+      "description": "The envelope that has the keyboard."
+    },
+    "marker": {
+      "$ref": "#/$defs/Ticks",
+      "description": "The insert marker, in ticks (from the beginning of the clip's contents in the Envelope Editor)."
+    },
+    "selected": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Ticks"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The selected breakpoint's position, or `null` when none is selected."
+    },
+    "value": {
+      "description": "The envelope's value at the insert marker, in the parameter's own units as its control shows it.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "envelope",
+    "marker",
+    "selected",
+    "value"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `EnvelopeKeys`
+
+Which envelope has the keyboard.
+
+One of:
+
+- `"lane"`: An automation lane in the Arrangement.
+- `"clip"`: The Clip View's Envelope Editor.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Which envelope has the keyboard.",
+  "oneOf": [
+    {
+      "const": "lane",
+      "description": "An automation lane in the Arrangement.",
+      "type": "string"
+    },
+    {
+      "const": "clip",
+      "description": "The Clip View's Envelope Editor.",
+      "type": "string"
+    }
+  ]
 }
 ```
 
@@ -8941,6 +9705,43 @@ What `plugin.export_list` returns: the file it wrote.
     "path"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `Expression`
+
+Which of a note's three expression envelopes.
+
+One of:
+
+- `"pitch"`: The note's own pitch bend, in semitones from its key, −48 to +48.
+- `"slide"`: The finger's movement along the key, 0 to 127.
+- `"pressure"`: The note's own pressure, 0 to 127.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Which of a note's three expression envelopes.",
+  "oneOf": [
+    {
+      "const": "pitch",
+      "description": "The note's own pitch bend, in semitones from its key, −48 to +48.",
+      "type": "string"
+    },
+    {
+      "const": "slide",
+      "description": "The finger's movement along the key, 0 to 127.",
+      "type": "string"
+    },
+    {
+      "const": "pressure",
+      "description": "The note's own pressure, 0 to 127.",
+      "type": "string"
+    }
+  ]
 }
 ```
 
@@ -9718,6 +10519,172 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `FilterGroup`
+
+A filter group as the Filter View shows it: its tags that some item under the label carries.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | The group's name. |
+| `tags` | array of [`FilterTag`](#filtertag) | yes | Its tag buttons, in the Tag Editor's order. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A filter group as the Filter View shows it: its tags that some item under the label carries.",
+  "properties": {
+    "name": {
+      "description": "The group's name.",
+      "type": "string"
+    },
+    "tags": {
+      "description": "Its tag buttons, in the Tag Editor's order.",
+      "items": {
+        "$ref": "#/$defs/FilterTag"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "name",
+    "tags"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `FilterGroupChoice`
+
+A group the chosen label can show, as the Filter View Menu lists it.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | The group's name. |
+| `shown` | boolean | yes | Whether the label shows it. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A group the chosen label can show, as the Filter View Menu lists it.",
+  "properties": {
+    "name": {
+      "description": "The group's name.",
+      "type": "string"
+    },
+    "shown": {
+      "description": "Whether the label shows it.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "name",
+    "shown"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `FilterTag`
+
+A tag button in the Filter View.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | What the button says: the tag's name, a subtag's with its tag's. |
+| `full_name` | string | yes | The tag's full name. |
+| `selected` | boolean | yes | Whether the tag is selected. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A tag button in the Filter View.",
+  "properties": {
+    "full_name": {
+      "description": "The tag's full name.",
+      "type": "string"
+    },
+    "name": {
+      "description": "What the button says: the tag's name, a subtag's with its tag's.",
+      "type": "string"
+    },
+    "selected": {
+      "description": "Whether the tag is selected.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "name",
+    "full_name",
+    "selected"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `FilterViewState`
+
+The Filter View (spec: browser-tags R18 to R22).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `shown` | boolean | yes | Whether the Filter View shows. |
+| `groups` | array of [`FilterGroup`](#filtergroup) | yes | The groups it shows under the chosen label that have tags to show. |
+| `menu` | array of [`FilterGroupChoice`](#filtergroupchoice) | yes | Every group the chosen label can show, with whether it shows. |
+| `selected` | array of string | yes | The selected tags' full names. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The Filter View (spec: browser-tags R18 to R22).",
+  "properties": {
+    "groups": {
+      "description": "The groups it shows under the chosen label that have tags to show.",
+      "items": {
+        "$ref": "#/$defs/FilterGroup"
+      },
+      "type": "array"
+    },
+    "menu": {
+      "description": "Every group the chosen label can show, with whether it shows.",
+      "items": {
+        "$ref": "#/$defs/FilterGroupChoice"
+      },
+      "type": "array"
+    },
+    "selected": {
+      "description": "The selected tags' full names.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "shown": {
+      "description": "Whether the Filter View shows.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "shown",
+    "groups",
+    "menu",
+    "selected"
+  ],
+  "type": "object"
 }
 ```
 
@@ -11531,6 +12498,7 @@ One row of the content pane.
 | `depth` | integer from 0 to 65535 | yes | How deep it's indented: 0 at the top of the list. |
 | `open` | boolean | yes | For a folder, whether it's open. |
 | `clip_kind` | [`ClipFileKind`](#clipfilekind) or null | no | For a clip file, what it holds; `null` when its first bytes don't say (a damaged file), which placing refuses (clip files R6). |
+| `details` | [`ItemDetails`](#itemdetails) or null | no | What the optional columns show for it, left out while none shows (spec: browser-tags R27). |
 | `folder` | string or null | no | In search results, the folder it's in, relative to its place. |
 | `format` | [`PluginFormat`](#pluginformat) or null | no | For a plug-in, its format, which the row's badge shows (the plug-in scanning spec, R11). |
 
@@ -11557,6 +12525,17 @@ One row of the content pane.
       "maximum": 65535,
       "minimum": 0,
       "type": "integer"
+    },
+    "details": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ItemDetails"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "What the optional columns show for it, left out while none shows (spec: browser-tags R27)."
     },
     "folder": {
       "description": "In search results, the folder it's in, relative to its place.",
@@ -11601,6 +12580,83 @@ One row of the content pane.
     "depth",
     "open"
   ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ItemDetails`
+
+What an item's optional columns show (spec: browser-tags R27); a value the item doesn't have, such as a folder's length, is left out.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `channels` | integer or null | no | For an audio file, its number of channels. |
+| `kind` | string or null | no | What it is, in words: `Folder`, `Audio File`. |
+| `length_seconds` | number or null | no | For an audio file, how long it plays, in seconds. |
+| `modified` | integer or null | no | When it changed, in seconds since the epoch. |
+| `sample_rate` | integer or null | no | For an audio file, its sample rate in hertz. |
+| `size` | integer or null | no | Its size in bytes. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What an item's optional columns show (spec: browser-tags R27); a value the item doesn't have, such as a folder's length, is left out.",
+  "properties": {
+    "channels": {
+      "description": "For an audio file, its number of channels.",
+      "format": "uint16",
+      "maximum": 65535,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "kind": {
+      "description": "What it is, in words: `Folder`, `Audio File`.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "length_seconds": {
+      "description": "For an audio file, how long it plays, in seconds.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "modified": {
+      "description": "When it changed, in seconds since the epoch.",
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "sample_rate": {
+      "description": "For an audio file, its sample rate in hertz.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "size": {
+      "description": "Its size in bytes.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
   "type": "object"
 }
 ```
@@ -12045,7 +13101,7 @@ The keymap in use, as `keymap.state` reports it.
 
 ### `Label`
 
-A label in the browser's sidebar: `all`, a Library category (`sounds`, `drums`, `instruments`, `audio_effects`, `midi_effects`, `modulators`, `plug_ins`, `clips`, `samples`, `grooves`, `tunings`, `templates`), a place (`user_library`, `current_project`), or a folder added to Places, as `{"folder": "/its/path"}`.
+A label in the browser's sidebar: `all`, a Library category (`sounds`, `drums`, `instruments`, `audio_effects`, `midi_effects`, `modulators`, `plug_ins`, `clips`, `samples`, `grooves`, `tunings`, `templates`), a place (`user_library`, `current_project`), or a folder added to Places, as `{"folder": "/its/path"}`, or a saved label, as `{"saved": 3}`.
 
 One of:
 
@@ -12065,12 +13121,13 @@ One of:
 - `"user_library"`: The User Library folder.
 - `"current_project"`: The open set's project folder.
 - an object with `folder` (string): A folder the person added to Places, by its path.
+- an object with `saved` (integer): A saved label, by its ID (spec: browser-tags R24).
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "A label in the browser's sidebar: `all`, a Library category (`sounds`, `drums`, `instruments`, `audio_effects`, `midi_effects`, `modulators`, `plug_ins`, `clips`, `samples`, `grooves`, `tunings`, `templates`), a place (`user_library`, `current_project`), or a folder added to Places, as `{\"folder\": \"/its/path\"}`.",
+  "description": "A label in the browser's sidebar: `all`, a Library category (`sounds`, `drums`, `instruments`, `audio_effects`, `midi_effects`, `modulators`, `plug_ins`, `clips`, `samples`, `grooves`, `tunings`, `templates`), a place (`user_library`, `current_project`), or a folder added to Places, as `{\"folder\": \"/its/path\"}`, or a saved label, as `{\"saved\": 3}`.",
   "oneOf": [
     {
       "const": "all",
@@ -12159,6 +13216,20 @@ One of:
         "folder"
       ],
       "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "A saved label, by its ID (spec: browser-tags R24).",
+      "properties": {
+        "saved": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "saved"
+      ],
+      "type": "object"
     }
   ]
 }
@@ -12176,6 +13247,8 @@ A label as the sidebar lists it.
 | `name` | string | yes | Its name. |
 | `section` | [`Section`](#section) | yes | Its section. |
 | `available` | boolean | yes | Whether its folder can be read now (a place) or it has content (a Library label). A missing folder is listed greyed, as in Live. |
+| `shown` | boolean | yes | Whether the sidebar shows it: the person can hide Library labels and saved labels (spec: browser-tags R26). |
+| `icon` | string or null | no | The icon the person gave it, from [`LABEL_ICONS`] (spec: browser-tags R25). |
 | `path` | string or null | no | For a place, its folder; `null` for Current Project while the set has never been saved. |
 
 <details><summary>JSON Schema</summary>
@@ -12187,6 +13260,13 @@ A label as the sidebar lists it.
     "available": {
       "description": "Whether its folder can be read now (a place) or it has content (a Library label). A missing folder is listed greyed, as in Live.",
       "type": "boolean"
+    },
+    "icon": {
+      "description": "The icon the person gave it, from [`LABEL_ICONS`] (spec: browser-tags R25).",
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "label": {
       "$ref": "#/$defs/Label",
@@ -12206,13 +13286,19 @@ A label as the sidebar lists it.
     "section": {
       "$ref": "#/$defs/Section",
       "description": "Its section."
+    },
+    "shown": {
+      "default": true,
+      "description": "Whether the sidebar shows it: the person can hide Library labels and saved labels (spec: browser-tags R26).",
+      "type": "boolean"
     }
   },
   "required": [
     "label",
     "name",
     "section",
-    "available"
+    "available",
+    "shown"
   ],
   "type": "object"
 }
@@ -14248,6 +15334,37 @@ One slot's mapping as its panel names it.
 
 </details>
 
+### `MarkerStep`
+
+How far `envelope.move_marker` moves the insert marker.
+
+One of:
+
+- `"grid"`: One grid step.
+- `"breakpoint"`: To the previous or next breakpoint.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "How far `envelope.move_marker` moves the insert marker.",
+  "oneOf": [
+    {
+      "const": "grid",
+      "description": "One grid step.",
+      "type": "string"
+    },
+    {
+      "const": "breakpoint",
+      "description": "To the previous or next breakpoint.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `Measure`
 
 One kind of analysis.
@@ -14996,6 +16113,7 @@ What `mixer_view.state` and the other view commands return.
 | `return_tracks_scroll` | boolean | yes | Whether the return tracks scroll with the tracks (IMP-01, the mixer view spec R21): they come after the drop area and only Main stays pinned. Off in a new install, so the returns stay pinned, as in Live. |
 | `track_options` | boolean | yes | Whether the tracks' Track Options sections show (track delay and Keep Monitoring Latency). Shown only while this shows; hidden in a new set. |
 | `performance_impact` | boolean | yes | Whether the Performance Impact section shows: under each strip, the six segments that light up from the left with the track's share of the set's processing time. Hidden in a new set. |
+| `devices` | boolean | yes | Whether the Devices section shows: between In/Out and Sends, each track's top-level devices with their activators (IMP-25, the mixer view spec R24). Hidden in a new install; the devices and whether each is on are the query tool's `track` devices with their `enabled`. |
 | `performance_impact_values` | array of [`TrackImpact`](#trackimpact) | yes | Each track's Performance Impact, as the engine last published it: the track, how many of its six segments are lit, and its share of the set's processing time (the mixer spec, R31). |
 | `gain_reduction` | array of [`TrackGainReduction`](#trackgainreduction) | yes | Each track's gain reduction, in the order the tracks run (IMP-25, R40); empty when no engine has published meters. |
 | `chains` | array of [`ChainStrip`](#chainstrip) | no | The chains folded out as strips, in the mixers' column order (racks spec, R27). |
@@ -15020,6 +16138,11 @@ What `mixer_view.state` and the other view commands return.
     },
     "crossfader": {
       "description": "Whether the Crossfader section shows: the tracks' A and B assign buttons and Main's crossfader. Hidden in a new set.",
+      "type": "boolean"
+    },
+    "devices": {
+      "default": false,
+      "description": "Whether the Devices section shows: between In/Out and Sends, each track's top-level devices with their activators (IMP-25, the mixer view spec R24). Hidden in a new install; the devices and whether each is on are the query tool's `track` devices with their `enabled`.",
       "type": "boolean"
     },
     "gain_reduction": {
@@ -15094,6 +16217,7 @@ What `mixer_view.state` and the other view commands return.
     "return_tracks_scroll",
     "track_options",
     "performance_impact",
+    "devices",
     "performance_impact_values",
     "gain_reduction"
   ],
@@ -15721,9 +16845,11 @@ A note in a MIDI clip.
 | `length` | [`Ticks`](#ticks) | yes | How long the note lasts. Always positive. |
 | `group` | integer or null | no | The probability group the note belongs to, an ID in the clip's `groups` (Spec: note-editing R21). |
 | `mute` | boolean | no | Whether the note is switched off, so it stays in place but doesn't play. |
-| `pressure` | array of [`PressurePoint`](#pressurepoint) | no | The note's own pressure, played as polyphonic pressure over its length: points in order of `at`, none at the same place. A note with none plays no pressure. |
+| `pitch` | array of [`Breakpoint`](#breakpoint) | no | The note's own pitch bend in semitones from its key, from −48 to +48 (WP-6.17; the MPE spec, R1): breakpoints counted from the note's start, in order of position with none at the same place. A note with none bends nowhere. |
+| `pressure` | array of [`Breakpoint`](#breakpoint) | no | The note's own pressure, from 0 to 127, as `pitch` is kept (the MIDI controller data spec, R2). A note with none plays no pressure. |
 | `probability` | number from 0 to 1 | no | The chance the note will play, from 0 to 1: 1 (100 %) unless given. |
 | `release_velocity` | integer from 1 to 127 | no | The release velocity, from 1 to 127; 64 unless given. |
+| `slide` | array of [`Breakpoint`](#breakpoint) | no | The finger's movement along the key, from 0 to 127, as `pitch` is kept. |
 | `velocity_deviation` | integer from -127 to 127 | no | How far velocity may deviate randomly, from -127 to +127: 0 unless given. |
 
 <details><summary>JSON Schema</summary>
@@ -15756,10 +16882,17 @@ A note in a MIDI clip.
       "description": "Whether the note is switched off, so it stays in place but doesn't play.",
       "type": "boolean"
     },
-    "pressure": {
-      "description": "The note's own pressure, played as polyphonic pressure over its length: points in order of `at`, none at the same place. A note with none plays no pressure.",
+    "pitch": {
+      "description": "The note's own pitch bend in semitones from its key, from −48 to +48 (WP-6.17; the MPE spec, R1): breakpoints counted from the note's start, in order of position with none at the same place. A note with none bends nowhere.",
       "items": {
-        "$ref": "#/$defs/PressurePoint"
+        "$ref": "#/$defs/Breakpoint"
+      },
+      "type": "array"
+    },
+    "pressure": {
+      "description": "The note's own pressure, from 0 to 127, as `pitch` is kept (the MIDI controller data spec, R2). A note with none plays no pressure.",
+      "items": {
+        "$ref": "#/$defs/Breakpoint"
       },
       "type": "array"
     },
@@ -15776,6 +16909,13 @@ A note in a MIDI clip.
       "maximum": 127,
       "minimum": 1,
       "type": "integer"
+    },
+    "slide": {
+      "description": "The finger's movement along the key, from 0 to 127, as `pitch` is kept.",
+      "items": {
+        "$ref": "#/$defs/Breakpoint"
+      },
+      "type": "array"
     },
     "start": {
       "$ref": "#/$defs/Ticks",
@@ -15977,6 +17117,194 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `NoteFilter`
+
+A note filter: `pitch`, `time`, `chance`, `condition`, `count`, `duration`, `scale` or `velocity`.
+
+One of:
+
+- `"pitch"`: Pitch classes, in every octave.
+- `"time"`: A window of beats, optionally repeating.
+- `"chance"`: A range of note chance.
+- `"condition"`: Whether a note is active, has a chance, or has a velocity deviation.
+- `"count"`: Every nth note, chord or grid step.
+- `"duration"`: A range of note lengths.
+- `"scale"`: Notes in a scale.
+- `"velocity"`: A range of velocities.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A note filter: `pitch`, `time`, `chance`, `condition`, `count`, `duration`, `scale` or `velocity`.",
+  "oneOf": [
+    {
+      "const": "pitch",
+      "description": "Pitch classes, in every octave.",
+      "type": "string"
+    },
+    {
+      "const": "time",
+      "description": "A window of beats, optionally repeating.",
+      "type": "string"
+    },
+    {
+      "const": "chance",
+      "description": "A range of note chance.",
+      "type": "string"
+    },
+    {
+      "const": "condition",
+      "description": "Whether a note is active, has a chance, or has a velocity deviation.",
+      "type": "string"
+    },
+    {
+      "const": "count",
+      "description": "Every nth note, chord or grid step.",
+      "type": "string"
+    },
+    {
+      "const": "duration",
+      "description": "A range of note lengths.",
+      "type": "string"
+    },
+    {
+      "const": "scale",
+      "description": "Notes in a scale.",
+      "type": "string"
+    },
+    {
+      "const": "velocity",
+      "description": "A range of velocities.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `NoteFilters`
+
+Find and Select Notes, as the editor holds it and `view.state` reports it: whether the bar shows, the filter it shows, and every filter's settings.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `visible` | boolean | yes | Whether the filter bar shows above the editor's ruler. |
+| `shown` | [`NoteFilter`](#notefilter) | yes | The filter whose controls the bar shows. |
+| `pitch` | [`PitchFilter`](#pitchfilter) | yes | The Pitch filter. |
+| `time` | [`TimeFilter`](#timefilter) | yes | The Time filter. |
+| `chance` | [`ChanceFilter`](#chancefilter) | yes | The Chance filter. |
+| `condition` | [`ConditionFilter`](#conditionfilter) | yes | The Condition filter. |
+| `count` | [`CountFilter`](#countfilter) | yes | The Count filter. |
+| `duration` | [`DurationFilter`](#durationfilter) | yes | The Duration filter. |
+| `scale` | [`ScaleFilter`](#scalefilter) | yes | The Scale filter. |
+| `velocity` | [`VelocityFilter`](#velocityfilter) | yes | The Velocity filter. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Find and Select Notes, as the editor holds it and `view.state` reports it: whether the bar shows, the filter it shows, and every filter's settings.",
+  "properties": {
+    "chance": {
+      "$ref": "#/$defs/ChanceFilter",
+      "description": "The Chance filter."
+    },
+    "condition": {
+      "$ref": "#/$defs/ConditionFilter",
+      "description": "The Condition filter."
+    },
+    "count": {
+      "$ref": "#/$defs/CountFilter",
+      "description": "The Count filter."
+    },
+    "duration": {
+      "$ref": "#/$defs/DurationFilter",
+      "description": "The Duration filter."
+    },
+    "pitch": {
+      "$ref": "#/$defs/PitchFilter",
+      "description": "The Pitch filter."
+    },
+    "scale": {
+      "$ref": "#/$defs/ScaleFilter",
+      "description": "The Scale filter."
+    },
+    "shown": {
+      "$ref": "#/$defs/NoteFilter",
+      "description": "The filter whose controls the bar shows."
+    },
+    "time": {
+      "$ref": "#/$defs/TimeFilter",
+      "description": "The Time filter."
+    },
+    "velocity": {
+      "$ref": "#/$defs/VelocityFilter",
+      "description": "The Velocity filter."
+    },
+    "visible": {
+      "description": "Whether the filter bar shows above the editor's ruler.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "visible",
+    "shown",
+    "pitch",
+    "time",
+    "chance",
+    "condition",
+    "count",
+    "duration",
+    "scale",
+    "velocity"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `NoteFiltersResult`
+
+What `clip_view.note_filters` returns: the filters and the selection.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `filters` | [`NoteFilters`](#notefilters) | yes | The filters' settings, with which are on. |
+| `selected` | array of integer, at least 0 | yes | The selected notes, by their place in the clip's notes in order. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `clip_view.note_filters` returns: the filters and the selection.",
+  "properties": {
+    "filters": {
+      "$ref": "#/$defs/NoteFilters",
+      "description": "The filters' settings, with which are on."
+    },
+    "selected": {
+      "description": "The selected notes, by their place in the clip's notes in order.",
+      "items": {
+        "format": "uint32",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "filters",
+    "selected"
+  ],
+  "type": "object"
 }
 ```
 
@@ -17108,6 +18436,95 @@ One of:
 
 </details>
 
+### `PitchArgs`
+
+The Pitch filter's controls in `clip_view.note_filters`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `classes` | array or null | no | The pitch classes switched on, 0 (C) to 11 (B). |
+| `invert` | boolean or null | no | Switches the filter's Invert. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "additionalProperties": false,
+  "description": "The Pitch filter's controls in `clip_view.note_filters`.",
+  "properties": {
+    "classes": {
+      "description": "The pitch classes switched on, 0 (C) to 11 (B).",
+      "items": {
+        "format": "uint8",
+        "maximum": 255,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "invert": {
+      "description": "Switches the filter's Invert.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    }
+  },
+  "type": "object"
+}
+```
+
+</details>
+
+### `PitchFilter`
+
+The Pitch filter: pitch classes C to B.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean | yes | Whether the filter is on. |
+| `invert` | boolean | yes | Whether it lets through the notes it would hold back. |
+| `classes` | array of integer from 0 to 255 | yes | The pitch classes that are switched on, 0 (C) to 11 (B), in order. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The Pitch filter: pitch classes C to B.",
+  "properties": {
+    "classes": {
+      "description": "The pitch classes that are switched on, 0 (C) to 11 (B), in order.",
+      "items": {
+        "format": "uint8",
+        "maximum": 255,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": "array"
+    },
+    "invert": {
+      "description": "Whether it lets through the notes it would hold back.",
+      "type": "boolean"
+    },
+    "on": {
+      "description": "Whether the filter is on.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "on",
+    "invert",
+    "classes"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `PlacedClip`
 
 A clip a browser command placed.
@@ -17670,6 +19087,7 @@ One MIDI port as the Settings window's table shows it.
 | `track` | boolean | yes | Track: an input's notes and controllers reach tracks; an output takes tracks' MIDI. |
 | `sync` | boolean | yes | Sync: an input's clock and transport messages are followed; an output sends clock. Kept now, acted on when sync is built. |
 | `remote` | boolean | yes | Remote: an input controls Beatlayer through MIDI mapping; an output sends feedback. Kept now, acted on when MIDI mapping is built. |
+| `mpe` | boolean | yes | MPE: an input's messages reach tracks as MPE, each note on a channel of its own; an output has no MPE switch, and reads false. |
 | `present` | boolean | yes | Whether the MIDI system offers the port now. |
 | `open` | boolean | yes | Whether it is open: any of its switches is on. |
 | `error` | string or null | no | Why it couldn't be opened, if it couldn't. |
@@ -17690,6 +19108,11 @@ One MIDI port as the Settings window's table shows it.
         "string",
         "null"
       ]
+    },
+    "mpe": {
+      "default": false,
+      "description": "MPE: an input's messages reach tracks as MPE, each note on a channel of its own; an output has no MPE switch, and reads false.",
+      "type": "boolean"
     },
     "name": {
       "description": "The name the MIDI system gives it.",
@@ -17722,6 +19145,7 @@ One MIDI port as the Settings window's table shows it.
     "track",
     "sync",
     "remote",
+    "mpe",
     "present",
     "open"
   ],
@@ -17853,43 +19277,6 @@ What the preset commands return.
     "device",
     "path",
     "name"
-  ],
-  "type": "object"
-}
-```
-
-</details>
-
-### `PressurePoint`
-
-One point of a note's pressure (WP-2.29): from `at` after the note's start the note's key is pressed to `value`, until the next point.
-
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `at` | [`Ticks`](#ticks) | yes | Where it takes effect, counted from the note's start: 0 or more and before the note's length. |
-| `value` | integer from 0 to 127 | yes | The pressure, from 0 to 127. |
-
-<details><summary>JSON Schema</summary>
-
-```json
-{
-  "description": "One point of a note's pressure (WP-2.29): from `at` after the note's start the note's key is pressed to `value`, until the next point.",
-  "properties": {
-    "at": {
-      "$ref": "#/$defs/Ticks",
-      "description": "Where it takes effect, counted from the note's start: 0 or more and before the note's length."
-    },
-    "value": {
-      "description": "The pressure, from 0 to 127.",
-      "format": "uint8",
-      "maximum": 127,
-      "minimum": 0,
-      "type": "integer"
-    }
-  },
-  "required": [
-    "at",
-    "value"
   ],
   "type": "object"
 }
@@ -20457,6 +21844,69 @@ What `clip.save_default` and `clip.defaults` return.
 
 </details>
 
+### `SavedLabelInfo`
+
+A saved label (spec: browser-tags R24).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `label` | [`Label`](#label) | yes | The label, `{"saved": id}`. |
+| `name` | string | yes | Its name. |
+| `base` | [`Label`](#label) | yes | The label it was made under. |
+| `search` | string | yes | The search words it keeps. |
+| `tags` | array of string | yes | The tags it keeps, by their full names. |
+| `icon` | string or null | no | The icon it was given. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A saved label (spec: browser-tags R24).",
+  "properties": {
+    "base": {
+      "$ref": "#/$defs/Label",
+      "description": "The label it was made under."
+    },
+    "icon": {
+      "description": "The icon it was given.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "label": {
+      "$ref": "#/$defs/Label",
+      "description": "The label, `{\"saved\": id}`."
+    },
+    "name": {
+      "description": "Its name.",
+      "type": "string"
+    },
+    "search": {
+      "description": "The search words it keeps.",
+      "type": "string"
+    },
+    "tags": {
+      "description": "The tags it keeps, by their full names.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "label",
+    "name",
+    "base",
+    "search",
+    "tags"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `Scale`
 
 A scale: whether Scale Mode is on (`enabled`), the root note (0 is C, 11 is B), and the scale's `name`, from the scale list. A scale with `enabled` false is the chromatic scale, whose degree is a semitone.
@@ -20500,6 +21950,66 @@ A scale: whether Scale Mode is on (`enabled`), the root note (0 is C, 11 is B), 
 
 </details>
 
+### `ScaleArgs`
+
+The Scale filter's controls in `clip_view.note_filters`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `invert` | boolean or null | no | Switches the filter's Invert. |
+| `name` | [`ScaleName`](#scalename) or null | no | The Scale Name chooser. |
+| `root` | integer or null | no | The Scale Root chooser, 0 (C) to 11 (B). |
+| `use_clip_scale` | boolean or null | no | The Use Clip Scale switch. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "additionalProperties": false,
+  "description": "The Scale filter's controls in `clip_view.note_filters`.",
+  "properties": {
+    "invert": {
+      "description": "Switches the filter's Invert.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "name": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ScaleName"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The Scale Name chooser."
+    },
+    "root": {
+      "description": "The Scale Root chooser, 0 (C) to 11 (B).",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "use_clip_scale": {
+      "description": "The Use Clip Scale switch.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    }
+  },
+  "type": "object"
+}
+```
+
+</details>
+
 ### `ScaleEntry`
 
 One scale in the list.
@@ -20533,6 +22043,61 @@ One scale in the list.
   "required": [
     "name",
     "steps"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ScaleFilter`
+
+The Scale filter.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean | yes | Whether the filter is on. |
+| `invert` | boolean | yes | Whether it lets through the notes it would hold back. |
+| `use_clip_scale` | boolean | yes | Use the clip's scale, whether or not its Scale Mode is on. |
+| `root` | integer from 0 to 255 | yes | The filter's own root, 0 (C) to 11 (B), while `use_clip_scale` is off. |
+| `name` | [`ScaleName`](#scalename) | yes | The filter's own scale, while `use_clip_scale` is off. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The Scale filter.",
+  "properties": {
+    "invert": {
+      "description": "Whether it lets through the notes it would hold back.",
+      "type": "boolean"
+    },
+    "name": {
+      "$ref": "#/$defs/ScaleName",
+      "description": "The filter's own scale, while `use_clip_scale` is off."
+    },
+    "on": {
+      "description": "Whether the filter is on.",
+      "type": "boolean"
+    },
+    "root": {
+      "description": "The filter's own root, 0 (C) to 11 (B), while `use_clip_scale` is off.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "use_clip_scale": {
+      "description": "Use the clip's scale, whether or not its Scale Mode is on.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "on",
+    "invert",
+    "use_clip_scale",
+    "root",
+    "name"
   ],
   "type": "object"
 }
@@ -20977,6 +22542,77 @@ What the search field shows (R15).
 
 </details>
 
+### `SecondWindowState`
+
+What `view.toggle_second_window` returns and `view.state` reports under `second_window` (second-window R15).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `open` | boolean | yes | Whether the second window is open. |
+| `main_view` | string | yes | The main view it shows, or would show: the one the main window doesn't. |
+| `browser` | boolean | yes | Whether its browser shows; it opens without. |
+| `full_screen` | boolean | yes | Whether it is in full-screen mode. |
+| `zoom` | number | yes | Its interface zoom, where 1 is 100%, kept while it is closed. |
+| `detail` | [`DetailState`](#detailstate) | yes | Its detail area. |
+| `frame` | [`WindowFrame`](#windowframe) or null | no | Where it sat and how big it was when it was last open, in points; none before it has been opened. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `view.toggle_second_window` returns and `view.state` reports under `second_window` (second-window R15).",
+  "properties": {
+    "browser": {
+      "description": "Whether its browser shows; it opens without.",
+      "type": "boolean"
+    },
+    "detail": {
+      "$ref": "#/$defs/DetailState",
+      "description": "Its detail area."
+    },
+    "frame": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/WindowFrame"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Where it sat and how big it was when it was last open, in points; none before it has been opened."
+    },
+    "full_screen": {
+      "description": "Whether it is in full-screen mode.",
+      "type": "boolean"
+    },
+    "main_view": {
+      "description": "The main view it shows, or would show: the one the main window doesn't.",
+      "type": "string"
+    },
+    "open": {
+      "description": "Whether the second window is open.",
+      "type": "boolean"
+    },
+    "zoom": {
+      "description": "Its interface zoom, where 1 is 100%, kept while it is closed.",
+      "format": "float",
+      "type": "number"
+    }
+  },
+  "required": [
+    "open",
+    "main_view",
+    "browser",
+    "full_screen",
+    "zoom",
+    "detail"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `Section`
 
 A sidebar section.
@@ -21083,6 +22719,46 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `SelectedBreakpoint`
+
+The breakpoint selected in an automation lane, with the edit it opens (the automation editing spec, R22, R23).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track. |
+| `target` | [`AutomationTarget`](#automationtarget) | yes | The parameter the lane shows. |
+| `at` | [`Ticks`](#ticks) | yes | The breakpoint's position. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The breakpoint selected in an automation lane, with the edit it opens (the automation editing spec, R22, R23).",
+  "properties": {
+    "at": {
+      "$ref": "#/$defs/Ticks",
+      "description": "The breakpoint's position."
+    },
+    "target": {
+      "$ref": "#/$defs/AutomationTarget",
+      "description": "The parameter the lane shows."
+    },
+    "track": {
+      "$ref": "#/$defs/TrackId",
+      "description": "The track."
+    }
+  },
+  "required": [
+    "track",
+    "target",
+    "at"
+  ],
+  "type": "object"
 }
 ```
 
@@ -23601,6 +25277,120 @@ Type: integer.
 
 </details>
 
+### `TimeArgs`
+
+The Time filter's controls in `clip_view.note_filters`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `invert` | boolean or null | no | Switches the filter's Invert. |
+| `length` | number or null | no | Length, in beats; above 0. |
+| `repeat` | number or null | no | Repeat, in beats; 0 for none, `null` for one bar of the clip's time signature. |
+| `start` | number or null | no | Start, in beats from 1; hundredths of a beat. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "additionalProperties": false,
+  "description": "The Time filter's controls in `clip_view.note_filters`.",
+  "properties": {
+    "invert": {
+      "description": "Switches the filter's Invert.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "length": {
+      "description": "Length, in beats; above 0.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "repeat": {
+      "description": "Repeat, in beats; 0 for none, `null` for one bar of the clip's time signature.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "start": {
+      "description": "Start, in beats from 1; hundredths of a beat.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    }
+  },
+  "type": "object"
+}
+```
+
+</details>
+
+### `TimeFilter`
+
+The Time filter, in beats of the clip's time signature.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean | yes | Whether the filter is on. |
+| `invert` | boolean | yes | Whether it lets through the notes it would hold back. |
+| `start` | number | yes | Where the window starts, in beats from 1, the clip's 1.1.1. |
+| `length` | number | yes | How long the window is, in beats; above 0. |
+| `repeat` | number or null | yes | How far later the window repeats, in beats; 0 for no repeat. `null` is one bar of the clip's time signature. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The Time filter, in beats of the clip's time signature.",
+  "properties": {
+    "invert": {
+      "description": "Whether it lets through the notes it would hold back.",
+      "type": "boolean"
+    },
+    "length": {
+      "description": "How long the window is, in beats; above 0.",
+      "format": "double",
+      "type": "number"
+    },
+    "on": {
+      "description": "Whether the filter is on.",
+      "type": "boolean"
+    },
+    "repeat": {
+      "description": "How far later the window repeats, in beats; 0 for no repeat. `null` is one bar of the clip's time signature.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "start": {
+      "description": "Where the window starts, in beats from 1, the clip's 1.1.1.",
+      "format": "double",
+      "type": "number"
+    }
+  },
+  "required": [
+    "on",
+    "invert",
+    "start",
+    "length",
+    "repeat"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `TimeRange`
 
 A span of time.
@@ -25333,6 +27123,109 @@ One stored macro variation as `rack.macros` reports it.
 
 </details>
 
+### `VelocityArgs`
+
+The Velocity filter's controls in `clip_view.note_filters`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `invert` | boolean or null | no | Switches the filter's Invert. |
+| `max` | integer or null | no | Max, 1 to 127. Moving it past Min takes Min with it. |
+| `min` | integer or null | no | Min, 1 to 127. Moving it past Max takes Max with it. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "additionalProperties": false,
+  "description": "The Velocity filter's controls in `clip_view.note_filters`.",
+  "properties": {
+    "invert": {
+      "description": "Switches the filter's Invert.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "max": {
+      "description": "Max, 1 to 127. Moving it past Min takes Min with it.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "min": {
+      "description": "Min, 1 to 127. Moving it past Max takes Max with it.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "type": "object"
+}
+```
+
+</details>
+
+### `VelocityFilter`
+
+The Velocity filter.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean | yes | Whether the filter is on. |
+| `invert` | boolean | yes | Whether it lets through the notes it would hold back. |
+| `min` | integer from 0 to 255 | yes | The lowest velocity let through, 1 to 127. |
+| `max` | integer from 0 to 255 | yes | The highest velocity let through, 1 to 127. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The Velocity filter.",
+  "properties": {
+    "invert": {
+      "description": "Whether it lets through the notes it would hold back.",
+      "type": "boolean"
+    },
+    "max": {
+      "description": "The highest velocity let through, 1 to 127.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "min": {
+      "description": "The lowest velocity let through, 1 to 127.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "on": {
+      "description": "Whether the filter is on.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "on",
+    "invert",
+    "min",
+    "max"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `View`
 
 A view to capture.
@@ -25437,6 +27330,7 @@ What the view commands return: the window's view state afterwards.
 |---|---|---|---|
 | `main_view` | string | yes | The main view: `arrangement` or `session`. |
 | `browser` | boolean | yes | Whether the browser shows. |
+| `full_height_browser` | boolean | yes | Whether the browser runs down to the Status Bar (Full-Height Browser, spec: browser R26). |
 | `info_view` | boolean | yes | Whether the Info View shows. |
 | `full_screen` | boolean | yes | Whether the main window is in full-screen mode. |
 | `zoom` | number | yes | The interface zoom, where 1 is 100%. |
@@ -25449,6 +27343,11 @@ What the view commands return: the window's view state afterwards.
   "properties": {
     "browser": {
       "description": "Whether the browser shows.",
+      "type": "boolean"
+    },
+    "full_height_browser": {
+      "default": false,
+      "description": "Whether the browser runs down to the Status Bar (Full-Height Browser, spec: browser R26).",
       "type": "boolean"
     },
     "full_screen": {
@@ -25472,6 +27371,7 @@ What the view commands return: the window's view state afterwards.
   "required": [
     "main_view",
     "browser",
+    "full_height_browser",
     "info_view",
     "full_screen",
     "zoom"
@@ -25489,6 +27389,8 @@ What `view.state` returns: what the view commands switch, without switching any 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `window` | [`ViewResult`](#viewresult) | yes | The main window: the main view, the browser, the Info View, full-screen mode and the interface zoom. |
+| `second_window` | [`SecondWindowState`](#secondwindowstate) | yes | The second window: whether it is open, the main view it shows, its browser, zoom, frame and detail area. |
+| `focused_window` | [`WindowName`](#windowname) | yes | The window the commands that act on one window act on when they aren't told which: the one with the focus. |
 | `clip_view` | [`ClipViewState`](#clipviewstate) | yes | The Clip View and its note editor: whether it shows, Draw Mode, the clip it holds, the selected notes, the lane and Fold. |
 | `detail` | [`DetailState`](#detailstate) | yes | The detail area: which of the Clip View and the Device View show, the Clip View's height, and where the focus is. |
 | `plugin_list` | [`PluginListState`](#pluginliststate) | yes | The list of the set's plug-ins: whether it shows, and whether Show Only Missing is on. |
@@ -25514,6 +27416,10 @@ What `view.state` returns: what the view commands switch, without switching any 
       "$ref": "#/$defs/DetailState",
       "description": "The detail area: which of the Clip View and the Device View show, the Clip View's height, and where the focus is."
     },
+    "focused_window": {
+      "$ref": "#/$defs/WindowName",
+      "description": "The window the commands that act on one window act on when they aren't told which: the one with the focus."
+    },
     "plug_in_windows": {
       "description": "Whether floating devices' and plug-ins' windows are shown, as `view.toggle_plug_in_windows` sets it.",
       "type": "boolean"
@@ -25521,6 +27427,10 @@ What `view.state` returns: what the view commands switch, without switching any 
     "plugin_list": {
       "$ref": "#/$defs/PluginListState",
       "description": "The list of the set's plug-ins: whether it shows, and whether Show Only Missing is on."
+    },
+    "second_window": {
+      "$ref": "#/$defs/SecondWindowState",
+      "description": "The second window: whether it is open, the main view it shows, its browser, zoom, frame and detail area."
     },
     "undo_history": {
       "description": "Whether the Undo History panel shows.",
@@ -25533,6 +27443,8 @@ What `view.state` returns: what the view commands switch, without switching any 
   },
   "required": [
     "window",
+    "second_window",
+    "focused_window",
     "clip_view",
     "detail",
     "plugin_list",
@@ -25852,6 +27764,37 @@ Where a floating device's window sits and how big it is (IMP-14, WP-2.5b), in po
     "height"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `WindowName`
+
+One of the two main windows (second-window R15).
+
+One of:
+
+- `"main"`: The main window.
+- `"second"`: The second window.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One of the two main windows (second-window R15).",
+  "oneOf": [
+    {
+      "const": "main",
+      "description": "The main window.",
+      "type": "string"
+    },
+    {
+      "const": "second",
+      "description": "The second window.",
+      "type": "string"
+    }
+  ]
 }
 ```
 

@@ -120,7 +120,7 @@ Result: [`MidiImportResult`](README.md#midiimportresult).
 
 **MIDI Ports**. Permission: `read`. Contexts: `global`.
 
-Lists every MIDI input and output port the computer offers, each with its Track, Sync, and Remote switches as the Settings window's Tempo & MIDI page shows them, and the computer MIDI keyboard's state. Changes nothing.
+Lists every MIDI input and output port the computer offers, each with its Track, Sync, Remote and MPE switches as the Settings window's Tempo & MIDI page shows them, and the computer MIDI keyboard's state. Changes nothing.
 
 Default keys: none.
 
@@ -132,7 +132,7 @@ Result: [`MidiPortsResult`](README.md#midiportsresult).
 
 **Set MIDI Port**. Permission: `external`. Contexts: `global`.
 
-Changes a MIDI port's Track, Sync, and Remote switches, as the Settings window's MIDI ports table does; switches left out stay as they are. A port is open while any of its switches is on and closed when all are off. An input's notes and controllers reach tracks only while its Track switch is on; Sync and Remote are kept and act when sync and MIDI mapping are built. The port's switches are kept for the next start, and aren't part of the set or an undo step. Opens or closes a device outside Beatlayer. Fails if the computer doesn't offer the port now.
+Changes a MIDI port's Track, Sync, Remote and MPE switches, as the Settings window's MIDI ports table does; switches left out stay as they are. A port is open while its Track, Sync or Remote switch is on and closed when all three are off; MPE opens nothing by itself. An input's notes and controllers reach tracks only while its Track switch is on, and as MPE, each note on a channel of its own with its own pitch, slide and pressure, while its MPE switch is on too; Sync and Remote are kept and act when sync and MIDI mapping are built. Output ports have no MPE switch, and `mpe` on one is refused. The port's switches are kept for the next start, and aren't part of the set or an undo step. Opens or closes a device outside Beatlayer. Fails if the computer doesn't offer the port now.
 
 Default keys: none.
 
@@ -142,6 +142,7 @@ Arguments:
 |---|---|---|---|
 | `direction` | [`PortDirection`](README.md#portdirection) | yes | Input or output. |
 | `name` | string | yes | The port's name, as `midi.ports` lists it. |
+| `mpe` | boolean or null | no | MPE on or off, for an input. Left out, it stays as it is. |
 | `remote` | boolean or null | no | Remote on or off. Left out, it stays as it is. |
 | `sync` | boolean or null | no | Sync on or off. Left out, it stays as it is. |
 | `track` | boolean or null | no | Track on or off. Left out, it stays as it is. |

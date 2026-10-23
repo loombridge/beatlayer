@@ -1935,6 +1935,17 @@ fn paths() -> BTreeMap<&'static str, Path> {
          the envelopes (S-EDIT-016), and the lane's gestures move and select their breakpoints \
          (automation-editing R2 to R4)",
     );
+    // The shapes are buttons in the time selection's context menu, which
+    // the keyboard opens (S-CTX-002); the handles that stretch and skew a
+    // selection are dragged, and the manual gives them no keys.
+    let envelope_shapes = Equivalent(
+        "the buttons of the time selection's context menu in an automation lane, which the \
+         context-menu keys open (S-CTX-002; automation-editing R11)",
+    );
+    let handles = Live(
+        "the handles of a time selection in an automation lane are dragged; the manual gives \
+         them no keys (manual 25.5.3; automation-editing R14 to R17)",
+    );
     // The browser's tags (browser-tags R10 to R16): the Tag Editor and
     // Quick Tags reach them.
     let tag_editor = Equivalent(
@@ -1962,7 +1973,11 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("automation.delete_range", Exception(envelope_edit)),
         ("automation.duplicate", Exception(envelope_edit)),
         ("automation.move_breakpoints", Exception(envelope_edit)),
+        ("automation.insert_shape", Exception(envelope_shapes)),
         ("automation.paste", Exception(envelope_edit)),
+        ("automation.skew", Exception(handles)),
+        ("automation.stretch_time", Exception(handles)),
+        ("automation.stretch_values", Exception(handles)),
         ("automation.select_segment", Exception(envelope_edit)),
         ("automation.set_envelope", Exception(envelope_edit)),
         (

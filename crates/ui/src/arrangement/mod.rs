@@ -1111,6 +1111,12 @@ impl ArrangementUi {
             automation::paint_lane(&painter, rect, theme);
             if let Some(lane) = automation_lanes.lane(row, shell) {
                 automation::paint_envelope(&painter, &lane, theme);
+                let outline = ui.input(|i| {
+                    let pointer = i.pointer.interact_pos()?;
+                    self.automation
+                        .outline(row.track, view, doc, pointer, i.modifiers)
+                });
+                automation::paint_handles(&painter, ui, &lane, theme, outline);
             }
             // The lane's accessible node, naming the parameter it shows.
             let id = automation::lane_id(row.track);

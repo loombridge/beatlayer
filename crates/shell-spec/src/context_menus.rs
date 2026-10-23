@@ -13,6 +13,7 @@
 
 use crate::arrangement::SET_GRID;
 use crate::audio_editing::CONSOLIDATE_TO_SCENE;
+use crate::automation::{INSERT_SHAPE, SIMPLIFY};
 use crate::devices::{
     COMPARE_COPY, COMPARE_SWITCH, SAVE_DEFAULT_PRESET, SET_FLOATING, SET_ROLE, UNGROUP,
 };
@@ -29,6 +30,11 @@ const SET_CHAIN_COLOUR: &str = "chain.set_colour";
 
 /// The rows that hold the zoom-adaptive grid's settings.
 pub const ADAPTIVE_GRID_ROWS: [&str; 2] = ["C-CLIP-ARR-020", "C-TIME-013"];
+
+/// The rows that hold the automation shapes, as rows of buttons: the
+/// waveforms, then the ramps and the ADSR (C-TIME-021; the automation
+/// editing spec, R11).
+pub const SHAPE_ROWS: [&str; 2] = ["C-TIME-021a", "C-TIME-021b"];
 
 /// The rows that hold the fixed grid's spacings.
 pub const FIXED_GRID_ROWS: [&str; 2] = ["C-CLIP-ARR-021", "C-TIME-014"];
@@ -506,7 +512,20 @@ pub fn pending_package(row: &str) -> Option<&'static str> {
 pub struct SelectionMenu {
     /// The selection holds clips.
     pub clips: bool,
+    /// The time selection covers an automation lane, which brings the
+    /// shapes and Simplify Envelope (C-TIME-021).
+    pub automation: bool,
 }
+
+/// The rows a time selection in an automation lane adds to the top of its
+/// menu: the shapes as two rows of buttons, and Simplify Envelope. Where in
+/// the menu they sit isn't recorded in the UI parity reference.
+const TIME_AUTOMATION: &[Row] = &[
+    ("C-TIME-021a", "Waveforms", Cmd(INSERT_SHAPE)),
+    ("C-TIME-021b", "Ramps and ADSR", Cmd(INSERT_SHAPE)),
+    ("C-TIME-021c", "Simplify Envelope", Cmd(SIMPLIFY)),
+    SEPARATOR,
+];
 
 /// The rows a selection that holds clips adds to a clip's menu.
 const CLIP_SELECTION: &[Row] = &[
@@ -612,7 +631,12 @@ pub fn arrangement_time() -> Vec<MenuItem> {
 /// adds.
 #[must_use]
 pub fn arrangement_time_in(state: SelectionMenu) -> Vec<MenuItem> {
-    items(&with_selection(TIME, TIME_SELECTION, "C-TIME-007", state))
+    let mut rows = Vec::new();
+    if state.automation {
+        rows.extend_from_slice(TIME_AUTOMATION);
+    }
+    rows.extend(with_selection(TIME, TIME_SELECTION, "C-TIME-007", state));
+    items(&rows)
 }
 
 /// The scrub area's menu (C-TIME-022).

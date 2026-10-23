@@ -110,8 +110,8 @@ pub use auto_warp::{
     nearest_bars,
 };
 pub use automation::{
-    Automation, AutomationTarget, Breakpoint, Envelope, MixerParam, TrackAutomation, curve_value,
-    envelope_value,
+    Automation, AutomationTarget, Breakpoint, Envelope, LinearRange, MixerParam, ParamScale, Shape,
+    TrackAutomation, curve_value, envelope_value,
 };
 pub use bl_stretch::WarpMap;
 pub use bounce::{BouncedAutomation, BouncedTrack};

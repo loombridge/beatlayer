@@ -6980,6 +6980,11 @@ impl Shell {
             // Spec: capture-midi R1. Nothing played, nothing to capture.
             return self.capture_midi_ready() && self.audio.engine_running();
         }
+        if id == automation_ids::SIMPLIFY && args.get("lanes").is_none() {
+            // Spec: automation-editing R18. Disabled without a time selection
+            // in an automation lane.
+            return automation::can_run(id, &self.arrangement, None);
+        }
         if ids::handles(id) || transport_ids::handles(id) {
             return true;
         }

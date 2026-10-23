@@ -19,6 +19,7 @@
 use crate::arrangement::{SHOW_IN_OUT, SHOW_RETURN_TRACKS, SHOW_VOLUME};
 use crate::assistant::VIEW_TOGGLE_ASSISTANT;
 use crate::audio_editing::CONSOLIDATE_TO_SCENE;
+use crate::automation::SIMPLIFY;
 use crate::browser::{ADD_FOLDER as BROWSER_ADD_FOLDER, SET_PREVIEW as BROWSER_PREVIEW};
 use crate::capture_midi::CAPTURE as CAPTURE_MIDI;
 use crate::commands::{
@@ -437,7 +438,7 @@ const EDIT: &[Row] = &[
         Pending(None),
     ),
     SEPARATOR,
-    ("M-EDIT-039", "Simplify Envelope", Pending(None)),
+    ("M-EDIT-039", "Simplify Envelope", Cmd(SIMPLIFY)),
     SEPARATOR,
     (
         "M-EDIT-040",

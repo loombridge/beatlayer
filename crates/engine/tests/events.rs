@@ -2,10 +2,7 @@
 //! the queue, without a recompile. Every block runs as a real-time section
 //! under the allocation trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_engine::mixer;
 use bl_engine::{NodeKey, ParamEvent, ParamValue, When, testing};
 use bl_model::{Command, TrackKind};

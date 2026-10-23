@@ -20,10 +20,7 @@
 //! Routing and transport commands run by ID with JSON arguments, as an
 //! agent runs them (D17).
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 

@@ -15,8 +15,6 @@ use bl_shell::audio::{EngineCallback, EngineShared, ToneSettings};
 use bl_shell::testing;
 use serde_json::json;
 
-bl_rt::install_trap!();
-
 fn context(frames: usize) -> ProcessContext {
     ProcessContext {
         sample_rate: 48_000,

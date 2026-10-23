@@ -4,8 +4,6 @@
 //! engine. Without `--autonomous`, the export, which writes a file outside
 //! the project, is refused, as there's no one to ask.
 
-bl_rt::install_trap!();
-
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;

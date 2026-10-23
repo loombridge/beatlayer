@@ -1,10 +1,7 @@
 //! Auto Pan-Tremolo tests (WP-5.20c; the auto-pan-tremolo spec).
 //! Every block runs as a real-time section under the allocation trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use core::f64::consts::SQRT_2;
 
 use bl_core::time::{Bpm, Frames, TempoMap, TempoSegment, Ticks};

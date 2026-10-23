@@ -1,10 +1,7 @@
 //! Looper (WP-5.26b; the looper spec). Every block runs as a real-time
 //! section under the allocation trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_core::time::{Bpm, Frames, TempoMap};
 use bl_devices::looper::{
     self, AFTER_RECORD, Action, FEEDBACK, INPUT_OUTPUT, QUANTIZATION, RECORD_LENGTH, REVERSE,

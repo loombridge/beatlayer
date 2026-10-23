@@ -9,8 +9,6 @@
 
 #![cfg(target_os = "macos")]
 
-bl_rt::install_trap!();
-
 use bl_core::id::Id;
 use bl_core::time::SampleRate;
 use bl_engine::{

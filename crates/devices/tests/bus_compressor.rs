@@ -3,10 +3,7 @@
 //! Auto Release, Range, Makeup, Soft Clip and its light, Dry/Wet,
 //! Oversampling and its latency, and a sidechain key that ducks the input.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use std::f64::consts::TAU;
 
 use bl_devices::bus_compressor::{

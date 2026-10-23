@@ -2,8 +2,7 @@
 //! track headers, the locators in the scrub area, the gestures, and the
 //! menus. Spec: time-editing.
 
-mod common;
-
+use crate::common;
 use bl_core::time::Ticks;
 use bl_shell::arrangement_commands::ArrangementState;
 use bl_shell::locator_commands as ids;

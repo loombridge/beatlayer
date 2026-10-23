@@ -8,10 +8,7 @@
 //!
 //! Spec: vst3-hosting R17, as clap-hosting R17.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_core::time::SampleRate;
 use bl_engine::{NodeConfig, NodeFactory};
 use bl_plugin_host::vst3::{Vst3Error, Vst3Host};

@@ -7,13 +7,10 @@
 //! Every block runs under the allocation trap. The spec is
 //! the transport spec, rule R20.
 //!
-//! `cargo test -p bl-engine --test playhead -- --nocapture` prints what the
+//! `cargo test -p bl-engine --test engine_tests -- playhead:: --nocapture` prints what the
 //! UI thread saw.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};

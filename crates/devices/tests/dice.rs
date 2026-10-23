@@ -3,10 +3,7 @@
 //! render repeats. Every block is a real-time section under the allocation
 //! trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_devices::dice::{CHANCE, CHOICES, DICE, INTERVAL, MODE, SIGN, USE_SCALE};
 use bl_engine::NoteKind;
 use bl_engine::scales::ScaleRuns;

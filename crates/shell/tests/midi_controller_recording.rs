@@ -10,8 +10,6 @@
 //!   disabled by controllers alone.
 //! - The whole path allocates nothing on the audio thread.
 
-bl_rt::install_trap!();
-
 use bl_audio_io::{BackendKind, NullBackend, NullControl, NullOptions, Pacing};
 use bl_midi_io::{Direction, TestBackend};
 use bl_model::{AutomationTarget, Clip, ClipData, SceneId, TrackId};

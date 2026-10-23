@@ -9,8 +9,6 @@
 //!
 //! The null tests against the stored references are in `golden.rs`.
 
-bl_rt::install_trap!();
-
 use bl_cli::golden::{SAMPLE_RATE, fixture};
 use bl_cli::render::Cue;
 use bl_core::time::{Frames, TempoMap, Ticks};

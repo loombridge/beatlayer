@@ -11,8 +11,6 @@
 //! the default for local runs and pull requests, each fixture exports as one
 //! of the three in turn, so every fixture and every format is still checked.
 
-bl_rt::install_trap!();
-
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};

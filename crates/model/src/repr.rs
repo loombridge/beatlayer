@@ -13,7 +13,7 @@ use schemars::{JsonSchema, Schema, schema_for};
 use serde::{Deserialize, Serialize};
 
 use crate::automation::{AutomationTarget, Breakpoint, Envelope};
-use crate::clip::{Clip, TakeLane};
+use crate::clip::{Clip, ClipData, TakeLane};
 use crate::command::{
     check_chain, check_clip, check_clip_fits, check_crossfader, check_device, check_extent,
     check_mixer, check_send_level,
@@ -454,21 +454,27 @@ impl Loader {
             track.devices.push_back(Shared::new(device));
         }
         check_chain(&track)?;
-        for clip in repr.clips {
+        for mut clip in repr.clips {
             self.claim(clip.id.0)?;
             check_clip_fits(&track, &clip.data)?;
             check_extent(clip.start, clip.length)?;
+            if let ClipData::Midi(midi) = &mut clip.data {
+                midi.repair_groups();
+            }
             check_clip(&clip)?;
             self.index.clip_track.insert(clip.id, id);
             track.clips.insert(clip.id, Shared::new(clip));
         }
-        for slot in repr.slots {
+        for mut slot in repr.slots {
             self.claim(slot.clip.id.0)?;
             check_clip_fits(&track, &slot.clip.data)?;
             if slot.clip.start != Ticks::ZERO {
                 return Err(ModelError::SlotClipPosition(slot.clip.start));
             }
             check_extent(slot.clip.start, slot.clip.length)?;
+            if let ClipData::Midi(midi) = &mut slot.clip.data {
+                midi.repair_groups();
+            }
             check_clip(&slot.clip)?;
             self.index.clip_track.insert(slot.clip.id, id);
             if track
@@ -479,12 +485,15 @@ impl Loader {
                 return Err(ModelError::DuplicateId(slot.scene.0));
             }
         }
-        for lane in repr.take_lanes {
+        for mut lane in repr.take_lanes {
             self.claim(lane.id.0)?;
-            for clip in &lane.clips {
+            for clip in lane.clips.iter_mut() {
                 self.claim(clip.id.0)?;
                 check_clip_fits(&track, &clip.data)?;
                 check_extent(clip.start, clip.length)?;
+                if let ClipData::Midi(midi) = &mut clip.data {
+                    midi.repair_groups();
+                }
                 check_clip(clip)?;
                 self.index.clip_track.insert(clip.id, id);
             }

@@ -8070,6 +8070,9 @@ pub(crate) fn check_midi(midi: &MidiData) -> Result<(), ModelError> {
     if let Some(end) = midi.loop_end.filter(|&end| end <= midi.loop_start) {
         return Err(ModelError::EmptyLength(end));
     }
+    if !midi.groups_hold() {
+        return Err(ModelError::BrokenGroups);
+    }
     Ok(())
 }
 
@@ -8988,6 +8991,70 @@ mod tests {
             song.reject(Command::SetClipData { clip, data }),
             ModelError::EmptyLength(Ticks::ZERO)
         );
+    }
+
+    // Spec: note-editing R21, R30. A clip's groups hold two or more notes of
+    // one chance, all listed; cropping ends a group left with one note.
+    #[test]
+    fn probability_groups_are_checked_and_end_below_two_notes() {
+        use crate::{GroupKind, NoteGroup};
+        let mut song = Song::new();
+        let track = song.track(TrackKind::Midi, None);
+        let clip = song.clip(track, 0);
+        let grouped = |chance: [f64; 2], listed: bool, third: bool| {
+            let notes = chance.iter().enumerate().map(|(place, chance)| Note {
+                probability: *chance,
+                group: Some(1),
+                ..Note::new(
+                    60 + place as u8,
+                    Ticks::QUARTER * place as i64,
+                    Ticks::QUARTER,
+                    100,
+                )
+            });
+            let mut data = MidiData::new(
+                notes.chain(third.then(|| Note::new(70, Ticks::QUARTER * 2, Ticks::QUARTER, 100))),
+            );
+            if listed {
+                data.groups = vec![NoteGroup {
+                    id: 1,
+                    kind: GroupKind::PlayOne,
+                }];
+            }
+            ClipData::Midi(data)
+        };
+        for data in [
+            grouped([0.5, 0.25], true, false),
+            grouped([0.5, 0.5], false, false),
+        ] {
+            assert_eq!(
+                song.reject(Command::SetClipData { clip, data }),
+                ModelError::BrokenGroups
+            );
+        }
+        let whole = grouped([0.5, 0.5], true, true);
+        song.apply(Command::SetClipData {
+            clip,
+            data: whole.clone(),
+        })
+        .unwrap();
+        // A group of one note is refused too.
+        let ClipData::Midi(full) = whole else {
+            unreachable!()
+        };
+        let mut one = full.clone();
+        one.notes.truncate(1);
+        assert_eq!(
+            song.reject(Command::SetClipData {
+                clip,
+                data: ClipData::Midi(one),
+            }),
+            ModelError::BrokenGroups
+        );
+        // Cropping to the first note leaves it alone in its group.
+        let cropped = full.cropped(Ticks::ZERO, Ticks::QUARTER);
+        assert_eq!(cropped.notes.len(), 1);
+        assert!(cropped.groups.is_empty() && cropped.notes[0].group.is_none());
     }
 
     // Spec: audio-clips R23, R25, R30

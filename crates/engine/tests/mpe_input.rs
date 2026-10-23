@@ -6,7 +6,7 @@
 
 bl_rt::install_trap!();
 
-mod common;
+use crate::common;
 
 use std::time::{Duration, Instant};
 

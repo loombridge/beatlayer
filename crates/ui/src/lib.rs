@@ -71,6 +71,7 @@ pub mod menus;
 pub mod middle;
 pub mod mixer;
 pub mod multisampler;
+pub mod note_filters;
 pub mod note_lanes;
 pub mod plugin_list;
 pub mod rack_view;

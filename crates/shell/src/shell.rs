@@ -6973,6 +6973,17 @@ impl Shell {
             REDUCED_LATENCY_MONITORING => {
                 return self.editor.document().settings().delay_compensation;
             }
+            // Spec: find-and-select-notes R13. Edit ▸ Invert Selection is
+            // enabled while the editor shows a clip that holds notes.
+            note_ids::INVERT_SELECTION => {
+                return self
+                    .clip_view
+                    .shown_clip(self.editor.document(), &self.arrangement)
+                    .and_then(|clip| self.editor.document().clip(clip))
+                    .is_some_and(
+                        |clip| matches!(&clip.data, ClipData::Midi(midi) if !midi.notes.is_empty()),
+                    );
+            }
             // Spec: note-editing R22, R23. Group Notes needs two notes, and
             // Ungroup Notes a grouped one.
             note_ids::GROUP | note_ids::UNGROUP => {
@@ -7957,6 +7968,11 @@ impl Shell {
             // current scale, and a change to that clip's scale changes it
             // with it.
             self.follow_shown_scale(id, shown);
+            // Spec: find-and-select-notes R12. Every filter is switched off
+            // when the editor shows another clip.
+            if self.shown_clip() != shown {
+                self.clip_view.switch_filters_off();
+            }
             if self.document_revision != revision && self.editor_generation == generation {
                 // Spec: crash-recovery R1. The finished edit is journalled,
                 // so the set can be recovered after a crash.

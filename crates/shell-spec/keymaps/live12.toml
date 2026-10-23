@@ -2048,7 +2048,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+Shift+A"]
 win = ["Ctrl+Shift+A"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "clip_view.invert_selection", contexts = ["note-editor"] },
+]
 
 [[shortcut]]
 id = "S-NOTE-035"
@@ -2084,7 +2087,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+Shift+F"]
 win = ["Ctrl+Shift+F"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "clip_view.note_filters", contexts = ["note-editor"], args = { toggle = true } },
+]
 
 [[shortcut]]
 id = "S-GRID-001"

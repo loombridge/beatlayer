@@ -112,6 +112,7 @@ pub mod midi_io;
 pub mod mixer_view;
 pub mod modulation;
 pub mod multisampler;
+pub mod note_filters;
 pub mod notes;
 pub mod pads;
 pub mod perception;

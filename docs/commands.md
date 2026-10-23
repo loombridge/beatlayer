@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-760 commands in 46 areas.
+762 commands in 46 areas.
 
 ## Permission classes
 
@@ -262,6 +262,8 @@ Each command has:
 | [`clip.warp_selection_as_loop`](#clipwarp_selection_as_loop) | Warp Selection as Loop | `edit` |  |  |
 | [`clip_view.focus_mode`](#clip_viewfocus_mode) | Focus Mode | `read` | `N` | `N` |
 | [`clip_view.foreground`](#clip_viewforeground) | Foreground Clip | `read` |  |  |
+| [`clip_view.invert_selection`](#clip_viewinvert_selection) | Invert Selection | `read` | `Cmd+Shift+A` | `Ctrl+Shift+A` |
+| [`clip_view.note_filters`](#clip_viewnote_filters) | Note Filters | `read` | `Cmd+Shift+F` | `Ctrl+Shift+F` |
 | [`clip_view.quantize_settings`](#clip_viewquantize_settings) | Quantize Settings | `read` | `Cmd+Shift+U` | `Ctrl+Shift+U` |
 | [`clip_view.sample_editor`](#clip_viewsample_editor) | Sample Editor State | `read` |  |  |
 | [`clip_view.sample_view`](#clip_viewsample_view) | Zoom Sample Editor | `read` | `Z`; `X`; `W`; `H` | `Z`; `X`; `W`; `H` |
@@ -4988,6 +4990,59 @@ Arguments:
 | `clip` | [`ClipId`](#clipid) | yes | The shown clip to make the foreground clip. |
 
 Result: [`ClipViewState`](#clipviewstate).
+
+#### `clip_view.invert_selection`
+
+**Invert Selection**. Permission: `read`. Contexts: `note-editor`, `note-selection`.
+
+Selects every note in the clip's span that was not selected and deselects those that were, as Edit ▸ Invert Selection does (Cmd-Shift-A, Ctrl-Shift-A on Windows). The time selection follows the new selection. It needs a clip that holds notes, is never an undo step, and changes nothing in the set.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-NOTE-034 | `Cmd+Shift+A` | `Ctrl+Shift+A` | `note-editor` | Invert the note selection | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows. |
+
+Result: [`ClipViewState`](#clipviewstate).
+
+#### `clip_view.note_filters`
+
+**Note Filters**. Permission: `read`. Contexts: `note-editor`, `note-selection`.
+
+Find and Select Notes. Shows or hides the filter bar (`visible`, or `toggle`, as Cmd-Shift-F does), chooses the filter whose controls it shows (`shown`), and sets the controls and Invert of any filter (`pitch`, `time`, `chance`, `condition`, `count`, `duration`, `scale`, `velocity`). Setting a control, or Invert, switches that filter on, and while any filter is on the selection is the notes in the clip's span that every filter that is on lets through, worked out again each time, with the time selection following it. `select` presses the Select button of each filter it lists: it is switched on and the notes are selected again. `off` switches filters off, keeping their settings; a click in the note area switches all eight off. Time's Start, Length and Repeat are in beats of the clip's time signature, to a hundredth, Start from 1; a Repeat of `null` is one bar. Duration's Min and Max are in beats too, a Max of `null` being the clip's span. Chance is in percent. Moving Min past Max takes Max with it, and the other way round. The settings belong to the editor: they are kept while the app runs, every filter is switched off when the editor shows another clip, and none of it is saved with the set or is an undo step. The result is every filter's settings and the selected notes.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-NOTE-037 | `Cmd+Shift+F` | `Ctrl+Shift+F` | `note-editor` | Show or hide the note filters | fixes `toggle` = `true` |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `chance` | [`ChanceArgs`](#chanceargs) or null | no | Chance controls. |
+| `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows. |
+| `condition` | [`ConditionArgs`](#conditionargs) or null | no | Condition controls. |
+| `count` | [`CountArgs`](#countargs) or null | no | Count controls. |
+| `duration` | [`DurationArgs`](#durationargs) or null | no | Duration controls. |
+| `off` | array of [`NoteFilter`](#notefilter) | no | Filters to switch off, keeping their settings. |
+| `pitch` | [`PitchArgs`](#pitchargs) or null | no | Pitch controls. |
+| `scale` | [`ScaleArgs`](#scaleargs) or null | no | Scale controls. |
+| `select` | array of [`NoteFilter`](#notefilter) | no | Filters whose Select button is pressed: each is switched on, and the notes are selected again. |
+| `shown` | [`NoteFilter`](#notefilter) or null | no | Chooses the filter whose controls the bar shows. |
+| `time` | [`TimeArgs`](#timeargs) or null | no | Time controls. |
+| `toggle` | boolean | no | Switches the bar, as Cmd-Shift-F does; `visible` wins if both are given. |
+| `velocity` | [`VelocityArgs`](#velocityargs) or null | no | Velocity controls. |
+| `visible` | boolean or null | no | Shows or hides the filter bar. |
+
+Result: [`NoteFiltersResult`](#notefiltersresult).
 
 #### `clip_view.quantize_settings`
 
@@ -18362,6 +18417,101 @@ A chain's zones, each `low`, `high` and the `fade_low` and `fade_high` values it
 
 </details>
 
+### `ChanceArgs`
+
+The Chance filter's controls in `clip_view.note_filters`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `invert` | boolean or null | no | Switches the filter's Invert. |
+| `max` | number or null | no | Max, 0 to 100 percent. Moving it past Min takes Min with it. |
+| `min` | number or null | no | Min, 0 to 100 percent. Moving it past Max takes Max with it. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "additionalProperties": false,
+  "description": "The Chance filter's controls in `clip_view.note_filters`.",
+  "properties": {
+    "invert": {
+      "description": "Switches the filter's Invert.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "max": {
+      "description": "Max, 0 to 100 percent. Moving it past Min takes Min with it.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "min": {
+      "description": "Min, 0 to 100 percent. Moving it past Max takes Max with it.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    }
+  },
+  "type": "object"
+}
+```
+
+</details>
+
+### `ChanceFilter`
+
+The Chance filter, in percent.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean | yes | Whether the filter is on. |
+| `invert` | boolean | yes | Whether it lets through the notes it would hold back. |
+| `min` | number | yes | The lowest chance let through, 0 to 100 percent. |
+| `max` | number | yes | The highest chance let through, 0 to 100 percent. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The Chance filter, in percent.",
+  "properties": {
+    "invert": {
+      "description": "Whether it lets through the notes it would hold back.",
+      "type": "boolean"
+    },
+    "max": {
+      "description": "The highest chance let through, 0 to 100 percent.",
+      "format": "double",
+      "type": "number"
+    },
+    "min": {
+      "description": "The lowest chance let through, 0 to 100 percent.",
+      "format": "double",
+      "type": "number"
+    },
+    "on": {
+      "description": "Whether the filter is on.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "on",
+    "invert",
+    "min",
+    "max"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `Change`
 
 How one object differs between two versions.
@@ -19400,6 +19550,7 @@ What the Clip View shows: which clip it is editing, the notes selected in it, it
 | `tab` | [`ClipTab`](#cliptab) | yes | The tab the Clip View shows. |
 | `preview` | boolean | yes | Whether the Preview switch is on (Spec: step-recording R1): one switch for every MIDI clip's editor, kept between launches. |
 | `envelope` | [`AutomationTarget`](#automationtarget) or null | yes | The parameter whose envelope the Envelopes tab shows; `null` when it shows none. |
+| `filters` | [`NoteFilters`](#notefilters) | yes | Find and Select Notes: whether the filter bar shows, and every filter's settings, with which are on. |
 | `envelope_breakpoint` | [`Ticks`](#ticks) or null | no | The breakpoint selected in the Envelope Editor (WP-6.26), if any: `clip.select_envelope_breakpoint` sets it. |
 | `envelope_marker` | [`Ticks`](#ticks) or null | no | The Envelope Editor's insert marker, in ticks from the beginning of the clip's contents (WP-6.26), which Left and Right move along the envelope; `null` until it has been moved. |
 
@@ -19470,6 +19621,10 @@ What the Clip View shows: which clip it is editing, the notes selected in it, it
         }
       ],
       "description": "The Envelope Editor's insert marker, in ticks from the beginning of the clip's contents (WP-6.26), which Left and Right move along the envelope; `null` until it has been moved."
+    },
+    "filters": {
+      "$ref": "#/$defs/NoteFilters",
+      "description": "Find and Select Notes: whether the filter bar shows, and every filter's settings, with which are on."
     },
     "focus_mode": {
       "description": "Whether Focus Mode is on (Spec: multi-clip-editing R13).",
@@ -19573,7 +19728,8 @@ What the Clip View shows: which clip it is editing, the notes selected in it, it
     "folded",
     "tab",
     "preview",
-    "envelope"
+    "envelope",
+    "filters"
   ],
   "type": "object"
 }
@@ -19940,6 +20096,111 @@ Changes to Complex Pro's controls.
 
 </details>
 
+### `ConditionArgs`
+
+The Condition filter's controls in `clip_view.note_filters`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `active` | boolean or null | no | The Active switch. |
+| `chance` | boolean or null | no | The Chance switch. |
+| `invert` | boolean or null | no | Switches the filter's Invert. |
+| `velocity_deviation` | boolean or null | no | The Velocity Deviation switch. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "additionalProperties": false,
+  "description": "The Condition filter's controls in `clip_view.note_filters`.",
+  "properties": {
+    "active": {
+      "description": "The Active switch.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "chance": {
+      "description": "The Chance switch.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "invert": {
+      "description": "Switches the filter's Invert.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "velocity_deviation": {
+      "description": "The Velocity Deviation switch.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    }
+  },
+  "type": "object"
+}
+```
+
+</details>
+
+### `ConditionFilter`
+
+The Condition filter: a note must pass each switch that is on.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean | yes | Whether the filter is on. |
+| `invert` | boolean | yes | Whether it lets through the notes it would hold back. |
+| `active` | boolean | yes | Let through the notes that aren't deactivated. |
+| `chance` | boolean | yes | Let through the notes whose chance is below 100 percent. |
+| `velocity_deviation` | boolean | yes | Let through the notes whose velocity deviation isn't 0. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The Condition filter: a note must pass each switch that is on.",
+  "properties": {
+    "active": {
+      "description": "Let through the notes that aren't deactivated.",
+      "type": "boolean"
+    },
+    "chance": {
+      "description": "Let through the notes whose chance is below 100 percent.",
+      "type": "boolean"
+    },
+    "invert": {
+      "description": "Whether it lets through the notes it would hold back.",
+      "type": "boolean"
+    },
+    "on": {
+      "description": "Whether the filter is on.",
+      "type": "boolean"
+    },
+    "velocity_deviation": {
+      "description": "Let through the notes whose velocity deviation isn't 0.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "on",
+    "invert",
+    "active",
+    "chance",
+    "velocity_deviation"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `ConfiguredParam`
 
 One parameter a plug-in device's panel can show (clap-hosting R5, configure mode): its ID and the name its right-click menu lists it by.
@@ -20296,6 +20557,123 @@ What `device.convert` returns.
     "device",
     "to",
     "dropped"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `CountArgs`
+
+The Count filter's controls in `clip_view.note_filters`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `every` | integer or null | no | Every, 1 to 16. |
+| `invert` | boolean or null | no | Switches the filter's Invert. |
+| `offset` | integer or null | no | Offset, 0 to one less than Every. |
+| `quantized` | boolean or null | no | The Quantized switch. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "additionalProperties": false,
+  "description": "The Count filter's controls in `clip_view.note_filters`.",
+  "properties": {
+    "every": {
+      "description": "Every, 1 to 16.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "invert": {
+      "description": "Switches the filter's Invert.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "offset": {
+      "description": "Offset, 0 to one less than Every.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "quantized": {
+      "description": "The Quantized switch.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    }
+  },
+  "type": "object"
+}
+```
+
+</details>
+
+### `CountFilter`
+
+The Count filter.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean | yes | Whether the filter is on. |
+| `invert` | boolean | yes | Whether it lets through the notes it would hold back. |
+| `every` | integer from 0 to 255 | yes | Let through each nth note, chord or step, 1 to 16. |
+| `offset` | integer from 0 to 255 | yes | Where counting starts, 0 to one less than `every`. |
+| `quantized` | boolean | yes | Count the editing grid's steps instead of the notes. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The Count filter.",
+  "properties": {
+    "every": {
+      "description": "Let through each nth note, chord or step, 1 to 16.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "invert": {
+      "description": "Whether it lets through the notes it would hold back.",
+      "type": "boolean"
+    },
+    "offset": {
+      "description": "Where counting starts, 0 to one less than `every`.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "on": {
+      "description": "Whether the filter is on.",
+      "type": "boolean"
+    },
+    "quantized": {
+      "description": "Count the editing grid's steps instead of the notes.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "on",
+    "invert",
+    "every",
+    "offset",
+    "quantized"
   ],
   "type": "object"
 }
@@ -22814,6 +23192,104 @@ A drum chain's row in the chain list (drum racks spec, R21).
     "sends",
     "previewing",
     "all_notes"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `DurationArgs`
+
+The Duration filter's controls in `clip_view.note_filters`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `invert` | boolean or null | no | Switches the filter's Invert. |
+| `max` | number or null | no | Max, in beats; `null` for the length of the clip's span. Moving it past Min takes Min with it. |
+| `min` | number or null | no | Min, in beats. Moving it past Max takes Max with it. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "additionalProperties": false,
+  "description": "The Duration filter's controls in `clip_view.note_filters`.",
+  "properties": {
+    "invert": {
+      "description": "Switches the filter's Invert.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "max": {
+      "description": "Max, in beats; `null` for the length of the clip's span. Moving it past Min takes Min with it.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "min": {
+      "description": "Min, in beats. Moving it past Max takes Max with it.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    }
+  },
+  "type": "object"
+}
+```
+
+</details>
+
+### `DurationFilter`
+
+The Duration filter, in beats of the clip's time signature.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean | yes | Whether the filter is on. |
+| `invert` | boolean | yes | Whether it lets through the notes it would hold back. |
+| `min` | number | yes | The shortest note let through, in beats. |
+| `max` | number or null | yes | The longest note let through, in beats. `null` is the length of the clip's span. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The Duration filter, in beats of the clip's time signature.",
+  "properties": {
+    "invert": {
+      "description": "Whether it lets through the notes it would hold back.",
+      "type": "boolean"
+    },
+    "max": {
+      "description": "The longest note let through, in beats. `null` is the length of the clip's span.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "min": {
+      "description": "The shortest note let through, in beats.",
+      "format": "double",
+      "type": "number"
+    },
+    "on": {
+      "description": "Whether the filter is on.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "on",
+    "invert",
+    "min",
+    "max"
   ],
   "type": "object"
 }
@@ -30756,6 +31232,194 @@ One of:
 
 </details>
 
+### `NoteFilter`
+
+A note filter: `pitch`, `time`, `chance`, `condition`, `count`, `duration`, `scale` or `velocity`.
+
+One of:
+
+- `"pitch"`: Pitch classes, in every octave.
+- `"time"`: A window of beats, optionally repeating.
+- `"chance"`: A range of note chance.
+- `"condition"`: Whether a note is active, has a chance, or has a velocity deviation.
+- `"count"`: Every nth note, chord or grid step.
+- `"duration"`: A range of note lengths.
+- `"scale"`: Notes in a scale.
+- `"velocity"`: A range of velocities.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A note filter: `pitch`, `time`, `chance`, `condition`, `count`, `duration`, `scale` or `velocity`.",
+  "oneOf": [
+    {
+      "const": "pitch",
+      "description": "Pitch classes, in every octave.",
+      "type": "string"
+    },
+    {
+      "const": "time",
+      "description": "A window of beats, optionally repeating.",
+      "type": "string"
+    },
+    {
+      "const": "chance",
+      "description": "A range of note chance.",
+      "type": "string"
+    },
+    {
+      "const": "condition",
+      "description": "Whether a note is active, has a chance, or has a velocity deviation.",
+      "type": "string"
+    },
+    {
+      "const": "count",
+      "description": "Every nth note, chord or grid step.",
+      "type": "string"
+    },
+    {
+      "const": "duration",
+      "description": "A range of note lengths.",
+      "type": "string"
+    },
+    {
+      "const": "scale",
+      "description": "Notes in a scale.",
+      "type": "string"
+    },
+    {
+      "const": "velocity",
+      "description": "A range of velocities.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `NoteFilters`
+
+Find and Select Notes, as the editor holds it and `view.state` reports it: whether the bar shows, the filter it shows, and every filter's settings.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `visible` | boolean | yes | Whether the filter bar shows above the editor's ruler. |
+| `shown` | [`NoteFilter`](#notefilter) | yes | The filter whose controls the bar shows. |
+| `pitch` | [`PitchFilter`](#pitchfilter) | yes | The Pitch filter. |
+| `time` | [`TimeFilter`](#timefilter) | yes | The Time filter. |
+| `chance` | [`ChanceFilter`](#chancefilter) | yes | The Chance filter. |
+| `condition` | [`ConditionFilter`](#conditionfilter) | yes | The Condition filter. |
+| `count` | [`CountFilter`](#countfilter) | yes | The Count filter. |
+| `duration` | [`DurationFilter`](#durationfilter) | yes | The Duration filter. |
+| `scale` | [`ScaleFilter`](#scalefilter) | yes | The Scale filter. |
+| `velocity` | [`VelocityFilter`](#velocityfilter) | yes | The Velocity filter. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Find and Select Notes, as the editor holds it and `view.state` reports it: whether the bar shows, the filter it shows, and every filter's settings.",
+  "properties": {
+    "chance": {
+      "$ref": "#/$defs/ChanceFilter",
+      "description": "The Chance filter."
+    },
+    "condition": {
+      "$ref": "#/$defs/ConditionFilter",
+      "description": "The Condition filter."
+    },
+    "count": {
+      "$ref": "#/$defs/CountFilter",
+      "description": "The Count filter."
+    },
+    "duration": {
+      "$ref": "#/$defs/DurationFilter",
+      "description": "The Duration filter."
+    },
+    "pitch": {
+      "$ref": "#/$defs/PitchFilter",
+      "description": "The Pitch filter."
+    },
+    "scale": {
+      "$ref": "#/$defs/ScaleFilter",
+      "description": "The Scale filter."
+    },
+    "shown": {
+      "$ref": "#/$defs/NoteFilter",
+      "description": "The filter whose controls the bar shows."
+    },
+    "time": {
+      "$ref": "#/$defs/TimeFilter",
+      "description": "The Time filter."
+    },
+    "velocity": {
+      "$ref": "#/$defs/VelocityFilter",
+      "description": "The Velocity filter."
+    },
+    "visible": {
+      "description": "Whether the filter bar shows above the editor's ruler.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "visible",
+    "shown",
+    "pitch",
+    "time",
+    "chance",
+    "condition",
+    "count",
+    "duration",
+    "scale",
+    "velocity"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `NoteFiltersResult`
+
+What `clip_view.note_filters` returns: the filters and the selection.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `filters` | [`NoteFilters`](#notefilters) | yes | The filters' settings, with which are on. |
+| `selected` | array of integer, at least 0 | yes | The selected notes, by their place in the clip's notes in order. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `clip_view.note_filters` returns: the filters and the selection.",
+  "properties": {
+    "filters": {
+      "$ref": "#/$defs/NoteFilters",
+      "description": "The filters' settings, with which are on."
+    },
+    "selected": {
+      "description": "The selected notes, by their place in the clip's notes in order.",
+      "items": {
+        "format": "uint32",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "filters",
+    "selected"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `NoteGroup`
 
 A probability group of a MIDI clip: its ID and kind. Its notes name it by `group` and hold its chance as their own.
@@ -31877,6 +32541,95 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `PitchArgs`
+
+The Pitch filter's controls in `clip_view.note_filters`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `classes` | array or null | no | The pitch classes switched on, 0 (C) to 11 (B). |
+| `invert` | boolean or null | no | Switches the filter's Invert. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "additionalProperties": false,
+  "description": "The Pitch filter's controls in `clip_view.note_filters`.",
+  "properties": {
+    "classes": {
+      "description": "The pitch classes switched on, 0 (C) to 11 (B).",
+      "items": {
+        "format": "uint8",
+        "maximum": 255,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "invert": {
+      "description": "Switches the filter's Invert.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    }
+  },
+  "type": "object"
+}
+```
+
+</details>
+
+### `PitchFilter`
+
+The Pitch filter: pitch classes C to B.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean | yes | Whether the filter is on. |
+| `invert` | boolean | yes | Whether it lets through the notes it would hold back. |
+| `classes` | array of integer from 0 to 255 | yes | The pitch classes that are switched on, 0 (C) to 11 (B), in order. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The Pitch filter: pitch classes C to B.",
+  "properties": {
+    "classes": {
+      "description": "The pitch classes that are switched on, 0 (C) to 11 (B), in order.",
+      "items": {
+        "format": "uint8",
+        "maximum": 255,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": "array"
+    },
+    "invert": {
+      "description": "Whether it lets through the notes it would hold back.",
+      "type": "boolean"
+    },
+    "on": {
+      "description": "Whether the filter is on.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "on",
+    "invert",
+    "classes"
+  ],
+  "type": "object"
 }
 ```
 
@@ -35274,6 +36027,66 @@ A scale: whether Scale Mode is on (`enabled`), the root note (0 is C, 11 is B), 
 
 </details>
 
+### `ScaleArgs`
+
+The Scale filter's controls in `clip_view.note_filters`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `invert` | boolean or null | no | Switches the filter's Invert. |
+| `name` | [`ScaleName`](#scalename) or null | no | The Scale Name chooser. |
+| `root` | integer or null | no | The Scale Root chooser, 0 (C) to 11 (B). |
+| `use_clip_scale` | boolean or null | no | The Use Clip Scale switch. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "additionalProperties": false,
+  "description": "The Scale filter's controls in `clip_view.note_filters`.",
+  "properties": {
+    "invert": {
+      "description": "Switches the filter's Invert.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "name": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ScaleName"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The Scale Name chooser."
+    },
+    "root": {
+      "description": "The Scale Root chooser, 0 (C) to 11 (B).",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "use_clip_scale": {
+      "description": "The Use Clip Scale switch.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    }
+  },
+  "type": "object"
+}
+```
+
+</details>
+
 ### `ScaleEntry`
 
 One scale in the list.
@@ -35307,6 +36120,61 @@ One scale in the list.
   "required": [
     "name",
     "steps"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ScaleFilter`
+
+The Scale filter.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean | yes | Whether the filter is on. |
+| `invert` | boolean | yes | Whether it lets through the notes it would hold back. |
+| `use_clip_scale` | boolean | yes | Use the clip's scale, whether or not its Scale Mode is on. |
+| `root` | integer from 0 to 255 | yes | The filter's own root, 0 (C) to 11 (B), while `use_clip_scale` is off. |
+| `name` | [`ScaleName`](#scalename) | yes | The filter's own scale, while `use_clip_scale` is off. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The Scale filter.",
+  "properties": {
+    "invert": {
+      "description": "Whether it lets through the notes it would hold back.",
+      "type": "boolean"
+    },
+    "name": {
+      "$ref": "#/$defs/ScaleName",
+      "description": "The filter's own scale, while `use_clip_scale` is off."
+    },
+    "on": {
+      "description": "Whether the filter is on.",
+      "type": "boolean"
+    },
+    "root": {
+      "description": "The filter's own root, 0 (C) to 11 (B), while `use_clip_scale` is off.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "use_clip_scale": {
+      "description": "Use the clip's scale, whether or not its Scale Mode is on.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "on",
+    "invert",
+    "use_clip_scale",
+    "root",
+    "name"
   ],
   "type": "object"
 }
@@ -38415,6 +39283,120 @@ Type: integer.
 
 </details>
 
+### `TimeArgs`
+
+The Time filter's controls in `clip_view.note_filters`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `invert` | boolean or null | no | Switches the filter's Invert. |
+| `length` | number or null | no | Length, in beats; above 0. |
+| `repeat` | number or null | no | Repeat, in beats; 0 for none, `null` for one bar of the clip's time signature. |
+| `start` | number or null | no | Start, in beats from 1; hundredths of a beat. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "additionalProperties": false,
+  "description": "The Time filter's controls in `clip_view.note_filters`.",
+  "properties": {
+    "invert": {
+      "description": "Switches the filter's Invert.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "length": {
+      "description": "Length, in beats; above 0.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "repeat": {
+      "description": "Repeat, in beats; 0 for none, `null` for one bar of the clip's time signature.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "start": {
+      "description": "Start, in beats from 1; hundredths of a beat.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    }
+  },
+  "type": "object"
+}
+```
+
+</details>
+
+### `TimeFilter`
+
+The Time filter, in beats of the clip's time signature.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean | yes | Whether the filter is on. |
+| `invert` | boolean | yes | Whether it lets through the notes it would hold back. |
+| `start` | number | yes | Where the window starts, in beats from 1, the clip's 1.1.1. |
+| `length` | number | yes | How long the window is, in beats; above 0. |
+| `repeat` | number or null | yes | How far later the window repeats, in beats; 0 for no repeat. `null` is one bar of the clip's time signature. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The Time filter, in beats of the clip's time signature.",
+  "properties": {
+    "invert": {
+      "description": "Whether it lets through the notes it would hold back.",
+      "type": "boolean"
+    },
+    "length": {
+      "description": "How long the window is, in beats; above 0.",
+      "format": "double",
+      "type": "number"
+    },
+    "on": {
+      "description": "Whether the filter is on.",
+      "type": "boolean"
+    },
+    "repeat": {
+      "description": "How far later the window repeats, in beats; 0 for no repeat. `null` is one bar of the clip's time signature.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "start": {
+      "description": "Where the window starts, in beats from 1, the clip's 1.1.1.",
+      "format": "double",
+      "type": "number"
+    }
+  },
+  "required": [
+    "on",
+    "invert",
+    "start",
+    "length",
+    "repeat"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `TimeRange`
 
 A span of time.
@@ -40140,6 +41122,109 @@ One stored macro variation as `rack.macros` reports it.
   "required": [
     "name",
     "values"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `VelocityArgs`
+
+The Velocity filter's controls in `clip_view.note_filters`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `invert` | boolean or null | no | Switches the filter's Invert. |
+| `max` | integer or null | no | Max, 1 to 127. Moving it past Min takes Min with it. |
+| `min` | integer or null | no | Min, 1 to 127. Moving it past Max takes Max with it. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "additionalProperties": false,
+  "description": "The Velocity filter's controls in `clip_view.note_filters`.",
+  "properties": {
+    "invert": {
+      "description": "Switches the filter's Invert.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "max": {
+      "description": "Max, 1 to 127. Moving it past Min takes Min with it.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "min": {
+      "description": "Min, 1 to 127. Moving it past Max takes Max with it.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "type": "object"
+}
+```
+
+</details>
+
+### `VelocityFilter`
+
+The Velocity filter.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean | yes | Whether the filter is on. |
+| `invert` | boolean | yes | Whether it lets through the notes it would hold back. |
+| `min` | integer from 0 to 255 | yes | The lowest velocity let through, 1 to 127. |
+| `max` | integer from 0 to 255 | yes | The highest velocity let through, 1 to 127. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The Velocity filter.",
+  "properties": {
+    "invert": {
+      "description": "Whether it lets through the notes it would hold back.",
+      "type": "boolean"
+    },
+    "max": {
+      "description": "The highest velocity let through, 1 to 127.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "min": {
+      "description": "The lowest velocity let through, 1 to 127.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "on": {
+      "description": "Whether the filter is on.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "on",
+    "invert",
+    "min",
+    "max"
   ],
   "type": "object"
 }

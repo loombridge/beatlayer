@@ -1086,3 +1086,107 @@ fn the_track_headers_keys_reach_the_track_commands() {
         }
     }
 }
+
+// Spec: automation-editing R29. Every key of R21 to R26 is bound or read by
+// the lane and the Envelope Editor, which the keymap names.
+#[test]
+fn the_envelope_keys_are_bound_or_read_by_the_lane_and_the_envelope_editor() {
+    let keymap = Keymap::live12();
+    for id in [
+        "S-A11Y-018",
+        "S-A11Y-019",
+        "S-A11Y-020",
+        "S-A11Y-021",
+        "S-A11Y-022",
+        "S-A11Y-023",
+        "S-A11Y-024",
+        "S-A11Y-025",
+        "S-A11Y-026",
+        "S-A11Y-027",
+        "S-A11Y-028",
+        "S-A11Y-029",
+        "S-A11Y-030",
+        "S-ENV-005",
+    ] {
+        let entry = keymap
+            .entry_for(id)
+            .unwrap_or_else(|| panic!("{id} is in the keymap"));
+        assert!(
+            matches!(entry.status, Status::Bound | Status::Widget(_)),
+            "{id} is handled: {:?}",
+            entry.status
+        );
+    }
+    let envelope = [Context::Envelope, Context::Arrangement, Context::Global];
+    let resolve = |key, m| {
+        keymap
+            .resolve(Platform::Other, key, m, &envelope)
+            .map(|hit| hit.command.id.clone())
+    };
+    let none = mods(false, false, false, false);
+    assert_eq!(resolve(Key::Enter, none).as_deref(), Some("envelope.enter"));
+    assert_eq!(
+        resolve(Key::Escape, none).as_deref(),
+        Some("envelope.cancel")
+    );
+    assert_eq!(
+        resolve(Key::Delete, none).as_deref(),
+        Some("envelope.delete_breakpoint")
+    );
+    assert_eq!(
+        resolve(Key::Delete, mods(false, true, false, false)).as_deref(),
+        Some("envelope.delete")
+    );
+    assert_eq!(
+        resolve(Key::Tab, none).as_deref(),
+        Some("envelope.select_adjacent")
+    );
+    assert_eq!(
+        resolve(Key::Tab, mods(false, false, false, true)).as_deref(),
+        Some("envelope.select_adjacent")
+    );
+    // The keys with two directions are read by the lane itself, so no wider
+    // context runs a command for them.
+    assert_eq!(resolve(Key::ArrowLeft, none), None);
+    assert_eq!(resolve(Key::ArrowUp, mods(false, false, true, false)), None);
+}
+
+// Spec: automation-editing R22 to R24. Tab, Esc and Delete decline when the
+// envelope has nothing for them, and fall through to the wider contexts.
+#[test]
+fn tab_esc_and_delete_in_the_envelope_context_fall_through_when_they_cannot_run() {
+    let keymap = Keymap::live12();
+    let contexts = [Context::Envelope, Context::TabFocus, Context::Global];
+    let never = |hit: &bl_ui::keymap::Hit<'_>| !hit.command.id.starts_with("envelope.");
+    let hit = keymap
+        .resolve_with(
+            Platform::Other,
+            Key::Tab,
+            mods(false, false, false, false),
+            &contexts,
+            never,
+        )
+        .expect("Tab still does something");
+    assert_eq!(hit.command.id, "focus.next");
+    let hit = keymap
+        .resolve_with(
+            Platform::Other,
+            Key::Tab,
+            mods(false, false, false, true),
+            &contexts,
+            never,
+        )
+        .expect("Shift-Tab still does something");
+    assert_eq!(hit.command.id, "focus.previous");
+    // Enter doesn't decline: it always makes or selects a breakpoint.
+    let hit = keymap
+        .resolve_with(
+            Platform::Other,
+            Key::Enter,
+            mods(false, false, false, false),
+            &contexts,
+            never,
+        )
+        .expect("Enter is the envelope's");
+    assert_eq!(hit.command.id, "envelope.enter");
+}

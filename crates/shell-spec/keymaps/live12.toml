@@ -1099,7 +1099,10 @@ trigger = "press"
 milestone = "M2"
 mac = ["Cmd+Delete"]
 win = ["Ctrl+Delete"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "envelope.delete", contexts = ["envelope"] },
+]
 
 [[shortcut]]
 id = "S-ENV-006"
@@ -4201,7 +4204,8 @@ trigger = "press"
 milestone = "M6"
 mac = ["Left", "Right"]
 win = ["Left", "Right"]
-status = "pending"
+status = "widget"
+handler = "the automation lane and the Envelope Editor: Left and Right move the insert marker one grid step along the envelope (`envelope.move_marker`)"
 
 [[shortcut]]
 id = "S-A11Y-019"
@@ -4212,7 +4216,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Enter"]
 win = ["Enter"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "envelope.enter", contexts = ["envelope"] },
+]
 
 [[shortcut]]
 id = "S-A11Y-020"
@@ -4223,7 +4230,8 @@ trigger = "press"
 milestone = "M6"
 mac = ["Option+Left", "Option+Right"]
 win = ["Alt+Left", "Alt+Right"]
-status = "pending"
+status = "widget"
+handler = "the automation lane and the Envelope Editor: Option-Left and Option-Right (Alt) move the insert marker to the previous or next breakpoint (`envelope.move_marker`)"
 
 [[shortcut]]
 id = "S-A11Y-021"
@@ -4234,7 +4242,8 @@ trigger = "press"
 milestone = "M6"
 mac = ["Option+click"]
 win = ["Alt+click"]
-status = "pending"
+status = "widget"
+handler = "the automation lane and the Envelope Editor: Option-click (Alt-click) a breakpoint selects it and moves the insert marker to it (`automation.select_breakpoint`, `clip.select_envelope_breakpoint`)"
 
 [[shortcut]]
 id = "S-A11Y-022"
@@ -4245,7 +4254,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Tab", "Shift+Tab"]
 win = ["Tab", "Shift+Tab"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "envelope.select_adjacent", contexts = ["envelope"], declines = true },
+]
 
 [[shortcut]]
 id = "S-A11Y-023"
@@ -4256,7 +4268,8 @@ trigger = "press"
 milestone = "M6"
 mac = ["Up", "Down"]
 win = ["Up", "Down"]
-status = "pending"
+status = "widget"
+handler = "the automation lane and the Envelope Editor: Up and Down change the selected breakpoint's value by a step of its control (`envelope.move_selected`), and a typed number sets it (`envelope.set_value`)"
 
 [[shortcut]]
 id = "S-A11Y-024"
@@ -4267,7 +4280,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Esc"]
 win = ["Esc"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "envelope.cancel", contexts = ["envelope"], declines = true },
+]
 
 [[shortcut]]
 id = "S-A11Y-025"
@@ -4278,7 +4294,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Delete"]
 win = ["Delete"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "envelope.delete_breakpoint", contexts = ["envelope"], declines = true },
+]
 
 [[shortcut]]
 id = "S-A11Y-026"
@@ -4289,7 +4308,8 @@ trigger = "press"
 milestone = "M6"
 mac = ["Option+Up", "Option+Down"]
 win = ["Alt+Up", "Alt+Down"]
-status = "pending"
+status = "widget"
+handler = "the Arrangement View: Option-Up and Option-Down (Alt) show the previous or next parameter that has an envelope in the selected track's automation lane (`arrangement.show_automation`)"
 
 [[shortcut]]
 id = "S-A11Y-027"
@@ -4300,7 +4320,8 @@ trigger = "press"
 milestone = "M6"
 mac = ["Shift+Option+Up", "Shift+Option+Down"]
 win = ["Shift+Alt+Up", "Shift+Alt+Down"]
-status = "pending"
+status = "widget"
+handler = "the Arrangement View: Shift-Option-Up and Shift-Option-Down (Shift-Alt) show the previous or next of every parameter the lane's choosers list (`arrangement.show_automation`)"
 
 [[shortcut]]
 id = "S-VIEW-021"
@@ -4758,7 +4779,8 @@ trigger = "press"
 milestone = "M6"
 mac = ["Option+Up", "Option+Down"]
 win = ["Alt+Up", "Alt+Down"]
-status = "pending"
+status = "widget"
+handler = "the Envelope Editor: as S-A11Y-026, for the clip's envelopes (`view.clip_envelope`)"
 
 [[shortcut]]
 id = "S-A11Y-029"
@@ -4769,7 +4791,8 @@ trigger = "press"
 milestone = "M6"
 mac = ["Shift+Option+Up", "Shift+Option+Down"]
 win = ["Shift+Alt+Up", "Shift+Alt+Down"]
-status = "pending"
+status = "widget"
+handler = "the Envelope Editor: as S-A11Y-027, for every parameter the choosers list (`view.clip_envelope`)"
 
 [[shortcut]]
 id = "S-A11Y-030"
@@ -4780,7 +4803,8 @@ trigger = "press"
 milestone = "M6"
 mac = ["Left", "Right"]
 win = ["Left", "Right"]
-status = "pending"
+status = "widget"
+handler = "the automation lane and the Envelope Editor: Left and Right move the selected breakpoint one grid step in time (`envelope.move_selected`)"
 
 [[shortcut]]
 id = "S-BRW-015"

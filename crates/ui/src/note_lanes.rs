@@ -13,8 +13,10 @@
 //! (`view.lanes`, `view.lane`). Only the lanes' heights, the drags under way
 //! and a number being typed live here. Spec: note-editing R1 to R17.
 
+use std::collections::BTreeSet;
+
 use bl_core::time::Ticks;
-use bl_model::{ClipId, Note};
+use bl_model::{ClipId, GroupKind, Note, NoteGroup};
 use bl_shell::clip_view::note_value;
 use bl_shell::commands::{VIEW_LANE, VIEW_LANES};
 use bl_shell::note_commands::{self as ids, NoteField, RandomizeAmounts};
@@ -164,10 +166,59 @@ pub fn footer_rects(footer: Rect, lane: NoteField) -> Vec<(&'static str, Rect)> 
 
 /// Whether a note shows the small triangle at its top-left corner: when it
 /// doesn't always play, or belongs to a probability group, and its key row
-/// is at least [`CORNER_ROW`] points tall (note-editing R4).
+/// is at least [`CORNER_ROW`] points tall (note-editing R4, R24).
 #[must_use]
 pub fn shows_corner(note: &Note, row_height: f32) -> bool {
-    note.probability < 1.0 && row_height >= CORNER_ROW
+    (note.probability < 1.0 || note.group.is_some()) && row_height >= CORNER_ROW
+}
+
+/// Whether the pointer marks the note at `place`: it hovers the note or its
+/// marker, or one of its probability group (note-editing R4, R24).
+#[must_use]
+pub fn is_marked(notes: &[Note], hovered: Option<u32>, place: usize) -> bool {
+    hovered
+        .and_then(|h| notes.get(h as usize))
+        .is_some_and(|h| {
+            hovered == u32::try_from(place).ok()
+                || (h.group.is_some() && h.group == notes[place].group)
+        })
+}
+
+/// For each note, whether it wears a marker in the Chance lane: a group
+/// shows one, at its first note, in place of its notes' own (note-editing
+/// R24).
+fn leaders(notes: &[Note]) -> Vec<bool> {
+    let mut seen = BTreeSet::new();
+    notes
+        .iter()
+        .map(|note| note.group.is_none_or(|group| seen.insert(group)))
+        .collect()
+}
+
+/// The places of the notes in `group`.
+fn members(notes: &[Note], group: u32) -> Vec<u32> {
+    notes
+        .iter()
+        .enumerate()
+        .filter(|(_, note)| note.group == Some(group))
+        .map(|(place, _)| u32::try_from(place).unwrap_or(u32::MAX))
+        .collect()
+}
+
+/// A group's mark at the top of its marker: a diamond for Play All, a
+/// triangle for Play One (note-editing R24).
+fn paint_group_mark(painter: &egui::Painter, at: Pos2, kind: GroupKind, colour: Color32) {
+    let r = 3.0;
+    let points = match kind {
+        GroupKind::PlayAll => vec![
+            at + vec2(0.0, -r),
+            at + vec2(r, 0.0),
+            at + vec2(0.0, r),
+            at + vec2(-r, 0.0),
+        ],
+        GroupKind::PlayOne => vec![at + vec2(0.0, -r), at + vec2(r, r), at + vec2(-r, r)],
+    };
+    painter.add(Shape::convex_polygon(points, colour, Stroke::NONE));
 }
 
 /// Paints the corner triangle at a note's top-left corner.
@@ -319,6 +370,9 @@ pub struct LaneUi {
     /// the note area is clicked (R16).
     focus: Option<NoteField>,
     typed: Option<Typed>,
+    /// The group the Chance lane's marker menu opened on (C-PGROUP): its
+    /// ID and the places of its notes.
+    group_menu: Option<(u32, Vec<u32>)>,
 }
 
 impl Default for LaneUi {
@@ -330,6 +384,7 @@ impl Default for LaneUi {
             divider: false,
             focus: None,
             typed: None,
+            group_menu: None,
         }
     }
 }
@@ -343,6 +398,8 @@ pub struct Frame<'a> {
     pub start: Ticks,
     pub length: Ticks,
     pub notes: &'a [Note],
+    /// The clip's probability groups.
+    pub groups: &'a [NoteGroup],
     pub selected: &'a [u32],
     /// The clip's track colour.
     pub face: Color32,
@@ -394,10 +451,14 @@ fn marker_at(
     lane: Rect,
     pos: Pos2,
 ) -> Option<u32> {
+    let leads = (field == NoteField::Chance).then(|| leaders(notes));
     notes
         .iter()
         .enumerate()
         .filter_map(|(place, note)| {
+            if leads.as_ref().is_some_and(|leads| !leads[place]) {
+                return None;
+            }
             let x = stem_x(grid, start, length, note) + STEM_WIDTH / 2.0;
             let top = y_of_value(lane, field, note_value(note, field));
             let reach = STEM_WIDTH / 2.0 + MARKER_GRAB;
@@ -409,6 +470,11 @@ fn marker_at(
 }
 
 impl Frame<'_> {
+    /// The kind of the probability group `group`.
+    fn kind_of(&self, group: u32) -> Option<GroupKind> {
+        self.groups.iter().find(|g| g.id == group).map(|g| g.kind)
+    }
+
     /// The marker of `field`'s lane under `pos`.
     fn marker_at(&self, field: NoteField, lane: Rect, pos: Pos2) -> Option<u32> {
         marker_at(
@@ -635,16 +701,30 @@ impl LaneUi {
                     ink,
                 );
             }
-            for (place, note) in frame.notes.iter().enumerate() {
+            let leads = (*field == NoteField::Chance).then(|| leaders(frame.notes));
+            for (index, note) in frame.notes.iter().enumerate() {
+                if leads.as_ref().is_some_and(|leads| !leads[index]) {
+                    continue;
+                }
                 let x = stem_x(grid, frame.start, frame.length, note);
                 if x + STEM_WIDTH < grid.left() || x > grid.right() {
                     continue;
                 }
-                let place = u32::try_from(place).unwrap_or(u32::MAX);
+                let place = u32::try_from(index).unwrap_or(u32::MAX);
                 let top = y_of_value(*lane, *field, note_value(note, *field));
                 let stem = Rect::from_min_max(pos2(x, top), pos2(x + STEM_WIDTH, lane.bottom()));
-                let chosen = frame.selected.contains(&place);
-                let marked = frame.hovered == Some(place);
+                // A group's marker stands for every note of it: it is chosen
+                // when one is, and marked when the pointer marks one.
+                let chosen = frame.selected.contains(&place)
+                    || (leads.is_some()
+                        && note.group.is_some()
+                        && frame.selected.iter().any(|s| {
+                            frame
+                                .notes
+                                .get(*s as usize)
+                                .is_some_and(|n| n.group == note.group)
+                        }));
+                let marked = is_marked(frame.notes, frame.hovered, index);
                 let ink = if chosen {
                     colours.time_selection.0
                 } else if note.mute {
@@ -678,6 +758,11 @@ impl LaneUi {
                         1.0,
                         colours.panel.0,
                     );
+                }
+                if leads.is_some()
+                    && let Some(kind) = note.group.and_then(|group| frame.kind_of(group))
+                {
+                    paint_group_mark(painter, pos2(x + STEM_WIDTH / 2.0, top), kind, ink);
                 }
             }
         }
@@ -884,6 +969,50 @@ impl LaneUi {
             {
                 ui.ctx().set_cursor_icon(CursorIcon::ResizeVertical);
             }
+            // Spec: note-editing R23, R24. A group's marker has a menu
+            // (C-PGROUP): its kind, ticked, and Ungroup Notes, which ends
+            // the whole group.
+            if field == NoteField::Chance {
+                if response.secondary_clicked() {
+                    self.group_menu = response
+                        .interact_pointer_pos()
+                        .and_then(|pos| frame.marker_at(field, lane, pos))
+                        .and_then(|place| frame.notes.get(place as usize)?.group)
+                        .map(|group| (group, members(frame.notes, group)));
+                }
+                if let Some((group, places)) = self.group_menu.clone() {
+                    response.context_menu(|ui| {
+                        let kind = frame.kind_of(group);
+                        for (text, choice, name) in [
+                            ("Play All", GroupKind::PlayAll, "play_all"),
+                            ("Play One", GroupKind::PlayOne, "play_one"),
+                        ] {
+                            let item =
+                                ui.add(egui::Button::new(text).selected(kind == Some(choice)));
+                            crate::menus::register_item(ui.ctx(), &item);
+                            if item.clicked() {
+                                invoke(
+                                    events,
+                                    ids::GROUP,
+                                    json!({ "clip": clip, "notes": places, "kind": name }),
+                                );
+                                ui.close();
+                            }
+                        }
+                        ui.separator();
+                        let item = ui.button("Ungroup Notes");
+                        crate::menus::register_item(ui.ctx(), &item);
+                        if item.clicked() {
+                            invoke(
+                                events,
+                                ids::UNGROUP,
+                                json!({ "clip": clip, "notes": places }),
+                            );
+                            ui.close();
+                        }
+                    });
+                }
+            }
             // Spec: note-editing R2. The lane header's context menu has
             // Swap Lane (C-LANE-001), which needs a hidden lane to show.
             let header =
@@ -899,7 +1028,11 @@ impl LaneUi {
             });
             // Spec: note-editing R20. Each marker is an item named for its
             // note and reading its value.
+            let leads = (field == NoteField::Chance).then(|| leaders(frame.notes));
             for (place, note) in frame.notes.iter().enumerate() {
+                if leads.as_ref().is_some_and(|leads| !leads[place]) {
+                    continue;
+                }
                 let x = stem_x(frame.layout.grid, frame.start, frame.length, note);
                 if x + STEM_WIDTH < frame.layout.grid.left() || x > frame.layout.grid.right() {
                     continue;
@@ -1289,14 +1422,43 @@ impl LaneUi {
 
         match lane {
             NoteField::Chance => {
-                // Spec: note-editing R10. Play All, Play One and Ungroup wait
-                // for probability groups (WP-6.2).
-                for name in ["Play All", "Play One", "Ungroup"] {
+                // Spec: note-editing R10, R22, R23. Play All and Play One group
+                // the selected notes, and Ungroup takes them out of their
+                // groups.
+                let grouped = frame.selected.iter().any(|place| {
+                    frame
+                        .notes
+                        .get(*place as usize)
+                        .is_some_and(|n| n.group.is_some())
+                });
+                for (name, enabled, command) in [
+                    (
+                        "Play All",
+                        frame.selected.len() >= 2,
+                        (ids::GROUP, json!({ "clip": clip, "kind": "play_all" })),
+                    ),
+                    (
+                        "Play One",
+                        frame.selected.len() >= 2,
+                        (ids::GROUP, json!({ "clip": clip, "kind": "play_one" })),
+                    ),
+                    ("Ungroup", grouped, (ids::UNGROUP, json!({ "clip": clip }))),
+                ] {
                     let rect = rect_of(name);
-                    let response =
-                        ui.interact(rect, Id::new(("footer", name, clip)), Sense::hover());
-                    paint_button(&painter, theme, rect, name, false, false);
-                    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, false, name));
+                    let response = ui.interact(
+                        rect,
+                        Id::new(("footer", name, clip)),
+                        if enabled {
+                            Sense::click()
+                        } else {
+                            Sense::hover()
+                        },
+                    );
+                    paint_button(&painter, theme, rect, name, enabled, response.hovered());
+                    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, name));
+                    if enabled && response.clicked() {
+                        invoke(events, command.0, command.1);
+                    }
                 }
             }
             _ => {

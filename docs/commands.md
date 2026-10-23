@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-737 commands in 44 areas.
+739 commands in 44 areas.
 
 ## Permission classes
 
@@ -476,6 +476,7 @@ Each command has:
 | [`note.delete`](#notedelete) | Delete Notes | `destructive` | `Delete` | `Delete` |
 | [`note.duplicate`](#noteduplicate) | Duplicate Notes | `edit` | `Cmd+D` | `Ctrl+D` |
 | [`note.fit_to_time`](#notefit_to_time) | Fit to Time Range | `edit` | `Cmd+Option+J` | `Ctrl+Alt+J` |
+| [`note.group`](#notegroup) | Group Notes | `edit` | `Cmd+G` | `Ctrl+G` |
 | [`note.join`](#notejoin) | Join Notes | `edit` | `Cmd+J` | `Ctrl+J` |
 | [`note.move`](#notemove) | Move Notes | `edit` |  |  |
 | [`note.paste`](#notepaste) | Paste Notes | `edit` | `Cmd+V` | `Ctrl+V` |
@@ -489,6 +490,7 @@ Each command has:
 | [`note.split_clip`](#notesplit_clip) | Split Clip | `edit` | `Cmd+Shift+E` | `Ctrl+Shift+E` |
 | [`note.step_record`](#notestep_record) | Step Record | `edit` |  |  |
 | [`note.stretch`](#notestretch) | Stretch Notes | `edit` |  |  |
+| [`note.ungroup`](#noteungroup) | Ungroup Notes | `edit` | `Cmd+Shift+G` | `Ctrl+Shift+G` |
 | [`pad.delete`](#paddelete) | Delete Pad | `destructive` |  |  |
 | [`pad.drop`](#paddrop) | Drop on Pad | `edit` |  |  |
 | [`pad.hot_swap`](#padhot_swap) | Hot-Swap Pad | `read` |  |  |
@@ -8745,6 +8747,28 @@ Arguments:
 
 Result: [`NoteEditResult`](#noteeditresult).
 
+#### `note.group`
+
+**Group Notes**. Permission: `edit`. Contexts: `note-editor`, `note-selection`.
+
+Puts notes (`notes`, or the selected notes) in a new probability group of `kind`: `play_all` plays all of its notes or none, `play_one` plays one of them, chosen evenly. Left out, `kind` is the one made last in this session, `play_all` until one is chosen. Notes leave the group they were in, a group left with fewer than two notes ends, and the new group's chance is that of its first note in the clip's order, which every note of it takes. Naming every note of one group changes its kind. Refused with fewer than two notes. One undo step, named Group Notes, or Change Group when it changes one group's kind; the notes stay selected. Read the groups back from the clip's `data.midi.groups` and each note's `group`.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-NOTE-031 | `Cmd+G` | `Ctrl+G` | `note-selection` | Group the selected notes (play all) | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows (the Arrangement's selected clip). |
+| `kind` | [`GroupKind`](#groupkind) or null | no | How the group plays. Left out, the kind made last in this session, `play_all` until one is chosen. |
+| `notes` | array or null | no | The notes, by their place in the clip's notes in order (by start, then pitch). Left out, the selected notes. |
+
+Result: [`NoteEditResult`](#noteeditresult).
+
 #### `note.join`
 
 **Join Notes**. Permission: `edit`. Contexts: `note-editor`, `note-selection`.
@@ -8998,6 +9022,27 @@ Arguments:
 | `from` | [`TickRange`](#tickrange) or null | no | The range being stretched. Left out, the time selection. |
 | `notes` | array or null | no | The notes, by their place in the clip's notes in order. Left out, the selected notes, or with none selected the notes that start inside `from`. |
 | `point` | [`StretchPoint`](#stretchpoint) or null | no | A point inside `from` that goes somewhere else: what lies on either side of it is scaled to meet it there. |
+
+Result: [`NoteEditResult`](#noteeditresult).
+
+#### `note.ungroup`
+
+**Ungroup Notes**. Permission: `edit`. Contexts: `note-editor`, `note-selection`.
+
+Takes notes (`notes`, or the selected notes) out of their probability groups, each keeping its group's chance as its own; a group left with fewer than two notes ends, and naming every note of a group ends it. One undo step, named Ungroup Notes; the notes stay selected. Read the groups back from the clip's `data.midi.groups` and each note's `group`.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-NOTE-032 | `Cmd+Shift+G` | `Ctrl+Shift+G` | `note-selection` | Ungroup the selected notes | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows (the Arrangement's selected clip). |
+| `notes` | array or null | no | The notes, by their place in the clip's notes in order (by start, then pitch). Left out, the selected notes. Naming every note of a group ends it. |
 
 Result: [`NoteEditResult`](#noteeditresult).
 
@@ -13964,6 +14009,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`note.delete`](#notedelete) | the query tool's `clip` | `data.midi.notes` |
 | [`note.duplicate`](#noteduplicate) | the query tool's `clip` | `data.midi.notes` |
 | [`note.fit_to_time`](#notefit_to_time) | the query tool's `clip` | `data.midi.notes` |
+| [`note.group`](#notegroup) | the query tool's `clip` | `data.midi.groups` |
 | [`note.join`](#notejoin) | the query tool's `clip` | `data.midi.notes` |
 | [`note.move`](#notemove) | the query tool's `clip` | `data.midi.notes` |
 | [`note.paste`](#notepaste) | the query tool's `clip` | `data.midi.notes` |
@@ -13976,6 +14022,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`note.split_clip`](#notesplit_clip) | the query tool's `track` | `clips` |
 | [`note.step_record`](#notestep_record) | the query tool's `clip` | `data.midi.notes` |
 | [`note.stretch`](#notestretch) | the query tool's `clip` | `data.midi.notes` |
+| [`note.ungroup`](#noteungroup) | the query tool's `clip` | `data.midi.groups` |
 | [`pad.delete`](#paddelete) | the query tool's `device` | `chains` |
 | [`pad.drop`](#paddrop) | the query tool's `device` | `chains` |
 | [`pad.preview`](#padpreview) | `device_view.state` | `devices` |
@@ -25348,6 +25395,37 @@ What `groove.save` returns.
 
 </details>
 
+### `GroupKind`
+
+How a probability group plays: `play_all` plays all its notes or none, `play_one` plays one of them, chosen evenly.
+
+One of:
+
+- `"play_all"`: All the group's notes play, or none do.
+- `"play_one"`: One of the group's notes plays, each equally likely.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "How a probability group plays: `play_all` plays all its notes or none, `play_one` plays one of them, chosen evenly.",
+  "oneOf": [
+    {
+      "const": "play_all",
+      "description": "All the group's notes play, or none do.",
+      "type": "string"
+    },
+    {
+      "const": "play_one",
+      "description": "One of the group's notes plays, each equally likely.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `Grouped`
 
 What `device.group` returns.
@@ -28853,6 +28931,7 @@ A MIDI clip's data: its notes, Start and End markers, and loop brace.
 |---|---|---|---|
 | `notes` | array of [`Note`](#note) | yes | The notes, in no particular order. |
 | `end` | [`Ticks`](#ticks) or null | no | The End marker: where a clip whose loop is off stops playing, after the Start marker; `null` (or nothing) for the end of the clip. |
+| `groups` | array of [`NoteGroup`](#notegroup) | no | The clip's probability groups and their kinds (Spec: note-editing R21): each note's `group` names one. A group holds two or more notes, all of one chance. |
 | `loop_end` | [`Ticks`](#ticks) or null | no | Where the loop brace ends, in ticks, after its start; `null` (or nothing) for the end of the clip. While the loop is on, the Start marker must be before it. |
 | `loop_start` | [`Ticks`](#ticks) | no | Where the loop brace starts, in ticks: 0 or more; 0 unless given. |
 | `looping` | boolean | no | The Loop switch: whether the clip repeats its loop brace. Off unless given. |
@@ -28875,6 +28954,13 @@ A MIDI clip's data: its notes, Start and End markers, and loop brace.
         }
       ],
       "description": "The End marker: where a clip whose loop is off stops playing, after the Start marker; `null` (or nothing) for the end of the clip."
+    },
+    "groups": {
+      "description": "The clip's probability groups and their kinds (Spec: note-editing R21): each note's `group` names one. A group holds two or more notes, all of one chance.",
+      "items": {
+        "$ref": "#/$defs/NoteGroup"
+      },
+      "type": "array"
     },
     "loop_end": {
       "anyOf": [
@@ -30080,6 +30166,7 @@ A note in a MIDI clip.
 | `velocity` | integer from 1 to 127 | yes | The velocity, from 1 to 127. |
 | `start` | [`Ticks`](#ticks) | yes | Where the note starts, counted from the beginning of the clip's contents: the clip's start less its offset. Never negative. |
 | `length` | [`Ticks`](#ticks) | yes | How long the note lasts. Always positive. |
+| `group` | integer or null | no | The probability group the note belongs to, an ID in the clip's `groups` (Spec: note-editing R21). |
 | `mute` | boolean | no | Whether the note is switched off, so it stays in place but doesn't play. |
 | `pressure` | array of [`PressurePoint`](#pressurepoint) | no | The note's own pressure, played as polyphonic pressure over its length: points in order of `at`, none at the same place. A note with none plays no pressure. |
 | `probability` | number from 0 to 1 | no | The chance the note will play, from 0 to 1: 1 (100 %) unless given. |
@@ -30092,6 +30179,15 @@ A note in a MIDI clip.
 {
   "description": "A note in a MIDI clip.",
   "properties": {
+    "group": {
+      "description": "The probability group the note belongs to, an ID in the clip's `groups` (Spec: note-editing R21).",
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
     "key": {
       "description": "The MIDI key, from 0 to 127. Middle C (C3 in Live) is 60.",
       "format": "uint8",
@@ -30506,6 +30602,42 @@ What `clip_view.note_filters` returns: the filters and the selection.
   "required": [
     "filters",
     "selected"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `NoteGroup`
+
+A probability group of a MIDI clip: its ID and kind. Its notes name it by `group` and hold its chance as their own.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | integer, at least 0 | yes | The ID the group's notes name, unique in the clip. |
+| `kind` | [`GroupKind`](#groupkind) | yes | How the group plays. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A probability group of a MIDI clip: its ID and kind. Its notes name it by `group` and hold its chance as their own.",
+  "properties": {
+    "id": {
+      "description": "The ID the group's notes name, unique in the clip.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "kind": {
+      "$ref": "#/$defs/GroupKind",
+      "description": "How the group plays."
+    }
+  },
+  "required": [
+    "id",
+    "kind"
   ],
   "type": "object"
 }

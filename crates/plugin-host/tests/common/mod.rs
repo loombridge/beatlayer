@@ -233,6 +233,7 @@ pub fn modulation_for(device: Device, param: u32, points: &[(Ticks, f64)]) -> No
                     loop_start: Ticks::ZERO,
                     loop_end: None,
                     signature: None,
+                    groups: Vec::new(),
                 }),
             ),
         })

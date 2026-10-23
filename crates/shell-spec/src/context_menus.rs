@@ -413,8 +413,8 @@ const NOTE: &[Row] = &[
     ("C-NOTE-005", "Delete", Key(&["S-EDIT-005"])),
     ("C-NOTE-006", "Invert Selection", Key(&["S-NOTE-034"])),
     ("C-NOTE-007", "Deactivate Note(s)", Key(&["S-NOTE-041"])),
-    ("C-NOTE-008", "Group Notes", Pending(Some("S-NOTE-031"))),
-    ("C-NOTE-009", "Ungroup Notes", Pending(Some("S-NOTE-032"))),
+    ("C-NOTE-008", "Group Notes", Key(&["S-NOTE-031"])),
+    ("C-NOTE-009", "Ungroup Notes", Key(&["S-NOTE-032"])),
     ("C-NOTE-010", "Split Note(s)", Cmd(SPLIT_NOTES)),
     ("C-NOTE-011", "Chop Note(s) on Grid", Cmd(CHOP_NOTES)),
     ("C-NOTE-012", "Join Notes", Key(&["S-NOTE-007"])),
@@ -475,7 +475,6 @@ pub fn pending_package(row: &str) -> Option<&'static str> {
             Some("Phase 9 (audio to MIDI, IMP-06)")
         }
         // The MIDI Note Editor's own items (piano-roll R30).
-        "C-NOTE-008" | "C-NOTE-009" => Some("WP-6.2 (probability groups)"),
         "C-NOTE-014" | "C-NOTE-014a" | "C-NOTE-014b" | "C-NOTE-014c" | "C-NOTE-014d" => {
             Some("WP-6.54 (the clip markers from the keys)")
         }

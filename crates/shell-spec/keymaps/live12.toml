@@ -842,6 +842,7 @@ mac = ["Cmd+R"]
 win = ["Ctrl+R"]
 status = "bound"
 commands = [
+  { id = "browser.rename_label", contexts = ["browser-sidebar"] },
   { id = "chain.rename", contexts = ["rack-chains"] },
   { id = "clip.rename", contexts = ["arrangement"] },
   { id = "device.rename", contexts = ["device-view"] },
@@ -3652,7 +3653,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+LeftBracket"]
 win = ["Ctrl+LeftBracket"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "browser.back", contexts = ["browser"] },
+]
 
 [[shortcut]]
 id = "S-BRW-012"
@@ -3663,7 +3667,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+RightBracket"]
 win = ["Ctrl+RightBracket"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "browser.forward", contexts = ["browser"] },
+]
 
 [[shortcut]]
 id = "S-BRW-013"
@@ -3674,7 +3681,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+Option+G"]
 win = ["Ctrl+Alt+G"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "browser.set_filter_view", contexts = ["browser"] },
+]
 
 [[shortcut]]
 id = "S-BRW-014"

@@ -19,6 +19,7 @@ pub mod automation;
 pub mod benchmark;
 pub mod context_menu;
 pub mod editing;
+pub mod fades;
 pub mod gpu;
 pub mod headers;
 pub mod peaks;
@@ -210,6 +211,8 @@ pub struct ArrangementUi {
     /// Where the last frame put the track lanes (WP-2.12), for working out
     /// an automation lane's rectangle.
     lanes: Option<Rect>,
+    /// The fade handles the last frame drew (WP-6.51).
+    fades_drawn: fades::Drawn,
 }
 
 impl std::fmt::Debug for ArrangementUi {
@@ -353,7 +356,15 @@ impl ArrangementUi {
             mixer: None,
             described: Vec::new(),
             lanes: None,
+            fades_drawn: fades::Drawn::default(),
         }
+    }
+
+    /// The fade handles the last frame drew (WP-6.51), and the dotted line
+    /// of the selected handle's limit.
+    #[must_use]
+    pub fn drawn_fades(&self) -> &fades::Drawn {
+        &self.fades_drawn
     }
 
     /// The playhead the last frame drew: the position it showed, and its x
@@ -608,6 +619,25 @@ impl ArrangementUi {
             self.menus.show(ui, shell, events);
         });
         self.draw_overlays(ui, view, theme, &layout, horizontal);
+        {
+            let clip_lanes = Lanes {
+                view,
+                doc,
+                rect: lanes,
+                horizontal,
+                shown: &self.shown,
+                rows: &self.rows,
+                scroll_y: view.scroll_y() as f32,
+            };
+            self.fades_drawn = fades::paint(
+                &ui.painter_at(lanes),
+                &clip_lanes,
+                theme,
+                ui.input(|i| i.pointer.latest_pos()),
+                self.clips.handles_held(),
+                view.selected_fade(),
+            );
+        }
         self.draw_automation(ui, shell, view, doc, theme, &layout, horizontal);
 
         // The rulers.
@@ -731,6 +761,12 @@ impl ArrangementUi {
             modifiers.ctrl && modifiers.alt
         };
         let keys = EditKeys::from(modifiers);
+        // Spec: audio-clips R27. F held shows every clip's fade handles
+        // (S-ARR-010, S-ENV-004).
+        self.clips.hold_handles(
+            ui.input(|i| i.key_down(Key::F) && i.modifiers.is_none())
+                && !ui.ctx().text_edit_focused(),
+        );
         let clip_lanes = Lanes {
             view,
             doc,
@@ -898,6 +934,21 @@ impl ArrangementUi {
                 let _ = self
                     .automation
                     .double_click(view, doc, &lane, pos, modifiers, events);
+            } else if let Some(pos) = response.interact_pointer_pos()
+                && let Some(hit) = clip_lanes.hit(pos)
+            {
+                // Spec: detail-views R4 (I-CLICK-005). Double-clicking a clip
+                // selects it and shows the Clip View.
+                invoke(
+                    events,
+                    bl_shell::editing_commands::SELECT_CLIPS,
+                    json!({ "clips": [hit.clip] }),
+                );
+                events.extend(
+                    crate::main_window::open_view(shell, bl_shell::commands::DetailView::Clip)
+                        .into_iter()
+                        .map(UiEvent::Invoke),
+                );
             }
         } else if response.clicked()
             && let Some(pos) = response.interact_pointer_pos()

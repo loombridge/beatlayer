@@ -42,13 +42,14 @@ use crate::clip_view::{self, ClipView};
 use crate::commands::{
     self as ids, AutomationRecordModeArgs, ClipEnvelopeArgs, ClipTabArgs, CollectFilesArgs,
     DefaultLaunchModeArgs, DefaultLaunchQuantizationArgs, DefaultSetArgs, DefaultWarpModeArgs,
-    FileReport, FoldNotesArgs, LaneArgs, LoopWarpShortSamplesArgs, PathArgs,
+    FileReport, FoldNotesArgs, LaneArgs, LanesArgs, LoopWarpShortSamplesArgs, PathArgs,
     RecordSessionAutomationInArgs, SampleEditorArgs, SampleEditorResult, SaveAsArgs, SetResult,
     SettingsArgs, SwitchArgs, SwitchResult, TemplateArgs, TemporaryFolderArgs,
     TemporaryFolderResult, TestToneArgs, TestToneState, ThemeArgs, UserLibraryArgs,
     UserLibraryResult, ViewResult, ViewState, ZoomArgs,
 };
 use crate::commands::{AppearanceArgs, BrightnessArgs, HueArgs, PercentArgs, ToneArgs};
+use crate::detail::DetailArea;
 use crate::devices::{self, DeviceError, DeviceView};
 use crate::files::{ProjectFiles, SetStore, new_set_from};
 use crate::midi::MidiHost;
@@ -73,6 +74,7 @@ use bl_shell_spec::autosampler as autosampler_ids;
 use bl_shell_spec::bounce as bounce_ids;
 use bl_shell_spec::browser as browser_ids;
 use bl_shell_spec::capture_midi as capture_ids;
+use bl_shell_spec::commands::DetailView;
 use bl_shell_spec::dawproject as dawproject_ids;
 use bl_shell_spec::devices as device_ids;
 use bl_shell_spec::editing as edit_ids;
@@ -84,7 +86,7 @@ use bl_shell_spec::midi_files as midi_ids;
 use bl_shell_spec::midi_io as midi_io_ids;
 use bl_shell_spec::mixer_view as mixer_ids;
 use bl_shell_spec::multisampler as multisampler_ids;
-use bl_shell_spec::notes::{self as note_ids, ClipTab};
+use bl_shell_spec::notes::{self as note_ids, ClipTab, RandomizeAmounts};
 use bl_shell_spec::pads as pad_ids;
 use bl_shell_spec::perception as perception_ids;
 use bl_shell_spec::plugins as plugin_ids;
@@ -113,6 +115,7 @@ mod export_dialog;
 pub use export_dialog::ExportPrefs;
 mod file_manager;
 mod freeze;
+mod grooves;
 mod keymap;
 mod multisampler;
 mod plugin_list;
@@ -540,6 +543,9 @@ pub struct Shell {
     /// What the Clip View shows (WP-2.3): whether it's open, Draw Mode, and
     /// the notes selected in its MIDI Note Editor.
     clip_view: ClipView,
+    /// Which of the Clip View and the Device View show, and how tall the
+    /// Clip View is (WP-6.27). View state, like the Clip View's own.
+    detail: DetailArea,
     /// The File Manager (WP-6.63): whether it shows, which files it shows,
     /// and the Automatic Search's switches. View state, never part of the
     /// set, like the browser's.
@@ -821,10 +827,14 @@ fn clip_marker_command(id: &str) -> bool {
 
 /// Whether `id` is one of the Arrangement's own clip drags, which the
 /// document runs per frame as gestures: stretching a warped clip's edge (the
-/// warping spec, R47) and sliding a clip's contents (R54), each one undo step
-/// however far the drag goes.
+/// warping spec, R47), sliding a clip's contents (R54) and dragging a fade's
+/// handles (the audio clips spec, R27), each one undo step however far the drag
+/// goes.
 fn arrangement_clip_command(id: &str) -> bool {
-    matches!(id, "clip.stretch" | "clip.slide_contents")
+    matches!(
+        id,
+        "clip.stretch" | "clip.slide_contents" | "clip.set_fades" | "arrangement.set_crossfade"
+    )
 }
 
 /// Whether `id` is an edit the Sample Editor makes to an audio clip's
@@ -846,6 +856,7 @@ fn marker_label(id: &str) -> &'static str {
     match id {
         "clip.stretch" => "Stretch clip",
         "clip.slide_contents" => "Slide clip contents",
+        "clip.set_fades" | "arrangement.set_crossfade" => "Change Fade",
         model::SET_MIDI_REGION | "clip.set_region" => "Change clip region",
         model::SET_MIDI_LOOP | "clip.set_loop" => "Change clip loop",
         "clip.insert_warp_marker" | "clip.move_warp_markers" => "Move warp markers",
@@ -1095,6 +1106,7 @@ impl Shell {
             undo_history_open: false,
             arrangement: ArrangementView::new(),
             clip_view: ClipView::default(),
+            detail: DetailArea::default(),
             file_manager: FileManager::default(),
             search: crate::search::Field::default(),
             plugin_list: plugin_list::PluginList::default(),
@@ -3940,10 +3952,225 @@ impl Shell {
         }))
     }
 
+    /// Selects tracks, as the Arrangement's selection. The title bars stay
+    /// selected when they were, so the keys that act on a title bar keep
+    /// working (the track context menu spec, R12, R14).
+    fn select_tracks(&mut self, tracks: &[TrackId]) {
+        let title_bars = self.arrangement.title_bars_selected();
+        self.arrangement
+            .run(
+                view_ids::SELECT_TRACKS,
+                json!({ "tracks": tracks, "title_bars": title_bars }),
+                self.editor.document(),
+            )
+            .ok();
+    }
+
+    /// Copies the tracks to the clipboard, with everything they hold (the
+    /// track context menu spec, R13, R14), and returns their IDs. The
+    /// clipboard holds whichever was copied last, these tracks or the
+    /// Arrangement's material.
+    fn copy_tracks(&mut self, id: &str, tracks: &[TrackId]) -> Result<Vec<TrackId>, ShellError> {
+        let originals = crate::tracks::duplicated(self.editor.document(), tracks);
+        if originals.is_empty() {
+            return Err(ShellError::Unavailable {
+                command: id.to_owned(),
+                reason: "there's no track to copy".to_owned(),
+            });
+        }
+        let doc = self.editor.document();
+        let tracks: Vec<crate::tracks::TrackData> = originals
+            .iter()
+            .filter_map(|&track| crate::tracks::snapshot(doc, track))
+            .collect();
+        // The files the tracks play go with them (R15; the set exchange
+        // spec, R7), for a paste into a set that doesn't list them.
+        let media = self
+            .store
+            .media_files()
+            .into_iter()
+            .filter(|(hash, ..)| tracks.iter().any(|track| track.plays(hash)))
+            .collect();
+        self.clipboard = Some(Clipboard::Tracks(crate::tracks::CopiedTracks {
+            tracks,
+            returns: doc.returns().collect(),
+            set: self.editor_generation,
+            media,
+        }));
+        Ok(originals)
+    }
+
+    /// The last selected track, in display order: where a paste goes.
+    fn last_selected_track(&self) -> Option<TrackId> {
+        let order = self.editor.document().track_order();
+        self.arrangement
+            .selected_tracks()
+            .iter()
+            .copied()
+            .filter(|track| order.contains(track))
+            .max_by_key(|track| order.iter().position(|t| t == track).unwrap_or(0))
+    }
+
+    /// Pastes the tracks on the clipboard, straight after the track to
+    /// paste after, at its level and inside its group when it's in one, or
+    /// after the last track when none is selected (R14).
+    fn paste_tracks(
+        &mut self,
+        id: &str,
+        copied: &crate::tracks::CopiedTracks,
+        after: Option<TrackId>,
+    ) -> Result<Vec<TrackId>, ShellError> {
+        let doc = self.editor.document();
+        let returns: Vec<TrackId> = doc.returns().collect();
+        let place = match after {
+            Some(track) => {
+                let parent = doc.parent(track);
+                if doc
+                    .track(track)
+                    .is_some_and(|track| track.kind() == bl_model::TrackKind::Return)
+                {
+                    // A return track goes among the returns.
+                    let at = returns
+                        .iter()
+                        .position(|&r| r == track)
+                        .map_or(returns.len(), |i| i + 1);
+                    crate::tracks::Place {
+                        parent: None,
+                        index: doc.top_level().len(),
+                        returns: at,
+                    }
+                } else {
+                    let siblings: Vec<TrackId> = match parent {
+                        Some(group) => doc
+                            .track(group)
+                            .map(|g| g.children().collect())
+                            .unwrap_or_default(),
+                        None => doc.top_level().collect(),
+                    };
+                    let at = siblings
+                        .iter()
+                        .position(|&t| t == track)
+                        .map_or(siblings.len(), |i| i + 1);
+                    crate::tracks::Place {
+                        parent,
+                        index: at,
+                        returns: returns.len(),
+                    }
+                }
+            }
+            None => crate::tracks::Place {
+                parent: None,
+                index: doc.top_level().len(),
+                returns: returns.len(),
+            },
+        };
+        // Tracks from another set: their files join this set's media table
+        // (R15), and the IDs they name mean nothing here (R15; the set
+        // exchange spec, R6).
+        let source_returns = (copied.set != self.editor_generation).then(|| copied.returns.clone());
+        if source_returns.is_some() {
+            for (hash, path, size) in &copied.media {
+                self.store.add_media(*hash, path, *size);
+                let hash = bl_media::ContentHash::from_bytes(hash.0);
+                if self.media.entry(hash).is_none() {
+                    let _ = self.media.import(path);
+                }
+            }
+        }
+        crate::tracks::copy_tracks(
+            &mut self.editor,
+            &copied.tracks,
+            place,
+            source_returns,
+            track_ids::PASTE_STEP,
+        )
+        .map_err(|reason| ShellError::Unavailable {
+            command: id.to_owned(),
+            reason,
+        })
+    }
+
     /// Runs a track command that needs the shell: Duplicate Track Without
-    /// Clips (WP-2.19b, IMP-12), Group Tracks (T24), or Ungroup Tracks (T24).
+    /// Clips (WP-2.19b, IMP-12), Group Tracks (T24), Ungroup Tracks (T24),
+    /// and the whole-track copies of WP-6.52.
     fn run_tracks(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
         match id {
+            track_ids::DUPLICATE => {
+                let track_ids::DuplicateTracksArgs { tracks } = Self::args(id, args)?;
+                let tracks = tracks.unwrap_or_else(|| self.arrangement.selected_tracks().to_vec());
+                let copies = crate::tracks::duplicate_tracks(
+                    &mut self.editor,
+                    &tracks,
+                    track_ids::DUPLICATE_STEP,
+                )
+                .map_err(|reason| ShellError::Unavailable {
+                    command: id.to_owned(),
+                    reason,
+                })?;
+                self.select_tracks(&copies);
+                self.dirty = true;
+                self.document_changed();
+                self.touch();
+                Ok(to_value(&track_ids::TracksDuplicated { tracks: copies }))
+            }
+            track_ids::COPY => {
+                let track_ids::DuplicateTracksArgs { tracks } = Self::args(id, args)?;
+                let tracks = tracks.unwrap_or_else(|| self.arrangement.selected_tracks().to_vec());
+                let copied = self.copy_tracks(id, &tracks)?;
+                self.touch();
+                Ok(to_value(&track_ids::TracksCopied { tracks: copied }))
+            }
+            track_ids::CUT => {
+                let track_ids::DuplicateTracksArgs { tracks } = Self::args(id, args)?;
+                let tracks = tracks.unwrap_or_else(|| self.arrangement.selected_tracks().to_vec());
+                let copied = self.copy_tracks(id, &tracks)?;
+                // The tracks go as Delete does (R4): every selected track
+                // but Main, and a track inside a deleted group with it.
+                let doomed = crate::tracks::duplicated(self.editor.document(), &tracks);
+                if !doomed.is_empty() {
+                    self.editor
+                        .transact(track_ids::CUT_STEP, |editor| {
+                            for track in &doomed {
+                                editor.apply(bl_model::Command::DeleteTrack { track: *track })?;
+                            }
+                            Ok::<_, bl_model::EditError>(())
+                        })
+                        .map_err(|error| ShellError::Failed {
+                            command: id.to_owned(),
+                            message: error.to_string(),
+                        })?;
+                }
+                self.dirty = true;
+                self.document_changed();
+                self.touch();
+                Ok(to_value(&track_ids::TracksCopied { tracks: copied }))
+            }
+            track_ids::PASTE => {
+                let track_ids::PasteTracksArgs { track } = Self::args(id, args)?;
+                // The clipboard holds whichever was copied last: the tracks,
+                // or the Arrangement's material (R14).
+                let Some(clipboard) = self.clipboard.clone() else {
+                    return Err(ShellError::Unavailable {
+                        command: id.to_owned(),
+                        reason: "there's nothing on the clipboard to paste".to_owned(),
+                    });
+                };
+                let Clipboard::Tracks(copied) = clipboard else {
+                    return Err(ShellError::Unavailable {
+                        command: id.to_owned(),
+                        reason: "the clipboard holds Arrangement material; paste it with \
+                                 arrangement.paste"
+                            .to_owned(),
+                    });
+                };
+                let after = track.or_else(|| self.last_selected_track());
+                let copies = self.paste_tracks(id, &copied, after)?;
+                self.select_tracks(&copies);
+                self.dirty = true;
+                self.document_changed();
+                self.touch();
+                Ok(to_value(&track_ids::TracksCopied { tracks: copies }))
+            }
             track_ids::DUPLICATE_WITHOUT_CLIPS => {
                 let track_ids::DuplicateTracksArgs { tracks } = Self::args(id, args)?;
                 let tracks = tracks.unwrap_or_else(|| self.arrangement.selected_tracks().to_vec());
@@ -4330,6 +4557,13 @@ impl Shell {
     #[must_use]
     pub fn clip_view(&self) -> &ClipView {
         &self.clip_view
+    }
+
+    /// Which of the Clip View and the Device View show, and where the
+    /// detail area's focus is (WP-6.27).
+    #[must_use]
+    pub fn detail(&self) -> &DetailArea {
+        &self.detail
     }
 
     /// The list of the set's plug-ins (IMP-29, WP-6.41).
@@ -5041,6 +5275,7 @@ impl Shell {
         }
         self.editor.begin(label);
         let launch = self.launch_settings();
+        let edge_fades = self.create_fades_on_clip_edges();
         let run = |editor: &mut Editor,
                    arrangement: &mut ArrangementView,
                    clip_view: &mut ClipView,
@@ -5098,6 +5333,7 @@ impl Shell {
                     editor,
                     arrangement,
                     clipboard,
+                    edge_fades,
                 )
             }
         };
@@ -5189,6 +5425,7 @@ impl Shell {
                     &mut self.editor,
                     &mut self.arrangement,
                     &mut self.clipboard,
+                    self.prefs.create_fades_on_clip_edges.0,
                 )
                 .map(|_| ())
             };
@@ -5721,6 +5958,7 @@ impl Shell {
                     .map(|(track, ..)| *track)
                     .chain(midi.iter().map(|take| take.track))
                     .collect();
+                let before = self.editor.document().clone();
                 self.editor.transact(label, |editor| {
                     for (track, hash, path, _) in &imported {
                         let id = editor.new_id();
@@ -5750,7 +5988,10 @@ impl Shell {
                         })?;
                     }
                     crate::recording::place_midi(editor, &midi, take, rate, overdub, &mut placed)?;
-                    crate::session_capture::place(editor, &watch, &runs, &armed, end)
+                    crate::session_capture::place(editor, &watch, &runs, &armed, end)?;
+                    // Spec: audio-clips R26. A take that meets a clip
+                    // already there is crossfaded with it.
+                    crate::arrangement::fades::settle(editor, &before, edge_fades)
                 })
             }
             Some(_) => {
@@ -6026,7 +6267,7 @@ impl Shell {
                     Area::Detail if self.value_focused => contexts.push(Context::ValueField),
                     // Spec: piano-roll. With the Clip View open, its MIDI
                     // Note Editor holds the detail area's keys.
-                    Area::Detail if self.clip_view.visible() => {
+                    Area::Detail if self.detail.focus_in_clip() => {
                         contexts.push(Context::ClipView);
                         if self.clip_view.tab() == ClipTab::Envelopes {
                             contexts.push(Context::Envelope);
@@ -6102,7 +6343,9 @@ impl Shell {
             }
             ids::VIEW_FULL_SCREEN => Some(self.full_screen),
             ids::VIEW_TOGGLE_BROWSER => Some(self.browser),
-            ids::VIEW_TOGGLE_CLIP_VIEW => Some(self.clip_view.visible()),
+            ids::VIEW_TOGGLE_CLIP_VIEW => Some(self.detail.clip_shown()),
+            ids::VIEW_TOGGLE_DEVICE_VIEW => Some(self.detail.device_shown()),
+            ids::VIEW_EXPAND_CLIP_VIEW => Some(self.detail.expanded()),
             ids::VIEW_TOGGLE_PLUGIN_LIST => Some(self.plugin_list.visible()),
             ids::VIEW_DRAW_MODE => Some(self.clip_view.draw_mode()),
             ids::VIEW_FOLD_NOTES => Some(
@@ -6194,6 +6437,11 @@ impl Shell {
             // Spec: time-editing R4. The Create menu's Add Locator reads
             // Delete Locator while a locator is selected.
             locator_ids::DELETE => Some("Delete Locator".to_owned()),
+            // Spec: audio-clips R28. Create ▸ Create Fade reads Create Fade
+            // In/Out or Create Crossfade as the selection gives one.
+            edit_ids::CREATE_FADE => Some(
+                editing::create_fade_label(self.editor.document(), &self.arrangement).to_owned(),
+            ),
             model::UNDO => Some(self.editor.undo_history().next().map_or_else(
                 || "Nothing to Undo".to_owned(),
                 |step| format!("Undo {step}"),
@@ -6237,6 +6485,30 @@ impl Shell {
                     _ => "Use as MIDI Effect".to_owned(),
                 })
             }
+            // Spec: detail-views R6. Hide Device View reads for the views it
+            // would hide, or the ones it would bring back.
+            ids::VIEW_TOGGLE_DETAIL_AREA => {
+                let (hiding, views) = self.detail.toggle_area_views();
+                let names = match views[..] {
+                    [DetailView::Clip] => "Clip View",
+                    [DetailView::Device] => "Device View",
+                    _ => "Clip and Device View",
+                };
+                Some(format!("{} {names}", if hiding { "Hide" } else { "Show" }))
+            }
+            // Spec: note-editing R18. The item reads Activate Note(s) when
+            // every selected note is deactivated already.
+            note_ids::DEACTIVATE => Some(
+                if self
+                    .clip_view
+                    .selection_deactivated(self.editor.document(), &self.arrangement)
+                {
+                    "Activate Note(s)"
+                } else {
+                    "Deactivate Note(s)"
+                }
+                .to_owned(),
+            ),
             // The Playback menu's first item toggles with Stop (M-PLAY-001).
             transport_ids::PLAY_STOP => {
                 Some(if self.playing() { "Stop" } else { "Play" }.to_owned())
@@ -6251,6 +6523,24 @@ impl Shell {
     #[must_use]
     pub fn can_invoke(&self, id: &str, args: &Value) -> bool {
         self.can_invoke_in(id, args, &self.active_contexts())
+    }
+
+    /// The contexts the MIDI Note Editor's context menus work in (C-NOTE,
+    /// C-KEYS): the note editor's, and the note selection's while notes are
+    /// selected, whatever has the keyboard, because the menu acts on what it
+    /// was opened on (Spec: piano-roll R30; note-editing R18).
+    #[must_use]
+    pub fn note_menu_contexts(&self) -> Vec<Context> {
+        let mut contexts = vec![Context::NoteEditor];
+        if !self
+            .clip_view
+            .selected_notes(self.editor.document(), &self.arrangement)
+            .is_empty()
+        {
+            contexts.push(Context::NoteSelection);
+        }
+        contexts.extend([Context::ClipView, Context::Global]);
+        contexts
     }
 
     /// The contexts a track's title-bar menu works in (WP-4.22): the active
@@ -6322,6 +6612,17 @@ impl Shell {
             .filter(|track| doc.track(*track).is_some_and(|t| t.is_frozen()))
     }
 
+    /// Whether a track can be copied: one is selected, and it isn't Main
+    /// (the track context menu spec, R3).
+    fn can_copy_tracks(&self) -> bool {
+        self.arrangement.selected_tracks().iter().any(|track| {
+            self.editor
+                .document()
+                .track(*track)
+                .is_some_and(|track| track.kind() != bl_model::TrackKind::Main)
+        })
+    }
+
     /// [`Shell::can_invoke`] with `active` as the contexts that apply.
     #[must_use]
     pub fn can_invoke_in(&self, id: &str, args: &Value, active: &[Context]) -> bool {
@@ -6331,6 +6632,12 @@ impl Shell {
         if self.edit_gesture.is_some() {
             // A drag is under way; keys wait for it (Esc cancels it).
             return false;
+        }
+        // Spec: detail-views R11. The menu item is enabled while the Clip
+        // View shows, whichever area has the focus; the key is the Clip
+        // View's own.
+        if id == ids::VIEW_EXPAND_CLIP_VIEW {
+            return self.detail.clip_shown();
         }
         if !spec.contexts.iter().any(|context| active.contains(context)) {
             return false;
@@ -6357,6 +6664,21 @@ impl Shell {
         match id {
             model::UNDO => return self.editor.can_undo(),
             model::REDO => return self.editor.can_redo(),
+            // The whole-track copies (the track context menu spec, R3):
+            // Cut, Copy and Duplicate work on the selected tracks, and
+            // Paste on the tracks on the clipboard.
+            track_ids::COPY | track_ids::CUT | track_ids::DUPLICATE => {
+                return self.can_copy_tracks();
+            }
+            track_ids::PASTE => {
+                return self
+                    .clipboard
+                    .as_ref()
+                    .is_some_and(|clipboard| match clipboard {
+                        Clipboard::Tracks(copied) => !copied.tracks.is_empty(),
+                        Clipboard::Material(_) => false,
+                    });
+            }
             ids::APP_HIDE => return cfg!(target_os = "macos"),
             ids::SET_OPEN | ids::SET_SAVE | ids::SET_SAVE_AS | ids::APP_SETTINGS => return true,
             ids::SET_DISCARD_CHANGES => return self.unsaved_changes(),
@@ -6573,7 +6895,11 @@ impl Shell {
                 .is_some_and(|schema| bl_commands::validate(schema, &args).is_ok())
                 // Spec: time-editing R4. The Delete key deletes the
                 // selected locators while there are any.
-                && !(id == edit_ids::DELETE && !self.arrangement.selected_locators().is_empty())
+                && !(id == edit_ids::DELETE
+                    && (!self.arrangement.selected_locators().is_empty()
+                        // Spec: audio-clips R29. Delete deletes the selected
+                        // fade handle's fade instead.
+                        || self.arrangement.selected_fade().is_some()))
                 && editing::can_run(
                     id,
                     &args,
@@ -7638,6 +7964,7 @@ impl Shell {
         self.check_warp_files(id, &args)?;
         let args = self.prepare_device_role(id, args)?;
         let args = self.prepare_scale_clips(id, args)?;
+        let args = self.prepare_groove_clips(id, args)?;
         self.prepare_warping(id, args)
     }
 
@@ -7888,6 +8215,7 @@ impl Shell {
                 &mut self.editor,
                 &mut self.arrangement,
                 &mut self.clipboard,
+                self.prefs.create_fades_on_clip_edges.0,
             )
             .map_err(|failure| edit_error(id, failure));
             if *self.editor.document() != before {
@@ -8457,6 +8785,9 @@ impl Shell {
         if bl_shell_spec::warping::handles(id) {
             return self.run_warping(id, args);
         }
+        if bl_shell_spec::groove::handles(id) {
+            return self.run_grooves(id, args);
+        }
         if bl_shell_spec::audio_panel::handles(id) {
             return self.run_audio_panel(id, args);
         }
@@ -8860,6 +9191,21 @@ impl Shell {
 
     fn view_result(&self) -> Value {
         to_value(&self.view_window())
+    }
+
+    /// What the detail area's commands return. The Clip View's own copy of
+    /// whether it shows follows the detail area here, the one place every
+    /// change passes.
+    fn detail_result(&mut self) -> Value {
+        self.clip_view.set_visible(self.detail.clip_shown());
+        to_value(&self.detail.state())
+    }
+
+    /// Gives the detail area the keyboard focus.
+    fn focus_detail(&mut self) {
+        self.focused_window = WindowKind::Main;
+        self.focused_area = Area::Detail;
+        self.effects.push(Effect::FocusArea(Area::Detail));
     }
 
     fn set_result(&self) -> Value {
@@ -9445,14 +9791,70 @@ impl Shell {
                 Ok(self.view_result())
             }
             ids::VIEW_TOGGLE_CLIP_VIEW => {
-                // Spec: piano-roll; L-STAT-004. View state only.
+                // Spec: detail-views R1; L-STAT-004. View state only.
                 Self::args::<NoArgs>(id, args)?;
-                self.clip_view.toggle();
-                Ok(to_value(
-                    &self
-                        .clip_view
-                        .state(self.editor.document(), &self.arrangement),
-                ))
+                self.detail.toggle(DetailView::Clip);
+                Ok(self.detail_result())
+            }
+            ids::VIEW_TOGGLE_DEVICE_VIEW => {
+                // Spec: detail-views R1; L-STAT-006.
+                Self::args::<NoArgs>(id, args)?;
+                self.detail.toggle(DetailView::Device);
+                Ok(self.detail_result())
+            }
+            ids::VIEW_SHOW_DETAIL_VIEWS => {
+                // Spec: detail-views R2; I-CLICK-027.
+                Self::args::<NoArgs>(id, args)?;
+                self.detail.both();
+                Ok(self.detail_result())
+            }
+            ids::VIEW_SWITCH_DETAIL_VIEW => {
+                // Spec: detail-views R5; S-VIEW-004.
+                Self::args::<NoArgs>(id, args)?;
+                if self.detail.switch() {
+                    self.focus_detail();
+                }
+                Ok(self.detail_result())
+            }
+            ids::VIEW_TOGGLE_DETAIL_AREA => {
+                // Spec: detail-views R6; S-VIEW-022.
+                Self::args::<NoArgs>(id, args)?;
+                self.detail.toggle_area();
+                Ok(self.detail_result())
+            }
+            ids::VIEW_EXPAND_CLIP_VIEW => {
+                // Spec: detail-views R11; S-NOTE-030.
+                Self::args::<NoArgs>(id, args)?;
+                if !self.detail.toggle_expanded() {
+                    return Err(ShellError::Unavailable {
+                        command: id.to_owned(),
+                        reason: "the Clip View is hidden".to_owned(),
+                    });
+                }
+                Ok(self.detail_result())
+            }
+            ids::VIEW_SET_DETAIL_HEIGHT => {
+                // Spec: detail-views R10, R18.
+                let ids::DetailHeightArgs { points } = Self::args(id, args)?;
+                if !points.is_finite() {
+                    return Err(ShellError::InvalidArgs {
+                        command: id.to_owned(),
+                        message: "`points` must be a number".to_owned(),
+                    });
+                }
+                self.detail.set_clip_height(points);
+                Ok(self.detail_result())
+            }
+            ids::FOCUS_CLIP_VIEW | ids::FOCUS_DEVICE_VIEW => {
+                // Spec: detail-views R14; S-FOCUS-004, S-FOCUS-005.
+                Self::args::<NoArgs>(id, args)?;
+                self.detail.focus_view(if id == ids::FOCUS_CLIP_VIEW {
+                    DetailView::Clip
+                } else {
+                    DetailView::Device
+                });
+                self.focus_detail();
+                Ok(self.detail_result())
             }
             ids::VIEW_TOGGLE_PLUGIN_LIST => {
                 // Spec: plugin-list R1, R3. View state only.
@@ -9563,6 +9965,51 @@ impl Shell {
                         .state(self.editor.document(), &self.arrangement),
                 ))
             }
+            ids::VIEW_LANES => {
+                // Spec: note-editing R1, R2, R13; the lanes under the note
+                // editor and their Randomize amounts.
+                let LanesArgs {
+                    lane,
+                    show,
+                    swap,
+                    amount,
+                    all,
+                } = Self::args(id, args)?;
+                if lane.is_none() && (show.is_some() || swap.is_some() || amount.is_some()) {
+                    return Err(ShellError::InvalidArgs {
+                        command: id.to_owned(),
+                        message: "`show`, `swap` and `amount` need a `lane`".to_owned(),
+                    });
+                }
+                if let Some(lane) = lane {
+                    if let Some(amount) = amount {
+                        let limit = RandomizeAmounts::limit(lane);
+                        if amount > limit {
+                            return Err(ShellError::InvalidArgs {
+                                command: id.to_owned(),
+                                message: format!("`amount` must be from 0 to {limit}"),
+                            });
+                        }
+                        self.clip_view.set_randomize_amount(lane, amount);
+                    }
+                    if swap == Some(true) {
+                        self.clip_view.swap_lane(lane);
+                    } else if let Some(on) = show {
+                        self.clip_view.show_lane(lane, on);
+                    } else if amount.is_none() && swap.is_none() {
+                        let on = !self.clip_view.lanes().is_shown(lane);
+                        self.clip_view.show_lane(lane, on);
+                    }
+                }
+                if let Some(on) = all {
+                    self.clip_view.show_all_lanes(on);
+                }
+                Ok(to_value(
+                    &self
+                        .clip_view
+                        .state(self.editor.document(), &self.arrangement),
+                ))
+            }
             ids::VIEW_STATE => {
                 Self::args::<NoArgs>(id, args)?;
                 Ok(to_value(&ViewState {
@@ -9570,6 +10017,7 @@ impl Shell {
                     clip_view: self
                         .clip_view
                         .state(self.editor.document(), &self.arrangement),
+                    detail: self.detail.state(),
                     plugin_list: self.plugin_list.state(),
                     assistant: self.assistant_panel_state(),
                     undo_history: self.undo_history_open,

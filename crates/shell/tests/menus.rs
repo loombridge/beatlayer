@@ -147,9 +147,12 @@ fn every_shell_command_is_on_a_menu_or_a_control() {
         // The MIDI Note Editor's lane and fold (WP-2.3): the View menu's
         // Fold to Notes reaches view.fold_notes through its key (M-VIEW-039,
         // S-NOTE-038), the lane header's own menu reaches view.lane
-        // (L-CLIP-014), and agents reach both.
+        // (L-CLIP-014), and agents reach both. The footer's Lane Selector,
+        // its Show/Hide All switch and the lane header's Swap Lane reach
+        // view.lanes (note-editing R1, R2).
         commands::VIEW_FOLD_NOTES,
         commands::VIEW_LANE,
+        commands::VIEW_LANES,
         // The Clip View's Envelopes tab (WP-3.16): the View menu's Content
         // Editor and Envelope Editor reach view.clip_tab through their keys
         // (M-VIEW-018, M-VIEW-019, S-CLIPMODE-003, S-CLIPMODE-004), and the
@@ -159,6 +162,12 @@ fn every_shell_command_is_on_a_menu_or_a_control() {
         // The list of the set's plug-ins' Show Only Missing switch (the
         // plug-in list spec, R3), which the list's own switch reaches.
         commands::VIEW_SET_PLUGIN_LIST_ONLY_MISSING,
+        // The detail area's commands that no View menu item holds (the
+        // detail views spec): Option-click on a view's toggle shows both
+        // views (R2, S-VIEW-005), and the top edge's drag sets the Clip
+        // View's height (R10).
+        commands::VIEW_SHOW_DETAIL_VIEWS,
+        commands::VIEW_SET_DETAIL_HEIGHT,
         // A query for agents, like `transport.state`.
         commands::VIEW_STATE,
         // The Shortcuts page's buttons (the custom shortcuts spec, R8 and

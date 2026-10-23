@@ -810,6 +810,8 @@ impl Shell {
                             envelopes: Vec::new(),
                             launch: bl_model::ClipLaunch::default(),
                             scale,
+                            // The render plays the groove, so it holds it.
+                            groove: None,
                         };
                         let placed = shell.editor.transact(label_of(scene), |editor| {
                             place(editor, track, scene, start, end, clip)
@@ -1235,6 +1237,10 @@ fn consolidated_audio(
         gain,
         fade_in: 0.0,
         fade_out: 0.0,
+        fade_in_curve: 0.0,
+        fade_out_curve: 0.0,
+        fade_in_before: 0.0,
+        fade_out_after: 0.0,
         warp: true,
         warp_markers: markers,
         tempo: Some(tempo),

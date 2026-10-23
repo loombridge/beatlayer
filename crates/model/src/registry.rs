@@ -962,8 +962,12 @@ const ENTRIES: &[Entry] = &[
             clicking or dragging a breakpoint on an automation lane does. `target` names the \
             parameter: `{\"type\": \"mixer\", \"param\": \"volume\"}`, `{\"type\": \"send\", \
             \"to\": <return track>}`, or `{\"type\": \"device\", \"device\": <device>, \
-            \"param\": <parameter>}`. A parameter with no envelope yet gets its first \
-            breakpoint and its envelope drives it from then on. Values are in the parameter's \
+            \"param\": <parameter>}`, or, on an audio track, a sound setting of its audio clips: \
+            `{\"type\": \"clip\", \"param\": \"formants\"}` (`gain` as linear gain, \
+            `transpose` in semitones, `detune` in cents, `high_quality`, `sample_offset` in \
+            sixteenths, and the warp modes' controls), which drives that setting of every \
+            audio clip on the track as it plays. A parameter with no envelope yet gets its \
+            first breakpoint and its envelope drives it from then on. Values are in the parameter's \
             own units: volume as linear gain, pan from -1 to 1, the Track Activator 1 for \
             muted, and a device parameter as the device's own value. `at` is 0 (1.1.1) or \
             later. The value between two breakpoints follows the segment's shape: the straight \
@@ -1437,10 +1441,52 @@ const ENTRIES: &[Entry] = &[
         keys: &[],
         description: "Sets the lengths, in seconds, of an audio clip's fade-in, from silence \
             at the clip's start in the arrangement, and its fade-out, to silence at its end; \
-            0 is no fade. Each fade is a straight line in amplitude. Short fades stop a clip \
-            that starts or ends mid-waveform from clicking: 0.004 (4 ms) is the length that \
-            Create Fades on Clip Edges gives new clips. Lengths must be finite and at least \
-            0.",
+            0 is no fade. `fade_in_curve` and `fade_out_curve`, from -1 to 1, shape each: 0, \
+            the default, is a straight line in amplitude, a positive curve bows the fade \
+            towards full level and a negative one towards silence; left out, a curve stays as \
+            it is. Short fades stop a clip that starts or ends mid-waveform from clicking: \
+            0.004 (4 ms) is the length that Create Fades on Clip Edges gives new clips. \
+            Lengths must be finite, at least 0 and within the clip's limits: a fade-in ends \
+            no later than the fade-out begins, and a fade takes in no point where the clip \
+            goes round its loop brace. Where a crossfade begins or ends at the clip, \
+            this sets the crossfade's part inside the clip and its curve, and the clip it \
+            meets follows; if it can't (its file doesn't reach back that far), the crossfade \
+            ends and each clip keeps its own fade. Read the result back with the query tool's `clip` field `data` \
+            and the clip's `fade_in_before` and `fade_out_after`.",
+    },
+    Entry {
+        id: "arrangement.set_crossfade",
+        action: Action::Apply("set_crossfade"),
+        label: "Set Crossfade",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Makes or changes the crossfade between two audio clips on a track that \
+            meet, the earlier one ending exactly where the later one starts: `boundary` is \
+            that position. The crossfade runs from `before` seconds before the boundary to \
+            `after` seconds past it, at least one of them above 0; over it the earlier \
+            clip fades out and the later one fades in, each playing what it would play there \
+            if its edge were moved to the span's far end, as resizing it would. `curve`, from \
+            -1 to 1, shapes both fades; 0, the default, is a straight line, so the two \
+            gains add to 1. Refused where no two audio clips meet at the boundary, or past a \
+            clip's fade limits: a crossfade reaches no further into a clip than the clip's \
+            other fade allows, takes in no point where a clip goes round its loop brace, and \
+            reads nothing before the start of a file. Read it back with the query tool's \
+            `clip` field `data`: the earlier clip's `fade_out` and `fade_out_after` and the \
+            later clip's `fade_in` and `fade_in_before`.",
+    },
+    Entry {
+        id: "arrangement.delete_crossfade",
+        action: Action::Apply("delete_crossfade"),
+        label: "Delete Crossfade",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Ends the crossfade between the two audio clips on a track that meet at \
+            `boundary`, leaving neither a fade there. Refused where they have no crossfade. \
+            The shell's `arrangement.delete_fades` does what Delete does on a selected fade \
+            handle, which with Create Fades on Clip Edges on gives the clips a 4 ms \
+            crossfade instead.",
     },
     Entry {
         id: "clip.set_warp",
@@ -1901,7 +1947,10 @@ const ENTRIES: &[Entry] = &[
             breakpoint there or replacing the one that's there, as clicking or dragging a \
             breakpoint in the Envelopes tab does. `clip` is the clip, `target` the parameter of \
             the clip's track the envelope modulates (a control of its mixer, one of its sends, \
-            or a parameter of a device in its chain), `at` the position in ticks from the \
+            or a parameter of a device in its chain; an audio clip's can instead be one of its \
+            sound settings, `{\"type\": \"clip\", \"param\": \"transpose\"}`, whose value \
+            is a share from 0 to 100 for `gain` and otherwise an amount added to the setting, \
+            in its own units), `at` the position in ticks from the \
             beginning of the clip's contents, and `value` the value there, in the parameter's \
             own units. A MIDI clip's `target` can instead be a MIDI controller (MIDI Ctrl in \
             the Envelopes tab): `{\"type\": \"midi.cc\", \"number\": 1}` (a controller from 1 to \
@@ -3174,6 +3223,97 @@ const ENTRIES: &[Entry] = &[
             Choosing it where it is set clears it, so the song starts at the insert marker \
             again. While it is set, Play starts the song there instead of at the insert \
             marker. One undo step, `Set Song Start Time`.",
+    },
+    Entry {
+        id: "groove.add",
+        action: Action::Apply("add_groove"),
+        label: "Add Groove",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Adds a groove to the end of the set's Groove Pool: a `groove` with a \
+            new ID, a name, a `length` in ticks, its `notes` (each a `position` from 0 to \
+            before the length and a `velocity` from 1 to 127, none two at one position) and \
+            its parameters, which are Base `1/16`, Quantize 0, Timing 100, Random 0 and \
+            Velocity 0 where left out. It changes no clip: use `clip.set_groove` to give a \
+            clip the groove. A groove that breaks those limits is refused. One undo step, \
+            `Add Groove`. To make a groove from a clip, use `groove.extract`; from a file, \
+            `groove.load`.",
+    },
+    Entry {
+        id: "groove.delete",
+        action: Action::Apply("delete_groove"),
+        label: "Delete Groove",
+        permission: Permission::Destructive,
+        contexts: &[Global],
+        keys: &[],
+        description: "Takes a groove out of the Groove Pool, as the Delete key does in the pool: \
+            every clip that used it is set to no groove, and if it was the auto-load groove \
+            nothing is auto-loaded any more. One undo step, `Delete Groove`. Because it \
+            removes the person's work, an agent asks first.",
+    },
+    Entry {
+        id: "groove.rename",
+        action: Action::Apply("rename_groove"),
+        label: "Rename Groove",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Renames a groove in the Groove Pool. One undo step, `Rename Groove`.",
+    },
+    Entry {
+        id: "groove.set",
+        action: Action::Apply("set_groove"),
+        label: "Set Groove",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Sets any of a groove's parameters, as its row in the Groove Pool does, and \
+            keeps those left out: `base` (`1/4`, `1/8`, `1/8T`, `1/16`, `1/16T` or `1/32`), \
+            `quantize` (0 to 100 percent), `timing` (0 to 100), `random` (0 to 100) and \
+            `velocity` (-100 to +100). A value out of range refuses them all. A change reaches \
+            every clip playing the groove from the next block. One undo step, named for the \
+            parameter when one is set: `Change Base`, `Change Quantize`, `Change Timing`, \
+            `Change Random` or `Change Velocity`.",
+    },
+    Entry {
+        id: "groove.set_global_amount",
+        action: Action::Apply("set_global_groove_amount"),
+        label: "Set Global Groove Amount",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Sets the Global Amount, from 0 to 130 percent: it scales Timing, Random \
+            and Velocity for every groove in the set at once, and not Quantize; 100 plays each \
+            groove as set. The set holds one. It reaches every clip playing a groove from the \
+            next block. One undo step, `Change Global Amount`.",
+    },
+    Entry {
+        id: "groove.set_auto_load",
+        action: Action::Apply("set_auto_load_groove"),
+        label: "Set Auto Load Groove",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Sets the Auto Load Groove switch (`enabled`) and the groove a new MIDI clip \
+            takes while it is on (`groove`, one of the pool's), and keeps what is left out. A \
+            MIDI clip made new, empty or by recording takes that groove; a clip made by \
+            copying, pasting or importing keeps its own. One undo step, `Change Auto Load \
+            Groove`.",
+    },
+    Entry {
+        id: "clip.set_groove",
+        action: Action::Apply("set_clip_groove"),
+        label: "Set Clip Groove",
+        permission: Permission::Edit,
+        contexts: &[Global, ClipView],
+        keys: &[],
+        description: "Sets the Clip Groove of MIDI or audio clips to a groove of the Groove \
+            Pool (`groove`), or to none when `groove` is left out. `clips` names the clips; \
+            left out, the selected ones are set. The groove changes when a clip's notes play \
+            and how loud, or where its audio plays, and changes nothing in the clip until \
+            `groove.commit`; an audio clip plays its groove only while it is warped. One undo \
+            step, `Change Clip Groove`, however many clips it sets.",
     },
     Entry {
         id: UNDO,

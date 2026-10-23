@@ -387,7 +387,7 @@ fn bl_cli_render_writes_what_the_harness_renders() {
         assert!(render.same_bits(&fixture.render()), "{}", fixture.name);
         rendered += 1;
     }
-    assert_eq!(rendered, 70);
+    assert_eq!(rendered, 75);
     assert!(!fs::read_dir(&temp.0).unwrap().any(|entry| {
         entry
             .unwrap()

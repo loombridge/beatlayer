@@ -338,7 +338,7 @@ impl View<'_> {
             ClipData::Audio(audio) => ("audio", json!({ "media": audio.media })),
             ClipData::Midi(midi) => ("midi", json!({ "notes": midi.notes.len() })),
         };
-        json!({
+        let mut value = json!({
             "id": clip.id,
             "name": clip.name,
             "kind": kind,
@@ -349,7 +349,12 @@ impl View<'_> {
             "mute": clip.mute,
             "scale": scale_value(clip.scale),
             "content": content,
-        })
+        });
+        // Only a clip with a groove shows one.
+        if let Some(groove) = clip.groove {
+            value["groove"] = json!(groove);
+        }
+        value
     }
 
     fn clip(&self, clip: &Clip) -> Value {
@@ -723,6 +728,13 @@ fn target_label(target: &AutomationTarget) -> String {
         AutomationTarget::ChainSend { chain, to } => {
             format!("chain {} send {}", chain.0.get(), to.0.get())
         }
+        AutomationTarget::Clip { param } => format!(
+            "clip {}",
+            serde_json::to_value(param)
+                .ok()
+                .and_then(|name| name.as_str().map(str::to_owned))
+                .unwrap_or_default()
+        ),
         AutomationTarget::MidiCc { number } => format!("midi cc {number}"),
         AutomationTarget::MidiPitchBend => "midi pitch bend".to_owned(),
         AutomationTarget::MidiChannelPressure => "midi channel pressure".to_owned(),

@@ -17,13 +17,18 @@ use crate::automation::{
 };
 use crate::clip::{
     AudioData, Clip, ClipData, ClipEnvelope, EnvelopeKind, MidiData, Note, TakeLane, clip_entry,
+    crossfades,
 };
+use crate::clip_param::ClipParam;
 use crate::device::{Device, DeviceKind, DeviceRole};
 use crate::document::Document;
 use crate::error::ModelError;
 use crate::external::{ExternalPort, HardwareLatency};
 use crate::follow::FollowPatch;
-use crate::ids::{ChainId, ClipId, ContentHash, DeviceId, LocatorId, ParamId, SceneId, TrackId};
+use crate::groove::{GLOBAL_AMOUNT_MAX, Groove, GrooveBase, check_percent};
+use crate::ids::{
+    ChainId, ClipId, ContentHash, DeviceId, GrooveId, LocatorId, ParamId, SceneId, TrackId,
+};
 use crate::launch::{ClipLaunch, LaunchMode, LaunchQuantization};
 use crate::layers::{
     Distribution, Layer, LayerId, LayerSettings, LayerSort, LayerZone, Layers, Zone, ZoneKind,
@@ -938,16 +943,58 @@ pub enum Command {
         #[schemars(range(min = 0.0))]
         gain: f64,
     },
-    /// Sets the lengths of an audio clip's fade-in and fade-out.
+    /// Sets the lengths and curves of an audio clip's fade-in and fade-out.
     SetClipFades {
         /// The audio clip.
         clip: ClipId,
         /// The fade-in's length in seconds from the clip's start: 0 for none.
+        /// Where a crossfade begins at the clip's start, this is how far
+        /// past the start it runs.
         #[schemars(range(min = 0.0))]
         fade_in: f64,
         /// The fade-out's length in seconds up to the clip's end: 0 for none.
+        /// Where a crossfade ends at the clip's end, this is how far before
+        /// the end it begins.
         #[schemars(range(min = 0.0))]
         fade_out: f64,
+        /// The fade-in's curve, from −1 to 1: 0 is a straight line, a
+        /// positive curve bows towards full level and a negative one towards
+        /// silence. Left out, the curve stays as it is.
+        #[serde(default)]
+        #[schemars(range(min = -1.0, max = 1.0))]
+        fade_in_curve: Option<f64>,
+        /// The fade-out's curve, from −1 to 1. Left out, the curve stays as
+        /// it is.
+        #[serde(default)]
+        #[schemars(range(min = -1.0, max = 1.0))]
+        fade_out_curve: Option<f64>,
+    },
+    /// Makes or changes the crossfade between two audio clips on a track
+    /// that meet at `boundary`.
+    SetCrossfade {
+        /// The track.
+        track: TrackId,
+        /// Where the earlier clip ends and the later one starts.
+        boundary: Ticks,
+        /// How many seconds before the boundary the crossfade starts.
+        #[schemars(range(min = 0.0))]
+        before: f64,
+        /// How many seconds after the boundary the crossfade ends.
+        #[schemars(range(min = 0.0))]
+        after: f64,
+        /// The curve of both fades, from −1 to 1: 0 is a straight line, so
+        /// the two gains add to 1.
+        #[serde(default)]
+        #[schemars(range(min = -1.0, max = 1.0))]
+        curve: f64,
+    },
+    /// Ends the crossfade between the two audio clips on a track that meet
+    /// at `boundary`, leaving neither clip a fade there.
+    DeleteCrossfade {
+        /// The track.
+        track: TrackId,
+        /// Where the earlier clip ends and the later one starts.
+        boundary: Ticks,
     },
     /// Switches an audio clip's Warp on or off (WP-4.1): its Start and End
     /// markers and loop brace convert through the warp map and it keeps its
@@ -2370,6 +2417,69 @@ pub enum Command {
         #[serde(default)]
         name: Option<String>,
     },
+    /// Adds a groove to the end of the Groove Pool (the grooves spec, R1):
+    /// what loading a groove file and extracting a groove make.
+    AddGroove {
+        /// The groove, with a new ID.
+        groove: Groove,
+    },
+    /// Takes a groove out of the pool, sets every clip that used it to none
+    /// and clears the auto-load groove if it was that one (R5).
+    DeleteGroove {
+        /// The groove.
+        groove: GrooveId,
+    },
+    /// Renames a groove (R5).
+    RenameGroove {
+        /// The groove.
+        groove: GrooveId,
+        /// The new name.
+        name: String,
+    },
+    /// Sets any of a groove's parameters, keeping those left out (R5).
+    SetGroove {
+        /// The groove.
+        groove: GrooveId,
+        /// The grid its notes are measured against.
+        #[serde(default)]
+        base: Option<GrooveBase>,
+        /// Quantize, from 0 to 100 percent.
+        #[serde(default)]
+        quantize: Option<f64>,
+        /// Timing, from 0 to 100 percent.
+        #[serde(default)]
+        timing: Option<f64>,
+        /// Random, from 0 to 100 percent.
+        #[serde(default)]
+        random: Option<f64>,
+        /// Velocity, from -100 to +100 percent.
+        #[serde(default)]
+        velocity: Option<f64>,
+    },
+    /// Sets the Global Amount, from 0 to 130 percent (R5).
+    SetGlobalGrooveAmount {
+        /// The amount, in percent.
+        amount: f64,
+    },
+    /// Sets the Auto Load Groove switch and its groove (R20), keeping what
+    /// is left out.
+    SetAutoLoadGroove {
+        /// Whether a new MIDI clip takes the auto-load groove.
+        #[serde(default)]
+        enabled: Option<bool>,
+        /// The auto-load groove, one of the pool's.
+        #[serde(default)]
+        groove: Option<GrooveId>,
+    },
+    /// Sets the groove of clips to one of the pool's, or to none (R3).
+    SetClipGroove {
+        /// The clips; left out, the ones selected.
+        #[serde(default)]
+        clips: Vec<ClipId>,
+        /// The groove; left out, none.
+        #[serde(default)]
+        groove: Option<GrooveId>,
+    },
 }
 
 impl Command {
@@ -2467,7 +2577,9 @@ impl Command {
             Self::SetMidiClipLoop { .. } => "Change clip loop",
             Self::SetClipLoopEnabled { .. } => "Switch clip loop",
             Self::SetClipGain { .. } => "Change clip gain",
-            Self::SetClipFades { .. } => "Change clip fades",
+            Self::SetClipFades { .. } => "Change Fade",
+            Self::SetCrossfade { .. } => "Change Fade",
+            Self::DeleteCrossfade { .. } => "Delete Fade",
             // WP-4.1. Live's undo names for the warp edits are to observe;
             // Beatlayer's name the edit.
             Self::SetClipWarp { .. } => "Switch Warp",
@@ -2663,6 +2775,15 @@ impl Command {
             // are to observe; Beatlayer's name the edit.
             Self::SetClipScale { .. } => "Change Clip Scale",
             Self::SetScale { .. } => "Change Scale",
+            // Spec: grooves R5, R16, R17, R32. Live's undo names for the
+            // groove edits are to observe; Beatlayer's name the edit.
+            Self::AddGroove { .. } => "Add Groove",
+            Self::DeleteGroove { .. } => "Delete Groove",
+            Self::RenameGroove { .. } => "Rename Groove",
+            Self::SetGroove { .. } => "Change Groove",
+            Self::SetGlobalGrooveAmount { .. } => "Change Global Amount",
+            Self::SetAutoLoadGroove { .. } => "Change Auto Load Groove",
+            Self::SetClipGroove { .. } => "Change Clip Groove",
         }
     }
 
@@ -2684,6 +2805,28 @@ impl Command {
             Self::CompareSwitch { .. } => "Compare: Switch to B",
             Self::CompareCopy { device } if b(device) => "Compare: Copy B to A",
             Self::CompareCopy { .. } => "Compare: Copy A to B",
+            // Spec: grooves R5. A change to one parameter is named for it.
+            Self::SetGroove {
+                base,
+                quantize,
+                timing,
+                random,
+                velocity,
+                ..
+            } => match (
+                base.is_some(),
+                quantize.is_some(),
+                timing.is_some(),
+                random.is_some(),
+                velocity.is_some(),
+            ) {
+                (true, false, false, false, false) => "Change Base",
+                (false, true, false, false, false) => "Change Quantize",
+                (false, false, true, false, false) => "Change Timing",
+                (false, false, false, true, false) => "Change Random",
+                (false, false, false, false, true) => "Change Velocity",
+                _ => self.label(),
+            },
             _ => self.label(),
         }
     }
@@ -2703,6 +2846,7 @@ impl Command {
             Self::GroupDevices { rack, .. } => rack.ids(),
             Self::CreateScene { id, .. } => vec![id.0],
             Self::AddLocator { locator } => vec![locator.id.0],
+            Self::AddGroove { groove } => vec![groove.id.0],
             Self::BounceTrackInPlace { bounced, .. } => {
                 bounced.clip_ids().iter().map(|clip| clip.0).collect()
             }
@@ -3356,6 +3500,52 @@ impl Document {
                 self.settings.scale = scaled(current, *enabled, *root, name.as_deref())?;
                 Ok(())
             }
+            Command::AddGroove { groove } => self.add_groove(groove.clone()),
+            Command::DeleteGroove { groove } => self.delete_groove(*groove),
+            Command::RenameGroove { groove, name } => {
+                self.groove_mut(*groove)?.name.clone_from(name);
+                Ok(())
+            }
+            Command::SetGroove {
+                groove,
+                base,
+                quantize,
+                timing,
+                random,
+                velocity,
+            } => self.set_groove(*groove, *base, [*quantize, *timing, *random, *velocity]),
+            Command::SetGlobalGrooveAmount { amount } => {
+                check_percent("the Global Amount", *amount, 0.0, GLOBAL_AMOUNT_MAX)?;
+                self.settings.grooves.global_amount = *amount;
+                Ok(())
+            }
+            Command::SetAutoLoadGroove { enabled, groove } => {
+                if let Some(groove) = groove {
+                    self.groove_mut(*groove)?;
+                }
+                let pool = &mut self.settings.grooves;
+                if let Some(enabled) = enabled {
+                    pool.auto_load = *enabled;
+                }
+                if groove.is_some() {
+                    pool.auto_load_groove = *groove;
+                }
+                Ok(())
+            }
+            Command::SetClipGroove { clips, groove } => {
+                if let Some(groove) = groove {
+                    self.groove_mut(*groove)?;
+                }
+                for clip in clips {
+                    self.clip_ref(*clip)?;
+                }
+                for clip in clips {
+                    if self.clip_ref(*clip)?.groove != *groove {
+                        self.clip_mut(*clip)?.groove = *groove;
+                    }
+                }
+                Ok(())
+            }
             Command::SetClipLaunchMode { clip, mode } => {
                 self.edit_launch(*clip, |launch| launch.mode = *mode)
             }
@@ -3473,10 +3663,36 @@ impl Document {
                 clip,
                 fade_in,
                 fade_out,
-            } => self.edit_audio(*clip, |audio| {
-                audio.fade_in = *fade_in;
-                audio.fade_out = *fade_out;
-            }),
+                fade_in_curve,
+                fade_out_curve,
+            } => self.set_clip_fades(*clip, *fade_in, *fade_out, *fade_in_curve, *fade_out_curve),
+            Command::SetCrossfade {
+                track,
+                boundary,
+                before,
+                after,
+                curve,
+            } => {
+                if *before <= 0.0 && *after <= 0.0 {
+                    return Err(ModelError::InvalidInput(
+                        "a crossfade must reach before or after the boundary; use \
+                         `arrangement.delete_crossfade` to end one",
+                    ));
+                }
+                self.set_crossfade(*track, *boundary, *before, *after, *curve)
+            }
+            Command::DeleteCrossfade { track, boundary } => {
+                let (earlier, later) = self.meeting_audio_clips(*track, *boundary)?;
+                if !crossfades(self.track(*track).iter().flat_map(|t| t.clips()))
+                    .iter()
+                    .any(|c| c.earlier == earlier && c.later == later)
+                {
+                    return Err(ModelError::InvalidInput(
+                        "there is no crossfade where those clips meet",
+                    ));
+                }
+                self.set_crossfade(*track, *boundary, 0.0, 0.0, 0.0)
+            }
             Command::SetClipWarp { clip, warp } => {
                 let at = self.clip_ref(*clip)?.start;
                 let set_tempo = self.settings.tempo.bpm_at(at);
@@ -5071,6 +5287,7 @@ impl Document {
 
     fn create_clip(&mut self, track: TrackId, clip: &Clip) -> Result<(), ModelError> {
         self.check_fresh(clip.id.0)?;
+        self.check_clip_groove(clip)?;
         check_clip_fits(self.track_ref(track)?, &clip.data)?;
         check_extent(clip.start, clip.length)?;
         check_clip(clip)?;
@@ -5320,6 +5537,7 @@ impl Document {
         clip: &Clip,
     ) -> Result<(), ModelError> {
         self.check_fresh(clip.id.0)?;
+        self.check_clip_groove(clip)?;
         let target = self.track_ref(track)?;
         check_kind(target, TrackKind::holds_clips, AUDIO_OR_MIDI)?;
         self.scene_position(scene)
@@ -5771,6 +5989,138 @@ impl Document {
         Ok(())
     }
 
+    /// The two audio clips on `track` that meet at `boundary`: the one that
+    /// ends there and the one that starts there.
+    fn meeting_audio_clips(
+        &self,
+        track: TrackId,
+        boundary: Ticks,
+    ) -> Result<(ClipId, ClipId), ModelError> {
+        let lane = self.track(track).ok_or(ModelError::NoSuchTrack(track))?;
+        let audio_at = |ends: bool| {
+            lane.clips().find(|clip| {
+                clip.data.is_audio() && if ends { clip.end() } else { clip.start } == boundary
+            })
+        };
+        match (audio_at(true), audio_at(false)) {
+            (Some(earlier), Some(later)) if earlier.id != later.id => Ok((earlier.id, later.id)),
+            _ => Err(ModelError::InvalidInput(
+                "no two audio clips on the track meet at that position",
+            )),
+        }
+    }
+
+    /// Checks that the fades of `audio`, the data clip `id` would have, stay
+    /// within the audio clips spec's R25 limits.
+    fn check_fades_of(&self, id: ClipId, audio: &AudioData) -> Result<(), ModelError> {
+        crate::fades::check_fades(self.clip_ref(id)?, audio, &self.settings.tempo)
+    }
+
+    /// Sets a clip's fades (R30), keeping a crossfade that ends or begins at
+    /// the clip consistent on its other clip.
+    fn set_clip_fades(
+        &mut self,
+        clip: ClipId,
+        fade_in: f64,
+        fade_out: f64,
+        fade_in_curve: Option<f64>,
+        fade_out_curve: Option<f64>,
+    ) -> Result<(), ModelError> {
+        let ClipData::Audio(current) = &self.clip_ref(clip)?.data else {
+            return Err(ModelError::NotAudioClip(clip));
+        };
+        let mut next = current.clone();
+        next.fade_in = fade_in;
+        next.fade_out = fade_out;
+        next.fade_in_curve = fade_in_curve.unwrap_or(next.fade_in_curve);
+        next.fade_out_curve = fade_out_curve.unwrap_or(next.fade_out_curve);
+        let track = self.clip_owner(clip)?;
+        let existing = self
+            .track(track)
+            .map(|t| crossfades(t.clips()))
+            .unwrap_or_default();
+        let at_start = existing.iter().find(|c| c.later == clip);
+        let at_end = existing.iter().find(|c| c.earlier == clip);
+        // The crossfade at an edge keeps the clip's length there as its own
+        // and the other clip follows. An edge without one is a plain fade,
+        // whatever an earlier crossfade left.
+        let mut partners = Vec::new();
+        next.fade_in_before = at_start.map_or(0.0, |c| c.before);
+        next.fade_out_after = at_end.map_or(0.0, |c| c.after);
+        if let Some(c) = at_start {
+            partners.push((c.earlier, true));
+        }
+        if let Some(c) = at_end {
+            partners.push((c.later, false));
+        }
+        let mut others = Vec::with_capacity(partners.len());
+        for (id, is_earlier) in partners {
+            let ClipData::Audio(data) = &self.clip_ref(id)?.data else {
+                continue;
+            };
+            let mut other = data.clone();
+            if is_earlier {
+                other.fade_out_after = next.fade_in;
+                other.fade_out_curve = next.fade_in_curve;
+            } else {
+                other.fade_in_before = next.fade_out;
+                other.fade_in_curve = next.fade_out_curve;
+            }
+            if check_audio(&other)
+                .and_then(|()| self.check_fades_of(id, &other))
+                .is_err()
+            {
+                // The other clip can't follow (its file doesn't reach back
+                // that far, say): the crossfade ends here, and each clip keeps
+                // its own fade.
+                other = data.clone();
+                if is_earlier {
+                    other.fade_out_after = 0.0;
+                    next.fade_in_before = 0.0;
+                } else {
+                    other.fade_in_before = 0.0;
+                    next.fade_out_after = 0.0;
+                }
+            }
+            others.push((id, other));
+        }
+        check_audio(&next)?;
+        self.check_fades_of(clip, &next)?;
+        self.edit_audio(clip, |audio| *audio = next)?;
+        for (id, other) in others {
+            self.edit_audio(id, |audio| *audio = other)?;
+        }
+        Ok(())
+    }
+
+    /// Gives the audio clips on `track` that meet at `boundary` a crossfade
+    /// of the span and curve, or none if `before` and `after` are 0 (R30).
+    fn set_crossfade(
+        &mut self,
+        track: TrackId,
+        boundary: Ticks,
+        before: f64,
+        after: f64,
+        curve: f64,
+    ) -> Result<(), ModelError> {
+        let (earlier, later) = self.meeting_audio_clips(track, boundary)?;
+        let (ClipData::Audio(first), ClipData::Audio(second)) =
+            (&self.clip_ref(earlier)?.data, &self.clip_ref(later)?.data)
+        else {
+            return Err(ModelError::InvalidInput(
+                "a crossfade is between audio clips",
+            ));
+        };
+        let (mut first, mut second) = (first.clone(), second.clone());
+        first.crossfade_into(&mut second, before, after, curve);
+        for (id, audio) in [(earlier, &first), (later, &second)] {
+            check_audio(audio)?;
+            self.check_fades_of(id, audio)?;
+        }
+        self.edit_audio(earlier, |audio| *audio = first)?;
+        self.edit_audio(later, |audio| *audio = second)
+    }
+
     /// Changes an audio clip's data with `edit`, if the result is valid.
     fn edit_audio(
         &mut self,
@@ -5784,7 +6134,19 @@ impl Document {
         edit(&mut next);
         check_audio(&next)?;
         if next != *current {
+            // Spec: warp-modes R31. Moving a clip's setting by hand turns off
+            // the track's automation of it, as automation R5 says.
+            let moved: Vec<ClipParam> = ClipParam::ALL
+                .into_iter()
+                .filter(|param| param.base(&next) != param.base(current))
+                .collect();
             self.clip_mut(id)?.data = ClipData::Audio(next);
+            if !moved.is_empty() {
+                let track = self.track_mut(self.clip_owner(id)?)?;
+                for param in moved {
+                    track.override_target(&AutomationTarget::Clip { param });
+                }
+            }
         }
         Ok(())
     }
@@ -5845,6 +6207,9 @@ impl Document {
         clip: &Clip,
         target: AutomationTarget,
     ) -> Result<(), ModelError> {
+        if target.is_clip() && !clip.data.is_audio() {
+            return Err(ModelError::NotAudioClip(clip.id));
+        }
         if !target.is_midi() {
             return self.check_automation_target(track, target);
         }
@@ -5897,6 +6262,7 @@ impl Document {
         if kind == EnvelopeKind::Automation && target.is_midi() {
             return Err(ModelError::MidiControllerNotAParameter);
         }
+        check_clip_setting_kind(target, kind)?;
         self.check_envelope_kind(clip, kind)?;
         clip_entry(&mut self.clip_mut(clip)?.envelopes, target, kind)
             .envelope
@@ -6019,6 +6385,7 @@ impl Document {
         linked: bool,
     ) -> Result<(), ModelError> {
         self.check_clip_envelope_target(clip, target)?;
+        check_clip_setting_kind(target, kind)?;
         self.check_envelope_kind(clip, kind)?;
         clip_entry(&mut self.clip_mut(clip)?.envelopes, target, kind).linked = linked;
         Ok(())
@@ -6556,6 +6923,14 @@ impl Document {
                     return Err(ModelError::NotADrumChain(chain));
                 }
             }
+            // Spec: warp-modes R28, R31
+            AutomationTarget::Clip { .. } => {
+                check_kind(
+                    self.track_ref(track)?,
+                    |kind| kind == TrackKind::Audio,
+                    AUDIO,
+                )?;
+            }
             AutomationTarget::MidiCc { .. }
             | AutomationTarget::MidiPitchBend
             | AutomationTarget::MidiChannelPressure => {
@@ -6579,7 +6954,15 @@ impl Document {
         if at < Ticks::ZERO {
             return Err(ModelError::NegativePosition(at));
         }
-        check_value("automation value", value, value.is_finite())?;
+        // Spec: warp-modes R28. A clip setting's value is inside its range.
+        let in_range = match target {
+            AutomationTarget::Clip { param } => {
+                let descriptor = param.descriptor();
+                (descriptor.min()..=descriptor.max()).contains(&value)
+            }
+            _ => value.is_finite(),
+        };
+        check_value("automation value", value, in_range)?;
         self.check_automation_target(track, target)?;
         entry(&mut self.track_mut(track)?.automation, target)
             .envelope
@@ -6803,6 +7186,64 @@ impl Document {
         brace.start = start;
         brace.length = next - start;
         brace.enabled = true;
+        Ok(())
+    }
+
+    /// The groove with this ID, to change.
+    fn groove_mut(&mut self, id: GrooveId) -> Result<&mut Groove, ModelError> {
+        self.settings
+            .grooves
+            .pool
+            .iter_mut()
+            .find(|groove| groove.id == id)
+            .ok_or(ModelError::NoSuchGroove(id))
+    }
+
+    /// Whether the groove a new clip names is in the pool (R3).
+    fn check_clip_groove(&self, clip: &Clip) -> Result<(), ModelError> {
+        match clip.groove {
+            Some(groove) if self.settings.grooves.get(groove).is_none() => {
+                Err(ModelError::NoSuchGroove(groove))
+            }
+            _ => Ok(()),
+        }
+    }
+
+    /// Adds a groove to the end of the pool (the grooves spec, R1).
+    fn add_groove(&mut self, groove: Groove) -> Result<(), ModelError> {
+        self.check_fresh(groove.id.0)?;
+        groove.check()?;
+        self.settings.grooves.pool.push(groove);
+        Ok(())
+    }
+
+    /// Takes a groove out of the pool and everything that used it (R5, R20).
+    fn delete_groove(&mut self, id: GrooveId) -> Result<(), ModelError> {
+        self.groove_mut(id)?;
+        self.settings.grooves.pool.retain(|groove| groove.id != id);
+        if self.settings.grooves.auto_load_groove == Some(id) {
+            self.settings.grooves.auto_load_groove = None;
+        }
+        self.forget_grooves(|used| used == id);
+        Ok(())
+    }
+
+    /// Sets a groove's parameters: Base, then Quantize, Timing, Random and
+    /// Velocity. A value out of range refuses them all (R2, R5).
+    fn set_groove(
+        &mut self,
+        id: GrooveId,
+        base: Option<GrooveBase>,
+        [quantize, timing, random, velocity]: [Option<f64>; 4],
+    ) -> Result<(), ModelError> {
+        let mut next = self.groove_mut(id)?.clone();
+        next.base = base.unwrap_or(next.base);
+        next.quantize = quantize.unwrap_or(next.quantize);
+        next.timing = timing.unwrap_or(next.timing);
+        next.random = random.unwrap_or(next.random);
+        next.velocity = velocity.unwrap_or(next.velocity);
+        next.check()?;
+        *self.groove_mut(id)? = next;
         Ok(())
     }
 
@@ -7135,6 +7576,7 @@ impl Document {
 const NOT_MAIN: &str = "a track other than Main";
 const AUDIO_OR_MIDI: &str = "an audio or MIDI track";
 const SENDER: &str = "an audio, MIDI, or group track";
+const AUDIO: &str = "an audio track";
 const RETURN: &str = "a return track";
 
 fn check_kind(
@@ -7244,8 +7686,24 @@ pub(crate) fn check_clip_envelope_value(
 ) -> Result<(), ModelError> {
     let in_range = target
         .midi_range()
+        .or_else(|| target.clip_range())
         .map_or(value.is_finite(), |(min, max)| (min..=max).contains(&value));
     check_value("clip envelope value", value, in_range)
+}
+
+/// Refuses an Automation envelope for a clip sound setting: its envelopes
+/// modulate, and the track's automation drives the setting (the warp modes
+/// spec, R29 and R31).
+pub(crate) fn check_clip_setting_kind(
+    target: AutomationTarget,
+    kind: EnvelopeKind,
+) -> Result<(), ModelError> {
+    if kind == EnvelopeKind::Automation && target.is_clip() {
+        return Err(ModelError::InvalidInput(
+            "a clip setting's envelope only modulates; the track's automation drives the setting",
+        ));
+    }
+    Ok(())
 }
 
 /// The breakpoints that [`TempoMap::from_breakpoints`] rebuilds `tempo`
@@ -7452,6 +7910,27 @@ pub(crate) fn check_audio(audio: &AudioData) -> Result<(), ModelError> {
         "fade-out length",
         audio.fade_out,
         at_least_zero(audio.fade_out),
+    )?;
+    check_value(
+        "fade-in start before the clip",
+        audio.fade_in_before,
+        at_least_zero(audio.fade_in_before),
+    )?;
+    check_value(
+        "fade-out end after the clip",
+        audio.fade_out_after,
+        at_least_zero(audio.fade_out_after),
+    )?;
+    let curve = |value: f64| value.is_finite() && (-1.0..=1.0).contains(&value);
+    check_value(
+        "fade-in curve",
+        audio.fade_in_curve,
+        curve(audio.fade_in_curve),
+    )?;
+    check_value(
+        "fade-out curve",
+        audio.fade_out_curve,
+        curve(audio.fade_out_curve),
     )
 }
 
@@ -8286,6 +8765,282 @@ mod tests {
         );
     }
 
+    // Spec: audio-clips R23, R25, R30
+    #[test]
+    fn fades_take_curves_and_stop_at_their_limits() {
+        let mut song = Song::new();
+        let track = song.track(TrackKind::Audio, None);
+        // A clip of a bar at 120 BPM: two seconds.
+        let clip = song.clip(track, 0);
+        let audio = |song: &Song| match &song.doc.clip(clip).unwrap().data {
+            ClipData::Audio(audio) => audio.clone(),
+            ClipData::Midi(_) => unreachable!("an audio clip"),
+        };
+        let fades = |fade_in, fade_out, fade_in_curve, fade_out_curve| Command::SetClipFades {
+            clip,
+            fade_in,
+            fade_out,
+            fade_in_curve,
+            fade_out_curve,
+        };
+        song.apply(fades(0.25, 0.5, Some(0.5), Some(-1.0))).unwrap();
+        let set = audio(&song);
+        assert_eq!((set.fade_in_curve, set.fade_out_curve), (0.5, -1.0));
+        // A curve left out stays as it was.
+        song.apply(fades(0.5, 0.5, None, Some(0.0))).unwrap();
+        let set = audio(&song);
+        assert_eq!((set.fade_in_curve, set.fade_out_curve), (0.5, 0.0));
+        for bad in [
+            fades(0.25, 0.5, Some(1.5), None),
+            fades(0.25, 0.5, None, Some(f64::NAN)),
+        ] {
+            assert!(matches!(song.reject(bad), ModelError::InvalidValue { .. }));
+        }
+        // The fade-in must end no later than the fade-out begins.
+        assert!(matches!(
+            song.reject(fades(1.6, 0.5, None, None)),
+            ModelError::InvalidInput(_)
+        ));
+        song.apply(fades(1.5, 0.5, None, None)).unwrap();
+
+        // Spec: audio-clips R25. A fade takes in no point where the clip
+        // goes round its loop brace: this clip starts half a second into its
+        // file and goes round at 1.5 seconds, after one second.
+        let looped = AudioData {
+            start: 0.5,
+            looping: true,
+            loop_start: 1.0,
+            loop_end: Some(1.5),
+            ..audio(&song)
+        };
+        song.apply(Command::SetClipData {
+            clip,
+            data: ClipData::Audio(looped),
+        })
+        .unwrap();
+        song.apply(fades(1.0, 0.0, None, None)).unwrap();
+        assert!(matches!(
+            song.reject(fades(1.1, 0.0, None, None)),
+            ModelError::InvalidInput(_)
+        ));
+        // The brace repeats every half second from then, so the clip goes
+        // round at 1, 1.5 and 2: a fade-out of 0.25 takes in none, 0.75 does.
+        song.apply(fades(0.0, 0.5, None, None)).unwrap();
+        assert!(matches!(
+            song.reject(fades(0.0, 0.75, None, None)),
+            ModelError::InvalidInput(_)
+        ));
+        let limits = song.doc.fade_limits(clip).unwrap();
+        assert_eq!(
+            (limits.start.inside, limits.start.outside),
+            (1.0, 0.0),
+            "no clip meets it"
+        );
+        assert_eq!(limits.end.inside, 0.5);
+    }
+
+    // Spec: audio-clips R24, R25, R30
+    #[test]
+    fn a_crossfade_is_kept_the_same_on_both_clips_and_ends_when_they_part() {
+        let mut song = Song::new();
+        let track = song.track(TrackKind::Audio, None);
+        let earlier = song.clip(track, 0);
+        let later = song.clip(track, 4);
+        let boundary = Ticks::WHOLE;
+        let audio = |song: &Song, clip| match &song.doc.clip(clip).unwrap().data {
+            ClipData::Audio(audio) => audio.clone(),
+            ClipData::Midi(_) => unreachable!("an audio clip"),
+        };
+        let found = |song: &Song| crate::clip::crossfades(song.doc.track(track).unwrap().clips());
+        // The later clip starts half a second into its file, so it can play
+        // that long before its start.
+        song.apply(Command::SetClipRegion {
+            clip: later,
+            start: 0.5,
+            end: None,
+            ticks: false,
+        })
+        .unwrap();
+        song.apply(Command::SetCrossfade {
+            track,
+            boundary,
+            before: 0.01,
+            after: 0.02,
+            curve: 0.25,
+        })
+        .unwrap();
+        let (first, second) = (audio(&song, earlier), audio(&song, later));
+        assert_eq!(
+            (first.fade_out, first.fade_out_after, first.fade_out_curve),
+            (0.01, 0.02, 0.25)
+        );
+        assert_eq!(
+            (second.fade_in, second.fade_in_before, second.fade_in_curve),
+            (0.02, 0.01, 0.25)
+        );
+        assert_eq!(
+            found(&song),
+            [crate::clip::Crossfade {
+                earlier,
+                later,
+                boundary,
+                before: 0.01,
+                after: 0.02,
+                curve: 0.25
+            }]
+        );
+        // The room each side: the later clip's file reaches back half a
+        // second, and the earlier clip's fade-in leaves it its whole length.
+        let limits = song.doc.fade_limits(later).unwrap();
+        assert_eq!(limits.start.outside, 0.5);
+        assert_eq!(song.doc.fade_limits(earlier).unwrap().end.outside, 2.0);
+
+        // Changing the fade at one clip's edge changes the crossfade, and the
+        // other clip follows.
+        song.apply(Command::SetClipFades {
+            clip: later,
+            fade_in: 0.05,
+            fade_out: 0.0,
+            fade_in_curve: Some(-0.5),
+            fade_out_curve: None,
+        })
+        .unwrap();
+        let first = audio(&song, earlier);
+        assert_eq!(
+            (first.fade_out, first.fade_out_after, first.fade_out_curve),
+            (0.01, 0.05, -0.5)
+        );
+        song.apply(Command::SetClipFades {
+            clip: earlier,
+            fade_in: 0.0,
+            fade_out: 0.03,
+            fade_in_curve: None,
+            fade_out_curve: None,
+        })
+        .unwrap();
+        let second = audio(&song, later);
+        assert_eq!(
+            (second.fade_in, second.fade_in_before, second.fade_in_curve),
+            (0.05, 0.03, -0.5)
+        );
+        assert_eq!(found(&song).len(), 1);
+
+        // Past a limit, where no clips meet, or with no span, it is refused.
+        for bad in [
+            // The later clip's file has half a second before its start.
+            Command::SetCrossfade {
+                track,
+                boundary,
+                before: 0.6,
+                after: 0.0,
+                curve: 0.0,
+            },
+            Command::SetCrossfade {
+                track,
+                boundary: boundary * 2,
+                before: 0.01,
+                after: 0.01,
+                curve: 0.0,
+            },
+            Command::SetCrossfade {
+                track,
+                boundary,
+                before: 0.0,
+                after: 0.0,
+                curve: 0.0,
+            },
+            Command::DeleteCrossfade {
+                track,
+                boundary: boundary * 2,
+            },
+        ] {
+            assert!(matches!(song.reject(bad), ModelError::InvalidInput(_)));
+        }
+        assert!(matches!(
+            song.reject(Command::SetCrossfade {
+                track,
+                boundary,
+                before: 0.01,
+                after: 0.01,
+                curve: 2.0,
+            }),
+            ModelError::InvalidValue { .. }
+        ));
+
+        // Moving the later clip away leaves the earlier one's fields, but
+        // they name a crossfade no longer.
+        song.apply(Command::MoveClip {
+            clip: later,
+            track,
+            start: Ticks::WHOLE * 3,
+        })
+        .unwrap();
+        assert!(found(&song).is_empty());
+        song.apply(Command::MoveClip {
+            clip: later,
+            track,
+            start: boundary,
+        })
+        .unwrap();
+        assert_eq!(found(&song).len(), 1);
+
+        song.apply(Command::DeleteCrossfade { track, boundary })
+            .unwrap();
+        assert!(found(&song).is_empty());
+        let (first, second) = (audio(&song, earlier), audio(&song, later));
+        assert_eq!(
+            (
+                first.fade_out,
+                first.fade_out_after,
+                second.fade_in,
+                second.fade_in_before
+            ),
+            (0.0, 0.0, 0.0, 0.0)
+        );
+        assert!(matches!(
+            song.reject(Command::DeleteCrossfade { track, boundary }),
+            ModelError::InvalidInput(_)
+        ));
+    }
+
+    // Spec: audio-clips R25, R30
+    #[test]
+    fn a_fade_the_other_clip_cant_follow_ends_the_crossfade() {
+        let mut song = Song::new();
+        let track = song.track(TrackKind::Audio, None);
+        let earlier = song.clip(track, 0);
+        let later = song.clip(track, 4);
+        let audio = |song: &Song, clip| match &song.doc.clip(clip).unwrap().data {
+            ClipData::Audio(audio) => audio.clone(),
+            ClipData::Midi(_) => unreachable!("an audio clip"),
+        };
+        // The later clip starts at the start of its file: a crossfade can only
+        // run past the boundary.
+        song.apply(Command::SetCrossfade {
+            track,
+            boundary: Ticks::WHOLE,
+            before: 0.0,
+            after: 0.004,
+            curve: 0.0,
+        })
+        .unwrap();
+        // A longer fade-out for the earlier clip would need the later clip
+        // to play before its start, so the crossfade ends, and each clip
+        // keeps its own fade.
+        song.apply(Command::SetClipFades {
+            clip: earlier,
+            fade_in: 0.0,
+            fade_out: 0.01,
+            fade_in_curve: None,
+            fade_out_curve: None,
+        })
+        .unwrap();
+        let (first, second) = (audio(&song, earlier), audio(&song, later));
+        assert_eq!((first.fade_out, first.fade_out_after), (0.01, 0.0));
+        assert_eq!((second.fade_in, second.fade_in_before), (0.004, 0.0));
+        assert!(crate::clip::crossfades(song.doc.track(track).unwrap().clips()).is_empty());
+    }
+
     // Spec: audio-clips R3, R4, R5, R6, R15
     #[test]
     fn audio_clip_settings_change_one_at_a_time_and_are_checked() {
@@ -8338,6 +9093,8 @@ mod tests {
             clip,
             fade_in: 0.25,
             fade_out: EDGE_FADE,
+            fade_in_curve: None,
+            fade_out_curve: None,
         })
         .unwrap();
         let set = audio(&song);
@@ -8399,11 +9156,15 @@ mod tests {
                 clip,
                 fade_in: -1.0,
                 fade_out: 0.0,
+                fade_in_curve: None,
+                fade_out_curve: None,
             },
             Command::SetClipFades {
                 clip,
                 fade_in: 0.0,
                 fade_out: f64::NAN,
+                fade_in_curve: None,
+                fade_out_curve: None,
             },
         ] {
             assert!(

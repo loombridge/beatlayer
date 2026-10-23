@@ -12,12 +12,12 @@ use bl_model::{
     ArrangementLoop, AudioData, AutomationTarget, BeatsUpdate, Breakpoint, Chain, ChainId, Change,
     ChangeSet, Channel, Clip, ClipData, ClipEdge, ClipId, ClipLaunch, Command, ComplexProUpdate,
     ContentHash, CountIn, CrossfadeAssign, Device, DeviceId, DeviceKind, DeviceRole, EditError,
-    Editor, ExternalPort, FileBeats, FollowAction, FollowActions, FollowPatch, HardwareLatency,
-    Input, LaunchMode, LaunchQuantization, Locator, LocatorId, MacroStyle, MacroTarget,
-    MetronomeRhythm, MetronomeSound, MidiData, MidiTo, MixerParam, ModelError, Monitor, Note,
-    Output, PanMode, ParamId, PluginFormat, Preserve, RackKind, SceneId, SendTap, SongStart,
-    TakeClip, TakeLane, Tap, TonesUpdate, TrackDelay, TrackId, TrackKind, WarpFrom, WarpMode,
-    WarpPoint,
+    Editor, ExternalPort, FileBeats, FollowAction, FollowActions, FollowPatch, GrooveBase,
+    GrooveId, GrooveNote, HardwareLatency, Input, LaunchMode, LaunchQuantization, Locator,
+    LocatorId, MacroStyle, MacroTarget, MetronomeRhythm, MetronomeSound, MidiData, MidiTo,
+    MixerParam, ModelError, Monitor, Note, Output, PanMode, ParamId, PluginFormat, Preserve,
+    RackKind, SceneId, SendTap, SongStart, TakeClip, TakeLane, Tap, TonesUpdate, TrackDelay,
+    TrackId, TrackKind, WarpFrom, WarpMode, WarpPoint,
 };
 use serde_json::{Value, json};
 
@@ -55,7 +55,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        227,
+        236,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
              the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
              routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -89,7 +89,10 @@ fn every_document_command_is_registered() {
              track, WP-6.7 the two for the scales: set_clip_scale and set_scale, and \
              WP-6.24 seven for \
              locators: add_locator, delete_locator, move_locator, rename_locator, \
-             set_locator_info_text, loop_to_next_locator and set_song_start"
+             set_locator_info_text, loop_to_next_locator and set_song_start, WP-6.51 the \
+             two for crossfades: set_crossfade and delete_crossfade, and WP-6.19 \
+             seven for grooves: add_groove, delete_groove, rename_groove, set_groove, \
+             set_global_groove_amount, set_auto_load_groove and set_clip_groove"
     );
 
     for op in &ops {
@@ -647,6 +650,59 @@ fn every_command_runs_by_id() {
             ..AudioData::new(ContentHash([0xab; 32]))
         }
     );
+    // Spec: audio-clips R30. A crossfade between two audio clips that meet,
+    // made and ended by ID, kept consistent on both clips.
+    let next_clip: ClipId = agent.new_id();
+    agent.run(
+        "clip.create",
+        json!({ "track": drums, "clip": {
+            "id": next_clip, "name": "Next", "start": bar, "length": bar, "mute": false,
+            "data": { "audio": { "media": "cd".repeat(32), "start": 0.5 } },
+        } }),
+    );
+    agent.run(
+        "arrangement.set_crossfade",
+        json!({ "track": drums, "boundary": bar, "before": 0.01, "after": 0.02, "curve": 0.25 }),
+    );
+    let fades = |agent: &Agent, clip: ClipId| {
+        let ClipData::Audio(audio) = agent.editor.document().clip(clip).unwrap().data.clone()
+        else {
+            panic!("an audio clip");
+        };
+        (
+            audio.fade_in,
+            audio.fade_in_before,
+            audio.fade_in_curve,
+            audio.fade_out,
+            audio.fade_out_after,
+            audio.fade_out_curve,
+        )
+    };
+    assert_eq!(
+        (fades(&agent, loop_clip).3, fades(&agent, loop_clip).4),
+        (0.01, 0.02)
+    );
+    assert_eq!(fades(&agent, loop_clip).5, 0.25);
+    assert_eq!(
+        (
+            fades(&agent, next_clip).0,
+            fades(&agent, next_clip).1,
+            fades(&agent, next_clip).2
+        ),
+        (0.02, 0.01, 0.25)
+    );
+    registry::run(
+        &mut agent.editor,
+        "arrangement.set_crossfade",
+        json!({ "track": drums, "boundary": bar * 3, "before": 0.01, "after": 0.02 }),
+    )
+    .expect_err("no clips meet there");
+    agent.run(
+        "arrangement.delete_crossfade",
+        json!({ "track": drums, "boundary": bar }),
+    );
+    assert_eq!(fades(&agent, next_clip), (0.0, 0.0, 0.0, 0.0, 0.0, 0.0));
+    agent.run("clip.delete", json!({ "clip": next_clip }));
     // A null end is the end of the file.
     agent.run(
         "clip.set_region",
@@ -2055,6 +2111,51 @@ fn every_command_runs_by_id() {
     );
     agent.run("song.delete_locator", json!({ "locator": chorus }));
 
+    // Grooves (WP-6.19): adding one, naming it, setting its parameters and
+    // the Global Amount, giving a clip it, auto-loading it, and deleting it.
+    let swing: GrooveId = agent.new_id();
+    agent.run(
+        "groove.add",
+        json!({ "groove": { "id": swing, "name": "Swing", "length": bar, "notes": [
+            { "position": 0, "velocity": 127 },
+            { "position": quarter / 2 + quarter / 8, "velocity": 90 },
+        ] } }),
+    );
+    agent.run(
+        "groove.rename",
+        json!({ "groove": swing, "name": "Swing 60" }),
+    );
+    agent.run(
+        "groove.set",
+        json!({ "groove": swing, "base": "1/8", "timing": 50.0, "velocity": -25.0 }),
+    );
+    agent.run("groove.set_global_amount", json!({ "amount": 120.0 }));
+    agent.run(
+        "clip.set_groove",
+        json!({ "clips": [riff], "groove": swing }),
+    );
+    agent.run(
+        "groove.set_auto_load",
+        json!({ "enabled": true, "groove": swing }),
+    );
+    let pool = &agent.editor.document().settings().grooves;
+    assert_eq!(pool.pool[0].name, "Swing 60");
+    assert_eq!(
+        (pool.pool[0].base, pool.pool[0].timing),
+        (GrooveBase::Eighth, 50.0)
+    );
+    assert_eq!(pool.global_amount, 120.0);
+    assert_eq!(pool.auto_loaded(), Some(swing));
+    assert_eq!(
+        agent.editor.document().clip(riff).unwrap().groove,
+        Some(swing)
+    );
+    agent.run("groove.delete", json!({ "groove": swing }));
+    let document = agent.editor.document();
+    assert!(document.settings().grooves.pool.is_empty());
+    assert_eq!(document.clip(riff).unwrap().groove, None);
+    assert_eq!(document.settings().grooves.auto_loaded(), None);
+
     // Deleting the group deletes the bass inside it; undo brings both back.
     agent.run("track.delete", json!({ "track": group }));
     assert!(agent.editor.document().track(bass).is_none());
@@ -2105,6 +2206,7 @@ fn schemas_match_what_commands_serialise() {
     let scene = SceneId(fresh());
     let scene_copy = SceneId(fresh());
     let locator = LocatorId(fresh());
+    let groove = GrooveId(fresh());
     let notes = MidiData::new([Note::new(127, Ticks::ZERO, Ticks::QUARTER, 1)]);
     let mut plugin = Device::new(
         device,
@@ -2210,6 +2312,57 @@ fn schemas_match_what_commands_serialise() {
             },
         ),
         ("song.delete_locator", Command::DeleteLocator { locator }),
+        (
+            "groove.add",
+            Command::AddGroove {
+                groove: bl_model::Groove::new(
+                    groove,
+                    "Swing".to_owned(),
+                    Ticks::WHOLE,
+                    vec![GrooveNote {
+                        position: Ticks::ZERO,
+                        velocity: 100,
+                    }],
+                ),
+            },
+        ),
+        (
+            "groove.rename",
+            Command::RenameGroove {
+                groove,
+                name: "Swing 60".to_owned(),
+            },
+        ),
+        (
+            "groove.set",
+            Command::SetGroove {
+                groove,
+                base: Some(GrooveBase::Eighth),
+                quantize: Some(10.0),
+                timing: None,
+                random: None,
+                velocity: None,
+            },
+        ),
+        (
+            "groove.set_global_amount",
+            Command::SetGlobalGrooveAmount { amount: 90.0 },
+        ),
+        (
+            "groove.set_auto_load",
+            Command::SetAutoLoadGroove {
+                enabled: Some(true),
+                groove: Some(groove),
+            },
+        ),
+        (
+            "clip.set_groove",
+            Command::SetClipGroove {
+                clips: vec![clip],
+                groove: Some(groove),
+            },
+        ),
+        ("groove.delete", Command::DeleteGroove { groove }),
         (
             "transport.set_loop",
             Command::SetLoop {
@@ -2702,6 +2855,8 @@ fn schemas_match_what_commands_serialise() {
                 clip,
                 fade_in: 0.004,
                 fade_out: 1.5,
+                fade_in_curve: None,
+                fade_out_curve: None,
             },
         ),
         ("clip.set_warp", Command::SetClipWarp { clip, warp: true }),
@@ -3736,6 +3891,24 @@ fn schemas_match_what_commands_serialise() {
                 enabled: Some(true),
                 root: Some(2),
                 name: Some("dorian".to_owned()),
+            },
+        ),
+        // Spec: audio-clips R30.
+        (
+            "arrangement.set_crossfade",
+            Command::SetCrossfade {
+                track,
+                boundary: Ticks::WHOLE,
+                before: 0.002,
+                after: 0.002,
+                curve: 0.5,
+            },
+        ),
+        (
+            "arrangement.delete_crossfade",
+            Command::DeleteCrossfade {
+                track,
+                boundary: Ticks::WHOLE,
             },
         ),
         (

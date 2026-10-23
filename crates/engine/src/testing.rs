@@ -8,6 +8,7 @@
 //! | [`DC`] | adds a constant to every sample | the constant |
 //! | [`COUNTER`] | counts the frames it processes and publishes the count | none |
 //! | [`TRANSPORT`] | adds 1 to every sample while the song plays | none |
+//! | [`GROOVE_AMOUNT`] | adds the Global Amount of groove its block carries (WP-6.19) | none |
 //! | [`POSITION`] | adds each frame's song position while the song plays, and −1 while it's stopped | none |
 //! | [`DATA`] | adds the `f32` it was last sent as [`NodeData`] | none |
 //! | [`GAIN`] | multiplies every sample by its gain (WP-2.4) | the gain, 1 by default |
@@ -42,6 +43,8 @@ pub const DC: &str = "test.dc";
 pub const COUNTER: &str = "test.counter";
 /// The transport probe's device type.
 pub const TRANSPORT: &str = "test.transport";
+/// The Global Amount probe's device type (WP-6.19).
+pub const GROOVE_AMOUNT: &str = "test.groove_amount";
 /// The position probe's device type.
 pub const POSITION: &str = "test.position";
 /// The data probe's device type.
@@ -217,6 +220,12 @@ pub fn registry(probe: &Arc<Probe>) -> Registry {
     let p = Arc::clone(probe);
     registry.add_native(TRANSPORT, move |_, _| {
         Box::new(TransportProbe {
+            _tracked: Tracked::new(&p),
+        })
+    });
+    let p = Arc::clone(probe);
+    registry.add_native(GROOVE_AMOUNT, move |_, _| {
+        Box::new(GrooveAmountProbe {
             _tracked: Tracked::new(&p),
         })
     });
@@ -431,6 +440,19 @@ impl Node for TransportProbe {
             let frames = block.frames();
             add(block, 0..frames, 1.0);
         }
+    }
+}
+
+/// Adds the Global Amount of groove its block carries.
+#[derive(Debug)]
+struct GrooveAmountProbe {
+    _tracked: Tracked,
+}
+
+impl Node for GrooveAmountProbe {
+    fn process(&mut self, block: &mut Block<'_>) {
+        let (frames, amount) = (block.frames(), block.groove_amount());
+        add(block, 0..frames, amount);
     }
 }
 

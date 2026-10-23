@@ -1,6 +1,6 @@
 # The track header's context menu
 
-- **Status:** partial (R1 to R9 are implemented, R3 changing with WP-6.52; R10 is WP-6.22's, R11 WP-6.23's, and R12 to R16 WP-6.52's)
+- **Status:** partial (R1 to R9 and R12 to R16 are implemented; R10 is WP-6.22's and R11 WP-6.23's)
 - **Work packages:** WP-4.22 (R1 to R9); WP-6.22 (the take-lane items, R10); WP-6.23 (Link Tracks and Unlink Track(s), R11); WP-6.52 (Cut, Copy, Paste and Duplicate on whole tracks: R3 as changed, R12 to R16); Deactivate All Devices is WP-5.29 (IMP-25, R7)
 - **Parity-matrix row:** Menu bar and context menus: structure, order, and wording of generic commands
 - **Checked against:** Live 12.4.3 on macOS, observed on 10 October 2026 (the menu as opened on a MIDI track's title bar), and the Live 12 reference manual, chapters 6, 8, 18, 20, 21, and 22
@@ -52,7 +52,7 @@ This spec covers the track title bar's menu, Delete and Rename on the selected t
 |---|---|---|
 | R1 | `crates/shell-spec/src/context_menus.rs`, `the_menus_follow_lives_rows_and_separators_in_order`; `crates/ui/tests/track_menu.rs`, `the_menu_lists_lives_items_and_names_later_packages`, `the_session_view_s_title_bars_open_the_same_menu`, `the_arrangement_mixer_s_title_bars_open_it_too` | unit, UI script |
 | R2 | `crates/ui/tests/track_menu.rs`, `with_several_tracks_selected_each_item_acts_on_all_of_them` | UI script |
-| R3 | `crates/ui/tests/track_menu.rs`, `working_items_show_their_keys_and_run_their_commands` (as WP-4.22 built it; the change is to be tested in WP-6.52) | UI script |
+| R3 | `crates/ui/tests/track_menu.rs`, `working_items_show_their_keys_and_run_their_commands`, `the_menu_copies_cuts_and_duplicates_the_selected_tracks`; `crates/shell/tests/shell_commands.rs`, `duplicating_a_track_copies_it_with_everything_it_holds` | UI script, headless |
 | R4 | `crates/shell/tests/shell_commands.rs`, `delete_and_rename_from_a_key_or_menu_act_on_the_selected_tracks`; `crates/ui/tests/track_menu.rs`, `delete_and_rename_act_on_the_selected_track`, `the_delete_key_deletes_the_selected_title_bars_tracks` | headless, UI script |
 | R5 | `crates/ui/tests/track_menu.rs`, `delete_and_rename_act_on_the_selected_track`, `renaming_a_track_out_of_view_leaves_the_keys_to_shortcuts`; `crates/shell/tests/shell_commands.rs`, `delete_and_rename_from_a_key_or_menu_act_on_the_selected_tracks` | UI script, headless |
 | R6 | `crates/shell-spec/src/context_menus.rs`, `the_device_and_track_menus_pending_items_name_their_package`; `crates/ui/tests/track_menu.rs`, `the_menu_lists_lives_items_and_names_later_packages` | unit, UI script |
@@ -61,8 +61,8 @@ This spec covers the track title bar's menu, Delete and Rename on the selected t
 | R9 | `crates/ui/tests/track_menu.rs`, `the_keys_open_the_selected_title_bar_s_menu`, `the_keys_open_a_session_column_s_title_menu` | UI script |
 | R10 | to be written in WP-6.22 | unit, UI script |
 | R11 | to be written in WP-6.23 | unit, UI script |
-| R12 | to be written in WP-6.52 | shell test, UI script |
-| R13 | to be written in WP-6.52 | shell test, golden render |
-| R14 | to be written in WP-6.52 | shell test, UI script |
-| R15 | to be written in WP-6.52 | shell test |
-| R16 | to be written in WP-6.52 | agent API, keymap test, `cargo xtask commands` |
+| R12 | `crates/shell/src/tracks.rs`, `a_duplicate_holds_what_its_track_holds_under_new_ids`, `a_duplicated_group_holds_copies_of_its_tracks_and_a_return_among_the_returns`; `crates/shell/tests/shell_commands.rs`, `duplicating_a_track_copies_it_with_everything_it_holds`, `a_duplicated_track_saves_and_loads_back_whole`; `crates/ui/tests/track_menu.rs`, `the_menu_copies_cuts_and_duplicates_the_selected_tracks` | unit, headless, UI script |
+| R13 | `crates/shell/src/tracks.rs`, `a_duplicate_holds_what_its_track_holds_under_new_ids`, `a_sidechain_between_two_copied_tracks_points_at_the_copies`; `crates/shell/tests/shell_commands.rs`, `a_pasted_track_keeps_its_clips_devices_and_automation`; `crates/shell/tests/whole_tracks.rs`, `a_copied_track_plays_as_its_source_does`, `a_frozen_tracks_copy_keeps_its_frozen_audio` | unit, headless, golden render |
+| R14 | `crates/shell/tests/shell_commands.rs`, `copying_and_cutting_tracks_moves_through_the_clipboard`; `crates/ui/tests/track_menu.rs`, `the_keys_on_a_title_bar_cut_copy_paste_and_duplicate_the_tracks` | headless, UI script |
+| R15 | `crates/shell/tests/shell_commands.rs`, `tracks_paste_into_another_set_and_settle_their_references`; `crates/shell/tests/whole_tracks.rs`, `tracks_pasted_into_another_set_bring_their_files` | headless |
+| R16 | `crates/cli/tests/agent.rs`, `an_agent_duplicates_copies_and_pastes_whole_tracks_and_reads_them_back`; `crates/ui/tests/keymap.rs`, `the_track_headers_keys_reach_the_track_commands`; `cargo xtask commands` | agent API, keymap test |

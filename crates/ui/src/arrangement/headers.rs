@@ -177,6 +177,11 @@ pub fn header(
             json!({ "tracks": [id], "add": add, "title_bars": true }),
         );
     }
+    if title_response.double_clicked() {
+        // Spec: detail-views R4 (I-CLICK-006). Double-clicking the title
+        // selects the track and shows the Device View.
+        crate::track_menu::open_device_view(shell, id, events);
+    }
     // WP-4.22: right-clicking the title, or the keys on it, open C-TRACK.
     menus.title(
         ui,

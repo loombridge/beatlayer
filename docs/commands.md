@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-678 commands in 42 areas.
+712 commands in 43 areas.
 
 ## Permission classes
 
@@ -45,8 +45,11 @@ Each command has:
 | [`arrangement.consolidate`](#arrangementconsolidate) | Consolidate | `destructive` | `Cmd+J` | `Ctrl+J` |
 | [`arrangement.consolidate_to_scene`](#arrangementconsolidate_to_scene) | Consolidate Time to New Scene | `edit` |  |  |
 | [`arrangement.copy`](#arrangementcopy) | Copy | `read` | `Cmd+C` | `Ctrl+C` |
+| [`arrangement.create_fade`](#arrangementcreate_fade) | Create Fade | `edit` | `Cmd+Option+F` | `Ctrl+Alt+F` |
 | [`arrangement.cut`](#arrangementcut) | Cut | `destructive` | `Cmd+X` | `Ctrl+X` |
 | [`arrangement.delete`](#arrangementdelete) | Delete | `destructive` | `Delete` | `Delete` |
+| [`arrangement.delete_crossfade`](#arrangementdelete_crossfade) | Delete Crossfade | `edit` |  |  |
+| [`arrangement.delete_fades`](#arrangementdelete_fades) | Delete Fades | `edit` | `Cmd+Option+Delete` | `Ctrl+Alt+Backspace` |
 | [`arrangement.duplicate`](#arrangementduplicate) | Duplicate | `edit` | `Cmd+D` | `Ctrl+D` |
 | [`arrangement.fixed_grid`](#arrangementfixed_grid) | Fixed Grid | `read` | `Cmd+5` | `Ctrl+5` |
 | [`arrangement.focus_title_bar`](#arrangementfocus_title_bar) | Go to Track Title Bar | `read` | `Esc` | `Esc` |
@@ -66,9 +69,11 @@ Each command has:
 | [`arrangement.scroll`](#arrangementscroll) | Scroll Arrangement | `read` | `Shift+scroll`; `Cmd+Option+drag`; `Cmd+Option+drag` | `Shift+scroll`; `Ctrl+Alt+drag`; `Ctrl+Alt+drag` |
 | [`arrangement.select_all`](#arrangementselect_all) | Select All | `read` | `Cmd+A` | `Ctrl+A` |
 | [`arrangement.select_clips`](#arrangementselect_clips) | Select Clips | `read` | `Cmd+click`; `Cmd+click`; `Shift+click`; `Shift+click`; `Shift+click`, `Shift+drag` | `Ctrl+click`; `Ctrl+click`; `Shift+click`; `Shift+click`; `Shift+click`, `Shift+drag` |
+| [`arrangement.select_fade_handle`](#arrangementselect_fade_handle) | Select Fade Handle | `read` |  |  |
 | [`arrangement.select_loop`](#arrangementselect_loop) | Select Loop | `read` | `Cmd+Shift+L`; `Cmd+Shift+L` | `Ctrl+Shift+L`; `Ctrl+Shift+L` |
 | [`arrangement.select_time`](#arrangementselect_time) | Select Time | `read` |  |  |
 | [`arrangement.select_tracks`](#arrangementselect_tracks) | Select Tracks | `read` |  |  |
+| [`arrangement.set_crossfade`](#arrangementset_crossfade) | Set Crossfade | `edit` |  |  |
 | [`arrangement.set_grid`](#arrangementset_grid) | Grid | `read` |  |  |
 | [`arrangement.set_insert_marker`](#arrangementset_insert_marker) | Set Insert Marker | `read` |  |  |
 | [`arrangement.set_track_height`](#arrangementset_track_height) | Set Track Height | `read` |  |  |
@@ -221,6 +226,7 @@ Each command has:
 | [`clip.set_fades`](#clipset_fades) | Set Clip Fades | `edit` |  |  |
 | [`clip.set_follow_actions`](#clipset_follow_actions) | Set Clip Follow Actions | `edit` |  |  |
 | [`clip.set_gain`](#clipset_gain) | Set Clip Gain | `edit` |  |  |
+| [`clip.set_groove`](#clipset_groove) | Set Clip Groove | `edit` |  |  |
 | [`clip.set_high_quality`](#clipset_high_quality) | Set Clip High Quality | `edit` |  |  |
 | [`clip.set_launch_mode`](#clipset_launch_mode) | Set Clip Launch Mode | `edit` |  |  |
 | [`clip.set_launch_quantization`](#clipset_launch_quantization) | Set Clip Launch Quantization | `edit` |  |  |
@@ -373,13 +379,27 @@ Each command has:
 | [`file_manager.state`](#file_managerstate) | File Manager State | `external` |  |  |
 | [`focus.arrangement`](#focusarrangement) | Arrangement View | `read` | `Option+2` | `Alt+2` |
 | [`focus.browser`](#focusbrowser) | Browser | `read` | `Option+5` | `Alt+5` |
+| [`focus.clip_view`](#focusclip_view) | Clip View | `read` | `Option+3` | `Alt+3` |
 | [`focus.control_bar`](#focuscontrol_bar) | Control Bar | `read` | `Option+0` | `Alt+0` |
+| [`focus.device_view`](#focusdevice_view) | Device View | `read` | `Option+4` | `Alt+4` |
 | [`focus.next`](#focusnext) | Next | `read` | `Tab`; `Tab` | `Tab`; `Tab` |
 | [`focus.next_neighbor`](#focusnext_neighbor) | Next Neighbor | `read` | `Option+Tab` | `Ctrl+Tab` |
 | [`focus.previous`](#focusprevious) | Previous | `read` | `Shift+Tab`; `Shift+Tab` | `Shift+Tab`; `Shift+Tab` |
 | [`focus.previous_neighbor`](#focusprevious_neighbor) | Previous Neighbor | `read` | `Option+Shift+Tab` | `Ctrl+Shift+Tab` |
 | [`focus.toggle_tab_navigation`](#focustoggle_tab_navigation) | Use Tab Key to Move Focus | `read` |  |  |
 | [`focus.toggle_wrap_navigation`](#focustoggle_wrap_navigation) | Wrap Keyboard Navigation | `read` |  |  |
+| [`groove.add`](#grooveadd) | Add Groove | `edit` |  |  |
+| [`groove.commit`](#groovecommit) | Commit Groove | `edit` |  |  |
+| [`groove.delete`](#groovedelete) | Delete Groove | `destructive` |  |  |
+| [`groove.extract`](#grooveextract) | Extract Groove | `edit` |  |  |
+| [`groove.load`](#grooveload) | Load Groove | `external` |  |  |
+| [`groove.pool`](#groovepool) | Groove Pool | `read` |  |  |
+| [`groove.rename`](#grooverename) | Rename Groove | `edit` |  |  |
+| [`groove.save`](#groovesave) | Save Groove | `external` |  |  |
+| [`groove.set`](#grooveset) | Set Groove | `edit` |  |  |
+| [`groove.set_auto_load`](#grooveset_auto_load) | Set Auto Load Groove | `edit` |  |  |
+| [`groove.set_global_amount`](#grooveset_global_amount) | Set Global Groove Amount | `edit` |  |  |
+| [`groove.to_clip`](#grooveto_clip) | Groove to Clip | `edit` |  |  |
 | [`keymap.bind`](#keymapbind) | Bind Keys | `edit` |  |  |
 | [`keymap.reset`](#keymapreset) | Reset Keys | `edit` |  |  |
 | [`keymap.state`](#keymapstate) | Keymap State | `read` |  |  |
@@ -444,14 +464,17 @@ Each command has:
 | [`modulator.set_shape`](#modulatorset_shape) | Edit Shape | `edit` |  |  |
 | [`modulator.unmap`](#modulatorunmap) | Unmap Modulator | `edit` |  |  |
 | [`note.add`](#noteadd) | Add Note | `edit` |  |  |
+| [`note.adjust_value`](#noteadjust_value) | Adjust Note Values | `edit` |  |  |
 | [`note.copy`](#notecopy) | Copy Notes | `read` | `Cmd+C` | `Ctrl+C` |
 | [`note.cut`](#notecut) | Cut Notes | `destructive` | `Cmd+X` | `Ctrl+X` |
+| [`note.deactivate`](#notedeactivate) | Deactivate Note(s) | `edit` | `0` | `0` |
 | [`note.delete`](#notedelete) | Delete Notes | `destructive` | `Delete` | `Delete` |
 | [`note.duplicate`](#noteduplicate) | Duplicate Notes | `edit` | `Cmd+D` | `Ctrl+D` |
 | [`note.move`](#notemove) | Move Notes | `edit` |  |  |
 | [`note.paste`](#notepaste) | Paste Notes | `edit` | `Cmd+V` | `Ctrl+V` |
 | [`note.quantize`](#notequantize) | Quantize | `edit` | `Cmd+U` | `Ctrl+U` |
 | [`note.ramp_value`](#noteramp_value) | Ramp Note Values | `edit` |  |  |
+| [`note.randomize`](#noterandomize) | Randomize Note Values | `edit` |  |  |
 | [`note.resize`](#noteresize) | Resize Notes | `edit` |  |  |
 | [`note.set_value`](#noteset_value) | Set Note Value | `edit` |  |  |
 | [`pad.delete`](#paddelete) | Delete Pad | `destructive` |  |  |
@@ -650,13 +673,17 @@ Each command has:
 | [`track.bounce_in_place`](#trackbounce_in_place) | Bounce Track in Place | `destructive` |  |  |
 | [`track.bounce_to_new_track`](#trackbounce_to_new_track) | Bounce to New Track | `edit` | `Cmd+B` | `Ctrl+B` |
 | [`track.clear_frozen`](#trackclear_frozen) | Clear Tracks Frozen | `edit` |  |  |
+| [`track.copy`](#trackcopy) | Copy Track(s) | `read` | `Cmd+C` | `Ctrl+C` |
 | [`track.create`](#trackcreate) | Insert Track | `edit` | `Cmd+T`; `Cmd+Shift+T`; `Cmd+Option+T` | `Ctrl+T`; `Ctrl+Shift+T`; `Ctrl+Alt+T` |
 | [`track.create_bounced_track`](#trackcreate_bounced_track) | Create Bounced Track | `edit` |  |  |
+| [`track.cut`](#trackcut) | Cut Track(s) | `destructive` | `Cmd+X` | `Ctrl+X` |
 | [`track.delete`](#trackdelete) | Delete Track | `destructive` | `Delete` | `Delete` |
+| [`track.duplicate`](#trackduplicate) | Duplicate Track(s) | `edit` | `Cmd+D` | `Ctrl+D` |
 | [`track.duplicate_without_clips`](#trackduplicate_without_clips) | Duplicate Track Without Clips | `edit` |  |  |
 | [`track.freeze`](#trackfreeze) | Freeze Track | `edit` | `Cmd+Option+Shift+F` | `Ctrl+Alt+Shift+F` |
 | [`track.group`](#trackgroup) | Group Tracks | `edit` | `Cmd+G` | `Ctrl+G` |
 | [`track.move`](#trackmove) | Move Track | `edit` |  |  |
+| [`track.paste`](#trackpaste) | Paste Track(s) | `edit` | `Cmd+V` | `Ctrl+V` |
 | [`track.paste_bounced_audio`](#trackpaste_bounced_audio) | Paste Bounced Audio | `edit` | `Cmd+Option+V` | `Ctrl+Alt+V` |
 | [`track.rename`](#trackrename) | Rename Track | `edit` | `Cmd+R` | `Ctrl+R` |
 | [`track.set_bounced`](#trackset_bounced) | Set Track Bounced | `destructive` |  |  |
@@ -689,15 +716,22 @@ Each command has:
 | [`view.clip_tab`](#viewclip_tab) | Clip View Tab | `read` | `Option+Tab`; `Option+Tab`; `Option+Shift+1`; `Option+Shift+2` | `Ctrl+Tab`; `Ctrl+Tab`; `Alt+Shift+1`; `Alt+Shift+2` |
 | [`view.close_plug_in_windows`](#viewclose_plug_in_windows) | Close All Plug-in Windows | `read` |  |  |
 | [`view.draw_mode`](#viewdraw_mode) | Draw Mode | `read` | `B` | `B` |
+| [`view.expand_clip_view`](#viewexpand_clip_view) | Expand Clip View | `read` | `Cmd+Option+E` | `Ctrl+Alt+E` |
 | [`view.fold_notes`](#viewfold_notes) | Fold to Notes | `read` | `F` | `F` |
 | [`view.full_screen`](#viewfull_screen) | Full Screen | `read` | `Ctrl+Cmd+F` | `F11` |
 | [`view.lane`](#viewlane) | Note Editor Lane | `read` |  |  |
+| [`view.lanes`](#viewlanes) | Expression Lanes | `read` |  |  |
+| [`view.set_detail_height`](#viewset_detail_height) | Set Clip View Height | `read` |  |  |
 | [`view.set_plugin_list_only_missing`](#viewset_plugin_list_only_missing) | Show Only Missing Plug-Ins | `read` |  |  |
 | [`view.set_zoom`](#viewset_zoom) | Zoom | `edit` |  |  |
+| [`view.show_detail_views`](#viewshow_detail_views) | Show Clip and Device View | `read` | `Option+click a view toggle` | `Alt+click a view toggle` |
 | [`view.state`](#viewstate) | View State | `read` |  |  |
+| [`view.switch_detail_view`](#viewswitch_detail_view) | Toggle Clip/Device View | `read` | `Shift+Tab`, `F12` | `Shift+Tab`, `F12` |
 | [`view.toggle_assistant`](#viewtoggle_assistant) | Assistant | `read` |  |  |
 | [`view.toggle_browser`](#viewtoggle_browser) | Browser | `read` | `Cmd+Option+B`, `Cmd+Option+5`; `Cmd+Option+B` | `Ctrl+Alt+B`, `Ctrl+Alt+5`; `Ctrl+Alt+B` |
 | [`view.toggle_clip_view`](#viewtoggle_clip_view) | Clip View | `read` | `Cmd+Option+3` | `Ctrl+Alt+3` |
+| [`view.toggle_detail_area`](#viewtoggle_detail_area) | Hide Device View | `read` | `Cmd+Option+L` | `Ctrl+Alt+L` |
+| [`view.toggle_device_view`](#viewtoggle_device_view) | Device View | `read` | `Cmd+Option+4` | `Ctrl+Alt+4` |
 | [`view.toggle_file_manager`](#viewtoggle_file_manager) | File Manager | `read` |  |  |
 | [`view.toggle_info_view`](#viewtoggle_info_view) | Info | `read` | `Shift+Slash` | `Shift+Slash` |
 | [`view.toggle_plug_in_windows`](#viewtoggle_plug_in_windows) | Plug-In Windows | `read` | `Cmd+Option+P` | `Ctrl+Alt+P` |
@@ -976,6 +1010,29 @@ Arguments:
 
 Result: [`ClipboardState`](#clipboardstate).
 
+#### `arrangement.create_fade`
+
+**Create Fade**. Permission: `edit`. Contexts: `arrangement`.
+
+Makes fades and crossfades from the Arrangement's selection, as Create Fade (Cmd-Option-F) does, on the selected audio clips (`clips`) or the time selection on its audio tracks (`tracks`, `start`, `end`). With a span of time: a clip whose start the span holds, and not its end, gets a fade-in from its start to the span's end; a clip whose end it holds, and not its start, gets a fade-out from the span's start to its end; two audio clips that meet inside the span get a crossfade over it; a clip the span holds whole, or holds neither edge of, is left as it is. With clips, each boundary where two of them meet gets a 4 ms crossfade, 2 ms each side, whatever the Create Fades on Clip Edges setting. Each fade is kept within its clip's limits, so a span longer than a clip allows makes the longest fade there is. One undo step, named Create Fade or Create Crossfade. Refused where the selection gives no fade. Read the result back from the clips' `data` with the query tool: `fade_in`, `fade_out`, their curves, `fade_in_before` and `fade_out_after`.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-ARR-008 | `Cmd+Option+F` | `Ctrl+Alt+F` | `arrangement` | Create a fade or crossfade from the selection | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clips` | array or null | no | Whole clips to act on. Give either `clips` or a span of time, not both. |
+| `end` | [`Position`](#position) or null | no | Where the span ends, after `start`. Left out, the time selection's end. |
+| `start` | [`Position`](#position) or null | no | Where the span starts. Left out, the time selection's start. |
+| `tracks` | array or null | no | The tracks a span of time covers. Left out, the selected tracks. |
+
+Result: [`EditResult`](#editresult).
+
 #### `arrangement.cut`
 
 **Cut**. Permission: `destructive`. Contexts: `arrangement`.
@@ -1019,6 +1076,44 @@ Arguments:
 | `end` | [`Position`](#position) or null | no | Where the span ends, after `start`. Left out, the time selection's end. |
 | `start` | [`Position`](#position) or null | no | Where the span starts. Left out, the time selection's start. |
 | `tracks` | array or null | no | The tracks a span of time covers. Left out, the selected tracks. |
+
+Result: [`EditResult`](#editresult).
+
+#### `arrangement.delete_crossfade`
+
+**Delete Crossfade**. Permission: `edit`. Contexts: `arrangement`.
+
+Ends the crossfade between the two audio clips on a track that meet at `boundary`, leaving neither a fade there. Refused where they have no crossfade. The shell's `arrangement.delete_fades` does what Delete does on a selected fade handle, which with Create Fades on Clip Edges on gives the clips a 4 ms crossfade instead.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track. |
+| `boundary` | [`Ticks`](#ticks) | yes | Where the earlier clip ends and the later one starts. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `arrangement.delete_fades`
+
+**Delete Fades**. Permission: `edit`. Contexts: `arrangement`.
+
+Deletes the fades and crossfades of audio clips (`clips`, or the selected clips), or only those at one `edge` of each, as Delete does with a fade handle selected. With Create Fades on Clip Edges on, a fade goes back to 4 ms and a crossfade to the 4 ms crossfade of two clips that meet; with it off, fades go, and a crossfade with them, leaving the clips meeting with no fade. One undo step, named Delete Fade or Delete Fades. Cmd-Option-Delete (Ctrl-Alt-Backspace) runs this.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-ARR-009 | `Cmd+Option+Delete` | `Ctrl+Alt+Backspace` | `arrangement` | Delete the fades in the selected clips | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clips` | array or null | no | The audio clips. Left out, the selected clips. |
+| `edge` | [`Edge`](#edge) or null | no | Only the fade at this edge of each clip, as Delete does with one fade handle selected. Left out, both edges. |
 
 Result: [`EditResult`](#editresult).
 
@@ -1412,6 +1507,24 @@ Arguments:
 
 Result: [`ArrangementState`](#arrangementstate).
 
+#### `arrangement.select_fade_handle`
+
+**Select Fade Handle**. Permission: `read`. Contexts: `arrangement`.
+
+Selects one of an audio clip's fade handles, as clicking it does: the `peak` handle where the fade reaches full level, the `outer` handle where it reaches silence, or the `curve` handle, of the fade-in at the clip's `start` or the fade-out at its `end`. A selected handle shows how far it can go, and Delete deletes its fade (`arrangement.delete_fades`). Left without `clip`, it clears the selection. Changes only the view.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) or null | no | The audio clip. Left out, no handle is selected. |
+| `edge` | [`Edge`](#edge) or null | no | Which edge's fade: the fade-in at `start`, the fade-out at `end`. |
+| `handle` | [`FadeHandle`](#fadehandle) or null | no | Which of the fade's handles; `peak` if left out. |
+
+Result: [`ArrangementState`](#arrangementstate).
+
 #### `arrangement.select_loop`
 
 **Select Loop**. Permission: `read`. Contexts: `arrangement`, `loop-brace`.
@@ -1465,6 +1578,26 @@ Arguments:
 | `title_bars` | boolean | no | Select their title bars, so the track-header shortcuts (fold, show and hide grouped tracks) apply, as clicking a title bar does. |
 
 Result: [`ArrangementState`](#arrangementstate).
+
+#### `arrangement.set_crossfade`
+
+**Set Crossfade**. Permission: `edit`. Contexts: `arrangement`.
+
+Makes or changes the crossfade between two audio clips on a track that meet, the earlier one ending exactly where the later one starts: `boundary` is that position. The crossfade runs from `before` seconds before the boundary to `after` seconds past it, at least one of them above 0; over it the earlier clip fades out and the later one fades in, each playing what it would play there if its edge were moved to the span's far end, as resizing it would. `curve`, from -1 to 1, shapes both fades; 0, the default, is a straight line, so the two gains add to 1. Refused where no two audio clips meet at the boundary, or past a clip's fade limits: a crossfade reaches no further into a clip than the clip's other fade allows, takes in no point where a clip goes round its loop brace, and reads nothing before the start of a file. Read it back with the query tool's `clip` field `data`: the earlier clip's `fade_out` and `fade_out_after` and the later clip's `fade_in` and `fade_in_before`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track. |
+| `boundary` | [`Ticks`](#ticks) | yes | Where the earlier clip ends and the later one starts. |
+| `before` | number, at least 0 | yes | How many seconds before the boundary the crossfade starts. |
+| `after` | number, at least 0 | yes | How many seconds after the boundary the crossfade ends. |
+| `curve` | number from -1 to 1 | no | The curve of both fades, from −1 to 1: 0 is a straight line, so the two gains add to 1. |
+
+Result: [`ChangeSet`](#changeset).
 
 #### `arrangement.set_grid`
 
@@ -2332,7 +2465,7 @@ Result: [`AutomationResult`](#automationresult).
 
 **Set Automation Breakpoint**. Permission: `edit`. Contexts: `global`.
 
-Sets one of a track's automatable parameters at `at` on its envelope, adding a breakpoint there or replacing the value of the one that's there, as clicking or dragging a breakpoint on an automation lane does. `target` names the parameter: `{"type": "mixer", "param": "volume"}`, `{"type": "send", "to": <return track>}`, or `{"type": "device", "device": <device>, "param": <parameter>}`. A parameter with no envelope yet gets its first breakpoint and its envelope drives it from then on. Values are in the parameter's own units: volume as linear gain, pan from -1 to 1, the Track Activator 1 for muted, and a device parameter as the device's own value. `at` is 0 (1.1.1) or later. The value between two breakpoints follows the segment's shape: the straight line unless `automation.set_curve` bent it; before the first and after the last the nearest one's value holds.
+Sets one of a track's automatable parameters at `at` on its envelope, adding a breakpoint there or replacing the value of the one that's there, as clicking or dragging a breakpoint on an automation lane does. `target` names the parameter: `{"type": "mixer", "param": "volume"}`, `{"type": "send", "to": <return track>}`, or `{"type": "device", "device": <device>, "param": <parameter>}`, or, on an audio track, a sound setting of its audio clips: `{"type": "clip", "param": "formants"}` (`gain` as linear gain, `transpose` in semitones, `detune` in cents, `high_quality`, `sample_offset` in sixteenths, and the warp modes' controls), which drives that setting of every audio clip on the track as it plays. A parameter with no envelope yet gets its first breakpoint and its envelope drives it from then on. Values are in the parameter's own units: volume as linear gain, pan from -1 to 1, the Track Activator 1 for muted, and a device parameter as the device's own value. `at` is 0 (1.1.1) or later. The value between two breakpoints follows the segment's shape: the straight line unless `automation.set_curve` bent it; before the first and after the last the nearest one's value holds.
 
 Default keys: none.
 
@@ -4029,7 +4162,7 @@ Result: [`ChangeSet`](#changeset).
 
 **Add Envelope Breakpoint**. Permission: `edit`. Contexts: `clip-view`.
 
-Sets the value of one of a clip's envelopes at a position, adding a breakpoint there or replacing the one that's there, as clicking or dragging a breakpoint in the Envelopes tab does. `clip` is the clip, `target` the parameter of the clip's track the envelope modulates (a control of its mixer, one of its sends, or a parameter of a device in its chain), `at` the position in ticks from the beginning of the clip's contents, and `value` the value there, in the parameter's own units. A MIDI clip's `target` can instead be a MIDI controller (MIDI Ctrl in the Envelopes tab): `{"type": "midi.cc", "number": 1}` (a controller from 1 to 31 or 33 to 119, value 0 to 127), `{"type": "midi.pitch_bend"}` (-8192 to 8191, 0 at rest) or `{"type": "midi.channel_pressure"}` (0 to 127); the value is the message the clip sends to its track's devices while it plays, on any channel. A parameter with no clip envelope gets one, linked to the clip, with this breakpoint as its first.
+Sets the value of one of a clip's envelopes at a position, adding a breakpoint there or replacing the one that's there, as clicking or dragging a breakpoint in the Envelopes tab does. `clip` is the clip, `target` the parameter of the clip's track the envelope modulates (a control of its mixer, one of its sends, or a parameter of a device in its chain; an audio clip's can instead be one of its sound settings, `{"type": "clip", "param": "transpose"}`, whose value is a share from 0 to 100 for `gain` and otherwise an amount added to the setting, in its own units), `at` the position in ticks from the beginning of the clip's contents, and `value` the value there, in the parameter's own units. A MIDI clip's `target` can instead be a MIDI controller (MIDI Ctrl in the Envelopes tab): `{"type": "midi.cc", "number": 1}` (a controller from 1 to 31 or 33 to 119, value 0 to 127), `{"type": "midi.pitch_bend"}` (-8192 to 8191, 0 at rest) or `{"type": "midi.channel_pressure"}` (0 to 127); the value is the message the clip sends to its track's devices while it plays, on any channel. A parameter with no clip envelope gets one, linked to the clip, with this breakpoint as its first.
 
 Default keys: none.
 
@@ -4088,7 +4221,7 @@ Result: [`ChangeSet`](#changeset).
 
 **Set Clip Fades**. Permission: `edit`. Contexts: `arrangement`.
 
-Sets the lengths, in seconds, of an audio clip's fade-in, from silence at the clip's start in the arrangement, and its fade-out, to silence at its end; 0 is no fade. Each fade is a straight line in amplitude. Short fades stop a clip that starts or ends mid-waveform from clicking: 0.004 (4 ms) is the length that Create Fades on Clip Edges gives new clips. Lengths must be finite and at least 0.
+Sets the lengths, in seconds, of an audio clip's fade-in, from silence at the clip's start in the arrangement, and its fade-out, to silence at its end; 0 is no fade. `fade_in_curve` and `fade_out_curve`, from -1 to 1, shape each: 0, the default, is a straight line in amplitude, a positive curve bows the fade towards full level and a negative one towards silence; left out, a curve stays as it is. Short fades stop a clip that starts or ends mid-waveform from clicking: 0.004 (4 ms) is the length that Create Fades on Clip Edges gives new clips. Lengths must be finite, at least 0 and within the clip's limits: a fade-in ends no later than the fade-out begins, and a fade takes in no point where the clip goes round its loop brace. Where a crossfade begins or ends at the clip, this sets the crossfade's part inside the clip and its curve, and the clip it meets follows; if it can't (its file doesn't reach back that far), the crossfade ends and each clip keeps its own fade. Read the result back with the query tool's `clip` field `data` and the clip's `fade_in_before` and `fade_out_after`.
 
 Default keys: none.
 
@@ -4097,8 +4230,10 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `clip` | [`ClipId`](#clipid) | yes | The audio clip. |
-| `fade_in` | number, at least 0 | yes | The fade-in's length in seconds from the clip's start: 0 for none. |
-| `fade_out` | number, at least 0 | yes | The fade-out's length in seconds up to the clip's end: 0 for none. |
+| `fade_in` | number, at least 0 | yes | The fade-in's length in seconds from the clip's start: 0 for none. Where a crossfade begins at the clip's start, this is how far past the start it runs. |
+| `fade_out` | number, at least 0 | yes | The fade-out's length in seconds up to the clip's end: 0 for none. Where a crossfade ends at the clip's end, this is how far before the end it begins. |
+| `fade_in_curve` | number or null | no | The fade-in's curve, from −1 to 1: 0 is a straight line, a positive curve bows towards full level and a negative one towards silence. Left out, the curve stays as it is. |
+| `fade_out_curve` | number or null | no | The fade-out's curve, from −1 to 1. Left out, the curve stays as it is. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -4141,6 +4276,23 @@ Arguments:
 |---|---|---|---|
 | `clip` | [`ClipId`](#clipid) | yes | The audio clip. |
 | `gain` | number, at least 0 | yes | The gain: 1 is 0 dB, 0.5 about −6 dB, and 0 silence. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `clip.set_groove`
+
+**Set Clip Groove**. Permission: `edit`. Contexts: `global`, `clip-view`.
+
+Sets the Clip Groove of MIDI or audio clips to a groove of the Groove Pool (`groove`), or to none when `groove` is left out. `clips` names the clips; left out, the selected ones are set. The groove changes when a clip's notes play and how loud, or where its audio plays, and changes nothing in the clip until `groove.commit`; an audio clip plays its groove only while it is warped. One undo step, `Change Clip Groove`, however many clips it sets.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clips` | array of [`ClipId`](#clipid) | no | The clips; left out, the ones selected. |
+| `groove` | [`GrooveId`](#grooveid) or null | no | The groove; left out, none. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -6876,6 +7028,22 @@ Arguments:
 
 Result: nothing (`null`).
 
+#### `focus.clip_view`
+
+**Clip View**. Permission: `read`. Contexts: `global`.
+
+Moves the keyboard focus to the Clip View's editor, so the Clip View's shortcuts apply, showing the Clip View first if it is hidden. Changes nothing in the set and isn't an undo step. The result is the detail area's state.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-FOCUS-004 | `Option+3` | `Alt+3` | `global` | Move focus to the Clip View's editor | runs it |
+
+Arguments: none (send `{}`).
+
+Result: [`DetailState`](#detailstate).
+
 #### `focus.control_bar`
 
 **Control Bar**. Permission: `read`. Contexts: `global`.
@@ -6891,6 +7059,22 @@ Default keys:
 Arguments: none (send `{}`).
 
 Result: nothing (`null`).
+
+#### `focus.device_view`
+
+**Device View**. Permission: `read`. Contexts: `global`.
+
+Moves the keyboard focus to the Device View, so its shortcuts apply, showing the Device View first if it is hidden. Changes nothing in the set and isn't an undo step. The result is the detail area's state.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-FOCUS-005 | `Option+4` | `Alt+4` | `global` | Move focus to the Device View | runs it |
+
+Arguments: none (send `{}`).
+
+Result: [`DetailState`](#detailstate).
 
 #### `focus.next`
 
@@ -6981,6 +7165,210 @@ Default keys: none.
 Arguments: none (send `{}`).
 
 Result: [`SwitchResult`](#switchresult).
+
+### Area `groove`
+
+#### `groove.add`
+
+**Add Groove**. Permission: `edit`. Contexts: `global`.
+
+Adds a groove to the end of the set's Groove Pool: a `groove` with a new ID, a name, a `length` in ticks, its `notes` (each a `position` from 0 to before the length and a `velocity` from 1 to 127, none two at one position) and its parameters, which are Base `1/16`, Quantize 0, Timing 100, Random 0 and Velocity 0 where left out. It changes no clip: use `clip.set_groove` to give a clip the groove. A groove that breaks those limits is refused. One undo step, `Add Groove`. To make a groove from a clip, use `groove.extract`; from a file, `groove.load`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `groove` | [`Groove`](#groove) | yes | The groove, with a new ID. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `groove.commit`
+
+**Commit Groove**. Permission: `edit`. Contexts: `global`, `clip-view`.
+
+Writes a clip's groove into the clip and sets its groove to none. A MIDI clip's notes move to where they play with the groove and take the velocities they play at, Random drawn once from `seed` (a new seed if left out). A warped audio clip gets a warp marker at each grid line and moved transient where the groove puts it, over the part of its contents that plays, and, while the groove's Velocity is above 0, a Volume clip envelope stepping through the gains it gives, replacing any Volume envelope the clip had (a Volume envelope only lowers a level, so the steps are shares of the loudest and the clip's gain rises by that gain). `clips` names the clips; left out, the selected ones; with `groove` and no clips, every clip that uses the groove. A clip with no groove is left as it is. One undo step, `Commit Groove`, however many clips it commits. An audio clip needs its file's analysis to be ready. Returns the clips committed.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clips` | array or null | no | The clips to commit. Left out, the selected ones. |
+| `groove` | [`GrooveId`](#grooveid) or null | no | A groove: with it and no `clips`, every clip that uses the groove is committed. |
+| `seed` | integer or null | no | The seed Random's one draw comes from. Left out, a new one. |
+
+Result: [`GrooveCommitted`](#groovecommitted).
+
+#### `groove.delete`
+
+**Delete Groove**. Permission: `destructive`. Contexts: `global`.
+
+Takes a groove out of the Groove Pool, as the Delete key does in the pool: every clip that used it is set to no groove, and if it was the auto-load groove nothing is auto-loaded any more. One undo step, `Delete Groove`. Because it removes the person's work, an agent asks first.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `groove` | [`GrooveId`](#grooveid) | yes | The groove. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `groove.extract`
+
+**Extract Groove**. Permission: `edit`. Contexts: `global`, `clip-view`.
+
+Makes a groove of each clip it names (`clips`, or the selected clips) at the end of the Groove Pool, from the part of the clip that plays: its loop brace while its loop is on, otherwise its Start to its End marker, the groove as long as that part. From a MIDI clip, a groove note at each note's start with its velocity, the loudest where notes start together. From an audio clip, a groove note at each of its transients, in its beats through its warp map (an unwarped clip's at the set's tempo where it starts), with a velocity from the audio's peak level in the 20 ms after it: the loudest peak 127, and 48 dB below it 1. The groove is named after the clip (`Groove` if it has no name) and has Base 1/16, Quantize 0, Timing 100, Random 0 and Velocity 0. An audio clip needs its file's analysis to be ready. One undo step, `Extract Groove`. Returns the grooves' IDs.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clips` | array or null | no | The clips to make grooves of. Left out, the selected ones. |
+
+Result: [`GrooveExtracted`](#grooveextracted).
+
+#### `groove.load`
+
+**Load Groove**. Permission: `external`. Contexts: `global`.
+
+Reads a groove file (`.blgroove`, Beatlayer's own JSON format) and adds the groove it holds to the end of the Groove Pool, with the parameters it holds, as double-clicking a groove in the browser does. With `clips`, those clips are given the groove too. One undo step, `Load Groove`. A file that is damaged, was saved by a newer Beatlayer or breaks a groove's limits is refused and changes nothing; loading the same file twice adds two grooves. Reads a file outside the project. Returns the groove's ID and name.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | The groove file, a `.blgroove`, absolute or relative to the app's working directory. |
+| `clips` | array of [`ClipId`](#clipid) | no | Clips to give the groove to as well, in the same undo step. |
+
+Result: [`GrooveLoaded`](#grooveloaded).
+
+#### `groove.pool`
+
+**Groove Pool**. Permission: `read`. Contexts: `global`.
+
+Reports the set's grooves: each with its ID, name, length, notes and its Base, Quantize, Timing, Random and Velocity, whether it is active (some clip uses it) and which clips use it; the Global Amount; and Auto Load Groove with its groove. Changes nothing.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`GroovePoolState`](#groovepoolstate).
+
+#### `groove.rename`
+
+**Rename Groove**. Permission: `edit`. Contexts: `global`.
+
+Renames a groove in the Groove Pool. One undo step, `Rename Groove`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `groove` | [`GrooveId`](#grooveid) | yes | The groove. |
+| `name` | string | yes | The new name. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `groove.save`
+
+**Save Groove**. Permission: `external`. Contexts: `global`.
+
+Writes a groove of the pool, with its current parameters, to a groove file: at `path`, or as `<name>.blgroove` in the User Library's Grooves folder, where the browser's Grooves label finds it. The file is written whole or not at all, and a file already there is left alone and the save refused unless `replace` is true. Changes nothing in the set and is no undo step; writes a file outside the project. Returns the path written.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `groove` | [`GrooveId`](#grooveid) | yes | The groove, one of the pool's. |
+| `path` | string or null | no | The file to write. Left out, `<name>.blgroove` in the User Library's Grooves folder. |
+| `replace` | boolean | no | Replace a file already there. Without it, an existing file is left alone and the save refused. |
+
+Result: [`GrooveSaved`](#groovesaved).
+
+#### `groove.set`
+
+**Set Groove**. Permission: `edit`. Contexts: `global`.
+
+Sets any of a groove's parameters, as its row in the Groove Pool does, and keeps those left out: `base` (`1/4`, `1/8`, `1/8T`, `1/16`, `1/16T` or `1/32`), `quantize` (0 to 100 percent), `timing` (0 to 100), `random` (0 to 100) and `velocity` (-100 to +100). A value out of range refuses them all. A change reaches every clip playing the groove from the next block. One undo step, named for the parameter when one is set: `Change Base`, `Change Quantize`, `Change Timing`, `Change Random` or `Change Velocity`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `groove` | [`GrooveId`](#grooveid) | yes | The groove. |
+| `base` | [`GrooveBase`](#groovebase) or null | no | The grid its notes are measured against. |
+| `quantize` | number or null | no | Quantize, from 0 to 100 percent. |
+| `random` | number or null | no | Random, from 0 to 100 percent. |
+| `timing` | number or null | no | Timing, from 0 to 100 percent. |
+| `velocity` | number or null | no | Velocity, from -100 to +100 percent. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `groove.set_auto_load`
+
+**Set Auto Load Groove**. Permission: `edit`. Contexts: `global`.
+
+Sets the Auto Load Groove switch (`enabled`) and the groove a new MIDI clip takes while it is on (`groove`, one of the pool's), and keeps what is left out. A MIDI clip made new, empty or by recording takes that groove; a clip made by copying, pasting or importing keeps its own. One undo step, `Change Auto Load Groove`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `enabled` | boolean or null | no | Whether a new MIDI clip takes the auto-load groove. |
+| `groove` | [`GrooveId`](#grooveid) or null | no | The auto-load groove, one of the pool's. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `groove.set_global_amount`
+
+**Set Global Groove Amount**. Permission: `edit`. Contexts: `global`.
+
+Sets the Global Amount, from 0 to 130 percent: it scales Timing, Random and Velocity for every groove in the set at once, and not Quantize; 100 plays each groove as set. The set holds one. It reaches every clip playing a groove from the next block. One undo step, `Change Global Amount`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `amount` | number | yes | The amount, in percent. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `groove.to_clip`
+
+**Groove to Clip**. Permission: `edit`. Contexts: `global`.
+
+Makes a MIDI clip of a groove of the pool on a MIDI track at a position, as dragging the groove onto the track does: a note on C3 (key 60) at each groove note with its velocity, each a sixteenth long or as long as the gap to the next note, whichever is shorter; the clip one groove long, looping, and named after the groove. A clip made so takes no auto-load groove. A clip already there is replaced where the new one covers it. One undo step, `Groove to Clip`. Returns the clip's ID.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `groove` | [`GrooveId`](#grooveid) | yes | The groove, one of the pool's. |
+| `track` | [`TrackId`](#trackid) | yes | The MIDI track to put the clip on. |
+| `at` | [`Ticks`](#ticks) | yes | Where the clip starts, in ticks. |
+
+Result: [`GrooveClip`](#grooveclip).
 
 ### Area `keymap`
 
@@ -8080,6 +8468,25 @@ Arguments:
 
 Result: [`NoteEditResult`](#noteeditresult).
 
+#### `note.adjust_value`
+
+**Adjust Note Values**. Permission: `edit`. Contexts: `note-editor`, `note-selection`.
+
+Changes one value of notes (`notes`, or the selected notes) by `by`, as the value keys and dragging a marker in an expression lane do: `field` is `velocity` or `release_velocity` (whole numbers, 1 to 127), `chance` (0 to 1; 0.1 is 10 %), or `velocity_deviation` (whole numbers, held to the room each note's velocity leaves: at most 127 less its velocity and at least 1 less). Each note is held within its range, so a change past an end brings it to that end, and a call that changes no note records no undo step. The edited notes stay selected, and the whole drag is one undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `field` | [`NoteField`](#notefield) | yes | Which value to change. |
+| `by` | number | yes | How much to add to each note's value; negative lowers it. Whole numbers for the whole-number fields; for `chance`, a fraction (0.1 is 10 %). |
+| `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows (the Arrangement's selected clip). |
+| `notes` | array or null | no | The notes, by their place in the clip's notes in order (by start, then pitch). Left out, the selected notes. |
+
+Result: [`NoteEditResult`](#noteeditresult).
+
 #### `note.copy`
 
 **Copy Notes**. Permission: `read`. Contexts: `note-editor`, `note-selection`.
@@ -8119,6 +8526,28 @@ Arguments:
 |---|---|---|---|
 | `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows (the Arrangement's selected clip). |
 | `notes` | array or null | no | The notes, by their place in the clip's notes in order (by start, then pitch). Left out, the selected notes, or with none selected the notes that start inside the time selection. |
+
+Result: [`NoteEditResult`](#noteeditresult).
+
+#### `note.deactivate`
+
+**Deactivate Note(s)**. Permission: `edit`. Contexts: `note-editor`, `note-selection`.
+
+Deactivates notes (`notes`, or the selected notes), as 0 does: a deactivated note keeps its place and values, is drawn grey and never plays. With `active` left out the notes are deactivated, or activated again when every one of them is deactivated already (the menu item then reads Activate Note(s)); `active` `true` or `false` sets them. The edit is one undo step, and the notes stay selected.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-NOTE-041 | `0` | `0` | `note-selection` | Deactivate the selected notes | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `active` | boolean or null | no | Whether the notes end up active (`true`) or deactivated (`false`). Left out, they are deactivated, or activated when every one of them is deactivated already. |
+| `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows (the Arrangement's selected clip). |
+| `notes` | array or null | no | The notes, by their place in the clip's notes in order (by start, then pitch). Left out, the selected notes. |
 
 Result: [`NoteEditResult`](#noteeditresult).
 
@@ -8233,7 +8662,7 @@ Result: [`NoteEditResult`](#noteeditresult).
 
 **Ramp Note Values**. Permission: `edit`. Contexts: `note-editor`, `note-selection`.
 
-Sets one value of notes (`notes`, or the selected notes) as a ramp, as dragging across several notes in the Clip View's lane does: the first note in the clip's order takes `from`, the last takes `to`, and those between take values evenly spaced between them (whole numbers for the whole-number fields). `field` takes the same fields and ranges as `note.set_value`; nothing changes if `from` or `to` is out of range. One note takes `from`. The edited notes stay selected, and the whole drag is one undo step.
+Sets one value of notes (`notes`, or the selected notes) as a ramp, as the footer's Ramp Start and Ramp End do: the first note by start takes `from`, the last takes `to`, and those between take values on a straight line between them by their start times, notes that start together taking the same value (whole numbers for the whole-number fields). `field` takes the same fields and ranges as `note.set_value`; nothing changes if `from` or `to` is out of range. One note takes `from`, and so do notes that all start together. The edited notes stay selected, and the whole edit is one undo step.
 
 Default keys: none.
 
@@ -8246,6 +8675,26 @@ Arguments:
 | `to` | number | yes | The value the last note takes. |
 | `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows (the Arrangement's selected clip). |
 | `notes` | array or null | no | The notes, by their place in the clip's notes in order (by start, then pitch). Left out, the selected notes. |
+
+Result: [`NoteEditResult`](#noteeditresult).
+
+#### `note.randomize`
+
+**Randomize Note Values**. Permission: `edit`. Contexts: `note-editor`, `note-selection`.
+
+Moves one value of notes (`notes`, or the selected notes, or with none selected every note in the clip's span) at random, as the footer's Randomize does: each note takes a value drawn evenly from its value less `amount` to its value plus `amount`, held within the field's range and whole for the velocities. `field` is `velocity`, `release_velocity` or `chance`; `amount` is in the field's own units, 0 to 127 or 0 to 1 for `chance`. The same `seed` with the same notes gives the same values, each note keeping its own draw so a larger `amount` moves it further the same way; left out, each call draws afresh. An `amount` of 0 changes nothing. The edit is one undo step, and the notes stay selected.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `field` | [`NoteField`](#notefield) | yes | Which value to randomise: `velocity`, `release_velocity` or `chance`. |
+| `amount` | number | yes | How far from its value each note may move, in the field's own units: 0 to 127 for the velocities, 0 to 1 for `chance` (0.25 is 25 %). |
+| `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows (the Arrangement's selected clip). |
+| `notes` | array or null | no | The notes, by their place in the clip's notes in order (by start, then pitch). Left out, the selected notes, or with none selected every note in the clip's span. |
+| `seed` | integer or null | no | Seeds the draw: the same seed with the same notes gives the same values. Left out, each call draws afresh. |
 
 Result: [`NoteEditResult`](#noteeditresult).
 
@@ -8271,7 +8720,7 @@ Result: [`NoteEditResult`](#noteeditresult).
 
 **Set Note Value**. Permission: `edit`. Contexts: `note-editor`, `note-selection`.
 
-Sets one value of notes (`notes`, or the selected notes) to `value`, as dragging a note's stem in the Clip View's lane does: `field` is `velocity` (whole numbers 1 to 127), `release_velocity` (whole numbers 1 to 127), `chance` (0 to 1), or `velocity_deviation` (whole numbers -127 to 127). Nothing changes if `value` is outside the field's range. The edited notes stay selected, and the whole drag is one undo step.
+Sets one value of notes (`notes`, or the selected notes) to `value`, or to each note's own entry of `values` (one for each note, in the order named), as typing a value or drawing across an expression lane does: `field` is `velocity` (whole numbers 1 to 127), `release_velocity` (whole numbers 1 to 127), `chance` (0 to 1), or `velocity_deviation` (whole numbers -127 to 127). Nothing changes if `value` is outside the field's range. A velocity deviation is held within the room each note's velocity leaves: at most 127 less its velocity and at least 1 less. The edited notes stay selected, and the whole drag is one undo step.
 
 Default keys: none.
 
@@ -8280,9 +8729,10 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `field` | [`NoteField`](#notefield) | yes | Which value to set. |
-| `value` | number | yes | The value, within the field's range. |
 | `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows (the Arrangement's selected clip). |
 | `notes` | array or null | no | The notes, by their place in the clip's notes in order (by start, then pitch). Left out, the selected notes. |
+| `value` | number or null | no | The value, within the field's range, for every one of the notes. Give this or `values`. |
+| `values` | array or null | no | One value for each of the notes, in the order they're named, each within the field's range: what drawing across a lane gives. Give this or `value`. |
 
 Result: [`NoteEditResult`](#noteeditresult).
 
@@ -11576,6 +12026,26 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `track.copy`
+
+**Copy Track(s)**. Permission: `read`. Contexts: `track-headers`.
+
+Copies the selected tracks (`tracks`, or the tracks named) to the clipboard, with everything they hold under new IDs, and changes nothing in the set. The clipboard holds whichever was copied last, these tracks or the Arrangement's material. Copying is never an undo step.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-EDIT-002 | `Cmd+C` | `Ctrl+C` | `global` | Copy | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `tracks` | array or null | no | The tracks; the selected tracks if left out. |
+
+Result: [`TracksCopied`](#trackscopied).
+
 #### `track.create`
 
 **Insert Track**. Permission: `edit`. Contexts: `global`.
@@ -11620,6 +12090,26 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `track.cut`
+
+**Cut Track(s)**. Permission: `destructive`. Contexts: `track-headers`.
+
+Copies the selected tracks (`tracks`, or the tracks named) to the clipboard, with everything they hold under new IDs, and deletes them as Delete does, as one undo step named Cut Track(s). The clipboard holds whichever was copied last, these tracks or the Arrangement's material.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-EDIT-001 | `Cmd+X` | `Ctrl+X` | `global` | Cut | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `tracks` | array or null | no | The tracks; the selected tracks if left out. |
+
+Result: [`TracksCopied`](#trackscopied).
+
 #### `track.delete`
 
 **Delete Track**. Permission: `destructive`. Contexts: `track-headers`.
@@ -11639,6 +12129,26 @@ Arguments:
 | `track` | [`TrackId`](#trackid) | yes | The track. |
 
 Result: [`ChangeSet`](#changeset).
+
+#### `track.duplicate`
+
+**Duplicate Track(s)**. Permission: `edit`. Contexts: `track-headers`.
+
+Duplicates the selected tracks (`tracks`, or the tracks named), each straight after itself, with everything it holds: its name (the next number where the name starts with the track's number), colour, mixer, sends, routing, devices with their states and sidechains, its Arrangement clips, take lanes and Session clips, its automation and clip envelopes, and its frozen state, all under new IDs. A reference between tracks copied together points at the copies; a reference to a track not copied stays as it is. The copies become the selected tracks. One undo step, named Duplicate Track(s). Main can't be duplicated.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-EDIT-004 | `Cmd+D` | `Ctrl+D` | `global` | Duplicate | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `tracks` | array or null | no | The tracks; the selected tracks if left out. |
+
+Result: [`TracksDuplicated`](#tracksduplicated).
 
 #### `track.duplicate_without_clips`
 
@@ -11713,6 +12223,26 @@ Arguments:
 | `parent` | [`TrackId`](#trackid) or null | no | The group to move it into, or `null` (or nothing) for the top level. |
 
 Result: [`ChangeSet`](#changeset).
+
+#### `track.paste`
+
+**Paste Track(s)**. Permission: `edit`. Contexts: `track-headers`.
+
+Pastes the tracks on the clipboard, with everything they hold under new IDs, straight after the last selected track, at its level and inside its group when it is in one, or after the last track when none is selected. Each paste makes new copies, and the tracks pasted are selected afterwards. One undo step, named Paste Track(s). References to tracks that are not in the set are settled as a set added from another set settles them. The files the tracks play go into the set's media table. With the Arrangement's material on the clipboard it is unavailable: that is pasted with `arrangement.paste`.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-EDIT-003 | `Cmd+V` | `Ctrl+V` | `global` | Paste | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) or null | no | The track to paste after; the last selected track if left out. |
+
+Result: [`TracksCopied`](#trackscopied).
 
 #### `track.paste_bounced_audio`
 
@@ -12241,6 +12771,22 @@ Arguments: none (send `{}`).
 
 Result: [`ClipViewState`](#clipviewstate).
 
+#### `view.expand_clip_view`
+
+**Expand Clip View**. Permission: `read`. Contexts: `clip-view`.
+
+Gives the Clip View its largest height, the one that leaves the main view 80 points, and run again gives back the height it had before. Refused while the Clip View is hidden. Dragging the detail area's top edge, or hiding the Clip View, ends the expansion. Changes nothing in the set and isn't an undo step. The result is the detail area's state, whose `expanded` says which way it went.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-NOTE-030 | `Cmd+Option+E` | `Ctrl+Alt+E` | `clip-view` | Expand the Clip View to full size | runs it |
+
+Arguments: none (send `{}`).
+
+Result: [`DetailState`](#detailstate).
+
 #### `view.fold_notes`
 
 **Fold to Notes**. Permission: `read`. Contexts: `clip-view`, `note-editor`.
@@ -12282,7 +12828,7 @@ Result: [`ViewResult`](#viewresult).
 
 **Note Editor Lane**. Permission: `read`. Contexts: `clip-view`, `note-editor`.
 
-Chooses which of a note's values the lane under the MIDI Note Editor shows and edits: `velocity` (the lane's default), `release_velocity`, `chance`, or `velocity_deviation`. Dragging a note's stem in the lane sets that value on that note, and dragging across several notes ramps it; the same edits are the `note.set_value` and `note.ramp_value` commands. Changes only the view, so it's no undo step and isn't saved with the set.
+Makes one of the MIDI Note Editor's expression lanes the active lane, whose controls the footer shows, and shows it: `velocity` (the default), `chance` or `release_velocity`; `velocity_deviation` is the Velocity lane, which shows it. Choosing a lane in the Lane Selector does the same. Changes only the view, so it's no undo step and isn't saved with the set.
 
 Default keys: none.
 
@@ -12293,6 +12839,42 @@ Arguments:
 | `lane` | [`NoteField`](#notefield) | yes | Which value the lane shows. |
 
 Result: [`ClipViewState`](#clipviewstate).
+
+#### `view.lanes`
+
+**Expression Lanes**. Permission: `read`. Contexts: `clip-view`, `note-editor`.
+
+Shows, hides and swaps the MIDI Note Editor's expression lanes (`velocity`, `chance`, `release_velocity`, always in that order from the top), and holds Randomize's amounts. With `lane`: `show` shows or hides it as the Lane Selector does (left out, it switches), `swap` hides it and shows in its place the first hidden lane after it, going round to the first (Swap Lane in the lane header's menu), and `amount` sets its Randomize amount, 0 to 127, or 0 to 100 (a percentage) for `chance`. `all` is the Show/Hide All Expression Editors switch: `false` hides every lane and `true` shows them again as they were. A new editor shows the Velocity lane alone, with every amount 0. Changes only the view, so it's no undo step and isn't saved with the set. The result is the Clip View's state, which lists the lanes shown.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `all` | boolean or null | no | The Show/Hide All Expression Editors switch: `false` hides every lane and `true` shows them again as they were; left out, nothing changes. |
+| `amount` | integer or null | no | With `lane`: set its Randomize amount, 0 to 127, or 0 to 100 (a percentage) for `chance`. |
+| `lane` | [`NoteField`](#notefield) or null | no | The lane the other fields but `all` act on: `velocity`, `chance` or `release_velocity` (`velocity_deviation` is the Velocity lane). |
+| `show` | boolean or null | no | With `lane`: show it (`true`) or hide it (`false`); left out, the Lane Selector's choice, which switches it. Showing a lane makes it the active lane. |
+| `swap` | boolean or null | no | With `lane`: hide it and show in its place the first hidden lane after it, going round to the first (the lane header's Swap Lane). |
+
+Result: [`ClipViewState`](#clipviewstate).
+
+#### `view.set_detail_height`
+
+**Set Clip View Height**. Permission: `read`. Contexts: `global`.
+
+Sets the Clip View's height to `points`, in points at 100% zoom and at least 100, as dragging the detail area's top edge does one frame at a time; a window too short for it shows the Clip View less tall, down to 100 points. Ends an expansion. The Device View's height doesn't change. Changes nothing in the set and isn't an undo step. The result is the detail area's state.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `points` | number | yes | The Clip View's height in points at 100%, at least 100. |
+
+Result: [`DetailState`](#detailstate).
 
 #### `view.set_plugin_list_only_missing`
 
@@ -12326,17 +12908,49 @@ Arguments:
 
 Result: [`ViewResult`](#viewresult).
 
+#### `view.show_detail_views`
+
+**Show Clip and Device View**. Permission: `read`. Contexts: `global`.
+
+Shows the Clip View and the Device View together, the Clip View above the Device View, as Option-click (Alt-click) on either view's toggle does. With both showing already it changes nothing. Changes nothing in the set and isn't an undo step. The result is the detail area's state.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-VIEW-005 | `Option+click a view toggle` | `Alt+click a view toggle` | `global` | Show Device View and Clip View together (stack them) | runs it |
+
+Arguments: none (send `{}`).
+
+Result: [`DetailState`](#detailstate).
+
 #### `view.state`
 
 **View State**. Permission: `read`. Contexts: `global`.
 
-Reports what the view commands switch: the main view (Arrangement or Session), whether the browser and the Info View show, full-screen mode and the zoom (`view.toggle_session_arrangement`, `view.toggle_browser`, `view.toggle_info_view`, `view.full_screen`, `view.set_zoom`), the Clip View with Draw Mode, the lane, Fold and the selected notes (`view.toggle_clip_view`, `view.draw_mode`, `view.lane`, `view.fold_notes`), the assistant's panel, the Undo History (`view.toggle_undo_history`), and whether plug-in windows are shown (`view.toggle_plug_in_windows`). Changes nothing. The Arrangement's own view is in `arrangement.state`, the Mixer's in `mixer_view.state`, the Session View's in `session.state` and the Device View's in `device_view.state`.
+Reports what the view commands switch: the main view (Arrangement or Session), whether the browser and the Info View show, full-screen mode and the zoom (`view.toggle_session_arrangement`, `view.toggle_browser`, `view.toggle_info_view`, `view.full_screen`, `view.set_zoom`), the Clip View with Draw Mode, the lane, Fold and the selected notes (`view.toggle_clip_view`, `view.draw_mode`, `view.lane`, `view.fold_notes`), the detail area under `detail`: which of the Clip View and the Device View show, the Clip View's height and where the focus is (`view.toggle_clip_view`, `view.toggle_device_view`, `view.show_detail_views`, `view.switch_detail_view`, `view.toggle_detail_area`, `view.expand_clip_view`, `view.set_detail_height`, `focus.clip_view`, `focus.device_view`), the assistant's panel, the Undo History (`view.toggle_undo_history`), and whether plug-in windows are shown (`view.toggle_plug_in_windows`). Changes nothing. The Arrangement's own view is in `arrangement.state`, the Mixer's in `mixer_view.state`, the Session View's in `session.state` and the Device View's in `device_view.state`.
 
 Default keys: none.
 
 Arguments: none (send `{}`).
 
 Result: [`ViewState`](#viewstate).
+
+#### `view.switch_detail_view`
+
+**Toggle Clip/Device View**. Permission: `read`. Contexts: `global`.
+
+With one of the Clip View and the Device View showing, shows the other in its place; with both showing, moves the keyboard focus to the Clip View's editor if the Device View has it, and to the Device View otherwise; with neither showing, shows the view that showed alone last, the Device View in a new session. Shift+Tab does this while Use Tab Key to Move Focus is off; F12 does it always. Changes nothing in the set and isn't an undo step. The result is the detail area's state.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-VIEW-004 | `Shift+Tab`, `F12` | `Shift+Tab`, `F12` | `global` | Switch the detail area between Device View and Clip View | runs it |
+
+Arguments: none (send `{}`).
+
+Result: [`DetailState`](#detailstate).
 
 #### `view.toggle_assistant`
 
@@ -12371,7 +12985,7 @@ Result: [`ViewResult`](#viewresult).
 
 **Clip View**. Permission: `read`. Contexts: `global`.
 
-Shows or hides the Clip View in the detail area, which holds the MIDI Note Editor for the Arrangement's selected MIDI clip; while it shows, it takes the detail area in place of the Device View. It shows the clip the Arrangement has selected, with its notes, and selecting another MIDI clip switches the editor to it, clearing the note selection. Changes nothing in the set and isn't an undo step. The result says whether it shows, what clip the editor holds, and which notes are selected.
+Shows or hides the Clip View in the detail area, which holds the MIDI Note Editor for the Arrangement's selected MIDI clip, and leaves the Device View as it is: with the Device View showing, showing the Clip View stacks it above the Device View. It shows the clip the Arrangement has selected, with its notes, and selecting another MIDI clip switches the editor to it, clearing the note selection. Changes nothing in the set and isn't an undo step. The result is the detail area's state, as `view.state` reports it under `detail`.
 
 Default keys:
 
@@ -12381,7 +12995,39 @@ Default keys:
 
 Arguments: none (send `{}`).
 
-Result: [`ClipViewState`](#clipviewstate).
+Result: [`DetailState`](#detailstate).
+
+#### `view.toggle_detail_area`
+
+**Hide Device View**. Permission: `read`. Contexts: `global`.
+
+Hides whichever of the Clip View and the Device View show, and run again shows the same ones again; with neither showing and nothing hidden this way, shows the Device View. The View menu's item reads Hide or Show followed by the views it would hide or bring back. Changes nothing in the set and isn't an undo step. The result is the detail area's state.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-VIEW-022 | `Cmd+Option+L` | `Ctrl+Alt+L` | `global` | Hide or show the detail area (the Clip View or Device View) | runs it |
+
+Arguments: none (send `{}`).
+
+Result: [`DetailState`](#detailstate).
+
+#### `view.toggle_device_view`
+
+**Device View**. Permission: `read`. Contexts: `global`.
+
+Shows or hides the Device View in the detail area, which shows the selected track's devices, and leaves the Clip View as it is: with the Clip View showing, showing the Device View stacks it below the Clip View. Changes nothing in the set and isn't an undo step. The result is the detail area's state, as `view.state` reports it under `detail`.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-VIEW-016 | `Cmd+Option+4` | `Ctrl+Alt+4` | `global` | Show or hide the Device View | runs it |
+
+Arguments: none (send `{}`).
+
+Result: [`DetailState`](#detailstate).
 
 #### `view.toggle_file_manager`
 
@@ -12557,8 +13203,11 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`agent.set_server`](#agentset_server) | `settings.state` | `agents.server` |
 | [`arrangement.consolidate`](#arrangementconsolidate) | the query tool's `track` | `clips` |
 | [`arrangement.consolidate_to_scene`](#arrangementconsolidate_to_scene) | the query tool's `song` | `scenes` |
+| [`arrangement.create_fade`](#arrangementcreate_fade) | the query tool's `clip` | `data.audio.fade_in` |
 | [`arrangement.cut`](#arrangementcut) | the query tool's `track` | `clips` |
 | [`arrangement.delete`](#arrangementdelete) | the query tool's `track` | `clips` |
+| [`arrangement.delete_crossfade`](#arrangementdelete_crossfade) | the query tool's `clip` | `data.audio.fade_in_before` |
+| [`arrangement.delete_fades`](#arrangementdelete_fades) | the query tool's `clip` | `data.audio.fade_in` |
 | [`arrangement.duplicate`](#arrangementduplicate) | the query tool's `track` | `clips` |
 | [`arrangement.loop_selection`](#arrangementloop_selection) | `transport.state` | `loop_start` |
 | [`arrangement.move_clips`](#arrangementmove_clips) | the query tool's `track` | `clips` |
@@ -12566,6 +13215,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`arrangement.paste`](#arrangementpaste) | the query tool's `track` | `clips` |
 | [`arrangement.resize_clips`](#arrangementresize_clips) | the query tool's `track` | `clips` |
 | [`arrangement.reverse`](#arrangementreverse) | the query tool's `track` | `clips` |
+| [`arrangement.set_crossfade`](#arrangementset_crossfade) | the query tool's `clip` | `data.audio.fade_in_before` |
 | [`arrangement.split`](#arrangementsplit) | the query tool's `track` | `clips` |
 | [`articulation.add`](#articulationadd) | `articulation.list` | `articulations` |
 | [`articulation.delete`](#articulationdelete) | `articulation.list` | `articulations` |
@@ -12657,6 +13307,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`clip.set_fades`](#clipset_fades) | the query tool's `clip` | `data.audio.fade_in` |
 | [`clip.set_follow_actions`](#clipset_follow_actions) | the query tool's `clip` | `launch.follow` |
 | [`clip.set_gain`](#clipset_gain) | the query tool's `clip` | `data.audio.gain` |
+| [`clip.set_groove`](#clipset_groove) | the query tool's `clip` | `groove` |
 | [`clip.set_high_quality`](#clipset_high_quality) | the query tool's `clip` | `data.audio.high_quality` |
 | [`clip.set_launch_mode`](#clipset_launch_mode) | the query tool's `clip` | `launch.mode` |
 | [`clip.set_launch_quantization`](#clipset_launch_quantization) | the query tool's `clip` | `launch.quantization` |
@@ -12766,6 +13417,16 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`export.start`](#exportstart) | `export.status` | `export` |
 | [`file_manager.edit_file`](#file_manageredit_file) | the query tool's `clip` | `data.audio.media` |
 | [`file_manager.replace_file`](#file_managerreplace_file) | the query tool's `clip` | `data.audio.media` |
+| [`groove.add`](#grooveadd) | the query tool's `song` | `settings.grooves` |
+| [`groove.commit`](#groovecommit) | the query tool's `clip` | `groove` |
+| [`groove.delete`](#groovedelete) | the query tool's `song` | `settings.grooves` |
+| [`groove.extract`](#grooveextract) | the query tool's `song` | `settings.grooves` |
+| [`groove.load`](#grooveload) | the query tool's `song` | `settings.grooves` |
+| [`groove.rename`](#grooverename) | the query tool's `song` | `settings.grooves` |
+| [`groove.set`](#grooveset) | the query tool's `song` | `settings.grooves` |
+| [`groove.set_auto_load`](#grooveset_auto_load) | the query tool's `song` | `settings.grooves` |
+| [`groove.set_global_amount`](#grooveset_global_amount) | the query tool's `song` | `settings.grooves` |
+| [`groove.to_clip`](#grooveto_clip) | the query tool's `track` | `clips` |
 | [`keymap.bind`](#keymapbind) | `keymap.state` | `shortcuts` |
 | [`keymap.reset`](#keymapreset) | `keymap.state` | `shortcuts` |
 | [`keymap.unbind`](#keymapunbind) | `keymap.state` | `shortcuts` |
@@ -12804,13 +13465,16 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`modulator.set_shape`](#modulatorset_shape) | the query tool's `device` | `shape` |
 | [`modulator.unmap`](#modulatorunmap) | the query tool's `device` | `mappings` |
 | [`note.add`](#noteadd) | the query tool's `clip` | `data.midi.notes` |
+| [`note.adjust_value`](#noteadjust_value) | the query tool's `clip` | `data.midi.notes` |
 | [`note.cut`](#notecut) | the query tool's `clip` | `data.midi.notes` |
+| [`note.deactivate`](#notedeactivate) | the query tool's `clip` | `data.midi.notes` |
 | [`note.delete`](#notedelete) | the query tool's `clip` | `data.midi.notes` |
 | [`note.duplicate`](#noteduplicate) | the query tool's `clip` | `data.midi.notes` |
 | [`note.move`](#notemove) | the query tool's `clip` | `data.midi.notes` |
 | [`note.paste`](#notepaste) | the query tool's `clip` | `data.midi.notes` |
 | [`note.quantize`](#notequantize) | the query tool's `clip` | `data.midi.notes` |
 | [`note.ramp_value`](#noteramp_value) | the query tool's `clip` | `data.midi.notes` |
+| [`note.randomize`](#noterandomize) | the query tool's `clip` | `data.midi.notes` |
 | [`note.resize`](#noteresize) | the query tool's `clip` | `data.midi.notes` |
 | [`note.set_value`](#noteset_value) | the query tool's `clip` | `data.midi.notes` |
 | [`pad.delete`](#paddelete) | the query tool's `device` | `chains` |
@@ -12947,11 +13611,14 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`track.clear_frozen`](#trackclear_frozen) | the query tool's `track` | `frozen` |
 | [`track.create`](#trackcreate) | the query tool's `song` | `tracks` |
 | [`track.create_bounced_track`](#trackcreate_bounced_track) | the query tool's `song` | `tracks` |
+| [`track.cut`](#trackcut) | the query tool's `song` | `tracks` |
 | [`track.delete`](#trackdelete) | the query tool's `song` | `tracks` |
+| [`track.duplicate`](#trackduplicate) | the query tool's `song` | `tracks` |
 | [`track.duplicate_without_clips`](#trackduplicate_without_clips) | the query tool's `song` | `tracks` |
 | [`track.freeze`](#trackfreeze) | the query tool's `track` | `frozen` |
 | [`track.group`](#trackgroup) | the query tool's `song` | `tracks` |
 | [`track.move`](#trackmove) | the query tool's `song` | `tracks` |
+| [`track.paste`](#trackpaste) | the query tool's `song` | `tracks` |
 | [`track.paste_bounced_audio`](#trackpaste_bounced_audio) | the query tool's `track` | `clips` |
 | [`track.rename`](#trackrename) | the query tool's `track` | `name` |
 | [`track.set_bounced`](#trackset_bounced) | the query tool's `song` | `tracks` |
@@ -13013,6 +13680,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`file_manager.delete_unused`](#file_managerdelete_unused) | moves files outside the set to the trash; the set doesn't change |
 | [`file_manager.hot_swap`](#file_managerhot_swap) | the File Manager's state is read with `file_manager.state`, which is `external` because it lists files outside the project |
 | [`file_manager.state`](#file_managerstate) | a query of its own: it reads the File Manager, and is `external` for the files it lists |
+| [`groove.save`](#groovesave) | writes a file outside the set; the set doesn't change |
 | [`midi.export_clip`](#midiexport_clip) | writes a file outside the set; the set doesn't change |
 | [`pad.save_default`](#padsave_default) | the default pad is the shell's, kept in memory and in the User Library, not in the set; the next `pad.drop` on an empty pad makes its chain from it |
 | [`plugin.export_list`](#pluginexport_list) | writes a file outside the set; the set doesn't change |
@@ -13476,6 +14144,7 @@ What the Arrangement View shows: every view command returns it.
 | `show_volume` | boolean | yes | Whether the track headers show their volume, pan, and sends. |
 | `show_return_tracks` | boolean | yes | Whether the return tracks' rows show in the lanes. |
 | `automation_lanes` | array of [`AutomationLane`](#automationlane) | no | The parameter each track's automation lane shows, for the tracks whose lane isn't showing the default (their volume): the choosers' choice. `target` `null` means the lane draws no envelope. |
+| `selected_fade` | [`FadeHandleState`](#fadehandlestate) or null | no | The selected fade handle (WP-6.51), if any: Delete deletes its fade. |
 | `time_selection_lanes` | array of [`Lane`](#lane) | no | The lanes the time selection covers: each a track's own lane or its automation lane (the automation editing spec, R1). Empty when the selection names no lane. |
 
 <details><summary>JSON Schema</summary>
@@ -13546,6 +14215,17 @@ What the Arrangement View shows: every view command returns it.
         "$ref": "#/$defs/ClipId"
       },
       "type": "array"
+    },
+    "selected_fade": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/FadeHandleState"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The selected fade handle (WP-6.51), if any: Delete deletes its fade."
     },
     "selected_locators": {
       "default": [],
@@ -14093,7 +14773,11 @@ An audio clip's data: the audio file it plays, named by content hash, and how it
 | `detune` | number from -50 to 50 | no | The clip's Detune, in cents, from −50 to 50 (R2): 0 unless given. It shifts the clip's pitch in every mode but Re-Pitch (R10, R26). |
 | `end` | number or null | no | The End marker: where in the file, in seconds, a clip whose loop is off stops playing, after the Start marker; `null` (or nothing) for the end of the file. |
 | `fade_in` | number, at least 0 | no | The fade-in's length in seconds, from the clip's start in the Arrangement: 0 (no fade) unless given. |
+| `fade_in_before` | number, at least 0 | no | How many seconds before the clip's start a crossfade (R24) begins its fade-in, over the clip that ends where this one starts: 0 unless this clip is the later of two crossfaded ones. The fade-in's length is then this much before the start and `fade_in` after it. |
+| `fade_in_curve` | number from -1 to 1 | no | The fade-in's curve (the audio clips spec, R23), from −1 to 1: 0, the straight line, unless given. |
 | `fade_out` | number, at least 0 | no | The fade-out's length in seconds, up to the clip's end in the Arrangement: 0 (no fade) unless given. |
+| `fade_out_after` | number, at least 0 | no | How many seconds past the clip's end a crossfade (R24) ends its fade-out, under the clip that starts where this one ends: 0 unless this clip is the earlier of two crossfaded ones. The fade-out's length is then `fade_out` before the end and this much after it. |
+| `fade_out_curve` | number from -1 to 1 | no | The fade-out's curve, from −1 to 1: 0 unless given. |
 | `gain` | number, at least 0 | no | The clip's gain, as a linear gain: 1 (0 dB) unless given, 0.5 about −6 dB, and 0 silence (−∞ dB). Finite and 0 or more. |
 | `high_quality` | boolean | no | The HiQ switch (R12): on unless given. On, the clip is resampled by a band-limited interpolator wherever it is read at another rate than 1. |
 | `loop_end` | number or null | no | Where the loop brace ends in the file, in seconds, after its start; `null` (or nothing) for the end of the file. While the loop is on, the Start marker must be before it. |
@@ -14138,10 +14822,36 @@ An audio clip's data: the audio file it plays, named by content hash, and how it
       "minimum": 0.0,
       "type": "number"
     },
+    "fade_in_before": {
+      "description": "How many seconds before the clip's start a crossfade (R24) begins its fade-in, over the clip that ends where this one starts: 0 unless this clip is the later of two crossfaded ones. The fade-in's length is then this much before the start and `fade_in` after it.",
+      "format": "double",
+      "minimum": 0.0,
+      "type": "number"
+    },
+    "fade_in_curve": {
+      "description": "The fade-in's curve (the audio clips spec, R23), from −1 to 1: 0, the straight line, unless given.",
+      "format": "double",
+      "maximum": 1.0,
+      "minimum": -1.0,
+      "type": "number"
+    },
     "fade_out": {
       "description": "The fade-out's length in seconds, up to the clip's end in the Arrangement: 0 (no fade) unless given.",
       "format": "double",
       "minimum": 0.0,
+      "type": "number"
+    },
+    "fade_out_after": {
+      "description": "How many seconds past the clip's end a crossfade (R24) ends its fade-out, under the clip that starts where this one ends: 0 unless this clip is the earlier of two crossfaded ones. The fade-out's length is then `fade_out` before the end and this much after it.",
+      "format": "double",
+      "minimum": 0.0,
+      "type": "number"
+    },
+    "fade_out_curve": {
+      "description": "The fade-out's curve, from −1 to 1: 0 unless given.",
+      "format": "double",
+      "maximum": 1.0,
+      "minimum": -1.0,
       "type": "number"
     },
     "gain": {
@@ -14794,7 +15504,7 @@ What an automation editing command reports: what it changed in the set, and the 
 
 ### `AutomationTarget`
 
-Which parameter of the track an envelope drives: `mixer` with a `param`, `send` with the return track it feeds (`to`), `device` with the device and its `param`, `chain` with a rack's chain and its mixer `param`, or `chain_send` with a drum rack's chain and the return chain it sends to (`to`). A MIDI clip's envelope can instead name a MIDI controller: `midi.cc` with its `number` (1 to 31 or 33 to 119), `midi.pitch_bend` or `midi.channel_pressure`.
+Which parameter of the track an envelope drives: `mixer` with a `param`, `send` with the return track it feeds (`to`), `device` with the device and its `param`, `chain` with a rack's chain and its mixer `param`, or `chain_send` with a drum rack's chain and the return chain it sends to (`to`), or `clip` with a sound setting (`param`) of the track's audio clips (Gain, Transpose, Detune, HiQ and the warp modes' controls). A MIDI clip's envelope can instead name a MIDI controller: `midi.cc` with its `number` (1 to 31 or 33 to 119), `midi.pitch_bend` or `midi.channel_pressure`.
 
 One of:
 
@@ -14803,6 +15513,7 @@ One of:
 - an object with `type` = `"device"`, `device` ([`DeviceId`](#deviceid)), `param` ([`ParamId`](#paramid)): A parameter of a device in the track's chain.
 - an object with `type` = `"chain"`, `chain` ([`ChainId`](#chainid)), `param` ([`MixerParam`](#mixerparam)): A control of a rack chain's mixer (WP-5.1, G2): the chain's Volume, Pan, or Chain Activator (`mute`: 1 muted, 0 not).
 - an object with `type` = `"chain_send"`, `chain` ([`ChainId`](#chainid)), `to` ([`ChainId`](#chainid)): The level of a drum chain's send to a return chain of its rack (drum racks R6, G2).
+- an object with `type` = `"clip"`, `param` ([`ClipParam`](#clipparam)): A sound setting of the track's audio clips (WP-4.8, the warp modes spec R28): a track's envelope for it drives the setting of every audio clip on the track as it plays, and a clip's envelope modulates it.
 - an object with `type` = `"midi.cc"`, `number` (integer from 0 to 255): A continuous controller of a MIDI clip's MIDI Ctrl envelopes (WP-2.29), 1 to 31 or 33 to 119, from 0 to 127. Only a MIDI clip's envelope names it; a track has no automation for it.
 - an object with `type` = `"midi.pitch_bend"`: A MIDI clip's pitch bend envelope, from −8192 to 8191, 0 at rest.
 - an object with `type` = `"midi.channel_pressure"`: A MIDI clip's channel pressure envelope, from 0 to 127.
@@ -14811,7 +15522,7 @@ One of:
 
 ```json
 {
-  "description": "Which parameter of the track an envelope drives: `mixer` with a `param`, `send` with the return track it feeds (`to`), `device` with the device and its `param`, `chain` with a rack's chain and its mixer `param`, or `chain_send` with a drum rack's chain and the return chain it sends to (`to`). A MIDI clip's envelope can instead name a MIDI controller: `midi.cc` with its `number` (1 to 31 or 33 to 119), `midi.pitch_bend` or `midi.channel_pressure`.",
+  "description": "Which parameter of the track an envelope drives: `mixer` with a `param`, `send` with the return track it feeds (`to`), `device` with the device and its `param`, `chain` with a rack's chain and its mixer `param`, or `chain_send` with a drum rack's chain and the return chain it sends to (`to`), or `clip` with a sound setting (`param`) of the track's audio clips (Gain, Transpose, Detune, HiQ and the warp modes' controls). A MIDI clip's envelope can instead name a MIDI controller: `midi.cc` with its `number` (1 to 31 or 33 to 119), `midi.pitch_bend` or `midi.channel_pressure`.",
   "oneOf": [
     {
       "description": "A control of the track's mixer.",
@@ -14915,6 +15626,24 @@ One of:
         "type",
         "chain",
         "to"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A sound setting of the track's audio clips (WP-4.8, the warp modes spec R28): a track's envelope for it drives the setting of every audio clip on the track as it plays, and a clip's envelope modulates it.",
+      "properties": {
+        "param": {
+          "$ref": "#/$defs/ClipParam",
+          "description": "The setting."
+        },
+        "type": {
+          "const": "clip",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "param"
       ],
       "type": "object"
     },
@@ -16882,6 +17611,7 @@ A clip on a track's arrangement lane.
 | `mute` | boolean | yes | Whether the clip is switched off, so it stays in place but doesn't play. |
 | `data` | [`ClipData`](#clipdata) | yes | What the clip plays. |
 | `envelopes` | array of [`ClipEnvelope`](#clipenvelope) | no | The clip's envelopes (WP-3.15): one per parameter of its track it modulates, in target order. Empty for a clip with none, which is what a set saved before this package holds. |
+| `groove` | [`GrooveId`](#grooveid) or null | no | The clip's groove (WP-6.19): one of the set's Groove Pool, or none. It changes when the clip's notes play, or where its audio plays, and nothing in the clip itself until it is committed. |
 | `launch` | [`ClipLaunch`](#cliplaunch) | no | The clip's launch settings (WP-3.4), which only a Session clip's launching reads. The defaults for a clip saved without them. |
 | `offset` | [`Ticks`](#ticks) | no | How far into its contents a MIDI clip starts: its notes are placed from `start - offset`, and the part before the clip's start doesn't play. 0 (or left out) plays the contents from their beginning. Never negative. Splitting a MIDI clip or trimming its left edge changes it, so each part plays what it played before. An audio clip's is always 0: its Start marker moves instead, as Live's does. |
 | `scale` | [`Scale`](#scale) | no | The clip's scale (WP-6.7): its Scale Mode switch, its root and its scale name. It never changes what the clip plays; it tells the rest of the set which keys belong. A clip off at C, in Major, writes nothing, so a set saved before the scales loads unchanged. |
@@ -16902,6 +17632,17 @@ A clip on a track's arrangement lane.
         "$ref": "#/$defs/ClipEnvelope"
       },
       "type": "array"
+    },
+    "groove": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/GrooveId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The clip's groove (WP-6.19): one of the set's Groove Pool, or none. It changes when the clip's notes play, or where its audio plays, and nothing in the clip itself until it is committed."
     },
     "id": {
       "$ref": "#/$defs/ClipId",
@@ -17250,6 +17991,103 @@ A Session clip's own launch settings (the Clip View's Launch panel, WP-3.4). The
 
 </details>
 
+### `ClipParam`
+
+A sound setting of an audio clip: `gain` (linear, 1 is 0 dB), `transpose` (semitones), `sample_offset` (Beats only, in sixteenth notes, an envelope only), `detune` (cents), `high_quality` (the HiQ switch), `preserve`, `transient_loop_mode` and `transient_envelope` (Beats), `tones_grain_size`, `texture_grain_size` and `texture_flux`, `formants` and `complex_pro_envelope` (Complex Pro).
+
+One of:
+
+- `"gain"`: The clip's gain: a linear gain from silence (−∞ dB) to +24 dB.
+- `"transpose"`: Transpose, in semitones, −48 to 48.
+- `"sample_offset"`: Beats' Sample Offset (R30), in sixteenth notes, −8 to 8. It has no setting of its own: only an envelope or automation moves it.
+- `"detune"`: Detune, in cents, −50 to 50.
+- `"high_quality"`: The HiQ switch.
+- `"preserve"`: Beats' Preserve, by its place in the list.
+- `"transient_loop_mode"`: Beats' Transient Loop Mode, by its place in the list.
+- `"transient_envelope"`: Beats' Transient Envelope, 0 to 100.
+- `"tones_grain_size"`: Tones' Grain Size, in milliseconds.
+- `"texture_grain_size"`: Texture's Grain Size, in milliseconds.
+- `"texture_flux"`: Texture's Flux, in per cent.
+- `"formants"`: Complex Pro's Formants, in per cent.
+- `"complex_pro_envelope"`: Complex Pro's Envelope, 8 to 512.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A sound setting of an audio clip: `gain` (linear, 1 is 0 dB), `transpose` (semitones), `sample_offset` (Beats only, in sixteenth notes, an envelope only), `detune` (cents), `high_quality` (the HiQ switch), `preserve`, `transient_loop_mode` and `transient_envelope` (Beats), `tones_grain_size`, `texture_grain_size` and `texture_flux`, `formants` and `complex_pro_envelope` (Complex Pro).",
+  "oneOf": [
+    {
+      "const": "gain",
+      "description": "The clip's gain: a linear gain from silence (−∞ dB) to +24 dB.",
+      "type": "string"
+    },
+    {
+      "const": "transpose",
+      "description": "Transpose, in semitones, −48 to 48.",
+      "type": "string"
+    },
+    {
+      "const": "sample_offset",
+      "description": "Beats' Sample Offset (R30), in sixteenth notes, −8 to 8. It has no setting of its own: only an envelope or automation moves it.",
+      "type": "string"
+    },
+    {
+      "const": "detune",
+      "description": "Detune, in cents, −50 to 50.",
+      "type": "string"
+    },
+    {
+      "const": "high_quality",
+      "description": "The HiQ switch.",
+      "type": "string"
+    },
+    {
+      "const": "preserve",
+      "description": "Beats' Preserve, by its place in the list.",
+      "type": "string"
+    },
+    {
+      "const": "transient_loop_mode",
+      "description": "Beats' Transient Loop Mode, by its place in the list.",
+      "type": "string"
+    },
+    {
+      "const": "transient_envelope",
+      "description": "Beats' Transient Envelope, 0 to 100.",
+      "type": "string"
+    },
+    {
+      "const": "tones_grain_size",
+      "description": "Tones' Grain Size, in milliseconds.",
+      "type": "string"
+    },
+    {
+      "const": "texture_grain_size",
+      "description": "Texture's Grain Size, in milliseconds.",
+      "type": "string"
+    },
+    {
+      "const": "texture_flux",
+      "description": "Texture's Flux, in per cent.",
+      "type": "string"
+    },
+    {
+      "const": "formants",
+      "description": "Complex Pro's Formants, in per cent.",
+      "type": "string"
+    },
+    {
+      "const": "complex_pro_envelope",
+      "description": "Complex Pro's Envelope, 8 to 512.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `ClipTab`
 
 A tab of the Clip View: `notes` (the MIDI Note Editor) or `envelopes` (the clip's envelopes).
@@ -17382,7 +18220,7 @@ What `clip.transients` returns.
 
 ### `ClipViewState`
 
-What the Clip View shows: which clip it is editing, the notes selected in it, its insert marker and time selection, the lane's setting, and the tab with the envelope it shows.
+What the Clip View shows: which clip it is editing, the notes selected in it, its insert marker and time selection, its expression lanes, and the tab with the envelope it shows.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -17392,7 +18230,10 @@ What the Clip View shows: which clip it is editing, the notes selected in it, it
 | `selected` | array of integer, at least 0 | yes | The selected notes, by their place in the clip's notes in order (by start, then pitch). |
 | `insert_marker` | [`Ticks`](#ticks) or null | yes | The insert marker, in ticks from the beginning of the clip's contents; `null` when there is none. |
 | `time_selection` | array or null | yes | The time selection's start and end, in ticks from the beginning of the clip's contents; `null` when there is none. |
-| `lane` | [`NoteField`](#notefield) | yes | Which value the lane under the note editor shows and edits. |
+| `lane` | [`NoteField`](#notefield) | yes | The active lane: `velocity`, `chance` or `release_velocity`, whose controls the footer shows. |
+| `lanes` | array of [`NoteField`](#notefield) | yes | The lanes shown under the note editor now, from the top: none while they are all hidden. |
+| `lanes_hidden` | boolean | yes | Whether the Show/Hide All Expression Editors switch has hidden every lane. |
+| `randomize` | [`RandomizeAmounts`](#randomizeamounts) | yes | The Randomize amounts of the three lanes. |
 | `folded` | boolean | yes | Whether the note editor shows only the rows that hold notes (Fold, F). |
 | `tab` | [`ClipTab`](#cliptab) | yes | The tab the Clip View shows. |
 | `envelope` | [`AutomationTarget`](#automationtarget) or null | yes | The parameter whose envelope the Envelopes tab shows; `null` when it shows none. |
@@ -17401,7 +18242,7 @@ What the Clip View shows: which clip it is editing, the notes selected in it, it
 
 ```json
 {
-  "description": "What the Clip View shows: which clip it is editing, the notes selected in it, its insert marker and time selection, the lane's setting, and the tab with the envelope it shows.",
+  "description": "What the Clip View shows: which clip it is editing, the notes selected in it, its insert marker and time selection, its expression lanes, and the tab with the envelope it shows.",
   "properties": {
     "clip": {
       "anyOf": [
@@ -17446,7 +18287,22 @@ What the Clip View shows: which clip it is editing, the notes selected in it, it
     },
     "lane": {
       "$ref": "#/$defs/NoteField",
-      "description": "Which value the lane under the note editor shows and edits."
+      "description": "The active lane: `velocity`, `chance` or `release_velocity`, whose controls the footer shows."
+    },
+    "lanes": {
+      "description": "The lanes shown under the note editor now, from the top: none while they are all hidden.",
+      "items": {
+        "$ref": "#/$defs/NoteField"
+      },
+      "type": "array"
+    },
+    "lanes_hidden": {
+      "description": "Whether the Show/Hide All Expression Editors switch has hidden every lane.",
+      "type": "boolean"
+    },
+    "randomize": {
+      "$ref": "#/$defs/RandomizeAmounts",
+      "description": "The Randomize amounts of the three lanes."
     },
     "selected": {
       "description": "The selected notes, by their place in the clip's notes in order (by start, then pitch).",
@@ -17491,6 +18347,9 @@ What the Clip View shows: which clip it is editing, the notes selected in it, it
     "insert_marker",
     "time_selection",
     "lane",
+    "lanes",
+    "lanes_hidden",
+    "randomize",
     "folded",
     "tab",
     "envelope"
@@ -18361,6 +19220,105 @@ What `file_manager.delete_unused` returns.
     "files"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `DetailState`
+
+What the detail area's commands return, and `view.state` reports under `detail` (detail-views R17): which views show, where the focus is and how tall the Clip View is.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clip_view` | boolean | yes | Whether the Clip View shows. |
+| `device_view` | boolean | yes | Whether the Device View shows. |
+| `alone_last` | [`DetailView`](#detailview) | yes | The view that showed alone last, which `view.switch_detail_view` brings back when neither shows. |
+| `hidden` | array of [`DetailView`](#detailview) | yes | The views `view.toggle_detail_area` hid, which it brings back; empty when it hid nothing. |
+| `clip_height` | number | yes | The Clip View's height in points at 100%, as it was set; it is squeezed in a window too short for it. |
+| `expanded` | boolean | yes | Whether the Clip View is expanded to its largest height. |
+| `focus` | [`DetailView`](#detailview) | yes | The view the detail area's keys go to while both show. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What the detail area's commands return, and `view.state` reports under `detail` (detail-views R17): which views show, where the focus is and how tall the Clip View is.",
+  "properties": {
+    "alone_last": {
+      "$ref": "#/$defs/DetailView",
+      "description": "The view that showed alone last, which `view.switch_detail_view` brings back when neither shows."
+    },
+    "clip_height": {
+      "description": "The Clip View's height in points at 100%, as it was set; it is squeezed in a window too short for it.",
+      "format": "double",
+      "type": "number"
+    },
+    "clip_view": {
+      "description": "Whether the Clip View shows.",
+      "type": "boolean"
+    },
+    "device_view": {
+      "description": "Whether the Device View shows.",
+      "type": "boolean"
+    },
+    "expanded": {
+      "description": "Whether the Clip View is expanded to its largest height.",
+      "type": "boolean"
+    },
+    "focus": {
+      "$ref": "#/$defs/DetailView",
+      "description": "The view the detail area's keys go to while both show."
+    },
+    "hidden": {
+      "description": "The views `view.toggle_detail_area` hid, which it brings back; empty when it hid nothing.",
+      "items": {
+        "$ref": "#/$defs/DetailView"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "clip_view",
+    "device_view",
+    "alone_last",
+    "hidden",
+    "clip_height",
+    "expanded",
+    "focus"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `DetailView`
+
+One of the detail area's two views.
+
+One of:
+
+- `"clip"`: The Clip View, which edits the selected clip.
+- `"device"`: The Device View, which shows the selected track's devices.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One of the detail area's two views.",
+  "oneOf": [
+    {
+      "const": "clip",
+      "description": "The Clip View, which edits the selected clip.",
+      "type": "string"
+    },
+    {
+      "const": "device",
+      "description": "The Device View, which shows the selected track's devices.",
+      "type": "string"
+    }
+  ]
 }
 ```
 
@@ -21645,6 +22603,83 @@ What `chain.extract` and `chain.extract_return` return.
 
 </details>
 
+### `FadeHandle`
+
+A fade's handle: `peak`, where it reaches full level; `outer`, where it reaches silence, at the clip's edge or a crossfade's far end; or `curve`, between them.
+
+One of:
+
+- `"peak"`: Where the fade reaches full level.
+- `"outer"`: Where it reaches silence.
+- `"curve"`: The handle that shapes it.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A fade's handle: `peak`, where it reaches full level; `outer`, where it reaches silence, at the clip's edge or a crossfade's far end; or `curve`, between them.",
+  "oneOf": [
+    {
+      "const": "peak",
+      "description": "Where the fade reaches full level.",
+      "type": "string"
+    },
+    {
+      "const": "outer",
+      "description": "Where it reaches silence.",
+      "type": "string"
+    },
+    {
+      "const": "curve",
+      "description": "The handle that shapes it.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `FadeHandleState`
+
+A selected fade handle.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The audio clip. |
+| `edge` | [`Edge`](#edge) | yes | Which edge's fade: the fade-in at `start`, the fade-out at `end`. |
+| `handle` | [`FadeHandle`](#fadehandle) | yes | Which of its handles. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A selected fade handle.",
+  "properties": {
+    "clip": {
+      "$ref": "#/$defs/ClipId",
+      "description": "The audio clip."
+    },
+    "edge": {
+      "$ref": "#/$defs/Edge",
+      "description": "Which edge's fade: the fade-in at `start`, the fade-out at `end`."
+    },
+    "handle": {
+      "$ref": "#/$defs/FadeHandle",
+      "description": "Which of its handles."
+    }
+  },
+  "required": [
+    "clip",
+    "edge",
+    "handle"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `FileBeats`
 
 A file's tempo and beats from its analysis, as `clip.transients` reports readiness: `seconds` is the file's length, `bpm` its tempo, `beats` the times in seconds of its beats, in order.
@@ -22742,6 +23777,511 @@ The editing grid, as the Arrangement View uses it now.
     "snap",
     "step",
     "label"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `Groove`
+
+A groove (the grooves spec, R1).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | [`GrooveId`](#grooveid) | yes | The groove's ID. |
+| `name` | string | yes | Its name. |
+| `length` | [`Ticks`](#ticks) | yes | How long it is, in ticks: positive. It repeats along a clip's contents every length. |
+| `notes` | array of [`GrooveNote`](#groovenote) | yes | Its notes, by position, no two at one position. |
+| `base` | [`GrooveBase`](#groovebase) | no | The grid its notes are measured against. |
+| `quantize` | number | no | How much straight quantisation to the Base grid is applied first, from 0 to 100 percent. |
+| `random` | number | no | How much random timing is added, from 0 to 100 percent. |
+| `timing` | number | no | How strongly the groove's timing acts, from 0 to 100 percent. |
+| `velocity` | number | no | How strongly the groove's velocities act, from -100 to +100 percent. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A groove (the grooves spec, R1).",
+  "properties": {
+    "base": {
+      "$ref": "#/$defs/GrooveBase",
+      "default": "1/16",
+      "description": "The grid its notes are measured against."
+    },
+    "id": {
+      "$ref": "#/$defs/GrooveId",
+      "description": "The groove's ID."
+    },
+    "length": {
+      "$ref": "#/$defs/Ticks",
+      "description": "How long it is, in ticks: positive. It repeats along a clip's contents every length."
+    },
+    "name": {
+      "description": "Its name.",
+      "type": "string"
+    },
+    "notes": {
+      "description": "Its notes, by position, no two at one position.",
+      "items": {
+        "$ref": "#/$defs/GrooveNote"
+      },
+      "type": "array"
+    },
+    "quantize": {
+      "default": 0.0,
+      "description": "How much straight quantisation to the Base grid is applied first, from 0 to 100 percent.",
+      "format": "double",
+      "type": "number"
+    },
+    "random": {
+      "default": 0.0,
+      "description": "How much random timing is added, from 0 to 100 percent.",
+      "format": "double",
+      "type": "number"
+    },
+    "timing": {
+      "default": 100.0,
+      "description": "How strongly the groove's timing acts, from 0 to 100 percent.",
+      "format": "double",
+      "type": "number"
+    },
+    "velocity": {
+      "default": 0.0,
+      "description": "How strongly the groove's velocities act, from -100 to +100 percent.",
+      "format": "double",
+      "type": "number"
+    }
+  },
+  "required": [
+    "id",
+    "name",
+    "length",
+    "notes"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `GrooveBase`
+
+The grid a groove's notes are measured against (the grooves spec, R2).
+
+One of:
+
+- `"1/4"`: A quarter note.
+- `"1/8"`: An eighth note.
+- `"1/8T"`: An eighth-note triplet.
+- `"1/16"`: A sixteenth note.
+- `"1/16T"`: A sixteenth-note triplet.
+- `"1/32"`: A thirty-second note.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The grid a groove's notes are measured against (the grooves spec, R2).",
+  "oneOf": [
+    {
+      "const": "1/4",
+      "description": "A quarter note.",
+      "type": "string"
+    },
+    {
+      "const": "1/8",
+      "description": "An eighth note.",
+      "type": "string"
+    },
+    {
+      "const": "1/8T",
+      "description": "An eighth-note triplet.",
+      "type": "string"
+    },
+    {
+      "const": "1/16",
+      "description": "A sixteenth note.",
+      "type": "string"
+    },
+    {
+      "const": "1/16T",
+      "description": "A sixteenth-note triplet.",
+      "type": "string"
+    },
+    {
+      "const": "1/32",
+      "description": "A thirty-second note.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `GrooveClip`
+
+What `groove.to_clip` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The clip it made. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `groove.to_clip` returns.",
+  "properties": {
+    "clip": {
+      "$ref": "#/$defs/ClipId",
+      "description": "The clip it made."
+    }
+  },
+  "required": [
+    "clip"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `GrooveCommitted`
+
+What `groove.commit` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clips` | array of [`ClipId`](#clipid) | yes | The clips whose groove was written in. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `groove.commit` returns.",
+  "properties": {
+    "clips": {
+      "description": "The clips whose groove was written in.",
+      "items": {
+        "$ref": "#/$defs/ClipId"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "clips"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `GrooveExtracted`
+
+What `groove.extract` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `grooves` | array of [`GrooveId`](#grooveid) | yes | The grooves it added to the end of the pool, one for each clip, in the clips' order. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `groove.extract` returns.",
+  "properties": {
+    "grooves": {
+      "description": "The grooves it added to the end of the pool, one for each clip, in the clips' order.",
+      "items": {
+        "$ref": "#/$defs/GrooveId"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "grooves"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `GrooveId`
+
+The ID of a groove: a positive integer, unique within the project and never reused.
+
+Type: integer, at least 1.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The ID of a groove: a positive integer, unique within the project and never reused.",
+  "format": "uint64",
+  "minimum": 1,
+  "type": "integer"
+}
+```
+
+</details>
+
+### `GrooveLoaded`
+
+What `groove.load` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `groove` | [`GrooveId`](#grooveid) | yes | The groove it added to the end of the pool. |
+| `name` | string | yes | Its name. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `groove.load` returns.",
+  "properties": {
+    "groove": {
+      "$ref": "#/$defs/GrooveId",
+      "description": "The groove it added to the end of the pool."
+    },
+    "name": {
+      "description": "Its name.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "groove",
+    "name"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `GrooveNote`
+
+One note of a groove: where it sits in the groove and how hard.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `position` | [`Ticks`](#ticks) | yes | From 0 to before the groove's length. |
+| `velocity` | integer from 0 to 255 | yes | From 1 to 127. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One note of a groove: where it sits in the groove and how hard.",
+  "properties": {
+    "position": {
+      "$ref": "#/$defs/Ticks",
+      "description": "From 0 to before the groove's length."
+    },
+    "velocity": {
+      "description": "From 1 to 127.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "position",
+    "velocity"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `GroovePoolEntry`
+
+One groove of the pool, as `groove.pool` reports it.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | [`GrooveId`](#grooveid) | yes | The groove's ID. |
+| `name` | string | yes | Its name. |
+| `length` | [`Ticks`](#ticks) | yes | How long it is, in ticks: positive. It repeats along a clip's contents every length. |
+| `notes` | array of [`GrooveNote`](#groovenote) | yes | Its notes, by position, no two at one position. |
+| `base` | [`GrooveBase`](#groovebase) | yes | The grid its notes are measured against. |
+| `quantize` | number | yes | How much straight quantisation to the Base grid is applied first, from 0 to 100 percent. |
+| `timing` | number | yes | How strongly the groove's timing acts, from 0 to 100 percent. |
+| `random` | number | yes | How much random timing is added, from 0 to 100 percent. |
+| `velocity` | number | yes | How strongly the groove's velocities act, from -100 to +100 percent. |
+| `active` | boolean | yes | Whether any clip uses it: an inactive groove's parameters are greyed. |
+| `clips` | array of [`ClipId`](#clipid) | yes | The clips that use it. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One groove of the pool, as `groove.pool` reports it.",
+  "properties": {
+    "active": {
+      "description": "Whether any clip uses it: an inactive groove's parameters are greyed.",
+      "type": "boolean"
+    },
+    "base": {
+      "$ref": "#/$defs/GrooveBase",
+      "default": "1/16",
+      "description": "The grid its notes are measured against."
+    },
+    "clips": {
+      "description": "The clips that use it.",
+      "items": {
+        "$ref": "#/$defs/ClipId"
+      },
+      "type": "array"
+    },
+    "id": {
+      "$ref": "#/$defs/GrooveId",
+      "description": "The groove's ID."
+    },
+    "length": {
+      "$ref": "#/$defs/Ticks",
+      "description": "How long it is, in ticks: positive. It repeats along a clip's contents every length."
+    },
+    "name": {
+      "description": "Its name.",
+      "type": "string"
+    },
+    "notes": {
+      "description": "Its notes, by position, no two at one position.",
+      "items": {
+        "$ref": "#/$defs/GrooveNote"
+      },
+      "type": "array"
+    },
+    "quantize": {
+      "default": 0.0,
+      "description": "How much straight quantisation to the Base grid is applied first, from 0 to 100 percent.",
+      "format": "double",
+      "type": "number"
+    },
+    "random": {
+      "default": 0.0,
+      "description": "How much random timing is added, from 0 to 100 percent.",
+      "format": "double",
+      "type": "number"
+    },
+    "timing": {
+      "default": 100.0,
+      "description": "How strongly the groove's timing acts, from 0 to 100 percent.",
+      "format": "double",
+      "type": "number"
+    },
+    "velocity": {
+      "default": 0.0,
+      "description": "How strongly the groove's velocities act, from -100 to +100 percent.",
+      "format": "double",
+      "type": "number"
+    }
+  },
+  "required": [
+    "id",
+    "name",
+    "length",
+    "notes",
+    "base",
+    "quantize",
+    "timing",
+    "random",
+    "velocity",
+    "active",
+    "clips"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `GroovePoolState`
+
+What `groove.pool` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `grooves` | array of [`GroovePoolEntry`](#groovepoolentry) | yes | The grooves, in the order they were added. |
+| `global_amount` | number | yes | The Global Amount, from 0 to 130 percent. |
+| `auto_load` | boolean | yes | The Auto Load Groove switch. |
+| `auto_load_groove` | [`GrooveId`](#grooveid) or null | no | The groove new MIDI clips take while the switch is on. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `groove.pool` returns.",
+  "properties": {
+    "auto_load": {
+      "description": "The Auto Load Groove switch.",
+      "type": "boolean"
+    },
+    "auto_load_groove": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/GrooveId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The groove new MIDI clips take while the switch is on."
+    },
+    "global_amount": {
+      "description": "The Global Amount, from 0 to 130 percent.",
+      "format": "double",
+      "type": "number"
+    },
+    "grooves": {
+      "description": "The grooves, in the order they were added.",
+      "items": {
+        "$ref": "#/$defs/GroovePoolEntry"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "grooves",
+    "global_amount",
+    "auto_load"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `GrooveSaved`
+
+What `groove.save` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | The file written. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `groove.save` returns.",
+  "properties": {
+    "path": {
+      "description": "The file written.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "path"
   ],
   "type": "object"
 }
@@ -30110,6 +31650,55 @@ Which views of a rack are shown: `macros` (the Macro Controls), `variations` (th
 
 </details>
 
+### `RandomizeAmounts`
+
+The Randomize amount of each lane, which the footer's control holds (Spec: note-editing R13). A new editor has 0 for each.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `velocity` | integer from 0 to 255 | yes | The Velocity lane's, from 0 to 127. |
+| `chance` | integer from 0 to 255 | yes | The Chance lane's, a percentage from 0 to 100. |
+| `release_velocity` | integer from 0 to 255 | yes | The Release Velocity lane's, from 0 to 127. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The Randomize amount of each lane, which the footer's control holds (Spec: note-editing R13). A new editor has 0 for each.",
+  "properties": {
+    "chance": {
+      "description": "The Chance lane's, a percentage from 0 to 100.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "release_velocity": {
+      "description": "The Release Velocity lane's, from 0 to 127.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "velocity": {
+      "description": "The Velocity lane's, from 0 to 127.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "velocity",
+    "chance",
+    "release_velocity"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `RangeSource`
 
 Where an export's range came from.
@@ -35440,6 +37029,37 @@ What `search.tracks` returns.
 
 </details>
 
+### `TracksCopied`
+
+What `track.copy`, `track.cut` and `track.paste` return.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `tracks` | array of [`TrackId`](#trackid) | yes | The new tracks: the copies `track.copy` puts on the clipboard, the copies `track.cut` puts on the clipboard, and the tracks `track.paste` makes. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `track.copy`, `track.cut` and `track.paste` return.",
+  "properties": {
+    "tracks": {
+      "description": "The new tracks: the copies `track.copy` puts on the clipboard, the copies `track.cut` puts on the clipboard, and the tracks `track.paste` makes.",
+      "items": {
+        "$ref": "#/$defs/TrackId"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "tracks"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `TracksDuplicated`
 
 What `track.duplicate_without_clips` returns.
@@ -36371,6 +37991,7 @@ What `view.state` returns: what the view commands switch, without switching any 
 |---|---|---|---|
 | `window` | [`ViewResult`](#viewresult) | yes | The main window: the main view, the browser, the Info View, full-screen mode and the interface zoom. |
 | `clip_view` | [`ClipViewState`](#clipviewstate) | yes | The Clip View and its note editor: whether it shows, Draw Mode, the clip it holds, the selected notes, the lane and Fold. |
+| `detail` | [`DetailState`](#detailstate) | yes | The detail area: which of the Clip View and the Device View show, the Clip View's height, and where the focus is. |
 | `plugin_list` | [`PluginListState`](#pluginliststate) | yes | The list of the set's plug-ins: whether it shows, and whether Show Only Missing is on. |
 | `assistant` | [`AssistantPanelState`](#assistantpanelstate) | yes | The assistant's panel. |
 | `undo_history` | boolean | yes | Whether the Undo History panel shows. |
@@ -36389,6 +38010,10 @@ What `view.state` returns: what the view commands switch, without switching any 
     "clip_view": {
       "$ref": "#/$defs/ClipViewState",
       "description": "The Clip View and its note editor: whether it shows, Draw Mode, the clip it holds, the selected notes, the lane and Fold."
+    },
+    "detail": {
+      "$ref": "#/$defs/DetailState",
+      "description": "The detail area: which of the Clip View and the Device View show, the Clip View's height, and where the focus is."
     },
     "plug_in_windows": {
       "description": "Whether floating devices' and plug-ins' windows are shown, as `view.toggle_plug_in_windows` sets it.",
@@ -36410,6 +38035,7 @@ What `view.state` returns: what the view commands switch, without switching any 
   "required": [
     "window",
     "clip_view",
+    "detail",
     "plugin_list",
     "assistant",
     "undo_history",

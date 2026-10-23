@@ -49,7 +49,10 @@ fn the_panes_sit_where_live_puts_them() {
     let info = layout.info_view.expect("the Info View shows by default");
     assert_eq!((info.left(), info.right()), (9.0, 240.0));
     assert_eq!(
-        (layout.device_view.left(), layout.device_view.right()),
+        (
+            layout.device_view.unwrap().left(),
+            layout.device_view.unwrap().right()
+        ),
         (249.0, 1591.0)
     );
     // L-WIN-007: 968 to 993, full width.
@@ -217,7 +220,10 @@ fn the_widest_assistant_pane_leaves_the_minimum_window_without_overlaps() {
     let layout = ShellLayout::compute_with_assistant(MINIMUM, true, true, Some(640.0));
     let pane = layout.assistant.expect("the pane shows");
     assert!(layout.main_view.width() > 0.0 && layout.main_view.right() < pane.left());
-    assert!(layout.device_view.width() > 0.0 && layout.device_view.right() < pane.left());
+    assert!(
+        layout.device_view.unwrap().width() > 0.0
+            && layout.device_view.unwrap().right() < pane.left()
+    );
     let message = layout.rect(Element::Message);
     let clip = layout.rect(Element::ClipViewToggle);
     assert!(message.right() <= clip.left(), "{message:?} {clip:?}");

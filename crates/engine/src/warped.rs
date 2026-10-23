@@ -27,13 +27,17 @@ use bl_core::time::{SampleRate, TempoMap, Ticks};
 use bl_media::SampleData;
 use bl_media::stream::{AudioSource, PlanarMut, Transition};
 use bl_model::WarpMode as ClipWarpMode;
-use bl_model::{AudioData, BeatsSettings, Clip, Preserve as ClipPreserve, TransientLoopMode};
+use bl_model::{
+    AudioData, AudioPass, BeatsSettings, Clip, ClipParam, GAIN_GLIDE_SECONDS, GroovePlay,
+    MovedTransients, Preserve as ClipPreserve, TransientLoopMode, clip_seed,
+};
 use bl_stretch::beats::{self, Loop, Plan, Preserve, Segment};
 use bl_stretch::{
     Beats, Complex, Interpolation, Piece, RePitch, Request, Texture, Tones, WarpMap, WarpMode,
     WarpTable, Window, grain_window_frames, stretch_window_frames,
 };
 
+use crate::clip_sound::ClipSound;
 use crate::clip_source::WINDOW_FRAMES as NARROW_WINDOW;
 
 /// How many file frames before a position a warped clip may read: the widest
@@ -86,6 +90,9 @@ const MAX_RUNS: usize = 1 << 20;
 /// a plan of a million segments is not worth the memory.
 const MAX_SEGMENT_RUNS: usize = 4_096;
 
+/// Ticks in a sixteenth note, the unit of Sample Offset (R30).
+const SIXTEENTH: i64 = Ticks::WHOLE.get() / 16;
+
 /// How far, in file frames, a table's straight pieces may stray from the
 /// exact position at their middles, where a smooth curve strays most (the
 /// warping spec, R12 allows a hundredth of a frame).
@@ -112,6 +119,25 @@ pub(crate) struct Playing {
     /// Whether the clip is warped: an unwarped one reads its file at the
     /// pitch ratio instead of through a mode (R27).
     pub(crate) warp: bool,
+    /// Beats' Transient Envelope, 0 to 100 (R16).
+    pub(crate) transient_envelope: f64,
+}
+
+impl Playing {
+    /// How `audio`, clip `clip_id`, plays with its settings as they stand.
+    pub(crate) fn of(clip_id: u64, audio: &AudioData) -> Self {
+        Self {
+            mode: audio.warp_mode,
+            high_quality: audio.high_quality,
+            tones: audio.warp_settings.tones,
+            texture: audio.warp_settings.texture,
+            complex_pro: audio.warp_settings.complex_pro,
+            clip_id,
+            pitch: audio.pitch_ratio(),
+            warp: audio.warp,
+            transient_envelope: f64::from(audio.warp_settings.beats.transient_envelope),
+        }
+    }
 }
 
 /// A warped clip's contents, in beats of the clip: where it starts, ends and
@@ -127,9 +153,50 @@ pub(crate) struct Contents {
     loop_start: f64,
     /// Infinite where the brace runs to the end of a file of unknown length.
     loop_end: f64,
+    /// The clip's groove, which moves the beats it plays on (the grooves
+    /// spec, R12).
+    groove: Option<Grooved>,
+}
+
+/// A clip's groove as its audio plays it: the groove worked out, the
+/// clip's transients as Quantize moves them, and the seed Random draws from.
+#[derive(Debug)]
+struct Grooved {
+    play: GroovePlay,
+    transients: MovedTransients,
+    seed: u64,
 }
 
 impl Contents {
+    /// The part of the contents pass number `pass` plays, from the beat it
+    /// starts at to the one it ends at (infinite where the contents run on).
+    fn pass_range(&self, pass: u64) -> (f64, f64) {
+        let lo = if pass == 0 {
+            self.start
+        } else {
+            self.loop_start
+        };
+        let hi = if self.looping {
+            self.loop_end
+        } else {
+            self.end.unwrap_or(f64::INFINITY)
+        };
+        (lo, hi)
+    }
+
+    /// The groove's view of the pass over `lo..hi`, if the clip has a groove.
+    fn grooved(&self, (lo, hi): (f64, f64), pass: u64) -> Option<AudioPass<'_>> {
+        self.groove
+            .as_ref()
+            .map(|g| AudioPass::new(&g.play, &g.transients, (lo, hi), g.seed, pass))
+    }
+
+    /// The file frame the audio on beat `played` of a pass plays on, through
+    /// the groove's view of the pass if there is one.
+    fn grooved_position(&self, view: Option<&AudioPass<'_>>, played: f64) -> f64 {
+        self.position(view.map_or(played, |view| view.unmap(played)))
+    }
+
     /// The file frame beat `beat` plays: fractional, and before the file's
     /// start (negative) where the map reaches back past it.
     fn position(&self, beat: f64) -> f64 {
@@ -175,12 +242,19 @@ pub(crate) struct Warped {
 /// What a Beats plan needs of the clip's media: the file's transients and,
 /// where the loop turns must be found, its audio.
 pub(crate) struct BeatsMedia<'a> {
+    /// What moves the clip's settings (R29, R31), where something does: Beats
+    /// reads its pitch ratio and its Sample Offset where each segment begins,
+    /// and its Preserve and Transient Loop Mode where the clip does.
+    pub(crate) sound: Option<&'a ClipSound>,
     /// The clip's transients in seconds into its file, its own edits applied
     /// (the warping spec, R23).
     pub(crate) transients: &'a [f64],
     /// The clip's file at the engine's rate, called only when a segment needs
     /// its turn: the media library's own decode, cached.
     pub(crate) samples: &'a dyn Fn() -> Option<Arc<SampleData>>,
+    /// The clip's groove at the set's Global Amount, if it has one that
+    /// changes anything (the grooves spec, R12).
+    pub(crate) groove: Option<&'a GroovePlay>,
 }
 
 impl Warped {
@@ -203,6 +277,20 @@ impl Warped {
             (None, Some(frames)) => map.time_to_beat(frames as f64 / r),
             (None, None) => f64::INFINITY,
         };
+        // Spec: grooves R12. The groove acts on the contents' beats, and
+        // Quantize moves the clip's transients among them.
+        let groove = media.groove.map(|play| Grooved {
+            play: play.clone(),
+            transients: MovedTransients::new(
+                play,
+                media
+                    .transients
+                    .iter()
+                    .map(|time| map.time_to_beat(*time))
+                    .collect(),
+            ),
+            seed: clip_seed(clip.id),
+        });
         let contents = Contents {
             map,
             rate: r,
@@ -211,9 +299,22 @@ impl Warped {
             looping: audio.looping,
             loop_start: audio.loop_start,
             loop_end,
+            groove,
         };
         let plan = if audio.warp_mode == ClipWarpMode::Beats {
-            Arc::new(contents.plan(clip, tempo, r, audio.warp_settings.beats, media))
+            // Spec: warp-modes R29. Preserve and Transient Loop Mode, which
+            // shape the whole plan, take the value they have where the clip
+            // begins.
+            let mut settings = audio.warp_settings.beats;
+            if let Some(sound) = media.sound {
+                let begins = tempo.ticks_to_frames(clip.start, rate).get();
+                settings.preserve =
+                    ClipPreserve::from_index(sound.value(ClipParam::Preserve, begins));
+                settings.transient_loop_mode = TransientLoopMode::from_index(
+                    sound.value(ClipParam::TransientLoopMode, begins),
+                );
+            }
+            Arc::new(contents.plan(clip, tempo, r, settings, media))
         } else {
             Arc::new(Plan::default())
         };
@@ -227,7 +328,7 @@ impl Warped {
             warped.table = if warped.plan.is_empty() {
                 warped.tabulate(clip, tempo, r)
             } else {
-                warped.beats_table(clip, tempo, r, audio.pitch_ratio())
+                warped.beats_table(clip, tempo, r, audio.pitch_ratio(), media.sound)
             };
         }
         Some(warped)
@@ -256,6 +357,42 @@ impl Warped {
             tempo,
             launch,
             rate,
+        }
+    }
+
+    /// The gain the groove's Velocity gives the clip at song frame `frame`
+    /// (the grooves spec, R13), 1 without a groove or a Velocity: the clip's
+    /// contents began at `origin` ticks, and the gain glides over a
+    /// millisecond to each step. A function of the frame alone, so a render
+    /// is the same at any block size.
+    pub(crate) fn groove_gain(&self, tempo: &TempoMap, rate: f64, origin: f64, frame: i64) -> f64 {
+        let Some(groove) = self
+            .contents
+            .groove
+            .as_ref()
+            .filter(|g| g.play.has_velocity())
+        else {
+            return 1.0;
+        };
+        let at = frame as f64 / rate;
+        let now = tempo.seconds_to_ticks_exact(at);
+        let Some((beat, pass)) = self.contents.beat_after((now - origin).max(0.0)) else {
+            return 1.0;
+        };
+        let (lo, hi) = self.contents.pass_range(pass);
+        let view = AudioPass::new(
+            &groove.play,
+            &groove.transients,
+            (lo, hi),
+            groove.seed,
+            pass,
+        );
+        let (before, after, since) = view.gain_at(beat);
+        let glide = now - tempo.seconds_to_ticks_exact(at - GAIN_GLIDE_SECONDS);
+        if since >= glide {
+            after
+        } else {
+            before + (after - before) * (since / glide)
         }
     }
 
@@ -315,10 +452,19 @@ impl Warped {
 
     /// The table of a Beats clip: its plan's stretches (R14 to R17), read at
     /// the clip's pitch ratio (R17).
-    fn beats_table(&self, clip: &Clip, tempo: &TempoMap, r: f64, pitch: f64) -> WarpTable {
+    fn beats_table(
+        &self,
+        clip: &Clip,
+        tempo: &TempoMap,
+        r: f64,
+        pitch: f64,
+        sound: Option<&ClipSound>,
+    ) -> WarpTable {
+        // Spec: warp-modes R17, R29. Each segment reads at the ratio the clip
+        // has where it begins.
         let mut pieces: Vec<Piece> = self
             .plan
-            .stretches(pitch)
+            .stretches_by(|segment| sound.map_or(pitch, |s| s.pitch_at(segment.frame)))
             .into_iter()
             .map(|stretch| Piece {
                 frame: stretch.frame,
@@ -388,7 +534,8 @@ impl Warped {
             } else {
                 reaches.round() as i64
             };
-            self.pass(&mut pieces, tempo, r, (tick, stop), beat);
+            let view = c.grooved((beat, beat + room), pass as u64);
+            self.pass(&mut pieces, tempo, r, (tick, stop), beat, view.as_ref());
             if stop >= end {
                 break;
             }
@@ -416,13 +563,16 @@ impl Warped {
         r: f64,
         (from, to): (i64, i64),
         beat: f64,
+        view: Option<&AudioPass<'_>>,
     ) {
         if to <= from {
             return;
         }
         let at = |tick: i64| {
             let frame = r * tempo.ticks_to_seconds(Ticks(tick));
-            let position = self.contents.position(beat + (tick - from) as f64);
+            let position = self
+                .contents
+                .grooved_position(view, beat + (tick - from) as f64);
             (frame, position)
         };
         let mut ticks = vec![from, to];
@@ -432,14 +582,27 @@ impl Warped {
                 .map(|segment| segment.start().get())
                 .filter(|&tick| from < tick && tick < to),
         );
-        ticks.extend(
-            self.contents
-                .map
-                .markers()
-                .iter()
-                .map(|marker| from + (marker.beat as f64 - beat).round() as i64)
-                .filter(|&tick| from < tick && tick < to),
-        );
+        let markers = self.contents.map.markers().iter().map(|m| m.beat as f64);
+        match view {
+            // Spec: grooves R12. The warp markers and the groove's own bends
+            // are where the position's straight lines break, on the beats
+            // the audio plays on.
+            Some(view) => {
+                let mut bends = Vec::new();
+                view.bends(beat + (to - from) as f64, markers, &mut bends);
+                ticks.extend(
+                    bends
+                        .into_iter()
+                        .map(|y| from + (y - beat).round() as i64)
+                        .filter(|&tick| from < tick && tick < to),
+                );
+            }
+            None => ticks.extend(
+                markers
+                    .map(|marker| from + (marker - beat).round() as i64)
+                    .filter(|&tick| from < tick && tick < to),
+            ),
+        }
         ticks.sort_unstable();
         ticks.dedup();
         let mut knots = Vec::with_capacity(ticks.len());
@@ -567,13 +730,18 @@ impl Contents {
             } else {
                 reaches.round() as i64
             };
+            let view = self.grooved((beat, beat + room), pass as u64);
             self.pass_segments(
                 &mut segments,
                 (tick, stop),
                 beat,
-                preserve,
-                media.transients,
-                &frame_of,
+                (preserve, media.transients),
+                (&frame_of, &|frame| {
+                    media.sound.map_or(0.0, |sound| {
+                        sound.value(ClipParam::SampleOffset, frame) * SIXTEENTH as f64
+                    })
+                }),
+                view.as_ref(),
             );
             if stop >= end {
                 break;
@@ -614,9 +782,9 @@ impl Contents {
         segments: &mut Vec<Segment>,
         (from, to): (i64, i64),
         beat: f64,
-        preserve: Preserve,
-        transients: &[f64],
-        frame_of: &dyn Fn(i64) -> f64,
+        (preserve, transients): (Preserve, &[f64]),
+        (frame_of, offset): (&dyn Fn(i64) -> f64, &dyn Fn(i64) -> f64),
+        view: Option<&AudioPass<'_>>,
     ) {
         let ticks = (to - from) as f64;
         if ticks <= 0.0 {
@@ -635,7 +803,9 @@ impl Contents {
         let mut lines: Vec<i64> = beats
             .into_iter()
             .filter(|b| b.is_finite() && *b >= beat && *b < beat + ticks)
-            .map(|b| from + (b - beat).round() as i64)
+            // Spec: grooves R12. Each cut plays on the beat the groove moves
+            // it to.
+            .map(|b| from + (view.map_or(b, |view| view.map(b)) - beat).round() as i64)
             .filter(|tick| (from..to).contains(tick))
             .collect();
         lines.sort_unstable();
@@ -643,8 +813,11 @@ impl Contents {
         lines.push(to);
         for pair in lines.windows(2) {
             let (a, b) = (pair[0], pair[1]);
-            let position = self.position(beat + (a - from) as f64);
-            let end = self.position(beat + (b - from) as f64);
+            // Spec: warp-modes R30. Sample Offset moves where the segment
+            // is taken from, as it is where the segment begins.
+            let moved = offset(frame_of(a).round() as i64);
+            let position = self.grooved_position(view, beat + (a - from) as f64 + moved);
+            let end = self.grooved_position(view, beat + (b - from) as f64 + moved);
             segments.push(Segment {
                 frame: frame_of(a).round() as i64,
                 until: frame_of(b).round() as i64,
@@ -750,6 +923,7 @@ impl Positions<'_> {
                 let started = tempo.seconds_to_ticks_exact(*launch as f64 / rate);
                 let mut frames = 0;
                 let mut wraps = 0;
+                let mut view = None;
                 for (i, position) in out.iter_mut().enumerate() {
                     let now = tempo.seconds_to_ticks_exact((first + i as i64) as f64 / rate);
                     // Frames before the launch frame play its first.
@@ -767,10 +941,15 @@ impl Positions<'_> {
                     };
                     if i == 0 {
                         wraps = passes;
+                        // Spec: grooves R12. A Session clip follows the
+                        // tempo from its launch through the same groove.
+                        view = warped
+                            .contents
+                            .grooved(warped.contents.pass_range(passes), passes);
                     } else if passes != wraps {
                         break;
                     }
-                    *position = warped.contents.position(beat);
+                    *position = warped.contents.grooved_position(view.as_ref(), beat);
                     frames = i + 1;
                 }
                 let span = out[frames - 1] - out[0];
@@ -1317,6 +1496,7 @@ impl WarpScratch {
                 neutral,
                 high_quality: playing.high_quality,
                 beats: plan,
+                transient_envelope: playing.transient_envelope,
                 pitch: playing.pitch,
                 clip: playing.clip_id,
             };
@@ -1432,6 +1612,8 @@ mod tests {
     /// What a Beats clip's plan asks of the media: nothing in these tests.
     fn media() -> BeatsMedia<'static> {
         BeatsMedia {
+            sound: None,
+            groove: None,
             transients: &[],
             samples: &|| None,
         }

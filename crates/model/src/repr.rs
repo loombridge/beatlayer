@@ -21,6 +21,7 @@ use crate::command::{
 use crate::device::Device;
 use crate::document::{Document, Index, Settings};
 use crate::error::ModelError;
+use crate::groove::{GLOBAL_AMOUNT_MAX, check_percent};
 use crate::ids::{SceneId, TrackId};
 use crate::launch::LaunchSettings;
 use crate::locator::{Locator, SongStart};
@@ -251,6 +252,16 @@ impl TryFrom<DocumentRepr> for Document {
         }
         check_crossfader(settings.crossfader)?;
         check_locators(&settings.locators)?;
+        for groove in &settings.grooves.pool {
+            groove.check()?;
+            loader.claim(groove.id.0)?;
+        }
+        check_percent(
+            "the Global Amount",
+            settings.grooves.global_amount,
+            0.0,
+            GLOBAL_AMOUNT_MAX,
+        )?;
         let main = loader.add(main, None)?;
         let returns = returns
             .into_iter()
@@ -293,6 +304,24 @@ impl TryFrom<DocumentRepr> for Document {
             && document.locator(id).is_none()
         {
             document.settings.song_start = None;
+        }
+        // Spec: grooves R22. A clip, or the auto-load setting, naming a
+        // groove the pool doesn't hold loads with none.
+        let held: BTreeSet<_> = document
+            .settings
+            .grooves
+            .pool
+            .iter()
+            .map(|g| g.id)
+            .collect();
+        document.forget_grooves(|id| !held.contains(&id));
+        if document
+            .settings
+            .grooves
+            .auto_load_groove
+            .is_some_and(|id| !held.contains(&id))
+        {
+            document.settings.grooves.auto_load_groove = None;
         }
         // Slots name their scenes, which may be the defaults just made.
         for track in document.tracks.values() {
@@ -1224,6 +1253,56 @@ mod tests {
         assert!(error.contains("loop end 0.1 is out of range"), "{error}");
     }
 
+    // Spec: audio-clips R30. Fade curves and a crossfade's reach are saved
+    // only where they differ from a new clip's, so a set saved before them
+    // opens with straight fades and no crossfades.
+    #[test]
+    fn fade_curves_and_crossfades_are_saved_only_where_they_are_set() {
+        let mut editor = Editor::new();
+        let track = editor.new_id();
+        editor
+            .apply(Command::CreateTrack {
+                id: track,
+                kind: TrackKind::Audio,
+                name: String::new(),
+                parent: None,
+                index: 0,
+            })
+            .unwrap();
+        let audio = AudioData {
+            start: 0.5,
+            fade_in: 0.002,
+            fade_in_curve: 0.5,
+            fade_in_before: 0.002,
+            fade_out: 0.004,
+            ..AudioData::new(ContentHash([1; 32]))
+        };
+        let clip = Clip::new(
+            editor.new_id(),
+            Ticks::WHOLE,
+            Ticks::WHOLE,
+            ClipData::Audio(audio),
+        );
+        editor.apply(Command::CreateClip { track, clip }).unwrap();
+        let value = serde_json::to_value(editor.document()).unwrap();
+        assert_eq!(
+            value["tracks"][0]["clips"][0]["data"]["audio"],
+            json!({
+                "media": "01".repeat(32),
+                "start": 0.5,
+                "fade_in": 0.002,
+                "fade_out": 0.004,
+                "fade_in_curve": 0.5,
+                "fade_in_before": 0.002,
+            })
+        );
+        assert_eq!(&load(value.clone()).unwrap(), editor.document());
+        let mut bad = value;
+        bad["tracks"][0]["clips"][0]["data"]["audio"]["fade_out_curve"] = json!(2.0);
+        let error = load(bad).unwrap_err();
+        assert!(error.contains("fade-out curve"), "{error}");
+    }
+
     // Spec: automation R7
     #[test]
     fn automation_saves_with_the_set_and_loads_back() {
@@ -2003,5 +2082,63 @@ mod tests {
             "the variations are saved"
         );
         assert!(load(broken).is_err(), "a value outside 0 to 1 doesn't load");
+    }
+
+    // Spec: warp-modes R32
+    #[test]
+    fn clip_targets_save_and_load() {
+        use crate::ClipParam;
+        let (mut doc, [_, audio, _]) = song();
+        let clip = doc.track(audio).unwrap().clips().next().unwrap().id;
+        let setting = |param| AutomationTarget::Clip { param };
+        for command in [
+            Command::SetAutomationBreakpoint {
+                track: audio,
+                target: setting(ClipParam::Formants),
+                at: Ticks::ZERO,
+                value: 40.0,
+            },
+            Command::SetClipEnvelopeBreakpoint {
+                clip,
+                kind: crate::EnvelopeKind::Modulation,
+                target: setting(ClipParam::Transpose),
+                at: Ticks::QUARTER,
+                value: -7.5,
+            },
+        ] {
+            doc.apply(&command).unwrap();
+        }
+        let value = serde_json::to_value(&doc).unwrap();
+        let text = value.to_string();
+        assert!(
+            text.contains(r#""type":"clip""#) && text.contains(r#""param":"formants""#),
+            "the track's automation is saved by the setting's name"
+        );
+        let saved = find_clip(&value, clip);
+        assert_eq!(
+            saved["envelopes"][0]["target"],
+            json!({ "type": "clip", "param": "transpose" })
+        );
+        let loaded = load(value.clone()).unwrap();
+        assert_eq!(loaded, doc);
+        loaded.check_invariants().unwrap();
+
+        // A set saved before these targets existed has neither, and loads
+        // unchanged.
+        let mut old = value.clone();
+        find_clip_mut(&mut old, clip)
+            .as_object_mut()
+            .unwrap()
+            .remove("envelopes");
+        assert_eq!(
+            load(old).unwrap().clip(clip).unwrap().envelopes().count(),
+            0
+        );
+
+        // A value outside the setting's envelope range doesn't load.
+        let mut broken = value;
+        find_clip_mut(&mut broken, clip)["envelopes"][0]["envelope"]["points"] =
+            json!([{ "at": 0, "value": 99.0 }]);
+        assert!(load(broken).unwrap_err().contains("out of range"));
     }
 }

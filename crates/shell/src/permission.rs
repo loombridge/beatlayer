@@ -321,7 +321,7 @@ fn paste_bounced(args: &Value, registered: Permission, scene: Scene<'_>) -> Call
     let Ok(args) = serde_json::from_value::<PasteBouncedAudioArgs>(args.clone()) else {
         return unchanged;
     };
-    let Some(clipboard) = scene.clipboard else {
+    let Some(clipboard) = scene.clipboard.as_ref().and_then(Clipboard::material) else {
         return unchanged;
     };
     if clipboard.tracks.is_empty() {
@@ -421,7 +421,8 @@ fn tried(id: &str, args: &Value, registered: Permission, scene: Scene<'_>) -> Ca
     let mut view = view.clone();
     let mut clipboard = clipboard.clone();
     editor.begin("Check a call's permission");
-    let ran = editing::run(id, args.clone(), editor, &mut view, &mut clipboard).is_ok();
+    // The fades an edit settles change no clip's place, so the dry run skips them.
+    let ran = editing::run(id, args.clone(), editor, &mut view, &mut clipboard, false).is_ok();
     let after = editor.document().clone();
     editor.cancel().ok();
     if !ran {

@@ -1726,6 +1726,21 @@ fn search_tracks(h: &mut Harness) {
 
 /// The list of the set's plug-ins, open in the detail area, with the
 /// keyboard in it (IMP-29, WP-6.41).
+/// The Clip View showing, as Cmd+Option+3 shows it.
+fn clip_view_shown(h: &mut Harness) {
+    h.shell.run("view.toggle_clip_view", json!({})).unwrap();
+}
+
+/// The keyboard focus in the detail area, off any control.
+fn detail_area(h: &mut Harness) {
+    h.shell.set_focused_area(bl_shell::Area::Detail);
+    h.ctx.memory_mut(|m| {
+        if let Some(id) = m.focused() {
+            m.surrender_focus(id);
+        }
+    });
+}
+
 fn plugin_list(h: &mut Harness) {
     h.shell
         .run("view.toggle_plugin_list", json!({}))
@@ -1866,11 +1881,17 @@ fn paths() -> BTreeMap<&'static str, Path> {
         key,
     };
     let clip_view = LaterView("the Clip View (milestone M2)");
+    let groove_pool = LaterView(
+        "the Groove Pool, the Clip View's groove controls and the browser's Grooves label (WP-6.20)",
+    );
     // The Clip View's note editing (WP-2.3): the pointer reaches each of
     // these — a click, a marquee, and drags in the note editor — and their
     // keys (shortcuts.md, `note-editor` and `note-selection`) come with a
     // later package.
     let note_editor = LaterView("the note editor's keys (the note-editor shortcuts, milestone M2)");
+    let note_footer = LaterView(
+        "the note editor's footer and Lane Selector in the Tab order (WP-6.1's follow-up)",
+    );
     let clip_launch = LaterView("the Clip View's Launch panel (WP-3.9)");
     let audio_panel = LaterView("the Audio Utilities panel's controls (WP-4.10b)");
     let clip_title_bar = LaterView("the audio clip's title bar Save button (WP-4.10b)");
@@ -1989,6 +2010,22 @@ fn paths() -> BTreeMap<&'static str, Path> {
             "clip.set_scale",
             main(a_clip_selected, control_bar, "Scale Mode", Key::Enter),
         ),
+        // Grooves (WP-6.19): the Groove Pool, the Clip View's groove controls
+        // and the browser's Grooves label come with WP-6.20; until then
+        // agents reach these.
+        ("clip.set_groove", Exception(groove_pool)),
+        ("groove.add", Exception(groove_pool)),
+        ("groove.commit", Exception(groove_pool)),
+        ("groove.delete", Exception(groove_pool)),
+        ("groove.extract", Exception(groove_pool)),
+        ("groove.load", Exception(groove_pool)),
+        ("groove.pool", Exception(Query)),
+        ("groove.rename", Exception(groove_pool)),
+        ("groove.save", Exception(groove_pool)),
+        ("groove.set", Exception(groove_pool)),
+        ("groove.set_auto_load", Exception(groove_pool)),
+        ("groove.set_global_amount", Exception(groove_pool)),
+        ("groove.to_clip", Exception(groove_pool)),
         ("transport.set_recording", Exception(recording)),
         ("transport.stop_recording", Exception(recording)),
         // Tempo breakpoints and time-signature markers (WP-2.20): the
@@ -2966,14 +3003,38 @@ fn paths() -> BTreeMap<&'static str, Path> {
         // `clip_view.select_notes` have keys of their own now: the
         // note-selection keys (S-A11Y-010, S-A11Y-011), Delete
         // (S-EDIT-005) and Cmd-A (S-NOTE-001).
-        ("note.set_value", Exception(note_editor)),
         ("note.ramp_value", Exception(note_editor)),
         ("view.lane", Exception(note_editor)),
+        // The expression lanes and the footer (WP-6.1): the pointer drags
+        // the markers and uses the footer's controls and the Lane
+        // Selector, which assistive technology reads by name and value
+        // (note-editing R20); Tab doesn't reach them yet.
+        ("note.randomize", Exception(note_footer)),
+        ("view.lanes", Exception(note_footer)),
         // The list of the set's plug-ins (IMP-29, WP-6.41): Enter on its
         // Show Only Missing switch.
         (
             "view.set_plugin_list_only_missing",
             main(nothing, plugin_list, "Show Only Missing", Key::Enter),
+        ),
+        // The detail views (WP-6.27): Option-click on a view's toggle shows
+        // both, and the keys of the two toggles do the same one after the
+        // other; the Clip View's top edge is a splitter the keyboard reaches
+        // and the arrow keys move.
+        (
+            "view.show_detail_views",
+            Exception(Equivalent(
+                "Option-click on a view's toggle; Cmd+Option+3 and Cmd+Option+4 show both views in turn",
+            )),
+        ),
+        (
+            "view.set_detail_height",
+            main(
+                clip_view_shown,
+                detail_area,
+                "Clip View Height",
+                Key::ArrowUp,
+            ),
         ),
         // The search field (WP-6.42): Tab reaches its scope buttons and Show
         // Only Matches, and Enter presses them; the text, the arrows, Return
@@ -4048,7 +4109,29 @@ fn paths() -> BTreeMap<&'static str, Path> {
             Exception(Live(
                 "Live doesn't support editing audio clip fades with a screen reader (manual \
                  41.4.1.3); its fade keys, Cmd-Option-F and Cmd-Option-Delete (S-ARR-008, \
-                 S-ARR-009), aren't bound yet",
+                 S-ARR-009), make and delete fades from the keyboard, and the handles don't \
+                 reach a screen reader",
+            )),
+        ),
+        (
+            "arrangement.set_crossfade",
+            Exception(Live(
+                "Live doesn't support editing audio clip fades with a screen reader (manual \
+                 41.4.1.3); Create Fade (S-ARR-008) makes a crossfade from the keyboard",
+            )),
+        ),
+        (
+            "arrangement.delete_crossfade",
+            Exception(Live(
+                "Live doesn't support editing audio clip fades with a screen reader (manual \
+                 41.4.1.3); Delete Fades (S-ARR-009) deletes a crossfade from the keyboard",
+            )),
+        ),
+        (
+            "arrangement.select_fade_handle",
+            Exception(Live(
+                "a fade handle is a pointer target Live doesn't expose to a screen reader \
+                 (manual 41.4.1.3)",
             )),
         ),
         // MIDI file import and export (WP-2.21): the menus show them, and a

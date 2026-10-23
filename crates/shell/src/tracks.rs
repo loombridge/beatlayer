@@ -1,11 +1,16 @@
 //! Track commands that run on the shell (WP-2.19b): Duplicate Track Without
-//! Clips (IMP-12).
+//! Clips (IMP-12), and the whole-track copies of WP-6.52: Duplicate, Copy,
+//! Cut and Paste on the selected tracks.
 //!
 //! A duplicate is made from the document's own commands, inside one
 //! transaction, so it's one undo step and each part of it is checked as any
 //! edit is.
 
-use bl_model::{Command, DeviceId, Document, EditError, Editor, Output, Track, TrackId, TrackKind};
+use bl_model::{
+    Automation, AutomationTarget, ChainId, Clip, ClipId, Command, Device, DeviceId, Document,
+    EditError, Editor, FrozenTrack, Input, MidiTo, Mixer, Output, Routing, SceneId, TakeLane,
+    Track, TrackDelay, TrackId, TrackKind,
+};
 
 use crate::routing::{return_letter, track_label};
 
@@ -31,6 +36,795 @@ pub fn duplicated(doc: &Document, tracks: &[TrackId]) -> Vec<TrackId> {
                 && !inside_another(id)
         })
         .collect()
+}
+
+/// One of a track's sends: the return track it feeds, that return's place
+/// among the set's return tracks, and the level.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SendTo {
+    /// The return track.
+    pub to: TrackId,
+    /// Its place among the set's return tracks, counted from 0.
+    pub position: usize,
+    /// The level, as a linear gain above 0.
+    pub level: f64,
+}
+
+/// What a track holds, as data: what a copy keeps (the track context menu
+/// spec, R13), so a copy can be made in another set as well as this one.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TrackData {
+    /// The track's ID in the set it came from, which the references in it
+    /// name.
+    pub id: TrackId,
+    /// The track's kind.
+    pub kind: TrackKind,
+    /// Its name.
+    pub name: String,
+    /// Its mixer settings.
+    pub mixer: Mixer,
+    /// Its sends.
+    pub sends: Vec<SendTo>,
+    /// Its In/Out settings.
+    pub routing: Routing,
+    /// Its devices, with the IDs they had.
+    pub devices: Vec<Device>,
+    /// Its Arrangement clips, with the IDs they had.
+    pub clips: Vec<Clip>,
+    /// Its Session clips: the scene each sits in, counted from 0, and the
+    /// clip.
+    pub slots: Vec<(usize, Clip)>,
+    /// The scenes whose slot's Clip Stop button was removed, counted from 0.
+    pub removed_stop_buttons: Vec<usize>,
+    /// Its take lanes.
+    pub take_lanes: Vec<TakeLane>,
+    /// Its automation: the parameter each envelope drives, and the envelope.
+    pub automation: Vec<(AutomationTarget, Automation)>,
+    /// Its delay.
+    pub delay: TrackDelay,
+    /// Whether it keeps its monitoring latency.
+    pub keep_monitoring_latency: bool,
+    /// Its frozen audio, if it is frozen.
+    pub frozen: Option<FrozenTrack>,
+    /// The tracks inside it, if it is a group.
+    pub children: Vec<TrackData>,
+}
+
+/// Whole tracks on the clipboard (R14, R15): what they hold, and what is
+/// needed to paste them into another set (the set exchange spec, R5 to R7).
+#[derive(Clone, Debug, PartialEq)]
+pub struct CopiedTracks {
+    /// The tracks.
+    pub tracks: Vec<TrackData>,
+    /// The return tracks of the set they came from, in order.
+    pub returns: Vec<TrackId>,
+    /// Which set they came from, as the shell counts its sets.
+    pub set: u64,
+    /// The media table entries of the files they play: the hash, the path
+    /// on disk and the size (R15).
+    pub media: Vec<(bl_model::ContentHash, std::path::PathBuf, u64)>,
+}
+
+impl TrackData {
+    /// Whether this track or one inside it plays the file with `hash`:
+    /// through a clip, a take lane, its frozen audio or a device's sample.
+    #[must_use]
+    pub fn plays(&self, hash: &bl_model::ContentHash) -> bool {
+        // shortcut: finds the hash in the saved text of what the track holds,
+        // since the model has no walk over every place a file is named;
+        // replace it with one when a second caller needs it.
+        let held = serde_json::to_string(&(
+            &self.devices,
+            &self.clips,
+            &self.slots,
+            &self.take_lanes,
+            &self.frozen,
+        ))
+        .unwrap_or_default();
+        held.contains(&hash.to_string()) || self.children.iter().any(|child| child.plays(hash))
+    }
+}
+
+/// What a track holds, as data: the copy the clipboard keeps and the
+/// duplicate is made from (R13).
+#[must_use]
+pub fn snapshot(doc: &Document, id: TrackId) -> Option<TrackData> {
+    let track = doc.track(id)?;
+    let returns: Vec<TrackId> = doc.returns().collect();
+    Some(TrackData {
+        id: track.id(),
+        kind: track.kind(),
+        name: track.name().to_owned(),
+        mixer: *track.mixer(),
+        sends: track
+            .sends()
+            .map(|(to, level)| SendTo {
+                position: returns.iter().position(|&r| r == to).unwrap_or(0),
+                to,
+                level,
+            })
+            .collect(),
+        routing: track.routing().clone(),
+        devices: track.devices().cloned().collect(),
+        clips: track.clips().cloned().collect(),
+        slots: track
+            .slots()
+            .map(|(scene, clip)| (doc.scene_position(scene).unwrap_or(0), clip.clone()))
+            .collect(),
+        removed_stop_buttons: track
+            .removed_stop_buttons()
+            .filter_map(|scene| doc.scene_position(scene))
+            .collect(),
+        take_lanes: track.take_lanes().cloned().collect(),
+        automation: track
+            .automation()
+            .map(|(target, automation)| (*target, automation.clone()))
+            .collect(),
+        delay: track.delay(),
+        keep_monitoring_latency: track.keep_monitoring_latency(),
+        frozen: track.frozen().cloned(),
+        children: track.children().filter_map(|c| snapshot(doc, c)).collect(),
+    })
+}
+
+/// The new IDs a copy holds: each original and its copy.
+#[derive(Default)]
+struct Copies {
+    tracks: Vec<(TrackId, TrackId)>,
+    devices: Vec<(DeviceId, DeviceId)>,
+    chains: Vec<(ChainId, ChainId)>,
+    clips: Vec<(ClipId, ClipId)>,
+    /// The return tracks of the set the tracks came from, when they are
+    /// pasted into another set: IDs are counters in each set, so an ID the
+    /// tracks name means nothing in this one (the set exchange spec, R6).
+    foreign: Option<Vec<TrackId>>,
+}
+
+impl Copies {
+    /// The copy of a track, if it was copied.
+    fn track(&self, id: TrackId) -> Option<TrackId> {
+        self.tracks.iter().find(|(o, _)| *o == id).map(|(_, c)| *c)
+    }
+
+    /// The copy of a device, if it was copied.
+    fn device(&self, id: DeviceId) -> Option<DeviceId> {
+        self.devices.iter().find(|(o, _)| *o == id).map(|(_, c)| *c)
+    }
+
+    /// The copy of a chain, if it was copied.
+    fn chain(&self, id: ChainId) -> Option<ChainId> {
+        self.chains.iter().find(|(o, _)| *o == id).map(|(_, c)| *c)
+    }
+
+    /// The copy of a clip, if it was copied.
+    fn clip(&self, id: ClipId) -> Option<ClipId> {
+        self.clips.iter().find(|(o, _)| *o == id).map(|(_, c)| *c)
+    }
+
+    /// Whether the tracks are pasted into another set than they came from.
+    fn is_foreign(&self) -> bool {
+        self.foreign.is_some()
+    }
+
+    /// The copy of a device, or the device itself when it's still in the
+    /// set the copy is made in.
+    fn device_or_same(&self, doc: &Document, id: DeviceId) -> Option<DeviceId> {
+        self.device(id)
+            .or_else(|| (!self.is_foreign() && doc.device(id).is_some()).then_some(id))
+    }
+
+    /// The copy of a chain, or the chain itself when it's still in the set
+    /// the copy is made in.
+    fn chain_or_same(&self, doc: &Document, id: ChainId) -> Option<ChainId> {
+        self.chain(id)
+            .or_else(|| (!self.is_foreign() && doc.chain(id).is_some()).then_some(id))
+    }
+}
+
+/// Where a reference to a track goes in a copy: the copy when the track was
+/// copied too, the same track when the copy is made in the set it came from
+/// and the set still has it, and nothing otherwise (the set exchange spec,
+/// R6).
+fn settle_track(copies: &Copies, doc: &Document, track: TrackId) -> Option<TrackId> {
+    copies
+        .track(track)
+        .or_else(|| (!copies.is_foreign() && doc.track(track).is_some()).then_some(track))
+}
+
+/// Where a reference to a return track goes in a copy: the copy when it was
+/// copied too, and then the same return track when the set still has it
+/// (or, in another set, the return at the same place among the returns),
+/// the return at `position` when it doesn't, and nothing when the set has
+/// no return there (the set exchange spec, R6).
+fn settle_return(
+    copies: &Copies,
+    doc: &Document,
+    to: TrackId,
+    position: Option<usize>,
+) -> Option<TrackId> {
+    let mut returns = doc.returns();
+    match &copies.foreign {
+        Some(source) => copies
+            .track(to)
+            .or_else(|| returns.nth(source.iter().position(|&r| r == to)?)),
+        None => copies
+            .track(to)
+            .or_else(|| doc.track(to).map(|_| to))
+            .or_else(|| returns.nth(position?)),
+    }
+}
+
+/// Where a send goes in a copy (the set exchange spec, R6).
+fn settle_send(copies: &Copies, editor: &Editor, send: &SendTo) -> Option<TrackId> {
+    settle_return(copies, editor.document(), send.to, Some(send.position))
+}
+
+/// Where a track's input goes in a copy: the copy of the track it names
+/// when that track was copied too, the same track when the set still has
+/// it, and the kind's default when it has neither (the set exchange spec,
+/// R6).
+fn settle_input(copies: &Copies, doc: &Document, input: &Input) -> Option<Input> {
+    match input {
+        Input::Track {
+            track,
+            tap,
+            chain,
+            output,
+        } => Some(Input::Track {
+            track: settle_track(copies, doc, *track)?,
+            tap: *tap,
+            chain: chain.and_then(|chain| copies.chain_or_same(doc, chain)),
+            output: output.and_then(|output| {
+                Some(bl_model::DeviceOutput {
+                    device: copies.device_or_same(doc, output.device)?,
+                    output: output.output,
+                })
+            }),
+        }),
+        other => Some(other.clone()),
+    }
+}
+
+/// Where a track's output goes in a copy: the copy of the track it names
+/// when that track was copied too, the same track when the set still has
+/// it, and Main when it has neither (the set exchange spec, R6).
+fn settle_output(copies: &Copies, doc: &Document, output: &Output) -> Option<Output> {
+    match output {
+        Output::Track { track } => Some(Output::Track {
+            track: settle_track(copies, doc, *track)?,
+        }),
+        other => Some(*other),
+    }
+}
+
+/// Where an automation target goes in a copy: the copy of the device or
+/// chain it names, and nothing when it wasn't copied and is in another set
+/// (the set exchange spec, R6).
+fn settle_target(
+    copies: &Copies,
+    doc: &Document,
+    target: &AutomationTarget,
+) -> Option<AutomationTarget> {
+    match target {
+        AutomationTarget::Mixer { param } => Some(AutomationTarget::Mixer { param: *param }),
+        // A send's envelope follows the send, which keeps its return track.
+        AutomationTarget::Send { to } => {
+            settle_return(copies, doc, *to, None).map(|to| AutomationTarget::Send { to })
+        }
+        AutomationTarget::Device { device, param } => Some(AutomationTarget::Device {
+            device: copies.device_or_same(doc, *device)?,
+            param: *param,
+        }),
+        AutomationTarget::Chain { chain, param } => Some(AutomationTarget::Chain {
+            chain: copies.chain_or_same(doc, *chain)?,
+            param: *param,
+        }),
+        AutomationTarget::ChainSend { chain, to } => Some(AutomationTarget::ChainSend {
+            chain: copies.chain_or_same(doc, *chain)?,
+            to: copies.chain_or_same(doc, *to)?,
+        }),
+        AutomationTarget::Clip { .. }
+        | AutomationTarget::MidiCc { .. }
+        | AutomationTarget::MidiPitchBend
+        | AutomationTarget::MidiChannelPressure => Some(*target),
+    }
+}
+
+/// Each chain of a device and of its copy, in the same order.
+fn chain_pairs(original: &Device, copy: &Device) -> Vec<(ChainId, ChainId)> {
+    let mut out = Vec::new();
+    let mut stack = vec![(original, copy)];
+    while let Some((original, copy)) = stack.pop() {
+        for (chain, copied) in original.chains.iter().zip(copy.chains.iter()) {
+            out.push((chain.id, copied.id));
+            for (device, copied) in chain.devices.iter().zip(copied.devices.iter()) {
+                stack.push((device, copied));
+            }
+        }
+    }
+    out
+}
+
+/// The scene at `position`, adding empty scenes at the end of the set when
+/// it has fewer (the set exchange spec, R5).
+fn scene_at(editor: &mut Editor, position: usize) -> Result<SceneId, EditError> {
+    while editor.document().scene_count() <= position {
+        let id: SceneId = editor.new_id();
+        let index = editor.document().scene_count();
+        editor.apply(Command::CreateScene { id, index })?;
+    }
+    Ok(editor
+        .document()
+        .scenes()
+        .nth(position)
+        .expect("the scene is there")
+        .id)
+}
+
+/// Creates a copy of `data` in the editor, at `index` in `parent`'s list
+/// (or among the returns), with its devices and its clips under new IDs.
+fn create(
+    editor: &mut Editor,
+    data: &TrackData,
+    parent: Option<TrackId>,
+    index: usize,
+    copies: &mut Copies,
+) -> Result<TrackId, EditError> {
+    let id: TrackId = editor.new_id();
+    let parent = if data.kind == TrackKind::Return {
+        None
+    } else {
+        parent
+    };
+    editor.apply(Command::CreateTrack {
+        id,
+        kind: data.kind,
+        name: data.name.clone(),
+        parent,
+        index,
+    })?;
+    copies.tracks.push((data.id, id));
+    for (index, device) in data.devices.iter().enumerate() {
+        // New IDs for the device and everything inside its racks.
+        let mut copy = device.clone();
+        copy.reassign_ids(&mut || editor.new_id::<DeviceId>().0);
+        copy.floating = device.floating;
+        let devices: Vec<(DeviceId, DeviceId)> = device
+            .walk()
+            .map(|d| d.id)
+            .zip(copy.walk().map(|d| d.id))
+            .collect();
+        copies.devices.extend(devices);
+        copies.chains.extend(chain_pairs(device, &copy));
+        // The mappings and the sidechain follow the copies, once they are
+        // all there (`finish` and `map_copies`).
+        copy.clear_mappings();
+        if let Some(sidechain) = copy.sidechain.as_mut() {
+            sidechain.input = Input::None;
+        }
+        if let Some(midi) = copy.midi_sidechain.as_mut() {
+            midi.source = None;
+        }
+        editor.apply(Command::InsertDevice {
+            track: id,
+            index,
+            device: copy,
+        })?;
+    }
+    for clip in &data.clips {
+        let original = clip.id;
+        let mut clip = clip.clone();
+        clip.id = editor.new_id();
+        copies.clips.push((original, clip.id));
+        remap_clip(&mut clip, copies, editor.document());
+        editor.apply(Command::CreateClip { track: id, clip })?;
+    }
+    for (position, clip) in &data.slots {
+        let scene = scene_at(editor, *position)?;
+        let original = clip.id;
+        let mut clip = clip.clone();
+        clip.id = editor.new_id();
+        copies.clips.push((original, clip.id));
+        remap_clip(&mut clip, copies, editor.document());
+        editor.apply(Command::CreateSlotClip {
+            track: id,
+            scene,
+            clip,
+        })?;
+    }
+    for (index, child) in data.children.iter().enumerate() {
+        create(editor, child, Some(id), index, copies)?;
+    }
+    Ok(id)
+}
+
+/// Points a clip's envelopes at the copies of the devices and returns they
+/// drive, and drops the ones whose device or return the copy has no match
+/// for.
+fn remap_clip(clip: &mut Clip, copies: &Copies, doc: &Document) {
+    clip.envelopes.retain_mut(|envelope| {
+        let target = match envelope.target {
+            AutomationTarget::Device { device, param } => copies
+                .device_or_same(doc, device)
+                .map(|device| AutomationTarget::Device { device, param }),
+            AutomationTarget::Send { to } => {
+                settle_return(copies, doc, to, None).map(|to| AutomationTarget::Send { to })
+            }
+            other => Some(other),
+        };
+        target.is_some_and(|target| {
+            envelope.target = target;
+            true
+        })
+    });
+}
+
+/// Gives a copy everything that names other objects: its mixer, its sends,
+/// its routing, its take lanes, its automation and its frozen audio.
+fn finish(editor: &mut Editor, data: &TrackData, copies: &Copies) -> Result<(), EditError> {
+    let Some(id) = copies.track(data.id) else {
+        return Ok(());
+    };
+    let mixer = data.mixer;
+    editor.apply(Command::SetVolume {
+        track: id,
+        volume: mixer.volume,
+    })?;
+    editor.apply(Command::SetPan {
+        track: id,
+        pan: mixer.pan,
+    })?;
+    if data.kind.has_mute_and_solo() {
+        editor.apply(Command::SetMute {
+            track: id,
+            mute: mixer.mute,
+        })?;
+        editor.apply(Command::SetSolo {
+            track: id,
+            solo: mixer.solo,
+        })?;
+    }
+    if data.kind.has_arm() {
+        editor.apply(Command::SetArm {
+            track: id,
+            arm: mixer.arm,
+        })?;
+    }
+    if data.kind == TrackKind::Return {
+        editor.apply(Command::SetSendTap {
+            track: id,
+            tap: mixer.tap,
+        })?;
+    }
+    if !mixer.crossfade.is_none() {
+        editor.apply(Command::SetCrossfadeAssign {
+            track: id,
+            assign: mixer.crossfade,
+        })?;
+    }
+    if !mixer.pan_mode.is_stereo() {
+        editor.apply(Command::SetPanMode {
+            track: id,
+            mode: mixer.pan_mode,
+        })?;
+    }
+    if mixer.split_left != 0.0 {
+        editor.apply(Command::SetSplitPanLeft {
+            track: id,
+            pan: mixer.split_left,
+        })?;
+    }
+    if mixer.split_right != 0.0 {
+        editor.apply(Command::SetSplitPanRight {
+            track: id,
+            pan: mixer.split_right,
+        })?;
+    }
+    if !data.keep_monitoring_latency {
+        editor.apply(Command::SetKeepMonitoringLatency {
+            track: id,
+            enabled: false,
+        })?;
+    }
+    if !data.delay.is_default() {
+        editor.apply(Command::SetTrackDelay {
+            track: id,
+            delay: data.delay,
+        })?;
+    }
+    for send in &data.sends {
+        let Some(to) = settle_send(copies, editor, send) else {
+            continue;
+        };
+        editor.apply(Command::SetSend {
+            track: id,
+            to,
+            level: send.level,
+        })?;
+    }
+    let routing = &data.routing;
+    if data.kind.holds_clips() {
+        if let Some(input) = settle_input(copies, editor.document(), &routing.input) {
+            editor.apply(Command::SetInput {
+                track: id,
+                input,
+                channel: routing.channel,
+            })?;
+        }
+        editor.apply(Command::SetMonitor {
+            track: id,
+            monitor: routing.monitor,
+        })?;
+    }
+    if routing.output != Output::Default
+        && let Some(output) = settle_output(copies, editor.document(), &routing.output)
+    {
+        editor.apply(Command::SetOutput { track: id, output })?;
+    }
+    if data.kind == TrackKind::Midi {
+        let to = match &routing.midi_output {
+            Some(MidiTo::Track(track)) => {
+                settle_track(copies, editor.document(), *track).map(MidiTo::Track)
+            }
+            Some(other) => Some(other.clone()),
+            None => None,
+        };
+        editor.apply(Command::SetMidiOutput { track: id, to })?;
+    }
+    for lane in &data.take_lanes {
+        editor.apply(Command::AddTakeLane {
+            track: id,
+            lane: lane.clone(),
+        })?;
+    }
+    for position in &data.removed_stop_buttons {
+        let scene = scene_at(editor, *position)?;
+        editor.apply(Command::SetSlotStopButton {
+            track: id,
+            scene,
+            stop_button: false,
+        })?;
+    }
+    for device in &data.devices {
+        let Some(copy) = copies.device(device.id) else {
+            continue;
+        };
+        if let Some(sidechain) = device.sidechain.as_ref()
+            && let Some(input) = settle_input(copies, editor.document(), &sidechain.input)
+        {
+            editor.apply(Command::SetSidechainInput {
+                device: copy,
+                input,
+            })?;
+        }
+        if let Some(midi) = device.midi_sidechain.as_ref() {
+            let source = midi
+                .source
+                .and_then(|track| settle_track(copies, editor.document(), track));
+            editor.apply(Command::SetMidiSidechainSource {
+                device: copy,
+                track: source,
+            })?;
+        }
+    }
+    for (target, automation) in &data.automation {
+        let Some(target) = settle_target(copies, editor.document(), target) else {
+            continue;
+        };
+        for point in automation.envelope.points() {
+            editor.apply(Command::SetAutomationBreakpoint {
+                track: id,
+                target,
+                at: point.at,
+                value: point.value,
+            })?;
+        }
+        for point in automation.envelope.points() {
+            if point.bend != 0.0 {
+                editor.apply(Command::SetAutomationCurve {
+                    track: id,
+                    target,
+                    at: point.at,
+                    bend: point.bend,
+                })?;
+            }
+        }
+    }
+    if let Some(frozen) = &data.frozen {
+        let mut frozen = frozen.clone();
+        for region in &mut frozen.clips {
+            if let Some(copy) = copies.clip(region.clip) {
+                region.clip = copy;
+            }
+        }
+        for tail in &mut frozen.tails {
+            if let Some(copy) = copies.clip(tail.clip) {
+                tail.clip = copy;
+            }
+            tail.id = editor.new_id();
+        }
+        if let Some(output) = frozen.output.as_mut()
+            && let Some(copy) = copies.clip(output.id)
+        {
+            output.id = copy;
+        }
+        editor.apply(Command::FreezeTracks {
+            frozen: vec![(id, frozen)],
+        })?;
+    }
+    for child in &data.children {
+        finish(editor, child, copies)?;
+    }
+    Ok(())
+}
+
+/// Points the copies' modulator mappings at the copies of their targets
+/// (the modulation spec, R19): a mapping whose target was copied too goes
+/// to the copy, and one whose target wasn't isn't copied. The mappings are
+/// those of the devices in `data`.
+fn map_copies(editor: &mut Editor, data: &[TrackData], copies: &Copies) -> Result<(), EditError> {
+    use bl_model::modulator::ModTarget;
+    for track in data {
+        for device in track.devices.iter().flat_map(Device::walk) {
+            let Some(copy) = copies.device(device.id) else {
+                continue;
+            };
+            for mapping in &device.mappings {
+                let target = match mapping.target {
+                    ModTarget::Mixer { track, param } => copies
+                        .track(track)
+                        .map(|track| ModTarget::Mixer { track, param }),
+                    ModTarget::Send { track, to } => copies
+                        .track(track)
+                        .map(|track| ModTarget::Send { track, to }),
+                    ModTarget::Device { device, param } => copies
+                        .device(device)
+                        .map(|device| ModTarget::Device { device, param }),
+                };
+                if let Some(target) = target {
+                    editor.apply(Command::MapModulator {
+                        device: copy,
+                        slot: mapping.slot,
+                        target,
+                    })?;
+                }
+            }
+        }
+        map_copies(editor, &track.children, copies)?;
+    }
+    Ok(())
+}
+
+/// Duplicates the tracks, each straight after itself, with everything they
+/// hold under new IDs (the track context menu spec, R12). Returns the
+/// copies, in display order.
+///
+/// # Errors
+///
+/// If nothing can be duplicated, or a command is refused; the set is then
+/// unchanged.
+pub fn duplicate_tracks(
+    editor: &mut Editor,
+    tracks: &[TrackId],
+    label: &'static str,
+) -> Result<Vec<TrackId>, String> {
+    let originals = duplicated(editor.document(), tracks);
+    if originals.is_empty() {
+        return Err("there's no track to duplicate".to_owned());
+    }
+    let mut copies = Vec::new();
+    let mut renames = Vec::new();
+    editor
+        .transact(label, |editor| {
+            let mut ids = Copies::default();
+            let mut data = Vec::new();
+            // The last first, so each original's place stays where it was.
+            for &original in originals.iter().rev() {
+                let doc = editor.document();
+                let parent = doc.parent(original);
+                let kind = doc.track(original).map(Track::kind);
+                let siblings: Vec<TrackId> = match (kind, parent) {
+                    (Some(TrackKind::Return), _) => doc.returns().collect(),
+                    (_, Some(group)) => doc
+                        .track(group)
+                        .map(|g| g.children().collect())
+                        .unwrap_or_default(),
+                    (_, None) => doc.top_level().collect(),
+                };
+                let index = siblings
+                    .iter()
+                    .position(|&t| t == original)
+                    .map_or(0, |i| i + 1);
+                let Some(track) = snapshot(doc, original) else {
+                    continue;
+                };
+                let copy = create(editor, &track, parent, index, &mut ids)?;
+                renames.push((copy, original));
+                copies.push(copy);
+                data.push(track);
+            }
+            // Everything that names the copies, now that they are all there.
+            data.reverse();
+            for track in &data {
+                finish(editor, track, &ids)?;
+            }
+            map_copies(editor, &data, &ids)?;
+            for (copy, original) in &renames {
+                rename_like(editor, *copy, *original)?;
+            }
+            Ok::<_, EditError>(())
+        })
+        .map_err(|e| e.to_string())?;
+    let order = editor.document().track_order();
+    copies.sort_by_key(|copy| order.iter().position(|t| t == copy));
+    Ok(copies)
+}
+
+/// Where the copies go: the tracks that aren't return tracks go in
+/// `parent`'s list (or the top level) at `index`, and the return tracks
+/// among the returns at `returns`.
+#[derive(Clone, Copy, Debug)]
+pub struct Place {
+    /// The group the copies go in, or the top level.
+    pub parent: Option<TrackId>,
+    /// The place in that list, counted from 0.
+    pub index: usize,
+    /// The place among the return tracks, counted from 0.
+    pub returns: usize,
+}
+
+/// Makes a copy of each track in `data` in the editor, with everything the
+/// tracks hold under new IDs (R13). The copies are made in two passes: the
+/// tracks, their devices and their clips first, then everything that names
+/// them, so a reference to a track copied later still finds its copy.
+/// `source_returns` is the return tracks of the set the tracks came from
+/// when that isn't this one, and the references the copies make to tracks
+/// not copied are then settled by place, not by ID.
+///
+/// # Errors
+///
+/// If a command is refused; the set is then unchanged.
+pub fn copy_tracks(
+    editor: &mut Editor,
+    data: &[TrackData],
+    place: Place,
+    source_returns: Option<Vec<TrackId>>,
+    label: &'static str,
+) -> Result<Vec<TrackId>, String> {
+    if data.is_empty() {
+        return Err("there's nothing on the clipboard to paste".to_owned());
+    }
+    let mut ids = Copies {
+        foreign: source_returns,
+        ..Copies::default()
+    };
+    let mut copies = Vec::with_capacity(data.len());
+    let mut index = place.index;
+    let mut returns = place.returns;
+    editor
+        .transact(label, |editor| {
+            for track in data {
+                // A return track goes among the returns, the others in the
+                // list they were pasted into.
+                let at = if track.kind == TrackKind::Return {
+                    let at = returns;
+                    returns += 1;
+                    at
+                } else {
+                    let at = index;
+                    index += 1;
+                    at
+                };
+                copies.push(create(editor, track, place.parent, at, &mut ids)?);
+            }
+            for track in data {
+                finish(editor, track, &ids)?;
+            }
+            map_copies(editor, data, &ids)?;
+            Ok::<_, EditError>(())
+        })
+        .map_err(|e| e.to_string())?;
+    Ok(copies)
 }
 
 /// Duplicates `tracks` without their clips, as one undo step named `label`:
@@ -76,7 +870,7 @@ pub fn duplicate_without_clips(
                 let copy = copy_track(editor, original, parent, index, &mut renames, &mut devices)?;
                 copies.push(copy);
             }
-            map_copies(editor, &renames, &devices)?;
+            map_modulators(editor, &renames, &devices)?;
             for (copy, original) in renames {
                 rename_like(editor, copy, original)?;
             }
@@ -211,7 +1005,7 @@ fn copy_track(
 /// modulation spec, R19): a mapping whose target was duplicated too goes to
 /// the copy, and one whose target wasn't isn't copied. `tracks` and
 /// `devices` pair each copy with its original.
-fn map_copies(
+fn map_modulators(
     editor: &mut Editor,
     tracks: &[(TrackId, TrackId)],
     devices: &[(DeviceId, DeviceId)],
@@ -425,6 +1219,8 @@ pub fn ungroup_tracks(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bl_core::time::Ticks;
+    use bl_model::{AudioData, ClipData, ContentHash, DeviceKind, ParamId};
 
     fn add(editor: &mut Editor, kind: TrackKind, name: &str, parent: Option<TrackId>) -> TrackId {
         let id = editor.new_id();
@@ -444,6 +1240,242 @@ mod tests {
             })
             .unwrap();
         id
+    }
+
+    /// A clip on a track, as the tests use them.
+    fn clip(editor: &mut Editor, track: TrackId, start: i64, length: i64) -> ClipId {
+        let id = editor.new_id();
+        editor
+            .apply(Command::CreateClip {
+                track,
+                clip: Clip::new(
+                    id,
+                    Ticks(start),
+                    Ticks(length),
+                    ClipData::Audio(AudioData::new(ContentHash([7; 32]))),
+                ),
+            })
+            .unwrap();
+        id
+    }
+
+    /// A MIDI clip on a track, as the tests use them.
+    fn midi_clip(editor: &mut Editor, track: TrackId, start: i64, length: i64) -> ClipId {
+        let id = editor.new_id();
+        editor
+            .apply(Command::CreateClip {
+                track,
+                clip: Clip::new(
+                    id,
+                    Ticks(start),
+                    Ticks(length),
+                    ClipData::Midi(bl_model::MidiData::default()),
+                ),
+            })
+            .unwrap();
+        id
+    }
+
+    /// A device on a track, as the tests use them.
+    fn device(editor: &mut Editor, track: TrackId) -> DeviceId {
+        let id = editor.new_id();
+        editor
+            .apply(Command::InsertDevice {
+                track,
+                index: 0,
+                device: Device::new(
+                    id,
+                    "Compressor",
+                    DeviceKind::Native {
+                        device_type: "beatlayer.squeeze".to_owned(),
+                    },
+                )
+                .with_sidechain(),
+            })
+            .unwrap();
+        id
+    }
+
+    // Spec: track-context-menu R12, R13
+    #[test]
+    fn a_duplicate_holds_what_its_track_holds_under_new_ids() {
+        let mut editor = Editor::new();
+        let one = add(&mut editor, TrackKind::Audio, "1 Audio", None);
+        let ret = add(&mut editor, TrackKind::Return, "A Reverb", None);
+        let clip = clip(&mut editor, one, 0, 960_000);
+        let device = device(&mut editor, one);
+        editor
+            .apply(Command::SetSend {
+                track: one,
+                to: ret,
+                level: 0.5,
+            })
+            .unwrap();
+        editor
+            .apply(Command::AddTakeLane {
+                track: one,
+                lane: TakeLane {
+                    name: "Take 1".to_owned(),
+                    clips: Vec::new(),
+                },
+            })
+            .unwrap();
+        editor
+            .apply(Command::SetAutomationBreakpoint {
+                track: one,
+                target: AutomationTarget::Device {
+                    device,
+                    param: ParamId(1),
+                },
+                at: Ticks(0),
+                value: 0.5,
+            })
+            .unwrap();
+        editor.clear_history().unwrap();
+
+        let copies = duplicate_tracks(&mut editor, &[one], "Duplicate Track(s)").unwrap();
+        assert_eq!(copies.len(), 1);
+        let copy = copies[0];
+        let doc = editor.document();
+        let original = doc.track(one).unwrap();
+        let made = doc.track(copy).unwrap();
+        assert_ne!(copy, one, "the copy has its own ID");
+        assert_eq!(made.mixer(), original.mixer());
+        assert_eq!(
+            made.sends().collect::<Vec<_>>(),
+            original.sends().collect::<Vec<_>>()
+        );
+        assert_eq!(made.take_lanes().count(), original.take_lanes().count());
+        assert_eq!(made.clips().count(), 1, "the clip came with it");
+        assert_ne!(
+            made.clips().next().unwrap().id,
+            clip,
+            "the clip has a new ID"
+        );
+        assert_eq!(made.devices().count(), 1, "the device came with it");
+        assert_ne!(
+            made.devices().next().unwrap().id,
+            device,
+            "the device has a new ID"
+        );
+        assert_eq!(made.automation().count(), 1, "the automation came with it");
+        // The copy goes straight after its track, and is named for its place.
+        let order = doc.track_order();
+        assert_eq!(order[1], copy);
+        assert_eq!(doc.track(copy).unwrap().name(), "2 Audio");
+        assert_eq!(editor.undo_history().next(), Some("Duplicate Track(s)"));
+    }
+
+    // Spec: track-context-menu R12 (a group, a return track)
+    #[test]
+    fn a_duplicated_group_holds_copies_of_its_tracks_and_a_return_among_the_returns() {
+        let mut editor = Editor::new();
+        let group = add(&mut editor, TrackKind::Group, "Group", None);
+        let inner = add(&mut editor, TrackKind::Audio, "1 Audio", Some(group));
+        let midi = add(&mut editor, TrackKind::Midi, "2 MIDI", Some(group));
+        let ret = add(&mut editor, TrackKind::Return, "A Reverb", None);
+        clip(&mut editor, inner, 0, 960_000);
+        midi_clip(&mut editor, midi, 0, 960_000);
+        editor.clear_history().unwrap();
+
+        let copies = duplicate_tracks(&mut editor, &[group, ret], "Duplicate Track(s)").unwrap();
+        assert_eq!(copies.len(), 2);
+        let doc = editor.document();
+        let group_copy = doc.track(copies[0]).unwrap();
+        assert_eq!(group_copy.kind(), TrackKind::Group);
+        let inner_copy = group_copy.children().next().expect("its track came too");
+        assert_eq!(
+            doc.track(inner_copy).unwrap().clips().count(),
+            1,
+            "the clip came with it"
+        );
+        let midi_copy = group_copy
+            .children()
+            .nth(1)
+            .expect("its MIDI track came too");
+        assert_eq!(
+            doc.track(midi_copy).unwrap().clips().count(),
+            1,
+            "the MIDI clip came with it"
+        );
+        let return_copy = doc.track(copies[1]).unwrap();
+        assert_eq!(return_copy.kind(), TrackKind::Return);
+        // The return's copy is among the returns, after the original.
+        let returns: Vec<TrackId> = doc.returns().collect();
+        assert_eq!(returns, [ret, copies[1]]);
+        assert_eq!(doc.track(copies[1]).unwrap().name(), "B Reverb");
+    }
+
+    // Spec: track-context-menu R13 (references between the tracks copied)
+    #[test]
+    fn a_sidechain_between_two_copied_tracks_points_at_the_copies() {
+        let mut editor = Editor::new();
+        let one = add(&mut editor, TrackKind::Audio, "1 Audio", None);
+        let two = add(&mut editor, TrackKind::Audio, "2 Audio", None);
+        let outside = add(&mut editor, TrackKind::Audio, "3 Audio", None);
+        let device = device(&mut editor, two);
+        editor
+            .apply(Command::SetSidechainInput {
+                device,
+                input: Input::Track {
+                    track: one,
+                    tap: bl_model::Tap::PostFx,
+                    chain: None,
+                    output: None,
+                },
+            })
+            .unwrap();
+        editor.clear_history().unwrap();
+
+        let copies = duplicate_tracks(&mut editor, &[one, two], "Duplicate Track(s)").unwrap();
+        let doc = editor.document();
+        let made = doc.track(copies[1]).unwrap();
+        let copy_device = made.devices().next().unwrap();
+        let Some(Input::Track { track, .. }) = copy_device.sidechain.as_ref().map(|s| &s.input)
+        else {
+            panic!("the copy kept its sidechain");
+        };
+        assert_eq!(*track, copies[0], "it points at the copy");
+
+        // A sidechain on a track that isn't copied stays as it is.
+        let outside_device = {
+            let id = editor.new_id();
+            editor
+                .apply(Command::InsertDevice {
+                    track: outside,
+                    index: 0,
+                    device: Device::new(
+                        id,
+                        "Compressor",
+                        DeviceKind::Native {
+                            device_type: "beatlayer.squeeze".to_owned(),
+                        },
+                    )
+                    .with_sidechain(),
+                })
+                .unwrap();
+            id
+        };
+        editor
+            .apply(Command::SetSidechainInput {
+                device: outside_device,
+                input: Input::Track {
+                    track: one,
+                    tap: bl_model::Tap::PostFx,
+                    chain: None,
+                    output: None,
+                },
+            })
+            .unwrap();
+        let copies = duplicate_tracks(&mut editor, &[outside], "Duplicate Track(s)").unwrap();
+        let doc = editor.document();
+        let made = doc.track(copies[0]).unwrap();
+        let copy_device = made.devices().next().unwrap();
+        let Some(Input::Track { track, .. }) = copy_device.sidechain.as_ref().map(|s| &s.input)
+        else {
+            panic!("the copy kept its sidechain");
+        };
+        assert_eq!(*track, one, "it still points at the track it did");
     }
 
     #[test]

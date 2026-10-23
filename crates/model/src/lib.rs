@@ -64,6 +64,7 @@ pub mod base64;
 pub mod bounce;
 mod changes;
 mod clip;
+mod clip_param;
 mod command;
 mod device;
 pub mod device_display;
@@ -73,8 +74,10 @@ mod editor;
 mod error;
 mod external;
 pub mod fader;
+mod fades;
 mod follow;
 pub mod graph;
+mod groove;
 mod ids;
 mod launch;
 mod layers;
@@ -111,9 +114,10 @@ pub use bl_stretch::WarpMap;
 pub use bounce::{BouncedAutomation, BouncedTrack};
 pub use changes::{Change, ChangeSet};
 pub use clip::{
-    AudioData, Clip, ClipData, ClipEnvelope, ClipFolds, EDGE_FADE_SECONDS, EnvelopeKind, MidiData,
-    Note, PressurePoint, TakeClip, TakeLane, consolidated_midi,
+    AudioData, Clip, ClipData, ClipEnvelope, ClipFolds, Crossfade, EDGE_FADE_SECONDS, EnvelopeKind,
+    MidiData, Note, PressurePoint, TakeClip, TakeLane, consolidated_midi, crossfades, fade_power,
 };
+pub use clip_param::ClipParam;
 pub use command::Command;
 pub use device::{
     Device, DeviceKind, DeviceRole, DeviceWarp, DeviceWindows, MAX_MEDIA_SLOTS, MidiSidechain,
@@ -124,6 +128,7 @@ pub use device_layout::DeviceLayout;
 pub use document::{ArrangementLoop, Document, MAX_CUE_VOLUME, Settings};
 pub use editor::{EditError, Editor, HistoryStep, Maker};
 pub use error::ModelError;
+pub use fades::{EdgeRoom, FadeLimits};
 pub mod freeze;
 pub use external::{
     External, ExternalPort, HardwareLatency, MAX_HARDWARE_LATENCY_MS, MAX_HARDWARE_LATENCY_SAMPLES,
@@ -133,9 +138,13 @@ pub use follow::{
     FollowPatch,
 };
 pub use freeze::{FrozenClip, FrozenOutput, FrozenTail, FrozenTrack};
+pub use groove::{
+    AudioPass, DEFAULT_BASE, GAIN_GLIDE_SECONDS, GLOBAL_AMOUNT_MAX, Groove, GrooveBase, GrooveNote,
+    GroovePlay, GroovePool, MovedTransients, clip_seed, noise,
+};
 pub use ids::{
-    ChainId, ClipId, ContentHash, DeviceId, LocatorId, ParamId, ParseContentHashError, SceneId,
-    TrackId,
+    ChainId, ClipId, ContentHash, DeviceId, GrooveId, LocatorId, ParamId, ParseContentHashError,
+    SceneId, TrackId,
 };
 /// The persistent collections the document's public types hold.
 pub use imbl::{OrdMap, Vector};

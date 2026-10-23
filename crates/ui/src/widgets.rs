@@ -137,7 +137,7 @@ fn paint(
             ink,
         );
     } else {
-        icon(&painter, placement.element, rect, ink, theme);
+        icon(&painter, placement.element, rect, ink, look.on, theme);
     }
     // Spec: accessibility R7: the outline follows Outline View in Focus.
     if response.has_focus() && crate::focus::outlined(&response.ctx) {
@@ -151,7 +151,14 @@ fn paint(
 }
 
 /// Beatlayer's own icons: plain shapes.
-fn icon(painter: &egui::Painter, element: Element, rect: Rect, ink: Color32, theme: &Theme) {
+fn icon(
+    painter: &egui::Painter,
+    element: Element,
+    rect: Rect,
+    ink: Color32,
+    on: bool,
+    theme: &Theme,
+) {
     let c = rect.center();
     let s = rect.height().min(rect.width()) * 0.5;
     let stroke = Stroke::new(1.2, ink);
@@ -174,6 +181,15 @@ fn icon(painter: &egui::Painter, element: Element, rect: Rect, ink: Color32, the
                 pos2(c.x - 3.0, c.y - 1.5),
                 pos2(c.x + 3.0, c.y - 1.5),
                 pos2(c.x, c.y + 2.0),
+            ));
+        }
+        // Spec: detail-views R3. A view's toggle points up while the view
+        // shows.
+        Element::ClipViewToggle | Element::DeviceViewToggle if on => {
+            painter.add(triangle(
+                pos2(c.x - 4.0, c.y + 2.5),
+                pos2(c.x + 4.0, c.y + 2.5),
+                pos2(c.x, c.y - 3.0),
             ));
         }
         Element::NudgeDown | Element::ClipViewToggle | Element::DeviceViewToggle => {

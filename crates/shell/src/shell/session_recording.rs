@@ -460,7 +460,10 @@ impl Shell {
                     self.editor.apply(Command::CreateSlotClip {
                         track: slot.slot.track,
                         scene: slot.slot.scene,
-                        clip: Clip::new(clip, Ticks::ZERO, length, data),
+                        // Spec: grooves R20. A clip made by recording takes
+                        // the set's auto-load groove.
+                        clip: Clip::new(clip, Ticks::ZERO, length, data)
+                            .with_groove(self.editor.document().settings().grooves.auto_loaded()),
                     })
                 }
             };
@@ -568,7 +571,12 @@ impl Shell {
                                 self.editor.apply(Command::CreateSlotClip {
                                     track,
                                     scene,
-                                    clip: Clip::new(clip, Ticks::ZERO, length, data),
+                                    // Spec: grooves R20. A clip made by
+                                    // recording takes the set's auto-load
+                                    // groove.
+                                    clip: Clip::new(clip, Ticks::ZERO, length, data).with_groove(
+                                        self.editor.document().settings().grooves.auto_loaded(),
+                                    ),
                                 })?;
                                 clip
                             }

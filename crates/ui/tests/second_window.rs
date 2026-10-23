@@ -5,7 +5,7 @@
 //!
 //! Spec: second-window R1 to R17; interface-zoom R11 to R15.
 
-mod common;
+use crate::common;
 
 use bl_shell::menus::{MenuPlatform, menu_bar};
 use bl_shell::{Area, Effect, MainView, WindowKind};

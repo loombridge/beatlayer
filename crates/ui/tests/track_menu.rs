@@ -533,7 +533,12 @@ fn the_keys_open_the_selected_title_bar_s_menu() {
         .find(|n| n.id == focus)
         .map(|n| n.label.clone())
         .unwrap_or_default();
-    assert_eq!(focused, "Cut ⌘X");
+    let cut = if cfg!(target_os = "macos") {
+        "Cut ⌘X"
+    } else {
+        "Cut Ctrl+X"
+    };
+    assert_eq!(focused, cut);
     // Down moves to Copy; Enter runs it.
     h.key(Key::ArrowDown, Modifiers::NONE);
     h.settle();

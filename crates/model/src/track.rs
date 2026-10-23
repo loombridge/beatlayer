@@ -774,6 +774,10 @@ pub struct Track {
     /// settings, so unfreezing plays them again (the freeze and bounce spec,
     /// R10).
     pub(crate) frozen: Option<FrozenTrack>,
+    /// Bypass Tuning (WP-6.9; the tunings spec, R14): whether the track
+    /// plays twelve equal steps whatever tuning the set holds. Off in a new
+    /// track, and saved only when on.
+    pub(crate) tuning_bypass: bool,
 }
 
 impl Track {
@@ -795,6 +799,7 @@ impl Track {
             children: Vector::new(),
             automation: TrackAutomation::new(),
             frozen: None,
+            tuning_bypass: false,
         }
     }
 
@@ -878,6 +883,29 @@ impl Track {
     #[must_use]
     pub const fn keep_monitoring_latency(&self) -> bool {
         self.keep_monitoring_latency
+    }
+
+    /// Whether the track's Bypass Tuning switch is on (the tunings spec,
+    /// R14). A track that holds a Drum Rack bypasses whatever it says; see
+    /// [`plays_tuning`](Self::plays_tuning).
+    #[must_use]
+    pub const fn tuning_bypass(&self) -> bool {
+        self.tuning_bypass
+    }
+
+    /// Whether the track holds a Drum Rack, at any depth, which makes it
+    /// bypass the tuning (the tunings spec, R14).
+    #[must_use]
+    pub fn holds_drum_rack(&self) -> bool {
+        self.devices_deep()
+            .any(|device| device.rack_kind() == Some(crate::RackKind::Drum))
+    }
+
+    /// Whether the track plays the set's tuning (the tunings spec, R14): a
+    /// MIDI track whose Bypass Tuning is off and that holds no Drum Rack.
+    #[must_use]
+    pub fn plays_tuning(&self) -> bool {
+        self.kind == TrackKind::Midi && !self.tuning_bypass && !self.holds_drum_rack()
     }
 
     /// The track's sends that aren't at −∞ dB, as (return track, level) in
@@ -1095,6 +1123,7 @@ impl Track {
             || self.routing != other.routing
             || self.delay != other.delay
             || self.keep_monitoring_latency != other.keep_monitoring_latency
+            || self.tuning_bypass != other.tuning_bypass
             || self.removed_stop_buttons != other.removed_stop_buttons
             || self.frozen != other.frozen
             || !(self.take_lanes.ptr_eq(&other.take_lanes) || self.take_lanes == other.take_lanes)

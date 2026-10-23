@@ -1881,6 +1881,7 @@ fn paths() -> BTreeMap<&'static str, Path> {
         key,
     };
     let clip_view = LaterView("the Clip View (milestone M2)");
+    let tuning_section = LaterView("the browser's Tunings label and the Tuning section (WP-6.10)");
     let groove_pool = LaterView(
         "the Groove Pool, the Clip View's groove controls and the browser's Grooves label (WP-6.20)",
     );
@@ -2009,6 +2010,22 @@ fn paths() -> BTreeMap<&'static str, Path> {
         (
             "clip.set_scale",
             main(a_clip_selected, control_bar, "Scale Mode", Key::Enter),
+        ),
+        // Tuning systems (WP-6.9): the browser's Tunings label and the
+        // Tuning section, which load, change and remove the tuning, come with
+        // WP-6.10; until then agents reach these.
+        ("tuning.load", Exception(tuning_section)),
+        ("tuning.remove", Exception(tuning_section)),
+        ("tuning.set", Exception(tuning_section)),
+        ("tuning.set_range", Exception(tuning_section)),
+        ("tuning.set_reference", Exception(tuning_section)),
+        ("tuning.state", Exception(Query)),
+        (
+            "track.set_tuning_bypass",
+            Exception(LaterView(
+                "the In/Out section's row for it, which the mixers' section has no room for \
+                 yet; the Arrangement's headers show it where they have the height (WP-6.9)",
+            )),
         ),
         // Grooves (WP-6.19): the Groove Pool, the Clip View's groove controls
         // and the browser's Grooves label come with WP-6.20; until then

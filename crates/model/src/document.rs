@@ -17,6 +17,7 @@ use crate::scale::Scale;
 use crate::scene::Scene;
 use crate::shared::Shared;
 use crate::track::{Track, TrackKind};
+use crate::tuning::Tuning;
 
 /// Song-wide settings.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -114,6 +115,11 @@ pub struct Settings {
     /// then, so a set saved before the scales loads unchanged.
     #[serde(default, skip_serializing_if = "Scale::is_default")]
     pub scale: Scale,
+    /// The set's tuning system (WP-6.9; the tunings spec, R1 and R11), saved
+    /// whole inside the set so it opens without the file it came from. None
+    /// plays twelve equal steps, and a set saved before tunings has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tuning: Option<Tuning>,
 }
 
 impl Default for Settings {
@@ -140,6 +146,7 @@ impl Default for Settings {
             song_start: None,
             grooves: GroovePool::default(),
             scale: Scale::default(),
+            tuning: None,
         }
     }
 }

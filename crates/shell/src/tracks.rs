@@ -84,6 +84,8 @@ pub struct TrackData {
     pub delay: TrackDelay,
     /// Whether it keeps its monitoring latency.
     pub keep_monitoring_latency: bool,
+    /// Whether it bypasses the set's tuning (WP-6.9).
+    pub tuning_bypass: bool,
     /// Its frozen audio, if it is frozen.
     pub frozen: Option<FrozenTrack>,
     /// The tracks inside it, if it is a group.
@@ -162,6 +164,7 @@ pub fn snapshot(doc: &Document, id: TrackId) -> Option<TrackData> {
             .collect(),
         delay: track.delay(),
         keep_monitoring_latency: track.keep_monitoring_latency(),
+        tuning_bypass: track.tuning_bypass(),
         frozen: track.frozen().cloned(),
         children: track.children().filter_map(|c| snapshot(doc, c)).collect(),
     })
@@ -524,6 +527,12 @@ fn finish(editor: &mut Editor, data: &TrackData, copies: &Copies) -> Result<(), 
         editor.apply(Command::SetKeepMonitoringLatency {
             track: id,
             enabled: false,
+        })?;
+    }
+    if data.tuning_bypass {
+        editor.apply(Command::SetTuningBypass {
+            track: id,
+            bypass: true,
         })?;
     }
     if !data.delay.is_default() {

@@ -548,6 +548,7 @@ mod tests {
                     track: false,
                     sync: true,
                     remote: true,
+                    mpe: false,
                 },
             )
             .unwrap();
@@ -564,5 +565,35 @@ mod tests {
             ),
             (1, 1, 1, 2)
         );
+    }
+
+    // Spec: midi-io R27. With MPE on, an input's messages are stamped as an
+    // MPE port's; MPE alone opens nothing.
+    #[test]
+    fn the_mpe_switch_stamps_messages_as_an_mpe_ports_and_opens_nothing() {
+        let test = TestBackend::new();
+        test.add_port(Direction::Input, "Roli");
+        let (mut ports, mut engine) = ports(&test);
+        let id = PortId::from_name("Roli");
+        let now = Instant::now();
+        assert!(test.send("Roli", now, &[0x91, 60, 100]));
+        assert_eq!(engine.pop().unwrap().source, MidiSource::Port(id));
+
+        let mpe = PortSwitches {
+            mpe: true,
+            ..PortSwitches::first_seen(Direction::Input)
+        };
+        ports.set_switches(Direction::Input, "Roli", mpe).unwrap();
+        assert!(test.send("Roli", now, &[0x91, 60, 100]));
+        assert_eq!(engine.pop().unwrap().source, MidiSource::MpePort(id));
+
+        let only_mpe = PortSwitches {
+            mpe: true,
+            ..PortSwitches::OFF
+        };
+        let state = ports
+            .set_switches(Direction::Input, "Roli", only_mpe)
+            .unwrap();
+        assert!(!state.open, "MPE alone leaves the port closed");
     }
 }

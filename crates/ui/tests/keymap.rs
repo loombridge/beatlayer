@@ -779,6 +779,16 @@ fn the_note_editors_keys_are_all_handled() {
         "S-NOTE-043",
         "S-NOTE-045",
         "S-NOTE-046",
+        // WP-6.1: the value keys, the typed velocity, the Cmd-drag, and
+        // deactivating.
+        "S-NOTE-016",
+        "S-NOTE-026",
+        "S-NOTE-027",
+        "S-NOTE-028",
+        "S-NOTE-029",
+        "S-NOTE-041",
+        "S-NOTE-050",
+        "S-NOTE-051",
         "S-A11Y-004",
         "S-A11Y-005",
         "S-A11Y-006",
@@ -803,6 +813,42 @@ fn the_note_editors_keys_are_all_handled() {
             entry.status
         );
     }
+}
+
+// Spec: note-editing R14, R15, R18. 0 deactivates the selected notes through
+// the keymap (S-NOTE-041); the keys that read a number or a direction are the
+// note editor's, and Cmd-Up and Cmd-Down with the Chord Selector Pad focused
+// (S-NOTE-052) wait for Stacks.
+#[test]
+fn zero_deactivates_the_selected_notes_and_the_value_keys_are_the_editors() {
+    let keymap = Keymap::live12();
+    let contexts = [Context::NoteEditor, Context::NoteSelection, Context::Global];
+    let none = mods(false, false, false, false);
+    let hit = keymap
+        .resolve(Platform::Mac, Key::Num0, none, &contexts)
+        .expect("0 is bound while notes are selected");
+    assert_eq!(hit.command.id, "note.deactivate");
+    // With no notes selected, 0 doesn't reach it.
+    let hit = keymap.resolve(
+        Platform::Mac,
+        Key::Num0,
+        none,
+        &[Context::NoteEditor, Context::Global],
+    );
+    assert!(
+        hit.is_none_or(|hit| hit.command.id != "note.deactivate"),
+        "no notes, no deactivating"
+    );
+    for id in ["S-NOTE-027", "S-NOTE-028", "S-NOTE-029"] {
+        let entry = keymap.entry_for(id).unwrap();
+        assert!(matches!(entry.status, Status::Widget(_)), "{id}");
+    }
+    let entry = keymap.entry_for("S-NOTE-052").unwrap();
+    assert!(
+        matches!(entry.status, Status::Pending { .. }),
+        "the Chord Selector Pad's keys wait for Stacks: {:?}",
+        entry.status
+    );
 }
 
 #[test]

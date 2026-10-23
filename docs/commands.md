@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-750 commands in 45 areas.
+760 commands in 46 areas.
 
 ## Permission classes
 
@@ -124,6 +124,7 @@ Each command has:
 | [`automation.paste`](#automationpaste) | Paste Automation | `edit` |  |  |
 | [`automation.re_enable`](#automationre_enable) | Re-Enable Automation | `edit` |  |  |
 | [`automation.re_enable_for`](#automationre_enable_for) | Re-Enable Automation for a Parameter | `edit` |  |  |
+| [`automation.select_breakpoint`](#automationselect_breakpoint) | Select Automation Breakpoint | `read` |  |  |
 | [`automation.select_segment`](#automationselect_segment) | Select Automation Segment | `read` |  |  |
 | [`automation.set_breakpoint`](#automationset_breakpoint) | Set Automation Breakpoint | `edit` |  |  |
 | [`automation.set_curve`](#automationset_curve) | Curve Automation Segment | `edit` |  |  |
@@ -219,6 +220,7 @@ Each command has:
 | [`clip.save_default`](#clipsave_default) | Save Default Clip | `external` |  |  |
 | [`clip.save_file`](#clipsave_file) | Save Clip as File | `external` |  |  |
 | [`clip.scale_tempo`](#clipscale_tempo) | Scale Clip Tempo | `edit` |  |  |
+| [`clip.select_envelope_breakpoint`](#clipselect_envelope_breakpoint) | Select Envelope Breakpoint | `read` |  |  |
 | [`clip.set_1_1_1_here`](#clipset_1_1_1_here) | Set 1.1.1 Here | `edit` |  |  |
 | [`clip.set_data`](#clipset_data) | Replace Clip Contents | `edit` |  |  |
 | [`clip.set_envelope_breakpoint`](#clipset_envelope_breakpoint) | Add Envelope Breakpoint | `edit` |  |  |
@@ -366,6 +368,14 @@ Each command has:
 | [`edit.go_to_step`](#editgo_to_step) | Go to Step | `edit` |  |  |
 | [`edit.redo`](#editredo) | Redo | `edit` | `Cmd+Shift+Z` | `Ctrl+Y` |
 | [`edit.undo`](#editundo) | Undo | `edit` | `Cmd+Z` | `Ctrl+Z` |
+| [`envelope.cancel`](#envelopecancel) | Envelope Cancel | `edit` | `Esc` | `Esc` |
+| [`envelope.delete`](#envelopedelete) | Delete Shown Envelope | `destructive` | `Cmd+Delete` | `Ctrl+Delete` |
+| [`envelope.delete_breakpoint`](#envelopedelete_breakpoint) | Delete Envelope Breakpoint | `destructive` | `Delete` | `Delete` |
+| [`envelope.enter`](#envelopeenter) | Envelope Enter | `edit` | `Enter` | `Enter` |
+| [`envelope.move_marker`](#envelopemove_marker) | Move Insert Marker Along Envelope | `read` |  |  |
+| [`envelope.move_selected`](#envelopemove_selected) | Move Selected Breakpoint | `edit` |  |  |
+| [`envelope.select_adjacent`](#envelopeselect_adjacent) | Select Adjacent Breakpoint | `read` | `Tab`, `Shift+Tab` | `Tab`, `Shift+Tab` |
+| [`envelope.set_value`](#envelopeset_value) | Set Breakpoint Value | `edit` |  |  |
 | [`export.audio`](#exportaudio) | Export Audio | `external` |  |  |
 | [`export.cancel`](#exportcancel) | Cancel Export | `read` |  |  |
 | [`export.close_dialog`](#exportclose_dialog) | Close Export Dialog | `read` |  |  |
@@ -1603,7 +1613,7 @@ Result: [`ArrangementState`](#arrangementstate).
 
 **Select Tracks**. Permission: `read`. Contexts: `arrangement`.
 
-Selects tracks in the Arrangement, replacing the selection or, with `add`, adding to it; with `title_bars`, their title bars, as clicking a title bar does, so the fold and grouped-track keys apply. Changes only the view.
+Selects tracks in the Arrangement, replacing the selection or, with `add`, adding to it; with `title_bars`, their title bars, as clicking a title bar does, so the fold and grouped-track keys apply; with `automation_lane` and one track, its automation lane, as Up and Down select it while Automation Mode is on, and the lane gets the keyboard. Changes only the view.
 
 Default keys: none.
 
@@ -1613,6 +1623,7 @@ Arguments:
 |---|---|---|---|
 | `tracks` | array of [`TrackId`](#trackid) | yes | The tracks to select. Empty clears the track selection. |
 | `add` | boolean | no | Add them to the tracks already selected instead of replacing them. |
+| `automation_lane` | boolean | no | Select the track's automation lane, as Up and Down do through the lanes while Automation Mode is on (the automation editing spec, R20): the lane gets the keyboard. One track only. |
 | `title_bars` | boolean | no | Select their title bars, so the track-header shortcuts (fold, show and hide grouped tracks) apply, as clicking a title bar does. |
 
 Result: [`ArrangementState`](#arrangementstate).
@@ -1660,7 +1671,7 @@ Result: [`ArrangementState`](#arrangementstate).
 
 **Set Insert Marker**. Permission: `read`. Contexts: `arrangement`.
 
-Places the Arrangement's insert marker at `at` and, with `track`, selects that track, as clicking in a track's lane does; a click also snaps to the grid when Snap to Grid is on, and resumes Follow. Clears the time selection. Not an undo step; changes only the view.
+Places the Arrangement's insert marker at `at` and, with `track`, selects that track, as clicking in a track's lane does; a click also snaps to the grid when Snap to Grid is on, and resumes Follow. Clears the time selection. With `automation_lane`, the track's automation lane is selected too, as clicking its background does, and gets the keyboard. Not an undo step; changes only the view.
 
 Default keys: none.
 
@@ -1669,6 +1680,7 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `at` | [`Ticks`](#ticks) | yes | Where to put it. It isn't snapped: snap first if you want the grid. |
+| `automation_lane` | boolean | no | Select the track's automation lane too, as clicking the lane's background does (the automation editing spec, R1): the lane gets the keyboard. |
 | `track` | [`TrackId`](#trackid) or null | no | The track to select with it, as clicking a track's lane does. Left out, the selected tracks stay selected. |
 
 Result: [`ArrangementState`](#arrangementstate).
@@ -2480,6 +2492,24 @@ Arguments:
 | `target` | [`AutomationTarget`](#automationtarget) | yes | The parameter. |
 
 Result: [`ChangeSet`](#changeset).
+
+#### `automation.select_breakpoint`
+
+**Select Automation Breakpoint**. Permission: `read`. Contexts: `arrangement`, `envelope`.
+
+Selects a breakpoint in a track's automation lane, as Enter or Option-click does: the lane gets the keyboard, the insert marker moves to the breakpoint, and an edit begins that ends when the selection is cleared with `at` `null` (keeping the changes) or the focus leaves; every change in between is one undo step. `at` may be a position where no breakpoint is yet, for `automation.set_breakpoint` to make one there as part of the same edit. `arrangement.state` reports the selection. Changes nothing in the set itself.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track whose automation lane holds the breakpoint. |
+| `target` | [`AutomationTarget`](#automationtarget) | yes | The parameter the lane shows. |
+| `at` | [`Ticks`](#ticks) or null | no | The position of the breakpoint to select, or `null` to keep the edit and select none. |
+
+Result: [`EnvelopeKeyState`](#envelopekeystate).
 
 #### `automation.select_segment`
 
@@ -4180,6 +4210,24 @@ Arguments:
 | `factor` | number | yes | What to multiply by: 2 for ×2, 0.5 for ÷2. |
 
 Result: [`ChangeSet`](#changeset).
+
+#### `clip.select_envelope_breakpoint`
+
+**Select Envelope Breakpoint**. Permission: `read`. Contexts: `clip-view`, `envelope`.
+
+Selects a breakpoint of a clip's envelope in the Clip View's Envelope Editor, as `automation.select_breakpoint` does in an automation lane: the insert marker moves to it, and an edit begins that ends when the selection is cleared with `at` `null` or the focus leaves; every change in between is one undo step. `clip_view.state` reports the selection. Changes nothing in the set itself.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The clip whose envelope holds the breakpoint. |
+| `target` | [`AutomationTarget`](#automationtarget) | yes | The parameter of the clip's track the envelope modulates. |
+| `at` | [`Ticks`](#ticks) or null | no | The position of the breakpoint to select, in ticks from the beginning of the clip's contents, or `null` to keep the edit and select none. |
+
+Result: [`EnvelopeKeyState`](#envelopekeystate).
 
 #### `clip.set_1_1_1_here`
 
@@ -6863,6 +6911,142 @@ Default keys:
 Arguments: none (send `{}`).
 
 Result: [`ChangeSet`](#changeset).
+
+### Area `envelope`
+
+#### `envelope.cancel`
+
+**Envelope Cancel**. Permission: `edit`. Contexts: `envelope`.
+
+Drops the edit of the selected breakpoint of the envelope that has the keyboard: it goes back to how it was when it was selected, a breakpoint `envelope.enter` made is removed, and nothing is selected. No undo step is recorded.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-A11Y-024 | `Esc` | `Esc` | `envelope` | Cancel the breakpoint edit and deselect | runs it |
+
+Arguments: none (send `{}`).
+
+Result: [`EnvelopeKeyState`](#envelopekeystate).
+
+#### `envelope.delete`
+
+**Delete Shown Envelope**. Permission: `destructive`. Contexts: `envelope`.
+
+Deletes the automation of the parameter the selected automation lane shows, as `automation.delete` does, or clears the envelope the Envelope Editor shows, as `clip.delete_envelope` does. One undo step. Because it removes the person's work, an agent asks first.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-ENV-005 | `Cmd+Delete` | `Ctrl+Delete` | `envelope` | Delete the selected envelope | runs it |
+
+Arguments: none (send `{}`).
+
+Result: [`EnvelopeKeyState`](#envelopekeystate).
+
+#### `envelope.delete_breakpoint`
+
+**Delete Envelope Breakpoint**. Permission: `destructive`. Contexts: `envelope`.
+
+Deletes the selected breakpoint of the envelope that has the keyboard, or with none selected the one at the insert marker, if there is one. One undo step. Because it removes the person's work, an agent asks first.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-A11Y-025 | `Delete` | `Delete` | `envelope` | Delete the selected breakpoint | runs it |
+
+Arguments: none (send `{}`).
+
+Result: [`EnvelopeKeyState`](#envelopekeystate).
+
+#### `envelope.enter`
+
+**Envelope Enter**. Permission: `edit`. Contexts: `envelope`.
+
+With no breakpoint selected, selects the breakpoint at the insert marker of the envelope that has the keyboard, or makes one there at the envelope's value at that point (the parameter's value when there is no envelope) and selects it. With one selected, keeps the changes made since it was selected and deselects it. All of it is one undo step.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-A11Y-019 | `Enter` | `Enter` | `envelope` | Create or select a breakpoint at the insert marker, or confirm an edit | runs it |
+
+Arguments: none (send `{}`).
+
+Result: [`EnvelopeKeyState`](#envelopekeystate).
+
+#### `envelope.move_marker`
+
+**Move Insert Marker Along Envelope**. Permission: `read`. Contexts: `arrangement`, `clip-view`, `envelope`.
+
+Moves the insert marker along the envelope that has the keyboard, one grid step to the `left` or `right` with `by` `grid`, or to the previous or next breakpoint with `by` `breakpoint`; it stays at the end if there is none further. The result says the envelope's value at the marker. Does nothing while a breakpoint is selected: `envelope.move_selected` moves that. Changes only the view.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `direction` | [`ArrowKey`](#arrowkey) | yes | `left` for earlier, `right` for later. |
+| `by` | [`MarkerStep`](#markerstep) | yes | `grid` for one grid step, or `breakpoint` for the previous or next breakpoint. |
+
+Result: [`EnvelopeKeyState`](#envelopekeystate).
+
+#### `envelope.move_selected`
+
+**Move Selected Breakpoint**. Permission: `edit`. Contexts: `arrangement`, `clip-view`, `envelope`.
+
+Moves the selected breakpoint of the envelope that has the keyboard: `left` and `right` one grid step in time, not past its neighbours, and `up` and `down` by one step of the parameter's control (1% of its travel, or one step of a stepped value), within its range. The insert marker goes with it. It is part of the edit that began when the breakpoint was selected.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `direction` | [`ArrowKey`](#arrowkey) | yes | `left` and `right` move it one grid step in time, `up` and `down` change its value by the step its parameter's control takes for an arrow key. |
+
+Result: [`EnvelopeKeyState`](#envelopekeystate).
+
+#### `envelope.select_adjacent`
+
+**Select Adjacent Breakpoint**. Permission: `read`. Contexts: `envelope`.
+
+While a breakpoint of the envelope that has the keyboard is selected, selects the next one (the previous one with `reverse`) and moves the insert marker to it; it stays on the last or first. Part of the edit that began when the first breakpoint was selected. Does nothing with none selected.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-A11Y-022 | `Tab`, `Shift+Tab` | `Tab`, `Shift+Tab` | `envelope` | Select the next or previous breakpoint | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `reverse` | boolean | no | Select the previous breakpoint instead of the next. |
+
+Result: [`EnvelopeKeyState`](#envelopekeystate).
+
+#### `envelope.set_value`
+
+**Set Breakpoint Value**. Permission: `edit`. Contexts: `arrangement`, `clip-view`, `envelope`.
+
+Types a value for the selected breakpoint of the envelope that has the keyboard, as its parameter's control reads it (`-6 dB`, `25L`, `50%`); the other selected breakpoints of a lane move by the same share of the travel. With `at`, makes a new breakpoint there with the value instead. A value the parameter doesn't read is refused. Part of the edit that began when the breakpoint was selected, or one undo step on its own.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `text` | string | yes | The value, as the parameter's control shows it: `-6` or `-6 dB` for a volume, `25L` for a pan, `50%` for a clip envelope. |
+| `at` | [`Ticks`](#ticks) or null | no | Where to make a new breakpoint with the value. Left out, the value goes to the selected breakpoint. |
+
+Result: [`EnvelopeKeyState`](#envelopekeystate).
 
 ### Area `export`
 
@@ -14147,6 +14331,12 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`edit.go_to_step`](#editgo_to_step) | the query tool's `song` | `undo.current` |
 | [`edit.redo`](#editredo) | the query tool's `song` | `undo.next_redo` |
 | [`edit.undo`](#editundo) | the query tool's `song` | `undo.next_undo` |
+| [`envelope.cancel`](#envelopecancel) | the query tool's `track` | `automation` |
+| [`envelope.delete`](#envelopedelete) | the query tool's `track` | `automation` |
+| [`envelope.delete_breakpoint`](#envelopedelete_breakpoint) | the query tool's `track` | `automation` |
+| [`envelope.enter`](#envelopeenter) | the query tool's `track` | `automation` |
+| [`envelope.move_selected`](#envelopemove_selected) | the query tool's `track` | `automation` |
+| [`envelope.set_value`](#envelopeset_value) | the query tool's `track` | `automation` |
 | [`export.realtime.auto_restart`](#exportrealtimeauto_restart) | `export.realtime.status` | `auto_restart` |
 | [`export.realtime.cancel`](#exportrealtimecancel) | `export.realtime.status` | `phase` |
 | [`export.realtime.restart`](#exportrealtimerestart) | `export.realtime.status` | `phase` |
@@ -14910,7 +15100,9 @@ What the Arrangement View shows: every view command returns it.
 | `show_volume` | boolean | yes | Whether the track headers show their volume, pan, and sends. |
 | `show_return_tracks` | boolean | yes | Whether the return tracks' rows show in the lanes. |
 | `automation_lanes` | array of [`AutomationLane`](#automationlane) | no | The parameter each track's automation lane shows, for the tracks whose lane isn't showing the default (their volume): the choosers' choice. `target` `null` means the lane draws no envelope. |
+| `selected_breakpoint` | [`SelectedBreakpoint`](#selectedbreakpoint) or null | no | The breakpoint selected in that lane (WP-6.26), if any: `automation.select_breakpoint` sets it. |
 | `selected_fade` | [`FadeHandleState`](#fadehandlestate) or null | no | The selected fade handle (WP-6.51), if any: Delete deletes its fade. |
+| `selected_lane` | [`Lane`](#lane) or null | no | The automation lane that has the keyboard (WP-6.26): the one the last click, or Up and Down, selected, while Automation Mode is on. The keys of the automation editing spec's R20 to R26 act on its envelope. |
 | `time_selection_lanes` | array of [`Lane`](#lane) | no | The lanes the time selection covers: each a track's own lane or its automation lane (the automation editing spec, R1). Empty when the selection names no lane. |
 
 <details><summary>JSON Schema</summary>
@@ -14974,6 +15166,17 @@ What the Arrangement View shows: every view command returns it.
       "format": "double",
       "type": "number"
     },
+    "selected_breakpoint": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SelectedBreakpoint"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The breakpoint selected in that lane (WP-6.26), if any: `automation.select_breakpoint` sets it."
+    },
     "selected_clips": {
       "default": [],
       "description": "The selected clips (WP-1.8b), in the order they were selected. The editing commands act on these when there are any, and on the time selection otherwise.",
@@ -14992,6 +15195,17 @@ What the Arrangement View shows: every view command returns it.
         }
       ],
       "description": "The selected fade handle (WP-6.51), if any: Delete deletes its fade."
+    },
+    "selected_lane": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Lane"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The automation lane that has the keyboard (WP-6.26): the one the last click, or Up and Down, selected, while Automation Mode is on. The keys of the automation editing spec's R20 to R26 act on its envelope."
     },
     "selected_locators": {
       "default": [],
@@ -15086,6 +15300,49 @@ What the Arrangement View shows: every view command returns it.
     "show_return_tracks"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `ArrowKey`
+
+A direction a key points.
+
+One of:
+
+- `"left"`: Earlier in time.
+- `"right"`: Later in time.
+- `"up"`: A higher value.
+- `"down"`: A lower value.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A direction a key points.",
+  "oneOf": [
+    {
+      "const": "left",
+      "description": "Earlier in time.",
+      "type": "string"
+    },
+    {
+      "const": "right",
+      "description": "Later in time.",
+      "type": "string"
+    },
+    {
+      "const": "up",
+      "description": "A higher value.",
+      "type": "string"
+    },
+    {
+      "const": "down",
+      "description": "A lower value.",
+      "type": "string"
+    }
+  ]
 }
 ```
 
@@ -19143,6 +19400,8 @@ What the Clip View shows: which clip it is editing, the notes selected in it, it
 | `tab` | [`ClipTab`](#cliptab) | yes | The tab the Clip View shows. |
 | `preview` | boolean | yes | Whether the Preview switch is on (Spec: step-recording R1): one switch for every MIDI clip's editor, kept between launches. |
 | `envelope` | [`AutomationTarget`](#automationtarget) or null | yes | The parameter whose envelope the Envelopes tab shows; `null` when it shows none. |
+| `envelope_breakpoint` | [`Ticks`](#ticks) or null | no | The breakpoint selected in the Envelope Editor (WP-6.26), if any: `clip.select_envelope_breakpoint` sets it. |
+| `envelope_marker` | [`Ticks`](#ticks) or null | no | The Envelope Editor's insert marker, in ticks from the beginning of the clip's contents (WP-6.26), which Left and Right move along the envelope; `null` until it has been moved. |
 
 <details><summary>JSON Schema</summary>
 
@@ -19189,6 +19448,28 @@ What the Clip View shows: which clip it is editing, the notes selected in it, it
         }
       ],
       "description": "The parameter whose envelope the Envelopes tab shows; `null` when it shows none."
+    },
+    "envelope_breakpoint": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Ticks"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The breakpoint selected in the Envelope Editor (WP-6.26), if any: `clip.select_envelope_breakpoint` sets it."
+    },
+    "envelope_marker": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Ticks"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The Envelope Editor's insert marker, in ticks from the beginning of the clip's contents (WP-6.26), which Left and Right move along the envelope; `null` until it has been moved."
     },
     "focus_mode": {
       "description": "Whether Focus Mode is on (Spec: multi-clip-editing R13).",
@@ -22848,6 +23129,90 @@ What `automation.copy` put on the clipboard.
     "length"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `EnvelopeKeyState`
+
+What the envelope keys' commands report: the envelope they acted on, the insert marker, the selected breakpoint, and the envelope's value at the marker as its parameter reads.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `envelope` | [`EnvelopeKeys`](#envelopekeys) | yes | The envelope that has the keyboard. |
+| `marker` | [`Ticks`](#ticks) | yes | The insert marker, in ticks (from the beginning of the clip's contents in the Envelope Editor). |
+| `selected` | [`Ticks`](#ticks) or null | yes | The selected breakpoint's position, or `null` when none is selected. |
+| `value` | string | yes | The envelope's value at the insert marker, in the parameter's own units as its control shows it. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What the envelope keys' commands report: the envelope they acted on, the insert marker, the selected breakpoint, and the envelope's value at the marker as its parameter reads.",
+  "properties": {
+    "envelope": {
+      "$ref": "#/$defs/EnvelopeKeys",
+      "description": "The envelope that has the keyboard."
+    },
+    "marker": {
+      "$ref": "#/$defs/Ticks",
+      "description": "The insert marker, in ticks (from the beginning of the clip's contents in the Envelope Editor)."
+    },
+    "selected": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Ticks"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The selected breakpoint's position, or `null` when none is selected."
+    },
+    "value": {
+      "description": "The envelope's value at the insert marker, in the parameter's own units as its control shows it.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "envelope",
+    "marker",
+    "selected",
+    "value"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `EnvelopeKeys`
+
+Which envelope has the keyboard.
+
+One of:
+
+- `"lane"`: An automation lane in the Arrangement.
+- `"clip"`: The Clip View's Envelope Editor.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Which envelope has the keyboard.",
+  "oneOf": [
+    {
+      "const": "lane",
+      "description": "An automation lane in the Arrangement.",
+      "type": "string"
+    },
+    {
+      "const": "clip",
+      "description": "The Clip View's Envelope Editor.",
+      "type": "string"
+    }
+  ]
 }
 ```
 
@@ -28621,6 +28986,37 @@ One slot's mapping as its panel names it.
     "label"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `MarkerStep`
+
+How far `envelope.move_marker` moves the insert marker.
+
+One of:
+
+- `"grid"`: One grid step.
+- `"breakpoint"`: To the previous or next breakpoint.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "How far `envelope.move_marker` moves the insert marker.",
+  "oneOf": [
+    {
+      "const": "grid",
+      "description": "One grid step.",
+      "type": "string"
+    },
+    {
+      "const": "breakpoint",
+      "description": "To the previous or next breakpoint.",
+      "type": "string"
+    }
+  ]
 }
 ```
 
@@ -35461,6 +35857,46 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `SelectedBreakpoint`
+
+The breakpoint selected in an automation lane, with the edit it opens (the automation editing spec, R22, R23).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track. |
+| `target` | [`AutomationTarget`](#automationtarget) | yes | The parameter the lane shows. |
+| `at` | [`Ticks`](#ticks) | yes | The breakpoint's position. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The breakpoint selected in an automation lane, with the edit it opens (the automation editing spec, R22, R23).",
+  "properties": {
+    "at": {
+      "$ref": "#/$defs/Ticks",
+      "description": "The breakpoint's position."
+    },
+    "target": {
+      "$ref": "#/$defs/AutomationTarget",
+      "description": "The parameter the lane shows."
+    },
+    "track": {
+      "$ref": "#/$defs/TrackId",
+      "description": "The track."
+    }
+  },
+  "required": [
+    "track",
+    "target",
+    "at"
+  ],
+  "type": "object"
 }
 ```
 

@@ -582,6 +582,12 @@ pub struct ClipView {
     tab: ClipTab,
     /// The parameter whose envelope the Envelopes tab shows.
     envelope: Option<AutomationTarget>,
+    /// The Envelope Editor's insert marker (WP-6.26): the clip it belongs to
+    /// and its place, in ticks from the beginning of the clip's contents.
+    envelope_marker: Option<(ClipId, Ticks)>,
+    /// The breakpoint selected in the Envelope Editor: the clip and the
+    /// parameter its envelope is for, and its position.
+    envelope_breakpoint: Option<(ClipId, AutomationTarget, Ticks)>,
     /// The clips of the Session slots selected, in track then scene order,
     /// which the Clip View shows until an Arrangement selection replaces
     /// them, and the one selected last.
@@ -802,7 +808,51 @@ impl ClipView {
 
     /// Chooses the parameter whose envelope the Envelopes tab shows.
     pub fn set_envelope(&mut self, target: Option<AutomationTarget>) {
+        if self.envelope != target {
+            self.envelope_breakpoint = None;
+        }
         self.envelope = target;
+    }
+
+    /// The Envelope Editor's insert marker for `clip`, in ticks from the
+    /// beginning of its contents: where Left and Right have put it, or the
+    /// beginning (WP-6.26).
+    #[must_use]
+    pub fn envelope_marker(&self, clip: ClipId) -> Ticks {
+        self.envelope_marker
+            .filter(|(marked, _)| *marked == clip)
+            .map_or(Ticks::ZERO, |(_, at)| at)
+    }
+
+    /// Puts the Envelope Editor's insert marker for `clip` at `at`.
+    pub fn set_envelope_marker(&mut self, clip: ClipId, at: Ticks) {
+        self.envelope_marker = Some((clip, at));
+    }
+
+    /// The breakpoint selected in the Envelope Editor: the clip, the
+    /// parameter and the position (WP-6.26).
+    #[must_use]
+    pub fn envelope_breakpoint(&self) -> Option<(ClipId, AutomationTarget, Ticks)> {
+        self.envelope_breakpoint
+    }
+
+    /// Lets go of the selected breakpoint.
+    pub fn deselect_envelope_breakpoint(&mut self) {
+        self.envelope_breakpoint = None;
+    }
+
+    /// Selects a breakpoint of `clip`'s envelope for `target`, or none with
+    /// `at` `None`. Selecting puts the insert marker on it.
+    pub fn select_envelope_breakpoint(
+        &mut self,
+        clip: ClipId,
+        target: AutomationTarget,
+        at: Option<Ticks>,
+    ) {
+        self.envelope_breakpoint = at.map(|at| (clip, target, at));
+        if let Some(at) = at {
+            self.envelope_marker = Some((clip, at));
+        }
     }
 
     /// Shows the Session clip in a slot just selected, in place of the
@@ -1261,6 +1311,7 @@ impl ClipView {
     pub fn state(&self, doc: &Document, arrangement: &ArrangementView) -> ClipViewState {
         let clip = self.shown_clip(doc, arrangement);
         let shown = self.shown(doc, arrangement);
+        let any_shown = self.shown_any_clip(doc, arrangement);
         ClipViewState {
             visible: self.visible,
             draw_mode: self.draw_mode,
@@ -1288,6 +1339,15 @@ impl ClipView {
             tab: self.tab,
             preview: self.preview,
             envelope: self.envelope,
+            envelope_marker: any_shown
+                .and_then(|clip| self.envelope_marker.filter(|(marked, _)| *marked == clip))
+                .map(|(_, at)| at),
+            envelope_breakpoint: self
+                .envelope_breakpoint
+                .filter(|(selected, target, _)| {
+                    Some(*selected) == any_shown && Some(*target) == self.envelope
+                })
+                .map(|(_, _, at)| at),
         }
     }
 
@@ -1302,6 +1362,8 @@ impl ClipView {
         self.session_clips.clear();
         self.session_last = None;
         self.envelope = None;
+        self.envelope_marker = None;
+        self.envelope_breakpoint = None;
         self.stepped.clear();
         self.sample = SampleView::default();
     }

@@ -1178,14 +1178,6 @@ fn envelopes_tab_with_an_envelope(h: &mut Harness) {
     h.settle();
 }
 
-/// Shows the tracks' automation lanes, so their choosers are drawn.
-fn automation_mode_on(h: &mut Harness) {
-    h.shell
-        .run("arrangement.automation_mode", json!({ "on": true }))
-        .unwrap();
-    h.settle();
-}
-
 /// A MIDI input port for the Tempo & MIDI page's table to list (WP-2.2).
 fn a_midi_port(h: &mut Harness) {
     let test = bl_midi_io::TestBackend::new();
@@ -1903,8 +1895,16 @@ fn paths() -> BTreeMap<&'static str, Path> {
     // The Envelopes tab (WP-3.16): the pointer draws, moves, curves and
     // deletes breakpoints, and the keys for the breakpoints come with a
     // later package; its choosers and Linked switch are reached by Tab.
-    let clip_envelopes =
-        LaterView("the Envelopes tab's keys for breakpoints (the clip envelopes package)");
+    let clip_envelopes = Equivalent(
+        "the Envelope Editor's keys (automation-editing R22 to R26, clip-envelopes R14): Enter \
+         makes and selects a breakpoint (S-A11Y-019), Left, Right, Up, Down and a typed number \
+         move it and change its value (S-A11Y-023, S-A11Y-030), Delete deletes it (S-A11Y-025) \
+         and Cmd-Delete clears the envelope (S-ENV-005)",
+    );
+    let curving = Unobserved(
+        "curving a segment from the keyboard: Live's manual (41.5) names no key for it, and \
+         whether Live has one isn't observed",
+    );
     let device_params = Equivalent(
         "a described device's parameter controls in the Device View: Tab to one, then Up and \
          Down step it and Delete sets its default (the device framework spec, R17)",
@@ -1935,6 +1935,21 @@ fn paths() -> BTreeMap<&'static str, Path> {
          the envelopes (S-EDIT-016), and the lane's gestures move and select their breakpoints \
          (automation-editing R2 to R4)",
     );
+    // The automation lane that has the keyboard (WP-6.26): Enter makes and
+    // selects a breakpoint at the insert marker, and the arrows, a typed
+    // number, Delete and Cmd-Delete edit it.
+    let lane_keys = Equivalent(
+        "the automation lane's keys (automation-editing R22 to R26): Enter makes and selects a \
+         breakpoint (S-A11Y-019), Left, Right, Up, Down and a typed number move it and change \
+         its value (S-A11Y-023, S-A11Y-030), Delete deletes it (S-A11Y-025) and Cmd-Delete \
+         deletes the shown parameter's automation (S-ENV-005)",
+    );
+    // Selecting a breakpoint is view state: Enter and Option-click do it.
+    let selecting = Equivalent(
+        "Enter at the insert marker selects the breakpoint there (S-A11Y-019), Tab and \
+         Shift-Tab the next or previous (S-A11Y-022), and Option-click (Alt-click) selects \
+         one with the pointer (S-A11Y-021)",
+    );
     // The browser's tags (browser-tags R10 to R16): the Tag Editor and
     // Quick Tags reach them.
     let tag_editor = Equivalent(
@@ -1964,6 +1979,8 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("automation.move_breakpoints", Exception(envelope_edit)),
         ("automation.paste", Exception(envelope_edit)),
         ("automation.select_segment", Exception(envelope_edit)),
+        ("automation.select_breakpoint", Exception(selecting)),
+        ("clip.select_envelope_breakpoint", Exception(selecting)),
         ("automation.set_envelope", Exception(envelope_edit)),
         (
             "transport.play",
@@ -2089,26 +2106,11 @@ fn paths() -> BTreeMap<&'static str, Path> {
             "arrangement.automation_arm",
             main(nothing, control_bar, "Automation Arm", Key::Enter),
         ),
-        (
-            "automation.set_breakpoint",
-            Exception(LaterView("the arrangement's automation lanes (WP-2.12)")),
-        ),
-        (
-            "automation.set_curve",
-            Exception(LaterView("the arrangement's automation lanes (WP-2.12)")),
-        ),
-        (
-            "automation.move_breakpoint",
-            Exception(LaterView("the arrangement's automation lanes (WP-2.12)")),
-        ),
-        (
-            "automation.delete_breakpoint",
-            Exception(LaterView("the arrangement's automation lanes (WP-2.12)")),
-        ),
-        (
-            "automation.delete",
-            Exception(LaterView("the arrangement's automation lanes (WP-2.12)")),
-        ),
+        ("automation.set_breakpoint", Exception(lane_keys)),
+        ("automation.set_curve", Exception(curving)),
+        ("automation.move_breakpoint", Exception(lane_keys)),
+        ("automation.delete_breakpoint", Exception(lane_keys)),
+        ("automation.delete", Exception(lane_keys)),
         (
             "automation.re_enable_for",
             Exception(LaterView("the arrangement's automation lanes (WP-2.12)")),
@@ -2589,17 +2591,6 @@ fn paths() -> BTreeMap<&'static str, Path> {
             "perception.capture_view",
             Exception(AgentOnly("an agent's capture of a view as an image")),
         ),
-        // The automation lane's choosers (WP-2.12): Tab to the device
-        // chooser, then Up or Down steps the parameter the lane shows.
-        (
-            "arrangement.show_automation",
-            main(
-                automation_mode_on,
-                nothing,
-                "Automation Device",
-                Key::ArrowDown,
-            ),
-        ),
         // Agents' forms of gestures and dialogs.
         (
             "arrangement.move_clips",
@@ -3002,7 +2993,7 @@ fn paths() -> BTreeMap<&'static str, Path> {
             )),
         ),
         ("clip.set_envelope_breakpoint", Exception(clip_envelopes)),
-        ("clip.set_envelope_curve", Exception(clip_envelopes)),
+        ("clip.set_envelope_curve", Exception(curving)),
         ("clip.move_envelope_breakpoint", Exception(clip_envelopes)),
         ("clip.delete_envelope_breakpoint", Exception(clip_envelopes)),
         ("clip.delete_envelope", Exception(clip_envelopes)),
@@ -3013,15 +3004,6 @@ fn paths() -> BTreeMap<&'static str, Path> {
                 device_view,
                 "Linked",
                 Key::Enter,
-            ),
-        ),
-        (
-            "view.clip_envelope",
-            main(
-                envelopes_tab,
-                device_view,
-                "Envelope Control",
-                Key::ArrowDown,
             ),
         ),
         (

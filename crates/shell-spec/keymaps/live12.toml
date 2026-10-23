@@ -4359,7 +4359,10 @@ trigger = "latch"
 milestone = "M6"
 mac = ["N"]
 win = ["N"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "clip_view.focus_mode", contexts = ["note-editor"] },
+]
 
 [[shortcut]]
 id = "S-NOTE-041"
@@ -4739,7 +4742,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+D"]
 win = ["Ctrl+D"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "clip.duplicate_loop", contexts = ["loop-brace"] },
+]
 
 [[shortcut]]
 id = "S-COMP-007"

@@ -6,8 +6,7 @@
 //!
 //! Spec: info-view R1 to R5.
 
-mod common;
-
+use crate::common;
 use bl_shell::commands as ids;
 use bl_shell::transport_commands;
 use bl_ui::layout::{Element, REFERENCE, ShellLayout};

@@ -5,10 +5,7 @@
 //! that is the same at any block size. Every block runs as a real-time
 //! section under the allocation trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use std::f64::consts::TAU;
 use std::sync::Arc;
 

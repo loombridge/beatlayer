@@ -5,8 +5,7 @@
 //! that agents run by ID. The shell plays through the null device, paced
 //! like a sound card. Spec: control-bar-transport.
 
-mod common;
-
+use crate::common;
 use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
 

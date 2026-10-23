@@ -2,8 +2,7 @@
 //! the marquee reach the same note commands agents run, and each edit is one
 //! undo step however many frames its drag spans. Spec: piano-roll.
 
-mod common;
-
+use crate::common;
 use bl_core::time::Ticks;
 use bl_model::{Clip, ClipData, ClipId, Command, Document, MidiData, Note, TrackId};
 use bl_shell::clip_view::notes_in_order;

@@ -3,8 +3,7 @@
 //! its button and on N tapped and held, and what hovering shows. Spec:
 //! multi-clip-editing.
 
-mod common;
-
+use crate::common;
 use bl_core::time::Ticks;
 use bl_model::{Clip, ClipData, ClipId, Command, Document, MidiData, Note, TrackId};
 use bl_shell::Area;

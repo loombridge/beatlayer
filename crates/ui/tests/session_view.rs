@@ -8,8 +8,7 @@
 //!
 //! Spec: session-view R1 to R14.
 
-mod common;
-
+use crate::common;
 use bl_model::{SceneId, TrackId};
 use bl_shell::mixer_view::MixerOf;
 use bl_ui::layout::mixer::{MixerLayout, SceneRow, Sections, SessionLayout, TrackColumn};

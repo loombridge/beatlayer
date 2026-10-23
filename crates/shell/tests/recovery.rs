@@ -133,7 +133,8 @@ impl Run {
         let mut command = Command::new(std::env::current_exe().unwrap());
         command
             .args([
-                "child_edits_until_killed",
+                // The test's name in the crate's one test binary.
+                "recovery::child_edits_until_killed",
                 "--exact",
                 "--nocapture",
                 "--test-threads=1",

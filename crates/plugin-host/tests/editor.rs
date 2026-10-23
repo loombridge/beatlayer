@@ -8,8 +8,7 @@
 
 #![cfg(any(target_os = "windows", all(unix, not(target_os = "macos"))))]
 
-mod common;
-
+use crate::common;
 use bl_engine::NodeFactory as _;
 use bl_model::{DeviceId, ParamId};
 use bl_plugin_host::clap::ClapHost;

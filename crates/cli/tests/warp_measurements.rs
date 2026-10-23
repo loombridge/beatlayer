@@ -1,8 +1,6 @@
 //! Measurements for the Tones and Texture warp modes (R4, R6, R18, R19, R34,
 //! R35), and for Complex and Complex Pro (R21 to R24, R35).
 
-bl_rt::install_trap!();
-
 use std::sync::Arc;
 
 use bl_analysis::Audio;

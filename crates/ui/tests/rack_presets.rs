@@ -3,8 +3,7 @@
 //! saved there, and presets and devices dragged from the browser land in the
 //! Device View. Each gesture runs the registered command an agent runs.
 
-mod common;
-
+use crate::common;
 use std::path::PathBuf;
 
 use bl_engine::testing;

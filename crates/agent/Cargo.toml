@@ -1,4 +1,5 @@
 [package]
+autotests = false
 name = "bl-agent"
 description = "The agent API: Beatlayer's tools, permissions, checkpoints, and scheduled commands, served over MCP by the plug-in kit's lspk-agent."
 version.workspace = true
@@ -49,6 +50,10 @@ bl-test-clap = { path = "../test-clap" }
 lspk-example-gain.workspace = true
 lspk-plugin = { workspace = true, features = ["clap"] }
 lspk-plugin-agent.workspace = true
+
+[[test]]
+name = "agent_tests"
+path = "tests/main.rs"
 
 [lints]
 workspace = true

@@ -3,8 +3,7 @@
 //! reach the clip envelope commands agents run, each gesture as one undo
 //! step. Spec: clip-envelopes R8 to R11; piano-roll R1.
 
-mod common;
-
+use crate::common;
 use bl_core::time::Ticks;
 use bl_model::{AutomationTarget, ClipData, ClipId, MixerParam, SceneId};
 use bl_shell::note_commands::ClipTab;

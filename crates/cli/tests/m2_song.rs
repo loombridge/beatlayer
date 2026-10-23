@@ -24,8 +24,6 @@
 //! At `BL_TEST_DEPTH=full` the song is three minutes long; at quick depth it
 //! is its first 16 bars.
 
-bl_rt::install_trap!();
-
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 

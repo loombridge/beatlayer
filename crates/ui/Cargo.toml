@@ -1,4 +1,5 @@
 [package]
+autotests = false
 name = "bl-ui"
 description = "Views, widgets, GPU canvases, theming, and accessibility."
 version.workspace = true
@@ -76,6 +77,10 @@ wgpu = { version = "=30.0.1", default-features = false, features = [
 # The benchmark reads the main thread's CPU time, as the UI spikes did.
 [target.'cfg(unix)'.dev-dependencies]
 libc = "0.2"
+
+[[test]]
+name = "ui_tests"
+path = "tests/main.rs"
 
 [lints]
 workspace = true

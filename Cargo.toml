@@ -74,6 +74,18 @@ todo = "warn"
 undocumented_unsafe_blocks = "warn"
 unimplemented = "warn"
 
+# Debug and test builds are lightly optimised, with line tables only for
+# Beatlayer's crates and no debug info for dependencies. Unoptimised, every
+# test binary carried the whole app (a 165 MB binary for the app's tests), and
+# a worktree's 1,700 test binaries filled 170 GB; at opt-level 1 that binary is
+# 79 MB and the tests run faster. Backtraces still name the file and line, and
+# debug assertions and overflow checks stay on (23 October 2026).
+[profile.dev]
+opt-level = 1
+debug = "line-tables-only"
+[profile.dev.package."*"]
+debug = false
+
 # Decoding and sample-rate conversion run optimised in debug and test builds
 # too, so those builds stream audio from disk in real time (WP-1.3).
 # Unoptimised, they take about 2 ms to decode and convert a 4,096-frame

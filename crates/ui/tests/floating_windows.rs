@@ -6,8 +6,7 @@
 //! Auto-Hide Plug-In Windows switch. Devices are the framework's test
 //! devices.
 
-mod common;
-
+use crate::common;
 use bl_devices::testing::{self, SCOPE_TIME};
 use bl_model::{DeviceId, ParamId, TrackId};
 use bl_shell::device_commands::{DeviceAdded, TITLE_BAR_HEIGHT, frame_width};

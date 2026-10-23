@@ -4,8 +4,7 @@
 //! follow-action controls and the nudge buttons are drawn in place and
 //! disabled. Spec: launch-quantisation R14; L-CLIP-003, L-CLIP-005.
 
-mod common;
-
+use crate::common;
 use bl_core::time::Ticks;
 use bl_model::{Clip, ClipData, ClipId, Command, LaunchMode, LaunchQuantization, MidiData};
 use bl_shell::files::factory_default_set;

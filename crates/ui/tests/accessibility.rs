@@ -8,8 +8,7 @@
 //!
 //! Spec: accessibility R1 to R9.
 
-mod common;
-
+use crate::common;
 use std::collections::BTreeMap;
 
 use bl_core::time::Ticks;

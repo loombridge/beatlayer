@@ -3,10 +3,7 @@
 //! Random, Drive and Compand. Every block is a real-time section under the
 //! allocation trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_devices::touch::{
     COMPAND, DRIVE, LOWEST, MODE, OPERATION, OUT_HIGH, OUT_LOW, RANDOM, RANGE, TOUCH, shape,
 };

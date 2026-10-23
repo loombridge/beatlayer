@@ -3,8 +3,7 @@
 //! automation lane draws, and the Clip View's modulation envelope on its own
 //! scale. Spec: modulation R7 to R9.
 
-mod common;
-
+use crate::common;
 use bl_core::time::Ticks;
 use bl_devices::testing::{self, DRIVE_DRIVE, UTILITY_BALANCE, UTILITY_GAIN};
 use bl_engine::{PlayedParam, target_node};

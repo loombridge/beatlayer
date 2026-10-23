@@ -22,8 +22,8 @@ use egui::{ColorImage, Rect};
 use egui_wgpu::wgpu;
 
 /// Which window shows `view`, if it's on screen now: the Settings window
-/// for `settings`, the whole-window and detail views from the main window,
-/// and the others from whichever of the main window and the second window
+/// for `settings`, the whole window from the main window, and the others
+/// from whichever of the main window and the second window
 /// shows them. Otherwise, why not, and the command that shows it.
 ///
 /// # Errors
@@ -53,7 +53,15 @@ pub fn window_of(view: View, shell: &Shell, settings_open: bool) -> Result<Windo
         (shell.main_view_of(window) == wanted).then_some(window)
     };
     match view {
-        View::Window | View::Detail => Ok(WindowKind::Main),
+        View::Window => Ok(WindowKind::Main),
+        // The Clip and Device Views each show in one window (R7); with
+        // neither showing, the main window's detail area.
+        View::Detail => Ok(windows
+            .iter()
+            .filter(|window| open(window))
+            .find(|window| shell.detail_of(**window).any_shown())
+            .copied()
+            .unwrap_or(WindowKind::Main)),
         View::Arrangement => showing(MainView::Arrangement).ok_or(()).or_else(|()| {
             hidden(
                 "Arrangement View (the Session View is in front)",
@@ -419,6 +427,19 @@ mod tests {
         let second = drawn_second(&shell);
         let session = region(View::Session, &shell, &second).unwrap().unwrap();
         assert!(session.right() <= 990.0, "{session:?}");
+        // The detail area comes from the window its views show in: F12
+        // moves the main window's Device View to the second window.
+        assert_eq!(window_of(View::Detail, &shell, false), Ok(WindowKind::Main));
+        shell
+            .run(ids::VIEW_SWITCH_DETAIL_VIEW, serde_json::json!({}))
+            .unwrap();
+        assert_eq!(
+            window_of(View::Detail, &shell, false),
+            Ok(WindowKind::Second)
+        );
+        shell
+            .run(ids::VIEW_SWITCH_DETAIL_VIEW, serde_json::json!({}))
+            .unwrap();
         // Swapping the views swaps the windows they come from.
         shell
             .run(ids::VIEW_TOGGLE_SESSION_ARRANGEMENT, serde_json::json!({}))

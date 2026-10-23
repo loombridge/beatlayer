@@ -1000,6 +1000,9 @@ impl Host {
             (false, true) => {
                 self.record_second_frame();
                 self.second = None;
+                // Nothing is under the pointer in a closed window
+                // (info-view R8).
+                self.main_ui.set_other_hovered(None);
                 if let Some(main) = &self.main {
                     main.window.focus_window();
                 }

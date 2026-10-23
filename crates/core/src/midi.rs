@@ -201,6 +201,10 @@ pub enum MidiSource {
     Port(PortId),
     /// The computer MIDI keyboard.
     ComputerKeyboard,
+    /// A preview of the MIDI Note Editor (Spec: step-recording R2): a note
+    /// played into the chain of the MIDI track with this ID, whatever its
+    /// input and monitoring say. It is neither recorded nor held as a key.
+    Preview(crate::id::Id),
 }
 
 /// A message on its way from a MIDI input to the engine: where it came

@@ -3,7 +3,7 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed};
 use std::sync::{Arc, Mutex, PoisonError};
 
-use bl_core::midi::{MidiInputEvent, MidiMessage};
+use bl_core::midi::{MidiInputEvent, MidiMessage, MidiSource};
 use rtrb::{Consumer, Producer, RingBuffer};
 
 /// Makes the queue that carries MIDI input to the engine: the sending end,
@@ -72,7 +72,10 @@ impl InputSender {
     /// dropped, if the queue is full.
     pub fn send(&self, event: MidiInputEvent) -> bool {
         let status = event.message.status() & 0xF0;
-        let tapped = event.message.is_note_on() || event.message.is_note_off() || status == 0xB0;
+        // A preview of the MIDI Note Editor is not played on a keyboard: the
+        // listeners never hear it (Spec: step-recording R3).
+        let tapped = (event.message.is_note_on() || event.message.is_note_off() || status == 0xB0)
+            && !matches!(event.source, MidiSource::Preview(_));
         if self.tap.on.load(Relaxed) && tapped {
             let mut notes = self
                 .tap

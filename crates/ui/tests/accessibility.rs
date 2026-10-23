@@ -3082,6 +3082,15 @@ fn paths() -> BTreeMap<&'static str, Path> {
         // note-selection keys (S-A11Y-010, S-A11Y-011), Delete
         // (S-EDIT-005) and Cmd-A (S-NOTE-001).
         ("note.ramp_value", Exception(note_editor)),
+        // Spec: step-recording R2. The pointer's press plays a preview; from
+        // the keyboard, selecting a note with the note-jump keys sounds it.
+        (
+            "note.preview",
+            Exception(Equivalent(
+                "the pointer's press on a piano ruler key or a note; a note selected from the \
+                 keys sounds as a preview too (`clip_view.select_notes`)",
+            )),
+        ),
         // The stretch markers are dragged (I-DRAG-040); Live has no key
         // for stretching notes, so a keyboard path needs the maintainer's
         // choice of keys.

@@ -1974,7 +1974,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+G"]
 win = ["Ctrl+G"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "note.group", contexts = ["note-selection"] },
+]
 
 [[shortcut]]
 id = "S-NOTE-032"
@@ -1985,7 +1988,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+Shift+G"]
 win = ["Ctrl+Shift+G"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "note.ungroup", contexts = ["note-selection"] },
+]
 
 [[shortcut]]
 id = "S-NOTE-033"

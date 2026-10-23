@@ -114,7 +114,8 @@ pub use bounce::{BouncedAutomation, BouncedTrack};
 pub use changes::{Change, ChangeSet};
 pub use clip::{
     AudioData, Clip, ClipData, ClipEnvelope, ClipFolds, Crossfade, EDGE_FADE_SECONDS, EnvelopeKind,
-    MidiData, Note, PressurePoint, TakeClip, TakeLane, consolidated_midi, crossfades, fade_power,
+    GroupKind, MidiData, Note, NoteGroup, PressurePoint, TakeClip, TakeLane, consolidated_midi,
+    crossfades, fade_power,
 };
 pub use command::Command;
 pub use device::{

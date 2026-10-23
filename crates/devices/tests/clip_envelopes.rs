@@ -70,6 +70,7 @@ fn one_bar_clip(editor: &mut Editor, track: TrackId) -> ClipId {
                     loop_start: Ticks::ZERO,
                     loop_end: None,
                     signature: None,
+                    groups: Vec::new(),
                 }),
             ),
         })

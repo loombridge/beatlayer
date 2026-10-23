@@ -150,6 +150,9 @@ pub enum ModelError {
         /// The number given.
         value: f64,
     },
+    /// A MIDI clip's probability groups aren't whole: a group of fewer than
+    /// two notes, of notes with different chances, or one that isn't listed.
+    BrokenGroups,
     /// A note's key or velocity is outside 0 to 127 (velocity 1 to 127).
     InvalidNote {
         /// The note's index in the clip's note list.
@@ -423,6 +426,9 @@ impl fmt::Display for ModelError {
             ),
             Self::PositionOverflow => f.write_str("position is too large"),
             Self::InvalidValue { what, value } => write!(f, "{what} {value} is out of range"),
+            Self::BrokenGroups => f.write_str(
+                "a probability group needs two or more notes of one chance, and must be listed",
+            ),
             Self::InvalidNote { index } => {
                 write!(f, "note {index} has a key or velocity out of range")
             }

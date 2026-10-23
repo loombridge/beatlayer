@@ -29,9 +29,9 @@ use bl_engine::{
     Action, MediaMap, NodeKey, ParamValue, ScheduledCommand, SessionCommand, TransportCommand,
 };
 use bl_model::{
-    AudioData, Clip, ClipData, ClipId, Command, ContentHash, CrossfadeAssign, Device, DeviceId,
-    DeviceKind, Editor, ParamId, Preserve, SendTap, TrackId, TrackKind, TransientLoopMode,
-    WarpMarker, WarpMode,
+    AudioData, AutomationTarget, BeatsUpdate, Clip, ClipData, ClipId, ClipParam, Command,
+    ContentHash, CrossfadeAssign, Device, DeviceId, DeviceKind, Editor, EnvelopeKind, ParamId,
+    Preserve, SendTap, TrackId, TrackKind, TransientLoopMode, WarpMarker, WarpMode,
 };
 
 use super::{Fixture, MediaFile, SAMPLE_RATE, Scene};
@@ -157,6 +157,15 @@ pub(super) const FIXTURES: &[Fixture] = &[
                 from the middle of its file, between its Start and End markers, and one is cut \
                 off by its own end mid-file.",
         build: clip_mid_bar,
+    },
+    Fixture {
+        name: "comp-from-two-takes",
+        about: "A comp copied from two take lanes (WP-6.21): the first half of a bar from one \
+                take of the chirp and the second from another take of it, started three \
+                quarters of a second later, each part cut from its take as Copy Selection to \
+                Main Lane cuts it, so the main lane plays the stretches of the takes they \
+                came from.",
+        build: comp_from_two_takes,
     },
     Fixture {
         name: "looped-clip",
@@ -368,6 +377,19 @@ pub(super) const FIXTURES: &[Fixture] = &[
         name: "complex-pro-240",
         about: "The same tone in a 240 BPM song, in Complex Pro.",
         build: complex_pro_240,
+    },
+    Fixture {
+        name: "transposition-envelope-beats",
+        about: "The drum loop in Beats, a Transposition clip envelope rising from 0 to 12 \
+                semitones over the bar, each segment read at the ratio it begins with \
+                (warp-modes R17, R29).",
+        build: transposition_envelope_beats,
+    },
+    Fixture {
+        name: "transposition-envelope-tones",
+        about: "The sweep in Tones, a Transposition clip envelope rising from 0 to 7 \
+                semitones over the bar (warp-modes R20, R29).",
+        build: transposition_envelope_tones,
     },
 ];
 
@@ -1248,6 +1270,63 @@ fn clip_mid_bar() -> Scene {
     song.finish(4.0)
 }
 
+/// Spec: comping R17, R18. Two takes, each on a take lane of its own; the main
+/// lane holds a part of each, cut from the take at the edges of the stretch
+/// and copied to the main lane under an ID of its own. The take lanes play
+/// nothing, so the render is the two stretches, one after the other, each
+/// from the place in its take that the comp took it from.
+fn comp_from_two_takes() -> Scene {
+    let mut song = Song::new();
+    let chirp = song.chirp();
+    let track = song.track(TrackKind::Audio, "Vocal", None);
+    let tempo = TempoMap::default();
+    let bar = Ticks::QUARTER * 4;
+    let mut takes = Vec::new();
+    for (name, audio) in [
+        ("Take 1", AudioData::new(chirp)),
+        (
+            "Take 2",
+            AudioData {
+                start: 0.75,
+                ..AudioData::new(chirp)
+            },
+        ),
+    ] {
+        let lane = song.editor.new_id();
+        song.apply(Command::AddTakeLane {
+            track,
+            lane: bl_model::NewTakeLane {
+                id: Some(lane),
+                name: name.to_owned(),
+                clips: Vec::new(),
+            },
+            index: None,
+        });
+        let clip = Clip::new(
+            song.editor.new_id(),
+            Ticks::ZERO,
+            bar,
+            ClipData::Audio(audio),
+        );
+        song.apply(Command::CreateTakeClip {
+            lane,
+            clip: clip.clone(),
+        });
+        takes.push(clip);
+    }
+    // The first two beats from the first take, the last two from the second.
+    let half = Ticks::QUARTER * 2;
+    for (take, from, to) in [(&takes[0], Ticks::ZERO, half), (&takes[1], half, bar)] {
+        let part = Clip {
+            id: song.editor.new_id(),
+            ..take.part(from, to, &tempo)
+        };
+        song.apply(Command::CreateClip { track, clip: part });
+    }
+    let seconds = song.to_last_clip();
+    song.finish(seconds)
+}
+
 /// Spec: audio-clips R4, R5. From 1.1.3, the clip plays 0.25 seconds of
 /// pre-roll from its Start marker, then its 0.3-second brace over and over
 /// until it ends, three seconds later.
@@ -1746,4 +1825,92 @@ fn complex_pro_180() -> Scene {
 
 fn complex_pro_240() -> Scene {
     complex(240.0, true)
+}
+
+/// A warped one-bar clip of `file` (`frames` long, at 120 BPM) in `mode`, at
+/// 120 BPM, with the clip's id.
+fn bar_clip(
+    song: &mut Song,
+    file: ContentHash,
+    frames: usize,
+    mode: WarpMode,
+) -> (TrackId, ClipId) {
+    song.apply(Command::SetTempo {
+        tempo: TempoMap::constant(bpm(120.0)),
+    });
+    let track = song.track(TrackKind::Audio, "Audio", None);
+    let audio = AudioData {
+        warp: true,
+        warp_markers: vec![
+            WarpMarker {
+                time: 0.0,
+                beat: Ticks::ZERO,
+            },
+            WarpMarker {
+                time: frames as f64 / 48_000.0,
+                beat: Ticks::WHOLE,
+            },
+        ],
+        tempo: Some(120.0),
+        warp_mode: mode,
+        ..AudioData::new(file)
+    };
+    let clip = song.audio_clip(track, Ticks::ZERO, Ticks::WHOLE, audio);
+    (track, clip)
+}
+
+/// A Transposition clip envelope rising from 0 to `semitones` over the bar.
+fn transposition_ramp(song: &mut Song, clip: ClipId, semitones: f64) {
+    for (at, value) in [(Ticks::ZERO, 0.0), (Ticks::WHOLE, semitones)] {
+        song.apply(Command::SetClipEnvelopeBreakpoint {
+            clip,
+            target: AutomationTarget::Clip {
+                param: ClipParam::Transpose,
+            },
+            kind: EnvelopeKind::Modulation,
+            at,
+            value,
+        });
+    }
+}
+
+/// Spec: warp-modes R17, R29. The drum loop in Beats under a Transposition
+/// envelope: each segment is read at the ratio the envelope has where it
+/// begins.
+fn transposition_envelope_beats() -> Scene {
+    let mut song = Song::new();
+    let bar = drum_bar();
+    let file = song.file("drums.wav", 48_000, &[bar]);
+    let (_, clip) = bar_clip(&mut song, file, 96_000, WarpMode::Beats);
+    // A segment at each eighth note: a saved set renders the same, with no
+    // transients to find.
+    song.apply(Command::SetClipWarpSettings {
+        clip,
+        beats: Some(BeatsUpdate {
+            preserve: Some(Preserve::Eighth),
+            ..BeatsUpdate::default()
+        }),
+        tones: None,
+        texture: None,
+        complex_pro: None,
+    });
+    transposition_ramp(&mut song, clip, 12.0);
+    let seconds = song.to_last_clip();
+    song.finish(seconds)
+}
+
+/// Spec: warp-modes R20, R29. A sweep in Tones under a Transposition
+/// envelope.
+fn transposition_envelope_tones() -> Scene {
+    let mut song = Song::new();
+    let frames = 96_000;
+    let file = song.file(
+        "tone.wav",
+        48_000,
+        &[chirp(frames, 48_000, 220.0, 880.0, 0.0625)],
+    );
+    let (_, clip) = bar_clip(&mut song, file, frames, WarpMode::Tones);
+    transposition_ramp(&mut song, clip, 7.0);
+    let seconds = song.to_last_clip();
+    song.finish(seconds)
 }

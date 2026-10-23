@@ -421,9 +421,9 @@ pub struct Placed {
 }
 
 /// The envelope target for a clip placed with the devices in `devices` and
-/// `chains` (old ID to new): a mixer control and a MIDI controller stay; a
-/// device's or a chain's follows the device it belongs to, if that came with
-/// the clip; the rest are left out (clip files R9).
+/// `chains` (old ID to new): a mixer control, a MIDI controller and a clip
+/// setting stay; a device's or a chain's follows the device it belongs to, if
+/// that came with the clip; the rest are left out (clip files R9).
 fn retarget(
     target: AutomationTarget,
     devices: &BTreeMap<DeviceId, DeviceId>,
@@ -431,9 +431,11 @@ fn retarget(
 ) -> Option<AutomationTarget> {
     use AutomationTarget as T;
     match target {
-        T::Mixer { .. } | T::MidiCc { .. } | T::MidiPitchBend | T::MidiChannelPressure => {
-            Some(target)
-        }
+        T::Mixer { .. }
+        | T::MidiCc { .. }
+        | T::MidiPitchBend
+        | T::MidiChannelPressure
+        | T::Clip { .. } => Some(target),
         // A return track of another set means nothing here.
         T::Send { .. } => None,
         T::Device { device, param } => devices

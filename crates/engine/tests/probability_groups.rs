@@ -243,6 +243,54 @@ fn a_relaunched_session_clip_rolls_again() {
     assert!(distinct.len() >= 3, "{chosen:?}");
 }
 
+// Spec: note-editing R26, R27. A locate while a Session clip plays doesn't
+// start a pass of it: a Play One group keeps the note each launch chose.
+#[test]
+fn a_locate_during_a_session_clip_does_not_roll_its_groups_again() {
+    let mut rig = Rig::new(64);
+    rig.editor
+        .apply(Command::SetTempo { tempo: tempo() })
+        .unwrap();
+    let track = track(&mut rig.editor, TrackKind::Midi, None);
+    device(&mut rig.editor, track, testing::INSTRUMENT, &[]);
+    let scene = rig.editor.document().scenes().next().unwrap().id;
+    let mut midi = grouped(GroupKind::PlayOne, 1.0, &[]);
+    midi.looping = false;
+    midi.loop_end = None;
+    let id = rig.editor.new_id();
+    rig.editor
+        .apply(Command::CreateSlotClip {
+            track,
+            scene,
+            clip: Clip::new(id, Ticks::ZERO, BEAT, ClipData::Midi(midi)),
+        })
+        .unwrap();
+    rig.sync();
+    rig.sender
+        .session(SessionCommand::SetQuantization(LaunchSettings {
+            quantization: LaunchQuantization::None,
+            enabled: true,
+            ..LaunchSettings::default()
+        }));
+    rig.sender.transport(TransportCommand::Play);
+    let beat = tempo().ticks_to_frames(BEAT, RATE).get() as usize;
+    let blocks = beat.div_ceil(64);
+    for launch in 0..60 {
+        rig.sender.session(SessionCommand::Launch { track, scene });
+        for block in 0..blocks {
+            if block == blocks / 2 {
+                rig.sender
+                    .transport(TransportCommand::Locate(BEAT * (launch % 5) as i64));
+            }
+            rig.block(64);
+        }
+        // A locate back can play the launch's note again, but never another.
+        let keys: std::collections::BTreeSet<u8> =
+            played(&mut rig).into_iter().map(|(_, key)| key).collect();
+        assert!(keys.len() <= 1, "launch {launch} played {keys:?}");
+    }
+}
+
 // A render from the player's fixed seed is always the same.
 #[test]
 fn a_grouped_clip_renders_the_same_notes_from_a_fixed_seed() {

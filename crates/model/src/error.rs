@@ -6,7 +6,7 @@ use bl_core::id::Id;
 use bl_core::time::Ticks;
 
 use crate::device::DeviceRole;
-use crate::ids::{ChainId, ClipId, DeviceId, GrooveId, LocatorId, SceneId, TrackId};
+use crate::ids::{ChainId, ClipId, DeviceId, GrooveId, LocatorId, SceneId, TakeLaneId, TrackId};
 use crate::layers::LayerId;
 use crate::track::TrackKind;
 
@@ -20,6 +20,16 @@ pub enum ModelError {
     NoSuchTrack(TrackId),
     /// No clip has this ID.
     NoSuchClip(ClipId),
+    /// No take lane has this ID (WP-6.21).
+    NoSuchTakeLane(TakeLaneId),
+    /// A take lane or one of its clips was handed over without the ID the
+    /// editor issues when it's left out (WP-6.21).
+    MissingId,
+    /// The take lanes a command names belong to different tracks, or there
+    /// are none (WP-6.21).
+    TakeLanesNotOnOneTrack,
+    /// A take lane's name can't be empty (the comping spec, R6).
+    EmptyTakeLaneName,
     /// No device has this ID.
     NoSuchDevice(DeviceId),
     /// No scene has this ID.
@@ -289,6 +299,12 @@ impl fmt::Display for ModelError {
         match self {
             Self::NoSuchTrack(id) => write!(f, "no {id}"),
             Self::NoSuchClip(id) => write!(f, "no {id}"),
+            Self::NoSuchTakeLane(id) => write!(f, "no {id}"),
+            Self::MissingId => f.write_str("a take lane and its clips need IDs"),
+            Self::TakeLanesNotOnOneTrack => {
+                f.write_str("the take lanes must be some of one track's")
+            }
+            Self::EmptyTakeLaneName => f.write_str("a take lane's name can't be empty"),
             Self::NoSuchDevice(id) => write!(f, "no {id}"),
             Self::NoSuchChain(id) => write!(f, "no {id}"),
             Self::NotARack(id) => write!(f, "{id} isn't a rack, so it has no chains"),

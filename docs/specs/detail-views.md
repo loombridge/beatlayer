@@ -1,6 +1,6 @@
 # The detail views: the Clip View and the Device View, shown alone or stacked, resized, and expanded
 
-- **Status:** draft
+- **Status:** partial (R1 to R18 implemented; R19 to R26 come with WP-6.72)
 - **Work packages:** WP-6.27 (R1 to R18): the Device View's own switch, the selectors, stacking, hiding and resizing the detail area, Expand Clip View, and the keyboard focus between the two views; WP-6.72 (R19 to R26): the clip panels' arrangement, horizontal or vertical, folding them, and the panel selector's keys. The second window's detail area, and moving a view between windows, are [second-window.md](second-window.md)'s; the Info View beside the views is [info-view.md](info-view.md)'s
 - **Parity-matrix row:** Views and workflow: Clip View and Device View shown together; Interface placement and key bindings: Placement of every view, panel, and control (the clip panels' arrangement)
 - **Checked against:** the Live 12 reference manual (online edition), read 20 October 2026; the Live 12 release notes, 12.0 and 12.0.5; the UI parity reference's rows L-WIN-006, L-WIN-009, L-CLIP-001, L-DEV-001, L-DEV-002, L-STAT-004 to L-STAT-007, M-VIEW-010 to M-VIEW-014, I-CLICK-005, I-CLICK-006, I-CLICK-027, I-DRAG-028 and I-FOCUS-002, recorded from Live 12.4.3 on macOS; for R19 to R26, L-CLIP-002, L-CLIP-003, L-CLIP-009, M-VIEW-015 to M-VIEW-017, M-NAV-011, I-CLICK-008, I-DRAG-029, S-FOCUS-009 and S-FOCUS-010
@@ -75,24 +75,24 @@ This spec covers the detail area of the main window: which views it shows, where
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1 | to be written in WP-6.27 | |
-| R2 | to be written in WP-6.27 | |
-| R3 | to be written in WP-6.27 | |
-| R4 | to be written in WP-6.27 | |
-| R5 | to be written in WP-6.27 | |
-| R6 | to be written in WP-6.27 | |
-| R7 | to be written in WP-6.27 | |
-| R8 | to be written in WP-6.27 | |
-| R9 | to be written in WP-6.27 | |
-| R10 | to be written in WP-6.27 | |
-| R11 | to be written in WP-6.27 | |
-| R12 | to be written in WP-6.27 | |
-| R13 | to be written in WP-6.27 | |
-| R14 | to be written in WP-6.27 | |
-| R15 | to be written in WP-6.27 | |
-| R16 | to be written in WP-6.27 | |
-| R17 | to be written in WP-6.27 | |
-| R18 | to be written in WP-6.27 | |
+| R1 | `crates/shell/tests/detail_views.rs`, `each_view_has_its_own_switch`; `crates/ui/tests/detail_views.rs`, `the_toggles_and_selectors_run_their_commands`, `the_keys_reach_the_detail_commands`, `the_menu_items_reach_their_commands_and_follow_the_views`; `crates/ui/tests/keymap.rs`, `the_detail_views_shortcuts_reach_their_commands` | unit, UI script |
+| R2 | `crates/shell/tests/detail_views.rs`, `option_click_shows_both_and_changes_nothing_when_both_show`; `crates/ui/tests/detail_views.rs`, `the_toggles_and_selectors_run_their_commands` | unit, UI script |
+| R3 | `crates/ui/tests/detail_views.rs`, `the_toggles_and_selectors_run_their_commands`, `the_toggles_and_selectors_reach_assistive_technology` | UI script |
+| R4 | `crates/ui/tests/detail_views.rs`, `double_clicking_an_arrangement_clip_shows_the_clip_view`, `double_clicking_a_session_slot_shows_the_clip_view`, `double_clicking_a_title_bar_shows_the_device_view` | UI script |
+| R5 | `crates/shell/tests/detail_views.rs`, `switching_shows_the_other_view_moves_the_focus_or_brings_one_back`; `crates/ui/tests/detail_views.rs`, `shift_tab_and_f12_switch_the_views_by_the_tab_setting` | unit, UI script |
+| R6 | `crates/shell/tests/detail_views.rs`, `hiding_the_detail_area_brings_the_same_views_back`; `crates/ui/tests/detail_views.rs`, `the_menu_items_reach_their_commands_and_follow_the_views` | unit, UI script |
+| R7 | `crates/ui/src/layout.rs` (tests), `one_view_alone_sits_at_the_detail_areas_bottom` | unit |
+| R8 | `crates/ui/src/layout.rs` (tests), `stacked_views_keep_the_device_view_at_the_bottom` | unit |
+| R9 | `crates/ui/src/layout.rs` (tests), `with_neither_view_the_main_view_runs_to_the_detail_areas_bottom` | unit |
+| R10 | `crates/shell/tests/detail_views.rs`, `the_clip_views_height_keeps_to_its_limits`; `crates/ui/tests/detail_views.rs`, `dragging_the_top_edge_resizes_and_closes_the_clip_view`, `dragging_the_device_views_edge_closes_it_past_half_its_height` | unit, UI script |
+| R11 | `crates/shell/tests/detail_views.rs`, `expanding_the_clip_view_goes_back_to_the_height_it_had`; `crates/ui/tests/detail_views.rs`, `the_expand_key_works_in_the_clip_view`; `crates/ui/src/layout.rs` (tests), `expanding_gives_the_clip_view_the_room_the_main_view_can_spare` | unit, UI script |
+| R12 | `crates/ui/src/layout.rs` (tests), `the_clip_views_height_is_squeezed_in_a_short_window`, `no_pane_overlaps_another_at_any_zoom_or_size` | unit |
+| R13 | `crates/ui/tests/detail_views.rs`, `the_scene_view_takes_the_top_views_place` | UI script |
+| R14 | `crates/shell/tests/detail_views.rs`, `the_focus_commands_show_their_view_and_set_the_keys_contexts`; `crates/ui/tests/detail_views.rs`, `the_keys_reach_the_detail_commands`, `a_click_in_a_view_gives_it_the_focus` | unit, UI script |
+| R15 | `crates/shell/tests/detail_views.rs`, `the_focus_commands_show_their_view_and_set_the_keys_contexts`; `crates/ui/tests/detail_views.rs`, `a_note_editor_key_reaches_only_the_view_with_the_focus` | unit, UI script |
+| R16 | `crates/shell/tests/detail_views.rs`, `a_new_session_shows_the_device_view_alone`, `no_detail_command_changes_the_set_or_adds_an_undo_step` | unit |
+| R17 | `crates/shell/tests/detail_views.rs`, `view_state_reports_the_detail_area`; `crates/agent/tests/readback_runtime.rs`, `view_state_reads_back_the_detail_area` | unit, agent API |
+| R18 | `crates/ui/tests/detail_views.rs`, `the_toggles_and_selectors_reach_assistive_technology`, `the_top_edge_is_a_splitter`; `crates/ui/tests/accessibility.rs`, `every_m1_command_is_reachable_from_the_keyboard` | UI script |
 | R19 | to be written in WP-6.72 | |
 | R20 | to be written in WP-6.72 | |
 | R21 | to be written in WP-6.72 | |

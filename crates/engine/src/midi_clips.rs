@@ -192,7 +192,7 @@ impl MidiClipList {
                 .map(Arc::new)
         };
         let mut clips = Vec::new();
-        for clip in track.clips() {
+        for clip in track.played_clips() {
             if clip.mute {
                 continue;
             }
@@ -436,9 +436,13 @@ pub struct MidiClipPlayer {
     /// The seed `rng` was made with, which the probability groups' rolls
     /// follow too.
     seed: u64,
-    /// Counts the starts of playback, locates and launches: each is a new
-    /// pass for every probability group (note-editing R26).
+    /// Counts the starts of playback, locates and returns to the
+    /// Arrangement: each is a new pass for the Arrangement's probability
+    /// groups (note-editing R26).
     epoch: u64,
+    /// Counts the Session launches, each a new pass for the launched clip's
+    /// groups, which a locate doesn't break.
+    launches: u64,
     /// The frame the last start or locate played from.
     entry_frame: i64,
     next_note_id: u32,
@@ -460,6 +464,7 @@ impl MidiClipPlayer {
             rng: Rng::new(0x853c_49e6_748f_ea9b),
             seed: 0x853c_49e6_748f_ea9b,
             epoch: 0,
+            launches: 0,
             entry_frame: 0,
             next_note_id: 1,
         }
@@ -977,7 +982,10 @@ impl Node for MidiClipPlayer {
                 stop_clip_sounding(old, 0, &mut self.sounding, &mut self.scratch_notes);
             }
             self.session = launched_id;
+            self.launches += 1;
+            // The Arrangement plays again from here.
             self.epoch += 1;
+            self.entry_frame = from_frame;
         }
         let arrangement = Roll {
             run: noise(self.seed, self.epoch, 0).to_bits(),
@@ -993,8 +1001,8 @@ impl Node for MidiClipPlayer {
                 tempo,
                 sample_rate,
                 Roll {
+                    run: noise(self.seed, self.launches, 1).to_bits(),
                     entry: None,
-                    ..arrangement
                 },
                 &mut self.rng,
                 &mut self.next_note_id,

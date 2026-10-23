@@ -34,7 +34,7 @@ fn a_new_set_shows_the_info_view_where_live_puts_it() {
     assert_eq!(info.min, layout.detail.min);
     assert_eq!(info.right(), 240.0);
     assert_eq!(info.bottom(), layout.detail.bottom());
-    assert_eq!(layout.device_view.left(), 249.0);
+    assert_eq!(layout.device_view.unwrap().left(), 249.0);
     let nodes = Harness::nodes(&output);
     assert!(
         nodes
@@ -140,7 +140,7 @@ fn the_status_bar_toggle_hides_it_and_the_device_view_widens() {
     let layout = h.main.drawn_layout().expect("the last frame's layout");
     assert!(layout.info_view.is_none());
     assert_eq!(
-        layout.device_view.left(),
+        layout.device_view.unwrap().left(),
         layout.detail.left(),
         "the Device View takes its place"
     );

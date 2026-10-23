@@ -19,16 +19,19 @@
 use std::collections::BTreeSet;
 
 use bl_core::time::{Ticks, TimeSignature, TimeSignatureMap};
+use bl_model::note_ops::{self, MOST_PARTS, Mapping};
 use bl_model::{
     AutomationTarget, ClipData, ClipFolds, ClipId, Command, Document, Editor, GroupKind, MidiData,
     Note, NoteGroup,
 };
+use bl_shell_spec::editing::{Position, SplitArgs};
 use bl_shell_spec::notes::{
-    self as ids, AddNoteArgs, AdjustValueArgs, ClipTab, ClipViewState, CopyNotesArgs,
-    DeactivateArgs, DeleteNotesArgs, DuplicateNotesArgs, GroupNotesArgs, MoveNotesArgs,
-    NoteClipboardState, NoteEditResult, NoteField, NoteSelectMode, NoteSelection, PasteNotesArgs,
-    QuantizeNotesArgs, QuantizeSettings, QuantizeSettingsArgs, QuantizeTarget, RampValueArgs,
-    RandomizeAmounts, RandomizeArgs, ResizeNotesArgs, SelectNotesArgs, SetValueArgs,
+    self as ids, AddNoteArgs, AdjustValueArgs, ChopNotesArgs, ChopStep, ClipTab, ClipViewState,
+    CopyNotesArgs, DeactivateArgs, DeleteNotesArgs, DuplicateNotesArgs, FitToTimeArgs,
+    GroupNotesArgs, JoinNotesArgs, MoveNotesArgs, NoteClipboardState, NoteEditResult, NoteField,
+    NoteSelectMode, NoteSelection, PasteNotesArgs, QuantizeNotesArgs, QuantizeSettings,
+    QuantizeSettingsArgs, QuantizeTarget, RampValueArgs, RandomizeAmounts, RandomizeArgs,
+    ResizeNotesArgs, SelectNotesArgs, SetValueArgs, SplitNotesArgs, StretchNotesArgs,
     UngroupNotesArgs,
 };
 use bl_shell_spec::sample_editor as sample_ids;
@@ -39,7 +42,7 @@ use serde_json::Value;
 
 use crate::arrangement::ArrangementView;
 use crate::arrangement::editing::{EditFailure, transaction};
-use crate::arrangement::grid::{Step, snap};
+use crate::arrangement::grid::{Step, lines, snap};
 use crate::sample_editor::SampleView;
 
 fn invalid(message: impl Into<String>) -> EditFailure {
@@ -515,7 +518,8 @@ impl NoteClipboard {
 /// settings.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ClipView {
-    /// Whether the Clip View shows in the detail area.
+    /// Whether the Clip View shows in the detail area, as the shell's
+    /// detail area has it (detail-views R1).
     visible: bool,
     /// Whether Draw Mode is on (B).
     draw_mode: bool,
@@ -678,9 +682,10 @@ impl ClipView {
         }
     }
 
-    /// Shows the Clip View, or hides it.
-    pub fn toggle(&mut self) {
-        self.visible = !self.visible;
+    /// Records whether the Clip View shows: the detail area decides, and
+    /// the shell passes it on.
+    pub(crate) fn set_visible(&mut self, visible: bool) {
+        self.visible = visible;
     }
 
     /// Switches Draw Mode on or off.
@@ -1124,6 +1129,233 @@ fn place_of(ordered: &[Note], note: &Note) -> u32 {
     u32::try_from(place).unwrap_or(u32::MAX)
 }
 
+/// How many parts a note has after one press of Cmd with Up or Down, from
+/// `parts`: one more or fewer, or the next or previous power of two, from 1
+/// to [`MOST_PARTS`] (note-editing R36).
+#[must_use]
+pub fn step_parts(parts: u32, step: ChopStep) -> u32 {
+    let power = |up: bool| {
+        let powers = (0..=MOST_PARTS.ilog2()).map(|k| 1u32 << k);
+        if up {
+            powers
+                .into_iter()
+                .find(|p| *p > parts)
+                .unwrap_or(MOST_PARTS)
+        } else {
+            powers.into_iter().rev().find(|p| *p < parts).unwrap_or(1)
+        }
+    };
+    match step {
+        ChopStep::More => (parts + 1).min(MOST_PARTS),
+        ChopStep::Fewer => parts.saturating_sub(1).max(1),
+        ChopStep::NextPower => power(true),
+        ChopStep::PreviousPower => power(false),
+    }
+}
+
+/// A note on its way through an edit that cuts, joins or reshapes notes:
+/// whether it was selected, and whether the edit made it.
+struct Carried {
+    note: Note,
+    selected: bool,
+    touched: bool,
+}
+
+impl Carried {
+    fn kept(note: &Note, selected: bool) -> Self {
+        Self {
+            note: note.clone(),
+            selected,
+            touched: false,
+        }
+    }
+
+    fn made(note: Note, selected: bool) -> Self {
+        Self {
+            note,
+            selected,
+            touched: true,
+        }
+    }
+}
+
+/// Stores `carried` as the clip's notes in the editor's order, and returns
+/// the places of the notes the edit made and of the ones selected.
+fn store(
+    editor: &mut Editor,
+    clip: ClipId,
+    midi: &MidiData,
+    mut carried: Vec<Carried>,
+) -> Result<(Vec<u32>, Vec<u32>), EditFailure> {
+    carried.sort_by_key(|carried| (carried.note.start, carried.note.key));
+    let places = |wanted: fn(&Carried) -> bool| -> Vec<u32> {
+        carried
+            .iter()
+            .enumerate()
+            .filter(|(_, carried)| wanted(carried))
+            .map(|(place, _)| u32::try_from(place).unwrap_or(u32::MAX))
+            .collect()
+    };
+    let made = places(|carried| carried.touched);
+    let selected = places(|carried| carried.selected);
+    set_notes(
+        editor,
+        clip,
+        midi,
+        carried.into_iter().map(|carried| carried.note).collect(),
+    )?;
+    Ok((made, selected))
+}
+
+/// What an edit that carries notes did, and the selection it leaves.
+fn carried_result(
+    view: &mut ClipView,
+    clip: ClipId,
+    (made, selected): (Vec<u32>, Vec<u32>),
+    recorded: bool,
+) -> Value {
+    view.select(clip, selected.clone());
+    to_value(&NoteEditResult {
+        notes: made,
+        selected,
+        undo_step: recorded,
+    })
+}
+
+/// Where each cut of `note.split` falls: the ticks given for every note
+/// named, or each note's own, as the places in the clip's notes in order.
+fn split_cuts(
+    args: SplitNotesArgs,
+    view: &ClipView,
+    doc: &Document,
+    arrangement: &ArrangementView,
+    clip: ClipId,
+    count: usize,
+) -> Result<Vec<(u32, Ticks)>, EditFailure> {
+    let SplitNotesArgs {
+        clip: _,
+        notes,
+        at,
+        cuts,
+    } = args;
+    if let Some(cuts) = cuts {
+        if notes.is_some() || at.is_some() {
+            return Err(invalid("give `cuts`, or `notes` and `at`, not both"));
+        }
+        if let Some(cut) = cuts.iter().find(|cut| cut.note as usize >= count) {
+            return Err(invalid(format!(
+                "clip {} has no note at place {}",
+                clip.0, cut.note
+            )));
+        }
+        return Ok(cuts.iter().map(|cut| (cut.note, cut.at)).collect());
+    }
+    let selected = view.selected_notes(doc, arrangement);
+    let places: Vec<u32> = match notes {
+        Some(notes) => places_or_selected(view, doc, arrangement, clip, Some(notes), count)?,
+        None if !selected.is_empty() => selected.to_vec(),
+        None => (0..u32::try_from(count).unwrap_or(u32::MAX)).collect(),
+    };
+    // Spec: note-editing R35. Without ticks, the time selection's edges, or
+    // the insert marker.
+    let ticks = match at {
+        Some(at) if at.is_empty() => return Err(invalid("`at` is empty")),
+        Some(at) => at,
+        None => match view.time_selection(doc, arrangement) {
+            Some((from, to)) => vec![from, to],
+            None => vec![
+                view.insert_marker(doc, arrangement)
+                    .ok_or_else(|| unavailable("there is no insert marker to split at"))?,
+            ],
+        },
+    };
+    Ok(places
+        .iter()
+        .flat_map(|place| ticks.iter().map(|at| (*place, *at)))
+        .collect())
+}
+
+/// Moves the breakpoints of a clip's linked envelopes that lie in `range`
+/// by `map` (note-editing R46). Each moved breakpoint is parked beyond
+/// every position first, so none meets another on the way, and one that
+/// lands on a breakpoint that stays replaces it.
+fn stretch_envelopes(
+    editor: &mut Editor,
+    clip: ClipId,
+    range: (Ticks, Ticks),
+    map: &Mapping,
+) -> Result<(), EditFailure> {
+    let envelopes = editor
+        .document()
+        .clip(clip)
+        .map(|clip| clip.envelopes.clone())
+        .unwrap_or_default();
+    for envelope in envelopes.iter().filter(|envelope| envelope.linked) {
+        let (target, kind) = (envelope.target, envelope.kind);
+        let points: Vec<Ticks> = envelope.envelope.points().map(|point| point.at).collect();
+        let moved: Vec<(Ticks, Ticks)> = points
+            .iter()
+            .filter(|at| **at >= range.0 && **at <= range.1)
+            .map(|at| (*at, map.at(*at)))
+            .filter(|(at, to)| at != to)
+            .collect();
+        if moved.iter().any(|(_, to)| to.is_negative()) {
+            return Err(refused(
+                "a breakpoint would move before the clip's contents",
+            ));
+        }
+        let top = points
+            .iter()
+            .chain(moved.iter().map(|(_, to)| to))
+            .max()
+            .copied()
+            .unwrap_or(Ticks::ZERO)
+            + Ticks(1);
+        for (index, (at, _)) in moved.iter().enumerate() {
+            let to = top + Ticks(i64::try_from(index).unwrap_or(0));
+            editor.apply(Command::MoveClipEnvelopeBreakpoint {
+                clip,
+                target,
+                kind,
+                at: *at,
+                to,
+                value: None,
+            })?;
+        }
+        for (index, (_, to)) in moved.iter().enumerate() {
+            let parked = top + Ticks(i64::try_from(index).unwrap_or(0));
+            let taken = editor
+                .document()
+                .clip(clip)
+                .and_then(|value| {
+                    value
+                        .envelopes
+                        .iter()
+                        .find(|e| e.target == target && e.kind == kind)
+                        .and_then(|e| e.envelope.point(*to))
+                })
+                .is_some();
+            if taken {
+                editor.apply(Command::DeleteClipEnvelopeBreakpoint {
+                    clip,
+                    target,
+                    kind,
+                    at: *to,
+                })?;
+            }
+            editor.apply(Command::MoveClipEnvelopeBreakpoint {
+                clip,
+                target,
+                kind,
+                at: parked,
+                to: *to,
+                value: None,
+            })?;
+        }
+    }
+    Ok(())
+}
+
 /// The name of the undo step a note command makes.
 #[must_use]
 pub fn label(id: &str) -> &'static str {
@@ -1135,6 +1367,11 @@ pub fn label(id: &str) -> &'static str {
         ids::QUANTIZE_NOTES => "Quantize notes",
         ids::SET_VALUE => "Set note values",
         ids::RAMP_VALUE => "Ramp note values",
+        ids::SPLIT => "Split Notes",
+        ids::CHOP => "Chop Notes",
+        ids::JOIN => "Join Notes",
+        ids::FIT_TO_TIME => "Fit to Time Range",
+        ids::STRETCH => "Stretch Notes",
         ids::ADJUST_VALUE => "Adjust note values",
         ids::RANDOMIZE => "Randomize note values",
         ids::DEACTIVATE => "Deactivate notes",
@@ -1210,6 +1447,94 @@ pub fn run_view(
         }
         other => Err(invalid(format!("`{other}` isn't a Clip View command"))),
     }
+}
+
+/// Whether Split Note(s) would split a note now: one the insert marker or
+/// an edge of the time selection crosses, among the selected notes or with
+/// none selected all of them (note-editing R35). The editor's menu shows
+/// the item only while this holds.
+#[must_use]
+pub fn would_split(doc: &Document, view: &ClipView, arrangement: &ArrangementView) -> bool {
+    let Ok((clip, midi)) = clip_and_data(doc, view, arrangement, None) else {
+        return false;
+    };
+    let ordered = notes_in_order(&midi);
+    let Ok(cuts) = split_cuts(
+        SplitNotesArgs::default(),
+        view,
+        doc,
+        arrangement,
+        clip,
+        ordered.len(),
+    ) else {
+        return false;
+    };
+    cuts.iter().any(|(place, at)| {
+        ordered
+            .get(*place as usize)
+            .is_some_and(|note| *at > note.start && *at < note.start + note.length)
+    })
+}
+
+/// What Split Clip runs (note-editing R41): the `arrangement.split`
+/// arguments that cut the Arrangement clip the editor shows at the time
+/// selection's edges that fall strictly inside it, and the clip's span
+/// from the time selection, in song ticks, whose parts the split selects.
+///
+/// # Errors
+///
+/// [`EditFailure`] for a Session clip, a missing time selection, or edges
+/// that all fall outside the clip.
+pub fn split_clip_plan(
+    doc: &Document,
+    view: &ClipView,
+    arrangement: &ArrangementView,
+) -> Result<(Value, ClipId, (Ticks, Ticks)), EditFailure> {
+    let clip = view
+        .shown_clip(doc, arrangement)
+        .ok_or_else(|| unavailable("no MIDI clip is shown in the Clip View"))?;
+    let value = doc
+        .clip(clip)
+        .ok_or_else(|| invalid(format!("no clip has the ID {}", clip.0)))?;
+    let arranged = doc
+        .clip_track(clip)
+        .and_then(|track| doc.track(track))
+        .is_some_and(|track| track.clips().any(|other| other.id == clip));
+    if !arranged {
+        return Err(refused(
+            "a Session clip can't be split: it isn't on the Arrangement",
+        ));
+    }
+    let ClipData::Midi(midi) = &value.data else {
+        return Err(refused("the clip isn't a MIDI clip"));
+    };
+    let (from, to) = view
+        .time_selection(doc, arrangement)
+        .ok_or_else(|| unavailable("there is no time selection to split at"))?;
+    // Contents tick `t` plays at the clip's start once the Start marker
+    // is taken off it.
+    let song = |tick: Ticks| value.start + (tick - midi.start);
+    let (from, to) = (song(from), song(to));
+    let at: Vec<Position> = [from, to]
+        .into_iter()
+        .filter(|at| *at > value.start && *at < value.end())
+        .map(Position::from)
+        .collect();
+    if at.is_empty() {
+        return Err(refused(
+            "the time selection's edges don't fall inside the clip",
+        ));
+    }
+    let args = SplitArgs {
+        clips: Some(vec![clip]),
+        at: Some(at),
+        ..SplitArgs::default()
+    };
+    Ok((
+        to_value(&args),
+        clip,
+        (from.max(value.start), to.min(value.end())),
+    ))
 }
 
 /// Runs a note command, as `Shell::run` does: an edit returns a
@@ -1898,6 +2223,236 @@ pub fn run(
                 undo_step: recorded,
             }))
         }
+        ids::SPLIT => {
+            let args: SplitNotesArgs = parse(args)?;
+            let (clip, midi) = clip_and_data(doc, view, arrangement, args.clip)?;
+            let ordered = notes_in_order(&midi);
+            let cuts = split_cuts(args, view, doc, arrangement, clip, ordered.len())?;
+            let selected = view.selected_notes(doc, arrangement).to_vec();
+            let (done, recorded) = transaction(editor, label(ids::SPLIT), |editor| {
+                let mut carried = Vec::with_capacity(ordered.len());
+                for (place, note) in ordered.iter().enumerate() {
+                    let place = u32::try_from(place).unwrap_or(u32::MAX);
+                    let at: Vec<Ticks> = cuts
+                        .iter()
+                        .filter(|(cut, _)| *cut == place)
+                        .map(|(_, at)| *at)
+                        .collect();
+                    let was = selected.contains(&place);
+                    let parts = note_ops::split(note, &at);
+                    if parts.len() == 1 {
+                        carried.push(Carried::kept(note, was));
+                    } else {
+                        carried.extend(parts.into_iter().map(|part| Carried::made(part, was)));
+                    }
+                }
+                store(editor, clip, &midi, carried)
+            })?;
+            Ok(carried_result(view, clip, done, recorded))
+        }
+        ids::CHOP => {
+            let ChopNotesArgs {
+                clip,
+                notes,
+                grid,
+                parts,
+                steps,
+            } = parse(args)?;
+            if grid.is_some() && parts.is_some() {
+                return Err(invalid("give `grid` or `parts`, not both"));
+            }
+            if parts.is_some_and(|parts| !(1..=MOST_PARTS).contains(&parts)) {
+                return Err(invalid("`parts` must be from 1 to 64"));
+            }
+            check_grid(grid)?;
+            let (clip, midi) = clip_and_data(doc, view, arrangement, clip)?;
+            let ordered = notes_in_order(&midi);
+            let places = places_or_selected(view, doc, arrangement, clip, notes, ordered.len())?;
+            let signatures = &doc.settings().time_signatures;
+            let clip_start = doc.clip(clip).map_or(Ticks::ZERO, |value| value.start);
+            let step = grid.map_or_else(
+                || arrangement.grid_step(doc),
+                |grid| quantize_step(grid, signatures.signature_at(clip_start)),
+            );
+            let selected = view.selected_notes(doc, arrangement).to_vec();
+            let (done, recorded) = transaction(editor, label(ids::CHOP), |editor| {
+                let mut carried = Vec::with_capacity(ordered.len());
+                for (place, note) in ordered.iter().enumerate() {
+                    let at = u32::try_from(place).unwrap_or(u32::MAX);
+                    let was = selected.contains(&at);
+                    if !places.contains(&at) {
+                        carried.push(Carried::kept(note, was));
+                        continue;
+                    }
+                    // Spec: note-editing R36. Cut on the grid, or into
+                    // equal parts, then change the count by each step.
+                    let mut cuts = Vec::new();
+                    let mut count = parts.unwrap_or(1);
+                    if parts.is_none() {
+                        lines(
+                            signatures,
+                            step,
+                            note.start + Ticks(1),
+                            note.start + note.length - Ticks(1),
+                            4096,
+                            |line, _| cuts.push(line),
+                        );
+                        count = u32::try_from(cuts.len() + 1).unwrap_or(MOST_PARTS);
+                    }
+                    let pieces = if steps.is_empty() && parts.is_none() {
+                        note_ops::split(note, &cuts)
+                    } else {
+                        let count = steps.iter().fold(count.min(MOST_PARTS), |count, step| {
+                            step_parts(count, *step)
+                        });
+                        note_ops::chop_equal(note, count)
+                    };
+                    if pieces.len() == 1 {
+                        carried.push(Carried::kept(note, was));
+                    } else {
+                        carried.extend(pieces.into_iter().map(|piece| Carried::made(piece, was)));
+                    }
+                }
+                store(editor, clip, &midi, carried)
+            })?;
+            Ok(carried_result(view, clip, done, recorded))
+        }
+        ids::JOIN => {
+            let JoinNotesArgs { clip, notes } = parse(args)?;
+            let (clip, midi) = clip_and_data(doc, view, arrangement, clip)?;
+            let ordered = notes_in_order(&midi);
+            let places = places_or_selected(view, doc, arrangement, clip, notes, ordered.len())?;
+            let selected = view.selected_notes(doc, arrangement).to_vec();
+            // Spec: note-editing R39. The notes of a pitch with two or more.
+            let mut groups: std::collections::BTreeMap<u8, Vec<u32>> = Default::default();
+            for place in &places {
+                groups
+                    .entry(ordered[*place as usize].key)
+                    .or_default()
+                    .push(*place);
+            }
+            groups.retain(|_, group| group.len() > 1);
+            if groups.is_empty() {
+                return Err(unavailable("there are no two notes of one pitch to join"));
+            }
+            for group in groups.values_mut() {
+                group.sort_unstable();
+            }
+            let (done, recorded) = transaction(editor, label(ids::JOIN), |editor| {
+                let mut carried = Vec::with_capacity(ordered.len());
+                for (place, note) in ordered.iter().enumerate() {
+                    let at = u32::try_from(place).unwrap_or(u32::MAX);
+                    match groups.get(&note.key) {
+                        Some(group) if group.first() == Some(&at) => {
+                            let members: Vec<Note> = group
+                                .iter()
+                                .map(|member| ordered[*member as usize].clone())
+                                .collect();
+                            carried.push(Carried::made(
+                                note_ops::join(&members),
+                                selected.contains(&at),
+                            ));
+                        }
+                        Some(group) if group.contains(&at) => {}
+                        _ => carried.push(Carried::kept(note, selected.contains(&at))),
+                    }
+                }
+                store(editor, clip, &midi, carried)
+            })?;
+            Ok(carried_result(view, clip, done, recorded))
+        }
+        ids::FIT_TO_TIME => {
+            let FitToTimeArgs { clip, notes, range } = parse(args)?;
+            let (clip, midi) = clip_and_data(doc, view, arrangement, clip)?;
+            let ordered = notes_in_order(&midi);
+            let places = places_or_selected(view, doc, arrangement, clip, notes, ordered.len())?;
+            let (from, to) = match range {
+                Some(range) => (range.start, range.end),
+                None => view
+                    .time_selection(doc, arrangement)
+                    .ok_or_else(|| unavailable("there is no time selection to fit to"))?,
+            };
+            if from < Ticks::ZERO || to <= from {
+                return Err(invalid(
+                    "the range must start at 0 or later and end after it",
+                ));
+            }
+            let selected = view.selected_notes(doc, arrangement).to_vec();
+            let (done, recorded) = transaction(editor, label(ids::FIT_TO_TIME), |editor| {
+                let mut carried = Vec::with_capacity(ordered.len());
+                for (place, note) in ordered.iter().enumerate() {
+                    let at = u32::try_from(place).unwrap_or(u32::MAX);
+                    let was = selected.contains(&at);
+                    if !places.contains(&at) {
+                        carried.push(Carried::kept(note, was));
+                        continue;
+                    }
+                    let own = (note.start, note.start + note.length);
+                    let map = Mapping::new(own, (from, to), None).map_err(invalid)?;
+                    let fitted = note_ops::remap(note, |tick| map.at(tick)).map_err(refused)?;
+                    carried.push(Carried::made(fitted, was));
+                }
+                store(editor, clip, &midi, carried)
+            })?;
+            view.set_time_selection(clip, Some((from, to)));
+            Ok(carried_result(view, clip, done, recorded))
+        }
+        ids::STRETCH => {
+            let StretchNotesArgs {
+                clip,
+                notes,
+                from,
+                to,
+                point,
+            } = parse(args)?;
+            let (clip, midi) = clip_and_data(doc, view, arrangement, clip)?;
+            let ordered = notes_in_order(&midi);
+            let (start, end) = match from {
+                Some(range) => (range.start, range.end),
+                None => view
+                    .time_selection(doc, arrangement)
+                    .ok_or_else(|| unavailable("there is no time selection to stretch"))?,
+            };
+            let map = Mapping::new(
+                (start, end),
+                (to.start, to.end),
+                point.map(|point| (point.from, point.to)),
+            )
+            .map_err(invalid)?;
+            let selected = view.selected_notes(doc, arrangement).to_vec();
+            // Spec: note-editing R43. The selected notes, or with none
+            // selected the notes that start inside the range.
+            let places: Vec<u32> = match notes {
+                Some(notes) => {
+                    places_or_selected(view, doc, arrangement, clip, Some(notes), ordered.len())?
+                }
+                None if !selected.is_empty() => selected.clone(),
+                None => ordered
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, note)| note.start >= start && note.start < end)
+                    .map(|(place, _)| u32::try_from(place).unwrap_or(u32::MAX))
+                    .collect(),
+            };
+            let (done, recorded) = transaction(editor, label(ids::STRETCH), |editor| {
+                let mut carried = Vec::with_capacity(ordered.len());
+                for (place, note) in ordered.iter().enumerate() {
+                    let at = u32::try_from(place).unwrap_or(u32::MAX);
+                    let was = selected.contains(&at);
+                    if places.contains(&at) {
+                        let moved = note_ops::remap(note, |tick| map.at(tick)).map_err(refused)?;
+                        carried.push(Carried::made(moved, was));
+                    } else {
+                        carried.push(Carried::kept(note, was));
+                    }
+                }
+                let done = store(editor, clip, &midi, carried)?;
+                stretch_envelopes(editor, clip, (start, end), &map)?;
+                Ok(done)
+            })?;
+            view.set_time_selection(clip, Some((to.start.min(to.end), to.start.max(to.end))));
+            Ok(carried_result(view, clip, done, recorded))
+        }
         other => Err(invalid(format!("`{other}` isn't a note command"))),
     }
 }
@@ -2045,6 +2600,19 @@ mod tests {
     use bl_model::PressurePoint;
 
     use super::*;
+
+    // Spec: note-editing R36.
+    #[test]
+    fn the_parts_of_a_chop_stay_from_one_to_sixty_four() {
+        assert_eq!(step_parts(4, ChopStep::More), 5);
+        assert_eq!(step_parts(5, ChopStep::NextPower), 8);
+        assert_eq!(step_parts(8, ChopStep::NextPower), 16);
+        assert_eq!(step_parts(8, ChopStep::PreviousPower), 4);
+        assert_eq!(step_parts(1, ChopStep::Fewer), 1);
+        assert_eq!(step_parts(1, ChopStep::PreviousPower), 1);
+        assert_eq!(step_parts(64, ChopStep::More), 64);
+        assert_eq!(step_parts(64, ChopStep::NextPower), 64);
+    }
 
     // Spec: midi-controller-data R2. A note made shorter loses the pressure
     // points past its new end, so the edit isn't refused for them.

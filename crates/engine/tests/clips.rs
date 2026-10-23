@@ -1022,3 +1022,99 @@ fn a_reversed_clip_plays_its_audio_backwards() {
         }
     }
 }
+
+// Spec: comping R14, R16. An auditioned take lane plays in place of the main
+// lane, from the next block and with no new program, at any block size; the
+// main lane's edits during the audition are what it plays once it is off.
+#[test]
+fn an_auditioned_take_lane_plays_in_place_of_the_main_lane_with_no_program() {
+    for block in [1, 61, 512, 4_096] {
+        let mut media = MediaMap::new();
+        media.insert(
+            hash(1),
+            Arc::new(SampleData::new(48_000, vec![vec![0.5; 96_000]]).unwrap()),
+        );
+        media.insert(
+            hash(2),
+            Arc::new(SampleData::new(48_000, vec![vec![0.25; 96_000]]).unwrap()),
+        );
+        let media = Arc::new(media);
+        let mut rig = Rig::with_registry(block, |registry| registry.set_media(media.clone()));
+        let a = track(&mut rig.editor, TrackKind::Audio, None);
+        let main = clip(
+            &mut rig.editor,
+            a,
+            Ticks::ZERO,
+            Ticks::WHOLE,
+            AudioData::new(hash(1)),
+        );
+        let lane: bl_model::TakeLaneId = rig.editor.new_id();
+        rig.editor
+            .apply(Command::AddTakeLane {
+                track: a,
+                lane: bl_model::NewTakeLane {
+                    id: Some(lane),
+                    name: "Take 1".to_owned(),
+                    clips: Vec::new(),
+                },
+                index: None,
+            })
+            .unwrap();
+        let lane_clip = Clip::new(
+            rig.editor.new_id(),
+            Ticks::ZERO,
+            Ticks::WHOLE,
+            ClipData::Audio(AudioData::new(hash(2))),
+        );
+        rig.editor
+            .apply(Command::CreateTakeClip {
+                lane,
+                clip: lane_clip,
+            })
+            .unwrap();
+        rig.sync();
+        rig.sender.transport(TransportCommand::Play);
+        let play_block = |rig: &mut Rig| {
+            for _ in 0..(4_096 / block).min(8) {
+                rig.block(block);
+            }
+            rig.last()
+        };
+        // The take lane plays nothing until it is auditioned.
+        assert!(
+            play_block(&mut rig).iter().all(|&s| s == 0.5),
+            "block {block}"
+        );
+
+        let synced = rig.apply(Command::SetAudition { lane, on: true });
+        assert!(!synced.program, "block {block}");
+        assert!(
+            play_block(&mut rig).iter().all(|&s| s == 0.25),
+            "block {block}"
+        );
+
+        // An edit of the main lane during the audition isn't heard...
+        rig.apply(Command::SetClipGain {
+            clip: main,
+            gain: 0.25,
+        });
+        assert!(
+            play_block(&mut rig).iter().all(|&s| s == 0.25),
+            "block {block}"
+        );
+
+        // ...until the audition is off.
+        let synced = rig.apply(Command::SetAudition { lane, on: false });
+        assert!(!synced.program, "block {block}");
+        assert!(
+            play_block(&mut rig).iter().all(|&s| s == 0.125),
+            "block {block}: 0.5 at -12 dB"
+        );
+        assert_eq!(
+            rig.monitor.state().swaps,
+            1,
+            "no new program, block {block}"
+        );
+        assert_eq!(rig.monitor.state().counters.data_unrouted, 0);
+    }
+}

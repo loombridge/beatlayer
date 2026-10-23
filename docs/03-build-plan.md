@@ -657,7 +657,7 @@ Total to 1.0: 256 packages planned in Phases 0 to 6, and about 110 estimated in 
 | 6.18 | todo |  |  |
 | 6.19 | done | 23 October 2026 | [#329](https://github.com/loombridge/beatlayer/pull/329); the Groove Pool, `.blgroove` files and a clip's groove, played on MIDI clips and warped audio clips (Base, Quantize, Timing, Random, Velocity and the Global Amount) as node data at any block size, with Commit, Extract, groove to clip and Auto Load Groove ([grooves](specs/grooves.md) R1 to R23) |
 | 6.20 | todo |  |  |
-| 6.21 | todo |  |  |
+| 6.21 | done | 23 October 2026 | [#332](https://github.com/loombridge/beatlayer/pull/332); take lanes with IDs of their own on audio and MIDI tracks, every Arrangement take placed on a take lane and copied to the main lane, auditioning a lane in the engine with no new program, the take-lane and comp commands with comp matching, and schema 8 with a migration for older take lanes ([comping](specs/comping.md) R1 to R14, R16 to R21 and R37, [recording](specs/recording.md) R16, [freeze and bounce](specs/freeze-and-bounce.md) R30) |
 | 6.22 | todo |  |  |
 | 6.22b | todo |  |  |
 | 6.23 | todo |  |  |

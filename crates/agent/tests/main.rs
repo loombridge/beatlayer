@@ -12,6 +12,7 @@ mod grooves;
 mod http;
 mod kit_devices;
 mod midi_effects;
+mod midi_tools;
 mod perception;
 mod permissions;
 mod plugin_midi_effect;

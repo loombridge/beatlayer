@@ -3,7 +3,7 @@
 //! description, and a control's drag as one undo step that Esc puts back.
 //! Spec: midi-tools R1, R2, R7, R22; L-CLIP-003, L-CLIP-007.
 
-mod common;
+use crate::common;
 
 use bl_core::time::Ticks;
 use bl_model::{Clip, ClipData, ClipId, Command, MidiData, Note};

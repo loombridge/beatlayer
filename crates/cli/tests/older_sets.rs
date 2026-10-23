@@ -132,6 +132,94 @@ fn a_version_1_set_with_split_audio_clips_loads_and_plays_as_it_did() {
     assert_eq!(render(&loaded.document), expected);
 }
 
+// Spec: audio-clips R30. A set saved before fade curves and crossfades has
+// only each clip's two fade lengths: it opens with the same fades, straight,
+// and no crossfades, and plays as it did.
+#[test]
+fn a_set_saved_before_crossfades_opens_with_the_same_fades_and_none_between_clips() {
+    let mut editor = Editor::new();
+    let track = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: track,
+            kind: TrackKind::Audio,
+            name: "Audio".to_owned(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    // Two clips that meet, each with the fades Create Fades on Clip Edges
+    // gave it, and a third with long ones.
+    let faded = |start: f64, fade_in: f64, fade_out: f64| AudioData {
+        start,
+        fade_in,
+        fade_out,
+        ..AudioData::new(MEDIA)
+    };
+    let mut ids = Vec::new();
+    for (at, audio) in [
+        (Ticks::ZERO, faded(0.0, 0.004, 0.004)),
+        (Ticks::WHOLE, faded(0.5, 0.004, 0.004)),
+        (Ticks::WHOLE * 3, faded(1.0, 0.25, 0.5)),
+    ] {
+        let id = editor.new_id();
+        editor
+            .apply(Command::CreateClip {
+                track,
+                clip: Clip::new(id, at, Ticks::WHOLE, ClipData::Audio(audio)),
+            })
+            .unwrap();
+        ids.push(id);
+    }
+    let expected = render(editor.document());
+    assert!(expected.iter().any(|&s| s != 0.0));
+    let project = Project {
+        document: editor.document().clone(),
+        ids: IdAllocator::new(),
+        media: Media::default(),
+        windows: bl_model::DeviceWindows::new(),
+        rack_views: bl_model::RackViewMap::new(),
+        folds: bl_model::ClipFolds::new(),
+        launch: bl_model::LaunchSettings::default(),
+        multisamplers: bl_model::MultisamplerViews::new(),
+    };
+    let saved: Value = serde_json::from_slice(&encode_json(&project, 1).unwrap()).unwrap();
+    // The set holds nothing of curves or crossfades, as before.
+    for clip in saved["document"]["tracks"][0]["clips"].as_array().unwrap() {
+        let audio = clip["data"]["audio"].as_object().unwrap();
+        for key in [
+            "fade_in_curve",
+            "fade_out_curve",
+            "fade_in_before",
+            "fade_out_after",
+        ] {
+            assert!(!audio.contains_key(key), "{key}");
+        }
+    }
+    let (loaded, _) = decode_json(
+        &serde_json::to_vec(&saved).unwrap(),
+        &LoadOptions::default(),
+    )
+    .unwrap();
+    for (id, (fade_in, fade_out)) in ids
+        .iter()
+        .zip([(0.004, 0.004), (0.004, 0.004), (0.25, 0.5)])
+    {
+        let ClipData::Audio(audio) = &loaded.document.clip(*id).unwrap().data else {
+            unreachable!("an audio clip");
+        };
+        assert_eq!((audio.fade_in, audio.fade_out), (fade_in, fade_out));
+        assert_eq!(
+            (audio.fade_in_curve, audio.fade_out_curve),
+            (0.0, 0.0),
+            "straight"
+        );
+    }
+    let lane = loaded.document.track(track).unwrap();
+    assert!(bl_model::crossfades(lane.clips()).is_empty());
+    assert_eq!(render(&loaded.document), expected);
+}
+
 // Spec: racks R13
 #[test]
 fn sets_from_before_racks_load_unchanged() {

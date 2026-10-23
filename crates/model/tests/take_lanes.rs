@@ -426,6 +426,8 @@ fn a_copy_cut_from_a_take_uses_it_until_it_is_changed() {
             clip: part_id,
             fade_in: 0.01,
             fade_out: 0.01,
+            fade_in_curve: Some(0.5),
+            fade_out_curve: None,
         })
         .unwrap();
     assert_eq!(comp::sources(track_of(&editor, audio), &tempo()).len(), 1);

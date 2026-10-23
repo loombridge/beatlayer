@@ -1246,6 +1246,56 @@ mod tests {
         assert!(error.contains("loop end 0.1 is out of range"), "{error}");
     }
 
+    // Spec: audio-clips R30. Fade curves and a crossfade's reach are saved
+    // only where they differ from a new clip's, so a set saved before them
+    // opens with straight fades and no crossfades.
+    #[test]
+    fn fade_curves_and_crossfades_are_saved_only_where_they_are_set() {
+        let mut editor = Editor::new();
+        let track = editor.new_id();
+        editor
+            .apply(Command::CreateTrack {
+                id: track,
+                kind: TrackKind::Audio,
+                name: String::new(),
+                parent: None,
+                index: 0,
+            })
+            .unwrap();
+        let audio = AudioData {
+            start: 0.5,
+            fade_in: 0.002,
+            fade_in_curve: 0.5,
+            fade_in_before: 0.002,
+            fade_out: 0.004,
+            ..AudioData::new(ContentHash([1; 32]))
+        };
+        let clip = Clip::new(
+            editor.new_id(),
+            Ticks::WHOLE,
+            Ticks::WHOLE,
+            ClipData::Audio(audio),
+        );
+        editor.apply(Command::CreateClip { track, clip }).unwrap();
+        let value = serde_json::to_value(editor.document()).unwrap();
+        assert_eq!(
+            value["tracks"][0]["clips"][0]["data"]["audio"],
+            json!({
+                "media": "01".repeat(32),
+                "start": 0.5,
+                "fade_in": 0.002,
+                "fade_out": 0.004,
+                "fade_in_curve": 0.5,
+                "fade_in_before": 0.002,
+            })
+        );
+        assert_eq!(&load(value.clone()).unwrap(), editor.document());
+        let mut bad = value;
+        bad["tracks"][0]["clips"][0]["data"]["audio"]["fade_out_curve"] = json!(2.0);
+        let error = load(bad).unwrap_err();
+        assert!(error.contains("fade-out curve"), "{error}");
+    }
+
     // Spec: automation R7
     #[test]
     fn automation_saves_with_the_set_and_loads_back() {

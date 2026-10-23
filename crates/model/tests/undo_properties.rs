@@ -714,7 +714,38 @@ impl Op {
                 // isn't warped, or with these numbers, and must then change
                 // nothing; the ones that land are one undo step.
                 let ticks = Ticks((*a * 100_000.0) as i64);
-                match which % 21 {
+                // Spec: audio-clips R30. Fades with curves and crossfades at
+                // the clip's end, where a neighbour may meet it: most are
+                // refused, and the ones that land are one undo step.
+                let edge = doc.clip(clip).map_or(Ticks::ZERO, Clip::end);
+                let owner = doc
+                    .clip_track(clip)
+                    .unwrap_or(TrackId(Id::new(u64::MAX).unwrap()));
+                match which % 24 {
+                    21 => {
+                        return Command::SetCrossfade {
+                            track: owner,
+                            boundary: edge,
+                            before: *a * 0.01,
+                            after: *b * 0.01,
+                            curve: *a - 1.0,
+                        };
+                    }
+                    22 => {
+                        return Command::DeleteCrossfade {
+                            track: owner,
+                            boundary: edge,
+                        };
+                    }
+                    23 => {
+                        return Command::SetClipFades {
+                            clip,
+                            fade_in: *a * 0.01,
+                            fade_out: *b * 0.01,
+                            fade_in_curve: Some(*a - 1.0),
+                            fade_out_curve: (*b > 1.0).then_some(*a - 1.0),
+                        };
+                    }
                     5 => {
                         return Command::SetClipWarp {
                             clip,
@@ -852,6 +883,8 @@ impl Op {
                         clip,
                         fade_in: *a,
                         fade_out: *b,
+                        fade_in_curve: None,
+                        fade_out_curve: None,
                     },
                 }
             }

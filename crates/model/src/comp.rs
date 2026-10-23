@@ -63,6 +63,10 @@ fn same_audio(a: &AudioData, b: &AudioData) -> bool {
         loop_end: if audio.looping { audio.loop_end } else { None },
         fade_in: 0.0,
         fade_out: 0.0,
+        fade_in_curve: 0.0,
+        fade_out_curve: 0.0,
+        fade_in_before: 0.0,
+        fade_out_after: 0.0,
         ..audio.clone()
     };
     (a.start - b.start).abs() <= MARKER_TOLERANCE && plain(a) == plain(b)

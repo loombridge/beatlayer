@@ -455,6 +455,7 @@ fn probability_groups_are_saved_with_the_clip_and_broken_ones_load_ungrouped() {
         windows: bl_model::DeviceWindows::new(),
         rack_views: bl_model::RackViewMap::new(),
         folds: bl_model::ClipFolds::new(),
+        midi_tools: bl_project::midi_tools::MidiToolSettings::default(),
         launch: bl_model::LaunchSettings::default(),
         multisamplers: bl_model::MultisamplerViews::new(),
     };

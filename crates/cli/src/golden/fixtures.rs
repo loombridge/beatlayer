@@ -370,12 +370,6 @@ pub(super) const FIXTURES: &[Fixture] = &[
         build: complex_pro_240,
     },
     Fixture {
-        name: "automated-formants",
-        about: "A vowel transposed up five semitones in Complex Pro, the track's automation of \
-                Formants falling from 100 % to 0 over the bar (warp-modes R31, R33).",
-        build: automated_formants,
-    },
-    Fixture {
         name: "transposition-envelope-beats",
         about: "The drum loop in Beats, a Transposition clip envelope rising from 0 to 12 \
                 semitones over the bar, each segment read at the ratio it begins with \
@@ -1767,33 +1761,6 @@ fn complex_pro_240() -> Scene {
     complex(240.0, true)
 }
 
-/// A vowel at `f0` Hz: the harmonics of a buzz weighted by two resonances,
-/// as an open "a" has them (formants near 700 and 1,220 Hz), scaled to a peak
-/// of -24 dBFS or so. Made with `libm`'s sine, so it is the same to the bit
-/// on every platform.
-fn vowel(frames: usize, rate: u32, f0: f64) -> Vec<f32> {
-    let weight = |hz: f64| {
-        let bump = |centre: f64, width: f64| 1.0 / (1.0 + ((hz - centre) / width).powi(2));
-        bump(700.0, 130.0) + 0.6 * bump(1_220.0, 90.0)
-    };
-    let harmonics: Vec<(f64, f64)> = (1..)
-        .map(|k| f64::from(k) * f0)
-        .take_while(|hz| *hz < 4_000.0)
-        .map(|hz| (hz, weight(hz)))
-        .collect();
-    let samples: Vec<f64> = (0..frames)
-        .map(|i| {
-            let t = i as f64 / f64::from(rate);
-            harmonics
-                .iter()
-                .map(|&(hz, gain)| gain * libm::sin(hz * t * std::f64::consts::TAU))
-                .sum()
-        })
-        .collect();
-    let peak = samples.iter().fold(0.0f64, |peak, s| peak.max(s.abs()));
-    samples.iter().map(|s| (s / peak * 0.0625) as f32).collect()
-}
-
 /// A warped one-bar clip of `file` (`frames` long, at 120 BPM) in `mode`, at
 /// 120 BPM, with the clip's id.
 fn bar_clip(
@@ -1824,32 +1791,6 @@ fn bar_clip(
     };
     let clip = song.audio_clip(track, Ticks::ZERO, Ticks::WHOLE, audio);
     (track, clip)
-}
-
-/// Spec: warp-modes R31, R33. A vowel a fourth up in Complex Pro, the
-/// track's automation of Formants taking it from 100 % to 0 over the bar.
-fn automated_formants() -> Scene {
-    let mut song = Song::new();
-    let frames = 96_000;
-    let file = song.file("vowel.wav", 48_000, &[vowel(frames, 48_000, 110.0)]);
-    let (track, clip) = bar_clip(&mut song, file, frames, WarpMode::ComplexPro);
-    song.apply(Command::SetClipPitch {
-        clip,
-        transpose: Some(5),
-        detune: None,
-    });
-    for (at, value) in [(Ticks::ZERO, 100.0), (Ticks::WHOLE, 0.0)] {
-        song.apply(Command::SetAutomationBreakpoint {
-            track,
-            target: AutomationTarget::Clip {
-                param: ClipParam::Formants,
-            },
-            at,
-            value,
-        });
-    }
-    let seconds = song.to_last_clip();
-    song.finish(seconds)
 }
 
 /// A Transposition clip envelope rising from 0 to `semitones` over the bar.

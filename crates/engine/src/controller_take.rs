@@ -1,12 +1,15 @@
 //! What a take or a capture makes of the controller messages it heard
 //! (WP-2.29b): the stepped envelopes of the clip and the pressure of its
-//! notes. Arithmetic on ticks, so the rules are tested without an engine.
+//! notes, and (WP-6.17) the Pitch, Slide and Pressure envelopes of the notes
+//! an MPE port played. Arithmetic on ticks, so the rules are tested without an
+//! engine.
 //!
-//! The rules are in the MIDI controller data spec, R10 to R15.
+//! The rules are in the MIDI controller data spec, R10 to R15, and the MPE
+//! spec, R12.
 
 use bl_core::midi::MidiMessage;
 use bl_core::time::Ticks;
-use bl_model::{AutomationTarget, Breakpoint, Note, PressurePoint, envelope_value};
+use bl_model::{AutomationTarget, Breakpoint, Expression, Note, envelope_value};
 
 /// Whether a recorded message is one a clip keeps besides notes: a control
 /// change for one of the controllers a clip can hold, pitch bend, channel
@@ -126,28 +129,114 @@ pub fn added(points: &[Breakpoint], moves: &[(Ticks, f64)]) -> Vec<(Ticks, f64)>
     set
 }
 
+/// The envelope that steps through `moves` (offsets from a note's start, in
+/// order, and values), as a recorded controller steps (MPE R12): a breakpoint
+/// at the note's start holding `start`, if there is one, and one at each
+/// move's offset, the value before it held up to the tick before; the later
+/// of two moves on one tick wins, and a move at or past `length`, which is
+/// after the note-off, isn't kept.
+#[must_use]
+pub fn step_envelope(start: Option<f64>, moves: &[(Ticks, f64)], length: Ticks) -> Vec<Breakpoint> {
+    let point = |at: Ticks, value: f64| Breakpoint {
+        at,
+        value,
+        bend: 0.0,
+    };
+    let mut points: Vec<Breakpoint> = Vec::with_capacity(moves.len() * 2 + 1);
+    let mut held = start;
+    if let Some(value) = start {
+        points.push(point(Ticks::ZERO, value));
+    }
+    for &(at, value) in moves {
+        if at >= length {
+            break;
+        }
+        let at = at.max(Ticks::ZERO);
+        match points.last_mut() {
+            Some(last) if last.at == at => last.value = value,
+            last => {
+                if let (Some(held), Some(last)) = (held, last)
+                    && at > last.at + Ticks(1)
+                {
+                    points.push(point(at - Ticks(1), held));
+                }
+                points.push(point(at, value));
+            }
+        }
+        held = Some(value);
+    }
+    points
+}
+
 /// Gives each polyphonic pressure message in `moves` to the note its key
-/// holds then: a pressure point at its offset from the note's start. A
-/// message for a key with no note held is left out, and the later of two on
-/// one tick wins (R11). Positions are in the same ticks as the notes'.
+/// holds then, as the note's Pressure envelope stepped through the messages
+/// (R11; MPE R2): a message for a key with no note held is left out, and the
+/// later of two on one tick wins. Positions are in the same ticks as the
+/// notes'.
 pub fn give_pressure(notes: &mut [Note], moves: &[(Ticks, MidiMessage)]) {
+    let mut heard: Vec<(usize, Ticks, f64)> = Vec::new();
     for &(at, message) in moves.iter().filter(|(_, m)| m.status() & 0xF0 == 0xA0) {
         let held = notes
-            .iter_mut()
-            .filter(|note| {
+            .iter()
+            .enumerate()
+            .filter(|(_, note)| {
                 note.key == message.data1() && note.start <= at && at < note.start + note.length
             })
-            .max_by_key(|note| note.start);
-        let Some(note) = held else {
+            .max_by_key(|(_, note)| note.start);
+        if let Some((index, note)) = held {
+            heard.push((index, at - note.start, f64::from(message.data2())));
+        }
+    }
+    for (index, note) in notes.iter_mut().enumerate() {
+        let moves: Vec<(Ticks, f64)> = heard
+            .iter()
+            .filter(|(held, ..)| *held == index)
+            .map(|&(_, at, value)| (at, value))
+            .collect();
+        if !moves.is_empty() {
+            note.pressure = step_envelope(Some(0.0), &moves, note.length);
+        }
+    }
+}
+
+/// One expression an MPE port sent for a note it was playing: the note's ID,
+/// which expression, its value in the envelope's own units (semitones, or 0
+/// to 127), and where, in the same ticks as the notes' starts.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Heard {
+    /// The note's ID, as the MPE input gave it.
+    pub id: u32,
+    /// Which envelope.
+    pub expression: Expression,
+    /// The value.
+    pub value: f64,
+    /// Where it was heard.
+    pub at: Ticks,
+}
+
+/// Gives each note an MPE port played, named by its entry of `ids` (`None`
+/// for a note from elsewhere), its Pitch, Slide and Pressure envelopes from
+/// what `heard` says of it, each stepped as [`step_envelope`] does (MPE R12).
+/// An expression the port sent nothing for leaves its envelope none.
+pub fn give_expressions(notes: &mut [Note], ids: &[Option<u32>], heard: &[Heard]) {
+    for (note, id) in notes.iter_mut().zip(ids) {
+        let Some(id) = *id else {
             continue;
         };
-        let point = PressurePoint {
-            at: at - note.start,
-            value: message.data2(),
-        };
-        match note.pressure.last_mut() {
-            Some(last) if last.at == point.at => *last = point,
-            _ => note.pressure.push(point),
+        for expression in Expression::ALL {
+            let (low, high) = expression.range();
+            let mut moves: Vec<(Ticks, f64)> = heard
+                .iter()
+                .filter(|h| h.id == id && h.expression == expression && h.at >= note.start)
+                .map(|h| (h.at - note.start, h.value.clamp(low, high)))
+                .collect();
+            moves.sort_by_key(|(at, _)| *at);
+            // A bend or pressure that first came after the note-on stepped
+            // from none; where Slide rests isn't known.
+            let rest = (expression != Expression::Slide).then_some(0.0);
+            if !moves.is_empty() {
+                *note.envelope_mut(expression) = step_envelope(rest, &moves, note.length);
+            }
         }
     }
 }
@@ -250,13 +339,13 @@ mod tests {
         assert!(!is_controller(&MidiMessage::note_on(0, 60, 100)));
     }
 
-    // Spec: midi-controller-data R11. Pressure goes to the note its key
-    // holds at that moment, and to none when no note is held.
+    // Spec: midi-controller-data R11; mpe R12. Pressure goes to the note its
+    // key holds, stepped, the later of two on one tick winning.
     #[test]
     fn pressure_goes_to_the_note_held_on_its_key() {
-        let mut notes = vec![
+        let mut notes = [
             Note::new(60, Ticks(0), Ticks(100), 100),
-            Note::new(62, Ticks(0), Ticks(100), 100),
+            Note::new(64, Ticks(0), Ticks(100), 100),
         ];
         let pressure = |key, value| MidiMessage::from_bytes(&[0xA0, key, value]).unwrap();
         give_pressure(
@@ -270,7 +359,71 @@ mod tests {
             ],
         );
         let heard: Vec<_> = notes[0].pressure.iter().map(|p| (p.at, p.value)).collect();
-        assert_eq!(heard, [(Ticks(10), 112), (Ticks(50), 97)]);
-        assert!(notes[1].pressure.is_empty());
+        assert_eq!(
+            heard,
+            [
+                (Ticks(0), 0.0),
+                (Ticks(9), 0.0),
+                (Ticks(10), 112.0),
+                (Ticks(49), 112.0),
+                (Ticks(50), 97.0)
+            ],
+            "none before the first; the one at 100 is after the note-off"
+        );
+        let other: Vec<_> = notes[1].pressure.iter().map(|p| (p.at, p.value)).collect();
+        assert_eq!(
+            other,
+            [(Ticks(0), 0.0), (Ticks(59), 0.0), (Ticks(60), 50.0)]
+        );
+        assert!(notes[0].expressions_fit());
+    }
+
+    // Spec: mpe R12. A starting value is a breakpoint at the note's start;
+    // each move holds the value before it, then steps; the later of two on
+    // a tick wins, and what is after the note-off isn't kept.
+    #[test]
+    fn expressions_step_from_the_starting_value() {
+        let heard = |expression, at, value| Heard {
+            id: 7,
+            expression,
+            value,
+            at: Ticks(at),
+        };
+        let mut notes = [
+            Note::new(60, Ticks(1000), Ticks(200), 100),
+            Note::new(62, Ticks(1000), Ticks(200), 100),
+        ];
+        give_expressions(
+            &mut notes,
+            &[Some(7), None],
+            &[
+                heard(Expression::Pitch, 1000, 0.0),
+                heard(Expression::Pitch, 1050, 2.0),
+                heard(Expression::Pitch, 1050, 3.0),
+                heard(Expression::Pitch, 1051, 4.0),
+                heard(Expression::Pitch, 1200, 9.0),
+                heard(Expression::Slide, 1100, 64.0),
+                heard(Expression::Pressure, 900, 10.0),
+            ],
+        );
+        let pitch: Vec<_> = notes[0]
+            .pitch
+            .iter()
+            .map(|p| (p.at.get(), p.value))
+            .collect();
+        assert_eq!(pitch, [(0, 0.0), (49, 0.0), (50, 3.0), (51, 4.0)]);
+        let slide: Vec<_> = notes[0]
+            .slide
+            .iter()
+            .map(|p| (p.at.get(), p.value))
+            .collect();
+        assert_eq!(
+            slide,
+            [(100, 64.0)],
+            "nothing before the first one, and no step"
+        );
+        assert!(notes[0].pressure.is_empty(), "heard before the note began");
+        assert!(!notes[1].has_expression(), "a note from elsewhere has none");
+        assert!(notes[0].expressions_fit());
     }
 }

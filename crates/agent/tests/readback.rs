@@ -7,13 +7,13 @@ use bl_agent::Agent;
 use bl_agent::client::{Client, InProcess};
 use bl_core::time::{Bpm, Ticks, TimeSignature};
 use bl_model::{
-    AudioData, AutomationTarget, Channel, Clip, ClipData, Command, ContentHash, CountIn,
-    CrossfadeAssign, Device, DeviceId, DeviceKind, DeviceOutput, DeviceRole, DeviceWarp, Editor,
-    External, GroupKind, HardwareLatency, Input, LaunchMode, LaunchQuantization, LaunchSettings,
-    MetronomeRhythm, MetronomeSound, MidiData, MidiTo, MixerParam, Monitor, NewTakeLane, Note,
-    NoteGroup, Output, PanMode, ParamId, PressurePoint, SendTap, Sidechain, TakeClip, TakeClipData,
-    Tap, TonesSettings, TrackDelay, TrackId, TrackKind, TransientEdits, WarpMarker, WarpMode,
-    WarpSettings,
+    AudioData, AutomationTarget, Breakpoint, Channel, Clip, ClipData, Command, ContentHash,
+    CountIn, CrossfadeAssign, Device, DeviceId, DeviceKind, DeviceOutput, DeviceRole, DeviceWarp,
+    Editor, External, GroupKind, HardwareLatency, Input, LaunchMode, LaunchQuantization,
+    LaunchSettings, MetronomeRhythm, MetronomeSound, MidiData, MidiTo, MixerParam, Monitor,
+    NewTakeLane, Note, NoteGroup, Output, PanMode, ParamId, SendTap, Sidechain, TakeClip,
+    TakeClipData, Tap, TonesSettings, TrackDelay, TrackId, TrackKind, TransientEdits, WarpMarker,
+    WarpMode, WarpSettings,
 };
 use bl_project::{Media, Project};
 use bl_shell::Shell;
@@ -31,9 +31,20 @@ fn note(key: u8, start: i64) -> Note {
         probability: 0.5,
         velocity_deviation: 7,
         mute: false,
-        pressure: vec![PressurePoint {
+        pitch: vec![Breakpoint {
+            at: Ticks(0),
+            value: -12.5,
+            bend: -0.25,
+        }],
+        slide: vec![Breakpoint {
+            at: Ticks(44_100),
+            value: 100.0,
+            bend: 0.0,
+        }],
+        pressure: vec![Breakpoint {
             at: Ticks(88_200),
-            value: 64,
+            value: 64.0,
+            bend: 0.0,
         }],
         group: None,
     }
@@ -1150,7 +1161,8 @@ fn the_fixture_sets_a_non_default_value_of_every_saved_field() {
 }
 
 // Spec: midi-controller-data R9. The fixture's MIDI clip holds controller
-// envelopes and a note with pressure points.
+// envelopes and a note with Pitch, Slide and Pressure envelopes
+// (mpe R9).
 #[test]
 fn full_query_results_hold_everything_the_set_format_encodes() {
     let project = fixture();

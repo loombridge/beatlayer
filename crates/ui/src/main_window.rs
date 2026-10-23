@@ -71,6 +71,11 @@ pub enum UiEvent {
     /// A device's value control gained (true) or lost (false) the keyboard
     /// focus, for [`Shell::set_value_focused`] (WP-2.5).
     FocusValue(bool),
+    /// A control other than the Arrangement View, an automation lane or the
+    /// Envelope Editor holds the keyboard focus (true), or none does
+    /// (false), for [`Shell::set_envelope_control_focused`]: Enter, Esc and
+    /// Delete are then the control's, not the envelope keys' (WP-6.26).
+    FocusControl(bool),
     /// The pointer is over something with a line for the Status Bar, such
     /// as a drum rack's pad (`Some`), or left it (`None`), for
     /// [`Shell::set_hint`] (WP-5.6).
@@ -398,6 +403,12 @@ impl MainWindowUi {
         let ctx = root.ctx().clone();
         let ctx = &ctx;
         let mut events = Vec::new();
+        // Spec: automation-editing R23. A value being typed goes with the
+        // envelope that has the keyboard, so it can't hold the keys after
+        // the keyboard leaves.
+        if shell.keyboard_envelope().is_none() {
+            crate::envelope_keys::set_typed(ctx, None);
+        }
         // Spec: accessibility R3, R4, R7. The keyboard's moves go by the
         // order the last frame drew.
         crate::menus::menu_keys(ctx);
@@ -604,7 +615,9 @@ impl MainWindowUi {
         // Spec: crash-recovery R22. The recovery prompt sits over the
         // window while there are sets a crash left to offer.
         crate::recovery_dialog::show(ctx, shell, theme, &mut events);
-        self.mixer_typing = crate::mixer::is_typing(ctx) || crate::track_menu::is_renaming(ctx);
+        self.mixer_typing = crate::mixer::is_typing(ctx)
+            || crate::track_menu::is_renaming(ctx)
+            || crate::envelope_keys::is_typing(ctx);
         // An open menu, or a dialog, keeps the keys.
         self.menu_open = egui::Popup::is_any_open(ctx)
             || shell.stems_dialog().is_some()
@@ -622,6 +635,20 @@ impl MainWindowUi {
             .map(|control| control.track);
         if track != shell.focused_track() {
             events.push(UiEvent::FocusTrack(track));
+        }
+        // Spec: automation-editing R20. The envelope keys are the view's,
+        // the lane's and the Envelope Editor's own: a button or chooser with
+        // the focus keeps Enter, Esc and Delete.
+        let doc = shell.editor().document();
+        let editor = shell
+            .clip_view()
+            .shown_any_clip(doc, shell.arrangement())
+            .map(crate::clip_envelope::lane_id);
+        let control = ctx.memory(egui::Memory::focused).is_some_and(|id| {
+            id != main_view_id() && id != crate::arrangement::lanes_id() && Some(id) != editor
+        });
+        if control != shell.envelope_control_focused() {
+            events.push(UiEvent::FocusControl(control));
         }
         let metering = shell.meters().iter().any(|m| {
             m.peak.iter().chain(&m.rms).any(|level| *level > 0.0) || m.gain_reduction < 0.0
@@ -787,6 +814,11 @@ impl MainWindowUi {
             return None;
         }
         let view = shell.arrangement();
+        // Spec: automation-editing R28. A selected automation lane is the
+        // focus: its parameter and value are read.
+        if let Some(lane) = self.arrangement.keyboard_lane_node(view) {
+            return Some(lane);
+        }
         if let Some(clip) = self.arrangement.selected_clip_node(view) {
             return Some(clip);
         }

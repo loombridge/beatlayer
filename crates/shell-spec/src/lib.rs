@@ -21,6 +21,10 @@
 //! - [`automation`]: the Arrangement's automation editing commands
 //!   (WP-6.25): moving the breakpoints of an envelope, the clipboard of
 //!   envelope shapes, and the edit commands that act on them.
+//! - [`envelope_keys`]: editing envelopes from the keyboard (WP-6.26): the
+//!   insert marker along an envelope, and making, selecting, moving and
+//!   deleting its breakpoints, in the Arrangement's automation lanes and the
+//!   Clip View's Envelope Editor.
 //! - [`groove`]: the grooves' commands that need the shell (WP-6.19): loading
 //!   and saving groove files, extracting, committing, a groove made into a
 //!   clip, and the pool query.
@@ -98,6 +102,7 @@ pub mod context_menus;
 pub mod dawproject;
 pub mod devices;
 pub mod editing;
+pub mod envelope_keys;
 pub mod export;
 pub mod file_manager;
 pub mod freeze;
@@ -111,6 +116,7 @@ pub mod midi_tools;
 pub mod mixer_view;
 pub mod modulation;
 pub mod multisampler;
+pub mod note_filters;
 pub mod notes;
 pub mod pads;
 pub mod perception;
@@ -143,6 +149,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     arrangement::register(registry)?;
     editing::register(registry)?;
     automation::register(registry)?;
+    envelope_keys::register(registry)?;
     groove::register(registry)?;
     locator::register(registry)?;
     notes::register(registry)?;

@@ -1,6 +1,6 @@
 # Find and Select Notes: the note filters and Invert Selection
 
-- **Status:** draft
+- **Status:** implemented (every rule has a passing test)
 - **Work packages:** WP-6.4 (R1 to R15). The note editor's selection, insert marker and time selection are [piano-roll.md](piano-roll.md)'s; the clip's scale, which the Scale filter reads, is [scales.md](scales.md)'s (WP-6.7); filters over several clips at once are [multi-clip-editing.md](multi-clip-editing.md)'s; the MIDI Tools that act on the selection are WP-6.11's
 - **Parity-matrix row:** MIDI editing: Find and Select Notes
 - **Checked against:** the Live 12 reference manual (online edition), read 20 October 2026; the Live 12 release notes, 12.0, 12.1, 12.1.5, 12.1.10 and 12.2; the UI parity reference's rows L-CLIP-010, L-CLIP-019, M-EDIT-010, S-NOTE-021, S-NOTE-034 and S-NOTE-037, recorded from Live 12.4.3 on macOS
@@ -47,18 +47,18 @@ This spec covers the filter bar, the eight filters, and Invert Selection. It lea
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1 | to be written in WP-6.4 | |
-| R2 | to be written in WP-6.4 | |
-| R3 | to be written in WP-6.4 | |
-| R4 | to be written in WP-6.4 | |
-| R5 | to be written in WP-6.4 | |
-| R6 | to be written in WP-6.4 | |
-| R7 | to be written in WP-6.4 | |
-| R8 | to be written in WP-6.4 | |
-| R9 | to be written in WP-6.4 | |
-| R10 | to be written in WP-6.4 | |
-| R11 | to be written in WP-6.4 | |
-| R12 | to be written in WP-6.4 | |
-| R13 | to be written in WP-6.4 | |
-| R14 | to be written in WP-6.4 | |
-| R15 | to be written in WP-6.4 | |
+| R1 | `crates/ui/tests/clip_view.rs`, `the_magnifier_and_cmd_shift_f_show_the_bar_above_the_ruler`; `crates/ui/tests/keymap.rs`, `the_note_filters_and_invert_selection_are_bound_in_the_note_editor`; `crates/shell/tests/note_filters.rs`, `the_bar_is_view_state_and_agents_read_the_filters_back` | UI script, unit |
+| R2 | `crates/ui/tests/clip_view.rs`, `the_magnifier_and_cmd_shift_f_show_the_bar_above_the_ruler`, `a_control_selects_live_and_a_click_switches_the_filters_off`; `crates/shell/tests/note_filters.rs`, `choosing_a_filter_keeps_the_selection_and_off_keeps_the_settings` | UI script, unit |
+| R3 | `crates/shell/tests/note_filters.rs`, `the_time_selection_follows_the_filters_and_nothing_is_an_undo_step`, `choosing_a_filter_keeps_the_selection_and_off_keeps_the_settings`, `filters_combine_and_each_keeps_its_own_invert`; `crates/ui/tests/clip_view.rs`, `a_control_selects_live_and_a_click_switches_the_filters_off` | unit, UI script |
+| R4 | `crates/shell/tests/note_filters.rs`, `invert_holds_back_exactly_what_each_filter_lets_through`, `pitch_lets_through_a_pitch_class_in_every_octave` | unit |
+| R5 | `crates/shell/tests/note_filters.rs`, `pitch_lets_through_a_pitch_class_in_every_octave`; `crates/ui/tests/clip_view.rs`, `a_control_selects_live_and_a_click_switches_the_filters_off` | unit, UI script |
+| R6 | `crates/shell/tests/note_filters.rs`, `time_selects_a_window_that_may_repeat`; `crates/ui/tests/clip_view.rs`, `a_shift_drag_sets_the_time_filters_window` | unit, UI script |
+| R7 | `crates/shell/tests/note_filters.rs`, `chance_and_velocity_select_their_bounds_and_move_each_other`, `a_control_out_of_range_changes_nothing` | unit |
+| R8 | `crates/shell/tests/note_filters.rs`, `condition_needs_every_switch_that_is_on` | unit |
+| R9 | `crates/shell/tests/note_filters.rs`, `count_counts_notes_or_grid_steps` | unit |
+| R10 | `crates/shell/tests/note_filters.rs`, `duration_selects_lengths_in_beats` | unit |
+| R11 | `crates/shell/tests/note_filters.rs`, `scale_reads_the_clip_scale_or_its_own` | unit |
+| R12 | `crates/shell/tests/note_filters.rs`, `another_clip_switches_every_filter_off` | unit |
+| R13 | `crates/shell/tests/note_filters.rs`, `invert_selection_swaps_the_selection_and_the_time_selection_follows`, `invert_selection_needs_a_clip_that_holds_notes`; `crates/ui/tests/clip_view.rs`, `invert_selection_runs_from_the_key_and_the_context_menu`, `the_context_menu_lists_the_items_in_order` | unit, UI script |
+| R14 | `crates/agent/tests/tools.rs`, `an_agent_sets_the_note_filters_and_inverts_the_selection_by_command`; `crates/shell/tests/note_filters.rs`, `the_bar_is_view_state_and_agents_read_the_filters_back` | unit |
+| R15 | `crates/ui/tests/clip_view.rs`, `the_magnifier_and_cmd_shift_f_show_the_bar_above_the_ruler`, `a_control_selects_live_and_a_click_switches_the_filters_off` | UI script |

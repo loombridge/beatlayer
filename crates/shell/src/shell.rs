@@ -5187,7 +5187,9 @@ impl Shell {
     /// step when it ends, so an agent's edits wait until then (WP-1.15b).
     #[must_use]
     pub fn gesture_under_way(&self) -> bool {
-        self.edit_gesture.is_some() || self.gesture
+        // The edit a selected breakpoint opens isn't one: it can last
+        // minutes, and another command ends it (automation-editing R23).
+        self.edit_gesture.is_some() || (self.gesture && self.key_edit.is_none())
     }
 
     /// Runs a command as [`Shell::run`] does, recording what it changes in
@@ -5551,6 +5553,11 @@ impl Shell {
     pub fn poll_engine(&mut self) -> EngineTransport {
         let engine = self.audio.transport_state();
         self.poll_capture();
+        // Spec: automation-editing R23. A recording edits the set as it
+        // runs, so it ends the edit a selected breakpoint opened.
+        if self.recording.is_some() || self.session_run.is_some() {
+            self.end_key_edit();
+        }
         // WP-2.13. A recording's take reaches the shell with the engine's
         // state; the clips are made from it once the writer has finished.
         self.poll_recording(&engine);

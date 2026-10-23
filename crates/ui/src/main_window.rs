@@ -403,6 +403,12 @@ impl MainWindowUi {
         let ctx = root.ctx().clone();
         let ctx = &ctx;
         let mut events = Vec::new();
+        // Spec: automation-editing R23. A value being typed goes with the
+        // envelope that has the keyboard, so it can't hold the keys after
+        // the keyboard leaves.
+        if shell.keyboard_envelope().is_none() {
+            crate::envelope_keys::set_typed(ctx, None);
+        }
         // Spec: accessibility R3, R4, R7. The keyboard's moves go by the
         // order the last frame drew.
         crate::menus::menu_keys(ctx);

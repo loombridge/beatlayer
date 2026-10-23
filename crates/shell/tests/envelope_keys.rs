@@ -292,8 +292,10 @@ fn enter_selects_a_breakpoint_and_enter_again_keeps_the_edit_as_one_undo_step() 
     song.keys(ids::MOVE_SELECTED, json!({ "direction": "down" }));
     song.keys(ids::MOVE_SELECTED, json!({ "direction": "down" }));
     song.keys(ids::MOVE_SELECTED, json!({ "direction": "right" }));
-    // Nothing is a step until it's let go of.
-    assert!(song.shell.gesture_under_way());
+    // Nothing is a step until it's let go of, and an agent's calls don't
+    // wait for it.
+    assert_eq!(song.steps(), steps);
+    assert!(!song.shell.gesture_under_way());
     let kept = song.keys(ids::ENTER, json!({}));
     assert_eq!(kept.selected, None);
     assert!(!song.shell.gesture_under_way());
@@ -546,7 +548,7 @@ fn the_edit_ends_when_another_command_edits_the_set() {
     song.lane_at(BAR);
     song.keys(ids::ENTER, json!({}));
     song.keys(ids::MOVE_SELECTED, json!({ "direction": "up" }));
-    assert!(song.shell.gesture_under_way());
+    assert!(song.state().selected_breakpoint.is_some());
     song.run("mixer.set_pan", json!({ "track": song.track, "pan": 0.25 }));
     assert!(!song.shell.gesture_under_way());
     assert_eq!(song.state().selected_breakpoint, None);

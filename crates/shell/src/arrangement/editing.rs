@@ -18,7 +18,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use bl_core::time::Ticks;
 use bl_model::{
     AutomationTarget, Breakpoint, Change, ChangeSet, Clip, ClipData, ClipId, Command, Document,
-    Editor, TrackId, TrackKind,
+    Editor, TakeLaneId, TrackId, TrackKind,
 };
 use bl_shell_spec::arrangement::{Lane, TimeRange};
 use bl_shell_spec::editing::{
@@ -31,7 +31,7 @@ use serde_json::Value;
 
 use super::automation;
 use super::fades;
-use super::placing::{clear, clear_spans, piece, split_off};
+use super::placing::{clear, clear_on, clear_spans, piece, split_off};
 use super::{ArrangementView, parse};
 
 /// Why an edit didn't happen. The document is as it was.
@@ -81,7 +81,7 @@ pub struct EnvelopeMaterial {
 /// Material copied from the Arrangement, for pasting: each track's clips,
 /// placed from the material's start.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct Clipboard {
+pub struct Material {
     /// Each track's clips, with the track's distance from the first in the
     /// track list. A clip's `start` counts from the material's start.
     pub tracks: Vec<(usize, Vec<Clip>)>,
@@ -99,7 +99,7 @@ pub struct Clipboard {
     pub envelopes: Vec<EnvelopeMaterial>,
 }
 
-impl Clipboard {
+impl Material {
     /// What it holds, as `arrangement.copy` reports it.
     #[must_use]
     pub fn state(&self) -> ClipboardState {
@@ -107,6 +107,29 @@ impl Clipboard {
             clips: self.tracks.iter().map(|(_, clips)| clips.len()).sum(),
             tracks: self.tracks.len(),
             length: self.length,
+        }
+    }
+}
+
+/// What the clipboard holds: the Arrangement's material, or whole tracks
+/// copied from the track headers (the track context menu spec, R14).
+/// Whichever was copied last is what it holds.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Clipboard {
+    /// The Arrangement's material: each track's clips, placed from the
+    /// material's start.
+    Material(Material),
+    /// Whole tracks, with everything they hold.
+    Tracks(crate::tracks::CopiedTracks),
+}
+
+impl Clipboard {
+    /// The Arrangement's material, if the clipboard holds it.
+    #[must_use]
+    pub fn material(&self) -> Option<&Material> {
+        match self {
+            Self::Material(material) => Some(material),
+            Self::Tracks(_) => None,
         }
     }
 }
@@ -184,21 +207,45 @@ fn clear_moved(
     moves: &[(ClipId, TrackId, Ticks, Ticks)],
 ) -> Result<(), EditFailure> {
     let keep: BTreeSet<ClipId> = clips.iter().copied().collect();
-    let mut spans: BTreeMap<TrackId, Vec<(Ticks, Ticks)>> = BTreeMap::new();
-    for (_, track, start, end) in moves {
-        spans.entry(*track).or_default().push((*start, *end));
+    type Place = (TrackId, Option<TakeLaneId>);
+    let mut spans: BTreeMap<Place, Vec<(Ticks, Ticks)>> = BTreeMap::new();
+    for (clip, track, start, end) in moves {
+        // A moved clip keeps its take lane, and so clears on it.
+        let lane = editor.document().clip_lane(*clip);
+        spans
+            .entry((*track, lane))
+            .or_default()
+            .push((*start, *end));
     }
-    for (track, spans) in spans {
-        clear_spans(editor, track, &spans, &keep)?;
+    for ((track, lane), spans) in spans {
+        clear_spans(editor, track, lane, &spans, &keep)?;
     }
     Ok(())
 }
 
 /// Puts new clips on tracks, each replacing what it covers, and returns
-/// their IDs. Each clip's own ID is replaced with a new one.
+/// their IDs. Each clip's own ID is replaced with a new one. A clip copied
+/// from a take lane of the track it lands on lands on that lane.
 pub(crate) fn place(
     editor: &mut Editor,
     placements: Vec<(TrackId, Vec<Clip>)>,
+) -> Result<Vec<ClipId>, EditFailure> {
+    place_clips(editor, placements, false)
+}
+
+/// As [`place`], but every clip goes on its track's main lane, whatever lane
+/// the clip it was copied from sat on.
+pub(crate) fn place_on_main(
+    editor: &mut Editor,
+    placements: Vec<(TrackId, Vec<Clip>)>,
+) -> Result<Vec<ClipId>, EditFailure> {
+    place_clips(editor, placements, true)
+}
+
+fn place_clips(
+    editor: &mut Editor,
+    placements: Vec<(TrackId, Vec<Clip>)>,
+    main: bool,
 ) -> Result<Vec<ClipId>, EditFailure> {
     let doc = editor.document();
     for (track, clips) in &placements {
@@ -225,22 +272,77 @@ pub(crate) fn place(
     let mut created = Vec::new();
     let mut placed = BTreeSet::new();
     for (track, clips) in placements {
-        for mut clip in clips {
-            clip.id = editor.new_id();
-            clear(editor, track, clip.start, clip.end(), &placed)?;
-            placed.insert(clip.id);
-            created.push(clip.id);
-            // Spec: scales R7. A copy keeps its source's scale, which the
-            // clip takes the set's current scale when it is made.
-            let scale = clip.scale;
-            let id = clip.id;
-            apply(editor, Command::CreateClip { track, clip })?;
-            if scale != editor.document().settings().scale {
-                apply(editor, scale.command(vec![id]))?;
-            }
+        for clip in clips {
+            let doc = editor.document();
+            let lane = doc
+                .clip_lane(clip.id)
+                .filter(|lane| !main && doc.take_lane_track(*lane) == Some(track));
+            created.push(place_clip(editor, track, lane, clip, &mut placed)?);
         }
     }
     Ok(created)
+}
+
+/// Puts new clips on take lane `lane` of `track`, each replacing what it
+/// covers on that lane, and returns their IDs.
+pub(crate) fn place_on_lane(
+    editor: &mut Editor,
+    track: TrackId,
+    lane: TakeLaneId,
+    clips: Vec<Clip>,
+) -> Result<Vec<ClipId>, EditFailure> {
+    let doc = editor.document();
+    if let Some(clip) = clips.iter().find(|c| !fits(doc, track, &c.data)) {
+        let what = if clip.data.is_audio() {
+            "an audio clip"
+        } else {
+            "a MIDI clip"
+        };
+        return Err(refused(format!(
+            "{what} can't go on take lane {}: audio clips go on audio tracks and MIDI clips on \
+             MIDI tracks",
+            lane.0
+        )));
+    }
+    let mut placed = BTreeSet::new();
+    clips
+        .into_iter()
+        .map(|clip| place_clip(editor, track, Some(lane), clip, &mut placed))
+        .collect()
+}
+
+/// Puts one new clip, under a new ID, on `track`'s main lane or its take
+/// lane `lane`, replacing what it covers there.
+fn place_clip(
+    editor: &mut Editor,
+    track: TrackId,
+    lane: Option<TakeLaneId>,
+    mut clip: Clip,
+    placed: &mut BTreeSet<ClipId>,
+) -> Result<ClipId, EditFailure> {
+    clip.id = editor.new_id();
+    // Spec: grooves R3, R5. A copy keeps its groove while the pool still
+    // holds it; one deleted since the copy leaves it none.
+    clip.groove = clip
+        .groove
+        .filter(|groove| editor.document().settings().grooves.get(*groove).is_some());
+    clear_on(editor, track, lane, clip.start, clip.end(), placed)?;
+    placed.insert(clip.id);
+    // Spec: scales R7. A copy keeps its source's scale, which the clip takes
+    // the set's current scale when it is made.
+    let scale = clip.scale;
+    let id = clip.id;
+    apply(
+        editor,
+        match lane {
+            Some(lane) => Command::CreateTakeClip { lane, clip },
+            None => Command::CreateClip { track, clip },
+        },
+    )?;
+    if scale != editor.document().settings().scale {
+        apply(editor, scale.command(vec![id]))?;
+    }
+    Ok(id)
 }
 
 /// Runs `edit` as one transaction labelled `label`, returning its result
@@ -421,7 +523,7 @@ pub(crate) fn material(
 }
 
 /// The clipboard holding a target's material.
-fn clipboard_of(doc: &Document, target: &Target) -> Clipboard {
+fn clipboard_of(doc: &Document, target: &Target) -> Material {
     let lanes = lanes(doc);
     let (by_track, start, end) = material(doc, target);
     let first = by_track
@@ -444,7 +546,7 @@ fn clipboard_of(doc: &Document, target: &Target) -> Clipboard {
         .collect();
     // Spec: automation-editing R9. The material's envelopes go with it.
     let envelopes = envelope_material(doc, target, &by_track, start, end);
-    Clipboard {
+    Material {
         tracks,
         length: end - start,
         start,
@@ -790,6 +892,38 @@ impl ArrangementView {
         self.grid_step(doc).ticks.max(Ticks(1))
     }
 
+    /// `at` on the nearest grid line, whether snapping is on or not: where
+    /// holding Cmd (Ctrl on Windows) puts a split (note-editing R33).
+    #[must_use]
+    pub fn nearest_line(&self, doc: &Document, at: Ticks) -> Ticks {
+        super::grid::snap(&doc.settings().time_signatures, self.grid_step(doc), at)
+    }
+
+    /// The grid lines either side of `at`: the last one before it and the
+    /// first one after it, or `at` itself where there is none. A stretch
+    /// marker moves freely between them before it snaps (note-editing R43).
+    #[must_use]
+    pub fn lines_around(&self, doc: &Document, at: Ticks) -> (Ticks, Ticks) {
+        let step = self.grid_step(doc);
+        let reach = step.ticks.max(Ticks(1)) * 2;
+        let (mut before, mut after) = (at, at);
+        super::grid::lines(
+            &doc.settings().time_signatures,
+            step,
+            (at - reach).max(Ticks::ZERO),
+            at + reach,
+            64,
+            |line, _| {
+                if line < at {
+                    before = line;
+                } else if line > at && after == at {
+                    after = line;
+                }
+            },
+        );
+        (before, after)
+    }
+
     /// Where something dragged to `at` lands: on the nearest grid line while
     /// snapping is on, and freely while it's off. Holding Cmd (Alt on
     /// Windows) during the drag, `invert`, does the opposite (I-DRAG-021;
@@ -926,7 +1060,7 @@ pub fn can_run(
         ids::CREATE_FADE => create_fade_plan(doc, view, args).is_some_and(|plan| !plan.is_empty()),
         ids::DELETE_FADES => given("clips") || !view.selected_clips.is_empty(),
         ids::PASTE => {
-            clipboard.is_some_and(|c| !c.tracks.is_empty())
+            clipboard.is_some_and(|c| c.material().is_some_and(|m| !m.tracks.is_empty()))
                 && (given("track") || !view.selected.is_empty() || !lanes(doc).is_empty())
         }
         _ => false,
@@ -1260,6 +1394,7 @@ pub fn run(
                         .expect("the clips exist")
                         .clone();
                     let track = editor.document().clip_track(*clip).expect("on a track");
+                    let lane = editor.document().clip_lane(*clip);
                     match edge {
                         Edge::End => {
                             apply(
@@ -1269,7 +1404,7 @@ pub fn run(
                                     length: value.length + by,
                                 },
                             )?;
-                            clear(editor, track, value.end(), value.end() + by, &keep)?;
+                            clear_on(editor, track, lane, value.end(), value.end() + by, &keep)?;
                         }
                         Edge::Start => {
                             apply(
@@ -1279,7 +1414,7 @@ pub fn run(
                                     start: value.start + by,
                                 },
                             )?;
-                            clear(editor, track, value.start + by, value.start, &keep)?;
+                            clear_on(editor, track, lane, value.start + by, value.start, &keep)?;
                         }
                     }
                 }
@@ -1404,7 +1539,7 @@ pub fn run(
             let target = target(doc, view, parse(args)?)?;
             let copied = clipboard_of(doc, &target);
             let state = copied.state();
-            *clipboard = Some(copied);
+            *clipboard = Some(Clipboard::Material(copied));
             Ok(to_value(&state))
         }
         ids::CUT => {
@@ -1413,13 +1548,17 @@ pub fn run(
             let (_, recorded) = settled(editor, "Cut", (doc, edge_fades), |editor| {
                 delete_target(editor, &target)
             })?;
-            *clipboard = Some(copied);
+            *clipboard = Some(Clipboard::Material(copied));
             view.selected_clips.clear();
             Ok(to_value(&result(doc, editor, view, recorded)))
         }
         ids::PASTE => {
             let PasteArgs { at, track } = parse(args)?;
-            let Some(copied) = clipboard.as_ref().filter(|c| !c.tracks.is_empty()) else {
+            let Some(copied) = clipboard
+                .as_ref()
+                .and_then(Clipboard::material)
+                .filter(|c| !c.tracks.is_empty())
+            else {
                 return Err(unavailable("there's nothing on the clipboard to paste"));
             };
             let at = match at {

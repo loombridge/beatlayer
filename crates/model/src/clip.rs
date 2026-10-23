@@ -30,7 +30,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::automation::{AutomationTarget, Breakpoint, Envelope};
 use crate::error::ModelError;
-use crate::ids::{ClipId, ContentHash};
+use crate::ids::{ClipId, ContentHash, GrooveId, TakeLaneId};
 use crate::launch::ClipLaunch;
 use crate::scale::Scale;
 use crate::warp::{TransientEdits, WarpMarker};
@@ -82,6 +82,11 @@ pub struct Clip {
     /// nothing, so a set saved before the scales loads unchanged.
     #[serde(default, skip_serializing_if = "Scale::is_default")]
     pub scale: Scale,
+    /// The clip's groove (WP-6.19): one of the set's Groove Pool, or none.
+    /// It changes when the clip's notes play, or where its audio plays, and
+    /// nothing in the clip itself until it is committed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub groove: Option<GrooveId>,
 }
 
 impl Clip {
@@ -99,7 +104,15 @@ impl Clip {
             envelopes: Vec::new(),
             launch: ClipLaunch::default(),
             scale: Scale::default(),
+            groove: None,
         }
+    }
+
+    /// The clip with `groove` as its groove: what a new MIDI clip is given
+    /// from the set's Auto Load Groove (the grooves spec, R20).
+    #[must_use]
+    pub fn with_groove(self, groove: Option<GrooveId>) -> Self {
+        Self { groove, ..self }
     }
 
     /// The clip's envelopes, in target order.
@@ -856,36 +869,115 @@ fn ending(at: f64, seconds: f64) -> Option<f64> {
     ((at - seconds).abs() > 1e-9).then_some(at)
 }
 
-/// One recorded pass on a take lane: where it sits, how long it is, and the
-/// audio it plays. Unlike an Arrangement [`Clip`] it has no ID and isn't
-/// addressed by any command yet; take-lane editing and comping come later
-/// (the recording spec, R12).
+/// What a pass handed to `track.add_take_lane` plays: audio data as it was
+/// given before take lanes held clips (just the audio's fields), or a clip's
+/// data tagged `audio` or `midi`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[schemars(
-    description = "A recorded pass on a take lane: its `name`, `start` and `length` in ticks \
-                   (705,600 to the quarter note), and the audio clip `data` it plays."
-)]
-pub struct TakeClip {
-    /// The pass's name, which may be empty.
-    pub name: String,
-    /// Where the pass starts in the arrangement. Never negative.
-    pub start: Ticks,
-    /// How long the pass is. Always positive.
-    pub length: Ticks,
-    /// The audio it plays.
-    pub data: AudioData,
+#[serde(untagged)]
+pub enum TakeClipData {
+    /// Audio or MIDI data, tagged as a clip's is.
+    Tagged(ClipData),
+    /// Audio data without the tag.
+    Audio(AudioData),
 }
 
-/// One take lane under a track's main lane: a name and the passes it holds,
-/// in start order. The track plays only its main lane; a take lane's clips
-/// are kept until comping lets a person audition and pick from them.
+impl TakeClipData {
+    /// The clip data it stands for.
+    #[must_use]
+    pub fn into_data(self) -> ClipData {
+        match self {
+            Self::Tagged(data) => data,
+            Self::Audio(audio) => ClipData::Audio(audio),
+        }
+    }
+}
+
+/// A clip handed to `track.add_take_lane`: where it sits, how long it is,
+/// and what it plays. Its ID is issued when it's left out.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[schemars(description = "A take lane under a track's main lane: its `name` and its `clips`.")]
-pub struct TakeLane {
+#[schemars(
+    description = "A clip for a new take lane: its `name`, `start` and `length` in ticks \
+                   (705,600 to the quarter note), and the `data` it plays, audio as \
+                   `clip.create` takes it or tagged `audio` or `midi`. Its `id` is issued when \
+                   it's left out."
+)]
+pub struct TakeClip {
+    /// The clip's ID. Left out, the editor issues one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<ClipId>,
+    /// The clip's name, which may be empty.
+    pub name: String,
+    /// Where the clip starts in the arrangement. Never negative.
+    pub start: Ticks,
+    /// How long the clip is. Always positive.
+    pub length: Ticks,
+    /// What it plays.
+    pub data: TakeClipData,
+}
+
+/// A take lane handed to `track.add_take_lane`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[schemars(
+    description = "A new take lane: its `name`, the `clips` it holds, and its `id`, issued when \
+                   it's left out."
+)]
+pub struct NewTakeLane {
+    /// The lane's ID. Left out, the editor issues one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<TakeLaneId>,
     /// The lane's name, such as `Take 1`.
     pub name: String,
-    /// The passes on the lane.
+    /// The clips on the lane.
+    #[serde(default)]
     pub clips: Vec<TakeClip>,
+}
+
+impl NewTakeLane {
+    /// The lane with its clips as the document holds them. Every ID must be
+    /// there: the editor issues the ones left out before the command runs.
+    pub(crate) fn lane(&self) -> Result<TakeLane, ModelError> {
+        let id = self.id.ok_or(ModelError::MissingId)?;
+        let clips = self
+            .clips
+            .iter()
+            .map(|clip| {
+                let id = clip.id.ok_or(ModelError::MissingId)?;
+                let data = clip.data.clone().into_data();
+                Ok(Clip {
+                    name: clip.name.clone(),
+                    ..Clip::new(id, clip.start, clip.length, data)
+                })
+            })
+            .collect::<Result<Vec<_>, ModelError>>()?;
+        Ok(TakeLane {
+            id,
+            name: self.name.clone(),
+            clips,
+        })
+    }
+}
+
+/// One take lane under a track's main lane (WP-6.21, the comping spec, R1):
+/// an ID that never changes, a name, and clips of its track's kind, which
+/// never overlap. The track plays only its main lane, or the lane that is
+/// auditioned in its place.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[schemars(description = "A take lane under a track's main lane: its `id`, `name` and `clips`.")]
+pub struct TakeLane {
+    /// The lane's ID.
+    pub id: TakeLaneId,
+    /// The lane's name, such as `Take 1`.
+    pub name: String,
+    /// The clips on the lane.
+    pub clips: Vec<Clip>,
+}
+
+impl TakeLane {
+    /// The lane's clip with this ID.
+    #[must_use]
+    pub fn clip(&self, id: ClipId) -> Option<&Clip> {
+        self.clips.iter().find(|clip| clip.id == id)
+    }
 }
 
 fn is_zero(value: &f64) -> bool {
@@ -1229,6 +1321,7 @@ pub fn consolidated_midi(
         // Spec: scales R7. A consolidated clip takes the scale of the first
         // clip it was made from.
         scale: clips.first().map_or_else(Scale::default, |clip| clip.scale),
+        groove: None,
     }
 }
 

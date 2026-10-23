@@ -76,6 +76,14 @@ const SHELL: &[&str] = &[
     "S-VIEW-019",
     "S-VIEW-020",
     "S-VIEW-021",
+    "S-VIEW-004",
+    "S-VIEW-005",
+    "S-VIEW-015",
+    "S-VIEW-016",
+    "S-VIEW-022",
+    "S-NOTE-030",
+    "S-FOCUS-004",
+    "S-FOCUS-005",
     "S-FOCUS-001",
     "S-FOCUS-003",
     "S-FOCUS-011",
@@ -907,4 +915,203 @@ fn the_tags_shortcuts_reach_their_commands() {
     );
     assert_eq!(entry.mac, vec!["Cmd+E".to_owned()]);
     assert_eq!(entry.win, vec!["Ctrl+E".to_owned()]);
+}
+
+// Spec: note-editing R35 to R41, R47 (WP-6.3). Join, Fit to Time Range and
+// Split Clip are bound in the note editor, ahead of the Arrangement's keys
+// they share (Consolidate on Cmd-J); the keys that run differently with
+// what is selected or held down are the note editor's own.
+#[test]
+fn the_note_operations_keys_reach_their_commands() {
+    let keymap = Keymap::live12();
+    let contexts = [
+        Context::NoteSelection,
+        Context::NoteEditor,
+        Context::ClipView,
+        Context::Global,
+    ];
+    for (platform, command, command_alt, command_shift) in [
+        (
+            Platform::Mac,
+            mods(true, false, false, false),
+            mods(true, false, true, false),
+            mods(true, false, false, true),
+        ),
+        (
+            Platform::Other,
+            mods(false, true, false, false),
+            mods(false, true, true, false),
+            mods(false, true, false, true),
+        ),
+    ] {
+        for (key, mods, expected) in [
+            (Key::J, command, "note.join"),
+            (Key::J, command_alt, "note.fit_to_time"),
+            (Key::E, command_shift, "note.split_clip"),
+        ] {
+            let hit = keymap
+                .resolve(platform, key, mods, &contexts)
+                .map(|hit| hit.command.id.clone());
+            assert_eq!(hit.as_deref(), Some(expected), "{platform:?} {key:?}");
+        }
+    }
+    for (id, status) in [
+        ("S-NOTE-007", "bound"),
+        ("S-NOTE-008", "bound"),
+        ("S-NOTE-036", "bound"),
+    ] {
+        let entry = keymap.entry_for(id).unwrap();
+        assert_eq!(entry.status, Status::Bound, "{id} is {status}");
+    }
+    for id in [
+        "S-NOTE-003",
+        "S-NOTE-004",
+        "S-NOTE-005",
+        "S-NOTE-006",
+        "S-NOTE-047",
+    ] {
+        let entry = keymap.entry_for(id).unwrap();
+        assert!(
+            matches!(entry.status, Status::Widget(_)),
+            "{id} is read by the note editor: {:?}",
+            entry.status
+        );
+    }
+    // Cmd-E isn't taken by anything wider in the note editor.
+    let plain = keymap.resolve(
+        Platform::Mac,
+        Key::E,
+        mods(true, false, false, false),
+        &contexts,
+    );
+    assert!(plain.is_none(), "the note editor reads Cmd-E itself");
+}
+
+// Spec: detail-views R1, R2, R5, R6, R11, R14. The detail views' seven
+// shortcuts, and Cmd+Option+3, are bound to the commands that carry them
+// out, on both platforms, in the contexts the spec gives.
+#[test]
+fn the_detail_views_shortcuts_reach_their_commands() {
+    let keymap = Keymap::live12();
+    for (id, command, contexts) in [
+        (
+            "S-VIEW-004",
+            "view.switch_detail_view",
+            &[Context::Global][..],
+        ),
+        (
+            "S-VIEW-005",
+            "view.show_detail_views",
+            &[Context::Global][..],
+        ),
+        (
+            "S-VIEW-015",
+            "view.toggle_clip_view",
+            &[Context::Global][..],
+        ),
+        (
+            "S-VIEW-016",
+            "view.toggle_device_view",
+            &[Context::Global][..],
+        ),
+        (
+            "S-VIEW-022",
+            "view.toggle_detail_area",
+            &[Context::Global][..],
+        ),
+        (
+            "S-NOTE-030",
+            "view.expand_clip_view",
+            &[Context::ClipView][..],
+        ),
+        ("S-FOCUS-004", "focus.clip_view", &[Context::Global][..]),
+        ("S-FOCUS-005", "focus.device_view", &[Context::Global][..]),
+    ] {
+        let entry = keymap.entry_for(id).unwrap();
+        assert_eq!(entry.status, Status::Bound, "{id}");
+        assert_eq!(entry.commands.len(), 1, "{id}");
+        assert_eq!(entry.commands[0].id, command, "{id}");
+        assert_eq!(entry.commands[0].contexts, contexts, "{id}");
+    }
+    let plain = mods(false, false, false, false);
+    for platform in [Platform::Mac, Platform::Other] {
+        // Shift+Tab and F12 switch the views in the global context, which
+        // Tab's own setting (the `tab-focus` context) comes before.
+        let at = |key, m, contexts: &[Context]| {
+            keymap
+                .resolve(platform, key, m, contexts)
+                .map(|hit| hit.command.id.clone())
+        };
+        let shift = mods(false, false, false, true);
+        assert_eq!(
+            at(Key::F12, plain, &[Context::Global]).as_deref(),
+            Some("view.switch_detail_view")
+        );
+        assert_eq!(
+            at(Key::Tab, shift, &[Context::Global]).as_deref(),
+            Some("view.switch_detail_view")
+        );
+        assert_eq!(
+            at(Key::Tab, shift, &[Context::TabFocus, Context::Global]).as_deref(),
+            Some("focus.previous")
+        );
+        // Expand Clip View is the Clip View's own key.
+        let (cmd, ctrl) = match platform {
+            Platform::Mac => (true, false),
+            Platform::Other => (false, true),
+        };
+        let expand = mods(cmd, ctrl, true, false);
+        assert_eq!(
+            at(Key::E, expand, &[Context::ClipView, Context::Global]).as_deref(),
+            Some("view.expand_clip_view")
+        );
+        assert_eq!(
+            at(Key::E, expand, &[Context::DeviceView, Context::Global]),
+            None
+        );
+    }
+}
+
+// Spec: track-context-menu R16. The whole-track commands have their keys
+// on the track headers, and the Arrangement's own edits keep them where
+// clips or time are selected.
+#[test]
+fn the_track_headers_keys_reach_the_track_commands() {
+    let keymap = Keymap::live12();
+    let headers = [Context::TrackHeaders, Context::Arrangement, Context::Global];
+    let arrangement = [Context::Arrangement, Context::Global];
+    // The Session View has no title-bar keys (R16: track headers only).
+    let session = [Context::Session, Context::Global];
+    let resolve = |platform, key, m, contexts: &[Context]| {
+        keymap
+            .resolve(platform, key, m, contexts)
+            .map(|hit| hit.command.id.clone())
+    };
+    for (platform, cmd) in [
+        (Platform::Mac, mods(true, false, false, false)),
+        (Platform::Other, mods(false, true, false, false)),
+    ] {
+        for (key, command, edit) in [
+            (Key::X, "track.cut", "arrangement.cut"),
+            (Key::C, "track.copy", "arrangement.copy"),
+            (Key::V, "track.paste", "arrangement.paste"),
+            (Key::D, "track.duplicate", "arrangement.duplicate"),
+        ] {
+            assert_eq!(
+                resolve(platform, key, cmd, &headers).as_deref(),
+                Some(command),
+                "{platform:?}: {command}"
+            );
+            assert_eq!(
+                resolve(platform, key, cmd, &arrangement).as_deref(),
+                Some(edit),
+                "{platform:?}: {edit}"
+            );
+            assert_ne!(
+                resolve(platform, key, cmd, &session).as_deref(),
+                Some(command),
+                "{platform:?}: {command} is not bound in the Session View"
+            );
+        }
+    }
 }

@@ -8,7 +8,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::clip::{Clip, ClipData};
 use crate::device::Device;
-use crate::ids::{ChainId, ClipId, DeviceId, LocatorId, SceneId, TrackId};
+use crate::groove::GroovePool;
+use crate::ids::{ChainId, ClipId, DeviceId, GrooveId, LocatorId, SceneId, TakeLaneId, TrackId};
 use crate::locator::{Locator, SongStart};
 use crate::metronome::MetronomeSettings;
 use crate::rack::Chain;
@@ -101,6 +102,12 @@ pub struct Settings {
     /// A set saved before the song start time has none and loads with none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub song_start: Option<SongStart>,
+    /// The set's grooves (WP-6.19): the Groove Pool, the Global Amount, and
+    /// Auto Load Groove with its groove. A set saved before grooves loads
+    /// with an empty pool, a Global Amount of 100 % and Auto Load Groove off,
+    /// and a set holding none doesn't write them.
+    #[serde(default, skip_serializing_if = "GroovePool::is_default")]
+    pub grooves: GroovePool,
     /// The set's current scale (WP-6.7): its Scale Mode switch, its root and
     /// its scale name, which the Control Bar's scale controls show and which
     /// a new clip takes. Off, at C, in Major, in a new set, and not written
@@ -131,6 +138,7 @@ impl Default for Settings {
             lock_envelopes: false,
             locators: Vec::new(),
             song_start: None,
+            grooves: GroovePool::default(),
             scale: Scale::default(),
         }
     }
@@ -255,8 +263,11 @@ pub struct Document {
 /// rebuilt when a document is loaded. They're never saved.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct Index {
-    /// The track that holds each clip.
+    /// The track that holds each clip: on its main lane, on one of its take
+    /// lanes or in one of its Session slots.
     pub(crate) clip_track: OrdMap<ClipId, TrackId>,
+    /// The track that holds each take lane (WP-6.21).
+    pub(crate) lane_track: OrdMap<TakeLaneId, TrackId>,
     /// The track whose chain holds each device, at any depth: a device in a
     /// rack's chain belongs to the rack's track.
     pub(crate) device_track: OrdMap<DeviceId, TrackId>,
@@ -553,6 +564,44 @@ impl Document {
         }
     }
 
+    /// The clips, on any track's Arrangement lane or in a Session slot, whose
+    /// groove is `groove`.
+    #[must_use]
+    pub fn clips_using_groove(&self, groove: GrooveId) -> Vec<ClipId> {
+        self.tracks
+            .values()
+            .flat_map(|track| track.clips().chain(track.slots().map(|(_, clip)| clip)))
+            .filter(|clip| clip.groove == Some(groove))
+            .map(|clip| clip.id)
+            .collect()
+    }
+
+    /// Sets to none the groove of every clip whose groove `gone` picks.
+    pub(crate) fn forget_grooves(&mut self, gone: impl Fn(GrooveId) -> bool) {
+        let owners: Vec<(TrackId, ClipId)> = self
+            .tracks
+            .iter()
+            .flat_map(|(id, track)| {
+                track
+                    .clips()
+                    .chain(track.slots().map(|(_, clip)| clip))
+                    .filter(|clip| clip.groove.is_some_and(&gone))
+                    .map(|clip| (*id, clip.id))
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        for (track, clip) in owners {
+            if let Some(clip) = self
+                .tracks
+                .get_mut(&track)
+                .map(crate::shared::Shared::make_mut)
+                .and_then(|track| track.clip_mut(clip))
+            {
+                clip.groove = None;
+            }
+        }
+    }
+
     /// How many scenes there are.
     #[must_use]
     pub fn scene_count(&self) -> usize {
@@ -631,6 +680,45 @@ impl Document {
     #[must_use]
     pub fn clip_track(&self, id: ClipId) -> Option<TrackId> {
         self.index.clip_track.get(&id).copied()
+    }
+
+    /// The track that holds a take lane (the comping spec, R1).
+    #[must_use]
+    pub fn take_lane_track(&self, id: TakeLaneId) -> Option<TrackId> {
+        self.index.lane_track.get(&id).copied()
+    }
+
+    /// The document with no take lane auditioned, as a freeze or a bounce
+    /// renders it: they take the main lanes only (the freeze and bounce
+    /// spec, R30).
+    #[must_use]
+    pub fn without_auditions(&self) -> Self {
+        let mut plain = self.clone();
+        let auditioned: Vec<TrackId> = plain
+            .tracks
+            .iter()
+            .filter(|(_, track)| track.audition.is_some())
+            .map(|(&id, _)| id)
+            .collect();
+        for id in auditioned {
+            if let Some(track) = plain.tracks.get_mut(&id) {
+                Shared::make_mut(track).audition = None;
+            }
+        }
+        plain
+    }
+
+    /// The take lane with this ID.
+    #[must_use]
+    pub fn take_lane(&self, id: TakeLaneId) -> Option<&crate::clip::TakeLane> {
+        self.track(self.take_lane_track(id)?)?.take_lane(id)
+    }
+
+    /// The take lane a clip sits on, if it sits on one rather than on its
+    /// track's main lane or in a Session slot (the comping spec, R2).
+    #[must_use]
+    pub fn clip_lane(&self, id: ClipId) -> Option<TakeLaneId> {
+        self.track(self.clip_track(id)?)?.clip_lane(id)
     }
 
     /// Every clip ID, in ID order.
@@ -736,6 +824,7 @@ impl Document {
     pub fn contains(&self, id: Id) -> bool {
         self.tracks.contains_key(&TrackId(id))
             || self.index.clip_track.contains_key(&ClipId(id))
+            || self.index.lane_track.contains_key(&TakeLaneId(id))
             || self.index.device_track.contains_key(&DeviceId(id))
             || self.index.chain_track.contains_key(&ChainId(id))
             || self.scenes.iter().any(|scene| scene.id.0 == id)
@@ -744,6 +833,12 @@ impl Document {
                 .locators
                 .iter()
                 .any(|locator| locator.id.0 == id)
+            || self
+                .settings
+                .grooves
+                .pool
+                .iter()
+                .any(|groove| groove.id.0 == id)
     }
 
     /// The largest ID of any track, clip, device, or scene.
@@ -751,6 +846,7 @@ impl Document {
     pub fn max_id(&self) -> Id {
         let track = self.tracks.get_max().map(|(id, _)| id.0);
         let clip = self.index.clip_track.get_max().map(|(id, _)| id.0);
+        let lane = self.index.lane_track.get_max().map(|(id, _)| id.0);
         let device = self.index.device_track.get_max().map(|(id, _)| id.0);
         let chain = self.index.chain_track.get_max().map(|(id, _)| id.0);
         let scene = self.scenes.iter().map(|scene| scene.id.0).max();
@@ -760,7 +856,14 @@ impl Document {
             .iter()
             .map(|locator| locator.id.0)
             .max();
-        [track, clip, device, chain, scene, locator]
+        let groove = self
+            .settings
+            .grooves
+            .pool
+            .iter()
+            .map(|groove| groove.id.0)
+            .max();
+        [track, clip, lane, device, chain, scene, locator, groove]
             .into_iter()
             .flatten()
             .max()

@@ -21,6 +21,9 @@
 //! - [`automation`]: the Arrangement's automation editing commands
 //!   (WP-6.25): moving the breakpoints of an envelope, the clipboard of
 //!   envelope shapes, and the edit commands that act on them.
+//! - [`groove`]: the grooves' commands that need the shell (WP-6.19): loading
+//!   and saving groove files, extracting, committing, a groove made into a
+//!   clip, and the pool query.
 //! - [`locator`]: the Arrangement's locators (WP-6.24): adding, deleting,
 //!   moving, renaming and describing them, looping to the next one, the
 //!   song start time, and the jumps between them.
@@ -50,6 +53,8 @@
 //!   what it lists, replacing a file, and the set's backups and copies.
 //! - [`bounce`]: bouncing tracks and pasting bounced audio (`track.bounce_*`,
 //!   WP-4.15).
+//! - [`comping`]: inserting and duplicating take lanes and building a comp
+//!   from them (`take_lane.insert`, `take_lane.copy_to_main_lane`, WP-6.21).
 //! - [`midi_files`]: importing and exporting Standard MIDI Files
 //!   (`midi.import_file`, `midi.export_clip`, WP-2.21).
 //! - [`midi_io`]: MIDI ports and the computer MIDI keyboard (`midi.ports`,
@@ -84,6 +89,7 @@ pub mod bounce;
 pub mod browser;
 pub mod capture_midi;
 pub mod commands;
+pub mod comping;
 pub mod context_menus;
 pub mod dawproject;
 pub mod devices;
@@ -91,6 +97,7 @@ pub mod editing;
 pub mod export;
 pub mod file_manager;
 pub mod freeze;
+pub mod groove;
 pub mod keymap;
 pub mod locator;
 pub mod menus;
@@ -131,6 +138,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     arrangement::register(registry)?;
     editing::register(registry)?;
     automation::register(registry)?;
+    groove::register(registry)?;
     locator::register(registry)?;
     notes::register(registry)?;
     transport::register(registry)?;
@@ -159,6 +167,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     audio_panel::register(registry)?;
     freeze::register(registry)?;
     bounce::register(registry)?;
+    comping::register(registry)?;
     slice::register(registry)?;
     warping::register(registry)?;
     scales::register(registry)?;

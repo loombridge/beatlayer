@@ -21,7 +21,7 @@ use std::time::{Duration, Instant};
 use bl_core::midi::{MidiInputEvent, MidiMessage, MidiSource};
 use bl_core::time::{Frames, Ticks};
 use bl_engine::{
-    MidiRecordTrack, NoInput, RecordedMidi, RecordingPlan, TakeBounds, TransportCommand,
+    LoopRegion, MidiRecordTrack, NoInput, RecordedMidi, RecordingPlan, TakeBounds, TransportCommand,
 };
 use bl_model::{Command, CountIn, Monitor, TrackId, TrackKind};
 use common::{Rig, track};
@@ -163,6 +163,7 @@ fn notes_played_during_a_take_are_on_their_exact_samples() {
             start: Frames(48_000),
             end: Frames(48_000 + 6 * BLOCK as i64),
             wrap: None,
+            frames: 6 * BLOCK as u64,
         })
     );
     midi.rig.collector.collect();
@@ -357,4 +358,58 @@ fn a_full_ring_ends_the_take_and_counts_its_dropped_messages() {
     assert_eq!(dropped.load(Ordering::Relaxed), 2);
     midi.rig.collector.collect();
     assert_eq!(drain(&mut ring), vec![]);
+}
+
+// Spec: recording R12, R16. In a take that goes round the Arrangement loop,
+// a message is stamped with the frames the take has run for, like the frames
+// of its file, so the shell can tell the passes apart: the loop's wrap sets
+// the song frame back, and the stamp runs on.
+#[test]
+fn a_take_round_the_loop_stamps_its_messages_with_the_frames_it_has_run_for() {
+    let mut midi = Midi::new(|_| {});
+    let (mut ring, _) = midi.record(64);
+    // At 120 bpm a quarter note is 24,000 frames: the loop is the second one,
+    // and playback starts at 1.1.1, a quarter note before it.
+    midi.rig
+        .sender
+        .transport(TransportCommand::SetLoop(Some(LoopRegion {
+            start: Ticks::QUARTER,
+            end: Ticks::QUARTER * 2,
+        })));
+    midi.rig
+        .sender
+        .transport(TransportCommand::SetRecording(true));
+    midi.rig.sender.transport(TransportCommand::Play);
+    let (first, later) = (
+        MidiMessage::note_on(0, 60, 100),
+        MidiMessage::note_on(0, 62, 100),
+    );
+    for _ in 0..3 {
+        midi.block();
+    }
+    // In the lead-in, then well into the second pass of the loop.
+    midi.send(2, 10, first);
+    for _ in 3..200 {
+        midi.block();
+    }
+    midi.send(200, 10, later);
+    for _ in 200..215 {
+        midi.block();
+    }
+    midi.rig.sender.transport(TransportCommand::Stop);
+    midi.block();
+
+    let state = midi.rig.monitor.state();
+    let take = state.take.expect("the take");
+    assert_eq!(take.wrap, Some((Frames(24_000), Frames(48_000))));
+    assert!(take.frames > 48_000, "{take:?}");
+    midi.rig.collector.collect();
+    assert_eq!(
+        drain(&mut ring),
+        vec![
+            (3 * BLOCK as i64 + 10, first),
+            // Not 24,000 and some: the take has run for 201 blocks and 10.
+            (201 * BLOCK as i64 + 10, later),
+        ]
+    );
 }

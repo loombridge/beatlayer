@@ -962,8 +962,12 @@ const ENTRIES: &[Entry] = &[
             clicking or dragging a breakpoint on an automation lane does. `target` names the \
             parameter: `{\"type\": \"mixer\", \"param\": \"volume\"}`, `{\"type\": \"send\", \
             \"to\": <return track>}`, or `{\"type\": \"device\", \"device\": <device>, \
-            \"param\": <parameter>}`. A parameter with no envelope yet gets its first \
-            breakpoint and its envelope drives it from then on. Values are in the parameter's \
+            \"param\": <parameter>}`, or, on an audio track, a sound setting of its audio clips: \
+            `{\"type\": \"clip\", \"param\": \"formants\"}` (`gain` as linear gain, \
+            `transpose` in semitones, `detune` in cents, `high_quality`, `sample_offset` in \
+            sixteenths, and the warp modes' controls), which drives that setting of every \
+            audio clip on the track as it plays. A parameter with no envelope yet gets its \
+            first breakpoint and its envelope drives it from then on. Values are in the parameter's \
             own units: volume as linear gain, pan from -1 to 1, the Track Activator 1 for \
             muted, and a device parameter as the device's own value. `at` is 0 (1.1.1) or \
             later. The value between two breakpoints follows the segment's shape: the straight \
@@ -1184,12 +1188,98 @@ const ENTRIES: &[Entry] = &[
         permission: Permission::Edit,
         contexts: &[Arrangement],
         keys: &[],
-        description: "Adds a take lane under an audio track's arrangement lane, after the lanes \
-            it has. `lane.name` names it and `lane.clips` are the recorded passes it holds, each \
-            with a `name`, a `start` and `length` in ticks (705,600 to the quarter note), and \
-            audio `data` as `clip.create` takes it. The track plays only its arrangement lane: \
-            loop recording adds a lane for every pass and copies the latest pass to the \
-            arrangement lane. Audio tracks only.",
+        description: "Adds a take lane under an audio or MIDI track's main lane, after the \
+            lanes it has, or at `index` among them (0 is the lane nearest the main lane). \
+            `lane.name` names it and `lane.clips` are the clips it holds, each with a `name`, \
+            a `start` and `length` in ticks (705,600 to the quarter note), and `data`: audio \
+            as `clip.create` takes it, or tagged `audio` or `midi`. The lane and its clips are \
+            given IDs when `id` is left out. A lane holds clips of its track's kind. The track \
+            plays only its main lane, or the take lane that is auditioned in its place \
+            (`take_lane.set_audition`); recording adds a lane for every take and copies the \
+            latest to the main lane. Read the lanes back with the query tool's `track` \
+            `take_lanes`.",
+    },
+    Entry {
+        id: "take_lane.create_clip",
+        action: Action::Apply("create_take_clip"),
+        label: "Create Clip on Take Lane",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Puts a new clip on a take lane, at `clip.start` for `clip.length` ticks \
+            (705,600 to the quarter note), as `clip.create` puts one on a main lane: an audio \
+            clip on an audio track's lane and a MIDI clip on a MIDI track's. `clip.id` must be \
+            a new ID the project has issued for it. It does not clear what the lane holds \
+            there. The clip is then edited by its ID with the `clip.*` commands, as a \
+            main-lane clip is.",
+    },
+    Entry {
+        id: "take_lane.rename",
+        action: Action::Apply("rename_take_lane"),
+        label: "Rename Take Lane",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Gives a take lane a new name. An empty name is refused.",
+    },
+    Entry {
+        id: "take_lane.delete",
+        action: Action::Apply("delete_take_lanes"),
+        label: "Delete Take Lane(s)",
+        permission: Permission::Destructive,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Deletes take lanes with their clips. The main lane is left as it was, and \
+            a deleted lane that was auditioned stops being. Undo restores them, but because it \
+            removes the person's work an agent asks first.",
+    },
+    Entry {
+        id: "take_lane.delete_all",
+        action: Action::Apply("delete_all_take_lanes"),
+        label: "Delete All Take Lanes",
+        permission: Permission::Destructive,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Deletes every take lane of each of the audio or MIDI `tracks`, with their \
+            clips. The main lane is left as it was. Undo restores them, but because it \
+            removes the person's work an agent asks first.",
+    },
+    Entry {
+        id: "take_lane.delete_unused",
+        action: Action::Apply("delete_unused_take_lanes"),
+        label: "Delete All Unused Take Lanes",
+        permission: Permission::Destructive,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Deletes each of the audio or MIDI `tracks`' take lanes none of whose \
+            material the main lane uses: a main-lane clip uses a take-lane clip over the stretch \
+            where both lie when they play the same thing there (`take_lane.comp_sources` lists \
+            what is used). The main lane is left as it was. Undo restores them, but because it \
+            removes the person's work an agent asks first.",
+    },
+    Entry {
+        id: "take_lane.move",
+        action: Action::Apply("move_take_lanes"),
+        label: "Move Take Lane(s)",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Moves take lanes, which must all be on one track, to a new place among \
+            that track's take lanes, keeping their order: `index` counts from 0, the lane \
+            nearest the main lane, among the lanes that are not moved. The main lane stays \
+            first.",
+    },
+    Entry {
+        id: "take_lane.set_audition",
+        action: Action::Apply("set_audition"),
+        label: "Audition Take Lane",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Switches the audition of a take lane on or off. While a take lane is \
+            auditioned, its track plays that lane's clips in place of its main lane's, from the \
+            next block; a track has at most one, so switching one on switches off the one \
+            auditioned before. Session clips are unaffected. It is saved with the set.",
     },
     Entry {
         id: "clip.delete",
@@ -1943,7 +2033,10 @@ const ENTRIES: &[Entry] = &[
             breakpoint there or replacing the one that's there, as clicking or dragging a \
             breakpoint in the Envelopes tab does. `clip` is the clip, `target` the parameter of \
             the clip's track the envelope modulates (a control of its mixer, one of its sends, \
-            or a parameter of a device in its chain), `at` the position in ticks from the \
+            or a parameter of a device in its chain; an audio clip's can instead be one of its \
+            sound settings, `{\"type\": \"clip\", \"param\": \"transpose\"}`, whose value \
+            is a share from 0 to 100 for `gain` and otherwise an amount added to the setting, \
+            in its own units), `at` the position in ticks from the \
             beginning of the clip's contents, and `value` the value there, in the parameter's \
             own units. A MIDI clip's `target` can instead be a MIDI controller (MIDI Ctrl in \
             the Envelopes tab): `{\"type\": \"midi.cc\", \"number\": 1}` (a controller from 1 to \
@@ -3216,6 +3309,97 @@ const ENTRIES: &[Entry] = &[
             Choosing it where it is set clears it, so the song starts at the insert marker \
             again. While it is set, Play starts the song there instead of at the insert \
             marker. One undo step, `Set Song Start Time`.",
+    },
+    Entry {
+        id: "groove.add",
+        action: Action::Apply("add_groove"),
+        label: "Add Groove",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Adds a groove to the end of the set's Groove Pool: a `groove` with a \
+            new ID, a name, a `length` in ticks, its `notes` (each a `position` from 0 to \
+            before the length and a `velocity` from 1 to 127, none two at one position) and \
+            its parameters, which are Base `1/16`, Quantize 0, Timing 100, Random 0 and \
+            Velocity 0 where left out. It changes no clip: use `clip.set_groove` to give a \
+            clip the groove. A groove that breaks those limits is refused. One undo step, \
+            `Add Groove`. To make a groove from a clip, use `groove.extract`; from a file, \
+            `groove.load`.",
+    },
+    Entry {
+        id: "groove.delete",
+        action: Action::Apply("delete_groove"),
+        label: "Delete Groove",
+        permission: Permission::Destructive,
+        contexts: &[Global],
+        keys: &[],
+        description: "Takes a groove out of the Groove Pool, as the Delete key does in the pool: \
+            every clip that used it is set to no groove, and if it was the auto-load groove \
+            nothing is auto-loaded any more. One undo step, `Delete Groove`. Because it \
+            removes the person's work, an agent asks first.",
+    },
+    Entry {
+        id: "groove.rename",
+        action: Action::Apply("rename_groove"),
+        label: "Rename Groove",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Renames a groove in the Groove Pool. One undo step, `Rename Groove`.",
+    },
+    Entry {
+        id: "groove.set",
+        action: Action::Apply("set_groove"),
+        label: "Set Groove",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Sets any of a groove's parameters, as its row in the Groove Pool does, and \
+            keeps those left out: `base` (`1/4`, `1/8`, `1/8T`, `1/16`, `1/16T` or `1/32`), \
+            `quantize` (0 to 100 percent), `timing` (0 to 100), `random` (0 to 100) and \
+            `velocity` (-100 to +100). A value out of range refuses them all. A change reaches \
+            every clip playing the groove from the next block. One undo step, named for the \
+            parameter when one is set: `Change Base`, `Change Quantize`, `Change Timing`, \
+            `Change Random` or `Change Velocity`.",
+    },
+    Entry {
+        id: "groove.set_global_amount",
+        action: Action::Apply("set_global_groove_amount"),
+        label: "Set Global Groove Amount",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Sets the Global Amount, from 0 to 130 percent: it scales Timing, Random \
+            and Velocity for every groove in the set at once, and not Quantize; 100 plays each \
+            groove as set. The set holds one. It reaches every clip playing a groove from the \
+            next block. One undo step, `Change Global Amount`.",
+    },
+    Entry {
+        id: "groove.set_auto_load",
+        action: Action::Apply("set_auto_load_groove"),
+        label: "Set Auto Load Groove",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Sets the Auto Load Groove switch (`enabled`) and the groove a new MIDI clip \
+            takes while it is on (`groove`, one of the pool's), and keeps what is left out. A \
+            MIDI clip made new, empty or by recording takes that groove; a clip made by \
+            copying, pasting or importing keeps its own. One undo step, `Change Auto Load \
+            Groove`.",
+    },
+    Entry {
+        id: "clip.set_groove",
+        action: Action::Apply("set_clip_groove"),
+        label: "Set Clip Groove",
+        permission: Permission::Edit,
+        contexts: &[Global, ClipView],
+        keys: &[],
+        description: "Sets the Clip Groove of MIDI or audio clips to a groove of the Groove \
+            Pool (`groove`), or to none when `groove` is left out. `clips` names the clips; \
+            left out, the selected ones are set. The groove changes when a clip's notes play \
+            and how loud, or where its audio plays, and changes nothing in the clip until \
+            `groove.commit`; an audio clip plays its groove only while it is warped. One undo \
+            step, `Change Clip Groove`, however many clips it sets.",
     },
     Entry {
         id: UNDO,

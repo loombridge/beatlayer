@@ -16,12 +16,13 @@ use crate::automation::{AutomationTarget, Breakpoint, Envelope};
 use crate::clip::{Clip, TakeLane};
 use crate::command::{
     check_chain, check_clip, check_clip_fits, check_crossfader, check_device, check_extent,
-    check_mixer, check_send_level, check_take_lane,
+    check_mixer, check_send_level,
 };
 use crate::device::Device;
 use crate::document::{Document, Index, Settings};
 use crate::error::ModelError;
-use crate::ids::{SceneId, TrackId};
+use crate::groove::{GLOBAL_AMOUNT_MAX, check_percent};
+use crate::ids::{SceneId, TakeLaneId, TrackId};
 use crate::launch::LaunchSettings;
 use crate::locator::{Locator, SongStart};
 use crate::scene::{Scene, default_scenes};
@@ -70,10 +71,13 @@ struct TrackRepr {
     /// saved before WP-3.2 have none: every slot has one.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     removed_stop_buttons: Vec<SceneId>,
-    /// The take lanes under the Arrangement lane (WP-2.13). Sets saved
+    /// The take lanes under the main lane (WP-2.13, WP-6.21). Sets saved
     /// before it have none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     take_lanes: Vec<TakeLane>,
+    /// The take lane the track plays in place of its main lane (WP-6.21).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    audition: Option<TakeLaneId>,
     /// The track's delay (the mixer spec). Sets saved before WP-5.36 have
     /// none, which loads as 0 frames and milliseconds.
     #[serde(default, skip_serializing_if = "TrackDelay::is_default")]
@@ -214,6 +218,7 @@ impl TrackRepr {
                 .collect(),
             removed_stop_buttons: track.removed_stop_buttons().collect(),
             take_lanes: track.take_lanes().cloned().collect(),
+            audition: track.audition(),
             delay: track.delay(),
             keep_monitoring_latency: track.keep_monitoring_latency(),
             frozen: track.frozen.clone(),
@@ -251,6 +256,16 @@ impl TryFrom<DocumentRepr> for Document {
         }
         check_crossfader(settings.crossfader)?;
         check_locators(&settings.locators)?;
+        for groove in &settings.grooves.pool {
+            groove.check()?;
+            loader.claim(groove.id.0)?;
+        }
+        check_percent(
+            "the Global Amount",
+            settings.grooves.global_amount,
+            0.0,
+            GLOBAL_AMOUNT_MAX,
+        )?;
         let main = loader.add(main, None)?;
         let returns = returns
             .into_iter()
@@ -294,6 +309,24 @@ impl TryFrom<DocumentRepr> for Document {
         {
             document.settings.song_start = None;
         }
+        // Spec: grooves R22. A clip, or the auto-load setting, naming a
+        // groove the pool doesn't hold loads with none.
+        let held: BTreeSet<_> = document
+            .settings
+            .grooves
+            .pool
+            .iter()
+            .map(|g| g.id)
+            .collect();
+        document.forget_grooves(|id| !held.contains(&id));
+        if document
+            .settings
+            .grooves
+            .auto_load_groove
+            .is_some_and(|id| !held.contains(&id))
+        {
+            document.settings.grooves.auto_load_groove = None;
+        }
         // Slots name their scenes, which may be the defaults just made.
         for track in document.tracks.values() {
             for scene in track.slots.keys() {
@@ -313,7 +346,11 @@ impl TryFrom<DocumentRepr> for Document {
             document.check_routing(id)?;
             document.check_automation(id)?;
             let track = document.track_ref(id)?;
-            for clip in track.clips().chain(track.slots().map(|(_, clip)| clip)) {
+            for clip in track
+                .clips()
+                .chain(track.slots().map(|(_, clip)| clip))
+                .chain(track.take_lanes().flat_map(|lane| lane.clips.iter()))
+            {
                 document.check_clip_envelopes(id, clip)?;
             }
         }
@@ -356,8 +393,8 @@ impl Loader {
         {
             return Err(wrong_kind(&repr, "an audio or MIDI track"));
         }
-        if !repr.take_lanes.is_empty() && repr.kind != TrackKind::Audio {
-            return Err(wrong_kind(&repr, "an audio track"));
+        if (!repr.take_lanes.is_empty() || repr.audition.is_some()) && !repr.kind.holds_clips() {
+            return Err(wrong_kind(&repr, "an audio or MIDI track"));
         }
         if !repr.children.is_empty() && repr.kind != TrackKind::Group {
             return Err(wrong_kind(&repr, "a group track"));
@@ -443,8 +480,22 @@ impl Loader {
             }
         }
         for lane in repr.take_lanes {
-            check_take_lane(&lane)?;
+            self.claim(lane.id.0)?;
+            for clip in &lane.clips {
+                self.claim(clip.id.0)?;
+                check_clip_fits(&track, &clip.data)?;
+                check_extent(clip.start, clip.length)?;
+                check_clip(clip)?;
+                self.index.clip_track.insert(clip.id, id);
+            }
+            self.index.lane_track.insert(lane.id, id);
             track.take_lanes.push_back(lane);
+        }
+        if let Some(lane) = repr.audition {
+            if track.take_lane(lane).is_none() {
+                return Err(ModelError::NoSuchTakeLane(lane));
+            }
+            track.audition = Some(lane);
         }
         for child in repr.children {
             let child = self.add_grouped(child, Some(id))?;
@@ -2053,5 +2104,63 @@ mod tests {
             "the variations are saved"
         );
         assert!(load(broken).is_err(), "a value outside 0 to 1 doesn't load");
+    }
+
+    // Spec: warp-modes R32
+    #[test]
+    fn clip_targets_save_and_load() {
+        use crate::ClipParam;
+        let (mut doc, [_, audio, _]) = song();
+        let clip = doc.track(audio).unwrap().clips().next().unwrap().id;
+        let setting = |param| AutomationTarget::Clip { param };
+        for command in [
+            Command::SetAutomationBreakpoint {
+                track: audio,
+                target: setting(ClipParam::Formants),
+                at: Ticks::ZERO,
+                value: 40.0,
+            },
+            Command::SetClipEnvelopeBreakpoint {
+                clip,
+                kind: crate::EnvelopeKind::Modulation,
+                target: setting(ClipParam::Transpose),
+                at: Ticks::QUARTER,
+                value: -7.5,
+            },
+        ] {
+            doc.apply(&command).unwrap();
+        }
+        let value = serde_json::to_value(&doc).unwrap();
+        let text = value.to_string();
+        assert!(
+            text.contains(r#""type":"clip""#) && text.contains(r#""param":"formants""#),
+            "the track's automation is saved by the setting's name"
+        );
+        let saved = find_clip(&value, clip);
+        assert_eq!(
+            saved["envelopes"][0]["target"],
+            json!({ "type": "clip", "param": "transpose" })
+        );
+        let loaded = load(value.clone()).unwrap();
+        assert_eq!(loaded, doc);
+        loaded.check_invariants().unwrap();
+
+        // A set saved before these targets existed has neither, and loads
+        // unchanged.
+        let mut old = value.clone();
+        find_clip_mut(&mut old, clip)
+            .as_object_mut()
+            .unwrap()
+            .remove("envelopes");
+        assert_eq!(
+            load(old).unwrap().clip(clip).unwrap().envelopes().count(),
+            0
+        );
+
+        // A value outside the setting's envelope range doesn't load.
+        let mut broken = value;
+        find_clip_mut(&mut broken, clip)["envelopes"][0]["envelope"]["points"] =
+            json!([{ "at": 0, "value": 99.0 }]);
+        assert!(load(broken).unwrap_err().contains("out of range"));
     }
 }

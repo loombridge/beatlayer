@@ -77,6 +77,7 @@ pub mod clip_defaults;
 pub mod clip_files;
 pub mod clip_view;
 pub mod dawproject;
+pub mod detail;
 pub mod devices;
 pub mod export;
 pub mod export_dialog;

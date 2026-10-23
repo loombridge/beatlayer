@@ -64,7 +64,9 @@ pub mod base64;
 pub mod bounce;
 mod changes;
 mod clip;
+mod clip_param;
 mod command;
+pub mod comp;
 mod device;
 pub mod device_display;
 pub mod device_layout;
@@ -76,6 +78,7 @@ pub mod fader;
 mod fades;
 mod follow;
 pub mod graph;
+mod groove;
 mod ids;
 mod launch;
 mod layers;
@@ -83,6 +86,7 @@ mod locator;
 mod metronome;
 pub mod modulation;
 pub mod modulator;
+pub mod note_ops;
 pub mod param;
 pub mod rack;
 pub mod registry;
@@ -113,8 +117,10 @@ pub use bounce::{BouncedAutomation, BouncedTrack};
 pub use changes::{Change, ChangeSet};
 pub use clip::{
     AudioData, Clip, ClipData, ClipEnvelope, ClipFolds, Crossfade, EDGE_FADE_SECONDS, EnvelopeKind,
-    MidiData, Note, PressurePoint, TakeClip, TakeLane, consolidated_midi, crossfades, fade_power,
+    MidiData, NewTakeLane, Note, PressurePoint, TakeClip, TakeClipData, TakeLane,
+    consolidated_midi, crossfades, fade_power,
 };
+pub use clip_param::ClipParam;
 pub use command::Command;
 pub use device::{
     Device, DeviceKind, DeviceRole, DeviceWarp, DeviceWindows, MAX_MEDIA_SLOTS, MidiSidechain,
@@ -135,9 +141,13 @@ pub use follow::{
     FollowPatch,
 };
 pub use freeze::{FrozenClip, FrozenOutput, FrozenTail, FrozenTrack};
+pub use groove::{
+    AudioPass, DEFAULT_BASE, GAIN_GLIDE_SECONDS, GLOBAL_AMOUNT_MAX, Groove, GrooveBase, GrooveNote,
+    GroovePlay, GroovePool, MovedTransients, clip_seed, noise,
+};
 pub use ids::{
-    ChainId, ClipId, ContentHash, DeviceId, LocatorId, ParamId, ParseContentHashError, SceneId,
-    TrackId,
+    ChainId, ClipId, ContentHash, DeviceId, GrooveId, LocatorId, ParamId, ParseContentHashError,
+    SceneId, TakeLaneId, TrackId,
 };
 /// The persistent collections the document's public types hold.
 pub use imbl::{OrdMap, Vector};

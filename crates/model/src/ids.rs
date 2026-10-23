@@ -101,9 +101,19 @@ object_id!(
     "chain"
 );
 object_id!(
+    /// The ID of a take lane under a track's main lane (WP-6.21).
+    TakeLaneId,
+    "take lane"
+);
+object_id!(
     /// The ID of a locator.
     LocatorId,
     "locator"
+);
+object_id!(
+    /// The ID of a groove in the Groove Pool (WP-6.19).
+    GrooveId,
+    "groove"
 );
 
 // A parameter of a device, numbered by the device: the plug-in kit's

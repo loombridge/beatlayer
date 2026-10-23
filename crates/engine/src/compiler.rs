@@ -189,6 +189,12 @@ pub struct Compiler {
     hits: ChainHits,
 }
 
+/// The set's Global Amount of groove as a transport command carries it, in
+/// tenths of a percent.
+fn groove_amount(document: &Document) -> u16 {
+    (document.settings().grooves.global_amount * 10.0).round() as u16
+}
+
 /// Whether `track` sits inside a frozen group, whose render replaces it
 /// (WP-4.14, R14).
 fn inside_frozen_group(document: &bl_model::Document, track: TrackId) -> bool {
@@ -368,12 +374,34 @@ impl Compiler {
         // their clips again, and their nodes their envelopes again, since a
         // clip's envelopes modulate those and where the clip sits decides
         // when it plays (WP-3.15).
-        let tracks: BTreeSet<TrackId> = changes
+        let mut tracks: BTreeSet<TrackId> = changes
             .clips
             .keys()
             .flat_map(|&clip| [old.clip_track(clip), document.clip_track(clip)])
             .flatten()
             .collect();
+        // Auditioning a take lane swaps the clips the track plays (the
+        // comping spec, R14): its player gets them again.
+        tracks.extend(changes.tracks.keys().copied().filter(|&id| {
+            matches!((old.track(id), document.track(id)),
+                (Some(was), Some(now)) if was.audition() != now.audition())
+        }));
+        // Spec: grooves R15. A groove's parameters, the Global Amount and the
+        // pool reach the clips that use them as node data: their tracks'
+        // lists are sent again, and no program is made.
+        if old.settings().grooves != document.settings().grooves {
+            tracks.extend(
+                document
+                    .tracks()
+                    .filter(|track| {
+                        track
+                            .played_clips()
+                            .chain(track.slots().map(|(_, clip)| clip))
+                            .any(|clip| clip.groove.is_some())
+                    })
+                    .map(bl_model::Track::id),
+            );
+        }
         let mut update = if recompile {
             let resend = Resend {
                 all: old.settings().tempo != document.settings().tempo,
@@ -400,6 +428,12 @@ impl Compiler {
                 update
                     .transport
                     .push(TransportCommand::SetPunch(punch(document)));
+            }
+            // Spec: grooves R21
+            if groove_amount(&old) != groove_amount(document) {
+                update
+                    .transport
+                    .push(TransportCommand::SetGrooveAmount(groove_amount(document)));
             }
             if old.settings().metronome != document.settings().metronome {
                 update.transport.push(TransportCommand::SetMetronome(
@@ -681,6 +715,7 @@ impl Compiler {
             pool,
             &mut self.sources,
             self.registry.media(),
+            &document.settings().grooves,
         );
         self.pool_specs.insert(track.id(), built.pool);
         update.missing.extend(built.missing);
@@ -712,8 +747,12 @@ impl Compiler {
             }
             TrackKind::Audio => self.send_audio_clips(document, track, previous, update),
             TrackKind::Midi => {
-                let list =
-                    MidiClipList::build(track, &document.settings().tempo, self.config.sample_rate);
+                let list = MidiClipList::build(
+                    track,
+                    &document.settings().tempo,
+                    self.config.sample_rate,
+                    &document.settings().grooves,
+                );
                 update
                     .data
                     .push((NodeKey::Player(track.id()), self.gc.data(list)));
@@ -1160,6 +1199,7 @@ impl Compiler {
                 TransportCommand::SetSongStart(document.song_start_ticks()),
                 TransportCommand::SetPunch(punch(document)),
                 TransportCommand::SetMetronome(document.settings().metronome),
+                TransportCommand::SetGrooveAmount(groove_amount(document)),
             ],
             params: build.restate,
             unhosted: build.unhosted,
@@ -1194,7 +1234,7 @@ impl Compiler {
         for track in document.tracks() {
             let id = track.id();
             let send = if build.new_players.contains(&id) {
-                track.clips().next().is_some() || track.slots().next().is_some()
+                track.played_clips().next().is_some() || track.slots().next().is_some()
             } else {
                 resend.all || resend.tracks.contains(&id)
             };
@@ -1277,6 +1317,12 @@ impl Compiler {
         }
         if old.as_ref().is_none_or(|old| punch(old) != punch(document)) {
             commands.push(TransportCommand::SetPunch(punch(document)));
+        }
+        if old
+            .as_ref()
+            .is_none_or(|old| groove_amount(old) != groove_amount(document))
+        {
+            commands.push(TransportCommand::SetGrooveAmount(groove_amount(document)));
         }
         commands
     }
@@ -3416,6 +3462,7 @@ mod tests {
                 events: &[],
                 transport: TransportInfo::default(),
                 session: &[],
+                groove_amount: 1.0,
             };
             program.run(None, &mut lane, block);
             program.output(0, 64).to_vec()

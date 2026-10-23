@@ -16,15 +16,20 @@ use crate::automation::{
     override_device,
 };
 use crate::clip::{
-    AudioData, Clip, ClipData, ClipEnvelope, EnvelopeKind, MidiData, Note, TakeLane, clip_entry,
-    crossfades,
+    AudioData, Clip, ClipData, ClipEnvelope, EnvelopeKind, MidiData, NewTakeLane, Note, TakeLane,
+    clip_entry, crossfades,
 };
+use crate::clip_param::ClipParam;
 use crate::device::{Device, DeviceKind, DeviceRole};
 use crate::document::Document;
 use crate::error::ModelError;
 use crate::external::{ExternalPort, HardwareLatency};
 use crate::follow::FollowPatch;
-use crate::ids::{ChainId, ClipId, ContentHash, DeviceId, LocatorId, ParamId, SceneId, TrackId};
+use crate::groove::{GLOBAL_AMOUNT_MAX, Groove, GrooveBase, check_percent};
+use crate::ids::{
+    ChainId, ClipId, ContentHash, DeviceId, GrooveId, LocatorId, ParamId, SceneId, TakeLaneId,
+    TrackId,
+};
 use crate::launch::{ClipLaunch, LaunchMode, LaunchQuantization};
 use crate::layers::{
     Distribution, Layer, LayerId, LayerSettings, LayerSort, LayerZone, Layers, Zone, ZoneKind,
@@ -114,6 +119,7 @@ fn forget_where(track: &mut Track, names_gone: impl Fn(&AutomationTarget) -> boo
     let clips: Vec<ClipId> = track
         .clips()
         .chain(track.slots().map(|(_, clip)| clip))
+        .chain(track.take_lanes().flat_map(|lane| lane.clips.iter()))
         .filter(|clip| clip.envelopes.iter().any(|e| names_gone(&e.target)))
         .map(|clip| clip.id)
         .collect();
@@ -732,13 +738,67 @@ pub enum Command {
         /// The clip, with a new ID.
         clip: Clip,
     },
-    /// Adds a take lane under an audio track's Arrangement lane, after the
-    /// lanes it has, holding recorded passes.
+    /// Adds a take lane under an audio or MIDI track's main lane, holding
+    /// clips of the track's kind: after the lanes it has, or at `index`
+    /// among them. IDs left out are issued.
     AddTakeLane {
-        /// The audio track.
+        /// The audio or MIDI track.
         track: TrackId,
-        /// The lane and its passes.
-        lane: TakeLane,
+        /// The lane and its clips.
+        lane: NewTakeLane,
+        /// Where among the track's take lanes the new one goes, counted
+        /// from 0 for the lane nearest the main lane. Left out, after the
+        /// last.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        index: Option<usize>,
+    },
+    /// Puts a new clip on a take lane. Its data must match the lane's
+    /// track.
+    CreateTakeClip {
+        /// The take lane.
+        lane: TakeLaneId,
+        /// The clip, with a new ID.
+        clip: Clip,
+    },
+    /// Renames a take lane.
+    RenameTakeLane {
+        /// The take lane.
+        lane: TakeLaneId,
+        /// Its new name, which can't be empty.
+        name: String,
+    },
+    /// Deletes take lanes with their clips.
+    DeleteTakeLanes {
+        /// The take lanes.
+        lanes: Vec<TakeLaneId>,
+    },
+    /// Deletes every take lane of the tracks.
+    DeleteAllTakeLanes {
+        /// The audio or MIDI tracks.
+        tracks: Vec<TrackId>,
+    },
+    /// Deletes each track's take lanes whose material its main lane doesn't
+    /// use (the comping spec, R20).
+    DeleteUnusedTakeLanes {
+        /// The audio or MIDI tracks.
+        tracks: Vec<TrackId>,
+    },
+    /// Moves take lanes, which must be some of one track's, to a new place
+    /// among its take lanes, keeping their order.
+    MoveTakeLanes {
+        /// The take lanes.
+        lanes: Vec<TakeLaneId>,
+        /// The place they take among the track's other take lanes, counted
+        /// from 0 for the lane nearest the main lane.
+        index: usize,
+    },
+    /// Switches the audition of a take lane on or off. A track plays an
+    /// auditioned lane in place of its main lane, and has at most one.
+    SetAudition {
+        /// The take lane.
+        lane: TakeLaneId,
+        /// Whether it is auditioned.
+        on: bool,
     },
     /// Deletes a clip, from the Arrangement or from a track's Session slot.
     DeleteClip {
@@ -2413,6 +2473,69 @@ pub enum Command {
         #[serde(default)]
         name: Option<String>,
     },
+    /// Adds a groove to the end of the Groove Pool (the grooves spec, R1):
+    /// what loading a groove file and extracting a groove make.
+    AddGroove {
+        /// The groove, with a new ID.
+        groove: Groove,
+    },
+    /// Takes a groove out of the pool, sets every clip that used it to none
+    /// and clears the auto-load groove if it was that one (R5).
+    DeleteGroove {
+        /// The groove.
+        groove: GrooveId,
+    },
+    /// Renames a groove (R5).
+    RenameGroove {
+        /// The groove.
+        groove: GrooveId,
+        /// The new name.
+        name: String,
+    },
+    /// Sets any of a groove's parameters, keeping those left out (R5).
+    SetGroove {
+        /// The groove.
+        groove: GrooveId,
+        /// The grid its notes are measured against.
+        #[serde(default)]
+        base: Option<GrooveBase>,
+        /// Quantize, from 0 to 100 percent.
+        #[serde(default)]
+        quantize: Option<f64>,
+        /// Timing, from 0 to 100 percent.
+        #[serde(default)]
+        timing: Option<f64>,
+        /// Random, from 0 to 100 percent.
+        #[serde(default)]
+        random: Option<f64>,
+        /// Velocity, from -100 to +100 percent.
+        #[serde(default)]
+        velocity: Option<f64>,
+    },
+    /// Sets the Global Amount, from 0 to 130 percent (R5).
+    SetGlobalGrooveAmount {
+        /// The amount, in percent.
+        amount: f64,
+    },
+    /// Sets the Auto Load Groove switch and its groove (R20), keeping what
+    /// is left out.
+    SetAutoLoadGroove {
+        /// Whether a new MIDI clip takes the auto-load groove.
+        #[serde(default)]
+        enabled: Option<bool>,
+        /// The auto-load groove, one of the pool's.
+        #[serde(default)]
+        groove: Option<GrooveId>,
+    },
+    /// Sets the groove of clips to one of the pool's, or to none (R3).
+    SetClipGroove {
+        /// The clips; left out, the ones selected.
+        #[serde(default)]
+        clips: Vec<ClipId>,
+        /// The groove; left out, none.
+        #[serde(default)]
+        groove: Option<GrooveId>,
+    },
 }
 
 impl Command {
@@ -2493,6 +2616,13 @@ impl Command {
             Self::SetMonitor { .. } => "Change monitoring",
             Self::CreateClip { .. } => "Create clip",
             Self::AddTakeLane { .. } => "Add take lane",
+            Self::CreateTakeClip { .. } => "Create clip",
+            Self::RenameTakeLane { .. } => "Rename Take Lane",
+            Self::DeleteTakeLanes { .. } => "Delete Take Lane(s)",
+            Self::DeleteAllTakeLanes { .. } => "Delete All Take Lanes",
+            Self::DeleteUnusedTakeLanes { .. } => "Delete All Unused Take Lanes",
+            Self::MoveTakeLanes { .. } => "Move Take Lane(s)",
+            Self::SetAudition { .. } => "Audition Take Lane",
             Self::DeleteClip { .. } => "Delete clip",
             Self::MoveClip { .. } => "Move clip",
             Self::MoveClips { .. } => "Move clips",
@@ -2708,6 +2838,15 @@ impl Command {
             // are to observe; Beatlayer's name the edit.
             Self::SetClipScale { .. } => "Change Clip Scale",
             Self::SetScale { .. } => "Change Scale",
+            // Spec: grooves R5, R16, R17, R32. Live's undo names for the
+            // groove edits are to observe; Beatlayer's name the edit.
+            Self::AddGroove { .. } => "Add Groove",
+            Self::DeleteGroove { .. } => "Delete Groove",
+            Self::RenameGroove { .. } => "Rename Groove",
+            Self::SetGroove { .. } => "Change Groove",
+            Self::SetGlobalGrooveAmount { .. } => "Change Global Amount",
+            Self::SetAutoLoadGroove { .. } => "Change Auto Load Groove",
+            Self::SetClipGroove { .. } => "Change Clip Groove",
         }
     }
 
@@ -2729,7 +2868,44 @@ impl Command {
             Self::CompareSwitch { .. } => "Compare: Switch to B",
             Self::CompareCopy { device } if b(device) => "Compare: Copy B to A",
             Self::CompareCopy { .. } => "Compare: Copy A to B",
+            // Spec: grooves R5. A change to one parameter is named for it.
+            Self::SetGroove {
+                base,
+                quantize,
+                timing,
+                random,
+                velocity,
+                ..
+            } => match (
+                base.is_some(),
+                quantize.is_some(),
+                timing.is_some(),
+                random.is_some(),
+                velocity.is_some(),
+            ) {
+                (true, false, false, false, false) => "Change Base",
+                (false, true, false, false, false) => "Change Quantize",
+                (false, false, true, false, false) => "Change Timing",
+                (false, false, false, true, false) => "Change Random",
+                (false, false, false, false, true) => "Change Velocity",
+                _ => self.label(),
+            },
             _ => self.label(),
+        }
+    }
+
+    /// Fills the IDs a command leaves out with ones from `issue`: a take
+    /// lane and clips handed to `AddTakeLane` without them.
+    pub fn issue_missing_ids(&mut self, issue: &mut dyn FnMut() -> Id) {
+        if let Self::AddTakeLane { lane, .. } = self {
+            if lane.id.is_none() {
+                lane.id = Some(issue().into());
+            }
+            for clip in &mut lane.clips {
+                if clip.id.is_none() {
+                    clip.id = Some(issue().into());
+                }
+            }
         }
     }
 
@@ -2741,6 +2917,13 @@ impl Command {
             Self::CreateTrack { id, .. } => vec![id.0],
             Self::CreateClip { clip, .. } => vec![clip.id.0],
             Self::CreateSlotClip { clip, .. } => vec![clip.id.0],
+            Self::CreateTakeClip { clip, .. } => vec![clip.id.0],
+            Self::AddTakeLane { lane, .. } => lane
+                .id
+                .map(|id| id.0)
+                .into_iter()
+                .chain(lane.clips.iter().filter_map(|clip| clip.id.map(|id| id.0)))
+                .collect(),
             Self::InsertDevice { device, .. } | Self::InsertChainDevice { device, .. } => {
                 device.ids()
             }
@@ -2748,6 +2931,7 @@ impl Command {
             Self::GroupDevices { rack, .. } => rack.ids(),
             Self::CreateScene { id, .. } => vec![id.0],
             Self::AddLocator { locator } => vec![locator.id.0],
+            Self::AddGroove { groove } => vec![groove.id.0],
             Self::BounceTrackInPlace { bounced, .. } => {
                 bounced.clip_ids().iter().map(|clip| clip.0).collect()
             }
@@ -3346,7 +3530,14 @@ impl Document {
                 self.set_main_channel(*channel, |routing| &mut routing.cue_out)
             }
             Command::CreateClip { track, clip } => self.create_clip(*track, clip),
-            Command::AddTakeLane { track, lane } => self.add_take_lane(*track, lane),
+            Command::AddTakeLane { track, lane, index } => self.add_take_lane(*track, lane, *index),
+            Command::CreateTakeClip { lane, clip } => self.create_take_clip(*lane, clip),
+            Command::RenameTakeLane { lane, name } => self.rename_take_lane(*lane, name),
+            Command::DeleteTakeLanes { lanes } => self.remove_take_lanes(lanes),
+            Command::DeleteAllTakeLanes { tracks } => self.delete_all_take_lanes(tracks),
+            Command::DeleteUnusedTakeLanes { tracks } => self.delete_unused_take_lanes(tracks),
+            Command::MoveTakeLanes { lanes, index } => self.move_take_lanes(lanes, *index),
+            Command::SetAudition { lane, on } => self.set_audition(*lane, *on),
             Command::DeleteClip { clip } => self.remove_clip(*clip),
             Command::MoveClip { clip, track, start } => self.move_clip(*clip, *track, *start),
             Command::MoveClips { clips, by } => self.move_clips(clips, *by),
@@ -3399,6 +3590,52 @@ impl Document {
             } => {
                 let current = self.settings.scale;
                 self.settings.scale = scaled(current, *enabled, *root, name.as_deref())?;
+                Ok(())
+            }
+            Command::AddGroove { groove } => self.add_groove(groove.clone()),
+            Command::DeleteGroove { groove } => self.delete_groove(*groove),
+            Command::RenameGroove { groove, name } => {
+                self.groove_mut(*groove)?.name.clone_from(name);
+                Ok(())
+            }
+            Command::SetGroove {
+                groove,
+                base,
+                quantize,
+                timing,
+                random,
+                velocity,
+            } => self.set_groove(*groove, *base, [*quantize, *timing, *random, *velocity]),
+            Command::SetGlobalGrooveAmount { amount } => {
+                check_percent("the Global Amount", *amount, 0.0, GLOBAL_AMOUNT_MAX)?;
+                self.settings.grooves.global_amount = *amount;
+                Ok(())
+            }
+            Command::SetAutoLoadGroove { enabled, groove } => {
+                if let Some(groove) = groove {
+                    self.groove_mut(*groove)?;
+                }
+                let pool = &mut self.settings.grooves;
+                if let Some(enabled) = enabled {
+                    pool.auto_load = *enabled;
+                }
+                if groove.is_some() {
+                    pool.auto_load_groove = *groove;
+                }
+                Ok(())
+            }
+            Command::SetClipGroove { clips, groove } => {
+                if let Some(groove) = groove {
+                    self.groove_mut(*groove)?;
+                }
+                for clip in clips {
+                    self.clip_ref(*clip)?;
+                }
+                for clip in clips {
+                    if self.clip_ref(*clip)?.groove != *groove {
+                        self.clip_mut(*clip)?.groove = *groove;
+                    }
+                }
                 Ok(())
             }
             Command::SetClipLaunchMode { clip, mode } => {
@@ -4903,9 +5140,18 @@ impl Document {
             .keys()
             .copied()
             .chain(self.track_ref(id)?.slots.values().map(|clip| clip.id))
+            .chain(
+                self.track_ref(id)?
+                    .take_lanes()
+                    .flat_map(|lane| lane.clips.iter().map(|clip| clip.id)),
+            )
             .collect();
+        let lanes: Vec<TakeLaneId> = self.track_ref(id)?.take_lanes().map(|l| l.id).collect();
         for clip in old {
             self.index.clip_track.remove(&clip);
+        }
+        for lane in lanes {
+            self.index.lane_track.remove(&lane);
         }
         {
             let track = self.track_mut(id)?;
@@ -4914,6 +5160,7 @@ impl Document {
             track.slots = OrdMap::new();
             track.removed_stop_buttons = BTreeSet::new();
             track.take_lanes = Vector::new();
+            track.audition = None;
             track.automation = OrdMap::new();
             track.frozen = None;
             track.delay = TrackDelay::default();
@@ -5007,6 +5254,12 @@ impl Document {
             }
             for clip in track.slots.values() {
                 self.index.clip_track.remove(&clip.id);
+            }
+            for lane in &track.take_lanes {
+                self.index.lane_track.remove(&lane.id);
+                for clip in &lane.clips {
+                    self.index.clip_track.remove(&clip.id);
+                }
             }
             for device in &track.devices {
                 self.index.remove_device(device);
@@ -5142,6 +5395,7 @@ impl Document {
 
     fn create_clip(&mut self, track: TrackId, clip: &Clip) -> Result<(), ModelError> {
         self.check_fresh(clip.id.0)?;
+        self.check_clip_groove(clip)?;
         check_clip_fits(self.track_ref(track)?, &clip.data)?;
         check_extent(clip.start, clip.length)?;
         check_clip(clip)?;
@@ -5159,14 +5413,158 @@ impl Document {
         Ok(())
     }
 
-    fn add_take_lane(&mut self, track: TrackId, lane: &TakeLane) -> Result<(), ModelError> {
+    fn add_take_lane(
+        &mut self,
+        track: TrackId,
+        new: &NewTakeLane,
+        index: Option<usize>,
+    ) -> Result<(), ModelError> {
         check_kind(
             self.track_ref(track)?,
-            |kind| kind == TrackKind::Audio,
-            "an audio track",
+            TrackKind::holds_clips,
+            AUDIO_OR_MIDI,
         )?;
-        check_take_lane(lane)?;
-        self.track_mut(track)?.take_lanes.push_back(lane.clone());
+        let lane = new.lane()?;
+        self.check_fresh(lane.id.0)?;
+        let mut seen = BTreeSet::from([lane.id.0]);
+        for clip in &lane.clips {
+            self.check_fresh(clip.id.0)?;
+            if !seen.insert(clip.id.0) {
+                return Err(ModelError::DuplicateId(clip.id.0));
+            }
+            self.check_take_clip(track, clip)?;
+        }
+        self.index.lane_track.insert(lane.id, track);
+        for clip in &lane.clips {
+            self.index.clip_track.insert(clip.id, track);
+        }
+        let lanes = &mut self.track_mut(track)?.take_lanes;
+        let at = index.map_or(lanes.len(), |index| index.min(lanes.len()));
+        lanes.insert(at, lane);
+        Ok(())
+    }
+
+    /// Checks a clip bound for one of `track`'s take lanes as one bound for
+    /// its main lane is checked.
+    fn check_take_clip(&self, track: TrackId, clip: &Clip) -> Result<(), ModelError> {
+        check_clip_fits(self.track_ref(track)?, &clip.data)?;
+        check_extent(clip.start, clip.length)?;
+        check_clip(clip)?;
+        self.check_clip_envelopes(track, clip)
+    }
+
+    fn take_lane_owner(&self, lane: TakeLaneId) -> Result<TrackId, ModelError> {
+        self.take_lane_track(lane)
+            .ok_or(ModelError::NoSuchTakeLane(lane))
+    }
+
+    fn lane_mut(&mut self, lane: TakeLaneId) -> Result<&mut TakeLane, ModelError> {
+        let owner = self.take_lane_owner(lane)?;
+        self.track_mut(owner)?
+            .take_lanes
+            .iter_mut()
+            .find(|held| held.id == lane)
+            .ok_or(ModelError::NoSuchTakeLane(lane))
+    }
+
+    fn create_take_clip(&mut self, lane: TakeLaneId, clip: &Clip) -> Result<(), ModelError> {
+        let owner = self.take_lane_owner(lane)?;
+        self.check_fresh(clip.id.0)?;
+        self.check_take_clip(owner, clip)?;
+        let mut clip = clip.clone();
+        if clip.scale.is_default() {
+            clip.scale = self.settings.scale;
+        }
+        let id = clip.id;
+        self.lane_mut(lane)?.clips.push(clip);
+        self.index.clip_track.insert(id, owner);
+        Ok(())
+    }
+
+    fn rename_take_lane(&mut self, lane: TakeLaneId, name: &str) -> Result<(), ModelError> {
+        if name.is_empty() {
+            return Err(ModelError::EmptyTakeLaneName);
+        }
+        let held = self.lane_mut(lane)?;
+        if held.name != name {
+            name.clone_into(&mut held.name);
+        }
+        Ok(())
+    }
+
+    /// Takes the lanes out of their tracks, and out of the lookups.
+    fn remove_take_lanes(&mut self, lanes: &[TakeLaneId]) -> Result<(), ModelError> {
+        // A lane listed twice goes once.
+        let lanes: BTreeSet<TakeLaneId> = lanes.iter().copied().collect();
+        for lane in lanes {
+            let owner = self.take_lane_owner(lane)?;
+            let track = self.track_mut(owner)?;
+            let at = track
+                .take_lanes
+                .iter()
+                .position(|held| held.id == lane)
+                .ok_or(ModelError::NoSuchTakeLane(lane))?;
+            let gone = track.take_lanes.remove(at);
+            if track.audition == Some(lane) {
+                track.audition = None;
+            }
+            self.index.lane_track.remove(&lane);
+            for clip in gone.clips {
+                self.index.clip_track.remove(&clip.id);
+            }
+        }
+        Ok(())
+    }
+
+    fn delete_all_take_lanes(&mut self, tracks: &[TrackId]) -> Result<(), ModelError> {
+        let mut lanes = Vec::new();
+        for &track in tracks {
+            let track = self.track_ref(track)?;
+            check_kind(track, TrackKind::holds_clips, AUDIO_OR_MIDI)?;
+            lanes.extend(track.take_lanes().map(|lane| lane.id));
+        }
+        self.remove_take_lanes(&lanes)
+    }
+
+    fn delete_unused_take_lanes(&mut self, tracks: &[TrackId]) -> Result<(), ModelError> {
+        let mut lanes = Vec::new();
+        for &track in tracks {
+            let track = self.track_ref(track)?;
+            check_kind(track, TrackKind::holds_clips, AUDIO_OR_MIDI)?;
+            lanes.extend(crate::comp::unused_lanes(track, &self.settings.tempo));
+        }
+        self.remove_take_lanes(&lanes)
+    }
+
+    fn move_take_lanes(&mut self, lanes: &[TakeLaneId], index: usize) -> Result<(), ModelError> {
+        let Some(&first) = lanes.first() else {
+            return Ok(());
+        };
+        let owner = self.take_lane_owner(first)?;
+        for &lane in lanes {
+            if self.take_lane_owner(lane)? != owner {
+                return Err(ModelError::TakeLanesNotOnOneTrack);
+            }
+        }
+        let track = self.track_mut(owner)?;
+        let all: Vec<TakeLane> = track.take_lanes.iter().cloned().collect();
+        let (moving, rest): (Vec<TakeLane>, Vec<TakeLane>) =
+            all.into_iter().partition(|lane| lanes.contains(&lane.id));
+        let mut next = rest;
+        let at = index.min(next.len());
+        next.splice(at..at, moving);
+        track.take_lanes = next.into_iter().collect();
+        Ok(())
+    }
+
+    fn set_audition(&mut self, lane: TakeLaneId, on: bool) -> Result<(), ModelError> {
+        let owner = self.take_lane_owner(lane)?;
+        let track = self.track_mut(owner)?;
+        if on {
+            track.audition = Some(lane);
+        } else if track.audition == Some(lane) {
+            track.audition = None;
+        }
         Ok(())
     }
 
@@ -5177,7 +5575,7 @@ impl Document {
         check_extent(start, clip.length)?;
         // A clip already on the track's Arrangement lane just moves; one in
         // a Session slot leaves the slot for the lane.
-        if owner == track && self.track_ref(owner)?.clips.contains_key(&id) {
+        if owner == track && self.in_arrangement(id)? {
             if clip.start != start {
                 self.clip_mut(id)?.start = start;
             }
@@ -5215,6 +5613,8 @@ impl Document {
         let owner = self.clip_owner(id)?;
         if self.track_ref(owner)?.clips.contains_key(&id) {
             self.track_mut(owner)?.clips.remove(&id);
+        } else if let Some(lane) = self.track_ref(owner)?.clip_lane(id) {
+            self.lane_mut(lane)?.clips.retain(|clip| clip.id != id);
         } else {
             let scene = self
                 .track_ref(owner)?
@@ -5391,6 +5791,7 @@ impl Document {
         clip: &Clip,
     ) -> Result<(), ModelError> {
         self.check_fresh(clip.id.0)?;
+        self.check_clip_groove(clip)?;
         let target = self.track_ref(track)?;
         check_kind(target, TrackKind::holds_clips, AUDIO_OR_MIDI)?;
         self.scene_position(scene)
@@ -5987,7 +6388,19 @@ impl Document {
         edit(&mut next);
         check_audio(&next)?;
         if next != *current {
+            // Spec: warp-modes R31. Moving a clip's setting by hand turns off
+            // the track's automation of it, as automation R5 says.
+            let moved: Vec<ClipParam> = ClipParam::ALL
+                .into_iter()
+                .filter(|param| param.base(&next) != param.base(current))
+                .collect();
             self.clip_mut(id)?.data = ClipData::Audio(next);
+            if !moved.is_empty() {
+                let track = self.track_mut(self.clip_owner(id)?)?;
+                for param in moved {
+                    track.override_target(&AutomationTarget::Clip { param });
+                }
+            }
         }
         Ok(())
     }
@@ -6048,6 +6461,9 @@ impl Document {
         clip: &Clip,
         target: AutomationTarget,
     ) -> Result<(), ModelError> {
+        if target.is_clip() && !clip.data.is_audio() {
+            return Err(ModelError::NotAudioClip(clip.id));
+        }
         if !target.is_midi() {
             return self.check_automation_target(track, target);
         }
@@ -6100,6 +6516,7 @@ impl Document {
         if kind == EnvelopeKind::Automation && target.is_midi() {
             return Err(ModelError::MidiControllerNotAParameter);
         }
+        check_clip_setting_kind(target, kind)?;
         self.check_envelope_kind(clip, kind)?;
         clip_entry(&mut self.clip_mut(clip)?.envelopes, target, kind)
             .envelope
@@ -6222,6 +6639,7 @@ impl Document {
         linked: bool,
     ) -> Result<(), ModelError> {
         self.check_clip_envelope_target(clip, target)?;
+        check_clip_setting_kind(target, kind)?;
         self.check_envelope_kind(clip, kind)?;
         clip_entry(&mut self.clip_mut(clip)?.envelopes, target, kind).linked = linked;
         Ok(())
@@ -6759,6 +7177,14 @@ impl Document {
                     return Err(ModelError::NotADrumChain(chain));
                 }
             }
+            // Spec: warp-modes R28, R31
+            AutomationTarget::Clip { .. } => {
+                check_kind(
+                    self.track_ref(track)?,
+                    |kind| kind == TrackKind::Audio,
+                    AUDIO,
+                )?;
+            }
             AutomationTarget::MidiCc { .. }
             | AutomationTarget::MidiPitchBend
             | AutomationTarget::MidiChannelPressure => {
@@ -6782,7 +7208,15 @@ impl Document {
         if at < Ticks::ZERO {
             return Err(ModelError::NegativePosition(at));
         }
-        check_value("automation value", value, value.is_finite())?;
+        // Spec: warp-modes R28. A clip setting's value is inside its range.
+        let in_range = match target {
+            AutomationTarget::Clip { param } => {
+                let descriptor = param.descriptor();
+                (descriptor.min()..=descriptor.max()).contains(&value)
+            }
+            _ => value.is_finite(),
+        };
+        check_value("automation value", value, in_range)?;
         self.check_automation_target(track, target)?;
         entry(&mut self.track_mut(track)?.automation, target)
             .envelope
@@ -7009,6 +7443,64 @@ impl Document {
         Ok(())
     }
 
+    /// The groove with this ID, to change.
+    fn groove_mut(&mut self, id: GrooveId) -> Result<&mut Groove, ModelError> {
+        self.settings
+            .grooves
+            .pool
+            .iter_mut()
+            .find(|groove| groove.id == id)
+            .ok_or(ModelError::NoSuchGroove(id))
+    }
+
+    /// Whether the groove a new clip names is in the pool (R3).
+    fn check_clip_groove(&self, clip: &Clip) -> Result<(), ModelError> {
+        match clip.groove {
+            Some(groove) if self.settings.grooves.get(groove).is_none() => {
+                Err(ModelError::NoSuchGroove(groove))
+            }
+            _ => Ok(()),
+        }
+    }
+
+    /// Adds a groove to the end of the pool (the grooves spec, R1).
+    fn add_groove(&mut self, groove: Groove) -> Result<(), ModelError> {
+        self.check_fresh(groove.id.0)?;
+        groove.check()?;
+        self.settings.grooves.pool.push(groove);
+        Ok(())
+    }
+
+    /// Takes a groove out of the pool and everything that used it (R5, R20).
+    fn delete_groove(&mut self, id: GrooveId) -> Result<(), ModelError> {
+        self.groove_mut(id)?;
+        self.settings.grooves.pool.retain(|groove| groove.id != id);
+        if self.settings.grooves.auto_load_groove == Some(id) {
+            self.settings.grooves.auto_load_groove = None;
+        }
+        self.forget_grooves(|used| used == id);
+        Ok(())
+    }
+
+    /// Sets a groove's parameters: Base, then Quantize, Timing, Random and
+    /// Velocity. A value out of range refuses them all (R2, R5).
+    fn set_groove(
+        &mut self,
+        id: GrooveId,
+        base: Option<GrooveBase>,
+        [quantize, timing, random, velocity]: [Option<f64>; 4],
+    ) -> Result<(), ModelError> {
+        let mut next = self.groove_mut(id)?.clone();
+        next.base = base.unwrap_or(next.base);
+        next.quantize = quantize.unwrap_or(next.quantize);
+        next.timing = timing.unwrap_or(next.timing);
+        next.random = random.unwrap_or(next.random);
+        next.velocity = velocity.unwrap_or(next.velocity);
+        next.check()?;
+        *self.groove_mut(id)? = next;
+        Ok(())
+    }
+
     /// Sets the time-signature marker at `at`, adding one when there's none.
     fn set_time_signature_change(
         &mut self,
@@ -7106,10 +7598,8 @@ impl Document {
     /// Whether a clip sits on its track's Arrangement lane rather than in a
     /// Session slot.
     fn in_arrangement(&self, id: ClipId) -> Result<bool, ModelError> {
-        Ok(self
-            .track_ref(self.clip_owner(id)?)?
-            .clips
-            .contains_key(&id))
+        let track = self.track_ref(self.clip_owner(id)?)?;
+        Ok(track.clips.contains_key(&id) || track.clip_lane(id).is_some())
     }
 
     fn clip_ref(&self, id: ClipId) -> Result<&Clip, ModelError> {
@@ -7118,24 +7608,8 @@ impl Document {
 
     fn clip_mut(&mut self, id: ClipId) -> Result<&mut Clip, ModelError> {
         let owner = self.clip_owner(id)?;
-        let track = self.track_mut(owner)?;
-        if track.clips.contains_key(&id) {
-            return track
-                .clips
-                .get_mut(&id)
-                .map(Shared::make_mut)
-                .ok_or(ModelError::NoSuchClip(id));
-        }
-        let scene = track
-            .slots
-            .iter()
-            .find(|(_, clip)| clip.id == id)
-            .map(|(&scene, _)| scene)
-            .ok_or(ModelError::NoSuchClip(id))?;
-        track
-            .slots
-            .get_mut(&scene)
-            .map(Shared::make_mut)
+        self.track_mut(owner)?
+            .clip_mut(id)
             .ok_or(ModelError::NoSuchClip(id))
     }
 
@@ -7338,6 +7812,7 @@ impl Document {
 const NOT_MAIN: &str = "a track other than Main";
 const AUDIO_OR_MIDI: &str = "an audio or MIDI track";
 const SENDER: &str = "an audio, MIDI, or group track";
+const AUDIO: &str = "an audio track";
 const RETURN: &str = "a return track";
 
 fn check_kind(
@@ -7447,8 +7922,24 @@ pub(crate) fn check_clip_envelope_value(
 ) -> Result<(), ModelError> {
     let in_range = target
         .midi_range()
+        .or_else(|| target.clip_range())
         .map_or(value.is_finite(), |(min, max)| (min..=max).contains(&value));
     check_value("clip envelope value", value, in_range)
+}
+
+/// Refuses an Automation envelope for a clip sound setting: its envelopes
+/// modulate, and the track's automation drives the setting (the warp modes
+/// spec, R29 and R31).
+pub(crate) fn check_clip_setting_kind(
+    target: AutomationTarget,
+    kind: EnvelopeKind,
+) -> Result<(), ModelError> {
+    if kind == EnvelopeKind::Automation && target.is_clip() {
+        return Err(ModelError::InvalidInput(
+            "a clip setting's envelope only modulates; the track's automation drives the setting",
+        ));
+    }
+    Ok(())
 }
 
 /// The breakpoints that [`TempoMap::from_breakpoints`] rebuilds `tempo`
@@ -7709,17 +8200,6 @@ pub(crate) fn check_clip(clip: &Clip) -> Result<(), ModelError> {
     check_clip_data(&clip.data)
 }
 
-/// Checks a take lane's passes: each has a start and length that fit and
-/// audio data that follows the audio clips' rules.
-pub(crate) fn check_take_lane(lane: &TakeLane) -> Result<(), ModelError> {
-    for clip in &lane.clips {
-        check_extent(clip.start, clip.length)?;
-        check_audio(&clip.data)?;
-        check_marker_order(&clip.data)?;
-    }
-    Ok(())
-}
-
 /// Checks a device's parameter values, and, for a rack, its chains and the
 /// devices in them.
 pub(crate) fn check_device(device: &Device) -> Result<(), ModelError> {
@@ -7870,7 +8350,7 @@ mod tests {
     use super::*;
     use crate::automation::Breakpoint;
     use crate::changes::ChangeSet;
-    use crate::clip::{EDGE_FADE_SECONDS as EDGE_FADE, MidiData, Note, TakeClip};
+    use crate::clip::{EDGE_FADE_SECONDS as EDGE_FADE, MidiData, Note, TakeClip, TakeClipData};
     use crate::device::{DeviceKind, DeviceRole, PluginFormat};
     use crate::follow::FollowAction;
     use crate::ids::ContentHash;
@@ -8964,36 +9444,46 @@ mod tests {
         ));
     }
 
-    // Spec: recording R12
+    // Spec: recording R12; comping R1, R3
     #[test]
-    fn take_lanes_are_added_in_order_to_audio_tracks_and_survive_a_save() {
+    fn take_lanes_are_added_in_order_to_audio_and_midi_tracks_and_survive_a_save() {
         let mut song = Song::new();
         let audio_track = song.track(TrackKind::Audio, None);
         let midi_track = song.track(TrackKind::Midi, None);
-        let lane = |name: &str, start: f64| TakeLane {
-            name: name.to_owned(),
-            clips: vec![TakeClip {
-                name: "Take".to_owned(),
-                start: Ticks::QUARTER,
-                length: Ticks::QUARTER,
-                data: AudioData {
-                    start,
-                    end: Some(start + 0.5),
-                    ..AudioData::new(ContentHash([3; 32]))
+        let lane = |song: &mut Song, name: &str, start: f64, data: Option<ClipData>| {
+            let data = data.map_or_else(
+                || {
+                    TakeClipData::Audio(AudioData {
+                        start,
+                        end: Some(start + 0.5),
+                        ..AudioData::new(ContentHash([3; 32]))
+                    })
                 },
-            }],
+                TakeClipData::Tagged,
+            );
+            NewTakeLane {
+                id: Some(TakeLaneId(song.ids.allocate())),
+                name: name.to_owned(),
+                clips: vec![TakeClip {
+                    id: Some(ClipId(song.ids.allocate())),
+                    name: "Take".to_owned(),
+                    start: Ticks::QUARTER,
+                    length: Ticks::QUARTER,
+                    data,
+                }],
+            }
         };
         let before = song.doc.clone();
-        song.apply(Command::AddTakeLane {
-            track: audio_track,
-            lane: lane("Take 1", 0.0),
-        })
-        .unwrap();
-        song.apply(Command::AddTakeLane {
-            track: audio_track,
-            lane: lane("Take 2", 0.5),
-        })
-        .unwrap();
+        let first = lane(&mut song, "Take 1", 0.0, None);
+        let second = lane(&mut song, "Take 2", 0.5, None);
+        for lane in [first, second] {
+            song.apply(Command::AddTakeLane {
+                track: audio_track,
+                lane,
+                index: None,
+            })
+            .unwrap();
+        }
         let names: Vec<&str> = song
             .doc
             .track(audio_track)
@@ -9009,30 +9499,56 @@ mod tests {
             "the track shows as changed"
         );
 
-        // Only audio tracks have take lanes, and a pass needs a real length
-        // and sound data.
+        // A MIDI track takes MIDI clips on a lane of its own, and a clip of
+        // the wrong kind is refused.
+        let midi_lane = lane(&mut song, "Take 1", 0.0, Some(midi()));
+        song.apply(Command::AddTakeLane {
+            track: midi_track,
+            lane: midi_lane,
+            index: None,
+        })
+        .unwrap();
+        let wrong = lane(&mut song, "Take 2", 0.0, None);
         assert!(matches!(
             song.reject(Command::AddTakeLane {
                 track: midi_track,
-                lane: lane("Take 1", 0.0),
+                lane: wrong,
+                index: None,
             }),
             ModelError::WrongTrackKind { .. }
         ));
-        let mut empty = lane("Take 3", 0.0);
+        let group = song.track(TrackKind::Group, None);
+        let none = lane(&mut song, "Take 1", 0.0, None);
+        assert!(matches!(
+            song.reject(Command::AddTakeLane {
+                track: group,
+                lane: none,
+                index: None,
+            }),
+            ModelError::WrongTrackKind { .. }
+        ));
+
+        // A clip needs a real length and sound data.
+        let mut empty = lane(&mut song, "Take 3", 0.0, None);
         empty.clips[0].length = Ticks::ZERO;
         assert!(matches!(
             song.reject(Command::AddTakeLane {
                 track: audio_track,
                 lane: empty,
+                index: None,
             }),
             ModelError::EmptyLength(_)
         ));
-        let mut bad = lane("Take 3", 0.0);
-        bad.clips[0].data.gain = f64::NAN;
+        let mut bad = lane(&mut song, "Take 3", 0.0, None);
+        bad.clips[0].data = TakeClipData::Audio(AudioData {
+            gain: f64::NAN,
+            ..AudioData::new(ContentHash([3; 32]))
+        });
         assert!(matches!(
             song.reject(Command::AddTakeLane {
                 track: audio_track,
                 lane: bad,
+                index: None,
             }),
             ModelError::InvalidValue { .. }
         ));
@@ -9045,6 +9561,7 @@ mod tests {
         assert_eq!(loaded, song.doc);
         loaded.check_invariants().unwrap();
         assert_eq!(loaded.track(audio_track).unwrap().take_lanes().len(), 2);
+        assert_eq!(loaded.track(midi_track).unwrap().take_lanes().len(), 1);
     }
 
     // Spec: mixer R28, R29, R30; delay-compensation R7, R8, R9

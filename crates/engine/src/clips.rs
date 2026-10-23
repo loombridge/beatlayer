@@ -40,6 +40,7 @@ use bl_model::{
     TrackId, WarpMode,
 };
 
+use crate::clip_sound::ClipSound;
 use crate::clip_source::ClipSource;
 use crate::mixer::{Ramp, scale, smoothing_frames};
 use crate::node::{Block, Node, NodeConfig, NodeData, NodeEvent, ParamValue, segments};
@@ -700,6 +701,9 @@ pub(crate) struct PlacedClip {
     /// Whether the player carries this clip's source over from its last
     /// list, rather than find it in this list's bank.
     carry: bool,
+    /// What moves the clip's settings while it plays (WP-4.8, R29, R31);
+    /// only an Arrangement clip has it, and only when something does.
+    sound: Option<Box<ClipSound>>,
     gain: f64,
     fade_in: u64,
     fade_out: u64,
@@ -775,6 +779,14 @@ impl PlacedClip {
         self.gain * fade
     }
 
+    /// The clip's gain at song frame `frame`: its own, or the automation's,
+    /// taken down by the clip's Gain envelope (R29, R31).
+    fn gain_at(&self, frame: i64) -> f64 {
+        self.sound
+            .as_ref()
+            .map_or(self.gain, |sound| sound.gain_at(frame))
+    }
+
     /// The clip's gain with its fades, `elapsed` frames after its start.
     fn level(&self, elapsed: u64) -> f64 {
         let shape = &self.shape;
@@ -796,7 +808,7 @@ impl PlacedClip {
             let out = shaped(left.max(0) as f64 / falling as f64, shape.out_power);
             fade = fade.min(out);
         }
-        self.gain * fade
+        self.gain_at(self.geometry.start.saturating_add(elapsed as i64)) * fade
     }
 }
 
@@ -852,16 +864,7 @@ fn past_of(
     let ClipData::Audio(before) = &old.data else {
         return None;
     };
-    let playing = Playing {
-        mode: before.warp_mode,
-        high_quality: before.high_quality,
-        tones: before.warp_settings.tones,
-        texture: before.warp_settings.texture,
-        complex_pro: before.warp_settings.complex_pro,
-        clip_id: clip.id.0.get(),
-        pitch: before.pitch_ratio(),
-        warp: before.warp,
-    };
+    let playing = Playing::of(clip.id.0.get(), before);
     if before.warp_mode == audio.warp_mode || !before.warp {
         return None;
     }
@@ -899,7 +902,7 @@ fn window_width(track: &Track, previous: Option<&Track>, rate: SampleRate) -> us
         _ => None,
     };
     track
-        .clips()
+        .played_clips()
         .filter_map(&audio)
         .chain(track.slots().filter_map(|(_, clip)| audio(clip)))
         .max()
@@ -1050,6 +1053,7 @@ impl ClipList {
         pool: Option<PoolSpec>,
         sources: &mut ClipSources,
         media: Option<&dyn MediaLibrary>,
+        grooves: &bl_model::GroovePool,
     ) -> Built {
         let mut placed = Vec::new();
         let mut missing = Vec::new();
@@ -1079,9 +1083,21 @@ impl ClipList {
                 .and_then(|library| library.transients(audio.media))
                 .map_or_else(Vec::new, |detected| audio.transient_edits.apply(&detected));
             let samples = || media.and_then(|library| library.sample(audio.media, rate));
+            // Spec: warp-modes R29, R31. What moves the clip's settings while
+            // it plays: the track's automation of them and the clip's own
+            // envelopes.
+            let sound = ClipSound::of(track, clip, audio, tempo, rate);
+            // Spec: grooves R12. The clip's groove at the Global Amount, if
+            // it changes anything.
+            let groove = clip
+                .groove
+                .and_then(|id| grooves.play(id))
+                .filter(|play| !play.is_inert());
             let beats = BeatsMedia {
+                sound: sound.as_ref(),
                 transients: &transients,
                 samples: &samples,
+                groove: groove.as_ref(),
             };
             // Where the clip starts reading, before its length is known.
             let at = Geometry::of(clip, audio, tempo, rate, None, true, &beats);
@@ -1140,19 +1156,11 @@ impl ClipList {
                     shape,
                     geometry,
                     carry,
+                    sound: sound.map(Box::new),
                     gain: audio.gain,
                     fade_in: frames(audio.fade_in),
                     fade_out: frames(audio.fade_out),
-                    playing: Playing {
-                        mode: audio.warp_mode,
-                        high_quality: audio.high_quality,
-                        tones: audio.warp_settings.tones,
-                        texture: audio.warp_settings.texture,
-                        complex_pro: audio.warp_settings.complex_pro,
-                        clip_id: clip.id.0.get(),
-                        pitch: audio.pitch_ratio(),
-                        warp: audio.warp,
-                    },
+                    playing: Playing::of(clip.id.0.get(), audio),
                     past,
                     lane: 0,
                 },
@@ -1176,9 +1184,17 @@ impl ClipList {
                 .and_then(|library| library.transients(audio.media))
                 .map_or_else(Vec::new, |detected| audio.transient_edits.apply(&detected));
             let samples = || media.and_then(|library| library.sample(audio.media, rate));
+            // Spec: grooves R12. The clip's groove at the Global Amount, if
+            // it changes anything.
+            let groove = clip
+                .groove
+                .and_then(|id| grooves.play(id))
+                .filter(|play| !play.is_inert());
             let beats = BeatsMedia {
+                sound: None,
                 transients: &transients,
                 samples: &samples,
+                groove: groove.as_ref(),
             };
             let at = Geometry::of(clip, audio, tempo, rate, None, false, &beats);
             if at.end <= at.start {
@@ -1223,19 +1239,11 @@ impl ClipList {
                     shape: FadeShape::straight(),
                     geometry,
                     carry,
+                    sound: None,
                     gain: audio.gain,
                     fade_in: frames(audio.fade_in),
                     fade_out: frames(audio.fade_out),
-                    playing: Playing {
-                        mode: audio.warp_mode,
-                        high_quality: audio.high_quality,
-                        tones: audio.warp_settings.tones,
-                        texture: audio.warp_settings.texture,
-                        complex_pro: audio.warp_settings.complex_pro,
-                        clip_id: clip.id.0.get(),
-                        pitch: audio.pitch_ratio(),
-                        warp: audio.warp,
-                    },
+                    playing: Playing::of(clip.id.0.get(), audio),
                     past,
                     lane: 0,
                 },
@@ -1550,6 +1558,22 @@ fn render(
     }
 }
 
+/// A clip's level with the gain its groove's Velocity gives it (the grooves
+/// spec, R13): `level` is the clip's own, `elapsed` frames after the song
+/// frame `origin` where its contents began.
+fn with_groove<'a>(
+    warped: &'a Warped,
+    tempo: &'a TempoMap,
+    rate: f64,
+    origin: i64,
+    level: fn(&PlacedClip, u64) -> f64,
+) -> impl Fn(&PlacedClip, u64) -> f64 + 'a {
+    let ticks = tempo.seconds_to_ticks_exact(origin as f64 / rate);
+    move |clip, elapsed| {
+        level(clip, elapsed) * warped.groove_gain(tempo, rate, ticks, origin + elapsed as i64)
+    }
+}
+
 /// Adds the frames `range` of the block, which are `elapsed` frames into the
 /// warped `clip` and start at song frame `frame`, read from `source` through
 /// the clip's positions and warp mode, to the block, through `level`.
@@ -1581,6 +1605,15 @@ fn render_warped(
         .map(|warped| warped.plan());
     let (mut at, mut elapsed, mut frame) = (range.start, elapsed, frame);
     while at < range.end {
+        // Spec: warp-modes R29, R33. A clip whose settings move reads them
+        // on a grid of song frames, so each run stays inside one step.
+        let (playing, want) = match &clip.sound {
+            Some(moving) => (
+                moving.playing(clip.playing, frame, clip.geometry.start),
+                (range.end - at).min(ClipSound::step_left(frame)),
+            ),
+            None => (clip.playing, range.end - at),
+        };
         // Spec: warping R12, warp-modes R9, R14
         let (n, sound) = warp.render(
             clip.id,
@@ -1589,8 +1622,8 @@ fn render_warped(
             positions,
             launched,
             frame,
-            range.end - at,
-            clip.playing,
+            want,
+            playing,
             plan,
             clip.past.as_ref(),
             history.as_deref_mut(),
@@ -1670,7 +1703,7 @@ impl Node for ClipPlayer {
                     (elapsed, from),
                     &mut self.warp,
                     histories[at].as_deref_mut(),
-                    PlacedClip::launch_level,
+                    with_groove(warped, tempo, rate, launch, PlacedClip::launch_level),
                     stretchers,
                     clip.lane as usize,
                 );
@@ -1769,6 +1802,7 @@ impl Node for ClipPlayer {
             let range = (start - from) as usize..(end - from) as usize;
             let elapsed = (start - clip.geometry.start) as u64;
             if let Some(warped) = &clip.geometry.warped {
+                let (tempo, rate) = (block.tempo(), block.sample_rate().as_f64());
                 render_warped(
                     clip,
                     &warped.positions(),
@@ -1780,7 +1814,7 @@ impl Node for ClipPlayer {
                     (elapsed, start),
                     warp,
                     history.as_deref_mut(),
-                    PlacedClip::level,
+                    with_groove(warped, tempo, rate, clip.geometry.start, PlacedClip::level),
                     stretchers,
                     clip.lane as usize,
                 );
@@ -2004,6 +2038,8 @@ mod tests {
     /// What a Beats clip's plan asks of the media: nothing in these tests.
     fn no_media() -> BeatsMedia<'static> {
         BeatsMedia {
+            sound: None,
+            groove: None,
             transients: &[],
             samples: &|| None,
         }
@@ -2025,6 +2061,7 @@ mod tests {
                 pitch: 1.0,
             },
             carry: false,
+            sound: None,
             gain: 0.5,
             fade_in: 10,
             fade_out: 20,
@@ -2038,6 +2075,7 @@ mod tests {
                 clip_id: 1,
                 pitch: 1.0,
                 warp: true,
+                transient_envelope: 100.0,
             },
             past: None,
             lane: 0,

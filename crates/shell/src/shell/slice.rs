@@ -646,6 +646,7 @@ impl Shell {
             envelopes: Vec::new(),
             launch: bl_model::ClipLaunch::default(),
             scale: bl_model::Scale::default(),
+            groove: None,
         };
         self.editor.begin(STEP);
         let outcome = (|| -> Result<(), ShellError> {

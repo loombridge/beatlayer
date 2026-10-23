@@ -192,7 +192,7 @@
     "question": "What is the sum of the velocity of all notes?"
   },
   {
-    "answer": "68",
+    "answer": "70",
     "fixture": "commands_clip",
     "id": "commands-total",
     "question": "How many commands are listed?"
@@ -204,7 +204,7 @@
     "question": "How many commands have the permission destructive?"
   },
   {
-    "answer": "clip.delete, clip.edit_sample, clip.save_default",
+    "answer": "clip.delete, clip.edit_sample, clip.save_default, clip.save_file",
     "fixture": "commands_clip",
     "id": "commands-refused",
     "question": "Which commands are refused to agents? Give their ids, in the order they are listed."
@@ -216,7 +216,7 @@
     "question": "What is the label of the command clip.set_gain?"
   },
   {
-    "answer": "28",
+    "answer": "29",
     "fixture": "commands_clip",
     "id": "commands-set-prefix",
     "question": "How many command ids start with clip.set_?"
@@ -234,7 +234,7 @@
     "question": "What are the names of the properties of the command's arguments, alphabetically?"
   },
   {
-    "answer": "37",
+    "answer": "39",
     "fixture": "describe_clip_create",
     "id": "describe-defs",
     "question": "How many definitions does the argument schema hold under $defs?"

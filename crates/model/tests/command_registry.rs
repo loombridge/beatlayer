@@ -12,12 +12,12 @@ use bl_model::{
     ArrangementLoop, AudioData, AutomationTarget, BeatsUpdate, Breakpoint, Chain, ChainId, Change,
     ChangeSet, Channel, Clip, ClipData, ClipEdge, ClipId, ClipLaunch, Command, ComplexProUpdate,
     ContentHash, CountIn, CrossfadeAssign, Device, DeviceId, DeviceKind, DeviceRole, EditError,
-    Editor, ExternalPort, FileBeats, FollowAction, FollowActions, FollowPatch, HardwareLatency,
-    Input, LaunchMode, LaunchQuantization, Locator, LocatorId, MacroStyle, MacroTarget,
-    MetronomeRhythm, MetronomeSound, MidiData, MidiTo, MixerParam, ModelError, Monitor, Note,
-    Output, PanMode, ParamId, PluginFormat, Preserve, RackKind, SceneId, SendTap, SongStart,
-    TakeClip, TakeLane, Tap, TonesUpdate, TrackDelay, TrackId, TrackKind, WarpFrom, WarpMode,
-    WarpPoint,
+    Editor, ExternalPort, FileBeats, FollowAction, FollowActions, FollowPatch, GrooveBase,
+    GrooveId, GrooveNote, HardwareLatency, Input, LaunchMode, LaunchQuantization, Locator,
+    LocatorId, MacroStyle, MacroTarget, MetronomeRhythm, MetronomeSound, MidiData, MidiTo,
+    MixerParam, ModelError, Monitor, NewTakeLane, Note, Output, PanMode, ParamId, PluginFormat,
+    Preserve, RackKind, SceneId, SendTap, SongStart, TakeClip, TakeClipData, TakeLaneId, Tap,
+    TonesUpdate, TrackDelay, TrackId, TrackKind, WarpFrom, WarpMode, WarpPoint,
 };
 use serde_json::{Value, json};
 
@@ -55,7 +55,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        229,
+        243,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
              the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
              routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -89,8 +89,10 @@ fn every_document_command_is_registered() {
              track, WP-6.7 the two for the scales: set_clip_scale and set_scale, and \
              WP-6.24 seven for \
              locators: add_locator, delete_locator, move_locator, rename_locator, \
-             set_locator_info_text, loop_to_next_locator and set_song_start, and WP-6.51 the \
-             two for crossfades: set_crossfade and delete_crossfade"
+             set_locator_info_text, loop_to_next_locator and set_song_start, WP-6.51 the \
+             two for crossfades: set_crossfade and delete_crossfade, and WP-6.19 \
+             seven for grooves: add_groove, delete_groove, rename_groove, set_groove, \
+             set_global_groove_amount, set_auto_load_groove and set_clip_groove"
     );
 
     for op in &ops {
@@ -512,6 +514,97 @@ fn every_command_runs_by_id() {
             "data": { "audio": { "media": "ab".repeat(32) } },
         } }),
     );
+    agent.run(
+        "track.add_take_lane",
+        json!({ "track": drums, "lane": { "name": "Take 1", "clips": [
+            { "name": "Loop", "start": 0, "length": bar,
+              "data": { "media": "ab".repeat(32), "start": 0.5, "end": 1.5 } },
+        ] } }),
+    );
+    // Take lanes (WP-6.21): a clip on one, a rename, an audition, a place
+    // among the others, and the three ways to delete them.
+    let take_lane = agent
+        .editor
+        .document()
+        .track(drums)
+        .unwrap()
+        .take_lanes()
+        .next()
+        .unwrap()
+        .id;
+    let take_clip: ClipId = agent.new_id();
+    agent.run(
+        "take_lane.create_clip",
+        json!({ "lane": take_lane, "clip": {
+            "id": take_clip, "name": "Second", "start": bar * 2, "length": bar, "mute": false,
+            "data": { "audio": { "media": "ab".repeat(32) } },
+        } }),
+    );
+    agent.run(
+        "take_lane.rename",
+        json!({ "lane": take_lane, "name": "Verse" }),
+    );
+    agent.run(
+        "take_lane.set_audition",
+        json!({ "lane": take_lane, "on": true }),
+    );
+    assert_eq!(
+        agent.editor.document().track(drums).unwrap().audition(),
+        Some(take_lane)
+    );
+    agent.run(
+        "track.add_take_lane",
+        json!({ "track": drums, "index": 0, "lane": { "name": "Take 2", "clips": [] } }),
+    );
+    agent.run(
+        "take_lane.move",
+        json!({ "lanes": [take_lane], "index": 0 }),
+    );
+    let first = agent
+        .editor
+        .document()
+        .track(drums)
+        .unwrap()
+        .take_lanes()
+        .next()
+        .unwrap()
+        .id;
+    assert_eq!(first, take_lane, "moved to the front");
+    agent.run("take_lane.delete_unused", json!({ "tracks": [drums] }));
+    assert_eq!(
+        agent
+            .editor
+            .document()
+            .track(drums)
+            .unwrap()
+            .take_lanes()
+            .len(),
+        0,
+        "neither lane plays what the main lane does"
+    );
+    assert_eq!(
+        agent.editor.document().track(drums).unwrap().audition(),
+        None
+    );
+    agent.run(
+        "track.add_take_lane",
+        json!({ "track": drums, "lane": { "name": "Take 1", "clips": [] } }),
+    );
+    let extra = agent
+        .editor
+        .document()
+        .track(drums)
+        .unwrap()
+        .take_lanes()
+        .next()
+        .unwrap()
+        .id;
+    agent.run("take_lane.delete", json!({ "lanes": [extra] }));
+    agent.run(
+        "track.add_take_lane",
+        json!({ "track": drums, "lane": { "name": "Take 1", "clips": [] } }),
+    );
+    agent.run("take_lane.delete_all", json!({ "tracks": [drums] }));
     agent.run(
         "track.add_take_lane",
         json!({ "track": drums, "lane": { "name": "Take 1", "clips": [
@@ -2109,6 +2202,51 @@ fn every_command_runs_by_id() {
     );
     agent.run("song.delete_locator", json!({ "locator": chorus }));
 
+    // Grooves (WP-6.19): adding one, naming it, setting its parameters and
+    // the Global Amount, giving a clip it, auto-loading it, and deleting it.
+    let swing: GrooveId = agent.new_id();
+    agent.run(
+        "groove.add",
+        json!({ "groove": { "id": swing, "name": "Swing", "length": bar, "notes": [
+            { "position": 0, "velocity": 127 },
+            { "position": quarter / 2 + quarter / 8, "velocity": 90 },
+        ] } }),
+    );
+    agent.run(
+        "groove.rename",
+        json!({ "groove": swing, "name": "Swing 60" }),
+    );
+    agent.run(
+        "groove.set",
+        json!({ "groove": swing, "base": "1/8", "timing": 50.0, "velocity": -25.0 }),
+    );
+    agent.run("groove.set_global_amount", json!({ "amount": 120.0 }));
+    agent.run(
+        "clip.set_groove",
+        json!({ "clips": [riff], "groove": swing }),
+    );
+    agent.run(
+        "groove.set_auto_load",
+        json!({ "enabled": true, "groove": swing }),
+    );
+    let pool = &agent.editor.document().settings().grooves;
+    assert_eq!(pool.pool[0].name, "Swing 60");
+    assert_eq!(
+        (pool.pool[0].base, pool.pool[0].timing),
+        (GrooveBase::Eighth, 50.0)
+    );
+    assert_eq!(pool.global_amount, 120.0);
+    assert_eq!(pool.auto_loaded(), Some(swing));
+    assert_eq!(
+        agent.editor.document().clip(riff).unwrap().groove,
+        Some(swing)
+    );
+    agent.run("groove.delete", json!({ "groove": swing }));
+    let document = agent.editor.document();
+    assert!(document.settings().grooves.pool.is_empty());
+    assert_eq!(document.clip(riff).unwrap().groove, None);
+    assert_eq!(document.settings().grooves.auto_loaded(), None);
+
     // Deleting the group deletes the bass inside it; undo brings both back.
     agent.run("track.delete", json!({ "track": group }));
     assert!(agent.editor.document().track(bass).is_none());
@@ -2159,6 +2297,7 @@ fn schemas_match_what_commands_serialise() {
     let scene = SceneId(fresh());
     let scene_copy = SceneId(fresh());
     let locator = LocatorId(fresh());
+    let groove = GrooveId(fresh());
     let notes = MidiData::new([Note::new(127, Ticks::ZERO, Ticks::QUARTER, 1)]);
     let mut plugin = Device::new(
         device,
@@ -2264,6 +2403,57 @@ fn schemas_match_what_commands_serialise() {
             },
         ),
         ("song.delete_locator", Command::DeleteLocator { locator }),
+        (
+            "groove.add",
+            Command::AddGroove {
+                groove: bl_model::Groove::new(
+                    groove,
+                    "Swing".to_owned(),
+                    Ticks::WHOLE,
+                    vec![GrooveNote {
+                        position: Ticks::ZERO,
+                        velocity: 100,
+                    }],
+                ),
+            },
+        ),
+        (
+            "groove.rename",
+            Command::RenameGroove {
+                groove,
+                name: "Swing 60".to_owned(),
+            },
+        ),
+        (
+            "groove.set",
+            Command::SetGroove {
+                groove,
+                base: Some(GrooveBase::Eighth),
+                quantize: Some(10.0),
+                timing: None,
+                random: None,
+                velocity: None,
+            },
+        ),
+        (
+            "groove.set_global_amount",
+            Command::SetGlobalGrooveAmount { amount: 90.0 },
+        ),
+        (
+            "groove.set_auto_load",
+            Command::SetAutoLoadGroove {
+                enabled: Some(true),
+                groove: Some(groove),
+            },
+        ),
+        (
+            "clip.set_groove",
+            Command::SetClipGroove {
+                clips: vec![clip],
+                groove: Some(groove),
+            },
+        ),
+        ("groove.delete", Command::DeleteGroove { groove }),
         (
             "transport.set_loop",
             Command::SetLoop {
@@ -2623,15 +2813,69 @@ fn schemas_match_what_commands_serialise() {
             "track.add_take_lane",
             Command::AddTakeLane {
                 track,
-                lane: TakeLane {
+                lane: NewTakeLane {
+                    id: Some(TakeLaneId(fresh())),
                     name: "Take 1".to_owned(),
                     clips: vec![TakeClip {
+                        id: Some(ClipId(fresh())),
                         name: "Loop".to_owned(),
                         start: Ticks::WHOLE,
                         length: Ticks::WHOLE,
-                        data: AudioData::new(ContentHash([5; 32])),
+                        data: TakeClipData::Audio(AudioData::new(ContentHash([5; 32]))),
                     }],
                 },
+                index: Some(0),
+            },
+        ),
+        (
+            "take_lane.create_clip",
+            Command::CreateTakeClip {
+                lane: TakeLaneId(fresh()),
+                clip: Clip::new(
+                    ClipId(fresh()),
+                    Ticks::WHOLE,
+                    Ticks::WHOLE,
+                    ClipData::Midi(notes.clone()),
+                ),
+            },
+        ),
+        (
+            "take_lane.rename",
+            Command::RenameTakeLane {
+                lane: TakeLaneId(fresh()),
+                name: "Verse".to_owned(),
+            },
+        ),
+        (
+            "take_lane.delete",
+            Command::DeleteTakeLanes {
+                lanes: vec![TakeLaneId(fresh())],
+            },
+        ),
+        (
+            "take_lane.delete_all",
+            Command::DeleteAllTakeLanes {
+                tracks: vec![track],
+            },
+        ),
+        (
+            "take_lane.delete_unused",
+            Command::DeleteUnusedTakeLanes {
+                tracks: vec![track],
+            },
+        ),
+        (
+            "take_lane.move",
+            Command::MoveTakeLanes {
+                lanes: vec![TakeLaneId(fresh())],
+                index: 1,
+            },
+        ),
+        (
+            "take_lane.set_audition",
+            Command::SetAudition {
+                lane: TakeLaneId(fresh()),
+                on: true,
             },
         ),
         ("clip.delete", Command::DeleteClip { clip }),

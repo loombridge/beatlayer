@@ -849,3 +849,235 @@ fn the_locators_and_the_song_start_time_are_saved_and_load_again() {
     assert_eq!(loaded.document.locators()[0].name, "Intro");
     assert_eq!(loaded.document.song_start_ticks(), Some(Ticks::WHOLE * 2));
 }
+
+/// A project holding `editor`'s document.
+fn project_of(editor: &Editor) -> Project {
+    Project {
+        document: editor.document().clone(),
+        ids: editor.ids(),
+        media: Media::default(),
+        windows: bl_model::DeviceWindows::new(),
+        rack_views: bl_model::RackViewMap::new(),
+        folds: bl_model::ClipFolds::new(),
+        launch: bl_model::LaunchSettings::default(),
+        multisamplers: bl_model::MultisamplerViews::new(),
+    }
+}
+
+/// A MIDI track holding a clip, and the clip's ID.
+fn midi_clip_song() -> (Editor, bl_model::ClipId) {
+    let mut editor = Editor::new();
+    let track = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: track,
+            kind: TrackKind::Midi,
+            name: "Keys".to_owned(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    let clip = editor.new_id();
+    editor
+        .apply(Command::CreateClip {
+            track,
+            clip: bl_model::Clip::new(
+                clip,
+                Ticks::ZERO,
+                Ticks::WHOLE,
+                bl_model::ClipData::Midi(bl_model::MidiData::default()),
+            ),
+        })
+        .unwrap();
+    (editor, clip)
+}
+
+/// A set saved before grooves loads with an empty pool, a Global Amount of
+/// 100 % and Auto Load Groove off, and a clip with no groove (the grooves
+/// spec, R22).
+#[test]
+fn a_set_saved_before_grooves_loads_with_an_empty_pool() {
+    let (editor, clip) = midi_clip_song();
+    let saved = encode_json(&project_of(&editor), 1).unwrap();
+    let value: Value = serde_json::from_slice(&saved).unwrap();
+    assert!(value["document"]["settings"].get("grooves").is_none());
+    assert!(
+        value["document"]["tracks"][0]["clips"][0]
+            .get("groove")
+            .is_none()
+    );
+    let (loaded, _) = decode_json(&saved, &LoadOptions::default()).unwrap();
+    let pool = &loaded.document.settings().grooves;
+    assert!(pool.pool.is_empty());
+    assert_eq!(pool.global_amount, 100.0);
+    assert!(!pool.auto_load && pool.auto_load_groove.is_none());
+    assert_eq!(loaded.document.clip(clip).unwrap().groove, None);
+    loaded.document.check_invariants().unwrap();
+}
+
+/// The pool, each groove's notes and parameters, the Global Amount, Auto Load
+/// Groove and its groove, and each clip's groove are saved with the set and
+/// load again; a clip naming a groove that isn't in the pool loads with none
+/// (the grooves spec, R22).
+#[test]
+fn the_grooves_are_saved_with_the_set_and_load_again() {
+    let (mut editor, clip) = midi_clip_song();
+    let groove: bl_model::GrooveId = editor.new_id();
+    editor
+        .apply(Command::AddGroove {
+            groove: bl_model::Groove::new(
+                groove,
+                "Swing".to_owned(),
+                Ticks::WHOLE,
+                vec![bl_model::GrooveNote {
+                    position: Ticks::SIXTEENTH,
+                    velocity: 90,
+                }],
+            ),
+        })
+        .unwrap();
+    editor
+        .apply(Command::SetGroove {
+            groove,
+            base: Some(bl_model::GrooveBase::EighthTriplet),
+            quantize: Some(25.0),
+            timing: None,
+            random: Some(5.0),
+            velocity: Some(-50.0),
+        })
+        .unwrap();
+    editor
+        .apply(Command::SetClipGroove {
+            clips: vec![clip],
+            groove: Some(groove),
+        })
+        .unwrap();
+    editor
+        .apply(Command::SetGlobalGrooveAmount { amount: 85.0 })
+        .unwrap();
+    editor
+        .apply(Command::SetAutoLoadGroove {
+            enabled: Some(true),
+            groove: Some(groove),
+        })
+        .unwrap();
+    let saved = encode_json(&project_of(&editor), 1).unwrap();
+    let (loaded, _) = decode_json(&saved, &LoadOptions::default()).unwrap();
+    assert_eq!(
+        loaded.document.settings().grooves,
+        editor.document().settings().grooves
+    );
+    assert_eq!(loaded.document.clip(clip).unwrap().groove, Some(groove));
+    // A clip that names a groove the pool doesn't hold loads with none.
+    let mut value: Value = serde_json::from_slice(&saved).unwrap();
+    value["document"]["settings"]["grooves"]["pool"] = serde_json::json!([]);
+    let (loaded, _) = decode_json(
+        &serde_json::to_vec(&value).unwrap(),
+        &LoadOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(loaded.document.clip(clip).unwrap().groove, None);
+    assert_eq!(loaded.document.settings().grooves.auto_load_groove, None);
+}
+
+// Spec: comping R3. A set saved with WP-2.13's take lanes, whose passes had no
+// IDs, opens with each pass a clip of its lane under a new ID, and plays as
+// it did: a take lane plays only while it's auditioned.
+#[test]
+fn a_version_7_set_with_take_lanes_loads_and_plays_as_it_did() {
+    let mut editor = Editor::new();
+    let track = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: track,
+            kind: TrackKind::Audio,
+            name: "Audio".to_owned(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    let audio = AudioData::new(MEDIA);
+    let main = Clip::new(
+        editor.new_id(),
+        Ticks::ZERO,
+        Ticks::WHOLE * 2,
+        ClipData::Audio(audio.clone()),
+    );
+    editor
+        .apply(Command::CreateClip { track, clip: main })
+        .unwrap();
+    let expected = render(editor.document());
+    assert!(expected.iter().any(|&s| s != 0.0));
+
+    // As version 7 saved a track with two take lanes of passes.
+    let lane = |editor: &mut Editor, name: &str, start: f64| bl_model::NewTakeLane {
+        id: Some(editor.new_id()),
+        name: name.to_owned(),
+        clips: vec![bl_model::TakeClip {
+            id: Some(editor.new_id()),
+            name: "pass".to_owned(),
+            start: Ticks::QUARTER,
+            length: Ticks::QUARTER * 4,
+            data: bl_model::TakeClipData::Audio(AudioData {
+                start,
+                ..audio.clone()
+            }),
+        }],
+    };
+    for (name, start) in [("Take 1", 0.5), ("Take 2", 1.0)] {
+        let lane = lane(&mut editor, name, start);
+        editor
+            .apply(Command::AddTakeLane {
+                track,
+                lane,
+                index: None,
+            })
+            .unwrap();
+    }
+    let project = project_of(&editor);
+    let mut saved: Value = serde_json::from_slice(&encode_json(&project, 1).unwrap()).unwrap();
+    saved["schema"] = json!(7);
+    for lane in saved["document"]["tracks"][0]["take_lanes"]
+        .as_array_mut()
+        .unwrap()
+    {
+        let lane = lane.as_object_mut().unwrap();
+        lane.remove("id");
+        for pass in lane["clips"].as_array_mut().unwrap() {
+            let pass = pass.as_object_mut().unwrap();
+            pass.remove("id");
+            pass.remove("mute");
+            // The pass's data was the audio's own fields.
+            let data = pass.remove("data").unwrap();
+            pass.insert("data".to_owned(), data["audio"].clone());
+        }
+    }
+
+    let (loaded, info) = decode_json(
+        &serde_json::to_vec(&saved).unwrap(),
+        &LoadOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(info.schema, 7);
+    loaded.document.check_invariants().unwrap();
+    let before = project.document.track(track).unwrap();
+    let after = loaded.document.track(track).unwrap();
+    assert_eq!(after.take_lanes().len(), 2);
+    for (was, now) in before.take_lanes().zip(after.take_lanes()) {
+        assert_eq!(was.name, now.name);
+        assert_eq!(was.clips.len(), now.clips.len());
+        assert_eq!(was.clips[0].data, now.clips[0].data);
+        assert_eq!(
+            (was.clips[0].start, was.clips[0].length),
+            (now.clips[0].start, now.clips[0].length)
+        );
+    }
+    assert_eq!(render(&loaded.document), expected, "plays as it did");
+    // Auditioned, a lane plays in its place.
+    let mut audition = Editor::from_document(loaded.document.clone(), loaded.ids);
+    let lane = after.take_lanes().next().unwrap().id;
+    audition
+        .apply(Command::SetAudition { lane, on: true })
+        .unwrap();
+    assert_ne!(render(audition.document()), expected);
+}

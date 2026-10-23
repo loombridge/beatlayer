@@ -7,6 +7,7 @@
 // can't install its own global allocator.
 bl_rt::install_trap!();
 
+mod common;
 mod alignment_delay;
 mod arpeggiator;
 mod articulation_map;
@@ -20,7 +21,6 @@ mod channel_eq;
 mod channel_messages;
 mod chorus_ensemble;
 mod clip_envelopes;
-mod common;
 mod compressor;
 mod curve_mod;
 mod delay;

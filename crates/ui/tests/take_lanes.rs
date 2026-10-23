@@ -3,7 +3,7 @@
 //! there, the keys and the menus. Every gesture reaches the commands agents
 //! run. Spec: comping R15 and R23 to R30.
 
-mod common;
+use crate::common;
 
 use bl_core::time::Ticks;
 use bl_model::{

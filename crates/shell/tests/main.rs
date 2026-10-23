@@ -101,6 +101,7 @@ mod sidechain;
 mod slice_to_midi;
 mod stems;
 mod step_recording;
+mod take_lanes_view;
 mod tempo_leaders;
 mod track_devices;
 mod transport;

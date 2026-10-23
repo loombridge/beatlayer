@@ -330,6 +330,70 @@ const ENTRIES: &[Entry] = &[
             \"Change Scale\", and the set is saved with it.",
     },
     Entry {
+        id: "tuning.set",
+        action: Action::Apply("set_tuning"),
+        label: "Set Tuning",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Makes a tuning, given whole (`tuning`: its name, description, the `cents` \
+            of its degrees above the unison with the pseudo-octave last, optional note `names` \
+            and `link`, its `reference` pitch and its `range` of notes), the set's tuning in \
+            place of any other. `tuning.load` makes one from a `.scl` or `.ascl` file instead. \
+            With `retune` true, every note of the MIDI clips on tracks that play the tuning \
+            moves to the key whose new pitch is nearest the pitch it had (the lower key on a \
+            tie; of two overlapping notes that land on one key the earlier is shortened, and of \
+            two that start together the shorter is deleted); with it false the notes keep \
+            their keys. A tuning that breaks the rules (no pitches, a pseudo-octave at or below \
+            the unison, a range of more than 128 notes) is refused and the set's tuning stays \
+            as it was. It is one undo step, named \"Load Tuning\", and the set is saved with \
+            the tuning inside it. `tuning.state` reads it back.",
+    },
+    Entry {
+        id: "tuning.remove",
+        action: Action::Apply("remove_tuning"),
+        label: "Remove Tuning",
+        permission: Permission::Destructive,
+        contexts: &[Global],
+        keys: &[],
+        description: "Removes the set's tuning, which puts the set back to twelve equal steps. \
+            With `retune` true, every note of the MIDI clips on tracks that play the tuning \
+            moves to the key nearest the pitch it had under the tuning; with it false the \
+            notes keep their keys and may sound other pitches. Refused when the set has no \
+            tuning. It is one undo step, named \"Remove Tuning\", and undo brings the tuning \
+            back. `tuning.state` reads it back.",
+    },
+    Entry {
+        id: "tuning.set_reference",
+        action: Action::Apply("set_tuning_reference"),
+        label: "Set Tuning Reference Pitch",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Sets the set's tuning's reference pitch: an `octave`, a `degree` of the \
+            tuning and a `frequency` in Hz; a value left out stays as it was. Changing the \
+            octave or the degree only names another note as the reference: the frequency \
+            becomes that note's present frequency and nothing sounds different. Changing the \
+            frequency moves every pitch of the set by one ratio. Refused when the set has no \
+            tuning, for a degree the tuning doesn't have, or for a frequency that isn't above \
+            0. It is one undo step, named \"Change Reference Pitch\". `tuning.state` reads it \
+            back.",
+    },
+    Entry {
+        id: "tuning.set_range",
+        action: Action::Apply("set_tuning_range"),
+        label: "Set Tuning Range",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Sets the set's tuning's note range: the `lowest` note, which key 0 plays, \
+            and the `highest`, each an `octave` and a `degree`. Given one, the other moves by \
+            as many notes, so the number of notes stays; given both, they are the range. A \
+            range of more than 128 notes, or one that starts above its end, is refused. Keys \
+            above the highest note play nothing. Refused when the set has no tuning. It is one \
+            undo step, named \"Change Tuning Range\". `tuning.state` reads it back.",
+    },
+    Entry {
         id: "song.set_time_signatures",
         action: Action::Apply("set_time_signatures"),
         label: "Set Time Signatures",
@@ -935,6 +999,20 @@ const ENTRIES: &[Entry] = &[
             monitored track that keeps its monitoring latency \
             (`mixer.set_keep_monitoring_latency`) is compensated as usual. The setting is saved \
             with the set, and each change is one undo step.",
+    },
+    Entry {
+        id: "track.set_tuning_bypass",
+        action: Action::Apply("set_tuning_bypass"),
+        label: "Bypass Tuning",
+        permission: Permission::Edit,
+        contexts: MIXER,
+        keys: &[],
+        description: "Switches a MIDI track's Bypass Tuning, as its In/Out section's switch \
+            does. On, the track plays twelve equal steps whatever tuning the set holds, and its \
+            clips' editors show twelve-step keys; off (a new track's), it plays the tuning. A \
+            track that holds a Drum Rack plays twelve equal steps whatever the switch says. \
+            Only MIDI tracks have it. The switch is saved with the set only where it's on, and \
+            each change is one undo step, named \"Bypass Tuning\".",
     },
     Entry {
         id: "mixer.set_keep_monitoring_latency",

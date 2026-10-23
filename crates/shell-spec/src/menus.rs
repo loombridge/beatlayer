@@ -822,7 +822,7 @@ const OPTIONS: &[Row] = &[
     (
         "M-OPT-022",
         "Retune Set On Loading Tuning Systems",
-        Pending(None),
+        Cmd("settings.set_retune_on_tuning_load"),
     ),
     SEPARATOR,
     (

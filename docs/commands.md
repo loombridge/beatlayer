@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-737 commands in 44 areas.
+745 commands in 45 areas.
 
 ## Permission classes
 
@@ -644,6 +644,7 @@ Each command has:
 | [`settings.set_loop_warp_short_samples`](#settingsset_loop_warp_short_samples) | Loop/Warp Short Samples | `edit` |  |  |
 | [`settings.set_outline_view_in_focus`](#settingsset_outline_view_in_focus) | Outline View in Focus | `edit` |  |  |
 | [`settings.set_record_session_automation_in`](#settingsset_record_session_automation_in) | Record Session Automation in | `edit` |  |  |
+| [`settings.set_retune_on_tuning_load`](#settingsset_retune_on_tuning_load) | Retune Set On Loading Tuning Systems | `edit` |  |  |
 | [`settings.set_sample_editor`](#settingsset_sample_editor) | Sample Editor | `edit` |  |  |
 | [`settings.set_select_next_scene_on_launch`](#settingsset_select_next_scene_on_launch) | Select Next Scene on Launch | `edit` |  |  |
 | [`settings.set_select_on_launch`](#settingsset_select_on_launch) | Select on Launch | `edit` |  |  |
@@ -714,6 +715,7 @@ Each command has:
 | [`track.set_bounced`](#trackset_bounced) | Set Track Bounced | `destructive` |  |  |
 | [`track.set_devices_enabled`](#trackset_devices_enabled) | Deactivate All Devices | `edit` |  |  |
 | [`track.set_frozen`](#trackset_frozen) | Set Tracks Frozen | `edit` |  |  |
+| [`track.set_tuning_bypass`](#trackset_tuning_bypass) | Bypass Tuning | `edit` |  |  |
 | [`track.unfreeze`](#trackunfreeze) | Unfreeze Track | `edit` |  |  |
 | [`track.ungroup`](#trackungroup) | Ungroup Tracks | `edit` | `Cmd+Shift+G` | `Ctrl+Shift+G` |
 | [`transport.continue`](#transportcontinue) | Continue Playback | `read` | `Shift+Space` | `Shift+Space` |
@@ -737,6 +739,12 @@ Each command has:
 | [`transport.state`](#transportstate) | Transport Status | `read` |  |  |
 | [`transport.stop`](#transportstop) | Stop | `read` |  |  |
 | [`transport.stop_recording`](#transportstop_recording) | Stop Recording | `read` |  |  |
+| [`tuning.load`](#tuningload) | Load Tuning | `external` |  |  |
+| [`tuning.remove`](#tuningremove) | Remove Tuning | `destructive` |  |  |
+| [`tuning.set`](#tuningset) | Set Tuning | `edit` |  |  |
+| [`tuning.set_range`](#tuningset_range) | Set Tuning Range | `edit` |  |  |
+| [`tuning.set_reference`](#tuningset_reference) | Set Tuning Reference Pitch | `edit` |  |  |
+| [`tuning.state`](#tuningstate) | Tuning State | `read` |  |  |
 | [`view.clip_envelope`](#viewclip_envelope) | Clip View Envelope | `read` |  |  |
 | [`view.clip_tab`](#viewclip_tab) | Clip View Tab | `read` | `Option+Tab`; `Option+Tab`; `Option+Shift+1`; `Option+Shift+2` | `Ctrl+Tab`; `Ctrl+Tab`; `Alt+Shift+1`; `Alt+Shift+2` |
 | [`view.close_plug_in_windows`](#viewclose_plug_in_windows) | Close All Plug-in Windows | `read` |  |  |
@@ -11615,6 +11623,22 @@ Arguments:
 
 Result: nothing (`null`).
 
+#### `settings.set_retune_on_tuning_load`
+
+**Retune Set On Loading Tuning Systems**. Permission: `edit`. Contexts: `settings`.
+
+Switches Retune Set On Loading Tuning Systems, the Options menu's item; it's off in a new install. With it off, loading, changing or removing a tuning leaves every note on its key. With it on, `tuning.load` and `tuning.remove` called without `retune` move every note of the MIDI clips on tracks that play the tuning to the key whose new pitch is nearest the pitch it had, and a person who loads or removes a tuning is asked first (Retune, or Cancel to change nothing). The setting is kept for the next start, and isn't part of the set or an undo step. The result's `on` is the setting afterwards.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean | yes | Whether the setting is on. |
+
+Result: [`SwitchResult`](#switchresult).
+
 #### `settings.set_sample_editor`
 
 **Sample Editor**. Permission: `edit`. Contexts: `settings`.
@@ -12818,6 +12842,23 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `track.set_tuning_bypass`
+
+**Bypass Tuning**. Permission: `edit`. Contexts: `track-headers`, `session`, `arrangement`.
+
+Switches a MIDI track's Bypass Tuning, as its In/Out section's switch does. On, the track plays twelve equal steps whatever tuning the set holds, and its clips' editors show twelve-step keys; off (a new track's), it plays the tuning. A track that holds a Drum Rack plays twelve equal steps whatever the switch says. Only MIDI tracks have it. The switch is saved with the set only where it's on, and each change is one undo step, named "Bypass Tuning".
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The MIDI track. |
+| `bypass` | boolean | yes | Whether it bypasses the tuning. |
+
+Result: [`ChangeSet`](#changeset).
+
 #### `track.unfreeze`
 
 **Unfreeze Track**. Permission: `edit`. Contexts: `arrangement`, `session`, `track-headers`.
@@ -13181,6 +13222,105 @@ Default keys: none.
 Arguments: none (send `{}`).
 
 Result: nothing (`null`).
+
+### Area `tuning`
+
+#### `tuning.load`
+
+**Load Tuning**. Permission: `external`. Contexts: `global`.
+
+Reads a Scala `.scl` file, or an `.ascl` file read as one, and makes it the set's tuning in place of any other, as one undo step named "Load Tuning". The set keeps the tuning inside it. A file that holds no pitches, a count that doesn't match its lines, a ratio of 0 or less, or a pseudo-octave at or below the unison is refused with an error naming the problem, and the set's tuning stays as it was. The tuning is named after the file, without its extension, and takes the default reference pitch (octave 3, degree 0, 261.626 Hz) and the 128 notes that put degree 0 of that octave on key 60. With `retune` true, every note of the MIDI clips on tracks that play the tuning moves to the key whose new pitch is nearest the pitch it had; left out, `retune` follows Retune Set On Loading Tuning Systems. The result is the tuning, as `tuning.state` reads it. Reads a file outside the project.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | The `.scl` or `.ascl` file to read, absolute or relative to the app's working directory. The tuning is named after the file, without its extension. |
+| `retune` | boolean or null | no | Whether every note of the MIDI clips on tracks that play the tuning moves to the key whose new pitch is nearest the pitch it had. Left out, it follows Retune Set On Loading Tuning Systems. |
+
+Result: [`TuningState`](#tuningstate).
+
+#### `tuning.remove`
+
+**Remove Tuning**. Permission: `destructive`. Contexts: `global`.
+
+Removes the set's tuning, which puts the set back to twelve equal steps. With `retune` true, every note of the MIDI clips on tracks that play the tuning moves to the key nearest the pitch it had under the tuning; with it false the notes keep their keys and may sound other pitches. Refused when the set has no tuning. It is one undo step, named "Remove Tuning", and undo brings the tuning back. `tuning.state` reads it back.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `retune` | boolean | no | Whether the notes are retuned. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `tuning.set`
+
+**Set Tuning**. Permission: `edit`. Contexts: `global`.
+
+Makes a tuning, given whole (`tuning`: its name, description, the `cents` of its degrees above the unison with the pseudo-octave last, optional note `names` and `link`, its `reference` pitch and its `range` of notes), the set's tuning in place of any other. `tuning.load` makes one from a `.scl` or `.ascl` file instead. With `retune` true, every note of the MIDI clips on tracks that play the tuning moves to the key whose new pitch is nearest the pitch it had (the lower key on a tie; of two overlapping notes that land on one key the earlier is shortened, and of two that start together the shorter is deleted); with it false the notes keep their keys. A tuning that breaks the rules (no pitches, a pseudo-octave at or below the unison, a range of more than 128 notes) is refused and the set's tuning stays as it was. It is one undo step, named "Load Tuning", and the set is saved with the tuning inside it. `tuning.state` reads it back.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `tuning` | [`Tuning`](#tuning) | yes | The tuning. |
+| `retune` | boolean | no | Whether the notes are retuned. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `tuning.set_range`
+
+**Set Tuning Range**. Permission: `edit`. Contexts: `global`.
+
+Sets the set's tuning's note range: the `lowest` note, which key 0 plays, and the `highest`, each an `octave` and a `degree`. Given one, the other moves by as many notes, so the number of notes stays; given both, they are the range. A range of more than 128 notes, or one that starts above its end, is refused. Keys above the highest note play nothing. Refused when the set has no tuning. It is one undo step, named "Change Tuning Range". `tuning.state` reads it back.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `highest` | [`TuningNote`](#tuningnote) or null | no | The highest note. |
+| `lowest` | [`TuningNote`](#tuningnote) or null | no | The lowest note. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `tuning.set_reference`
+
+**Set Tuning Reference Pitch**. Permission: `edit`. Contexts: `global`.
+
+Sets the set's tuning's reference pitch: an `octave`, a `degree` of the tuning and a `frequency` in Hz; a value left out stays as it was. Changing the octave or the degree only names another note as the reference: the frequency becomes that note's present frequency and nothing sounds different. Changing the frequency moves every pitch of the set by one ratio. Refused when the set has no tuning, for a degree the tuning doesn't have, or for a frequency that isn't above 0. It is one undo step, named "Change Reference Pitch". `tuning.state` reads it back.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `degree` | integer or null | no | The reference note's degree. |
+| `frequency` | number or null | no | The reference note's frequency in Hz. |
+| `octave` | integer or null | no | The reference note's octave. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `tuning.state`
+
+**Tuning State**. Permission: `read`. Contexts: `global`.
+
+Reports the set's tuning: its name, description, how many notes it holds to the pseudo-octave, the pitch of each in cents, the pseudo-octave's size, the note names and link where it has them, the reference pitch (octave, degree and frequency in Hz), the note range (the lowest note, which key 0 plays, and the highest) and the frequency of each key 0 to 127 (null for a key above the range, which plays nothing). `tuning` is null when the set plays twelve equal steps. Changes nothing. The commands that change the tuning read back through it.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`TuningState`](#tuningstate).
 
 ### Area `view`
 
@@ -14064,6 +14204,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`settings.set_loop_warp_short_samples`](#settingsset_loop_warp_short_samples) | `settings.state` | `warp.loop_warp_short_samples` |
 | [`settings.set_outline_view_in_focus`](#settingsset_outline_view_in_focus) | `settings.state` | `display_input.outline_view_in_focus` |
 | [`settings.set_record_session_automation_in`](#settingsset_record_session_automation_in) | `settings.state` | `record_session_automation_in` |
+| [`settings.set_retune_on_tuning_load`](#settingsset_retune_on_tuning_load) | `settings.state` | `retune_on_tuning_load` |
 | [`settings.set_sample_editor`](#settingsset_sample_editor) | `settings.state` | `file_folder.sample_editor` |
 | [`settings.set_select_next_scene_on_launch`](#settingsset_select_next_scene_on_launch) | `settings.state` | `launch.select_next_scene_on_launch` |
 | [`settings.set_select_on_launch`](#settingsset_select_on_launch) | `settings.state` | `launch.select_on_launch` |
@@ -14127,6 +14268,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`track.set_bounced`](#trackset_bounced) | the query tool's `song` | `tracks` |
 | [`track.set_devices_enabled`](#trackset_devices_enabled) | the query tool's `track` | `devices` |
 | [`track.set_frozen`](#trackset_frozen) | the query tool's `track` | `frozen` |
+| [`track.set_tuning_bypass`](#trackset_tuning_bypass) | the query tool's `track` | `tuning_bypass` |
 | [`track.unfreeze`](#trackunfreeze) | the query tool's `track` | `frozen` |
 | [`track.ungroup`](#trackungroup) | the query tool's `song` | `tracks` |
 | [`transport.set_loop`](#transportset_loop) | `transport.state` | `loop_start` |
@@ -14140,6 +14282,11 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`transport.set_punch_in`](#transportset_punch_in) | `transport.state` | `punch_in` |
 | [`transport.set_punch_out`](#transportset_punch_out) | `transport.state` | `punch_out` |
 | [`transport.set_recording`](#transportset_recording) | `transport.state` | `recording` |
+| [`tuning.load`](#tuningload) | `tuning.state` | `tuning` |
+| [`tuning.remove`](#tuningremove) | `tuning.state` | `tuning` |
+| [`tuning.set`](#tuningset) | `tuning.state` | `tuning` |
+| [`tuning.set_range`](#tuningset_range) | `tuning.state` | `tuning` |
+| [`tuning.set_reference`](#tuningset_reference) | `tuning.state` | `tuning` |
 | [`view.set_zoom`](#viewset_zoom) | `view.state` | `window.zoom` |
 | [`view.zoom_in`](#viewzoom_in) | `view.state` | `window.zoom` |
 | [`view.zoom_out`](#viewzoom_out) | `view.state` | `window.zoom` |
@@ -33125,6 +33272,50 @@ What `set.later_recovery` returns: the recovery prompt's state.
 
 </details>
 
+### `Reference`
+
+A tuning's reference pitch (the tunings spec, R7): a note, and the frequency in Hz it sounds at, which tunes the whole set.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `octave` | integer | yes | The reference note's octave. |
+| `degree` | integer, at least 0 | yes | The reference note's degree. |
+| `frequency` | number | yes | The reference note's frequency in Hz. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A tuning's reference pitch (the tunings spec, R7): a note, and the frequency in Hz it sounds at, which tunes the whole set.",
+  "properties": {
+    "degree": {
+      "description": "The reference note's degree.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "frequency": {
+      "description": "The reference note's frequency in Hz.",
+      "format": "double",
+      "type": "number"
+    },
+    "octave": {
+      "description": "The reference note's octave.",
+      "format": "int32",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "octave",
+    "degree",
+    "frequency"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `ReleaseMode`
 
 What a note's end does while a sustain loop is on (R18).
@@ -35436,6 +35627,7 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
 | `audio` | [`AudioPageSettings`](#audiopagesettings) | yes | Audio. |
 | `tempo_midi` | [`MidiPortsResult`](#midiportsresult) | yes | Tempo & MIDI: the MIDI ports' switches and the computer MIDI keyboard, the same as `midi.ports` reports. |
 | `create_fades_on_clip_edges` | boolean | yes | Record, Warp & Launch: Create Fades on Clip Edges, as `settings.set_create_fades_on_clip_edges` sets it. |
+| `retune_on_tuning_load` | boolean | yes | Options ▸ Retune Set On Loading Tuning Systems, as `settings.set_retune_on_tuning_load` sets it (the tunings spec, R15). |
 | `warp_recorded_audio` | boolean | yes | Record, Warp & Launch: Warp Recorded Audio, as `settings.set_warp_recorded_audio` sets it. |
 | `warp` | [`WarpPrefs`](#warpprefs) | yes | Record, Warp & Launch: Loop/Warp Short Samples, Auto-Warp Long Samples and Default Warp Mode. |
 | `launch` | [`LaunchPrefs`](#launchprefs) | yes | Record, Warp & Launch: the Launch section, as the `settings.set_default_launch_*`, `settings.set_select_on_launch`, `settings.set_select_next_scene_on_launch` and `settings.set_start_recording_on_scene_launch` commands set it. |
@@ -35506,6 +35698,10 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
       "$ref": "#/$defs/SessionAutomationTracks",
       "description": "Record, Warp & Launch: Record Session automation in, as `settings.set_record_session_automation_in` sets it."
     },
+    "retune_on_tuning_load": {
+      "description": "Options ▸ Retune Set On Loading Tuning Systems, as `settings.set_retune_on_tuning_load` sets it (the tunings spec, R15).",
+      "type": "boolean"
+    },
     "tempo_midi": {
       "$ref": "#/$defs/MidiPortsResult",
       "description": "Tempo & MIDI: the MIDI ports' switches and the computer MIDI keyboard, the same as `midi.ports` reports."
@@ -35530,6 +35726,7 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
     "audio",
     "tempo_midi",
     "create_fades_on_clip_edges",
+    "retune_on_tuning_load",
     "warp_recorded_audio",
     "warp",
     "launch",
@@ -38569,6 +38766,294 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `Tuning`
+
+A tuning: its `name`, `description`, the `cents` of degrees 1 to n above the unison (the last is the pseudo-octave), optional note `names` (one per degree) and `link`, its `reference` pitch (octave, degree and frequency in Hz) and its `range` of notes (the `lowest` on key 0 and the `highest`, at most 128 notes).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | The tuning's name: its file's name without the extension. |
+| `description` | string | yes | The tuning's description, from its file. |
+| `cents` | array of number | yes | The pitch of degrees 1 to n above degree 0 in cents; the last is the pseudo-octave. The pitches needn't rise in order. |
+| `reference` | [`Reference`](#reference) | yes | The reference pitch. |
+| `range` | [`TuningRange`](#tuningrange) | yes | The note range. |
+| `link` | string or null | no | A link to a page about the tuning. |
+| `names` | array of string | no | The name of each degree, 0 to n − 1, or none at all. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A tuning: its `name`, `description`, the `cents` of degrees 1 to n above the unison (the last is the pseudo-octave), optional note `names` (one per degree) and `link`, its `reference` pitch (octave, degree and frequency in Hz) and its `range` of notes (the `lowest` on key 0 and the `highest`, at most 128 notes).",
+  "properties": {
+    "cents": {
+      "description": "The pitch of degrees 1 to n above degree 0 in cents; the last is the pseudo-octave. The pitches needn't rise in order.",
+      "items": {
+        "format": "double",
+        "type": "number"
+      },
+      "type": "array"
+    },
+    "description": {
+      "description": "The tuning's description, from its file.",
+      "type": "string"
+    },
+    "link": {
+      "description": "A link to a page about the tuning.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "name": {
+      "description": "The tuning's name: its file's name without the extension.",
+      "type": "string"
+    },
+    "names": {
+      "description": "The name of each degree, 0 to n − 1, or none at all.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "range": {
+      "$ref": "#/$defs/TuningRange",
+      "description": "The note range."
+    },
+    "reference": {
+      "$ref": "#/$defs/Reference",
+      "description": "The reference pitch."
+    }
+  },
+  "required": [
+    "name",
+    "description",
+    "cents",
+    "reference",
+    "range"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `TuningNote`
+
+A note of a tuning: a degree in an octave. Octave 0 starts at degree 0 of the unison; a note below it has a negative octave.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `octave` | integer | yes | The octave (a pseudo-octave of the tuning), negative below the first. |
+| `degree` | integer, at least 0 | yes | The degree within it, 0 to the tuning's degrees − 1. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A note of a tuning: a degree in an octave. Octave 0 starts at degree 0 of the unison; a note below it has a negative octave.",
+  "properties": {
+    "degree": {
+      "description": "The degree within it, 0 to the tuning's degrees − 1.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "octave": {
+      "description": "The octave (a pseudo-octave of the tuning), negative below the first.",
+      "format": "int32",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "octave",
+    "degree"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `TuningRange`
+
+A tuning's note range (the tunings spec, R8): the notes the keys play, from the lowest, on key 0, to the highest.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `lowest` | [`TuningNote`](#tuningnote) | yes | The note key 0 plays. |
+| `highest` | [`TuningNote`](#tuningnote) | yes | The last note a key plays. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A tuning's note range (the tunings spec, R8): the notes the keys play, from the lowest, on key 0, to the highest.",
+  "properties": {
+    "highest": {
+      "$ref": "#/$defs/TuningNote",
+      "description": "The last note a key plays."
+    },
+    "lowest": {
+      "$ref": "#/$defs/TuningNote",
+      "description": "The note key 0 plays."
+    }
+  },
+  "required": [
+    "lowest",
+    "highest"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `TuningReadout`
+
+A tuning as the agent API reads it back (the tunings spec, R19), by `tuning.state` and the query tool's `song`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | The tuning's name. |
+| `description` | string | yes | The tuning's description. |
+| `notes_per_octave` | integer, at least 0 | yes | How many notes it holds to the pseudo-octave. |
+| `pitches` | array of number | yes | The pitch of degrees 1 to n above the unison, in cents. |
+| `pseudo_octave` | number | yes | The pseudo-octave's size in cents. |
+| `names` | array of string | yes | The name of each degree; empty when the tuning names none. |
+| `link` | string or null | yes | A link to a page about the tuning. |
+| `reference` | [`Reference`](#reference) | yes | The reference pitch. |
+| `range` | [`TuningRange`](#tuningrange) | yes | The note range. |
+| `key_count` | integer, at least 0 | yes | How many keys play: 1 to 128. |
+| `frequencies` | array of number or null | yes | The frequency in Hz of each key 0 to 127; null for a key that plays nothing. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A tuning as the agent API reads it back (the tunings spec, R19), by `tuning.state` and the query tool's `song`.",
+  "properties": {
+    "description": {
+      "description": "The tuning's description.",
+      "type": "string"
+    },
+    "frequencies": {
+      "description": "The frequency in Hz of each key 0 to 127; null for a key that plays nothing.",
+      "items": {
+        "format": "double",
+        "type": [
+          "number",
+          "null"
+        ]
+      },
+      "type": "array"
+    },
+    "key_count": {
+      "description": "How many keys play: 1 to 128.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "link": {
+      "description": "A link to a page about the tuning.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "name": {
+      "description": "The tuning's name.",
+      "type": "string"
+    },
+    "names": {
+      "description": "The name of each degree; empty when the tuning names none.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "notes_per_octave": {
+      "description": "How many notes it holds to the pseudo-octave.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "pitches": {
+      "description": "The pitch of degrees 1 to n above the unison, in cents.",
+      "items": {
+        "format": "double",
+        "type": "number"
+      },
+      "type": "array"
+    },
+    "pseudo_octave": {
+      "description": "The pseudo-octave's size in cents.",
+      "format": "double",
+      "type": "number"
+    },
+    "range": {
+      "$ref": "#/$defs/TuningRange",
+      "description": "The note range."
+    },
+    "reference": {
+      "$ref": "#/$defs/Reference",
+      "description": "The reference pitch."
+    }
+  },
+  "required": [
+    "name",
+    "description",
+    "notes_per_octave",
+    "pitches",
+    "pseudo_octave",
+    "names",
+    "link",
+    "reference",
+    "range",
+    "key_count",
+    "frequencies"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `TuningState`
+
+What `tuning.load` and `tuning.state` return.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `tuning` | [`TuningReadout`](#tuningreadout) or null | yes | The set's tuning, or null when it plays twelve equal steps. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `tuning.load` and `tuning.state` return.",
+  "properties": {
+    "tuning": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TuningReadout"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The set's tuning, or null when it plays twelve equal steps."
+    }
+  },
+  "required": [
+    "tuning"
+  ],
+  "type": "object"
 }
 ```
 

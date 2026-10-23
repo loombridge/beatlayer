@@ -75,6 +75,7 @@ fn clip_with_envelopes(editor: &mut Editor, track: TrackId, to: TrackId) -> Clip
                     loop_start: Ticks::ZERO,
                     loop_end: Some(Ticks::WHOLE),
                     signature: None,
+                    groups: Vec::new(),
                 }),
             ),
         })

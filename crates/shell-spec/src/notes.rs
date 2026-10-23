@@ -25,7 +25,7 @@ use bl_commands::Context::{
 };
 use bl_commands::{Binding, CommandSpec, NoArgs, Permission, RegisterError, Registry};
 use bl_core::time::Ticks;
-use bl_model::{AutomationTarget, ClipId};
+use bl_model::{AutomationTarget, ClipId, GroupKind};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -62,6 +62,10 @@ pub const CUT: &str = "note.cut";
 pub const PASTE: &str = "note.paste";
 /// `note.duplicate`: put a copy of the notes straight after them.
 pub const DUPLICATE: &str = "note.duplicate";
+/// `note.group`: put notes in a new probability group.
+pub const GROUP: &str = "note.group";
+/// `note.ungroup`: take notes out of their probability groups.
+pub const UNGROUP: &str = "note.ungroup";
 
 /// `clip_view.set_preview`: the MIDI Note Editor's Preview switch.
 pub const SET_PREVIEW: &str = "clip_view.set_preview";
@@ -104,6 +108,8 @@ pub const IDS: &[&str] = &[
     CUT,
     PASTE,
     DUPLICATE,
+    GROUP,
+    UNGROUP,
     SET_PREVIEW,
     PREVIEW_NOTE,
     STEP_RECORD,
@@ -384,6 +390,39 @@ pub struct DeactivateArgs {
     /// is deactivated already.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active: Option<bool>,
+}
+
+/// Arguments of `note.group`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct GroupNotesArgs {
+    /// The MIDI clip. Left out, the one the Clip View shows (the
+    /// Arrangement's selected clip).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<ClipId>,
+    /// The notes, by their place in the clip's notes in order (by start,
+    /// then pitch). Left out, the selected notes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<Vec<u32>>,
+    /// How the group plays. Left out, the kind made last in this session,
+    /// `play_all` until one is chosen.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<GroupKind>,
+}
+
+/// Arguments of `note.ungroup`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct UngroupNotesArgs {
+    /// The MIDI clip. Left out, the one the Clip View shows (the
+    /// Arrangement's selected clip).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<ClipId>,
+    /// The notes, by their place in the clip's notes in order (by start,
+    /// then pitch). Left out, the selected notes. Naming every note of a
+    /// group ends it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<Vec<u32>>,
 }
 
 /// Arguments of `clip_view.select_notes`.
@@ -1146,6 +1185,35 @@ fn specs() -> Vec<CommandSpec> {
         )
         .binding("S-NOTE-041")
         .args::<DeactivateArgs>(),
+        edit(
+            GROUP,
+            "Group Notes",
+            Permission::Edit,
+            "Puts notes (`notes`, or the selected notes) in a new probability group of \
+             `kind`: `play_all` plays all of its notes or none, `play_one` plays one of them, \
+             chosen evenly. Left out, `kind` is the one made last in this session, `play_all` \
+             until one is chosen. Notes leave the group they were in, a group left with fewer \
+             than two notes ends, and the new group's chance is that of its first note in the \
+             clip's order, which every note of it takes. Naming every note of one group \
+             changes its kind. Refused with fewer than two notes. One undo step, named Group \
+             Notes, or Change Group when it changes one group's kind; the notes stay \
+             selected. Read the groups back from the clip's `data.midi.groups` and each note's \
+             `group`.",
+        )
+        .binding("S-NOTE-031")
+        .args::<GroupNotesArgs>(),
+        edit(
+            UNGROUP,
+            "Ungroup Notes",
+            Permission::Edit,
+            "Takes notes (`notes`, or the selected notes) out of their probability groups, \
+             each keeping its group's chance as its own; a group left with fewer than two \
+             notes ends, and naming every note of a group ends it. One undo step, named \
+             Ungroup Notes; the notes stay selected. Read the groups back from the clip's \
+             `data.midi.groups` and each note's `group`.",
+        )
+        .binding("S-NOTE-032")
+        .args::<UngroupNotesArgs>(),
         CommandSpec::new(COPY, "Copy Notes")
             .description(
                 "Copies notes (`notes`, or the selected notes, or with none selected the notes \
@@ -1374,7 +1442,15 @@ mod tests {
         assert_eq!(class(RESIZE_NOTES), Some(Permission::Edit));
         assert_eq!(class(QUANTIZE_NOTES), Some(Permission::Edit));
         // The value commands the lanes, the footer and the keys run.
-        for id in [SET_VALUE, RAMP_VALUE, ADJUST_VALUE, RANDOMIZE, DEACTIVATE] {
+        for id in [
+            SET_VALUE,
+            RAMP_VALUE,
+            ADJUST_VALUE,
+            RANDOMIZE,
+            DEACTIVATE,
+            GROUP,
+            UNGROUP,
+        ] {
             assert_eq!(class(id), Some(Permission::Edit), "{id}");
         }
         // The note clipboard: copying changes nothing, cutting removes work.

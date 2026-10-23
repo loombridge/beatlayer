@@ -2648,6 +2648,14 @@ impl Shell {
         self.hint.as_deref()
     }
 
+    /// What the Status Bar says of the selected notes' probability groups,
+    /// when they belong to any (Spec: note-editing R24).
+    #[must_use]
+    pub fn note_group_status(&self) -> Option<String> {
+        self.clip_view
+            .group_status(self.editor.document(), &self.arrangement)
+    }
+
     /// Sets, or with `None` clears, the Status Bar's hint.
     pub fn set_hint(&mut self, hint: Option<String>) {
         if self.hint != hint {
@@ -6623,6 +6631,10 @@ impl Shell {
                 }
                 .to_owned(),
             ),
+            // Spec: note-editing R22. M-EDIT-014 and M-EDIT-015 read Group
+            // Notes and Ungroup Notes with notes selected.
+            note_ids::GROUP => Some("Group Notes".to_owned()),
+            note_ids::UNGROUP => Some("Ungroup Notes".to_owned()),
             // The Playback menu's first item toggles with Stop (M-PLAY-001).
             transport_ids::PLAY_STOP => {
                 Some(if self.playing() { "Stop" } else { "Play" }.to_owned())
@@ -6916,6 +6928,24 @@ impl Shell {
             // R8).
             REDUCED_LATENCY_MONITORING => {
                 return self.editor.document().settings().delay_compensation;
+            }
+            // Spec: note-editing R22, R23. Group Notes needs two notes, and
+            // Ungroup Notes a grouped one.
+            note_ids::GROUP | note_ids::UNGROUP => {
+                let named = args.get("notes").and_then(Value::as_array).map(Vec::len);
+                return if id == note_ids::GROUP {
+                    named.unwrap_or_else(|| {
+                        self.clip_view
+                            .selected_notes(self.editor.document(), &self.arrangement)
+                            .len()
+                    }) >= 2
+                } else {
+                    named.is_some()
+                        || self
+                            .clip_view
+                            .selection_group_kinds(self.editor.document(), &self.arrangement)
+                            != (false, false)
+                };
             }
             // Spec: step-recording R9. Step Input Mode is available while the
             // editor shows a MIDI clip.

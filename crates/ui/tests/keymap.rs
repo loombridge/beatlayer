@@ -870,6 +870,9 @@ fn the_note_editors_keys_are_all_handled() {
         "S-NOTE-028",
         "S-NOTE-029",
         "S-NOTE-041",
+        // WP-6.2: Group Notes and Ungroup Notes.
+        "S-NOTE-031",
+        "S-NOTE-032",
         "S-NOTE-050",
         "S-NOTE-051",
         "S-A11Y-004",
@@ -924,6 +927,50 @@ fn cmd_shift_b_runs_step_input_mode_and_the_arrows_step_in_the_note_editor() {
     for id in ["S-NOTE-048", "S-NOTE-049"] {
         let entry = keymap.entry_for(id).unwrap();
         assert!(matches!(entry.status, Status::Widget(_)), "{id}");
+    }
+}
+
+// Spec: note-editing R22, R23. Cmd-G and Cmd-Shift-G group and ungroup the
+// selected notes (S-NOTE-031, S-NOTE-032); with devices or tracks in front
+// they are those windows' own.
+#[test]
+fn cmd_g_and_cmd_shift_g_group_and_ungroup_notes_while_notes_are_selected() {
+    let keymap = Keymap::live12();
+    let notes = [Context::NoteEditor, Context::NoteSelection, Context::Global];
+    for (platform, group, ungroup) in [
+        (
+            Platform::Mac,
+            mods(true, false, false, false),
+            mods(true, false, false, true),
+        ),
+        (
+            Platform::Other,
+            mods(false, true, false, false),
+            mods(false, true, false, true),
+        ),
+    ] {
+        let hit = |mods, contexts: &[Context]| {
+            keymap
+                .resolve(platform, Key::G, mods, contexts)
+                .map(|hit| hit.command.id.clone())
+        };
+        assert_eq!(
+            hit(group, &notes).as_deref(),
+            Some("note.group"),
+            "{platform:?}"
+        );
+        assert_eq!(
+            hit(ungroup, &notes).as_deref(),
+            Some("note.ungroup"),
+            "{platform:?}"
+        );
+        // With no notes selected, the keys are not the notes'.
+        let none = [Context::NoteEditor, Context::Global];
+        assert_ne!(
+            hit(group, &none).as_deref(),
+            Some("note.group"),
+            "{platform:?}"
+        );
     }
 }
 

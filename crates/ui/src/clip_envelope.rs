@@ -394,7 +394,10 @@ impl EnvelopeEditor {
         let keys = shell
             .keyboard_envelope()
             .filter(|keys| keys.envelope == bl_shell::envelope_commands::EnvelopeKeys::Clip)
-            .filter(|_| shell.focused_area() == Area::Detail && frame.target.is_some());
+            .filter(|_| {
+                shell.focused_area_of(shell.acting_window()) == Area::Detail
+                    && frame.target.is_some()
+            });
         let mut focused = None;
         ui.ctx().accesskit_node_builder(response.id, |node| {
             node.set_role(egui::accesskit::Role::Group);

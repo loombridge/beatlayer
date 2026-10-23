@@ -523,3 +523,37 @@ fn the_return_tracks_scroll_with_the_tracks_and_are_kept_between_launches() {
     assert!(state(&mut again).return_tracks_scroll);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// Spec: mixer-view R24, R31.
+#[test]
+fn the_devices_section_is_hidden_in_a_new_set_and_switches_as_view_state() {
+    let mut shell = Shell::headless();
+    assert!(!state(&mut shell).devices);
+    assert_eq!(shell.switch_state(ids::DEVICES), Some(false));
+    let before = undo_steps(&shell);
+    shell.invoke(ids::DEVICES, json!({})).unwrap();
+    assert!(state(&mut shell).devices);
+    assert_eq!(shell.switch_state(ids::DEVICES), Some(true));
+    shell
+        .invoke(ids::DEVICES, json!({ "shown": false }))
+        .unwrap();
+    assert!(!state(&mut shell).devices);
+    shell
+        .invoke(ids::DEVICES, json!({ "shown": true }))
+        .unwrap();
+    // View state: no undo step, and a new set hides it again.
+    assert_eq!(undo_steps(&shell), before);
+    shell.run("set.new", json!({})).unwrap();
+    assert!(!state(&mut shell).devices);
+    // It changes only the Devices section.
+    let other = state(&mut shell);
+    shell.invoke(ids::DEVICES, json!({})).unwrap();
+    let now = state(&mut shell);
+    assert_eq!(
+        MixerViewState {
+            devices: false,
+            ..now
+        },
+        other
+    );
+}

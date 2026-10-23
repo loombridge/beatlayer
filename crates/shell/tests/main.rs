@@ -90,6 +90,7 @@ mod sampler;
 mod scales;
 mod scene_tempo;
 mod search;
+mod second_window;
 mod session_automation;
 mod session_launch;
 mod session_recording;

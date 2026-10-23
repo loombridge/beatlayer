@@ -989,8 +989,30 @@ fn display_page(
     ) {
         events.push(UiEvent::Invoke(Invocation::new(
             ids::VIEW_SET_ZOOM,
-            json!({ "percent": next as u16 }),
+            json!({ "percent": next as u16, "window": "main" }),
         )));
+    }
+    // Spec: interface-zoom R12. While the second window is open, its zoom
+    // is a row of its own after Zoom.
+    if shell.second_window_open() {
+        let percent = shell.zoom_percent_of(bl_shell::WindowKind::Second);
+        let rect = rows.row(ui, "Second Window Zoom", SettingsLayout::NUMBER);
+        if let Some(next) = number_box(
+            ui,
+            theme,
+            "second-window-zoom",
+            "Second Window Zoom",
+            rect,
+            f64::from(percent),
+            (f64::from(ZOOM_MIN_PERCENT), f64::from(ZOOM_MAX_PERCENT)),
+            &|value, steps| f64::from(zoom_step(value as u16, steps)),
+            &format!("{percent} %"),
+        ) {
+            events.push(UiEvent::Invoke(Invocation::new(
+                ids::VIEW_SET_ZOOM,
+                json!({ "percent": next as u16, "window": "second" }),
+            )));
+        }
     }
     // Spec: accessibility R6, R7 (L-SET-010): the Display Options and
     // Navigation and Keyboard sections, with the keyboard's settings built
@@ -1040,8 +1062,9 @@ fn display_page(
     }
     rows.note(
         ui,
-        "The zoom scales every window; View > Zoom and its keys change it too. The Mouse and \
-         Pen Input and Application Options settings come with later packages.",
+        "The zoom scales the main window and this one; View > Zoom and its keys change the \
+         zoom of the window in front. The Mouse and Pen Input and Application Options \
+         settings come with later packages.",
     );
 }
 

@@ -125,7 +125,7 @@ fn set_zoom_takes_any_whole_percentage_in_range() {
     assert!(matches!(
         shell.run(
             ids::VIEW_SET_ZOOM,
-            json!({ "percent": 150, "window": "main" })
+            json!({ "percent": 150, "screen": "main" })
         ),
         Err(ShellError::InvalidArgs { .. })
     ));

@@ -2697,7 +2697,7 @@ impl DeviceViewUi {
 
     fn chain_keys(&self, ui: &Ui, shell: &Shell, rack: &RackFrame, events: &mut Vec<UiEvent>) {
         if !rack.chain_list_focused
-            || shell.focused_area() != Area::Detail
+            || crate::window::focused_area(ui.ctx(), shell) != Area::Detail
             || self.renaming_chain.is_some()
             || egui::Popup::is_any_open(ui.ctx())
         {

@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-712 commands in 43 areas.
+718 commands in 43 areas.
 
 ## Permission classes
 
@@ -465,11 +465,14 @@ Each command has:
 | [`modulator.unmap`](#modulatorunmap) | Unmap Modulator | `edit` |  |  |
 | [`note.add`](#noteadd) | Add Note | `edit` |  |  |
 | [`note.adjust_value`](#noteadjust_value) | Adjust Note Values | `edit` |  |  |
+| [`note.chop`](#notechop) | Chop Note(s) on Grid | `edit` |  |  |
 | [`note.copy`](#notecopy) | Copy Notes | `read` | `Cmd+C` | `Ctrl+C` |
 | [`note.cut`](#notecut) | Cut Notes | `destructive` | `Cmd+X` | `Ctrl+X` |
 | [`note.deactivate`](#notedeactivate) | Deactivate Note(s) | `edit` | `0` | `0` |
 | [`note.delete`](#notedelete) | Delete Notes | `destructive` | `Delete` | `Delete` |
 | [`note.duplicate`](#noteduplicate) | Duplicate Notes | `edit` | `Cmd+D` | `Ctrl+D` |
+| [`note.fit_to_time`](#notefit_to_time) | Fit to Time Range | `edit` | `Cmd+Option+J` | `Ctrl+Alt+J` |
+| [`note.join`](#notejoin) | Join Notes | `edit` | `Cmd+J` | `Ctrl+J` |
 | [`note.move`](#notemove) | Move Notes | `edit` |  |  |
 | [`note.paste`](#notepaste) | Paste Notes | `edit` | `Cmd+V` | `Ctrl+V` |
 | [`note.quantize`](#notequantize) | Quantize | `edit` | `Cmd+U` | `Ctrl+U` |
@@ -477,6 +480,9 @@ Each command has:
 | [`note.randomize`](#noterandomize) | Randomize Note Values | `edit` |  |  |
 | [`note.resize`](#noteresize) | Resize Notes | `edit` |  |  |
 | [`note.set_value`](#noteset_value) | Set Note Value | `edit` |  |  |
+| [`note.split`](#notesplit) | Split Note(s) | `edit` |  |  |
+| [`note.split_clip`](#notesplit_clip) | Split Clip | `edit` | `Cmd+Shift+E` | `Ctrl+Shift+E` |
+| [`note.stretch`](#notestretch) | Stretch Notes | `edit` |  |  |
 | [`pad.delete`](#paddelete) | Delete Pad | `destructive` |  |  |
 | [`pad.drop`](#paddrop) | Drop on Pad | `edit` |  |  |
 | [`pad.hot_swap`](#padhot_swap) | Hot-Swap Pad | `read` |  |  |
@@ -8487,6 +8493,26 @@ Arguments:
 
 Result: [`NoteEditResult`](#noteeditresult).
 
+#### `note.chop`
+
+**Chop Note(s) on Grid**. Permission: `edit`. Contexts: `note-selection`.
+
+Chops notes (`notes`, or the selected notes), as Cmd-E (Ctrl-E) with notes selected does: each is cut at every line of `grid` (ticks apart; the editing grid if left out) that falls strictly inside it, or with `parts`, into that many equal parts, from 1 to 64. `steps` then change each note's number of parts, one part more or fewer or the next or previous power of two, as Cmd with Up and Down does while Cmd is held; the number stays from 1 to 64, and a note keeps parts of at least a tick. The parts keep what Split keeps, and stay selected. The edit is one undo step, `Chop Notes`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows (the Arrangement's selected clip). |
+| `grid` | [`Ticks`](#ticks) or null | no | Cut at every line of a grid this many ticks apart. Left out (and without `parts`), the editing grid. |
+| `notes` | array or null | no | The notes, by their place in the clip's notes in order. Left out, the selected notes. |
+| `parts` | integer or null | no | Instead of the grid: cut every note into this many equal parts, from 1 to 64. |
+| `steps` | array of [`ChopStep`](#chopstep) | no | Changes to make to each note's parts after the first cut, in order, as Cmd with Up and Down does. |
+
+Result: [`NoteEditResult`](#noteeditresult).
+
 #### `note.copy`
 
 **Copy Notes**. Permission: `read`. Contexts: `note-editor`, `note-selection`.
@@ -8590,6 +8616,49 @@ Arguments:
 |---|---|---|---|
 | `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows (the Arrangement's selected clip). |
 | `notes` | array or null | no | The notes, by their place in the clip's notes in order (by start, then pitch). Left out, the selected notes, or with none selected the notes that start inside the time selection. |
+
+Result: [`NoteEditResult`](#noteeditresult).
+
+#### `note.fit_to_time`
+
+**Fit to Time Range**. Permission: `edit`. Contexts: `note-editor`, `note-selection`.
+
+Gives every note (`notes`, or the selected notes) the start and end of `range`, or of the time selection, as Cmd-Option-J (Ctrl-Alt-J) does. Each note's pressure points scale with it. Refused with no notes or no range. The edit is one undo step, `Fit to Time Range`.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-NOTE-008 | `Cmd+Option+J` | `Ctrl+Alt+J` | `note-editor` | Fit the selected notes to the time range | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows (the Arrangement's selected clip). |
+| `notes` | array or null | no | The notes, by their place in the clip's notes in order. Left out, the selected notes. |
+| `range` | [`TickRange`](#tickrange) or null | no | The range every note takes. Left out, the time selection. |
+
+Result: [`NoteEditResult`](#noteeditresult).
+
+#### `note.join`
+
+**Join Notes**. Permission: `edit`. Contexts: `note-editor`, `note-selection`.
+
+Joins notes (`notes`, or the selected notes), as Cmd-J (Ctrl-J) does: the notes of each pitch that has two or more become one note from the earliest start among them to the latest end, with the values of the earliest of them. Every joined note's pressure points stay at their places in time, and where two overlap the later note's win. A pitch with one note is left alone, and the command is refused when there is nothing to join. The joined notes are selected afterwards. The edit is one undo step, `Join Notes`.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-NOTE-007 | `Cmd+J` | `Ctrl+J` | `note-editor` | Join the selected notes | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows (the Arrangement's selected clip). |
+| `notes` | array or null | no | The notes, by their place in the clip's notes in order. Left out, the selected notes. |
 
 Result: [`NoteEditResult`](#noteeditresult).
 
@@ -8733,6 +8802,61 @@ Arguments:
 | `notes` | array or null | no | The notes, by their place in the clip's notes in order (by start, then pitch). Left out, the selected notes. |
 | `value` | number or null | no | The value, within the field's range, for every one of the notes. Give this or `values`. |
 | `values` | array or null | no | One value for each of the notes, in the order they're named, each within the field's range: what drawing across a lane gives. Give this or `value`. |
+
+Result: [`NoteEditResult`](#noteeditresult).
+
+#### `note.split`
+
+**Split Note(s)**. Permission: `edit`. Contexts: `note-editor`.
+
+Splits notes at ticks, as holding E and clicking a note, or Cmd-E (Ctrl-E) with no notes selected, does. `notes` (or the selected notes, or with none selected every note) are each split at every tick of `at` (or of the time selection's start and end, or the insert marker) that falls strictly inside them; `cuts` instead names a tick for each note. A note split becomes parts that together cover it: the first keeps its start, the last its end, each keeps the note's pitch, velocity, release velocity, chance, deviation and deactivation, and its pressure points go with the part they fall in. A tick at or outside a note's start or end splits nothing, and when no note splits nothing changes and no undo step is recorded. The parts of the notes that were selected stay selected. The edit is one undo step, `Split Notes`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `at` | array or null | no | The ticks to split them at, from the beginning of the clip's contents. Left out, the time selection's start and end, or the insert marker. |
+| `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows (the Arrangement's selected clip). |
+| `cuts` | array or null | no | Instead of `notes` and `at`: each note with its own tick, as dragging E across several notes splits each where the drag crosses it. |
+| `notes` | array or null | no | The notes to split, by their place in the clip's notes in order. Left out, the selected notes, or with none selected every note. |
+
+Result: [`NoteEditResult`](#noteeditresult).
+
+#### `note.split_clip`
+
+**Split Clip**. Permission: `edit`. Contexts: `note-editor`, `note-selection`.
+
+Splits the Arrangement clip the Clip View shows at the start and end of the editor's time selection, each that falls strictly inside the clip, as `arrangement.split` does, and selects the part inside. Cmd-Shift-E (Ctrl-Shift-E) runs it. Refused for a Session clip, or with no time selection.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-NOTE-036 | `Cmd+Shift+E` | `Ctrl+Shift+E` | `note-editor` | Split an Arrangement clip at the time selection | runs it |
+
+Arguments: none (send `{}`).
+
+Result: [`EditResult`](#editresult).
+
+#### `note.stretch`
+
+**Stretch Notes**. Permission: `edit`. Contexts: `note-editor`, `note-selection`.
+
+Scales notes in time from the range `from` (or the time selection) to the range `to`, as dragging a note stretch marker does: `from`'s start goes to `to`'s start and its end to `to`'s end, and each note's start and end keep their place in proportion, so starts and lengths scale together. The notes are `notes`, or the selected notes, or with none selected those that start inside `from`. With `point`, what lies between the start and the point is scaled to end at the point's new place, and what lies between the point and the end to start there, as dragging the pseudo marker does. A `to` that ends before it starts mirrors the notes' order in time. A note's pressure points scale with it, and the breakpoints of the clip's linked envelopes inside `from` move by the same mapping, replacing any breakpoint they land on; unlinked envelopes stay. Refused, changing nothing, if a note would be shorter than a tick or start before the clip's contents. The time selection becomes `to`. The edit is one undo step, `Stretch Notes`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `to` | [`TickRange`](#tickrange) | yes | The range it becomes: its start is where `from`'s start goes, and its end where `from`'s end goes. |
+| `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows (the Arrangement's selected clip). |
+| `from` | [`TickRange`](#tickrange) or null | no | The range being stretched. Left out, the time selection. |
+| `notes` | array or null | no | The notes, by their place in the clip's notes in order. Left out, the selected notes, or with none selected the notes that start inside `from`. |
+| `point` | [`StretchPoint`](#stretchpoint) or null | no | A point inside `from` that goes somewhere else: what lies on either side of it is scaled to meet it there. |
 
 Result: [`NoteEditResult`](#noteeditresult).
 
@@ -13466,10 +13590,13 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`modulator.unmap`](#modulatorunmap) | the query tool's `device` | `mappings` |
 | [`note.add`](#noteadd) | the query tool's `clip` | `data.midi.notes` |
 | [`note.adjust_value`](#noteadjust_value) | the query tool's `clip` | `data.midi.notes` |
+| [`note.chop`](#notechop) | the query tool's `clip` | `data.midi.notes` |
 | [`note.cut`](#notecut) | the query tool's `clip` | `data.midi.notes` |
 | [`note.deactivate`](#notedeactivate) | the query tool's `clip` | `data.midi.notes` |
 | [`note.delete`](#notedelete) | the query tool's `clip` | `data.midi.notes` |
 | [`note.duplicate`](#noteduplicate) | the query tool's `clip` | `data.midi.notes` |
+| [`note.fit_to_time`](#notefit_to_time) | the query tool's `clip` | `data.midi.notes` |
+| [`note.join`](#notejoin) | the query tool's `clip` | `data.midi.notes` |
 | [`note.move`](#notemove) | the query tool's `clip` | `data.midi.notes` |
 | [`note.paste`](#notepaste) | the query tool's `clip` | `data.midi.notes` |
 | [`note.quantize`](#notequantize) | the query tool's `clip` | `data.midi.notes` |
@@ -13477,6 +13604,9 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`note.randomize`](#noterandomize) | the query tool's `clip` | `data.midi.notes` |
 | [`note.resize`](#noteresize) | the query tool's `clip` | `data.midi.notes` |
 | [`note.set_value`](#noteset_value) | the query tool's `clip` | `data.midi.notes` |
+| [`note.split`](#notesplit) | the query tool's `clip` | `data.midi.notes` |
+| [`note.split_clip`](#notesplit_clip) | the query tool's `track` | `clips` |
+| [`note.stretch`](#notestretch) | the query tool's `clip` | `data.midi.notes` |
 | [`pad.delete`](#paddelete) | the query tool's `device` | `chains` |
 | [`pad.drop`](#paddrop) | the query tool's `device` | `chains` |
 | [`pad.preview`](#padpreview) | `device_view.state` | `devices` |
@@ -17590,6 +17720,49 @@ One of:
     {
       "const": "stereo",
       "description": "Two channels: a mono render's in both.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `ChopStep`
+
+One change of a chop's parts, counted from each note's own parts: `more`                    and `fewer` add or take away one, `next_power` and `previous_power` go to                    the next or previous power of two (1, 2, 4 and up to 64).
+
+One of:
+
+- `"more"`: One part more.
+- `"fewer"`: One part fewer.
+- `"next_power"`: The next power of two.
+- `"previous_power"`: The previous power of two.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One change of a chop's parts, counted from each note's own parts: `more`                    and `fewer` add or take away one, `next_power` and `previous_power` go to                    the next or previous power of two (1, 2, 4 and up to 64).",
+  "oneOf": [
+    {
+      "const": "more",
+      "description": "One part more.",
+      "type": "string"
+    },
+    {
+      "const": "fewer",
+      "description": "One part fewer.",
+      "type": "string"
+    },
+    {
+      "const": "next_power",
+      "description": "The next power of two.",
+      "type": "string"
+    },
+    {
+      "const": "previous_power",
+      "description": "The previous power of two.",
       "type": "string"
     }
   ]
@@ -29015,6 +29188,43 @@ What the note clipboard holds, as `note.copy` reports it.
 
 </details>
 
+### `NoteCut`
+
+One cut of `note.split`: a note and the tick it is split at.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `note` | integer, at least 0 | yes | The note, by its place in the clip's notes in order. |
+| `at` | [`Ticks`](#ticks) | yes | The tick to split it at, from the beginning of the clip's contents. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "additionalProperties": false,
+  "description": "One cut of `note.split`: a note and the tick it is split at.",
+  "properties": {
+    "at": {
+      "$ref": "#/$defs/Ticks",
+      "description": "The tick to split it at, from the beginning of the clip's contents."
+    },
+    "note": {
+      "description": "The note, by its place in the clip's notes in order.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "note",
+    "at"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `NoteEditResult`
 
 What a note edit did, and what's selected afterwards.
@@ -35596,6 +35806,41 @@ What `stems.status` returns.
 
 </details>
 
+### `StretchPoint`
+
+A point inside a stretch's range that moves while both ends stay, as dragging the pseudo marker does.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `from` | [`Ticks`](#ticks) | yes | Where the point is in the range being stretched. |
+| `to` | [`Ticks`](#ticks) | yes | Where it goes. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "additionalProperties": false,
+  "description": "A point inside a stretch's range that moves while both ends stay, as dragging the pseudo marker does.",
+  "properties": {
+    "from": {
+      "$ref": "#/$defs/Ticks",
+      "description": "Where the point is in the range being stretched."
+    },
+    "to": {
+      "$ref": "#/$defs/Ticks",
+      "description": "Where it goes."
+    }
+  },
+  "required": [
+    "from",
+    "to"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `SustainMode`
 
 What a voice does between Sample Start and Sample End while a note is held (R17).
@@ -36419,6 +36664,41 @@ Theme & Colors in `settings.state` (themes R12).
     "appearance",
     "drawn_appearance",
     "themes"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `TickRange`
+
+A range of time in a MIDI clip's contents, in ticks.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `start` | [`Ticks`](#ticks) | yes | Where it starts. |
+| `end` | [`Ticks`](#ticks) | yes | Where it ends. In a range a stretch ends at, this may be before `start`, which mirrors the notes' order in time. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "additionalProperties": false,
+  "description": "A range of time in a MIDI clip's contents, in ticks.",
+  "properties": {
+    "end": {
+      "$ref": "#/$defs/Ticks",
+      "description": "Where it ends. In a range a stretch ends at, this may be before `start`, which mirrors the notes' order in time."
+    },
+    "start": {
+      "$ref": "#/$defs/Ticks",
+      "description": "Where it starts."
+    }
+  },
+  "required": [
+    "start",
+    "end"
   ],
   "type": "object"
 }

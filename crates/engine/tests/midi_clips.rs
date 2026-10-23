@@ -717,3 +717,65 @@ fn a_clip_s_scale_doesnt_change_what_it_plays() {
         "the clip's scale doesn't change what it plays"
     );
 }
+
+/// What `rig` plays of a clip holding `notes` for one bar at 120 BPM: each
+/// note's on and off, as `(frame, key, on)`.
+fn played(notes: Vec<Note>) -> Vec<(i64, u8, bool)> {
+    let mut rig = Rig::new(256);
+    let trk = midi_track(&mut rig.editor);
+    instrument(&mut rig.editor, trk);
+    midi_clip(&mut rig.editor, trk, Ticks::ZERO, BAR, MidiData::new(notes));
+    rig.sync();
+    rig.sender.transport(TransportCommand::Play);
+    play(&mut rig, 96_000, 256);
+    rig.probe
+        .recorded_notes()
+        .iter()
+        .map(|note| (note.frame, note.event.key, note.event.kind == NoteKind::On))
+        .collect()
+}
+
+// Spec: note-editing R34, R39. Notes the split, chop and join operations
+// make play on their frames: the parts one after another, the joined note
+// as one from the earliest start to the latest end.
+#[test]
+fn chopped_and_joined_notes_play_on_their_frames() {
+    use bl_model::note_ops::{chop_equal, join, split};
+
+    // 1 beat = 24,000 frames at 120 BPM and 48 kHz. A one-beat note cut in
+    // two at its middle, then in four, plays its parts back to back.
+    let whole = Note::new(60, Ticks::ZERO, BEAT, 100);
+    let halves = split(&whole, &[BEAT / 2]);
+    assert_eq!(
+        played(halves.clone()),
+        [
+            (0, 60, true),
+            (12_000, 60, false),
+            (12_000, 60, true),
+            (24_000, 60, false)
+        ]
+    );
+    let quarters = chop_equal(&whole, 4);
+    let frames = played(quarters);
+    assert_eq!(
+        frames
+            .iter()
+            .filter(|(_, _, on)| *on)
+            .map(|(f, _, _)| *f)
+            .collect::<Vec<_>>(),
+        [0, 6_000, 12_000, 18_000],
+        "each part starts where the one before ended"
+    );
+    assert_eq!(frames.last(), Some(&(24_000, 60, false)));
+
+    // Two notes of one pitch with a gap between them join into one that
+    // sounds through it.
+    let first = Note::new(64, Ticks::ZERO, BEAT / 2, 100);
+    let second = Note::new(64, BEAT, BEAT / 2, 100);
+    let joined = join(&[first, second]);
+    assert_eq!(
+        played(vec![joined]),
+        [(0, 64, true), (36_000, 64, false)],
+        "one note from the earliest start to the latest end"
+    );
+}

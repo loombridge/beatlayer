@@ -167,6 +167,9 @@ pub fn show(
     clip: ClipId,
     events: &mut Vec<UiEvent>,
 ) {
+    // An Esc a frame took that the note editor didn't read (another tab
+    // showed) would swallow the editor's next Esc.
+    took_escape(ui.ctx());
     let shown = shell.clip_view().midi_tools().panel();
     let c = &theme.colors;
     ui.painter().rect_filled(rect, 0.0, c.panel.0);

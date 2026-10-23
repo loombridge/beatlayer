@@ -7,7 +7,7 @@ use crate::common;
 use bl_core::time::{TICKS_PER_QUARTER, Ticks};
 use bl_engine::{NoteExpression, NoteKind, TransportCommand, testing};
 use bl_model::{
-    AutomationTarget, Clip, ClipData, ClipId, Command, EnvelopeKind, MidiData, Note, PressurePoint,
+    AutomationTarget, Breakpoint, Clip, ClipData, ClipId, Command, EnvelopeKind, MidiData, Note,
     TrackId, TrackKind,
 };
 use common::{Rig, device, track};
@@ -224,19 +224,24 @@ fn stopping_sends_no_controller_back_to_rest() {
     );
 }
 
-// Spec: midi-controller-data R3
+fn point(at: Ticks, value: f64) -> Breakpoint {
+    Breakpoint {
+        at,
+        value,
+        bend: 0.0,
+    }
+}
+
+// Spec: midi-controller-data R3; mpe R2, R5. A set saved with pressure points
+// holds each as a step, and the pressure plays what it played.
 #[test]
 fn per_note_pressure_arrives_as_polyphonic_pressure_on_the_note() {
+    // As the version 7 set's points 0 → 127 and BEAT / 2 → 64 load.
     let note = Note {
         pressure: vec![
-            PressurePoint {
-                at: Ticks::ZERO,
-                value: 127,
-            },
-            PressurePoint {
-                at: BEAT / 2,
-                value: 64,
-            },
+            point(Ticks::ZERO, 127.0),
+            point(BEAT / 2 - Ticks(1), 127.0),
+            point(BEAT / 2, 64.0),
         ],
         ..Note::new(62, BEAT, BEAT * 2, 100)
     };
@@ -259,6 +264,138 @@ fn per_note_pressure_arrives_as_polyphonic_pressure_on_the_note() {
             (BEAT_FRAMES * 3, NoteKind::Off, 62),
         ]
     );
+}
+
+fn expression(heard: &[Heard], which: NoteExpression) -> Vec<(i64, f32)> {
+    heard
+        .iter()
+        .filter_map(|&(frame, kind, _)| match kind {
+            NoteKind::Expression { expression, value } if expression == which => {
+                Some((frame, value))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// A note of two beats from the second beat: Pitch rises 12 semitones over
+/// its first beat and holds, Slide steps from 10 to 100 a half beat in, and
+/// Pressure has one breakpoint.
+fn bent() -> Note {
+    Note {
+        pitch: vec![point(Ticks::ZERO, 0.0), point(BEAT, 12.0)],
+        slide: vec![
+            point(Ticks::ZERO, 10.0),
+            point(BEAT / 2 - Ticks(1), 10.0),
+            point(BEAT / 2, 100.0),
+        ],
+        pressure: vec![point(BEAT, 50.0)],
+        ..Note::new(60, BEAT, BEAT * 2, 100)
+    }
+}
+
+// Spec: mpe R5, R6, R8. A clip note's three envelopes reach the device on
+// their frames: each starting value just after the note-on, a step on its
+// breakpoint's frame, a value at least every 5 ms along a slope, nothing
+// from the note-off on; the same at every block size, under the allocation
+// trap.
+#[test]
+fn a_clip_notes_pitch_slide_and_pressure_reach_the_device_on_their_frames() {
+    let heard = in_every_block_size(
+        &MidiData::new([bent()]),
+        |_, _, _| {},
+        BEAT_FRAMES as usize * 5,
+        None,
+    );
+    let off = BEAT_FRAMES * 3;
+    // The note-on comes first, and the starting values just after it, on its
+    // frame.
+    assert_eq!(heard[0], (BEAT_FRAMES, NoteKind::On, 60));
+    let starting: Vec<_> = heard[1..4].iter().map(|h| (h.0, h.2)).collect();
+    assert_eq!(
+        starting,
+        [(BEAT_FRAMES, 60), (BEAT_FRAMES, 60), (BEAT_FRAMES, 60)]
+    );
+    let bend = expression(&heard, NoteExpression::Bend);
+    assert_eq!(bend[0], (BEAT_FRAMES, 0.0), "a bend of 0 semitones");
+    // The slope streams on a grid at most 5 ms (240 frames) apart, each value
+    // a share of 48 semitones.
+    let slope: Vec<_> = bend[1..bend.len() - 1].to_vec();
+    assert!(slope.len() >= 124, "{} messages", slope.len());
+    for pair in slope.windows(2) {
+        assert!(pair[1].0 - pair[0].0 <= 240, "{pair:?}");
+        assert!(pair[1].1 > pair[0].1, "each message is a new, higher value");
+    }
+    for &(frame, value) in &slope {
+        let semitones = 12.0 * (frame - BEAT_FRAMES) as f32 / BEAT_FRAMES as f32;
+        assert!((value * 48.0 - semitones).abs() < 0.01, "{frame}: {value}");
+    }
+    // It ends on the breakpoint's frame at +12 semitones, a quarter of the
+    // range, and nothing is sent after.
+    assert_eq!(bend.last(), Some(&(BEAT_FRAMES * 2, 0.25)));
+    // Slide steps once, on its frame.
+    let slide = expression(&heard, NoteExpression::Slide);
+    assert_eq!(
+        slide,
+        [
+            (BEAT_FRAMES, 10.0 / 127.0),
+            (BEAT_FRAMES + BEAT_FRAMES / 2, 100.0 / 127.0)
+        ]
+    );
+    // Pressure has its one value to start with.
+    assert_eq!(
+        expression(&heard, NoteExpression::Pressure),
+        [(BEAT_FRAMES, 50.0 / 127.0)]
+    );
+    // The note-off is the last thing, and every expression is before it.
+    assert_eq!(heard.last(), Some(&(off, NoteKind::Off, 60)));
+    assert!(
+        heard
+            .iter()
+            .filter(|h| matches!(h.1, NoteKind::Expression { .. }))
+            .all(|h| h.0 < off)
+    );
+}
+
+// Spec: mpe R5. A note that doesn't sound sends no expression.
+#[test]
+fn a_note_that_does_not_sound_sends_no_expression() {
+    let silent = Note {
+        probability: 0.0,
+        ..bent()
+    };
+    let muted = Note {
+        mute: true,
+        key: 61,
+        ..bent()
+    };
+    let heard = in_every_block_size(
+        &MidiData::new([silent, muted]),
+        |_, _, _| {},
+        BEAT_FRAMES as usize * 5,
+        None,
+    );
+    assert_eq!(heard, []);
+}
+
+// Spec: mpe R5. Stopping sends no more expression: the note ends.
+#[test]
+fn stopping_ends_a_notes_expressions_with_it() {
+    let heard = in_every_block_size(
+        &MidiData::new([bent()]),
+        |_, _, _| {},
+        0,
+        Some(BEAT_FRAMES as usize * 2 + BEAT_FRAMES as usize / 2),
+    );
+    let stop = BEAT_FRAMES * 5 / 2;
+    assert!(
+        heard
+            .iter()
+            .filter(|h| matches!(h.1, NoteKind::Expression { .. }))
+            .all(|h| h.0 < stop),
+        "nothing after the stop"
+    );
+    assert!(heard.iter().any(|h| matches!(h.1, NoteKind::Off)));
 }
 
 // Spec: midi-controller-data R3

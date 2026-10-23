@@ -1038,6 +1038,53 @@ fn the_tags_shortcuts_reach_their_commands() {
     assert_eq!(entry.win, vec!["Ctrl+E".to_owned()]);
 }
 
+#[test]
+fn the_filter_and_history_shortcuts_reach_their_commands() {
+    // Spec: browser-tags R18, R30.
+    let keymap = Keymap::live12();
+    for (shortcut, mac, win, command) in [
+        (
+            "S-BRW-013",
+            "Cmd+Option+G",
+            "Ctrl+Alt+G",
+            "browser.set_filter_view",
+        ),
+        (
+            "S-BRW-011",
+            "Cmd+LeftBracket",
+            "Ctrl+LeftBracket",
+            "browser.back",
+        ),
+        (
+            "S-BRW-012",
+            "Cmd+RightBracket",
+            "Ctrl+RightBracket",
+            "browser.forward",
+        ),
+    ] {
+        let entry = keymap.entry_for(shortcut).expect("the shortcut");
+        assert_eq!(entry.status, Status::Bound, "{shortcut}");
+        assert_eq!(entry.mac, vec![mac.to_owned()]);
+        assert_eq!(entry.win, vec![win.to_owned()]);
+        assert!(
+            entry.commands.iter().any(|c| c.id == command),
+            "{shortcut}: {:?}",
+            entry.commands
+        );
+    }
+    // Rename (Cmd-R) renames the chosen label while the sidebar has the
+    // keyboard (browser-tags R25).
+    let rename = keymap.entry_for("S-EDIT-008").expect("the shortcut");
+    assert!(
+        rename
+            .commands
+            .iter()
+            .any(|c| c.id == "browser.rename_label"),
+        "{:?}",
+        rename.commands
+    );
+}
+
 // Spec: note-editing R35 to R41, R47 (WP-6.3). Join, Fit to Time Range and
 // Split Clip are bound in the note editor, ahead of the Arrangement's keys
 // they share (Consolidate on Cmd-J); the keys that run differently with

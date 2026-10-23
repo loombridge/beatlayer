@@ -11,7 +11,8 @@ use std::collections::BTreeMap;
 use bl_core::midi::MidiMessage;
 use bl_core::time::{Bpm, TempoMap};
 use bl_engine::SessionCommand;
-use bl_engine::controller_take::give_pressure;
+use bl_engine::controller_take::{Heard, give_expressions, give_pressure};
+use bl_engine::mpe::MpeRole;
 use bl_model::{
     AutomationTarget, Clip, ClipData, ClipId, Command, EnvelopeKind, MidiData, Note, SceneId,
 };
@@ -178,9 +179,15 @@ impl Shell {
                 let (Some((scene, clip)), Some(started)) = (slot, started) else {
                     continue;
                 };
-                let mut notes = launch_relative(notes, started, &ticks);
+                let (mut notes, ids) = launch_relative(notes, started, &ticks);
                 let moves = launch_moves(&controllers[track], started, &ticks);
                 give_pressure(&mut notes, &moves);
+                // Spec: mpe R12. The expressions of notes an MPE port played.
+                give_expressions(
+                    &mut notes,
+                    &ids,
+                    &launch_expressions(&heard[track], started, &ticks),
+                );
                 work.push((
                     *track,
                     Work::Merge {
@@ -195,6 +202,12 @@ impl Shell {
             let mut placed = capture::place(notes, timing, ticks, phrase, bar);
             let moves = capture::place_controllers(&controllers[track], timing, ticks);
             give_pressure(&mut placed.notes, &moves);
+            // Spec: mpe R12. The expressions of notes an MPE port played.
+            give_expressions(
+                &mut placed.notes,
+                &placed.ids,
+                &capture::place_expressions(&heard[track], timing, ticks),
+            );
             let data = MidiData {
                 looping: true,
                 start: placed.loop_start,
@@ -242,13 +255,14 @@ impl Shell {
     }
 }
 
-/// The notes with their starts counted from the frame the clip launched on;
-/// those played before it, or with no known song position, are left out.
+/// The notes with their starts counted from the frame the clip launched on,
+/// and the ID each has if an MPE port played it; those played before it, or
+/// with no known song position, are left out.
 fn launch_relative(
     notes: &[Played],
     started: Frames,
     ticks: &impl Fn(Frames) -> Ticks,
-) -> Vec<Note> {
+) -> (Vec<Note>, Vec<Option<u32>>) {
     let begin = ticks(started);
     notes
         .iter()
@@ -257,7 +271,37 @@ fn launch_relative(
             (on >= begin).then(|| {
                 let mut note = Note::new(n.key, on - begin, (off - on).max(Ticks(1)), n.velocity);
                 note.release_velocity = n.release;
-                note
+                (note, n.id)
+            })
+        })
+        .unzip()
+}
+
+/// What an MPE port said about its notes, with positions counted from the
+/// frame the clip launched on, like [`launch_relative`]'s.
+fn launch_expressions(
+    messages: &[CapturedMidi],
+    started: Frames,
+    ticks: &impl Fn(Frames) -> Ticks,
+) -> Vec<Heard> {
+    let begin = ticks(started);
+    messages
+        .iter()
+        .filter_map(|m| {
+            let MpeRole::Expression {
+                id,
+                expression,
+                value,
+                ..
+            } = m.mpe
+            else {
+                return None;
+            };
+            Some(Heard {
+                id,
+                expression,
+                value: f64::from(value),
+                at: ticks(m.song?) - begin,
             })
         })
         .collect()

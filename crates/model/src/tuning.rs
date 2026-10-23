@@ -488,7 +488,8 @@ pub(crate) fn retune(
                 }
                 dead[i] = true;
             } else {
-                all[a].length = all[i].start - all[a].start;
+                let length = all[i].start - all[a].start;
+                all[a].set_length(length);
             }
             break;
         }

@@ -1,6 +1,7 @@
 //! MIDI controller data in a playing MIDI clip (WP-2.29): the clip's MIDI
-//! Ctrl envelopes and its notes' pressure, sent to the track's devices as
-//! channel messages and polyphonic pressure.
+//! Ctrl envelopes, sent to the track's devices as channel messages, and its
+//! notes' Pitch, Slide and Pressure envelopes (WP-6.17), sent as each note's
+//! own expressions.
 //!
 //! The rules are in the MIDI controller data spec, R3 to R5. Everything here
 //! depends only on the frame it is asked about and on the clip, never on
@@ -190,23 +191,45 @@ impl PlacedController {
     }
 }
 
-/// A note while it sounds: what its pressure needs to be placed.
+/// A note while it sounds: what its expressions need to be placed.
 #[derive(Clone, Copy, Debug)]
 pub struct Sounding {
     /// The ID its note-on carried.
     pub note_id: Option<u32>,
     /// Where the note starts in the song.
     pub song_start: Ticks,
-    /// The song frames it starts and ends on.
+    /// The song frames it starts and ends on. A note that started in an
+    /// earlier block starts at `i64::MIN`, so its starting values aren't sent
+    /// again.
     pub on: i64,
     pub off: i64,
 }
 
-/// Puts the pressure of `note` that falls on the frames `from..to` into
-/// `out`, while the note sounds: each point is polyphonic pressure for the
-/// note, on its frame (R3).
-// Spec: midi-controller-data R3
-pub fn play_pressure(
+/// A note's three expression envelopes, as the devices take them: which
+/// expression, and how a value of its envelope becomes the event's (MPE R6).
+fn expressions(note: &Note) -> [(NoteExpression, &[Breakpoint], f64); 3] {
+    [
+        (NoteExpression::Bend, &note.pitch, 1.0 / 48.0),
+        (NoteExpression::Slide, &note.slide, 1.0 / 127.0),
+        (NoteExpression::Pressure, &note.pressure, 1.0 / 127.0),
+    ]
+}
+
+/// The room [`play_expressions`] leaves in its buffer for the note-ons and
+/// note-offs of the block, which matter more than any expression: one of
+/// each for every note a clip player holds.
+const NOTE_ROOM: usize = 512;
+
+/// Puts the expressions of `note` that fall on the frames `from..to` into
+/// `out`, while the note sounds, each as the note's own expression with its
+/// key and note ID (the MPE spec, R5 and R6): each envelope's starting value
+/// on the note-on's frame, after the note-on; then a step on each breakpoint's
+/// frame and, along a slope, a value on every frame that is a multiple of the
+/// stream step; nothing from the note-off on. A value that is already there
+/// isn't sent again, and every event depends only on its frame, so a render
+/// is the same at any block size.
+// Spec: mpe R5, R6, R8
+pub fn play_expressions(
     note: &Note,
     sounding: Sounding,
     (from, to): (i64, i64),
@@ -220,23 +243,93 @@ pub fn play_pressure(
         on,
         off,
     } = sounding;
-    for point in &note.pressure {
-        let frame = tempo.ticks_to_frames(song_start + point.at, rate).get();
-        if frame < on.max(from) || frame >= off.min(to) {
+    let step = ((rate.as_f64() * STREAM_SECONDS) as i64).max(1);
+    let (low, high) = (from.max(on), to.min(off));
+    let frame_of = |at: Ticks| tempo.ticks_to_frames(song_start + at, rate).get();
+    let tick_of = |frame: i64| tempo.frames_to_ticks(Frames(frame), rate) - song_start;
+    for (expression, points, scale) in expressions(note) {
+        let Some(first) = points.first() else {
             continue;
+        };
+        let mut push = |frame: i64, value: f64| {
+            if out.len() + NOTE_ROOM < out.capacity() {
+                out.push(NoteEvent {
+                    offset: (frame - from) as u32,
+                    kind: NoteKind::Expression {
+                        expression,
+                        value: (value * scale).clamp(-1.0, 1.0) as f32,
+                    },
+                    channel: 0,
+                    key: note.key,
+                    velocity: 0.0,
+                    note_id,
+                });
+            }
+        };
+        // The value on the slope from `a` to `b` at `frame`.
+        let on_slope = |a: &Breakpoint, b: &Breakpoint, frame: i64| {
+            let span = (b.at - a.at).get() as f64;
+            let along = ((tick_of(frame) - a.at).get() as f64 / span).clamp(0.0, 1.0);
+            curve_value(a.value, b.value, along, a.bend)
+        };
+
+        // The starting value, whichever the first breakpoint is.
+        if on >= from && on < to {
+            push(on, first.value);
         }
-        if out.len() < out.capacity() {
-            out.push(NoteEvent {
-                offset: (frame - from) as u32,
-                kind: NoteKind::Expression {
-                    expression: NoteExpression::Pressure,
-                    value: f32::from(point.value) / 127.0,
-                },
-                channel: 0,
-                key: note.key,
-                velocity: 0.0,
-                note_id,
-            });
+        // Each later breakpoint sends its value on its own frame unless the
+        // value is already there: where the segment before it ended.
+        // The breakpoints before the block are skipped by a binary search,
+        // so the work is bounded by the breakpoints in the block (R8).
+        let first = points.partition_point(|p| frame_of(p.at) < low).max(1);
+        for i in first..points.len() {
+            let (a, b) = (points[i - 1], points[i]);
+            let at = frame_of(b.at);
+            if at >= high {
+                break;
+            }
+            if at < low {
+                continue;
+            }
+            let last = (at - 1).div_euclid(step) * step;
+            let held = if a.value != b.value && last > frame_of(a.at) {
+                on_slope(&a, &b, last)
+            } else {
+                a.value
+            };
+            if held != b.value {
+                push(at, b.value);
+            }
+        }
+        // Along each sloped segment, a value on every frame of the stream
+        // grid, unless it is the one before.
+        let first = points
+            .partition_point(|p| frame_of(p.at) <= low)
+            .saturating_sub(1);
+        for pair in points[first..].windows(2) {
+            let (a, b) = (pair[0], pair[1]);
+            let start = frame_of(a.at);
+            if start >= high {
+                break;
+            }
+            let end = frame_of(b.at);
+            if a.value == b.value || end <= low {
+                continue;
+            }
+            let mut frame = (start + 1).max(low);
+            frame = (frame + step - 1).div_euclid(step) * step;
+            while frame < end && frame < high {
+                let value = on_slope(&a, &b, frame);
+                let before = if frame - step > start {
+                    on_slope(&a, &b, frame - step)
+                } else {
+                    a.value
+                };
+                if before != value {
+                    push(frame, value);
+                }
+                frame += step;
+            }
         }
     }
 }

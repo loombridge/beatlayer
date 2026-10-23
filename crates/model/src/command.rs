@@ -16,7 +16,7 @@ use crate::automation::{
     override_device,
 };
 use crate::clip::{
-    AudioData, Clip, ClipData, ClipEnvelope, EnvelopeKind, MidiData, NewTakeLane, Note, TakeLane,
+    AudioData, Clip, ClipData, ClipEnvelope, EnvelopeKind, MidiData, NewTakeLane, TakeLane,
     clip_entry, crossfades,
 };
 use crate::clip_param::ClipParam;
@@ -8149,16 +8149,6 @@ pub(crate) fn check_clip_fits(track: &Track, data: &ClipData) -> Result<(), Mode
     }
 }
 
-/// Whether a note's pressure points obey the MIDI controller data spec's R2:
-/// each from the note's start to before its end, 0 to 127, in order with none
-/// at the same place.
-fn pressure_fits(note: &Note) -> bool {
-    note.pressure
-        .iter()
-        .all(|point| point.value <= 127 && point.at >= Ticks::ZERO && point.at < note.length)
-        && note.pressure.windows(2).all(|pair| pair[0].at < pair[1].at)
-}
-
 /// Checks a clip or note's start and length.
 pub(crate) fn check_extent(start: Ticks, length: Ticks) -> Result<(), ModelError> {
     if start.is_negative() {
@@ -8205,7 +8195,7 @@ pub(crate) fn check_clip_data(data: &ClipData) -> Result<(), ModelError> {
                     || !(1..=127).contains(&note.release_velocity)
                     || !note.probability.is_finite()
                     || !(0.0..=1.0).contains(&note.probability)
-                    || !pressure_fits(note)
+                    || !note.expressions_fit()
                 {
                     return Err(ModelError::InvalidNote { index });
                 }

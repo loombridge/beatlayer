@@ -19,7 +19,7 @@ use bl_model::ClipId;
 use bl_shell::browser::drop::{DropTarget, drop_target_on};
 use bl_shell::browser::listing::file_kind;
 use bl_shell::browser_commands::{
-    self as ids, ClipFileKind, Item, ItemKind, Label, LabelInfo, Part, Section, TagEditorRow,
+    self as ids, ClipFileKind, Item, ItemKind, Label, LabelInfo, Part, TagEditorRow,
     TagEditorRowKind, TagState,
 };
 use bl_shell::{Area, Invocation, MainView, Shell};
@@ -30,7 +30,17 @@ use egui::{
 };
 use serde_json::{Value, json};
 
-use crate::layout::{ArrangementLayout, BROWSER_ROW, BrowserLayout};
+mod columns;
+mod filter_view;
+mod labels;
+
+pub use columns::{column_id, content_options_id};
+pub use filter_view::{
+    add_label_id, clear_filters_id, filter_group_id, filter_tag_id, filter_view_id, results_bar_id,
+};
+pub use labels::{label_check_id, label_rename_id, labels_edit_id};
+
+use crate::layout::{ArrangementLayout, BROWSER_ROW, BrowserLayout, BrowserParts};
 use crate::main_window::UiEvent;
 use crate::theme::Theme;
 
@@ -48,6 +58,13 @@ pub fn part_of(id: Id) -> Option<&'static str> {
     } else {
         None
     }
+}
+
+/// One of the top row's buttons, by its name: Browse Back, Browse Forward,
+/// Show Filter View and Filter View Menu.
+#[must_use]
+pub fn control_id(name: &str) -> Id {
+    Id::new(("browser-control", name))
 }
 
 /// The search field's ID.
@@ -180,6 +197,18 @@ struct AskCopy {
     folder: Option<String>,
 }
 
+/// A deletion that waits for the person's answer: saved labels use what it
+/// deletes (browser-tags R8).
+#[derive(Clone, Debug, PartialEq)]
+struct AskDelete {
+    args: Value,
+    labels: Vec<String>,
+}
+
+fn ask_delete_id() -> Id {
+    Id::new("browser-ask-delete")
+}
+
 fn clip_drag_id() -> Id {
     Id::new("browser-clip-drag")
 }
@@ -283,6 +312,8 @@ pub struct BrowserStats {
 #[derive(Clone, Debug, PartialEq)]
 enum SideRow {
     Heading(&'static str),
+    /// The Library heading, which has Edit and Done at its right.
+    LibraryHeading,
     /// A collection label (M6): its name and colour's palette index, or
     /// `None` for Favorites.
     Collection(&'static str, Option<usize>),
@@ -367,6 +398,23 @@ pub struct BrowserUi {
     /// R4), and the file it is for.
     rename: String,
     rename_for: Option<String>,
+    /// The Filter View's scroll.
+    filter_scroll: f32,
+    /// The Filter View's lines for the groups and width last drawn.
+    filter_lines: filter_view::FilterLines,
+    /// The tag button the keyboard is on in the Filter View (spec:
+    /// browser-tags R23).
+    filter_cursor: usize,
+    /// Whether the Library section is in Edit mode (spec: browser-tags
+    /// R26).
+    editing_labels: bool,
+    /// The text of the label name being edited, and the label it is for.
+    label_text: String,
+    label_text_for: Option<Label>,
+    /// Where the columns sit in the rows being drawn, and where the Name
+    /// column ends.
+    spans: Vec<columns::Span>,
+    name_right: f32,
 }
 
 /// The text after the last `#` in the search field, when a `#` term is
@@ -429,7 +477,18 @@ impl BrowserUi {
                 .data_mut(|data| data.insert_temp(clip_target_id(), None::<ClipDropTarget>));
         }
         self.ask_copy_dialog(ui.ctx(), theme, events);
-        let layout = BrowserLayout::compute_with(column, view.quick_tags_shown());
+        Self::ask_delete_dialog(ui.ctx(), events);
+        // Spec: browser-tags R18, R22. The Filter View fills the content
+        // pane's top while it shows, and the Results bar follows it while a
+        // search or a filter is active.
+        let layout = BrowserLayout::compute_parts(
+            column,
+            BrowserParts {
+                quick_tags: view.quick_tags_shown(),
+                filter_view: view.filter_view_shown(),
+                results_bar: view.results_bar(),
+            },
+        );
         let region = Id::new("region-browser");
         let _ = ui.interact(column, region, Sense::hover());
         ui.ctx().accesskit_node_builder(region, |node| {
@@ -453,6 +512,11 @@ impl BrowserUi {
                     m.request_focus(target);
                 }
             });
+            // Spec: browser-tags R22. Cmd-F selects the search field's text
+            // rather than clearing it, so typing replaces it.
+            if view.focus() == Part::Search {
+                self.select_search_text(ui.ctx());
+            }
         }
 
         // Everything inside hangs from the browser's node for assistive
@@ -464,18 +528,117 @@ impl BrowserUi {
             |ui| {
                 self.top_row(ui, shell, theme, &layout, events);
                 self.sidebar(ui, shell, theme, &layout, events);
+                if view.filter_view_shown() {
+                    self.filter_view(ui, shell, theme, &layout, events);
+                }
+                if view.results_bar() {
+                    self.results_bar(ui, shell, theme, &layout, events);
+                }
                 self.content(ui, shell, theme, &layout, events);
                 if view.quick_tags_shown() {
                     self.quick_tags(ui, shell, theme, layout.quick_tags, events);
                 }
                 self.preview_strip(ui, shell, theme, &layout, events);
                 self.keys(ui, shell, events);
+                self.mouse_history(ui, shell, column, events);
             },
         );
         if view.index_state().indexing || view.preview_active() {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(50));
         }
+    }
+
+    /// Selects all the text in the search field.
+    fn select_search_text(&self, ctx: &egui::Context) {
+        let len = self.search.chars().count();
+        if let Some(mut state) = egui::TextEdit::load_state(ctx, search_id()) {
+            state
+                .cursor
+                .set_char_range(Some(egui::text::CCursorRange::two(
+                    egui::text::CCursor::new(0),
+                    egui::text::CCursor::new(len),
+                )));
+            state.store(ctx, search_id());
+        }
+    }
+
+    /// The mouse's back and forward buttons over the browser go a step
+    /// back or forward (spec: browser-tags R30, I-CLICK-050).
+    fn mouse_history(&self, ui: &Ui, shell: &Shell, column: Rect, events: &mut Vec<UiEvent>) {
+        let view = shell.browser_view();
+        let presses: Vec<egui::PointerButton> = ui.input(|i| {
+            i.events
+                .iter()
+                .filter_map(|event| match event {
+                    egui::Event::PointerButton {
+                        button,
+                        pressed: true,
+                        pos,
+                        ..
+                    } if column.contains(*pos) => Some(*button),
+                    _ => None,
+                })
+                .collect()
+        });
+        for button in presses {
+            match button {
+                egui::PointerButton::Extra1 if view.can_back() => {
+                    invoke(events, ids::BACK, json!({}));
+                }
+                egui::PointerButton::Extra2 if view.can_forward() => {
+                    invoke(events, ids::FORWARD, json!({}));
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// One of the buttons on the top row (L-BRW-001): a small square with a
+    /// mark, disabled or on.
+    fn top_button(
+        ui: &mut Ui,
+        theme: &Theme,
+        rect: Rect,
+        name: &str,
+        kind: Glyph,
+        enabled: bool,
+        on: bool,
+    ) -> egui::Response {
+        let id = control_id(name);
+        let response = ui.interact(rect, id, Sense::click());
+        let painter = ui.painter_at(rect.expand(1.0));
+        let fill = if on {
+            theme.colors.accent.0
+        } else if enabled && response.hovered() {
+            theme.colors.control_hover.0
+        } else if enabled {
+            theme.colors.control.0
+        } else {
+            theme.colors.control.0.gamma_multiply(0.6)
+        };
+        painter.rect_filled(rect, theme.sizes.corner, fill);
+        let ink = if on {
+            theme.colors.accent_text.0
+        } else if enabled {
+            theme.colors.text.0
+        } else {
+            theme.colors.pending.0
+        };
+        glyph(&painter, rect, kind, ink);
+        response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, name));
+        ui.ctx().accesskit_node_builder(id, |node| {
+            node.set_role(Role::Button);
+            node.set_label(name.to_owned());
+            node.set_bounds(bounds(rect));
+            if !enabled {
+                node.set_disabled();
+            }
+            if on {
+                node.set_toggled(egui::accesskit::Toggled::True);
+            }
+        });
+        response
     }
 
     fn top_row(
@@ -486,38 +649,35 @@ impl BrowserUi {
         layout: &BrowserLayout,
         events: &mut Vec<UiEvent>,
     ) {
-        // Back, Forward, and the filters arrive with the browser's history
-        // and tags (M6).
-        for (rect, name, kind) in [
-            (layout.back, "Browse Back", Glyph::Left),
-            (layout.forward, "Browse Forward", Glyph::Right),
-            (layout.filter_toggle, "Show Filter View", Glyph::Filter),
-            (layout.filter_menu, "Filter View Menu", Glyph::Menu),
+        let view = shell.browser_view();
+        // Browse Back and Browse Forward (spec: browser-tags R30), disabled
+        // at the ends of the history.
+        for (rect, name, kind, enabled, id) in [
+            (
+                layout.back,
+                "Browse Back",
+                Glyph::Left,
+                view.can_back(),
+                ids::BACK,
+            ),
+            (
+                layout.forward,
+                "Browse Forward",
+                Glyph::Right,
+                view.can_forward(),
+                ids::FORWARD,
+            ),
         ] {
-            let id = Id::new(("browser-control", name));
-            let response = ui.interact(rect, id, Sense::click());
-            let painter = ui.painter_at(rect.expand(1.0));
-            painter.rect_filled(
-                rect,
-                theme.sizes.corner,
-                theme.colors.control.0.gamma_multiply(0.6),
-            );
-            glyph(&painter, rect, kind, theme.colors.pending.0);
-            response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, false, name));
-            ui.ctx().accesskit_node_builder(id, |node| {
-                node.set_description("Not built yet: arrives in milestone M6.".to_owned());
-            });
-            // The Filter View Menu (C-FILTER): the Tag Editor and Quick
-            // Tags for now; the Filter View's groups come with WP-6.32.
-            if name == "Filter View Menu" && response.clicked() {
-                egui::Popup::menu(&response).show(|ui| {
-                    self.filter_view_menu(ui, shell, events);
-                });
+            let response = Self::top_button(ui, theme, rect, name, kind, enabled, false);
+            if enabled {
+                crate::focus::register(ui.ctx(), response.id, bl_shell::Area::Browser, None);
+            }
+            if enabled && response.clicked() {
+                invoke(events, id, json!({}));
             }
         }
 
         // The search field (S-BRW-006, S-BRW-007).
-        let view = shell.browser_view();
         // The shell's search changed by other means (an agent, Cmd-F's All):
         // the field shows it.
         if view.search_text() != self.search_seen {
@@ -538,7 +698,8 @@ impl BrowserUi {
             .margin(vec2(4.0, 2.0));
         let response = ui.put(layout.search, edit);
         // Tab's order in the browser (the accessibility spec, R3;
-        // I-FOCUS-007): the search field, the sidebar, then the list.
+        // I-FOCUS-007): the search field, the Filter View toggle and menu,
+        // the sidebar, the Filter View, then the list.
         crate::focus::register(ui.ctx(), response.id, bl_shell::Area::Browser, None);
         // Live's Info View calls it the Search Field (observed in Live
         // 12.4.6; the accessibility spec, R1).
@@ -552,6 +713,35 @@ impl BrowserUi {
             invoke(events, ids::SEARCH, json!({ "query": self.search }));
             self.search_seen.clone_from(&self.search);
         }
+        // The Filter View toggle and its menu (spec: browser-tags R18,
+        // R21).
+        let toggle = Self::top_button(
+            ui,
+            theme,
+            layout.filter_toggle,
+            "Show Filter View",
+            Glyph::Filter,
+            true,
+            view.filter_view_shown(),
+        );
+        crate::focus::register(ui.ctx(), toggle.id, bl_shell::Area::Browser, None);
+        if toggle.clicked() {
+            invoke(events, ids::SET_FILTER_VIEW, json!({}));
+        }
+        let menu = Self::top_button(
+            ui,
+            theme,
+            layout.filter_menu,
+            "Filter View Menu",
+            Glyph::Menu,
+            true,
+            false,
+        );
+        crate::focus::register(ui.ctx(), menu.id, bl_shell::Area::Browser, None);
+        egui::Popup::menu(&menu).show(|ui| {
+            self.filter_view_menu(ui, shell, events);
+        });
+
         // A `#` term suggests the tags it names (spec: browser-tags R15).
         if let Some(prefix) = search_tag_prefix(&self.search) {
             let suggestions = view.tag_suggestions(prefix);
@@ -597,38 +787,15 @@ impl BrowserUi {
             self.go_to_results(shell, events);
         } else if response.lost_focus() && enter {
             self.go_to_results(shell, events);
-        } else if response.lost_focus() && escape && !self.search.is_empty() {
+        } else if response.lost_focus()
+            && escape
+            && (!self.search.is_empty() || view.filter_count() > 0)
+        {
+            // Spec: browser-tags R22. Esc clears the search words and the
+            // selected tags.
             self.search.clear();
             self.search_seen.clear();
-            invoke(events, ids::SEARCH, json!({ "query": "" }));
-        }
-    }
-
-    /// The Filter View Menu (C-FILTER): the Tag Editor and Quick Tags for
-    /// now; the Filter View's groups come with WP-6.32.
-    fn filter_view_menu(&mut self, ui: &mut Ui, shell: &Shell, events: &mut Vec<UiEvent>) {
-        let view = shell.browser_view();
-        if ui
-            .selectable_label(view.tag_editor(), "Tag Editor")
-            .clicked()
-        {
-            invoke(
-                events,
-                ids::SHOW_TAG_EDITOR,
-                json!({ "show": !view.tag_editor() }),
-            );
-            ui.close();
-        }
-        if ui
-            .selectable_label(view.quick_tags_shown(), "Show Quick Tags")
-            .clicked()
-        {
-            invoke(
-                events,
-                ids::SHOW_QUICK_TAGS,
-                json!({ "show": !view.quick_tags_shown() }),
-            );
-            ui.close();
+            invoke(events, ids::CLEAR_FILTERS, json!({}));
         }
     }
 
@@ -641,243 +808,6 @@ impl BrowserUi {
         }
     }
 
-    fn side_rows(shell: &Shell) -> Vec<SideRow> {
-        let view = shell.browser_view();
-        let labels = view.labels();
-        let mut rows = vec![SideRow::Heading("Collections")];
-        rows.extend(
-            COLLECTIONS
-                .iter()
-                .map(|(name, colour)| SideRow::Collection(name, *colour)),
-        );
-        rows.push(SideRow::Heading("Library"));
-        rows.extend(
-            labels
-                .iter()
-                .filter(|l| l.section == Section::Library)
-                .cloned()
-                .map(SideRow::Label),
-        );
-        rows.push(SideRow::Heading("Places"));
-        rows.extend(
-            labels
-                .into_iter()
-                .filter(|l| l.section == Section::Places)
-                .map(SideRow::Label),
-        );
-        rows.push(SideRow::AddFolder);
-        rows
-    }
-
-    fn sidebar(
-        &mut self,
-        ui: &mut Ui,
-        shell: &Shell,
-        theme: &Theme,
-        layout: &BrowserLayout,
-        events: &mut Vec<UiEvent>,
-    ) {
-        let area = layout.sidebar;
-        let view = shell.browser_view();
-        let painter = ui.painter_at(area);
-        painter.rect_filled(area, 0.0, theme.colors.bar.0);
-        let region = ui.interact(area, sidebar_id(), Sense::click());
-        crate::focus::register(ui.ctx(), sidebar_id(), bl_shell::Area::Browser, None);
-        ui.ctx().accesskit_node_builder(sidebar_id(), |node| {
-            node.set_role(Role::List);
-            node.set_label("Browser Sidebar".to_owned());
-        });
-        if region.clicked() {
-            region.request_focus();
-        }
-        let rows = Self::side_rows(shell);
-        let content = rows.len() as f32 * BROWSER_ROW;
-        self.sidebar_scroll = scrolled(ui, area, self.sidebar_scroll, content);
-        // Spec: view-options R1. A middle-button drag pans the list, the
-        // content following the pointer.
-        if let Some(delta) = crate::middle::pan(ui, area) {
-            self.sidebar_scroll =
-                (self.sidebar_scroll - delta.y).clamp(0.0, (content - area.height()).max(0.0));
-        }
-        let first = (self.sidebar_scroll / BROWSER_ROW).floor() as usize;
-        let mut sidebar_ui = ui.new_child(egui::UiBuilder::new().max_rect(area));
-        sidebar_ui.set_clip_rect(area);
-        for (index, row) in rows.iter().enumerate().skip(first) {
-            let top = area.top() + index as f32 * BROWSER_ROW - self.sidebar_scroll;
-            if top > area.bottom() {
-                break;
-            }
-            let rect = Rect::from_min_size(pos2(area.left(), top), vec2(area.width(), BROWSER_ROW));
-            match row {
-                SideRow::Heading(name) => {
-                    let mut text = (*name).to_owned();
-                    if *name == "Places" && view.index_state().indexing {
-                        text.push_str(" \u{b7} indexing");
-                    }
-                    painter.text(
-                        pos2(rect.left() + 4.0, rect.center().y),
-                        Align2::LEFT_CENTER,
-                        text,
-                        theme.small_font(),
-                        theme.colors.text_dim.0,
-                    );
-                    let id = Id::new(("browser-heading", *name));
-                    let _ = sidebar_ui.interact(rect, id, Sense::hover());
-                    ui.ctx().accesskit_node_builder(id, |node| {
-                        node.set_role(Role::Heading);
-                        node.set_label((*name).to_owned());
-                        if *name == "Places" && view.index_state().indexing {
-                            node.set_description("Indexing the places' files".to_owned());
-                        }
-                    });
-                }
-                SideRow::Collection(name, colour) => {
-                    let id = Id::new(("browser-collection", *name));
-                    let response = sidebar_ui.interact(rect, id, Sense::hover());
-                    let dot = colour.map_or(theme.colors.accent.0, |i| {
-                        theme.colors.track_palette[i % theme.colors.track_palette.len()].0
-                    });
-                    painter.circle_filled(pos2(rect.left() + 10.0, rect.center().y), 3.5, dot);
-                    painter.text(
-                        pos2(rect.left() + 18.0, rect.center().y),
-                        Align2::LEFT_CENTER,
-                        *name,
-                        theme.small_font(),
-                        theme.colors.pending.0,
-                    );
-                    response.widget_info(|| WidgetInfo::labeled(WidgetType::Other, false, *name));
-                    ui.ctx().accesskit_node_builder(id, |node| {
-                        node.set_role(Role::ListItem);
-                        node.set_description("Collections arrive in milestone M6.".to_owned());
-                    });
-                }
-                SideRow::Label(info) => {
-                    self.label_row(&mut sidebar_ui, shell, theme, rect, info, events);
-                }
-                SideRow::AddFolder => {
-                    let response = sidebar_ui.interact(rect, add_folder_id(), Sense::click());
-                    if response.hovered() {
-                        painter.rect_filled(rect, 0.0, theme.colors.control_hover.0);
-                    }
-                    painter.text(
-                        pos2(rect.left() + 8.0, rect.center().y),
-                        Align2::LEFT_CENTER,
-                        "Add Folder\u{2026}",
-                        theme.small_font(),
-                        theme.colors.text.0,
-                    );
-                    if response.clicked() {
-                        invoke(events, ids::ADD_FOLDER, json!({}));
-                    }
-                    response.widget_info(|| {
-                        WidgetInfo::labeled(WidgetType::Button, true, "Add Folder\u{2026}")
-                    });
-                }
-            }
-        }
-        // Spec: accessibility R7: outlined only with Outline View in Focus.
-        if ui.memory(|m| m.has_focus(sidebar_id())) && crate::focus::outlined(ui.ctx()) {
-            ui.painter().rect_stroke(
-                area.shrink(1.0),
-                0.0,
-                Stroke::new(1.0, theme.colors.focus.0),
-                StrokeKind::Inside,
-            );
-        }
-    }
-
-    fn label_row(
-        &self,
-        ui: &mut Ui,
-        shell: &Shell,
-        theme: &Theme,
-        rect: Rect,
-        info: &LabelInfo,
-        events: &mut Vec<UiEvent>,
-    ) {
-        let view = shell.browser_view();
-        let id = label_id(&info.label);
-        let response = ui.interact(rect, id, Sense::CLICK);
-        let chosen = *view.label() == info.label;
-        let painter = ui.painter_at(rect);
-        if chosen {
-            painter.rect_filled(rect, 0.0, theme.colors.lane_selected.0);
-        } else if response.hovered() {
-            painter.rect_filled(rect, 0.0, theme.colors.control_hover.0);
-        }
-        let colour = if info.available {
-            theme.colors.text.0
-        } else {
-            theme.colors.pending.0
-        };
-        painter.text(
-            pos2(rect.left() + 8.0, rect.center().y),
-            Align2::LEFT_CENTER,
-            &info.name,
-            theme.small_font(),
-            colour,
-        );
-        if response.clicked() {
-            if view.focus() != Part::Sidebar
-                || crate::window::focused_area(ui.ctx(), shell) != Area::Browser
-            {
-                invoke(events, ids::FOCUS_BROWSER, json!({ "part": "sidebar" }));
-            }
-            invoke(events, ids::OPEN_PLACE, json!({ "label": info.label }));
-        }
-        // Spec: racks R46. A chain dropped on a place is saved there; on the
-        // User Library, in its folder for the rack's presets.
-        match (&info.label, &info.path) {
-            (Label::UserLibrary, _) => drop_chains(ui, theme, rect, "", events),
-            (label, Some(path)) if label.is_place() => {
-                drop_chains(ui, theme, rect, path, events);
-            }
-            _ => {}
-        }
-        // Spec: clip files R3. A clip dropped on a place's label is saved in
-        // its folder, and on the Clips label in the User Library's `Clips`.
-        match (&info.label, &info.path) {
-            (Label::Clips, _) => note_clip_target(ui, theme, rect, ClipDropTarget::Clips),
-            (label, Some(path)) if label.is_place() => {
-                note_clip_target(ui, theme, rect, ClipDropTarget::Folder(path.clone()));
-            }
-            _ => {}
-        }
-        if let Label::Folder(path) = &info.label {
-            // C-BROWSER-017: a folder the person added.
-            let menu = |ui: &mut Ui, events: &mut Vec<UiEvent>| {
-                let response = ui.button("Remove from Sidebar");
-                crate::menus::register_item(ui.ctx(), &response);
-                crate::menus::take_focus_first(ui, &response);
-                if response.clicked() {
-                    invoke(events, ids::REMOVE_FOLDER, json!({ "path": path }));
-                    ui.close();
-                }
-            };
-            response.context_menu(|ui| menu(ui, events));
-            // S-CTX-002: the keys open the chosen place's menu while the
-            // sidebar has the keyboard (the accessibility spec, R8).
-            if chosen
-                && ui.memory(|m| m.has_focus(sidebar_id()))
-                && crate::menus::context_menu_keys(ui)
-            {
-                crate::menus::open_keyboard_context_menu(ui.ctx(), id, rect.left_bottom());
-            }
-            crate::menus::keyboard_context_menu(&response, |ui| menu(ui, events));
-        }
-        response.widget_info(|| WidgetInfo::selected(WidgetType::Other, true, chosen, &info.name));
-        ui.ctx().accesskit_node_builder(id, |node| {
-            node.set_role(Role::ListItem);
-            node.set_label(info.name.clone());
-            node.set_selected(chosen);
-            if let Some(path) = &info.path {
-                node.set_description(path.clone());
-            } else if let Some(note) = info.label.pending() {
-                node.set_description(note.to_owned());
-            }
-        });
-    }
-
     fn content(
         &mut self,
         ui: &mut Ui,
@@ -887,32 +817,15 @@ impl BrowserUi {
         events: &mut Vec<UiEvent>,
     ) {
         let view = shell.browser_view();
-        // The column header row (L-BRW-009): Name.
-        let header = layout.header;
         let painter = ui.painter_at(layout.content);
-        painter.rect_filled(header, 0.0, theme.colors.ruler.0);
-        painter.text(
-            pos2(header.left() + 6.0, header.center().y),
-            Align2::LEFT_CENTER,
-            "Name",
-            theme.small_font(),
-            theme.colors.text_dim.0,
-        );
-        painter.line_segment(
-            [header.left_bottom(), header.right_bottom()],
-            Stroke::new(1.0, theme.colors.separator.0),
-        );
-        painter.line_segment(
-            [layout.content.left_top(), layout.content.left_bottom()],
-            Stroke::new(1.0, theme.colors.separator.0),
-        );
-        let header_id = Id::new("browser-column-name");
-        let _ = ui.interact(header, header_id, Sense::hover());
-        ui.ctx().accesskit_node_builder(header_id, |node| {
-            node.set_role(Role::ColumnHeader);
-            node.set_label("Name".to_owned());
-            node.set_bounds(bounds(header));
-        });
+        // The column header row (L-BRW-009): Name and the columns shown
+        // (spec: browser-tags R27).
+        let shown = view.columns().shown.clone();
+        let (name_right, spans) =
+            columns::spans(&shown, layout.header.left(), layout.header.right() - 16.0);
+        self.name_right = name_right;
+        self.spans.clone_from(&spans);
+        self.header(ui, shell, theme, layout, &spans, name_right, events);
 
         let list = layout.list;
         let region = ui.interact(list, list_id(), Sense::click());
@@ -1441,18 +1354,24 @@ impl BrowserUi {
                         let response = ui.button("Delete");
                         crate::menus::register_item(ui.ctx(), &response);
                         if response.clicked() {
-                            invoke(
-                                events,
-                                ids::DELETE_TAG,
-                                match row.kind {
-                                    TagEditorRowKind::Group => {
-                                        json!({ "group": row.name })
-                                    }
-                                    _ => json!({
-                                        "tag": row.full_name.clone().unwrap_or_default()
-                                    }),
-                                },
-                            );
+                            let args = match row.kind {
+                                TagEditorRowKind::Group => json!({ "group": row.name }),
+                                _ => json!({
+                                    "tag": row.full_name.clone().unwrap_or_default()
+                                }),
+                            };
+                            // Spec: browser-tags R8. Saved labels that use
+                            // it are named first.
+                            let labels = shell
+                                .browser_view()
+                                .labels_using_tag(args["tag"].as_str(), args["group"].as_str());
+                            if labels.is_empty() {
+                                invoke(events, ids::DELETE_TAG, args);
+                            } else {
+                                ui.ctx().data_mut(|data| {
+                                    data.insert_temp(ask_delete_id(), AskDelete { args, labels });
+                                });
+                            }
                             ui.close();
                         }
                     };
@@ -1827,6 +1746,41 @@ impl BrowserUi {
         );
     }
 
+    /// Deleting a tag or a group that saved labels use asks first, naming
+    /// them (spec: browser-tags R8); the labels then leave it out.
+    fn ask_delete_dialog(ctx: &egui::Context, events: &mut Vec<UiEvent>) {
+        let Some(ask) = ctx.data(|data| data.get_temp::<AskDelete>(ask_delete_id())) else {
+            return;
+        };
+        let mut answer = None;
+        egui::Window::new("Delete Tag")
+            .id(Id::new("browser-ask-delete-window"))
+            .collapsible(false)
+            .resizable(false)
+            .anchor(Align2::CENTER_CENTER, vec2(0.0, 0.0))
+            .show(ctx, |ui| {
+                ui.label(format!(
+                    "The saved labels {} use it. They will leave it out.",
+                    ask.labels.join(", ")
+                ));
+                ui.horizontal(|ui| {
+                    for (label, delete) in [("Delete", true), ("Cancel", false)] {
+                        if ui.button(label).clicked() {
+                            answer = Some(delete);
+                        }
+                    }
+                });
+            });
+        if let Some(delete) = answer {
+            ctx.data_mut(|data| data.remove::<AskDelete>(ask_delete_id()));
+            if delete {
+                let mut args = ask.args;
+                args["confirm"] = json!(true);
+                invoke(events, ids::DELETE_TAG, args);
+            }
+        }
+    }
+
     /// Collect Files on Export's Ask (file management R8): Copy, Don't Copy
     /// and Cancel for a clip being saved.
     fn ask_copy_dialog(&mut self, ctx: &egui::Context, theme: &Theme, events: &mut Vec<UiEvent>) {
@@ -1987,13 +1941,28 @@ impl BrowserUi {
         }
         // Spec: clip files R4. A saved clip's name is open for editing.
         let renaming = view.renaming() == Some(Path::new(&item.path));
+        // Spec: browser-tags R27. Names show their extensions unless Show
+        // File Extensions is off.
+        let shown_name = if view.columns().file_extensions
+            || matches!(
+                item.kind,
+                ItemKind::Folder | ItemKind::Plugin | ItemKind::Device
+            ) {
+            item.name.clone()
+        } else {
+            Path::new(&item.name).file_stem().map_or_else(
+                || item.name.clone(),
+                |stem| stem.to_string_lossy().into_owned(),
+            )
+        };
+        let name_area = Rect::from_min_max(rect.min, pos2(self.name_right, rect.bottom()));
         let name = if renaming {
             self.rename_field(ui, theme, rect, name_left, item, events)
         } else {
-            painter.text(
+            painter.with_clip_rect(name_area).text(
                 pos2(name_left, rect.center().y),
                 Align2::LEFT_CENTER,
-                &item.name,
+                &shown_name,
                 theme.small_font(),
                 text_colour,
             )
@@ -2001,15 +1970,37 @@ impl BrowserUi {
         if let Some(folder) = &item.folder {
             // Search results name their folder at the right, in the room
             // the name leaves, showing the folder's end when it's long.
-            let room = Rect::from_min_max(pos2(name.right() + 8.0, rect.top()), rect.max);
+            let room = Rect::from_min_max(
+                pos2(name.right() + 8.0, rect.top()),
+                pos2(self.name_right, rect.bottom()),
+            );
             if room.width() > 12.0 {
                 painter.with_clip_rect(room).text(
-                    pos2(rect.right() - 4.0, rect.center().y),
+                    pos2(self.name_right - 4.0, rect.center().y),
                     Align2::RIGHT_CENTER,
                     folder,
                     theme.small_font(),
                     theme.colors.pending.0,
                 );
+            }
+        }
+        // The other columns (spec: browser-tags R27).
+        if let Some(details) = &item.details {
+            for span in &self.spans {
+                if let Some(text) = columns::cell_text(span.column, details) {
+                    painter
+                        .with_clip_rect(Rect::from_min_max(
+                            pos2(span.left, rect.top()),
+                            pos2(span.right, rect.bottom()),
+                        ))
+                        .text(
+                            pos2(span.left + 6.0, rect.center().y),
+                            Align2::LEFT_CENTER,
+                            text,
+                            theme.small_font(),
+                            theme.colors.text_dim.0,
+                        );
+                }
             }
         }
 
@@ -2503,7 +2494,12 @@ impl BrowserUi {
     fn sidebar_keys(shell: &Shell, up: bool, down: bool, right: bool, events: &mut Vec<UiEvent>) {
         let view = shell.browser_view();
         if up || down {
-            let labels: Vec<Label> = view.labels().into_iter().map(|l| l.label).collect();
+            let labels: Vec<Label> = view
+                .labels()
+                .into_iter()
+                .filter(|l| l.shown)
+                .map(|l| l.label)
+                .collect();
             let at = labels.iter().position(|l| l == view.label()).unwrap_or(0);
             let next = if up {
                 at.checked_sub(1)
@@ -2940,7 +2936,10 @@ enum Glyph {
     Left,
     Right,
     Down,
+    Up,
     Filter,
+    Bookmark,
+    Cross,
     Menu,
     Wave,
     Set,
@@ -2968,6 +2967,29 @@ fn glyph(painter: &egui::Painter, rect: Rect, glyph: Glyph, colour: Color32) {
             c + vec2(s, -s * 0.7),
             c + vec2(0.0, s),
         ]),
+        Glyph::Up => triangle([
+            c + vec2(-s, s * 0.7),
+            c + vec2(s, s * 0.7),
+            c + vec2(0.0, -s),
+        ]),
+        Glyph::Bookmark => {
+            let w = s * 0.8;
+            painter.add(Shape::convex_polygon(
+                vec![
+                    c + vec2(-w, -s),
+                    c + vec2(w, -s),
+                    c + vec2(w, s),
+                    c + vec2(0.0, s * 0.4),
+                    c + vec2(-w, s),
+                ],
+                colour,
+                Stroke::NONE,
+            ));
+        }
+        Glyph::Cross => {
+            painter.line_segment([c + vec2(-s, -s), c + vec2(s, s)], Stroke::new(1.5, colour));
+            painter.line_segment([c + vec2(-s, s), c + vec2(s, -s)], Stroke::new(1.5, colour));
+        }
         Glyph::Menu => triangle([
             c + vec2(-s, -s * 0.5),
             c + vec2(s, -s * 0.5),

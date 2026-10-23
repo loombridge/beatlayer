@@ -86,7 +86,7 @@ pub fn join(notes: &[Note]) -> Note {
             let offset = note.start - first.start;
             let source = note.envelope(expression);
             if !source.is_empty() {
-                points.retain(|kept| kept.at < offset || kept.at >= offset + note.length);
+                points.retain(|kept| kept.at < offset || kept.at > offset + note.length);
             }
             points.extend(source.iter().map(|point| Breakpoint {
                 at: offset + point.at,
@@ -290,6 +290,26 @@ mod tests {
             [point(0, 1), point(100, 3)],
             "where they overlap the later note's points win"
         );
+    }
+
+    // Spec: mpe R1, R4. Two notes whose envelopes both end on one tick join
+    // with one breakpoint there, the later note's.
+    #[test]
+    fn a_join_keeps_one_breakpoint_where_two_ends_meet() {
+        let a = Note {
+            pressure: vec![point(0, 1), point(1000, 5)],
+            ..note(0, 1000)
+        };
+        let b = Note {
+            pressure: vec![point(0, 2), point(800, 9)],
+            ..note(200, 800)
+        };
+        let joined = join(&[a, b]);
+        assert_eq!(
+            joined.pressure,
+            [point(0, 1), point(200, 2), point(1000, 9)]
+        );
+        assert!(joined.expressions_fit());
     }
 
     // Spec: note-editing R43, R44, R45.

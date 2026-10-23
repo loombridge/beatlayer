@@ -199,8 +199,11 @@ fn a_session_recording_keeps_the_controllers_with_its_notes_in_one_undo_step() {
         panic!("a MIDI clip");
     };
     let pressure = &data.notes.iter().next().unwrap().pressure;
-    assert_eq!(pressure.len(), 1);
-    assert_eq!(pressure[0].value, 90.0);
+    // From none at the note's start, unless the pressure came on its tick.
+    assert_eq!(pressure[0].at, bl_core::time::Ticks(0));
+    assert_eq!(pressure.last().unwrap().value, 90.0);
+    let (_, rest) = pressure.split_last().unwrap();
+    assert!(rest.iter().all(|p| p.value == 0.0), "{pressure:?}");
     let held = values(&clip, cc(1));
     assert_eq!(held.first(), Some(&0.0), "rest before the first message");
     assert_eq!(held.last(), Some(&99.0), "the channel is dropped");

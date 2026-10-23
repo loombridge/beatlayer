@@ -215,6 +215,11 @@ fn expressions(note: &Note) -> [(NoteExpression, &[Breakpoint], f64); 3] {
     ]
 }
 
+/// The room [`play_expressions`] leaves in its buffer for the note-ons and
+/// note-offs of the block, which matter more than any expression: one of
+/// each for every note a clip player holds.
+const NOTE_ROOM: usize = 512;
+
 /// Puts the expressions of `note` that fall on the frames `from..to` into
 /// `out`, while the note sounds, each as the note's own expression with its
 /// key and note ID (the MPE spec, R5 and R6): each envelope's starting value
@@ -247,7 +252,7 @@ pub fn play_expressions(
             continue;
         };
         let mut push = |frame: i64, value: f64| {
-            if out.len() < out.capacity() {
+            if out.len() + NOTE_ROOM < out.capacity() {
                 out.push(NoteEvent {
                     offset: (frame - from) as u32,
                     kind: NoteKind::Expression {
@@ -274,7 +279,10 @@ pub fn play_expressions(
         }
         // Each later breakpoint sends its value on its own frame unless the
         // value is already there: where the segment before it ended.
-        for i in 1..points.len() {
+        // The breakpoints before the block are skipped by a binary search,
+        // so the work is bounded by the breakpoints in the block (R8).
+        let first = points.partition_point(|p| frame_of(p.at) < low).max(1);
+        for i in first..points.len() {
             let (a, b) = (points[i - 1], points[i]);
             let at = frame_of(b.at);
             if at >= high {
@@ -295,7 +303,10 @@ pub fn play_expressions(
         }
         // Along each sloped segment, a value on every frame of the stream
         // grid, unless it is the one before.
-        for pair in points.windows(2) {
+        let first = points
+            .partition_point(|p| frame_of(p.at) <= low)
+            .saturating_sub(1);
+        for pair in points[first..].windows(2) {
             let (a, b) = (pair[0], pair[1]);
             let start = frame_of(a.at);
             if start >= high {

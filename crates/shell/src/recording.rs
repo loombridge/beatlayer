@@ -1768,6 +1768,8 @@ mod tests {
                 .map(|p| (p.at, p.value))
                 .collect::<Vec<_>>(),
             vec![
+                (Ticks(0), 0.0),
+                (tick(30_000) - tick(24_000) - Ticks(1), 0.0),
                 (tick(30_000) - tick(24_000), 127.0),
                 (tick(36_000) - tick(24_000) - Ticks(1), 127.0),
                 (tick(36_000) - tick(24_000), 112.0)

@@ -23,6 +23,9 @@ const ROLES: usize = 140;
 /// A member channel's per-note bend range before a pitch bend sensitivity
 /// changes it, in semitones (R10).
 const BEND_RANGE: f32 = 48.0;
+/// The MPE reader's notes take IDs from here up to `0x8000_0000`: above the
+/// clip player's, which count from 1, and below the ones MIDI effects make.
+const FIRST_ID: u32 = 0x4000_0000;
 
 /// What one message of an MPE port is, on a track's input.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -186,11 +189,14 @@ impl Port {
         let member = &mut self.members[usize::from(channel)];
         match status {
             0x90 | 0x80 if message.is_note_on() => {
+                // A note whose note-off never came (the switch turned off or
+                // the cable pulled while it was held) gives way to a new one,
+                // so the port never stops playing.
                 if self.held.len() == self.held.capacity() {
-                    return;
+                    self.held.remove(0);
                 }
                 let id = *next_id;
-                *next_id = next_id.wrapping_add(1) | 0x8000_0000;
+                *next_id = FIRST_ID | (next_id.wrapping_add(1) & (FIRST_ID - 1));
                 self.held.push(Held {
                     id,
                     channel,
@@ -319,7 +325,7 @@ impl MpeReader {
         Self {
             ports: (0..PORTS).map(|_| Port::new()).collect(),
             used: 0,
-            next_id: 0x8000_0000,
+            next_id: FIRST_ID,
             roles: Vec::with_capacity(ROLES),
         }
     }
@@ -382,6 +388,21 @@ mod tests {
         // The master channel's messages are channel messages.
         assert_eq!(roles(&mut reader, &[0xB0, 1, 5]), [MpeRole::Plain]);
         assert_eq!(roles(&mut reader, &[0xE0, 0, 0x40]), [MpeRole::Plain]);
+    }
+
+    // Spec: mpe R11. Notes whose note-offs never came don't stop the port:
+    // the oldest gives way, and the new notes' IDs stay apart from those of
+    // the clip player and MIDI effects.
+    #[test]
+    fn notes_left_held_give_way_to_new_ones() {
+        let mut reader = MpeReader::new();
+        for n in 0..=HELD {
+            let on = roles(&mut reader, &[0x91 + (n % 15) as u8, (n % 128) as u8, 100]);
+            let [MpeRole::Note { id }] = on[..] else {
+                panic!("note {n}: {on:?}");
+            };
+            assert!((0x4000_0000..0x8000_0000).contains(&id), "{id:#x}");
+        }
     }
 
     // Spec: mpe R10. An upper zone's configuration message takes channels

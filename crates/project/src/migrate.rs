@@ -129,8 +129,19 @@ fn steps_of_pressure(note: &mut Value) {
         point.insert("value".to_owned(), Value::from(value));
         Value::Object(point)
     };
-    let mut steps: Vec<Value> = Vec::with_capacity(points.len() * 2);
+    let mut steps: Vec<Value> = Vec::with_capacity(points.len() * 2 + 1);
     let mut before: Option<(i64, f64)> = None;
+    // A note played no pressure before its first point; an envelope holds
+    // its first value back to the note's start, so it starts from none.
+    if points
+        .first()
+        .and_then(|point| point.get("at"))
+        .and_then(Value::as_i64)
+        .is_some_and(|at| at > 0)
+    {
+        steps.push(breakpoint(0, 0.0));
+        before = Some((0, 0.0));
+    }
     for point in points.iter() {
         let (Some(at), Some(value)) = (
             point.get("at").and_then(Value::as_i64),
@@ -617,6 +628,7 @@ mod tests {
                     { "at": 501, "value": 30 },
                 ] },
                 { "key": 62 },
+                { "key": 64, "pressure": [{ "at": 100, "value": 64 }] },
             ] } } }] }]
         });
         pressure_to_breakpoints(&mut value);
@@ -632,5 +644,14 @@ mod tests {
             "a point a tick after another needs no step before it"
         );
         assert!(notes[1].get("pressure").is_none());
+        assert_eq!(
+            notes[2]["pressure"],
+            json!([
+                { "at": 0, "value": 0.0 },
+                { "at": 99, "value": 0.0 },
+                { "at": 100, "value": 64.0 },
+            ]),
+            "no pressure before the first point, as it played"
+        );
     }
 }

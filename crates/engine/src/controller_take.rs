@@ -194,7 +194,7 @@ pub fn give_pressure(notes: &mut [Note], moves: &[(Ticks, MidiMessage)]) {
             .map(|&(_, at, value)| (at, value))
             .collect();
         if !moves.is_empty() {
-            note.pressure = step_envelope(None, &moves, note.length);
+            note.pressure = step_envelope(Some(0.0), &moves, note.length);
         }
     }
 }
@@ -231,8 +231,11 @@ pub fn give_expressions(notes: &mut [Note], ids: &[Option<u32>], heard: &[Heard]
                 .map(|h| (h.at - note.start, h.value.clamp(low, high)))
                 .collect();
             moves.sort_by_key(|(at, _)| *at);
+            // A bend or pressure that first came after the note-on stepped
+            // from none; where Slide rests isn't known.
+            let rest = (expression != Expression::Slide).then_some(0.0);
             if !moves.is_empty() {
-                *note.envelope_mut(expression) = step_envelope(None, &moves, note.length);
+                *note.envelope_mut(expression) = step_envelope(rest, &moves, note.length);
             }
         }
     }
@@ -358,11 +361,20 @@ mod tests {
         let heard: Vec<_> = notes[0].pressure.iter().map(|p| (p.at, p.value)).collect();
         assert_eq!(
             heard,
-            [(Ticks(10), 112.0), (Ticks(49), 112.0), (Ticks(50), 97.0)],
-            "the one at 100 is after the note-off"
+            [
+                (Ticks(0), 0.0),
+                (Ticks(9), 0.0),
+                (Ticks(10), 112.0),
+                (Ticks(49), 112.0),
+                (Ticks(50), 97.0)
+            ],
+            "none before the first; the one at 100 is after the note-off"
         );
         let other: Vec<_> = notes[1].pressure.iter().map(|p| (p.at, p.value)).collect();
-        assert_eq!(other, [(Ticks(60), 50.0)]);
+        assert_eq!(
+            other,
+            [(Ticks(0), 0.0), (Ticks(59), 0.0), (Ticks(60), 50.0)]
+        );
         assert!(notes[0].expressions_fit());
     }
 

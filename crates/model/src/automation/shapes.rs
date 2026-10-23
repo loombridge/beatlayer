@@ -783,9 +783,9 @@ mod tests {
     #[test]
     fn a_recorded_sweep_of_hundreds_of_breakpoints_needs_a_few_dozen() {
         let mut sweep = Envelope::default();
-        for k in 0..400 {
+        for k in 0..400_i32 {
             let along = f64::from(k) / 399.0;
-            sweep.set(Ticks(k * 1_000), 0.5 + 0.4 * (along * 5.0).sin());
+            sweep.set(Ticks(i64::from(k) * 1_000), 0.5 + 0.4 * (along * 5.0).sin());
         }
         let original = sweep.clone();
         sweep.simplify_span(Ticks(0), Ticks(400_000), &RANGE);

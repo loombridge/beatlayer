@@ -265,6 +265,7 @@ impl View<'_> {
             },
             "delay": track.delay(),
             "keep_monitoring_latency": track.keep_monitoring_latency(),
+            "tuning_bypass": track.tuning_bypass(),
             "clips": track.clips().len(),
             "devices": track.devices().len(),
             "frozen": track.frozen(),
@@ -655,6 +656,7 @@ fn overview(ctx: &Ctx<'_>, view: &View<'_>) -> Value {
         },
         "time_signature_at_start": settings.time_signatures.signature_at(Ticks::ZERO).to_string(),
         "scale": scale_value(settings.scale),
+        "tuning": settings.tuning.as_ref().map(bl_model::Tuning::readout),
         "counts": {
             "tracks": document.track_count(),
             "clips": document.clip_count(),

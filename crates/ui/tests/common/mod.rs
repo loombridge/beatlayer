@@ -47,6 +47,8 @@ pub struct Node {
     /// Whether it's toggled, for switches (a switch's on state).
     pub toggled: Option<bool>,
     pub numeric: Option<f64>,
+    /// The node a screen reader reads as the focus inside this one.
+    pub active_descendant: Option<accesskit::NodeId>,
     pub children: Vec<accesskit::NodeId>,
     pub bounds: Option<accesskit::Rect>,
 }
@@ -357,6 +359,9 @@ impl Harness {
                 UiEvent::FocusArea(area) => self.shell.set_focused_area_in(self.kind(), *area),
                 UiEvent::FocusTrack(track) => self.shell.set_focused_track(*track),
                 UiEvent::FocusValue(focused) => self.shell.set_value_focused(*focused),
+                UiEvent::FocusControl(focused) => {
+                    self.shell.set_envelope_control_focused(*focused);
+                }
                 UiEvent::StatusHint(hint) => self.shell.set_hint(hint.clone()),
                 UiEvent::SearchRun(index) => self.shell.search_run_row(*index),
                 UiEvent::ArrangementViewport { width, height } => {
@@ -502,6 +507,9 @@ impl Harness {
                 UiEvent::FocusArea(area) => self.shell.set_focused_area_in(window, *area),
                 UiEvent::FocusTrack(track) => self.shell.set_focused_track(*track),
                 UiEvent::FocusValue(focused) => self.shell.set_value_focused(*focused),
+                UiEvent::FocusControl(focused) => {
+                    self.shell.set_envelope_control_focused(*focused);
+                }
                 UiEvent::StatusHint(hint) => self.shell.set_hint(hint.clone()),
                 UiEvent::SearchRun(index) => self.shell.search_run_row(*index),
                 UiEvent::ArrangementViewport { width, height } => {
@@ -599,6 +607,7 @@ impl Harness {
                     .toggled()
                     .map(|toggled| toggled == accesskit::Toggled::True),
                 numeric: node.numeric_value(),
+                active_descendant: node.active_descendant(),
                 bounds: node.bounds(),
                 children: node.children().to_vec(),
             })

@@ -22,7 +22,9 @@
 
 use core::f64::consts::TAU;
 
-use bl_engine::{DeviceType, NodeConfig, NodeEvent, NoteExpression, NoteKind, Registry};
+use bl_engine::{
+    DeviceType, KeyPitches, NodeConfig, NodeData, NodeEvent, NoteExpression, NoteKind, Registry,
+};
 use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Widget};
 use bl_model::param::gain_to_db;
 use bl_model::{DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
@@ -960,6 +962,11 @@ impl NativeDevice for PolySynth {
             if self.events.len() >= self.events.capacity() {
                 break;
             }
+            // Spec: polysynth R24. A key past a tuning's range plays nothing;
+            // a note it already plays still gets its release.
+            if matches!(note.kind, NoteKind::On) && self.synth.keys.pitch(note.key).is_none() {
+                continue;
+            }
             let which = Note {
                 port: Some(0),
                 channel: Some(note.channel),
@@ -1008,7 +1015,22 @@ impl NativeDevice for PolySynth {
                         // expression, in semitones over the instrument's
                         // PB Range; the kit's voice manager keeps it on
                         // the one note the event names.
-                        NoteExpression::Bend => (Expression::Tuning, value * self.synth.pb_range),
+                        // Spec: polysynth R25. Under a tuning the bend
+                        // moves the note by steps of the tuning: the kit
+                        // adds it to the pitch the voice started at, which
+                        // is the key's tuned pitch.
+                        NoteExpression::Bend => {
+                            let steps = value * self.synth.pb_range;
+                            let keys = &self.synth.keys;
+                            let moved = if keys.is_tuned() {
+                                keys.bent(note.key, f64::from(steps))
+                                    .zip(keys.pitch(note.key))
+                                    .map_or(steps, |(bent, tuned)| (bent - tuned) as f32)
+                            } else {
+                                steps
+                            };
+                            (Expression::Tuning, moved)
+                        }
                         NoteExpression::Pressure => (Expression::Pressure, value),
                         NoteExpression::Slide => (Expression::Brightness, value),
                     };
@@ -1048,6 +1070,14 @@ impl NativeDevice for PolySynth {
         // doesn't carry one over to the moment it comes back on.
         self.voices.reset();
         self.synth.silence();
+    }
+
+    /// The pitch of every key under the set's tuning (the tunings spec,
+    /// R12, R18). Notes already sounding keep the pitch they started at.
+    fn receive_data(&mut self, data: NodeData) {
+        if let Some(keys) = data.downcast_ref::<KeyPitches>() {
+            self.synth.keys = *keys;
+        }
     }
 }
 
@@ -1106,6 +1136,12 @@ struct Synth {
     filter_type: usize,
     /// The most notes at once.
     polyphony: usize,
+    /// The pitch of every key under the set's tuning (the tunings spec,
+    /// R12), and how far above its key's twelve-step pitch each sounding
+    /// voice started, in semitones: set when the voice starts, so a tuning
+    /// that changes leaves sounding notes where they are (R18).
+    keys: KeyPitches,
+    tuned_by: [f32; MAX_VOICES],
     /// The LFO's settings, the routes, and the per-note bend settings of
     /// the stretch.
     lfos: Lfos,
@@ -1224,6 +1260,8 @@ impl Synth {
             wave2: 3,
             filter_type: 0,
             polyphony: 16,
+            keys: KeyPitches::twelve(),
+            tuned_by: [0.0; MAX_VOICES],
             lfos: Lfos {
                 shape: LFO_SINE,
                 mode: MODE_SYNC,
@@ -1674,6 +1712,10 @@ impl VoiceHandler for Synth {
                     Start::Legato => OscOnset::Legato,
                     Start::Join { .. } => OscOnset::Join,
                 };
+                self.tuned_by[voice] = self
+                    .keys
+                    .offset(voices.info(voice).key)
+                    .map_or(0.0, |offset| offset as f32);
                 self.osc1.start(voice, key, onset);
                 self.osc2.start(voice, key, onset);
                 // Retrigger starts the LFO's cycle over, and so does the
@@ -1709,6 +1751,7 @@ impl VoiceHandler for Synth {
                 self.env2.release(voice);
             }
             VoiceEventKind::End { .. } => {
+                self.tuned_by[voice] = 0.0;
                 self.env1.reset(voice);
                 self.env2.reset(voice);
             }
@@ -1750,7 +1793,9 @@ impl VoiceHandler for Synth {
                 let plain_hp = pitch_of(self.hp_hz[from + frame], REFERENCE);
                 let key = self.key[from + frame];
                 for voice in 0..span {
-                    let note = pitch[voice] + step[voice] * frame as f32 - MIDDLE_C;
+                    // Spec: polysynth R24. Key follows the tuned pitch.
+                    let note =
+                        pitch[voice] + self.tuned_by[voice] + step[voice] * frame as f32 - MIDDLE_C;
                     let lp = if freq_moved {
                         let base =
                             self.position_of(DEST_LP_FREQ, f64::from(self.freq[from + frame]));
@@ -1776,7 +1821,10 @@ impl VoiceHandler for Synth {
         // 3. Pitch Mod, in semitones, and Shape Mod, in frames; both
         //    oscillators take Pitch and Oscillator 1 the Shape. Oscillator
         //    2's Detune is part of its own pitch.
-        let pitch_moved = self.routes.has(DEST_PITCH);
+        // Spec: polysynth R24. A tuned voice's offset from its key's pitch
+        // rides on Pitch Mod, so the oscillators play the tuned pitch.
+        let tuned = self.tuned_by.iter().any(|&by| by != 0.0);
+        let pitch_moved = self.routes.has(DEST_PITCH) || tuned;
         let shape_moved = self.routes.has(DEST_OSC1_SHAPE);
         let detune_moved = self.routes.has(DEST_OSC2_DETUNE);
         if pitch_moved {
@@ -1784,7 +1832,8 @@ impl VoiceHandler for Synth {
             for frame in 0..count {
                 for voice in 0..span {
                     self.pitch_mod[frame * stride + voice] =
-                        (self.pitch_semitones(voice, frame, voices)) as f32;
+                        (self.pitch_semitones(voice, frame, voices)
+                            + f64::from(self.tuned_by[voice])) as f32;
                 }
             }
         }
@@ -1793,7 +1842,8 @@ impl VoiceHandler for Synth {
             for frame in 0..count {
                 let base_value = f64::from(self.detune[from + frame]);
                 for voice in 0..span {
-                    let semitones = self.pitch_semitones(voice, frame, voices);
+                    let semitones = self.pitch_semitones(voice, frame, voices)
+                        + f64::from(self.tuned_by[voice]);
                     let base = self.position_of(DEST_OSC2_DETUNE, base_value);
                     let position = self.modulated(base, DEST_OSC2_DETUNE, voice, frame, voices);
                     let moved = self.value_of(DEST_OSC2_DETUNE, position);

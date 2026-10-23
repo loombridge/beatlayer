@@ -9,6 +9,7 @@
 //! | [`COUNTER`] | counts the frames it processes and publishes the count | none |
 //! | [`TRANSPORT`] | adds 1 to every sample while the song plays | none |
 //! | [`GROOVE_AMOUNT`] | adds the Global Amount of groove its block carries (WP-6.19) | none |
+//! | [`SCALE`] | adds, each frame, a number naming its track's current scale: 0 while Scale Mode is off, else 1 + the root + 12 times the scale's place in the list (WP-6.8) | none |
 //! | [`POSITION`] | adds each frame's song position while the song plays, and −1 while it's stopped | none |
 //! | [`DATA`] | adds the `f32` it was last sent as [`NodeData`] | none |
 //! | [`GAIN`] | multiplies every sample by its gain (WP-2.4) | the gain, 1 by default |
@@ -45,6 +46,8 @@ pub const COUNTER: &str = "test.counter";
 pub const TRANSPORT: &str = "test.transport";
 /// The Global Amount probe's device type (WP-6.19).
 pub const GROOVE_AMOUNT: &str = "test.groove_amount";
+/// The scale probe's device type (WP-6.8).
+pub const SCALE: &str = "test.scale";
 /// The position probe's device type.
 pub const POSITION: &str = "test.position";
 /// The data probe's device type.
@@ -226,6 +229,12 @@ pub fn registry(probe: &Arc<Probe>) -> Registry {
     let p = Arc::clone(probe);
     registry.add_native(GROOVE_AMOUNT, move |_, _| {
         Box::new(GrooveAmountProbe {
+            _tracked: Tracked::new(&p),
+        })
+    });
+    let p = Arc::clone(probe);
+    registry.add_native(SCALE, move |_, _| {
+        Box::new(ScaleProbe {
             _tracked: Tracked::new(&p),
         })
     });
@@ -454,6 +463,36 @@ impl Node for GrooveAmountProbe {
         let (frames, amount) = (block.frames(), block.groove_amount());
         add(block, 0..frames, amount);
     }
+}
+
+/// Adds, for each frame, the number [`scale_code`] gives the scale its block
+/// carries there.
+#[derive(Debug)]
+struct ScaleProbe {
+    _tracked: Tracked,
+}
+
+impl Node for ScaleProbe {
+    fn process(&mut self, block: &mut Block<'_>) {
+        for frame in 0..block.frames() {
+            let code = scale_code(&block.scale_at(frame));
+            add(block, frame..frame + 1, code);
+        }
+    }
+}
+
+/// The number the scale probe adds for `scale`: 0 while its Scale Mode is
+/// off, otherwise 1 plus its root plus 12 times its place in the scale list.
+#[must_use]
+pub fn scale_code(scale: &bl_model::Scale) -> f32 {
+    if !scale.enabled {
+        return 0.0;
+    }
+    let place = bl_model::ScaleName::ALL
+        .iter()
+        .position(|name| *name == scale.name)
+        .unwrap_or(0);
+    (1 + usize::from(scale.root) + 12 * place) as f32
 }
 
 /// Adds each frame's song position while the song plays, and −1 while it's

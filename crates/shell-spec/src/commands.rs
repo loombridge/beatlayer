@@ -171,6 +171,9 @@ pub const SETTINGS_SET_COLOR_HUE: &str = "settings.set_color_hue";
 /// `settings.set_create_fades_on_clip_edges`: switch Create Fades on Clip
 /// Edges.
 pub const SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES: &str = "settings.set_create_fades_on_clip_edges";
+/// `settings.set_retune_on_tuning_load`: switch Retune Set On Loading Tuning
+/// Systems (WP-6.9; the tunings spec, R15).
+pub const SETTINGS_SET_RETUNE_ON_TUNING_LOAD: &str = "settings.set_retune_on_tuning_load";
 /// `settings.set_temporary_folder`: choose the Temporary Folder on the File &
 /// Folder page (WP-4.20).
 pub const SETTINGS_SET_TEMPORARY_FOLDER: &str = "settings.set_temporary_folder";
@@ -305,6 +308,7 @@ pub const IDS: &[&str] = &[
     SETTINGS_SET_COLOR_INTENSITY,
     SETTINGS_SET_COLOR_HUE,
     SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES,
+    SETTINGS_SET_RETUNE_ON_TUNING_LOAD,
     SETTINGS_SET_TEMPORARY_FOLDER,
     SETTINGS_SET_SAMPLE_EDITOR,
     SETTINGS_SET_WARP_RECORDED_AUDIO,
@@ -1819,6 +1823,25 @@ fn specs() -> Vec<CommandSpec> {
              their fades, which `clip.set_fades` changes. The setting is kept for the next \
              start, and isn't part of the set or an undo step. The result's `on` is the setting \
              afterwards.",
+        )
+        .permission(Permission::Edit)
+        .context(Settings)
+        .args::<SwitchArgs>()
+        .result::<SwitchResult>(),
+        // Spec: tunings R15 (M-OPT-022): an edit-class preference.
+        CommandSpec::new(
+            SETTINGS_SET_RETUNE_ON_TUNING_LOAD,
+            "Retune Set On Loading Tuning Systems",
+        )
+        .description(
+            "Switches Retune Set On Loading Tuning Systems, the Options menu's item; it's off \
+             in a new install. With it off, loading, changing or removing a tuning leaves every \
+             note on its key. With it on, `tuning.load` and `tuning.remove` called without \
+             `retune` move every note of the MIDI clips on tracks that play the tuning to the \
+             key whose new pitch is nearest the pitch it had, and a person who loads or removes \
+             a tuning is asked first (Retune, or Cancel to change nothing). The setting is kept \
+             for the next start, and isn't part of the set or an undo step. The result's `on` \
+             is the setting afterwards.",
         )
         .permission(Permission::Edit)
         .context(Settings)

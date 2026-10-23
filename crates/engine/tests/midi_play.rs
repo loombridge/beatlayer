@@ -255,6 +255,50 @@ fn a_track_that_doesnt_monitor_sends_its_devices_nothing() {
     }
 }
 
+// Spec: step-recording R2, R3
+#[test]
+fn a_preview_plays_on_its_own_track_with_the_song_stopped_and_is_never_input() {
+    for size in SIZES {
+        let mut play = Play::new(size);
+        let previewed = play.instrument();
+        play.rig.apply(Command::SetMonitor {
+            track: previewed,
+            monitor: Monitor::Off,
+        });
+        let other = play.instrument();
+        play.rig.apply(Command::SetMonitor {
+            track: other,
+            monitor: Monitor::Off,
+        });
+        // The song stays stopped: one block locks the block clock.
+        play.block();
+        let preview = MidiSource::Preview(previewed.0);
+        play.send(preview, 8192 + 7, MidiMessage::note_on(0, 64, 100));
+        play.send(preview, 8192 + 2000, MidiMessage::note_off(0, 64));
+        play.run_to(8192 + 5000);
+
+        // The track doesn't monitor and the transport is stopped, yet its
+        // device heard the note and, on release, its note-off; the other
+        // track's device heard nothing. (A stopped song's frames are offsets
+        // in the block, so only the notes are compared.)
+        let heard: Vec<_> = play
+            .heard()
+            .into_iter()
+            .map(|(_, kind, key)| (kind, key))
+            .collect();
+        assert_eq!(
+            heard,
+            [(NoteKind::On, 64), (NoteKind::Off, 64)],
+            "block size {size}"
+        );
+        // It reached no track's input: recording and Capture MIDI take
+        // nothing from it, and the other track played nothing.
+        for id in [previewed, other] {
+            assert!(play.rig.processor.midi_input(id).unwrap().events.is_empty());
+        }
+    }
+}
+
 /// Holds a note on `track` and returns the frame the next block starts at
 /// once the edit `change` is applied, then the notes heard after it.
 fn held_then(

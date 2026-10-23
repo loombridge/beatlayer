@@ -8,7 +8,7 @@ use bl_engine::{DeviceType, NoteBuffer, NoteEvent, NoteKind, Registry};
 use bl_model::{DeviceDescription, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
 
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
-use crate::midi_fx::{Key, Router, value};
+use crate::midi_fx::{Key, Router, scale_in_use, value};
 
 /// The Pitch device type's id.
 pub const LIFT: &str = "beatlayer.lift";
@@ -23,8 +23,12 @@ pub const LOWEST: ParamId = ParamId(2);
 pub const RANGE: ParamId = ParamId(3);
 /// What happens to a note outside the window.
 pub const MODE: ParamId = ParamId(4);
-/// Reads Pitch and Step Width in scale degrees (Phase 6).
+/// Reads Pitch and Step Width in degrees of the device's current scale
+/// (the transposing spec, R12); the title bar draws it.
 pub const USE_SCALE: ParamId = ParamId(5);
+
+/// The most degrees Pitch and Step Width count with Use Current Scale on.
+const MOST_DEGREES: i32 = 30;
 
 /// The Mode choices.
 pub const MODES: [&str; 3] = ["Block", "Fold", "Limit"];
@@ -47,9 +51,11 @@ pub fn lift_type() -> DeviceType {
                  octaves into the window, Limit moves it to the window's nearest edge.",
             ),
             ParamDescriptor::toggle(USE_SCALE, "Use Current Scale", false).describe(
-                "Reads Pitch in scale degrees. It does nothing until scales arrive in Phase 6.",
+                "Reads Pitch and Step Width in degrees of the current scale, from -30 to 30, \
+                 instead of semitones.",
             ),
-        ]),
+        ])
+        .with_title_switch(USE_SCALE),
     )
 }
 
@@ -60,10 +66,9 @@ pub fn register(registry: &mut Registry) {
     });
 }
 
-/// Where Pitch sends `key`: moved by `pitch` into the window from `lowest`
-/// up to `highest`, or `None` if the note is blocked.
-fn lifted(key: u8, pitch: i32, lowest: i32, highest: i32, mode: usize) -> Option<u8> {
-    let moved = i32::from(key) + pitch;
+/// Where Pitch sends a note whose move gives `moved`, into the window from
+/// `lowest` up to `highest`, or `None` if the note is blocked.
+fn lifted(moved: i32, lowest: i32, highest: i32, mode: usize) -> Option<u8> {
     if (lowest..=highest).contains(&moved) {
         return Some(moved as u8);
     }
@@ -91,14 +96,25 @@ struct Lift {
 
 impl NativeDevice for Lift {
     fn process(&mut self, audio: &mut Audio<'_, '_>, params: &ParamBank) {
+        let degrees = value(params, USE_SCALE) >= 0.5;
         let pitch = value(params, PITCH) as i32;
+        let pitch = if degrees {
+            pitch.clamp(-MOST_DEGREES, MOST_DEGREES)
+        } else {
+            pitch
+        };
         let lowest = value(params, LOWEST) as i32;
         let highest = (lowest + value(params, RANGE) as i32).min(127);
         let mode = value(params, MODE) as usize;
         for note in audio.notes() {
             match note.kind {
                 NoteKind::On => {
-                    let made = lifted(note.key, pitch, lowest, highest, mode).map(|key| Key {
+                    // Spec: midi-transpose R12, R13. The move counts degrees
+                    // of the current scale, and the window takes the key it
+                    // gives.
+                    let moved = scale_in_use(audio, params, USE_SCALE, note.offset)
+                        .move_off(note.key, pitch);
+                    let made = lifted(moved, lowest, highest, mode).map(|key| Key {
                         key,
                         ..Key::of(&note)
                     });
@@ -113,7 +129,12 @@ impl NativeDevice for Lift {
                     }
                 }
                 NoteKind::Off | NoteKind::Choke => self.router.end(audio, &note, note.velocity),
-                NoteKind::Expression { .. } => self.router.expression(audio, &note),
+                // Spec: midi-transpose R14
+                NoteKind::Expression { .. } => {
+                    let scale = scale_in_use(audio, params, USE_SCALE, note.offset);
+                    self.router
+                        .expression_by(audio, &note, |from, to, bend| scale.bend(from, to, bend));
+                }
                 // Spec: device-framework R39. A channel message passes through.
                 _ => audio.send(note),
             }

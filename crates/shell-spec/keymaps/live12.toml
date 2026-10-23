@@ -1102,7 +1102,10 @@ trigger = "press"
 milestone = "M2"
 mac = ["Cmd+Delete"]
 win = ["Ctrl+Delete"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "envelope.delete", contexts = ["envelope"] },
+]
 
 [[shortcut]]
 id = "S-ENV-006"
@@ -2009,7 +2012,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+G"]
 win = ["Ctrl+G"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "note.group", contexts = ["note-selection"] },
+]
 
 [[shortcut]]
 id = "S-NOTE-032"
@@ -2020,7 +2026,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+Shift+G"]
 win = ["Ctrl+Shift+G"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "note.ungroup", contexts = ["note-selection"] },
+]
 
 [[shortcut]]
 id = "S-NOTE-033"
@@ -2042,7 +2051,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+Shift+A"]
 win = ["Ctrl+Shift+A"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "clip_view.invert_selection", contexts = ["note-editor"] },
+]
 
 [[shortcut]]
 id = "S-NOTE-035"
@@ -2078,7 +2090,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+Shift+F"]
 win = ["Ctrl+Shift+F"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "clip_view.note_filters", contexts = ["note-editor"], args = { toggle = true } },
+]
 
 [[shortcut]]
 id = "S-GRID-001"
@@ -4204,7 +4219,8 @@ trigger = "press"
 milestone = "M6"
 mac = ["Left", "Right"]
 win = ["Left", "Right"]
-status = "pending"
+status = "widget"
+handler = "the automation lane and the Envelope Editor: Left and Right move the insert marker one grid step along the envelope (`envelope.move_marker`)"
 
 [[shortcut]]
 id = "S-A11Y-019"
@@ -4215,7 +4231,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Enter"]
 win = ["Enter"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "envelope.enter", contexts = ["envelope"] },
+]
 
 [[shortcut]]
 id = "S-A11Y-020"
@@ -4226,7 +4245,8 @@ trigger = "press"
 milestone = "M6"
 mac = ["Option+Left", "Option+Right"]
 win = ["Alt+Left", "Alt+Right"]
-status = "pending"
+status = "widget"
+handler = "the automation lane and the Envelope Editor: Option-Left and Option-Right (Alt) move the insert marker to the previous or next breakpoint (`envelope.move_marker`)"
 
 [[shortcut]]
 id = "S-A11Y-021"
@@ -4237,7 +4257,8 @@ trigger = "press"
 milestone = "M6"
 mac = ["Option+click"]
 win = ["Alt+click"]
-status = "pending"
+status = "widget"
+handler = "the automation lane and the Envelope Editor: Option-click (Alt-click) a breakpoint selects it and moves the insert marker to it (`automation.select_breakpoint`, `clip.select_envelope_breakpoint`)"
 
 [[shortcut]]
 id = "S-A11Y-022"
@@ -4248,7 +4269,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Tab", "Shift+Tab"]
 win = ["Tab", "Shift+Tab"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "envelope.select_adjacent", contexts = ["envelope"], declines = true },
+]
 
 [[shortcut]]
 id = "S-A11Y-023"
@@ -4259,7 +4283,8 @@ trigger = "press"
 milestone = "M6"
 mac = ["Up", "Down"]
 win = ["Up", "Down"]
-status = "pending"
+status = "widget"
+handler = "the automation lane and the Envelope Editor: Up and Down change the selected breakpoint's value by a step of its control (`envelope.move_selected`), and a typed number sets it (`envelope.set_value`)"
 
 [[shortcut]]
 id = "S-A11Y-024"
@@ -4270,7 +4295,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Esc"]
 win = ["Esc"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "envelope.cancel", contexts = ["envelope"], declines = true },
+]
 
 [[shortcut]]
 id = "S-A11Y-025"
@@ -4281,7 +4309,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Delete"]
 win = ["Delete"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "envelope.delete_breakpoint", contexts = ["envelope"], declines = true },
+]
 
 [[shortcut]]
 id = "S-A11Y-026"
@@ -4292,7 +4323,8 @@ trigger = "press"
 milestone = "M6"
 mac = ["Option+Up", "Option+Down"]
 win = ["Alt+Up", "Alt+Down"]
-status = "pending"
+status = "widget"
+handler = "the Arrangement View: Option-Up and Option-Down (Alt) show the previous or next parameter that has an envelope in the selected track's automation lane (`arrangement.show_automation`)"
 
 [[shortcut]]
 id = "S-A11Y-027"
@@ -4303,7 +4335,8 @@ trigger = "press"
 milestone = "M6"
 mac = ["Shift+Option+Up", "Shift+Option+Down"]
 win = ["Shift+Alt+Up", "Shift+Alt+Down"]
-status = "pending"
+status = "widget"
+handler = "the Arrangement View: Shift-Option-Up and Shift-Option-Down (Shift-Alt) show the previous or next of every parameter the lane's choosers list (`arrangement.show_automation`)"
 
 [[shortcut]]
 id = "S-VIEW-021"
@@ -4353,7 +4386,10 @@ trigger = "latch"
 milestone = "M6"
 mac = ["N"]
 win = ["N"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "clip_view.focus_mode", contexts = ["note-editor"] },
+]
 
 [[shortcut]]
 id = "S-NOTE-041"
@@ -4601,7 +4637,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+Shift+B"]
 win = ["Ctrl+Shift+B"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "clip_view.step_input_mode", contexts = ["note-editor"] },
+]
 
 [[shortcut]]
 id = "S-MENU-006"
@@ -4660,7 +4699,8 @@ trigger = "press"
 milestone = "M6"
 mac = ["Right"]
 win = ["Right"]
-status = "pending"
+status = "widget"
+handler = "the Clip View's note editor: Right adds the held notes at the insert marker and steps on, or lengthens the notes just added, while step recording (`note.step_record`)"
 
 [[shortcut]]
 id = "S-NOTE-049"
@@ -4671,7 +4711,8 @@ trigger = "press"
 milestone = "M6"
 mac = ["Left"]
 win = ["Left"]
-status = "pending"
+status = "widget"
+handler = "the Clip View's note editor: Left shortens the notes just added and steps back, while step recording (`note.step_record`)"
 
 [[shortcut]]
 id = "S-NOTE-050"
@@ -4728,7 +4769,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+D"]
 win = ["Ctrl+D"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "clip.duplicate_loop", contexts = ["loop-brace"] },
+]
 
 [[shortcut]]
 id = "S-COMP-007"
@@ -4761,7 +4805,8 @@ trigger = "press"
 milestone = "M6"
 mac = ["Option+Up", "Option+Down"]
 win = ["Alt+Up", "Alt+Down"]
-status = "pending"
+status = "widget"
+handler = "the Envelope Editor: as S-A11Y-026, for the clip's envelopes (`view.clip_envelope`)"
 
 [[shortcut]]
 id = "S-A11Y-029"
@@ -4772,7 +4817,8 @@ trigger = "press"
 milestone = "M6"
 mac = ["Shift+Option+Up", "Shift+Option+Down"]
 win = ["Shift+Alt+Up", "Shift+Alt+Down"]
-status = "pending"
+status = "widget"
+handler = "the Envelope Editor: as S-A11Y-027, for every parameter the choosers list (`view.clip_envelope`)"
 
 [[shortcut]]
 id = "S-A11Y-030"
@@ -4783,7 +4829,8 @@ trigger = "press"
 milestone = "M6"
 mac = ["Left", "Right"]
 win = ["Left", "Right"]
-status = "pending"
+status = "widget"
+handler = "the automation lane and the Envelope Editor: Left and Right move the selected breakpoint one grid step in time (`envelope.move_selected`)"
 
 [[shortcut]]
 id = "S-BRW-015"

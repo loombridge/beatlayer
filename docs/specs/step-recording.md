@@ -1,6 +1,6 @@
 # Step recording: the Preview switch, MIDI step recording, and Step Input Mode
 
-- **Status:** draft
+- **Status:** implemented (R1 to R11 and R13 have passing tests; R12 comes with the map modes, milestone M7)
 - **Work packages:** WP-6.5 (R1 to R13). The insert marker and the editing grid it moves by are [piano-roll.md](piano-roll.md)'s; a track's MIDI input, monitoring and the computer MIDI keyboard [midi-io.md](midi-io.md)'s; recording while the transport runs [recording.md](recording.md)'s; mapping the step buttons to keys and MIDI comes with the map modes (milestone M7)
 - **Parity-matrix row:** MIDI editing: Step input and step recording
 - **Checked against:** the Live 12 reference manual (online edition), read 20 October 2026; the Live 12 release notes, 12.0 and 12.0.5; the UI parity reference's rows L-CLIP-012, M-OPT-004, M-OPT-005, M-OPT-018 and S-NOTE-044, recorded from Live 12.4.3 on macOS
@@ -54,16 +54,16 @@ This spec covers the Preview switch, step recording and Step Input Mode. It leav
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1 | to be written in WP-6.5 | |
-| R2 | to be written in WP-6.5 | |
-| R3 | to be written in WP-6.5 | |
-| R4 | to be written in WP-6.5 | |
-| R5 | to be written in WP-6.5 | |
-| R6 | to be written in WP-6.5 | |
-| R7 | to be written in WP-6.5 | |
-| R8 | to be written in WP-6.5 | |
-| R9 | to be written in WP-6.5 | |
-| R10 | to be written in WP-6.5 | |
-| R11 | to be written in WP-6.5 | |
-| R12 | to be written in WP-6.5 | |
-| R13 | to be written in WP-6.5 | |
+| R1 | `crates/shell/tests/step_recording.rs`, `the_preview_switch_is_a_preference_that_survives_a_restart`; `crates/ui/tests/clip_view.rs`, `the_preview_switch_above_the_piano_ruler_runs_set_preview` | unit, UI script |
+| R2 | `crates/engine/tests/midi_play.rs`, `a_preview_plays_on_its_own_track_with_the_song_stopped_and_is_never_input`; `crates/shell/tests/step_recording.rs`, `a_preview_plays_into_the_clips_track_until_released_and_never_hangs`, `a_note_selected_from_the_keys_sounds_at_its_own_velocity_for_250_ms`; `crates/ui/tests/clip_view.rs`, `a_key_held_in_the_piano_ruler_plays_until_released_with_preview_on`, `a_dragged_note_plays_each_pitch_it_reaches_and_ends_on_release` | engine, unit, UI script |
+| R3 | `crates/shell/tests/step_recording.rs`, `nothing_step_records_with_the_transport_running_preview_off_or_the_track_disarmed`, `a_preview_is_not_a_held_key`; `crates/ui/tests/clip_view.rs`, `left_and_right_step_while_step_recording_and_move_the_marker_otherwise` | unit, UI script |
+| R4 | `crates/shell/tests/step_recording.rs`, `holding_two_keys_and_pressing_right_twice_adds_two_notes_two_steps_long`, `right_with_nothing_held_leaves_a_rest` | unit |
+| R5 | `crates/shell/tests/step_recording.rs`, `letting_one_key_go_lengthens_only_the_other_and_a_new_key_is_added_at_the_marker` | unit |
+| R6 | `crates/shell/tests/step_recording.rs`, `left_shortens_the_notes_just_recorded_and_then_removes_them` | unit |
+| R7 | `crates/shell/tests/step_recording.rs`, `letting_one_key_go_lengthens_only_the_other_and_a_new_key_is_added_at_the_marker`, `nothing_step_records_with_the_transport_running_preview_off_or_the_track_disarmed` | unit |
+| R8 | `crates/engine/tests/midi_play.rs`, `a_preview_plays_on_its_own_track_with_the_song_stopped_and_is_never_input` (every block under the allocation trap); `crates/shell/tests/step_recording.rs`, `a_preview_is_not_a_held_key` | engine, unit |
+| R9 | `crates/shell/tests/step_recording.rs`, `step_input_mode_arms_the_track_focuses_the_clip_view_and_switches_the_keyboard`; `crates/ui/tests/keymap.rs`, `cmd_shift_b_runs_step_input_mode_and_the_arrows_step_in_the_note_editor`; `crates/ui/tests/clip_view.rs`, `cmd_shift_b_arms_the_track_and_switches_the_computer_keyboard` | unit, UI script |
+| R10 | `crates/shell/tests/step_recording.rs`, `holding_two_keys_and_pressing_right_twice_adds_two_notes_two_steps_long` (the computer MIDI keyboard's keys); `crates/ui/tests/clip_view.rs`, `left_and_right_step_while_step_recording_and_move_the_marker_otherwise` | unit, UI script |
+| R11 | `crates/shell/tests/step_recording.rs`, `each_step_is_announced` | unit |
+| R12 | Waits for the map modes (milestone M7) | |
+| R13 | `crates/shell-spec/src/notes.rs`, `every_listed_id_is_registered_and_complete`; `crates/shell/tests/step_recording.rs`, `step_record_by_id_takes_the_held_notes_as_keys_and_velocities`; `cargo xtask commands` (the readback table) | unit |

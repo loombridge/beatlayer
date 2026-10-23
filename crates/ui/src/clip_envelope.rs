@@ -18,10 +18,8 @@
 //! envelopes spec.
 
 use bl_core::time::Ticks;
-use bl_model::modulation::Travel;
 use bl_model::{
-    AutomationTarget, Breakpoint, Clip, ClipData, ClipId, ClipParam, Document, Envelope, MidiData,
-    MixerParam,
+    AutomationTarget, Breakpoint, Clip, ClipData, ClipId, Document, Envelope, MidiData,
 };
 use bl_shell::{Area, GesturePhase, Invocation, Shell};
 use egui::{
@@ -54,46 +52,100 @@ const LINKED_WIDTH: f32 = 56.0;
 /// The gap between the footer's controls, in points.
 const GAP: f32 = 3.0;
 
-/// The scale a clip's modulation envelope is drawn and edited on: shares of
-/// the parameter's travel, 0 to 100 % for a level (Volume and sends) and
-/// −100 % to 100 % for the rest, not the parameter's own units.
-// Spec: modulation R9
-pub(crate) fn share_scale(target: AutomationTarget) -> LaneScale {
-    // A MIDI controller is drawn on its own range, pitch bend centred
-    // (midi-controller-data R8), and a clip's sound setting on its own
-    // (warp-modes R29).
-    if let Some((min, max)) = target.midi_range().or_else(|| target.clip_range()) {
-        return LaneScale::Linear { min, max };
+pub(crate) use bl_shell::arrangement::automation::{rest_of, share_scale};
+
+/// The device chooser's choices for a clip, in the order it lists them
+/// (L-CLIP-017): an audio clip's sound settings or a MIDI clip's controllers
+/// first, then the track's mixer and each device in its chain.
+fn editor_devices(doc: &Document, clip: &Clip) -> Vec<Choice<AutomationDevice>> {
+    let mut devices: Vec<Choice<AutomationDevice>> = doc
+        .clip_track(clip.id)
+        .map(|track| device_choices(doc, track))
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|choice| choice.value != AutomationDevice::None)
+        .collect();
+    // The device chooser's first choice reads "Mixer" (L-CLIP-017).
+    if let Some(mixer) = devices.first_mut() {
+        mixer.label = "Mixer".to_owned();
     }
-    let travel = if is_level(target) {
-        Travel::Fader
-    } else {
-        Travel::Pan
-    };
-    let (min, max) = travel.clip_range();
-    LaneScale::Linear { min, max }
+    // An audio clip's sound settings come first (L-CLIP-017).
+    // Spec: warp-modes R29
+    if clip.data.is_audio() {
+        devices.insert(
+            0,
+            Choice {
+                label: "Clip".to_owned(),
+                value: AutomationDevice::Clip,
+                leds: NO_LEDS,
+            },
+        );
+    }
+    // A MIDI clip's controllers come first, before the Mixer.
+    // Spec: midi-controller-data R8
+    if !clip.data.is_audio() {
+        devices.insert(
+            0,
+            Choice {
+                label: "MIDI Ctrl".to_owned(),
+                value: AutomationDevice::MidiCtrl,
+                leds: NO_LEDS,
+            },
+        );
+    }
+    devices
 }
 
-/// Where an envelope for `target` modulates nothing: the top of a share (a
-/// level, or a clip's Gain), and zero for the rest.
-fn rest_of(target: AutomationTarget) -> f64 {
-    match target {
-        _ if is_level(target) => 1.0,
-        AutomationTarget::Clip {
-            param: ClipParam::Gain,
-        } => 100.0,
-        _ => 0.0,
+/// The control chooser's choices for a clip's chosen device.
+fn editor_controls(
+    shell: &Shell,
+    doc: &Document,
+    clip: &Clip,
+    device: AutomationDevice,
+) -> Vec<Choice<AutomationTarget>> {
+    match (device, &clip.data) {
+        (AutomationDevice::Clip, ClipData::Audio(audio)) => clip_choices(audio),
+        _ => control_choices(shell, doc, device),
     }
 }
 
-/// Whether a parameter is a level, whose modulation is a share of its base.
-fn is_level(target: AutomationTarget) -> bool {
-    matches!(
-        target,
-        AutomationTarget::Mixer {
-            param: MixerParam::Volume
-        } | AutomationTarget::Send { .. }
-    )
+/// The invocation that shows the previous or next parameter in the Envelope
+/// Editor (S-A11Y-028, S-A11Y-029): the one the clip has an envelope for, or
+/// with `all`, any the choosers list, in the order they list them.
+fn cycle(
+    shell: &Shell,
+    clip: &Clip,
+    current: Option<AutomationTarget>,
+    forward: bool,
+    all: bool,
+) -> Option<Invocation> {
+    let doc = shell.editor().document();
+    let list: Vec<AutomationTarget> = editor_devices(doc, clip)
+        .into_iter()
+        .flat_map(|device| editor_controls(shell, doc, clip, device.value))
+        .map(|choice| choice.value)
+        .collect();
+    let target = crate::arrangement::automation::cycle_target(&list, current, forward, |target| {
+        all || clip.envelope(target).is_some()
+    })?;
+    Some(Invocation::new(
+        "view.clip_envelope",
+        json!({ "target": target }),
+    ))
+}
+
+/// The ID of the accessible node of a breakpoint in the Envelope Editor.
+fn breakpoint_id(clip: ClipId, at: Ticks) -> Id {
+    Id::new(("clip-envelope-breakpoint", clip, at.get()))
+}
+
+/// What a right-click in the editor offered (C-TIME-026).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Menu {
+    /// Edit Value, on a breakpoint.
+    Edit(Ticks),
+    /// Add Value, on the line, at a position.
+    Add(Ticks),
 }
 
 /// The editor's area: the note area's width, down to the footer.
@@ -296,6 +348,8 @@ fn drag_command(
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct EnvelopeEditor {
     drag: Option<Drag>,
+    /// What the last right-click offered.
+    menu: Option<Menu>,
 }
 
 /// What the editor draws and edits in a frame.
@@ -314,6 +368,7 @@ impl EnvelopeEditor {
     /// Forgets a drag, as another clip showing does.
     pub fn reset(&mut self) {
         self.drag = None;
+        self.menu = None;
     }
 
     /// Draws the editor and its footer, and turns the pointer's gestures
@@ -333,10 +388,24 @@ impl EnvelopeEditor {
         let name = frame
             .target
             .map_or_else(|| "None".to_owned(), |t| target_label(shell, doc, t));
+        // Spec: automation-editing R20 to R28. While the Envelope Editor has
+        // the keyboard, the insert marker, the focused and selected
+        // breakpoints and the value at the marker are drawn and read.
+        let keys = shell
+            .keyboard_envelope()
+            .filter(|keys| keys.envelope == bl_shell::envelope_commands::EnvelopeKeys::Clip)
+            .filter(|_| {
+                shell.focused_area_of(shell.acting_window()) == Area::Detail
+                    && frame.target.is_some()
+            });
+        let mut focused = None;
         ui.ctx().accesskit_node_builder(response.id, |node| {
             node.set_role(egui::accesskit::Role::Group);
             node.set_label("Clip Envelope".to_owned());
-            node.set_value(name.clone());
+            node.set_value(match &keys {
+                Some(keys) => format!("{name}, {}", keys.value),
+                None => name.clone(),
+            });
         });
         let start = axis_start(clip, frame.midi, frame.target);
         paint_grid_lines(ui, shell, theme, rect, start, clip.length);
@@ -356,13 +425,183 @@ impl EnvelopeEditor {
                 rest: rest_of(target),
                 envelope,
             };
-            self.paint(ui, theme, &lane);
+            let time = ui.input(|i| i.time);
+            self.paint(ui, theme, &lane, keys.as_ref(), time);
+            if let Some(keys) = &keys {
+                focused = self.paint_keys(ui, shell, theme, frame, &lane, keys);
+                self.read_keys(ui, shell, frame, &response, keys, events);
+            }
             self.input(ui, shell, doc, frame, target, &lane, &response, events);
+            self.context_menu(shell, frame, target, &lane, &response, events);
+        }
+        if let Some(focused) = focused {
+            ui.ctx().accesskit_node_builder(response.id, |node| {
+                node.set_active_descendant(focused.accesskit_id());
+            });
         }
         self.footer(ui, shell, theme, frame, events);
     }
 
-    fn paint(&self, ui: &Ui, theme: &Theme, lane: &Lane<'_>) {
+    /// Draws the insert marker with the value beside it, or what is being
+    /// typed, and the node of the focused or selected breakpoint, which is
+    /// returned for the editor's group to name as its active descendant
+    /// (R21, R28).
+    fn paint_keys(
+        &self,
+        ui: &Ui,
+        shell: &Shell,
+        theme: &Theme,
+        frame: &Frame<'_>,
+        lane: &Lane<'_>,
+        keys: &bl_shell::envelope_commands::EnvelopeKeyState,
+    ) -> Option<Id> {
+        let painter = ui.painter_at(lane.rect);
+        let typed = crate::envelope_keys::typed(ui.ctx());
+        let x = x_of_tick(lane.rect, lane.start, lane.length, keys.marker);
+        if (lane.rect.left()..=lane.rect.right()).contains(&x) {
+            crate::envelope_keys::paint_marker(
+                &painter,
+                theme,
+                lane.rect,
+                x,
+                typed.as_ref().map_or(&keys.value, |typed| &typed.text),
+                typed.is_some(),
+            );
+        }
+        if keys.selected.is_some() {
+            // The selected breakpoint pulses.
+            ui.ctx()
+                .request_repaint_after(crate::envelope_keys::PULSE_FRAME);
+        }
+        let at = keys.selected.unwrap_or(keys.marker);
+        let point = lane.envelope?.point(at)?;
+        let id = breakpoint_id(frame.clip.id, at);
+        let rect = Rect::from_center_size(
+            lane.point_pos(point),
+            vec2(BREAKPOINT_SIZE * 2.0, BREAKPOINT_SIZE * 2.0),
+        );
+        crate::envelope_keys::describe_breakpoint(
+            ui,
+            id,
+            rect,
+            shell
+                .editor()
+                .document()
+                .settings()
+                .time_signatures
+                .to_bbs(at)
+                .to_string(),
+            shell.keyboard_breakpoint_text(at).unwrap_or_default(),
+            keys.selected == Some(at),
+        );
+        Some(id)
+    }
+
+    /// Reads the keys the keymap leaves to the editor while it has the
+    /// keyboard (S-A11Y-018 to S-A11Y-030).
+    fn read_keys(
+        &self,
+        ui: &Ui,
+        shell: &Shell,
+        frame: &Frame<'_>,
+        response: &egui::Response,
+        keys: &bl_shell::envelope_commands::EnvelopeKeyState,
+        events: &mut Vec<UiEvent>,
+    ) {
+        // A chooser or the Linked switch with the keyboard keeps its arrows.
+        let focus = ui.ctx().memory(egui::Memory::focused);
+        if ui.ctx().text_edit_focused()
+            || focus.is_some_and(|id| id != response.id)
+            || !shell
+                .active_contexts()
+                .contains(&bl_commands::Context::Envelope)
+        {
+            return;
+        }
+        let current = frame.target;
+        crate::envelope_keys::read(
+            ui,
+            keys,
+            |forward, all| cycle(shell, frame.clip, current, forward, all),
+            events,
+        );
+    }
+
+    /// Right-clicking a breakpoint offers Edit Value, and right-clicking the
+    /// line, Add Value (C-TIME-026; the automation editing spec, R27): each
+    /// types a value, which Return sets.
+    fn context_menu(
+        &mut self,
+        shell: &Shell,
+        frame: &Frame<'_>,
+        target: AutomationTarget,
+        lane: &Lane<'_>,
+        response: &egui::Response,
+        events: &mut Vec<UiEvent>,
+    ) {
+        if response.secondary_clicked()
+            && let Some(pos) = response.interact_pointer_pos()
+        {
+            self.menu = match lane.hit(pos) {
+                Hit::Breakpoint(at) => Some(Menu::Edit(at)),
+                Hit::Segment(_) => Some(Menu::Add(shell.arrangement().snap_drag(
+                    shell.editor().document(),
+                    lane.at(pos),
+                    false,
+                ))),
+                Hit::Empty => None,
+            };
+        }
+        let Some(menu) = self.menu else {
+            return;
+        };
+        let clip = frame.clip.id;
+        let select = |at: Option<Ticks>| {
+            (
+                bl_shell::envelope_commands::SELECT_ENVELOPE_BREAKPOINT.to_owned(),
+                json!({ "clip": clip, "target": target, "at": at }),
+            )
+        };
+        response.context_menu(|ui| match menu {
+            Menu::Edit(at) => {
+                if ui.button("Edit Value").clicked() {
+                    let (id, args) = select(Some(at));
+                    invoke(events, &id, args);
+                    crate::envelope_keys::set_typed(
+                        ui.ctx(),
+                        Some(crate::envelope_keys::Typed {
+                            text: String::new(),
+                            add_at: None,
+                            release: Some(select(None)),
+                        }),
+                    );
+                    ui.close();
+                }
+            }
+            Menu::Add(at) => {
+                if ui.button("Add Value").clicked() {
+                    crate::envelope_keys::set_typed(
+                        ui.ctx(),
+                        Some(crate::envelope_keys::Typed {
+                            text: String::new(),
+                            add_at: Some(at),
+                            release: None,
+                        }),
+                    );
+                    ui.close();
+                }
+            }
+        });
+    }
+
+    fn paint(
+        &self,
+        ui: &Ui,
+        theme: &Theme,
+        lane: &Lane<'_>,
+        keys: Option<&bl_shell::envelope_commands::EnvelopeKeyState>,
+        time: f64,
+    ) {
         let painter = ui.painter_at(lane.rect);
         let colours = &theme.colors;
         // Spec: modulation R9: the left axis reads in percent, and a MIDI
@@ -415,7 +654,10 @@ impl EnvelopeEditor {
                     vec2(BREAKPOINT_SIZE, BREAKPOINT_SIZE),
                 ),
                 0.0,
-                colours.text.0,
+                keys.and_then(|keys| {
+                    crate::envelope_keys::breakpoint_colour(theme, point.at, keys, time)
+                })
+                .unwrap_or(colours.text.0),
             );
         }
     }
@@ -523,6 +765,13 @@ impl EnvelopeEditor {
             }
         } else if response.clicked() {
             match lane.hit(pos) {
+                // Spec: automation-editing R22 (S-A11Y-021). Option-click
+                // (Alt-click) selects the breakpoint and puts the insert
+                // marker on it.
+                Hit::Breakpoint(at) if modifiers.alt => Some((
+                    bl_shell::envelope_commands::SELECT_ENVELOPE_BREAKPOINT,
+                    json!({ "clip": clip, "target": target, "at": at }),
+                )),
                 Hit::Breakpoint(at) => Some((
                     "clip.delete_envelope_breakpoint",
                     json!({ "clip": clip, "target": target, "at": at }),
@@ -569,46 +818,10 @@ impl EnvelopeEditor {
         );
         let track = doc.clip_track(clip.id);
         let device = frame.target.map(device_of);
-        let mut devices: Vec<Choice<AutomationDevice>> = track
-            .map(|track| device_choices(doc, track))
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|choice| choice.value != AutomationDevice::None)
-            .collect();
-        // The device chooser's first choice reads "Mixer" (L-CLIP-017).
-        if let Some(mixer) = devices.first_mut() {
-            mixer.label = "Mixer".to_owned();
-        }
-        // An audio clip's sound settings come first (L-CLIP-017).
-        // Spec: warp-modes R29
-        if clip.data.is_audio() {
-            devices.insert(
-                0,
-                Choice {
-                    label: "Clip".to_owned(),
-                    value: AutomationDevice::Clip,
-                    leds: NO_LEDS,
-                },
-            );
-        }
-        // A MIDI clip's controllers come first, before the Mixer.
-        // Spec: midi-controller-data R8
-        if !clip.data.is_audio() {
-            devices.insert(
-                0,
-                Choice {
-                    label: "MIDI Ctrl".to_owned(),
-                    value: AutomationDevice::MidiCtrl,
-                    leds: NO_LEDS,
-                },
-            );
-        }
-        let mut controls = match (device, &clip.data) {
-            (Some(AutomationDevice::Clip), ClipData::Audio(audio)) => clip_choices(audio),
-            _ => device
-                .map(|device| control_choices(shell, doc, device))
-                .unwrap_or_default(),
-        };
+        let mut devices = editor_devices(doc, clip);
+        let mut controls = device
+            .map(|device| editor_controls(shell, doc, clip, device))
+            .unwrap_or_default();
         if let Some(track) = track {
             mark_devices(&mut devices, doc, track, theme);
             mark_controls(&mut controls, doc, track, theme);

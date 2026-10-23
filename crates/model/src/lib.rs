@@ -97,6 +97,7 @@ mod scale;
 mod scene;
 mod shared;
 mod track;
+mod tuning;
 mod warp;
 mod warp_settings;
 mod window_views;
@@ -118,8 +119,8 @@ pub use bounce::{BouncedAutomation, BouncedTrack};
 pub use changes::{Change, ChangeSet};
 pub use clip::{
     AudioData, Clip, ClipData, ClipEnvelope, ClipFolds, Crossfade, EDGE_FADE_SECONDS, EnvelopeKind,
-    MidiData, NewTakeLane, Note, PressurePoint, TakeClip, TakeClipData, TakeLane,
-    consolidated_midi, crossfades, fade_power,
+    GroupKind, MidiData, NewTakeLane, Note, NoteGroup, PressurePoint, TakeClip, TakeClipData,
+    TakeLane, consolidated_midi, crossfades, fade_power,
 };
 pub use clip_param::ClipParam;
 pub use command::Command;
@@ -176,6 +177,10 @@ pub use scene::{DEFAULT_SCENE_COUNT, SCENE_TEMPO_MAX, SCENE_TEMPO_MIN, Scene};
 pub use track::{
     Channel, CrossfadeAssign, DeviceOutput, Input, MAX_TRACK_DELAY_MS, MAX_TRACK_DELAY_SAMPLES,
     MidiTo, Mixer, Monitor, Output, PanMode, Routing, SendTap, Tap, Track, TrackDelay, TrackKind,
+};
+pub use tuning::{
+    DEFAULT_REFERENCE_HZ, DEFAULT_REFERENCE_OCTAVE, MAX_CENTS, MAX_DEGREES, MAX_KEYS, Reference,
+    Tuning, TuningNote, TuningRange, TuningReadout, pitch_of,
 };
 pub use warp::{TRANSIENT_MATCH, TransientEdits, WarpMarker};
 pub use warp_settings::{

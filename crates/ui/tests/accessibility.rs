@@ -1178,14 +1178,6 @@ fn envelopes_tab_with_an_envelope(h: &mut Harness) {
     h.settle();
 }
 
-/// Shows the tracks' automation lanes, so their choosers are drawn.
-fn automation_mode_on(h: &mut Harness) {
-    h.shell
-        .run("arrangement.automation_mode", json!({ "on": true }))
-        .unwrap();
-    h.settle();
-}
-
 /// A MIDI input port for the Tempo & MIDI page's table to list (WP-2.2).
 fn a_midi_port(h: &mut Harness) {
     let test = bl_midi_io::TestBackend::new();
@@ -1881,6 +1873,7 @@ fn paths() -> BTreeMap<&'static str, Path> {
         key,
     };
     let clip_view = LaterView("the Clip View (milestone M2)");
+    let tuning_section = LaterView("the browser's Tunings label and the Tuning section (WP-6.10)");
     let groove_pool = LaterView(
         "the Groove Pool, the Clip View's groove controls and the browser's Grooves label (WP-6.20)",
     );
@@ -1902,8 +1895,16 @@ fn paths() -> BTreeMap<&'static str, Path> {
     // The Envelopes tab (WP-3.16): the pointer draws, moves, curves and
     // deletes breakpoints, and the keys for the breakpoints come with a
     // later package; its choosers and Linked switch are reached by Tab.
-    let clip_envelopes =
-        LaterView("the Envelopes tab's keys for breakpoints (the clip envelopes package)");
+    let clip_envelopes = Equivalent(
+        "the Envelope Editor's keys (automation-editing R22 to R26, clip-envelopes R14): Enter \
+         makes and selects a breakpoint (S-A11Y-019), Left, Right, Up, Down and a typed number \
+         move it and change its value (S-A11Y-023, S-A11Y-030), Delete deletes it (S-A11Y-025) \
+         and Cmd-Delete clears the envelope (S-ENV-005)",
+    );
+    let curving = Unobserved(
+        "curving a segment from the keyboard: Live's manual (41.5) names no key for it, and \
+         whether Live has one isn't observed",
+    );
     let device_params = Equivalent(
         "a described device's parameter controls in the Device View: Tab to one, then Up and \
          Down step it and Delete sets its default (the device framework spec, R17)",
@@ -1934,6 +1935,21 @@ fn paths() -> BTreeMap<&'static str, Path> {
          the envelopes (S-EDIT-016), and the lane's gestures move and select their breakpoints \
          (automation-editing R2 to R4)",
     );
+    // The automation lane that has the keyboard (WP-6.26): Enter makes and
+    // selects a breakpoint at the insert marker, and the arrows, a typed
+    // number, Delete and Cmd-Delete edit it.
+    let lane_keys = Equivalent(
+        "the automation lane's keys (automation-editing R22 to R26): Enter makes and selects a \
+         breakpoint (S-A11Y-019), Left, Right, Up, Down and a typed number move it and change \
+         its value (S-A11Y-023, S-A11Y-030), Delete deletes it (S-A11Y-025) and Cmd-Delete \
+         deletes the shown parameter's automation (S-ENV-005)",
+    );
+    // Selecting a breakpoint is view state: Enter and Option-click do it.
+    let selecting = Equivalent(
+        "Enter at the insert marker selects the breakpoint there (S-A11Y-019), Tab and \
+         Shift-Tab the next or previous (S-A11Y-022), and Option-click (Alt-click) selects \
+         one with the pointer (S-A11Y-021)",
+    );
     // The browser's tags (browser-tags R10 to R16): the Tag Editor and
     // Quick Tags reach them.
     let tag_editor = Equivalent(
@@ -1963,6 +1979,8 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("automation.move_breakpoints", Exception(envelope_edit)),
         ("automation.paste", Exception(envelope_edit)),
         ("automation.select_segment", Exception(envelope_edit)),
+        ("automation.select_breakpoint", Exception(selecting)),
+        ("clip.select_envelope_breakpoint", Exception(selecting)),
         ("automation.set_envelope", Exception(envelope_edit)),
         (
             "transport.play",
@@ -2009,6 +2027,22 @@ fn paths() -> BTreeMap<&'static str, Path> {
         (
             "clip.set_scale",
             main(a_clip_selected, control_bar, "Scale Mode", Key::Enter),
+        ),
+        // Tuning systems (WP-6.9): the browser's Tunings label and the
+        // Tuning section, which load, change and remove the tuning, come with
+        // WP-6.10; until then agents reach these.
+        ("tuning.load", Exception(tuning_section)),
+        ("tuning.remove", Exception(tuning_section)),
+        ("tuning.set", Exception(tuning_section)),
+        ("tuning.set_range", Exception(tuning_section)),
+        ("tuning.set_reference", Exception(tuning_section)),
+        ("tuning.state", Exception(Query)),
+        (
+            "track.set_tuning_bypass",
+            Exception(LaterView(
+                "the In/Out section's row for it, which the mixers' section has no room for \
+                 yet; the Arrangement's headers show it where they have the height (WP-6.9)",
+            )),
         ),
         // Grooves (WP-6.19): the Groove Pool, the Clip View's groove controls
         // and the browser's Grooves label come with WP-6.20; until then
@@ -2072,26 +2106,11 @@ fn paths() -> BTreeMap<&'static str, Path> {
             "arrangement.automation_arm",
             main(nothing, control_bar, "Automation Arm", Key::Enter),
         ),
-        (
-            "automation.set_breakpoint",
-            Exception(LaterView("the arrangement's automation lanes (WP-2.12)")),
-        ),
-        (
-            "automation.set_curve",
-            Exception(LaterView("the arrangement's automation lanes (WP-2.12)")),
-        ),
-        (
-            "automation.move_breakpoint",
-            Exception(LaterView("the arrangement's automation lanes (WP-2.12)")),
-        ),
-        (
-            "automation.delete_breakpoint",
-            Exception(LaterView("the arrangement's automation lanes (WP-2.12)")),
-        ),
-        (
-            "automation.delete",
-            Exception(LaterView("the arrangement's automation lanes (WP-2.12)")),
-        ),
+        ("automation.set_breakpoint", Exception(lane_keys)),
+        ("automation.set_curve", Exception(curving)),
+        ("automation.move_breakpoint", Exception(lane_keys)),
+        ("automation.delete_breakpoint", Exception(lane_keys)),
+        ("automation.delete", Exception(lane_keys)),
         (
             "automation.re_enable_for",
             Exception(LaterView("the arrangement's automation lanes (WP-2.12)")),
@@ -2572,17 +2591,6 @@ fn paths() -> BTreeMap<&'static str, Path> {
             "perception.capture_view",
             Exception(AgentOnly("an agent's capture of a view as an image")),
         ),
-        // The automation lane's choosers (WP-2.12): Tab to the device
-        // chooser, then Up or Down steps the parameter the lane shows.
-        (
-            "arrangement.show_automation",
-            main(
-                automation_mode_on,
-                nothing,
-                "Automation Device",
-                Key::ArrowDown,
-            ),
-        ),
         // Agents' forms of gestures and dialogs.
         (
             "arrangement.move_clips",
@@ -2903,6 +2911,21 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("clip.set_loop", Exception(clip_view)),
         ("clip.set_loop_enabled", Exception(clip_view)),
         ("clip.set_midi_loop", Exception(clip_view)),
+        ("clip.set_signature", Exception(clip_view)),
+        (
+            "clip_view.foreground",
+            Exception(Equivalent(
+                "clicking a note, or a loop bar, which assistive technology reads by name and \
+                 activates (multi-clip editing R3, R10)",
+            )),
+        ),
+        (
+            "clip_view.select_loop_bars",
+            Exception(Equivalent(
+                "the loop bars above the note editor, which assistive technology reads by \
+                 name and activates (multi-clip editing R10)",
+            )),
+        ),
         ("clip.set_midi_region", Exception(clip_view)),
         ("clip.set_data", Exception(clip_view)),
         // The crop's document-level commands (WP-4.13): `clip.crop` is the
@@ -2970,7 +2993,7 @@ fn paths() -> BTreeMap<&'static str, Path> {
             )),
         ),
         ("clip.set_envelope_breakpoint", Exception(clip_envelopes)),
-        ("clip.set_envelope_curve", Exception(clip_envelopes)),
+        ("clip.set_envelope_curve", Exception(curving)),
         ("clip.move_envelope_breakpoint", Exception(clip_envelopes)),
         ("clip.delete_envelope_breakpoint", Exception(clip_envelopes)),
         ("clip.delete_envelope", Exception(clip_envelopes)),
@@ -2981,15 +3004,6 @@ fn paths() -> BTreeMap<&'static str, Path> {
                 device_view,
                 "Linked",
                 Key::Enter,
-            ),
-        ),
-        (
-            "view.clip_envelope",
-            main(
-                envelopes_tab,
-                device_view,
-                "Envelope Control",
-                Key::ArrowDown,
             ),
         ),
         (
@@ -3082,6 +3096,15 @@ fn paths() -> BTreeMap<&'static str, Path> {
         // note-selection keys (S-A11Y-010, S-A11Y-011), Delete
         // (S-EDIT-005) and Cmd-A (S-NOTE-001).
         ("note.ramp_value", Exception(note_editor)),
+        // Spec: step-recording R2. The pointer's press plays a preview; from
+        // the keyboard, selecting a note with the note-jump keys sounds it.
+        (
+            "note.preview",
+            Exception(Equivalent(
+                "the pointer's press on a piano ruler key or a note; a note selected from the \
+                 keys sounds as a preview too (`clip_view.select_notes`)",
+            )),
+        ),
         // The stretch markers are dragged (I-DRAG-040); Live has no key
         // for stretching notes, so a keyboard path needs the maintainer's
         // choice of keys.

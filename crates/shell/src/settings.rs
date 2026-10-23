@@ -55,6 +55,13 @@ pub struct Preferences {
     pub zoom: Option<f32>,
     /// The main window's last size in points, as width and height.
     pub window_size: Option<(f32, f32)>,
+    /// The second window's own zoom (interface-zoom R11), where 1 is 100%:
+    /// none until it has been opened or set, when it takes the main
+    /// window's.
+    pub second_zoom: Option<f32>,
+    /// Where the second window sat and how big it was when it was last open
+    /// (second-window R1).
+    pub second_window: Option<bl_model::WindowFrame>,
     /// The Settings page shown last.
     pub settings_page: SettingsPage,
     /// The agent server: whether it runs, its port and token, and the

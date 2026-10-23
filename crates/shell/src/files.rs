@@ -16,7 +16,7 @@ use std::path::{Component, Path, PathBuf};
 use bl_core::id::IdAllocator;
 use bl_model::{
     ClipFolds, ContentHash, DEFAULT_SCENE_COUNT, DeviceWindows, Document, Editor, LaunchSettings,
-    MultisamplerViews, RackViewMap, SceneId, TrackId, TrackKind, registry,
+    MultisamplerViews, RackViewMap, SceneId, TrackId, TrackKind, WindowViews, registry,
 };
 use bl_project::{
     Media, MediaPath, MediaRef, Project, ProjectFolder, SET_EXTENSION, SaveOptions, SetFile,
@@ -208,6 +208,18 @@ pub trait SetStore {
         LaunchSettings::default()
     }
 
+    /// Gives the store the main view and the second window's switch
+    /// (WP-6.29), for the next save to write beside the document. A store
+    /// that keeps none ignores it.
+    fn set_window_views(&mut self, views: WindowViews) {
+        let _ = views;
+    }
+
+    /// The open set's main view and second window, as it was saved.
+    fn window_views(&self) -> WindowViews {
+        WindowViews::default()
+    }
+
     /// Writes `editor` to `path` as a copy without making it the open set:
     /// the default set and templates (WP-2.25). Returns warnings about
     /// things that went wrong without stopping the write. A store that
@@ -298,6 +310,9 @@ pub struct ProjectFiles {
     /// The global launch quantisation and its switch (WP-3.2): the open
     /// set's, then the shell's for the next save.
     launch: LaunchSettings,
+    /// The main view and the second window (WP-6.29): the open set's, then
+    /// the shell's for the next save.
+    window_views: WindowViews,
 }
 
 impl ProjectFiles {
@@ -323,6 +338,7 @@ impl SetStore for ProjectFiles {
         self.multisamplers = project.multisamplers;
         self.folds = project.folds;
         self.launch = project.launch;
+        self.window_views = project.window_views;
         self.added.clear();
         Ok((editor, opened))
     }
@@ -392,6 +408,7 @@ impl SetStore for ProjectFiles {
         self.multisamplers = MultisamplerViews::new();
         self.folds = ClipFolds::new();
         self.launch = LaunchSettings::default();
+        self.window_views = WindowViews::default();
         self.added.clear();
     }
 
@@ -410,6 +427,7 @@ impl SetStore for ProjectFiles {
             .with_multisamplers(&self.multisamplers)
             .with_folds(&self.folds)
             .with_launch(self.launch)
+            .with_window_views(self.window_views)
     }
 
     fn adopt(&mut self, set: Option<SetFile>, project: Project) {
@@ -420,6 +438,7 @@ impl SetStore for ProjectFiles {
         self.multisamplers = project.multisamplers;
         self.folds = project.folds;
         self.launch = project.launch;
+        self.window_views = project.window_views;
         self.added.clear();
     }
 
@@ -465,6 +484,14 @@ impl SetStore for ProjectFiles {
 
     fn set_launch(&mut self, launch: LaunchSettings) {
         self.launch = launch;
+    }
+
+    fn set_window_views(&mut self, views: WindowViews) {
+        self.window_views = views;
+    }
+
+    fn window_views(&self) -> WindowViews {
+        self.window_views
     }
 
     fn launch(&self) -> LaunchSettings {
@@ -534,7 +561,8 @@ impl SetStore for ProjectFiles {
             .with_rack_views(&self.rack_views)
             .with_multisamplers(&self.multisamplers)
             .with_folds(&self.folds)
-            .with_launch(self.launch);
+            .with_launch(self.launch)
+            .with_window_views(self.window_views);
         let mut set = SetFile::open(path)
             .map(|(set, _)| set)
             .unwrap_or_else(|_| SetFile::new(path.to_owned()));
@@ -731,7 +759,8 @@ impl ProjectFiles {
             .with_rack_views(&self.rack_views)
             .with_multisamplers(&self.multisamplers)
             .with_folds(&self.folds)
-            .with_launch(self.launch);
+            .with_launch(self.launch)
+            .with_window_views(self.window_views);
         let mut set = self
             .set
             .clone()
@@ -1073,17 +1102,19 @@ pub fn factory_default_set() -> Editor {
 /// The set a new set starts from: the saved default set at `path` when it
 /// can be read, otherwise [`factory_default_set`] (WP-2.25). File ▸ Save
 /// Beatlayer Set As Default Set makes the open set the one a new set starts
-/// from, as Live's does.
+/// from, as Live's does. The main view and second window a saved default
+/// set keeps come with it (second-window R14); the factory default set
+/// opens in the Arrangement View with one window.
 #[must_use]
-pub fn new_set_from(path: Option<&Path>) -> Editor {
+pub fn new_set_from(path: Option<&Path>) -> (Editor, WindowViews) {
     path.and_then(|path| SetFile::open(path).ok())
         .map(|(set, mut project)| {
             if set.info().is_some_and(SetInfo::before_relative_modulation) {
                 bl_devices::relative_clip_envelopes(&mut project.document);
             }
-            project.editor()
+            (project.editor(), project.window_views)
         })
-        .unwrap_or_else(factory_default_set)
+        .unwrap_or_else(|| (factory_default_set(), WindowViews::default()))
 }
 
 #[cfg(test)]

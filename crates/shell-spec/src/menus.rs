@@ -37,11 +37,11 @@ use crate::devices::COMPARE_COPY;
 use crate::export::OPEN_DIALOG as EXPORT_OPEN_DIALOG;
 use crate::file_manager::{SET_SAVE_COPY, VIEW_TOGGLE_FILE_MANAGER};
 use crate::mixer_view::{
-    CROSSFADER as MIXER_CROSSFADER, FOCUS as MIXER_FOCUS, IN_OUT as MIXER_IN_OUT,
-    PERFORMANCE_IMPACT as MIXER_PERFORMANCE_IMPACT, RETURN_TRACKS as MIXER_RETURN_TRACKS,
-    RETURN_TRACKS_SCROLL as MIXER_RETURN_TRACKS_SCROLL, SCENE_TEMPO as MIXER_SCENE_TEMPO,
-    SENDS as MIXER_SENDS, TOGGLE as MIXER_TOGGLE, TRACK_OPTIONS as MIXER_TRACK_OPTIONS,
-    VOLUME as MIXER_VOLUME,
+    CROSSFADER as MIXER_CROSSFADER, DEVICES as MIXER_DEVICES, FOCUS as MIXER_FOCUS,
+    IN_OUT as MIXER_IN_OUT, PERFORMANCE_IMPACT as MIXER_PERFORMANCE_IMPACT,
+    RETURN_TRACKS as MIXER_RETURN_TRACKS, RETURN_TRACKS_SCROLL as MIXER_RETURN_TRACKS_SCROLL,
+    SCENE_TEMPO as MIXER_SCENE_TEMPO, SENDS as MIXER_SENDS, TOGGLE as MIXER_TOGGLE,
+    TRACK_OPTIONS as MIXER_TRACK_OPTIONS, VOLUME as MIXER_VOLUME,
 };
 use crate::notes::SET_PREVIEW as NOTE_PREVIEW;
 
@@ -122,6 +122,12 @@ pub const IMP_12: &str = "IMP-12";
 /// Arrangement Track Controls submenu: an improvement, so not one of
 /// menus.md's Live rows, though the reference names it IMP-01.
 pub const IMP_01: &str = "IMP-01";
+
+/// The row of Beatlayer's own Devices section switch (IMP-25), straight
+/// after Performance Impact in the Mixer Controls submenu: an improvement,
+/// so not one of menus.md's Live rows, though the reference names it
+/// IMP-25.
+pub const IMP_25: &str = "IMP-25";
 
 /// The row of Beatlayer's own Close All Plug-in Windows (IMP-25), after
 /// Plug-In Windows: an improvement, so not a row of menus.md.
@@ -660,6 +666,7 @@ const VIEW: &[Row] = &[
         "Performance Impact",
         Cmd(MIXER_PERFORMANCE_IMPACT),
     ),
+    (IMP_25, "Devices", Cmd(MIXER_DEVICES)),
     ("M-VIEW-032-sep2", "", Action::Separator),
     ("M-VIEW-032g", "Return Tracks", Cmd(MIXER_RETURN_TRACKS)),
     // IMP-01's switch, straight after Return Tracks, with no key.
@@ -909,11 +916,12 @@ pub(crate) fn items(rows: &[Row]) -> Vec<MenuItem> {
             items: Vec::new(),
         };
         // A row joins the submenu above it when its ID starts with the
-        // submenu's, and so does IMP-01's row, which the reference names
-        // with its improvement's ID, when the row above it was one of the
-        // submenu's.
+        // submenu's, and so do IMP-01's and IMP-25's rows, which the
+        // reference names with their improvements' IDs, when the row above
+        // it was one of the submenu's.
         let joins = |submenu: &str| {
-            row.starts_with(submenu) || (row == IMP_01 && previous.starts_with(submenu))
+            row.starts_with(submenu)
+                || ((row == IMP_01 || row == IMP_25) && previous.starts_with(submenu))
         };
         let parent = out
             .last_mut()

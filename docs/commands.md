@@ -464,6 +464,7 @@ Each command has:
 | [`mixer.set_volume`](#mixerset_volume) | Set Track Volume | `edit` |  |  |
 | [`mixer.solo_exclusive`](#mixersolo_exclusive) | Solo Track Exclusively | `edit` |  |  |
 | [`mixer_view.crossfader`](#mixer_viewcrossfader) | Mixer Crossfader | `read` |  |  |
+| [`mixer_view.devices`](#mixer_viewdevices) | Mixer Devices | `read` |  |  |
 | [`mixer_view.focus`](#mixer_viewfocus) | Move Focus to Mixer | `read` | `Option+Shift+M` | `Alt+Shift+M` |
 | [`mixer_view.fold_chains`](#mixer_viewfold_chains) | Fold Rack Chains | `read` |  |  |
 | [`mixer_view.in_out`](#mixer_viewin_out) | Mixer In/Out | `read` | `Cmd+Option+I` | `Ctrl+Alt+I` |
@@ -6176,7 +6177,7 @@ Result: [`ChangeSet`](#changeset).
 
 **Select Device**. Permission: `read`. Contexts: `device-view`.
 
-Selects a device, as clicking its title bar does, or none with `null`. The Device View's keys (Delete, Cmd-C, Cmd-D, Cmd-R) act on it. Selecting changes nothing in the set.
+Selects a device, as clicking its title bar does, or none with `null`. The Device View's keys (Delete, Cmd-C, Cmd-D, Cmd-R) act on it. A device that floats in its own window also brings that window to the front. Selecting changes nothing in the set.
 
 Default keys: none.
 
@@ -8547,6 +8548,22 @@ Arguments:
 
 Result: [`MixerViewState`](#mixerviewstate).
 
+#### `mixer_view.devices`
+
+**Mixer Devices**. Permission: `read`. Contexts: `global`.
+
+Shows or hides the mixers' Devices section, as View > Mixer Controls > Devices does: between In/Out and Sends, each track's top-level devices in chain order, each with its activator and name. A click on a name selects the device and shows the Device View; a click on an activator switches the device. Hidden in a new install. Switches unless `shown` says which. Changes only the view; the devices and whether each is on are in the query tool's `track` devices, as `enabled`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `shown` | boolean or null | no | Show it (true) or hide it (false); switches it if left out. |
+
+Result: [`MixerViewState`](#mixerviewstate).
+
 #### `mixer_view.focus`
 
 **Move Focus to Mixer**. Permission: `read`. Contexts: `arrangement`.
@@ -8709,7 +8726,7 @@ Result: [`MixerViewState`](#mixerviewstate).
 
 **Mixer View State**. Permission: `read`. Contexts: `global`.
 
-Reports what the mixers show: whether the Session View's and the Arrangement View's mixers are shown and how far each is scrolled, and which sections (In/Out, Sends, the volume strips, the return tracks, the Performance Impact) show. The Performance Impact values are the engine's last, one entry per track: how many of the six segments are lit and the track's share of the set's processing time. Track values (volume, pan, the activator, Solo, Arm, routing, sends, the crossfader assignment) are in the set; read them with the query tool: a track with `detail: "full"` returns them as the set saves them. Changes nothing.
+Reports what the mixers show: whether the Session View's and the Arrangement View's mixers are shown and how far each is scrolled, and which sections (In/Out, Sends, the volume strips, the return tracks, the Performance Impact, the Devices) show. The Performance Impact values are the engine's last, one entry per track: how many of the six segments are lit and the track's share of the set's processing time. Track values (volume, pan, the activator, Solo, Arm, routing, sends, the crossfader assignment) are in the set; read them with the query tool: a track with `detail: "full"` returns them as the set saves them. Changes nothing.
 
 Default keys: none.
 
@@ -30328,6 +30345,7 @@ What `mixer_view.state` and the other view commands return.
 | `return_tracks_scroll` | boolean | yes | Whether the return tracks scroll with the tracks (IMP-01, the mixer view spec R21): they come after the drop area and only Main stays pinned. Off in a new install, so the returns stay pinned, as in Live. |
 | `track_options` | boolean | yes | Whether the tracks' Track Options sections show (track delay and Keep Monitoring Latency). Shown only while this shows; hidden in a new set. |
 | `performance_impact` | boolean | yes | Whether the Performance Impact section shows: under each strip, the six segments that light up from the left with the track's share of the set's processing time. Hidden in a new set. |
+| `devices` | boolean | yes | Whether the Devices section shows: between In/Out and Sends, each track's top-level devices with their activators (IMP-25, the mixer view spec R24). Hidden in a new install; the devices and whether each is on are the query tool's `track` devices with their `enabled`. |
 | `performance_impact_values` | array of [`TrackImpact`](#trackimpact) | yes | Each track's Performance Impact, as the engine last published it: the track, how many of its six segments are lit, and its share of the set's processing time (the mixer spec, R31). |
 | `gain_reduction` | array of [`TrackGainReduction`](#trackgainreduction) | yes | Each track's gain reduction, in the order the tracks run (IMP-25, R40); empty when no engine has published meters. |
 | `chains` | array of [`ChainStrip`](#chainstrip) | no | The chains folded out as strips, in the mixers' column order (racks spec, R27). |
@@ -30352,6 +30370,11 @@ What `mixer_view.state` and the other view commands return.
     },
     "crossfader": {
       "description": "Whether the Crossfader section shows: the tracks' A and B assign buttons and Main's crossfader. Hidden in a new set.",
+      "type": "boolean"
+    },
+    "devices": {
+      "default": false,
+      "description": "Whether the Devices section shows: between In/Out and Sends, each track's top-level devices with their activators (IMP-25, the mixer view spec R24). Hidden in a new install; the devices and whether each is on are the query tool's `track` devices with their `enabled`.",
       "type": "boolean"
     },
     "gain_reduction": {
@@ -30426,6 +30449,7 @@ What `mixer_view.state` and the other view commands return.
     "return_tracks_scroll",
     "track_options",
     "performance_impact",
+    "devices",
     "performance_impact_values",
     "gain_reduction"
   ],

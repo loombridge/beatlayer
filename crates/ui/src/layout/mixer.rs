@@ -152,6 +152,13 @@ pub const CROSSFADER_HEIGHT: f32 = 28.0;
 /// The Track Options section's height under the strip (L-MIX-005).
 pub const TRACK_OPTIONS_HEIGHT: f32 = 26.0;
 
+/// The Devices section's height, between In/Out and Sends (IMP-25, the
+/// mixer view spec R25): room for eight rows of [`DEVICE_ROW`].
+pub const DEVICES_HEIGHT: f32 = 112.0;
+
+/// One row of the Devices section (IMP-25, the mixer view spec R25).
+pub const DEVICE_ROW: f32 = 14.0;
+
 /// The Performance Impact section's height under the strip (L-MIX-007;
 /// its segments' sizes are [`unmeasured`]).
 pub const PERFORMANCE_IMPACT_HEIGHT: f32 = 12.0;
@@ -211,6 +218,9 @@ pub struct Sections {
     /// that light up with the track's share of the set's processing time.
     /// Hidden by default (observed).
     pub performance_impact: bool,
+    /// The Devices section: each track's top-level devices between In/Out
+    /// and Sends (IMP-25, the mixer view spec R24). Hidden by default.
+    pub devices: bool,
     /// Whether the return tracks scroll with the tracks (IMP-01, the mixer
     /// view spec R21). Off in a new install, so they stay pinned, as in
     /// Live.
@@ -227,6 +237,7 @@ impl Sections {
         returns: true,
         track_options: false,
         performance_impact: false,
+        devices: false,
         return_tracks_scroll: false,
     };
 
@@ -237,6 +248,9 @@ impl Sections {
         let mut height = COLOUR_STRIP;
         if self.in_out {
             height += IN_OUT_HEIGHT;
+        }
+        if self.devices {
+            height += DEVICES_HEIGHT;
         }
         if self.sends {
             height += SENDS_HEIGHT;
@@ -336,6 +350,8 @@ pub struct MixerLayout {
     pub main: Column,
     /// The In/Out section's rows, top and bottom, if it shows.
     pub in_out: Option<(f32, f32)>,
+    /// The Devices section's, if it shows.
+    pub devices: Option<(f32, f32)>,
     /// The Sends section's, if it shows.
     pub sends: Option<(f32, f32)>,
     /// The Crossfader section's, if it shows.
@@ -501,6 +517,7 @@ impl MixerLayout {
         let performance_impact = stack(sections.performance_impact, PERFORMANCE_IMPACT_HEIGHT);
         let strip = stack(sections.volume, STRIP_HEIGHT);
         let sends = stack(sections.sends, SENDS_HEIGHT);
+        let devices = stack(sections.devices, DEVICES_HEIGHT);
         let in_out = stack(sections.in_out, IN_OUT_HEIGHT);
         Self {
             area,
@@ -514,6 +531,7 @@ impl MixerLayout {
                 rect: main_rect,
             },
             in_out,
+            devices,
             sends,
             crossfader,
             track_options,
@@ -575,6 +593,9 @@ impl MixerLayout {
         };
         if let Some(span) = self.in_out {
             rows.push(super::row("L-MIX-001", "In/Out", across(span)));
+        }
+        if let Some(span) = self.devices {
+            rows.push(super::row("IMP-25", "Devices section", across(span)));
         }
         if let Some(span) = self.sends {
             rows.push(super::row("L-MIX-002", "Sends", across(span)));
@@ -861,6 +882,32 @@ pub fn performance_impact(column: Rect, span: (f32, f32)) -> [Rect; 6] {
     })
 }
 
+/// Where a Devices section's row `index` sits in a column (IMP-25, the
+/// mixer view spec R25 and R26), `scroll` points down: 14 points tall
+/// across the column, the first at the section's top.
+#[must_use]
+pub fn device_row(column: Rect, span: (f32, f32), index: usize, scroll: f32) -> Rect {
+    let top = span.0 + DEVICE_ROW * index as f32 - scroll;
+    Rect::from_min_max(
+        pos2(column.left(), top),
+        pos2(column.right(), top + DEVICE_ROW),
+    )
+}
+
+/// A Devices section row's parts (the mixer view spec R26): the activator
+/// square at its left, and the device's name across the rest.
+#[must_use]
+pub fn device_row_parts(row: Rect) -> (Rect, Rect) {
+    use unmeasured::PAD;
+    let side = row.height() - 4.0;
+    let square = Rect::from_min_size(
+        pos2(row.left() + PAD, row.center().y - side / 2.0),
+        egui::vec2(side, side),
+    );
+    let name = Rect::from_min_max(pos2(square.right() + PAD, row.top()), row.max);
+    (square, name)
+}
+
 /// The two Split Stereo Pan Mode controls beside the pan knob in a strip
 /// (the mixer spec, R29): to its left and right, each as tall as it.
 #[must_use]
@@ -1125,6 +1172,58 @@ mod tests {
         let hidden = SessionLayout::compute(view, None);
         assert_eq!(hidden.mixer, None);
         assert_eq!(hidden.status_row.bottom(), 766.0);
+    }
+
+    // Spec: mixer-view R25.
+    #[test]
+    fn the_devices_section_sits_between_in_out_and_sends_and_takes_the_slots_height() {
+        let view = main_view();
+        let plain = SessionLayout::compute(view, Some(Sections::DEFAULT));
+        let with = Sections {
+            devices: true,
+            ..Sections::DEFAULT
+        };
+        let session = SessionLayout::compute(view, Some(with));
+        // 112 points, in both mixers, taken from the clip slots and added to
+        // the Arrangement's mixer.
+        assert_eq!(DEVICES_HEIGHT, 112.0);
+        assert_eq!(
+            plain.slots.height() - session.slots.height(),
+            DEVICES_HEIGHT
+        );
+        assert_eq!(
+            plain.mixer.unwrap().top() - session.mixer.unwrap().top(),
+            DEVICES_HEIGHT
+        );
+        assert_eq!(
+            plain.mixer.unwrap().bottom(),
+            session.mixer.unwrap().bottom()
+        );
+        let layout = MixerLayout::compute(session.mixer.unwrap(), &tracks(4), 2, with, 0.0);
+        let before =
+            MixerLayout::compute(plain.mixer.unwrap(), &tracks(4), 2, Sections::DEFAULT, 0.0);
+        // Between In/Out and Sends, with every other section as tall as it
+        // was.
+        let devices = layout.devices.unwrap();
+        assert_eq!(devices.1 - devices.0, 112.0);
+        assert_eq!(layout.in_out.unwrap().1, devices.0);
+        assert_eq!(devices.1, layout.sends.unwrap().0);
+        let height = |span: Option<(f32, f32)>| span.map(|s| s.1 - s.0);
+        assert_eq!(height(layout.in_out), height(before.in_out));
+        assert_eq!(height(layout.sends), height(before.sends));
+        assert_eq!(height(layout.strip), height(before.strip));
+        assert_eq!(layout.strip, before.strip);
+        assert_eq!(layout.colour, before.colour);
+        // The Arrangement's mixer gains the same height.
+        assert_eq!(
+            arrangement_mixer(view, Sections::DEFAULT).top() - arrangement_mixer(view, with).top(),
+            DEVICES_HEIGHT
+        );
+        // Eight 14-point rows fill it, the first at its top.
+        let column = layout.columns[0].rect;
+        assert_eq!(device_row(column, devices, 0, 0.0).top(), devices.0);
+        assert_eq!(device_row(column, devices, 7, 0.0).bottom(), devices.1);
+        assert_eq!(device_row(column, devices, 2, 14.0).top(), devices.0 + 14.0);
     }
 
     // Spec: mixer-view R2.

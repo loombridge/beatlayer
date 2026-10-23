@@ -341,6 +341,9 @@ pub enum Effect {
     /// person types the new name; Return runs `locator.rename` with it
     /// (WP-6.24; the time editing spec, R8).
     RenameLocator(bl_model::LocatorId),
+    /// Bring a floating device's window to the front (the mixer view spec,
+    /// R28).
+    RaiseDeviceWindow(bl_model::DeviceId),
 }
 
 /// Where a gesture that edits the set is (WP-1.8b): see [`Shell::gesture`].
@@ -3874,6 +3877,12 @@ impl Shell {
             // for an agent that never polls the engine.
             self.audio.displays_into(self.devices.displays_mut());
         }
+        // Spec: mixer-view R28. Selecting a device that floats brings its
+        // window to the front.
+        let selected = (id == device_ids::SELECT)
+            .then(|| serde_json::from_value::<device_ids::SelectDeviceArgs>(args.clone()).ok())
+            .flatten()
+            .and_then(|a| a.device);
         let user_library = self.browser_view.user_library().map(Path::to_path_buf);
         let zoom = self.zoom();
         let auto_hide = self.prefs.auto_hide_plug_in_windows.0;
@@ -3911,6 +3920,15 @@ impl Shell {
         }
         if let Some(message) = outcome.message {
             self.set_message(message, false);
+        }
+        if let Some(device) = selected
+            && self
+                .floating_windows()
+                .windows
+                .iter()
+                .any(|w| w.device == device && w.shown)
+        {
+            self.effects.push(Effect::RaiseDeviceWindow(device));
         }
         if let Some(route) = outcome.browse {
             // Spec: device-chains R19. Hot-swapping shows the device's

@@ -34,6 +34,15 @@ pub fn check_peaks(peaks: &bl_media::peaks::Peaks, source: bl_media::ContentHash
     assert_eq!(&again, peaks, "a loaded peak file changes over a save");
 }
 
+/// Anything the clip file reader accepts saves again and decodes to the same
+/// clip file.
+pub fn check_clip_file(file: &bl_project::clip_file::ClipFile) {
+    let bytes = file.encode().expect("a loaded clip file encodes");
+    let again = bl_project::clip_file::ClipFile::decode(&bytes)
+        .expect("a re-encoded clip file loads");
+    assert_eq!(&again, file, "a loaded clip file changes over a save");
+}
+
 /// Anything the preset decoder accepts saves again and decodes to the same
 /// preset.
 pub fn check_preset(preset: &bl_project::preset::Preset) {

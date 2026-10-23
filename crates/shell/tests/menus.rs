@@ -122,6 +122,10 @@ fn every_shell_command_is_on_a_menu_or_a_control() {
         // The same page's Record Session automation in chooser (the Session
         // automation spec, R5).
         commands::SETTINGS_SET_RECORD_SESSION_AUTOMATION_IN,
+        // The Library page's Collect Files on Export chooser and User
+        // Library location (file management R7, browser R24).
+        commands::SETTINGS_SET_COLLECT_FILES_ON_EXPORT,
+        commands::SETTINGS_SET_USER_LIBRARY,
         // The Automation Arm button's context menu (the automation spec,
         // R18).
         commands::SETTINGS_SET_AUTOMATION_RECORD_MODE,

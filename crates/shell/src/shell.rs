@@ -40,12 +40,13 @@ use crate::auto_warp;
 use crate::browser::{self, BrowserError, BrowserView, Waker};
 use crate::clip_view::{self, ClipView};
 use crate::commands::{
-    self as ids, AutomationRecordModeArgs, ClipEnvelopeArgs, ClipTabArgs, DefaultLaunchModeArgs,
-    DefaultLaunchQuantizationArgs, DefaultSetArgs, DefaultWarpModeArgs, FileReport, FoldNotesArgs,
-    LaneArgs, LoopWarpShortSamplesArgs, PathArgs, RecordSessionAutomationInArgs, SampleEditorArgs,
-    SampleEditorResult, SaveAsArgs, SetResult, SettingsArgs, SwitchArgs, SwitchResult,
-    TemplateArgs, TemporaryFolderArgs, TemporaryFolderResult, TestToneArgs, TestToneState,
-    ThemeArgs, ViewResult, ViewState, ZoomArgs,
+    self as ids, AutomationRecordModeArgs, ClipEnvelopeArgs, ClipTabArgs, CollectFilesArgs,
+    DefaultLaunchModeArgs, DefaultLaunchQuantizationArgs, DefaultSetArgs, DefaultWarpModeArgs,
+    FileReport, FoldNotesArgs, LaneArgs, LoopWarpShortSamplesArgs, PathArgs,
+    RecordSessionAutomationInArgs, SampleEditorArgs, SampleEditorResult, SaveAsArgs, SetResult,
+    SettingsArgs, SwitchArgs, SwitchResult, TemplateArgs, TemporaryFolderArgs,
+    TemporaryFolderResult, TestToneArgs, TestToneState, ThemeArgs, UserLibraryArgs,
+    UserLibraryResult, ViewResult, ViewState, ZoomArgs,
 };
 use crate::commands::{AppearanceArgs, BrightnessArgs, HueArgs, PercentArgs, ToneArgs};
 use crate::detail::DetailArea;
@@ -97,7 +98,7 @@ use bl_shell_spec::session_record as session_record_ids;
 use bl_shell_spec::session_view as session_ids;
 use bl_shell_spec::settings::{
     AgentsPageSettings, AudioPageSettings, DisplayInputSettings, FileFolderSettings, LaunchPrefs,
-    STATE as SETTINGS_STATE, SettingsState, ThemeColorsSettings,
+    LibrarySettings, STATE as SETTINGS_STATE, SettingsState, ThemeColorsSettings,
 };
 use bl_shell_spec::slice as slice_ids;
 use bl_shell_spec::stems as stems_ids;
@@ -283,6 +284,9 @@ pub enum Effect {
     /// Ask for a folder, then run `settings.set_temporary_folder` with it
     /// (WP-4.20).
     PickTemporaryFolder,
+    /// Ask for a folder, then run `settings.set_user_library` with it
+    /// (browser R24).
+    PickUserLibrary,
     /// Ask for a program, then run `settings.set_sample_editor` with it
     /// (WP-4.10b).
     PickSampleEditor,
@@ -822,10 +826,14 @@ fn clip_marker_command(id: &str) -> bool {
 
 /// Whether `id` is one of the Arrangement's own clip drags, which the
 /// document runs per frame as gestures: stretching a warped clip's edge (the
-/// warping spec, R47) and sliding a clip's contents (R54), each one undo step
-/// however far the drag goes.
+/// warping spec, R47), sliding a clip's contents (R54) and dragging a fade's
+/// handles (the audio clips spec, R27), each one undo step however far the drag
+/// goes.
 fn arrangement_clip_command(id: &str) -> bool {
-    matches!(id, "clip.stretch" | "clip.slide_contents")
+    matches!(
+        id,
+        "clip.stretch" | "clip.slide_contents" | "clip.set_fades" | "arrangement.set_crossfade"
+    )
 }
 
 /// Whether `id` is an edit the Sample Editor makes to an audio clip's
@@ -847,6 +855,7 @@ fn marker_label(id: &str) -> &'static str {
     match id {
         "clip.stretch" => "Stretch clip",
         "clip.slide_contents" => "Slide clip contents",
+        "clip.set_fades" | "arrangement.set_crossfade" => "Change Fade",
         model::SET_MIDI_REGION | "clip.set_region" => "Change clip region",
         model::SET_MIDI_LOOP | "clip.set_loop" => "Change clip loop",
         "clip.insert_warp_marker" | "clip.move_warp_markers" => "Move warp markers",
@@ -2395,6 +2404,14 @@ impl Shell {
             },
             launch: self.prefs.launch,
             record_session_automation_in: self.prefs.record_session_automation_in,
+            library: LibrarySettings {
+                collect_files_on_export: self.prefs.collect_files_on_export,
+                user_library: self
+                    .browser_view
+                    .user_library()
+                    .map(|path| path.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+            },
             automation_record_mode: self.prefs.automation_record_mode,
             auto_hide_plug_in_windows: self.auto_hide_plug_in_windows(),
             plug_ins: self.plugin_settings(),
@@ -4488,6 +4505,43 @@ impl Shell {
         self.touch();
     }
 
+    /// Waits for the browser's index to finish, up to `timeout`, for tests
+    /// and tools. Returns whether it finished.
+    #[doc(hidden)]
+    pub fn wait_for_browser_index(&mut self, timeout: std::time::Duration) -> bool {
+        self.browser_view.wait_for_index(timeout)
+    }
+
+    /// What Collect Files on Export is set to (Settings ▸ Library).
+    #[must_use]
+    pub fn collect_files_on_export(&self) -> bl_shell_spec::settings::CollectFiles {
+        self.prefs.collect_files_on_export
+    }
+
+    /// Whether saving `clip` into `folder` (the User Library's `Clips` folder
+    /// when `None`) as a clip file must ask the person first: Collect Files
+    /// on Export is Ask and the clip or its track's devices play an audio
+    /// file outside the project the file lands in (file management R8). The
+    /// answer goes to `clip.save_file` as `copy`.
+    #[must_use]
+    pub fn clip_save_asks(&self, clip: bl_model::ClipId, folder: Option<&Path>) -> bool {
+        let library = self.browser_view.user_library();
+        let Some(folder) = folder
+            .map(Path::to_path_buf)
+            .or_else(|| library.map(|library| library.join("Clips")))
+        else {
+            return false;
+        };
+        self.prefs.collect_files_on_export == bl_shell_spec::settings::CollectFiles::Ask
+            && crate::clip_files::uses_outside(
+                self.editor.document(),
+                &self.media,
+                clip,
+                &folder,
+                library,
+            )
+    }
+
     /// Takes background work's news: the browser's index, a decoded
     /// preview, a preview that finished. The host calls it every frame and
     /// when woken; a failure shows in the Status Bar. Returns whether
@@ -4726,6 +4780,7 @@ impl Shell {
     /// the shell.
     fn run_browser(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
         self.analysis_cache();
+        let search = self.browser_view.search_folders();
         let context = browser::Context {
             insert_marker: self.arrangement.insert_marker(),
             selected_track: self.arrangement.selected_tracks().first().copied(),
@@ -4737,6 +4792,8 @@ impl Shell {
                 prefs: self.prefs.warp,
                 analysis: self.analysis.as_ref(),
             },
+            collect_files: self.prefs.collect_files_on_export,
+            search: &search,
         };
         let outcome = self
             .browser_view
@@ -5002,6 +5059,7 @@ impl Shell {
         }
         self.editor.begin(label);
         let launch = self.launch_settings();
+        let edge_fades = self.create_fades_on_clip_edges();
         let run = |editor: &mut Editor,
                    arrangement: &mut ArrangementView,
                    clip_view: &mut ClipView,
@@ -5059,6 +5117,7 @@ impl Shell {
                     editor,
                     arrangement,
                     clipboard,
+                    edge_fades,
                 )
             }
         };
@@ -5150,6 +5209,7 @@ impl Shell {
                     &mut self.editor,
                     &mut self.arrangement,
                     &mut self.clipboard,
+                    self.prefs.create_fades_on_clip_edges.0,
                 )
                 .map(|_| ())
             };
@@ -5682,6 +5742,7 @@ impl Shell {
                     .map(|(track, ..)| *track)
                     .chain(midi.iter().map(|take| take.track))
                     .collect();
+                let before = self.editor.document().clone();
                 self.editor.transact(label, |editor| {
                     for (track, hash, path, _) in &imported {
                         let id = editor.new_id();
@@ -5711,7 +5772,10 @@ impl Shell {
                         })?;
                     }
                     crate::recording::place_midi(editor, &midi, take, rate, overdub, &mut placed)?;
-                    crate::session_capture::place(editor, &watch, &runs, &armed, end)
+                    crate::session_capture::place(editor, &watch, &runs, &armed, end)?;
+                    // Spec: audio-clips R26. A take that meets a clip
+                    // already there is crossfaded with it.
+                    crate::arrangement::fades::settle(editor, &before, edge_fades)
                 })
             }
             Some(_) => {
@@ -6157,6 +6221,11 @@ impl Shell {
             // Spec: time-editing R4. The Create menu's Add Locator reads
             // Delete Locator while a locator is selected.
             locator_ids::DELETE => Some("Delete Locator".to_owned()),
+            // Spec: audio-clips R28. Create ▸ Create Fade reads Create Fade
+            // In/Out or Create Crossfade as the selection gives one.
+            edit_ids::CREATE_FADE => Some(
+                editing::create_fade_label(self.editor.document(), &self.arrangement).to_owned(),
+            ),
             model::UNDO => Some(self.editor.undo_history().next().map_or_else(
                 || "Nothing to Undo".to_owned(),
                 |step| format!("Undo {step}"),
@@ -6553,7 +6622,11 @@ impl Shell {
                 .is_some_and(|schema| bl_commands::validate(schema, &args).is_ok())
                 // Spec: time-editing R4. The Delete key deletes the
                 // selected locators while there are any.
-                && !(id == edit_ids::DELETE && !self.arrangement.selected_locators().is_empty())
+                && !(id == edit_ids::DELETE
+                    && (!self.arrangement.selected_locators().is_empty()
+                        // Spec: audio-clips R29. Delete deletes the selected
+                        // fade handle's fade instead.
+                        || self.arrangement.selected_fade().is_some()))
                 && editing::can_run(
                     id,
                     &args,
@@ -7012,6 +7085,10 @@ impl Shell {
             }
             ids::SETTINGS_SET_TEMPORARY_FOLDER if !has("path") => {
                 self.effects.push(Effect::PickTemporaryFolder);
+                Ok(Value::Null)
+            }
+            ids::SETTINGS_SET_USER_LIBRARY if !has("path") => {
+                self.effects.push(Effect::PickUserLibrary);
                 Ok(Value::Null)
             }
             ids::SETTINGS_SET_SAMPLE_EDITOR if !has("path") => {
@@ -7864,6 +7941,7 @@ impl Shell {
                 &mut self.editor,
                 &mut self.arrangement,
                 &mut self.clipboard,
+                self.prefs.create_fades_on_clip_edges.0,
             )
             .map_err(|failure| edit_error(id, failure));
             if *self.editor.document() != before {
@@ -8202,6 +8280,7 @@ impl Shell {
                 .map(|scene| scene.id)
                 .collect();
             let edge_fades = self.prefs.create_fades_on_clip_edges.0;
+            let search = self.browser_view.search_folders();
             self.analysis_cache();
             // Spec: session-view R24. Capture and Insert Scene copies the
             // clips the engine plays, whichever scene they sit in.
@@ -8234,6 +8313,7 @@ impl Shell {
                         launch_mode: self.prefs.launch.default_mode,
                         capture,
                         launch_quantization: self.prefs.launch.default_quantization,
+                        search: &search,
                     },
                 )
                 .map_err(|error| match error {
@@ -8256,6 +8336,9 @@ impl Shell {
             if outcome.document_changed {
                 self.dirty = true;
                 self.document_changed();
+            }
+            if let Some(message) = outcome.message {
+                self.set_message(message, false);
             }
             if let Some(scene) = outcome.captured {
                 // Spec: session-view R24. The playing clips carry on in the
@@ -8307,6 +8390,45 @@ impl Shell {
             let loaded = self.load_browser_plugin(id, &plugin)?;
             self.touch();
             return Ok(loaded);
+        }
+        if id == browser_ids::LOAD_SELECTED
+            && self.main_view == MainView::Session
+            && !self.browser_view.selected_clip_files().is_empty()
+        {
+            // Spec: clip files R10. With the Session View shown, the selected
+            // clip files go in the selected slot when it is empty and on a
+            // track of their kind, otherwise on a new track in the selected
+            // scene.
+            Self::args::<NoArgs>(id, args)?;
+            let files = self.browser_view.selected_clip_files();
+            let selected = self.session.first_slot();
+            let doc = self.editor.document();
+            let wanted = match browser::listing::clip_kind(&files[0]) {
+                Some(bl_shell_spec::browser::ClipFileKind::Midi) => TrackKind::Midi,
+                _ => TrackKind::Audio,
+            };
+            let scene = selected
+                .map(|slot| slot.scene)
+                .or_else(|| self.session.state().scenes.first().copied())
+                .or_else(|| doc.scenes().next().map(|scene| scene.id))
+                .ok_or_else(|| ShellError::Unavailable {
+                    command: id.to_owned(),
+                    reason: "the set has no scene".to_owned(),
+                })?;
+            let track = selected
+                .filter(|slot| {
+                    doc.slot(slot.track, slot.scene).is_none()
+                        && doc.track(slot.track).is_some_and(|t| t.kind() == wanted)
+                })
+                .map(|slot| slot.track);
+            let paths: Vec<String> = files
+                .iter()
+                .map(|p| p.to_string_lossy().into_owned())
+                .collect();
+            return self.run(
+                session_ids::DROP_FILES,
+                json!({ "paths": paths, "track": track, "scene": scene }),
+            );
         }
         if id == browser_ids::LOAD_SELECTED
             && let Some(path) = self.browser_view.selected_sfz()
@@ -9791,6 +9913,41 @@ impl Shell {
                 self.save_preferences();
                 Ok(to_value(&TemporaryFolderResult {
                     path: self.temporary_folder().to_string_lossy().into_owned(),
+                }))
+            }
+            ids::SETTINGS_SET_COLLECT_FILES_ON_EXPORT => {
+                let CollectFilesArgs { mode } = Self::args(id, args)?;
+                self.prefs.collect_files_on_export = mode;
+                self.save_preferences();
+                Ok(Value::Null)
+            }
+            ids::SETTINGS_SET_USER_LIBRARY => {
+                let UserLibraryArgs { path } = Self::args(id, args)?;
+                let chosen = path.map(PathBuf::from);
+                if chosen.as_deref().is_some_and(|path| !path.is_absolute()) {
+                    return Err(ShellError::InvalidArgs {
+                        command: id.to_owned(),
+                        message: "the User Library's path must be absolute".to_owned(),
+                    });
+                }
+                let library = chosen
+                    .clone()
+                    .or_else(browser::places::default_user_library);
+                if let Some(library) = &library {
+                    browser::places::make_user_library(library).map_err(|e| {
+                        ShellError::Failed {
+                            command: id.to_owned(),
+                            message: format!("couldn't make {}: {e}", library.display()),
+                        }
+                    })?;
+                }
+                self.prefs.browser.user_library = chosen;
+                self.browser_view.set_user_library(library.clone());
+                self.save_preferences();
+                Ok(to_value(&UserLibraryResult {
+                    path: library
+                        .map(|path| path.to_string_lossy().into_owned())
+                        .unwrap_or_default(),
                 }))
             }
             ids::SETTINGS_SET_SAMPLE_EDITOR => {

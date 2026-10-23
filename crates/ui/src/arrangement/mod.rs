@@ -19,6 +19,7 @@ pub mod automation;
 pub mod benchmark;
 pub mod context_menu;
 pub mod editing;
+pub mod fades;
 pub mod gpu;
 pub mod headers;
 pub mod peaks;
@@ -210,6 +211,8 @@ pub struct ArrangementUi {
     /// Where the last frame put the track lanes (WP-2.12), for working out
     /// an automation lane's rectangle.
     lanes: Option<Rect>,
+    /// The fade handles the last frame drew (WP-6.51).
+    fades_drawn: fades::Drawn,
 }
 
 impl std::fmt::Debug for ArrangementUi {
@@ -353,7 +356,15 @@ impl ArrangementUi {
             mixer: None,
             described: Vec::new(),
             lanes: None,
+            fades_drawn: fades::Drawn::default(),
         }
+    }
+
+    /// The fade handles the last frame drew (WP-6.51), and the dotted line
+    /// of the selected handle's limit.
+    #[must_use]
+    pub fn drawn_fades(&self) -> &fades::Drawn {
+        &self.fades_drawn
     }
 
     /// The playhead the last frame drew: the position it showed, and its x
@@ -608,6 +619,25 @@ impl ArrangementUi {
             self.menus.show(ui, shell, events);
         });
         self.draw_overlays(ui, view, theme, &layout, horizontal);
+        {
+            let clip_lanes = Lanes {
+                view,
+                doc,
+                rect: lanes,
+                horizontal,
+                shown: &self.shown,
+                rows: &self.rows,
+                scroll_y: view.scroll_y() as f32,
+            };
+            self.fades_drawn = fades::paint(
+                &ui.painter_at(lanes),
+                &clip_lanes,
+                theme,
+                ui.input(|i| i.pointer.latest_pos()),
+                self.clips.handles_held(),
+                view.selected_fade(),
+            );
+        }
         self.draw_automation(ui, shell, view, doc, theme, &layout, horizontal);
 
         // The rulers.
@@ -731,6 +761,12 @@ impl ArrangementUi {
             modifiers.ctrl && modifiers.alt
         };
         let keys = EditKeys::from(modifiers);
+        // Spec: audio-clips R27. F held shows every clip's fade handles
+        // (S-ARR-010, S-ENV-004).
+        self.clips.hold_handles(
+            ui.input(|i| i.key_down(Key::F) && i.modifiers.is_none())
+                && !ui.ctx().text_edit_focused(),
+        );
         let clip_lanes = Lanes {
             view,
             doc,
@@ -761,7 +797,11 @@ impl ArrangementUi {
             } else if automation {
                 Drag::Automation
             } else if self.clips.begin(&clip_lanes, press, keys, events) {
-                // WP-1.8b: a clip's title bar or edge.
+                // WP-1.8b: a clip's title bar or edge. Spec: clip files R3. A
+                // clip moved by its title bar can be dropped on the browser.
+                if self.clips.moving().is_some() {
+                    crate::browser::begin_clip_drag(ui.ctx());
+                }
                 Drag::Clips
             } else if keys.extend {
                 // Shift-drag extends the time selection (I-DRAG-010).
@@ -843,6 +883,9 @@ impl ArrangementUi {
         }
         // Esc abandons a clip drag; egui ends the drag on it too.
         if self.drag == Some(Drag::Clips) && ui.input(|i| i.key_pressed(Key::Escape)) {
+            if self.clips.moving().is_some() {
+                crate::browser::end_clip_drag(ui.ctx());
+            }
             self.clips.cancel(events);
             self.drag = None;
         }
@@ -852,7 +895,22 @@ impl ArrangementUi {
         }
         if response.drag_stopped() {
             match self.drag {
-                Some(Drag::Clips) => self.clips.end(&clip_lanes, pointer, keys, events),
+                Some(Drag::Clips) => {
+                    // Spec: clip files R3. Released over a folder or label of
+                    // the browser, a moved clip goes back where it was and
+                    // is saved as a clip file there.
+                    let moving = self.clips.moving();
+                    let target = moving.and_then(|_| crate::browser::end_clip_drag(ui.ctx()));
+                    match (moving, target) {
+                        (Some((clip, count)), Some(target)) => {
+                            self.clips.cancel(events);
+                            if count == 1 {
+                                crate::browser::save_clip(ui.ctx(), shell, clip, &target, events);
+                            }
+                        }
+                        _ => self.clips.end(&clip_lanes, pointer, keys, events),
+                    }
+                }
                 Some(Drag::Automation) => {
                     self.automation
                         .end(view, doc, horizontal, pointer, modifiers, events);

@@ -12,6 +12,7 @@
 
 pub mod automation;
 pub mod editing;
+pub(crate) mod fades;
 pub mod grid;
 pub mod locator;
 pub mod placing;
@@ -22,11 +23,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use bl_core::time::{Ticks, TimeSignature};
 use bl_model::{AutomationTarget, ClipId, Document, LocatorId, MixerParam, TrackId, TrackKind};
 use bl_shell_spec::arrangement::{
-    self as ids, ArrangementState, AutomationLane, FoldArgs, FoldGroupsArgs, FollowArgs,
-    InsertMarkerArgs, Lane, ScrollArgs, SelectTimeArgs, SelectTracksArgs, SetGridArgs,
-    ShowAutomationArgs, ShowRangeArgs, ShowTrackArgs, SwitchArgs, TimeRange, TrackHeightArgs,
-    ZoomArgs,
+    self as ids, ArrangementState, AutomationLane, FadeHandle, FadeHandleState, FoldArgs,
+    FoldGroupsArgs, FollowArgs, InsertMarkerArgs, Lane, ScrollArgs, SelectFadeHandleArgs,
+    SelectTimeArgs, SelectTracksArgs, SetGridArgs, ShowAutomationArgs, ShowRangeArgs,
+    ShowTrackArgs, SwitchArgs, TimeRange, TrackHeightArgs, ZoomArgs,
 };
+use bl_shell_spec::editing::Edge;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
@@ -175,6 +177,8 @@ pub struct ArrangementView {
     selected_clips: Vec<ClipId>,
     /// The selected locators (WP-6.24): see [`locator`].
     selected_locators: Vec<LocatorId>,
+    /// The selected fade handle (WP-6.51): see [`fades`].
+    selected_fade: Option<FadeHandleState>,
     title_bars: bool,
     time_selection: Option<(Ticks, Ticks)>,
     /// The lanes the time selection covers: each a track's own lane or its
@@ -248,6 +252,7 @@ impl ArrangementView {
             selected: Vec::new(),
             selected_clips: Vec::new(),
             selected_locators: Vec::new(),
+            selected_fade: None,
             title_bars: false,
             time_selection: None,
             time_selection_lanes: Vec::new(),
@@ -1093,8 +1098,28 @@ impl ArrangementView {
                     self.grid.snap = snap;
                 }
             }
+            ids::SELECT_FADE_HANDLE => {
+                let SelectFadeHandleArgs { clip, edge, handle } = parse(args)?;
+                self.selected_fade = match clip {
+                    None => None,
+                    Some(clip) => {
+                        if !doc.clip(clip).is_some_and(|c| c.data.is_audio()) {
+                            return Err(ViewError::InvalidArgs(format!(
+                                "no audio clip has the ID {}",
+                                clip.0
+                            )));
+                        }
+                        Some(FadeHandleState {
+                            clip,
+                            edge: edge.unwrap_or(Edge::Start),
+                            handle: handle.unwrap_or(FadeHandle::Peak),
+                        })
+                    }
+                };
+            }
             ids::SET_INSERT_MARKER => {
                 let InsertMarkerArgs { at, track } = parse(args)?;
+                self.selected_fade = None;
                 if let Some(track) = track {
                     self.targets(doc, Some(vec![track]))?;
                     self.selected = vec![track];
@@ -1118,6 +1143,7 @@ impl ArrangementView {
                 } = parse(args)?;
                 let tracks = self.targets(doc, Some(tracks))?;
                 self.selected_clips.clear();
+                self.selected_fade = None;
                 if add {
                     for track in tracks {
                         if !self.selected.contains(&track) {
@@ -1164,6 +1190,7 @@ impl ArrangementView {
                 };
                 self.time_selection = (end > start).then_some((start, end));
                 self.insert_marker = start;
+                self.selected_fade = None;
                 self.title_bars = false;
                 // Spec: arrangement-editing R2.
                 self.selected_clips.clear();
@@ -1294,6 +1321,12 @@ impl ArrangementView {
         self.scroll_y = saved.scroll_y;
     }
 
+    /// The selected fade handle (WP-6.51), if any.
+    #[must_use]
+    pub fn selected_fade(&self) -> Option<FadeHandleState> {
+        self.selected_fade
+    }
+
     /// The view's state, as every view command returns it.
     #[must_use]
     pub fn state(&self, doc: &Document) -> ArrangementState {
@@ -1320,6 +1353,7 @@ impl ArrangementView {
             selected_tracks: self.selected.clone(),
             selected_clips: self.selected_clips.clone(),
             selected_locators: self.selected_locators.clone(),
+            selected_fade: self.selected_fade,
             time_selection: self
                 .time_selection
                 .map(|(start, end)| TimeRange { start, end }),

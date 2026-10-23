@@ -5746,6 +5746,100 @@ fn an_agent_builds_an_articulation_map_by_command_and_reads_it_back() {
     assert_eq!(found["articulations"][1]["trigger"]["key"], 36);
 }
 
+/// An agent saves a clip as a clip file, places it on a new track, and reads
+/// both back, all by command ID (clip files R15).
+#[test]
+fn an_agent_saves_a_clip_file_places_it_and_reads_both_back() {
+    // Spec: clip-files R15, file-management R7.
+    let dir = TempDir::new("clip-files");
+    let library = dir.0.join("Library");
+    let mut client = bl_cli_mcp(&["--autonomous"]);
+    let tracks = default_tracks(&mut client);
+    for (command, args) in [
+        ("settings.set_user_library", json!({ "path": library })),
+        (
+            "settings.set_collect_files_on_export",
+            json!({ "mode": "ask" }),
+        ),
+    ] {
+        call(
+            &mut client,
+            "run",
+            json!({ "commands": [{ "command": command, "args": args }] }),
+        );
+    }
+    let made = call(
+        &mut client,
+        "run",
+        json!({ "commands": [
+            { "command": "clip.create",
+              "args": { "track": tracks[0], "clip": {
+                  "id": {"$new": "Idea"}, "name": "Idea", "start": 0, "length": 2 * BAR,
+                  "mute": false, "data": { "midi": { "notes": [
+                      { "key": 60, "velocity": 100, "start": 0, "length": BAR / 4 } ] } } } } },
+        ] }),
+    );
+    let idea = made["ids"]["Idea"].as_u64().expect("the clip's ID");
+    let saved = call(
+        &mut client,
+        "run",
+        json!({ "commands": [
+            { "command": "clip.save_file", "args": { "clip": idea } },
+        ] }),
+    );
+    assert_eq!(saved["ran"], 1, "{saved}");
+    let file = saved["results"][0]["result"]["path"].as_str().unwrap();
+    assert!(Path::new(file).ends_with("Clips/Idea.blclip"), "{saved}");
+    assert_eq!(saved["results"][0]["result"]["kind"], "midi");
+
+    // The settings and the new row read back.
+    let run_one = |client: &mut Client<Stdio>, command: &str| {
+        call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": command, "args": {} }] }),
+        )
+    };
+    let settings_state = run_one(&mut client, "settings.state");
+    let settings = &settings_state["results"][0]["result"]["library"];
+    assert_eq!(
+        settings["collect_files_on_export"], "ask",
+        "{settings_state}"
+    );
+    assert_eq!(settings["user_library"], json!(library), "{settings_state}");
+    let state = run_one(&mut client, "browser.state");
+    let browser = &state["results"][0]["result"];
+    assert_eq!(browser["renaming"], file, "{state}");
+    let row = browser["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["path"] == file)
+        .unwrap_or_else(|| panic!("the new row in {state}"));
+    assert_eq!(
+        (row["kind"].as_str(), row["clip_kind"].as_str()),
+        (Some("clip"), Some("midi"))
+    );
+
+    // Placing it makes a MIDI track, which the query tool reads back.
+    let placed = call(
+        &mut client,
+        "run",
+        json!({ "commands": [
+            { "command": "browser.add_to_arrangement", "args": { "paths": [file] } },
+        ] }),
+    );
+    let clips = &placed["results"][0]["result"]["clips"];
+    assert_eq!(clips.as_array().map(Vec::len), Some(1), "{placed}");
+    let after = default_tracks(&mut client);
+    assert_eq!(after.len(), tracks.len() + 1);
+    let made = placed["results"][0]["result"]["created_tracks"][0]
+        .as_u64()
+        .unwrap();
+    assert!(after.contains(&made));
+    assert!(client.into_transport().finish().unwrap().success());
+}
+
 // Spec: mixer-view R21. An agent switches the return tracks scrolling with
 // the tracks, and reads the switch back in the mixers' state.
 #[test]

@@ -55,7 +55,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        227,
+        229,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
              the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
              routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -89,7 +89,8 @@ fn every_document_command_is_registered() {
              track, WP-6.7 the two for the scales: set_clip_scale and set_scale, and \
              WP-6.24 seven for \
              locators: add_locator, delete_locator, move_locator, rename_locator, \
-             set_locator_info_text, loop_to_next_locator and set_song_start"
+             set_locator_info_text, loop_to_next_locator and set_song_start, and WP-6.51 the \
+             two for crossfades: set_crossfade and delete_crossfade"
     );
 
     for op in &ops {
@@ -647,6 +648,59 @@ fn every_command_runs_by_id() {
             ..AudioData::new(ContentHash([0xab; 32]))
         }
     );
+    // Spec: audio-clips R30. A crossfade between two audio clips that meet,
+    // made and ended by ID, kept consistent on both clips.
+    let next_clip: ClipId = agent.new_id();
+    agent.run(
+        "clip.create",
+        json!({ "track": drums, "clip": {
+            "id": next_clip, "name": "Next", "start": bar, "length": bar, "mute": false,
+            "data": { "audio": { "media": "cd".repeat(32), "start": 0.5 } },
+        } }),
+    );
+    agent.run(
+        "arrangement.set_crossfade",
+        json!({ "track": drums, "boundary": bar, "before": 0.01, "after": 0.02, "curve": 0.25 }),
+    );
+    let fades = |agent: &Agent, clip: ClipId| {
+        let ClipData::Audio(audio) = agent.editor.document().clip(clip).unwrap().data.clone()
+        else {
+            panic!("an audio clip");
+        };
+        (
+            audio.fade_in,
+            audio.fade_in_before,
+            audio.fade_in_curve,
+            audio.fade_out,
+            audio.fade_out_after,
+            audio.fade_out_curve,
+        )
+    };
+    assert_eq!(
+        (fades(&agent, loop_clip).3, fades(&agent, loop_clip).4),
+        (0.01, 0.02)
+    );
+    assert_eq!(fades(&agent, loop_clip).5, 0.25);
+    assert_eq!(
+        (
+            fades(&agent, next_clip).0,
+            fades(&agent, next_clip).1,
+            fades(&agent, next_clip).2
+        ),
+        (0.02, 0.01, 0.25)
+    );
+    registry::run(
+        &mut agent.editor,
+        "arrangement.set_crossfade",
+        json!({ "track": drums, "boundary": bar * 3, "before": 0.01, "after": 0.02 }),
+    )
+    .expect_err("no clips meet there");
+    agent.run(
+        "arrangement.delete_crossfade",
+        json!({ "track": drums, "boundary": bar }),
+    );
+    assert_eq!(fades(&agent, next_clip), (0.0, 0.0, 0.0, 0.0, 0.0, 0.0));
+    agent.run("clip.delete", json!({ "clip": next_clip }));
     // A null end is the end of the file.
     agent.run(
         "clip.set_region",
@@ -2702,6 +2756,8 @@ fn schemas_match_what_commands_serialise() {
                 clip,
                 fade_in: 0.004,
                 fade_out: 1.5,
+                fade_in_curve: None,
+                fade_out_curve: None,
             },
         ),
         ("clip.set_warp", Command::SetClipWarp { clip, warp: true }),
@@ -3736,6 +3792,24 @@ fn schemas_match_what_commands_serialise() {
                 enabled: Some(true),
                 root: Some(2),
                 name: Some("dorian".to_owned()),
+            },
+        ),
+        // Spec: audio-clips R30.
+        (
+            "arrangement.set_crossfade",
+            Command::SetCrossfade {
+                track,
+                boundary: Ticks::WHOLE,
+                before: 0.002,
+                after: 0.002,
+                curve: 0.5,
+            },
+        ),
+        (
+            "arrangement.delete_crossfade",
+            Command::DeleteCrossfade {
+                track,
+                boundary: Ticks::WHOLE,
             },
         ),
         (

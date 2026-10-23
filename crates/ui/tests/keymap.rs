@@ -283,6 +283,69 @@ fn float_s_key_reaches_float_in_the_device_view_and_fades_in_the_arrangement() {
     assert_eq!(hit(Platform::Mac, cmd_option, &devices), None);
 }
 
+// Spec: audio-clips R27 to R29. The fade keys are bound: Cmd-Option-F and
+// Cmd-Option-Delete (Ctrl-Alt-F and Ctrl-Alt-Backspace) run Create Fade and
+// Delete Fades in the Arrangement, and F held shows the fade handles, which
+// the Arrangement View reads itself (S-ARR-010, S-ENV-004).
+#[test]
+fn the_fade_keys_are_bound() {
+    let keymap = Keymap::live12();
+    let command_of = |id: &str| {
+        let entry = keymap.entry_for(id).unwrap();
+        assert_eq!(entry.context, "arrangement", "{id}");
+        match &entry.status {
+            Status::Bound => Some(entry.commands[0].id.clone()),
+            Status::Widget(handler) => {
+                assert!(handler.contains("fade handles"), "{id}: {handler}");
+                None
+            }
+            other => panic!("{id} is {other:?}"),
+        }
+    };
+    assert_eq!(
+        command_of("S-ARR-008").as_deref(),
+        Some("arrangement.create_fade")
+    );
+    assert_eq!(
+        command_of("S-ARR-009").as_deref(),
+        Some("arrangement.delete_fades")
+    );
+    assert_eq!(command_of("S-ARR-010"), None);
+    assert_eq!(command_of("S-ENV-004"), None);
+    // The keys resolve to them in the Arrangement.
+    let arrangement = [Context::Arrangement, Context::Global];
+    for (platform, create, delete, delete_key) in [
+        (
+            Platform::Mac,
+            mods(true, false, true, false),
+            mods(true, false, true, false),
+            Key::Delete,
+        ),
+        (
+            Platform::Other,
+            mods(false, true, true, false),
+            mods(false, true, true, false),
+            Key::Backspace,
+        ),
+    ] {
+        let hit = |key, m| {
+            keymap
+                .resolve(platform, key, m, &arrangement)
+                .map(|hit| hit.command.id.clone())
+        };
+        assert_eq!(
+            hit(Key::F, create).as_deref(),
+            Some("arrangement.create_fade"),
+            "{platform:?}"
+        );
+        assert_eq!(
+            hit(delete_key, delete).as_deref(),
+            Some("arrangement.delete_fades"),
+            "{platform:?}"
+        );
+    }
+}
+
 // Spec: racks R9, R11. Group and Ungroup have their keys in the Device View
 // (S-DEV-001, S-DEV-002), and the Edit menu's items reach them there.
 #[test]

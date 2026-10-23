@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-704 commands in 43 areas.
+709 commands in 43 areas.
 
 ## Permission classes
 
@@ -198,6 +198,7 @@ Each command has:
 | [`clip.delete_envelope_breakpoint`](#clipdelete_envelope_breakpoint) | Delete Envelope Breakpoint | `edit` |  |  |
 | [`clip.delete_transients`](#clipdelete_transients) | Delete Transients | `edit` | `Cmd+Shift+Delete` | `Ctrl+Shift+Delete` |
 | [`clip.delete_warp_markers`](#clipdelete_warp_markers) | Delete Warp Markers | `edit` | `Delete` | `Delete` |
+| [`clip.duplicate_loop`](#clipduplicate_loop) | Duplicate Loop | `edit` | `Cmd+D` | `Ctrl+D` |
 | [`clip.edit_sample`](#clipedit_sample) | Edit Sample | `external` |  |  |
 | [`clip.insert_transient`](#clipinsert_transient) | Insert Transient | `edit` | `Cmd+Shift+I` | `Ctrl+Shift+I` |
 | [`clip.insert_warp_marker`](#clipinsert_warp_marker) | Insert Warp Marker | `edit` | `Cmd+I` | `Ctrl+I` |
@@ -242,6 +243,7 @@ Each command has:
 | [`clip.set_region`](#clipset_region) | Set Clip Start and End | `edit` |  |  |
 | [`clip.set_scale`](#clipset_scale) | Set Clip Scale | `edit` |  |  |
 | [`clip.set_segment_bpm`](#clipset_segment_bpm) | Set Warp Segment BPM | `edit` |  |  |
+| [`clip.set_signature`](#clipset_signature) | Set MIDI Clip Signature | `edit` |  |  |
 | [`clip.set_tempo_leader`](#clipset_tempo_leader) | Switch Lead/Follow | `edit` |  |  |
 | [`clip.set_velocity_amount`](#clipset_velocity_amount) | Set Clip Velocity Amount | `edit` |  |  |
 | [`clip.set_warp`](#clipset_warp) | Clip Warp On/Off | `edit` |  |  |
@@ -256,9 +258,12 @@ Each command has:
 | [`clip.warp_as_loop`](#clipwarp_as_loop) | Warp as Loop | `edit` |  |  |
 | [`clip.warp_from_here`](#clipwarp_from_here) | Warp From Here | `edit` |  |  |
 | [`clip.warp_selection_as_loop`](#clipwarp_selection_as_loop) | Warp Selection as Loop | `edit` |  |  |
+| [`clip_view.focus_mode`](#clip_viewfocus_mode) | Focus Mode | `read` | `N` | `N` |
+| [`clip_view.foreground`](#clip_viewforeground) | Foreground Clip | `read` |  |  |
 | [`clip_view.quantize_settings`](#clip_viewquantize_settings) | Quantize Settings | `read` | `Cmd+Shift+U` | `Ctrl+Shift+U` |
 | [`clip_view.sample_editor`](#clip_viewsample_editor) | Sample Editor State | `read` |  |  |
 | [`clip_view.sample_view`](#clip_viewsample_view) | Zoom Sample Editor | `read` | `Z`; `X`; `W`; `H` | `Z`; `X`; `W`; `H` |
+| [`clip_view.select_loop_bars`](#clip_viewselect_loop_bars) | Select Loop Bars | `read` |  |  |
 | [`clip_view.select_notes`](#clip_viewselect_notes) | Select Notes | `read` | `Cmd+A`; `Cmd+A` | `Ctrl+A`; `Ctrl+A` |
 | [`clip_view.select_time`](#clip_viewselect_time) | Select Time | `read` |  |  |
 | [`clip_view.select_transients`](#clip_viewselect_transients) | Select Transients | `read` |  |  |
@@ -3743,6 +3748,26 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `clip.duplicate_loop`
+
+**Duplicate Loop**. Permission: `edit`. Contexts: `loop-brace`.
+
+Doubles the loop brace of each MIDI clip (`clips`, or the clips of the selected loop bars, or the clip shown) and copies the notes inside it into the new half; notes after the loop's end move later with it, keeping their distance from the end. Cmd-D (Ctrl-D) with the loop brace or loop bars selected, and Duplicate in a loop bar's menu, run it. A clip whose loop would reach past the clip's end is refused. One undo step, named Duplicate Loop.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-LOOP-012 | `Cmd+D` | `Ctrl+D` | `loop-brace` | Duplicate Loop: double the loop and copy its notes into the new half | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clips` | array or null | no | The MIDI clips. Left out, the clips of the selected loop bars, or the clip shown. |
+
+Result: [`NoteEditResult`](#noteeditresult).
+
 #### `clip.edit_sample`
 
 **Edit Sample**. Permission: `external`. Contexts: `clip-view`.
@@ -3990,8 +4015,9 @@ Arguments:
 
 | Name | Type | Required | Description |
 |---|---|---|---|
-| `clip` | [`ClipId`](#clipid) | yes | The clip. |
 | `name` | string | yes | The new name. |
+| `clip` | [`ClipId`](#clipid) | no | The clip. |
+| `clips` | array of integer, at least 1 or object | no | Clips to make the same change to, as one undo step, in place of `clip`. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -4404,8 +4430,9 @@ Arguments:
 
 | Name | Type | Required | Description |
 |---|---|---|---|
-| `clip` | [`ClipId`](#clipid) | yes | The clip. |
 | `enabled` | boolean | yes | Whether the clip repeats its loop brace. |
+| `clip` | [`ClipId`](#clipid) | no | The clip. |
+| `clips` | array of integer, at least 1 or object | no | Clips to make the same change to, as one undo step, in place of `clip`. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -4421,8 +4448,9 @@ Arguments:
 
 | Name | Type | Required | Description |
 |---|---|---|---|
-| `clip` | [`ClipId`](#clipid) | yes | The MIDI clip. |
 | `start` | [`Ticks`](#ticks) | yes | Where the brace starts, in ticks from the clip's beginning. |
+| `clip` | [`ClipId`](#clipid) | no | The MIDI clip. |
+| `clips` | array of integer, at least 1 or object | no | Clips to make the same change to, as one undo step, in place of `clip`. |
 | `end` | [`Ticks`](#ticks) or null | no | Where it ends, in ticks, after `start`; `null` (or nothing) for the end of the clip. |
 
 Result: [`ChangeSet`](#changeset).
@@ -4461,8 +4489,9 @@ Arguments:
 
 | Name | Type | Required | Description |
 |---|---|---|---|
-| `clip` | [`ClipId`](#clipid) | yes | The clip. |
 | `mute` | boolean | yes | Whether it's muted. |
+| `clip` | [`ClipId`](#clipid) | no | The clip. |
+| `clips` | array of integer, at least 1 or object | no | Clips to make the same change to, as one undo step, in place of `clip`. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -4554,6 +4583,24 @@ Arguments:
 | `clip` | [`ClipId`](#clipid) | yes | The warped audio clip. |
 | `bpm` | number | yes | The tempo in BPM: positive, and from 1 to 1,000 for the clip's. |
 | `marker` | integer or null | no | The marker whose segment to set, by its place in the map, the first being 0: `null` (or nothing) for the first segment's tempo, which scales every segment. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `clip.set_signature`
+
+**Set MIDI Clip Signature**. Permission: `edit`. Contexts: `clip-view`.
+
+Sets a MIDI clip's time signature, as the Clip View's Signature fields do; `signature` `null` makes the clip follow the song's signature at its position.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | no | The MIDI clip. |
+| `clips` | array of integer, at least 1 or object | no | Clips to make the same change to, as one undo step, in place of `clip`. |
+| `signature` | [`TimeSignature`](#timesignature) or null | no | The clip's signature; `null` (or nothing) follows the song's at the clip's position. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -4817,6 +4864,42 @@ Result: [`ChangeSet`](#changeset).
 
 ### Area `clip_view`
 
+#### `clip_view.focus_mode`
+
+**Focus Mode**. Permission: `read`. Contexts: `note-editor`, `note-selection`.
+
+Switches Focus Mode (N, or the Focus button): a tap switches it, and holding N switches it while it's held. It acts while the note editor shows several clips: with it on, edits, drawing and the filters reach the foreground clip alone, and the others show grey. It is off when the app starts and isn't saved or an undo step. `on` says which way; left out, it switches. The result is the Clip View's state.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-NOTE-040 | `N` | `N` | `note-editor` | Toggle Focus Mode for multi-clip editing (momentary while held) | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean or null | no | Whether Focus Mode ends up on; left out, it switches. |
+
+Result: [`ClipViewState`](#clipviewstate).
+
+#### `clip_view.foreground`
+
+**Foreground Clip**. Permission: `read`. Contexts: `note-editor`, `note-selection`.
+
+Makes one of the clips the note editor shows the foreground clip, as clicking its note or its loop bar does: the expression lanes and the footer edit its notes alone, and with Focus Mode on it is the active clip. Changes only the view: it isn't saved with the set and isn't an undo step. The result is the Clip View's state.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The shown clip to make the foreground clip. |
+
+Result: [`ClipViewState`](#clipviewstate).
+
 #### `clip_view.quantize_settings`
 
 **Quantize Settings**. Permission: `read`. Contexts: `note-editor`, `note-selection`, `sample-editor`.
@@ -4878,6 +4961,23 @@ Arguments:
 
 Result: [`SampleEditorState`](#sampleeditorstate).
 
+#### `clip_view.select_loop_bars`
+
+**Select Loop Bars**. Permission: `read`. Contexts: `note-editor`, `note-selection`.
+
+Selects the loop bars above the note editor of the given clips, in place of the selected ones, or with `toggle` adds each to the selection or takes it out, as Cmd-click does (Ctrl-click on Windows). The last clip given becomes the foreground clip. With Focus Mode on only one bar can be selected. Changes only the view: it isn't an undo step. The result is the Clip View's state.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clips` | array of [`ClipId`](#clipid) | no | The clips whose loop bars to select; empty selects none. |
+| `toggle` | boolean | no | Add them to the selected bars, or take out those already selected, as Cmd-click does, instead of replacing the selection. |
+
+Result: [`ClipViewState`](#clipviewstate).
+
 #### `clip_view.select_notes`
 
 **Select Notes**. Permission: `read`. Contexts: `note-editor`, `note-selection`.
@@ -4897,6 +4997,7 @@ Arguments:
 |---|---|---|---|
 | `add` | boolean | no | Add to the selection instead of replacing it, as Shift with the note-jump keys does. |
 | `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows (the Arrangement's selected clip). |
+| `clips` | array or null | no | The clips, each with its notes, in place of `clip` and `notes` (Spec: multi-clip-editing R18). Left out with `clip` and `notes`, the selected notes of every clip shown, or of the active clip alone in Focus Mode. |
 | `mode` | [`NoteSelectMode`](#noteselectmode) | no | How to change the selection; `replace` if left out. |
 | `notes` | array of integer, at least 0 | no | The notes, by their place in the clip's notes in order (by start, then pitch). Empty with `replace` clears the selection, and empty with `select` chooses the notes `select` names. |
 | `select` | [`NoteSelection`](#noteselection) or null | no | What to select when `notes` is empty: the notes the keyboard reaches (Option with the arrows), every note in the clip's span (Cmd-A), or the notes at a pitch (a key in the piano ruler). |
@@ -8443,6 +8544,7 @@ Arguments:
 | `field` | [`NoteField`](#notefield) | yes | Which value to change. |
 | `by` | number | yes | How much to add to each note's value; negative lowers it. Whole numbers for the whole-number fields; for `chance`, a fraction (0.1 is 10 %). |
 | `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows (the Arrangement's selected clip). |
+| `clips` | array or null | no | The clips, each with its notes, in place of `clip` and `notes` (Spec: multi-clip-editing R18). Left out with `clip` and `notes`, the selected notes of every clip shown, or of the active clip alone in Focus Mode. |
 | `notes` | array or null | no | The notes, by their place in the clip's notes in order (by start, then pitch). Left out, the selected notes. |
 
 Result: [`NoteEditResult`](#noteeditresult).
@@ -8464,6 +8566,7 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows (the Arrangement's selected clip). |
+| `clips` | array or null | no | The clips, each with its notes, in place of `clip` and `notes` (Spec: multi-clip-editing R18). Left out with `clip` and `notes`, the selected notes of every clip shown, or of the active clip alone in Focus Mode. |
 | `notes` | array or null | no | The notes, by their place in the clip's notes in order (by start, then pitch). Left out, the selected notes, or with none selected the notes that start inside the time selection. |
 
 Result: [`NoteClipboardState`](#noteclipboardstate).
@@ -8485,6 +8588,7 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows (the Arrangement's selected clip). |
+| `clips` | array or null | no | The clips, each with its notes, in place of `clip` and `notes` (Spec: multi-clip-editing R18). Left out with `clip` and `notes`, the selected notes of every clip shown, or of the active clip alone in Focus Mode. |
 | `notes` | array or null | no | The notes, by their place in the clip's notes in order (by start, then pitch). Left out, the selected notes, or with none selected the notes that start inside the time selection. |
 
 Result: [`NoteEditResult`](#noteeditresult).
@@ -8507,6 +8611,7 @@ Arguments:
 |---|---|---|---|
 | `active` | boolean or null | no | Whether the notes end up active (`true`) or deactivated (`false`). Left out, they are deactivated, or activated when every one of them is deactivated already. |
 | `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows (the Arrangement's selected clip). |
+| `clips` | array or null | no | The clips, each with its notes, in place of `clip` and `notes` (Spec: multi-clip-editing R18). Left out with `clip` and `notes`, the selected notes of every clip shown, or of the active clip alone in Focus Mode. |
 | `notes` | array or null | no | The notes, by their place in the clip's notes in order (by start, then pitch). Left out, the selected notes. |
 
 Result: [`NoteEditResult`](#noteeditresult).
@@ -8528,6 +8633,7 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows (the Arrangement's selected clip). |
+| `clips` | array or null | no | The clips, each with its notes, in place of `clip` and `notes` (Spec: multi-clip-editing R18). Left out with `clip` and `notes`, the selected notes of every clip shown, or of the active clip alone in Focus Mode. |
 | `notes` | array or null | no | The notes, by their place in the clip's notes in order (by start, then pitch). Left out, the selected notes. |
 
 Result: [`NoteEditResult`](#noteeditresult).
@@ -8549,6 +8655,7 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows (the Arrangement's selected clip). |
+| `clips` | array or null | no | The clips, each with its notes, in place of `clip` and `notes` (Spec: multi-clip-editing R18). Left out with `clip` and `notes`, the selected notes of every clip shown, or of the active clip alone in Focus Mode. |
 | `notes` | array or null | no | The notes, by their place in the clip's notes in order (by start, then pitch). Left out, the selected notes, or with none selected the notes that start inside the time selection. |
 
 Result: [`NoteEditResult`](#noteeditresult).
@@ -8567,6 +8674,7 @@ Arguments:
 |---|---|---|---|
 | `by` | [`Ticks`](#ticks) or null | no | How far to move them in time, in ticks; negative is earlier. Give `by` or `semitones`, or both. |
 | `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows (the Arrangement's selected clip). |
+| `clips` | array or null | no | The clips, each with its notes, in place of `clip` and `notes` (Spec: multi-clip-editing R18). Left out with `clip` and `notes`, the selected notes of every clip shown, or of the active clip alone in Focus Mode. |
 | `copy` | boolean or null | no | Copy them instead of moving them, as Option-dragging a note does: the copies land where the notes would have gone and the originals stay. |
 | `notes` | array or null | no | The notes, by their place in the clip's notes in order (by start, then pitch). Left out, the selected notes. |
 | `semitones` | integer or null | no | How far to move them in pitch, in semitones; negative is lower. |
@@ -8612,6 +8720,7 @@ Arguments:
 |---|---|---|---|
 | `amount` | integer or null | no | How far each note moves toward its grid line, from 0 to 100 percent. |
 | `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows (the Arrangement's selected clip). |
+| `clips` | array or null | no | The clips, each with its notes, in place of `clip` and `notes` (Spec: multi-clip-editing R18). Left out with `clip` and `notes`, the selected notes of every clip shown, or of the active clip alone in Focus Mode. |
 | `grid` | [`Ticks`](#ticks) or null | no | The grid line spacing in ticks, over the Quantize settings. Lines are laid out from each bar's start, as the editing grid's are; a spacing of whole bars counts bars from 1.1.1. |
 | `notes` | array or null | no | The notes, by their place in the clip's notes in order (by start, then pitch). Left out, the selected notes. |
 | `target` | [`QuantizeTarget`](#quantizetarget) or null | no | What to move toward the grid. |
@@ -8634,6 +8743,7 @@ Arguments:
 | `from` | number | yes | The value the first note takes. |
 | `to` | number | yes | The value the last note takes. |
 | `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows (the Arrangement's selected clip). |
+| `clips` | array or null | no | The clips, each with its notes, in place of `clip` and `notes` (Spec: multi-clip-editing R18). Left out with `clip` and `notes`, the selected notes of every clip shown, or of the active clip alone in Focus Mode. |
 | `notes` | array or null | no | The notes, by their place in the clip's notes in order (by start, then pitch). Left out, the selected notes. |
 
 Result: [`NoteEditResult`](#noteeditresult).
@@ -8653,6 +8763,7 @@ Arguments:
 | `field` | [`NoteField`](#notefield) | yes | Which value to randomise: `velocity`, `release_velocity` or `chance`. |
 | `amount` | number | yes | How far from its value each note may move, in the field's own units: 0 to 127 for the velocities, 0 to 1 for `chance` (0.25 is 25 %). |
 | `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows (the Arrangement's selected clip). |
+| `clips` | array or null | no | The clips, each with its notes, in place of `clip` and `notes` (Spec: multi-clip-editing R18). Left out with `clip` and `notes`, the selected notes of every clip shown, or of the active clip alone in Focus Mode. |
 | `notes` | array or null | no | The notes, by their place in the clip's notes in order (by start, then pitch). Left out, the selected notes, or with none selected every note in the clip's span. |
 | `seed` | integer or null | no | Seeds the draw: the same seed with the same notes gives the same values. Left out, each call draws afresh. |
 
@@ -8672,6 +8783,7 @@ Arguments:
 |---|---|---|---|
 | `by` | [`Ticks`](#ticks) | yes | How far each note's end moves, in ticks; negative is shorter. A note keeps at least one tick of length. |
 | `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows (the Arrangement's selected clip). |
+| `clips` | array or null | no | The clips, each with its notes, in place of `clip` and `notes` (Spec: multi-clip-editing R18). Left out with `clip` and `notes`, the selected notes of every clip shown, or of the active clip alone in Focus Mode. |
 | `notes` | array or null | no | The notes, by their place in the clip's notes in order (by start, then pitch). Left out, the selected notes. |
 
 Result: [`NoteEditResult`](#noteeditresult).
@@ -8690,6 +8802,7 @@ Arguments:
 |---|---|---|---|
 | `field` | [`NoteField`](#notefield) | yes | Which value to set. |
 | `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows (the Arrangement's selected clip). |
+| `clips` | array or null | no | The clips, each with its notes, in place of `clip` and `notes` (Spec: multi-clip-editing R18). Left out with `clip` and `notes`, the selected notes of every clip shown, or of the active clip alone in Focus Mode. |
 | `notes` | array or null | no | The notes, by their place in the clip's notes in order (by start, then pitch). Left out, the selected notes. |
 | `value` | number or null | no | The value, within the field's range, for every one of the notes. Give this or `values`. |
 | `values` | array or null | no | One value for each of the notes, in the order they're named, each within the field's range: what drawing across a lane gives. Give this or `value`. |
@@ -13145,6 +13258,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`clip.delete_envelope_breakpoint`](#clipdelete_envelope_breakpoint) | the query tool's `clip` | `envelopes` |
 | [`clip.delete_transients`](#clipdelete_transients) | `clip.transients` | `transients` |
 | [`clip.delete_warp_markers`](#clipdelete_warp_markers) | the query tool's `clip` | `data.audio.warp_markers` |
+| [`clip.duplicate_loop`](#clipduplicate_loop) | the query tool's `clip` | `data.midi.loop_end` |
 | [`clip.edit_sample`](#clipedit_sample) | the query tool's `clip` | `data.audio.media` |
 | [`clip.insert_transient`](#clipinsert_transient) | `clip.transients` | `transients` |
 | [`clip.insert_warp_marker`](#clipinsert_warp_marker) | the query tool's `clip` | `data.audio.warp_markers` |
@@ -13187,6 +13301,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`clip.set_region`](#clipset_region) | the query tool's `clip` | `data.audio.start` |
 | [`clip.set_scale`](#clipset_scale) | the query tool's `clip` | `scale` |
 | [`clip.set_segment_bpm`](#clipset_segment_bpm) | the query tool's `clip` | `data.audio.warp_markers` |
+| [`clip.set_signature`](#clipset_signature) | the query tool's `clip` | `data.midi.signature` |
 | [`clip.set_tempo_leader`](#clipset_tempo_leader) | the query tool's `clip` | `data.audio.tempo_leader` |
 | [`clip.set_velocity_amount`](#clipset_velocity_amount) | the query tool's `clip` | `launch.velocity_amount` |
 | [`clip.set_warp`](#clipset_warp) | the query tool's `clip` | `data.audio.warp` |
@@ -17680,6 +17795,56 @@ One of:
 
 </details>
 
+### `ClipEdit`
+
+What an edit across several clips did in one of them.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The clip. |
+| `notes` | array of integer, at least 0 | yes | The notes the edit created or changed in it, by their place in its notes in order afterwards. |
+| `selected` | array of integer, at least 0 | yes | The notes selected in it afterwards. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What an edit across several clips did in one of them.",
+  "properties": {
+    "clip": {
+      "$ref": "#/$defs/ClipId",
+      "description": "The clip."
+    },
+    "notes": {
+      "description": "The notes the edit created or changed in it, by their place in its notes in order afterwards.",
+      "items": {
+        "format": "uint32",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": "array"
+    },
+    "selected": {
+      "description": "The notes selected in it afterwards.",
+      "items": {
+        "format": "uint32",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "clip",
+    "notes",
+    "selected"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `ClipEnvelope`
 
 An envelope a clip carries for a parameter of its track: the parameter it modulates, its breakpoints, and whether it follows the clip's timeline (`linked`, the default) or runs once from the clip's start (`false`).
@@ -17836,6 +18001,48 @@ A Session clip's own launch settings (the Clip View's Launch panel, WP-3.4). The
 
 </details>
 
+### `ClipNotes`
+
+Notes of one clip among several shown (Spec: multi-clip-editing R18).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The MIDI clip. |
+| `notes` | array or null | no | The notes, by their place in the clip's notes in order. Left out, the clip's selected notes. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "additionalProperties": false,
+  "description": "Notes of one clip among several shown (Spec: multi-clip-editing R18).",
+  "properties": {
+    "clip": {
+      "$ref": "#/$defs/ClipId",
+      "description": "The MIDI clip."
+    },
+    "notes": {
+      "description": "The notes, by their place in the clip's notes in order. Left out, the clip's selected notes.",
+      "items": {
+        "format": "uint32",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "clip"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `ClipTab`
 
 A tab of the Clip View: `notes` (the MIDI Note Editor) or `envelopes` (the clip's envelopes).
@@ -17974,8 +18181,12 @@ What the Clip View shows: which clip it is editing, the notes selected in it, it
 |---|---|---|---|
 | `visible` | boolean | yes | Whether the Clip View shows in the detail area. |
 | `draw_mode` | boolean | yes | Whether Draw Mode is on (B): clicking the note area adds a note, and clicking a note removes it. |
-| `clip` | [`ClipId`](#clipid) or null | yes | The clip the note editor shows; `null` when none does. |
-| `selected` | array of integer, at least 0 | yes | The selected notes, by their place in the clip's notes in order (by start, then pitch). |
+| `clip` | [`ClipId`](#clipid) or null | yes | The clip the note editor shows; `null` when none does. With several clips shown, the foreground clip. |
+| `clips` | array of [`ClipId`](#clipid) | yes | The clips the note editor shows, in the loop bars' order (Spec: multi-clip-editing R1, R2): none, one, or up to eight. |
+| `loop_bars` | array of [`ClipId`](#clipid) | yes | The loop bars selected, in the order of `clips`. |
+| `focus_mode` | boolean | yes | Whether Focus Mode is on (Spec: multi-clip-editing R13). |
+| `selected` | array of integer, at least 0 | yes | The selected notes of the foreground clip, by their place in its notes in order (by start, then pitch). |
+| `clip_selections` | array of [`ClipEdit`](#clipedit) | yes | The selected notes of every clip shown, by clip; the foreground clip's are `selected` too. |
 | `insert_marker` | [`Ticks`](#ticks) or null | yes | The insert marker, in ticks from the beginning of the clip's contents; `null` when there is none. |
 | `time_selection` | array or null | yes | The time selection's start and end, in ticks from the beginning of the clip's contents; `null` when there is none. |
 | `lane` | [`NoteField`](#notefield) | yes | The active lane: `velocity`, `chance` or `release_velocity`, whose controls the footer shows. |
@@ -18001,7 +18212,21 @@ What the Clip View shows: which clip it is editing, the notes selected in it, it
           "type": "null"
         }
       ],
-      "description": "The clip the note editor shows; `null` when none does."
+      "description": "The clip the note editor shows; `null` when none does. With several clips shown, the foreground clip."
+    },
+    "clip_selections": {
+      "description": "The selected notes of every clip shown, by clip; the foreground clip's are `selected` too.",
+      "items": {
+        "$ref": "#/$defs/ClipEdit"
+      },
+      "type": "array"
+    },
+    "clips": {
+      "description": "The clips the note editor shows, in the loop bars' order (Spec: multi-clip-editing R1, R2): none, one, or up to eight.",
+      "items": {
+        "$ref": "#/$defs/ClipId"
+      },
+      "type": "array"
     },
     "draw_mode": {
       "description": "Whether Draw Mode is on (B): clicking the note area adds a note, and clicking a note removes it.",
@@ -18017,6 +18242,10 @@ What the Clip View shows: which clip it is editing, the notes selected in it, it
         }
       ],
       "description": "The parameter whose envelope the Envelopes tab shows; `null` when it shows none."
+    },
+    "focus_mode": {
+      "description": "Whether Focus Mode is on (Spec: multi-clip-editing R13).",
+      "type": "boolean"
     },
     "folded": {
       "description": "Whether the note editor shows only the rows that hold notes (Fold, F).",
@@ -18048,12 +18277,19 @@ What the Clip View shows: which clip it is editing, the notes selected in it, it
       "description": "Whether the Show/Hide All Expression Editors switch has hidden every lane.",
       "type": "boolean"
     },
+    "loop_bars": {
+      "description": "The loop bars selected, in the order of `clips`.",
+      "items": {
+        "$ref": "#/$defs/ClipId"
+      },
+      "type": "array"
+    },
     "randomize": {
       "$ref": "#/$defs/RandomizeAmounts",
       "description": "The Randomize amounts of the three lanes."
     },
     "selected": {
-      "description": "The selected notes, by their place in the clip's notes in order (by start, then pitch).",
+      "description": "The selected notes of the foreground clip, by their place in its notes in order (by start, then pitch).",
       "items": {
         "format": "uint32",
         "minimum": 0,
@@ -18091,7 +18327,11 @@ What the Clip View shows: which clip it is editing, the notes selected in it, it
     "visible",
     "draw_mode",
     "clip",
+    "clips",
+    "loop_bars",
+    "focus_mode",
     "selected",
+    "clip_selections",
     "insert_marker",
     "time_selection",
     "lane",
@@ -28673,6 +28913,7 @@ What a note edit did, and what's selected afterwards.
 | `notes` | array of integer, at least 0 | yes | The notes the edit created or changed, by their place in the clip's notes in order afterwards. |
 | `selected` | array of integer, at least 0 | yes | The notes selected afterwards. |
 | `undo_step` | boolean | yes | Whether the edit was recorded as an undo step: false when it changed nothing. |
+| `clips` | array of [`ClipEdit`](#clipedit) | no | Across several clips (Spec: multi-clip-editing R18): what the edit did in each clip. `notes` and `selected` above are the first clip's. |
 
 <details><summary>JSON Schema</summary>
 
@@ -28680,6 +28921,13 @@ What a note edit did, and what's selected afterwards.
 {
   "description": "What a note edit did, and what's selected afterwards.",
   "properties": {
+    "clips": {
+      "description": "Across several clips (Spec: multi-clip-editing R18): what the edit did in each clip. `notes` and `selected` above are the first clip's.",
+      "items": {
+        "$ref": "#/$defs/ClipEdit"
+      },
+      "type": "array"
+    },
     "notes": {
       "description": "The notes the edit created or changed, by their place in the clip's notes in order afterwards.",
       "items": {

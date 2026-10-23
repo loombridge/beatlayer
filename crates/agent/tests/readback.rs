@@ -1441,3 +1441,55 @@ fn the_note_value_commands_run_by_id_and_read_back() {
     assert_ne!(after[2]["release_velocity"], before[2]["release_velocity"]);
     assert_eq!(after[0]["mute"], before[0]["mute"], "the others untouched");
 }
+
+// Spec: multi-clip-editing R9, R11, R18. The clip property commands take
+// `clips`, Duplicate Loop runs by ID, and the view commands report Focus Mode;
+// each effect reads back through the query tool.
+#[test]
+fn the_multi_clip_commands_run_by_id_and_read_back() {
+    let mut client = open(&fixture(), "multi-clip");
+    let keys = query(
+        &mut client,
+        json!({ "path": "track \"Keys\"", "detail": "full" }),
+    );
+    let clip = keys["saved"]["clips"]["items"][0]["id"].clone();
+    let midi = |client: &mut Client<InProcess>| -> Value {
+        query(client, json!({ "id": clip, "detail": "full" }))["saved"]["data"]["midi"].clone()
+    };
+    let run = |client: &mut Client<InProcess>, command: &str, args: Value| {
+        client
+            .call(
+                "run",
+                json!({ "label": "Multi", "commands": [{ "command": command, "args": args }] }),
+            )
+            .unwrap()
+            .ok()
+            .unwrap_or_else(|error| panic!("{command}: {error}"))
+    };
+    run(
+        &mut client,
+        "clip.set_midi_loop",
+        json!({ "clips": [clip], "start": 0, "end": BAR }),
+    );
+    run(
+        &mut client,
+        "clip.set_signature",
+        json!({ "clips": [clip], "signature": { "numerator": 3, "denominator": 4 } }),
+    );
+    assert_eq!(midi(&mut client)["loop_end"], BAR);
+    assert_eq!(midi(&mut client)["signature"]["numerator"], 3);
+    run(
+        &mut client,
+        "clip.duplicate_loop",
+        json!({ "clips": [clip] }),
+    );
+    let after = midi(&mut client);
+    assert_eq!(after["loop_end"], 2 * BAR, "the loop doubles");
+    assert_eq!(
+        after["notes"]["items"].as_array().unwrap().len(),
+        6,
+        "the notes in the loop are copied"
+    );
+    let state = run(&mut client, "clip_view.focus_mode", json!({ "on": true }));
+    assert!(state.to_string().contains("\"focus_mode\":true"), "{state}");
+}

@@ -453,6 +453,16 @@ const KEYS: &[Row] = &[
     ("C-KEYS-002", "Note spelling", Pending(None)),
 ];
 
+/// The menu a loop bar above the note editor opens while it shows several
+/// clips (C-LOOPBAR).
+const LOOP_BAR: &[Row] = &[("C-LOOPBAR-001", "Duplicate", Key(&["S-LOOP-012"]))];
+
+/// The menu a loop bar opens (C-LOOPBAR).
+#[must_use]
+pub fn loop_bar() -> Vec<MenuItem> {
+    items(LOOP_BAR)
+}
+
 /// The menu a note or the empty grid in the MIDI Note Editor opens
 /// (C-NOTE).
 #[must_use]
@@ -820,6 +830,7 @@ mod tests {
             (track(TrackMenu::default()), "(C-TRACK)"),
             (note(), "(C-NOTE)"),
             (keys(), "(C-KEYS)"),
+            (loop_bar(), "(C-LOOPBAR)"),
         ] {
             let Some(theirs) = reference(heading) else {
                 return;

@@ -2810,6 +2810,21 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("clip.set_loop", Exception(clip_view)),
         ("clip.set_loop_enabled", Exception(clip_view)),
         ("clip.set_midi_loop", Exception(clip_view)),
+        ("clip.set_signature", Exception(clip_view)),
+        (
+            "clip_view.foreground",
+            Exception(Equivalent(
+                "clicking a note, or a loop bar, which assistive technology reads by name and \
+                 activates (multi-clip editing R3, R10)",
+            )),
+        ),
+        (
+            "clip_view.select_loop_bars",
+            Exception(Equivalent(
+                "the loop bars above the note editor, which assistive technology reads by \
+                 name and activates (multi-clip editing R10)",
+            )),
+        ),
         ("clip.set_midi_region", Exception(clip_view)),
         ("clip.set_data", Exception(clip_view)),
         // The crop's document-level commands (WP-4.13): `clip.crop` is the

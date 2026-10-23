@@ -6255,6 +6255,15 @@ impl Shell {
                     // Spec: piano-roll. With the Clip View open, its MIDI
                     // Note Editor holds the detail area's keys.
                     Area::Detail if self.clip_view.visible() => {
+                        // Spec: multi-clip-editing R11. With loop bars
+                        // selected, Cmd-D duplicates their loops.
+                        if !self
+                            .clip_view
+                            .loop_bars(self.editor.document(), &self.arrangement)
+                            .is_empty()
+                        {
+                            contexts.push(Context::LoopBrace);
+                        }
                         contexts.push(Context::ClipView);
                         if self.clip_view.tab() == ClipTab::Envelopes {
                             contexts.push(Context::Envelope);
@@ -6268,10 +6277,11 @@ impl Shell {
                             contexts.push(Context::SampleEditor);
                         } else {
                             contexts.push(Context::NoteEditor);
-                            if !self
+                            if self
                                 .clip_view
-                                .selected_notes(self.editor.document(), &self.arrangement)
-                                .is_empty()
+                                .active_clips(self.editor.document(), &self.arrangement)
+                                .iter()
+                                .any(|clip| !self.clip_view.selection_of(*clip).is_empty())
                             {
                                 contexts.push(Context::NoteSelection);
                             }
@@ -7569,6 +7579,7 @@ impl Shell {
         self.poll_capture();
         let arranged = self.arrangement.selected_clips().to_vec();
         let slot = self.selected_slot_clip();
+        let slots = self.selected_slot_clips();
         let shown = self.shown_clip();
         let revision = self.document_revision;
         let generation = self.editor_generation;
@@ -7579,7 +7590,7 @@ impl Shell {
             self.refresh_search();
         }
         if result.is_ok() {
-            self.follow_clip_selection(id, &arranged, slot);
+            self.follow_clip_selection(id, &arranged, slot, &slots);
             // Spec: scales R10. Selecting a clip makes its scale the
             // current scale, and a change to that clip's scale changes it
             // with it.
@@ -7639,10 +7650,40 @@ impl Shell {
             .map(|clip| clip.id)
     }
 
+    /// The clips in the selected Session slots, in track then scene order.
+    fn selected_slot_clips(&self) -> Vec<bl_model::ClipId> {
+        let doc = self.editor.document();
+        let order = doc.track_order();
+        let mut slots = self.session.selected_slots().to_vec();
+        // Spec: multi-clip-editing R2. By track, then scene.
+        slots.sort_by_key(|slot| {
+            (
+                order.iter().position(|track| *track == slot.track),
+                doc.scene_position(slot.scene),
+            )
+        });
+        slots
+            .iter()
+            .filter_map(|slot| doc.slot(slot.track, slot.scene).map(|clip| clip.id))
+            .collect()
+    }
+
     /// The clips the Control Bar's scale controls change (the scales spec,
     /// R12): the Arrangement's selected clips, or the Session slot's clip.
     #[must_use]
     pub fn scale_targets(&self) -> Vec<bl_model::ClipId> {
+        // Spec: multi-clip-editing R9, R15. Every clip the note editor
+        // shows, or with Focus Mode on the active clip alone.
+        let active = self
+            .clip_view
+            .active_clips(self.editor.document(), &self.arrangement);
+        if active.len() > 1
+            || self
+                .clip_view
+                .focus_active(self.editor.document(), &self.arrangement)
+        {
+            return active;
+        }
         let arranged = self.arrangement.selected_clips();
         if !arranged.is_empty() {
             return arranged.to_vec();
@@ -7668,14 +7709,25 @@ impl Shell {
         id: &str,
         arranged: &[bl_model::ClipId],
         slot: Option<bl_model::ClipId>,
+        slots: &[bl_model::ClipId],
     ) {
         let now = self.selected_slot_clip();
+        let all = self.selected_slot_clips();
         let picked = matches!(
             id,
             session_ids::SELECT | session_ids::SELECT_ALL | session_ids::SELECT_EDGE
-        ) || now != slot;
-        if let Some(clip) = now.filter(|_| picked) {
-            self.clip_view.show_session_clip(clip);
+        ) || now != slot
+            || all != slots;
+        if now.is_some() && picked {
+            // Spec: multi-clip-editing R1, R3. Every selected slot's clip
+            // shows, the one clicked last being the foreground clip.
+            let doc = self.editor.document();
+            let last = self
+                .session
+                .anchor()
+                .and_then(|anchor| doc.slot(anchor.track, anchor.scene))
+                .map(|clip| clip.id);
+            self.clip_view.show_session_clips(all, last);
         } else if (matches!(id, edit_ids::SELECT_CLIPS | edit_ids::SELECT_ALL)
             || self.arrangement.selected_clips() != arranged)
             && !self.arrangement.selected_clips().is_empty()
@@ -9788,6 +9840,7 @@ impl Shell {
                 // Spec: piano-roll; M-VIEW-039, S-NOTE-038. View state only,
                 // saved with the set.
                 let FoldNotesArgs { clip, folded } = Self::args(id, args)?;
+                let args_clip_named = clip.is_some();
                 let clip = match clip {
                     Some(clip) => clip,
                     None => self
@@ -9806,6 +9859,14 @@ impl Shell {
                 }
                 let folded = folded.unwrap_or(!self.clip_view.is_folded(clip));
                 self.clip_view.set_folded(clip, folded);
+                if !args_clip_named {
+                    for other in self
+                        .clip_view
+                        .shown(self.editor.document(), &self.arrangement)
+                    {
+                        self.clip_view.set_folded(other, folded);
+                    }
+                }
                 Ok(to_value(
                     &self
                         .clip_view

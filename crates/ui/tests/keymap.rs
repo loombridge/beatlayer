@@ -851,6 +851,46 @@ fn zero_deactivates_the_selected_notes_and_the_value_keys_are_the_editors() {
     );
 }
 
+// Spec: multi-clip-editing R11, R13. N is Focus Mode's latch (S-NOTE-040) in
+// the note editor, and Cmd-D duplicates the loop (S-LOOP-012) when the loop
+// brace or loop bars are selected, ahead of the notes' Duplicate.
+#[test]
+fn n_switches_focus_mode_and_cmd_d_duplicates_the_loop_of_selected_bars() {
+    let keymap = Keymap::live12();
+    for id in ["S-NOTE-040", "S-LOOP-012"] {
+        let entry = keymap.entry_for(id).unwrap();
+        assert_eq!(entry.status, Status::Bound, "{id}");
+    }
+    let none = mods(false, false, false, false);
+    let hit = keymap
+        .resolve(
+            Platform::Mac,
+            Key::N,
+            none,
+            &[Context::NoteEditor, Context::Global],
+        )
+        .expect("N is bound in the note editor");
+    assert_eq!(hit.command.id, "clip_view.focus_mode");
+    assert_eq!(hit.entry.trigger, bl_ui::keymap::Trigger::Latch);
+    let command = mods(true, false, false, false);
+    let contexts = [
+        Context::LoopBrace,
+        Context::ClipView,
+        Context::NoteEditor,
+        Context::NoteSelection,
+        Context::Global,
+    ];
+    let hit = keymap
+        .resolve(Platform::Mac, Key::D, command, &contexts)
+        .expect("Cmd-D is bound");
+    assert_eq!(hit.command.id, "clip.duplicate_loop");
+    // Without a selected brace or bar it still duplicates the notes.
+    let hit = keymap
+        .resolve(Platform::Mac, Key::D, command, &contexts[1..])
+        .expect("Cmd-D is bound");
+    assert_eq!(hit.command.id, "note.duplicate");
+}
+
 #[test]
 fn the_tags_shortcuts_reach_their_commands() {
     // Spec: browser-tags R10 and R14.

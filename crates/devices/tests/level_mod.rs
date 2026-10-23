@@ -3,10 +3,7 @@
 //! Fall, and is held back by Delay; its audio passes untouched. Every block
 //! runs as a real-time section under the allocation trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_core::time::{Frames, TempoMap};
 use bl_devices::level_mod::{
     DELAY_BEATS, DELAY_MODE, DELAY_TIME, FALL, GAIN, RISE, level_mod_type,

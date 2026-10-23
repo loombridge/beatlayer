@@ -3,10 +3,7 @@
 //! Dry/Wet. Every block runs as a real-time section under the allocation
 //! trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_core::id::Id;
 use bl_core::time::{Bpm, TempoMap};
 use bl_devices::grain_delay::{

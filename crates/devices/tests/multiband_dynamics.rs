@@ -5,10 +5,7 @@
 //! sidechain key, the display, and renders that don't depend on the block
 //! size. Every block is a real-time section under the allocation trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use core::f64::consts::TAU;
 
 use bl_devices::multiband_dynamics::{

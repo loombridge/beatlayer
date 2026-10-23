@@ -3,10 +3,7 @@
 //! changes that glide, never as a new program, and a copy sends nothing.
 //! Each block runs as a real-time section under the allocation trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_devices::testing::{self, UTILITY_GAIN};
 use bl_engine::{Collector, Compiler, EngineConfig, NodeEvent, NodeKey, ParamValue, Update};
 use bl_model::{Command, DeviceId, Editor, TrackId, TrackKind};

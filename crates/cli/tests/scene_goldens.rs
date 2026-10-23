@@ -8,8 +8,6 @@
 //!
 //! The null test against the stored reference is in `golden.rs`.
 
-bl_rt::install_trap!();
-
 use bl_cli::golden::{SAMPLE_RATE, fixture};
 use bl_core::time::{Bpm, Frames, TempoMap, Ticks};
 use bl_engine::nodes::{BEAT_TONE, BeatTone};

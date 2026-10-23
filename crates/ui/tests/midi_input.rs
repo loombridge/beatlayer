@@ -3,8 +3,7 @@
 //! Computer MIDI Keyboard switch, and the letter keys that play notes while
 //! the keyboard is on and run their shortcuts while it is off.
 
-mod common;
-
+use crate::common;
 use bl_core::midi::{MidiInputEvent, MidiSource};
 use bl_midi_io::{Direction, TestBackend};
 use bl_shell::settings::SettingsPage;

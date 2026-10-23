@@ -4,8 +4,7 @@
 //! on a control is one undo step named for its parameter, and a tab's
 //! indicator lights while a routing sends to a control in it.
 
-mod common;
-
+use crate::common;
 use bl_devices::multisampler::{AUX_AMOUNT_A, AUX_DEST_A, AUX_ON, TRANSPOSE, dest, midi_param};
 use bl_model::{DeviceId, ParamId};
 use bl_shell::device_commands::{DeviceAdded, TITLE_BAR_HEIGHT, frame_width};

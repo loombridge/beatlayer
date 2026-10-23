@@ -16,8 +16,6 @@
 //!   headless through the engine's queue, with scheduled transport commands
 //!   among them, and every frame plays where the transport's rules put it.
 
-bl_rt::install_trap!();
-
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -1454,7 +1452,7 @@ fn with_result_format_toon_a_long_table_is_toon_and_anything_else_stays_compact_
     assert!(plain.text.starts_with("{\"tracks\":"), "{}", plain.text);
     assert!(
         long.text
-            .starts_with("tracks:\n  items[11]{clips,delay.unit,delay.value,devices,frozen,group,id,keep_monitoring_latency,kind,mixer.arm,mixer.mute,mixer.pan,mixer.pan_mode,mixer.solo,mixer.split_left,mixer.split_right,mixer.volume,mixer.volume_db,name,tracks_inside}:"),
+            .starts_with("tracks:\n  items[11]{clips,delay.unit,delay.value,devices,frozen,group,id,keep_monitoring_latency,kind,mixer.arm,mixer.mute,mixer.pan,mixer.pan_mode,mixer.solo,mixer.split_left,mixer.split_right,mixer.volume,mixer.volume_db,name,tracks_inside,tuning_bypass}:"),
         "{}",
         long.text
     );

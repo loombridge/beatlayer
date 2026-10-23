@@ -5,10 +5,7 @@
 //!
 //! Every block runs as a real-time section under the allocation trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use std::sync::atomic::Ordering::Relaxed;
 
 use bl_commands::Registry as Commands;

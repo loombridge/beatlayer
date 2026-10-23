@@ -3,13 +3,13 @@
 //! Fold and the window. Every block is a real-time section under the
 //! allocation trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
-use bl_devices::remap::{BASE, FOLD, LOWEST, RANGE, REMAP, TRANSPOSE, map};
+use crate::common;
+use bl_devices::remap::{BASE, FOLD, LOWEST, RANGE, REMAP, SCALE_NAME, TRANSPOSE, USE_SCALE, map};
 use bl_engine::NoteKind;
+use bl_engine::scales::ScaleRuns;
+use bl_model::{Scale, ScaleName};
 use common::chain::{BEAT_FRAMES, Chain, note, nothing_hangs};
+use common::{device, keys_on, node, off, on, registry, scaled_through};
 
 /// Plays one note per beat of `keys` through Scale and returns the keys of
 /// the note-ons.
@@ -94,4 +94,135 @@ fn notes_outside_the_window_pass_through() {
         &[48, 60, 72],
     );
     assert_eq!(keys, [48, 62, 72]);
+}
+
+/// The chooser's entry for `name`: User is 0 and the list follows.
+fn entry(name: ScaleName) -> f64 {
+    1.0 + ScaleName::ALL.iter().position(|n| *n == name).unwrap() as f64
+}
+
+/// The keys the twelve notes from C3 up leave Scale as, set by `params`
+/// under `scale`.
+fn twelve(params: &[(bl_model::ParamId, f64)], scale: Scale) -> Vec<u8> {
+    let mut remap = node(&registry(), &device(&bl_devices::remap_type(), params), 256);
+    let notes: Vec<_> = (0..12).map(|k| on(k, 60 + k as u8, 1 + k)).collect();
+    keys_on(&scaled_through(
+        remap.as_mut(),
+        &notes,
+        256,
+        ScaleRuns::of(scale),
+    ))
+}
+
+// Spec: midi-scale-map R10. A named scale sends each note to the scale note
+// nearest it, counted from Base, the lower of two: in-scale notes stay,
+// out-of-scale ones move.
+#[test]
+fn a_named_scale_sends_each_note_to_the_nearest_scale_note() {
+    let c_major = [(SCALE_NAME, entry(ScaleName::Major))];
+    assert_eq!(
+        twelve(&c_major, Scale::default()),
+        [60, 60, 62, 62, 64, 65, 65, 67, 67, 69, 69, 71]
+    );
+    // Counted from Base D, C3 is between B2 and C#3 and goes to the lower.
+    let d_major = [(SCALE_NAME, entry(ScaleName::Major)), (BASE, 2.0)];
+    let sent = twelve(&d_major, Scale::default());
+    assert_eq!(sent[0], 59);
+    assert!(
+        sent.iter()
+            .all(|k| Scale::new(2, ScaleName::Major).holds(*k))
+    );
+    // User keeps its Map columns, which a named scale leaves alone.
+    let mut remap = node(
+        &registry(),
+        &device(
+            &bl_devices::remap_type(),
+            &[(map(0), 5.0), (SCALE_NAME, entry(ScaleName::Major))],
+        ),
+        256,
+    );
+    let sent = scaled_through(
+        remap.as_mut(),
+        &[on(0, 60, 1)],
+        256,
+        ScaleRuns::of(Scale::default()),
+    );
+    assert_eq!(keys_on(&sent), [60], "the named scale, not the column");
+    let mut remap = node(
+        &registry(),
+        &device(&bl_devices::remap_type(), &[(map(0), 5.0)]),
+        256,
+    );
+    let sent = scaled_through(
+        remap.as_mut(),
+        &[on(0, 60, 1)],
+        256,
+        ScaleRuns::of(Scale::default()),
+    );
+    assert_eq!(keys_on(&sent), [65], "User: the column is back");
+}
+
+// Spec: midi-scale-map R11. Fold works only for User: with a named scale it
+// acts as off.
+#[test]
+fn fold_acts_as_off_with_a_named_scale() {
+    let named = [(SCALE_NAME, entry(ScaleName::MinorPentatonic))];
+    let folded = [(SCALE_NAME, entry(ScaleName::MinorPentatonic)), (FOLD, 1.0)];
+    assert_eq!(
+        twelve(&named, Scale::default()),
+        twelve(&folded, Scale::default())
+    );
+    // User still folds: column 0 sent to row 12 lands an octave above the
+    // note, which Fold brings back down.
+    let user = |fold| {
+        let mut remap = node(
+            &registry(),
+            &device(&bl_devices::remap_type(), &[(map(0), 12.0), (FOLD, fold)]),
+            256,
+        );
+        keys_on(&scaled_through(
+            remap.as_mut(),
+            &[on(0, 60, 1)],
+            256,
+            ScaleRuns::of(Scale::default()),
+        ))
+    };
+    assert_eq!(user(0.0), [72]);
+    assert_eq!(user(1.0), [60]);
+}
+
+// Spec: midi-scale-map R12. With Use Current Scale on, Base and Scale Name
+// follow the device's current scale; with its Scale Mode off every note stays
+// as it came, Transpose too.
+#[test]
+fn use_current_scale_takes_base_and_scale_name_from_the_current_scale() {
+    let follow = [(USE_SCALE, 1.0), (BASE, 5.0), (SCALE_NAME, 0.0)];
+    let d_dorian = Scale::new(2, ScaleName::Dorian);
+    let sent = twelve(&follow, d_dorian);
+    assert!(sent.iter().all(|k| d_dorian.holds(*k)), "{sent:?}");
+    assert_eq!(sent[2], 62, "D3 is in D Dorian and stays");
+    let transposing = [(USE_SCALE, 1.0), (TRANSPOSE, 5.0)];
+    assert_eq!(
+        twelve(&transposing, Scale::default()),
+        (60..72).collect::<Vec<u8>>()
+    );
+}
+
+// Spec: midi-scale-map R12, scales R17. A change of the current scale while a
+// note is held doesn't move it.
+#[test]
+fn a_scale_change_while_a_note_is_held_does_not_move_it() {
+    let mut remap = node(
+        &registry(),
+        &device(&bl_devices::remap_type(), &[(USE_SCALE, 1.0)]),
+        256,
+    );
+    let mut scale = ScaleRuns::of(Scale::new(0, ScaleName::Major));
+    scale.push(100, Scale::default());
+    let sent = scaled_through(remap.as_mut(), &[on(0, 61, 1), off(200, 61, 1)], 256, scale);
+    // C#3 went to C3 under C Major, and its note-off follows it there.
+    assert_eq!(
+        sent.iter().map(|n| (n.kind, n.key)).collect::<Vec<_>>(),
+        [(NoteKind::On, 60), (NoteKind::Off, 60)]
+    );
 }

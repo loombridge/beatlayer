@@ -4,8 +4,7 @@
 //! commands an agent runs, and the variations view stores, launches and edits
 //! them.
 
-mod common;
-
+use crate::common;
 use bl_model::{DeviceId, RackView, TrackId};
 use bl_shell::Area;
 use bl_shell::device_commands::DeviceAdded;

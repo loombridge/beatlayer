@@ -4,8 +4,7 @@
 //!
 //! Spec: one-shot-drum-sampler R22 and R23.
 
-mod common;
-
+use crate::common;
 use bl_devices::drum_sampler::{ENV_FOLLOWS_PITCH, PER_NOTE_BEND, drum_sampler_type};
 use bl_model::{DeviceId, DeviceKind, TrackId};
 use bl_shell::device_commands::DeviceAdded;

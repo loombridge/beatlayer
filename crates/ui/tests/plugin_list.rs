@@ -4,8 +4,7 @@
 //! Missing hides the plug-ins this computer has, and a click on a track's
 //! name in a row selects the device.
 
-mod common;
-
+use crate::common;
 use bl_model::{DeviceId, TrackId};
 use bl_ui::main_window::UiEvent;
 use common::{Harness, Node, Window};

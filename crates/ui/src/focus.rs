@@ -78,6 +78,8 @@ pub enum Slot {
     OutputType,
     /// The output channel chooser.
     OutputChannel,
+    /// A MIDI track's Bypass Tuning switch, while the set has a tuning.
+    TuningBypass,
     /// The send to the return track with this index.
     Send(usize),
 }
@@ -403,7 +405,7 @@ impl Slot {
             Self::InputChannel => Some(3),
             Self::Monitoring => Some(4),
             Self::OutputType => Some(5),
-            Self::OutputChannel => Some(6),
+            Self::OutputChannel | Self::TuningBypass => Some(6),
             _ => None,
         };
         if let Some(rank) = in_out {

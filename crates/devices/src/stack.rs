@@ -6,10 +6,10 @@
 
 use bl_engine::midi_clips::Rng;
 use bl_engine::{DeviceType, NoteBuffer, NoteEvent, NoteKind, Registry};
-use bl_model::{DeviceDescription, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
+use bl_model::{DeviceDescription, DeviceRole, ParamDescriptor, ParamId, ParamUnit, Scale};
 
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
-use crate::midi_fx::{Key, Router, seed, value};
+use crate::midi_fx::{Key, Router, scale_in_use, seed, value};
 
 /// The Chord device type's id.
 pub const STACK: &str = "beatlayer.stack";
@@ -42,7 +42,8 @@ pub const TENSION: ParamId = ParamId(3 * SHIFTS + 1);
 pub const CRESCENDO: ParamId = ParamId(3 * SHIFTS + 2);
 /// Sets the shifts from a chord played while it is on.
 pub const LEARN: ParamId = ParamId(3 * SHIFTS + 3);
-/// Reads the shifts in scale degrees (Phase 6).
+/// Reads the shifts in degrees of the device's current scale (the chord
+/// spec, R16); the title bar draws it.
 pub const USE_SCALE: ParamId = ParamId(3 * SHIFTS + 4);
 /// Lets a strum sound a key that is already sounding.
 pub const DUPLICATES: ParamId = ParamId(3 * SHIFTS + 5);
@@ -127,7 +128,8 @@ pub fn stack_type() -> DeviceType {
              the shifts.",
         ),
         ParamDescriptor::toggle(USE_SCALE, "Use Current Scale", false).describe(
-            "Reads the shifts in scale degrees. It does nothing until scales arrive in Phase 6.",
+            "Reads the shifts in degrees of the current scale instead of semitones, so the chord \
+             stays in the scale.",
         ),
         ParamDescriptor::toggle(DUPLICATES, "Play Duplicate Notes", false)
             .describe("Lets a strum sound a key that is already sounding or waiting to sound."),
@@ -137,7 +139,7 @@ pub fn stack_type() -> DeviceType {
         ),
     ]);
     DeviceType::native(STACK, "Chord", DeviceRole::MidiEffect)
-        .with_description(DeviceDescription::new(params))
+        .with_description(DeviceDescription::new(params).with_title_switch(USE_SCALE))
 }
 
 /// Adds Chord to `registry`.
@@ -162,13 +164,14 @@ pub fn strum_position(j: usize, n: usize, tension: f64) -> f64 {
 /// The shifts a chord sets while Learn is on: `held` is the keys down in the
 /// order they went down; the first is the root and the rest, up to six,
 /// become the shifts in order, each as its distance from the root in
-/// semitones. Shifts past the chord are 0.
+/// semitones, or in degrees of `scale` while Use Current Scale is on (a
+/// chromatic scale counts semitones). Shifts past the chord are 0.
 #[must_use]
-pub fn learn(held: &[u8]) -> [i32; SHIFTS as usize] {
+pub fn learn(held: &[u8], scale: &Scale) -> [i32; SHIFTS as usize] {
     let mut shifts = [0; SHIFTS as usize];
     if let Some((&root, rest)) = held.split_first() {
         for (shift, &key) in shifts.iter_mut().zip(rest) {
-            *shift = (i32::from(key) - i32::from(root)).clamp(-36, 36);
+            *shift = scale.degrees_between(root, key).clamp(-36, 36);
         }
     }
     shifts
@@ -198,10 +201,15 @@ impl NativeDevice for Stack {
                     // The note that came in, then the shifts that sound.
                     let mut order = [None::<usize>; SHIFTS as usize + 1];
                     let mut count = 1;
-                    for (n, &distance) in shifts.iter().enumerate() {
+                    // Spec: midi-chord R16. A shift counts degrees from the
+                    // scale note at or below the note, off the keyboard
+                    // playing nothing.
+                    let scale = scale_in_use(audio, params, USE_SCALE, note.offset);
+                    let added = |n: usize| scale.land_off(note.key, shifts[n]);
+                    for n in 0..shifts.len() {
                         let sounds = used(n)
                             && self.rng.next_f64() * 100.0 < value(params, chance(n as u32))
-                            && (0..=127).contains(&(i32::from(note.key) + distance));
+                            && (0..=127).contains(&added(n));
                         if sounds {
                             order[count] = Some(n);
                             count += 1;
@@ -216,7 +224,7 @@ impl NativeDevice for Stack {
                         let (key, share, made_id, follows) = match slot {
                             None => (note.key, 1.0, note.note_id, true),
                             Some(n) => (
-                                (i32::from(note.key) + shifts[*n]) as u8,
+                                added(*n) as u8,
                                 value(params, velocity(*n as u32)) / 100.0,
                                 per_note.then(|| self.router.fresh_id()),
                                 per_note,
@@ -264,7 +272,12 @@ impl NativeDevice for Stack {
                     }
                 }
                 NoteKind::Off | NoteKind::Choke => self.router.end(audio, &note, note.velocity),
-                NoteKind::Expression { .. } => self.router.expression(audio, &note),
+                // Spec: midi-chord R18
+                NoteKind::Expression { .. } => {
+                    let scale = scale_in_use(audio, params, USE_SCALE, note.offset);
+                    self.router
+                        .expression_by(audio, &note, |from, to, bend| scale.bend(from, to, bend));
+                }
                 // Spec: device-framework R39. A channel message passes through.
                 _ => audio.send(note),
             }

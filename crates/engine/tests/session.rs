@@ -4,10 +4,7 @@
 //! publishes each slot's state. Every block runs as a real-time section
 //! under the allocation trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use std::sync::Arc;
 
 use bl_core::time::{Bpm, TempoMap, Ticks};
@@ -421,8 +418,19 @@ fn render_session_clip(
     block: usize,
     cues: impl FnOnce(TrackId, SceneId) -> Vec<(u64, Cue)>,
 ) -> Vec<f32> {
+    render_session_file(ramp(96_000), audio, frames, block, cues)
+}
+
+/// As [`render_session_clip`], with `file` in place of the ramp.
+fn render_session_file(
+    file: Arc<SampleData>,
+    audio: AudioData,
+    frames: u64,
+    block: usize,
+    cues: impl FnOnce(TrackId, SceneId) -> Vec<(u64, Cue)>,
+) -> Vec<f32> {
     let mut media = MediaMap::new();
-    media.insert(ContentHash([7; 32]), ramp(96_000));
+    media.insert(ContentHash([7; 32]), file);
     let registry = Registry::new().with_media(Arc::new(media));
     let mut offline = Offline::new(EngineConfig::new(RATE, block), registry);
     let mut editor = Editor::new();
@@ -540,12 +548,79 @@ fn a_launched_warped_clip_plays_its_start_beat_on_its_launch_frame() {
         // a beat left of it: 18,000 song frames. The loop then starts again
         // from the file's start, and wraps every beat, 24,000 frames.
         assert!((position(out[96_000 + 17_999]) - 47_998.0).abs() < 0.02);
-        assert!(position(out[96_000 + 18_000]).abs() < 0.02);
-        assert!((position(out[96_000 + 18_001]) - 2.0).abs() < 0.02);
-        assert!(position(out[96_000 + 18_000 + 24_000]).abs() < 0.02);
+        // Reads this close to the file's start are within reach of the
+        // interpolator's filter, which finds nothing before it: half a frame.
+        assert!(position(out[96_000 + 18_000]).abs() < 0.5);
+        assert!((position(out[96_000 + 18_001]) - 2.0).abs() < 0.5);
+        assert!(position(out[96_000 + 18_000 + 24_000]).abs() < 0.5);
         match &reference {
             None => reference = Some(out),
             Some(reference) => assert_eq!(&out, reference, "blocks of {block}"),
+        }
+    }
+}
+
+// Spec: warp-modes R6, R12. A launched clip whose speed changes at its warp
+// markers reads through the same filter at any block size: the
+// interpolator's width doesn't depend on how the blocks fall.
+#[test]
+fn a_launched_clips_filter_doesnt_depend_on_the_block_size() {
+    use bl_model::{WarpMarker, WarpMode};
+    // A high tone, which the filter's width changes, unlike a ramp.
+    let tone: Vec<f32> = (0..240_000)
+        .map(|i| (f64::from(i) * 0.37).sin() as f32 * 0.5)
+        .collect();
+    let file = Arc::new(SampleData::new(48_000, vec![tone.clone(), tone]).unwrap());
+    let audio = AudioData {
+        warp: true,
+        // Beats of the file's first second, its next three quarters, a second
+        // and a half and a second: at 120 BPM, read at 2, 1.5, 3 and 2 times
+        // its speed, never at its own, where a run reads frame for frame.
+        warp_markers: vec![
+            WarpMarker {
+                time: 0.0,
+                beat: Ticks::ZERO,
+            },
+            WarpMarker {
+                time: 1.0,
+                beat: Ticks::QUARTER,
+            },
+            WarpMarker {
+                time: 1.75,
+                beat: Ticks::QUARTER * 2,
+            },
+            WarpMarker {
+                time: 3.25,
+                beat: Ticks::QUARTER * 3,
+            },
+            WarpMarker {
+                time: 4.25,
+                beat: Ticks::QUARTER * 4,
+            },
+        ],
+        tempo: Some(120.0),
+        warp_mode: WarpMode::RePitch,
+        ..AudioData::new(ContentHash([7; 32]))
+    };
+    let mut reference = None;
+    for block in [100, 512, 4_096] {
+        // Launched on the second bar line, frame 96,000.
+        let out = render_session_file(
+            file.clone(),
+            audio.clone(),
+            168_000,
+            block,
+            |track, scene| {
+                vec![
+                    (0, Cue::Transport(TransportCommand::Play)),
+                    (1, Cue::Session(SessionCommand::Launch { track, scene })),
+                ]
+            },
+        );
+        assert!(out[96_000..].iter().any(|&sample| sample != 0.0));
+        match &reference {
+            None => reference = Some(out),
+            Some(reference) => assert!(out == *reference, "blocks of {block}"),
         }
     }
 }

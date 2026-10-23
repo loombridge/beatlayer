@@ -24,10 +24,7 @@
 //! A second test locates all 64 streams at once to a point nothing was cued
 //! for, and measures how long they wait for the disk.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering::Relaxed};

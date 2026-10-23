@@ -3,7 +3,7 @@
 //! its rows reach assistive technology, and Restore, a double-click and
 //! Return restore a row.
 
-mod common;
+use crate::common;
 
 use std::path::PathBuf;
 

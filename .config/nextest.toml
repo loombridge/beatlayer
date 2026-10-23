@@ -1,3 +1,6 @@
+# Each crate's integration tests are one binary (tests/main.rs), so a test
+# file is a module: filter it with test(/^<file>::/), not binary(<file>).
+
 # cargo-nextest's settings for `cargo xtask check`, which runs the tests with
 # it: every test in a process of its own, as many at once as the machine has
 # cores. Doctests run separately, with `cargo test --doc`.
@@ -15,7 +18,7 @@ fail-fast = false
 # for others on a bigger machine. It starts first, so it never waits for
 # running tests to finish.
 [[profile.default.overrides]]
-filter = "package(bl-project) & binary(crash_recovery) & test(=edits_are_journalled_within_a_second)"
+filter = "package(bl-project) & test(=crash_recovery::edits_are_journalled_within_a_second)"
 threads-required = 4
 priority = 100
 
@@ -26,8 +29,8 @@ priority = 100
 # room for others. They start straight after the disk test above.
 [[profile.default.overrides]]
 filter = """
-    (package(bl-engine) & binary(playhead) & test(=the_ui_thread_sees_the_playhead_the_engine_played))
-    | (package(bl-engine) & binary(stress) & test(=a_thousand_recompiles_during_playback_touch_no_heap_and_drop_no_audio))
+    (package(bl-engine) & test(=playhead::the_ui_thread_sees_the_playhead_the_engine_played))
+    | (package(bl-engine) & test(=stress::a_thousand_recompiles_during_playback_touch_no_heap_and_drop_no_audio))
 """
 threads-required = 4
 priority = 90
@@ -36,11 +39,11 @@ priority = 90
 # end waiting for one that started late.
 [[profile.default.overrides]]
 filter = """
-    (package(bl-model) & binary(undo_properties))
-    | (package(bl-project) & (binary(interrupted_save) | binary(crash_recovery) | binary(round_trip)))
-    | (package(bl-cli) & binary(export))
+    (package(bl-model) & test(/^undo_properties::/))
+    | (package(bl-project) & test(/^(interrupted_save|crash_recovery|round_trip)::/))
+    | (package(bl-cli) & binary(cli_tests) & test(/^export::/))
     | (package(bl-engine) & binary(streaming))
-    | (package(bl-ui) & binary(zoom))
+    | (package(bl-ui) & test(/^zoom::/))
     | package(beatlayer)
 """
 priority = 50

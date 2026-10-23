@@ -3,10 +3,7 @@
 //! under a steady tempo and a ramp, exactly the same at any block size, with
 //! every block a real-time section under the allocation trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use std::sync::Arc;
 
 use bl_core::time::{Bpm, TempoMap, Ticks};
@@ -128,7 +125,10 @@ fn song(tempo: &[(Ticks, f64)], start: Ticks, length: Ticks, audio: AudioData) -
 
 fn media() -> MediaMap {
     let mut media = MediaMap::new();
-    media.insert(hash(1), ramp(96_000));
+    // A little past the two seconds the tests read to, so the interpolator's
+    // filter, which reaches a few hundred frames ahead of a faster read,
+    // finds the ramp rather than the file's end.
+    media.insert(hash(1), ramp(97_000));
     media
 }
 
@@ -156,7 +156,9 @@ fn a_warped_clip_plays_the_file_position_its_beat_maps_to_at_any_block_size() {
             assert_eq!(got, reference, "{name}: blocks of {block}");
         }
         let mut worst: f64 = 0.0;
-        for (frame, &sample) in reference.iter().enumerate().skip(1) {
+        // From where the interpolator's filter, which reaches a few hundred
+        // frames either side, no longer reaches back past the file's start.
+        for (frame, &sample) in reference.iter().enumerate().skip(300) {
             let want = mapped(&map, Ticks::ZERO, &audio, frame as i64);
             worst = worst.max((position(sample) - want).abs());
         }
@@ -491,7 +493,8 @@ fn re_pitch_follows_the_tempo_ratio_within_a_cent() {
             // Skip the interpolator's first frames.
             let heard = play(&editor, &media, 40_000, 512, &[]);
             let want = 440.0 * song_bpm / file_bpm;
-            let got = pitch(&heard[2_000..]);
+            // While the file lasts: at four times the speed, 20,000 frames read it all.
+            let got = pitch(&heard[2_000..20_000]);
             let cents = 1_200.0 * (got / want).log2();
             assert!(
                 cents.abs() < 1.0,

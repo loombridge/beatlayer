@@ -3,13 +3,13 @@
 //! render repeats. Every block is a real-time section under the allocation
 //! trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
-use bl_devices::dice::{CHANCE, CHOICES, DICE, INTERVAL, MODE, SIGN};
+use crate::common;
+use bl_devices::dice::{CHANCE, CHOICES, DICE, INTERVAL, MODE, SIGN, USE_SCALE};
 use bl_engine::NoteKind;
+use bl_engine::scales::ScaleRuns;
+use bl_model::{Scale, ScaleName};
 use common::chain::{BEAT_FRAMES, Chain, note, nothing_hangs};
+use common::{bend, bends, device, keys_on, node, off, on, registry, scaled_through};
 
 /// Eight notes of middle C, a beat each, played through Random.
 fn render(params: &[(bl_model::ParamId, f64)], size: usize) -> Vec<(i64, NoteKind, u8, f32)> {
@@ -136,4 +136,134 @@ fn every_note_ends_on_its_own_key() {
     chain.play();
     chain.run(2 * BEAT_FRAMES as usize, 512);
     assert!(chain.heard().iter().all(|h| h.2 <= 127));
+}
+
+fn c_major() -> Scale {
+    Scale::new(0, ScaleName::Major)
+}
+
+/// Sixteen notes of `key`, a beat each, played through Random counting
+/// degrees of the clip's C Major, and the keys that sounded.
+fn degrees(params: &[(bl_model::ParamId, f64)], key: u8, size: usize) -> Vec<u8> {
+    let mut chain = Chain::new(4096);
+    chain.effect(DICE, params);
+    chain.clip(16, (0..16).map(|b| note(key, b, 1)));
+    chain.scale_clips(c_major());
+    chain.sync();
+    chain.play();
+    chain.run(17 * BEAT_FRAMES as usize, size);
+    chain
+        .heard()
+        .iter()
+        .filter(|h| h.1 == NoteKind::On)
+        .map(|h| h.2)
+        .collect()
+}
+
+// Spec: midi-random-pitch R10. With Use Current Scale on, a note that moves goes
+// k times Interval degrees: a note in the scale lands on a scale note, and
+// so does one outside it, counted from the scale note below.
+#[test]
+fn use_current_scale_moves_notes_by_degrees_and_lands_in_the_scale() {
+    let params = [
+        (USE_SCALE, 1.0),
+        (CHANCE, 100.0),
+        (CHOICES, 4.0),
+        (INTERVAL, 2.0),
+        (SIGN, 2.0),
+    ];
+    for size in [1, 512, 4096] {
+        for key in [60, 61, 66] {
+            let keys = degrees(&params, key, size);
+            assert_eq!(keys.len(), 16);
+            assert!(keys.iter().all(|k| c_major().holds(*k)), "{key}: {keys:?}");
+            // Two, four, six or eight degrees away from the scale note at or
+            // below the key: C3 (60) for 60 and 61, F3 (65) for 66.
+            let base = [(60, 60), (61, 60), (66, 65)]
+                .iter()
+                .find(|b| b.0 == key)
+                .unwrap()
+                .1;
+            let allowed: Vec<u8> = [-8, -6, -4, -2, 2, 4, 6, 8]
+                .iter()
+                .map(|d| c_major().land_off(base, *d) as u8)
+                .collect();
+            assert!(
+                keys.iter().all(|k| allowed.contains(k)),
+                "{keys:?} {allowed:?}"
+            );
+        }
+    }
+    // A note Chance leaves alone stays as it came, in the scale or not.
+    let still = [(USE_SCALE, 1.0), (CHANCE, 0.0)];
+    assert_eq!(degrees(&still, 61, 512), [61; 16]);
+}
+
+// Spec: midi-random-pitch R10. With the switch off, or a current scale with
+// Scale Mode off, distances are semitones.
+#[test]
+fn without_a_scale_the_distances_are_semitones() {
+    let params = [
+        (USE_SCALE, 1.0),
+        (CHANCE, 100.0),
+        (CHOICES, 1.0),
+        (INTERVAL, 3.0),
+        (SIGN, 0.0),
+    ];
+    let mut chain = Chain::new(512);
+    chain.effect(DICE, &params);
+    chain.clip(2, [note(61, 0, 1)]);
+    chain.sync();
+    chain.play();
+    chain.run(2 * BEAT_FRAMES as usize, 512);
+    // The clip's scale is off, so the chromatic scale: three semitones.
+    assert_eq!(ons(&chain.heard()), [64 - 60]);
+}
+
+// Spec: midi-random-pitch R10, R6. Two renders with the scale are bit for
+// bit the same, at any block size.
+#[test]
+fn two_renders_with_the_scale_are_identical() {
+    let params = [
+        (USE_SCALE, 1.0),
+        (CHANCE, 70.0),
+        (CHOICES, 12.0),
+        (INTERVAL, 2.0),
+        (SIGN, 2.0),
+    ];
+    assert_eq!(degrees(&params, 62, 512), degrees(&params, 62, 100));
+}
+
+// Spec: midi-random-pitch R11. A moved note's bend is carried in degrees, and
+// a scale change while it is held doesn't move it.
+#[test]
+fn a_moved_note_s_bend_is_carried_in_degrees() {
+    let params = [
+        (USE_SCALE, 1.0),
+        (CHANCE, 100.0),
+        (CHOICES, 1.0),
+        (INTERVAL, 2.0),
+        (SIGN, 0.0),
+    ];
+    let device = device(&bl_devices::dice_type(), &params);
+    let mut dice = node(&registry(), &device, 256);
+    // C3 goes two degrees up to E3; a bend of two semitones, a degree up
+    // from C3, becomes a degree up from E3: one semitone.
+    let notes = [on(0, 60, 1), bend(5, 60, 1, 2.0 / 48.0)];
+    let sent = scaled_through(dice.as_mut(), &notes, 256, ScaleRuns::of(c_major()));
+    assert_eq!(keys_on(&sent), [64]);
+    let carried = bends(&sent);
+    assert_eq!(carried.len(), 1);
+    assert_eq!(carried[0].0, 64);
+    assert!((carried[0].1 - 1.0 / 48.0).abs() < 1e-6, "{carried:?}");
+    // A scale change before the note-off leaves it on E3.
+    let mut scale = ScaleRuns::of(c_major());
+    scale.push(100, Scale::new(1, ScaleName::Minor));
+    let sent = scaled_through(
+        node(&registry(), &device, 256).as_mut(),
+        &[on(0, 60, 1), off(200, 60, 1)],
+        256,
+        scale,
+    );
+    assert_eq!(sent.iter().map(|n| n.key).collect::<Vec<_>>(), [64, 64]);
 }

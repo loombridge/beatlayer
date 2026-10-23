@@ -3,4 +3,5 @@
 
 pub mod dawproject;
 pub mod midi;
+pub mod scala;
 pub mod sfz;

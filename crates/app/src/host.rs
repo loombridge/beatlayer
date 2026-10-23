@@ -1223,6 +1223,9 @@ impl Host {
                 UiEvent::FocusArea(area) => self.shell.set_focused_area(area),
                 UiEvent::FocusTrack(track) => self.shell.set_focused_track(track),
                 UiEvent::FocusValue(focused) => self.shell.set_value_focused(focused),
+                UiEvent::FocusControl(focused) => {
+                    self.shell.set_envelope_control_focused(focused);
+                }
                 UiEvent::StatusHint(hint) => self.shell.set_hint(hint),
                 UiEvent::SearchRun(index) => self.shell.search_run_row(index),
                 UiEvent::ArrangementViewport { width, height } => {
@@ -1396,6 +1399,7 @@ impl Host {
     fn effect(&mut self, effect: Effect, event_loop: &ActiveEventLoop) {
         match effect {
             Effect::ConfirmDiscard { then } => self.confirm_discard(&then),
+            Effect::ConfirmRetune { then } => self.confirm_retune(&then),
             Effect::PickOpenPath { discard_changes } => {
                 let mut dialog = rfd::FileDialog::new()
                     .set_title("Open Beatlayer Set")
@@ -1946,6 +1950,39 @@ impl Host {
                 let _ = self.shell.discard_and_invoke(then);
             }
             _ => {}
+        }
+    }
+
+    /// Asks whether to retune the set's notes before a tuning is loaded or
+    /// removed (Retune Set On Loading Tuning Systems; the tunings spec,
+    /// R15). The wording is Beatlayer's own. Cancel changes nothing.
+    fn confirm_retune(&mut self, then: &Invocation) {
+        let what = if then.id == "tuning.remove" {
+            "Removing the tuning"
+        } else {
+            "Loading this tuning"
+        };
+        let answer = rfd::MessageDialog::new()
+            .set_level(rfd::MessageLevel::Info)
+            .set_title("Beatlayer")
+            .set_description(format!(
+                "{what} can change the pitch the set's notes play. Retune them to the keys \
+                 nearest their present pitches? Notes that land on one key may be shortened \
+                 or deleted."
+            ))
+            .set_buttons(rfd::MessageButtons::OkCancelCustom(
+                "Retune".to_owned(),
+                "Cancel".to_owned(),
+            ))
+            .show();
+        if matches!(&answer, rfd::MessageDialogResult::Ok)
+            || matches!(&answer, rfd::MessageDialogResult::Custom(choice) if choice == "Retune")
+        {
+            let mut args = then.args.clone();
+            if let Some(fields) = args.as_object_mut() {
+                fields.insert("retune".to_owned(), json!(true));
+            }
+            let _ = self.shell.invoke(&then.id, args);
         }
     }
 

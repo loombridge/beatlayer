@@ -48,6 +48,7 @@ use crate::track::{
     Channel, CrossfadeAssign, Input, MidiTo, Mixer, Monitor, Output, PanMode, SendTap, Track,
     TrackDelay, TrackKind,
 };
+use crate::tuning::{Tuning, TuningNote};
 use crate::warp::{MarkerAt, TransientEdits};
 use crate::warp_settings::{
     BeatsUpdate, ComplexProUpdate, DETUNE_MAX, DETUNE_MIN, TRANSPOSE_MAX, TRANSPOSE_MIN,
@@ -982,6 +983,15 @@ pub enum Command {
         /// the end of the clip.
         #[serde(default)]
         end: Option<Ticks>,
+    },
+    /// Sets a MIDI clip's time signature, the Clip View's Signature fields.
+    SetMidiClipSignature {
+        /// The MIDI clip.
+        clip: ClipId,
+        /// The clip's signature; `null` (or nothing) follows the song's at
+        /// the clip's position.
+        #[serde(default)]
+        signature: Option<TimeSignature>,
     },
     /// Switches an audio or MIDI clip's loop on or off, leaving its brace where it
     /// is.
@@ -2473,6 +2483,61 @@ pub enum Command {
         #[serde(default)]
         name: Option<String>,
     },
+    /// Makes a tuning the set's, in place of any other (the tunings spec,
+    /// R2 and R15). With `retune`, every note of the MIDI clips on tracks
+    /// that play the tuning moves to the key whose new pitch is nearest the
+    /// pitch it had, in the same undo step.
+    SetTuning {
+        /// The tuning.
+        tuning: Tuning,
+        /// Whether the notes are retuned.
+        #[serde(default)]
+        retune: bool,
+    },
+    /// Removes the set's tuning, which returns it to twelve equal steps
+    /// (the tunings spec, R9 and R15), retuning the notes as `retune` says.
+    RemoveTuning {
+        /// Whether the notes are retuned.
+        #[serde(default)]
+        retune: bool,
+    },
+    /// Changes the set's tuning's reference pitch (the tunings spec, R7): its
+    /// octave, its degree, its frequency in Hz. Changing the octave or the
+    /// degree names another note as the reference and leaves every pitch as
+    /// it was; changing the frequency moves every pitch by one ratio. A
+    /// value left out stays as it was.
+    SetTuningReference {
+        /// The reference note's octave.
+        #[serde(default)]
+        octave: Option<i32>,
+        /// The reference note's degree.
+        #[serde(default)]
+        degree: Option<u32>,
+        /// The reference note's frequency in Hz.
+        #[serde(default)]
+        frequency: Option<f64>,
+    },
+    /// Changes the set's tuning's note range (the tunings spec, R8): the
+    /// lowest note, which key 0 plays, and the highest. Given one, the
+    /// other moves by as many notes, so the count stays; given both, they
+    /// are the range, which holds at most 128 notes.
+    SetTuningRange {
+        /// The lowest note.
+        #[serde(default)]
+        lowest: Option<TuningNote>,
+        /// The highest note.
+        #[serde(default)]
+        highest: Option<TuningNote>,
+    },
+    /// Switches a MIDI track's Bypass Tuning on or off (the tunings spec,
+    /// R14): on, the track plays twelve equal steps whatever tuning the set
+    /// holds.
+    SetTuningBypass {
+        /// The MIDI track.
+        track: TrackId,
+        /// Whether it bypasses the tuning.
+        bypass: bool,
+    },
     /// Adds a groove to the end of the Groove Pool (the grooves spec, R1):
     /// what loading a groove file and extracting a groove make.
     AddGroove {
@@ -2638,6 +2703,7 @@ impl Command {
             Self::SetClipLoop { .. } => "Change clip loop",
             Self::SetMidiClipRegion { .. } => "Change clip region",
             Self::SetMidiClipLoop { .. } => "Change clip loop",
+            Self::SetMidiClipSignature { .. } => "Change clip signature",
             Self::SetClipLoopEnabled { .. } => "Switch clip loop",
             Self::SetClipGain { .. } => "Change clip gain",
             Self::SetClipFades { .. } => "Change Fade",
@@ -2838,6 +2904,13 @@ impl Command {
             // are to observe; Beatlayer's name the edit.
             Self::SetClipScale { .. } => "Change Clip Scale",
             Self::SetScale { .. } => "Change Scale",
+            // Spec: tunings R2, R7, R8, R9, R14. Live's names for these
+            // edits are to observe; `Load Tuning` is Beatlayer's own.
+            Self::SetTuning { .. } => "Load Tuning",
+            Self::RemoveTuning { .. } => "Remove Tuning",
+            Self::SetTuningReference { .. } => "Change Reference Pitch",
+            Self::SetTuningRange { .. } => "Change Tuning Range",
+            Self::SetTuningBypass { .. } => "Bypass Tuning",
             // Spec: grooves R5, R16, R17, R32. Live's undo names for the
             // groove edits are to observe; Beatlayer's name the edit.
             Self::AddGroove { .. } => "Add Groove",
@@ -3638,6 +3711,52 @@ impl Document {
                 }
                 Ok(())
             }
+            // Spec: tunings R2, R9, R15. A tuning that breaks R3's limits is
+            // refused and the set's stays as it was.
+            Command::SetTuning { tuning, retune } => {
+                tuning.check()?;
+                let before = self.settings.tuning.replace(tuning.clone());
+                if *retune {
+                    self.retune_notes(before.as_ref());
+                }
+                Ok(())
+            }
+            Command::RemoveTuning { retune } => {
+                let before = self
+                    .settings
+                    .tuning
+                    .take()
+                    .ok_or(ModelError::InvalidInput("the set has no tuning to remove"))?;
+                if *retune {
+                    self.retune_notes(Some(&before));
+                }
+                Ok(())
+            }
+            Command::SetTuningReference {
+                octave,
+                degree,
+                frequency,
+            } => {
+                let tuning = self.held_tuning()?;
+                self.settings.tuning = Some(tuning.with_reference(*octave, *degree, *frequency)?);
+                Ok(())
+            }
+            Command::SetTuningRange { lowest, highest } => {
+                let tuning = self.held_tuning()?;
+                self.settings.tuning = Some(tuning.with_range(*lowest, *highest)?);
+                Ok(())
+            }
+            Command::SetTuningBypass { track, bypass } => {
+                if self.track_ref(*track)?.kind() != TrackKind::Midi {
+                    return Err(ModelError::InvalidInput(
+                        "only a MIDI track has Bypass Tuning",
+                    ));
+                }
+                if self.track_ref(*track)?.tuning_bypass != *bypass {
+                    self.track_mut(*track)?.tuning_bypass = *bypass;
+                }
+                Ok(())
+            }
             Command::SetClipLaunchMode { clip, mode } => {
                 self.edit_launch(*clip, |launch| launch.mode = *mode)
             }
@@ -3737,6 +3856,9 @@ impl Document {
                     midi.loop_start = *start;
                     midi.loop_end = *end;
                 })
+            }
+            Command::SetMidiClipSignature { clip, signature } => {
+                self.edit_midi(*clip, |midi| midi.signature = *signature)
             }
             Command::SetClipLoopEnabled { clip, enabled } => match &self.clip_ref(*clip)?.data {
                 // Spec: warping R14. Only a warped audio clip can switch its
@@ -7576,6 +7698,45 @@ impl Document {
         }
         self.settings.time_signatures = time_signature_map(changes);
         Ok(())
+    }
+
+    /// The set's tuning, for a command that changes it.
+    fn held_tuning(&self) -> Result<&Tuning, ModelError> {
+        self.settings
+            .tuning
+            .as_ref()
+            .ok_or(ModelError::InvalidInput("the set has no tuning"))
+    }
+
+    /// Moves every note of every MIDI clip on a track that plays the tuning
+    /// from the key it had under `before` (None: twelve equal steps) to the
+    /// key nearest its pitch under the set's tuning now (the tunings spec,
+    /// R15).
+    fn retune_notes(&mut self, before: Option<&Tuning>) {
+        let from = crate::tuning::key_pitches(before);
+        let to = crate::tuning::key_pitches(self.settings.tuning.as_ref());
+        let tracks: Vec<TrackId> = self
+            .tracks()
+            .filter(|track| track.plays_tuning())
+            .map(Track::id)
+            .collect();
+        for id in tracks {
+            let Some(track) = self.tracks.get_mut(&id).map(Shared::make_mut) else {
+                continue;
+            };
+            let clips: Vec<ClipId> = track
+                .clips
+                .keys()
+                .copied()
+                .chain(track.slots.values().map(|clip| clip.id))
+                .collect();
+            for clip in clips {
+                if let Some(ClipData::Midi(midi)) = track.clip_mut(clip).map(|clip| &mut clip.data)
+                {
+                    crate::tuning::retune(&mut midi.notes, &from, &to);
+                }
+            }
+        }
     }
 
     // Lookups that fail with the error a command reports.

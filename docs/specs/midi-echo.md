@@ -1,6 +1,6 @@
 # The note-echo MIDI effect
 
-- **Status:** partial (R1 to R9 have passing tests; R10 is WP-6.8's)
+- **Status:** implemented (every rule below has a passing test)
 - **Work packages:** WP-5.31 (R1 to R9); WP-6.8 (R10, scales). The framework it sits on is WP-2.5 ([the native device framework](device-framework.md)), with the note rules of R30 to R34
 - **Parity-matrix row:** Devices: MIDI effects
 - **Checked against:** the Live 12 reference manual, chapter 33 "Max for Live Devices", section 33.3.5 "Note Echo", read on 19 October 2026, and again for scales on 20 October 2026
@@ -48,7 +48,7 @@ The device takes Live's name, Note Echo; its appearance is the device framework'
 | R7 | `crates/devices/tests/note_echo.rs`, `stopping_transport_leaves_no_hanging_echoes`, `stopping_transport_while_an_echo_sounds_leaves_no_hanging_notes` | real-time trap |
 | R8 | `crates/agent/tests/midi_effects.rs`, `an_agent_reaches_every_parameter_of_every_midi_effect` | MCP script |
 | R9 | `crates/devices/tests/rules.rs`; `rtsan/tests/midi_effects.rs` | real-time trap |
-| R10 | to be written in WP-6.8 | |
+| R10 | `crates/devices/tests/note_echo.rs`, `pitch_moves_by_keys_whatever_the_clip_s_scale` | real-time trap |
 
 ## Defaults, ranges and details
 

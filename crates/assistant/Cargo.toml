@@ -1,4 +1,5 @@
 [package]
+autotests = false
 name = "bl-assistant"
 description = "The built-in assistant: model providers over the command registry, and keys in the OS keychain."
 version.workspace = true
@@ -34,6 +35,10 @@ schemars = { version = "=1.2.2", default-features = false, features = ["std", "d
 # The agent-loop tests' commands: a real document and undo history, so a
 # turn's edits can be run and undone for real.
 bl-model.workspace = true
+
+[[test]]
+name = "assistant_tests"
+path = "tests/main.rs"
 
 [lints]
 workspace = true

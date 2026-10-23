@@ -16,12 +16,13 @@ use std::sync::Arc;
 
 use bl_core::time::{Frames, SampleRate, TempoMap, Ticks};
 use bl_model::{
-    Clip, ClipData, ClipId, GroovePlay, GroovePool, GroupKind, MidiData, Note, SceneId, Track,
-    TrackId, clip_seed, noise,
+    Clip, ClipData, ClipId, GroovePlay, GroovePool, GroupKind, MidiData, Note, Scale, SceneId,
+    Track, TrackId, clip_seed, noise,
 };
 
 use crate::midi_controllers::{PlacedController, Sounding, Stretch, play_pressure};
 use crate::node::{Block, Node, NodeConfig, NodeData, NodeEvent, NoteEvent, NoteKind, ParamValue};
+use crate::scales::{ScaleRuns, Span, TrackScale};
 
 /// Simple deterministic xorshift64* pseudo-random number generator.
 /// Zero allocations, real-time safe.
@@ -108,6 +109,9 @@ pub struct PlacedMidiClip {
     /// The clip's groove at the set's Global Amount, if it has one that
     /// changes anything (the grooves spec, R6 to R11).
     pub groove: Option<Arc<GroovePlay>>,
+    /// The clip's scale, which the devices on its track read while it plays
+    /// (the scales spec, R15). It changes none of the clip's notes.
+    pub scale: Scale,
 }
 
 /// A probability group of a placed clip: its kind and the places of its
@@ -221,6 +225,7 @@ impl MidiClipList {
                 note_groups,
                 controllers: PlacedController::of(clip),
                 groove: groove(clip),
+                scale: clip.scale,
             });
         }
         // The track's Session slot clips (WP-3.2): they play only when the
@@ -251,6 +256,7 @@ impl MidiClipList {
                 note_groups,
                 controllers: PlacedController::of(clip),
                 groove: groove(clip),
+                scale: clip.scale,
             });
         }
         clips.sort_by_key(|c| c.start);
@@ -446,6 +452,10 @@ pub struct MidiClipPlayer {
     /// The frame the last start or locate played from.
     entry_frame: i64,
     next_note_id: u32,
+    /// What the player keeps of its track's scale between blocks, and the
+    /// scale it worked out for the last block (the scales spec, R15).
+    scale: TrackScale,
+    runs: Option<ScaleRuns>,
 }
 
 impl MidiClipPlayer {
@@ -467,7 +477,35 @@ impl MidiClipPlayer {
             launches: 0,
             entry_frame: 0,
             next_note_id: 1,
+            scale: TrackScale::default(),
+            runs: None,
         }
+    }
+
+    /// Works out the track's scale over `block` from the clips it plays.
+    fn work_out_scale(&mut self, block: &Block<'_>) {
+        let Self {
+            clips, scale, runs, ..
+        } = self;
+        let (rate, tempo) = (block.sample_rate(), block.tempo());
+        *runs = Some(
+            match clips
+                .as_ref()
+                .and_then(|d| d.downcast_ref::<MidiClipList>())
+            {
+                Some(list) => {
+                    let frame = |ticks| tempo.ticks_to_frames(ticks, rate).get();
+                    let spans = list.clips.iter().map(|clip| Span {
+                        scene: clip.scene,
+                        start: frame(clip.start),
+                        end: frame(clip.start + clip.length),
+                        scale: clip.scale,
+                    });
+                    scale.runs(list.track, spans, block)
+                }
+                None => ScaleRuns::of(block.set_scale()),
+            },
+        );
     }
 
     /// Sets whether the clips are audible (Monitor In silences them).
@@ -767,6 +805,7 @@ fn process_clip_segment(
 
 impl Node for MidiClipPlayer {
     fn process(&mut self, block: &mut Block<'_>) {
+        self.work_out_scale(block);
         for event in block.events() {
             if event.param == crate::clips::player::AUDIBLE {
                 self.audible = match event.value {
@@ -1195,5 +1234,9 @@ impl Node for MidiClipPlayer {
 
     fn receive_data(&mut self, data: NodeData) {
         self.clips = Some(data);
+    }
+
+    fn track_scale(&self) -> Option<ScaleRuns> {
+        self.runs
     }
 }

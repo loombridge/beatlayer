@@ -13,8 +13,6 @@
 //! stops, in Write its envelope is written from where the recording started,
 //! and both carry on over the Arrangement loop's wrap.
 
-bl_rt::install_trap!();
-
 use bl_audio_io::{BackendKind, NullBackend, NullControl, NullOptions, Pacing};
 use bl_core::time::Ticks;
 use bl_model::{AutomationTarget, Envelope, MixerParam, TrackId};

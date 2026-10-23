@@ -4,8 +4,7 @@
 //! every selected layer, the list's menu runs its commands, and hovering a
 //! zone shows it in the Status Bar.
 
-mod common;
-
+use crate::common;
 use bl_model::{DeviceId, Layer, LayerId, ZoneKind};
 use bl_ui::multisampler::{areas, bar_parts, row_height};
 use common::{Harness, Window};

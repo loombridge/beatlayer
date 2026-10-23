@@ -293,7 +293,10 @@ fn the_user_library_is_made_once_with_live_s_folders() {
         ids::OPEN_PLACE,
         json!({ "label": "user_library" }),
     );
-    assert_eq!(names(&state), ["Clips", "Grooves", "Presets", "Samples"]);
+    assert_eq!(
+        names(&state),
+        ["Clips", "Grooves", "Presets", "Samples", "Tunings"]
+    );
     let place = state
         .labels
         .iter()
@@ -437,12 +440,13 @@ fn folders_list_what_beatlayer_opens_folders_first() {
             "Grooves",
             "Presets",
             "Samples",
+            "Tunings",
             "Loop 120.wav",
             "Song.blset"
         ]
     );
-    assert_eq!(state.rows[5].kind, ItemKind::Audio);
-    assert_eq!(state.rows[6].kind, ItemKind::Set);
+    assert_eq!(state.rows[6].kind, ItemKind::Audio);
+    assert_eq!(state.rows[7].kind, ItemKind::Set);
     let drums = root.join("Samples").join("Drums");
     run::<BrowserState>(
         &mut shell,
@@ -541,7 +545,7 @@ fn selection_moves_extends_and_crosses_folders() {
         json!({ "paths": [text(&loop_file)] }),
     );
     assert_eq!(state.selected, [text(&loop_file)]);
-    assert_eq!(shell.browser_view().cursor(), Some(5));
+    assert_eq!(shell.browser_view().cursor(), Some(6));
     let set = root.join("Song.blset");
     let state: BrowserState = run(
         &mut shell,
@@ -549,14 +553,14 @@ fn selection_moves_extends_and_crosses_folders() {
         json!({ "paths": [text(&set)], "add": true }),
     );
     assert_eq!(state.selected.len(), 2);
-    assert_eq!(shell.browser_view().cursor(), Some(6));
+    assert_eq!(shell.browser_view().cursor(), Some(7));
     // The selection survives opening a folder above it; the cursor follows.
     run::<BrowserState>(
         &mut shell,
         ids::OPEN_FOLDER,
         json!({ "path": text(&root.join("Samples")) }),
     );
-    assert_eq!(shell.browser_view().cursor(), Some(8));
+    assert_eq!(shell.browser_view().cursor(), Some(9));
     let error = shell
         .run(
             ids::SELECT,
@@ -639,9 +643,9 @@ fn the_index_follows_places_in_the_background() {
     let (mut shell, root) = shell_with_library(&scratch);
     wait_for_index(&mut shell);
     let indexed = shell.browser_view().index_state();
-    // Five audio files and the set; the five starting folders, and Drums
+    // Five audio files and the set; the six starting folders, and Drums
     // and Pads in Samples.
-    assert_eq!((indexed.files, indexed.folders), (6, 7));
+    assert_eq!((indexed.files, indexed.folders), (6, 8));
 
     let extra = scratch.path("Extra");
     for i in 0..300 {

@@ -5,10 +5,7 @@
 //! it is set to. Every block runs as a real-time section under the
 //! allocation trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use std::time::{Duration, Instant};
 
 use bl_core::midi::{MidiInputEvent, MidiMessage, MidiOutputEvent, MidiSource, PortId};

@@ -7,8 +7,6 @@ use bl_agent::client::{Client, InProcess, Transport};
 use bl_shell::Shell;
 use serde_json::{Value, json};
 
-bl_rt::install_trap!();
-
 /// A bar, in ticks.
 const BAR: i64 = 4 * 705_600;
 

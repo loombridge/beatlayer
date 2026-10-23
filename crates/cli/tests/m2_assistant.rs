@@ -13,11 +13,9 @@
 //! `scripted.json` is the transcript of a script, not a model: the test
 //! `record_the_scripted_transcript` records it through the same `--record`
 //! path, so the replay and its checks run in CI before a model's transcript
-//! is kept. Run it again (`cargo test -p bl-cli --test m2_assistant --
+//! is kept. Run it again (`cargo test -p bl-cli --test cli_tests -- m2_assistant::
 //! --ignored`) when a command's result changes and a replay fails with a
 //! drift diff.
-
-bl_rt::install_trap!();
 
 use std::collections::VecDeque;
 use std::fs;

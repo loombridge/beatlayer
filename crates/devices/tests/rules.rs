@@ -2,10 +2,7 @@
 //! device framework spec, R2 and R3): Beatlayer's own native devices
 //! (none ship yet) and the framework's test devices.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_core::time::{Frames, Ticks};
 use bl_devices::{Audio, NativeDevice, NativeNode, ParamBank, testing};
 use bl_engine::{

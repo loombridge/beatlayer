@@ -3,10 +3,7 @@
 //! Release Velocity, Decay Time, Key Scale and Latch. Every block is a
 //! real-time section under the allocation trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_core::time::Bpm;
 use bl_devices::hold::{
     DECAY_TIME, GATE, HOLD, KEY_SCALE, LATCH, LENGTH_DIVISION, LENGTH_MS, RELEASE_VELOCITY, SYNC,

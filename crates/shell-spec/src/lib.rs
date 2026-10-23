@@ -53,6 +53,8 @@
 //!   what it lists, replacing a file, and the set's backups and copies.
 //! - [`bounce`]: bouncing tracks and pasting bounced audio (`track.bounce_*`,
 //!   WP-4.15).
+//! - [`comping`]: inserting and duplicating take lanes and building a comp
+//!   from them (`take_lane.insert`, `take_lane.copy_to_main_lane`, WP-6.21).
 //! - [`midi_files`]: importing and exporting Standard MIDI Files
 //!   (`midi.import_file`, `midi.export_clip`, WP-2.21).
 //! - [`midi_io`]: MIDI ports and the computer MIDI keyboard (`midi.ports`,
@@ -70,6 +72,7 @@
 //!   (`clip.crop`, `arrangement.consolidate*`, WP-4.13).
 //! - [`audio_panel`]: the Audio Utilities panel's own commands
 //!   (`clip.edit_sample`, `clip.replace_sample`, WP-4.10b).
+//! - [`tunings`]: tuning systems (`tuning.load`, `tuning.state`, WP-6.9).
 //! - [`search`]: the search field's commands (`search.*`, WP-6.42): command
 //!   search and track search.
 //!
@@ -90,6 +93,7 @@ pub mod bounce;
 pub mod browser;
 pub mod capture_midi;
 pub mod commands;
+pub mod comping;
 pub mod context_menus;
 pub mod dawproject;
 pub mod devices;
@@ -122,6 +126,7 @@ pub mod slice;
 pub mod stems;
 pub mod tracks;
 pub mod transport;
+pub mod tunings;
 pub mod warping;
 
 use bl_commands::{RegisterError, Registry};
@@ -168,8 +173,10 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     audio_panel::register(registry)?;
     freeze::register(registry)?;
     bounce::register(registry)?;
+    comping::register(registry)?;
     slice::register(registry)?;
     warping::register(registry)?;
     scales::register(registry)?;
+    tunings::register(registry)?;
     search::register(registry)
 }

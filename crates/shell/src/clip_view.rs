@@ -21,16 +21,18 @@ use std::collections::BTreeSet;
 use bl_core::time::{Ticks, TimeSignature, TimeSignatureMap};
 use bl_model::note_ops::{self, MOST_PARTS, Mapping};
 use bl_model::{
-    AutomationTarget, ClipData, ClipFolds, ClipId, Command, Document, Editor, MidiData, Note,
+    AutomationTarget, ClipData, ClipFolds, ClipId, Command, Document, Editor, GroupKind, MidiData,
+    Note, NoteGroup,
 };
 use bl_shell_spec::editing::{Position, SplitArgs};
 use bl_shell_spec::notes::{
     self as ids, AddNoteArgs, AdjustValueArgs, ChopNotesArgs, ChopStep, ClipTab, ClipViewState,
     CopyNotesArgs, DeactivateArgs, DeleteNotesArgs, DuplicateNotesArgs, FitToTimeArgs,
-    JoinNotesArgs, MoveNotesArgs, NoteClipboardState, NoteEditResult, NoteField, NoteSelectMode,
-    NoteSelection, PasteNotesArgs, QuantizeNotesArgs, QuantizeSettings, QuantizeSettingsArgs,
-    QuantizeTarget, RampValueArgs, RandomizeAmounts, RandomizeArgs, ResizeNotesArgs,
-    SelectNotesArgs, SetValueArgs, SplitNotesArgs, StretchNotesArgs,
+    GroupNotesArgs, HeldKey, JoinNotesArgs, MoveNotesArgs, NoteClipboardState, NoteEditResult,
+    NoteField, NoteSelectMode, NoteSelection, PasteNotesArgs, QuantizeNotesArgs, QuantizeSettings,
+    QuantizeSettingsArgs, QuantizeTarget, RampValueArgs, RandomizeAmounts, RandomizeArgs,
+    ResizeNotesArgs, SelectNotesArgs, SetValueArgs, SplitNotesArgs, StepRecordArgs,
+    StepRecordResult, StretchNotesArgs, UngroupNotesArgs,
 };
 use bl_shell_spec::sample_editor as sample_ids;
 use bl_shell_spec::sample_editor::{SelectTimeArgs, SetInsertMarkerArgs};
@@ -452,12 +454,14 @@ impl Lanes {
 pub struct NoteClipboard {
     /// The notes, with their starts counting from the earliest of them.
     notes: Vec<Note>,
+    /// The groups the notes were in, which pasting them makes anew.
+    groups: Vec<NoteGroup>,
 }
 
 impl NoteClipboard {
     /// The clipboard holding `notes`, with their starts counting from the
     /// earliest of them.
-    fn of(notes: &[Note]) -> Self {
+    fn of(notes: &[Note], midi: &MidiData) -> Self {
         let earliest = notes
             .iter()
             .map(|note| note.start)
@@ -468,7 +472,8 @@ impl NoteClipboard {
             note.start -= earliest;
         }
         notes.sort_by_key(|note| (note.start, note.key));
-        Self { notes }
+        let groups = midi.groups.clone();
+        Self { notes, groups }
     }
 
     /// Whether it holds no notes.
@@ -527,6 +532,9 @@ pub struct ClipView {
     amounts: RandomizeAmounts,
     /// How many unseeded randomisations have run, which seeds the next.
     draws: u64,
+    /// The kind of group made last, which Group Notes makes again
+    /// (note-editing R22).
+    group_kind: GroupKind,
     /// The clips whose note editor is folded to the rows that hold notes
     /// (F). Saved with the set, like the floating devices' windows.
     folds: ClipFolds,
@@ -563,6 +571,13 @@ pub struct ClipView {
     /// The MIDI Tools' panel, choices, settings and open application
     /// (WP-6.11).
     pub(crate) tools: crate::midi_tools::MidiTools,
+    /// Whether the Preview switch is on (Spec: step-recording R1): the
+    /// shell keeps it as a preference.
+    preview: bool,
+    /// The notes step recording just added or lengthened, as the key and
+    /// start of each, in `stepped_clip` (Spec: step-recording R5, R6).
+    stepped_clip: Option<ClipId>,
+    stepped: Vec<(u8, Ticks)>,
 }
 
 impl ClipView {
@@ -698,6 +713,42 @@ impl ClipView {
     /// Switches Draw Mode on or off.
     pub fn toggle_draw_mode(&mut self) {
         self.draw_mode = !self.draw_mode;
+    }
+
+    /// Whether the Preview switch is on (Spec: step-recording R1).
+    #[must_use]
+    pub fn preview(&self) -> bool {
+        self.preview
+    }
+
+    /// Switches Preview on or off.
+    pub fn set_preview(&mut self, on: bool) {
+        self.preview = on;
+    }
+
+    /// Forgets that the note at `key` was just recorded: its key went up
+    /// (Spec: step-recording R5).
+    pub fn step_release(&mut self, key: u8) {
+        self.stepped.retain(|(k, _)| *k != key);
+    }
+
+    /// The notes step recording just added or lengthened in `clip` whose
+    /// keys are still in `held`, as the key and start of each (Spec:
+    /// step-recording R5, R6).
+    fn just_recorded(&self, clip: ClipId, held: &[HeldKey]) -> Vec<(u8, Ticks)> {
+        if self.stepped_clip != Some(clip) {
+            return Vec::new();
+        }
+        self.stepped
+            .iter()
+            .copied()
+            .filter(|(key, _)| held.iter().any(|h| h.key == *key))
+            .collect()
+    }
+
+    fn set_just_recorded(&mut self, clip: ClipId, just: Vec<(u8, Ticks)>) {
+        self.stepped_clip = Some(clip);
+        self.stepped = just;
     }
 
     /// The Quantize settings `note.quantize` uses when its arguments leave
@@ -870,6 +921,50 @@ impl ClipView {
                 .all(|place| ordered.get(*place as usize).is_some_and(|note| note.mute))
     }
 
+    /// Which kinds of probability group the notes selected in the shown clip
+    /// belong to: Play All, Play One (Spec: note-editing R23, R24).
+    #[must_use]
+    pub fn selection_group_kinds(
+        &self,
+        doc: &Document,
+        arrangement: &ArrangementView,
+    ) -> (bool, bool) {
+        let selected = self.selected_notes(doc, arrangement);
+        let Some(ClipData::Midi(midi)) = self
+            .shown_clip(doc, arrangement)
+            .and_then(|clip| doc.clip(clip))
+            .map(|clip| &clip.data)
+        else {
+            return (false, false);
+        };
+        let ordered = notes_in_order(midi);
+        let mut kinds = (false, false);
+        for group in selected
+            .iter()
+            .filter_map(|place| ordered.get(*place as usize)?.group)
+        {
+            match midi.group_kind(group) {
+                Some(GroupKind::PlayAll) => kinds.0 = true,
+                Some(GroupKind::PlayOne) => kinds.1 = true,
+                None => {}
+            }
+        }
+        kinds
+    }
+
+    /// What the Status Bar says of the selected notes' probability groups:
+    /// their kind, with an asterisk when they belong to groups of both
+    /// (Spec: note-editing R24).
+    #[must_use]
+    pub fn group_status(&self, doc: &Document, arrangement: &ArrangementView) -> Option<String> {
+        match self.selection_group_kinds(doc, arrangement) {
+            (false, false) => None,
+            (true, false) => Some("Probability group: Play All".to_owned()),
+            (false, true) => Some("Probability group: Play One".to_owned()),
+            (true, true) => Some("Probability group: Play All, Play One*".to_owned()),
+        }
+    }
+
     /// Selects notes of `clip`, by their places in its notes in order.
     pub fn select(&mut self, clip: ClipId, places: Vec<u32>) {
         self.selected_clip = Some(clip);
@@ -944,6 +1039,7 @@ impl ClipView {
             randomize: self.amounts,
             folded: clip.is_some_and(|clip| self.is_folded(clip)),
             tab: self.tab,
+            preview: self.preview,
             envelope: self.envelope,
         }
     }
@@ -957,6 +1053,7 @@ impl ClipView {
         self.time = None;
         self.session_clip = None;
         self.envelope = None;
+        self.stepped.clear();
         self.sample = SampleView::default();
         self.tools.close();
     }
@@ -1024,8 +1121,19 @@ fn set_notes(
     midi: &MidiData,
     notes: Vec<Note>,
 ) -> Result<(), EditFailure> {
-    let mut data = midi.clone();
+    set_notes_in(editor, clip, midi.clone(), notes)
+}
+
+/// [`set_notes`] with `data` as the clip's other data, changed by the caller.
+/// A group left with fewer than two notes ends (Spec: note-editing R22).
+fn set_notes_in(
+    editor: &mut Editor,
+    clip: ClipId,
+    mut data: MidiData,
+    notes: Vec<Note>,
+) -> Result<(), EditFailure> {
     data.notes = notes.into_iter().collect();
+    data.tidy_groups();
     editor
         .apply(Command::SetClipData {
             clip,
@@ -1033,6 +1141,46 @@ fn set_notes(
         })
         .map(|_| ())?;
     Ok(())
+}
+
+/// Gives the chance of each of `places`' notes to the rest of its group,
+/// the first of a group named winning (Spec: note-editing R25).
+fn share_chance(notes: &mut [Note], places: &[u32]) {
+    let mut done = BTreeSet::new();
+    for place in places {
+        let Some(group) = notes[*place as usize].group else {
+            continue;
+        };
+        if done.insert(group) {
+            let chance = notes[*place as usize].probability;
+            for note in notes.iter_mut().filter(|n| n.group == Some(group)) {
+                note.probability = chance;
+            }
+        }
+    }
+}
+
+/// Puts `copies` in groups of their own, one for each group they came from,
+/// of the kinds `kinds` give (Spec: note-editing R31).
+fn regroup(data: &mut MidiData, copies: &mut [Note], kinds: &[NoteGroup]) {
+    let mut made: Vec<(u32, u32)> = Vec::new();
+    for note in copies {
+        let Some(old) = note.group else { continue };
+        let Some(kind) = kinds.iter().find(|g| g.id == old).map(|g| g.kind) else {
+            note.group = None;
+            continue;
+        };
+        let new = match made.iter().find(|(from, _)| *from == old) {
+            Some((_, new)) => *new,
+            None => {
+                let id = data.new_group_id();
+                data.groups.push(NoteGroup { id, kind });
+                made.push((old, id));
+                id
+            }
+        };
+        note.group = Some(new);
+    }
 }
 
 /// The place of `note` among `ordered`: the first equal note, which is
@@ -1288,8 +1436,107 @@ pub fn label(id: &str) -> &'static str {
         ids::ADJUST_VALUE => "Adjust note values",
         ids::RANDOMIZE => "Randomize note values",
         ids::DEACTIVATE => "Deactivate notes",
+        ids::GROUP => "Group Notes",
+        ids::UNGROUP => "Ungroup Notes",
+        ids::STEP_RECORD => "Step Record",
         _ => "Select notes",
     }
+}
+
+/// What one step of step recording did to a clip's notes (Spec:
+/// step-recording R4 to R6).
+struct Stepped {
+    /// The clip's notes in order afterwards.
+    notes: Vec<Note>,
+    /// The notes just recorded afterwards, as the key and start of each.
+    just: Vec<(u8, Ticks)>,
+    /// The insert marker afterwards.
+    marker: Ticks,
+    added: u32,
+    lengthened: u32,
+    shortened: u32,
+    removed: u32,
+}
+
+impl Stepped {
+    fn changed(&self) -> bool {
+        self.added + self.lengthened + self.shortened + self.removed > 0
+    }
+}
+
+/// Steps forward or `back` from the insert marker `at` with `held` keys
+/// down, `just` being the notes the last step added or lengthened whose keys
+/// are still down. Forward, those notes are lengthened by a grid `step` and
+/// the other held keys are added at `at`, one step long; back, those notes
+/// are shortened a step, and removed when none is left. Nothing held leaves
+/// the notes as they are and moves the marker, a rest. Nothing goes past the
+/// clip's span `(from, to)`.
+fn step_notes(
+    mut notes: Vec<Note>,
+    step: Ticks,
+    (from, to): (Ticks, Ticks),
+    at: Ticks,
+    just: &[(u8, Ticks)],
+    held: &[HeldKey],
+    back: bool,
+) -> Stepped {
+    let mut out = Stepped {
+        notes: Vec::new(),
+        just: Vec::new(),
+        marker: at,
+        added: 0,
+        lengthened: 0,
+        shortened: 0,
+        removed: 0,
+    };
+    let find = |notes: &[Note], (key, start): (u8, Ticks)| {
+        notes
+            .iter()
+            .position(|note| note.key == key && note.start == start)
+    };
+    if back {
+        for &recorded in just {
+            let Some(place) = find(&notes, recorded) else {
+                continue;
+            };
+            if notes[place].length > step {
+                notes[place].length -= step;
+                out.shortened += 1;
+                out.just.push(recorded);
+            } else {
+                notes.remove(place);
+                out.removed += 1;
+            }
+        }
+        out.marker = (at - step).max(from);
+    } else {
+        for &recorded in just {
+            let Some(place) = find(&notes, recorded) else {
+                continue;
+            };
+            let note = &mut notes[place];
+            let end = (note.start + note.length + step).min(to);
+            if end > note.start + note.length {
+                note.length = end - note.start;
+                out.lengthened += 1;
+            }
+            out.just.push(recorded);
+        }
+        for key in held
+            .iter()
+            .filter(|h| !just.iter().any(|(key, _)| *key == h.key))
+        {
+            if at < to {
+                notes.push(Note::new(key.key, at, step.min(to - at), key.velocity));
+                out.added += 1;
+                out.just.push((key.key, at));
+            }
+        }
+        out.marker = (at + step).min(to);
+    }
+    notes.sort_by_key(|note| (note.start, note.key));
+    out.notes = notes;
+    out
 }
 
 /// A tick of a MIDI clip's contents, from the number an argument gives.
@@ -1522,6 +1769,53 @@ pub fn run(
             }
             Ok(to_value(&view.state(doc, arrangement)))
         }
+        ids::STEP_RECORD => {
+            let StepRecordArgs { clip, back, held } = parse(args)?;
+            let held = held.ok_or_else(|| invalid("`held` must name the keys held"))?;
+            if let Some(key) = held
+                .iter()
+                .find(|h| h.key > 127 || !(1..=127).contains(&h.velocity))
+            {
+                return Err(invalid(format!(
+                    "held key {} needs a key up to 127 and a velocity from 1 to 127",
+                    key.key
+                )));
+            }
+            let (clip, midi) = clip_and_data(doc, view, arrangement, clip)?;
+            let length = doc.clip(clip).map_or(Ticks::ZERO, |clip| clip.length);
+            let (from, to) = span(&midi, length);
+            let at = view.insert_marker(doc, arrangement).unwrap_or(from);
+            let just = view.just_recorded(clip, &held);
+            let stepped = step_notes(
+                notes_in_order(&midi),
+                arrangement.grid_ticks(doc),
+                (from, to),
+                at,
+                &just,
+                &held,
+                back,
+            );
+            let undo_step = if stepped.changed() {
+                transaction(editor, "Step Record", |editor| {
+                    set_notes(editor, clip, &midi, stepped.notes.clone())
+                })?
+                .1
+            } else {
+                false
+            };
+            // The places the selection named may have moved.
+            view.select(clip, Vec::new());
+            view.set_just_recorded(clip, stepped.just.clone());
+            view.set_insert_marker(clip, Some(stepped.marker));
+            Ok(to_value(&StepRecordResult {
+                added: stepped.added,
+                lengthened: stepped.lengthened,
+                shortened: stepped.shortened,
+                removed: stepped.removed,
+                insert_marker: stepped.marker,
+                undo_step,
+            }))
+        }
         ids::ADD_NOTE => {
             let AddNoteArgs {
                 clip,
@@ -1599,6 +1893,7 @@ pub fn run(
             let semitones = semitones.unwrap_or(0);
             let copy = copy.unwrap_or(false);
             let (after, recorded) = transaction(editor, "Move notes", |editor| {
+                let mut data = midi.clone();
                 let mut moved = ordered.clone();
                 let mut moved_notes = Vec::with_capacity(places.len());
                 for place in &places {
@@ -1610,7 +1905,9 @@ pub fn run(
                 }
                 if copy {
                     // The copies land where the notes would have gone, and
-                    // the originals stay (piano-roll R29).
+                    // the originals stay (piano-roll R29); a group's copies
+                    // form a group of their own (note-editing R31).
+                    regroup(&mut data, &mut moved_notes, &midi.groups);
                     moved.extend(moved_notes.iter().cloned());
                 } else {
                     for (place, note) in places.iter().zip(&moved_notes) {
@@ -1622,7 +1919,7 @@ pub fn run(
                     .iter()
                     .map(|note| place_of(&moved, note))
                     .collect();
-                set_notes(editor, clip, &midi, moved)?;
+                set_notes_in(editor, clip, data, moved)?;
                 Ok(places)
             })?;
             view.select(clip, after.clone());
@@ -1758,6 +2055,9 @@ pub fn run(
                 for (place, value) in places.iter().zip(&values) {
                     set_note_value(&mut edited[*place as usize], field, *value);
                 }
+                if field == NoteField::Chance {
+                    share_chance(&mut edited, &places);
+                }
                 set_notes(editor, clip, &midi, edited)?;
                 Ok(places.clone())
             })?;
@@ -1792,6 +2092,9 @@ pub fn run(
                 for (place, value) in places.iter().zip(&values) {
                     set_note_value(&mut edited[*place as usize], field, *value);
                 }
+                if field == NoteField::Chance {
+                    share_chance(&mut edited, &places);
+                }
                 set_notes(editor, clip, &midi, edited)?;
                 Ok(places.clone())
             })?;
@@ -1825,6 +2128,9 @@ pub fn run(
                     let note = &mut edited[*place as usize];
                     let next = tidy(field, (note_value(note, field) + by).clamp(low, high));
                     set_note_value(note, field, next);
+                }
+                if field == NoteField::Chance {
+                    share_chance(&mut edited, &places);
                 }
                 set_notes(editor, clip, &midi, edited)?;
                 Ok(places.clone())
@@ -1879,10 +2185,20 @@ pub fn run(
             let (low, high) = field.range();
             let (after, recorded) = transaction(editor, label(ids::RANDOMIZE), |editor| {
                 let mut edited = ordered.clone();
+                // A group draws once, at its first note named (R25).
+                let mut drawn = BTreeSet::new();
                 for place in &places {
                     let note = &mut edited[*place as usize];
+                    if field == NoteField::Chance
+                        && note.group.is_some_and(|group| !drawn.insert(group))
+                    {
+                        continue;
+                    }
                     let next = note_value(note, field) + amount * draw(seed, *place);
                     set_note_value(note, field, tidy(field, next.clamp(low, high)));
+                }
+                if field == NoteField::Chance {
+                    share_chance(&mut edited, &places);
                 }
                 set_notes(editor, clip, &midi, edited)?;
                 Ok(places.clone())
@@ -1929,6 +2245,74 @@ pub fn run(
                 undo_step: recorded,
             }))
         }
+        ids::GROUP => {
+            let GroupNotesArgs { clip, notes, kind } = parse(args)?;
+            let (clip, midi) = clip_and_data(doc, view, arrangement, clip)?;
+            let ordered = notes_in_order(&midi);
+            let mut places =
+                places_or_selected(view, doc, arrangement, clip, notes, ordered.len())?;
+            if places.len() < 2 {
+                return Err(refused("a group needs two or more notes"));
+            }
+            places.sort_unstable();
+            if let Some(kind) = kind {
+                view.group_kind = kind;
+            }
+            let kind = view.group_kind;
+            // Spec: note-editing R22, R23. Naming a group's every note
+            // changes its kind.
+            let groups: BTreeSet<_> = places
+                .iter()
+                .map(|place| ordered[*place as usize].group)
+                .collect();
+            let whole = groups.len() == 1
+                && groups.first().copied().flatten().is_some_and(|group| {
+                    ordered.iter().filter(|n| n.group == Some(group)).count() == places.len()
+                });
+            let name = if whole {
+                "Change Group"
+            } else {
+                label(ids::GROUP)
+            };
+            let (_, recorded) = transaction(editor, name, |editor| {
+                let mut data = midi.clone();
+                let mut edited = ordered.clone();
+                let id = data.new_group_id();
+                data.groups.push(NoteGroup { id, kind });
+                let chance = edited[places[0] as usize].probability;
+                for place in &places {
+                    let note = &mut edited[*place as usize];
+                    note.group = Some(id);
+                    note.probability = chance;
+                }
+                set_notes_in(editor, clip, data, edited)
+            })?;
+            view.select(clip, places.clone());
+            Ok(to_value(&NoteEditResult {
+                notes: places.clone(),
+                selected: places,
+                undo_step: recorded,
+            }))
+        }
+        ids::UNGROUP => {
+            let UngroupNotesArgs { clip, notes } = parse(args)?;
+            let (clip, midi) = clip_and_data(doc, view, arrangement, clip)?;
+            let ordered = notes_in_order(&midi);
+            let places = places_or_selected(view, doc, arrangement, clip, notes, ordered.len())?;
+            let (_, recorded) = transaction(editor, label(ids::UNGROUP), |editor| {
+                let mut edited = ordered.clone();
+                for place in &places {
+                    edited[*place as usize].group = None;
+                }
+                set_notes(editor, clip, &midi, edited)
+            })?;
+            view.select(clip, places.clone());
+            Ok(to_value(&NoteEditResult {
+                notes: places.clone(),
+                selected: places,
+                undo_step: recorded,
+            }))
+        }
         ids::COPY | ids::CUT => {
             let CopyNotesArgs { clip, notes } = parse(args)?;
             let (clip, midi) = clip_and_data(doc, view, arrangement, clip)?;
@@ -1939,7 +2323,7 @@ pub fn run(
                 .filter_map(|place| ordered.get(*place as usize))
                 .cloned()
                 .collect();
-            view.clipboard = NoteClipboard::of(&copied);
+            view.clipboard = NoteClipboard::of(&copied, &midi);
             let mut recorded = false;
             if id == ids::CUT {
                 // Cut copies the notes and deletes them, as one undo step.
@@ -1977,13 +2361,15 @@ pub fn run(
                 .or_else(|| view.insert_marker(doc, arrangement))
                 .or_else(|| view.time_selection(doc, arrangement).map(|(from, _)| from))
                 .ok_or_else(|| unavailable("there is no insert marker to paste at"))?;
-            let pasted = view.clipboard.at(at);
+            let mut data = midi.clone();
+            let mut pasted = view.clipboard.at(at);
+            regroup(&mut data, &mut pasted, &view.clipboard.groups);
             let (after, recorded) = transaction(editor, "Paste notes", |editor| {
                 let mut notes = notes_in_order(&midi);
                 notes.extend(pasted.iter().cloned());
                 notes.sort_by_key(|note| (note.start, note.key));
                 let places: Vec<u32> = pasted.iter().map(|note| place_of(&notes, note)).collect();
-                set_notes(editor, clip, &midi, notes)?;
+                set_notes_in(editor, clip, data, notes)?;
                 Ok(places)
             })?;
             view.select(clip, after.clone());
@@ -2021,13 +2407,15 @@ pub fn run(
                     .unwrap_or(Ticks::ZERO),
             );
             let (_, to) = view.time_selection(doc, arrangement).unwrap_or(own);
-            let pasted = NoteClipboard::of(&copied).at(to);
+            let mut data = midi.clone();
+            let mut pasted = NoteClipboard::of(&copied, &midi).at(to);
+            regroup(&mut data, &mut pasted, &midi.groups);
             let (after, recorded) = transaction(editor, "Duplicate notes", |editor| {
                 let mut notes = notes_in_order(&midi);
                 notes.extend(pasted.iter().cloned());
                 notes.sort_by_key(|note| (note.start, note.key));
                 let places: Vec<u32> = pasted.iter().map(|note| place_of(&notes, note)).collect();
-                set_notes(editor, clip, &midi, notes)?;
+                set_notes_in(editor, clip, data, notes)?;
                 Ok(places)
             })?;
             view.select(clip, after.clone());

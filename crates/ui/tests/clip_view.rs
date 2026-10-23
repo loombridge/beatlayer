@@ -1021,7 +1021,8 @@ fn option_dragging_a_note_copies_it() {
 fn the_context_menu_lists_the_items_in_order() {
     // Spec: piano-roll R30. Right-clicking a note opens the editor's
     // context menu: the items whose commands exist run them, and the rest
-    // are drawn disabled and name their packages.
+    // are drawn disabled and name their packages. Group Notes needs two
+    // notes and Ungroup Notes a grouped one.
     let step = n_step();
     let mut n = set(vec![Note::new(60, Ticks::ZERO, step, 100)]);
     let at = n.at(60, step / 2);
@@ -1039,10 +1040,11 @@ fn the_context_menu_lists_the_items_in_order() {
         let node = menu_item(&nodes, label);
         assert!(!node.disabled, "{label} works");
     }
+    for label in ["Group Notes", "Ungroup Notes"] {
+        assert!(menu_item(&nodes, label).disabled, "{label} has no use here");
+    }
     for (label, package) in [
         ("Invert Selection", "WP-6.4"),
-        ("Group Notes", "WP-6.2"),
-        ("Ungroup Notes", "WP-6.2"),
         ("Highlight Scales", "WP-6.7b"),
     ] {
         let node = menu_item(&nodes, label);
@@ -1676,7 +1678,7 @@ fn deactivating_notes_from_the_menus_and_the_piano_ruler() {
 fn the_footer_has_the_active_lanes_controls() {
     // Spec: note-editing R10 to R13. Velocity: Randomize with its amount,
     // Ramp's start and end, Deviation; Chance: Randomize with its amount, and
-    // Play All, Play One and Ungroup, drawn disabled until WP-6.2.
+    // Play All, Play One and Ungroup, which wait for notes to group.
     let mut n = run_of_notes(3, 100);
     let nodes = Harness::nodes(&n.h.settle());
     for label in [
@@ -1697,7 +1699,7 @@ fn the_footer_has_the_active_lanes_controls() {
             .iter()
             .find(|node| node.label == label)
             .unwrap_or_else(|| panic!("{label}"));
-        assert!(node.disabled, "{label} waits for probability groups");
+        assert!(node.disabled, "{label} waits for notes to group");
     }
     assert!(!nodes.iter().any(|node| node.label == "Ramp Start"));
 }
@@ -2006,6 +2008,173 @@ fn the_notes_are_paler_the_softer_their_velocity() {
             "velocity 64 is between the palest and the full colour"
         );
     }
+}
+
+/// Switches Preview on, arms the clip's track and turns the computer MIDI
+/// keyboard on, as step recording needs, and lets a frame pass so the
+/// input's copy is on.
+fn start_step_recording(n: &mut Notes) {
+    let track = n.doc().clip_track(n.clip).unwrap();
+    n.h.shell
+        .run("mixer.set_arm", json!({ "track": track, "arm": true }))
+        .unwrap();
+    n.h.shell
+        .run("clip_view.set_preview", json!({ "on": true }))
+        .unwrap();
+    n.h.shell
+        .run("midi.toggle_computer_keyboard", json!({ "on": true }))
+        .unwrap();
+    n.h.settle();
+    n.h.shell.poll();
+}
+
+#[test]
+fn the_preview_switch_above_the_piano_ruler_runs_set_preview() {
+    // Spec: step-recording R1. L-CLIP-012: the switch sits above the piano
+    // ruler, in the marker strip's left end.
+    let mut n = set(vec![]);
+    assert!(!n.h.shell.clip_view().preview(), "off in a new install");
+    let strip = n.strip();
+    let switch = pos2(strip.left() + KEY_WIDTH / 2.0, strip.center().y);
+    n.click(switch, Modifiers::NONE);
+    assert!(n.h.shell.clip_view().preview());
+    assert_eq!(n.steps(), 0, "no undo step");
+    n.click(switch, Modifiers::NONE);
+    assert!(!n.h.shell.clip_view().preview());
+}
+
+#[test]
+fn a_key_held_in_the_piano_ruler_plays_until_released_with_preview_on() {
+    // Spec: step-recording R2. A click on a key plays it at velocity 100
+    // while the button is held, and only with Preview on.
+    let mut n = set(vec![]);
+    let track = n.doc().clip_track(n.clip).unwrap();
+    let mut queue = n.h.shell.midi().sender().attach(64);
+    let heard = |queue: &mut rtrb::Consumer<bl_core::midi::MidiInputEvent>| {
+        std::iter::from_fn(|| queue.pop().ok())
+            .map(|e| {
+                (
+                    e.source,
+                    e.message.status(),
+                    e.message.data1(),
+                    e.message.data2(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    let source = bl_core::midi::MidiSource::Preview(track.0);
+    let key = n.key_at(57);
+    let press = |n: &mut Notes, pressed: bool| {
+        n.h.frame(vec![Event::PointerButton {
+            pos: key,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        }]);
+        n.h.settle();
+    };
+    n.h.frame(vec![Event::PointerMoved(key)]);
+    press(&mut n, true);
+    press(&mut n, false);
+    assert_eq!(heard(&mut queue), [], "Preview is off");
+
+    n.h.shell
+        .run("clip_view.set_preview", json!({ "on": true }))
+        .unwrap();
+    n.h.settle();
+    press(&mut n, true);
+    assert_eq!(heard(&mut queue), [(source, 0x90, 57, 100)]);
+    press(&mut n, false);
+    assert_eq!(heard(&mut queue), [(source, 0x80, 57, 64)]);
+    assert_eq!(n.steps(), 0, "a preview changes nothing in the set");
+}
+
+#[test]
+fn a_dragged_note_plays_each_pitch_it_reaches_and_ends_on_release() {
+    // Spec: step-recording R2. A drag that moves notes to a new pitch plays
+    // the grabbed note at each new pitch, ending the one before.
+    let step = n_step();
+    let mut n = set(vec![Note::new(60, Ticks::ZERO, step, 90)]);
+    let track = n.doc().clip_track(n.clip).unwrap();
+    n.h.shell
+        .run("clip_view.set_preview", json!({ "on": true }))
+        .unwrap();
+    n.h.settle();
+    let mut queue = n.h.shell.midi().sender().attach(256);
+    let from = n.at(60, step / 2);
+    let to = n.at(63, step / 2);
+    n.drag(from, to, Modifiers::NONE);
+    let heard: Vec<_> = std::iter::from_fn(|| queue.pop().ok())
+        .map(|e| {
+            assert_eq!(e.source, bl_core::midi::MidiSource::Preview(track.0));
+            (e.message.is_note_on(), e.message.data1())
+        })
+        .collect();
+    assert_eq!(heard.first(), Some(&(true, 60)), "the grabbed pitch first");
+    assert!(heard.contains(&(true, 63)), "and the pitch it reached");
+    assert_eq!(heard.last(), Some(&(false, 63)), "ended on release");
+    let on = heard.iter().filter(|(on, _)| *on).count();
+    let off = heard.len() - on;
+    assert_eq!(on, off, "every note-on has its note-off");
+    assert_eq!(n.notes()[0].key, 63);
+}
+
+#[test]
+fn left_and_right_step_while_step_recording_and_move_the_marker_otherwise() {
+    // Spec: step-recording R3, R4, R6, R10. Right with a key held adds the
+    // note at the insert marker and steps on; Left takes it off again.
+    let step = n_step();
+    let mut n = set(vec![]);
+    let at = n.at(60, step / 4);
+    n.click(at, Modifiers::NONE);
+    assert_eq!(n.insert(), Some(Ticks::ZERO));
+    // Not step recording yet: the arrows only move the marker.
+    n.h.key(egui::Key::ArrowRight, Modifiers::NONE);
+    assert_eq!(n.insert(), Some(step));
+    n.h.key(egui::Key::ArrowLeft, Modifiers::NONE);
+
+    start_step_recording(&mut n);
+    // A on the computer MIDI keyboard is C3.
+    n.h.shell
+        .run(
+            "midi.computer_keyboard_key",
+            json!({ "key": "A", "pressed": true }),
+        )
+        .unwrap();
+    n.h.settle();
+    n.h.key(egui::Key::ArrowRight, Modifiers::NONE);
+    assert_eq!(n.notes().len(), 1);
+    assert_eq!(n.notes()[0].start, Ticks::ZERO);
+    assert_eq!(n.notes()[0].length, step);
+    assert_eq!(n.insert(), Some(step));
+    n.h.key(egui::Key::ArrowRight, Modifiers::NONE);
+    assert_eq!(n.notes()[0].length, 2 * step);
+    n.h.key(egui::Key::ArrowLeft, Modifiers::NONE);
+    n.h.key(egui::Key::ArrowLeft, Modifiers::NONE);
+    assert_eq!(n.notes(), []);
+    assert_eq!(n.insert(), Some(Ticks::ZERO));
+    // Shift still selects time, as without step recording.
+    n.h.key(egui::Key::ArrowRight, Modifiers::SHIFT);
+    assert_eq!(n.time(), Some((Ticks::ZERO, step)));
+}
+
+#[test]
+fn cmd_shift_b_arms_the_track_and_switches_the_computer_keyboard() {
+    // Spec: step-recording R9, M-OPT-018. The key runs Step Input Mode in
+    // the note editor, with the Clip View open on a MIDI clip.
+    let mut n = set(vec![]);
+    n.h.shell.set_focused_area(bl_shell::Area::Detail);
+    let track = n.doc().clip_track(n.clip).unwrap();
+    assert!(!n.h.shell.computer_keyboard_on());
+    let chord = if cfg!(target_os = "macos") {
+        Modifiers::MAC_CMD | Modifiers::COMMAND | Modifiers::SHIFT
+    } else {
+        Modifiers::CTRL | Modifiers::COMMAND | Modifiers::SHIFT
+    };
+    n.h.key(egui::Key::B, chord);
+    assert!(n.doc().track(track).unwrap().mixer().arm);
+    assert!(n.h.shell.computer_keyboard_on());
+    assert_eq!(n.steps(), 1, "arming is the one undo step");
 }
 
 /// The modifier that copies while dragging, and with E chops: Option on
@@ -2435,4 +2604,292 @@ fn a_stretch_marker_dragged_with_cmd_does_not_snap_and_the_pseudo_marker_keeps_t
     let (_, end) = n.time().unwrap();
     assert!((end - wanted).get().abs() <= 2, "{end:?} near {wanted:?}");
     assert_ne!(end.get() % step.get(), 0);
+}
+
+// -- Probability groups (WP-6.2) --------------------------------------------
+
+use bl_model::{GroupKind, NoteGroup};
+
+/// A clip of `count` notes one grid step apart, with the Chance lane shown
+/// and active.
+fn chance_notes(count: i64) -> Notes {
+    let step = n_step();
+    let mut n = set((0..count)
+        .map(|i| Note::new(60 + i as u8, 4 * i * step, step, 100))
+        .collect());
+    n.h.shell
+        .run("view.lanes", json!({ "lane": "chance" }))
+        .unwrap();
+    n.h.settle();
+    n
+}
+
+impl Notes {
+    /// The clip's groups.
+    fn groups(&self) -> Vec<NoteGroup> {
+        match &self.doc().clip(self.clip).unwrap().data {
+            ClipData::Midi(midi) => midi.groups.clone(),
+            ClipData::Audio(_) => panic!("the clip is MIDI"),
+        }
+    }
+
+    fn grouped(&self) -> Vec<Option<u32>> {
+        self.notes().iter().map(|note| note.group).collect()
+    }
+}
+
+// Spec: note-editing R22, R23, S-NOTE-031, S-NOTE-032. Cmd-G groups the
+// selected notes, Cmd-Shift-G ungroups them, each in one undo step.
+#[test]
+fn cmd_g_groups_the_selected_notes_and_cmd_shift_g_ungroups_them() {
+    let mut n = run_of_notes(3, 100);
+    n.focus();
+    n.select(&[0, 1, 2]);
+    let before = n.doc().clone();
+    n.h.key(Key::G, command());
+    n.h.settle();
+    assert_eq!(n.grouped(), [Some(1); 3]);
+    assert_eq!(n.groups()[0].kind, GroupKind::PlayAll);
+    assert_eq!(n.selected(), [0, 1, 2], "the notes stay selected");
+    n.one_step(&before, "Group Notes");
+    let before = n.doc().clone();
+    n.h.key(Key::G, command() | Modifiers::SHIFT);
+    n.h.settle();
+    assert_eq!(n.grouped(), [None; 3]);
+    n.one_step(&before, "Ungroup Notes");
+}
+
+// Spec: note-editing R22, R23, R10. The Chance lane's footer groups the
+// selected notes as Play All or Play One, and ungroups them.
+#[test]
+fn the_footer_buttons_group_and_ungroup() {
+    let mut n = chance_notes(4);
+    let nodes = Harness::nodes(&n.h.settle());
+    for label in ["Play All", "Play One", "Ungroup"] {
+        assert!(
+            nodes
+                .iter()
+                .find(|node| node.label == label)
+                .unwrap()
+                .disabled,
+            "{label} needs notes"
+        );
+    }
+    n.select(&[0, 1, 2]);
+    let nodes = Harness::nodes(&n.h.settle());
+    assert!(
+        !nodes
+            .iter()
+            .find(|node| node.label == "Play One")
+            .unwrap()
+            .disabled
+    );
+    assert!(
+        nodes
+            .iter()
+            .find(|node| node.label == "Ungroup")
+            .unwrap()
+            .disabled,
+        "no note is grouped yet"
+    );
+    let before = n.doc().clone();
+    let button = n.footer("Play One").center();
+    n.h.click(button);
+    n.h.settle();
+    assert_eq!(n.groups()[0].kind, GroupKind::PlayOne);
+    assert_eq!(n.grouped(), [Some(1), Some(1), Some(1), None]);
+    n.one_step(&before, "Group Notes");
+    // Play All on the same notes changes the group's kind.
+    let button = n.footer("Play All").center();
+    n.h.click(button);
+    n.h.settle();
+    assert_eq!(n.groups().len(), 1);
+    assert_eq!(n.groups()[0].kind, GroupKind::PlayAll);
+    let before = n.doc().clone();
+    let button = n.footer("Ungroup").center();
+    n.h.click(button);
+    n.h.settle();
+    assert!(n.groups().is_empty());
+    n.one_step(&before, "Ungroup Notes");
+}
+
+// Spec: note-editing R24, R25, R5. A group shows one marker in the Chance
+// lane, at its first note; dragging it sets the group's chance, in one step.
+#[test]
+fn a_group_has_one_marker_in_the_chance_lane_and_dragging_it_sets_the_group() {
+    let step = n_step();
+    let mut n = chance_notes(4);
+    n.h.shell
+        .run(
+            "note.group",
+            json!({ "clip": n.clip, "notes": [0, 1, 2], "kind": "play_one" }),
+        )
+        .unwrap();
+    n.h.settle();
+    let nodes = Harness::nodes(&n.h.settle());
+    // The Chance lane's markers read a percentage.
+    let in_chance = |nodes: &[Node]| {
+        nodes
+            .iter()
+            .filter(|node| {
+                node.role == egui::accesskit::Role::ListItem && node.value.ends_with('%')
+            })
+            .count()
+    };
+    assert_eq!(
+        in_chance(&nodes),
+        2,
+        "one marker for the group, one for the loner"
+    );
+    // A press where the group's other notes start grabs nothing.
+    let before = n.doc().clone();
+    let from = n.lane_at(Ticks::ZERO, NoteField::Chance, 1.0);
+    let to = n.lane_at(Ticks::ZERO, NoteField::Chance, 0.5);
+    n.drag(from, to, Modifiers::NONE);
+    let chances: Vec<f64> = n.notes().iter().map(|note| note.probability).collect();
+    assert!(
+        chances[0] < 1.0 && chances[0] == chances[1] && chances[1] == chances[2],
+        "{chances:?}"
+    );
+    assert_eq!(chances[3], 1.0, "the loner is its own");
+    n.one_step(&before, "Adjust note values");
+    let other = n.lane_at(8 * step, NoteField::Chance, 1.0);
+    let selected = n.selected();
+    n.click(other, Modifiers::NONE);
+    assert_eq!(
+        n.selected(),
+        selected,
+        "no marker there: the group's is at its first note"
+    );
+}
+
+// Spec: note-editing R23, R24, C-PGROUP-001 to C-PGROUP-003. The group
+// marker's menu changes the group's kind, ticked, and ends the group.
+#[test]
+fn the_group_marker_s_menu_changes_its_kind_and_ends_it() {
+    // The menu's kinds are the buttons that can be ticked; the footer has
+    // buttons of the same names.
+    fn kind_item(nodes: &[Node], label: &str) -> Node {
+        nodes
+            .iter()
+            .find(|node| node.label == label && node.toggled.is_some())
+            .unwrap_or_else(|| panic!("no menu item {label:?}"))
+            .clone()
+    }
+    fn click(n: &mut Notes, node: &Node) {
+        let b = node.bounds.expect("bounds");
+        n.h.click(pos2(
+            ((b.x0 + b.x1) / 2.0) as f32,
+            ((b.y0 + b.y1) / 2.0) as f32,
+        ));
+        n.h.settle();
+    }
+    let mut n = chance_notes(3);
+    n.h.shell
+        .run(
+            "note.group",
+            json!({ "clip": n.clip, "kind": "play_all", "notes": [0, 1] }),
+        )
+        .unwrap();
+    n.h.settle();
+    let marker = n.lane_at(Ticks::ZERO, NoteField::Chance, 1.0);
+    let nodes = right_click(&mut n, marker);
+    assert_eq!(
+        kind_item(&nodes, "Play All").toggled,
+        Some(true),
+        "the kind is ticked"
+    );
+    assert_eq!(kind_item(&nodes, "Play One").toggled, Some(false));
+    let before = n.doc().clone();
+    click(&mut n, &kind_item(&nodes, "Play One"));
+    assert_eq!(n.groups().len(), 1);
+    assert_eq!(n.groups()[0].kind, GroupKind::PlayOne);
+    n.one_step(&before, "Change Group");
+    let nodes = right_click(&mut n, marker);
+    assert_eq!(kind_item(&nodes, "Play One").toggled, Some(true));
+    let before = n.doc().clone();
+    n.click_node(&nodes, egui::accesskit::Role::Button, "Ungroup Notes");
+    assert!(n.groups().is_empty(), "the whole group ended");
+    assert_eq!(n.grouped(), [None; 3]);
+    n.one_step(&before, "Ungroup Notes");
+    // The editor's own menu has the items too, when they apply: Ungroup
+    // Notes ended the group, and the notes are still selected.
+    let at = n.at(60, n_step() / 2);
+    let nodes = right_click(&mut n, at);
+    assert_eq!(n.selected(), [0, 1]);
+    assert!(!menu_item(&nodes, "Group Notes").disabled);
+    assert!(
+        menu_item(&nodes, "Ungroup Notes").disabled,
+        "none is grouped"
+    );
+}
+
+// Spec: note-editing R4, R24. A grouped note wears the corner triangle
+// whatever its chance, and hovering a note marks its whole group.
+#[test]
+fn a_grouped_note_wears_the_corner_triangle_and_hovering_marks_the_group() {
+    let mut n = run_of_notes(3, 100);
+    n.h.shell
+        .run("note.group", json!({ "clip": n.clip, "notes": [0, 1] }))
+        .unwrap();
+    n.h.settle();
+    let notes = n.notes();
+    assert!(shows_corner(&notes[0], 12.0) && shows_corner(&notes[1], 12.0));
+    assert!(!shows_corner(&notes[2], 12.0), "the loner always plays");
+    assert!(
+        bl_ui::note_lanes::is_marked(&notes, Some(0), 1),
+        "the group's other note"
+    );
+    assert!(bl_ui::note_lanes::is_marked(&notes, Some(0), 0));
+    assert!(!bl_ui::note_lanes::is_marked(&notes, Some(0), 2));
+    assert!(!bl_ui::note_lanes::is_marked(&notes, Some(2), 1));
+}
+
+// Spec: note-editing R24. While notes are selected the Status Bar names
+// their groups' kind, with an asterisk across kinds.
+#[test]
+fn the_status_bar_names_the_selected_notes_group_kind() {
+    let mut n = run_of_notes(4, 100);
+    assert_eq!(n.h.shell.note_group_status(), None);
+    for (notes, kind) in [([0, 1], "play_all"), ([2, 3], "play_one")] {
+        n.h.shell
+            .run(
+                "note.group",
+                json!({ "clip": n.clip, "notes": notes, "kind": kind }),
+            )
+            .unwrap();
+    }
+    n.select(&[0]);
+    assert_eq!(
+        n.h.shell.note_group_status().as_deref(),
+        Some("Probability group: Play All")
+    );
+    // The Status Bar paints it.
+    let output = n.h.settle();
+    fn painted(shape: &egui::Shape, text: &str) -> bool {
+        match shape {
+            egui::Shape::Text(t) => t.galley.job.text == text,
+            egui::Shape::Vec(shapes) => shapes.iter().any(|shape| painted(shape, text)),
+            _ => false,
+        }
+    }
+    assert!(
+        output
+            .shapes
+            .iter()
+            .any(|clipped| painted(&clipped.shape, "Probability group: Play All")),
+        "the Status Bar reads it"
+    );
+    n.select(&[2]);
+    assert_eq!(
+        n.h.shell.note_group_status().as_deref(),
+        Some("Probability group: Play One")
+    );
+    n.select(&[0, 3]);
+    assert_eq!(
+        n.h.shell.note_group_status().as_deref(),
+        Some("Probability group: Play All, Play One*")
+    );
+    n.select(&[]);
+    assert_eq!(n.h.shell.note_group_status(), None);
 }

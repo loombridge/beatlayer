@@ -1722,6 +1722,10 @@ fn look(element: Element, shell: &Shell) -> Look {
             },
             // Spec: file-management R12. The Status Bar says how many of
             // the set's files are missing, until none is.
+            (None, None) if shell.note_group_status().is_some() => Look {
+                text: shell.note_group_status(),
+                ..Look::default()
+            },
             (None, None) => {
                 let missing = shell.missing_files();
                 Look {

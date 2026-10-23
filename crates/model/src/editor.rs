@@ -247,7 +247,8 @@ impl Editor {
     /// [`EditError::IdNotIssued`] if it creates an object with an ID that
     /// [`Editor::new_id`] didn't hand out or that's been used. Either way the
     /// document is as it was and any open transaction stays open.
-    pub fn apply(&mut self, command: Command) -> Result<ChangeSet, EditError> {
+    pub fn apply(&mut self, mut command: Command) -> Result<ChangeSet, EditError> {
+        command.issue_missing_ids(&mut || self.new_id());
         let created = command.created_ids();
         for id in &created {
             if !self.unused_ids.contains(id) {

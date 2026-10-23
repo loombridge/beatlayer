@@ -330,6 +330,70 @@ const ENTRIES: &[Entry] = &[
             \"Change Scale\", and the set is saved with it.",
     },
     Entry {
+        id: "tuning.set",
+        action: Action::Apply("set_tuning"),
+        label: "Set Tuning",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Makes a tuning, given whole (`tuning`: its name, description, the `cents` \
+            of its degrees above the unison with the pseudo-octave last, optional note `names` \
+            and `link`, its `reference` pitch and its `range` of notes), the set's tuning in \
+            place of any other. `tuning.load` makes one from a `.scl` or `.ascl` file instead. \
+            With `retune` true, every note of the MIDI clips on tracks that play the tuning \
+            moves to the key whose new pitch is nearest the pitch it had (the lower key on a \
+            tie; of two overlapping notes that land on one key the earlier is shortened, and of \
+            two that start together the shorter is deleted); with it false the notes keep \
+            their keys. A tuning that breaks the rules (no pitches, a pseudo-octave at or below \
+            the unison, a range of more than 128 notes) is refused and the set's tuning stays \
+            as it was. It is one undo step, named \"Load Tuning\", and the set is saved with \
+            the tuning inside it. `tuning.state` reads it back.",
+    },
+    Entry {
+        id: "tuning.remove",
+        action: Action::Apply("remove_tuning"),
+        label: "Remove Tuning",
+        permission: Permission::Destructive,
+        contexts: &[Global],
+        keys: &[],
+        description: "Removes the set's tuning, which puts the set back to twelve equal steps. \
+            With `retune` true, every note of the MIDI clips on tracks that play the tuning \
+            moves to the key nearest the pitch it had under the tuning; with it false the \
+            notes keep their keys and may sound other pitches. Refused when the set has no \
+            tuning. It is one undo step, named \"Remove Tuning\", and undo brings the tuning \
+            back. `tuning.state` reads it back.",
+    },
+    Entry {
+        id: "tuning.set_reference",
+        action: Action::Apply("set_tuning_reference"),
+        label: "Set Tuning Reference Pitch",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Sets the set's tuning's reference pitch: an `octave`, a `degree` of the \
+            tuning and a `frequency` in Hz; a value left out stays as it was. Changing the \
+            octave or the degree only names another note as the reference: the frequency \
+            becomes that note's present frequency and nothing sounds different. Changing the \
+            frequency moves every pitch of the set by one ratio. Refused when the set has no \
+            tuning, for a degree the tuning doesn't have, or for a frequency that isn't above \
+            0. It is one undo step, named \"Change Reference Pitch\". `tuning.state` reads it \
+            back.",
+    },
+    Entry {
+        id: "tuning.set_range",
+        action: Action::Apply("set_tuning_range"),
+        label: "Set Tuning Range",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Sets the set's tuning's note range: the `lowest` note, which key 0 plays, \
+            and the `highest`, each an `octave` and a `degree`. Given one, the other moves by \
+            as many notes, so the number of notes stays; given both, they are the range. A \
+            range of more than 128 notes, or one that starts above its end, is refused. Keys \
+            above the highest note play nothing. Refused when the set has no tuning. It is one \
+            undo step, named \"Change Tuning Range\". `tuning.state` reads it back.",
+    },
+    Entry {
         id: "song.set_time_signatures",
         action: Action::Apply("set_time_signatures"),
         label: "Set Time Signatures",
@@ -937,6 +1001,20 @@ const ENTRIES: &[Entry] = &[
             with the set, and each change is one undo step.",
     },
     Entry {
+        id: "track.set_tuning_bypass",
+        action: Action::Apply("set_tuning_bypass"),
+        label: "Bypass Tuning",
+        permission: Permission::Edit,
+        contexts: MIXER,
+        keys: &[],
+        description: "Switches a MIDI track's Bypass Tuning, as its In/Out section's switch \
+            does. On, the track plays twelve equal steps whatever tuning the set holds, and its \
+            clips' editors show twelve-step keys; off (a new track's), it plays the tuning. A \
+            track that holds a Drum Rack plays twelve equal steps whatever the switch says. \
+            Only MIDI tracks have it. The switch is saved with the set only where it's on, and \
+            each change is one undo step, named \"Bypass Tuning\".",
+    },
+    Entry {
         id: "mixer.set_keep_monitoring_latency",
         action: Action::Apply("set_keep_monitoring_latency"),
         label: "Keep Monitoring Latency",
@@ -1188,12 +1266,98 @@ const ENTRIES: &[Entry] = &[
         permission: Permission::Edit,
         contexts: &[Arrangement],
         keys: &[],
-        description: "Adds a take lane under an audio track's arrangement lane, after the lanes \
-            it has. `lane.name` names it and `lane.clips` are the recorded passes it holds, each \
-            with a `name`, a `start` and `length` in ticks (705,600 to the quarter note), and \
-            audio `data` as `clip.create` takes it. The track plays only its arrangement lane: \
-            loop recording adds a lane for every pass and copies the latest pass to the \
-            arrangement lane. Audio tracks only.",
+        description: "Adds a take lane under an audio or MIDI track's main lane, after the \
+            lanes it has, or at `index` among them (0 is the lane nearest the main lane). \
+            `lane.name` names it and `lane.clips` are the clips it holds, each with a `name`, \
+            a `start` and `length` in ticks (705,600 to the quarter note), and `data`: audio \
+            as `clip.create` takes it, or tagged `audio` or `midi`. The lane and its clips are \
+            given IDs when `id` is left out. A lane holds clips of its track's kind. The track \
+            plays only its main lane, or the take lane that is auditioned in its place \
+            (`take_lane.set_audition`); recording adds a lane for every take and copies the \
+            latest to the main lane. Read the lanes back with the query tool's `track` \
+            `take_lanes`.",
+    },
+    Entry {
+        id: "take_lane.create_clip",
+        action: Action::Apply("create_take_clip"),
+        label: "Create Clip on Take Lane",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Puts a new clip on a take lane, at `clip.start` for `clip.length` ticks \
+            (705,600 to the quarter note), as `clip.create` puts one on a main lane: an audio \
+            clip on an audio track's lane and a MIDI clip on a MIDI track's. `clip.id` must be \
+            a new ID the project has issued for it. It does not clear what the lane holds \
+            there. The clip is then edited by its ID with the `clip.*` commands, as a \
+            main-lane clip is.",
+    },
+    Entry {
+        id: "take_lane.rename",
+        action: Action::Apply("rename_take_lane"),
+        label: "Rename Take Lane",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Gives a take lane a new name. An empty name is refused.",
+    },
+    Entry {
+        id: "take_lane.delete",
+        action: Action::Apply("delete_take_lanes"),
+        label: "Delete Take Lane(s)",
+        permission: Permission::Destructive,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Deletes take lanes with their clips. The main lane is left as it was, and \
+            a deleted lane that was auditioned stops being. Undo restores them, but because it \
+            removes the person's work an agent asks first.",
+    },
+    Entry {
+        id: "take_lane.delete_all",
+        action: Action::Apply("delete_all_take_lanes"),
+        label: "Delete All Take Lanes",
+        permission: Permission::Destructive,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Deletes every take lane of each of the audio or MIDI `tracks`, with their \
+            clips. The main lane is left as it was. Undo restores them, but because it \
+            removes the person's work an agent asks first.",
+    },
+    Entry {
+        id: "take_lane.delete_unused",
+        action: Action::Apply("delete_unused_take_lanes"),
+        label: "Delete All Unused Take Lanes",
+        permission: Permission::Destructive,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Deletes each of the audio or MIDI `tracks`' take lanes none of whose \
+            material the main lane uses: a main-lane clip uses a take-lane clip over the stretch \
+            where both lie when they play the same thing there (`take_lane.comp_sources` lists \
+            what is used). The main lane is left as it was. Undo restores them, but because it \
+            removes the person's work an agent asks first.",
+    },
+    Entry {
+        id: "take_lane.move",
+        action: Action::Apply("move_take_lanes"),
+        label: "Move Take Lane(s)",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Moves take lanes, which must all be on one track, to a new place among \
+            that track's take lanes, keeping their order: `index` counts from 0, the lane \
+            nearest the main lane, among the lanes that are not moved. The main lane stays \
+            first.",
+    },
+    Entry {
+        id: "take_lane.set_audition",
+        action: Action::Apply("set_audition"),
+        label: "Audition Take Lane",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Switches the audition of a take lane on or off. While a take lane is \
+            auditioned, its track plays that lane's clips in place of its main lane's, from the \
+            next block; a track has at most one, so switching one on switches off the one \
+            auditioned before. Session clips are unaffected. It is saved with the set.",
     },
     Entry {
         id: "clip.delete",

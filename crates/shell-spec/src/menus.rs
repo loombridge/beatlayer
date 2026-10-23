@@ -42,6 +42,7 @@ use crate::mixer_view::{
     SENDS as MIXER_SENDS, TOGGLE as MIXER_TOGGLE, TRACK_OPTIONS as MIXER_TRACK_OPTIONS,
     VOLUME as MIXER_VOLUME,
 };
+use crate::notes::SET_PREVIEW as NOTE_PREVIEW;
 
 /// The platform a menu bar is for: macOS has an application menu; Windows
 /// and Linux put Settings in Options, Quit in File, and About in Help.
@@ -762,7 +763,7 @@ const OPTIONS: &[Row] = &[
     ("M-OPT-002", "Edit MIDI Map", Key(&["S-MAP-001"])),
     ("M-OPT-003", "Edit Key Map", Key(&["S-MAP-002"])),
     ("M-OPT-004", "Computer MIDI Keyboard", Key(&["S-MAP-003"])),
-    ("M-OPT-005", "MIDI Note Editor Preview", Pending(None)),
+    ("M-OPT-005", "MIDI Note Editor Preview", Cmd(NOTE_PREVIEW)),
     ("M-OPT-006", "Browser File Preview", Cmd(BROWSER_PREVIEW)),
     SEPARATOR,
     ("M-OPT-007", "External Sync", Pending(None)),
@@ -821,7 +822,7 @@ const OPTIONS: &[Row] = &[
     (
         "M-OPT-022",
         "Retune Set On Loading Tuning Systems",
-        Pending(None),
+        Cmd("settings.set_retune_on_tuning_load"),
     ),
     SEPARATOR,
     (

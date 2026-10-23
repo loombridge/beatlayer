@@ -16,8 +16,8 @@ use crate::automation::{
     override_device,
 };
 use crate::clip::{
-    AudioData, Clip, ClipData, ClipEnvelope, EnvelopeKind, MidiData, Note, TakeLane, clip_entry,
-    crossfades,
+    AudioData, Clip, ClipData, ClipEnvelope, EnvelopeKind, MidiData, NewTakeLane, Note, TakeLane,
+    clip_entry, crossfades,
 };
 use crate::clip_param::ClipParam;
 use crate::device::{Device, DeviceKind, DeviceRole};
@@ -27,7 +27,8 @@ use crate::external::{ExternalPort, HardwareLatency};
 use crate::follow::FollowPatch;
 use crate::groove::{GLOBAL_AMOUNT_MAX, Groove, GrooveBase, check_percent};
 use crate::ids::{
-    ChainId, ClipId, ContentHash, DeviceId, GrooveId, LocatorId, ParamId, SceneId, TrackId,
+    ChainId, ClipId, ContentHash, DeviceId, GrooveId, LocatorId, ParamId, SceneId, TakeLaneId,
+    TrackId,
 };
 use crate::launch::{ClipLaunch, LaunchMode, LaunchQuantization};
 use crate::layers::{
@@ -47,6 +48,7 @@ use crate::track::{
     Channel, CrossfadeAssign, Input, MidiTo, Mixer, Monitor, Output, PanMode, SendTap, Track,
     TrackDelay, TrackKind,
 };
+use crate::tuning::{Tuning, TuningNote};
 use crate::warp::{MarkerAt, TransientEdits};
 use crate::warp_settings::{
     BeatsUpdate, ComplexProUpdate, DETUNE_MAX, DETUNE_MIN, TRANSPOSE_MAX, TRANSPOSE_MIN,
@@ -118,6 +120,7 @@ fn forget_where(track: &mut Track, names_gone: impl Fn(&AutomationTarget) -> boo
     let clips: Vec<ClipId> = track
         .clips()
         .chain(track.slots().map(|(_, clip)| clip))
+        .chain(track.take_lanes().flat_map(|lane| lane.clips.iter()))
         .filter(|clip| clip.envelopes.iter().any(|e| names_gone(&e.target)))
         .map(|clip| clip.id)
         .collect();
@@ -736,13 +739,67 @@ pub enum Command {
         /// The clip, with a new ID.
         clip: Clip,
     },
-    /// Adds a take lane under an audio track's Arrangement lane, after the
-    /// lanes it has, holding recorded passes.
+    /// Adds a take lane under an audio or MIDI track's main lane, holding
+    /// clips of the track's kind: after the lanes it has, or at `index`
+    /// among them. IDs left out are issued.
     AddTakeLane {
-        /// The audio track.
+        /// The audio or MIDI track.
         track: TrackId,
-        /// The lane and its passes.
-        lane: TakeLane,
+        /// The lane and its clips.
+        lane: NewTakeLane,
+        /// Where among the track's take lanes the new one goes, counted
+        /// from 0 for the lane nearest the main lane. Left out, after the
+        /// last.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        index: Option<usize>,
+    },
+    /// Puts a new clip on a take lane. Its data must match the lane's
+    /// track.
+    CreateTakeClip {
+        /// The take lane.
+        lane: TakeLaneId,
+        /// The clip, with a new ID.
+        clip: Clip,
+    },
+    /// Renames a take lane.
+    RenameTakeLane {
+        /// The take lane.
+        lane: TakeLaneId,
+        /// Its new name, which can't be empty.
+        name: String,
+    },
+    /// Deletes take lanes with their clips.
+    DeleteTakeLanes {
+        /// The take lanes.
+        lanes: Vec<TakeLaneId>,
+    },
+    /// Deletes every take lane of the tracks.
+    DeleteAllTakeLanes {
+        /// The audio or MIDI tracks.
+        tracks: Vec<TrackId>,
+    },
+    /// Deletes each track's take lanes whose material its main lane doesn't
+    /// use (the comping spec, R20).
+    DeleteUnusedTakeLanes {
+        /// The audio or MIDI tracks.
+        tracks: Vec<TrackId>,
+    },
+    /// Moves take lanes, which must be some of one track's, to a new place
+    /// among its take lanes, keeping their order.
+    MoveTakeLanes {
+        /// The take lanes.
+        lanes: Vec<TakeLaneId>,
+        /// The place they take among the track's other take lanes, counted
+        /// from 0 for the lane nearest the main lane.
+        index: usize,
+    },
+    /// Switches the audition of a take lane on or off. A track plays an
+    /// auditioned lane in place of its main lane, and has at most one.
+    SetAudition {
+        /// The take lane.
+        lane: TakeLaneId,
+        /// Whether it is auditioned.
+        on: bool,
     },
     /// Deletes a clip, from the Arrangement or from a track's Session slot.
     DeleteClip {
@@ -2417,6 +2474,61 @@ pub enum Command {
         #[serde(default)]
         name: Option<String>,
     },
+    /// Makes a tuning the set's, in place of any other (the tunings spec,
+    /// R2 and R15). With `retune`, every note of the MIDI clips on tracks
+    /// that play the tuning moves to the key whose new pitch is nearest the
+    /// pitch it had, in the same undo step.
+    SetTuning {
+        /// The tuning.
+        tuning: Tuning,
+        /// Whether the notes are retuned.
+        #[serde(default)]
+        retune: bool,
+    },
+    /// Removes the set's tuning, which returns it to twelve equal steps
+    /// (the tunings spec, R9 and R15), retuning the notes as `retune` says.
+    RemoveTuning {
+        /// Whether the notes are retuned.
+        #[serde(default)]
+        retune: bool,
+    },
+    /// Changes the set's tuning's reference pitch (the tunings spec, R7): its
+    /// octave, its degree, its frequency in Hz. Changing the octave or the
+    /// degree names another note as the reference and leaves every pitch as
+    /// it was; changing the frequency moves every pitch by one ratio. A
+    /// value left out stays as it was.
+    SetTuningReference {
+        /// The reference note's octave.
+        #[serde(default)]
+        octave: Option<i32>,
+        /// The reference note's degree.
+        #[serde(default)]
+        degree: Option<u32>,
+        /// The reference note's frequency in Hz.
+        #[serde(default)]
+        frequency: Option<f64>,
+    },
+    /// Changes the set's tuning's note range (the tunings spec, R8): the
+    /// lowest note, which key 0 plays, and the highest. Given one, the
+    /// other moves by as many notes, so the count stays; given both, they
+    /// are the range, which holds at most 128 notes.
+    SetTuningRange {
+        /// The lowest note.
+        #[serde(default)]
+        lowest: Option<TuningNote>,
+        /// The highest note.
+        #[serde(default)]
+        highest: Option<TuningNote>,
+    },
+    /// Switches a MIDI track's Bypass Tuning on or off (the tunings spec,
+    /// R14): on, the track plays twelve equal steps whatever tuning the set
+    /// holds.
+    SetTuningBypass {
+        /// The MIDI track.
+        track: TrackId,
+        /// Whether it bypasses the tuning.
+        bypass: bool,
+    },
     /// Adds a groove to the end of the Groove Pool (the grooves spec, R1):
     /// what loading a groove file and extracting a groove make.
     AddGroove {
@@ -2560,6 +2672,13 @@ impl Command {
             Self::SetMonitor { .. } => "Change monitoring",
             Self::CreateClip { .. } => "Create clip",
             Self::AddTakeLane { .. } => "Add take lane",
+            Self::CreateTakeClip { .. } => "Create clip",
+            Self::RenameTakeLane { .. } => "Rename Take Lane",
+            Self::DeleteTakeLanes { .. } => "Delete Take Lane(s)",
+            Self::DeleteAllTakeLanes { .. } => "Delete All Take Lanes",
+            Self::DeleteUnusedTakeLanes { .. } => "Delete All Unused Take Lanes",
+            Self::MoveTakeLanes { .. } => "Move Take Lane(s)",
+            Self::SetAudition { .. } => "Audition Take Lane",
             Self::DeleteClip { .. } => "Delete clip",
             Self::MoveClip { .. } => "Move clip",
             Self::MoveClips { .. } => "Move clips",
@@ -2775,6 +2894,13 @@ impl Command {
             // are to observe; Beatlayer's name the edit.
             Self::SetClipScale { .. } => "Change Clip Scale",
             Self::SetScale { .. } => "Change Scale",
+            // Spec: tunings R2, R7, R8, R9, R14. Live's names for these
+            // edits are to observe; `Load Tuning` is Beatlayer's own.
+            Self::SetTuning { .. } => "Load Tuning",
+            Self::RemoveTuning { .. } => "Remove Tuning",
+            Self::SetTuningReference { .. } => "Change Reference Pitch",
+            Self::SetTuningRange { .. } => "Change Tuning Range",
+            Self::SetTuningBypass { .. } => "Bypass Tuning",
             // Spec: grooves R5, R16, R17, R32. Live's undo names for the
             // groove edits are to observe; Beatlayer's name the edit.
             Self::AddGroove { .. } => "Add Groove",
@@ -2831,6 +2957,21 @@ impl Command {
         }
     }
 
+    /// Fills the IDs a command leaves out with ones from `issue`: a take
+    /// lane and clips handed to `AddTakeLane` without them.
+    pub fn issue_missing_ids(&mut self, issue: &mut dyn FnMut() -> Id) {
+        if let Self::AddTakeLane { lane, .. } = self {
+            if lane.id.is_none() {
+                lane.id = Some(issue().into());
+            }
+            for clip in &mut lane.clips {
+                if clip.id.is_none() {
+                    clip.id = Some(issue().into());
+                }
+            }
+        }
+    }
+
     /// The IDs of the objects this command creates, in the order it creates
     /// them: the track, clip, device, scene, or clip copies.
     #[must_use]
@@ -2839,6 +2980,13 @@ impl Command {
             Self::CreateTrack { id, .. } => vec![id.0],
             Self::CreateClip { clip, .. } => vec![clip.id.0],
             Self::CreateSlotClip { clip, .. } => vec![clip.id.0],
+            Self::CreateTakeClip { clip, .. } => vec![clip.id.0],
+            Self::AddTakeLane { lane, .. } => lane
+                .id
+                .map(|id| id.0)
+                .into_iter()
+                .chain(lane.clips.iter().filter_map(|clip| clip.id.map(|id| id.0)))
+                .collect(),
             Self::InsertDevice { device, .. } | Self::InsertChainDevice { device, .. } => {
                 device.ids()
             }
@@ -3445,7 +3593,14 @@ impl Document {
                 self.set_main_channel(*channel, |routing| &mut routing.cue_out)
             }
             Command::CreateClip { track, clip } => self.create_clip(*track, clip),
-            Command::AddTakeLane { track, lane } => self.add_take_lane(*track, lane),
+            Command::AddTakeLane { track, lane, index } => self.add_take_lane(*track, lane, *index),
+            Command::CreateTakeClip { lane, clip } => self.create_take_clip(*lane, clip),
+            Command::RenameTakeLane { lane, name } => self.rename_take_lane(*lane, name),
+            Command::DeleteTakeLanes { lanes } => self.remove_take_lanes(lanes),
+            Command::DeleteAllTakeLanes { tracks } => self.delete_all_take_lanes(tracks),
+            Command::DeleteUnusedTakeLanes { tracks } => self.delete_unused_take_lanes(tracks),
+            Command::MoveTakeLanes { lanes, index } => self.move_take_lanes(lanes, *index),
+            Command::SetAudition { lane, on } => self.set_audition(*lane, *on),
             Command::DeleteClip { clip } => self.remove_clip(*clip),
             Command::MoveClip { clip, track, start } => self.move_clip(*clip, *track, *start),
             Command::MoveClips { clips, by } => self.move_clips(clips, *by),
@@ -3543,6 +3698,52 @@ impl Document {
                     if self.clip_ref(*clip)?.groove != *groove {
                         self.clip_mut(*clip)?.groove = *groove;
                     }
+                }
+                Ok(())
+            }
+            // Spec: tunings R2, R9, R15. A tuning that breaks R3's limits is
+            // refused and the set's stays as it was.
+            Command::SetTuning { tuning, retune } => {
+                tuning.check()?;
+                let before = self.settings.tuning.replace(tuning.clone());
+                if *retune {
+                    self.retune_notes(before.as_ref());
+                }
+                Ok(())
+            }
+            Command::RemoveTuning { retune } => {
+                let before = self
+                    .settings
+                    .tuning
+                    .take()
+                    .ok_or(ModelError::InvalidInput("the set has no tuning to remove"))?;
+                if *retune {
+                    self.retune_notes(Some(&before));
+                }
+                Ok(())
+            }
+            Command::SetTuningReference {
+                octave,
+                degree,
+                frequency,
+            } => {
+                let tuning = self.held_tuning()?;
+                self.settings.tuning = Some(tuning.with_reference(*octave, *degree, *frequency)?);
+                Ok(())
+            }
+            Command::SetTuningRange { lowest, highest } => {
+                let tuning = self.held_tuning()?;
+                self.settings.tuning = Some(tuning.with_range(*lowest, *highest)?);
+                Ok(())
+            }
+            Command::SetTuningBypass { track, bypass } => {
+                if self.track_ref(*track)?.kind() != TrackKind::Midi {
+                    return Err(ModelError::InvalidInput(
+                        "only a MIDI track has Bypass Tuning",
+                    ));
+                }
+                if self.track_ref(*track)?.tuning_bypass != *bypass {
+                    self.track_mut(*track)?.tuning_bypass = *bypass;
                 }
                 Ok(())
             }
@@ -5048,9 +5249,18 @@ impl Document {
             .keys()
             .copied()
             .chain(self.track_ref(id)?.slots.values().map(|clip| clip.id))
+            .chain(
+                self.track_ref(id)?
+                    .take_lanes()
+                    .flat_map(|lane| lane.clips.iter().map(|clip| clip.id)),
+            )
             .collect();
+        let lanes: Vec<TakeLaneId> = self.track_ref(id)?.take_lanes().map(|l| l.id).collect();
         for clip in old {
             self.index.clip_track.remove(&clip);
+        }
+        for lane in lanes {
+            self.index.lane_track.remove(&lane);
         }
         {
             let track = self.track_mut(id)?;
@@ -5059,6 +5269,7 @@ impl Document {
             track.slots = OrdMap::new();
             track.removed_stop_buttons = BTreeSet::new();
             track.take_lanes = Vector::new();
+            track.audition = None;
             track.automation = OrdMap::new();
             track.frozen = None;
             track.delay = TrackDelay::default();
@@ -5152,6 +5363,12 @@ impl Document {
             }
             for clip in track.slots.values() {
                 self.index.clip_track.remove(&clip.id);
+            }
+            for lane in &track.take_lanes {
+                self.index.lane_track.remove(&lane.id);
+                for clip in &lane.clips {
+                    self.index.clip_track.remove(&clip.id);
+                }
             }
             for device in &track.devices {
                 self.index.remove_device(device);
@@ -5305,14 +5522,158 @@ impl Document {
         Ok(())
     }
 
-    fn add_take_lane(&mut self, track: TrackId, lane: &TakeLane) -> Result<(), ModelError> {
+    fn add_take_lane(
+        &mut self,
+        track: TrackId,
+        new: &NewTakeLane,
+        index: Option<usize>,
+    ) -> Result<(), ModelError> {
         check_kind(
             self.track_ref(track)?,
-            |kind| kind == TrackKind::Audio,
-            "an audio track",
+            TrackKind::holds_clips,
+            AUDIO_OR_MIDI,
         )?;
-        check_take_lane(lane)?;
-        self.track_mut(track)?.take_lanes.push_back(lane.clone());
+        let lane = new.lane()?;
+        self.check_fresh(lane.id.0)?;
+        let mut seen = BTreeSet::from([lane.id.0]);
+        for clip in &lane.clips {
+            self.check_fresh(clip.id.0)?;
+            if !seen.insert(clip.id.0) {
+                return Err(ModelError::DuplicateId(clip.id.0));
+            }
+            self.check_take_clip(track, clip)?;
+        }
+        self.index.lane_track.insert(lane.id, track);
+        for clip in &lane.clips {
+            self.index.clip_track.insert(clip.id, track);
+        }
+        let lanes = &mut self.track_mut(track)?.take_lanes;
+        let at = index.map_or(lanes.len(), |index| index.min(lanes.len()));
+        lanes.insert(at, lane);
+        Ok(())
+    }
+
+    /// Checks a clip bound for one of `track`'s take lanes as one bound for
+    /// its main lane is checked.
+    fn check_take_clip(&self, track: TrackId, clip: &Clip) -> Result<(), ModelError> {
+        check_clip_fits(self.track_ref(track)?, &clip.data)?;
+        check_extent(clip.start, clip.length)?;
+        check_clip(clip)?;
+        self.check_clip_envelopes(track, clip)
+    }
+
+    fn take_lane_owner(&self, lane: TakeLaneId) -> Result<TrackId, ModelError> {
+        self.take_lane_track(lane)
+            .ok_or(ModelError::NoSuchTakeLane(lane))
+    }
+
+    fn lane_mut(&mut self, lane: TakeLaneId) -> Result<&mut TakeLane, ModelError> {
+        let owner = self.take_lane_owner(lane)?;
+        self.track_mut(owner)?
+            .take_lanes
+            .iter_mut()
+            .find(|held| held.id == lane)
+            .ok_or(ModelError::NoSuchTakeLane(lane))
+    }
+
+    fn create_take_clip(&mut self, lane: TakeLaneId, clip: &Clip) -> Result<(), ModelError> {
+        let owner = self.take_lane_owner(lane)?;
+        self.check_fresh(clip.id.0)?;
+        self.check_take_clip(owner, clip)?;
+        let mut clip = clip.clone();
+        if clip.scale.is_default() {
+            clip.scale = self.settings.scale;
+        }
+        let id = clip.id;
+        self.lane_mut(lane)?.clips.push(clip);
+        self.index.clip_track.insert(id, owner);
+        Ok(())
+    }
+
+    fn rename_take_lane(&mut self, lane: TakeLaneId, name: &str) -> Result<(), ModelError> {
+        if name.is_empty() {
+            return Err(ModelError::EmptyTakeLaneName);
+        }
+        let held = self.lane_mut(lane)?;
+        if held.name != name {
+            name.clone_into(&mut held.name);
+        }
+        Ok(())
+    }
+
+    /// Takes the lanes out of their tracks, and out of the lookups.
+    fn remove_take_lanes(&mut self, lanes: &[TakeLaneId]) -> Result<(), ModelError> {
+        // A lane listed twice goes once.
+        let lanes: BTreeSet<TakeLaneId> = lanes.iter().copied().collect();
+        for lane in lanes {
+            let owner = self.take_lane_owner(lane)?;
+            let track = self.track_mut(owner)?;
+            let at = track
+                .take_lanes
+                .iter()
+                .position(|held| held.id == lane)
+                .ok_or(ModelError::NoSuchTakeLane(lane))?;
+            let gone = track.take_lanes.remove(at);
+            if track.audition == Some(lane) {
+                track.audition = None;
+            }
+            self.index.lane_track.remove(&lane);
+            for clip in gone.clips {
+                self.index.clip_track.remove(&clip.id);
+            }
+        }
+        Ok(())
+    }
+
+    fn delete_all_take_lanes(&mut self, tracks: &[TrackId]) -> Result<(), ModelError> {
+        let mut lanes = Vec::new();
+        for &track in tracks {
+            let track = self.track_ref(track)?;
+            check_kind(track, TrackKind::holds_clips, AUDIO_OR_MIDI)?;
+            lanes.extend(track.take_lanes().map(|lane| lane.id));
+        }
+        self.remove_take_lanes(&lanes)
+    }
+
+    fn delete_unused_take_lanes(&mut self, tracks: &[TrackId]) -> Result<(), ModelError> {
+        let mut lanes = Vec::new();
+        for &track in tracks {
+            let track = self.track_ref(track)?;
+            check_kind(track, TrackKind::holds_clips, AUDIO_OR_MIDI)?;
+            lanes.extend(crate::comp::unused_lanes(track, &self.settings.tempo));
+        }
+        self.remove_take_lanes(&lanes)
+    }
+
+    fn move_take_lanes(&mut self, lanes: &[TakeLaneId], index: usize) -> Result<(), ModelError> {
+        let Some(&first) = lanes.first() else {
+            return Ok(());
+        };
+        let owner = self.take_lane_owner(first)?;
+        for &lane in lanes {
+            if self.take_lane_owner(lane)? != owner {
+                return Err(ModelError::TakeLanesNotOnOneTrack);
+            }
+        }
+        let track = self.track_mut(owner)?;
+        let all: Vec<TakeLane> = track.take_lanes.iter().cloned().collect();
+        let (moving, rest): (Vec<TakeLane>, Vec<TakeLane>) =
+            all.into_iter().partition(|lane| lanes.contains(&lane.id));
+        let mut next = rest;
+        let at = index.min(next.len());
+        next.splice(at..at, moving);
+        track.take_lanes = next.into_iter().collect();
+        Ok(())
+    }
+
+    fn set_audition(&mut self, lane: TakeLaneId, on: bool) -> Result<(), ModelError> {
+        let owner = self.take_lane_owner(lane)?;
+        let track = self.track_mut(owner)?;
+        if on {
+            track.audition = Some(lane);
+        } else if track.audition == Some(lane) {
+            track.audition = None;
+        }
         Ok(())
     }
 
@@ -5323,7 +5684,7 @@ impl Document {
         check_extent(start, clip.length)?;
         // A clip already on the track's Arrangement lane just moves; one in
         // a Session slot leaves the slot for the lane.
-        if owner == track && self.track_ref(owner)?.clips.contains_key(&id) {
+        if owner == track && self.in_arrangement(id)? {
             if clip.start != start {
                 self.clip_mut(id)?.start = start;
             }
@@ -5361,6 +5722,8 @@ impl Document {
         let owner = self.clip_owner(id)?;
         if self.track_ref(owner)?.clips.contains_key(&id) {
             self.track_mut(owner)?.clips.remove(&id);
+        } else if let Some(lane) = self.track_ref(owner)?.clip_lane(id) {
+            self.lane_mut(lane)?.clips.retain(|clip| clip.id != id);
         } else {
             let scene = self
                 .track_ref(owner)?
@@ -7324,6 +7687,45 @@ impl Document {
         Ok(())
     }
 
+    /// The set's tuning, for a command that changes it.
+    fn held_tuning(&self) -> Result<&Tuning, ModelError> {
+        self.settings
+            .tuning
+            .as_ref()
+            .ok_or(ModelError::InvalidInput("the set has no tuning"))
+    }
+
+    /// Moves every note of every MIDI clip on a track that plays the tuning
+    /// from the key it had under `before` (None: twelve equal steps) to the
+    /// key nearest its pitch under the set's tuning now (the tunings spec,
+    /// R15).
+    fn retune_notes(&mut self, before: Option<&Tuning>) {
+        let from = crate::tuning::key_pitches(before);
+        let to = crate::tuning::key_pitches(self.settings.tuning.as_ref());
+        let tracks: Vec<TrackId> = self
+            .tracks()
+            .filter(|track| track.plays_tuning())
+            .map(Track::id)
+            .collect();
+        for id in tracks {
+            let Some(track) = self.tracks.get_mut(&id).map(Shared::make_mut) else {
+                continue;
+            };
+            let clips: Vec<ClipId> = track
+                .clips
+                .keys()
+                .copied()
+                .chain(track.slots.values().map(|clip| clip.id))
+                .collect();
+            for clip in clips {
+                if let Some(ClipData::Midi(midi)) = track.clip_mut(clip).map(|clip| &mut clip.data)
+                {
+                    crate::tuning::retune(&mut midi.notes, &from, &to);
+                }
+            }
+        }
+    }
+
     // Lookups that fail with the error a command reports.
 
     pub(crate) fn track_ref(&self, id: TrackId) -> Result<&Track, ModelError> {
@@ -7344,10 +7746,8 @@ impl Document {
     /// Whether a clip sits on its track's Arrangement lane rather than in a
     /// Session slot.
     fn in_arrangement(&self, id: ClipId) -> Result<bool, ModelError> {
-        Ok(self
-            .track_ref(self.clip_owner(id)?)?
-            .clips
-            .contains_key(&id))
+        let track = self.track_ref(self.clip_owner(id)?)?;
+        Ok(track.clips.contains_key(&id) || track.clip_lane(id).is_some())
     }
 
     fn clip_ref(&self, id: ClipId) -> Result<&Clip, ModelError> {
@@ -7356,24 +7756,8 @@ impl Document {
 
     fn clip_mut(&mut self, id: ClipId) -> Result<&mut Clip, ModelError> {
         let owner = self.clip_owner(id)?;
-        let track = self.track_mut(owner)?;
-        if track.clips.contains_key(&id) {
-            return track
-                .clips
-                .get_mut(&id)
-                .map(Shared::make_mut)
-                .ok_or(ModelError::NoSuchClip(id));
-        }
-        let scene = track
-            .slots
-            .iter()
-            .find(|(_, clip)| clip.id == id)
-            .map(|(&scene, _)| scene)
-            .ok_or(ModelError::NoSuchClip(id))?;
-        track
-            .slots
-            .get_mut(&scene)
-            .map(Shared::make_mut)
+        self.track_mut(owner)?
+            .clip_mut(id)
             .ok_or(ModelError::NoSuchClip(id))
     }
 
@@ -7834,6 +8218,9 @@ pub(crate) fn check_midi(midi: &MidiData) -> Result<(), ModelError> {
     if let Some(end) = midi.loop_end.filter(|&end| end <= midi.loop_start) {
         return Err(ModelError::EmptyLength(end));
     }
+    if !midi.groups_hold() {
+        return Err(ModelError::BrokenGroups);
+    }
     Ok(())
 }
 
@@ -7962,17 +8349,6 @@ pub(crate) fn check_clip(clip: &Clip) -> Result<(), ModelError> {
         return Err(ModelError::AudioClipOffset(clip.offset));
     }
     check_clip_data(&clip.data)
-}
-
-/// Checks a take lane's passes: each has a start and length that fit and
-/// audio data that follows the audio clips' rules.
-pub(crate) fn check_take_lane(lane: &TakeLane) -> Result<(), ModelError> {
-    for clip in &lane.clips {
-        check_extent(clip.start, clip.length)?;
-        check_audio(&clip.data)?;
-        check_marker_order(&clip.data)?;
-    }
-    Ok(())
 }
 
 /// Checks a device's parameter values, and, for a rack, its chains and the
@@ -8125,7 +8501,7 @@ mod tests {
     use super::*;
     use crate::automation::Breakpoint;
     use crate::changes::ChangeSet;
-    use crate::clip::{EDGE_FADE_SECONDS as EDGE_FADE, MidiData, Note, TakeClip};
+    use crate::clip::{EDGE_FADE_SECONDS as EDGE_FADE, MidiData, Note, TakeClip, TakeClipData};
     use crate::device::{DeviceKind, DeviceRole, PluginFormat};
     use crate::follow::FollowAction;
     use crate::ids::ContentHash;
@@ -8765,6 +9141,70 @@ mod tests {
         );
     }
 
+    // Spec: note-editing R21, R30. A clip's groups hold two or more notes of
+    // one chance, all listed; cropping ends a group left with one note.
+    #[test]
+    fn probability_groups_are_checked_and_end_below_two_notes() {
+        use crate::{GroupKind, NoteGroup};
+        let mut song = Song::new();
+        let track = song.track(TrackKind::Midi, None);
+        let clip = song.clip(track, 0);
+        let grouped = |chance: [f64; 2], listed: bool, third: bool| {
+            let notes = chance.iter().enumerate().map(|(place, chance)| Note {
+                probability: *chance,
+                group: Some(1),
+                ..Note::new(
+                    60 + place as u8,
+                    Ticks::QUARTER * place as i64,
+                    Ticks::QUARTER,
+                    100,
+                )
+            });
+            let mut data = MidiData::new(
+                notes.chain(third.then(|| Note::new(70, Ticks::QUARTER * 2, Ticks::QUARTER, 100))),
+            );
+            if listed {
+                data.groups = vec![NoteGroup {
+                    id: 1,
+                    kind: GroupKind::PlayOne,
+                }];
+            }
+            ClipData::Midi(data)
+        };
+        for data in [
+            grouped([0.5, 0.25], true, false),
+            grouped([0.5, 0.5], false, false),
+        ] {
+            assert_eq!(
+                song.reject(Command::SetClipData { clip, data }),
+                ModelError::BrokenGroups
+            );
+        }
+        let whole = grouped([0.5, 0.5], true, true);
+        song.apply(Command::SetClipData {
+            clip,
+            data: whole.clone(),
+        })
+        .unwrap();
+        // A group of one note is refused too.
+        let ClipData::Midi(full) = whole else {
+            unreachable!()
+        };
+        let mut one = full.clone();
+        one.notes.truncate(1);
+        assert_eq!(
+            song.reject(Command::SetClipData {
+                clip,
+                data: ClipData::Midi(one),
+            }),
+            ModelError::BrokenGroups
+        );
+        // Cropping to the first note leaves it alone in its group.
+        let cropped = full.cropped(Ticks::ZERO, Ticks::QUARTER);
+        assert_eq!(cropped.notes.len(), 1);
+        assert!(cropped.groups.is_empty() && cropped.notes[0].group.is_none());
+    }
+
     // Spec: audio-clips R23, R25, R30
     #[test]
     fn fades_take_curves_and_stop_at_their_limits() {
@@ -9219,36 +9659,46 @@ mod tests {
         ));
     }
 
-    // Spec: recording R12
+    // Spec: recording R12; comping R1, R3
     #[test]
-    fn take_lanes_are_added_in_order_to_audio_tracks_and_survive_a_save() {
+    fn take_lanes_are_added_in_order_to_audio_and_midi_tracks_and_survive_a_save() {
         let mut song = Song::new();
         let audio_track = song.track(TrackKind::Audio, None);
         let midi_track = song.track(TrackKind::Midi, None);
-        let lane = |name: &str, start: f64| TakeLane {
-            name: name.to_owned(),
-            clips: vec![TakeClip {
-                name: "Take".to_owned(),
-                start: Ticks::QUARTER,
-                length: Ticks::QUARTER,
-                data: AudioData {
-                    start,
-                    end: Some(start + 0.5),
-                    ..AudioData::new(ContentHash([3; 32]))
+        let lane = |song: &mut Song, name: &str, start: f64, data: Option<ClipData>| {
+            let data = data.map_or_else(
+                || {
+                    TakeClipData::Audio(AudioData {
+                        start,
+                        end: Some(start + 0.5),
+                        ..AudioData::new(ContentHash([3; 32]))
+                    })
                 },
-            }],
+                TakeClipData::Tagged,
+            );
+            NewTakeLane {
+                id: Some(TakeLaneId(song.ids.allocate())),
+                name: name.to_owned(),
+                clips: vec![TakeClip {
+                    id: Some(ClipId(song.ids.allocate())),
+                    name: "Take".to_owned(),
+                    start: Ticks::QUARTER,
+                    length: Ticks::QUARTER,
+                    data,
+                }],
+            }
         };
         let before = song.doc.clone();
-        song.apply(Command::AddTakeLane {
-            track: audio_track,
-            lane: lane("Take 1", 0.0),
-        })
-        .unwrap();
-        song.apply(Command::AddTakeLane {
-            track: audio_track,
-            lane: lane("Take 2", 0.5),
-        })
-        .unwrap();
+        let first = lane(&mut song, "Take 1", 0.0, None);
+        let second = lane(&mut song, "Take 2", 0.5, None);
+        for lane in [first, second] {
+            song.apply(Command::AddTakeLane {
+                track: audio_track,
+                lane,
+                index: None,
+            })
+            .unwrap();
+        }
         let names: Vec<&str> = song
             .doc
             .track(audio_track)
@@ -9264,30 +9714,56 @@ mod tests {
             "the track shows as changed"
         );
 
-        // Only audio tracks have take lanes, and a pass needs a real length
-        // and sound data.
+        // A MIDI track takes MIDI clips on a lane of its own, and a clip of
+        // the wrong kind is refused.
+        let midi_lane = lane(&mut song, "Take 1", 0.0, Some(midi()));
+        song.apply(Command::AddTakeLane {
+            track: midi_track,
+            lane: midi_lane,
+            index: None,
+        })
+        .unwrap();
+        let wrong = lane(&mut song, "Take 2", 0.0, None);
         assert!(matches!(
             song.reject(Command::AddTakeLane {
                 track: midi_track,
-                lane: lane("Take 1", 0.0),
+                lane: wrong,
+                index: None,
             }),
             ModelError::WrongTrackKind { .. }
         ));
-        let mut empty = lane("Take 3", 0.0);
+        let group = song.track(TrackKind::Group, None);
+        let none = lane(&mut song, "Take 1", 0.0, None);
+        assert!(matches!(
+            song.reject(Command::AddTakeLane {
+                track: group,
+                lane: none,
+                index: None,
+            }),
+            ModelError::WrongTrackKind { .. }
+        ));
+
+        // A clip needs a real length and sound data.
+        let mut empty = lane(&mut song, "Take 3", 0.0, None);
         empty.clips[0].length = Ticks::ZERO;
         assert!(matches!(
             song.reject(Command::AddTakeLane {
                 track: audio_track,
                 lane: empty,
+                index: None,
             }),
             ModelError::EmptyLength(_)
         ));
-        let mut bad = lane("Take 3", 0.0);
-        bad.clips[0].data.gain = f64::NAN;
+        let mut bad = lane(&mut song, "Take 3", 0.0, None);
+        bad.clips[0].data = TakeClipData::Audio(AudioData {
+            gain: f64::NAN,
+            ..AudioData::new(ContentHash([3; 32]))
+        });
         assert!(matches!(
             song.reject(Command::AddTakeLane {
                 track: audio_track,
                 lane: bad,
+                index: None,
             }),
             ModelError::InvalidValue { .. }
         ));
@@ -9300,6 +9776,7 @@ mod tests {
         assert_eq!(loaded, song.doc);
         loaded.check_invariants().unwrap();
         assert_eq!(loaded.track(audio_track).unwrap().take_lanes().len(), 2);
+        assert_eq!(loaded.track(midi_track).unwrap().take_lanes().len(), 1);
     }
 
     // Spec: mixer R28, R29, R30; delay-compensation R7, R8, R9

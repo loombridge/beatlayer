@@ -18,7 +18,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use bl_core::time::Ticks;
 use bl_model::{
     AutomationTarget, Breakpoint, Change, ChangeSet, Clip, ClipData, ClipId, Command, Document,
-    Editor, TrackId, TrackKind,
+    Editor, TakeLaneId, TrackId, TrackKind,
 };
 use bl_shell_spec::arrangement::{Lane, TimeRange};
 use bl_shell_spec::editing::{
@@ -31,7 +31,7 @@ use serde_json::Value;
 
 use super::automation;
 use super::fades;
-use super::placing::{clear, clear_spans, piece, split_off};
+use super::placing::{clear, clear_on, clear_spans, piece, split_off};
 use super::{ArrangementView, parse};
 
 /// Why an edit didn't happen. The document is as it was.
@@ -207,21 +207,45 @@ fn clear_moved(
     moves: &[(ClipId, TrackId, Ticks, Ticks)],
 ) -> Result<(), EditFailure> {
     let keep: BTreeSet<ClipId> = clips.iter().copied().collect();
-    let mut spans: BTreeMap<TrackId, Vec<(Ticks, Ticks)>> = BTreeMap::new();
-    for (_, track, start, end) in moves {
-        spans.entry(*track).or_default().push((*start, *end));
+    type Place = (TrackId, Option<TakeLaneId>);
+    let mut spans: BTreeMap<Place, Vec<(Ticks, Ticks)>> = BTreeMap::new();
+    for (clip, track, start, end) in moves {
+        // A moved clip keeps its take lane, and so clears on it.
+        let lane = editor.document().clip_lane(*clip);
+        spans
+            .entry((*track, lane))
+            .or_default()
+            .push((*start, *end));
     }
-    for (track, spans) in spans {
-        clear_spans(editor, track, &spans, &keep)?;
+    for ((track, lane), spans) in spans {
+        clear_spans(editor, track, lane, &spans, &keep)?;
     }
     Ok(())
 }
 
 /// Puts new clips on tracks, each replacing what it covers, and returns
-/// their IDs. Each clip's own ID is replaced with a new one.
+/// their IDs. Each clip's own ID is replaced with a new one. A clip copied
+/// from a take lane of the track it lands on lands on that lane.
 pub(crate) fn place(
     editor: &mut Editor,
     placements: Vec<(TrackId, Vec<Clip>)>,
+) -> Result<Vec<ClipId>, EditFailure> {
+    place_clips(editor, placements, false)
+}
+
+/// As [`place`], but every clip goes on its track's main lane, whatever lane
+/// the clip it was copied from sat on.
+pub(crate) fn place_on_main(
+    editor: &mut Editor,
+    placements: Vec<(TrackId, Vec<Clip>)>,
+) -> Result<Vec<ClipId>, EditFailure> {
+    place_clips(editor, placements, true)
+}
+
+fn place_clips(
+    editor: &mut Editor,
+    placements: Vec<(TrackId, Vec<Clip>)>,
+    main: bool,
 ) -> Result<Vec<ClipId>, EditFailure> {
     let doc = editor.document();
     for (track, clips) in &placements {
@@ -248,27 +272,77 @@ pub(crate) fn place(
     let mut created = Vec::new();
     let mut placed = BTreeSet::new();
     for (track, clips) in placements {
-        for mut clip in clips {
-            clip.id = editor.new_id();
-            // Spec: grooves R3, R5. A copy keeps its groove while the pool
-            // still holds it; one deleted since the copy leaves it none.
-            clip.groove = clip
-                .groove
-                .filter(|groove| editor.document().settings().grooves.get(*groove).is_some());
-            clear(editor, track, clip.start, clip.end(), &placed)?;
-            placed.insert(clip.id);
-            created.push(clip.id);
-            // Spec: scales R7. A copy keeps its source's scale, which the
-            // clip takes the set's current scale when it is made.
-            let scale = clip.scale;
-            let id = clip.id;
-            apply(editor, Command::CreateClip { track, clip })?;
-            if scale != editor.document().settings().scale {
-                apply(editor, scale.command(vec![id]))?;
-            }
+        for clip in clips {
+            let doc = editor.document();
+            let lane = doc
+                .clip_lane(clip.id)
+                .filter(|lane| !main && doc.take_lane_track(*lane) == Some(track));
+            created.push(place_clip(editor, track, lane, clip, &mut placed)?);
         }
     }
     Ok(created)
+}
+
+/// Puts new clips on take lane `lane` of `track`, each replacing what it
+/// covers on that lane, and returns their IDs.
+pub(crate) fn place_on_lane(
+    editor: &mut Editor,
+    track: TrackId,
+    lane: TakeLaneId,
+    clips: Vec<Clip>,
+) -> Result<Vec<ClipId>, EditFailure> {
+    let doc = editor.document();
+    if let Some(clip) = clips.iter().find(|c| !fits(doc, track, &c.data)) {
+        let what = if clip.data.is_audio() {
+            "an audio clip"
+        } else {
+            "a MIDI clip"
+        };
+        return Err(refused(format!(
+            "{what} can't go on take lane {}: audio clips go on audio tracks and MIDI clips on \
+             MIDI tracks",
+            lane.0
+        )));
+    }
+    let mut placed = BTreeSet::new();
+    clips
+        .into_iter()
+        .map(|clip| place_clip(editor, track, Some(lane), clip, &mut placed))
+        .collect()
+}
+
+/// Puts one new clip, under a new ID, on `track`'s main lane or its take
+/// lane `lane`, replacing what it covers there.
+fn place_clip(
+    editor: &mut Editor,
+    track: TrackId,
+    lane: Option<TakeLaneId>,
+    mut clip: Clip,
+    placed: &mut BTreeSet<ClipId>,
+) -> Result<ClipId, EditFailure> {
+    clip.id = editor.new_id();
+    // Spec: grooves R3, R5. A copy keeps its groove while the pool still
+    // holds it; one deleted since the copy leaves it none.
+    clip.groove = clip
+        .groove
+        .filter(|groove| editor.document().settings().grooves.get(*groove).is_some());
+    clear_on(editor, track, lane, clip.start, clip.end(), placed)?;
+    placed.insert(clip.id);
+    // Spec: scales R7. A copy keeps its source's scale, which the clip takes
+    // the set's current scale when it is made.
+    let scale = clip.scale;
+    let id = clip.id;
+    apply(
+        editor,
+        match lane {
+            Some(lane) => Command::CreateTakeClip { lane, clip },
+            None => Command::CreateClip { track, clip },
+        },
+    )?;
+    if scale != editor.document().settings().scale {
+        apply(editor, scale.command(vec![id]))?;
+    }
+    Ok(id)
 }
 
 /// Runs `edit` as one transaction labelled `label`, returning its result
@@ -1320,6 +1394,7 @@ pub fn run(
                         .expect("the clips exist")
                         .clone();
                     let track = editor.document().clip_track(*clip).expect("on a track");
+                    let lane = editor.document().clip_lane(*clip);
                     match edge {
                         Edge::End => {
                             apply(
@@ -1329,7 +1404,7 @@ pub fn run(
                                     length: value.length + by,
                                 },
                             )?;
-                            clear(editor, track, value.end(), value.end() + by, &keep)?;
+                            clear_on(editor, track, lane, value.end(), value.end() + by, &keep)?;
                         }
                         Edge::Start => {
                             apply(
@@ -1339,7 +1414,7 @@ pub fn run(
                                     start: value.start + by,
                                 },
                             )?;
-                            clear(editor, track, value.start + by, value.start, &keep)?;
+                            clear_on(editor, track, lane, value.start + by, value.start, &keep)?;
                         }
                     }
                 }

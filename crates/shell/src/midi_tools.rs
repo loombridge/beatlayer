@@ -677,6 +677,8 @@ fn note_of(tool: &ToolNote) -> Note {
         probability: tool.chance.clamp(0.0, 1.0),
         velocity_deviation: tool.velocity_deviation,
         mute: tool.deactivated,
+        // A written note joins no probability group (note-editing R21).
+        group: None,
         pressure: tool
             .pressure
             .iter()
@@ -802,6 +804,8 @@ fn set_notes(
 ) -> Result<(), EditFailure> {
     let mut data = midi.clone();
     data.notes = notes.into_iter().collect();
+    // The notes a tool took may leave a group with fewer than two.
+    data.tidy_groups();
     editor.apply(bl_model::Command::SetClipData {
         clip,
         data: ClipData::Midi(data),

@@ -1925,6 +1925,7 @@ fn paths() -> BTreeMap<&'static str, Path> {
         key,
     };
     let clip_view = LaterView("the Clip View (milestone M2)");
+    let tuning_section = LaterView("the browser's Tunings label and the Tuning section (WP-6.10)");
     let groove_pool = LaterView(
         "the Groove Pool, the Clip View's groove controls and the browser's Grooves label (WP-6.20)",
     );
@@ -2053,6 +2054,22 @@ fn paths() -> BTreeMap<&'static str, Path> {
         (
             "clip.set_scale",
             main(a_clip_selected, control_bar, "Scale Mode", Key::Enter),
+        ),
+        // Tuning systems (WP-6.9): the browser's Tunings label and the
+        // Tuning section, which load, change and remove the tuning, come with
+        // WP-6.10; until then agents reach these.
+        ("tuning.load", Exception(tuning_section)),
+        ("tuning.remove", Exception(tuning_section)),
+        ("tuning.set", Exception(tuning_section)),
+        ("tuning.set_range", Exception(tuning_section)),
+        ("tuning.set_reference", Exception(tuning_section)),
+        ("tuning.state", Exception(Query)),
+        (
+            "track.set_tuning_bypass",
+            Exception(LaterView(
+                "the In/Out section's row for it, which the mixers' section has no room for \
+                 yet; the Arrangement's headers show it where they have the height (WP-6.9)",
+            )),
         ),
         // Grooves (WP-6.19): the Groove Pool, the Clip View's groove controls
         // and the browser's Grooves label come with WP-6.20; until then
@@ -2858,6 +2875,84 @@ fn paths() -> BTreeMap<&'static str, Path> {
                 "the take lanes' view and comping (milestone M6); loop recording makes the lanes",
             )),
         ),
+        (
+            "take_lane.comp_sources",
+            Exception(LaterView(
+                "the take lanes' rows, headers, keys and menus (WP-6.22, comping R23 to R30)",
+            )),
+        ),
+        (
+            "take_lane.copy_to_main_lane",
+            Exception(LaterView(
+                "the take lanes' rows, headers, keys and menus (WP-6.22, comping R23 to R30)",
+            )),
+        ),
+        (
+            "take_lane.create_clip",
+            Exception(LaterView(
+                "the take lanes' rows, headers, keys and menus (WP-6.22, comping R23 to R30)",
+            )),
+        ),
+        (
+            "take_lane.delete",
+            Exception(LaterView(
+                "the take lanes' rows, headers, keys and menus (WP-6.22, comping R23 to R30)",
+            )),
+        ),
+        (
+            "take_lane.delete_all",
+            Exception(LaterView(
+                "the take lanes' rows, headers, keys and menus (WP-6.22, comping R23 to R30)",
+            )),
+        ),
+        (
+            "take_lane.delete_unused",
+            Exception(LaterView(
+                "the take lanes' rows, headers, keys and menus (WP-6.22, comping R23 to R30)",
+            )),
+        ),
+        (
+            "take_lane.duplicate",
+            Exception(LaterView(
+                "the take lanes' rows, headers, keys and menus (WP-6.22, comping R23 to R30)",
+            )),
+        ),
+        (
+            "take_lane.insert",
+            Exception(LaterView(
+                "the take lanes' rows, headers, keys and menus (WP-6.22, comping R23 to R30)",
+            )),
+        ),
+        (
+            "take_lane.move",
+            Exception(LaterView(
+                "the take lanes' rows, headers, keys and menus (WP-6.22, comping R23 to R30)",
+            )),
+        ),
+        (
+            "take_lane.move_comp_edge",
+            Exception(LaterView(
+                "the take lanes' rows, headers, keys and menus (WP-6.22, comping R23 to R30)",
+            )),
+        ),
+        (
+            "take_lane.rename",
+            Exception(LaterView(
+                "the take lanes' rows, headers, keys and menus (WP-6.22, comping R23 to R30)",
+            )),
+        ),
+        (
+            "take_lane.replace_with_take",
+            Exception(LaterView(
+                "the take lanes' rows, headers, keys and menus (WP-6.22, comping R23 to R30)",
+            )),
+        ),
+        (
+            "take_lane.set_audition",
+            Exception(LaterView(
+                "the take lanes' rows, headers, keys and menus (WP-6.22, comping R23 to R30)",
+            )),
+        ),
         ("clip.delete", Exception(editing)),
         ("clip.move", Exception(editing)),
         ("clip.move_by", Exception(editing)),
@@ -3096,6 +3191,15 @@ fn paths() -> BTreeMap<&'static str, Path> {
         // note-selection keys (S-A11Y-010, S-A11Y-011), Delete
         // (S-EDIT-005) and Cmd-A (S-NOTE-001).
         ("note.ramp_value", Exception(note_editor)),
+        // Spec: step-recording R2. The pointer's press plays a preview; from
+        // the keyboard, selecting a note with the note-jump keys sounds it.
+        (
+            "note.preview",
+            Exception(Equivalent(
+                "the pointer's press on a piano ruler key or a note; a note selected from the \
+                 keys sounds as a preview too (`clip_view.select_notes`)",
+            )),
+        ),
         // The stretch markers are dragged (I-DRAG-040); Live has no key
         // for stretching notes, so a keyboard path needs the maintainer's
         // choice of keys.

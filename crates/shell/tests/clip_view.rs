@@ -906,3 +906,430 @@ fn copying_a_note_by_dragging_leaves_the_original() {
     );
     assert_eq!(result.selected, [1], "the copy is selected");
 }
+
+// Spec: note-editing R20. The value commands are in the edit class and the
+// lane commands are read.
+#[test]
+fn the_note_value_commands_are_registered_with_their_classes() {
+    let mut registry = bl_commands::Registry::new();
+    bl_shell::register(&mut registry).unwrap();
+    let class = |id: &str| registry.get(id).unwrap().permission;
+    for id in [ids::ADJUST_VALUE, ids::RANDOMIZE, ids::DEACTIVATE] {
+        assert!(registry.contains(id), "{id}");
+        assert_eq!(class(id), Some(Permission::Edit), "{id}");
+    }
+    assert_eq!(
+        class(bl_shell::commands::VIEW_LANES),
+        Some(Permission::Read)
+    );
+}
+
+// Spec: note-editing R15, R5. A change by an amount holds each note within
+// its range, so dragging past an end brings every selected note to it.
+#[test]
+fn adjusting_values_is_one_step_and_holds_each_note_in_range() {
+    let mut song = song(vec![
+        song_note(48, 0, SIXTEENTH),
+        song_note(60, BAR, QUARTER),
+        song_note(64, 2 * BAR, QUARTER),
+    ]);
+    song.one_step(
+        ids::SET_VALUE,
+        json!({ "notes": [0], "field": "velocity", "value": 20 }),
+    );
+    song.view(ids::SELECT_NOTES, json!({ "notes": [0, 1] }));
+    let result = song.one_step(ids::ADJUST_VALUE, json!({ "field": "velocity", "by": 10 }));
+    let velocities =
+        |song: &Song| -> Vec<u8> { song.notes().iter().map(|note| note.velocity).collect() };
+    assert_eq!(
+        velocities(&song),
+        [30, 100 + 10, 100],
+        "{:?}",
+        velocities(&song)
+    );
+    assert_eq!(result.selected, [0, 1], "the notes stay selected");
+    // Past the end, each stops at it.
+    song.one_step(ids::ADJUST_VALUE, json!({ "field": "velocity", "by": 100 }));
+    assert_eq!(velocities(&song), [127, 127, 100]);
+    song.one_step(
+        ids::ADJUST_VALUE,
+        json!({ "field": "velocity", "by": -300 }),
+    );
+    assert_eq!(velocities(&song), [1, 1, 100]);
+    // A change that moves no note is no step.
+    let steps = song.steps();
+    let result = song.edit(ids::ADJUST_VALUE, json!({ "field": "velocity", "by": -5 }));
+    assert!(!result.undo_step);
+    assert_eq!(song.steps(), steps);
+    // Chance moves by fractions, and ten steps of 10 % reach 100 % exactly.
+    song.one_step(ids::SET_VALUE, json!({ "field": "chance", "value": 0.0 }));
+    for _ in 0..10 {
+        song.edit(ids::ADJUST_VALUE, json!({ "field": "chance", "by": 0.1 }));
+    }
+    let chances: Vec<f64> = song.notes().iter().map(|note| note.probability).collect();
+    assert_eq!(chances, [1.0, 1.0, 1.0]);
+    // A fraction of a whole-number field, and a value that isn't a number,
+    // change nothing.
+    let before = song.doc().clone();
+    for args in [
+        json!({ "field": "velocity", "by": 1.5 }),
+        json!({ "field": "velocity", "by": 1, "nope": 1 }),
+        json!({ "field": "velocity", "notes": [9], "by": 1 }),
+    ] {
+        assert!(
+            song.shell.run(ids::ADJUST_VALUE, args.clone()).is_err(),
+            "{args}"
+        );
+        assert_eq!(*song.doc(), before, "{args}");
+    }
+}
+
+// Spec: note-editing R7, R8. A note's deviation stays within the room its
+// velocity leaves; a value outside -127 to 127 is still refused.
+#[test]
+fn a_deviation_is_held_to_the_room_its_velocity_leaves() {
+    let mut song = song(vec![
+        song_note(48, 0, SIXTEENTH),
+        song_note(60, BAR, QUARTER),
+    ]);
+    song.one_step(
+        ids::SET_VALUE,
+        json!({ "notes": [0], "field": "velocity", "value": 50 }),
+    );
+    song.view(ids::SELECT_NOTES, json!({ "notes": [0, 1] }));
+    // A note at 50 reaches +77; a note at 100 reaches +27.
+    song.one_step(
+        ids::SET_VALUE,
+        json!({ "field": "velocity_deviation", "value": 127 }),
+    );
+    let deviations = |song: &Song| -> Vec<i8> {
+        song.notes()
+            .iter()
+            .map(|note| note.velocity_deviation)
+            .collect()
+    };
+    assert_eq!(deviations(&song), [77, 27]);
+    // And below: at least 1 less than the velocity.
+    song.one_step(
+        ids::SET_VALUE,
+        json!({ "field": "velocity_deviation", "value": -127 }),
+    );
+    assert_eq!(deviations(&song), [-49, -99]);
+    // Adjusting by the key's step is held the same way.
+    song.one_step(
+        ids::ADJUST_VALUE,
+        json!({ "field": "velocity_deviation", "by": 200 }),
+    );
+    assert_eq!(deviations(&song), [77, 27]);
+    // A later change of velocity leaves the deviation as it is.
+    song.one_step(
+        ids::SET_VALUE,
+        json!({ "notes": [1], "field": "velocity", "value": 120 }),
+    );
+    assert_eq!(deviations(&song), [77, 27]);
+    // A ramp is held the same way.
+    song.one_step(
+        ids::RAMP_VALUE,
+        json!({ "field": "velocity_deviation", "from": 100, "to": 100 }),
+    );
+    assert_eq!(deviations(&song), [77, 7]);
+    let before = song.doc().clone();
+    assert!(
+        song.shell
+            .run(
+                ids::SET_VALUE,
+                json!({ "field": "velocity_deviation", "value": 128 })
+            )
+            .is_err()
+    );
+    assert_eq!(*song.doc(), before);
+}
+
+// Spec: note-editing R11. A ramp spreads by start time, and notes that start
+// together take the same value.
+#[test]
+fn a_ramp_spreads_by_start_time_with_chords_equal() {
+    let mut song = song(vec![
+        song_note(48, 0, SIXTEENTH),
+        song_note(55, 0, SIXTEENTH),
+        song_note(60, BAR, QUARTER),
+        song_note(64, 3 * BAR, QUARTER),
+        song_note(67, 3 * BAR, QUARTER),
+    ]);
+    song.view(ids::SELECT_NOTES, json!({ "notes": [0, 1, 2, 3, 4] }));
+    song.one_step(
+        ids::RAMP_VALUE,
+        json!({ "field": "velocity", "from": 20, "to": 120 }),
+    );
+    let velocities: Vec<u8> = song.notes().iter().map(|note| note.velocity).collect();
+    // Starts 0, 0, 1 bar, 3 bars, 3 bars: a third of the way at the bar.
+    assert_eq!(velocities, [20, 20, 53, 120, 120]);
+    // Every selected note starting together: all take the start value.
+    song.view(ids::SELECT_NOTES, json!({ "notes": [0, 1] }));
+    song.one_step(
+        ids::RAMP_VALUE,
+        json!({ "field": "velocity", "from": 70, "to": 90 }),
+    );
+    let velocities: Vec<u8> = song.notes().iter().map(|note| note.velocity).collect();
+    assert_eq!(&velocities[..2], [70, 70]);
+}
+
+// Spec: note-editing R13. Randomize draws evenly around each note's value,
+// the same seed repeats, and an amount of 0 changes nothing.
+#[test]
+fn randomizing_repeats_with_a_seed_and_an_amount_of_zero_changes_nothing() {
+    let notes: Vec<Note> = (0..16)
+        .map(|i| song_note(48 + i as u8, i * SIXTEENTH, SIXTEENTH))
+        .collect();
+    let mut song = song(notes);
+    let before = song.doc().clone();
+    let steps = song.steps();
+    // Nothing selected: every note in the clip's span, and an amount of 0
+    // moves none.
+    let result = song.edit(
+        ids::RANDOMIZE,
+        json!({ "field": "velocity", "amount": 0, "seed": 7 }),
+    );
+    assert!(!result.undo_step);
+    assert_eq!(*song.doc(), before);
+    assert_eq!(song.steps(), steps);
+    // One step, every note within the amount and the range, and whole.
+    song.one_step(
+        ids::RANDOMIZE,
+        json!({ "field": "velocity", "amount": 20, "seed": 7 }),
+    );
+    let first: Vec<u8> = song.notes().iter().map(|note| note.velocity).collect();
+    assert!(first.iter().all(|v| (80..=120).contains(v)), "{first:?}");
+    assert!(first.iter().any(|v| *v != 100), "{first:?}");
+    // The same seed on the same notes gives the same values.
+    song.shell.run("edit.undo", json!({})).unwrap();
+    assert_eq!(*song.doc(), before);
+    song.edit(
+        ids::RANDOMIZE,
+        json!({ "field": "velocity", "amount": 20, "seed": 7 }),
+    );
+    let again: Vec<u8> = song.notes().iter().map(|note| note.velocity).collect();
+    assert_eq!(again, first);
+    // A larger amount moves each note further the same way.
+    song.shell.run("edit.undo", json!({})).unwrap();
+    song.edit(
+        ids::RANDOMIZE,
+        json!({ "field": "velocity", "amount": 10, "seed": 7 }),
+    );
+    let half: Vec<u8> = song.notes().iter().map(|note| note.velocity).collect();
+    for (half, full) in half.iter().zip(&first) {
+        let (half, full) = (i32::from(*half) - 100, i32::from(*full) - 100);
+        assert!(half.abs() <= full.abs() + 1, "{half} {full}");
+        assert!(half * full >= 0, "{half} {full}: the same direction");
+    }
+    // Chance draws in its own units, held to 0 to 1.
+    song.shell.run("edit.undo", json!({})).unwrap();
+    song.one_step(
+        ids::RANDOMIZE,
+        json!({ "field": "chance", "amount": 0.5, "seed": 3 }),
+    );
+    let chances: Vec<f64> = song.notes().iter().map(|note| note.probability).collect();
+    assert!(
+        chances.iter().all(|c| (0.5..=1.0).contains(c)),
+        "{chances:?}"
+    );
+    // Only the selected notes move when some are selected, and each call
+    // without a seed draws afresh.
+    song.view(ids::SELECT_NOTES, json!({ "notes": [0, 1, 2] }));
+    let mid = song.doc().clone();
+    song.edit(
+        ids::RANDOMIZE,
+        json!({ "field": "release_velocity", "amount": 30 }),
+    );
+    let one: Vec<u8> = song.notes().iter().map(|n| n.release_velocity).collect();
+    assert!(one[3..].iter().all(|v| *v == 64), "{one:?}");
+    song.shell.run("edit.undo", json!({})).unwrap();
+    assert_eq!(*song.doc(), mid);
+    song.edit(
+        ids::RANDOMIZE,
+        json!({ "field": "release_velocity", "amount": 30 }),
+    );
+    let two: Vec<u8> = song.notes().iter().map(|n| n.release_velocity).collect();
+    assert_ne!(one, two, "an unseeded call draws afresh");
+    // Out of range or the wrong field changes nothing.
+    let before = song.doc().clone();
+    for args in [
+        json!({ "field": "velocity", "amount": 128 }),
+        json!({ "field": "velocity", "amount": -1 }),
+        json!({ "field": "chance", "amount": 1.5 }),
+        json!({ "field": "velocity_deviation", "amount": 5 }),
+    ] {
+        assert!(
+            song.shell.run(ids::RANDOMIZE, args.clone()).is_err(),
+            "{args}"
+        );
+        assert_eq!(*song.doc(), before, "{args}");
+    }
+}
+
+// Spec: note-editing R18. Deactivating toggles, keeps each note's place and
+// values, and is one step.
+#[test]
+fn deactivating_notes_toggles_and_is_one_step() {
+    let mut song = song(vec![
+        song_note(48, 0, SIXTEENTH),
+        song_note(60, BAR, QUARTER),
+    ]);
+    song.view(ids::SELECT_NOTES, json!({ "notes": [0, 1] }));
+    assert_eq!(
+        song.shell.dynamic_label(ids::DEACTIVATE).as_deref(),
+        Some("Deactivate Note(s)")
+    );
+    let result = song.one_step(ids::DEACTIVATE, json!({}));
+    assert_eq!(result.selected, [0, 1]);
+    assert!(song.notes().iter().all(|note| note.mute));
+    assert_eq!(song.notes()[0].start, Ticks(0), "the note keeps its place");
+    assert_eq!(song.notes()[0].velocity, 100, "and its values");
+    assert_eq!(
+        song.shell.dynamic_label(ids::DEACTIVATE).as_deref(),
+        Some("Activate Note(s)"),
+        "every selected note is off"
+    );
+    // All off: the command activates them again.
+    song.one_step(ids::DEACTIVATE, json!({}));
+    assert!(song.notes().iter().all(|note| !note.mute));
+    // With only some off, it deactivates the rest.
+    song.one_step(ids::DEACTIVATE, json!({ "notes": [0] }));
+    song.view(ids::SELECT_NOTES, json!({ "notes": [0, 1] }));
+    assert_eq!(
+        song.shell.dynamic_label(ids::DEACTIVATE).as_deref(),
+        Some("Deactivate Note(s)")
+    );
+    song.one_step(ids::DEACTIVATE, json!({}));
+    assert!(song.notes().iter().all(|note| note.mute));
+    // `active` says which way.
+    song.one_step(ids::DEACTIVATE, json!({ "active": true }));
+    assert!(song.notes().iter().all(|note| !note.mute));
+    let steps = song.steps();
+    let result = song.edit(ids::DEACTIVATE, json!({ "active": true }));
+    assert!(!result.undo_step, "already active");
+    assert_eq!(song.steps(), steps);
+}
+
+// Spec: note-editing R1 to R3, R13, R20. The lanes are view state: a new
+// editor shows Velocity alone, and no change to them is a step.
+#[test]
+fn the_lanes_are_view_state_that_shows_hides_and_swaps() {
+    use bl_shell::commands::{VIEW_LANE, VIEW_LANES};
+    use bl_shell::note_commands::NoteField::{Chance, ReleaseVelocity, Velocity};
+    let mut song = song(vec![song_note(60, 0, QUARTER)]);
+    let steps = song.steps();
+    let state = song.view(VIEW_LANES, json!({}));
+    assert_eq!(state.lanes, [Velocity], "a new editor shows Velocity alone");
+    assert_eq!(state.lane, Velocity);
+    assert!(!state.lanes_hidden);
+    assert_eq!(state.randomize, Default::default(), "every amount is 0");
+    // The Lane Selector shows a lane and makes it the active one.
+    let state = song.view(VIEW_LANES, json!({ "lane": "chance" }));
+    assert_eq!(state.lanes, [Velocity, Chance], "in the lanes' order");
+    assert_eq!(state.lane, Chance);
+    let state = song.view(
+        VIEW_LANES,
+        json!({ "lane": "release_velocity", "show": true }),
+    );
+    assert_eq!(state.lanes, [Velocity, Chance, ReleaseVelocity]);
+    // Choosing a shown lane hides it; the active lane moves on if it was.
+    let state = song.view(
+        VIEW_LANES,
+        json!({ "lane": "release_velocity", "show": false }),
+    );
+    assert_eq!(state.lanes, [Velocity, Chance]);
+    assert_eq!(
+        state.lane, Velocity,
+        "the first lane still shown takes over"
+    );
+    let state = song.view(VIEW_LANES, json!({ "lane": "chance" }));
+    assert_eq!(state.lanes, [Velocity]);
+    assert_eq!(
+        state.lane, Velocity,
+        "the active lane stays among those shown"
+    );
+    // `view.lane` shows the lane too, and velocity deviation is Velocity's.
+    let state = song.view(VIEW_LANE, json!({ "lane": "release_velocity" }));
+    assert_eq!(state.lanes, [Velocity, ReleaseVelocity]);
+    assert_eq!(state.lane, ReleaseVelocity);
+    let state = song.view(VIEW_LANE, json!({ "lane": "velocity_deviation" }));
+    assert_eq!(state.lane, Velocity);
+    // Swap Lane hides the lane and shows the first hidden lane after it,
+    // going round to the first.
+    let state = song.view(VIEW_LANES, json!({ "lane": "velocity", "swap": true }));
+    assert_eq!(state.lanes, [Chance, ReleaseVelocity]);
+    assert_eq!(state.lane, Chance, "the active lane's place is taken");
+    let state = song.view(
+        VIEW_LANES,
+        json!({ "lane": "release_velocity", "swap": true }),
+    );
+    assert_eq!(state.lanes, [Velocity, Chance], "round to the first");
+    // With every lane shown a swap changes nothing.
+    song.view(
+        VIEW_LANES,
+        json!({ "lane": "release_velocity", "show": true }),
+    );
+    let state = song.view(VIEW_LANES, json!({ "lane": "chance", "swap": true }));
+    assert_eq!(state.lanes, [Velocity, Chance, ReleaseVelocity]);
+    // The switch hides every lane and shows them again as they were.
+    let state = song.view(VIEW_LANES, json!({ "all": false }));
+    assert!(state.lanes.is_empty() && state.lanes_hidden);
+    let state = song.view(VIEW_LANES, json!({ "all": true }));
+    assert_eq!(state.lanes, [Velocity, Chance, ReleaseVelocity]);
+    // Randomize's amounts are the lane's own, held to its limit.
+    let state = song.view(VIEW_LANES, json!({ "lane": "velocity", "amount": 40 }));
+    assert_eq!(state.randomize.velocity, 40);
+    assert_eq!(
+        state.lanes.len(),
+        3,
+        "setting an amount doesn't hide the lane"
+    );
+    let state = song.view(VIEW_LANES, json!({ "lane": "chance", "amount": 25 }));
+    assert_eq!(state.randomize.chance, 25);
+    for args in [
+        json!({ "lane": "chance", "amount": 101 }),
+        json!({ "lane": "velocity", "amount": 128 }),
+        json!({ "amount": 5 }),
+        json!({ "show": true }),
+        json!({ "nope": true }),
+    ] {
+        assert!(song.shell.run(VIEW_LANES, args.clone()).is_err(), "{args}");
+    }
+    assert_eq!(song.steps(), steps, "none of it is an undo step");
+    assert!(!song.shell.is_dirty(), "and none of it dirties the set");
+}
+
+// Spec: note-editing R6. Drawing across a lane gives each note its own
+// value in one step.
+#[test]
+fn each_note_takes_its_own_value_in_one_step() {
+    let mut song = song(vec![
+        song_note(48, 0, SIXTEENTH),
+        song_note(60, BAR, QUARTER),
+        song_note(64, 2 * BAR, QUARTER),
+    ]);
+    song.one_step(
+        ids::SET_VALUE,
+        json!({ "notes": [2, 0], "field": "velocity", "values": [10, 120] }),
+    );
+    let velocities: Vec<u8> = song.notes().iter().map(|note| note.velocity).collect();
+    assert_eq!(
+        velocities,
+        [120, 100, 10],
+        "in the order the notes were named"
+    );
+    let before = song.doc().clone();
+    for args in [
+        json!({ "notes": [0, 1], "field": "velocity", "values": [10] }),
+        json!({ "notes": [0], "field": "velocity", "values": [200] }),
+        json!({ "notes": [0], "field": "velocity", "value": 10, "values": [10] }),
+        json!({ "notes": [0], "field": "velocity" }),
+    ] {
+        assert!(
+            song.shell.run(ids::SET_VALUE, args.clone()).is_err(),
+            "{args}"
+        );
+        assert_eq!(*song.doc(), before, "{args}");
+    }
+}

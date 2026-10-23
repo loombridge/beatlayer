@@ -1,6 +1,6 @@
 # Note editing: the expression lanes, deactivating notes, probability groups, and splitting, chopping, joining and stretching notes
 
-- **Status:** draft
+- **Status:** partial (R1 to R20 have passing tests; R21 to R32 come with WP-6.2 and R33 to R47 with WP-6.3)
 - **Work packages:** WP-6.1 (the Velocity, Chance and Release Velocity lanes, the footer's value controls, the value keys and deactivating notes: R1 to R20), WP-6.2 (probability groups, Play All and Play One, in the document, the engine and the Chance lane: R21 to R32), WP-6.3 (Split, Chop, Join, Fit to Time Range, Split Clip, and the note stretch markers: R33 to R47). Drawing, selecting, moving, the insert marker, the time selection and the note clipboard are [piano-roll.md](piano-roll.md)'s; what a note holds and how a clip plays it [midi-clips.md](midi-clips.md)'s; the MIDI Tools and the Pitch and Time Utilities (the Chop tool, Stretch) WP-6.11 to WP-6.16's; the MPE tab WP-6.18's; several clips in one editor [multi-clip-editing.md](multi-clip-editing.md)'s
 - **Parity-matrix row:** MIDI editing: Release velocity, velocity deviation, mute, note chance (the editing); MIDI editing: Probability groups (Play All, Play One); MIDI editing: Split, chop, join, span notes; note stretch markers; deactivate notes
 - **Checked against:** the Live 12 reference manual (online edition), read 20 October 2026; the Live 12 release notes, 12.0, 12.0.5, 12.1, 12.1.5 and 12.4; the UI parity reference's rows L-CLIP-010 to L-CLIP-015, M-EDIT-008, M-EDIT-014, M-EDIT-015, M-EDIT-034, I-DRAG-025, I-DRAG-026 and the S-NOTE rows named below, recorded from Live 12.4.3 on macOS
@@ -103,26 +103,26 @@ This spec covers the lanes, the footer's value controls, the value keys, deactiv
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1 | to be written in WP-6.1 | |
-| R2 | to be written in WP-6.1 | |
-| R3 | to be written in WP-6.1 | |
-| R4 | to be written in WP-6.1 | |
-| R5 | to be written in WP-6.1 | |
-| R6 | to be written in WP-6.1 | |
-| R7 | to be written in WP-6.1 | |
-| R8 | to be written in WP-6.1 | |
-| R9 | to be written in WP-6.1 | |
-| R10 | to be written in WP-6.1 | |
-| R11 | to be written in WP-6.1 | |
-| R12 | to be written in WP-6.1 | |
-| R13 | to be written in WP-6.1 | |
-| R14 | to be written in WP-6.1 | |
-| R15 | to be written in WP-6.1 | |
-| R16 | to be written in WP-6.1 | |
-| R17 | to be written in WP-6.1 | |
-| R18 | to be written in WP-6.1 | |
-| R19 | to be written in WP-6.1 | |
-| R20 | to be written in WP-6.1 | |
+| R1 | `crates/ui/tests/clip_view.rs`, `the_lane_selector_the_switch_and_swap_lane_show_hide_and_swap_lanes`; `crates/shell/tests/clip_view.rs`, `the_lanes_are_view_state_that_shows_hides_and_swaps` | UI script, unit |
+| R2 | `crates/ui/tests/clip_view.rs`, `the_lane_selector_the_switch_and_swap_lane_show_hide_and_swap_lanes`, `the_lanes_dividers_wheel_and_a_lane_dragged_to_nothing_resize_and_hide`; `crates/shell/tests/clip_view.rs`, `the_lanes_are_view_state_that_shows_hides_and_swaps` | UI script, unit |
+| R3 | `crates/shell/tests/clip_view.rs`, `the_lanes_are_view_state_that_shows_hides_and_swaps`, `the_lane_and_fold_are_view_switches`; `crates/ui/tests/clip_view.rs`, `clicking_a_marker_selects_its_note_and_shift_adds_and_removes`, `assistive_technology_reads_each_lane_marker_and_footer_control` | unit, UI script |
+| R4 | `crates/ui/tests/clip_view.rs`, `a_note_that_doesnt_always_play_shows_a_corner_triangle_on_a_tall_enough_row`, `assistive_technology_reads_each_lane_marker_and_footer_control` | UI script |
+| R5 | `crates/ui/tests/clip_view.rs`, `dragging_a_marker_moves_every_selected_note_by_the_same_amount`, `dragging_a_stem_sets_that_notes_velocity_and_nothing_else`, `clicking_a_marker_selects_its_note_and_shift_adds_and_removes`; `crates/shell/tests/clip_view.rs`, `adjusting_values_is_one_step_and_holds_each_note_in_range` | UI script, unit |
+| R6 | `crates/ui/tests/clip_view.rs`, `drawing_in_a_lane_with_draw_mode_sets_values_per_grid_step_or_per_note`, `option_draws_a_straight_line_and_with_shift_a_level_one`; `crates/shell/tests/clip_view.rs`, `each_note_takes_its_own_value_in_one_step` | UI script, unit |
+| R7 | `crates/ui/tests/clip_view.rs`, `cmd_dragging_a_velocity_marker_sets_its_deviation_and_a_double_click_resets_it`; `crates/shell/tests/clip_view.rs`, `a_deviation_is_held_to_the_room_its_velocity_leaves` | UI script, unit |
+| R8 | `crates/shell/tests/clip_view.rs`, `a_deviation_is_held_to_the_room_its_velocity_leaves` | unit |
+| R9 | `crates/ui/tests/clip_view.rs`, `dragging_a_stem_sets_that_notes_velocity_and_nothing_else` (the Chance lane); `crates/shell/tests/clip_view.rs`, `setting_a_notes_values_is_one_step` (release velocity) | UI script, unit |
+| R10 | `crates/ui/tests/clip_view.rs`, `the_footer_has_the_active_lanes_controls`, `typing_into_the_footers_fields_sets_the_ramp_the_deviation_and_the_amount` | UI script |
+| R11 | `crates/shell/tests/clip_view.rs`, `a_ramp_spreads_by_start_time_with_chords_equal`; `crates/ui/tests/clip_view.rs`, `the_ramps_ends_follow_the_selection`, `typing_into_the_footers_fields_sets_the_ramp_the_deviation_and_the_amount` | unit, UI script |
+| R12 | `crates/ui/tests/clip_view.rs`, `typing_into_the_footers_fields_sets_the_ramp_the_deviation_and_the_amount`; `crates/shell/tests/clip_view.rs`, `a_deviation_is_held_to_the_room_its_velocity_leaves` | UI script, unit |
+| R13 | `crates/shell/tests/clip_view.rs`, `randomizing_repeats_with_a_seed_and_an_amount_of_zero_changes_nothing`; `crates/ui/tests/clip_view.rs`, `the_footers_randomize_button_and_amount_randomise_in_one_step` | unit, UI script |
+| R14 | `crates/ui/tests/clip_view.rs`, `a_typed_velocity_sets_the_selected_notes_and_zero_is_a_digit_only_while_typing` | UI script |
+| R15 | `crates/ui/tests/clip_view.rs`, `the_value_keys_change_the_selected_notes`; `crates/shell/tests/clip_view.rs`, `adjusting_values_is_one_step_and_holds_each_note_in_range` | UI script, unit |
+| R16 | `crates/ui/tests/clip_view.rs`, `the_value_keys_change_the_selected_notes` | UI script |
+| R17 | `crates/ui/tests/clip_view.rs`, `cmd_dragging_a_note_changes_its_velocity_and_along_the_grid_moves_it` | UI script |
+| R18 | `crates/shell/tests/clip_view.rs`, `deactivating_notes_toggles_and_is_one_step`; `crates/engine/tests/midi_clips.rs`, `a_note_deactivated_in_the_document_is_silent_until_it_is_activated`; `crates/ui/tests/clip_view.rs`, `deactivating_notes_from_the_menus_and_the_piano_ruler`; `crates/ui/tests/keymap.rs`, `zero_deactivates_the_selected_notes_and_the_value_keys_are_the_editors` | unit, engine, UI script |
+| R19 | `crates/ui/tests/clip_view.rs`, `deactivating_notes_from_the_menus_and_the_piano_ruler` | UI script |
+| R20 | `crates/shell/tests/clip_view.rs`, `the_note_value_commands_are_registered_with_their_classes`; `crates/agent/tests/readback.rs`, `the_note_value_commands_run_by_id_and_read_back`; `crates/ui/tests/keymap.rs`, `the_note_editors_keys_are_all_handled`; `crates/ui/tests/clip_view.rs`, `assistive_technology_reads_each_lane_marker_and_footer_control`; `crates/cli/tests/older_sets.rs`, `a_set_saved_before_the_lanes_loads_unchanged_and_every_note_value_round_trips` | unit, UI script, integration |
 | R21 | to be written in WP-6.2 | |
 | R22 | to be written in WP-6.2 | |
 | R23 | to be written in WP-6.2 | |

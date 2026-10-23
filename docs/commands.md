@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-735 commands in 44 areas.
+738 commands in 44 areas.
 
 ## Permission classes
 
@@ -608,6 +608,9 @@ Each command has:
 | [`set.collect_all_and_save`](#setcollect_all_and_save) | Collect All and Save | `external` |  |  |
 | [`set.discard_changes`](#setdiscard_changes) | Don't Save | `destructive` |  |  |
 | [`set.discard_recovery`](#setdiscard_recovery) | Discard Recovery | `destructive` |  |  |
+| [`set.export_clips`](#setexport_clips) | Save Clips as Set | `external` |  |  |
+| [`set.export_tracks`](#setexport_tracks) | Save Tracks as Set | `external` |  |  |
+| [`set.import`](#setimport) | Import Tracks from Set | `external` |  |  |
 | [`set.import_dawproject`](#setimport_dawproject) | Import DAWproject File | `external` |  |  |
 | [`set.import_report`](#setimport_report) | DAWproject Import Report | `read` |  |  |
 | [`set.later_recovery`](#setlater_recovery) | Later Recovery | `read` |  |  |
@@ -2682,7 +2685,7 @@ Result: [`TagsState`](#tagsstate).
 
 **Open Folder**. Permission: `external`. Contexts: `browser`.
 
-Opens or closes a folder in the browser's content pane, listing its folders and audio files indented under it (in the Plug-Ins label, a vendor's folder and its plug-ins). Opening a folder closes the other open folders it isn't inside, unless `keep_others` (Cmd or Ctrl held). Right and Left do this on the selected folder. Changes nothing, but reads folders outside the project.
+Opens or closes a folder in the browser's content pane, listing its folders and audio files indented under it (in the Plug-Ins label, a vendor's folder and its plug-ins). A set file opens like a folder, read in the background: its tracks in its order, a group holding its tracks, then its return tracks and Main, each openable in turn (a track lists its Session clips by scene, and every track a Devices row); a set that can't be read opens to a line saying why. A row of an opened set is named by its `path`, the set's path, `#` and `t`, `d` or `c` with the ID of the track, the track whose chain it is, or the Session clip; `set.import` takes those IDs. Opening a folder closes the other open folders it isn't inside, unless `keep_others` (Cmd or Ctrl held). Right and Left do this on the selected folder. Changes nothing, but reads folders outside the project.
 
 Default keys: none.
 
@@ -2690,7 +2693,7 @@ Arguments:
 
 | Name | Type | Required | Description |
 |---|---|---|---|
-| `path` | string | yes | The folder, as a row of the content pane gives it. |
+| `path` | string | yes | The folder, set file or row of an opened set, as a row of the content pane gives it. |
 | `keep_others` | boolean | no | Keep the other open folders open, as holding Cmd (Ctrl) does. Otherwise opening a folder closes every open folder it isn't inside. |
 | `open` | boolean or null | no | Open (true) or close (false). Left out, it toggles. |
 
@@ -11025,6 +11028,64 @@ Arguments:
 
 Result: [`DiscardedRecovery`](#discardedrecovery).
 
+#### `set.export_clips`
+
+**Save Clips as Set**. Permission: `external`. Contexts: `session`, `browser`.
+
+Saves several Session clips of the open set as a new set in `folder`, as dragging them onto a folder in the browser does: a track for each track they are on, in the open set's order, with its kind, name, colour, mixer and devices but none of its other clips or automation, and each clip in the scene as far below the first clip's scene as it was in the open set. The new set takes the open set's tempo and time signature. Named, placed, written and copied as `set.export_tracks` does, with " Clips" added to the open set's name. Changes nothing in the open set. Writes files outside the project.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clips` | array of [`ClipId`](#clipid) | yes | The Session clips to save. At least one. |
+| `folder` | string | yes | The folder to save the set in. |
+| `copy` | boolean or null | no | Answers Collect Files on Export when it is set to Ask, as `set.export_tracks`' does. |
+| `name` | string or null | no | The set's name, without the extension. Left out, the open set's name with " Clips" added. |
+
+Result: [`ExportedSet`](#exportedset).
+
+#### `set.export_tracks`
+
+**Save Tracks as Set**. Permission: `external`. Contexts: `arrangement`, `session`, `browser`, `track-headers`.
+
+Saves tracks of the open set as a new set in `folder`, as dragging their title bars onto a folder in the browser does: whole, with their clips, devices, take lanes and automation, a group with the tracks inside it. The new set also holds the open set's return tracks with their devices, and its tempo, time signature and scenes. It is named `name`, the track's name when one track is saved, or the open set's, and is placed as Save Set As places a set: in the folder when it is a project folder, otherwise in a new "<name> Project" folder; written whole or not at all. The audio files are copied into its project folder's `Samples/Imported` or left where they are, as Collect Files on Export says (`settings.state`'s `library.collect_files_on_export`); under Ask, `copy` answers for the person and leaving it out refuses the command. The new row is selected with its name open for editing (`browser.state`'s `renaming`; `browser.rename_file` finishes it). Changes nothing in the open set. Writes files outside the project.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `folder` | string | yes | The folder to save the set in. |
+| `copy` | boolean or null | no | Answers Collect Files on Export when it is set to Ask: `true` copies the audio files the tracks play into the new set's project folder, `false` leaves the new set naming them where they are. Under Always and Never it is ignored; under Ask, leaving it out refuses the command. |
+| `name` | string or null | no | The set's name, without the extension. Left out, the track's name when one track is saved, and the open set's otherwise. |
+| `tracks` | array or null | no | The tracks to save: one, a group with the tracks inside it, or several. Left out, the selected tracks. Main can't be saved. |
+
+Result: [`ExportedSet`](#exportedset).
+
+#### `set.import`
+
+**Import Tracks from Set**. Permission: `external`. Contexts: `arrangement`, `session`, `browser`, `track-headers`.
+
+Adds tracks from a set file to the open set, as dragging the set or its rows from the browser does. With neither `tracks` nor `devices`, every track of the file but its return tracks and Main; with `tracks`, those tracks (a group brings the tracks inside it); with `devices`, only that track's chain of devices, with every device's state and without automation, onto a track that takes it or a new track. An added track keeps its kind, name, colour, mixer, sends' levels, devices, Arrangement clips, Session clips, take lanes and automation, with new IDs; its Session clips go in the open set's scenes at the positions they had, and the open set gets empty scenes at its end when it has fewer. Its sends go to the open set's return tracks in the same position and are left out past the last; an input, output or sidechain naming a track that isn't added goes back to its default or to none; links are dropped. The audio files are registered from the file's project folder and found by content when they moved; none is copied. The open set's tempo, time signature, scenes and loop are unchanged. One undo step. Reads a file outside the project. Read the new tracks back with the query tool's `song` and `track` objects.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | The set file to take tracks from, or a track's chain of devices. |
+| `at` | [`TrackId`](#trackid) or null | no | For tracks, the track of the open set they go after, at its level (inside its group when it is in one); for a chain, the track it goes on, after the track's own devices. Left out, the first selected track (the last one for tracks), or, when none is selected, after the last track or on a new track. |
+| `devices` | [`TrackId`](#trackid) or null | no | Add only the chain of devices of this track of that set (its Devices row), with every device's state and without automation. |
+| `drop_area` | boolean | no | Ignore the selection: tracks go after the last track, and a chain goes on a new track of its kind (a MIDI track for a chain with an instrument or a MIDI effect, an audio track otherwise), as dropping in a view's drop area does. Ignored when `at` is given. |
+| `tracks` | array or null | no | The tracks to add, by their IDs in that set (the IDs `browser.state` gives in the rows of the opened set): one track, a group with every track inside it, or several, which come in that set's order. Left out (and `devices` too), every track but its return tracks and Main, as dropping the set file does. A return track or Main can't be added; add its chain of devices with `devices`. |
+
+Result: [`Imported`](#imported).
+
 #### `set.import_dawproject`
 
 **Import DAWproject File**. Permission: `external`. Contexts: `global`.
@@ -13992,6 +14053,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`session.toggle_follow_actions`](#sessiontoggle_follow_actions) | the query tool's `clip` | `launch.follow.enabled` |
 | [`set.collect_all_and_save`](#setcollect_all_and_save) | the query tool's `song` | `set.unsaved_changes` |
 | [`set.discard_changes`](#setdiscard_changes) | the query tool's `song` | `set.unsaved_changes` |
+| [`set.import`](#setimport) | the query tool's `song` | `tracks` |
 | [`set.import_dawproject`](#setimport_dawproject) | the query tool's `song` | `set.name` |
 | [`set.new`](#setnew) | the query tool's `song` | `set.name` |
 | [`set.open`](#setopen) | the query tool's `song` | `set.path` |
@@ -14142,6 +14204,8 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`pad.save_default`](#padsave_default) | the default pad is the shell's, kept in memory and in the User Library, not in the set; the next `pad.drop` on an empty pad makes its chain from it |
 | [`plugin.export_list`](#pluginexport_list) | writes a file outside the set; the set doesn't change |
 | [`set.discard_recovery`](#setdiscard_recovery) | deletes a recovery file outside the set |
+| [`set.export_clips`](#setexport_clips) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
+| [`set.export_tracks`](#setexport_tracks) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`set.relink_missing`](#setrelink_missing) | finds files outside the set; the clips that use them read their media |
 | [`set.save_as_default`](#setsave_as_default) | writes a file outside the set; the set doesn't change |
 | [`set.save_as_template`](#setsave_as_template) | writes a file outside the set; the set doesn't change |
@@ -22870,6 +22934,48 @@ What `plugin.export_list` returns: the file it wrote.
 
 </details>
 
+### `ExportedSet`
+
+What `set.export_tracks` and `set.export_clips` return.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | The new set file's path. |
+| `name` | string | yes | Its name, without the extension. |
+| `copied` | integer, at least 0 | yes | How many audio files were copied into its project folder. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `set.export_tracks` and `set.export_clips` return.",
+  "properties": {
+    "copied": {
+      "description": "How many audio files were copied into its project folder.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "name": {
+      "description": "Its name, without the extension.",
+      "type": "string"
+    },
+    "path": {
+      "description": "The new set file's path.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "path",
+    "name",
+    "copied"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `External`
 
 An external device's routing: `port` (MIDI To, the MIDI output port's name as the MIDI settings list it; absent for No Output), `channel` (the MIDI channel, 1 to 16), `audio_from` (the audio interface's inputs it comes back on, a channel or a pair), and `hardware_latency`.
@@ -25159,6 +25265,62 @@ One thing the import left out or changed.
 
 </details>
 
+### `Imported`
+
+What `set.import` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `tracks` | array of [`TrackId`](#trackid) | yes | The tracks added, in display order: the new track a chain went on, or the track it was added to. |
+| `devices` | array of [`DeviceId`](#deviceid) | yes | The devices added, in the order of the chain, for a chain. |
+| `scenes_added` | integer, at least 0 | yes | How many empty scenes were added at the end of the set so the Session clips keep their places. |
+| `missing_files` | integer, at least 0 | yes | How many audio files the added tracks play that couldn't be found. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `set.import` returns.",
+  "properties": {
+    "devices": {
+      "description": "The devices added, in the order of the chain, for a chain.",
+      "items": {
+        "$ref": "#/$defs/DeviceId"
+      },
+      "type": "array"
+    },
+    "missing_files": {
+      "description": "How many audio files the added tracks play that couldn't be found.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "scenes_added": {
+      "description": "How many empty scenes were added at the end of the set so the Session clips keep their places.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "tracks": {
+      "description": "The tracks added, in display order: the new track a chain went on, or the track it was added to.",
+      "items": {
+        "$ref": "#/$defs/TrackId"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "tracks",
+    "devices",
+    "scenes_added",
+    "missing_files"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `ImportedClip`
 
 A clip `midi.import_file` placed.
@@ -25514,6 +25676,13 @@ One of:
 - `"plugin"`: A plug-in the scanner found (WP-2.9).
 - `"device"`: One of Beatlayer's own devices, listed under a device label (the Modulators label, WP-5.10); its path is the device type's ID.
 - `"clip"`: A clip file (WP-6.34); the row's `clip_kind` says whether it holds an audio clip or a MIDI clip.
+- `"track"`: A track of a set opened in the browser (WP-6.35); its path is the set's, `#t` and the track's ID.
+- `"group"`: A group track of an opened set, holding its tracks.
+- `"return"`: A return track of an opened set.
+- `"main"`: The Main track of an opened set.
+- `"session_clip"`: A Session clip of an opened set (`#c` and the clip's ID): it behaves as a clip file does, and the row's `clip_kind` says whether it holds an audio clip or a MIDI clip.
+- `"devices"`: A track's chain of devices in an opened set (`#d` and the track's ID).
+- `"notice"`: A line in place of an opened set's rows, saying why it can't be read or that it is being read. Offers nothing to drag.
 
 <details><summary>JSON Schema</summary>
 
@@ -25559,6 +25728,41 @@ One of:
     {
       "const": "clip",
       "description": "A clip file (WP-6.34); the row's `clip_kind` says whether it holds an audio clip or a MIDI clip.",
+      "type": "string"
+    },
+    {
+      "const": "track",
+      "description": "A track of a set opened in the browser (WP-6.35); its path is the set's, `#t` and the track's ID.",
+      "type": "string"
+    },
+    {
+      "const": "group",
+      "description": "A group track of an opened set, holding its tracks.",
+      "type": "string"
+    },
+    {
+      "const": "return",
+      "description": "A return track of an opened set.",
+      "type": "string"
+    },
+    {
+      "const": "main",
+      "description": "The Main track of an opened set.",
+      "type": "string"
+    },
+    {
+      "const": "session_clip",
+      "description": "A Session clip of an opened set (`#c` and the clip's ID): it behaves as a clip file does, and the row's `clip_kind` says whether it holds an audio clip or a MIDI clip.",
+      "type": "string"
+    },
+    {
+      "const": "devices",
+      "description": "A track's chain of devices in an opened set (`#d` and the track's ID).",
+      "type": "string"
+    },
+    {
+      "const": "notice",
+      "description": "A line in place of an opened set's rows, saying why it can't be read or that it is being read. Offers nothing to drag.",
       "type": "string"
     }
   ]

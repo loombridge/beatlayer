@@ -101,6 +101,7 @@ pub mod scene_fields;
 pub mod search;
 mod session_capture;
 pub mod session_view;
+pub mod set_exchange;
 pub mod settings;
 mod shell;
 pub mod stems;
@@ -172,6 +173,9 @@ pub use bl_shell_spec::session_launch as session_launch_commands;
 /// The Session View grid's command IDs and their argument and result types
 /// (WP-3.7).
 pub use bl_shell_spec::session_view as session_view_commands;
+/// The set exchange commands' IDs and their argument and result types
+/// (WP-6.35).
+pub use bl_shell_spec::set_exchange as set_exchange_commands;
 pub use bl_shell_spec::settings::ZOOM_STEPS;
 pub use bl_shell_spec::slice as slice_commands;
 /// The shell's track command IDs and their argument and result types

@@ -57,6 +57,15 @@ impl TrackMenus {
         if title.secondary_clicked() {
             select(shell, track, events);
         }
+        // Spec: set-exchange R11 (I-DROP-011). Dragging the title bars
+        // carries the tracks to a folder in the browser, which saves them as
+        // a new set.
+        if title.drag_started() {
+            crate::browser::begin_tracks_drag(ui.ctx(), shell, track);
+        }
+        // Spec: set-exchange R3, R4, R8 (I-DROP-021, I-DROP-022). A set, its
+        // tracks or a chain dropped on the title bar are added there.
+        crate::browser::drop_set_on_track(ui, theme, title.rect, track, events);
         title.context_menu(|ui| self.show(ui, theme, shell, track, arrangement, events));
         if focused && crate::menus::context_menu_keys(ui) {
             select(shell, track, events);

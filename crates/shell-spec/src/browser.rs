@@ -297,6 +297,24 @@ pub enum ItemKind {
     /// A clip file (WP-6.34); the row's `clip_kind` says whether it holds an
     /// audio clip or a MIDI clip.
     Clip,
+    /// A track of a set opened in the browser (WP-6.35); its path is the
+    /// set's, `#t` and the track's ID.
+    Track,
+    /// A group track of an opened set, holding its tracks.
+    Group,
+    /// A return track of an opened set.
+    Return,
+    /// The Main track of an opened set.
+    Main,
+    /// A Session clip of an opened set (`#c` and the clip's ID): it behaves as
+    /// a clip file does, and the row's `clip_kind` says whether it holds an
+    /// audio clip or a MIDI clip.
+    SessionClip,
+    /// A track's chain of devices in an opened set (`#d` and the track's ID).
+    Devices,
+    /// A line in place of an opened set's rows, saying why it can't be read or
+    /// that it is being read. Offers nothing to drag.
+    Notice,
 }
 
 /// What a clip file holds.
@@ -722,7 +740,8 @@ pub struct OpenPlaceArgs {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct OpenFolderArgs {
-    /// The folder, as a row of the content pane gives it.
+    /// The folder, set file or row of an opened set, as a row of the content
+    /// pane gives it.
     pub path: String,
     /// Open (true) or close (false). Left out, it toggles.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -975,10 +994,16 @@ fn specs() -> Vec<CommandSpec> {
             .description(
                 "Opens or closes a folder in the browser's content pane, listing its folders \
                  and audio files indented under it (in the Plug-Ins label, a vendor's folder \
-                 and its plug-ins). Opening a folder closes the other open \
-                 folders it isn't inside, unless `keep_others` (Cmd or Ctrl held). Right and \
-                 Left do this on the selected folder. Changes nothing, but reads folders outside \
-                 the project.",
+                 and its plug-ins). A set file opens like a folder, read in the background: \
+                 its tracks in its order, a group holding its tracks, then its return tracks \
+                 and Main, each openable in turn (a track lists its Session clips by scene, and \
+                 every track a Devices row); a set that can't be read opens to a line saying \
+                 why. A row of an opened set is named by its `path`, the set's path, `#` and \
+                 `t`, `d` or `c` with the ID of the track, the track whose chain it is, or the \
+                 Session clip; `set.import` takes those IDs. Opening a folder closes the other \
+                 open folders it isn't inside, unless `keep_others` (Cmd or Ctrl held). Right \
+                 and Left do this on the selected folder. Changes nothing, but reads folders \
+                 outside the project.",
             )
             .permission(Permission::External)
             .context(Browser)

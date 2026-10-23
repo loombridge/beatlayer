@@ -3314,6 +3314,27 @@ fn paths() -> BTreeMap<&'static str, Path> {
             )),
         ),
         (
+            "set.import",
+            Exception(Equivalent(
+                "Enter on a track or a Devices row of a set opened in the browser \
+                 (`browser.load_selected`)",
+            )),
+        ),
+        (
+            "set.export_tracks",
+            Exception(Gap(
+                "a drag of track title bars into the browser has no keyboard form yet (set \
+                 exchange R11)",
+            )),
+        ),
+        (
+            "set.export_clips",
+            Exception(Gap(
+                "a drag of Session clips into the browser has no keyboard form yet (set \
+                 exchange R12)",
+            )),
+        ),
+        (
             "browser.rename_file",
             Exception(Equivalent(
                 "typing in the saved clip's name field in the browser's list: Enter renames \
@@ -4675,6 +4696,8 @@ fn every_m1_command_is_reachable_from_the_keyboard() {
             "device.sort_layers",
             "locator.set_info_text",
             "rack.set_macro_info_text",
+            "set.export_clips",
+            "set.export_tracks",
             "track.move",
         ],
         "the gaps the accessibility spec lists"

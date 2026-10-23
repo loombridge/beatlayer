@@ -116,6 +116,7 @@ pub mod search;
 pub mod session_launch;
 pub mod session_record;
 pub mod session_view;
+pub mod set_exchange;
 pub mod settings;
 pub mod slice;
 pub mod stems;
@@ -145,6 +146,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     browser::register(registry)?;
     export::register(registry)?;
     file_manager::register(registry)?;
+    set_exchange::register(registry)?;
     midi_files::register(registry)?;
     dawproject::register(registry)?;
     midi_io::register(registry)?;

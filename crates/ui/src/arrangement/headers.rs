@@ -155,7 +155,7 @@ pub fn header(
         Stroke::new(1.0, colors.lane_line.0),
     );
     let name = track.name();
-    let title_response = ui.interact(title, title_id(id), Sense::click());
+    let title_response = ui.interact(title, title_id(id), Sense::click_and_drag());
     crate::rack_view::focus_track_under_drag(ui, shell, id, title, events);
     // The title marks the track as drawn for the keyboard's neighbour moves
     // (the accessibility spec, R4); Tab doesn't stop on it.

@@ -15,7 +15,7 @@
 use std::path::Path;
 
 use bl_core::time::Ticks;
-use bl_model::ClipId;
+use bl_model::{ClipId, TrackId};
 use bl_shell::browser::drop::{DropTarget, drop_target_on};
 use bl_shell::browser::listing::file_kind;
 use bl_shell::browser_commands::{
@@ -162,6 +162,101 @@ pub struct BrowserDrag {
     pub plugin: Option<String>,
 }
 
+/// What dragging a set from the browser, or rows of a set opened there,
+/// carries (set exchange R3, R4, R8): dropped on a track's title bar or in a
+/// view's drop area, it is added to the open set by `set.import`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SetDrag {
+    /// The set file.
+    pub path: String,
+    /// The tracks dragged, by their IDs in that set; none for the whole set
+    /// or a chain.
+    pub tracks: Option<Vec<TrackId>>,
+    /// The track whose chain of devices is dragged (its Devices row).
+    pub devices: Option<TrackId>,
+}
+
+impl SetDrag {
+    /// The arguments of `set.import` for a drop on `at`, or in a drop area.
+    pub fn args(&self, at: Option<TrackId>, drop_area: bool) -> Value {
+        let mut args = json!({ "path": self.path, "drop_area": drop_area });
+        if let Some(tracks) = &self.tracks {
+            args["tracks"] = json!(tracks);
+        }
+        if let Some(devices) = self.devices {
+            args["devices"] = json!(devices);
+        }
+        if let Some(at) = at {
+            args["at"] = json!(at);
+        }
+        args
+    }
+}
+
+/// What dragging track title bars carries (set exchange R11): dropped on a
+/// folder or a place's label in the browser, the tracks are saved there as a
+/// new set.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TracksDrag {
+    /// The tracks, in the order they were selected.
+    pub tracks: Vec<TrackId>,
+}
+
+/// Starts a drag of the track title bars: the selected title bars when the
+/// one dragged is among them, otherwise that one (set exchange R11).
+pub fn begin_tracks_drag(ctx: &egui::Context, shell: &Shell, track: TrackId) {
+    let view = shell.arrangement();
+    let tracks = if view.title_bars_selected() && view.selected_tracks().contains(&track) {
+        view.selected_tracks().to_vec()
+    } else {
+        vec![track]
+    };
+    DragAndDrop::set_payload(ctx, TracksDrag { tracks });
+}
+
+/// A set dragged from the browser over a track's title bar at `rect`: the
+/// bar is outlined, and released there the set's tracks, a track or a chain
+/// are added after the track or onto it (set exchange R3, R4, R8; I-DROP-021,
+/// I-DROP-022).
+pub fn drop_set_on_track(
+    ui: &Ui,
+    theme: &Theme,
+    rect: Rect,
+    track: TrackId,
+    events: &mut Vec<UiEvent>,
+) {
+    let Some(drag) = DragAndDrop::payload::<SetDrag>(ui.ctx()) else {
+        return;
+    };
+    let Some(pointer) = ui.input(|i| i.pointer.hover_pos()) else {
+        return;
+    };
+    if !rect.contains(pointer) || !ui.clip_rect().contains(pointer) {
+        return;
+    }
+    ui.painter().rect_stroke(
+        rect,
+        0.0,
+        Stroke::new(2.0, theme.colors.focus.0),
+        StrokeKind::Inside,
+    );
+    if ui.input(|i| i.pointer.any_released()) {
+        DragAndDrop::clear_payload(ui.ctx());
+        invoke(events, "set.import", drag.args(Some(track), false));
+    }
+}
+
+/// What a save of tracks or clips to a folder of the browser is for.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum SaveWhat {
+    /// A clip, as a clip file.
+    Clip(ClipId),
+    /// Track title bars, as a new set.
+    Tracks(Vec<TrackId>),
+    /// Several Session clips, as a new set.
+    Clips(Vec<ClipId>),
+}
+
 /// Where a clip dragged out of the Arrangement or the Session View is saved
 /// if it is released over the browser (clip files R3).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -176,7 +271,7 @@ pub enum ClipDropTarget {
 /// Ask (file management R8).
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct AskCopy {
-    clip: ClipId,
+    what: SaveWhat,
     folder: Option<String>,
 }
 
@@ -226,7 +321,8 @@ pub fn save_clip(
         ClipDropTarget::Clips => None,
     };
     if shell.clip_save_asks(clip, folder.as_deref().map(Path::new)) {
-        ctx.data_mut(|data| data.insert_temp(ask_copy_id(), AskCopy { clip, folder }));
+        let what = SaveWhat::Clip(clip);
+        ctx.data_mut(|data| data.insert_temp(ask_copy_id(), AskCopy { what, folder }));
         return;
     }
     let mut args = json!({ "clip": clip });
@@ -234,6 +330,107 @@ pub fn save_clip(
         args["folder"] = json!(folder);
     }
     invoke(events, "clip.save_file", args);
+}
+
+/// Saves several selected Session clips as a new set at `target` (set
+/// exchange R12): at once, or, with Collect Files on Export on Ask and audio
+/// to copy, once the person has answered. Onto the Clips label, which is no
+/// folder of sets, each is saved as a clip file instead.
+pub fn save_clips_as_set(
+    ctx: &egui::Context,
+    shell: &Shell,
+    clips: Vec<ClipId>,
+    target: &ClipDropTarget,
+    events: &mut Vec<UiEvent>,
+) {
+    let ClipDropTarget::Folder(folder) = target else {
+        for clip in clips {
+            save_clip(ctx, shell, clip, target, events);
+        }
+        return;
+    };
+    save_in_folder(ctx, shell, SaveWhat::Clips(clips), folder, events);
+}
+
+/// Saves what was dragged at `what` in `folder`, asking first when Collect
+/// Files on Export says to (set exchange R11, R12, R14).
+fn save_in_folder(
+    ctx: &egui::Context,
+    shell: &Shell,
+    what: SaveWhat,
+    folder: &str,
+    events: &mut Vec<UiEvent>,
+) {
+    let asks = match &what {
+        SaveWhat::Clip(clip) => shell.clip_save_asks(*clip, Some(Path::new(folder))),
+        SaveWhat::Tracks(tracks) => shell.tracks_save_asks(tracks, Path::new(folder)),
+        SaveWhat::Clips(clips) => shell.clips_save_asks(clips, Path::new(folder)),
+    };
+    if asks {
+        let folder = Some(folder.to_owned());
+        ctx.data_mut(|data| data.insert_temp(ask_copy_id(), AskCopy { what, folder }));
+        return;
+    }
+    save_invoke(events, &what, Some(folder), None);
+}
+
+/// The command that saves `what`, with the answer to Ask if there is one.
+fn save_invoke(
+    events: &mut Vec<UiEvent>,
+    what: &SaveWhat,
+    folder: Option<&str>,
+    copy: Option<bool>,
+) {
+    let (command, mut args) = match what {
+        SaveWhat::Clip(clip) => ("clip.save_file", json!({ "clip": clip })),
+        SaveWhat::Tracks(tracks) => ("set.export_tracks", json!({ "tracks": tracks })),
+        SaveWhat::Clips(clips) => ("set.export_clips", json!({ "clips": clips })),
+    };
+    if let Some(folder) = folder {
+        args["folder"] = json!(folder);
+    }
+    if let Some(copy) = copy {
+        args["copy"] = json!(copy);
+    }
+    invoke(events, command, args);
+}
+
+/// Track title bars dragged over `rect` are saved as a new set in `folder`
+/// when released there (set exchange R11; I-DROP-011): the rectangle is
+/// outlined while they are over it.
+fn drop_tracks(
+    ui: &Ui,
+    shell: &Shell,
+    theme: &Theme,
+    rect: Rect,
+    folder: &str,
+    events: &mut Vec<UiEvent>,
+) {
+    let Some(drag) = DragAndDrop::payload::<TracksDrag>(ui.ctx()) else {
+        return;
+    };
+    let Some(pointer) = ui.input(|i| i.pointer.hover_pos()) else {
+        return;
+    };
+    if !rect.contains(pointer) || !ui.clip_rect().contains(pointer) {
+        return;
+    }
+    ui.painter().rect_stroke(
+        rect,
+        0.0,
+        Stroke::new(2.0, theme.colors.accent.0),
+        StrokeKind::Inside,
+    );
+    if ui.input(|i| i.pointer.any_released()) {
+        DragAndDrop::clear_payload(ui.ctx());
+        save_in_folder(
+            ui.ctx(),
+            shell,
+            SaveWhat::Tracks(drag.tracks.clone()),
+            folder,
+            events,
+        );
+    }
 }
 
 /// While a clip is dragged, outlines `rect` and notes `target` when the
@@ -831,6 +1028,13 @@ impl BrowserUi {
                 drop_chains(ui, theme, rect, path, events);
             }
             _ => {}
+        }
+        // Spec: set-exchange R11. Track title bars dropped on a place's label
+        // are saved there as a new set.
+        if info.label.is_place()
+            && let Some(path) = &info.path
+        {
+            drop_tracks(ui, shell, theme, rect, path, events);
         }
         // Spec: clip files R3. A clip dropped on a place's label is saved in
         // its folder, and on the Clips label in the User Library's `Clips`.
@@ -1838,9 +2042,12 @@ impl BrowserUi {
             .resizable(false)
             .anchor(Align2::CENTER_CENTER, vec2(0.0, 0.0))
             .show(ctx, |ui| {
-                ui.label(
-                    "Copy the audio files this clip uses into the project the clip file is saved in?",
-                );
+                ui.label(match ask.what {
+                    SaveWhat::Clip(_) => {
+                        "Copy the audio files this clip uses into the project the clip file is saved in?"
+                    }
+                    _ => "Copy the audio files this set uses into the project the set is saved in?",
+                });
                 ui.horizontal(|ui| {
                     for (label, copy) in [("Copy", Some(true)), ("Don't Copy", Some(false)), ("Cancel", None)] {
                         let button = ui.button(label);
@@ -1854,11 +2061,7 @@ impl BrowserUi {
         if let Some(copy) = answer {
             ctx.data_mut(|data| data.remove::<AskCopy>(ask_copy_id()));
             if let Some(copy) = copy {
-                let mut args = json!({ "clip": ask.clip, "copy": copy });
-                if let Some(folder) = ask.folder {
-                    args["folder"] = json!(folder);
-                }
-                invoke(events, "clip.save_file", args);
+                save_invoke(events, &ask.what, ask.folder.as_deref(), Some(copy));
             }
         }
     }
@@ -1947,17 +2150,24 @@ impl BrowserUi {
         let mark = Rect::from_center_size(pos2(indent + 4.0, rect.center().y), vec2(8.0, 8.0));
         let ink = theme.colors.text_dim.0;
         match item.kind {
-            ItemKind::Folder => glyph(
+            ItemKind::Folder
+            | ItemKind::Set
+            | ItemKind::Track
+            | ItemKind::Group
+            | ItemKind::Return
+            | ItemKind::Main => glyph(
                 &painter,
                 mark,
                 if item.open { Glyph::Down } else { Glyph::Right },
                 ink,
             ),
             ItemKind::Audio | ItemKind::Sfz => glyph(&painter, mark, Glyph::Wave, ink),
-            ItemKind::Clip => glyph(&painter, mark, Glyph::Clip, ink),
-            ItemKind::Set => glyph(&painter, mark, Glyph::Set, ink),
+            ItemKind::Clip | ItemKind::SessionClip => glyph(&painter, mark, Glyph::Clip, ink),
             ItemKind::Preset => glyph(&painter, mark, Glyph::Preset, ink),
-            ItemKind::Plugin | ItemKind::Device => glyph(&painter, mark, Glyph::Plugin, ink),
+            ItemKind::Plugin | ItemKind::Device | ItemKind::Devices => {
+                glyph(&painter, mark, Glyph::Plugin, ink);
+            }
+            ItemKind::Notice => {}
         }
         let text_colour = if selected {
             theme.colors.text.0
@@ -2013,6 +2223,7 @@ impl BrowserUi {
 
         if item.kind == ItemKind::Folder {
             drop_chains(ui, theme, rect, &item.path, events);
+            drop_tracks(ui, shell, theme, rect, &item.path, events);
             note_clip_target(ui, theme, rect, ClipDropTarget::Folder(item.path.clone()));
             // Spec: file-management R10, C-BROWSER-014. A project folder's
             // context menu has Manage Project, which shows the File
@@ -2044,8 +2255,9 @@ impl BrowserUi {
                     json!({ "path": item.path, "keep_others": command(modifiers) }),
                 ),
                 ItemKind::Audio => invoke(events, ids::LOAD_SELECTED, json!({})),
-                // Spec: clip files R10. A clip file places its clip.
-                ItemKind::Clip => {
+                // Spec: clip files R10, set-exchange R2. A clip file places
+                // its clip, and so does a Session clip of an opened set.
+                ItemKind::Clip | ItemKind::SessionClip => {
                     if !selected {
                         invoke(events, ids::SELECT, json!({ "paths": [item.path] }));
                     }
@@ -2075,8 +2287,42 @@ impl BrowserUi {
                     }
                     invoke(events, ids::LOAD_SELECTED, json!({}));
                 }
-                ItemKind::Set => {}
+                // Spec: set-exchange R1. A set opens like a folder.
+                ItemKind::Set => invoke(
+                    events,
+                    ids::OPEN_FOLDER,
+                    json!({ "path": item.path, "keep_others": command(modifiers) }),
+                ),
+                // Spec: set-exchange R4, R8. Double-clicking a track of an
+                // opened set adds it, and a Devices row adds its chain. A
+                // return track and Main only open, to their Devices row.
+                ItemKind::Track | ItemKind::Group | ItemKind::Devices => {
+                    if !selected {
+                        invoke(events, ids::SELECT, json!({ "paths": [item.path] }));
+                    }
+                    invoke(events, ids::LOAD_SELECTED, json!({}));
+                }
+                ItemKind::Return | ItemKind::Main => invoke(
+                    events,
+                    ids::OPEN_FOLDER,
+                    json!({ "path": item.path, "keep_others": true }),
+                ),
+                ItemKind::Notice => {}
             }
+        } else if response.clicked()
+            && openable(item.kind)
+            && item.kind != ItemKind::Folder
+            && ui
+                .input(|i| i.pointer.interact_pos())
+                .is_some_and(|p| mark.expand(4.0).contains(p))
+        {
+            // Spec: set-exchange R1. A set and its tracks open by their
+            // triangle.
+            invoke(
+                events,
+                ids::OPEN_FOLDER,
+                json!({ "path": item.path, "keep_others": command(modifiers) }),
+            );
         } else if response.clicked() {
             ui.memory_mut(|m| {
                 if !m.has_focus(list_id()) {
@@ -2107,6 +2353,10 @@ impl BrowserUi {
                         plugin: Some(item.path.clone()),
                     },
                 );
+            } else if let Some(drag) = set_drag(item, &paths) {
+                // Spec: set-exchange R3, R4, R8. A set, tracks of one or a
+                // Devices row.
+                DragAndDrop::set_payload(ui.ctx(), drag);
             } else {
                 let (loadable, mut audio): (Vec<String>, Vec<String>) =
                     paths.into_iter().partition(|p| is_loadable(p));
@@ -2186,6 +2436,17 @@ impl BrowserUi {
                 None => "plug-in",
             },
             ItemKind::Device => "device",
+            ItemKind::Track => "track in a set",
+            ItemKind::Group => "group track in a set",
+            ItemKind::Return => "return track in a set",
+            ItemKind::Main => "Main track in a set",
+            ItemKind::SessionClip => match item.clip_kind {
+                Some(ClipFileKind::Audio) => "audio Session clip in a set",
+                Some(ClipFileKind::Midi) => "MIDI Session clip in a set",
+                None => "Session clip in a set",
+            },
+            ItemKind::Devices => "devices in a set",
+            ItemKind::Notice => "note",
         };
         response
             .widget_info(|| WidgetInfo::selected(WidgetType::Other, true, selected, &item.name));
@@ -2558,29 +2819,25 @@ impl BrowserUi {
         };
         if right {
             match item.kind {
-                ItemKind::Folder if !item.open => invoke(
+                kind if openable(kind) && !item.open => invoke(
                     events,
                     ids::OPEN_FOLDER,
                     json!({ "path": item.path, "open": true, "keep_others": cmd }),
                 ),
-                ItemKind::Folder => {
+                kind if openable(kind) => {
                     if let Some(child) = view.row(cursor + 1).filter(|c| c.depth > item.depth) {
                         self.anchor = Some(cursor + 1);
                         invoke(events, ids::SELECT, json!({ "paths": [child.path] }));
                     }
                 }
-                ItemKind::Audio | ItemKind::Clip => {
+                ItemKind::Audio | ItemKind::Clip | ItemKind::SessionClip => {
                     invoke(events, ids::PREVIEW, json!({ "path": item.path }));
                 }
-                ItemKind::Sfz
-                | ItemKind::Set
-                | ItemKind::Preset
-                | ItemKind::Plugin
-                | ItemKind::Device => {}
+                _ => {}
             }
         }
         if left {
-            if item.kind == ItemKind::Folder && item.open {
+            if openable(item.kind) && item.open {
                 invoke(
                     events,
                     ids::OPEN_FOLDER,
@@ -2613,6 +2870,7 @@ impl BrowserUi {
     ) {
         let ctx = ui.ctx().clone();
         let payload = DragAndDrop::payload::<BrowserDrag>(&ctx);
+        let set_payload = DragAndDrop::payload::<SetDrag>(&ctx);
         let (dropped, hovering, released, pointer, modifiers) = ctx.input(|i| {
             let dropped: Vec<String> = i
                 .raw
@@ -2629,7 +2887,7 @@ impl BrowserUi {
                 i.modifiers,
             )
         });
-        if payload.is_none() && dropped.is_empty() && !hovering {
+        if payload.is_none() && set_payload.is_none() && dropped.is_empty() && !hovering {
             return;
         }
         if shell.main_view() != MainView::Arrangement {
@@ -2683,6 +2941,23 @@ impl BrowserUi {
                 ignore_snap,
             )
         });
+        if let Some(drag) = set_payload {
+            // Spec: set-exchange R3, R8 (I-DROP-021, I-DROP-022). A set, its
+            // tracks or a chain go into the drop area under the tracks.
+            let area = target.filter(|t| t.track.is_none());
+            if let Some(area) = &area {
+                draw_target(ui, theme, lanes, view, doc, area, "Drop to add the tracks");
+            } else if pointer.is_some_and(|p| main_view.contains(p)) {
+                ctx.set_cursor_icon(CursorIcon::NoDrop);
+            }
+            if released {
+                DragAndDrop::clear_payload(&ctx);
+                if area.is_some() {
+                    invoke(events, "set.import", drag.args(None, true));
+                }
+            }
+            return;
+        }
         let plugin = payload.as_ref().and_then(|p| p.plugin.clone());
         if let Some(key) = plugin {
             // Spec: plugin-scanning R11. A plug-in dropped on a track loads
@@ -2708,7 +2983,12 @@ impl BrowserUi {
             return;
         }
         if let Some(target) = target {
-            draw_target(ui, theme, lanes, view, doc, &target, kind);
+            let text = if kind == bl_model::TrackKind::Midi {
+                "Drop to make a new MIDI track"
+            } else {
+                "Drop to make a new audio track"
+            };
+            draw_target(ui, theme, lanes, view, doc, &target, text);
         } else if pointer.is_some_and(|p| main_view.contains(p)) {
             ctx.set_cursor_icon(CursorIcon::NoDrop);
         }
@@ -2781,7 +3061,7 @@ fn draw_target(
     view: &bl_shell::arrangement::ArrangementView,
     doc: &bl_model::Document,
     target: &DropTarget,
-    kind: bl_model::TrackKind,
+    text: &str,
 ) {
     let painter = ui.painter_at(lanes);
     let top = lanes.top() + target.top;
@@ -2807,11 +3087,7 @@ fn draw_target(
         painter.text(
             rect.center(),
             Align2::CENTER_CENTER,
-            if kind == bl_model::TrackKind::Midi {
-                "Drop to make a new MIDI track"
-            } else {
-                "Drop to make a new audio track"
-            },
+            text,
             theme.small_font(),
             theme.colors.text.0,
         );
@@ -2876,6 +3152,59 @@ fn drop_chains(ui: &Ui, theme: &Theme, rect: Rect, folder: &str, events: &mut Ve
     }
 }
 
+/// Whether rows of this kind open to list what is inside them.
+fn openable(kind: ItemKind) -> bool {
+    matches!(
+        kind,
+        ItemKind::Folder
+            | ItemKind::Set
+            | ItemKind::Track
+            | ItemKind::Group
+            | ItemKind::Return
+            | ItemKind::Main
+    )
+}
+
+/// What dragging `item` carries when it is a set or a row of one: the set,
+/// the tracks among `paths` (the selection or the row), or a chain of devices
+/// (set exchange R3, R4, R8). `None` for any other item.
+fn set_drag(item: &Item, paths: &[String]) -> Option<SetDrag> {
+    use bl_shell::set_exchange::{Row, parse_key};
+    match item.kind {
+        ItemKind::Set => Some(SetDrag {
+            path: item.path.clone(),
+            tracks: None,
+            devices: None,
+        }),
+        ItemKind::Devices => {
+            let (set, Row::Devices(track)) = parse_key(&item.path)? else {
+                return None;
+            };
+            Some(SetDrag {
+                path: set.to_string_lossy().into_owned(),
+                tracks: None,
+                devices: Some(track),
+            })
+        }
+        ItemKind::Track | ItemKind::Group => {
+            let (set, _) = parse_key(&item.path)?;
+            let tracks: Vec<TrackId> = paths
+                .iter()
+                .filter_map(|path| match parse_key(path)? {
+                    (found, Row::Track(track)) if found == set => Some(track),
+                    _ => None,
+                })
+                .collect();
+            Some(SetDrag {
+                path: set.to_string_lossy().into_owned(),
+                tracks: Some(tracks),
+                devices: None,
+            })
+        }
+        _ => None,
+    }
+}
+
 /// Whether a dragged path is a preset file or the ID of a device a label
 /// lists: what the Device View loads.
 fn is_loadable(path: &str) -> bool {
@@ -2895,10 +3224,7 @@ fn is_audio(path: &str) -> bool {
 
 /// Whether `path` names a clip file.
 pub(crate) fn is_clip(path: &str) -> bool {
-    Path::new(path)
-        .file_name()
-        .and_then(|n| file_kind(&n.to_string_lossy()))
-        == Some(ItemKind::Clip)
+    bl_shell::browser::listing::path_kind(Path::new(path)) == Some(ItemKind::Clip)
 }
 
 /// Whether `path` names an SFZ instrument, which a MIDI track or the drop
@@ -2940,7 +3266,6 @@ enum Glyph {
     Filter,
     Menu,
     Wave,
-    Set,
     Preset,
     Plugin,
     Clip,
@@ -3009,14 +3334,6 @@ fn glyph(painter: &egui::Painter, rect: Rect, glyph: Glyph, colour: Color32) {
                 Rect::from_min_size(body.min, vec2(body.width(), s * 0.5)),
                 1.0,
                 colour,
-            );
-        }
-        Glyph::Set => {
-            painter.rect_stroke(
-                Rect::from_center_size(c, vec2(s * 1.8, s * 1.8)),
-                1.0,
-                Stroke::new(1.0, colour),
-                StrokeKind::Inside,
             );
         }
         Glyph::Speaker => {

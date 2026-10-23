@@ -100,7 +100,7 @@ impl DetailEdge {
         {
             self.drag = Some(Drag {
                 grab: pointer.y - detail.top(),
-                before: shell.detail().clip_height(),
+                before: shell.detail_of(crate::window::of(ui.ctx())).clip_height(),
                 top: detail.top(),
             });
         }
@@ -117,7 +117,7 @@ impl DetailEdge {
         if response.drag_stopped()
             && let Some(drag) = self.drag.take()
         {
-            self.release(shell, layout, drag, events);
+            self.release(shell, crate::window::of(ui.ctx()), layout, drag, events);
         }
         if response.hovered() || response.dragged() {
             ui.painter().line_segment(
@@ -134,7 +134,14 @@ impl DetailEdge {
     /// the Clip View, which opens again at the height it had; with only the
     /// Device View showing, one that ends lower than half its height closes
     /// it (R10).
-    fn release(&self, shell: &Shell, layout: &ShellLayout, drag: Drag, events: &mut Vec<UiEvent>) {
+    fn release(
+        &self,
+        shell: &Shell,
+        window: bl_shell::WindowKind,
+        layout: &ShellLayout,
+        drag: Drag,
+        events: &mut Vec<UiEvent>,
+    ) {
         if let Some(clip) = layout.clip_view {
             if clip.bottom() - drag.top < CLIP_VIEW_MIN_HEIGHT {
                 invoke(
@@ -144,7 +151,7 @@ impl DetailEdge {
                 );
                 invoke(events, VIEW_TOGGLE_CLIP_VIEW, json!({}));
             }
-        } else if shell.detail().device_shown()
+        } else if shell.detail_of(window).device_shown()
             && drag.top - layout.detail.top() > DEVICE_VIEW_HEIGHT / 2.0
         {
             invoke(events, VIEW_TOGGLE_DEVICE_VIEW, json!({}));

@@ -221,6 +221,7 @@ impl Importer<'_, '_> {
             folds: bl_model::ClipFolds::new(),
             launch: bl_model::LaunchSettings::default(),
             multisamplers: bl_model::MultisamplerViews::new(),
+            window_views: bl_model::WindowViews::default(),
         };
         Ok(Imported {
             project,

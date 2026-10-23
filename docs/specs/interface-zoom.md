@@ -1,6 +1,6 @@
 # Interface zoom
 
-- **Status:** partial (R1 to R10 each have a passing test; R11 to R15 come with WP-6.29)
+- **Status:** implemented (R1 to R15 each have a passing test)
 - **Work packages:** WP-1.17 (global zoom: R1 to R10); WP-6.29 (each window's own zoom, with the second window: R11 to R15)
 - **Parity-matrix row:** Views and workflow: Interface zoom, per window
 - **Checked against:** Live 12.4.3, through the UI parity reference recorded on 10 October 2026, and the Live 12 reference manual and release notes as published on 11 October 2026
@@ -55,8 +55,8 @@ R1 to R10 cover one zoom for every window. Live 12 gives the second window a zoo
 | R8 | `crates/ui/tests/zoom.rs`, `the_settings_window_scales_with_the_zoom`, `the_settings_window_draws_its_rows_scaled_at_every_step` | unit, UI script |
 | R9 | `crates/ui/tests/zoom.rs`, `the_main_window_draws_every_row_scaled_at_every_step` (with the title bar drawn), `the_settings_window_draws_its_rows_scaled_at_every_step` | UI script |
 | R10 | `crates/ui/tests/zoom.rs`, `the_zoom_keys_zoom_every_layout_point_and_egui_s_own_keys_are_off` | UI script |
-| R11 | to be written in WP-6.29 | |
-| R12 | to be written in WP-6.29 | |
-| R13 | to be written in WP-6.29 | |
-| R14 | to be written in WP-6.29 | |
-| R15 | to be written in WP-6.29 | |
+| R11 | `crates/shell/tests/second_window.rs`, `each_window_zooms_on_its_own`, `the_second_windows_zoom_and_frame_are_kept_between_launches`; `crates/ui/tests/second_window.rs`, `the_second_window_zooms_on_its_own` | unit, UI script, through real preference files |
+| R12 | `crates/shell/tests/second_window.rs`, `the_second_window_zoom_row_shows_only_while_it_is_open`; `crates/ui/tests/second_window.rs`, `display_and_input_shows_second_window_zoom_only_while_it_is_open` | unit, UI script |
+| R13 | `crates/shell/tests/second_window.rs`, `each_window_zooms_on_its_own` (the disabled ends); `crates/ui/tests/second_window.rs`, `the_second_window_zooms_on_its_own` (Cmd-plus in each window), `view_second_window_is_ticked_while_it_is_open_and_the_zoom_items_follow_the_window` (View ▸ Zoom) | unit, UI script |
+| R14 | `crates/shell/tests/second_window.rs`, `each_window_zooms_on_its_own`, `zoom_set_while_the_second_window_is_closed_is_the_zoom_it_opens_at`; `crates/agent/tests/readback_runtime.rs`, `view_state_reads_back_the_second_window`; `crates/shell/tests/interface_zoom.rs`, `zoom_commands_are_edit_class_preferences_outside_the_set` | unit, through the agent API |
+| R15 | `crates/ui/tests/second_window.rs`, `it_lays_out_at_its_first_size_and_its_smallest_at_50_100_and_200_percent` (the smallest size at each zoom is `minimum_second_window`); `crates/ui/src/layout.rs`, `fit_second_window` | UI script; the app applies it as the window's minimum size |

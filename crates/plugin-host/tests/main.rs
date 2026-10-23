@@ -7,9 +7,9 @@
 // can't install its own global allocator.
 bl_rt::install_trap!();
 
+mod common;
 mod au;
 mod clap;
-mod common;
 mod editor;
 mod engine;
 mod midi_effect;

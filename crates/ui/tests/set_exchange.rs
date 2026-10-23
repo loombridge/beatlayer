@@ -5,7 +5,7 @@
 //! browser are saved there as a new set. Each gesture runs the registered
 //! command an agent runs.
 
-mod common;
+use crate::common;
 
 use std::path::{Path, PathBuf};
 

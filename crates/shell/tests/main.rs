@@ -94,6 +94,7 @@ mod session_launch;
 mod session_recording;
 mod session_to_arrangement;
 mod session_view;
+mod set_exchange;
 mod sfz_import;
 mod shell_commands;
 mod shifter;

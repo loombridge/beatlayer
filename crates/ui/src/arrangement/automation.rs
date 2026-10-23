@@ -59,6 +59,13 @@ pub(crate) const NEIGHBOUR_GRAB: f64 = 6.0;
 /// automation editing spec, R4).
 pub(crate) const SEGMENT_ON: f32 = 1.0;
 
+/// How close to a handle of a hovered time selection, in points, a press
+/// grabs it (the automation editing spec, R14).
+pub(crate) const HANDLE_GRAB: f32 = 6.0;
+
+/// The size of a handle's square, in points.
+const HANDLE_SIZE: f32 = 6.0;
+
 fn invoke(events: &mut Vec<UiEvent>, id: &str, args: Value) {
     events.push(UiEvent::Invoke(Invocation::new(id, args)));
 }
@@ -120,6 +127,33 @@ impl Lane<'_> {
             self.rect.left() + self.horizontal.x(point.at) as f32,
             self.y_of_value(point.value),
         )
+    }
+
+    /// The box round the time selection in the lane: the span across the
+    /// parameter's whole range (the automation editing spec, R14).
+    pub(super) fn span_box(&self) -> Option<Rect> {
+        let (start, end) = self.span?;
+        Some(Rect::from_min_max(
+            pos2(
+                self.rect.left() + self.horizontal.x(start) as f32,
+                self.rect.top(),
+            ),
+            pos2(
+                self.rect.left() + self.horizontal.x(end) as f32,
+                self.rect.bottom(),
+            ),
+        ))
+    }
+
+    /// The handle of the time selection's box under a point, if any.
+    fn handle_at(&self, pos: Pos2) -> Option<Handle> {
+        let rect = self.span_box()?;
+        Handle::ALL
+            .into_iter()
+            .map(|handle| (handle, handle.pos(rect).distance(pos)))
+            .filter(|(_, away)| *away <= HANDLE_GRAB)
+            .min_by(|(_, a), (_, b)| a.total_cmp(b))
+            .map(|(handle, _)| handle)
     }
 
     /// How far a point is from the envelope's line, if it is near it.
@@ -526,9 +560,224 @@ pub(crate) fn mark_controls(
     }
 }
 
+/// One of the eight handles on a hovered time selection's box (the
+/// automation editing spec, R14).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Handle {
+    Top,
+    Bottom,
+    Left,
+    Right,
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
+}
+
+impl Handle {
+    const ALL: [Self; 8] = [
+        Self::Top,
+        Self::Bottom,
+        Self::Left,
+        Self::Right,
+        Self::TopLeft,
+        Self::TopRight,
+        Self::BottomLeft,
+        Self::BottomRight,
+    ];
+
+    /// Where the handle sits on `rect`.
+    fn pos(self, rect: Rect) -> Pos2 {
+        let c = rect.center();
+        match self {
+            Self::Top => pos2(c.x, rect.top()),
+            Self::Bottom => pos2(c.x, rect.bottom()),
+            Self::Left => pos2(rect.left(), c.y),
+            Self::Right => pos2(rect.right(), c.y),
+            Self::TopLeft => rect.left_top(),
+            Self::TopRight => rect.right_top(),
+            Self::BottomLeft => rect.left_bottom(),
+            Self::BottomRight => rect.right_bottom(),
+        }
+    }
+
+    /// The pointer that shows what dragging the handle does.
+    fn cursor(self) -> egui::CursorIcon {
+        match self {
+            Self::Top | Self::Bottom => egui::CursorIcon::ResizeVertical,
+            Self::Left | Self::Right => egui::CursorIcon::ResizeHorizontal,
+            Self::TopLeft | Self::BottomRight => egui::CursorIcon::ResizeNwSe,
+            Self::TopRight | Self::BottomLeft => egui::CursorIcon::ResizeNeSw,
+        }
+    }
+}
+
+/// The box round a time selection while a handle drags it: the span, and
+/// where the bottom and top edges run at its start and end, as shares of
+/// the parameter's travel.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct BoxShape {
+    start: Ticks,
+    end: Ticks,
+    bottom: (f64, f64),
+    top: (f64, f64),
+}
+
+impl BoxShape {
+    /// The box's four corners on screen: top left, top right, bottom right,
+    /// bottom left.
+    fn corners(self, rect: Rect, horizontal: Horizontal) -> [Pos2; 4] {
+        let x = |at: Ticks| rect.left() + horizontal.x(at) as f32;
+        let y = |share: f64| rect.bottom() - share as f32 * rect.height();
+        [
+            pos2(x(self.start), y(self.top.0)),
+            pos2(x(self.end), y(self.top.1)),
+            pos2(x(self.end), y(self.bottom.1)),
+            pos2(x(self.start), y(self.bottom.0)),
+        ]
+    }
+}
+
+/// The box a handle's drag makes of the one that began it, for the pointer
+/// at `pointer` (the automation editing spec, R15 to R17): Shift makes a
+/// vertical drag finer, Option (Alt on Windows) moves the opposite handle
+/// the opposite way, and Cmd (Alt on Windows) does the opposite of the
+/// grid's setting.
+#[expect(clippy::too_many_arguments, reason = "the drag's inputs")]
+fn drag_box(
+    handle: Handle,
+    from: (Ticks, Ticks),
+    rect: Rect,
+    view: &ArrangementView,
+    doc: &Document,
+    horizontal: Horizontal,
+    pointer: Pos2,
+    modifiers: Modifiers,
+) -> BoxShape {
+    let (start, end) = from;
+    let mut shape = BoxShape {
+        start,
+        end,
+        bottom: (0.0, 0.0),
+        top: (1.0, 1.0),
+    };
+    // How far up the travel the pointer is, finer with Shift, from where
+    // the handle began. The drag may leave the lane: values past the travel
+    // are clipped (R15).
+    let height = |began: f64| {
+        let t = (f64::from(rect.bottom() - pointer.y) / f64::from(rect.height())).clamp(-1.0, 2.0);
+        if modifiers.shift {
+            began + (t - began) * FINE_VALUE
+        } else {
+            t
+        }
+    };
+    let mirror = modifiers.alt;
+    let invert = if cfg!(target_os = "macos") {
+        modifiers.mac_cmd
+    } else {
+        modifiers.alt
+    };
+    let at = view.snap_drag(
+        doc,
+        horizontal.at(f64::from(pointer.x - rect.left())),
+        invert,
+    );
+    match handle {
+        Handle::Top => {
+            let top = height(1.0);
+            if mirror {
+                let d = (top - 1.0).max(-0.5);
+                shape.bottom = (-d, -d);
+                shape.top = (1.0 + d, 1.0 + d);
+            } else {
+                shape.top = (top.max(0.0), top.max(0.0));
+            }
+        }
+        Handle::Bottom => {
+            let bottom = height(0.0);
+            if mirror {
+                let d = bottom.min(0.5);
+                shape.bottom = (d, d);
+                shape.top = (1.0 - d, 1.0 - d);
+            } else {
+                shape.bottom = (bottom.min(1.0), bottom.min(1.0));
+            }
+        }
+        Handle::Left => {
+            shape.start = at.clamp(Ticks::ZERO, end - Ticks(1));
+            if mirror {
+                shape.end = (end - (shape.start - start)).max(shape.start + Ticks(1));
+            }
+        }
+        Handle::Right => {
+            shape.end = at.max(start + Ticks(1));
+            if mirror {
+                shape.start = (start - (shape.end - end)).clamp(Ticks::ZERO, shape.end - Ticks(1));
+            }
+        }
+        Handle::TopLeft | Handle::TopRight => {
+            let moved = height(1.0);
+            let d = if mirror {
+                (moved - 1.0).clamp(-1.0, 1.0)
+            } else {
+                0.0
+            };
+            let (left, right) = if handle == Handle::TopLeft {
+                (moved.max(0.0), if mirror { 1.0 - d } else { 1.0 })
+            } else {
+                (if mirror { 1.0 - d } else { 1.0 }, moved.max(0.0))
+            };
+            shape.top = (left, right);
+        }
+        Handle::BottomLeft | Handle::BottomRight => {
+            let moved = height(0.0);
+            let d = if mirror { moved.clamp(-1.0, 1.0) } else { 0.0 };
+            let (left, right) = if handle == Handle::BottomLeft {
+                (moved.min(1.0), if mirror { -d } else { 0.0 })
+            } else {
+                (if mirror { -d } else { 0.0 }, moved.min(1.0))
+            };
+            shape.bottom = (left, right);
+        }
+    }
+    shape
+}
+
+/// The command that makes the box a handle's drag drew.
+fn box_command(handle: Handle, shape: BoxShape, carry: bool) -> (&'static str, Value) {
+    match handle {
+        Handle::Top | Handle::Bottom => (
+            "automation.stretch_values",
+            json!({ "bottom": shape.bottom.0, "top": shape.top.0 }),
+        ),
+        Handle::Left | Handle::Right => (
+            "automation.stretch_time",
+            json!({ "to_start": shape.start, "to_end": shape.end, "carry": carry }),
+        ),
+        Handle::TopLeft | Handle::TopRight => (
+            "automation.skew",
+            json!({ "edge": "top", "at_start": shape.top.0, "at_end": shape.top.1 }),
+        ),
+        Handle::BottomLeft | Handle::BottomRight => (
+            "automation.skew",
+            json!({ "edge": "bottom", "at_start": shape.bottom.0, "at_end": shape.bottom.1 }),
+        ),
+    }
+}
+
 /// A drag on an automation lane.
 #[derive(Clone, Debug, PartialEq)]
 enum LaneDrag {
+    /// Dragging a handle of the time selection's box, to stretch the
+    /// automation in value or in time, or to skew it (R14 to R17).
+    Handle {
+        handle: Handle,
+        /// The span the box began with.
+        span: (Ticks, Ticks),
+        rect: Rect,
+        horizontal: Horizontal,
+    },
     /// Dragging breakpoints to another position and value: the ones that
     /// are selected move together.
     Breakpoint {
@@ -572,6 +821,20 @@ impl AutomationGestures {
     /// it curves the segment. Returns whether it took the press; anywhere
     /// else the lanes' other gestures apply.
     pub fn begin(&mut self, lane: &Lane<'_>, press: Pos2, modifiers: Modifiers) -> bool {
+        // Spec: automation-editing R14. A press on a handle of the time
+        // selection's box takes it, unless a breakpoint is there too.
+        if let (Some(handle), Some(span)) = (lane.handle_at(press), lane.span)
+            && !matches!(lane.hit(press), LaneHit::Breakpoint(_))
+        {
+            self.lane = Some(lane.track);
+            self.drag = Some(LaneDrag::Handle {
+                handle,
+                span,
+                rect: lane.rect,
+                horizontal: lane.horizontal,
+            });
+            return true;
+        }
         match lane.hit(press) {
             LaneHit::Breakpoint(at) => {
                 let grabbed = at;
@@ -687,6 +950,24 @@ impl AutomationGestures {
     ) -> Option<(&'static str, Value)> {
         let track = self.lane?;
         match self.drag.as_ref()? {
+            LaneDrag::Handle {
+                handle,
+                span,
+                rect,
+                horizontal,
+            } => {
+                let shape = drag_box(
+                    *handle,
+                    *span,
+                    *rect,
+                    view,
+                    doc,
+                    *horizontal,
+                    pointer,
+                    modifiers,
+                );
+                Some(box_command(*handle, shape, modifiers.shift))
+            }
             LaneDrag::Breakpoint {
                 target,
                 at,
@@ -763,6 +1044,41 @@ impl AutomationGestures {
                 ))
             }
         }
+    }
+
+    /// The outline of the box a handle's drag has made of the time
+    /// selection in `track`'s lane for the pointer at `pointer`, if one is
+    /// being dragged (R14).
+    pub fn outline(
+        &self,
+        track: TrackId,
+        view: &ArrangementView,
+        doc: &Document,
+        pointer: Pos2,
+        modifiers: Modifiers,
+    ) -> Option<[Pos2; 4]> {
+        let LaneDrag::Handle {
+            handle,
+            span,
+            rect,
+            horizontal,
+        } = self.drag.as_ref()?
+        else {
+            return None;
+        };
+        (self.lane == Some(track)).then(|| {
+            drag_box(
+                *handle,
+                *span,
+                *rect,
+                view,
+                doc,
+                *horizontal,
+                pointer,
+                modifiers,
+            )
+            .corners(*rect, *horizontal)
+        })
     }
 
     /// The drag went on to `pointer`.
@@ -992,6 +1308,46 @@ pub(super) fn paint_envelope(
                 theme.colors.text.0
             }),
         );
+    }
+}
+
+/// Paints the handles of the time selection's box in a lane while the
+/// pointer is over it or a handle is being dragged, and the outline of the
+/// box a drag has made (the automation editing spec, R14).
+pub(super) fn paint_handles(
+    painter: &Painter,
+    ui: &Ui,
+    lane: &Lane<'_>,
+    theme: &Theme,
+    outline: Option<[Pos2; 4]>,
+) {
+    let Some(rect) = lane.span_box() else {
+        return;
+    };
+    let hover = ui.input(|i| i.pointer.hover_pos());
+    if outline.is_none() && !hover.is_some_and(|pos| rect.expand(HANDLE_GRAB).contains(pos)) {
+        return;
+    }
+    if let Some(corners) = outline {
+        let mut line = corners.to_vec();
+        line.push(corners[0]);
+        painter.add(egui::Shape::line(
+            line,
+            Stroke::new(1.0, theme.colors.time_selection.0),
+        ));
+    }
+    for handle in Handle::ALL {
+        let at = handle.pos(rect);
+        painter.rect(
+            Rect::from_center_size(at, vec2(HANDLE_SIZE, HANDLE_SIZE)),
+            0.0,
+            theme.colors.time_selection.0,
+            Stroke::new(1.0, theme.colors.text.0),
+            egui::StrokeKind::Inside,
+        );
+        if hover.is_some_and(|pos| pos.distance(at) <= HANDLE_GRAB) {
+            ui.ctx().set_cursor_icon(handle.cursor());
+        }
     }
 }
 

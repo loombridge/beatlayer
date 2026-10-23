@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-784 commands in 46 areas.
+789 commands in 46 areas.
 
 ## Permission classes
 
@@ -121,6 +121,7 @@ Each command has:
 | [`automation.delete_breakpoint`](#automationdelete_breakpoint) | Delete Automation Breakpoint | `edit` |  |  |
 | [`automation.delete_range`](#automationdelete_range) | Delete Automation Range | `destructive` |  |  |
 | [`automation.duplicate`](#automationduplicate) | Duplicate Automation | `edit` |  |  |
+| [`automation.insert_shape`](#automationinsert_shape) | Insert Shape | `edit` |  |  |
 | [`automation.move_breakpoint`](#automationmove_breakpoint) | Move Automation Breakpoint | `edit` |  |  |
 | [`automation.move_breakpoints`](#automationmove_breakpoints) | Move Automation Breakpoints | `edit` |  |  |
 | [`automation.paste`](#automationpaste) | Paste Automation | `edit` |  |  |
@@ -131,6 +132,10 @@ Each command has:
 | [`automation.set_breakpoint`](#automationset_breakpoint) | Set Automation Breakpoint | `edit` |  |  |
 | [`automation.set_curve`](#automationset_curve) | Curve Automation Segment | `edit` |  |  |
 | [`automation.set_envelope`](#automationset_envelope) | Set Automation Envelope | `edit` |  |  |
+| [`automation.simplify`](#automationsimplify) | Simplify Envelope | `edit` |  |  |
+| [`automation.skew`](#automationskew) | Skew Automation | `edit` |  |  |
+| [`automation.stretch_time`](#automationstretch_time) | Stretch Automation in Time | `edit` |  |  |
+| [`automation.stretch_values`](#automationstretch_values) | Stretch Automation Values | `edit` |  |  |
 | [`browser.add_folder`](#browseradd_folder) | Add Folder to Browser... | `external` |  |  |
 | [`browser.add_label`](#browseradd_label) | Add Label | `edit` |  |  |
 | [`browser.add_tag`](#browseradd_tag) | Add Browser Tag | `edit` |  |  |
@@ -2483,6 +2488,25 @@ Arguments:
 
 Result: [`AutomationResult`](#automationresult).
 
+#### `automation.insert_shape`
+
+**Insert Shape**. Permission: `edit`. Contexts: `arrangement`, `envelope`.
+
+Writes a ready-made shape into the envelopes of the lanes the time selection covers, over the span, replacing each envelope there: `sine`, `triangle`, `sawtooth`, `inverse_sawtooth` or `square` run one cycle between the bottom and top of the parameter's range, and `rise`, `fall`, `rise_to`, `fall_to` and `adsr` join the envelope's value before or after the span. With no time selection, the span is one grid step from the insert marker. The breakpoints follow the shape within 1% of the parameter's travel, and the envelope outside the span stays as it was. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `shape` | [`Shape`](#shape) | yes | The shape to write. |
+| `end` | [`Position`](#position) or null | no | Where the span ends, after `start`. Left out, the time selection's end, or one grid step after the insert marker. |
+| `lanes` | array or null | no | The lanes to write it in: each a track and the parameter its automation lane shows. Left out, the automation lanes the time selection covers, or those the selected tracks show. |
+| `start` | [`Position`](#position) or null | no | Where the span starts. Left out, the time selection's start, or the insert marker. |
+
+Result: [`AutomationResult`](#automationresult).
+
 #### `automation.move_breakpoint`
 
 **Move Automation Breakpoint**. Permission: `edit`. Contexts: `global`.
@@ -2660,6 +2684,86 @@ Arguments:
 | `points` | array of [`Breakpoint`](#breakpoint) | yes | The envelope's breakpoints, in position order. Empty takes the parameter's automation with it. |
 
 Result: [`ChangeSet`](#changeset).
+
+#### `automation.simplify`
+
+**Simplify Envelope**. Permission: `edit`. Contexts: `arrangement`, `envelope`.
+
+Replaces the breakpoints of the lanes the time selection covers, inside the span, with as few as keep each envelope within 0.5% of the parameter's travel of what it was, using curved segments where one follows the shape. The values at the span's edges and the envelope outside the span are kept, and no breakpoint is added. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `end` | [`Position`](#position) or null | no | Where the span ends, after `start`. Left out, the time selection's end. |
+| `lanes` | array or null | no | The lanes the shape is in: each a track and the parameter its automation lane shows. Left out, the automation lanes the time selection covers. |
+| `start` | [`Position`](#position) or null | no | Where the span starts. Left out, the time selection's start. |
+
+Result: [`AutomationResult`](#automationresult).
+
+#### `automation.skew`
+
+**Skew Automation**. Permission: `edit`. Contexts: `arrangement`, `envelope`.
+
+Tilts the top or bottom edge of the box round a span's values, as dragging a corner handle of a time selection in an automation lane does: `at_start` and `at_end` are where the `edge` runs at the span's start and end, as shares of the parameter's travel, and each breakpoint in the span moves to the same position between the bottom and top edges at its own time. The top edge can't pass the bottom. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `edge` | [`SkewEdge`](#skewedge) | yes | The edge to tilt. |
+| `at_start` | number | yes | Where the edge goes at the span's start, as a share of the parameter's travel. |
+| `at_end` | number | yes | Where it goes at the span's end. |
+| `end` | [`Position`](#position) or null | no | Where the span ends. Left out, the time selection's end. |
+| `lanes` | array or null | no | The lanes, as for `automation.copy`. |
+| `start` | [`Position`](#position) or null | no | Where the span starts. Left out, the time selection's start. |
+
+Result: [`AutomationResult`](#automationresult).
+
+#### `automation.stretch_time`
+
+**Stretch Automation in Time**. Permission: `edit`. Contexts: `arrangement`, `envelope`.
+
+Stretches the breakpoints in the span into a new span, as dragging the left or right handle of a time selection in an automation lane does: each moves to the same place in the new span, and the time selection follows. A breakpoint outside the span that a moving end passes over is removed; with `carry`, the breakpoints beyond that end move with it instead. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `carry` | boolean | no | Move the breakpoints beyond a moving end with it, instead of removing the ones it passes over. |
+| `end` | [`Position`](#position) or null | no | Where the span ends now. Left out, the time selection's end. |
+| `lanes` | array or null | no | The lanes, as for `automation.copy`. |
+| `start` | [`Position`](#position) or null | no | Where the span starts now. Left out, the time selection's start. |
+| `to_end` | [`Position`](#position) or null | no | Where the span ends afterwards. Left out, where it ends now. |
+| `to_start` | [`Position`](#position) or null | no | Where the span starts afterwards. Left out, where it starts now. |
+
+Result: [`AutomationResult`](#automationresult).
+
+#### `automation.stretch_values`
+
+**Stretch Automation Values**. Permission: `edit`. Contexts: `arrangement`, `envelope`.
+
+Stretches the values of the breakpoints in the span between a new bottom and top edge, as dragging the top or bottom handle of a time selection in an automation lane does: each moves to the same position between the new edges as it had between the old, which are the whole travel, and a value past the parameter's range is clipped to it. `bottom` and `top` are shares of the travel, and the bottom can't pass the top. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `bottom` | number | no | Where the box's bottom edge goes, as a share of the parameter's travel: 0 is the bottom of the control, which is where it starts. It can't pass `top`. |
+| `end` | [`Position`](#position) or null | no | Where the span ends. Left out, the time selection's end. |
+| `lanes` | array or null | no | The lanes, as for `automation.copy`. |
+| `start` | [`Position`](#position) or null | no | Where the span starts. Left out, the time selection's start. |
+| `top` | number | no | Where the box's top edge goes: 1 is the top of the control, which is where it starts. Past 1 or below 0, values are clipped to the travel. |
+
+Result: [`AutomationResult`](#automationresult).
 
 ### Area `browser`
 
@@ -14688,6 +14792,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`automation.delete_breakpoint`](#automationdelete_breakpoint) | the query tool's `track` | `automation` |
 | [`automation.delete_range`](#automationdelete_range) | the query tool's `track` | `automation` |
 | [`automation.duplicate`](#automationduplicate) | the query tool's `track` | `automation` |
+| [`automation.insert_shape`](#automationinsert_shape) | the query tool's `track` | `automation` |
 | [`automation.move_breakpoint`](#automationmove_breakpoint) | the query tool's `track` | `automation` |
 | [`automation.move_breakpoints`](#automationmove_breakpoints) | the query tool's `track` | `automation` |
 | [`automation.paste`](#automationpaste) | the query tool's `track` | `automation` |
@@ -14696,6 +14801,10 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`automation.set_breakpoint`](#automationset_breakpoint) | the query tool's `track` | `automation` |
 | [`automation.set_curve`](#automationset_curve) | the query tool's `track` | `automation` |
 | [`automation.set_envelope`](#automationset_envelope) | the query tool's `track` | `automation` |
+| [`automation.simplify`](#automationsimplify) | the query tool's `track` | `automation` |
+| [`automation.skew`](#automationskew) | the query tool's `track` | `automation` |
+| [`automation.stretch_time`](#automationstretch_time) | the query tool's `track` | `automation` |
+| [`automation.stretch_values`](#automationstretch_values) | the query tool's `track` | `automation` |
 | [`browser.add_to_arrangement`](#browseradd_to_arrangement) | the query tool's `track` | `clips` |
 | [`browser.load_selected`](#browserload_selected) | the query tool's `track` | `clips` |
 | [`chain.add`](#chainadd) | the query tool's `device` | `chains` |
@@ -38628,6 +38737,85 @@ A region the import left out.
 
 </details>
 
+### `Shape`
+
+An automation shape: the waveforms `sine`, `triangle`, `sawtooth`, `inverse_sawtooth` and `square`, which run one cycle across the span between the bottom and top of the parameter's range; the ramps `rise` (from the value at the span's start to the top), `fall` (to the bottom), `rise_to` (from the bottom to the value at the span's end) and `fall_to` (from the top); and `adsr`.
+
+One of:
+
+- `"sine"`: One sine cycle, from the middle, rising first.
+- `"triangle"`: Bottom to top at the span's middle and back.
+- `"sawtooth"`: Bottom rising to top.
+- `"inverse_sawtooth"`: Top falling to bottom.
+- `"square"`: Top for the first half, bottom for the second.
+- `"rise"`: The value at the span's start, rising to the top.
+- `"fall"`: The value at the span's start, falling to the bottom.
+- `"rise_to"`: The bottom, rising to the value at the span's end.
+- `"fall_to"`: The top, falling to the value at the span's end.
+- `"adsr"`: Attack, decay, sustain and release.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "An automation shape: the waveforms `sine`, `triangle`, `sawtooth`, `inverse_sawtooth` and `square`, which run one cycle across the span between the bottom and top of the parameter's range; the ramps `rise` (from the value at the span's start to the top), `fall` (to the bottom), `rise_to` (from the bottom to the value at the span's end) and `fall_to` (from the top); and `adsr`.",
+  "oneOf": [
+    {
+      "const": "sine",
+      "description": "One sine cycle, from the middle, rising first.",
+      "type": "string"
+    },
+    {
+      "const": "triangle",
+      "description": "Bottom to top at the span's middle and back.",
+      "type": "string"
+    },
+    {
+      "const": "sawtooth",
+      "description": "Bottom rising to top.",
+      "type": "string"
+    },
+    {
+      "const": "inverse_sawtooth",
+      "description": "Top falling to bottom.",
+      "type": "string"
+    },
+    {
+      "const": "square",
+      "description": "Top for the first half, bottom for the second.",
+      "type": "string"
+    },
+    {
+      "const": "rise",
+      "description": "The value at the span's start, rising to the top.",
+      "type": "string"
+    },
+    {
+      "const": "fall",
+      "description": "The value at the span's start, falling to the bottom.",
+      "type": "string"
+    },
+    {
+      "const": "rise_to",
+      "description": "The bottom, rising to the value at the span's end.",
+      "type": "string"
+    },
+    {
+      "const": "fall_to",
+      "description": "The top, falling to the value at the span's end.",
+      "type": "string"
+    },
+    {
+      "const": "adsr",
+      "description": "Attack, decay, sustain and release.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `ShapePoint`
 
 One breakpoint of a Shaper's shape (R23): a place in the cycle, the output there, and the bend of the segment starting at it.
@@ -38896,6 +39084,37 @@ A device's sidechain section, as its left strip and the section show it (WP-2.19
     "listen"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `SkewEdge`
+
+Which edge of the box `automation.skew` tilts.
+
+One of:
+
+- `"top"`: The top edge, which starts at 1.
+- `"bottom"`: The bottom edge, which starts at 0.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Which edge of the box `automation.skew` tilts.",
+  "oneOf": [
+    {
+      "const": "top",
+      "description": "The top edge, which starts at 1.",
+      "type": "string"
+    },
+    {
+      "const": "bottom",
+      "description": "The bottom edge, which starts at 0.",
+      "type": "string"
+    }
+  ]
 }
 ```
 

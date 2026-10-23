@@ -126,7 +126,7 @@ Menu-bar order on macOS: Live (application menu), File, Edit, Create, Playback, 
 | M-EDIT-038h | Sixteenth-Note and Triplets Quantization | | | | |
 | M-EDIT-038i | Thirty-Second Note Quantization | | | | |
 | | — | | | | |
-| M-EDIT-039 | Simplify Envelope | | | disabled | |
+| M-EDIT-039 | Simplify Envelope | | | disabled | Enabled with a time selection in an automation lane ([automation editing](../specs/automation-editing.md) R18) |
 | | — | | | | |
 | M-EDIT-040 | Emoji & Symbols | ^⌘Space | S-MENU-006 | | Added by macOS to every Edit menu |
 

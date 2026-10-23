@@ -5,8 +5,7 @@
 //! The last writes a real sparse file over 4 GB on macOS and Linux, where a
 //! file with a hole takes no space.
 
-mod common;
-
+use crate::common;
 use std::io::{self, Read, Seek, SeekFrom};
 
 use bl_media::{Codec, Container, Decoder};

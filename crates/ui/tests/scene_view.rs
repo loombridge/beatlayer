@@ -8,8 +8,7 @@
 //!
 //! Spec: session-view R21, R23.
 
-mod common;
-
+use crate::common;
 use bl_core::time::{Bpm, TimeSignature};
 use bl_model::SceneId;
 use bl_shell::mixer_view_commands as view;

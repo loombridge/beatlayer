@@ -14,8 +14,7 @@
 //! the crate stops a save after each of its steps in turn, including halfway
 //! through each write; this test kills real processes.
 
-mod common;
-
+use crate::common;
 use std::ffi::OsString;
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
@@ -93,7 +92,8 @@ fn killed_saves_leave_a_readable_set() {
         let before = leftovers(dir.path());
         let mut child = Command::new(std::env::current_exe().unwrap())
             .args([
-                "child_saves_until_killed",
+                // The test's name in the crate's one test binary.
+                "interrupted_save::child_saves_until_killed",
                 "--exact",
                 "--nocapture",
                 "--test-threads=1",

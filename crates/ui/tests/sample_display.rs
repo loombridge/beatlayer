@@ -4,8 +4,7 @@
 //! changes nothing; Esc; the context menu's edits; and a sample dropped on
 //! the multisampler's Sample tab.
 
-mod common;
-
+use crate::common;
 use bl_devices::sampler::{self, LENGTH, LOOP, MODE, SLICE_BY, SLICE_REGIONS};
 use bl_model::{DeviceId, LayerId};
 use common::{Harness, Node, Window};

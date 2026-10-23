@@ -1,4 +1,5 @@
 [package]
+autotests = false
 name = "bl-analysis"
 description = "Transient, tempo, key, and loudness analysis, and on-device ML features."
 version.workspace = true
@@ -26,6 +27,10 @@ ort = { version = "=2.0.0-rc.14", default-features = false, features = ["std", "
 [features]
 # Stem separation through ONNX Runtime.
 stems = ["dep:ort"]
+
+[[test]]
+name = "analysis_tests"
+path = "tests/main.rs"
 
 [lints]
 workspace = true

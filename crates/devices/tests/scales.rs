@@ -5,10 +5,7 @@
 //! Arrangement clip, at every block size. Every block is a real-time section
 //! under the allocation trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_devices::arpeggiator::{ARPEGGIATOR, DISTANCE, STEPS};
 use bl_devices::dice::{CHANCE, CHOICES, DICE, INTERVAL, SIGN};
 use bl_devices::lift::{LIFT, PITCH};

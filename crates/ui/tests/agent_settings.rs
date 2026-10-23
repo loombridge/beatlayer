@@ -6,8 +6,7 @@
 //! command. The address and the tokens can be selected and copied, each
 //! with a Copy button beside it.
 
-mod common;
-
+use crate::common;
 use std::time::Instant;
 
 use bl_shell::agent::AgentServerStatus;
@@ -367,7 +366,7 @@ fn each_copy_button_puts_its_value_on_the_clipboard_and_the_values_are_selectabl
 /// The UI's CPU time per frame for this view, against a scene like
 /// ADR-001's benchmark: 200 tracks and 5,000 clips in the open set, the
 /// agent server on, and 20 allowed agents. Run it in release:
-/// `cargo test --release -p bl-ui --test agent_settings -- --ignored --nocapture`.
+/// `cargo test --release -p bl-ui --test ui_tests -- agent_settings:: --ignored --nocapture`.
 #[test]
 #[ignore = "a measurement, run on demand in release"]
 fn frame_time_of_the_agents_page() {

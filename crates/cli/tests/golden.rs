@@ -5,8 +5,6 @@
 //!
 //! Remake references with `cargo xtask golden --update`, never from here.
 
-bl_rt::install_trap!();
-
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};

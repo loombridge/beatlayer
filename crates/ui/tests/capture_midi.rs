@@ -3,8 +3,7 @@
 //!
 //! The behaviour is in the capture MIDI spec.
 
-mod common;
-
+use crate::common;
 use bl_ui::layout::Element;
 use bl_ui::main_window;
 use common::Harness;

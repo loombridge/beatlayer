@@ -3,10 +3,7 @@
 //! passes through, and Learn's helpers name the dial a controller goes to.
 //! Every block is a real-time section under the allocation trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_devices::midi_cc::{
     CC_CONTROL, CUSTOM_A, MOD_WHEEL, PITCH_BEND, PRESSURE, SEND, cc_control_type, cc_type_for,
     dial_cc, dial_value, next_unassigned,

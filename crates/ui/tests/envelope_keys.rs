@@ -6,8 +6,7 @@
 //! each edit one undo step, and what a screen reader is told. Spec:
 //! automation-editing R20 to R29; clip-envelopes R14.
 
-mod common;
-
+use crate::common;
 use bl_core::time::Ticks;
 use bl_model::{AutomationTarget, Breakpoint, ClipId, Document, MixerParam, TrackId};
 use bl_shell::Area;

@@ -2,8 +2,7 @@
 //! keeps a stale or damaged file from being shown (the warping spec, R20
 //! and R21).
 
-mod common;
-
+use crate::common;
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;

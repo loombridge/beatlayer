@@ -2968,6 +2968,15 @@ fn paths() -> BTreeMap<&'static str, Path> {
         // (S-EDIT-005) and Cmd-A (S-NOTE-001).
         ("note.set_value", Exception(note_editor)),
         ("note.ramp_value", Exception(note_editor)),
+        // The stretch markers are dragged (I-DRAG-040); Live has no key
+        // for stretching notes, so a keyboard path needs the maintainer's
+        // choice of keys.
+        (
+            "note.stretch",
+            Exception(LaterView(
+                "keys for the note stretch markers (Live has none; the choice is the maintainer's)",
+            )),
+        ),
         ("view.lane", Exception(note_editor)),
         // The list of the set's plug-ins (IMP-29, WP-6.41): Enter on its
         // Show Only Missing switch.

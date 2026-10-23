@@ -19,8 +19,9 @@
 //! check them and list them in the command reference; `bl-shell` runs them
 //! by ID. The behaviour they follow is in the piano roll spec.
 
+use crate::editing::EditResult;
 use bl_commands::Context::{NoteEditor, NoteSelection as NoteSelectionContext, SampleEditor};
-use bl_commands::{Binding, CommandSpec, Permission, RegisterError, Registry};
+use bl_commands::{Binding, CommandSpec, NoArgs, Permission, RegisterError, Registry};
 use bl_core::time::Ticks;
 use bl_model::{AutomationTarget, ClipId};
 use schemars::JsonSchema;
@@ -54,6 +55,20 @@ pub const PASTE: &str = "note.paste";
 /// `note.duplicate`: put a copy of the notes straight after them.
 pub const DUPLICATE: &str = "note.duplicate";
 
+/// `note.split`: split notes at ticks.
+pub const SPLIT: &str = "note.split";
+/// `note.chop`: chop notes on the grid or into equal parts.
+pub const CHOP: &str = "note.chop";
+/// `note.join`: join the notes of each pitch into one.
+pub const JOIN: &str = "note.join";
+/// `note.fit_to_time`: give notes a time range's start and end.
+pub const FIT_TO_TIME: &str = "note.fit_to_time";
+/// `note.stretch`: scale notes from one range of time to another.
+pub const STRETCH: &str = "note.stretch";
+/// `note.split_clip`: split the Arrangement clip the editor shows at the
+/// time selection.
+pub const SPLIT_CLIP: &str = "note.split_clip";
+
 /// Every command [`register`] adds, so a host knows which IDs to send to
 /// `bl-shell`'s `Shell::run`.
 pub const IDS: &[&str] = &[
@@ -70,6 +85,12 @@ pub const IDS: &[&str] = &[
     CUT,
     PASTE,
     DUPLICATE,
+    SPLIT,
+    CHOP,
+    JOIN,
+    FIT_TO_TIME,
+    STRETCH,
+    SPLIT_CLIP,
 ];
 
 /// Whether `id` is one of the Clip View's note-editing commands.
@@ -317,6 +338,162 @@ pub struct DuplicateNotesArgs {
     /// notes that start inside the time selection.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<Vec<u32>>,
+}
+
+/// One cut of `note.split`: a note and the tick it is split at.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct NoteCut {
+    /// The note, by its place in the clip's notes in order.
+    pub note: u32,
+    /// The tick to split it at, from the beginning of the clip's contents.
+    pub at: Ticks,
+}
+
+/// Arguments of `note.split`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SplitNotesArgs {
+    /// The MIDI clip. Left out, the one the Clip View shows (the
+    /// Arrangement's selected clip).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<ClipId>,
+    /// The notes to split, by their place in the clip's notes in order.
+    /// Left out, the selected notes, or with none selected every note.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<Vec<u32>>,
+    /// The ticks to split them at, from the beginning of the clip's
+    /// contents. Left out, the time selection's start and end, or the
+    /// insert marker.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<Vec<Ticks>>,
+    /// Instead of `notes` and `at`: each note with its own tick, as
+    /// dragging E across several notes splits each where the drag crosses
+    /// it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cuts: Option<Vec<NoteCut>>,
+}
+
+/// How `note.chop` changes the number of parts it has made, one press of
+/// Up or Down with Cmd held.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[schemars(
+    description = "One change of a chop's parts, counted from each note's own parts: `more`                    and `fewer` add or take away one, `next_power` and `previous_power` go to                    the next or previous power of two (1, 2, 4 and up to 64)."
+)]
+pub enum ChopStep {
+    /// One part more.
+    More,
+    /// One part fewer.
+    Fewer,
+    /// The next power of two.
+    NextPower,
+    /// The previous power of two.
+    PreviousPower,
+}
+
+/// Arguments of `note.chop`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ChopNotesArgs {
+    /// The MIDI clip. Left out, the one the Clip View shows (the
+    /// Arrangement's selected clip).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<ClipId>,
+    /// The notes, by their place in the clip's notes in order. Left out,
+    /// the selected notes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<Vec<u32>>,
+    /// Cut at every line of a grid this many ticks apart. Left out (and
+    /// without `parts`), the editing grid.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grid: Option<Ticks>,
+    /// Instead of the grid: cut every note into this many equal parts,
+    /// from 1 to 64.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parts: Option<u32>,
+    /// Changes to make to each note's parts after the first cut, in order,
+    /// as Cmd with Up and Down does.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub steps: Vec<ChopStep>,
+}
+
+/// Arguments of `note.join`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct JoinNotesArgs {
+    /// The MIDI clip. Left out, the one the Clip View shows (the
+    /// Arrangement's selected clip).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<ClipId>,
+    /// The notes, by their place in the clip's notes in order. Left out,
+    /// the selected notes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<Vec<u32>>,
+}
+
+/// A range of time in a MIDI clip's contents, in ticks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TickRange {
+    /// Where it starts.
+    pub start: Ticks,
+    /// Where it ends. In a range a stretch ends at, this may be before
+    /// `start`, which mirrors the notes' order in time.
+    pub end: Ticks,
+}
+
+/// Arguments of `note.fit_to_time`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FitToTimeArgs {
+    /// The MIDI clip. Left out, the one the Clip View shows (the
+    /// Arrangement's selected clip).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<ClipId>,
+    /// The notes, by their place in the clip's notes in order. Left out,
+    /// the selected notes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<Vec<u32>>,
+    /// The range every note takes. Left out, the time selection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub range: Option<TickRange>,
+}
+
+/// A point inside a stretch's range that moves while both ends stay, as
+/// dragging the pseudo marker does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct StretchPoint {
+    /// Where the point is in the range being stretched.
+    pub from: Ticks,
+    /// Where it goes.
+    pub to: Ticks,
+}
+
+/// Arguments of `note.stretch`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct StretchNotesArgs {
+    /// The MIDI clip. Left out, the one the Clip View shows (the
+    /// Arrangement's selected clip).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<ClipId>,
+    /// The notes, by their place in the clip's notes in order. Left out,
+    /// the selected notes, or with none selected the notes that start
+    /// inside `from`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<Vec<u32>>,
+    /// The range being stretched. Left out, the time selection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<TickRange>,
+    /// The range it becomes: its start is where `from`'s start goes, and
+    /// its end where `from`'s end goes.
+    pub to: TickRange,
+    /// A point inside `from` that goes somewhere else: what lies on either
+    /// side of it is scaled to meet it there.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub point: Option<StretchPoint>,
 }
 
 /// Arguments of `note.add`.
@@ -737,6 +914,100 @@ fn specs() -> Vec<CommandSpec> {
         )
         .binding("S-EDIT-004")
         .args::<DuplicateNotesArgs>(),
+        CommandSpec::new(SPLIT, "Split Note(s)")
+            .description(
+                "Splits notes at ticks, as holding E and clicking a note, or Cmd-E (Ctrl-E) \
+                 with no notes selected, does. `notes` (or the selected notes, or with none \
+                 selected every note) are each split at every tick of `at` (or of the time \
+                 selection's start and end, or the insert marker) that falls strictly inside \
+                 them; `cuts` instead names a tick for each note. A note split becomes parts \
+                 that together cover it: the first keeps its start, the last its end, each \
+                 keeps the note's pitch, velocity, release velocity, chance, deviation and \
+                 deactivation, and its pressure points go with the part they fall in. A tick \
+                 at or outside a note's start or end splits nothing, and when no note splits \
+                 nothing changes and no undo step is recorded. The parts of the notes that \
+                 were selected stay selected. The edit is one undo step, `Split Notes`.",
+            )
+            .permission(Permission::Edit)
+            .contexts([NoteEditor])
+            .args::<SplitNotesArgs>()
+            .result::<NoteEditResult>(),
+        CommandSpec::new(CHOP, "Chop Note(s) on Grid")
+            .description(
+                "Chops notes (`notes`, or the selected notes), as Cmd-E (Ctrl-E) with notes \
+                 selected does: each is cut at every line of `grid` (ticks apart; the editing \
+                 grid if left out) that falls strictly inside it, or with `parts`, into that \
+                 many equal parts, from 1 to 64. `steps` then change each note's number of \
+                 parts, one part more or fewer or the next or previous power of two, as Cmd \
+                 with Up and Down does while Cmd is held; the number stays from 1 to 64, \
+                 and a note keeps parts of at least a tick. The parts keep what Split keeps, \
+                 and stay selected. The edit is one undo step, `Chop Notes`.",
+            )
+            .permission(Permission::Edit)
+            .contexts([NoteSelectionContext])
+            .args::<ChopNotesArgs>()
+            .result::<NoteEditResult>(),
+        CommandSpec::new(JOIN, "Join Notes")
+            .description(
+                "Joins notes (`notes`, or the selected notes), as Cmd-J (Ctrl-J) does: the \
+                 notes of each pitch that has two or more become one note from the earliest \
+                 start among them to the latest end, with the values of the earliest of them. \
+                 Every joined note's pressure points stay at their places in time, and where \
+                 two overlap the later note's win. A pitch with one note is left alone, and \
+                 the command is refused when there is nothing to join. The joined notes are \
+                 selected afterwards. The edit is one undo step, `Join Notes`.",
+            )
+            .permission(Permission::Edit)
+            .contexts([NoteEditor, NoteSelectionContext])
+            .binding("S-NOTE-007")
+            .args::<JoinNotesArgs>()
+            .result::<NoteEditResult>(),
+        CommandSpec::new(FIT_TO_TIME, "Fit to Time Range")
+            .description(
+                "Gives every note (`notes`, or the selected notes) the start and end of \
+                 `range`, or of the time selection, as Cmd-Option-J (Ctrl-Alt-J) does. Each \
+                 note's pressure points scale with it. Refused with no notes or no range. \
+                 The edit is one undo step, `Fit to Time Range`.",
+            )
+            .permission(Permission::Edit)
+            .contexts([NoteEditor, NoteSelectionContext])
+            .binding("S-NOTE-008")
+            .args::<FitToTimeArgs>()
+            .result::<NoteEditResult>(),
+        CommandSpec::new(STRETCH, "Stretch Notes")
+            .description(
+                "Scales notes in time from the range `from` (or the time selection) to the \
+                 range `to`, as dragging a note stretch marker does: `from`'s start goes to \
+                 `to`'s start and its end to `to`'s end, and each note's start and end keep \
+                 their place in proportion, so starts and lengths scale together. The notes \
+                 are `notes`, or the selected notes, or with none selected those that start \
+                 inside `from`. With `point`, what lies between the start and the point is \
+                 scaled to end at the point's new place, and what lies between the point and \
+                 the end to start there, as dragging the pseudo marker does. A `to` that ends \
+                 before it starts mirrors the notes' order in time. A note's pressure points \
+                 scale with it, and the breakpoints of the clip's linked envelopes inside \
+                 `from` move by the same mapping, replacing any breakpoint they land on; \
+                 unlinked envelopes stay. Refused, changing nothing, if a note would be \
+                 shorter than a tick or start before the clip's contents. The time selection \
+                 becomes `to`. The edit is one undo step, `Stretch Notes`.",
+            )
+            .permission(Permission::Edit)
+            .contexts([NoteEditor, NoteSelectionContext])
+            .args::<StretchNotesArgs>()
+            .result::<NoteEditResult>(),
+        CommandSpec::new(SPLIT_CLIP, "Split Clip")
+            .description(
+                "Splits the Arrangement clip the Clip View shows at the start and end of the \
+                 editor's time selection, each that falls strictly inside the clip, as \
+                 `arrangement.split` does, and selects the part inside. Cmd-Shift-E \
+                 (Ctrl-Shift-E) runs it. Refused for a Session clip, or with no time \
+                 selection.",
+            )
+            .permission(Permission::Edit)
+            .contexts([NoteEditor, NoteSelectionContext])
+            .binding("S-NOTE-036")
+            .args::<NoArgs>()
+            .result::<EditResult>(),
     ]
 }
 

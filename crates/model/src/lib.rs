@@ -83,6 +83,7 @@ mod locator;
 mod metronome;
 pub mod modulation;
 pub mod modulator;
+pub mod note_ops;
 pub mod param;
 pub mod rack;
 pub mod registry;

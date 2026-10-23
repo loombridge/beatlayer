@@ -906,3 +906,531 @@ fn copying_a_note_by_dragging_leaves_the_original() {
     );
     assert_eq!(result.selected, [1], "the copy is selected");
 }
+
+fn with_pressure(note: Note, points: &[(i64, u8)]) -> Note {
+    Note {
+        pressure: points
+            .iter()
+            .map(|(at, value)| bl_model::PressurePoint {
+                at: Ticks(*at),
+                value: *value,
+            })
+            .collect(),
+        ..note
+    }
+}
+
+#[test]
+fn a_split_keeps_every_value_and_puts_pressure_in_its_part() {
+    // Spec: note-editing R33, R34, R35, R47. A split at a tick, at the
+    // insert marker and at a time selection's edges is one undo step, each
+    // part keeps the note's values, and the pressure goes with its part.
+    let held = Note {
+        velocity: 90,
+        release_velocity: 30,
+        probability: 0.5,
+        velocity_deviation: 7,
+        mute: true,
+        ..with_pressure(song_note(60, 0, 4 * QUARTER), &[(0, 10), (QUARTER, 20)])
+    };
+    let mut song = song(vec![held.clone(), song_note(64, 0, QUARTER)]);
+    song.one_step(
+        ids::SPLIT,
+        json!({ "notes": [0], "at": [QUARTER, 2 * QUARTER] }),
+    );
+    let notes = song.notes();
+    assert_eq!(notes.len(), 4, "the C splits in three, the E stays");
+    let parts: Vec<&Note> = notes.iter().filter(|note| note.key == 60).collect();
+    let spans: Vec<(i64, i64)> = parts
+        .iter()
+        .map(|note| (note.start.get(), note.length.get()))
+        .collect();
+    assert_eq!(
+        spans,
+        [(0, QUARTER), (QUARTER, QUARTER), (2 * QUARTER, 2 * QUARTER)]
+    );
+    for part in &parts {
+        assert_eq!(
+            (
+                part.velocity,
+                part.release_velocity,
+                part.probability,
+                part.velocity_deviation,
+                part.mute
+            ),
+            (90, 30, 0.5, 7, true),
+            "each part keeps the values"
+        );
+    }
+    assert_eq!(
+        parts[0].pressure,
+        with_pressure(song_note(0, 0, 1), &[(0, 10)]).pressure
+    );
+    assert_eq!(
+        parts[1].pressure,
+        with_pressure(song_note(0, 0, 1), &[(0, 20)]).pressure,
+        "a point is counted from its part"
+    );
+    assert!(parts[2].pressure.is_empty());
+
+    // With no notes selected, the insert marker splits every note it
+    // crosses.
+    let mut song = self::song(vec![
+        song_note(60, 0, 2 * QUARTER),
+        song_note(64, QUARTER, 2 * QUARTER),
+    ]);
+    song.view(
+        "clip_view.set_insert_marker",
+        json!({ "clip": song.clip, "beat": QUARTER + QUARTER / 2 }),
+    );
+    song.one_step(ids::SPLIT, json!({}));
+    assert_eq!(
+        song.notes()
+            .iter()
+            .map(|n| (n.key, n.start.get()))
+            .collect::<Vec<_>>(),
+        [
+            (60, 0),
+            (64, QUARTER),
+            (60, QUARTER + QUARTER / 2),
+            (64, QUARTER + QUARTER / 2)
+        ]
+    );
+
+    // With a time selection, each edge splits the notes it crosses.
+    let mut song = self::song(vec![song_note(60, 0, 4 * QUARTER)]);
+    song.view(
+        "clip_view.select_time",
+        json!({ "clip": song.clip, "start": QUARTER, "end": 3 * QUARTER }),
+    );
+    song.one_step(ids::SPLIT, json!({}));
+    assert_eq!(
+        song.notes()
+            .iter()
+            .map(|n| n.start.get())
+            .collect::<Vec<_>>(),
+        [0, QUARTER, 3 * QUARTER]
+    );
+
+    // A tick at a note's start or end, or outside it, splits nothing and
+    // records nothing.
+    let mut song = self::song(vec![song_note(60, QUARTER, QUARTER)]);
+    let before = song.doc().clone();
+    let result = song.edit(
+        ids::SPLIT,
+        json!({ "notes": [0], "at": [0, QUARTER, 2 * QUARTER, 3 * QUARTER] }),
+    );
+    assert!(!result.undo_step);
+    assert_eq!(*song.doc(), before);
+
+    // Each note can be given its own tick.
+    let mut song = self::song(vec![
+        song_note(60, 0, 2 * QUARTER),
+        song_note(62, 0, 2 * QUARTER),
+    ]);
+    song.one_step(
+        ids::SPLIT,
+        json!({ "cuts": [{ "note": 0, "at": QUARTER }, { "note": 1, "at": 3 * QUARTER / 2 }] }),
+    );
+    assert_eq!(
+        song.notes()
+            .iter()
+            .map(|n| (n.key, n.start.get()))
+            .collect::<Vec<_>>(),
+        [(60, 0), (62, 0), (60, QUARTER), (62, 3 * QUARTER / 2)]
+    );
+}
+
+#[test]
+fn chopping_on_the_grid_and_the_arrows_re_chop_in_one_step() {
+    // Spec: note-editing R36, R47. A one-bar note chopped on a 1/4 grid
+    // makes four parts; Cmd with the arrows makes five, then four, and with
+    // Shift eight: the whole gesture is one undo step.
+    let mut song = song(vec![song_note(60, 0, BAR)]);
+    song.view(
+        "clip_view.select_notes",
+        json!({ "clip": song.clip, "notes": [0] }),
+    );
+    let before = song.doc().clone();
+    let steps = song.steps();
+    let count = |song: &Song| song.notes().len();
+    let gesture = |song: &mut Song, phase, args: Value| {
+        song.shell
+            .gesture(phase, Some(&bl_shell::Invocation::new(ids::CHOP, args)))
+            .unwrap();
+    };
+    use bl_shell::GesturePhase::{Commit, Update};
+    gesture(&mut song, Update, json!({ "grid": QUARTER }));
+    assert_eq!(count(&song), 4);
+    gesture(
+        &mut song,
+        Update,
+        json!({ "grid": QUARTER, "steps": ["more"] }),
+    );
+    assert_eq!(count(&song), 5);
+    gesture(
+        &mut song,
+        Update,
+        json!({ "grid": QUARTER, "steps": ["more", "fewer"] }),
+    );
+    assert_eq!(count(&song), 4);
+    gesture(
+        &mut song,
+        Update,
+        json!({ "grid": QUARTER, "steps": ["more", "fewer", "next_power"] }),
+    );
+    assert_eq!(count(&song), 8);
+    assert_eq!(
+        song.notes().iter().map(|n| n.length.get()).sum::<i64>(),
+        BAR,
+        "the parts cover the note"
+    );
+    gesture(
+        &mut song,
+        Commit,
+        json!({ "grid": QUARTER, "steps": ["more", "fewer", "next_power"] }),
+    );
+    assert_eq!(song.steps(), steps + 1, "all one undo step");
+    assert_eq!(
+        song.shell.editor().undo_history().next(),
+        Some("Chop Notes")
+    );
+    song.shell.run("edit.undo", json!({})).unwrap();
+    assert_eq!(*song.doc(), before, "one Undo puts the note back");
+}
+
+#[test]
+fn chopping_into_equal_parts_and_its_limits() {
+    // Spec: note-editing R36, R37, R47. `parts` runs from 1 to 64, and the
+    // parts cover the note.
+    let mut song = song(vec![song_note(60, 0, BAR), song_note(64, 0, BAR)]);
+    let result = song.one_step(ids::CHOP, json!({ "notes": [0], "parts": 3 }));
+    assert_eq!(result.notes.len(), 3);
+    assert_eq!(song.notes().iter().filter(|n| n.key == 60).count(), 3);
+    assert_eq!(song.notes().iter().filter(|n| n.key == 64).count(), 1);
+    for parts in [0, 65] {
+        assert!(
+            song.shell
+                .run(ids::CHOP, json!({ "notes": [0], "parts": parts }))
+                .is_err(),
+            "{parts} parts"
+        );
+    }
+    // A chop on the grid with nothing to cut changes nothing.
+    let mut still = self::song(vec![song_note(60, 0, QUARTER)]);
+    let before = still.doc().clone();
+    let result = still.edit(ids::CHOP, json!({ "notes": [0], "grid": QUARTER }));
+    assert!(!result.undo_step);
+    assert_eq!(*still.doc(), before);
+}
+
+#[test]
+fn join_fills_the_gap_with_the_first_notes_values() {
+    // Spec: note-editing R39, R47. The selected notes of a pitch become one
+    // note from the earliest start to the latest end.
+    let first = Note {
+        velocity: 90,
+        ..with_pressure(song_note(60, 0, QUARTER), &[(0, 5)])
+    };
+    let second = Note {
+        velocity: 40,
+        ..with_pressure(song_note(60, 2 * QUARTER, QUARTER), &[(0, 9)])
+    };
+    let mut song = song(vec![first, second, song_note(64, 0, QUARTER)]);
+    song.view(
+        "clip_view.select_notes",
+        json!({ "clip": song.clip, "notes": [0, 1, 2] }),
+    );
+    let result = song.one_step(ids::JOIN, json!({}));
+    let notes = song.notes();
+    assert_eq!(notes.len(), 2, "the pitch with one note is left alone");
+    let joined = notes.iter().find(|n| n.key == 60).unwrap();
+    assert_eq!((joined.start.get(), joined.length.get()), (0, 3 * QUARTER));
+    assert_eq!(joined.velocity, 90, "the first note's values");
+    assert_eq!(
+        joined.pressure,
+        with_pressure(song_note(0, 0, 1), &[(0, 5), (2 * QUARTER, 9)]).pressure,
+        "every note's pressure stays at its place in time"
+    );
+    assert_eq!(result.notes.len(), 1);
+    // Nothing to join is refused.
+    let mut single = self::song(vec![song_note(60, 0, QUARTER), song_note(62, 0, QUARTER)]);
+    single.view(
+        "clip_view.select_notes",
+        json!({ "clip": single.clip, "notes": [0, 1] }),
+    );
+    assert!(single.shell.run(ids::JOIN, json!({})).is_err());
+    assert_eq!(single.steps(), 0);
+}
+
+#[test]
+fn fit_to_time_range_gives_every_note_the_selections_start_and_end() {
+    // Spec: note-editing R40, R47.
+    let mut song = song(vec![
+        with_pressure(song_note(60, 0, QUARTER), &[(0, 10), (QUARTER / 2, 20)]),
+        song_note(64, QUARTER, QUARTER / 2),
+    ]);
+    song.view(
+        "clip_view.select_notes",
+        json!({ "clip": song.clip, "notes": [0, 1] }),
+    );
+    song.view(
+        "clip_view.select_time",
+        json!({ "clip": song.clip, "start": 2 * QUARTER, "end": 4 * QUARTER }),
+    );
+    song.one_step(ids::FIT_TO_TIME, json!({}));
+    let notes = song.notes();
+    assert!(
+        notes
+            .iter()
+            .all(|n| (n.start.get(), n.length.get()) == (2 * QUARTER, 2 * QUARTER))
+    );
+    let c = notes.iter().find(|n| n.key == 60).unwrap();
+    assert_eq!(
+        c.pressure,
+        with_pressure(song_note(0, 0, 1), &[(0, 10), (QUARTER, 20)]).pressure,
+        "pressure scales with the note"
+    );
+    // With no notes selected it is refused.
+    song.view(
+        "clip_view.select_notes",
+        json!({ "clip": song.clip, "notes": [] }),
+    );
+    assert!(song.shell.run(ids::FIT_TO_TIME, json!({})).is_err());
+}
+
+fn pan() -> bl_model::AutomationTarget {
+    bl_model::AutomationTarget::Mixer {
+        param: bl_model::MixerParam::Pan,
+    }
+}
+
+fn envelope_ats(song: &Song) -> Vec<i64> {
+    let clip = song.doc().clip(song.clip).unwrap();
+    clip.envelopes
+        .first()
+        .map(|e| e.envelope.points().map(|p| p.at.get()).collect())
+        .unwrap_or_default()
+}
+
+#[test]
+fn a_stretch_scales_starts_and_lengths_and_moves_linked_envelopes() {
+    // Spec: note-editing R43, R45, R46, R47.
+    let mut song = song(vec![
+        with_pressure(song_note(60, 0, QUARTER), &[(0, 10), (QUARTER / 2, 20)]),
+        song_note(64, 2 * QUARTER, QUARTER),
+    ]);
+    for at in [0, 2 * QUARTER] {
+        song.shell
+            .run(
+                "clip.set_envelope_breakpoint",
+                json!({ "clip": song.clip, "target": pan(), "at": at, "value": 0.5 }),
+            )
+            .unwrap();
+    }
+    song.view(
+        "clip_view.select_notes",
+        json!({ "clip": song.clip, "notes": [0, 1] }),
+    );
+    let range = json!({ "start": 0, "end": 3 * QUARTER });
+    // A marker dragged to twice the span doubles starts and lengths.
+    let result = song.one_step(
+        ids::STRETCH,
+        json!({ "to": { "start": 0, "end": 6 * QUARTER } }),
+    );
+    assert_eq!(result.notes.len(), 2);
+    let notes = song.notes();
+    assert_eq!(
+        (notes[0].start.get(), notes[0].length.get()),
+        (0, 2 * QUARTER)
+    );
+    assert_eq!(
+        (notes[1].start.get(), notes[1].length.get()),
+        (4 * QUARTER, 2 * QUARTER)
+    );
+    assert_eq!(
+        notes[0].pressure,
+        with_pressure(song_note(0, 0, 1), &[(0, 10), (QUARTER, 20)]).pressure,
+        "pressure scales"
+    );
+    assert_eq!(
+        envelope_ats(&song),
+        [0, 4 * QUARTER],
+        "the linked envelope moves"
+    );
+    assert_eq!(
+        song.shell
+            .clip_view()
+            .time_selection(song.doc(), song.shell.arrangement()),
+        Some((Ticks::ZERO, Ticks(6 * QUARTER))),
+        "the time selection becomes the range stretched to"
+    );
+    song.shell.run("edit.undo", json!({})).unwrap();
+
+    // An unlinked envelope stays.
+    song.shell
+        .run(
+            "clip.set_envelope_linked",
+            json!({ "clip": song.clip, "target": pan(), "linked": false }),
+        )
+        .unwrap();
+    song.view(
+        "clip_view.select_notes",
+        json!({ "clip": song.clip, "notes": [0, 1] }),
+    );
+    song.edit(
+        ids::STRETCH,
+        json!({ "from": range, "to": { "start": 0, "end": 6 * QUARTER } }),
+    );
+    assert_eq!(envelope_ats(&song), [0, 2 * QUARTER]);
+    song.shell.run("edit.undo", json!({})).unwrap();
+
+    // A pseudo marker keeps both ends and moves the point between them.
+    song.view(
+        "clip_view.select_notes",
+        json!({ "clip": song.clip, "notes": [0, 1] }),
+    );
+    song.one_step(
+        ids::STRETCH,
+        json!({
+            "from": range,
+            "to": range,
+            "point": { "from": QUARTER, "to": 2 * QUARTER },
+        }),
+    );
+    let notes = song.notes();
+    assert_eq!(
+        (notes[0].start.get(), notes[0].length.get()),
+        (0, 2 * QUARTER),
+        "what lay before the point is scaled to end at it"
+    );
+    assert_eq!(
+        notes[1].start.get(),
+        2 * QUARTER + QUARTER / 2,
+        "and what lay after starts there"
+    );
+    assert_eq!(notes[1].length.get(), QUARTER / 2);
+    song.shell.run("edit.undo", json!({})).unwrap();
+
+    // Crossing mirrors the notes' order in time.
+    song.view(
+        "clip_view.select_notes",
+        json!({ "clip": song.clip, "notes": [0, 1] }),
+    );
+    song.one_step(
+        ids::STRETCH,
+        json!({ "from": range, "to": { "start": 3 * QUARTER, "end": 0 } }),
+    );
+    let notes = song.notes();
+    assert_eq!(
+        notes
+            .iter()
+            .map(|n| (n.key, n.start.get()))
+            .collect::<Vec<_>>(),
+        [(64, 0), (60, 2 * QUARTER)],
+        "the order is mirrored"
+    );
+    song.shell.run("edit.undo", json!({})).unwrap();
+
+    // The limits: a note at least a tick long, starting inside the contents.
+    song.view(
+        "clip_view.select_notes",
+        json!({ "clip": song.clip, "notes": [0, 1] }),
+    );
+    let before = song.doc().clone();
+    for to in [
+        json!({ "start": 0, "end": 0 }),
+        json!({ "start": -QUARTER, "end": 3 * QUARTER }),
+    ] {
+        assert!(
+            song.shell
+                .run(ids::STRETCH, json!({ "from": range, "to": to }))
+                .is_err(),
+            "{to}"
+        );
+    }
+    assert_eq!(*song.doc(), before);
+}
+
+#[test]
+fn the_note_operations_are_edit_class_commands_with_readback() {
+    // Spec: note-editing R47.
+    let song = song(vec![]);
+    for id in [
+        ids::SPLIT,
+        ids::CHOP,
+        ids::JOIN,
+        ids::FIT_TO_TIME,
+        ids::STRETCH,
+        ids::SPLIT_CLIP,
+    ] {
+        assert_eq!(
+            song.shell.registry().get(id).unwrap().permission,
+            Some(Permission::Edit),
+            "{id}"
+        );
+    }
+}
+
+#[test]
+fn split_clip_splits_an_arrangement_clip_at_the_time_selection() {
+    // Spec: note-editing R41, R47. The time selection's two edges split the
+    // Arrangement clip in two places, and the part inside is selected.
+    let mut song = song(vec![song_note(60, 0, QUARTER)]);
+    song.view(
+        "clip_view.select_time",
+        json!({ "clip": song.clip, "start": BAR, "end": 2 * BAR }),
+    );
+    let steps = song.steps();
+    song.shell.run(ids::SPLIT_CLIP, json!({})).unwrap();
+    let mut spans: Vec<(i64, i64)> = song
+        .doc()
+        .track(song.track)
+        .unwrap()
+        .clips()
+        .map(|clip| (clip.start.get(), clip.end().get()))
+        .collect();
+    spans.sort_unstable();
+    assert_eq!(spans, [(0, BAR), (BAR, 2 * BAR), (2 * BAR, 4 * BAR)]);
+    assert_eq!(song.steps(), steps + 1, "one undo step");
+    let selected = song.shell.arrangement().selected_clips().to_vec();
+    assert_eq!(selected.len(), 1);
+    assert_eq!(
+        song.doc().clip(selected[0]).unwrap().start,
+        Ticks(BAR),
+        "the part inside"
+    );
+    song.shell.run("edit.undo", json!({})).unwrap();
+    assert_eq!(song.doc().track(song.track).unwrap().clips().count(), 1);
+}
+
+#[test]
+fn split_clip_refuses_a_session_clip_and_no_time_selection() {
+    // Spec: note-editing R41.
+    let mut song = song(vec![]);
+    assert!(
+        song.shell.run(ids::SPLIT_CLIP, json!({})).is_err(),
+        "no time selection"
+    );
+    let scene = song.doc().scenes().next().unwrap().id;
+    song.shell
+        .run(
+            "session.insert_empty_midi_clip",
+            json!({ "track": song.track, "scene": scene }),
+        )
+        .unwrap();
+    song.shell
+        .run(
+            "session.select",
+            json!({ "track": song.track, "scene": scene }),
+        )
+        .unwrap();
+    let session = song.doc().slot(song.track, scene).unwrap().id;
+    song.view(
+        "clip_view.select_time",
+        json!({ "clip": session, "start": 0, "end": BAR }),
+    );
+    let before = song.doc().clone();
+    assert!(song.shell.run(ids::SPLIT_CLIP, json!({})).is_err());
+    assert_eq!(*song.doc(), before);
+}

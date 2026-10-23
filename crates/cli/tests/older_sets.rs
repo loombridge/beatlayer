@@ -394,6 +394,154 @@ fn a_set_saved_before_the_lanes_loads_unchanged_and_every_note_value_round_trips
     assert_eq!(encode_json(&loaded, 1).unwrap(), saved);
 }
 
+// Spec: note-editing R30. A group is saved with its clip and loads again; a
+// set saved before groups loads with none; a group that isn't whole loads
+// its notes ungrouped.
+#[test]
+fn probability_groups_are_saved_with_the_clip_and_broken_ones_load_ungrouped() {
+    use bl_model::{GroupKind, MidiData, Note, NoteGroup};
+    let mut editor = Editor::new();
+    let track = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: track,
+            kind: TrackKind::Midi,
+            name: "Keys".to_owned(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    let mut notes: Vec<Note> = (0..3)
+        .map(|place| {
+            Note::new(
+                60 + place,
+                Ticks::QUARTER * i64::from(place),
+                Ticks::QUARTER,
+                100,
+            )
+        })
+        .collect();
+    for note in &mut notes[..2] {
+        note.probability = 0.5;
+        note.group = Some(7);
+    }
+    let mut data = MidiData::new(notes);
+    data.groups = vec![NoteGroup {
+        id: 7,
+        kind: GroupKind::PlayOne,
+    }];
+    let clip = editor.new_id();
+    editor
+        .apply(Command::CreateClip {
+            track,
+            clip: Clip::new(
+                clip,
+                Ticks::ZERO,
+                Ticks::WHOLE,
+                ClipData::Midi(data.clone()),
+            ),
+        })
+        .unwrap();
+    let lane: bl_model::TakeLaneId = editor.new_id();
+    let project = Project {
+        document: editor.document().clone(),
+        ids: editor.ids(),
+        media: Media::default(),
+        windows: bl_model::DeviceWindows::new(),
+        rack_views: bl_model::RackViewMap::new(),
+        folds: bl_model::ClipFolds::new(),
+        launch: bl_model::LaunchSettings::default(),
+        multisamplers: bl_model::MultisamplerViews::new(),
+    };
+    let saved = encode_json(&project, 1).unwrap();
+    let value: Value = serde_json::from_slice(&saved).unwrap();
+    let midi = &value["document"]["tracks"][0]["clips"][0]["data"]["midi"];
+    assert_eq!(midi["groups"], json!([{ "id": 7, "kind": "play_one" }]));
+    assert_eq!(midi["notes"][0]["group"], json!(7));
+    assert!(midi["notes"][2].get("group").is_none(), "an ungrouped note");
+    let midi_of = |value: &Value| -> MidiData {
+        let (loaded, _) =
+            decode_json(&serde_json::to_vec(value).unwrap(), &LoadOptions::default()).unwrap();
+        match &loaded.document.clip(clip).unwrap().data {
+            ClipData::Midi(midi) => midi.clone(),
+            ClipData::Audio(_) => panic!("a MIDI clip"),
+        }
+    };
+    assert_eq!(midi_of(&value), data, "the group comes back");
+
+    // A set saved before groups has neither field.
+    let mut older = value.clone();
+    let path = "/document/tracks/0/clips/0/data/midi";
+    older
+        .pointer_mut(path)
+        .unwrap()
+        .as_object_mut()
+        .unwrap()
+        .remove("groups");
+    for index in 0..3 {
+        older
+            .pointer_mut(&format!("{path}/notes/{index}"))
+            .unwrap()
+            .as_object_mut()
+            .unwrap()
+            .remove("group");
+    }
+    let loaded = midi_of(&older);
+    assert!(loaded.groups.is_empty() && loaded.notes.iter().all(|n| n.group.is_none()));
+
+    // Groups that aren't whole: chances that differ, a note naming a group
+    // the clip doesn't list, and a group of one note.
+    let mut differ = value.clone();
+    *differ
+        .pointer_mut(&format!("{path}/notes/1/probability"))
+        .unwrap() = json!(0.25);
+    let mut missing = value.clone();
+    missing
+        .pointer_mut(path)
+        .unwrap()
+        .as_object_mut()
+        .unwrap()
+        .remove("groups");
+    let mut single = value.clone();
+    single
+        .pointer_mut(&format!("{path}/notes/1"))
+        .unwrap()
+        .as_object_mut()
+        .unwrap()
+        .remove("group");
+    for (name, broken) in [
+        ("differ", differ.clone()),
+        ("missing", missing),
+        ("single", single),
+    ] {
+        let loaded = midi_of(&broken);
+        assert!(loaded.groups.is_empty(), "{name}");
+        assert!(loaded.notes.iter().all(|n| n.group.is_none()), "{name}");
+    }
+
+    // A take lane's clip with a broken group loads it ungrouped too.
+    let mut taken = differ;
+    let track_value = taken.pointer_mut("/document/tracks/0").unwrap();
+    let moved = track_value["clips"].as_array_mut().unwrap().remove(0);
+    track_value["take_lanes"] = json!([{ "id": lane, "name": "Take 1", "clips": [moved] }]);
+    let (loaded, _) = decode_json(
+        &serde_json::to_vec(&taken).unwrap(),
+        &LoadOptions::default(),
+    )
+    .unwrap();
+    let lanes: Vec<_> = loaded
+        .document
+        .tracks()
+        .next()
+        .unwrap()
+        .take_lanes()
+        .collect();
+    let ClipData::Midi(midi) = &lanes[0].clips[0].data else {
+        panic!("a MIDI clip");
+    };
+    assert!(midi.groups.is_empty() && midi.notes.iter().all(|n| n.group.is_none()));
+}
+
 /// A one-bar MIDI clip, on the track from the start of the song.
 fn midi_clip(editor: &mut Editor, track: bl_model::TrackId) -> bl_model::ClipId {
     let clip = editor.new_id();

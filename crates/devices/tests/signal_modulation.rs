@@ -469,6 +469,7 @@ fn gate_rig(block: usize) -> Rig {
                 loop_start: Ticks::ZERO,
                 loop_end: None,
                 signature: None,
+                groups: Vec::new(),
             }),
         ),
     });

@@ -1415,6 +1415,7 @@ impl ClipViewUi {
             start: axis,
             length,
             notes: &notes,
+            groups: &midi.groups,
             selected: &selected,
             face,
             hovered,
@@ -1784,7 +1785,8 @@ impl ClipViewUi {
             if note_lanes::shows_corner(note, KEY_HEIGHT) {
                 note_lanes::paint_corner(painter, rect, colours.text.0);
             }
-            if frame.hovered == Some(u32::try_from(place).unwrap_or(u32::MAX)) {
+            // Hovering a grouped note marks every note of its group (R24).
+            if note_lanes::is_marked(frame.notes, frame.hovered, place) {
                 painter.rect_stroke(
                     rect,
                     corner,

@@ -297,6 +297,16 @@ const WIDGET: &[(&str, &str)] = &[
          selection's end to the next or previous note edge (`clip_view.select_time`)",
     ),
     (
+        "S-NOTE-048",
+        "the Clip View's note editor: Right adds the held notes at the insert marker and steps \
+         on, or lengthens the notes just added, while step recording (`note.step_record`)",
+    ),
+    (
+        "S-NOTE-049",
+        "the Clip View's note editor: Left shortens the notes just added and steps back, while \
+         step recording (`note.step_record`)",
+    ),
+    (
         "S-A11Y-004",
         "the Clip View's note editor: Shift-Left and Shift-Right select time, a grid step at a \
          time (`clip_view.select_time`)",

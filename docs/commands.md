@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-704 commands in 43 areas.
+708 commands in 43 areas.
 
 ## Permission classes
 
@@ -264,6 +264,8 @@ Each command has:
 | [`clip_view.select_transients`](#clip_viewselect_transients) | Select Transients | `read` |  |  |
 | [`clip_view.select_warp_markers`](#clip_viewselect_warp_markers) | Select Warp Markers | `read` |  |  |
 | [`clip_view.set_insert_marker`](#clip_viewset_insert_marker) | Set Insert Marker | `read` |  |  |
+| [`clip_view.set_preview`](#clip_viewset_preview) | MIDI Note Editor Preview | `edit` |  |  |
+| [`clip_view.step_input_mode`](#clip_viewstep_input_mode) | Step Input Mode | `edit` | `Cmd+Shift+B` | `Ctrl+Shift+B` |
 | [`device.add`](#deviceadd) | Add Device | `edit` |  |  |
 | [`device.add_layers`](#deviceadd_layers) | Add Samples | `external` |  |  |
 | [`device.add_preset`](#deviceadd_preset) | Add Preset | `external` |  |  |
@@ -470,11 +472,13 @@ Each command has:
 | [`note.duplicate`](#noteduplicate) | Duplicate Notes | `edit` | `Cmd+D` | `Ctrl+D` |
 | [`note.move`](#notemove) | Move Notes | `edit` |  |  |
 | [`note.paste`](#notepaste) | Paste Notes | `edit` | `Cmd+V` | `Ctrl+V` |
+| [`note.preview`](#notepreview) | Preview Note | `edit` |  |  |
 | [`note.quantize`](#notequantize) | Quantize | `edit` | `Cmd+U` | `Ctrl+U` |
 | [`note.ramp_value`](#noteramp_value) | Ramp Note Values | `edit` |  |  |
 | [`note.randomize`](#noterandomize) | Randomize Note Values | `edit` |  |  |
 | [`note.resize`](#noteresize) | Resize Notes | `edit` |  |  |
 | [`note.set_value`](#noteset_value) | Set Note Value | `edit` |  |  |
+| [`note.step_record`](#notestep_record) | Step Record | `edit` |  |  |
 | [`pad.delete`](#paddelete) | Delete Pad | `destructive` |  |  |
 | [`pad.drop`](#paddrop) | Drop on Pad | `edit` |  |  |
 | [`pad.hot_swap`](#padhot_swap) | Hot-Swap Pad | `read` |  |  |
@@ -4977,6 +4981,38 @@ Arguments:
 
 Result: [`SampleEditorState`](#sampleeditorstate).
 
+#### `clip_view.set_preview`
+
+**MIDI Note Editor Preview**. Permission: `edit`. Contexts: `global`, `clip-view`, `note-editor`, `note-selection`.
+
+Sets the MIDI Note Editor's Preview switch (`on`), the one above the piano ruler and Options ▸ MIDI Note Editor Preview: with it on, clicking a key, drawing, clicking and keyboard-selecting a note, and dragging notes to a new pitch play into the clip's track, and an armed track can be step-recorded. Left out, `on` flips the switch. It is one switch for every MIDI clip, off in a new install and kept between launches as a preference; it is never an undo step and changes nothing in the set. Switching it off ends the previews sounding.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean or null | no | Whether Preview is on. Left out, the switch flips. |
+
+Result: [`ClipViewState`](#clipviewstate).
+
+#### `clip_view.step_input_mode`
+
+**Step Input Mode**. Permission: `edit`. Contexts: `global`, `clip-view`, `note-editor`, `note-selection`.
+
+Gets the editor ready for step recording: arms the track of the clip the Clip View shows (as the track's arm button does), moves the keyboard focus to the Clip View, and switches the computer MIDI keyboard to the other state. It is a command, not a switch, and is available while the editor shows a MIDI clip. Arming is an undo step, as arming is.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-NOTE-044 | `Cmd+Shift+B` | `Ctrl+Shift+B` | `note-editor` | Turn Step Input Mode on or off | runs it |
+
+Arguments: none (send `{}`).
+
+Result: [`ClipViewState`](#clipviewstate).
+
 ### Area `device`
 
 #### `device.add`
@@ -8594,6 +8630,25 @@ Arguments:
 
 Result: [`NoteEditResult`](#noteeditresult).
 
+#### `note.preview`
+
+**Preview Note**. Permission: `edit`. Contexts: `global`, `clip-view`, `note-editor`, `note-selection`.
+
+Plays a note on the track of a MIDI clip (`clip`, or the one the Clip View shows), through its devices and mixer, whether or not the song plays and whether or not the track is armed or monitoring: `on` presses it (`velocity`, 100 unless given) and a later call with `on` false releases it. A press with no release plays until the release, so an agent that presses must release. Needs the Preview switch on. It changes nothing in the set and is never an undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `key` | integer from 0 to 255 | yes | The pitch, a MIDI key from 0 to 127; 60 is middle C. |
+| `on` | boolean | yes | Press (true) or release (false) the note. |
+| `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip whose track plays the note. Left out, the one the Clip View shows. |
+| `velocity` | integer or null | no | The velocity, from 1 to 127; 100 unless given. Used when `on`. |
+
+Result: [`ClipViewState`](#clipviewstate).
+
 #### `note.quantize`
 
 **Quantize**. Permission: `edit`. Contexts: `note-editor`, `note-selection`.
@@ -8695,6 +8750,24 @@ Arguments:
 | `values` | array or null | no | One value for each of the notes, in the order they're named, each within the field's range: what drawing across a lane gives. Give this or `value`. |
 
 Result: [`NoteEditResult`](#noteeditresult).
+
+#### `note.step_record`
+
+**Step Record**. Permission: `edit`. Contexts: `note-editor`, `note-selection`.
+
+Step-records at the insert marker of a MIDI clip while its track is armed, Preview is on and the transport is stopped. Forward (Right): each held key (`held`, or the keys held on the track's MIDI input) is added at the insert marker, one grid step long at its velocity, and the marker moves one step on; held keys that this stepping just added are made one step longer instead, and a key let go is left as it is. Back (`back`, Left): the held notes just added are made one step shorter, a note left with no length is removed, and the marker moves one step back. With nothing held, the marker moves a step and leaves a rest. No record quantisation applies. One undo step, `Step Record`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `back` | boolean | no | Step back, as Left does, instead of forward, as Right does. |
+| `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows. |
+| `held` | array or null | no | The keys held, each with its velocity. Left out, the keys held on the track's MIDI input now; an empty list means no key is held. |
+
+Result: [`StepRecordResult`](#steprecordresult).
 
 ### Area `pad`
 
@@ -13200,6 +13273,8 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`clip.warp_as_loop`](#clipwarp_as_loop) | the query tool's `clip` | `data.audio.warp_markers` |
 | [`clip.warp_from_here`](#clipwarp_from_here) | the query tool's `clip` | `data.audio.warp_markers` |
 | [`clip.warp_selection_as_loop`](#clipwarp_selection_as_loop) | the query tool's `clip` | `data.audio.warp_markers` |
+| [`clip_view.set_preview`](#clip_viewset_preview) | `view.state` | `clip_view.preview` |
+| [`clip_view.step_input_mode`](#clip_viewstep_input_mode) | the query tool's `track` | `mixer.arm` |
 | [`device.add`](#deviceadd) | the query tool's `track` | `devices` |
 | [`device.add_layers`](#deviceadd_layers) | the query tool's `device` | `layers` |
 | [`device.add_preset`](#deviceadd_preset) | the query tool's `track` | `devices` |
@@ -13341,6 +13416,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`note.randomize`](#noterandomize) | the query tool's `clip` | `data.midi.notes` |
 | [`note.resize`](#noteresize) | the query tool's `clip` | `data.midi.notes` |
 | [`note.set_value`](#noteset_value) | the query tool's `clip` | `data.midi.notes` |
+| [`note.step_record`](#notestep_record) | the query tool's `clip` | `data.midi.notes` |
 | [`pad.delete`](#paddelete) | the query tool's `device` | `chains` |
 | [`pad.drop`](#paddrop) | the query tool's `device` | `chains` |
 | [`pad.preview`](#padpreview) | `device_view.state` | `devices` |
@@ -13546,6 +13622,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`file_manager.state`](#file_managerstate) | a query of its own: it reads the File Manager, and is `external` for the files it lists |
 | [`groove.save`](#groovesave) | writes a file outside the set; the set doesn't change |
 | [`midi.export_clip`](#midiexport_clip) | writes a file outside the set; the set doesn't change |
+| [`note.preview`](#notepreview) | plays a note and changes nothing in the set |
 | [`pad.save_default`](#padsave_default) | the default pad is the shell's, kept in memory and in the User Library, not in the set; the next `pad.drop` on an empty pad makes its chain from it |
 | [`plugin.export_list`](#pluginexport_list) | writes a file outside the set; the set doesn't change |
 | [`set.discard_recovery`](#setdiscard_recovery) | deletes a recovery file outside the set |
@@ -17984,6 +18061,7 @@ What the Clip View shows: which clip it is editing, the notes selected in it, it
 | `randomize` | [`RandomizeAmounts`](#randomizeamounts) | yes | The Randomize amounts of the three lanes. |
 | `folded` | boolean | yes | Whether the note editor shows only the rows that hold notes (Fold, F). |
 | `tab` | [`ClipTab`](#cliptab) | yes | The tab the Clip View shows. |
+| `preview` | boolean | yes | Whether the Preview switch is on (Spec: step-recording R1): one switch for every MIDI clip's editor, kept between launches. |
 | `envelope` | [`AutomationTarget`](#automationtarget) or null | yes | The parameter whose envelope the Envelopes tab shows; `null` when it shows none. |
 
 <details><summary>JSON Schema</summary>
@@ -18048,6 +18126,10 @@ What the Clip View shows: which clip it is editing, the notes selected in it, it
       "description": "Whether the Show/Hide All Expression Editors switch has hidden every lane.",
       "type": "boolean"
     },
+    "preview": {
+      "description": "Whether the Preview switch is on (Spec: step-recording R1): one switch for every MIDI clip's editor, kept between launches.",
+      "type": "boolean"
+    },
     "randomize": {
       "$ref": "#/$defs/RandomizeAmounts",
       "description": "The Randomize amounts of the three lanes."
@@ -18100,6 +18182,7 @@ What the Clip View shows: which clip it is editing, the notes selected in it, it
     "randomize",
     "folded",
     "tab",
+    "preview",
     "envelope"
   ],
   "type": "object"
@@ -24027,6 +24110,47 @@ One of:
       "type": "object"
     }
   ]
+}
+```
+
+</details>
+
+### `HeldKey`
+
+A key held on the track's MIDI input, with the velocity it was played at.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `key` | integer from 0 to 255 | yes | The pitch, a MIDI key from 0 to 127; 60 is middle C. |
+| `velocity` | integer from 0 to 255 | yes | The velocity it was played at, from 1 to 127. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "additionalProperties": false,
+  "description": "A key held on the track's MIDI input, with the velocity it was played at.",
+  "properties": {
+    "key": {
+      "description": "The pitch, a MIDI key from 0 to 127; 60 is middle C.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "velocity": {
+      "description": "The velocity it was played at, from 1 to 127.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "key",
+    "velocity"
+  ],
+  "type": "object"
 }
 ```
 
@@ -35238,6 +35362,72 @@ What `stems.status` returns.
     "packages",
     "install",
     "separation"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `StepRecordResult`
+
+What `note.step_record` did.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `added` | integer, at least 0 | yes | How many notes it added. |
+| `lengthened` | integer, at least 0 | yes | How many notes it made one grid step longer. |
+| `shortened` | integer, at least 0 | yes | How many notes it made one grid step shorter. |
+| `removed` | integer, at least 0 | yes | How many notes it removed, having no length left. |
+| `insert_marker` | [`Ticks`](#ticks) | yes | The insert marker afterwards, in ticks from the beginning of the clip's contents. |
+| `undo_step` | boolean | yes | Whether the step was recorded as an undo step: false when it changed no note. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `note.step_record` did.",
+  "properties": {
+    "added": {
+      "description": "How many notes it added.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "insert_marker": {
+      "$ref": "#/$defs/Ticks",
+      "description": "The insert marker afterwards, in ticks from the beginning of the clip's contents."
+    },
+    "lengthened": {
+      "description": "How many notes it made one grid step longer.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "removed": {
+      "description": "How many notes it removed, having no length left.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "shortened": {
+      "description": "How many notes it made one grid step shorter.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "undo_step": {
+      "description": "Whether the step was recorded as an undo step: false when it changed no note.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "added",
+    "lengthened",
+    "shortened",
+    "removed",
+    "insert_marker",
+    "undo_step"
   ],
   "type": "object"
 }

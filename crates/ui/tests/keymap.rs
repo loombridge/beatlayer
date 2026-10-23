@@ -779,6 +779,10 @@ fn the_note_editors_keys_are_all_handled() {
         "S-NOTE-043",
         "S-NOTE-045",
         "S-NOTE-046",
+        // WP-6.5: Step Input Mode, and the arrows that step-record.
+        "S-NOTE-044",
+        "S-NOTE-048",
+        "S-NOTE-049",
         // WP-6.1: the value keys, the typed velocity, the Cmd-drag, and
         // deactivating.
         "S-NOTE-016",
@@ -812,6 +816,35 @@ fn the_note_editors_keys_are_all_handled() {
             "{id} is handled: {:?}",
             entry.status
         );
+    }
+}
+
+// Spec: step-recording R4, R6, R9. Cmd-Shift-B (Ctrl-Shift-B) runs Step Input
+// Mode in the note editor (S-NOTE-044; the Options menu's item reaches it from
+// anywhere), and Right and Left are the note editor's own while it
+// step-records.
+#[test]
+fn cmd_shift_b_runs_step_input_mode_and_the_arrows_step_in_the_note_editor() {
+    let keymap = Keymap::live12();
+    let entry = keymap.entry_for("S-NOTE-044").unwrap();
+    assert_eq!(entry.status, Status::Bound);
+    for (platform, mods) in [
+        (Platform::Mac, mods(true, false, false, true)),
+        (Platform::Other, mods(false, true, false, true)),
+    ] {
+        let hit = keymap
+            .resolve(
+                platform,
+                Key::B,
+                mods,
+                &[Context::NoteEditor, Context::Global],
+            )
+            .expect("Cmd-Shift-B is bound in the note editor");
+        assert_eq!(hit.command.id, "clip_view.step_input_mode", "{platform:?}");
+    }
+    for id in ["S-NOTE-048", "S-NOTE-049"] {
+        let entry = keymap.entry_for(id).unwrap();
+        assert!(matches!(entry.status, Status::Widget(_)), "{id}");
     }
 }
 

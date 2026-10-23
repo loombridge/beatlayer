@@ -551,6 +551,10 @@ enum NoteDrag {
         /// Copy the notes instead of moving them, as Option-dragging a note
         /// does (S-NOTE-002, piano-roll R29).
         copy: bool,
+        /// The grabbed note's pitch and velocity when the drag began, which
+        /// the Preview plays at the pitch the drag has reached (Spec:
+        /// step-recording R2).
+        grabbed: (u8, u8),
     },
     /// A Cmd-drag that hasn't gone far enough to say which it is: moving
     /// the notes off the grid when it runs along the note area, or changing
@@ -974,6 +978,9 @@ pub struct ClipViewUi {
     sample: SampleEditorUi,
     /// The note editor's context menus (C-NOTE, C-KEYS).
     menus: NoteMenus,
+    /// The preview the pointer holds: the clip, the key and the velocity
+    /// (Spec: step-recording R2).
+    preview: Option<(ClipId, u8, u8)>,
 }
 
 impl Default for ClipViewUi {
@@ -990,6 +997,7 @@ impl Default for ClipViewUi {
             envelope: EnvelopeEditor::default(),
             sample: SampleEditorUi::default(),
             menus: NoteMenus::default(),
+            preview: None,
         }
     }
 }
@@ -1064,6 +1072,7 @@ impl ClipViewUi {
                 ClipData::Audio(_) => None,
             });
         let Some((clip, midi, length)) = editor else {
+            self.end_preview(events);
             self.shown = None;
             self.drag = None;
             self.strip_drag = None;
@@ -1195,6 +1204,135 @@ impl ClipViewUi {
             events,
         );
         self.lanes.footer(ui, shell, theme, &frame, events);
+        Self::preview_switch(ui, shell, theme, strip, events);
+    }
+
+    /// The Preview switch above the piano ruler (L-CLIP-012), which runs
+    /// `clip_view.set_preview` (Spec: step-recording R1).
+    fn preview_switch(
+        ui: &mut Ui,
+        shell: &Shell,
+        theme: &Theme,
+        strip: Rect,
+        events: &mut Vec<UiEvent>,
+    ) {
+        let on = shell.clip_view().preview();
+        let rect = Rect::from_min_size(
+            strip.min + vec2(2.0, 2.0),
+            vec2(KEY_WIDTH - 4.0, STRIP_HEIGHT - 4.0),
+        );
+        let id = Id::new("clip-view-preview");
+        let response = ui.interact(rect, id, Sense::click());
+        crate::focus::register(ui.ctx(), id, Area::Detail, None);
+        let colours = &theme.colors;
+        let face = if on {
+            colours.accent.0
+        } else if response.hovered() {
+            colours.control_hover.0
+        } else {
+            colours.control.0
+        };
+        let ink = if on {
+            colours.accent_text.0
+        } else {
+            colours.text.0
+        };
+        let painter = ui.painter();
+        painter.rect_filled(rect, theme.sizes.corner, face);
+        // A note: a head and its stem.
+        let head = rect.center() + vec2(-2.0, 2.0);
+        painter.circle_filled(head, 2.0, ink);
+        painter.line_segment(
+            [head + vec2(2.0, 0.0), head + vec2(2.0, -6.0)],
+            Stroke::new(1.0, ink),
+        );
+        response.widget_info(|| WidgetInfo::selected(WidgetType::Button, true, on, "Preview"));
+        if response.clicked() {
+            events.push(UiEvent::Invoke(Invocation::new(
+                ids::SET_PREVIEW,
+                json!({ "on": !on }),
+            )));
+        }
+    }
+
+    /// Lets go of the preview the pointer holds, if there is one.
+    fn end_preview(&mut self, events: &mut Vec<UiEvent>) {
+        if let Some((clip, key, _)) = self.preview.take() {
+            events.push(UiEvent::Invoke(Invocation::new(
+                ids::PREVIEW_NOTE,
+                json!({ "clip": clip, "key": key, "on": false }),
+            )));
+        }
+    }
+
+    /// Plays what the pointer holds, as `note.preview`, and lets the
+    /// previous one go (Spec: step-recording R2).
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the editor's pointer and geometry"
+    )]
+    fn preview_input(
+        &mut self,
+        ui: &Ui,
+        shell: &Shell,
+        keys_rect: Rect,
+        grid: &Rect,
+        rows: &KeyRows,
+        clip: ClipId,
+        notes: &[Note],
+        pointer: Option<Pos2>,
+        draw_mode: bool,
+        hit: &dyn Fn(Pos2) -> Option<(u32, NoteZone)>,
+        events: &mut Vec<UiEvent>,
+    ) {
+        let held = ui
+            .input(|i| i.pointer.primary_down())
+            .then(|| ui.input(|i| i.pointer.press_origin()));
+        let row = |y: f32| {
+            rows.key_at(*grid, y)
+                .map(|key| key.round().clamp(0.0, 127.0) as u8)
+        };
+        let want = match (shell.clip_view().preview(), held.flatten(), pointer) {
+            (true, Some(press), Some(pos)) if keys_rect.contains(press) => {
+                row(pos.y).map(|key| (key, 100))
+            }
+            (true, Some(press), pos) if grid.contains(press) => match &self.drag {
+                Some(NoteDrag::Move {
+                    grab_key,
+                    limits,
+                    grabbed: (key, velocity),
+                    ..
+                }) => {
+                    let now = pos
+                        .and_then(|pos| rows.key_at(*grid, pos.y))
+                        .unwrap_or(*grab_key);
+                    let semitones = ((now - *grab_key).round() as i32).clamp(limits.1, limits.2);
+                    Some(((i32::from(*key) + semitones).clamp(0, 127) as u8, *velocity))
+                }
+                // A resize or a velocity drag keeps what the press played.
+                Some(_) => self.preview.map(|(_, key, velocity)| (key, velocity)),
+                None => match (hit(press), draw_mode) {
+                    (Some((place, _)), _) => notes
+                        .get(place as usize)
+                        .map(|note| (note.key, note.velocity)),
+                    (None, true) => row(press.y).map(|key| (key, 100)),
+                    (None, false) => None,
+                },
+            },
+            _ => None,
+        };
+        let sounding = self.preview.map(|(_, key, velocity)| (key, velocity));
+        if want == sounding {
+            return;
+        }
+        self.end_preview(events);
+        if let Some((key, velocity)) = want {
+            events.push(UiEvent::Invoke(Invocation::new(
+                ids::PREVIEW_NOTE,
+                json!({ "clip": clip, "key": key, "velocity": velocity, "on": true }),
+            )));
+            self.preview = Some((clip, key, velocity));
+        }
     }
 
     /// The note the pointer marks: the one under it in the note area, or
@@ -1666,6 +1804,7 @@ impl ClipViewUi {
                         // copies it.
                         copy: keys.copy,
                         places: places.clone(),
+                        grabbed: (note.key, note.velocity),
                     };
                     // Spec: note-editing R17. Cmd-dragging a note (Alt on
                     // Windows) up or down changes its velocity, or every
@@ -1870,6 +2009,22 @@ impl ClipViewUi {
                 }),
             )));
         }
+        // Spec: step-recording R2. With Preview on, a key held in the piano
+        // ruler, a note drawn or clicked, and a note dragged to a new pitch
+        // sound until the button is let go.
+        self.preview_input(
+            ui,
+            shell,
+            keys_rect,
+            &frame.layout.grid,
+            rows,
+            clip,
+            notes,
+            pointer,
+            draw_mode,
+            &hit,
+            events,
+        );
         // Spec: piano-roll R30. Right-clicking a note, which selects it
         // alone first if it isn't selected, or empty grid opens the editor's
         // context menu; right-clicking a key in the piano ruler opens that
@@ -2038,6 +2193,21 @@ impl ClipViewUi {
             let edge = if mac { alt } else { ctrl };
             // The key that adds to the selection while jumping (S-NOTE-043).
             let adding = if mac { alt && shift } else { ctrl && shift };
+            // Spec: step-recording R4 to R6. While step recording, Left and
+            // Right step: the held notes are added or lengthened, shortened
+            // or removed, and with none held the marker moves a step. With
+            // notes selected and none held they move the selection as usual.
+            if matches!(key, Key::ArrowLeft | Key::ArrowRight)
+                && !(shift || alt || ctrl || modifiers.command)
+                && shell.step_recording()
+                && (selected.is_empty() || !shell.held_keys().is_empty())
+            {
+                events.push(UiEvent::Invoke(Invocation::new(
+                    ids::STEP_RECORD,
+                    json!({ "clip": clip, "back": key == Key::ArrowLeft }),
+                )));
+                continue;
+            }
             match key {
                 Key::ArrowLeft | Key::ArrowRight => {
                     let forward = key == Key::ArrowRight;
@@ -2321,6 +2491,7 @@ impl NoteDrag {
                 grab,
                 limits,
                 copy,
+                grabbed: _,
             } => {
                 // Spec: piano-roll R10. With snapping on, the grabbed note's
                 // start lands on the grid, and Cmd (Alt) bypasses it.

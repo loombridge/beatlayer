@@ -1973,3 +1973,170 @@ fn the_notes_are_paler_the_softer_their_velocity() {
         );
     }
 }
+
+/// Switches Preview on, arms the clip's track and turns the computer MIDI
+/// keyboard on, as step recording needs, and lets a frame pass so the
+/// input's copy is on.
+fn start_step_recording(n: &mut Notes) {
+    let track = n.doc().clip_track(n.clip).unwrap();
+    n.h.shell
+        .run("mixer.set_arm", json!({ "track": track, "arm": true }))
+        .unwrap();
+    n.h.shell
+        .run("clip_view.set_preview", json!({ "on": true }))
+        .unwrap();
+    n.h.shell
+        .run("midi.toggle_computer_keyboard", json!({ "on": true }))
+        .unwrap();
+    n.h.settle();
+    n.h.shell.poll();
+}
+
+#[test]
+fn the_preview_switch_above_the_piano_ruler_runs_set_preview() {
+    // Spec: step-recording R1. L-CLIP-012: the switch sits above the piano
+    // ruler, in the marker strip's left end.
+    let mut n = set(vec![]);
+    assert!(!n.h.shell.clip_view().preview(), "off in a new install");
+    let strip = n.strip();
+    let switch = pos2(strip.left() + KEY_WIDTH / 2.0, strip.center().y);
+    n.click(switch, Modifiers::NONE);
+    assert!(n.h.shell.clip_view().preview());
+    assert_eq!(n.steps(), 0, "no undo step");
+    n.click(switch, Modifiers::NONE);
+    assert!(!n.h.shell.clip_view().preview());
+}
+
+#[test]
+fn a_key_held_in_the_piano_ruler_plays_until_released_with_preview_on() {
+    // Spec: step-recording R2. A click on a key plays it at velocity 100
+    // while the button is held, and only with Preview on.
+    let mut n = set(vec![]);
+    let track = n.doc().clip_track(n.clip).unwrap();
+    let mut queue = n.h.shell.midi().sender().attach(64);
+    let heard = |queue: &mut rtrb::Consumer<bl_core::midi::MidiInputEvent>| {
+        std::iter::from_fn(|| queue.pop().ok())
+            .map(|e| {
+                (
+                    e.source,
+                    e.message.status(),
+                    e.message.data1(),
+                    e.message.data2(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    let source = bl_core::midi::MidiSource::Preview(track.0);
+    let key = n.key_at(57);
+    let press = |n: &mut Notes, pressed: bool| {
+        n.h.frame(vec![Event::PointerButton {
+            pos: key,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        }]);
+        n.h.settle();
+    };
+    n.h.frame(vec![Event::PointerMoved(key)]);
+    press(&mut n, true);
+    press(&mut n, false);
+    assert_eq!(heard(&mut queue), [], "Preview is off");
+
+    n.h.shell
+        .run("clip_view.set_preview", json!({ "on": true }))
+        .unwrap();
+    n.h.settle();
+    press(&mut n, true);
+    assert_eq!(heard(&mut queue), [(source, 0x90, 57, 100)]);
+    press(&mut n, false);
+    assert_eq!(heard(&mut queue), [(source, 0x80, 57, 64)]);
+    assert_eq!(n.steps(), 0, "a preview changes nothing in the set");
+}
+
+#[test]
+fn a_dragged_note_plays_each_pitch_it_reaches_and_ends_on_release() {
+    // Spec: step-recording R2. A drag that moves notes to a new pitch plays
+    // the grabbed note at each new pitch, ending the one before.
+    let step = n_step();
+    let mut n = set(vec![Note::new(60, Ticks::ZERO, step, 90)]);
+    let track = n.doc().clip_track(n.clip).unwrap();
+    n.h.shell
+        .run("clip_view.set_preview", json!({ "on": true }))
+        .unwrap();
+    n.h.settle();
+    let mut queue = n.h.shell.midi().sender().attach(256);
+    let from = n.at(60, step / 2);
+    let to = n.at(63, step / 2);
+    n.drag(from, to, Modifiers::NONE);
+    let heard: Vec<_> = std::iter::from_fn(|| queue.pop().ok())
+        .map(|e| {
+            assert_eq!(e.source, bl_core::midi::MidiSource::Preview(track.0));
+            (e.message.is_note_on(), e.message.data1())
+        })
+        .collect();
+    assert_eq!(heard.first(), Some(&(true, 60)), "the grabbed pitch first");
+    assert!(heard.contains(&(true, 63)), "and the pitch it reached");
+    assert_eq!(heard.last(), Some(&(false, 63)), "ended on release");
+    let on = heard.iter().filter(|(on, _)| *on).count();
+    let off = heard.len() - on;
+    assert_eq!(on, off, "every note-on has its note-off");
+    assert_eq!(n.notes()[0].key, 63);
+}
+
+#[test]
+fn left_and_right_step_while_step_recording_and_move_the_marker_otherwise() {
+    // Spec: step-recording R3, R4, R6, R10. Right with a key held adds the
+    // note at the insert marker and steps on; Left takes it off again.
+    let step = n_step();
+    let mut n = set(vec![]);
+    let at = n.at(60, step / 4);
+    n.click(at, Modifiers::NONE);
+    assert_eq!(n.insert(), Some(Ticks::ZERO));
+    // Not step recording yet: the arrows only move the marker.
+    n.h.key(egui::Key::ArrowRight, Modifiers::NONE);
+    assert_eq!(n.insert(), Some(step));
+    n.h.key(egui::Key::ArrowLeft, Modifiers::NONE);
+
+    start_step_recording(&mut n);
+    // A on the computer MIDI keyboard is C3.
+    n.h.shell
+        .run(
+            "midi.computer_keyboard_key",
+            json!({ "key": "A", "pressed": true }),
+        )
+        .unwrap();
+    n.h.settle();
+    n.h.key(egui::Key::ArrowRight, Modifiers::NONE);
+    assert_eq!(n.notes().len(), 1);
+    assert_eq!(n.notes()[0].start, Ticks::ZERO);
+    assert_eq!(n.notes()[0].length, step);
+    assert_eq!(n.insert(), Some(step));
+    n.h.key(egui::Key::ArrowRight, Modifiers::NONE);
+    assert_eq!(n.notes()[0].length, 2 * step);
+    n.h.key(egui::Key::ArrowLeft, Modifiers::NONE);
+    n.h.key(egui::Key::ArrowLeft, Modifiers::NONE);
+    assert_eq!(n.notes(), []);
+    assert_eq!(n.insert(), Some(Ticks::ZERO));
+    // Shift still selects time, as without step recording.
+    n.h.key(egui::Key::ArrowRight, Modifiers::SHIFT);
+    assert_eq!(n.time(), Some((Ticks::ZERO, step)));
+}
+
+#[test]
+fn cmd_shift_b_arms_the_track_and_switches_the_computer_keyboard() {
+    // Spec: step-recording R9, M-OPT-018. The key runs Step Input Mode in
+    // the note editor, with the Clip View open on a MIDI clip.
+    let mut n = set(vec![]);
+    n.h.shell.set_focused_area(bl_shell::Area::Detail);
+    let track = n.doc().clip_track(n.clip).unwrap();
+    assert!(!n.h.shell.computer_keyboard_on());
+    let chord = if cfg!(target_os = "macos") {
+        Modifiers::MAC_CMD | Modifiers::COMMAND | Modifiers::SHIFT
+    } else {
+        Modifiers::CTRL | Modifiers::COMMAND | Modifiers::SHIFT
+    };
+    n.h.key(egui::Key::B, chord);
+    assert!(n.doc().track(track).unwrap().mixer().arm);
+    assert!(n.h.shell.computer_keyboard_on());
+    assert_eq!(n.steps(), 1, "arming is the one undo step");
+}

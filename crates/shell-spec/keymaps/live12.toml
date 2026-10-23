@@ -711,6 +711,7 @@ commands = [
   { id = "chain.cut", contexts = ["rack-chains"] },
   { id = "device.cut", contexts = ["device-view"] },
   { id = "note.cut", contexts = ["note-editor", "note-selection"] },
+  { id = "track.cut", contexts = ["track-headers"] },
 ]
 
 [[shortcut]]
@@ -728,6 +729,7 @@ commands = [
   { id = "chain.copy", contexts = ["rack-chains"] },
   { id = "device.copy", contexts = ["device-view"] },
   { id = "note.copy", contexts = ["note-editor", "note-selection"] },
+  { id = "track.copy", contexts = ["track-headers"] },
 ]
 
 [[shortcut]]
@@ -745,6 +747,7 @@ commands = [
   { id = "chain.paste", contexts = ["rack-chains"] },
   { id = "device.paste", contexts = ["device-view"] },
   { id = "note.paste", contexts = ["note-editor", "note-selection"] },
+  { id = "track.paste", contexts = ["track-headers"] },
 ]
 
 [[shortcut]]
@@ -762,6 +765,7 @@ commands = [
   { id = "chain.duplicate", contexts = ["rack-chains"] },
   { id = "device.duplicate", contexts = ["device-view"] },
   { id = "note.duplicate", contexts = ["note-editor", "note-selection"] },
+  { id = "track.duplicate", contexts = ["track-headers"] },
 ]
 
 [[shortcut]]

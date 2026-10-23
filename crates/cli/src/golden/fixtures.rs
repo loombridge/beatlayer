@@ -29,9 +29,9 @@ use bl_engine::{
     Action, MediaMap, NodeKey, ParamValue, ScheduledCommand, SessionCommand, TransportCommand,
 };
 use bl_model::{
-    AudioData, AutomationTarget, Clip, ClipData, ClipId, ClipParam, Command, ContentHash,
-    CrossfadeAssign, Device, DeviceId, DeviceKind, Editor, EnvelopeKind, ParamId, Preserve,
-    SendTap, TrackId, TrackKind, TransientLoopMode, WarpMarker, WarpMode,
+    AudioData, AutomationTarget, BeatsUpdate, Clip, ClipData, ClipId, ClipParam, Command,
+    ContentHash, CrossfadeAssign, Device, DeviceId, DeviceKind, Editor, EnvelopeKind, ParamId,
+    Preserve, SendTap, TrackId, TrackKind, TransientLoopMode, WarpMarker, WarpMode,
 };
 
 use super::{Fixture, MediaFile, SAMPLE_RATE, Scene};
@@ -1715,9 +1715,19 @@ fn transposition_envelope_beats() -> Scene {
     let mut song = Song::new();
     let bar = drum_bar();
     let file = song.file("drums.wav", 48_000, &[bar]);
-    song.media
-        .set_transients(file, (0..8).map(|n| f64::from(n) * 0.25).collect());
     let (_, clip) = bar_clip(&mut song, file, 96_000, WarpMode::Beats);
+    // A segment at each eighth note: a saved set renders the same, with no
+    // transients to find.
+    song.apply(Command::SetClipWarpSettings {
+        clip,
+        beats: Some(BeatsUpdate {
+            preserve: Some(Preserve::Eighth),
+            ..BeatsUpdate::default()
+        }),
+        tones: None,
+        texture: None,
+        complex_pro: None,
+    });
     transposition_ramp(&mut song, clip, 12.0);
     let seconds = song.to_last_clip();
     song.finish(seconds)

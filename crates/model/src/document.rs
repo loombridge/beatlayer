@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::clip::{Clip, ClipData};
 use crate::device::Device;
 use crate::groove::GroovePool;
-use crate::ids::{ChainId, ClipId, DeviceId, GrooveId, LocatorId, SceneId, TrackId};
+use crate::ids::{ChainId, ClipId, DeviceId, GrooveId, LocatorId, SceneId, TakeLaneId, TrackId};
 use crate::locator::{Locator, SongStart};
 use crate::metronome::MetronomeSettings;
 use crate::rack::Chain;
@@ -263,8 +263,11 @@ pub struct Document {
 /// rebuilt when a document is loaded. They're never saved.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct Index {
-    /// The track that holds each clip.
+    /// The track that holds each clip: on its main lane, on one of its take
+    /// lanes or in one of its Session slots.
     pub(crate) clip_track: OrdMap<ClipId, TrackId>,
+    /// The track that holds each take lane (WP-6.21).
+    pub(crate) lane_track: OrdMap<TakeLaneId, TrackId>,
     /// The track whose chain holds each device, at any depth: a device in a
     /// rack's chain belongs to the rack's track.
     pub(crate) device_track: OrdMap<DeviceId, TrackId>,
@@ -679,6 +682,45 @@ impl Document {
         self.index.clip_track.get(&id).copied()
     }
 
+    /// The track that holds a take lane (the comping spec, R1).
+    #[must_use]
+    pub fn take_lane_track(&self, id: TakeLaneId) -> Option<TrackId> {
+        self.index.lane_track.get(&id).copied()
+    }
+
+    /// The document with no take lane auditioned, as a freeze or a bounce
+    /// renders it: they take the main lanes only (the freeze and bounce
+    /// spec, R30).
+    #[must_use]
+    pub fn without_auditions(&self) -> Self {
+        let mut plain = self.clone();
+        let auditioned: Vec<TrackId> = plain
+            .tracks
+            .iter()
+            .filter(|(_, track)| track.audition.is_some())
+            .map(|(&id, _)| id)
+            .collect();
+        for id in auditioned {
+            if let Some(track) = plain.tracks.get_mut(&id) {
+                Shared::make_mut(track).audition = None;
+            }
+        }
+        plain
+    }
+
+    /// The take lane with this ID.
+    #[must_use]
+    pub fn take_lane(&self, id: TakeLaneId) -> Option<&crate::clip::TakeLane> {
+        self.track(self.take_lane_track(id)?)?.take_lane(id)
+    }
+
+    /// The take lane a clip sits on, if it sits on one rather than on its
+    /// track's main lane or in a Session slot (the comping spec, R2).
+    #[must_use]
+    pub fn clip_lane(&self, id: ClipId) -> Option<TakeLaneId> {
+        self.track(self.clip_track(id)?)?.clip_lane(id)
+    }
+
     /// Every clip ID, in ID order.
     pub fn clip_ids(&self) -> impl ExactSizeIterator<Item = ClipId> + '_ {
         self.index.clip_track.keys().copied()
@@ -782,6 +824,7 @@ impl Document {
     pub fn contains(&self, id: Id) -> bool {
         self.tracks.contains_key(&TrackId(id))
             || self.index.clip_track.contains_key(&ClipId(id))
+            || self.index.lane_track.contains_key(&TakeLaneId(id))
             || self.index.device_track.contains_key(&DeviceId(id))
             || self.index.chain_track.contains_key(&ChainId(id))
             || self.scenes.iter().any(|scene| scene.id.0 == id)
@@ -803,6 +846,7 @@ impl Document {
     pub fn max_id(&self) -> Id {
         let track = self.tracks.get_max().map(|(id, _)| id.0);
         let clip = self.index.clip_track.get_max().map(|(id, _)| id.0);
+        let lane = self.index.lane_track.get_max().map(|(id, _)| id.0);
         let device = self.index.device_track.get_max().map(|(id, _)| id.0);
         let chain = self.index.chain_track.get_max().map(|(id, _)| id.0);
         let scene = self.scenes.iter().map(|scene| scene.id.0).max();
@@ -819,7 +863,7 @@ impl Document {
             .iter()
             .map(|groove| groove.id.0)
             .max();
-        [track, clip, device, chain, scene, locator, groove]
+        [track, clip, lane, device, chain, scene, locator, groove]
             .into_iter()
             .flatten()
             .max()

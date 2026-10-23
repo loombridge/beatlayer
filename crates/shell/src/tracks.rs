@@ -8,8 +8,8 @@
 
 use bl_model::{
     Automation, AutomationTarget, ChainId, Clip, ClipId, Command, Device, DeviceId, Document,
-    EditError, Editor, FrozenTrack, Input, MidiTo, Mixer, Output, Routing, SceneId, TakeLane,
-    Track, TrackDelay, TrackId, TrackKind,
+    EditError, Editor, FrozenTrack, Input, MidiTo, Mixer, NewTakeLane, Output, Routing, SceneId,
+    TakeLane, Track, TrackDelay, TrackId, TrackKind,
 };
 
 use crate::routing::{return_letter, track_label};
@@ -432,6 +432,30 @@ fn create(
             clip,
         })?;
     }
+    // Spec: comping R9. The lanes and their clips come under new IDs.
+    for lane in &data.take_lanes {
+        let lane_id = editor.new_id();
+        editor.apply(Command::AddTakeLane {
+            track: id,
+            lane: NewTakeLane {
+                id: Some(lane_id),
+                name: lane.name.clone(),
+                clips: Vec::new(),
+            },
+            index: None,
+        })?;
+        for clip in &lane.clips {
+            let original = clip.id;
+            let mut clip = clip.clone();
+            clip.id = editor.new_id();
+            copies.clips.push((original, clip.id));
+            remap_clip(&mut clip, copies, editor.document());
+            editor.apply(Command::CreateTakeClip {
+                lane: lane_id,
+                clip,
+            })?;
+        }
+    }
     for (index, child) in data.children.iter().enumerate() {
         create(editor, child, Some(id), index, copies)?;
     }
@@ -570,12 +594,6 @@ fn finish(editor: &mut Editor, data: &TrackData, copies: &Copies) -> Result<(), 
             None => None,
         };
         editor.apply(Command::SetMidiOutput { track: id, to })?;
-    }
-    for lane in &data.take_lanes {
-        editor.apply(Command::AddTakeLane {
-            track: id,
-            lane: lane.clone(),
-        })?;
     }
     for position in &data.removed_stop_buttons {
         let scene = scene_at(editor, *position)?;
@@ -1314,10 +1332,32 @@ mod tests {
         editor
             .apply(Command::AddTakeLane {
                 track: one,
-                lane: TakeLane {
+                lane: NewTakeLane {
+                    id: None,
                     name: "Take 1".to_owned(),
                     clips: Vec::new(),
                 },
+                index: None,
+            })
+            .unwrap();
+        let lane = editor
+            .document()
+            .track(one)
+            .unwrap()
+            .take_lanes()
+            .next()
+            .unwrap()
+            .id;
+        let take: ClipId = editor.new_id();
+        editor
+            .apply(Command::CreateTakeClip {
+                lane,
+                clip: Clip::new(
+                    take,
+                    Ticks(0),
+                    Ticks(960_000),
+                    ClipData::Audio(AudioData::new(ContentHash([8; 32]))),
+                ),
             })
             .unwrap();
         editor
@@ -1346,6 +1386,11 @@ mod tests {
             original.sends().collect::<Vec<_>>()
         );
         assert_eq!(made.take_lanes().count(), original.take_lanes().count());
+        let made_lane = made.take_lanes().next().unwrap();
+        assert_ne!(made_lane.id, lane, "the lane has its own ID");
+        assert_eq!(made_lane.clips.len(), 1);
+        assert_ne!(made_lane.clips[0].id, take, "so does its clip");
+        doc.check_invariants().unwrap();
         assert_eq!(made.clips().count(), 1, "the clip came with it");
         assert_ne!(
             made.clips().next().unwrap().id,

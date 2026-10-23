@@ -1,6 +1,6 @@
 # Comping: take lanes, recording takes, auditioning, and building a comp
 
-- **Status:** draft
+- **Status:** partial (WP-6.21 is implemented: R1 to R14, R16 to R21 and R37 for the commands that take explicit tracks, lanes and ranges, apart from R13's clip colours, which wait for [themes](themes.md) R14 and R20 (WP-6.30b); the selection forms of R37, R15 and R22 to R36 are WP-6.22's and WP-6.22b's)
 - **Work packages:** WP-6.21 (take lanes in the document and engine, recording into them, auditioning, and the comp commands: R1 to R14, R16 to R21, R37); WP-6.22 (take lanes in the Arrangement: their rows and headers, Show Take Lanes, selecting on them, the Arrangement's edits on them, their keys and menus: R15, R23 to R30); WP-6.22b (comping with the mouse: Draw Mode, source highlights and their edges, dragging lane headers, dropping files on take lanes, and crossfades at comp edges: R22, R31 to R36). Loop recording into take lanes, which these build on, is WP-2.13's ([recording](recording.md) R11 and R12); the fades and crossfades between adjacent clips that R22 relies on are WP-6.51's; linking tracks so one comp edits several is [linked-track editing](linked-track-editing.md)'s (WP-6.23)
 - **Parity-matrix row:** Recording: Take lanes and comping, take-lane commands
 - **Checked against:** the Live 12 reference manual (online edition), read 20 October 2026 (chapter 21 "Comping", chapter 6 section 6.8, chapter 19 section 19.3.1, chapter 42 section 42.17); the Live 12 release notes 12.0, 12.2, 12.2.5, 12.3 and 12.4; and the UI parity reference's rows L-ARR-012, M-CREATE-004, C-TRACK-019, I-DROP-016 and S-COMP-001 to S-COMP-006
@@ -97,27 +97,27 @@ This spec covers take lanes and comping on one track. It leaves to other specs: 
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1 | to be written in WP-6.21 | unit |
-| R2 | to be written in WP-6.21 | unit, engine |
-| R3 | to be written in WP-6.21 | unit, migration |
-| R4 | to be written in WP-6.21 | unit, agent API |
-| R5 | to be written in WP-6.21 | unit |
-| R6 | to be written in WP-6.21 | unit |
-| R7 | to be written in WP-6.21 | unit, agent API |
-| R8 | to be written in WP-6.21 | unit |
-| R9 | to be written in WP-6.21 | unit |
-| R10 | to be written in WP-6.21 | shell test, null backend |
-| R11 | to be written in WP-6.21 | shell test, null backend |
-| R12 | to be written in WP-6.21 | shell test, null backend |
-| R13 | to be written in WP-6.21 | shell test |
-| R14 | to be written in WP-6.21 | engine test under the allocation trap, golden render |
+| R1 | `crates/model/tests/take_lanes.rs`, `a_take_lane_clip_is_a_clip_found_by_id_that_the_clip_commands_edit`; `crates/model/src/command.rs`, `take_lanes_are_added_in_order_to_audio_and_midi_tracks_and_survive_a_save` | unit |
+| R2 | `crates/model/tests/take_lanes.rs`, `a_take_lane_clip_is_a_clip_found_by_id_that_the_clip_commands_edit`; `crates/engine/tests/clips.rs`, `an_auditioned_take_lane_plays_in_place_of_the_main_lane_with_no_program`; `crates/shell/tests/comping.rs`, `resizing_a_take_lane_clip_clears_only_its_own_lane` | unit, engine |
+| R3 | `crates/project/tests/schemas.rs`, `a_schema_7_set_with_take_lanes_opens_with_ids_for_its_lanes_and_passes`; `crates/cli/tests/older_sets.rs`, `a_version_7_set_with_take_lanes_loads_and_plays_as_it_did`; `crates/project/tests/round_trip.rs`, `take_lanes_and_their_commands_survive_a_save_and_a_load` | unit, migration |
+| R4 | `crates/shell/tests/comping.rs`, `insert_take_lane_names_and_places_each_new_lane`; `crates/model/tests/take_lanes.rs`, `lanes_are_named_by_the_highest_take_number_and_never_empty`; `crates/agent/tests/comping.rs`, `every_take_lane_command_runs_by_id_and_reads_back` | unit, agent API |
+| R5 | `crates/shell/tests/comping.rs`, `duplicate_copies_each_lane_after_it_with_new_ids` | unit |
+| R6 | `crates/model/tests/take_lanes.rs`, `lanes_are_named_by_the_highest_take_number_and_never_empty` | unit |
+| R7 | `crates/model/tests/take_lanes.rs`, `lanes_are_deleted_moved_and_auditioned_one_undo_step_each`, `deleting_unused_lanes_keeps_those_the_main_lane_uses`; `crates/agent/tests/comping.rs`, `every_take_lane_command_runs_by_id_and_reads_back` | unit, agent API |
+| R8 | `crates/model/tests/take_lanes.rs`, `lanes_are_deleted_moved_and_auditioned_one_undo_step_each`, `lanes_of_two_tracks_are_not_moved_together` | unit |
+| R9 | `crates/model/tests/take_lanes.rs`, `take_lanes_are_saved_and_go_with_their_track_through_delete_and_undo`; `crates/shell/tests/comping.rs`, `duplicate_track_without_clips_copies_no_take_lanes` | unit |
+| R10 | `crates/shell/tests/recording.rs`, `an_audio_take_goes_on_a_take_lane_and_a_later_take_reuses_it`, `recording_over_a_loop_makes_a_take_lane_for_each_pass` | shell test, null backend |
+| R11 | `crates/shell/tests/recording.rs`, `an_audio_take_goes_on_a_take_lane_and_a_later_take_reuses_it` | shell test, null backend |
+| R12 | `crates/shell/tests/recording.rs`, `a_midi_take_goes_on_a_take_lane_and_overdub_merges_only_the_main_lane`, `midi_passes_round_the_loop_each_go_on_a_take_lane`; `crates/engine/tests/midi_recording.rs`, `a_take_round_the_loop_stamps_its_messages_with_the_frames_it_has_run_for` | shell test, null backend |
+| R13 | `crates/shell/tests/recording.rs`, `an_audio_take_goes_on_a_take_lane_and_a_later_take_reuses_it` (the names; the colours are WP-6.30b's) | shell test |
+| R14 | `crates/engine/tests/clips.rs`, `an_auditioned_take_lane_plays_in_place_of_the_main_lane_with_no_program`; `crates/engine/tests/midi_clips.rs`, `an_auditioned_midi_take_lane_plays_in_place_of_the_main_lane_with_no_program`; `rtsan/tests/clips.rs`, `clip_playback_passes_under_rtsan`; `crates/cli/tests/clip_goldens.rs`, `a_comp_copied_from_two_takes_renders_their_stretches` | engine test under the allocation trap, golden render |
 | R15 | to be written in WP-6.22 | shell test, UI script |
-| R16 | to be written in WP-6.21 | engine test |
-| R17 | to be written in WP-6.21 | unit, agent API |
-| R18 | to be written in WP-6.21 | unit |
-| R19 | to be written in WP-6.21 | unit |
-| R20 | to be written in WP-6.21 | unit, property |
-| R21 | to be written in WP-6.21 | unit, engine |
+| R16 | `crates/engine/tests/clips.rs`, `an_auditioned_take_lane_plays_in_place_of_the_main_lane_with_no_program` | engine test |
+| R17 | `crates/shell/tests/comping.rs`, `copy_to_the_main_lane_cuts_replaces_and_stays_independent`, `the_last_listed_lane_of_a_track_is_copied_from`; `crates/agent/tests/comping.rs`, `the_comp_commands_read_back_and_ask_when_they_replace_a_clip` | unit, agent API |
+| R18 | `crates/shell/tests/comping.rs`, `copy_to_the_main_lane_cuts_replaces_and_stays_independent` | unit |
+| R19 | `crates/shell/tests/comping.rs`, `replace_with_a_take_counts_from_the_selected_lane_and_skips_empty_ones`, `from_the_main_lane_a_part_that_uses_no_take_takes_the_first_lane` | unit |
+| R20 | `crates/model/tests/take_lanes.rs`, `a_copy_cut_from_a_take_uses_it_until_it_is_changed`, `a_comp_copied_from_random_takes_matches_its_sources` (property); `crates/shell/tests/comping.rs`, `a_midi_comp_matches_by_its_notes` | unit, property |
+| R21 | `crates/shell/tests/comping.rs`, `a_comp_edge_moves_within_what_the_take_reaches` | unit |
 | R22 | to be written in WP-6.22b | golden render |
 | R23 | to be written in WP-6.22 | UI script |
 | R24 | to be written in WP-6.22 | shell test, UI script |
@@ -133,4 +133,4 @@ This spec covers take lanes and comping on one track. It leaves to other specs: 
 | R34 | to be written in WP-6.22b | UI script |
 | R35 | to be written in WP-6.22b | UI script |
 | R36 | to be written in WP-6.22b | UI script |
-| R37 | to be written in WP-6.21 and WP-6.22 | agent API, `cargo xtask commands` |
+| R37 | `crates/agent/tests/comping.rs`, `every_take_lane_command_runs_by_id_and_reads_back`; `crates/agent/tests/readback.rs`; `cargo xtask commands` (the selection forms are WP-6.22's) | agent API, `cargo xtask commands` |

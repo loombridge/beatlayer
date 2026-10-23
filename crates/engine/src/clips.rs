@@ -902,7 +902,7 @@ fn window_width(track: &Track, previous: Option<&Track>, rate: SampleRate) -> us
         _ => None,
     };
     track
-        .clips()
+        .played_clips()
         .filter_map(&audio)
         .chain(track.slots().filter_map(|(_, clip)| audio(clip)))
         .max()

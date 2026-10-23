@@ -1015,10 +1015,11 @@ impl Importer<'_, '_> {
             .into_iter()
             .filter_map(|Piece { clip, .. }| match clip.data {
                 ClipData::Audio(data) => Some(bl_model::TakeClip {
+                    id: None,
                     name: clip.name,
                     start: clip.start,
                     length: clip.length,
-                    data,
+                    data: bl_model::TakeClipData::Audio(data),
                 }),
                 ClipData::Midi(_) => None,
             })
@@ -1028,7 +1029,12 @@ impl Importer<'_, '_> {
         }
         let command = bl_model::Command::AddTakeLane {
             track: lane.id,
-            lane: bl_model::TakeLane { name, clips },
+            lane: bl_model::NewTakeLane {
+                id: None,
+                name,
+                clips,
+            },
+            index: None,
         };
         if let Err(error) = self.editor.apply(command) {
             self.report.add(

@@ -875,6 +875,7 @@ dependencies = [
  "bl-project",
  "flate2",
  "midly",
+ "proptest",
  "quick-xml",
  "serde_json",
  "zip",

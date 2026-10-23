@@ -120,6 +120,21 @@ fn fixture() -> Project {
         Command::SetCueMode { enabled: true },
         Command::SetCueVolume { volume: 0.5 },
         Command::SetReducedLatencyMonitoring { enabled: true },
+        // Spec: tunings R2, R14. A tuning inside the set, with a track that
+        // bypasses it.
+        Command::SetTuning {
+            tuning: bl_model::Tuning::new(
+                "Five".to_owned(),
+                "Five equal steps".to_owned(),
+                (1..=5).map(|i| 240.0 * f64::from(i)).collect(),
+            )
+            .unwrap(),
+            retune: false,
+        },
+        Command::SetTuningBypass {
+            track: pad,
+            bypass: true,
+        },
         // Spec: scales R9.
         Command::SetScale {
             enabled: Some(true),
@@ -980,6 +995,7 @@ fn the_fixture_sets_a_non_default_value_of_every_saved_field() {
                 "grooves.auto_load",
                 "grooves.auto_load_groove",
                 "scale",
+                "tuning.name",
             ][..],
         ),
         (

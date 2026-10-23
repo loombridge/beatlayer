@@ -14,7 +14,8 @@ use std::sync::Arc;
 
 use bl_core::time::{Frames, SampleRate, TempoMap};
 use bl_engine::{
-    Audition, DeviceType, NodeConfig, NodeData, NoteEvent, NoteKind, Registry, SlotSample,
+    Audition, DeviceType, KeyPitches, NodeConfig, NodeData, NoteEvent, NoteKind, Registry,
+    SlotSample,
 };
 use bl_media::SampleData;
 use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Widget};
@@ -682,6 +683,9 @@ pub struct Sampler {
     data: Option<NodeData>,
     /// A click in the display waiting for the next block (WP-5.15, R54).
     audition: Option<Audition>,
+    /// The pitch of every key under the set's tuning (the tunings spec,
+    /// R12; the sampler spec, R21).
+    keys: KeyPitches,
     voices: [Voice; SLOTS],
     /// How many notes have been played: voices are stolen oldest first.
     counter: u64,
@@ -724,6 +728,7 @@ impl Sampler {
         Self {
             data: None,
             audition: None,
+            keys: KeyPitches::twelve(),
             voices: [Voice::idle(); SLOTS],
             counter: 0,
             last_pitch: None,
@@ -909,13 +914,26 @@ impl Sampler {
         if region_end <= region_start {
             return;
         }
+        // Spec: sampler R21. A voice reads the sample at its key's tuned
+        // pitch, C3's twelve-step pitch still playing the sample as it is;
+        // a key past the tuning's range plays nothing. A slice is chosen by
+        // the key and a click in the display plays the root pitch, so
+        // neither follows the tuning.
+        let tuned = if sliced || audition.is_some() {
+            f64::from(note.key)
+        } else {
+            match self.keys.pitch(note.key) {
+                Some(tuned) => tuned,
+                None => return,
+            }
+        };
         let base = s.transpose + s.detune / 100.0;
         let pitch = if sliced {
             // A slice plays at the sample's own rate; the note names the
             // slice and doesn't transpose it.
             base
         } else {
-            f64::from(note.key) - 60.0 + base
+            tuned - 60.0 + base
         };
         let velocity = note.velocity.clamp(0.0, 1.0);
         // Glide's monophonic mode takes the sounding voice over: the new
@@ -929,6 +947,7 @@ impl Sampler {
             && let Some(voice) = self.newest_playing()
         {
             voice.key = note.key;
+            voice.tuned = tuned;
             voice.target = pitch;
             voice.step = if s.glide_frames == 0 {
                 voice.pitch = pitch;
@@ -975,6 +994,7 @@ impl Sampler {
         let mut voice = Voice::idle();
         voice.active = true;
         voice.key = note.key;
+        voice.tuned = tuned;
         voice.counter = counter;
         voice.audition = audition.is_some();
         voice.position = audition.map_or(region_start as f64, |(at, _)| at);
@@ -1140,7 +1160,7 @@ impl Sampler {
             // own rate, rising over its Attack after the note starts.
             let mut lfo_value = 0.0f32;
             if s.lfo_on {
-                let cycle = voice_cycle(s, voice.key);
+                let cycle = voice_cycle(s, voice.tuned);
                 voice.lfo_phase += 1.0 / cycle;
                 if voice.lfo_phase >= 1.0 {
                     voice.lfo_phase -= 1.0;
@@ -1191,7 +1211,7 @@ impl Sampler {
             self.audio[base] = value.0 * level;
             self.audio[base + stride] = value.1 * level;
             self.cutoff[frame * stride + slot] =
-                s.cutoff_pitch(voice.key, voice.filter_env.level, lfo_value);
+                s.cutoff_pitch(voice.tuned, voice.filter_env.level, lfo_value);
             self.lfo[frame * stride + slot] = lfo_value;
             // The voice moves on: its pitch first (with the LFO's bend and pitch envelope),
             // then its position.
@@ -1380,6 +1400,10 @@ impl NativeDevice for Sampler {
     }
 
     fn receive_data(&mut self, data: NodeData) {
+        if let Some(keys) = data.downcast_ref::<KeyPitches>() {
+            self.keys = *keys;
+            return;
+        }
         if let Some(audition) = data.downcast_ref::<Audition>() {
             self.audition = Some(*audition);
             return;
@@ -1470,8 +1494,8 @@ impl Settings {
     /// The cutoff a voice's filter runs at this frame, in the filter's
     /// semitones: the knob's frequency, moved by the played note (Key),
     /// the filter envelope and the LFO.
-    fn cutoff_pitch(&self, key: u8, envelope: f32, lfo: f32) -> f32 {
-        let note = f64::from(key) - 60.0;
+    fn cutoff_pitch(&self, tuned: f64, envelope: f32, lfo: f32) -> f32 {
+        let note = tuned - 60.0;
         let pitch = f64::from(pitch_of(self.filter_freq as f32, REFERENCE_HZ))
             + f64::from(self.filter_key) * note
             + FILTER_ENV_OCTAVES * 12.0 * f64::from(self.filter_amount) * f64::from(envelope)
@@ -1496,8 +1520,8 @@ pub(crate) fn filter_type_of(entry: usize) -> FilterType {
 
 /// A voice's LFO cycle, in frames: the device's cycle at the voice's own
 /// rate through Key (an octave above C3 doubles it at 100 %).
-fn voice_cycle(s: &Settings, key: u8) -> f64 {
-    let scale = 2f64.powf(f64::from(s.lfo_key) * (f64::from(key) - 60.0) / 12.0);
+fn voice_cycle(s: &Settings, tuned: f64) -> f64 {
+    let scale = 2f64.powf(f64::from(s.lfo_key) * (tuned - 60.0) / 12.0);
     (s.lfo_cycle_frames / scale).max(1.0)
 }
 
@@ -1893,6 +1917,9 @@ struct Voice {
     /// sounding voice.
     fading: bool,
     key: u8,
+    /// Its key's pitch under the set's tuning in semitones, which the
+    /// filter's Key and the LFO's Key follow (the sampler spec, R21).
+    tuned: f64,
     /// When it started: the oldest voice is stolen first.
     counter: u64,
     /// Its position in the sample, in frames.
@@ -1936,6 +1963,7 @@ impl Voice {
             active: false,
             fading: false,
             key: 0,
+            tuned: 0.0,
             counter: 0,
             position: 0.0,
             end: 0,

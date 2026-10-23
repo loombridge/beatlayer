@@ -186,6 +186,7 @@ fn discovery_lists_areas_searches_and_describes_with_schemas() {
             "track.set_bounced",
             "track.set_devices_enabled",
             "track.set_frozen",
+            "track.set_tuning_bypass",
             "track.unfreeze",
             "track.ungroup"
         ]

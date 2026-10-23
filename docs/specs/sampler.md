@@ -1,6 +1,6 @@
 # The sampler
 
-- **Status:** partial (slicing playback chooser, filter circuit models/morph and velocity wait; R21, tuning systems, is WP-6.9's)
+- **Status:** partial (slicing playback chooser, filter circuit models/morph and velocity wait)
 - **Work packages:** WP-2.16 (parts 1 and 2: playback, envelopes and voices; slicing, the filter and the LFO), WP-5.15 (the sample display, IMP-28), WP-5.15b (the warp controls, manual slicing, and the pitch envelope); WP-6.9 (tuning systems: R21)
 - **Parity-matrix row:** Devices: Simpler
 - **Checked against:** Live 12's reference manual, chapter 31 "Live Instrument Reference", section 31.11 "Simpler" (31.11.1 "Playback Modes", including 31.11.1.3 "Slicing Playback Mode"; 31.11.2 "Warp Controls"; 31.11.3 "Filter"; 31.11.4 "Envelopes"; 31.11.5 "LFO"; 31.11.6 "Global Parameters"), read October 2026
@@ -83,7 +83,7 @@ This spec covers the sampler's playback, envelopes, voices, slicing, filter, LFO
 | R18 | `crates/devices/tests/sampler.rs`, `warped_sample_plays_at_tempo_matching_warped_clip_golden_render`, `held_warped_note_follows_tempo_change` | unit, real-time trap |
 | R19 | `crates/devices/tests/sampler.rs`, `pitch_envelope_moves_pitch_by_amount_rule_by_rule` | unit, real-time trap |
 | R20 | `crates/devices/tests/sampler.rs`, `manual_slices_play_chromatically_from_c3`; `crates/ui/tests/sample_display.rs`, `manual_slice_gestures_add_move_and_delete` | unit, real-time trap; UI script |
-| R21 | to be written in WP-6.9 | |
+| R21 | `crates/devices/tests/tuning.rs`, `keys_play_at_the_tunings_frequencies_at_any_block_size`, `a_sounding_note_does_not_move_when_the_tuning_changes`, `keys_above_the_range_are_silent` | unit |
 
 ## Not built yet
 

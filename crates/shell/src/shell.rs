@@ -106,6 +106,7 @@ use bl_shell_spec::stems as stems_ids;
 use bl_shell_spec::tracks as track_ids;
 use bl_shell_spec::transport as transport_ids;
 use bl_shell_spec::transport::{RecordedFileReport, RecordingReport, RunningRecording};
+use bl_shell_spec::tunings as tuning_ids;
 
 pub(crate) mod audio_editing;
 mod audio_panel;
@@ -129,6 +130,7 @@ mod session_recording;
 mod slice;
 mod stems;
 mod step_input;
+mod tunings;
 mod warping;
 
 use file_manager::FileManager;
@@ -228,6 +230,13 @@ impl Invocation {
 /// drains these after each command with [`Shell::take_effects`].
 #[derive(Clone, Debug, PartialEq)]
 pub enum Effect {
+    /// Ask whether to retune the set's notes to the tuning about to be
+    /// loaded or removed (the tunings spec, R15), then run `then` with
+    /// `retune` true if the person says Retune. Cancel changes nothing.
+    ConfirmRetune {
+        /// The load or removal.
+        then: Invocation,
+    },
     /// Ask whether to save the set's unsaved changes, then run `then`. The
     /// person can save first, discard the changes, or cancel.
     ConfirmDiscard {
@@ -2373,6 +2382,13 @@ impl Shell {
         self.prefs.create_fades_on_clip_edges.0
     }
 
+    /// Whether Retune Set On Loading Tuning Systems is on (the tunings spec,
+    /// R15).
+    #[must_use]
+    pub fn retune_on_tuning_load(&self) -> bool {
+        self.prefs.retune_on_tuning_load
+    }
+
     /// Loop/Warp Short Samples, Auto-Warp Long Samples and Default Warp
     /// Mode (WP-4.9).
     #[must_use]
@@ -2416,6 +2432,7 @@ impl Shell {
             },
             tempo_midi: self.midi.report(),
             create_fades_on_clip_edges: self.create_fades_on_clip_edges(),
+            retune_on_tuning_load: self.retune_on_tuning_load(),
             warp_recorded_audio: self.warp_recorded_audio(),
             warp: self.prefs.warp,
             file_folder: FileFolderSettings {
@@ -6444,6 +6461,7 @@ impl Shell {
             ids::VIEW_TOGGLE_PLUG_IN_WINDOWS => Some(self.plug_in_windows),
             ids::FOCUS_TOGGLE_TAB_NAVIGATION => Some(self.prefs.tab_navigation),
             ids::FOCUS_TOGGLE_WRAP_NAVIGATION => Some(self.prefs.wrap_navigation.0),
+            ids::SETTINGS_SET_RETUNE_ON_TUNING_LOAD => Some(self.prefs.retune_on_tuning_load),
             session_launch_ids::SET_QUANTIZATION_ENABLED => Some(self.store.launch().enabled),
             SOLO_IN_PLACE => Some(self.editor.document().settings().solo_in_place),
             DELAY_COMPENSATION => Some(self.editor.document().settings().delay_compensation),
@@ -7563,6 +7581,26 @@ impl Shell {
                 self.effects.push(Effect::PickFolder);
                 Ok(Value::Null)
             }
+            // Spec: tunings R15. With Retune Set On Loading Tuning Systems
+            // on, a person who loads a tuning, or removes it, is asked
+            // first; Cancel changes nothing.
+            tuning_ids::LOAD | tuning_ids::REMOVE
+                if !has("retune")
+                    && self.tuning_change_asks()
+                    && (id == tuning_ids::LOAD
+                        || self.editor.document().settings().tuning.is_some()) =>
+            {
+                self.effects.push(Effect::ConfirmRetune {
+                    then: Invocation::new(id, args),
+                });
+                Ok(Value::Null)
+            }
+            ids::SETTINGS_SET_RETUNE_ON_TUNING_LOAD if !has("on") => {
+                // Options ▸ Retune Set On Loading Tuning Systems switches
+                // the setting to the other state.
+                let on = !self.prefs.retune_on_tuning_load;
+                self.run(id, json!({ "on": on }))
+            }
             ids::SETTINGS_SET_TEMPORARY_FOLDER if !has("path") => {
                 self.effects.push(Effect::PickTemporaryFolder);
                 Ok(Value::Null)
@@ -8177,6 +8215,9 @@ impl Shell {
         let args = self.prepare_device_role(id, args)?;
         let args = self.prepare_scale_clips(id, args)?;
         let args = self.prepare_groove_clips(id, args)?;
+        // Spec: tunings R15. A tuning set or removed without `retune`
+        // follows Retune Set On Loading Tuning Systems.
+        let args = self.with_retune(id, args);
         self.prepare_warping(id, args)
     }
 
@@ -9052,6 +9093,9 @@ impl Shell {
         }
         if midi_ids::handles(id) {
             return self.run_midi_files(id, args);
+        }
+        if tuning_ids::handles(id) {
+            return self.run_tunings(id, args);
         }
         if dawproject_ids::handles(id) {
             return self.run_dawproject(id, args);
@@ -10469,6 +10513,12 @@ impl Shell {
             ids::SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES => {
                 let SwitchArgs { on } = Self::args(id, args)?;
                 self.prefs.create_fades_on_clip_edges = OnByDefault(on);
+                self.save_preferences();
+                Ok(to_value(&SwitchResult { on }))
+            }
+            ids::SETTINGS_SET_RETUNE_ON_TUNING_LOAD => {
+                let SwitchArgs { on } = Self::args(id, args)?;
+                self.prefs.retune_on_tuning_load = on;
                 self.save_preferences();
                 Ok(to_value(&SwitchResult { on }))
             }

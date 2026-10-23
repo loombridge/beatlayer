@@ -87,6 +87,10 @@ struct TrackRepr {
     /// WP-5.36 have none, which loads as on.
     #[serde(default = "on", skip_serializing_if = "is_on")]
     keep_monitoring_latency: bool,
+    /// Bypass Tuning (the tunings spec, R14). Off in a new track, so a set
+    /// writes it only when it's on.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    tuning_bypass: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     children: Vec<TrackRepr>,
     /// The track's frozen audio (WP-4.14). Sets saved before it have none,
@@ -221,6 +225,7 @@ impl TrackRepr {
             audition: track.audition(),
             delay: track.delay(),
             keep_monitoring_latency: track.keep_monitoring_latency(),
+            tuning_bypass: track.tuning_bypass(),
             frozen: track.frozen.clone(),
             children: if with_children {
                 track
@@ -256,6 +261,9 @@ impl TryFrom<DocumentRepr> for Document {
         }
         check_crossfader(settings.crossfader)?;
         check_locators(&settings.locators)?;
+        if let Some(tuning) = &settings.tuning {
+            tuning.check()?;
+        }
         for groove in &settings.grooves.pool {
             groove.check()?;
             loader.claim(groove.id.0)?;
@@ -412,6 +420,7 @@ impl Loader {
             });
         }
         track.keep_monitoring_latency = repr.keep_monitoring_latency;
+        track.tuning_bypass = repr.tuning_bypass;
         track.frozen = repr.frozen;
         if let Some(routing) = repr.routing {
             track.routing = routing;

@@ -1,6 +1,6 @@
 # Tuning systems: loading, the reference pitch and note range, per-track bypass, playing a tuning, and tunings in the browser and the editor
 
-- **Status:** draft
+- **Status:** partial (R1 to R9, R11 to R15 and R17 to R19 are built, WP-6.9; `.ascl` files are read as `.scl` files (R4) and `tuning.save` (R10) wait for a decision on the ASCL specification, decision 1; the In/Out section's Bypass Tuning row has no place in the mixers yet, see R14; WP-6.9b and WP-6.10 are not built)
 - **Work packages:** WP-6.9 (the set's tuning in the document and the engine: `.scl` and `.ascl` files, the reference pitch and note range, removing and saving, native instruments playing the tuning, Bypass Tuning, retuning the set: R1 to R15 and R17 to R19), WP-6.9b (tunings on plug-ins and MIDI controllers: R20 to R24), WP-6.10 (tunings in the browser and the editor: scales under a tuning, the Tunings label, the Tuning section, the note editor's rows and names, Beatlayer's own tunings, and the Tuner: R16 and R25 to R33). Each native instrument's spec says how it plays a tuning; per-note pitch to plug-ins is WP-6.17b's ([mpe.md](mpe.md)); the scales themselves are [scales.md](scales.md)'s
 - **Parity-matrix row:** MIDI editing: Tuning systems: `.scl` and `.ascl` import, `.ascl` save, reference pitch, per-track bypass
 - **Checked against:** the Live 12 reference manual (online edition), read 20 October 2026; the Live 12 release notes, 12.0, 12.0.5, 12.1, 12.1.10 and 12.2; the UI parity reference rows L-CTRL-001, L-BRW-004, L-BRW-014, L-MIX-001, L-MIX-010, L-OTH-009, M-VIEW-023, M-NAV-009, M-OPT-022, I-DROP-013 and C-DEVICE-015
@@ -46,7 +46,7 @@ While a tuning that doesn't hold twelve notes to its pseudo-octave is loaded, th
 - **R11.** The set saves its tuning inside the set file: its name, description, pitches, note names, link, reference pitch and range. A set opens with its tuning whether or not its file is still there, and a set saved before tunings opens with none. (S2)
 - **R12.** On a MIDI track that doesn't bypass the tuning (R14), a native instrument plays each key at the tuning's pitch for it: where it played key k at 12 × log₂(f₁₂(k) / 440) + 69 semitones, it plays it at 12 × log₂(f(k) / 440) + 69, f(k) being the key's frequency under R6 and R8 and f₁₂(k) under R1, and its transposition, detune, glide, pitch modulation and pitch envelope add to that as they add to a key without a tuning (the law is Beatlayer's own). What an instrument chooses by key — a Sampler zone, a Simpler slice, an Impulse slot, a Drum Rack pad, a Key modulation source — goes by the key number, so a tuning doesn't change which sample plays (Beatlayer's own). Each instrument's spec says which of its parts follow the tuned pitch. (S1, S6)
 - **R13.** Under a tuning, a per-note pitch bend of b semitones moves a note by b steps of the tuning: it sounds at the tuned pitch of key k + b, between two keys' tuned pitches in proportion in semitones. The channel's pitch bend still moves notes by semitones (Beatlayer's own). (S7)
-- **R14.** Bypass Tuning, a switch in a MIDI track's In/Out section shown while the set has a tuning (L-MIX-010), off in a new track, makes the track play twelve equal steps (R1) and its clips' editors show twelve-step keys, as one undo step, `Bypass Tuning`, saved with the set (`track.set_tuning_bypass`, `edit`). A MIDI track whose chain holds a Drum Rack plays twelve equal steps whatever the switch says, and the switch shows on and can't be changed while the rack is there (the presentation is Beatlayer's own). (S4, S6)
+- **R14.** Bypass Tuning, a switch in a MIDI track's In/Out section shown while the set has a tuning (L-MIX-010), off in a new track, makes the track play twelve equal steps (R1) and its clips' editors show twelve-step keys, as one undo step, `Bypass Tuning`, saved with the set (`track.set_tuning_bypass`, `edit`). A MIDI track whose chain holds a Drum Rack plays twelve equal steps whatever the switch says, and the switch shows on and can't be changed while the rack is there (the presentation is Beatlayer's own; the mixers' In/Out section has no row for the switch yet, so only the Arrangement's track headers draw it, where they are tall enough). (S4, S6)
 - **R15.** Retune Set On Loading Tuning Systems (Options ▸ M-OPT-022, ticked while on; `settings.set_retune_on_tuning_load`, `edit`) is off in a new install and kept between launches. With it off, loading, changing or removing a tuning leaves every note on its key. With it on, a dialog asks first (Retune, or Cancel to change nothing; the wording is Beatlayer's own), and then every note of every MIDI clip on a track that doesn't bypass the tuning moves to the key whose new pitch is nearest the pitch it had, the lower on a tie, in the same undo step as the load. Where two notes that overlap land on one key, the earlier is shortened to end where the later starts, and of two that start together the shorter is deleted (Beatlayer's own). `tuning.load` and `tuning.remove` take `retune`, which, left out, follows the setting. (S2)
 - **R16.** While the set's tuning holds 12 notes to its pseudo-octave, scales work on its keys as on twelve equal steps' ([scales.md](scales.md) R2). While it holds any other number, the Scale Mode switch and choosers in the Control Bar and the Clip View are hidden, the note editor's scale buttons are hidden, and each scale-aware device's Use Current Scale switch is disabled and acts as off; every clip keeps its scale, and the controls come back with it when the tuning goes. (S2, S6, S7)
 - **R17.** MIDI effects work on keys whatever the tuning, so under a tuning a move of n semitones is a move of n keys, n steps of the tuning. (S6)
@@ -77,25 +77,25 @@ While a tuning that doesn't hold twelve notes to its pseudo-octave is loaded, th
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1 | to be written in WP-6.9 | |
-| R2 | to be written in WP-6.9 | |
-| R3 | to be written in WP-6.9 | |
-| R4 | to be written in WP-6.9 | |
-| R5 | to be written in WP-6.9 | |
-| R6 | to be written in WP-6.9 | |
-| R7 | to be written in WP-6.9 | |
-| R8 | to be written in WP-6.9 | |
-| R9 | to be written in WP-6.9 | |
-| R10 | to be written in WP-6.9 | |
-| R11 | to be written in WP-6.9 | |
-| R12 | to be written in WP-6.9 | |
-| R13 | to be written in WP-6.9 | |
-| R14 | to be written in WP-6.9 | |
-| R15 | to be written in WP-6.9 | |
+| R1 | `crates/model/src/tuning.rs`, `twelve_equal_steps_play_the_keys_they_always_did`; `crates/model/tests/tunings.rs`, `a_set_plays_twelve_steps_until_a_tuning_is_loaded_and_each_edit_is_one_undo_step`; `crates/devices/tests/tuning.rs`, `without_a_tuning_keys_play_as_before` | unit |
+| R2 | `crates/shell/tests/tunings.rs`, `tuning_load_reads_a_file_and_tuning_state_reads_it_back`, `a_file_that_breaks_the_rules_is_refused_with_its_reason`; `crates/model/tests/tunings.rs`, `a_command_that_breaks_a_rule_changes_nothing` | unit |
+| R3 | `crates/interop/tests/scala.rs`, `equal_divisions_read_as_their_steps`, `ratios_read_as_cents`, `a_non_octave_tuning_keeps_its_pseudo_octave`, `steps_that_do_not_rise_in_order_are_all_used`, `comments_blank_lines_and_text_after_a_pitch_are_skipped`, `each_refusal_names_its_problem`, `latin_1_text_and_a_byte_order_mark_are_read`, `any_pitches_that_end_above_the_unison_read_back_as_written`, `a_wrong_count_is_always_refused` | unit, property |
+| R4 | `crates/interop/tests/scala.rs`, `a_file_is_read_with_the_default_reference_and_range` (an `.ascl` file is read as a `.scl` file; its comments' note names, reference pitch, range and link wait for decision 1) | unit |
+| R5 | `crates/interop/tests/scala.rs`, `the_name_is_the_files_without_its_extension_dash_and_number_kept` | unit |
+| R6 | `crates/model/src/tuning.rs`, `nineteen_steps_follow_r6`; `crates/devices/tests/tuning.rs`, `keys_play_at_the_tunings_frequencies_at_any_block_size` | unit |
+| R7 | `crates/model/src/tuning.rs`, `a_new_reference_note_keeps_the_sound_and_a_new_frequency_moves_it`; `crates/devices/tests/tuning_engine.rs`, `a_changed_tuning_reaches_the_next_notes_with_no_new_program` | unit |
+| R8 | `crates/model/src/tuning.rs`, `the_default_range_puts_degree_0_of_the_reference_octave_on_key_60`, `moving_one_end_of_the_range_moves_the_other_by_as_many_notes`, `a_range_of_fewer_notes_silences_the_keys_above_it`, `a_range_of_more_than_128_notes_or_backwards_is_refused`; `crates/devices/tests/tuning.rs`, `keys_above_the_range_are_silent` | unit |
+| R9 | `crates/model/tests/tunings.rs`, `a_set_plays_twelve_steps_until_a_tuning_is_loaded_and_each_edit_is_one_undo_step`, `removing_a_tuning_can_retune_the_notes_back`; `crates/devices/tests/tuning_engine.rs`, `a_changed_tuning_reaches_the_next_notes_with_no_new_program` | unit |
+| R10 | to be written when decision 1 is answered (`tuning.save` and the `.ascl` writer wait for it) | |
+| R11 | `crates/model/tests/tunings.rs`, `a_set_saves_its_tuning_inside_and_a_set_from_before_tunings_has_none`, `a_saved_tuning_that_breaks_the_rules_does_not_load`; `crates/cli/tests/older_sets.rs`, `a_set_saved_before_tunings_loads_with_none_and_a_set_with_one_keeps_it`; `crates/shell/tests/tunings.rs`, `a_saved_set_keeps_its_tuning_without_the_file` | unit |
+| R12 | `crates/devices/tests/tuning.rs`, `keys_play_at_the_tunings_frequencies_at_any_block_size`, `the_key_table_agrees_with_the_tuning`; `crates/engine/src/tuned.rs`, `a_tuning_gives_each_key_its_pitch_and_silences_keys_past_the_range` | unit |
+| R13 | `crates/devices/tests/tuning.rs`, `a_per_note_bend_moves_by_steps_of_the_tuning`; `crates/engine/src/tuned.rs`, `a_bend_moves_by_steps_of_the_tuning` | unit |
+| R14 | `crates/model/tests/tunings.rs`, `bypass_tuning_is_saved_only_where_it_is_on`, `a_retune_moves_only_the_notes_of_tracks_that_play_the_tuning`; `crates/devices/tests/tuning_engine.rs`, `bypass_tuning_makes_a_track_play_twelve_steps_and_only_that_track`, `a_drum_racks_track_renders_as_without_a_tuning` | unit |
+| R15 | `crates/model/tests/tunings.rs`, `retuning_moves_each_note_to_the_nearest_key_the_lower_on_a_tie`, `loading_without_retune_leaves_every_note_on_its_key`, `notes_that_overlap_on_one_key_after_a_retune_are_shortened_or_deleted`, `a_retune_leaves_alone_the_notes_it_didnt_move`, `a_note_on_a_key_that_played_nothing_stays_put`; `crates/shell/tests/tunings.rs`, `retune_follows_the_setting_unless_the_command_says`, `the_commands_that_set_and_remove_follow_the_setting`, `a_person_is_asked_before_a_tuning_changes_when_the_setting_is_on`, `the_setting_is_off_in_a_new_install_and_kept` | unit |
 | R16 | to be written in WP-6.10 | |
-| R17 | to be written in WP-6.9 | |
-| R18 | to be written in WP-6.9 | |
-| R19 | to be written in WP-6.9 | |
+| R17 | `crates/devices/tests/tuning_engine.rs`, `a_midi_effect_moves_keys_and_the_instrument_plays_the_tuned_pitch_of_the_new_key` | unit |
+| R18 | `crates/devices/tests/tuning.rs`, `a_changed_tuning_reaches_the_next_notes_and_leaves_sounding_ones`, `a_sounding_note_does_not_move_when_the_tuning_changes`, `keys_play_at_the_tunings_frequencies_at_any_block_size`; `crates/devices/tests/tuning_engine.rs`, `a_changed_tuning_reaches_the_next_notes_with_no_new_program`; `rtsan/tests/tuning.rs`, `instruments_playing_through_tuning_changes_pass_under_rtsan` | unit, real-time |
+| R19 | `crates/model/tests/command_registry.rs`, `every_command_runs_by_id`; `crates/agent/tests/tunings.rs`, `the_tuning_commands_run_by_id_and_read_back_through_tuning_state_and_the_query_tool`, `the_retune_setting_reads_back_from_settings_state`; `crates/agent/tests/readback.rs`, `every_query_readback_the_command_table_names_is_in_a_real_full_result` | unit |
 | R20 | to be written in WP-6.9b | |
 | R21 | to be written in WP-6.9b | |
 | R22 | to be written in WP-6.9b | |

@@ -1148,7 +1148,7 @@ fn step_notes(
                 continue;
             };
             if notes[place].length > step {
-                notes[place].length = notes[place].length - step;
+                notes[place].length -= step;
                 out.shortened += 1;
                 out.just.push(recorded);
             } else {

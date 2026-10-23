@@ -7,7 +7,7 @@
 //! on channel 16, which changes nothing in any program that sees the port
 //! while the test runs.
 //!
-//! `cargo test -p bl-midi-io --test platform -- --nocapture` prints the
+//! `cargo test -p bl-midi-io --test midi_io_tests -- platform:: --nocapture` prints the
 //! ports and the measurement.
 
 use bl_midi_io::{Direction, MidiBackend, MidirBackend};

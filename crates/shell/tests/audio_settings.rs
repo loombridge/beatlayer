@@ -381,7 +381,7 @@ fn a_device_change_applies_without_a_restart() {
 
 /// On this Mac's real output device, playing silence: the buffer size
 /// changes while the stream runs. Not run by default (CI has no device):
-/// `cargo test -p bl-shell --test audio_settings -- --ignored`.
+/// `cargo test -p bl-shell --test shell_tests -- audio_settings:: --ignored`.
 #[test]
 #[ignore = "needs a real audio output device"]
 fn on_the_default_device_a_buffer_change_applies_without_a_restart() {

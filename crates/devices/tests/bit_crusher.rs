@@ -2,10 +2,7 @@
 //! sample-rate reduction with its jitter and filters, and the bit reduction
 //! with its shape and DC shift.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use std::collections::BTreeSet;
 
 use bl_devices::crusher::{

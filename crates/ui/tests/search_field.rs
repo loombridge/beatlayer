@@ -4,8 +4,7 @@
 //! in the Arrangement, the Session View and the mixers, Show Only Matches,
 //! assistive technology, and the field's place at every zoom.
 
-mod common;
-
+use crate::common;
 use bl_commands::Context;
 use bl_core::time::Ticks;
 use bl_model::{Clip, ClipData, ClipId, Command, MidiData, TrackId};

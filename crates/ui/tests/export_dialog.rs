@@ -5,8 +5,7 @@
 //! file, and the progress window's bar moves and Cancel leaves nothing
 //! behind.
 
-mod common;
-
+use crate::common;
 use std::path::{Path, PathBuf};
 
 use bl_core::time::Ticks;

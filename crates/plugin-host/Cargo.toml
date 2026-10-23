@@ -1,4 +1,5 @@
 [package]
+autotests = false
 name = "bl-plugin-host"
 description = "CLAP, VST3, Audio Unit, and LV2 hosting behind one trait; the scanner; editor windows."
 version.workspace = true
@@ -138,6 +139,10 @@ block2 = "0.6.2"
 [[test]]
 name = "mac_editor"
 harness = false
+
+[[test]]
+name = "plugin_host_tests"
+path = "tests/main.rs"
 
 [lints]
 workspace = true

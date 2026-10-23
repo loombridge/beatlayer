@@ -4,10 +4,8 @@
 //! timestamps give, with every engine block a real-time section under the
 //! allocation trap.
 //!
-//! `cargo test -p bl-midi-io --test to_the_engine -- --nocapture` prints the
+//! `cargo test -p bl-midi-io --test midi_io_tests -- to_the_engine:: --nocapture` prints the
 //! timing measurement.
-
-bl_rt::install_trap!();
 
 use std::thread;
 use std::time::{Duration, Instant};

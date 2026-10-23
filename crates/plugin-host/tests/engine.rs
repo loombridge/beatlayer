@@ -5,10 +5,7 @@
 //!
 //! Spec: clap-hosting R17.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use std::sync::Arc;
 
 use bl_engine::testing::{self, Probe};

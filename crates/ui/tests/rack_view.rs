@@ -4,8 +4,7 @@
 //! the menus. Each gesture runs the registered command an agent runs.
 //! Devices are the engine's test devices.
 
-mod common;
-
+use crate::common;
 use bl_engine::testing;
 use bl_model::{ChainId, DeviceId, RackView, TrackId};
 use bl_shell::device_commands::{DeviceAdded, DeviceFrame, RackFrame, TITLE_BAR_HEIGHT};

@@ -279,7 +279,7 @@ fn written_now() -> Value {
 
 /// Creates the fixtures for the current schema version if they're missing.
 /// Run it once, by hand, when the schema version goes up:
-/// `cargo test -p bl-project --test schemas -- --ignored`. It never
+/// `cargo test -p bl-project --test project_tests -- schemas:: --ignored`. It never
 /// overwrites a fixture.
 #[test]
 #[ignore = "creates fixture files; run by hand for a new schema version"]

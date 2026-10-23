@@ -3,10 +3,7 @@
 //! slopes, a band at -inf or off leaving the others' response, the signal
 //! lights, and the display.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use std::f64::consts::TAU;
 
 use bl_devices::NativeNode;

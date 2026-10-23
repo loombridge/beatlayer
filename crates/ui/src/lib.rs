@@ -49,6 +49,7 @@ pub mod chain_strips;
 pub mod clip_envelope;
 pub mod clip_view;
 pub mod control_bar;
+pub mod detail_area;
 pub mod device_display;
 pub mod device_panel;
 pub mod device_view;

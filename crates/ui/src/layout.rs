@@ -27,6 +27,9 @@
 //! title bar keeps its 23 window points, as the system's buttons in it
 //! don't scale ([`title_bar_height`]).
 
+use bl_shell::commands::{
+    CLIP_VIEW_HEIGHT, CLIP_VIEW_MIN_HEIGHT, DETAIL_GAP, DEVICE_VIEW_HEIGHT, MAIN_VIEW_MIN_HEIGHT,
+};
 use egui::{Pos2, Rect, Vec2, pos2, vec2};
 
 pub mod mixer;
@@ -434,8 +437,8 @@ pub const ELEMENTS: &[Placement] = &[
     p(E::InfoToggle, "L-STAT-001", "Show/Hide Info View", SB, 17.0, 16.0, Left, Switch, None),
     p(E::Message, "L-STAT-002", "Status", SB, 44.0, 1196.0, Left, Display, None),
     p(E::ClipViewToggle, "L-STAT-004", "Show/Hide Clip View", SB, 1259.0, 10.0, Right, Switch, None),
-    p(E::ClipSelector, "L-STAT-005", "Clip View Selector", SB, 1270.0, 198.0, Right, Display, Some("M2")),
-    p(E::DeviceViewToggle, "L-STAT-006", "Show/Hide Device View", SB, 1486.0, 10.0, Right, Switch, Some("M2")),
+    p(E::ClipSelector, "L-STAT-005", "Clip View Selector", SB, 1270.0, 198.0, Right, Display, None),
+    p(E::DeviceViewToggle, "L-STAT-006", "Show/Hide Device View", SB, 1486.0, 10.0, Right, Switch, None),
     p(E::DeviceSelector, "L-STAT-007", "Device View Selector", SB, 1497.0, 41.0, Right, Display, None),
     p(E::MixerToggle, "L-STAT-008", "Show/Hide Mixer", SB, 1557.0, 24.0, Right, Switch, None),
     p(E::MixerMenu, "L-STAT-008", "Mixer Config Menu", SB, 1581.0, 10.0, Right, MenuArrow, None),
@@ -456,6 +459,47 @@ pub fn placement(element: Element) -> &'static Placement {
 /// second is 157 points here, the assistant's toggle having taken 20 (D24).
 const MIDDLE_SHARE: f32 = 103.0 / (103.0 + 157.0);
 
+/// Which of the detail area's views show and how tall the Clip View is,
+/// which decide where the detail area, the main view and the browser go
+/// (detail-views R7 to R12). A window holds one of its own.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DetailViews {
+    /// Whether the Clip View shows.
+    pub clip: bool,
+    /// Whether the Device View shows.
+    pub device: bool,
+    /// The Clip View's height, in layout points, as it was set.
+    pub clip_height: f32,
+    /// Whether the Clip View takes its largest height.
+    pub expanded: bool,
+}
+
+impl DetailViews {
+    /// What the shell's detail area shows.
+    #[must_use]
+    pub fn of(detail: &bl_shell::detail::DetailArea) -> Self {
+        Self {
+            clip: detail.clip_shown(),
+            device: detail.device_shown(),
+            clip_height: detail.clip_height() as f32,
+            expanded: detail.expanded(),
+        }
+    }
+}
+
+impl Default for DetailViews {
+    /// A new session: the Device View alone, the Clip View at its own
+    /// height.
+    fn default() -> Self {
+        Self {
+            clip: false,
+            device: true,
+            clip_height: CLIP_VIEW_HEIGHT,
+            expanded: false,
+        }
+    }
+}
+
 /// The rectangles of the main window's panes and controls for a content
 /// area of a given size.
 #[derive(Clone, Debug, PartialEq)]
@@ -468,15 +512,25 @@ pub struct ShellLayout {
     pub browser: Option<Rect>,
     /// The main view (L-WIN-005).
     pub main_view: Rect,
-    /// The detail area (L-WIN-006): the Info View and the Clip or Device
-    /// View.
+    /// The detail area (L-WIN-006): the Clip View and the Device View,
+    /// stacked when both show, without the Info View. It has no height
+    /// while neither shows.
     pub detail: Rect,
     /// The Info View, at the detail area's left, while it shows
-    /// (L-INFO-001).
+    /// (L-INFO-001), as tall as the detail area, or as the Device View
+    /// while neither shows (info-view R7).
     pub info_view: Option<Rect>,
+    /// The Clip View, right of the Info View (L-CLIP-001), or taking the
+    /// whole detail area's width while the Info View hides: alone, or above
+    /// the Device View.
+    pub clip_view: Option<Rect>,
     /// The Device View, right of the Info View (L-DEV-001), or taking the
-    /// whole detail area while the Info View hides.
-    pub device_view: Rect,
+    /// whole detail area's width while the Info View hides, at the
+    /// detail area's bottom.
+    pub device_view: Option<Rect>,
+    /// The tallest the Clip View can be in this window, in layout points:
+    /// the height that leaves the main view its smallest (R10).
+    pub largest_clip_view: f32,
     /// The Status Bar strip (L-WIN-007).
     pub status_bar: Rect,
     /// The assistant's pane, at the right edge, while it's docked and open
@@ -525,6 +579,26 @@ impl ShellLayout {
         assistant: Option<f32>,
         undo_history: Option<f32>,
     ) -> Self {
+        Self::compute_with_detail(
+            size,
+            browser,
+            info_view,
+            assistant,
+            undo_history,
+            DetailViews::default(),
+        )
+    }
+
+    /// The same, with the detail area's views as `detail` has them.
+    #[must_use]
+    pub fn compute_with_detail(
+        size: Vec2,
+        browser: bool,
+        info_view: bool,
+        assistant: Option<f32>,
+        undo_history: Option<f32>,
+        detail_views: DetailViews,
+    ) -> Self {
         let size = size.max(MINIMUM);
         let (w, h) = (size.x, size.y);
         let extra = w - REFERENCE.x;
@@ -564,21 +638,73 @@ impl ShellLayout {
             )
         });
         let detail_bottom = status_bar.top() - (y(968.0) - y(962.0));
+        // The Device View keeps its height at the bottom and the Clip View
+        // sits above it; a window too short for the Clip View's height
+        // gives it less, down to its smallest, and below that the main view
+        // less (detail-views R8, R10, R12).
+        let device_height = if detail_views.device {
+            DEVICE_VIEW_HEIGHT
+        } else {
+            0.0
+        };
+        let gap = if detail_views.clip && detail_views.device {
+            DETAIL_GAP
+        } else {
+            0.0
+        };
+        let largest_clip_view =
+            (detail_bottom - y(61.0) - MAIN_VIEW_MIN_HEIGHT - DETAIL_GAP - device_height - gap)
+                .max(CLIP_VIEW_MIN_HEIGHT);
+        let clip_height = match (detail_views.clip, detail_views.expanded) {
+            (false, _) => 0.0,
+            (true, true) => largest_clip_view,
+            (true, false) => detail_views
+                .clip_height
+                .clamp(CLIP_VIEW_MIN_HEIGHT, largest_clip_view),
+        };
+        let height = clip_height + gap + device_height;
         let detail = Rect::from_min_max(
-            pos2(MARGIN, detail_bottom - 188.0),
+            pos2(MARGIN, detail_bottom - height),
             pos2(right, detail_bottom),
         );
-        let views_bottom = detail.top() - 8.0;
+        // The Info View is as tall as the detail area, or as tall as the
+        // Device View while neither view shows (info-view R7).
+        let info_view = info_view.then(|| {
+            let height = if height > 0.0 {
+                height
+            } else {
+                DEVICE_VIEW_HEIGHT
+            };
+            Rect::from_min_max(
+                pos2(detail.left(), detail_bottom - height),
+                pos2(240.0, detail_bottom),
+            )
+        });
+        // The main view runs down to the detail area, 8 points above it, or
+        // to its bottom edge while neither view shows; the browser stops
+        // above the Info View as well (R9).
+        let views_bottom = if height > 0.0 {
+            detail.top() - DETAIL_GAP
+        } else {
+            detail_bottom
+        };
+        let browser_bottom = info_view.map_or(views_bottom, |info| info.top() - DETAIL_GAP);
         let browser_rect =
-            browser.then(|| Rect::from_min_max(pos2(MARGIN, y(61.0)), pos2(311.0, views_bottom)));
+            browser.then(|| Rect::from_min_max(pos2(MARGIN, y(61.0)), pos2(311.0, browser_bottom)));
         let main_left = browser_rect.map_or(MARGIN, |b| b.right() + MARGIN);
         let main_view = Rect::from_min_max(pos2(main_left, y(61.0)), pos2(right, views_bottom));
-        let info_view =
-            info_view.then(|| Rect::from_min_max(detail.min, pos2(240.0, detail.bottom())));
-        // With the Info View hidden the Device View takes the detail area's
-        // whole width.
-        let device_left = info_view.map_or(detail.min.x, |info| info.right() + 9.0);
-        let device_view = Rect::from_min_max(pos2(device_left, detail.top()), detail.max);
+        // With the Info View hidden the views take the detail area's whole
+        // width.
+        let views_left = info_view.map_or(detail.left(), |info| info.right() + 9.0);
+        let clip_view = detail_views.clip.then(|| {
+            Rect::from_min_max(
+                pos2(views_left, detail.top()),
+                pos2(right, detail.top() + clip_height),
+            )
+        });
+        let device_view = detail_views.device.then(|| {
+            Rect::from_min_max(pos2(views_left, detail_bottom - device_height), detail.max)
+        });
 
         let elements = ELEMENTS
             .iter()
@@ -614,12 +740,31 @@ impl ShellLayout {
             main_view,
             detail,
             info_view,
+            clip_view,
             device_view,
+            largest_clip_view,
             status_bar,
             assistant,
             undo_history,
             elements,
         }
+    }
+
+    /// Where the detail area's views go, right of the Info View: both
+    /// views and the gap between them, or where the Device View would be
+    /// while neither shows. The File Manager and the list of the set's
+    /// plug-ins take it.
+    #[must_use]
+    pub fn views(&self) -> Rect {
+        let left = self
+            .info_view
+            .map_or(self.detail.left(), |info| info.right() + MARGIN);
+        let top = if self.detail.height() > 0.0 {
+            self.detail.top()
+        } else {
+            self.detail.bottom() - DEVICE_VIEW_HEIGHT
+        };
+        Rect::from_min_max(pos2(left, top), self.detail.max)
     }
 
     /// The same layout moved by `offset`, for a content area that doesn't
@@ -632,9 +777,14 @@ impl ShellLayout {
             &mut self.control_bar,
             &mut self.main_view,
             &mut self.detail,
-            &mut self.device_view,
             &mut self.status_bar,
         ] {
+            move_rect(rect);
+        }
+        for rect in [&mut self.clip_view, &mut self.device_view]
+            .into_iter()
+            .flatten()
+        {
             move_rect(rect);
         }
         if let Some(browser) = &mut self.browser {
@@ -665,11 +815,17 @@ impl ShellLayout {
             &mut self.control_bar,
             &mut self.main_view,
             &mut self.detail,
-            &mut self.device_view,
             &mut self.status_bar,
         ] {
             scale(rect);
         }
+        for rect in [&mut self.clip_view, &mut self.device_view]
+            .into_iter()
+            .flatten()
+        {
+            scale(rect);
+        }
+        self.largest_clip_view *= factor;
         if let Some(browser) = &mut self.browser {
             scale(browser);
         }
@@ -696,11 +852,19 @@ impl ShellLayout {
             row("L-WIN-003", "Control Bar", self.control_bar),
             row("L-WIN-005", "Main view", self.main_view),
             row("L-WIN-006", "Detail area", self.detail),
-            row("L-DEV-001", "Device View", self.device_view),
             row("L-WIN-007", "Status Bar", self.status_bar),
         ];
-        if let Some(info_view) = self.info_view {
-            rows.insert(3, row("L-INFO-001", "Info View", info_view));
+        let views = [
+            ("L-INFO-001", "Info View", self.info_view),
+            ("L-CLIP-001", "Clip View", self.clip_view),
+            ("L-DEV-001", "Device View", self.device_view),
+        ];
+        let mut at = 3;
+        for (id, name, rect) in views {
+            if let Some(rect) = rect {
+                rows.insert(at, row(id, name, rect));
+                at += 1;
+            }
         }
         if let Some(browser) = self.browser {
             rows.insert(1, row("L-WIN-004", "Browser", browser));
@@ -1306,7 +1470,7 @@ mod tests {
         assert_eq!(info.min, layout.detail.min);
         assert_eq!(info.right(), 240.0);
         assert_eq!(info.bottom(), layout.detail.bottom());
-        assert_eq!(layout.device_view.left(), 249.0);
+        assert_eq!(layout.device_view.unwrap().left(), 249.0);
         assert!(layout.rows().iter().any(|r| r.id == "L-INFO-001"));
     }
 
@@ -1316,8 +1480,153 @@ mod tests {
         let shown = ShellLayout::compute(REFERENCE, true, true);
         let hidden = ShellLayout::compute(REFERENCE, true, false);
         assert_eq!(hidden.info_view, None);
-        assert_eq!(hidden.device_view.left(), hidden.detail.left());
-        assert_eq!(hidden.device_view.right(), shown.device_view.right());
+        assert_eq!(hidden.device_view.unwrap().left(), hidden.detail.left());
+        assert_eq!(
+            hidden.device_view.unwrap().right(),
+            shown.device_view.unwrap().right()
+        );
         assert!(!hidden.rows().iter().any(|r| r.id == "L-INFO-001"));
+    }
+
+    fn detail(clip: bool, device: bool) -> DetailViews {
+        DetailViews {
+            clip,
+            device,
+            ..DetailViews::default()
+        }
+    }
+
+    fn with(size: Vec2, browser: bool, info: bool, views: DetailViews) -> ShellLayout {
+        ShellLayout::compute_with_detail(size, browser, info, None, None, views)
+    }
+
+    /// Whether two rectangles share any area.
+    fn overlap(a: Rect, b: Rect) -> bool {
+        let both = a.intersect(b);
+        both.width() > 0.01 && both.height() > 0.01
+    }
+
+    // Spec: detail-views R7.
+    #[test]
+    fn one_view_alone_sits_at_the_detail_areas_bottom() {
+        let device = with(REFERENCE, true, true, detail(false, true));
+        assert_eq!(device.clip_view, None);
+        assert_eq!(device.detail.height(), 188.0);
+        assert_eq!(device.device_view.unwrap().height(), 188.0);
+        assert_eq!(device.main_view.bottom(), device.detail.top() - 8.0);
+        assert_eq!(device.browser.unwrap().bottom(), device.detail.top() - 8.0);
+
+        let clip = with(REFERENCE, true, true, detail(true, false));
+        assert_eq!(clip.device_view, None);
+        assert_eq!(clip.detail.height(), 225.0);
+        let view = clip.clip_view.unwrap();
+        assert_eq!(view.height(), 225.0);
+        assert_eq!(view.bottom(), clip.detail.bottom());
+        assert_eq!(view.left(), 249.0, "right of the Info View");
+        assert_eq!(clip.main_view.bottom(), clip.detail.top() - 8.0);
+        assert!(clip.rows().iter().any(|r| r.id == "L-CLIP-001"));
+        assert!(!clip.rows().iter().any(|r| r.id == "L-DEV-001"));
+    }
+
+    // Spec: detail-views R8, info-view R7.
+    #[test]
+    fn stacked_views_keep_the_device_view_at_the_bottom() {
+        let both = with(REFERENCE, true, true, detail(true, true));
+        let (clip, device) = (both.clip_view.unwrap(), both.device_view.unwrap());
+        assert_eq!(device.height(), 188.0);
+        assert_eq!(device.bottom(), both.detail.bottom());
+        assert_eq!(clip.height(), 225.0);
+        assert_eq!(clip.bottom() + 8.0, device.top(), "8 points between them");
+        assert_eq!(both.detail.height(), 225.0 + 8.0 + 188.0);
+        assert_eq!(both.main_view.bottom(), clip.top() - 8.0);
+        let info = both.info_view.unwrap();
+        assert_eq!(info.top(), clip.top(), "as tall as the detail area");
+        assert_eq!(info.bottom(), device.bottom());
+    }
+
+    // Spec: detail-views R9, info-view R7.
+    #[test]
+    fn with_neither_view_the_main_view_runs_to_the_detail_areas_bottom() {
+        let none = with(REFERENCE, true, true, detail(false, false));
+        assert_eq!((none.clip_view, none.device_view), (None, None));
+        assert_eq!(none.detail.height(), 0.0);
+        assert_eq!(none.main_view.bottom(), none.detail.bottom());
+        let info = none.info_view.unwrap();
+        assert_eq!(info.height(), 188.0, "the Device View's height");
+        assert_eq!(none.browser.unwrap().bottom(), info.top() - 8.0);
+        let no_info = with(REFERENCE, true, false, detail(false, false));
+        assert_eq!(no_info.browser.unwrap().bottom(), no_info.detail.bottom());
+    }
+
+    // Spec: detail-views R11.
+    #[test]
+    fn expanding_gives_the_clip_view_the_room_the_main_view_can_spare() {
+        let mut views = detail(true, false);
+        views.expanded = true;
+        let alone = with(REFERENCE, true, true, views);
+        assert_eq!(alone.main_view.height(), 80.0);
+        assert_eq!(alone.clip_view.unwrap().height(), alone.largest_clip_view);
+        views.device = true;
+        let stacked = with(REFERENCE, true, true, views);
+        assert_eq!(stacked.main_view.height(), 80.0);
+        assert_eq!(stacked.device_view.unwrap().height(), 188.0);
+        assert!(stacked.largest_clip_view < alone.largest_clip_view);
+    }
+
+    // Spec: detail-views R10, R12.
+    #[test]
+    fn the_clip_views_height_is_squeezed_in_a_short_window() {
+        let mut views = detail(true, true);
+        views.clip_height = 2000.0;
+        let tall = with(REFERENCE, true, true, views);
+        assert_eq!(tall.main_view.height(), 80.0);
+        let short = with(MINIMUM, true, true, views);
+        let clip = short.clip_view.unwrap().height();
+        assert!(clip >= 100.0);
+        assert!(clip == 100.0 || short.main_view.height() == 80.0);
+        views.clip_height = 10.0;
+        let small = with(REFERENCE, true, true, views);
+        assert_eq!(small.clip_view.unwrap().height(), 100.0);
+    }
+
+    // Spec: detail-views R7 to R9, R12.
+    #[test]
+    fn no_pane_overlaps_another_at_any_zoom_or_size() {
+        for (clip, device) in [(true, false), (false, true), (true, true), (false, false)] {
+            for expanded in [false, true] {
+                for zoom in [0.5_f32, 1.0, 2.0] {
+                    for window in [REFERENCE, MINIMUM] {
+                        let views = DetailViews {
+                            expanded,
+                            ..detail(clip, device)
+                        };
+                        let layout = with(window, true, true, views).scale(zoom);
+                        let panes: Vec<Rect> = [
+                            Some(layout.main_view),
+                            layout.browser,
+                            layout.info_view,
+                            layout.clip_view,
+                            layout.device_view,
+                            Some(layout.status_bar),
+                        ]
+                        .into_iter()
+                        .flatten()
+                        .collect();
+                        for (at, one) in panes.iter().enumerate() {
+                            for other in &panes[at + 1..] {
+                                assert!(
+                                    !overlap(*one, *other),
+                                    "{one:?} overlaps {other:?}: {views:?} at {zoom}"
+                                );
+                            }
+                        }
+                        // The heights scale with the zoom (R12).
+                        if let Some(device) = layout.device_view {
+                            assert!((device.height() - 188.0 * zoom).abs() < 0.01);
+                        }
+                    }
+                }
+            }
+        }
     }
 }

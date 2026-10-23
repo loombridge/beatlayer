@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-779 commands in 46 areas.
+780 commands in 46 areas.
 
 ## Permission classes
 
@@ -515,6 +515,7 @@ Each command has:
 | [`note.ramp_value`](#noteramp_value) | Ramp Note Values | `edit` |  |  |
 | [`note.randomize`](#noterandomize) | Randomize Note Values | `edit` |  |  |
 | [`note.resize`](#noteresize) | Resize Notes | `edit` |  |  |
+| [`note.set_expression`](#noteset_expression) | Set Note Expression | `edit` |  |  |
 | [`note.set_value`](#noteset_value) | Set Note Value | `edit` |  |  |
 | [`note.split`](#notesplit) | Split Note(s) | `edit` |  |  |
 | [`note.split_clip`](#notesplit_clip) | Split Clip | `edit` | `Cmd+Shift+E` | `Ctrl+Shift+E` |
@@ -8370,7 +8371,7 @@ Result: [`MidiImportResult`](#midiimportresult).
 
 **MIDI Ports**. Permission: `read`. Contexts: `global`.
 
-Lists every MIDI input and output port the computer offers, each with its Track, Sync, and Remote switches as the Settings window's Tempo & MIDI page shows them, and the computer MIDI keyboard's state. Changes nothing.
+Lists every MIDI input and output port the computer offers, each with its Track, Sync, Remote and MPE switches as the Settings window's Tempo & MIDI page shows them, and the computer MIDI keyboard's state. Changes nothing.
 
 Default keys: none.
 
@@ -8382,7 +8383,7 @@ Result: [`MidiPortsResult`](#midiportsresult).
 
 **Set MIDI Port**. Permission: `external`. Contexts: `global`.
 
-Changes a MIDI port's Track, Sync, and Remote switches, as the Settings window's MIDI ports table does; switches left out stay as they are. A port is open while any of its switches is on and closed when all are off. An input's notes and controllers reach tracks only while its Track switch is on; Sync and Remote are kept and act when sync and MIDI mapping are built. The port's switches are kept for the next start, and aren't part of the set or an undo step. Opens or closes a device outside Beatlayer. Fails if the computer doesn't offer the port now.
+Changes a MIDI port's Track, Sync, Remote and MPE switches, as the Settings window's MIDI ports table does; switches left out stay as they are. A port is open while its Track, Sync or Remote switch is on and closed when all three are off; MPE opens nothing by itself. An input's notes and controllers reach tracks only while its Track switch is on, and as MPE, each note on a channel of its own with its own pitch, slide and pressure, while its MPE switch is on too; Sync and Remote are kept and act when sync and MIDI mapping are built. Output ports have no MPE switch, and `mpe` on one is refused. The port's switches are kept for the next start, and aren't part of the set or an undo step. Opens or closes a device outside Beatlayer. Fails if the computer doesn't offer the port now.
 
 Default keys: none.
 
@@ -8392,6 +8393,7 @@ Arguments:
 |---|---|---|---|
 | `direction` | [`PortDirection`](#portdirection) | yes | Input or output. |
 | `name` | string | yes | The port's name, as `midi.ports` lists it. |
+| `mpe` | boolean or null | no | MPE on or off, for an input. Left out, it stays as it is. |
 | `remote` | boolean or null | no | Remote on or off. Left out, it stays as it is. |
 | `sync` | boolean or null | no | Sync on or off. Left out, it stays as it is. |
 | `track` | boolean or null | no | Track on or off. Left out, it stays as it is. |
@@ -9511,6 +9513,25 @@ Arguments:
 | `by` | [`Ticks`](#ticks) | yes | How far each note's end moves, in ticks; negative is shorter. A note keeps at least one tick of length. |
 | `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows (the Arrangement's selected clip). |
 | `clips` | array or null | no | The clips, each with its notes, in place of `clip` and `notes` (Spec: multi-clip-editing R18). Left out with `clip` and `notes`, the selected notes of every clip shown, or of the active clip alone in Focus Mode. |
+| `notes` | array or null | no | The notes, by their place in the clip's notes in order (by start, then pitch). Left out, the selected notes. |
+
+Result: [`NoteEditResult`](#noteeditresult).
+
+#### `note.set_expression`
+
+**Set Note Expression**. Permission: `edit`. Contexts: `note-editor`, `note-selection`.
+
+Replaces one expression envelope of notes (`notes`, or the selected notes) with `breakpoints`, as editing the Clip View's MPE tab does: `envelope` is `pitch` (the note's own pitch bend in semitones from its key, -48 to 48), `slide` (0 to 127) or `pressure` (0 to 127). Each breakpoint is an `at` in ticks counted from the note's start, from 0 to the note's length, a `value` in the envelope's range, and a `bend` from -1 to 1 for the segment starting there (0 is straight); they go in order of `at`, none twice. An empty list clears the envelope. Nothing changes if a value, a position or a bend is out of range, two breakpoints share a position, or the clip isn't a MIDI clip. One undo step, Set Note Expression; the notes stay selected. The clip query's notes read each envelope back.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `envelope` | [`Expression`](#expression) | yes | Which envelope to replace: `pitch` (semitones from the note's key, −48 to 48), `slide` or `pressure` (0 to 127). |
+| `breakpoints` | array of [`Breakpoint`](#breakpoint) | yes | The breakpoints every one of the notes gets, each at a position in ticks counted from the note's start (0 to its length, in order, none twice), with a value in the envelope's range and an optional `bend` from −1 to 1 for the segment starting there. An empty list clears the envelope. |
+| `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows (the Arrangement's selected clip). |
 | `notes` | array or null | no | The notes, by their place in the clip's notes in order (by start, then pitch). Left out, the selected notes. |
 
 Result: [`NoteEditResult`](#noteeditresult).
@@ -14815,6 +14836,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`note.ramp_value`](#noteramp_value) | the query tool's `clip` | `data.midi.notes` |
 | [`note.randomize`](#noterandomize) | the query tool's `clip` | `data.midi.notes` |
 | [`note.resize`](#noteresize) | the query tool's `clip` | `data.midi.notes` |
+| [`note.set_expression`](#noteset_expression) | the query tool's `clip` | `data.midi.notes` |
 | [`note.set_value`](#noteset_value) | the query tool's `clip` | `data.midi.notes` |
 | [`note.split`](#notesplit) | the query tool's `clip` | `data.midi.notes` |
 | [`note.split_clip`](#notesplit_clip) | the query tool's `track` | `clips` |
@@ -24700,6 +24722,43 @@ What `plugin.export_list` returns: the file it wrote.
 
 </details>
 
+### `Expression`
+
+Which of a note's three expression envelopes.
+
+One of:
+
+- `"pitch"`: The note's own pitch bend, in semitones from its key, −48 to +48.
+- `"slide"`: The finger's movement along the key, 0 to 127.
+- `"pressure"`: The note's own pressure, 0 to 127.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Which of a note's three expression envelopes.",
+  "oneOf": [
+    {
+      "const": "pitch",
+      "description": "The note's own pitch bend, in semitones from its key, −48 to +48.",
+      "type": "string"
+    },
+    {
+      "const": "slide",
+      "description": "The finger's movement along the key, 0 to 127.",
+      "type": "string"
+    },
+    {
+      "const": "pressure",
+      "description": "The note's own pressure, 0 to 127.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `External`
 
 An external device's routing: `port` (MIDI To, the MIDI output port's name as the MIDI settings list it; absent for No Output), `channel` (the MIDI channel, 1 to 16), `audio_from` (the audio interface's inputs it comes back on, a channel or a pair), and `hardware_latency`.
@@ -31798,9 +31857,11 @@ A note in a MIDI clip.
 | `length` | [`Ticks`](#ticks) | yes | How long the note lasts. Always positive. |
 | `group` | integer or null | no | The probability group the note belongs to, an ID in the clip's `groups` (Spec: note-editing R21). |
 | `mute` | boolean | no | Whether the note is switched off, so it stays in place but doesn't play. |
-| `pressure` | array of [`PressurePoint`](#pressurepoint) | no | The note's own pressure, played as polyphonic pressure over its length: points in order of `at`, none at the same place. A note with none plays no pressure. |
+| `pitch` | array of [`Breakpoint`](#breakpoint) | no | The note's own pitch bend in semitones from its key, from −48 to +48 (WP-6.17; the MPE spec, R1): breakpoints counted from the note's start, in order of position with none at the same place. A note with none bends nowhere. |
+| `pressure` | array of [`Breakpoint`](#breakpoint) | no | The note's own pressure, from 0 to 127, as `pitch` is kept (the MIDI controller data spec, R2). A note with none plays no pressure. |
 | `probability` | number from 0 to 1 | no | The chance the note will play, from 0 to 1: 1 (100 %) unless given. |
 | `release_velocity` | integer from 1 to 127 | no | The release velocity, from 1 to 127; 64 unless given. |
+| `slide` | array of [`Breakpoint`](#breakpoint) | no | The finger's movement along the key, from 0 to 127, as `pitch` is kept. |
 | `velocity_deviation` | integer from -127 to 127 | no | How far velocity may deviate randomly, from -127 to +127: 0 unless given. |
 
 <details><summary>JSON Schema</summary>
@@ -31833,10 +31894,17 @@ A note in a MIDI clip.
       "description": "Whether the note is switched off, so it stays in place but doesn't play.",
       "type": "boolean"
     },
-    "pressure": {
-      "description": "The note's own pressure, played as polyphonic pressure over its length: points in order of `at`, none at the same place. A note with none plays no pressure.",
+    "pitch": {
+      "description": "The note's own pitch bend in semitones from its key, from −48 to +48 (WP-6.17; the MPE spec, R1): breakpoints counted from the note's start, in order of position with none at the same place. A note with none bends nowhere.",
       "items": {
-        "$ref": "#/$defs/PressurePoint"
+        "$ref": "#/$defs/Breakpoint"
+      },
+      "type": "array"
+    },
+    "pressure": {
+      "description": "The note's own pressure, from 0 to 127, as `pitch` is kept (the MIDI controller data spec, R2). A note with none plays no pressure.",
+      "items": {
+        "$ref": "#/$defs/Breakpoint"
       },
       "type": "array"
     },
@@ -31853,6 +31921,13 @@ A note in a MIDI clip.
       "maximum": 127,
       "minimum": 1,
       "type": "integer"
+    },
+    "slide": {
+      "description": "The finger's movement along the key, from 0 to 127, as `pitch` is kept.",
+      "items": {
+        "$ref": "#/$defs/Breakpoint"
+      },
+      "type": "array"
     },
     "start": {
       "$ref": "#/$defs/Ticks",
@@ -34024,6 +34099,7 @@ One MIDI port as the Settings window's table shows it.
 | `track` | boolean | yes | Track: an input's notes and controllers reach tracks; an output takes tracks' MIDI. |
 | `sync` | boolean | yes | Sync: an input's clock and transport messages are followed; an output sends clock. Kept now, acted on when sync is built. |
 | `remote` | boolean | yes | Remote: an input controls Beatlayer through MIDI mapping; an output sends feedback. Kept now, acted on when MIDI mapping is built. |
+| `mpe` | boolean | yes | MPE: an input's messages reach tracks as MPE, each note on a channel of its own; an output has no MPE switch, and reads false. |
 | `present` | boolean | yes | Whether the MIDI system offers the port now. |
 | `open` | boolean | yes | Whether it is open: any of its switches is on. |
 | `error` | string or null | no | Why it couldn't be opened, if it couldn't. |
@@ -34044,6 +34120,11 @@ One MIDI port as the Settings window's table shows it.
         "string",
         "null"
       ]
+    },
+    "mpe": {
+      "default": false,
+      "description": "MPE: an input's messages reach tracks as MPE, each note on a channel of its own; an output has no MPE switch, and reads false.",
+      "type": "boolean"
     },
     "name": {
       "description": "The name the MIDI system gives it.",
@@ -34076,6 +34157,7 @@ One MIDI port as the Settings window's table shows it.
     "track",
     "sync",
     "remote",
+    "mpe",
     "present",
     "open"
   ],
@@ -34207,43 +34289,6 @@ What the preset commands return.
     "device",
     "path",
     "name"
-  ],
-  "type": "object"
-}
-```
-
-</details>
-
-### `PressurePoint`
-
-One point of a note's pressure (WP-2.29): from `at` after the note's start the note's key is pressed to `value`, until the next point.
-
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `at` | [`Ticks`](#ticks) | yes | Where it takes effect, counted from the note's start: 0 or more and before the note's length. |
-| `value` | integer from 0 to 127 | yes | The pressure, from 0 to 127. |
-
-<details><summary>JSON Schema</summary>
-
-```json
-{
-  "description": "One point of a note's pressure (WP-2.29): from `at` after the note's start the note's key is pressed to `value`, until the next point.",
-  "properties": {
-    "at": {
-      "$ref": "#/$defs/Ticks",
-      "description": "Where it takes effect, counted from the note's start: 0 or more and before the note's length."
-    },
-    "value": {
-      "description": "The pressure, from 0 to 127.",
-      "format": "uint8",
-      "maximum": 127,
-      "minimum": 0,
-      "type": "integer"
-    }
-  },
-  "required": [
-    "at",
-    "value"
   ],
   "type": "object"
 }

@@ -781,9 +781,20 @@ fn a_chain_from_the_list_takes_its_devices_and_from_the_mixer_its_notes() {
     // A clip on the rack's track plays both pads' notes.
     let clip: bl_model::ClipId = kit.shell.new_id();
     let beat = bl_core::time::Ticks(bl_core::time::TICKS_PER_QUARTER);
+    // Spec: mpe R4. The note a chain takes with it keeps its envelopes.
+    let point = |at: bl_core::time::Ticks, value: f64| bl_model::Breakpoint {
+        at,
+        value,
+        bend: 0.0,
+    };
+    let bent = bl_model::Note {
+        pitch: vec![point(bl_core::time::Ticks::ZERO, 0.0), point(beat / 2, 7.0)],
+        slide: vec![point(bl_core::time::Ticks::ZERO, 90.0)],
+        ..bl_model::Note::new(38, beat, beat, 90)
+    };
     let notes = [
         bl_model::Note::new(36, bl_core::time::Ticks::ZERO, beat, 100),
-        bl_model::Note::new(38, beat, beat, 90),
+        bent.clone(),
         bl_model::Note::new(36, beat * 2, beat, 80),
     ];
     kit.shell
@@ -827,6 +838,8 @@ fn a_chain_from_the_list_takes_its_devices_and_from_the_mixer_its_notes() {
     assert_eq!(data.notes.len(), 1);
     assert_eq!(data.notes[0].key, 62, "at the chain's Play note");
     assert_eq!(data.notes[0].start, beat);
+    assert_eq!(data.notes[0].pitch, bent.pitch, "with its envelopes");
+    assert_eq!(data.notes[0].slide, bent.slide);
     // The source clip keeps only the other pad's notes.
     let source = doc.track(kit.track).unwrap().clips().next().unwrap();
     let bl_model::ClipData::Midi(left) = &source.data else {

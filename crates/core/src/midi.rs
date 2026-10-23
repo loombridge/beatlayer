@@ -199,12 +199,27 @@ impl PortId {
 pub enum MidiSource {
     /// An input port, by its ID.
     Port(PortId),
+    /// An input port whose MPE switch is on (`docs/specs/midi-io.md`, R27),
+    /// by its ID: its messages are read as MPE.
+    MpePort(PortId),
     /// The computer MIDI keyboard.
     ComputerKeyboard,
     /// A preview of the MIDI Note Editor (Spec: step-recording R2): a note
     /// played into the chain of the MIDI track with this ID, whatever its
     /// input and monitoring say. It is neither recorded nor held as a key.
     Preview(crate::id::Id),
+}
+
+impl MidiSource {
+    /// The port the message came from, MPE or not; `None` for the computer
+    /// keyboard and a preview.
+    #[must_use]
+    pub const fn port(self) -> Option<PortId> {
+        match self {
+            Self::Port(port) | Self::MpePort(port) => Some(port),
+            Self::ComputerKeyboard | Self::Preview(_) => None,
+        }
+    }
 }
 
 /// A message on its way from a MIDI input to the engine: where it came

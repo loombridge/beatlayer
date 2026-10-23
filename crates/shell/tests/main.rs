@@ -64,6 +64,7 @@ mod midi_controller_recording;
 mod midi_files;
 mod midi_io;
 mod mixer_view;
+mod mpe_recording;
 mod multi_clip;
 mod multi_output;
 mod multiband_dynamics;

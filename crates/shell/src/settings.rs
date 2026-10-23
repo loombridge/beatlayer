@@ -203,6 +203,9 @@ pub struct PortPrefs {
     pub sync: bool,
     /// Remote.
     pub remote: bool,
+    /// MPE, for an input; a preferences file from before it has none.
+    #[serde(default)]
+    pub mpe: bool,
 }
 
 /// A switch that's on unless the preferences say otherwise, read and

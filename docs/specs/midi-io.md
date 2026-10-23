@@ -88,5 +88,5 @@ This spec covers ports and their switches, a MIDI track's input and channel, the
 | R22 | `bl-ui` `midi_input::m_switches_the_keyboard_on_and_its_letters_play_notes` | UI |
 | R23 | `bl-shell` `midi_io::the_computer_keyboard_reaches_tracks_set_to_it_or_all_ins_only` | integration |
 | R6, R24 | `bl-cli` `agent_midi_io` (each `midi.*` command by ID through `bl-cli mcp`; `midi.set_port` refused without `--autonomous`) | agent API |
-| R27 | to be written in WP-6.17 | integration, UI |
-| R28 | to be written in WP-6.17 | integration |
+| R27 | `bl-shell` `midi_io::the_mpe_switch_persists_across_restarts_and_opens_nothing_by_itself`; `bl-shell` `mpe_recording::the_ports_mpe_switch_is_set_by_id_read_back_and_kept`; `bl-ui` `midi_input::an_inputs_row_has_an_mpe_switch_after_remote_and_an_outputs_has_none`; `bl-cli` `agent_midi_io::the_mpe_switch_is_external_like_the_others`; `bl-engine` `mpe_input::a_port_that_is_not_mpe_is_read_as_before` | integration, UI |
+| R28 | `bl-shell` `midi_io::a_track_on_an_mpe_port_shows_all_channels_and_keeps_the_channel_it_chose`; `bl-engine` `mpe_input::a_track_takes_every_channel_of_an_mpe_port` | integration |

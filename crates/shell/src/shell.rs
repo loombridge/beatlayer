@@ -2041,6 +2041,7 @@ impl Shell {
             inputs,
             outputs,
             midi_inputs: self.midi.input_names(),
+            mpe_inputs: self.midi.mpe_input_names(),
             midi_outputs: self.midi.output_names(),
             device_outputs,
         }
@@ -9440,6 +9441,7 @@ impl Shell {
                         args.track,
                         args.sync,
                         args.remote,
+                        args.mpe,
                     )
                     .map_err(failed)?;
                 self.prefs.midi = self.midi.prefs();

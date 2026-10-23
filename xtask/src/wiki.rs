@@ -5,9 +5,8 @@
 //!
 //! The wiki is flat, so every document becomes a page named in [`page_name`],
 //! and links between documents become links between pages. A link to any
-//! other file in the repository becomes a link to it on GitHub. The command
-//! reference is too long for one wiki page, so its commands and its types
-//! each get a page of their own. Only tracked files are read.
+//! other file in the repository becomes a link to it on GitHub. Only tracked
+//! files are read.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -15,13 +14,6 @@ use std::process::Command;
 
 /// Where links to files outside `docs/` point.
 const REPO_URL: &str = "https://github.com/loombridge/beatlayer";
-
-/// The command reference's sections that get a page of their own, with the
-/// page's name.
-const COMMAND_PAGES: [(&str, &str); 2] = [
-    ("## Commands", "Command-reference-commands"),
-    ("## Types", "Command-reference-types"),
-];
 
 /// The planning documents and the other pages outside the specs, in the
 /// sidebar's order.
@@ -32,7 +24,7 @@ const NAMED: [(&str, &str); 12] = [
     ("docs/04-parity-matrix.md", "Parity-matrix"),
     ("docs/05-improvements.md", "Improvements-over-Live"),
     ("docs/progress.md", "Progress"),
-    ("docs/commands.md", "Command-reference"),
+    ("docs/commands/README.md", "Command-reference"),
     ("docs/security.md", "Security"),
     ("docs/ui-parity/README.md", "UI-parity-reference"),
     ("docs/specs/README.md", "Behaviour-specs"),
@@ -108,28 +100,14 @@ pub fn pages(
     for (path, text) in docs {
         let name = &names[path];
         let text = drop_title(text, name, path);
-        if path == "docs/commands.md" {
-            drafts.extend(
-                split_commands(&text)
-                    .into_iter()
-                    .map(|(n, t)| (path.clone(), n, t)),
-            );
-        } else {
-            drafts.push((path.clone(), name.clone(), text));
-        }
+        drafts.push((path.clone(), name.clone(), text));
     }
     let anchors: BTreeMap<String, BTreeSet<String>> = drafts
         .iter()
         .map(|(_, name, text)| (name.clone(), anchors(text)))
         .collect();
     // The pages a document's anchors can be on, its own page first.
-    let pages_of = |path: &str| -> Vec<String> {
-        let mut found: Vec<String> = names.get(path).into_iter().cloned().collect();
-        if path == "docs/commands.md" {
-            found.extend(COMMAND_PAGES.iter().map(|(_, n)| n.to_string()));
-        }
-        found
-    };
+    let pages_of = |path: &str| -> Vec<String> { names.get(path).into_iter().cloned().collect() };
     let resolve = |path: &str, anchor: &str| -> Option<String> {
         let candidates = pages_of(path);
         let first = candidates.first()?.clone();
@@ -203,7 +181,8 @@ pub fn pages(
 }
 
 /// The wiki page a document becomes: a fixed name for the documents in
-/// [`NAMED`], `UI-parity-<file>` for the rest of the UI parity reference, and
+/// [`NAMED`], `UI-parity-<file>` for the rest of the UI parity reference,
+/// `Command-reference-<file>` for a command namespace's, and
 /// a spec's file name, first letter capitalised, with any word its title
 /// writes in capitals written that way (`clap-hosting.md` is `CLAP-hosting`).
 fn page_name(path: &str, text: &str) -> String {
@@ -217,6 +196,9 @@ fn page_name(path: &str, text: &str) -> String {
         .trim_end_matches(".md");
     if path.starts_with("docs/ui-parity/") {
         return format!("UI-parity-{file}");
+    }
+    if path.starts_with("docs/commands/") {
+        return format!("Command-reference-{file}");
     }
     let title = title(text).unwrap_or("");
     let cased: BTreeMap<String, &str> = title
@@ -273,55 +255,13 @@ fn drop_title(text: &str, name: &str, path: &str) -> String {
     out
 }
 
-/// The command reference as three pages: its commands, its types, and the
-/// rest, which links to them where they were.
-fn split_commands(text: &str) -> Vec<(String, String)> {
-    let mut main = String::new();
-    let mut parts: Vec<(String, String)> = COMMAND_PAGES
-        .iter()
-        .map(|(_, n)| (n.to_string(), String::new()))
-        .collect();
-    let mut current: Option<usize> = None;
-    let mut fence = false;
-    for line in text.lines() {
-        if is_fence(line) {
-            fence = !fence;
-        }
-        if !fence && line.starts_with("## ") {
-            current = COMMAND_PAGES
-                .iter()
-                .position(|(h, _)| line.trim_end() == *h);
-            if let Some(i) = current {
-                let (heading, name) = COMMAND_PAGES[i];
-                let label = heading.trim_start_matches("## ");
-                main.push_str(&format!(
-                    "{heading}\n\nOn a page of its own: [{label}]({name}).\n\n"
-                ));
-            }
-        }
-        match current {
-            Some(i) => {
-                parts[i].1.push_str(line);
-                parts[i].1.push('\n');
-            }
-            None => {
-                main.push_str(line);
-                main.push('\n');
-            }
-        }
-    }
-    let mut pages = vec![("Command-reference".to_string(), main)];
-    pages.extend(parts);
-    pages
-}
-
-fn is_fence(line: &str) -> bool {
+pub(crate) fn is_fence(line: &str) -> bool {
     let t = line.trim_start();
     t.starts_with("```") || t.starts_with("~~~")
 }
 
 /// The anchors GitHub gives a page's headings, and its HTML anchors.
-fn anchors(text: &str) -> BTreeSet<String> {
+pub(crate) fn anchors(text: &str) -> BTreeSet<String> {
     let mut seen: BTreeMap<String, usize> = BTreeMap::new();
     let mut out = BTreeSet::new();
     let mut fence = false;
@@ -360,7 +300,7 @@ fn anchors(text: &str) -> BTreeSet<String> {
 
 /// GitHub's anchor for a heading: its text lower-cased, without punctuation
 /// other than hyphens and underscores, with spaces as hyphens.
-fn slug(heading: &str) -> String {
+pub(crate) fn slug(heading: &str) -> String {
     let text = rewrite_links(heading, |_| None);
     // A link's text stands for the link.
     let mut plain = String::new();
@@ -394,7 +334,7 @@ fn slug(heading: &str) -> String {
 
 /// Applies `map` to the target of every inline link outside code, keeping
 /// the target where `map` gives `None`.
-fn rewrite_links(text: &str, mut map: impl FnMut(&str) -> Option<String>) -> String {
+pub(crate) fn rewrite_links(text: &str, mut map: impl FnMut(&str) -> Option<String>) -> String {
     let mut out = String::with_capacity(text.len());
     let mut fence = false;
     for line in text.split_inclusive('\n') {
@@ -494,7 +434,11 @@ fn listed<'a>(names: &'a BTreeMap<String, String>, prefix: &str) -> Vec<(&'a str
         .iter()
         .filter(|(p, _)| p.starts_with(prefix) && names.contains_key(*p))
         .map(|(p, n)| (*p, *n))
-        .filter(|(p, _)| prefix != "docs/" || !p["docs/".len()..].contains('/'))
+        .filter(|(p, _)| {
+            prefix != "docs/"
+                || !p["docs/".len()..].contains('/')
+                || *p == "docs/commands/README.md"
+        })
         .map(|(p, n)| (p, names.get(p).map_or(n, String::as_str)))
         .collect();
     if prefix == "docs/ui-parity/" {
@@ -642,34 +586,33 @@ mod tests {
     }
 
     #[test]
-    fn the_command_reference_is_split_and_its_anchors_follow() {
+    fn the_command_reference_is_a_page_for_the_index_and_one_for_each_namespace() {
         let docs = docs(&[
             (
-                "docs/commands.md",
-                "# Command reference\n\nUses [Types](#types) and [`foo`](#foo).\n\n## Summary\n\n## Commands\n\n### `foo`\n\nTakes [`Bar`](#bar).\n\n## Types\n\n### `Bar`\n",
+                "docs/commands/README.md",
+                "# Command reference\n\nSee [`foo`](foo.md) and [Types](#types).\n\n## Types\n\n### `Bar`\n",
+            ),
+            (
+                "docs/commands/foo.md",
+                "# `foo` commands\n\nTakes [`Bar`](README.md#bar).\n",
             ),
             (
                 "docs/02-architecture.md",
-                "# 02. Architecture\n\n[bar](commands.md#bar)\n",
+                "# 02. Architecture\n\n[bar](commands/README.md#bar) [foo](commands/foo.md)\n",
             ),
         ]);
         let pages = pages(&docs, &BTreeSet::new(), "abc").unwrap();
-        let main = page(&pages, "Command-reference");
         assert!(
-            main.starts_with("Uses [Types](#types) and [`foo`](Command-reference-commands#foo)."),
-            "{main}"
+            page(&pages, "Command-reference")
+                .starts_with("See [`foo`](Command-reference-foo) and [Types](#types).")
         );
-        assert!(main.contains(
-            "## Commands\n\nOn a page of its own: [Commands](Command-reference-commands)."
-        ));
-        assert!(!main.contains("### `foo`"));
-        assert!(
-            page(&pages, "Command-reference-commands")
-                .contains("Takes [`Bar`](Command-reference-types#bar).")
+        assert_eq!(
+            page(&pages, "Command-reference-foo"),
+            "Takes [`Bar`](Command-reference#bar).\n"
         );
         assert_eq!(
             page(&pages, "Architecture"),
-            "[bar](Command-reference-types#bar)\n"
+            "[bar](Command-reference#bar) [foo](Command-reference-foo)\n"
         );
     }
 

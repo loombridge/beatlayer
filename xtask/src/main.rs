@@ -39,7 +39,7 @@ Tasks:
   ui-parity      Validate the shortcut reference and regenerate its Markdown form
                  (with --check, fail instead of writing if shortcuts.md is out of date)
   commands       Check the command registry and regenerate the command reference
-                 (with --check, fail instead of writing if commands.md is out of date)
+                 (with --check, fail instead of writing if a file of it is out of date)
   keymap         Regenerate crates/shell-spec/keymaps/live12.toml from shortcuts.toml and the
                  command registry (with --check, fail instead if it's out of date)
   deny-selftest  Prove that deny.toml still rejects an incompatible licence
@@ -318,7 +318,7 @@ fn check(root: &Path, options: &CheckOptions) -> Result<(), String> {
             "command reference",
             Box::new(move || {
                 if reference {
-                    commands::refresh(root)
+                    commands::check(root)
                 } else {
                     commands::check_registry()
                 }

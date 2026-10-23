@@ -5,7 +5,7 @@
 //! command and the field in its result, or the query tool's path for an
 //! object and the field in its full result. An action with nothing to read
 //! back says so, with a reason. [`problems`] checks the table against the
-//! registry, and [`markdown`] renders it for the command reference.
+//! registry, and [`markdown`] renders a namespace's rows for the command reference.
 
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
@@ -832,14 +832,24 @@ pub fn problems(
     problems
 }
 
-/// The reference's "Readback" section: where each command that isn't `read`
-/// reads back, then the commands with nothing to read back and why.
+/// The reference's "Readback" section as the index explains it.
+pub const INTRO: &str = "## Readback\n\n\
+     Anything an agent can set, it can read back. Each command that isn't `read` names where \
+     its effect shows: a read command and the field in its result, or the query tool's path \
+     for an object and the field in its full result. A query field is one the set saves for \
+     the object, or one of the song's overview. `cargo xtask commands` fails when a command \
+     that changes something names none, or names a field that isn't there. Each namespace's \
+     page has the rows for its commands.\n";
+
+/// The rows of one namespace (the ID's part before its first dot): where
+/// each of its commands that isn't `read` reads back, then those with
+/// nothing to read back and why. Empty when it has no such command.
 #[must_use]
-pub fn markdown(registry: &Registry, table: &[(&str, Readback)]) -> String {
+pub fn markdown(registry: &Registry, table: &[(&str, Readback)], namespace: &str) -> String {
     let anchor = |id: &str| format!("[`{id}`](#{})", id.replace('.', ""));
     let mut reads = String::new();
     let mut nothing = String::new();
-    for spec in registry.iter() {
+    for spec in registry.iter().filter(|spec| spec.area() == namespace) {
         let Some((_, readback)) = table.iter().find(|(id, _)| *id == spec.id) else {
             continue;
         };
@@ -860,17 +870,20 @@ pub fn markdown(registry: &Registry, table: &[(&str, Readback)]) -> String {
             }
         }
     }
-    format!(
-        "## Readback\n\n\
-         Anything an agent can set, it can read back. Each command that isn't `read` names where \
-         its effect shows: a read command and the field in its result, or the query tool's path \
-         for an object and the field in its full result. A query field is one the set saves for \
-         the object, or one of the song's overview. `cargo xtask commands` fails when a command \
-         that changes something names none, or names a field that isn't there.\n\n\
-         | Command | Read it with | Field |\n|---|---|---|\n{reads}\n\
-         ### Nothing to read back\n\n\
-         | Command | Why |\n|---|---|\n{nothing}\n"
-    )
+    let mut out = String::new();
+    if !reads.is_empty() {
+        let _ = write!(
+            out,
+            "| Command | Read it with | Field |\n|---|---|---|\n{reads}\n"
+        );
+    }
+    if !nothing.is_empty() {
+        let _ = write!(
+            out,
+            "### Nothing to read back\n\n| Command | Why |\n|---|---|\n{nothing}\n"
+        );
+    }
+    out
 }
 
 #[cfg(test)]
@@ -1001,7 +1014,7 @@ mod tests {
             ("test.set_loop", read("test.state", "loop_on")),
             ("test.quit", nothing("ends the app")),
         ];
-        let text = markdown(&registry(), &table);
+        let text = markdown(&registry(), &table, "test");
         assert!(text.contains("| [`test.set_loop`](#testset_loop) | `test.state` | `loop_on` |"));
         assert!(text.contains("| [`test.quit`](#testquit) | ends the app |"));
     }

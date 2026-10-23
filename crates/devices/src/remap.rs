@@ -9,7 +9,7 @@ use bl_engine::{DeviceType, NoteBuffer, NoteEvent, NoteKind, Registry};
 use bl_model::{DeviceDescription, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
 
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
-use crate::midi_fx::{Key, Router, value};
+use crate::midi_fx::{Key, Router, scale_choices, scale_named, value};
 
 /// The Scale device type's id.
 pub const REMAP: &str = "beatlayer.remap";
@@ -24,7 +24,8 @@ pub const FOLD: ParamId = ParamId(2);
 pub const LOWEST: ParamId = ParamId(3);
 /// How many keys above Lowest are remapped.
 pub const RANGE: ParamId = ParamId(4);
-/// Reads the clip's scale (Phase 6).
+/// Takes Base and Scale Name from the device's current scale (the scale-map
+/// spec, R12); the title bar draws it.
 pub const USE_SCALE: ParamId = ParamId(5);
 /// The grid's first column: where the note one step above Base goes is the
 /// second, and so on for the twelve notes of an octave. The value is the
@@ -33,6 +34,11 @@ pub const MAP: ParamId = ParamId(6);
 
 /// The twelve columns.
 const COLUMNS: u32 = 12;
+
+/// The chooser of the grid: User, the grid a person edits, then a scale from
+/// the list (the scale-map spec, R10). A parameter after the columns, so a
+/// device saved before it keeps its numbers.
+pub const SCALE_NAME: ParamId = ParamId(MAP.0 + COLUMNS);
 
 /// The pitch classes the Base chooser offers.
 pub const NOTES: [&str; 12] = [
@@ -61,8 +67,8 @@ pub fn remap_type() -> DeviceType {
         ParamDescriptor::integer(RANGE, "Range", (0, 127), 127, ParamUnit::None)
             .describe("How many keys above Lowest are remapped; higher keys pass through."),
         ParamDescriptor::toggle(USE_SCALE, "Use Current Scale", false).describe(
-            "Takes the base and scale from the clip. It does nothing until scales arrive in \
-             Phase 6.",
+            "Takes Base and Scale Name from the current scale, and shows them. Every note stays \
+             as it came while the current scale has Scale Mode off.",
         ),
     ];
     params.extend((0..COLUMNS).map(|c| {
@@ -75,8 +81,14 @@ pub fn remap_type() -> DeviceType {
         )
         .describe("Where this note of the octave goes: its row in the grid, or -1 for nowhere.")
     }));
+    params.push(
+        ParamDescriptor::choice(SCALE_NAME, "Scale Name", &scale_choices("User"), 0).describe(
+            "User sends the notes by the grid you edit. A scale of the list sends each note to \
+             the scale note nearest it, counted from Base.",
+        ),
+    );
     DeviceType::native(REMAP, "Scale", DeviceRole::MidiEffect)
-        .with_description(DeviceDescription::new(params))
+        .with_description(DeviceDescription::new(params).with_title_switch(USE_SCALE))
 }
 
 /// Adds Scale to `registry`.
@@ -126,21 +138,66 @@ impl Grid {
     }
 }
 
-impl NativeDevice for Remap {
-    fn process(&mut self, audio: &mut Audio<'_, '_>, params: &ParamBank) {
+impl Remap {
+    /// The grid for a note `offset` frames into the stretch, or `None` where
+    /// the note stays as it came: Use Current Scale on with the current
+    /// scale's Scale Mode off (the scale-map spec, R12).
+    fn grid(audio: &Audio<'_, '_>, params: &ParamBank, offset: u32) -> Option<Grid> {
         let lowest = value(params, LOWEST) as i32;
-        let grid = Grid {
-            base: value(params, BASE) as i32,
-            rows: core::array::from_fn(|c| value(params, map(c as u32)) as i32),
+        let (base, named) = if value(params, USE_SCALE) >= 0.5 {
+            let scale = audio.scale_at(offset);
+            (i32::from(scale.root), scale.enabled.then_some(scale.name))
+        } else {
+            (
+                value(params, BASE) as i32,
+                scale_named(value(params, SCALE_NAME) as usize),
+            )
+        };
+        if value(params, USE_SCALE) >= 0.5 && named.is_none() {
+            return None;
+        }
+        Some(Grid {
+            base,
+            rows: match named {
+                // Spec: midi-scale-map R10. Each column goes to the scale
+                // note nearest it, the lower of two.
+                Some(name) => nearest_rows(name.steps()),
+                None => core::array::from_fn(|c| value(params, map(c as u32)) as i32),
+            },
             transpose: value(params, TRANSPOSE) as i32,
-            fold: value(params, FOLD) >= 0.5,
+            // Spec: midi-scale-map R11. Fold works only for User.
+            fold: named.is_none() && value(params, FOLD) >= 0.5,
             lowest,
             highest: (lowest + value(params, RANGE) as i32).min(127),
-        };
+        })
+    }
+}
+
+/// The row each column of a named scale sends its note to: the step of
+/// `steps`, or the octave above, nearest the column, the lower of two.
+fn nearest_rows(steps: &[u8]) -> [i32; COLUMNS as usize] {
+    core::array::from_fn(|column| {
+        let column = column as i32;
+        let steps = || steps.iter().map(|step| i32::from(*step)).chain([12]);
+        let below = steps().filter(|step| *step <= column).max().unwrap_or(0);
+        let above = steps().filter(|step| *step >= column).min().unwrap_or(12);
+        if column - below <= above - column {
+            below
+        } else {
+            above
+        }
+    })
+}
+
+impl NativeDevice for Remap {
+    fn process(&mut self, audio: &mut Audio<'_, '_>, params: &ParamBank) {
         for note in audio.notes() {
             match note.kind {
                 NoteKind::On => {
-                    let to = grid.apply(note.key);
+                    let to = match Self::grid(audio, params, note.offset) {
+                        Some(grid) => grid.apply(note.key),
+                        None => Some(note.key),
+                    };
                     let made = to.map(|key| Key {
                         key,
                         ..Key::of(&note)

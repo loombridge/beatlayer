@@ -15,7 +15,7 @@ use bl_shell::device_commands::{DEVICE_GAP, DeviceAdded, TITLE_BAR_HEIGHT};
 use bl_shell::menus::MenuPlatform;
 use bl_shell::menus::menu_bar;
 use bl_ui::device_view::{
-    EMPTY_TEXT, activator_rect, button_rects, control_id, layout, title_rect,
+    EMPTY_TEXT, activator_rect, button_rects, control_id, layout, title_rect, title_switch_rect,
 };
 use bl_ui::keymap::Platform;
 use bl_ui::main_window::UiEvent;
@@ -1224,4 +1224,139 @@ fn the_middle_button_pans_the_device_chain() {
         "the chain moved 100 points: {}",
         before - h.main.devices().scroll()
     );
+}
+
+// Spec: scales R16, device-chains L-DEV-004. Pitch's Use Current Scale is a
+// switch in its title bar, after the activator and before the name: the panel
+// no longer draws it, assistive technology reads a switch with its state, and
+// pressing it runs `device.set_param` as one undo step.
+#[test]
+fn the_use_current_scale_switch_is_drawn_in_the_title_bar_and_not_the_panel() {
+    use bl_devices::lift::{LIFT, USE_SCALE};
+
+    let mut h = harness();
+    let t = bl_devices::lift_type();
+    let device = add(
+        &mut h,
+        json!({ "kind": t.kind, "name": t.name, "role": t.role }),
+    );
+    let frame = frame_of(&mut h, device);
+    let switch = title_switch_rect(frame, false);
+    assert!(
+        switch.left() > activator_rect(frame, false).right(),
+        "after the activator"
+    );
+    // Drawn once, as a switch, off, where its rect says.
+    let nodes = Harness::nodes(&h.settle());
+    let found: Vec<&Node> = nodes
+        .iter()
+        .filter(|n| n.label == "Use Current Scale")
+        .collect();
+    assert_eq!(found.len(), 1, "the panel draws no control for it");
+    assert_eq!(found[0].role, Role::Switch);
+    assert_eq!(found[0].toggled, Some(false));
+    let b = found[0].bounds.unwrap();
+    assert!(
+        (b.x0 as f32 - switch.left()).abs() < 3.0,
+        "drawn where its rect says"
+    );
+    let params = |h: &Harness| {
+        h.shell
+            .editor()
+            .document()
+            .device(device)
+            .unwrap()
+            .params
+            .get(&USE_SCALE)
+            .copied()
+            .unwrap_or(0.0)
+    };
+    assert_eq!(params(&h), 0.0);
+    let steps = h.shell.editor().undo_history().len();
+    h.click(switch.center());
+    assert_eq!(params(&h), 1.0, "the click ran device.set_param");
+    assert_eq!(
+        h.shell.editor().undo_history().len(),
+        steps + 1,
+        "one undo step"
+    );
+    let nodes = Harness::nodes(&h.settle());
+    let on = nodes
+        .iter()
+        .find(|n| n.label == "Use Current Scale")
+        .unwrap();
+    assert_eq!(on.toggled, Some(true));
+    // A second press turns it off; the agent reads the same by id.
+    h.click(switch.center());
+    assert_eq!(params(&h), 0.0);
+    let read = h
+        .shell
+        .run("device.parameters", json!({ "device": device }))
+        .unwrap();
+    let state = read["params"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["id"] == json!(USE_SCALE.0))
+        .unwrap();
+    assert_eq!(state["title_switch"], json!(true));
+    let _ = LIFT;
+}
+
+// Spec: midi-scale-map R12, arpeggiator R16. With Use Current Scale on, Scale's
+// Base and Scale Name show the set's current scale, and they and
+// Arpeggiator's Root and Scale are drawn disabled.
+#[test]
+fn the_choosers_a_device_takes_from_the_current_scale_are_disabled() {
+    use bl_devices::{arpeggiator, remap};
+
+    let mut h = harness();
+    let t = bl_devices::remap_type();
+    let scale = add(
+        &mut h,
+        json!({ "kind": t.kind, "name": t.name, "role": t.role }),
+    );
+    let t = bl_devices::arpeggiator_type();
+    let arp = add(
+        &mut h,
+        json!({ "kind": t.kind, "name": t.name, "role": t.role }),
+    );
+    h.shell
+        .run(
+            "song.set_scale",
+            json!({ "enabled": true, "root": 2, "name": "dorian" }),
+        )
+        .unwrap();
+    let panel = |h: &Harness, device: DeviceId| {
+        h.shell
+            .device_view_state()
+            .devices
+            .iter()
+            .find(|d| d.id == device)
+            .and_then(|d| d.panel.clone())
+            .unwrap()
+    };
+    let value = |panel: &bl_shell::device_commands::DevicePanel, id| {
+        let at = panel.description.params.iter().position(|p| p.id == id);
+        panel.value(at.unwrap())
+    };
+    assert!(panel(&h, scale).locked.is_empty(), "off: free to choose");
+    for (device, switch) in [(scale, remap::USE_SCALE), (arp, arpeggiator::USE_SCALE)] {
+        h.shell
+            .run(
+                "device.set_param",
+                json!({ "device": device, "param": switch.0, "value": 1.0 }),
+            )
+            .unwrap();
+    }
+    let followed = panel(&h, scale);
+    assert_eq!(followed.locked, [remap::BASE, remap::SCALE_NAME]);
+    assert_eq!(value(&followed, remap::BASE), 2.0, "D");
+    assert_eq!(
+        value(&followed, remap::SCALE_NAME),
+        3.0,
+        "User, Major, Minor, Dorian"
+    );
+    let arpeggio = panel(&h, arp);
+    assert_eq!(arpeggio.locked, [arpeggiator::ROOT, arpeggiator::SCALE]);
 }

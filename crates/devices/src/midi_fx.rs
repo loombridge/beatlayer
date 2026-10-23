@@ -5,8 +5,9 @@
 //! when the device is switched off, moved or removed. Both are made with the
 //! device and fixed in size: a note past their room is dropped and counted.
 
-use bl_engine::{NoteBuffer, NoteEvent, NoteKind};
-use bl_model::{Device, ParamId};
+use bl_engine::scales::OFF;
+use bl_engine::{NoteBuffer, NoteEvent, NoteExpression, NoteKind};
+use bl_model::{Device, ParamId, Scale, ScaleName};
 
 use crate::framework::{Audio, ParamBank};
 
@@ -21,6 +22,40 @@ const FIRST_ID: u32 = 0x8000_0000;
 /// The value of parameter `id`, which the device's description holds.
 pub(crate) fn value(params: &ParamBank, id: ParamId) -> f64 {
     params.value(params.index(id).expect("the description holds it"))
+}
+
+/// The scale a scale-aware device counts degrees of, `offset` frames into
+/// its stretch (the scales spec, R15, R16): its current scale while its Use
+/// Current Scale switch `switch` is on, otherwise the chromatic one, whose
+/// degree is a semitone.
+pub(crate) fn scale_in_use(
+    audio: &Audio<'_, '_>,
+    params: &ParamBank,
+    switch: ParamId,
+    offset: u32,
+) -> Scale {
+    if value(params, switch) >= 0.5 {
+        audio.scale_at(offset)
+    } else {
+        OFF
+    }
+}
+
+/// The entries of a chooser of scale names: `first`, then the scale list in
+/// its order (the scales spec, R1).
+pub(crate) fn scale_choices(first: &'static str) -> Vec<&'static str> {
+    std::iter::once(first)
+        .chain(ScaleName::ALL.iter().map(|name| name.label()))
+        .collect()
+}
+
+/// The scale a chooser entry names, counting from the entry after `first`:
+/// `None` for the first entry itself and for one past the list.
+pub(crate) fn scale_named(entry: usize) -> Option<ScaleName> {
+    entry
+        .checked_sub(1)
+        .and_then(|n| ScaleName::ALL.get(n))
+        .copied()
 }
 
 /// A seed for the random choices of `device`: its ID, so a render repeats
@@ -278,8 +313,20 @@ impl Router {
     /// Passes a per-note expression on to the notes made from the note it
     /// names, or as it is if the table doesn't know that note.
     pub(crate) fn expression(&self, audio: &mut Audio<'_, '_>, note: &NoteEvent) {
+        self.expression_by(audio, note, |_, _, bend| bend);
+    }
+
+    /// As [`expression`](Self::expression), carrying a per-note bend through
+    /// `bend`, which takes the source's key, the key of the note made and the
+    /// bend, and gives the bend the note made gets (the scales spec, R18).
+    pub(crate) fn expression_by(
+        &self,
+        audio: &mut Audio<'_, '_>,
+        note: &NoteEvent,
+        bend: impl Fn(u8, u8, f32) -> f32,
+    ) {
         if self.knows(note) {
-            self.follow(audio, note);
+            self.follow(audio, note, bend);
         } else {
             audio.send(*note);
         }
@@ -287,8 +334,13 @@ impl Router {
 
     /// Sends the expression `note` carries to everything sounding that its
     /// source made, so a bend, pressure or slide follows the note it
-    /// belongs to.
-    pub(crate) fn follow(&self, audio: &mut Audio<'_, '_>, note: &NoteEvent) {
+    /// belongs to; the bend goes through `bend`.
+    fn follow(
+        &self,
+        audio: &mut Audio<'_, '_>,
+        note: &NoteEvent,
+        bend: impl Fn(u8, u8, f32) -> f32,
+    ) {
         for entry in &self.entries {
             if let (true, Some(made), true, true) = (
                 entry.source.names(note),
@@ -296,10 +348,21 @@ impl Router {
                 entry.sounding,
                 entry.follows,
             ) {
+                let kind = match note.kind {
+                    NoteKind::Expression {
+                        expression: NoteExpression::Bend,
+                        value,
+                    } => NoteKind::Expression {
+                        expression: NoteExpression::Bend,
+                        value: bend(entry.source.key, made.key, value),
+                    },
+                    kind => kind,
+                };
                 audio.send(NoteEvent {
                     channel: made.channel,
                     key: made.key,
                     note_id: made.id,
+                    kind,
                     ..*note
                 });
             }

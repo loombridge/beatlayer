@@ -2271,9 +2271,13 @@ fn the_chop_drags_count_parts_in_the_status_bar() {
         Note::new(60, Ticks::ZERO, 8 * step, 100),
         Note::new(64, Ticks::ZERO, 8 * step, 100),
     ]);
+    // A click in the editor gives it the keyboard, so Cmd-E (Ctrl-E) and
+    // E reach it rather than the Arrangement's keys.
+    let at = n.at(60, step / 2);
+    n.click(at, Modifiers::NONE);
     n.select_all();
-    n.hold(egui::Key::E, chop_key());
     let before = n.doc().clone();
+    n.hold(egui::Key::E, chop_key());
     let from = n.at(60, 4 * step);
     let up = |by: f32| pos2(from.x, from.y - by);
     n.drag_frames(from, up(25.0), chop_key());

@@ -23,11 +23,11 @@ use bl_model::{
     AutomationTarget, ClipData, ClipFolds, ClipId, Command, Document, Editor, MidiData, Note,
 };
 use bl_shell_spec::notes::{
-    self as ids, AddNoteArgs, ClipTab, ClipViewState, CopyNotesArgs, DeleteNotesArgs,
-    DuplicateNotesArgs, MoveNotesArgs, NoteClipboardState, NoteEditResult, NoteField,
-    NoteSelectMode, NoteSelection, PasteNotesArgs, QuantizeNotesArgs, QuantizeSettings,
-    QuantizeSettingsArgs, QuantizeTarget, RampValueArgs, ResizeNotesArgs, SelectNotesArgs,
-    SetValueArgs,
+    self as ids, AddNoteArgs, AdjustValueArgs, ClipTab, ClipViewState, CopyNotesArgs,
+    DeactivateArgs, DeleteNotesArgs, DuplicateNotesArgs, MoveNotesArgs, NoteClipboardState,
+    NoteEditResult, NoteField, NoteSelectMode, NoteSelection, PasteNotesArgs, QuantizeNotesArgs,
+    QuantizeSettings, QuantizeSettingsArgs, QuantizeTarget, RampValueArgs, RandomizeAmounts,
+    RandomizeArgs, ResizeNotesArgs, SelectNotesArgs, SetValueArgs,
 };
 use bl_shell_spec::sample_editor as sample_ids;
 use bl_shell_spec::sample_editor::{SelectTimeArgs, SetInsertMarkerArgs};
@@ -267,21 +267,48 @@ pub fn resize_limit(notes: &[Note], shortest: Ticks) -> Ticks {
     -room
 }
 
-/// The evenly spaced values a ramp gives `count` notes: `from` at the first,
-/// `to` at the last, and those between spread evenly, whole numbers for the
-/// whole-number fields. One note takes `from`.
+/// The values a ramp gives notes that start at `starts`, in the clip's
+/// order: `from` at the first note by start, `to` at the last, and those
+/// between on a straight line by their start times, so notes that start
+/// together take the same value; whole numbers for the whole-number fields.
+/// When every note starts together they all take `from` (Spec: note-editing
+/// R11).
 #[must_use]
-pub fn ramp_values(field: NoteField, from: f64, to: f64, count: usize) -> Vec<f64> {
-    match count {
-        0 => Vec::new(),
-        1 => vec![from],
-        n => (0..n)
-            .map(|i| {
-                let at = from + (to - from) * i as f64 / (n - 1) as f64;
-                if field.whole() { at.round() } else { at }
-            })
-            .collect(),
+pub fn ramp_values(field: NoteField, from: f64, to: f64, starts: &[Ticks]) -> Vec<f64> {
+    let (Some(first), Some(last)) = (starts.first(), starts.last()) else {
+        return Vec::new();
+    };
+    let width = (*last - *first).get() as f64;
+    starts
+        .iter()
+        .map(|start| {
+            let along = if width > 0.0 {
+                (*start - *first).get() as f64 / width
+            } else {
+                0.0
+            };
+            let at = from + (to - from) * along;
+            if field.whole() { at.round() } else { at }
+        })
+        .collect()
+}
+
+/// A note's value of `field`.
+#[must_use]
+pub fn note_value(note: &Note, field: NoteField) -> f64 {
+    match field {
+        NoteField::Velocity => f64::from(note.velocity),
+        NoteField::ReleaseVelocity => f64::from(note.release_velocity),
+        NoteField::Chance => note.probability,
+        NoteField::VelocityDeviation => f64::from(note.velocity_deviation),
     }
+}
+
+/// The room a note's velocity leaves its velocity deviation: from 1 less
+/// than the velocity to 127 more (Spec: note-editing R7).
+#[must_use]
+pub fn deviation_room(velocity: u8) -> (i16, i16) {
+    (1 - i16::from(velocity), 127 - i16::from(velocity))
 }
 
 /// A value for `field`, checked against the field's range and its
@@ -300,13 +327,118 @@ fn value_of(field: NoteField, value: f64) -> Result<f64, EditFailure> {
     Ok(value)
 }
 
-/// Sets a note's `field` to `value`, which [`value_of`] checked.
+/// Sets a note's `field` to `value`, which [`value_of`] checked, or to the
+/// nearest the note has room for: a velocity deviation stays within what its
+/// velocity leaves (Spec: note-editing R8).
 fn set_note_value(note: &mut Note, field: NoteField, value: f64) {
     match field {
         NoteField::Velocity => note.velocity = value as u8,
         NoteField::ReleaseVelocity => note.release_velocity = value as u8,
         NoteField::Chance => note.probability = value,
-        NoteField::VelocityDeviation => note.velocity_deviation = value as i8,
+        NoteField::VelocityDeviation => {
+            let (low, high) = deviation_room(note.velocity);
+            note.velocity_deviation = (value as i16).clamp(low, high) as i8;
+        }
+    }
+}
+
+/// A chance with float noise rounded off, so ten steps of 10 % land on 100 %.
+fn tidy(field: NoteField, value: f64) -> f64 {
+    if field.whole() {
+        value.round()
+    } else {
+        (value * 1e6).round() / 1e6
+    }
+}
+
+/// One note's draw for `seed`, from -1 to 1: a hash of the seed and the
+/// note's place, so each note keeps its own draw however the amount
+/// changes (Spec: note-editing R13).
+fn draw(seed: u64, place: u32) -> f64 {
+    let mut x = seed ^ u64::from(place).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    x = (x ^ (x >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    x = (x ^ (x >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    x ^= x >> 31;
+    (x >> 11) as f64 / (1u64 << 52) as f64 - 1.0
+}
+
+/// Which of the three expression lanes show (Spec: note-editing R1, R2): a
+/// new editor shows the Velocity lane alone. Always listed in the lanes'
+/// order, whatever order they were shown in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Lanes {
+    shown: [bool; 3],
+    /// Whether the Show/Hide All Expression Editors switch has hidden every
+    /// lane: the lanes that were shown come back when it's switched on.
+    hidden: bool,
+}
+
+impl Default for Lanes {
+    fn default() -> Self {
+        Self {
+            shown: [true, false, false],
+            hidden: false,
+        }
+    }
+}
+
+impl Lanes {
+    fn index(field: NoteField) -> usize {
+        NoteField::LANES
+            .iter()
+            .position(|lane| *lane == field.lane())
+            .unwrap_or(0)
+    }
+
+    /// The lanes shown now, from the top.
+    #[must_use]
+    pub fn shown(&self) -> Vec<NoteField> {
+        NoteField::LANES
+            .iter()
+            .zip(self.shown)
+            .filter(|(_, on)| *on && !self.hidden)
+            .map(|(lane, _)| *lane)
+            .collect()
+    }
+
+    /// Whether the switch has hidden every lane.
+    #[must_use]
+    pub fn all_hidden(&self) -> bool {
+        self.hidden
+    }
+
+    /// Whether `lane` shows now.
+    #[must_use]
+    pub fn is_shown(&self, lane: NoteField) -> bool {
+        self.shown[Self::index(lane)] && !self.hidden
+    }
+
+    /// Shows or hides `lane`. Showing a lane brings the lanes back if the
+    /// switch had hidden them.
+    pub fn show(&mut self, lane: NoteField, on: bool) {
+        self.shown[Self::index(lane)] = on;
+        if on {
+            self.hidden = false;
+        }
+    }
+
+    /// The Show/Hide All Expression Editors switch.
+    pub fn show_all(&mut self, on: bool) {
+        self.hidden = !on;
+    }
+
+    /// Hides `lane` and shows in its place the first hidden lane after it,
+    /// going round to the first (Swap Lane). Returns the lane that now
+    /// shows, or `None` when every lane shows already and nothing changes.
+    pub fn swap(&mut self, lane: NoteField) -> Option<NoteField> {
+        let at = Self::index(lane);
+        let next = (1..3)
+            .map(|step| (at + step) % 3)
+            .find(|other| !self.shown[*other])?;
+        self.shown[at] = false;
+        self.shown[next] = true;
+        self.hidden = false;
+        Some(NoteField::LANES[next])
     }
 }
 
@@ -383,8 +515,15 @@ pub struct ClipView {
     visible: bool,
     /// Whether Draw Mode is on (B).
     draw_mode: bool,
-    /// Which value the lane under the note editor shows and edits.
+    /// The active lane, whose controls the footer shows: Velocity,
+    /// Chance or Release Velocity (note-editing R3).
     lane: NoteField,
+    /// The expression lanes shown under the note editor (R1).
+    lanes: Lanes,
+    /// Each lane's Randomize amount (R13).
+    amounts: RandomizeAmounts,
+    /// How many unseeded randomisations have run, which seeds the next.
+    draws: u64,
     /// The clips whose note editor is folded to the rows that hold notes
     /// (F). Saved with the set, like the floating devices' windows.
     folds: ClipFolds,
@@ -433,15 +572,76 @@ impl ClipView {
         self.draw_mode
     }
 
-    /// Which value the lane under the note editor shows and edits.
+    /// The active lane: Velocity, Chance or Release Velocity.
     #[must_use]
     pub fn lane(&self) -> NoteField {
         self.lane
     }
 
-    /// Chooses the value the lane shows and edits.
+    /// Makes `lane` the active lane and shows it (note-editing R3);
+    /// velocity deviation is the Velocity lane's.
     pub fn set_lane(&mut self, lane: NoteField) {
-        self.lane = lane;
+        self.lane = lane.lane();
+        self.lanes.show(self.lane, true);
+    }
+
+    /// The expression lanes shown under the note editor.
+    #[must_use]
+    pub fn lanes(&self) -> &Lanes {
+        &self.lanes
+    }
+
+    /// Shows or hides `lane`, as the Lane Selector does. Hiding the active
+    /// lane makes the first lane still shown the active one.
+    pub fn show_lane(&mut self, lane: NoteField, on: bool) {
+        if on {
+            self.set_lane(lane);
+        } else {
+            self.lanes.show(lane, false);
+            self.keep_lane_active();
+        }
+    }
+
+    /// The Show/Hide All Expression Editors switch.
+    pub fn show_all_lanes(&mut self, on: bool) {
+        self.lanes.show_all(on);
+    }
+
+    /// Swap Lane: hides `lane` and shows the next hidden one in its place,
+    /// which becomes the active lane when `lane` was.
+    pub fn swap_lane(&mut self, lane: NoteField) {
+        let lane = lane.lane();
+        if let Some(now) = self.lanes.swap(lane)
+            && self.lane == lane
+        {
+            self.lane = now;
+        }
+    }
+
+    /// Keeps the active lane among the shown ones while any shows.
+    fn keep_lane_active(&mut self) {
+        if let Some(first) = self.lanes.shown().first()
+            && !self.lanes.is_shown(self.lane)
+        {
+            self.lane = *first;
+        }
+    }
+
+    /// Each lane's Randomize amount.
+    #[must_use]
+    pub fn randomize_amounts(&self) -> RandomizeAmounts {
+        self.amounts
+    }
+
+    /// Sets the Randomize amount of the lane that edits `lane`, held to the
+    /// lane's limit.
+    pub fn set_randomize_amount(&mut self, lane: NoteField, amount: u8) {
+        let amount = amount.min(RandomizeAmounts::limit(lane));
+        match lane.lane() {
+            NoteField::Chance => self.amounts.chance = amount,
+            NoteField::ReleaseVelocity => self.amounts.release_velocity = amount,
+            _ => self.amounts.velocity = amount,
+        }
     }
 
     /// The clips whose note editor is folded to the rows that hold notes.
@@ -633,6 +833,25 @@ impl ClipView {
         }
     }
 
+    /// Whether the notes selected in the shown clip are all deactivated, so
+    /// Deactivate Note(s) reads Activate Note(s) (Spec: note-editing R18).
+    #[must_use]
+    pub fn selection_deactivated(&self, doc: &Document, arrangement: &ArrangementView) -> bool {
+        let selected = self.selected_notes(doc, arrangement);
+        let Some(ClipData::Midi(midi)) = self
+            .shown_clip(doc, arrangement)
+            .and_then(|clip| doc.clip(clip))
+            .map(|clip| &clip.data)
+        else {
+            return false;
+        };
+        let ordered = notes_in_order(midi);
+        !selected.is_empty()
+            && selected
+                .iter()
+                .all(|place| ordered.get(*place as usize).is_some_and(|note| note.mute))
+    }
+
     /// Selects notes of `clip`, by their places in its notes in order.
     pub fn select(&mut self, clip: ClipId, places: Vec<u32>) {
         self.selected_clip = Some(clip);
@@ -702,6 +921,9 @@ impl ClipView {
             insert_marker: self.insert_marker(doc, arrangement),
             time_selection: self.time_selection(doc, arrangement),
             lane: self.lane,
+            lanes: self.lanes.shown(),
+            lanes_hidden: self.lanes.all_hidden(),
+            randomize: self.amounts,
             folded: clip.is_some_and(|clip| self.is_folded(clip)),
             tab: self.tab,
             envelope: self.envelope,
@@ -812,6 +1034,9 @@ pub fn label(id: &str) -> &'static str {
         ids::QUANTIZE_NOTES => "Quantize notes",
         ids::SET_VALUE => "Set note values",
         ids::RAMP_VALUE => "Ramp note values",
+        ids::ADJUST_VALUE => "Adjust note values",
+        ids::RANDOMIZE => "Randomize note values",
+        ids::DEACTIVATE => "Deactivate notes",
         _ => "Select notes",
     }
 }
@@ -1173,15 +1398,26 @@ pub fn run(
                 notes,
                 field,
                 value,
+                values,
             } = parse(args)?;
             let (clip, midi) = clip_and_data(doc, view, arrangement, clip)?;
             let ordered = notes_in_order(&midi);
             let places = places_or_selected(view, doc, arrangement, clip, notes, ordered.len())?;
-            let value = value_of(field, value)?;
+            let values = match (value, values) {
+                (Some(value), None) => vec![value_of(field, value)?; places.len()],
+                (None, Some(values)) if values.len() == places.len() => values
+                    .into_iter()
+                    .map(|value| value_of(field, value))
+                    .collect::<Result<Vec<_>, _>>()?,
+                (None, Some(_)) => {
+                    return Err(invalid("`values` needs one value for each of the notes"));
+                }
+                _ => return Err(invalid("give `value` or `values`, not both or neither")),
+            };
             let (after, recorded) = transaction(editor, label(ids::SET_VALUE), |editor| {
                 let mut edited = ordered.clone();
-                for place in &places {
-                    set_note_value(&mut edited[*place as usize], field, value);
+                for (place, value) in places.iter().zip(&values) {
+                    set_note_value(&mut edited[*place as usize], field, *value);
                 }
                 set_notes(editor, clip, &midi, edited)?;
                 Ok(places.clone())
@@ -1207,14 +1443,142 @@ pub fn run(
             let from = value_of(field, from)?;
             let to = value_of(field, to)?;
             // The ramp runs in the clip's note order, whatever order the
-            // places came in.
+            // places came in, spread by the notes' start times (R11).
             let mut places = places;
             places.sort_unstable();
-            let values = ramp_values(field, from, to, places.len());
+            let starts: Vec<Ticks> = places.iter().map(|p| ordered[*p as usize].start).collect();
+            let values = ramp_values(field, from, to, &starts);
             let (after, recorded) = transaction(editor, label(ids::RAMP_VALUE), |editor| {
                 let mut edited = ordered.clone();
                 for (place, value) in places.iter().zip(&values) {
                     set_note_value(&mut edited[*place as usize], field, *value);
+                }
+                set_notes(editor, clip, &midi, edited)?;
+                Ok(places.clone())
+            })?;
+            view.select(clip, after.clone());
+            Ok(to_value(&NoteEditResult {
+                notes: after.clone(),
+                selected: after,
+                undo_step: recorded,
+            }))
+        }
+        ids::ADJUST_VALUE => {
+            let AdjustValueArgs {
+                clip,
+                notes,
+                field,
+                by,
+            } = parse(args)?;
+            if !by.is_finite() {
+                return Err(invalid("`by` must be a number"));
+            }
+            if field.whole() && by.fract() != 0.0 {
+                return Err(invalid(format!("`{}` takes whole numbers", field.name())));
+            }
+            let (clip, midi) = clip_and_data(doc, view, arrangement, clip)?;
+            let ordered = notes_in_order(&midi);
+            let places = places_or_selected(view, doc, arrangement, clip, notes, ordered.len())?;
+            let (low, high) = field.range();
+            let (after, recorded) = transaction(editor, label(ids::ADJUST_VALUE), |editor| {
+                let mut edited = ordered.clone();
+                for place in &places {
+                    let note = &mut edited[*place as usize];
+                    let next = tidy(field, (note_value(note, field) + by).clamp(low, high));
+                    set_note_value(note, field, next);
+                }
+                set_notes(editor, clip, &midi, edited)?;
+                Ok(places.clone())
+            })?;
+            view.select(clip, after.clone());
+            Ok(to_value(&NoteEditResult {
+                notes: after.clone(),
+                selected: after,
+                undo_step: recorded,
+            }))
+        }
+        ids::RANDOMIZE => {
+            let RandomizeArgs {
+                clip,
+                notes,
+                field,
+                amount,
+                seed,
+            } = parse(args)?;
+            if field == NoteField::VelocityDeviation {
+                return Err(invalid(
+                    "`field` must be `velocity`, `release_velocity` or `chance`",
+                ));
+            }
+            let limit = if field.whole() { 127.0 } else { 1.0 };
+            if !(0.0..=limit).contains(&amount) {
+                return Err(invalid(format!("`amount` must be from 0 to {limit}")));
+            }
+            let (clip, midi) = clip_and_data(doc, view, arrangement, clip)?;
+            let length = doc.clip(clip).map_or(Ticks::ZERO, |clip| clip.length);
+            let ordered = notes_in_order(&midi);
+            // With none named or selected, every note in the clip's span.
+            let places = if notes.is_none() && view.selected_notes(doc, arrangement).is_empty() {
+                let (from, to) = span(&midi, length);
+                let inside: Vec<u32> = (0..ordered.len() as u32)
+                    .filter(|place| {
+                        let start = ordered[*place as usize].start;
+                        start >= from && start < to
+                    })
+                    .collect();
+                if inside.is_empty() {
+                    return Err(unavailable("the clip has no notes in view"));
+                }
+                inside
+            } else {
+                places_or_selected(view, doc, arrangement, clip, notes, ordered.len())?
+            };
+            let seed = seed.unwrap_or_else(|| {
+                view.draws += 1;
+                view.draws.wrapping_mul(0x9E37_79B9_7F4A_7C15)
+            });
+            let (low, high) = field.range();
+            let (after, recorded) = transaction(editor, label(ids::RANDOMIZE), |editor| {
+                let mut edited = ordered.clone();
+                for place in &places {
+                    let note = &mut edited[*place as usize];
+                    let next = note_value(note, field) + amount * draw(seed, *place);
+                    set_note_value(note, field, tidy(field, next.clamp(low, high)));
+                }
+                set_notes(editor, clip, &midi, edited)?;
+                Ok(places.clone())
+            })?;
+            view.select(clip, after.clone());
+            Ok(to_value(&NoteEditResult {
+                notes: after.clone(),
+                selected: after,
+                undo_step: recorded,
+            }))
+        }
+        ids::DEACTIVATE => {
+            let DeactivateArgs {
+                clip,
+                notes,
+                active,
+            } = parse(args)?;
+            let (clip, midi) = clip_and_data(doc, view, arrangement, clip)?;
+            let ordered = notes_in_order(&midi);
+            let places = places_or_selected(view, doc, arrangement, clip, notes, ordered.len())?;
+            // Spec: note-editing R18. Deactivate, or activate when every
+            // one of them is off already.
+            let mute = match active {
+                Some(active) => !active,
+                None => !places.iter().all(|place| ordered[*place as usize].mute),
+            };
+            let name = if mute {
+                label(ids::DEACTIVATE)
+            } else {
+                "Activate notes"
+            };
+            let (after, recorded) = transaction(editor, name, |editor| {
+                let mut edited = ordered.clone();
+                for place in &places {
+                    edited[*place as usize].mute = mute;
                 }
                 set_notes(editor, clip, &midi, edited)?;
                 Ok(places.clone())

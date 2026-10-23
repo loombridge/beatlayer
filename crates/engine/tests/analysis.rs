@@ -3,10 +3,7 @@
 //! renders blocks under the allocation trap. Nothing on either side waits on
 //! the other.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use std::sync::Arc;
 
 use bl_analysis::cache::{AnalysisCache, AnalysisOptions, AnalysisStatus};

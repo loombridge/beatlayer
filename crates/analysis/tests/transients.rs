@@ -1,7 +1,6 @@
 //! Transients on a generated drum loop (the warping spec, R22).
 
-mod common;
-
+use crate::common;
 use bl_analysis::cache::Analysis;
 use bl_media::decode_file;
 use common::{TempDir, drum_hits, drum_loop};

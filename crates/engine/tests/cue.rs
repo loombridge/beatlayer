@@ -13,10 +13,7 @@
 //! Commands run by ID with JSON arguments, as an agent runs them (D17).
 //! Every block runs as a real-time section under the allocation trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_commands::Registry as Commands;
 use bl_engine::testing::{GAIN, GAIN_PARAM};
 use bl_model::{Command, Editor, TrackId, TrackKind, registry};

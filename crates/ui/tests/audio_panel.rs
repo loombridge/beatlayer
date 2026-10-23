@@ -3,8 +3,7 @@
 //! pending ones are announced with the package that brings them, and Warp
 //! off disables the tempo controls. Spec: sample-editor R14, R15, R17.
 
-mod common;
-
+use crate::common;
 use std::path::{Path, PathBuf};
 
 use bl_model::{ClipData, ClipId, Document};

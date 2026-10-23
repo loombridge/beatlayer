@@ -1,4 +1,5 @@
 [package]
+autotests = false
 name = "bl-shell"
 description = "The app shell's headless half: the shell's state and commands at work (files, views, settings, the transport), the audio host running the engine, and preferences."
 version.workspace = true
@@ -88,6 +89,10 @@ lspk-example-gain.workspace = true
 [[test]]
 name = "au_editor"
 harness = false
+
+[[test]]
+name = "shell_tests"
+path = "tests/main.rs"
 
 [lints]
 workspace = true

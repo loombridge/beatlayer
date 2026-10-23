@@ -4,10 +4,7 @@
 //! envelope, the Peak and RMS modes, the look-ahead and its latency,
 //! Makeup, Dry/Wet and Out, and a sidechain key that ducks the input.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_devices::compressor::{
     ATTACK, AUTO_RELEASE, COMPRESSOR, DRY_WET, ENVELOPE, KNEE, LOOKAHEAD, MAKEUP, MODE, OUT, RATIO,
     RELEASE, SC_FILTER, SC_FREQ, SC_RES, SC_TYPE, THRESHOLD, compressor_type,

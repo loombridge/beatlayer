@@ -5,8 +5,7 @@
 //!
 //! Spec: device-framework R15 to R20.
 
-mod common;
-
+use crate::common;
 use bl_devices::testing::{self, SCOPE_TIME, UTILITY_GAIN, UTILITY_MUTE};
 use bl_model::param::db_to_gain;
 use bl_model::{DeviceId, TrackId};

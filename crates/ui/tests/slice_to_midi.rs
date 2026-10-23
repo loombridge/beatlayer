@@ -1,8 +1,7 @@
 //! Slice to New MIDI Track from an audio clip's menu, and its dialog
 //! (WP-4.16; the slice-to-midi spec, R1 and R2).
 
-mod common;
-
+use crate::common;
 use bl_core::time::Ticks;
 use bl_model::{AudioData, Clip, ClipData, ClipId, Command, TrackId};
 use bl_shell::files::factory_default_set;

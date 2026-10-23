@@ -2,10 +2,7 @@
 //! in on its own message. Every block runs as a real-time section under the
 //! allocation trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use std::thread;
 
 use bl_core::time::{Frames, TempoMap};

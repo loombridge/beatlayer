@@ -7,8 +7,7 @@
 //!
 //! Spec: track-context-menu R1 to R7; accessibility R8.
 
-mod common;
-
+use crate::common;
 use bl_model::{TrackId, TrackKind};
 use bl_shell::mixer_view::MixerOf;
 use bl_shell::mixer_view_commands::TOGGLE;

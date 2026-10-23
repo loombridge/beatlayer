@@ -132,8 +132,9 @@ jobs:
     needs: changes
     runs-on: ${{ matrix.os }}
     # Windows ran past 45 minutes testing every package (a change to
-    # Cargo.lock), so it gets an hour and a half; Linux keeps 45.
-    timeout-minutes: ${{ matrix.os == 'windows-2025' && 90 || 45 }}
+    # Cargo.lock), so Windows and Linux get an hour and a half; macOS, on a
+    # manual run, keeps 45.
+    timeout-minutes: ${{ matrix.os == 'macos-15' && 45 || 90 }}
     strategy:
       fail-fast: false
       matrix:

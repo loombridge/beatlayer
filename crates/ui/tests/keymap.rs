@@ -275,6 +275,69 @@ fn float_s_key_reaches_float_in_the_device_view_and_fades_in_the_arrangement() {
     assert_eq!(hit(Platform::Mac, cmd_option, &devices), None);
 }
 
+// Spec: audio-clips R27 to R29. The fade keys are bound: Cmd-Option-F and
+// Cmd-Option-Delete (Ctrl-Alt-F and Ctrl-Alt-Backspace) run Create Fade and
+// Delete Fades in the Arrangement, and F held shows the fade handles, which
+// the Arrangement View reads itself (S-ARR-010, S-ENV-004).
+#[test]
+fn the_fade_keys_are_bound() {
+    let keymap = Keymap::live12();
+    let command_of = |id: &str| {
+        let entry = keymap.entry_for(id).unwrap();
+        assert_eq!(entry.context, "arrangement", "{id}");
+        match &entry.status {
+            Status::Bound => Some(entry.commands[0].id.clone()),
+            Status::Widget(handler) => {
+                assert!(handler.contains("fade handles"), "{id}: {handler}");
+                None
+            }
+            other => panic!("{id} is {other:?}"),
+        }
+    };
+    assert_eq!(
+        command_of("S-ARR-008").as_deref(),
+        Some("arrangement.create_fade")
+    );
+    assert_eq!(
+        command_of("S-ARR-009").as_deref(),
+        Some("arrangement.delete_fades")
+    );
+    assert_eq!(command_of("S-ARR-010"), None);
+    assert_eq!(command_of("S-ENV-004"), None);
+    // The keys resolve to them in the Arrangement.
+    let arrangement = [Context::Arrangement, Context::Global];
+    for (platform, create, delete, delete_key) in [
+        (
+            Platform::Mac,
+            mods(true, false, true, false),
+            mods(true, false, true, false),
+            Key::Delete,
+        ),
+        (
+            Platform::Other,
+            mods(false, true, true, false),
+            mods(false, true, true, false),
+            Key::Backspace,
+        ),
+    ] {
+        let hit = |key, m| {
+            keymap
+                .resolve(platform, key, m, &arrangement)
+                .map(|hit| hit.command.id.clone())
+        };
+        assert_eq!(
+            hit(Key::F, create).as_deref(),
+            Some("arrangement.create_fade"),
+            "{platform:?}"
+        );
+        assert_eq!(
+            hit(delete_key, delete).as_deref(),
+            Some("arrangement.delete_fades"),
+            "{platform:?}"
+        );
+    }
+}
+
 // Spec: racks R9, R11. Group and Ungroup have their keys in the Device View
 // (S-DEV-001, S-DEV-002), and the Edit menu's items reach them there.
 #[test]
@@ -716,6 +779,16 @@ fn the_note_editors_keys_are_all_handled() {
         "S-NOTE-043",
         "S-NOTE-045",
         "S-NOTE-046",
+        // WP-6.1: the value keys, the typed velocity, the Cmd-drag, and
+        // deactivating.
+        "S-NOTE-016",
+        "S-NOTE-026",
+        "S-NOTE-027",
+        "S-NOTE-028",
+        "S-NOTE-029",
+        "S-NOTE-041",
+        "S-NOTE-050",
+        "S-NOTE-051",
         "S-A11Y-004",
         "S-A11Y-005",
         "S-A11Y-006",
@@ -740,6 +813,42 @@ fn the_note_editors_keys_are_all_handled() {
             entry.status
         );
     }
+}
+
+// Spec: note-editing R14, R15, R18. 0 deactivates the selected notes through
+// the keymap (S-NOTE-041); the keys that read a number or a direction are the
+// note editor's, and Cmd-Up and Cmd-Down with the Chord Selector Pad focused
+// (S-NOTE-052) wait for Stacks.
+#[test]
+fn zero_deactivates_the_selected_notes_and_the_value_keys_are_the_editors() {
+    let keymap = Keymap::live12();
+    let contexts = [Context::NoteEditor, Context::NoteSelection, Context::Global];
+    let none = mods(false, false, false, false);
+    let hit = keymap
+        .resolve(Platform::Mac, Key::Num0, none, &contexts)
+        .expect("0 is bound while notes are selected");
+    assert_eq!(hit.command.id, "note.deactivate");
+    // With no notes selected, 0 doesn't reach it.
+    let hit = keymap.resolve(
+        Platform::Mac,
+        Key::Num0,
+        none,
+        &[Context::NoteEditor, Context::Global],
+    );
+    assert!(
+        hit.is_none_or(|hit| hit.command.id != "note.deactivate"),
+        "no notes, no deactivating"
+    );
+    for id in ["S-NOTE-027", "S-NOTE-028", "S-NOTE-029"] {
+        let entry = keymap.entry_for(id).unwrap();
+        assert!(matches!(entry.status, Status::Widget(_)), "{id}");
+    }
+    let entry = keymap.entry_for("S-NOTE-052").unwrap();
+    assert!(
+        matches!(entry.status, Status::Pending { .. }),
+        "the Chord Selector Pad's keys wait for Stacks: {:?}",
+        entry.status
+    );
 }
 
 #[test]

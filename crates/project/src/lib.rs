@@ -50,7 +50,9 @@
 //! format is unchanged. The commands that reach these are in [`registry`].
 
 pub mod autosave;
+pub mod clip_file;
 pub mod format;
+pub mod groove_file;
 pub mod journal;
 pub mod migrate;
 pub mod preset;

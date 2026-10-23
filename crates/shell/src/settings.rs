@@ -12,7 +12,7 @@ use bl_model::PluginFormat;
 pub use bl_shell_spec::midi_io::PortDirection;
 pub use bl_shell_spec::settings::{
     Appearance, AutomationRecordMode, BRIGHTNESS, BUNDLED_THEME, COLOR_HUE, COLOR_INTENSITY,
-    DefaultWarpMode, GRID_LINE_INTENSITY, LaunchPrefs, LoopWarpShortSamples,
+    CollectFiles, DefaultWarpMode, GRID_LINE_INTENSITY, LaunchPrefs, LoopWarpShortSamples,
     SessionAutomationTracks, SettingsPage, ThemeLook, Tone, WarpPrefs, ZOOM_MAX_PERCENT,
     ZOOM_MIN_PERCENT, ZOOM_STEPS, zoom_factor, zoom_percent, zoom_step,
 };
@@ -148,6 +148,9 @@ pub struct Preferences {
     /// argument. `None` names no editor, so Edit opens the File & Folder
     /// page instead.
     pub sample_editor: Option<String>,
+    /// Collect Files on Export (Library, L-SET-016): what saving a clip to
+    /// the browser does with the audio files it plays (file-management R7).
+    pub collect_files_on_export: CollectFiles,
     /// Save Continuously (File & Folder, L-SET-015): whether every finished
     /// edit of a set that has a file is saved within a second (WP-6.62, the
     /// crash-recovery spec, R8 and R24). Off in a new install, as Live has

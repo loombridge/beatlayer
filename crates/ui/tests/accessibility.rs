@@ -1866,11 +1866,17 @@ fn paths() -> BTreeMap<&'static str, Path> {
         key,
     };
     let clip_view = LaterView("the Clip View (milestone M2)");
+    let groove_pool = LaterView(
+        "the Groove Pool, the Clip View's groove controls and the browser's Grooves label (WP-6.20)",
+    );
     // The Clip View's note editing (WP-2.3): the pointer reaches each of
     // these — a click, a marquee, and drags in the note editor — and their
     // keys (shortcuts.md, `note-editor` and `note-selection`) come with a
     // later package.
     let note_editor = LaterView("the note editor's keys (the note-editor shortcuts, milestone M2)");
+    let note_footer = LaterView(
+        "the note editor's footer and Lane Selector in the Tab order (WP-6.1's follow-up)",
+    );
     let clip_launch = LaterView("the Clip View's Launch panel (WP-3.9)");
     let audio_panel = LaterView("the Audio Utilities panel's controls (WP-4.10b)");
     let clip_title_bar = LaterView("the audio clip's title bar Save button (WP-4.10b)");
@@ -1989,6 +1995,22 @@ fn paths() -> BTreeMap<&'static str, Path> {
             "clip.set_scale",
             main(a_clip_selected, control_bar, "Scale Mode", Key::Enter),
         ),
+        // Grooves (WP-6.19): the Groove Pool, the Clip View's groove controls
+        // and the browser's Grooves label come with WP-6.20; until then
+        // agents reach these.
+        ("clip.set_groove", Exception(groove_pool)),
+        ("groove.add", Exception(groove_pool)),
+        ("groove.commit", Exception(groove_pool)),
+        ("groove.delete", Exception(groove_pool)),
+        ("groove.extract", Exception(groove_pool)),
+        ("groove.load", Exception(groove_pool)),
+        ("groove.pool", Exception(Query)),
+        ("groove.rename", Exception(groove_pool)),
+        ("groove.save", Exception(groove_pool)),
+        ("groove.set", Exception(groove_pool)),
+        ("groove.set_auto_load", Exception(groove_pool)),
+        ("groove.set_global_amount", Exception(groove_pool)),
+        ("groove.to_clip", Exception(groove_pool)),
         ("transport.set_recording", Exception(recording)),
         ("transport.stop_recording", Exception(recording)),
         // Tempo breakpoints and time-signature markers (WP-2.20): the
@@ -2325,6 +2347,19 @@ fn paths() -> BTreeMap<&'static str, Path> {
         (
             "settings.set_temporary_folder",
             settings("file-folder", nothing, "Browse", Key::Enter),
+        ),
+        (
+            "settings.set_collect_files_on_export",
+            settings(
+                "library",
+                nothing,
+                "Collect Files on Export",
+                Key::ArrowDown,
+            ),
+        ),
+        (
+            "settings.set_user_library",
+            settings("library", nothing, "Browse", Key::Enter),
         ),
         (
             "settings.set_warp_recorded_audio",
@@ -2953,9 +2988,14 @@ fn paths() -> BTreeMap<&'static str, Path> {
         // `clip_view.select_notes` have keys of their own now: the
         // note-selection keys (S-A11Y-010, S-A11Y-011), Delete
         // (S-EDIT-005) and Cmd-A (S-NOTE-001).
-        ("note.set_value", Exception(note_editor)),
         ("note.ramp_value", Exception(note_editor)),
         ("view.lane", Exception(note_editor)),
+        // The expression lanes and the footer (WP-6.1): the pointer drags
+        // the markers and uses the footer's controls and the Lane
+        // Selector, which assistive technology reads by name and value
+        // (note-editing R20); Tab doesn't reach them yet.
+        ("note.randomize", Exception(note_footer)),
+        ("view.lanes", Exception(note_footer)),
         // The list of the set's plug-ins (IMP-29, WP-6.41): Enter on its
         // Show Only Missing switch.
         (
@@ -3135,6 +3175,19 @@ fn paths() -> BTreeMap<&'static str, Path> {
             "chain.save_preset",
             Exception(Gap(
                 "a drag of the chain's row into the browser has no keyboard form yet (racks R46)",
+            )),
+        ),
+        (
+            "clip.save_file",
+            Exception(Gap(
+                "a drag of a clip into the browser has no keyboard form yet (clip files R3)",
+            )),
+        ),
+        (
+            "browser.rename_file",
+            Exception(Equivalent(
+                "typing in the saved clip's name field in the browser's list: Enter renames \
+                 the file, Esc keeps its name (clip files R4)",
             )),
         ),
         (
@@ -4022,7 +4075,29 @@ fn paths() -> BTreeMap<&'static str, Path> {
             Exception(Live(
                 "Live doesn't support editing audio clip fades with a screen reader (manual \
                  41.4.1.3); its fade keys, Cmd-Option-F and Cmd-Option-Delete (S-ARR-008, \
-                 S-ARR-009), aren't bound yet",
+                 S-ARR-009), make and delete fades from the keyboard, and the handles don't \
+                 reach a screen reader",
+            )),
+        ),
+        (
+            "arrangement.set_crossfade",
+            Exception(Live(
+                "Live doesn't support editing audio clip fades with a screen reader (manual \
+                 41.4.1.3); Create Fade (S-ARR-008) makes a crossfade from the keyboard",
+            )),
+        ),
+        (
+            "arrangement.delete_crossfade",
+            Exception(Live(
+                "Live doesn't support editing audio clip fades with a screen reader (manual \
+                 41.4.1.3); Delete Fades (S-ARR-009) deletes a crossfade from the keyboard",
+            )),
+        ),
+        (
+            "arrangement.select_fade_handle",
+            Exception(Live(
+                "a fade handle is a pointer target Live doesn't expose to a screen reader \
+                 (manual 41.4.1.3)",
             )),
         ),
         // MIDI file import and export (WP-2.21): the menus show them, and a
@@ -4447,6 +4522,7 @@ fn every_m1_command_is_reachable_from_the_keyboard() {
         gaps,
         [
             "chain.save_preset",
+            "clip.save_file",
             "device.add_layers",
             "device.add_slice",
             "device.audition_sample",

@@ -1,6 +1,6 @@
 # Clip files: saving clips to the browser and placing them in a set
 
-- **Status:** draft
+- **Status:** partial (R1 to R15 each have a passing test; R16 is WP-6.34b's and R17 WP-6.19's)
 - **Work packages:** WP-6.34, the clip file, saving one, the Clips label, placing one in a set, and previewing an audio clip file (R1 to R15); WP-6.34b, previewing a MIDI clip file (R16); WP-6.19, a clip's groove in its clip file (R17). Collect Files on Export is [file management](file-management.md)'s (R7 to R9); saving several Session clips or tracks as a new set, and a set's clips in the browser, are [set exchange](set-exchange.md)'s
 - **Parity-matrix row:** Files and export: Clip, device preset, and rack preset files (clips)
 - **Checked against:** the Live 12 reference manual (online edition), read 20 October 2026; the Live 12 release notes, 12.1; the UI parity reference's rows I-DROP-001, 002, 004 to 006 and 011, S-SES-017 and L-BRW-004
@@ -50,20 +50,27 @@ This spec covers the clip file, saving a clip, the Clips label, placing a clip f
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1 | to be written in WP-6.34 | |
-| R2 | to be written in WP-6.34 | |
-| R3 | to be written in WP-6.34 | |
-| R4 | to be written in WP-6.34 | |
-| R5 | to be written in WP-6.34 | |
-| R6 | to be written in WP-6.34 | |
-| R7 | to be written in WP-6.34 | |
-| R8 | to be written in WP-6.34 | |
-| R9 | to be written in WP-6.34 | |
-| R10 | to be written in WP-6.34 | |
-| R11 | to be written in WP-6.34 | |
-| R12 | to be written in WP-6.34 | |
-| R13 | to be written in WP-6.34 | |
-| R14 | to be written in WP-6.34 | |
-| R15 | to be written in WP-6.34 | |
+| R1 | `crates/project/src/clip_file.rs`, `a_midi_clip_on_a_track_with_a_rack_round_trips_exactly`, `an_audio_clips_warp_markers_round_trip`, `newer_and_damaged_clip_files_are_refused` | unit |
+| R2 | `crates/project/src/clip_file.rs`, `a_midi_clip_on_a_track_with_a_rack_round_trips_exactly`; `crates/shell/tests/clip_files.rs`, `a_clip_file_on_an_empty_track_brings_its_chain_and_on_a_full_one_only_the_clip` | unit, through `Shell::run` |
+| R3 | `crates/shell/tests/clip_files.rs`, `a_clip_is_saved_named_and_its_row_opened_for_renaming`, `a_session_clip_is_saved_into_a_folder_of_the_person_s`; `crates/ui/tests/clip_files.rs`, `an_arrangement_clip_dragged_onto_a_folder_is_saved_and_its_name_opens`, `a_session_clip_dragged_onto_a_folder_is_saved_and_its_name_opens`, `several_arrangement_clips_dragged_onto_a_folder_save_nothing` | unit, UI script |
+| R4 | `crates/shell/tests/clip_files.rs`, `a_clip_is_saved_named_and_its_row_opened_for_renaming`; `crates/project/src/clip_file.rs`, `a_clip_file_is_written_whole_named_and_its_kind_peeked`; `crates/ui/tests/clip_files.rs`, `esc_keeps_the_name_a_saved_clip_has` | unit, UI script |
+| R5 | `crates/shell/tests/clip_files.rs`, `collect_files_on_export_copies_refers_or_asks`, `copies_go_into_the_project_the_file_lands_in` | unit, through `Shell::run` on real folders |
+| R6 | `crates/shell/tests/clip_files.rs`, `the_clips_label_lists_every_clip_file_and_search_finds_clip_files_only`, `clip_files_carry_the_content_tags_audio_clip_and_midi_clip` | unit |
+| R7 | `crates/shell/tests/clip_files.rs`, `several_clip_files_go_down_the_scenes_or_spread_across_the_tracks`, `a_clip_file_that_cannot_go_where_it_is_dropped_changes_nothing`; `crates/ui/tests/clip_files.rs`, `a_clip_file_dragged_onto_a_lane_of_its_kind_is_placed_there`, `a_clip_file_dropped_on_the_sessions_drop_area_makes_a_track` | unit, UI script |
+| R8 | `crates/shell/tests/clip_files.rs`, `a_clip_file_on_an_empty_track_brings_its_chain_and_on_a_full_one_only_the_clip`, `a_clip_file_dropped_in_the_session_drop_area_makes_a_track` | unit |
+| R9 | `crates/shell/tests/clip_files.rs`, `an_unwarped_audio_clip_keeps_its_time_and_a_warped_one_its_beats`, `a_clip_file_on_an_empty_track_brings_its_chain_and_on_a_full_one_only_the_clip` | unit |
+| R10 | `crates/shell/tests/clip_files.rs`, `enter_places_the_selected_clip_file_in_either_view` | unit |
+| R11 | `crates/shell/tests/clip_files.rs`, `a_clip_file_on_an_empty_track_brings_its_chain_and_on_a_full_one_only_the_clip`, `a_placed_clip_survives_save_and_reopen` | unit |
+| R12 | `crates/shell/tests/clip_files.rs`, `a_sample_that_moved_is_found_by_content_and_a_lost_one_is_listed_missing` | unit, through `Shell::run` on real folders |
+| R13 | `crates/shell/tests/clip_files.rs`, `an_audio_clip_file_previews_through_its_own_warp_settings` | unit |
+| R14 | `crates/project/src/clip_file.rs`, `a_clip_file_over_the_size_limit_is_refused`, `newer_and_damaged_clip_files_are_refused`; `fuzz/fuzz_targets/clip_file.rs` | unit, fuzz |
+| R15 | `crates/cli/tests/agent.rs`, `an_agent_saves_a_clip_file_places_it_and_reads_both_back`; `crates/shell-spec/src/browser.rs`, `every_listed_id_is_registered_and_complete`; `cargo xtask commands` | unit, agent API |
 | R16 | to be written in WP-6.34b | |
 | R17 | to be written in WP-6.19 | |
+
+## Not built yet
+
+- A clip file is read on the thread that runs the command when a command or a drop places it; only previewing reads it on a background thread (R14).
+- The Session View doesn't highlight the slot a clip file would go in (R7), as it doesn't for audio files; its drop area and the Arrangement's lanes do.
+- A clip's groove isn't in the clip file (R17): grooves aren't in the document yet (WP-6.19).
+- A MIDI clip file doesn't preview (R16, WP-6.34b).

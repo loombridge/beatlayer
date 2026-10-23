@@ -375,6 +375,9 @@ impl SettingsUi {
                 SettingsPage::FileFolder => {
                     file_folder_page(ui, shell, theme, &mut rows, &mut events);
                 }
+                SettingsPage::Library => {
+                    library_page(ui, shell, theme, &mut rows, &mut events);
+                }
                 other => rows.note(
                     ui,
                     &format!(
@@ -1691,6 +1694,65 @@ fn file_folder_page(
             json!({ "on": on }),
         )));
     }
+}
+
+/// Library (L-SET-016): Collect Files on Export and the User Library's
+/// folder (WP-6.34; file management R7, browser R24). Show Downloadable
+/// Packs, Show Cloud, Show Push, Show Splice, the pack installation folder
+/// and the Splice download folder are left out (D21).
+fn library_page(
+    ui: &mut Ui,
+    shell: &Shell,
+    theme: &Theme,
+    rows: &mut Rows<'_>,
+    events: &mut Vec<UiEvent>,
+) {
+    use bl_shell::settings::CollectFiles;
+    rows.heading(ui, "Collect Files on Export");
+    let modes: Vec<Choice<CollectFiles>> = [
+        ("Always", CollectFiles::Always),
+        ("Never", CollectFiles::Never),
+        ("Ask", CollectFiles::Ask),
+    ]
+    .into_iter()
+    .map(|(label, value)| Choice {
+        label: label.to_owned(),
+        value,
+        leds: NO_LEDS,
+    })
+    .collect();
+    let rect = rows.row(ui, "Collect Files on Export", SettingsLayout::CHOOSER);
+    let current = shell.collect_files_on_export();
+    if let Some(mode) = chooser(
+        ui,
+        theme,
+        "collect-files-on-export",
+        "Collect Files on Export",
+        rect,
+        &modes,
+        Some(&current),
+        true,
+    ) {
+        events.push(UiEvent::Invoke(Invocation::new(
+            ids::SETTINGS_SET_COLLECT_FILES_ON_EXPORT,
+            json!({ "mode": mode }),
+        )));
+    }
+    rows.heading(ui, "Locations");
+    let rect = rows.row(ui, "User Library", SettingsLayout::CHOOSER);
+    if ui.put(rect, egui::Button::new("Browse")).clicked() {
+        // No path: the host asks for a folder.
+        events.push(UiEvent::Invoke(Invocation::new(
+            ids::SETTINGS_SET_USER_LIBRARY,
+            json!({}),
+        )));
+    }
+    let path = shell
+        .browser_view()
+        .user_library()
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    rows.copyable_row(ui, "Path", "user-library", &path);
 }
 
 /// Tempo & MIDI (L-SET-014): the MIDI ports table (WP-2.2), each input and

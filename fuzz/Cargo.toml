@@ -36,6 +36,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "groove_file"
+path = "fuzz_targets/groove_file.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "midi_file"
 path = "fuzz_targets/midi_file.rs"
 test = false
@@ -45,6 +52,13 @@ bench = false
 [[bin]]
 name = "peak_file"
 path = "fuzz_targets/peak_file.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "clip_file"
+path = "fuzz_targets/clip_file.rs"
 test = false
 doc = false
 bench = false

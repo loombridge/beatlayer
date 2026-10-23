@@ -37,14 +37,15 @@ use bl_media::MediaStore;
 use bl_model::{Editor, TrackId};
 pub use bl_shell_spec::browser::Part;
 use bl_shell_spec::browser::{
-    self as ids, AddTagArgs, AddTagGroupArgs, AddToArrangementArgs, BrowserState, DeleteTagArgs,
-    FocusArgs, FolderArgs, IndexState, Item, ItemKind, ItemTag, Label, LabelInfo,
+    self as ids, AddTagArgs, AddTagGroupArgs, AddToArrangementArgs, BrowserState, ClipFileKind,
+    DeleteTagArgs, FocusArgs, FolderArgs, IndexState, Item, ItemKind, ItemTag, Label, LabelInfo,
     MAX_PREVIEW_VOLUME, MoveTagArgs, OpenFolderArgs, OpenPlaceArgs, PreviewArgs, PreviewState,
-    QuickTag, RenameTagArgs, ScrubPreviewArgs, SearchArgs, Section, SelectArgs, SetPreviewArgs,
-    SetRawArgs, ShowFileArgs, ShowQuickTagsArgs, ShowTagEditorArgs, StateArgs, TagEditorRow,
-    TagEditorRowKind, TagGroupInfo, TagInfo, TagItemsArgs, TagSource, TagState, TaggedItem,
-    TagsArgs, TagsState,
+    QuickTag, RenameFileArgs, RenameTagArgs, SaveClipFileArgs, SaveClipFileResult,
+    ScrubPreviewArgs, SearchArgs, Section, SelectArgs, SetPreviewArgs, SetRawArgs, ShowFileArgs,
+    ShowQuickTagsArgs, ShowTagEditorArgs, StateArgs, TagEditorRow, TagEditorRowKind, TagGroupInfo,
+    TagInfo, TagItemsArgs, TagSource, TagState, TaggedItem, TagsArgs, TagsState,
 };
+use bl_shell_spec::settings::CollectFiles;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -57,6 +58,7 @@ use self::listing::{Entry, file_kind};
 use self::preview::{Loader, MediaSamples};
 use self::tags::{Source, TagStore};
 use crate::audio::AudioHost;
+use crate::clip_files;
 use bl_plugin_host::scan::ScannedPlugin;
 
 /// Wakes the app's event loop when background work (indexing, decoding a
@@ -175,6 +177,13 @@ pub struct Context<'a> {
     /// What a new clip's warp settings are made from (the warping spec,
     /// R33).
     pub warping: crate::auto_warp::Warping<'a>,
+    /// Collect Files on Export: what saving a clip does with its audio
+    /// (file management R7).
+    pub collect_files: bl_shell_spec::settings::CollectFiles,
+    /// Folders to search for the audio a clip file names when it isn't where
+    /// the file says: the set's project folder, the User Library and the
+    /// places (clip files R12).
+    pub search: &'a [PathBuf],
 }
 
 /// What [`BrowserView::poll`] found.
@@ -276,6 +285,9 @@ pub struct BrowserView {
     quick_tags: bool,
     /// What the Status Bar says, if anything.
     message: Option<String>,
+    /// The file whose name is open for editing after `clip.save_file` saved
+    /// it (clip files R4).
+    renaming: Option<PathBuf>,
 }
 
 /// A tagged file's size and content hash, so the tags pass to the same
@@ -356,6 +368,13 @@ fn label_devices(label: &Label) -> Vec<BrowserDevice> {
         }
     }));
     devices
+}
+
+/// What a clip file's row says it holds: nothing for any other row.
+fn clip_kind_of(kind: ItemKind, path: &Path) -> Option<bl_shell_spec::browser::ClipFileKind> {
+    (kind == ItemKind::Clip)
+        .then(|| listing::clip_kind(path))
+        .flatten()
 }
 
 fn rack_id(kind: bl_model::RackKind) -> &'static str {
@@ -464,6 +483,7 @@ impl BrowserView {
             tag_editor: prefs.tag_editor,
             quick_tags: prefs.quick_tags,
             message: None,
+            renaming: None,
         };
         view.user_library.clone_from(&prefs.user_library);
         view.places_changed();
@@ -672,6 +692,15 @@ impl BrowserView {
             };
             match file_kind(&name) {
                 Some(ItemKind::Audio) => names.push("Content|Sample".to_owned()),
+                Some(ItemKind::Clip) => match listing::clip_kind(path) {
+                    Some(bl_shell_spec::browser::ClipFileKind::Audio) => {
+                        names.push("Content|Audio Clip".to_owned());
+                    }
+                    Some(bl_shell_spec::browser::ClipFileKind::Midi) => {
+                        names.push("Content|MIDI Clip".to_owned());
+                    }
+                    None => {}
+                },
                 Some(ItemKind::Preset) => names.push("Content|Preset".to_owned()),
                 Some(ItemKind::Set) => {
                     if self.is_backup_set(path) {
@@ -1099,9 +1128,14 @@ impl BrowserView {
     }
 
     /// The rows the search finds (spec: browser R9 and browser-tags R15).
-    fn search_hits(&self, snapshot: &Arc<Snapshot>, scope: Scope, audio_only: bool) -> Vec<u32> {
+    fn search_hits(
+        &self,
+        snapshot: &Arc<Snapshot>,
+        scope: Scope,
+        only: Option<ItemKind>,
+    ) -> Vec<u32> {
         let (words, tags, _) = self.search_terms();
-        let hits = snapshot.search(&words.join(" "), scope, audio_only);
+        let hits = snapshot.search(&words.join(" "), scope, only);
         if tags.is_empty() {
             return hits;
         }
@@ -1268,6 +1302,15 @@ impl BrowserView {
         labels
     }
 
+    /// Files were written or renamed in the places: index them again and
+    /// list the label afresh.
+    fn files_changed(&mut self) {
+        self.index.refresh();
+        self.indexing = self.index.indexing();
+        self.listings.clear();
+        self.rebuild();
+    }
+
     /// The places changed: index them again and list the label afresh.
     fn places_changed(&mut self) {
         let roots = self.roots().into_iter().map(|(_, path)| path).collect();
@@ -1290,10 +1333,11 @@ impl BrowserView {
 
     /// The scope a label searches, and whether only audio files count; or
     /// `None` for a Library label without content yet.
-    fn scope(&self, label: &Label) -> Option<(Scope, bool)> {
+    fn scope(&self, label: &Label) -> Option<(Scope, Option<ItemKind>)> {
         match label {
-            Label::All => Some((Scope::All, false)),
-            Label::Samples => Some((Scope::All, true)),
+            Label::All => Some((Scope::All, None)),
+            Label::Samples => Some((Scope::All, Some(ItemKind::Audio))),
+            Label::Clips => Some((Scope::All, Some(ItemKind::Clip))),
             place if place.is_place() => {
                 let path = self.place_path(place)?;
                 let index = self
@@ -1302,7 +1346,7 @@ impl BrowserView {
                     .roots()
                     .iter()
                     .position(|root| *root == path)?;
-                Some((Scope::Place(u16::try_from(index).ok()?), false))
+                Some((Scope::Place(u16::try_from(index).ok()?), None))
             }
             _ => None,
         }
@@ -1333,6 +1377,7 @@ impl BrowserView {
                 open,
                 folder: None,
                 format: None,
+                clip_kind: entry.clip,
             });
             if open {
                 self.list_into(&entry.path, depth.saturating_add(1), out);
@@ -1360,6 +1405,7 @@ impl BrowserView {
                     open: false,
                     folder: None,
                     format: None,
+                    clip_kind: None,
                 })
                 .collect();
             if items.is_empty() {
@@ -1384,14 +1430,17 @@ impl BrowserView {
             self.cursor = self.selected.last().and_then(|path| self.position_of(path));
             return;
         }
-        if !self.search.trim().is_empty() || label == Label::Samples {
+        if !self.search.trim().is_empty() || matches!(label, Label::Samples | Label::Clips) {
             match self.scope(&label) {
-                Some((scope, audio_only)) => {
+                Some((scope, only)) => {
                     let snapshot = Arc::clone(self.index.snapshot());
-                    let hits = self.search_hits(&snapshot, scope, audio_only);
+                    let hits = self.search_hits(&snapshot, scope, only);
                     if hits.is_empty() {
                         self.note = Some(if self.index.indexing() {
                             "Indexing the places\u{2026}".to_owned()
+                        } else if self.search.trim().is_empty() && label == Label::Clips {
+                            "No clip files in the places yet. Drag a clip here to save it."
+                                .to_owned()
                         } else if self.search.trim().is_empty() {
                             "No audio files in the places yet. Add samples to the User Library, \
                              or add a folder to Places."
@@ -1438,6 +1487,7 @@ impl BrowserView {
                             open,
                             folder: None,
                             format: None,
+                            clip_kind: None,
                         });
                         if open {
                             self.list_into(&path, 1, &mut items);
@@ -1514,6 +1564,7 @@ impl BrowserView {
             open: false,
             folder,
             format: Some(p.format),
+            clip_kind: None,
         };
         let mut items = Vec::new();
         if !query.is_empty() {
@@ -1545,6 +1596,7 @@ impl BrowserView {
                 open,
                 folder: None,
                 format: None,
+                clip_kind: None,
             });
             if open {
                 items.extend(
@@ -1620,6 +1672,7 @@ impl BrowserView {
                     open: false,
                     folder: Some(snapshot.folder_label(hit)),
                     format: None,
+                    clip_kind: clip_kind_of(entry.kind, &snapshot.path(hit)),
                 })
             }
         }
@@ -1733,6 +1786,10 @@ impl BrowserView {
                 .collect(),
             preview: self.preview_state(audio),
             index: self.index_state(),
+            renaming: self
+                .renaming
+                .as_ref()
+                .map(|p| p.to_string_lossy().into_owned()),
             tag_editor: self.tag_editor,
             quick_tags: self.quick_tags,
         }
@@ -1782,7 +1839,9 @@ impl BrowserView {
             match loaded.result {
                 Ok(data) => {
                     let seconds = data.frames() as f64 / f64::from(data.sample_rate().max(1));
-                    if self.raw {
+                    if let Some(clip) = loaded.clip {
+                        self.play_clip(audio, loaded.path, data, clip, set_bpm, &mut polled);
+                    } else if self.raw {
                         match audio.play_preview(Box::new(MediaSamples(data))) {
                             Ok(generation) => {
                                 self.playing = Some(Playing {
@@ -1906,6 +1965,47 @@ impl BrowserView {
         polled
     }
 
+    /// Previews an audio clip file through its clip's own settings (clip
+    /// files R13): warped and looping at the set's tempo, or, with Raw on or
+    /// for an unwarped clip, once from the clip's start at the audio's own
+    /// speed.
+    fn play_clip(
+        &mut self,
+        audio: &mut AudioHost,
+        path: PathBuf,
+        data: bl_media::SampleData,
+        clip: Box<bl_model::AudioData>,
+        set_bpm: f64,
+        polled: &mut Polled,
+    ) {
+        let seconds = data.frames() as f64 / f64::from(data.sample_rate().max(1));
+        if self.raw || !clip.warp {
+            let data = preview::trim(&data, clip.start, clip.end);
+            let length_seconds = data.frames() as f64 / f64::from(data.sample_rate().max(1));
+            match audio.play_preview(Box::new(MediaSamples(data))) {
+                Ok(generation) => {
+                    self.playing = Some(Playing {
+                        generation,
+                        path,
+                        started: false,
+                        warp_map: None,
+                        length_seconds,
+                    });
+                }
+                Err(error) => polled.error = Some(format!("Couldn't preview: {error}")),
+            }
+            return;
+        }
+        let hash = bl_media::ContentHash::from_bytes(clip.media.0);
+        let pending = PendingPreview {
+            path,
+            hash,
+            data,
+            seconds,
+        };
+        self.start_warped_preview(audio, pending, clip, set_bpm, polled);
+    }
+
     fn start_warped_preview(
         &mut self,
         audio: &mut AudioHost,
@@ -1974,13 +2074,56 @@ impl BrowserView {
         self.loading.is_some() || self.pending_warp.is_some() || self.playing.is_some()
     }
 
-    fn start_preview(&mut self, path: &Path, audio: &mut AudioHost) -> Result<(), BrowserError> {
-        let name = path.file_name().map(|n| n.to_string_lossy().into_owned());
-        if name.as_deref().and_then(file_kind) != Some(ItemKind::Audio) || !path.is_file() {
+    /// Renames the file at `path` to `name`, keeping its extension; returns
+    /// its new path.
+    fn renamed(&self, path: &Path, name: &str) -> Result<PathBuf, BrowserError> {
+        if !path.is_file() {
             return Err(BrowserError::InvalidArgs(format!(
-                "{} isn't an audio file Beatlayer opens",
+                "{} isn't a file",
                 path.to_string_lossy()
             )));
+        }
+        let name = bl_project::preset::file_safe(name);
+        let new = match path.extension() {
+            Some(extension) => {
+                path.with_file_name(format!("{name}.{}", extension.to_string_lossy()))
+            }
+            None => path.with_file_name(&name),
+        };
+        if new == path {
+            return Ok(new);
+        }
+        if new.exists() {
+            return Err(BrowserError::InvalidArgs(format!(
+                "{} is already there",
+                new.to_string_lossy()
+            )));
+        }
+        std::fs::rename(path, &new)
+            .map_err(|e| BrowserError::Failed(format!("couldn't rename the file: {e}")))?;
+        Ok(new)
+    }
+
+    fn start_preview(
+        &mut self,
+        path: &Path,
+        audio: &mut AudioHost,
+        search: &[PathBuf],
+    ) -> Result<(), BrowserError> {
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned());
+        let kind = name.as_deref().and_then(file_kind);
+        if !matches!(kind, Some(ItemKind::Audio | ItemKind::Clip)) || !path.is_file() {
+            return Err(BrowserError::InvalidArgs(format!(
+                "{} isn't an audio file or clip file Beatlayer opens",
+                path.to_string_lossy()
+            )));
+        }
+        if kind == Some(ItemKind::Clip)
+            && listing::clip_kind(path) == Some(bl_shell_spec::browser::ClipFileKind::Midi)
+        {
+            return Err(BrowserError::Unavailable(
+                "MIDI clip files don't preview yet".to_owned(),
+            ));
         }
         let rate = audio.sample_rate().ok_or_else(|| {
             BrowserError::Unavailable(
@@ -1990,10 +2133,12 @@ impl BrowserView {
         audio.stop_preview();
         self.playing = None;
         self.pending_warp = None;
-        let id = self
-            .loader
-            .request(path, rate)
-            .map_err(BrowserError::Failed)?;
+        let id = if kind == Some(ItemKind::Clip) {
+            self.loader.request_clip(path, rate, search.to_vec())
+        } else {
+            self.loader.request(path, rate)
+        }
+        .map_err(BrowserError::Failed)?;
         self.loading = Some((id, path.to_path_buf()));
         self.preview_rate = rate;
         Ok(())
@@ -2048,17 +2193,51 @@ impl BrowserView {
         files.into_iter().map(|(_, path)| path).collect()
     }
 
+    /// The file whose name is open for editing after a clip was saved (clip
+    /// files R4).
+    #[must_use]
+    pub fn renaming(&self) -> Option<&Path> {
+        self.renaming.as_deref()
+    }
+
+    /// The selected clip files, in the content pane's order.
+    pub(crate) fn selected_clip_files(&self) -> Vec<PathBuf> {
+        let mut files: Vec<(Option<usize>, PathBuf)> = self
+            .selected
+            .iter()
+            .filter(|p| {
+                p.file_name().and_then(|n| file_kind(&n.to_string_lossy())) == Some(ItemKind::Clip)
+            })
+            .map(|p| (self.position_of(p), p.clone()))
+            .collect();
+        files.sort_by_key(|(position, _)| *position);
+        files.into_iter().map(|(_, path)| path).collect()
+    }
+
+    /// The folders searched for a clip file's audio that isn't where the
+    /// file says: the places (the User Library, the Current Project and the
+    /// folders added), clip files R12.
+    #[must_use]
+    pub fn search_folders(&self) -> Vec<PathBuf> {
+        self.roots().into_iter().map(|(_, path)| path).collect()
+    }
+
     /// Whether a person can run browser command `id` with `args` now.
     #[must_use]
     pub fn can_run(&self, id: &str, args: &Value) -> bool {
         match id {
             ids::LOAD_SELECTED => {
                 !self.selected_audio().is_empty()
+                    || !self.selected_clip_files().is_empty()
                     || self.selected_plugin().is_some()
                     || self.selected_device().is_some()
                     || self.selected_sfz().is_some()
             }
-            ids::PREVIEW => args.get("path").is_some() || self.selected_audio().len() == 1,
+            ids::PREVIEW => {
+                args.get("path").is_some()
+                    || self.selected_audio().len() == 1
+                    || self.selected_clip_files().len() == 1
+            }
             ids::REMOVE_FOLDER => args
                 .get("path")
                 .and_then(Value::as_str)
@@ -2213,11 +2392,22 @@ impl BrowserView {
                 // Spec: browser R11. One audio file previews while the switch
                 // is on; anything else stops the preview.
                 let audio_files = self.selected_audio();
-                if self.preview_on && self.selected.len() == 1 && audio_files.len() == 1 {
+                let clip_files = self.selected_clip_files();
+                if self.preview_on
+                    && self.selected.len() == 1
+                    && (audio_files.len() == 1 || clip_files.len() == 1)
+                {
                     // Without a running device there's nothing to hear; the
                     // selection stands either way.
                     if ctx.audio.sample_rate().is_some() {
-                        let _ = self.start_preview(&audio_files[0], ctx.audio);
+                        let _ = self.start_preview(
+                            audio_files
+                                .first()
+                                .or(clip_files.first())
+                                .expect("one file"),
+                            ctx.audio,
+                            ctx.search,
+                        );
                     }
                 } else if self.preview_active() {
                     self.stop_preview(ctx.audio);
@@ -2266,32 +2456,7 @@ impl BrowserView {
                         path.to_string_lossy()
                     )));
                 }
-                let Some((label, root)) = self
-                    .roots()
-                    .into_iter()
-                    .find(|(_, root)| path.starts_with(root))
-                else {
-                    return Err(BrowserError::Unavailable(format!(
-                        "{} lies in none of the browser's places: add its folder with \
-                         `browser.add_folder` first",
-                        path.to_string_lossy()
-                    )));
-                };
-                self.label = label;
-                self.search.clear();
-                for folder in path.ancestors().skip(1) {
-                    if folder == root {
-                        break;
-                    }
-                    self.listings.remove(folder);
-                    self.open.insert(folder.to_path_buf());
-                }
-                self.rebuild();
-                self.selected = vec![path.clone()];
-                self.cursor = self.position_of(&path);
-                if self.preview_active() {
-                    self.stop_preview(ctx.audio);
-                }
+                self.reveal(&path, ctx.audio)?;
                 outcome.show_browser = true;
                 outcome.value = state(self, ctx.audio);
             }
@@ -2334,17 +2499,18 @@ impl BrowserView {
                     Some(path) => absolute(&path)?,
                     None => {
                         let files = self.selected_audio();
-                        match files.as_slice() {
-                            [one] => one.clone(),
+                        let clips = self.selected_clip_files();
+                        match (files.as_slice(), clips.as_slice()) {
+                            ([one], []) | ([], [one]) => one.clone(),
                             _ => {
                                 return Err(BrowserError::Unavailable(
-                                    "select one audio file to preview".to_owned(),
+                                    "select one audio file or clip file to preview".to_owned(),
                                 ));
                             }
                         }
                     }
                 };
-                self.start_preview(&path, ctx.audio)?;
+                self.start_preview(&path, ctx.audio, ctx.search)?;
                 outcome.value = to_value(&self.preview_state(ctx.audio));
             }
             ids::STOP_PREVIEW => {
@@ -2406,19 +2572,31 @@ impl BrowserView {
             }
             ids::LOAD_SELECTED => {
                 parse::<bl_commands::NoArgs>(args)?;
-                let files = self.selected_audio();
+                let clips = self.selected_clip_files();
+                let files = if clips.is_empty() {
+                    self.selected_audio()
+                } else {
+                    clips
+                };
                 if files.is_empty() {
                     return Err(BrowserError::Unavailable(
-                        "select an audio file in the browser first".to_owned(),
+                        "select an audio file or a clip file in the browser first".to_owned(),
                     ));
                 }
-                // Spec: browser R14. The selected track if it holds audio,
-                // otherwise a new one.
+                // Spec: browser R14, clip files R10. The selected track if it
+                // is a track of the files' kind, otherwise a new one.
+                let wanted = match listing::clip_kind(&files[0]) {
+                    _ if file_kind(&files[0].to_string_lossy()) != Some(ItemKind::Clip) => {
+                        bl_model::TrackKind::Audio
+                    }
+                    Some(bl_shell_spec::browser::ClipFileKind::Midi) => bl_model::TrackKind::Midi,
+                    _ => bl_model::TrackKind::Audio,
+                };
                 let track = ctx.selected_track.filter(|track| {
                     ctx.editor
                         .document()
                         .track(*track)
-                        .is_some_and(|t| t.kind() == bl_model::TrackKind::Audio)
+                        .is_some_and(|t| t.kind() == wanted)
                 });
                 let args = AddToArrangementArgs {
                     paths: files
@@ -2434,6 +2612,99 @@ impl BrowserView {
             ids::ADD_TO_ARRANGEMENT => {
                 let args: AddToArrangementArgs = parse(args)?;
                 self.add(&args, ctx, &mut outcome)?;
+            }
+            ids::SAVE_CLIP_FILE => {
+                let SaveClipFileArgs {
+                    clip,
+                    folder,
+                    name,
+                    copy,
+                } = parse(args)?;
+                let library = self.user_library.clone();
+                let folder = match folder {
+                    Some(folder) => absolute(&folder)?,
+                    None => library
+                        .clone()
+                        .ok_or_else(|| {
+                            BrowserError::Unavailable(
+                                "the User Library hasn't been set up".to_owned(),
+                            )
+                        })?
+                        .join("Clips"),
+                };
+                if folder.exists() && !folder.is_dir() {
+                    return Err(BrowserError::InvalidArgs(format!(
+                        "{} isn't a folder",
+                        folder.to_string_lossy()
+                    )));
+                }
+                let doc = ctx.editor.document();
+                let copy = match (ctx.collect_files, copy) {
+                    (CollectFiles::Always, _) => true,
+                    (CollectFiles::Never, _) => false,
+                    (CollectFiles::Ask, Some(copy)) => copy,
+                    (CollectFiles::Ask, None) => {
+                        if clip_files::uses_outside(
+                            doc,
+                            ctx.media,
+                            clip,
+                            &folder,
+                            library.as_deref(),
+                        ) {
+                            return Err(BrowserError::Unavailable(
+                                "Collect Files on Export is set to Ask: ask the person whether to \
+                                 copy the audio files, then run the command again with `copy` \
+                                 set to true or false"
+                                    .to_owned(),
+                            ));
+                        }
+                        false
+                    }
+                };
+                let saved = clip_files::save(
+                    doc,
+                    ctx.media,
+                    clip,
+                    &folder,
+                    name.as_deref(),
+                    copy,
+                    library.as_deref(),
+                )
+                .map_err(BrowserError::Failed)?;
+                self.files_changed();
+                // Its row is selected with the name open for editing, if the
+                // folder is in a place the browser shows (clip files R4).
+                let shown = self.reveal(&saved.path, ctx.audio).is_ok();
+                self.renaming = shown.then(|| saved.path.clone());
+                outcome.show_browser = shown;
+                outcome.message = Some(format!("Saved clip file {}.", saved.name));
+                outcome.value = to_value(&SaveClipFileResult {
+                    path: saved.path.to_string_lossy().into_owned(),
+                    name: saved.name,
+                    kind: match saved.kind {
+                        bl_project::clip_file::ClipKind::Audio => ClipFileKind::Audio,
+                        bl_project::clip_file::ClipKind::Midi => ClipFileKind::Midi,
+                    },
+                    copied: saved.copied,
+                });
+            }
+            ids::RENAME_FILE => {
+                let RenameFileArgs { path, name } = parse(args)?;
+                let target = match path {
+                    Some(path) => absolute(&path)?,
+                    None => self.renaming.clone().ok_or_else(|| {
+                        BrowserError::Unavailable("no file's name is open for editing".to_owned())
+                    })?,
+                };
+                if self.renaming.as_ref() == Some(&target) {
+                    self.renaming = None;
+                }
+                if let Some(name) = name {
+                    let new = self.renamed(&target, &name)?;
+                    self.files_changed();
+                    let _ = self.reveal(&new, ctx.audio);
+                }
+                outcome.value = state(self, ctx.audio);
             }
             ids::TAGS => {
                 let TagsArgs { items } = parse(args)?;
@@ -2804,24 +3075,67 @@ impl BrowserView {
         }
     }
 
+    /// Shows `path` in the place it lies in, opened down to it, and selects
+    /// it (Show in Browser; a saved clip file's new row).
+    fn reveal(&mut self, path: &Path, audio: &AudioHost) -> Result<(), BrowserError> {
+        let Some((label, root)) = self
+            .roots()
+            .into_iter()
+            .find(|(_, root)| path.starts_with(root))
+        else {
+            return Err(BrowserError::Unavailable(format!(
+                "{} lies in none of the browser's places: add its folder with \
+                 `browser.add_folder` first",
+                path.to_string_lossy()
+            )));
+        };
+        self.label = label;
+        self.search.clear();
+        for folder in path.ancestors().skip(1) {
+            if folder == root {
+                break;
+            }
+            self.listings.remove(folder);
+            self.open.insert(folder.to_path_buf());
+        }
+        self.rebuild();
+        self.selected = vec![path.to_path_buf()];
+        self.cursor = self.position_of(path);
+        if self.preview_active() {
+            self.stop_preview(audio);
+        }
+        Ok(())
+    }
+
     fn add(
         &mut self,
         args: &AddToArrangementArgs,
         ctx: Context<'_>,
         outcome: &mut Outcome,
     ) -> Result<(), BrowserError> {
-        let (result, media) = arrange::add_files(
-            ctx.editor,
-            ctx.media,
-            ctx.insert_marker,
-            ctx.edge_fades,
-            ctx.warping,
-            args,
-        )
-        .map_err(|error| match error {
-            AddError::InvalidArgs(message) => BrowserError::InvalidArgs(message),
-            AddError::Failed(message) => BrowserError::Failed(message),
-        })?;
+        let (result, media) = if args.paths.iter().any(|p| arrange::is_clip_file(p)) {
+            let (result, media, missing) =
+                arrange::add_clip_files(ctx.editor, ctx.media, ctx.insert_marker, ctx.search, args)
+                    .map_err(|error| match error {
+                        AddError::InvalidArgs(message) => BrowserError::InvalidArgs(message),
+                        AddError::Failed(message) => BrowserError::Failed(message),
+                    })?;
+            outcome.message = arrange::missing_message(missing);
+            (result, media)
+        } else {
+            arrange::add_files(
+                ctx.editor,
+                ctx.media,
+                ctx.insert_marker,
+                ctx.edge_fades,
+                ctx.warping,
+                args,
+            )
+            .map_err(|error| match error {
+                AddError::InvalidArgs(message) => BrowserError::InvalidArgs(message),
+                AddError::Failed(message) => BrowserError::Failed(message),
+            })?
+        };
         outcome.value = to_value(&result);
         outcome.media = media;
         outcome.document_changed = true;

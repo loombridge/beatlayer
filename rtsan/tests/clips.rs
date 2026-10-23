@@ -103,6 +103,8 @@ fn clip_playback_passes_under_rtsan() {
                 clip,
                 fade_in: (round % 5) as f64 * 0.01,
                 fade_out: 0.004,
+                fade_in_curve: None,
+                fade_out_curve: None,
             }),
             8 => Some(Command::MoveClip {
                 clip,
@@ -161,4 +163,109 @@ fn clip_playback_passes_under_rtsan() {
         state.swaps,
         state.cpu_load_max * 100.0
     );
+}
+
+// Spec: audio-clips R31. Crossfaded clips play on past their edges, from the
+// sources they keep, while their crossfades are made, changed, ended and moved
+// and the clips edited around them: nothing allocates, frees or locks.
+#[test]
+fn crossfaded_clip_playback_passes_under_rtsan() {
+    let mut media = MediaMap::new();
+    media.insert(ContentHash([1; 32]), file(96_000, 0.001));
+    media.insert(ContentHash([2; 32]), file(96_000, 0.002));
+    let registry = Registry::new().with_media(Arc::new(media));
+    let config = EngineConfig::new(SampleRate::HZ_48000, 256);
+    let mut collector = Collector::new();
+    let mut compiler = Compiler::new(config, registry, collector.handle());
+    let (mut sender, mut processor, mut monitor) = channel(&config);
+
+    let mut editor = Editor::new();
+    let track = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: track,
+            kind: TrackKind::Audio,
+            name: String::new(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    // Two clips that meet, the later starting half a second into its file so
+    // that it can play on before its start.
+    let mut clips = Vec::new();
+    for (start, audio) in [
+        (Ticks::ZERO, AudioData::new(ContentHash([1; 32]))),
+        (
+            Ticks::WHOLE,
+            AudioData {
+                start: 0.5,
+                ..AudioData::new(ContentHash([2; 32]))
+            },
+        ),
+    ] {
+        let id = editor.new_id();
+        let clip = Clip::new(id, start, Ticks::WHOLE, ClipData::Audio(audio));
+        editor.apply(Command::CreateClip { track, clip }).unwrap();
+        clips.push(id);
+    }
+    editor
+        .apply(Command::SetCrossfade {
+            track,
+            boundary: Ticks::WHOLE,
+            before: 0.01,
+            after: 0.02,
+            curve: 0.0,
+        })
+        .unwrap();
+    sender.send_update(compiler.sync(editor.document()));
+    sender.transport(TransportCommand::Play);
+
+    for round in 0..2_000u64 {
+        // An edit every few blocks, most of them refused or no-ops once the
+        // clips have moved: the ones that land send the track a new list.
+        let command = match round % 20 {
+            0 => Some(Command::SetCrossfade {
+                track,
+                boundary: Ticks::WHOLE,
+                before: (round % 5) as f64 * 0.005,
+                after: 0.005 + (round % 3) as f64 * 0.01,
+                curve: ((round % 7) as f64 - 3.0) / 3.0,
+            }),
+            5 => Some(Command::DeleteCrossfade {
+                track,
+                boundary: Ticks::WHOLE,
+            }),
+            10 => Some(Command::SetClipLength {
+                clip: clips[0],
+                length: Ticks::WHOLE - Ticks::QUARTER * (round % 3) as i64 / 4,
+            }),
+            15 => Some(Command::MoveClip {
+                clip: clips[1],
+                track,
+                start: Ticks::WHOLE - Ticks::QUARTER * (round % 3) as i64 / 4,
+            }),
+            _ => None,
+        };
+        if let Some(command) = command {
+            // A refused edit changes nothing.
+            if editor.apply(command).is_ok() {
+                sender.send_update(compiler.sync(editor.document()));
+            }
+        }
+        // Into the middle of a span now and then.
+        if round % 100 == 50 {
+            sender.transport(TransportCommand::Locate(Ticks::WHOLE - Ticks(7_000)));
+        }
+        assert!(sender.flush());
+        bl_rt::rt_test!({
+            processor.process(256);
+        });
+        if round % 50 == 0 {
+            collector.collect();
+        }
+    }
+    let state = monitor.state().clone();
+    assert_eq!(state.counters.data_unrouted, 0);
+    assert!(state.counters.data_delivered > 100);
+    assert!(state.meter(track).is_some_and(|[left, _]| left > 0.0));
 }

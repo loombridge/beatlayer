@@ -456,13 +456,23 @@ fn splitting_keeps_what_each_part_plays() {
         panic!("audio clips");
     };
     assert_eq!(moved.start, whole.start + 2.0);
+    // With Create Fades on Clip Edges on, as it is by default, the parts meet
+    // in a crossfade (audio-clips R26); nothing else of the data changed.
+    let unfaded = |audio: &bl_model::AudioData| bl_model::AudioData {
+        fade_in: 0.0,
+        fade_out: 0.0,
+        fade_in_before: 0.0,
+        fade_out_after: 0.0,
+        ..audio.clone()
+    };
     assert_eq!(
         bl_model::AudioData {
             start: whole.start,
-            ..moved.clone()
+            ..unfaded(moved)
         },
-        *whole
+        unfaded(whole)
     );
+    assert_eq!(moved.fade_in_before, bl_model::EDGE_FADE_SECONDS / 2.0);
     // At a time selection's edges: the part inside is selected.
     s.view(
         view_ids::SELECT_TIME,

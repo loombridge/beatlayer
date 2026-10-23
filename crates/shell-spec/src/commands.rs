@@ -73,6 +73,9 @@ pub const VIEW_DRAW_MODE: &str = "view.draw_mode";
 pub const VIEW_FOLD_NOTES: &str = "view.fold_notes";
 /// `view.lane`: choose which value the Clip View's lane shows (WP-2.3).
 pub const VIEW_LANE: &str = "view.lane";
+/// `view.lanes`: show, hide and swap the Clip View's expression lanes, and
+/// set Randomize's amounts (WP-6.1).
+pub const VIEW_LANES: &str = "view.lanes";
 /// `view.clip_tab`: show a tab of the Clip View, or go on to the next
 /// (S-CLIPMODE-001 to 004, WP-3.16).
 pub const VIEW_CLIP_TAB: &str = "view.clip_tab";
@@ -187,6 +190,11 @@ pub const SETTINGS_SET_AUTOMATION_RECORD_MODE: &str = "settings.set_automation_r
 /// `settings.set_auto_hide_plug_in_windows`: switch Auto-Hide Plug-In
 /// Windows (WP-2.5b).
 pub const SETTINGS_SET_AUTO_HIDE_PLUG_IN_WINDOWS: &str = "settings.set_auto_hide_plug_in_windows";
+/// `settings.set_collect_files_on_export`: choose Collect Files on Export
+/// (WP-6.34).
+pub const SETTINGS_SET_COLLECT_FILES_ON_EXPORT: &str = "settings.set_collect_files_on_export";
+/// `settings.set_user_library`: choose the User Library's folder (WP-6.34).
+pub const SETTINGS_SET_USER_LIBRARY: &str = "settings.set_user_library";
 /// `audio.devices`: list drivers and devices.
 pub const AUDIO_DEVICES: &str = "audio.devices";
 /// `audio.status`: what the audio device runs at.
@@ -234,6 +242,7 @@ pub const IDS: &[&str] = &[
     VIEW_DRAW_MODE,
     VIEW_FOLD_NOTES,
     VIEW_LANE,
+    VIEW_LANES,
     VIEW_CLIP_TAB,
     VIEW_CLIP_ENVELOPE,
     VIEW_TOGGLE_INFO_VIEW,
@@ -279,6 +288,8 @@ pub const IDS: &[&str] = &[
     SETTINGS_SET_AUTOMATION_RECORD_MODE,
     SETTINGS_SET_AUTO_HIDE_PLUG_IN_WINDOWS,
     SETTINGS_SET_OUTLINE_VIEW_IN_FOCUS,
+    SETTINGS_SET_COLLECT_FILES_ON_EXPORT,
+    SETTINGS_SET_USER_LIBRARY,
     AUDIO_DEVICES,
     AUDIO_STATUS,
     AUDIO_CONFIGURE,
@@ -506,6 +517,32 @@ pub struct DefaultLaunchQuantizationArgs {
     pub quantization: Option<LaunchQuantization>,
 }
 
+/// Arguments of `settings.set_collect_files_on_export`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CollectFilesArgs {
+    /// `always`, `never` or `ask`.
+    pub mode: crate::settings::CollectFiles,
+}
+
+/// Arguments of `settings.set_user_library`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct UserLibraryArgs {
+    /// The folder's absolute path, or `null` for the default: a `User
+    /// Library` folder in a Beatlayer folder in the Music folder (the
+    /// Documents folder on Windows).
+    pub path: Option<String>,
+}
+
+/// What `settings.set_user_library` returns: the User Library in use
+/// afterwards.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct UserLibraryResult {
+    /// The User Library's path; empty when there is none.
+    pub path: String,
+}
+
 /// Arguments of `settings.set_temporary_folder`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -631,6 +668,33 @@ pub struct FoldNotesArgs {
 pub struct LaneArgs {
     /// Which value the lane shows.
     pub lane: NoteField,
+}
+
+/// Arguments of `view.lanes`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LanesArgs {
+    /// The lane the other fields but `all` act on: `velocity`, `chance` or
+    /// `release_velocity` (`velocity_deviation` is the Velocity lane).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lane: Option<NoteField>,
+    /// With `lane`: show it (`true`) or hide it (`false`); left out, the Lane
+    /// Selector's choice, which switches it. Showing a lane makes it the
+    /// active lane.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub show: Option<bool>,
+    /// With `lane`: hide it and show in its place the first hidden lane
+    /// after it, going round to the first (the lane header's Swap Lane).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub swap: Option<bool>,
+    /// With `lane`: set its Randomize amount, 0 to 127, or 0 to 100 (a
+    /// percentage) for `chance`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub amount: Option<u8>,
+    /// The Show/Hide All Expression Editors switch: `false` hides every lane
+    /// and `true` shows them again as they were; left out, nothing changes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub all: Option<bool>,
 }
 
 /// Arguments of `view.set_plugin_list_only_missing`.
@@ -1077,16 +1141,33 @@ fn specs() -> Vec<CommandSpec> {
             .result::<ClipViewState>(),
         CommandSpec::new(VIEW_LANE, "Note Editor Lane")
             .description(
-                "Chooses which of a note's values the lane under the MIDI Note Editor shows \
-                 and edits: `velocity` (the lane's default), `release_velocity`, `chance`, or \
-                 `velocity_deviation`. Dragging a note's stem in the lane sets that value on \
-                 that note, and dragging across several notes ramps it; the same edits are \
-                 the `note.set_value` and `note.ramp_value` commands. Changes only the view, \
-                 so it's no undo step and isn't saved with the set.",
+                "Makes one of the MIDI Note Editor's expression lanes the active lane, whose \
+                 controls the footer shows, and shows it: `velocity` (the default), `chance` \
+                 or `release_velocity`; `velocity_deviation` is the Velocity lane, which shows \
+                 it. Choosing a lane in the Lane Selector does the same. Changes only the \
+                 view, so it's no undo step and isn't saved with the set.",
             )
             .permission(Permission::Read)
             .contexts([ClipView, NoteEditor])
             .args::<LaneArgs>()
+            .result::<ClipViewState>(),
+        CommandSpec::new(VIEW_LANES, "Expression Lanes")
+            .description(
+                "Shows, hides and swaps the MIDI Note Editor's expression lanes (`velocity`, \
+                 `chance`, `release_velocity`, always in that order from the top), and holds \
+                 Randomize's amounts. With `lane`: `show` shows or hides it as the Lane \
+                 Selector does (left out, it switches), `swap` hides it and shows in its \
+                 place the first hidden lane after it, going round to the first (Swap Lane in \
+                 the lane header's menu), and `amount` sets its Randomize amount, 0 to 127, or \
+                 0 to 100 (a percentage) for `chance`. `all` is the Show/Hide All Expression \
+                 Editors switch: `false` hides every lane and `true` shows them again as they \
+                 were. A new editor shows the Velocity lane alone, with every amount 0. \
+                 Changes only the view, so it's no undo step and isn't saved with the set. \
+                 The result is the Clip View's state, which lists the lanes shown.",
+            )
+            .permission(Permission::Read)
+            .contexts([ClipView, NoteEditor])
+            .args::<LanesArgs>()
             .result::<ClipViewState>(),
         CommandSpec::new(VIEW_CLIP_TAB, "Clip View Tab")
             .description(
@@ -1424,6 +1505,42 @@ fn specs() -> Vec<CommandSpec> {
         .context(Settings)
         .args::<SwitchArgs>()
         .result::<SwitchResult>(),
+        // Library (L-SET-016; WP-6.34): an edit-class preference.
+        CommandSpec::new(
+            SETTINGS_SET_COLLECT_FILES_ON_EXPORT,
+            "Collect Files on Export",
+        )
+        .description(
+            "Chooses Collect Files on Export on the Settings window's Library page: what \
+                 happens to the audio files a clip or a set uses when it is saved to the \
+                 browser as a clip file or a set. `always` (a new install's choice) copies \
+                 every such file that isn't already in the saved file's project into its \
+                 `Samples/Imported` folder; `never` copies none, and the saved file names each \
+                 file where it is; `ask` asks first, with Copy, Don't Copy and Cancel, and the \
+                 commands that save to the browser refuse to run under it without their `copy` \
+                 argument, so an agent asks the person first. Collect All and Save and device \
+                 presets don't follow it. The setting is kept for the next start, and isn't \
+                 part of the set or an undo step.",
+        )
+        .permission(Permission::Edit)
+        .context(Settings)
+        .args::<CollectFilesArgs>()
+        .result::<()>(),
+        CommandSpec::new(SETTINGS_SET_USER_LIBRARY, "User Library")
+            .description(
+                "Chooses the User Library's folder on the Settings window's Library page. \
+                 `path` is an absolute path, or `null` for the default. The folder becomes the \
+                 User Library at once: its starting folders (Clips, Defaults, Grooves, \
+                 Presets, Samples, Tunings) are made in it if it has none, and it is indexed \
+                 in the background. Nothing is moved from the folder before. Run by a person \
+                 from the Browse button without a `path`, it asks for a folder. The setting is \
+                 kept for the next start, and isn't part of the set or an undo step. The \
+                 result's `path` is the User Library in use afterwards.",
+            )
+            .permission(Permission::Edit)
+            .context(Settings)
+            .args::<UserLibraryArgs>()
+            .result::<UserLibraryResult>(),
         // File & Folder (L-SET-015; WP-4.20): an edit-class preference.
         CommandSpec::new(SETTINGS_SET_TEMPORARY_FOLDER, "Temporary Folder")
             .description(

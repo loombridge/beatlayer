@@ -32,7 +32,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use bl_core::time::{SampleRate, TempoMap};
+use bl_core::time::{SampleRate, TempoMap, Ticks};
 use bl_media::stream::{AudioSource, MemorySource, PlanarMut, Source, StreamConfig, Transition};
 use bl_media::{MediaStore, SampleData, StreamId, Streamer, StreamerStats, convert_sample_rate};
 use bl_model::{
@@ -707,6 +707,10 @@ pub(crate) struct PlacedClip {
     gain: f64,
     fade_in: u64,
     fade_out: u64,
+    /// The fades' shape and reach past the clip's own edges (the audio clips
+    /// spec, R23, R24, R31): all of the clip's own fades, and the straight
+    /// ones of a clip with no crossfade.
+    shape: FadeShape,
     /// The clip's warp mode and HiQ switch (the warp modes spec, R8 and R12).
     playing: Playing,
     /// What the clip was playing before a mode change, where the new list
@@ -716,6 +720,46 @@ pub(crate) struct PlacedClip {
     /// of the track's clips that can sound at once have different lanes, so
     /// they never share a stretcher.
     lane: u16,
+}
+
+/// How a clip's fades are shaped and where they reach (R23, R24). A clip with
+/// a crossfade plays on past an edge of its own, so its geometry runs `lead`
+/// frames before its start and `tail` frames past its end, and its fades are
+/// measured from the edges it has in the song.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct FadeShape {
+    /// How many frames the geometry starts before the clip's own start.
+    lead: u64,
+    /// How many frames it runs past the clip's own end.
+    tail: u64,
+    /// How many frames before the clip's start its fade-in begins: 0 unless
+    /// the clip crossfades with the one before it.
+    before: u64,
+    /// How many frames past the clip's end its fade-out ends: 0 unless the
+    /// clip crossfades with the one after it.
+    after: u64,
+    /// The exponents of the curves (R23), 1 for a straight line.
+    in_power: f64,
+    out_power: f64,
+}
+
+impl FadeShape {
+    /// A clip with straight fades that reach nowhere past its edges.
+    pub(crate) fn straight() -> Self {
+        Self {
+            lead: 0,
+            tail: 0,
+            before: 0,
+            after: 0,
+            in_power: 1.0,
+            out_power: 1.0,
+        }
+    }
+}
+
+/// A fade's gain `x` of the way through it, along a curve of exponent `power`.
+fn shaped(x: f64, power: f64) -> f64 {
+    if power == 1.0 { x } else { x.powf(power) }
 }
 
 impl PlacedClip {
@@ -745,14 +789,24 @@ impl PlacedClip {
 
     /// The clip's gain with its fades, `elapsed` frames after its start.
     fn level(&self, elapsed: u64) -> f64 {
+        let shape = &self.shape;
+        // Frames from the clip's own start, before it for a crossfade's lead.
+        let at = elapsed as i64 - shape.lead as i64;
         let mut fade = 1.0f64;
-        if elapsed < self.fade_in {
-            fade = elapsed as f64 / self.fade_in as f64;
+        // Spec: audio-clips R6, R23, R24. The fade-in rises from its start
+        // (a crossfade's, `before` the clip's) to its peak, `fade_in` after
+        // the clip's start.
+        let rising = self.fade_in + shape.before;
+        let into = at + shape.before as i64;
+        if rising > 0 && into < rising as i64 {
+            fade = shaped(into.max(0) as f64 / rising as f64, shape.in_power);
         }
-        let length = (self.geometry.end - self.geometry.start) as u64;
-        let left = length.saturating_sub(elapsed);
-        if left < self.fade_out {
-            fade = fade.min(left as f64 / self.fade_out as f64);
+        let falling = self.fade_out + shape.after;
+        let length = self.geometry.end - self.geometry.start - (shape.lead + shape.tail) as i64;
+        let left = length + shape.after as i64 - at;
+        if falling > 0 && left < falling as i64 {
+            let out = shaped(left.max(0) as f64 / falling as f64, shape.out_power);
+            fade = fade.min(out);
         }
         self.gain_at(self.geometry.start.saturating_add(elapsed as i64)) * fade
     }
@@ -925,6 +979,62 @@ pub(crate) struct Built {
     pub(crate) pool: PoolSpec,
 }
 
+/// How far a crossfade has a clip play past its edges (the audio clips spec,
+/// R24): seconds before its start and after its end, 0 for a clip with no
+/// crossfade there.
+#[derive(Clone, Copy, Debug)]
+struct Reach {
+    before: f64,
+    after: f64,
+}
+
+/// How many ticks past a crossfade's far end a clip is read, so that the
+/// frame the span ends on is inside it whichever way the tick rounds.
+const REACH_MARGIN: i64 = 2;
+
+impl Reach {
+    /// What the crossfades among a track's clips (`joined`) make clip `id`
+    /// play past its edges.
+    fn of(id: ClipId, joined: &[bl_model::Crossfade]) -> Self {
+        Self {
+            before: joined
+                .iter()
+                .find(|c| c.later == id)
+                .map_or(0.0, |c| c.before),
+            after: joined
+                .iter()
+                .find(|c| c.earlier == id)
+                .map_or(0.0, |c| c.after),
+        }
+    }
+
+    /// The clip with its edges moved out to the ends of its crossfades,
+    /// still playing what it plays (R24): resizing it would; `None` for a
+    /// clip with no crossfade, or one that can't read that far before its
+    /// start.
+    fn extend(self, clip: &Clip, tempo: &TempoMap) -> Option<Clip> {
+        if self.before <= 0.0 && self.after <= 0.0 {
+            return None;
+        }
+        let mut extended = clip.clone();
+        if self.before > 0.0 {
+            let at = tempo.seconds_to_ticks(tempo.ticks_to_seconds(clip.start) - self.before);
+            // A span that reaches back to the start of the file has no room
+            // for the margin: take the earliest start the file allows.
+            if let Some(earlier) = (-REACH_MARGIN..=REACH_MARGIN)
+                .find_map(|margin| clip.with_start(Ticks(at.get() + margin), tempo).ok())
+            {
+                extended = earlier;
+            }
+        }
+        if self.after > 0.0 {
+            let at = tempo.seconds_to_ticks(tempo.ticks_to_seconds(clip.end()) + self.after);
+            extended.length = Ticks(at.get() + REACH_MARGIN) - extended.start;
+        }
+        Some(extended)
+    }
+}
+
 impl ClipList {
     /// The clips of `track` under `tempo` at `rate`, with their sources
     /// from `sources` (opened from `media`), and the Arrangement loop's
@@ -943,6 +1053,7 @@ impl ClipList {
         pool: Option<PoolSpec>,
         sources: &mut ClipSources,
         media: Option<&dyn MediaLibrary>,
+        grooves: &bl_model::GroovePool,
     ) -> Built {
         let mut placed = Vec::new();
         let mut missing = Vec::new();
@@ -950,13 +1061,22 @@ impl ClipList {
         // A frozen track plays its freeze files instead of its clips (WP-4.14,
         // R6).
         let clips = track.playback_clips();
-        for clip in &clips {
+        // Spec: audio-clips R24, R31. A crossfaded clip plays over its span
+        // past its edge, from its source.
+        let joined = bl_model::crossfades(clips.iter());
+        for own in &clips {
+            let ClipData::Audio(_) = &own.data else {
+                continue;
+            };
+            if own.mute {
+                continue;
+            }
+            let reach = Reach::of(own.id, &joined);
+            let extended = reach.extend(own, tempo);
+            let clip = extended.as_ref().unwrap_or(own);
             let ClipData::Audio(audio) = &clip.data else {
                 continue;
             };
-            if clip.mute {
-                continue;
-            }
             // A Beats clip's plan asks for the file's transients, and for
             // its audio where a loop turn must be found (R14, R15).
             let transients = media
@@ -967,10 +1087,17 @@ impl ClipList {
             // it plays: the track's automation of them and the clip's own
             // envelopes.
             let sound = ClipSound::of(track, clip, audio, tempo, rate);
+            // Spec: grooves R12. The clip's groove at the Global Amount, if
+            // it changes anything.
+            let groove = clip
+                .groove
+                .and_then(|id| grooves.play(id))
+                .filter(|play| !play.is_inert());
             let beats = BeatsMedia {
                 sound: sound.as_ref(),
                 transients: &transients,
                 samples: &samples,
+                groove: groove.as_ref(),
             };
             // Where the clip starts reading, before its length is known.
             let at = Geometry::of(clip, audio, tempo, rate, None, true, &beats);
@@ -1004,6 +1131,19 @@ impl ClipList {
             );
             let frames =
                 |seconds: f64| u64::try_from(rate.seconds_to_frames(seconds).get()).unwrap_or(0);
+            // Spec: audio-clips R23, R24. The clip's own edges in the song,
+            // inside the geometry a crossfade extends.
+            let own_start = tempo.ticks_to_frames(own.start, rate).get();
+            let own_end = tempo.ticks_to_frames(own.end(), rate).get();
+            let lead = u64::try_from(own_start - geometry.start).unwrap_or(0);
+            let shape = FadeShape {
+                lead,
+                tail: u64::try_from(geometry.end - own_end).unwrap_or(0),
+                before: frames(reach.before).min(lead),
+                after: frames(reach.after),
+                in_power: bl_model::fade_power(audio.fade_in_curve),
+                out_power: bl_model::fade_power(audio.fade_out_curve),
+            };
             let (carry, source) = match sourced.supply {
                 Supply::Carry => (true, None),
                 Supply::Fresh(source) => (false, Some(source)),
@@ -1013,6 +1153,7 @@ impl ClipList {
                 PlacedClip {
                     id: clip.id,
                     scene: None,
+                    shape,
                     geometry,
                     carry,
                     sound: sound.map(Box::new),
@@ -1043,10 +1184,17 @@ impl ClipList {
                 .and_then(|library| library.transients(audio.media))
                 .map_or_else(Vec::new, |detected| audio.transient_edits.apply(&detected));
             let samples = || media.and_then(|library| library.sample(audio.media, rate));
+            // Spec: grooves R12. The clip's groove at the Global Amount, if
+            // it changes anything.
+            let groove = clip
+                .groove
+                .and_then(|id| grooves.play(id))
+                .filter(|play| !play.is_inert());
             let beats = BeatsMedia {
                 sound: None,
                 transients: &transients,
                 samples: &samples,
+                groove: groove.as_ref(),
             };
             let at = Geometry::of(clip, audio, tempo, rate, None, false, &beats);
             if at.end <= at.start {
@@ -1088,6 +1236,7 @@ impl ClipList {
                 PlacedClip {
                     id: clip.id,
                     scene: Some(*scene),
+                    shape: FadeShape::straight(),
                     geometry,
                     carry,
                     sound: None,
@@ -1409,6 +1558,22 @@ fn render(
     }
 }
 
+/// A clip's level with the gain its groove's Velocity gives it (the grooves
+/// spec, R13): `level` is the clip's own, `elapsed` frames after the song
+/// frame `origin` where its contents began.
+fn with_groove<'a>(
+    warped: &'a Warped,
+    tempo: &'a TempoMap,
+    rate: f64,
+    origin: i64,
+    level: fn(&PlacedClip, u64) -> f64,
+) -> impl Fn(&PlacedClip, u64) -> f64 + 'a {
+    let ticks = tempo.seconds_to_ticks_exact(origin as f64 / rate);
+    move |clip, elapsed| {
+        level(clip, elapsed) * warped.groove_gain(tempo, rate, ticks, origin + elapsed as i64)
+    }
+}
+
 /// Adds the frames `range` of the block, which are `elapsed` frames into the
 /// warped `clip` and start at song frame `frame`, read from `source` through
 /// the clip's positions and warp mode, to the block, through `level`.
@@ -1538,7 +1703,7 @@ impl Node for ClipPlayer {
                     (elapsed, from),
                     &mut self.warp,
                     histories[at].as_deref_mut(),
-                    PlacedClip::launch_level,
+                    with_groove(warped, tempo, rate, launch, PlacedClip::launch_level),
                     stretchers,
                     clip.lane as usize,
                 );
@@ -1637,6 +1802,7 @@ impl Node for ClipPlayer {
             let range = (start - from) as usize..(end - from) as usize;
             let elapsed = (start - clip.geometry.start) as u64;
             if let Some(warped) = &clip.geometry.warped {
+                let (tempo, rate) = (block.tempo(), block.sample_rate().as_f64());
                 render_warped(
                     clip,
                     &warped.positions(),
@@ -1648,7 +1814,7 @@ impl Node for ClipPlayer {
                     (elapsed, start),
                     warp,
                     history.as_deref_mut(),
-                    PlacedClip::level,
+                    with_groove(warped, tempo, rate, clip.geometry.start, PlacedClip::level),
                     stretchers,
                     clip.lane as usize,
                 );
@@ -1873,6 +2039,7 @@ mod tests {
     fn no_media() -> BeatsMedia<'static> {
         BeatsMedia {
             sound: None,
+            groove: None,
             transients: &[],
             samples: &|| None,
         }
@@ -1898,6 +2065,7 @@ mod tests {
             gain: 0.5,
             fade_in: 10,
             fade_out: 20,
+            shape: FadeShape::straight(),
             playing: Playing {
                 mode: bl_model::WarpMode::RePitch,
                 high_quality: true,
@@ -2076,6 +2244,45 @@ mod tests {
         assert_eq!(short.level(6), 0.5 * 6.0 / 12.0);
         assert_eq!(short.level(8), 0.5 * 8.0 / 12.0);
         assert_eq!(short.level(10), 0.5 * 6.0 / 12.0);
+    }
+
+    // Spec: audio-clips R23, R24. A curve bows a fade by the law x^p with
+    // p = 4^(-curve), and a crossfade's fade runs from before the clip's start
+    // to after its end.
+    #[test]
+    fn curves_bow_the_fades_and_a_crossfade_reaches_past_the_edges() {
+        let mut bowed = clip(false);
+        bowed.shape.in_power = bl_model::fade_power(0.5);
+        bowed.shape.out_power = bl_model::fade_power(-0.5);
+        assert_eq!(bowed.shape.in_power, 0.5);
+        assert_eq!(bowed.level(0), 0.0);
+        assert_eq!(bowed.level(5), 0.5 * 0.5f64.powf(0.5));
+        assert_eq!(bowed.level(10), 0.5);
+        assert_eq!(bowed.level(990), 0.5 * 0.5f64.powf(2.0));
+        // A later clip's fade-in: 30 frames before its start and 50 after.
+        let mut later = clip(false);
+        later.fade_in = 50;
+        later.fade_out = 0;
+        later.shape.lead = 30;
+        later.shape.before = 30;
+        later.geometry.start -= 30;
+        assert_eq!(later.level(0), 0.0);
+        assert_eq!(later.level(30), 0.5 * 30.0 / 80.0);
+        assert_eq!(later.level(70), 0.5 * 70.0 / 80.0);
+        assert_eq!(later.level(80), 0.5, "the peak, 50 frames after the start");
+        // An earlier clip's fade-out: 40 frames before its end and 25 after.
+        let mut earlier = clip(false);
+        earlier.fade_in = 0;
+        earlier.fade_out = 40;
+        earlier.shape.after = 25;
+        earlier.shape.tail = 27;
+        earlier.geometry.end += 27;
+        assert_eq!(earlier.level(959), 0.5);
+        assert_eq!(earlier.level(960), 0.5);
+        assert_eq!(earlier.level(980), 0.5 * 45.0 / 65.0);
+        assert_eq!(earlier.level(1000), 0.5 * 25.0 / 65.0);
+        assert_eq!(earlier.level(1024), 0.5 * 1.0 / 65.0);
+        assert_eq!(earlier.level(1025), 0.0, "the span's far end");
     }
 
     // Spec: audio-clips R3, R16

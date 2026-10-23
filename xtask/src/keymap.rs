@@ -185,6 +185,16 @@ const WIDGET: &[(&str, &str)] = &[
         "the Arrangement View: Shift-Option-dragging (Shift-Alt) a clip's title bar selects \
          time inside the clip (`arrangement.select_time`)",
     ),
+    // WP-6.51: F held shows the fade handles, which the view reads as it goes.
+    (
+        "S-ARR-010",
+        "the Arrangement View: F held shows every clip's fade handles (audio clips R27)",
+    ),
+    (
+        "S-ENV-004",
+        "the Arrangement View: as S-ARR-010, F held shows every clip's fade handles, over an \
+         automation lane in Automation Mode too (audio clips R27)",
+    ),
     // The value fields (WP-1.18): the Control Bar's transport section today,
     // each change running the field's registered command
     // (the control bar transport spec).
@@ -291,6 +301,47 @@ const WIDGET: &[(&str, &str)] = &[
         "the Clip View's note editor: Shift-Left and Shift-Right select time, a grid step at a \
          time (`clip_view.select_time`)",
     ),
+    // WP-6.1: the note editor reads the keys that change the selected notes'
+    // values itself, because each has two directions, or reads a number
+    // typed over several presses, or a drag (the keymap gives a shortcut one
+    // command with one set of arguments).
+    (
+        "S-NOTE-016",
+        "the Clip View's note editor: Cmd-dragging a note (Alt-dragging on Windows) up or down \
+         changes its velocity, or every selected note's (`note.adjust_value`)",
+    ),
+    (
+        "S-NOTE-026",
+        "the Clip View's note editor: a digit from 1 to 9 starts a velocity for the selected \
+         notes, more digits add to it, and Enter sets it (`note.set_value`)",
+    ),
+    (
+        "S-NOTE-027",
+        "the Clip View's note editor: Cmd-Up and Cmd-Down raise and lower the selected notes' \
+         velocity by 10 (`note.adjust_value`)",
+    ),
+    (
+        "S-NOTE-028",
+        "the Clip View's note editor: Cmd-Shift-Up and Cmd-Shift-Down raise and lower the \
+         selected notes' velocity deviation by 10 (`note.adjust_value`)",
+    ),
+    (
+        "S-NOTE-029",
+        "the Clip View's note editor: Cmd-Option-Up and Cmd-Option-Down raise and lower the \
+         selected notes' chance by 10 % (`note.adjust_value`)",
+    ),
+    (
+        "S-NOTE-050",
+        "the Clip View's note editor, after a marker in the Velocity or Release Velocity lane \
+         was clicked: Cmd-Up and Cmd-Down change the selected notes' value by 10, and with Shift \
+         by 1 (`note.adjust_value`)",
+    ),
+    (
+        "S-NOTE-051",
+        "the Clip View's note editor, after a marker in the Chance lane was clicked: Up and \
+         Down change the selected notes' chance by 10 %, and with Shift by 1 % \
+         (`note.adjust_value`)",
+    ),
     (
         "S-A11Y-005",
         "the Clip View's note editor: Enter selects the notes that start inside the time \
@@ -376,10 +427,6 @@ const WIDGET: &[(&str, &str)] = &[
 const OWNERS: &[(&str, &str)] = &[
     ("S-VIEW-011", "WP-1.8a"),
     ("S-EDIT-012", "WP-1.8b"),
-    ("S-ENV-004", "WP-6.51"),
-    ("S-ARR-008", "WP-6.51"),
-    ("S-ARR-009", "WP-6.51"),
-    ("S-ARR-010", "WP-6.51"),
     ("S-ZOOM-003", "WP-1.8a"),
     ("S-ZOOM-004", "WP-1.8a"),
     ("S-ZOOM-005", "WP-1.8a"),

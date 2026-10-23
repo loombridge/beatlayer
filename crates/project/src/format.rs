@@ -450,7 +450,7 @@ pub fn decode_json(json: &[u8], options: &LoadOptions) -> Result<(Project, SetIn
 
 /// Decompresses a set file's one zstd frame, checking its checksum and that
 /// nothing follows it.
-fn decompress(bytes: &[u8], limit: usize) -> Result<Vec<u8>, LoadError> {
+pub(crate) fn decompress(bytes: &[u8], limit: usize) -> Result<Vec<u8>, LoadError> {
     let mut rest = bytes;
     let json = decompress_frame(&mut rest, limit)?;
     if !rest.is_empty() {

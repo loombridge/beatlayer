@@ -37,6 +37,7 @@ use std::io::Read;
 use bl_core::id::IdAllocator;
 use bl_model::{
     ClipFolds, DeviceWindows, Document, Editor, LaunchSettings, MultisamplerViews, RackViewMap,
+    WindowViews,
 };
 use ruzstd::decoding::StreamingDecoder;
 use ruzstd::encoding::{CompressionLevel, compress_to_vec};
@@ -85,6 +86,10 @@ pub struct Project {
     /// editor. Saved with the set, but not part of the document, so
     /// changing them is no undo step (the multisampler spec, R1).
     pub multisamplers: MultisamplerViews,
+    /// The main view the main window shows and whether the second window is
+    /// open (second-window R14): saved with the set, but not part of the
+    /// document, so switching either is no undo step.
+    pub window_views: WindowViews,
 }
 
 impl Project {
@@ -107,6 +112,7 @@ impl Project {
             folds: ClipFolds::new(),
             launch: LaunchSettings::default(),
             multisamplers: MultisamplerViews::new(),
+            window_views: WindowViews::default(),
         }
     }
 
@@ -174,6 +180,13 @@ impl Project {
     #[must_use]
     pub fn with_launch(mut self, launch: LaunchSettings) -> Self {
         self.launch = launch;
+        self
+    }
+
+    /// The same project with these window views.
+    #[must_use]
+    pub fn with_window_views(mut self, window_views: WindowViews) -> Self {
+        self.window_views = window_views;
         self
     }
 }
@@ -255,6 +268,8 @@ struct Saving<'a> {
     launch: LaunchSettings,
     #[serde(skip_serializing_if = "MultisamplerViews::is_empty")]
     multisamplers: &'a MultisamplerViews,
+    #[serde(skip_serializing_if = "WindowViews::is_default")]
+    window_views: WindowViews,
     document: &'a Document,
 }
 
@@ -272,6 +287,7 @@ impl<'a> Saving<'a> {
             folds: &project.folds,
             launch: project.launch,
             multisamplers: &project.multisamplers,
+            window_views: project.window_views,
             document: &project.document,
         }
     }
@@ -304,6 +320,10 @@ struct Saved {
     /// open with the views a new device has.
     #[serde(default)]
     multisamplers: MultisamplerViews,
+    /// The main view and the second window (WP-6.29). Sets saved before it
+    /// open in the Arrangement View with one window.
+    #[serde(default)]
+    window_views: WindowViews,
     document: Document,
 }
 
@@ -408,6 +428,7 @@ pub fn decode_json(json: &[u8], options: &LoadOptions) -> Result<(Project, SetIn
         folds,
         launch,
         multisamplers,
+        window_views,
         document,
         ..
     } = saved;
@@ -435,6 +456,7 @@ pub fn decode_json(json: &[u8], options: &LoadOptions) -> Result<(Project, SetIn
         folds: ClipFolds::new(),
         launch,
         multisamplers: MultisamplerViews::new(),
+        window_views,
     }
     .with_windows(&windows)
     .with_rack_views(&rack_views)

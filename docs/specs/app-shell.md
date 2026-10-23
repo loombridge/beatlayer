@@ -82,4 +82,4 @@ This spec covers the shell's own behaviour. Where each pane and control sits is 
 | R21 | `crates/shell/tests/project_folders.rs`, `save_as_to_another_project_keeps_using_the_same_media` | unit, through `Shell::run` on real folders |
 | R22 | `crates/shell/tests/project_folders.rs`, `the_save_dialog_opens_in_the_sets_project_folder` | unit; the app passes the folder to the system dialog |
 | R23 | `crates/agent/tests/readback_runtime.rs`, `each_settings_command_reads_back_from_settings_state`, `settings_state_reports_secrets_only_as_stored_or_not`, `view_state_reads_back_the_view_toggles` | unit, through the agent API |
-| R24 | to be written in WP-6.27 to WP-6.30, each for its own fields | |
+| R24 | `crates/agent/tests/readback_runtime.rs`, `view_state_reads_back_the_detail_area` (`detail`, WP-6.27), `view_state_reads_back_the_second_window` (`second_window` and `focused_window`, WP-6.29); the other packages' fields come with their own | unit, through the agent API |

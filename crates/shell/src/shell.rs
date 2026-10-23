@@ -136,6 +136,7 @@ mod stems;
 mod step_input;
 mod tunings;
 mod warping;
+mod windows;
 
 use file_manager::FileManager;
 
@@ -169,6 +170,9 @@ impl MainView {
 pub enum WindowKind {
     /// The main window.
     Main,
+    /// The second window (WP-6.29): another main view, with a Control Bar,
+    /// a detail area and a Status Bar of its own.
+    Second,
     /// The Settings window.
     Settings,
     /// A floating device's window (WP-2.5b, IMP-14).
@@ -282,8 +286,13 @@ pub enum Effect {
     CloseSettings,
     /// Enter or leave full-screen mode.
     SetFullScreen(bool),
+    /// Enter or leave full-screen mode in the second window.
+    SetSecondFullScreen(bool),
     /// Move the keyboard focus to an area of the main window.
     FocusArea(Area),
+    /// Move the keyboard focus to an area of the second window, and bring
+    /// it to the front.
+    FocusSecondArea(Area),
     /// Move the keyboard focus to the next or previous control, or to the
     /// same control on the next or previous track.
     MoveFocus {
@@ -334,6 +343,9 @@ pub enum Effect {
     /// person types the new name; Return runs `locator.rename` with it
     /// (WP-6.24; the time editing spec, R8).
     RenameLocator(bl_model::LocatorId),
+    /// Bring a floating device's window to the front (the mixer view spec,
+    /// R28).
+    RaiseDeviceWindow(bl_model::DeviceId),
 }
 
 /// Where a gesture that edits the set is (WP-1.8b): see [`Shell::gesture`].
@@ -508,6 +520,11 @@ pub struct Shell {
     system_dark: bool,
     focused_window: WindowKind,
     focused_area: Area,
+    /// The second window's state (WP-6.29).
+    second: windows::SecondWindow,
+    /// The main window or the second window, whichever was in front last:
+    /// the one the commands that act on one window act on.
+    front_window: WindowKind,
     /// The track whose control has the keyboard focus (WP-1.14).
     focused_track: Option<TrackId>,
     /// Whether a device's value control (a knob or a number box) has the
@@ -1030,7 +1047,7 @@ impl Shell {
         audio.set_preview_gain(prefs.browser.preview_volume as f32);
         // Spec: file-management R1. A saved default set is what a new set
         // starts from; without one, the factory default set.
-        let editor = new_set_from(prefs.default_set.as_deref());
+        let (editor, window_views) = new_set_from(prefs.default_set.as_deref());
         // The engine's clips stream from the set's media (WP-1.4b).
         let media = Arc::new(MediaStore::new());
         audio.set_media(Arc::clone(&media));
@@ -1113,6 +1130,8 @@ impl Shell {
             full_screen: false,
             focused_window: WindowKind::Main,
             focused_area: Area::MainView,
+            second: windows::SecondWindow::default(),
+            front_window: WindowKind::Main,
             focused_track: None,
             value_focused: false,
             effects: Vec::new(),
@@ -1195,6 +1214,9 @@ impl Shell {
             device_commands_key: Vec::new(),
             plugins_generation: 0,
         };
+        // Spec: second-window R14. A saved default set keeps its main view
+        // and the second window.
+        shell.apply_window_views(window_views);
         shell.agent_tokens_in_file = !agent::StoredTokens::of(&shell.prefs.agent).is_empty();
         shell.give_agents_tokens();
         shell.publish_plugins();
@@ -1468,9 +1490,11 @@ impl Shell {
             self.set_path
                 .as_deref()
                 .or(self.prefs.default_set.as_deref()),
-        );
+        )
+        .0;
         self.dirty = true;
         self.store.adopt(set, project);
+        self.apply_window_views(self.store.window_views());
         // The views saved beside the song, and its files, as `set.open`
         // takes them.
         self.devices.set_windows(self.store.windows());
@@ -2448,6 +2472,10 @@ impl Shell {
             page: self.prefs.settings_page,
             display_input: DisplayInputSettings {
                 zoom_percent: self.zoom_percent(),
+                second_window_zoom_percent: self
+                    .second
+                    .open
+                    .then(|| self.zoom_percent_of(WindowKind::Second)),
                 outline_view_in_focus: self.outline_view_in_focus(),
                 use_tab_key_to_move_focus: self.tab_navigation(),
                 wrap_tab_navigation: self.wrap_navigation(),
@@ -2633,6 +2661,12 @@ impl Shell {
 
     /// Records which window has the keyboard focus.
     pub fn set_focused_window(&mut self, window: WindowKind) {
+        if window == WindowKind::Second && !self.second.open {
+            return;
+        }
+        if matches!(window, WindowKind::Main | WindowKind::Second) {
+            self.front_window = window;
+        }
         if self.focused_window != window {
             // Spec: automation-editing R23. The edit ends when the focus
             // leaves.
@@ -3845,6 +3879,12 @@ impl Shell {
             // for an agent that never polls the engine.
             self.audio.displays_into(self.devices.displays_mut());
         }
+        // Spec: mixer-view R28. Selecting a device that floats brings its
+        // window to the front.
+        let selected = (id == device_ids::SELECT)
+            .then(|| serde_json::from_value::<device_ids::SelectDeviceArgs>(args.clone()).ok())
+            .flatten()
+            .and_then(|a| a.device);
         let user_library = self.browser_view.user_library().map(Path::to_path_buf);
         let zoom = self.zoom();
         let auto_hide = self.prefs.auto_hide_plug_in_windows.0;
@@ -3882,6 +3922,15 @@ impl Shell {
         }
         if let Some(message) = outcome.message {
             self.set_message(message, false);
+        }
+        if let Some(device) = selected
+            && self
+                .floating_windows()
+                .windows
+                .iter()
+                .any(|w| w.device == device && w.shown)
+        {
+            self.effects.push(Effect::RaiseDeviceWindow(device));
         }
         if let Some(route) = outcome.browse {
             // Spec: device-chains R19. Hot-swapping shows the device's
@@ -4703,10 +4752,16 @@ impl Shell {
         &self.session
     }
 
-    /// The mixer of the view in front.
+    /// The mixer of the view in the window in front.
     #[must_use]
     pub fn front_mixer(&self) -> MixerOf {
-        match self.main_view {
+        self.mixer_of(self.acting_window())
+    }
+
+    /// The mixer of the view `window` shows.
+    #[must_use]
+    pub fn mixer_of(&self, window: WindowKind) -> MixerOf {
+        match self.main_view_of(window) {
             MainView::Arrangement => MixerOf::Arrangement,
             MainView::Session => MixerOf::Session,
         }
@@ -5163,15 +5218,13 @@ impl Shell {
             self.save_preferences();
         }
         if outcome.show_browser {
-            self.browser = true;
+            self.show_browser_in(self.acting_window());
         }
         if let Some(message) = outcome.message {
             self.set_message(message, false);
         }
         if outcome.focus {
-            self.focused_window = WindowKind::Main;
-            self.focused_area = Area::Browser;
-            self.effects.push(Effect::FocusArea(Area::Browser));
+            self.focus_area(Area::Browser);
         }
         if id != browser_ids::STATE {
             self.touch();
@@ -5741,7 +5794,14 @@ impl Shell {
     /// first scene selected in the Session View, while it's in front.
     #[must_use]
     pub fn scene_view_scene(&self) -> Option<bl_model::SceneId> {
-        (self.main_view == MainView::Session)
+        self.scene_view_scene_in(WindowKind::Main)
+    }
+
+    /// The same for `window`: only the window that shows the Session View
+    /// has it.
+    #[must_use]
+    pub fn scene_view_scene_in(&self, window: WindowKind) -> Option<bl_model::SceneId> {
+        (self.main_view_of(window) == MainView::Session)
             .then(|| self.session.state().scenes.first().copied())
             .flatten()
             .filter(|scene| self.editor.document().scene(*scene).is_some())
@@ -6429,7 +6489,7 @@ impl Shell {
             // Device View's keys act on it (Float's among them), and the
             // global ones work.
             WindowKind::Device(_) => vec![Context::DeviceView, Context::Global],
-            WindowKind::Main => {
+            window @ (WindowKind::Main | WindowKind::Second) => {
                 let mut contexts = Vec::with_capacity(3);
                 // Spec: crash-recovery R23. While the recovery prompt is
                 // open, it has the keyboard: the main window's own keys
@@ -6438,8 +6498,9 @@ impl Shell {
                 if self.recovery_prompt_open() {
                     return contexts;
                 }
-                match self.focused_area {
-                    Area::MainView => match self.main_view {
+                let detail = self.detail_of(window);
+                match self.focused_area_of(window) {
+                    Area::MainView => match self.main_view_of(window) {
                         MainView::Arrangement => {
                             // A selected title bar's keys come first
                             // (shortcuts.md, `track-headers`).
@@ -6462,7 +6523,7 @@ impl Shell {
                     Area::Detail if self.value_focused => contexts.push(Context::ValueField),
                     // Spec: piano-roll. With the Clip View open, its MIDI
                     // Note Editor holds the detail area's keys.
-                    Area::Detail if self.detail.focus_in_clip() => {
+                    Area::Detail if detail.focus_in_clip() => {
                         // Spec: multi-clip-editing R11. With loop bars
                         // selected, Cmd-D duplicates their loops.
                         if !self
@@ -6548,11 +6609,14 @@ impl Shell {
                         == selected.map(bl_model::SongStart::Locator),
                 )
             }
-            ids::VIEW_FULL_SCREEN => Some(self.full_screen),
-            ids::VIEW_TOGGLE_BROWSER => Some(self.browser),
-            ids::VIEW_TOGGLE_CLIP_VIEW => Some(self.detail.clip_shown()),
-            ids::VIEW_TOGGLE_DEVICE_VIEW => Some(self.detail.device_shown()),
-            ids::VIEW_EXPAND_CLIP_VIEW => Some(self.detail.expanded()),
+            ids::VIEW_FULL_SCREEN => Some(self.full_screen_of(self.acting_window())),
+            ids::VIEW_TOGGLE_SECOND_WINDOW => Some(self.second.open),
+            ids::VIEW_TOGGLE_BROWSER => Some(self.browser_of(self.acting_window())),
+            ids::VIEW_TOGGLE_CLIP_VIEW => Some(self.detail_of(self.acting_window()).clip_shown()),
+            ids::VIEW_TOGGLE_DEVICE_VIEW => {
+                Some(self.detail_of(self.acting_window()).device_shown())
+            }
+            ids::VIEW_EXPAND_CLIP_VIEW => Some(self.detail_of(self.acting_window()).expanded()),
             ids::VIEW_TOGGLE_PLUGIN_LIST => Some(self.plugin_list.visible()),
             ids::VIEW_DRAW_MODE => Some(self.clip_view.draw_mode()),
             note_ids::SET_PREVIEW => Some(self.clip_view.preview()),
@@ -6697,7 +6761,7 @@ impl Shell {
             // Spec: detail-views R6. Hide Device View reads for the views it
             // would hide, or the ones it would bring back.
             ids::VIEW_TOGGLE_DETAIL_AREA => {
-                let (hiding, views) = self.detail.toggle_area_views();
+                let (hiding, views) = self.detail_of(self.acting_window()).toggle_area_views();
                 let names = match views[..] {
                     [DetailView::Clip] => "Clip View",
                     [DetailView::Device] => "Device View",
@@ -6933,7 +6997,7 @@ impl Shell {
         // View shows, whichever area has the focus; the key is the Clip
         // View's own.
         if id == ids::VIEW_EXPAND_CLIP_VIEW {
-            return self.detail.clip_shown();
+            return self.detail_of(self.window_in(args)).clip_shown();
         }
         if !spec.contexts.iter().any(|context| active.contains(context)) {
             return false;
@@ -7029,8 +7093,21 @@ impl Shell {
             "clip.rename" => return self.arrangement.selected_locators().is_empty(),
             // Zoom In and Zoom Out stop at the zoom's ends (interface-zoom
             // R3).
-            ids::VIEW_ZOOM_IN => return self.zoom_percent() < ZOOM_MAX_PERCENT,
-            ids::VIEW_ZOOM_OUT => return self.zoom_percent() > ZOOM_MIN_PERCENT,
+            ids::VIEW_ZOOM_IN | ids::VIEW_ZOOM_OUT => {
+                // Spec: interface-zoom R13. The ends are those of the window
+                // the zoom acts on.
+                let window = self.zoom_window(match args["window"].as_str() {
+                    Some("main") => Some(ids::WindowName::Main),
+                    Some("second") => Some(ids::WindowName::Second),
+                    _ => None,
+                });
+                let percent = self.zoom_percent_of(window);
+                return if id == ids::VIEW_ZOOM_IN {
+                    percent < ZOOM_MAX_PERCENT
+                } else {
+                    percent > ZOOM_MIN_PERCENT
+                };
+            }
             // A person's Zoom setting always names a percentage in range, as
             // the Customization settings do (themes R7).
             ids::VIEW_SET_ZOOM
@@ -7061,6 +7138,7 @@ impl Shell {
                         .document()
                         .device(device)
                         .is_some_and(|d| d.floating),
+                    WindowKind::Second => self.second.open,
                     WindowKind::Main => false,
                 };
             }
@@ -8923,9 +9001,7 @@ impl Shell {
             if result.is_ok() && id == view_ids::FOCUS_TITLE_BAR {
                 // Spec: accessibility R4. Esc from a track's control gives
                 // the keyboard back to the Arrangement, at the title bar.
-                self.focused_window = WindowKind::Main;
-                self.focused_area = Area::MainView;
-                self.effects.push(Effect::FocusArea(Area::MainView));
+                self.focus_area(Area::MainView);
             }
             if result.is_ok() && matches!(id, view_ids::SET_INSERT_MARKER | view_ids::SELECT_TIME) {
                 // Spec: control-bar-transport R15. A click or a time
@@ -8963,9 +9039,7 @@ impl Shell {
                 });
             if result.is_ok() && id == mixer_ids::FOCUS {
                 // Spec: mixer-view R13.
-                self.focused_window = WindowKind::Main;
-                self.focused_area = Area::MainView;
-                self.effects.push(Effect::FocusArea(Area::MainView));
+                self.focus_area(Area::MainView);
             }
             if result.is_ok() && id == mixer_ids::RETURN_TRACKS_SCROLL {
                 // Spec: mixer-view R21. The switch is an application
@@ -9064,10 +9138,7 @@ impl Shell {
             if id == session_ids::FOCUS {
                 // Spec: session-view. Navigate ▸ Session View shows it and
                 // moves the focus into it.
-                self.main_view = MainView::Session;
-                self.focused_window = WindowKind::Main;
-                self.focused_area = Area::MainView;
-                self.effects.push(Effect::FocusArea(Area::MainView));
+                self.focus_main_view(MainView::Session);
             }
             if id != session_ids::STATE {
                 self.touch();
@@ -9674,32 +9745,11 @@ impl Shell {
     }
 
     fn view_window(&self) -> ViewResult {
-        ViewResult {
-            main_view: self.main_view.id().to_owned(),
-            browser: self.browser,
-            info_view: self.info_view,
-            full_screen: self.full_screen,
-            zoom: self.zoom(),
-        }
+        self.view_result_of(WindowKind::Main)
     }
 
     fn view_result(&self) -> Value {
         to_value(&self.view_window())
-    }
-
-    /// What the detail area's commands return. The Clip View's own copy of
-    /// whether it shows follows the detail area here, the one place every
-    /// change passes.
-    fn detail_result(&mut self) -> Value {
-        self.clip_view.set_visible(self.detail.clip_shown());
-        to_value(&self.detail.state())
-    }
-
-    /// Gives the detail area the keyboard focus.
-    fn focus_detail(&mut self) {
-        self.focused_window = WindowKind::Main;
-        self.focused_area = Area::Detail;
-        self.effects.push(Effect::FocusArea(Area::Detail));
     }
 
     fn set_result(&self) -> Value {
@@ -9882,10 +9932,11 @@ impl Shell {
                 self.set_replaced();
                 // Spec: file-management R1. A new set starts from the saved
                 // default set when there is one.
-                let editor = new_set_from(self.prefs.default_set.as_deref());
+                let (editor, window_views) = new_set_from(self.prefs.default_set.as_deref());
                 self.saved = snapshot(&editor);
                 self.editor = editor;
                 self.store.close();
+                self.apply_window_views(window_views);
                 self.devices.set_windows(bl_model::DeviceWindows::new());
                 self.devices.set_rack_views(bl_model::RackViewMap::new());
                 self.devices
@@ -9893,7 +9944,6 @@ impl Shell {
                 self.clip_view.set_folds(bl_model::ClipFolds::new());
                 self.set_path = None;
                 self.dirty = false;
-                self.main_view = MainView::Arrangement;
                 self.message = None;
                 self.arrangement.reset();
                 self.clip_view.forget_selection();
@@ -9929,6 +9979,9 @@ impl Shell {
                 self.saved = snapshot(&editor);
                 self.set_replaced();
                 self.editor = editor;
+                // Spec: second-window R14. The set opens with the main view
+                // and the second window it was saved with.
+                self.apply_window_views(self.store.window_views());
                 self.set_path = Some(opened);
                 self.dirty = false;
                 self.message = None;
@@ -10245,17 +10298,16 @@ impl Shell {
                     self.touch();
                     return Ok(Value::Null);
                 }
+                if self.focused_window == WindowKind::Second {
+                    // Spec: second-window R1. Close Window closes the second
+                    // window with it in front.
+                    return self.run_window_view(ids::VIEW_TOGGLE_SECOND_WINDOW, json!({}));
+                }
                 if !self.settings_open {
                     return Err(unavailable("no secondary window is open"));
                 }
                 self.close_settings();
                 Ok(Value::Null)
-            }
-            ids::VIEW_FULL_SCREEN => {
-                Self::args::<NoArgs>(id, args)?;
-                self.full_screen = !self.full_screen;
-                self.effects.push(Effect::SetFullScreen(self.full_screen));
-                Ok(self.view_result())
             }
             ids::VIEW_TOGGLE_PLUG_IN_WINDOWS => {
                 // Spec: device-chains R33. It hides and shows windows only.
@@ -10276,80 +10328,6 @@ impl Shell {
                 let closed = self.close_plug_in_windows();
                 self.touch();
                 Ok(to_value(&ids::ClosedPlugInWindows { closed }))
-            }
-            ids::VIEW_TOGGLE_BROWSER => {
-                Self::args::<NoArgs>(id, args)?;
-                self.browser = !self.browser;
-                if !self.browser && self.focused_area == Area::Browser {
-                    self.focused_area = Area::MainView;
-                }
-                Ok(self.view_result())
-            }
-            ids::VIEW_TOGGLE_CLIP_VIEW => {
-                // Spec: detail-views R1; L-STAT-004. View state only.
-                Self::args::<NoArgs>(id, args)?;
-                self.detail.toggle(DetailView::Clip);
-                Ok(self.detail_result())
-            }
-            ids::VIEW_TOGGLE_DEVICE_VIEW => {
-                // Spec: detail-views R1; L-STAT-006.
-                Self::args::<NoArgs>(id, args)?;
-                self.detail.toggle(DetailView::Device);
-                Ok(self.detail_result())
-            }
-            ids::VIEW_SHOW_DETAIL_VIEWS => {
-                // Spec: detail-views R2; I-CLICK-027.
-                Self::args::<NoArgs>(id, args)?;
-                self.detail.both();
-                Ok(self.detail_result())
-            }
-            ids::VIEW_SWITCH_DETAIL_VIEW => {
-                // Spec: detail-views R5; S-VIEW-004.
-                Self::args::<NoArgs>(id, args)?;
-                if self.detail.switch() {
-                    self.focus_detail();
-                }
-                Ok(self.detail_result())
-            }
-            ids::VIEW_TOGGLE_DETAIL_AREA => {
-                // Spec: detail-views R6; S-VIEW-022.
-                Self::args::<NoArgs>(id, args)?;
-                self.detail.toggle_area();
-                Ok(self.detail_result())
-            }
-            ids::VIEW_EXPAND_CLIP_VIEW => {
-                // Spec: detail-views R11; S-NOTE-030.
-                Self::args::<NoArgs>(id, args)?;
-                if !self.detail.toggle_expanded() {
-                    return Err(ShellError::Unavailable {
-                        command: id.to_owned(),
-                        reason: "the Clip View is hidden".to_owned(),
-                    });
-                }
-                Ok(self.detail_result())
-            }
-            ids::VIEW_SET_DETAIL_HEIGHT => {
-                // Spec: detail-views R10, R18.
-                let ids::DetailHeightArgs { points } = Self::args(id, args)?;
-                if !points.is_finite() {
-                    return Err(ShellError::InvalidArgs {
-                        command: id.to_owned(),
-                        message: "`points` must be a number".to_owned(),
-                    });
-                }
-                self.detail.set_clip_height(points);
-                Ok(self.detail_result())
-            }
-            ids::FOCUS_CLIP_VIEW | ids::FOCUS_DEVICE_VIEW => {
-                // Spec: detail-views R14; S-FOCUS-004, S-FOCUS-005.
-                Self::args::<NoArgs>(id, args)?;
-                self.detail.focus_view(if id == ids::FOCUS_CLIP_VIEW {
-                    DetailView::Clip
-                } else {
-                    DetailView::Device
-                });
-                self.focus_detail();
-                Ok(self.detail_result())
             }
             ids::VIEW_TOGGLE_PLUGIN_LIST => {
                 // Spec: plugin-list R1, R3. View state only.
@@ -10518,6 +10496,12 @@ impl Shell {
                 Self::args::<NoArgs>(id, args)?;
                 Ok(to_value(&ViewState {
                     window: self.view_window(),
+                    second_window: self.second_window_state(),
+                    focused_window: if self.acting_window() == WindowKind::Second {
+                        ids::WindowName::Second
+                    } else {
+                        ids::WindowName::Main
+                    },
                     clip_view: self
                         .clip_view
                         .state(self.editor.document(), &self.arrangement),
@@ -10541,45 +10525,25 @@ impl Shell {
                 self.info_view = !self.info_view;
                 Ok(self.view_result())
             }
-            ids::VIEW_TOGGLE_SESSION_ARRANGEMENT => {
-                Self::args::<NoArgs>(id, args)?;
-                self.main_view = match self.main_view {
-                    MainView::Arrangement => MainView::Session,
-                    MainView::Session => MainView::Arrangement,
-                };
-                Ok(self.view_result())
-            }
-            // Spec: interface-zoom R3, R5, R6.
-            ids::VIEW_ZOOM_IN | ids::VIEW_ZOOM_OUT | ids::VIEW_ZOOM_RESET => {
-                Self::args::<NoArgs>(id, args)?;
-                let next = match id {
-                    ids::VIEW_ZOOM_IN => zoom_step(self.zoom_percent(), 1),
-                    ids::VIEW_ZOOM_OUT => zoom_step(self.zoom_percent(), -1),
-                    _ => 100,
-                };
-                self.set_zoom_percent(next);
-                Ok(self.view_result())
-            }
-            ids::VIEW_SET_ZOOM => {
-                let ZoomArgs { percent } = Self::args(id, args)?;
-                self.set_zoom_percent(percent);
-                Ok(self.view_result())
-            }
-            ids::FOCUS_CONTROL_BAR => {
-                Self::args::<NoArgs>(id, args)?;
-                self.focused_window = WindowKind::Main;
-                self.focused_area = Area::ControlBar;
-                self.effects.push(Effect::FocusArea(Area::ControlBar));
-                Ok(Value::Null)
-            }
-            ids::FOCUS_ARRANGEMENT => {
-                Self::args::<NoArgs>(id, args)?;
-                self.main_view = MainView::Arrangement;
-                self.focused_window = WindowKind::Main;
-                self.focused_area = Area::MainView;
-                self.effects.push(Effect::FocusArea(Area::MainView));
-                Ok(Value::Null)
-            }
+            ids::VIEW_TOGGLE_SECOND_WINDOW
+            | ids::VIEW_FULL_SCREEN
+            | ids::VIEW_TOGGLE_BROWSER
+            | ids::VIEW_TOGGLE_CLIP_VIEW
+            | ids::VIEW_TOGGLE_DEVICE_VIEW
+            | ids::VIEW_SHOW_DETAIL_VIEWS
+            | ids::VIEW_SWITCH_DETAIL_VIEW
+            | ids::VIEW_TOGGLE_DETAIL_AREA
+            | ids::VIEW_EXPAND_CLIP_VIEW
+            | ids::VIEW_SET_DETAIL_HEIGHT
+            | ids::FOCUS_CLIP_VIEW
+            | ids::FOCUS_DEVICE_VIEW
+            | ids::VIEW_TOGGLE_SESSION_ARRANGEMENT
+            | ids::VIEW_ZOOM_IN
+            | ids::VIEW_ZOOM_OUT
+            | ids::VIEW_ZOOM_RESET
+            | ids::VIEW_SET_ZOOM
+            | ids::FOCUS_CONTROL_BAR
+            | ids::FOCUS_ARRANGEMENT => self.run_window_view(id, args),
             ids::FOCUS_NEXT | ids::FOCUS_PREVIOUS => {
                 Self::args::<NoArgs>(id, args)?;
                 self.effects.push(Effect::MoveFocus {

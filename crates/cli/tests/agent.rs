@@ -6061,3 +6061,62 @@ fn an_agent_scrolls_the_return_tracks_with_the_tracks_and_reads_it_back() {
     let state = run(&mut client, "mixer_view.state", json!({}));
     assert_eq!(state["return_tracks_scroll"], false);
 }
+
+// Spec: mixer-view R24, R31. An agent shows the Devices section, reads the
+// switch back in the mixers' state, and reads the devices the section lists
+// with their `enabled` from the query tool.
+#[test]
+fn an_agent_shows_the_devices_section_and_reads_it_back() {
+    let mut client = Client::new(InProcess::new(Agent::headless(false), Shell::headless()));
+    client.initialize("mixer").unwrap();
+    let run = |client: &mut Client<InProcess>, command: &str, args: Value| {
+        let out = call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": command, "args": args }] }),
+        );
+        out["results"][0]["result"].clone()
+    };
+    // Hidden in a new install.
+    assert_eq!(
+        run(&mut client, "mixer_view.state", json!({}))["devices"],
+        false
+    );
+    let on = run(&mut client, "mixer_view.devices", json!({ "shown": true }));
+    assert_eq!(on["devices"], true);
+    assert_eq!(
+        run(&mut client, "mixer_view.state", json!({}))["devices"],
+        true
+    );
+    let off = run(&mut client, "mixer_view.devices", json!({}));
+    assert_eq!(off["devices"], false);
+    assert_eq!(
+        run(&mut client, "mixer_view.state", json!({}))["devices"],
+        false
+    );
+    // The devices the section lists, and whether each is on, are the
+    // query tool's track devices with their `enabled`.
+    let audio = default_tracks(&mut client)[2];
+    let built = call(
+        &mut client,
+        "run",
+        json!({ "commands": [
+            { "command": "device.insert", "args": { "track": audio, "index": 0, "device": {
+                "id": {"$new": "through"}, "name": "Pass", "enabled": true, "params": [],
+                "kind": { "native": { "device_type": "test.through" } },
+            } } },
+        ] }),
+    );
+    let device = built["ids"]["through"].as_u64().unwrap();
+    let enabled = |client: &mut Client<InProcess>| {
+        let track = call(client, "query", json!({ "id": audio, "detail": "full" }));
+        track["devices"][0]["enabled"].clone()
+    };
+    assert_eq!(enabled(&mut client), true);
+    run(
+        &mut client,
+        "device.set_enabled",
+        json!({ "device": device, "enabled": false }),
+    );
+    assert_eq!(enabled(&mut client), false);
+}

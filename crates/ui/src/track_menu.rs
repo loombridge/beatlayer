@@ -90,7 +90,8 @@ impl TrackMenus {
         let keymap = Keymap::from_data(shell.keymap().clone());
         let view = shell.arrangement();
         let doc = shell.editor().document();
-        let in_arrangement = arrangement && shell.main_view() == MainView::Arrangement;
+        let in_arrangement =
+            arrangement && crate::window::main_view(ui.ctx(), shell) == MainView::Arrangement;
         let menu = context_menus::track(TrackMenu {
             group: doc
                 .track(track)

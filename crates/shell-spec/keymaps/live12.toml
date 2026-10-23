@@ -33,7 +33,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+Shift+W"]
 win = ["Ctrl+Shift+W"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "view.toggle_second_window", contexts = ["global"] },
+]
 
 [[shortcut]]
 id = "S-VIEW-003"

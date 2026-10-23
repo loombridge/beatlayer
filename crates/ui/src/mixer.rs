@@ -35,7 +35,8 @@ use crate::arrangement::scene::track_colour;
 use crate::layout::mixer::{
     ARRANGEMENT_TITLE_ROW, ChainColumn, ChainStripLayout, Column, ColumnKind, MixerLayout,
     SCALE_LABELS, Sections, SessionLayout, StripLayout, TrackColumn, crossfade_buttons,
-    crossfader_slider, in_out_row, performance_impact, send_knob, split_pans, track_options,
+    crossfader_slider, device_row, device_row_parts, in_out_row, performance_impact, send_knob,
+    split_pans, track_options,
 };
 use crate::main_window::UiEvent;
 use crate::theme::Theme;
@@ -54,6 +55,7 @@ pub fn sections(shell: &Shell) -> Sections {
         returns: view.return_tracks(),
         track_options: view.track_options(),
         performance_impact: view.performance_impact(),
+        devices: view.devices(),
         return_tracks_scroll: view.return_tracks_scroll(),
     }
 }
@@ -447,6 +449,16 @@ impl MixerUi {
                     },
                     events,
                 );
+            }
+            if let Some(span) = layout.devices {
+                let parts = StripParts {
+                    shell,
+                    theme,
+                    place,
+                    track,
+                    activator: &label,
+                };
+                parts.devices_section(&mut column_ui, column.rect, span, events);
             }
             if let Some(span) = layout.sends {
                 let parts = StripParts {
@@ -1498,6 +1510,156 @@ impl StripParts<'_> {
             node.set_value(format!("{lit} of 6 segments"));
             node.set_bounds(bounds(rect));
         });
+    }
+
+    /// The Devices section (IMP-25, the mixer view spec R26 to R30): the
+    /// track's top-level devices in chain order, a rack as one row. A row
+    /// holds the device's activator, a square lit while it is on, and its
+    /// name; a click on the name selects the device and shows the Device
+    /// View, a double-click on a plug-in's name opens or closes its editor,
+    /// and a click on the activator switches the device. The rows scroll
+    /// with the wheel over the section, on their own.
+    fn devices_section(
+        &self,
+        ui: &mut Ui,
+        column: Rect,
+        span: (f32, f32),
+        events: &mut Vec<UiEvent>,
+    ) {
+        let Some(track) = self.doc().track(self.track) else {
+            return;
+        };
+        let area = Rect::from_min_max(pos2(column.left(), span.0), pos2(column.right(), span.1));
+        let list = Id::new(("mixer-devices", self.place, self.track));
+        let scroll_id = list.with("scroll");
+        let content = crate::layout::mixer::DEVICE_ROW * track.devices().len() as f32;
+        let most = (content - area.height()).max(0.0);
+        let mut scroll = ui
+            .data(|d| d.get_temp::<f32>(scroll_id))
+            .unwrap_or(0.0)
+            .clamp(0.0, most);
+        // Spec: mixer-view R27. The wheel over a section that holds more
+        // than it shows scrolls its rows, and not the columns.
+        let over = ui
+            .input(|i| i.pointer.hover_pos())
+            .is_some_and(|pos| area.intersect(ui.clip_rect()).contains(pos));
+        if over && most > 0.0 {
+            let dy = ui.input(|i| i.smooth_scroll_delta.y);
+            if dy != 0.0 {
+                scroll = (scroll - dy).clamp(0.0, most);
+                ui.input_mut(|i| i.smooth_scroll_delta.y = 0.0);
+            }
+        }
+        ui.data_mut(|d| d.insert_temp(scroll_id, scroll));
+        let _ = ui.interact(area, list, Sense::hover());
+        // The list's node comes first, so the rows' container hangs from it.
+        ui.ctx().accesskit_node_builder(list, |node| {
+            node.set_role(Role::List);
+            node.set_label("Devices".to_owned());
+            node.set_bounds(bounds(area));
+        });
+        let ui = &mut ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(area)
+                .accessibility_parent(list),
+        );
+        ui.set_clip_rect(area.intersect(ui.clip_rect()));
+        let c = &self.theme.colors;
+        for (index, device) in track.devices().enumerate() {
+            let row = device_row(column, span, index, scroll);
+            if row.bottom() <= area.top() || row.top() >= area.bottom() {
+                continue;
+            }
+            let (square, name) = device_row_parts(row);
+            let shown = row.intersect(area);
+            let activator = Id::new(("mixer-device-activator", self.place, device.id));
+            let button = Id::new(("mixer-device", self.place, device.id));
+            let response = ui.interact(square.intersect(area), activator, Sense::click());
+            if response.clicked() {
+                // Spec: mixer-view R29. Only this device, whatever tracks
+                // are selected; one undo step.
+                events.push(UiEvent::Invoke(Invocation::new(
+                    "device.set_enabled",
+                    json!({ "device": device.id, "enabled": !device.enabled }),
+                )));
+            }
+            let painter = ui.painter_at(shown);
+            let lit = if device.enabled {
+                c.accent.0
+            } else {
+                c.window.0
+            };
+            painter.rect_filled(square, self.theme.sizes.corner, lit);
+            painter.rect_stroke(
+                square,
+                self.theme.sizes.corner,
+                Stroke::new(1.0, c.separator.0),
+                StrokeKind::Inside,
+            );
+            focus_ring(&painter, self.theme, square, &response);
+            let state = if device.enabled { "on" } else { "off" };
+            ui.ctx().accesskit_node_builder(activator, |node| {
+                node.set_role(Role::Switch);
+                node.set_label("Device Activator".to_owned());
+                node.set_value(format!("{}, {state}", device.title()));
+                node.set_toggled(if device.enabled {
+                    accesskit::Toggled::True
+                } else {
+                    accesskit::Toggled::False
+                });
+                node.set_bounds(bounds(square));
+            });
+            let response = ui.interact(name.intersect(area), button, Sense::click());
+            if response.double_clicked() && self.shell.plugin_info(device.id).is_some() {
+                // Spec: mixer-view R28. As the device's window button does.
+                events.push(UiEvent::Invoke(Invocation::new(
+                    bl_shell::plugin_commands::SHOW_WINDOW,
+                    json!({ "device": device.id }),
+                )));
+            } else if response.clicked() {
+                // Spec: mixer-view R28. Selecting the device shows its
+                // track's chain; the Device View opens if it was hidden,
+                // and a floating device's window comes to the front.
+                events.push(UiEvent::Invoke(Invocation::new(
+                    bl_shell::device_commands::SELECT,
+                    json!({ "device": device.id }),
+                )));
+                events.push(UiEvent::Invoke(Invocation::new(
+                    bl_shell::commands::FOCUS_DEVICE_VIEW,
+                    json!({}),
+                )));
+            }
+            if response.hovered() {
+                painter.rect_filled(name, 0.0, c.control_hover.0.gamma_multiply(0.4));
+            }
+            let mut job = egui::text::LayoutJob::simple_singleline(
+                device.title().to_owned(),
+                self.theme.small_font(),
+                if device.enabled {
+                    c.text.0
+                } else {
+                    c.text_dim.0
+                },
+            );
+            job.wrap = egui::text::TextWrapping {
+                max_width: name.width() - 2.0,
+                max_rows: 1,
+                break_anywhere: true,
+                overflow_character: Some('…'),
+            };
+            let galley = painter.layout_job(job);
+            painter.galley(
+                pos2(name.left(), name.center().y - galley.size().y / 2.0),
+                galley,
+                c.text.0,
+            );
+            focus_ring(&painter, self.theme, name, &response);
+            ui.ctx().accesskit_node_builder(button, |node| {
+                node.set_role(Role::Button);
+                node.set_label(device.title().to_owned());
+                node.set_bounds(bounds(name));
+            });
+        }
     }
 
     /// How many of the six Performance Impact segments the track lights:

@@ -15,7 +15,7 @@ pub use bl_shell_spec::mixer_view::{
     SectionArgs, ToggleArgs, TrackGainReduction, TrackImpact, ViewMixerState, impact_segments,
 };
 use bl_shell_spec::mixer_view::{
-    CROSSFADER, FOCUS, FOLD_CHAINS, IN_OUT, PERFORMANCE_IMPACT, RETURN_TRACKS,
+    CROSSFADER, DEVICES, FOCUS, FOLD_CHAINS, IN_OUT, PERFORMANCE_IMPACT, RETURN_TRACKS,
     RETURN_TRACKS_SCROLL, SCENE_TEMPO, SCROLL, SENDS, STATE, TOGGLE, TRACK_OPTIONS, VOLUME,
 };
 
@@ -46,6 +46,7 @@ pub struct MixerView {
     return_tracks_scroll: bool,
     track_options: bool,
     performance_impact: bool,
+    devices: bool,
     /// The racks whose chains are folded out as strips in the mixers (racks
     /// spec, R27).
     folded: BTreeSet<DeviceId>,
@@ -85,6 +86,7 @@ impl MixerView {
             return_tracks_scroll: false,
             track_options: false,
             performance_impact: false,
+            devices: false,
             folded: BTreeSet::new(),
             focus_requests: 0,
         }
@@ -178,6 +180,12 @@ impl MixerView {
         self.performance_impact
     }
 
+    /// Whether the Devices section shows (IMP-25, the mixer view spec R24).
+    #[must_use]
+    pub fn devices(&self) -> bool {
+        self.devices
+    }
+
     /// How many times `mixer_view.focus` has run.
     #[must_use]
     pub fn focus_requests(&self) -> u64 {
@@ -201,6 +209,7 @@ impl MixerView {
             return_tracks_scroll: self.return_tracks_scroll,
             track_options: self.track_options,
             performance_impact: self.performance_impact,
+            devices: self.devices,
             performance_impact_values: Vec::new(),
             gain_reduction: Vec::new(),
             racks,
@@ -290,6 +299,7 @@ impl MixerView {
             RETURN_TRACKS_SCROLL => Some(self.return_tracks_scroll),
             TRACK_OPTIONS => Some(self.track_options),
             PERFORMANCE_IMPACT => Some(self.performance_impact),
+            DEVICES => Some(self.devices),
             _ => None,
         }
     }
@@ -326,7 +336,7 @@ impl MixerView {
                 mixer.shown = shown.unwrap_or(!mixer.shown);
             }
             IN_OUT | SENDS | VOLUME | CROSSFADER | SCENE_TEMPO | RETURN_TRACKS | TRACK_OPTIONS
-            | PERFORMANCE_IMPACT => {
+            | PERFORMANCE_IMPACT | DEVICES => {
                 let SectionArgs { shown } = serde_json::from_value(args).map_err(parse_error)?;
                 let section = match id {
                     IN_OUT => &mut self.in_out,
@@ -336,6 +346,7 @@ impl MixerView {
                     SCENE_TEMPO => &mut self.scene_tempo,
                     TRACK_OPTIONS => &mut self.track_options,
                     PERFORMANCE_IMPACT => &mut self.performance_impact,
+                    DEVICES => &mut self.devices,
                     _ => &mut self.return_tracks,
                 };
                 *section = shown.unwrap_or(!*section);

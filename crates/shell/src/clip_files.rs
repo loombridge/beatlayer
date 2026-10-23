@@ -511,6 +511,9 @@ pub fn place(
     let mut clip = file.clip.clone();
     clip.id = editor.new_id();
     clip.start = start;
+    // Spec: grooves R3. A groove ID names a groove of the set the file came
+    // from, so a loaded clip has none.
+    clip.groove = None;
     if clip.name.trim().is_empty() {
         clip.name.clone_from(&loaded.stem);
     }

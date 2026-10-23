@@ -365,7 +365,10 @@ fn apply(
                 editor.apply(Command::CreateSlotClip {
                     track,
                     scene,
-                    clip: Clip::new(clip, Ticks::ZERO, length, ClipData::Midi(data)),
+                    // Spec: grooves R20. A clip made by recording takes the
+                    // set's auto-load groove.
+                    clip: Clip::new(clip, Ticks::ZERO, length, ClipData::Midi(data))
+                        .with_groove(editor.document().settings().grooves.auto_loaded()),
                 })?;
                 write_moves(editor, clip, &moves, None)?;
                 made.push(CapturedClip {

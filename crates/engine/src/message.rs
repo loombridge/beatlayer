@@ -109,6 +109,9 @@ pub enum TransportCommand {
     SetSongStart(Option<Ticks>),
     /// Sets the metronome settings (WP-2.15).
     SetMetronome(bl_model::MetronomeSettings),
+    /// Sets the Global Amount of groove every device's block carries, in
+    /// tenths of a percent: 1,000 is 100 % (the grooves spec, R21).
+    SetGrooveAmount(u16),
     /// Sets whether the transport is recording.
     SetRecording(bool),
     /// Sets where recording punches in and out (WP-2.13).

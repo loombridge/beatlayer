@@ -240,6 +240,8 @@ impl Shell {
                     // Spec: scales R7. A bounced clip keeps its source's
                     // scale.
                     scale: clip.scale,
+                    // A bounce plays the groove, so the audio holds it already.
+                    groove: None,
                 },
             ));
         }
@@ -305,6 +307,8 @@ impl Shell {
                 launch: clip.launch,
                 // Spec: scales R7. A bounced clip keeps its source's scale.
                 scale: clip.scale,
+                // A bounce plays the groove, so the audio holds it already.
+                groove: None,
             });
         }
         Ok(lane)
@@ -355,6 +359,8 @@ impl Shell {
             // Spec: scales R7. A clip made from nothing takes the set's
             // current scale.
             scale: doc.settings().scale,
+            // A bounce plays the groove, so the audio holds it already.
+            groove: None,
         };
         Ok(BouncedTrack {
             name: bounced_name(name),
@@ -669,6 +675,8 @@ impl Shell {
                         // Spec: scales R7. A bounced clip keeps its source's
                         // scale.
                         scale: clip.scale,
+                        // A bounce plays the groove, so the audio holds it already.
+                        groove: None,
                     },
                 ));
             }
@@ -766,6 +774,8 @@ impl Shell {
                     // Spec: scales R7. A clip made from nothing takes the
                     // set's current scale.
                     scale: self.editor.document().settings().scale,
+                    // A bounce plays the groove, so the audio holds it already.
+                    groove: None,
                 },
             ));
         }

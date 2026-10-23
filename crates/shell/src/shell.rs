@@ -113,6 +113,7 @@ mod export_dialog;
 pub use export_dialog::ExportPrefs;
 mod file_manager;
 mod freeze;
+mod grooves;
 mod keymap;
 mod multisampler;
 mod plugin_list;
@@ -7690,6 +7691,7 @@ impl Shell {
         self.check_warp_files(id, &args)?;
         let args = self.prepare_device_role(id, args)?;
         let args = self.prepare_scale_clips(id, args)?;
+        let args = self.prepare_groove_clips(id, args)?;
         self.prepare_warping(id, args)
     }
 
@@ -8509,6 +8511,9 @@ impl Shell {
         }
         if bl_shell_spec::warping::handles(id) {
             return self.run_warping(id, args);
+        }
+        if bl_shell_spec::groove::handles(id) {
+            return self.run_grooves(id, args);
         }
         if bl_shell_spec::audio_panel::handles(id) {
             return self.run_audio_panel(id, args);

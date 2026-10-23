@@ -810,6 +810,8 @@ impl Shell {
                             envelopes: Vec::new(),
                             launch: bl_model::ClipLaunch::default(),
                             scale,
+                            // The render plays the groove, so it holds it.
+                            groove: None,
                         };
                         let placed = shell.editor.transact(label_of(scene), |editor| {
                             place(editor, track, scene, start, end, clip)

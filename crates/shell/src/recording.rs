@@ -929,7 +929,10 @@ pub fn place_midi(
                 continue;
             }
             let id = editor.new_id();
-            let clip = Clip::new(id, from, to - from, ClipData::Midi(MidiData::new(inside)));
+            // Spec: grooves R20. A clip made by recording takes the set's
+            // auto-load groove.
+            let clip = Clip::new(id, from, to - from, ClipData::Midi(MidiData::new(inside)))
+                .with_groove(editor.document().settings().grooves.auto_loaded());
             crate::arrangement::placing::clear(editor, recorded.track, from, to, placed)?;
             placed.insert(id);
             editor.apply(Command::CreateClip {

@@ -610,6 +610,39 @@ fn fixture() -> Project {
             name: Some("minor".to_owned()),
         },
     );
+    // WP-6.19: a groove in the pool, used by the clip, with the Global
+    // Amount and Auto Load Groove off their defaults, so the format writes
+    // `grooves` and the clip's `groove`.
+    let groove: bl_model::GrooveId = editor.new_id();
+    apply(
+        &mut editor,
+        Command::AddGroove {
+            groove: bl_model::Groove::new(
+                groove,
+                "Swing".to_owned(),
+                Ticks::WHOLE,
+                vec![bl_model::GrooveNote {
+                    position: Ticks::SIXTEENTH,
+                    velocity: 90,
+                }],
+            ),
+        },
+    );
+    apply(
+        &mut editor,
+        Command::SetClipGroove {
+            clips: vec![midi_id],
+            groove: Some(groove),
+        },
+    );
+    apply(&mut editor, Command::SetGlobalGrooveAmount { amount: 80.0 });
+    apply(
+        &mut editor,
+        Command::SetAutoLoadGroove {
+            enabled: Some(true),
+            groove: Some(groove),
+        },
+    );
     // MIDI controller envelopes (WP-2.29): a modulation wheel one and an
     // unlinked pitch bend one.
     for (target, value) in [
@@ -908,6 +941,10 @@ fn the_fixture_sets_a_non_default_value_of_every_saved_field() {
                 "midi_overdub",
                 "locators",
                 "song_start",
+                "grooves.pool.0.name",
+                "grooves.global_amount",
+                "grooves.auto_load",
+                "grooves.auto_load_groove",
                 "scale",
             ][..],
         ),
@@ -1049,6 +1086,7 @@ fn the_fixture_sets_a_non_default_value_of_every_saved_field() {
                 "data.midi.signature",
                 "data.midi.notes.0.probability",
                 "scale",
+                "groove",
             ][..],
         ),
     ] {

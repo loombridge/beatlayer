@@ -21,6 +21,9 @@
 //! - [`automation`]: the Arrangement's automation editing commands
 //!   (WP-6.25): moving the breakpoints of an envelope, the clipboard of
 //!   envelope shapes, and the edit commands that act on them.
+//! - [`groove`]: the grooves' commands that need the shell (WP-6.19): loading
+//!   and saving groove files, extracting, committing, a groove made into a
+//!   clip, and the pool query.
 //! - [`locator`]: the Arrangement's locators (WP-6.24): adding, deleting,
 //!   moving, renaming and describing them, looping to the next one, the
 //!   song start time, and the jumps between them.
@@ -91,6 +94,7 @@ pub mod editing;
 pub mod export;
 pub mod file_manager;
 pub mod freeze;
+pub mod groove;
 pub mod keymap;
 pub mod locator;
 pub mod menus;
@@ -130,6 +134,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     arrangement::register(registry)?;
     editing::register(registry)?;
     automation::register(registry)?;
+    groove::register(registry)?;
     locator::register(registry)?;
     notes::register(registry)?;
     transport::register(registry)?;

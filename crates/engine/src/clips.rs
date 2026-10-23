@@ -1050,6 +1050,7 @@ impl ClipList {
         pool: Option<PoolSpec>,
         sources: &mut ClipSources,
         media: Option<&dyn MediaLibrary>,
+        grooves: &bl_model::GroovePool,
     ) -> Built {
         let mut placed = Vec::new();
         let mut missing = Vec::new();
@@ -1079,9 +1080,16 @@ impl ClipList {
                 .and_then(|library| library.transients(audio.media))
                 .map_or_else(Vec::new, |detected| audio.transient_edits.apply(&detected));
             let samples = || media.and_then(|library| library.sample(audio.media, rate));
+            // Spec: grooves R12. The clip's groove at the Global Amount, if
+            // it changes anything.
+            let groove = clip
+                .groove
+                .and_then(|id| grooves.play(id))
+                .filter(|play| !play.is_inert());
             let beats = BeatsMedia {
                 transients: &transients,
                 samples: &samples,
+                groove: groove.as_ref(),
             };
             // Where the clip starts reading, before its length is known.
             let at = Geometry::of(clip, audio, tempo, rate, None, true, &beats);
@@ -1176,9 +1184,16 @@ impl ClipList {
                 .and_then(|library| library.transients(audio.media))
                 .map_or_else(Vec::new, |detected| audio.transient_edits.apply(&detected));
             let samples = || media.and_then(|library| library.sample(audio.media, rate));
+            // Spec: grooves R12. The clip's groove at the Global Amount, if
+            // it changes anything.
+            let groove = clip
+                .groove
+                .and_then(|id| grooves.play(id))
+                .filter(|play| !play.is_inert());
             let beats = BeatsMedia {
                 transients: &transients,
                 samples: &samples,
+                groove: groove.as_ref(),
             };
             let at = Geometry::of(clip, audio, tempo, rate, None, false, &beats);
             if at.end <= at.start {
@@ -1550,6 +1565,22 @@ fn render(
     }
 }
 
+/// A clip's level with the gain its groove's Velocity gives it (the grooves
+/// spec, R13): `level` is the clip's own, `elapsed` frames after the song
+/// frame `origin` where its contents began.
+fn with_groove<'a>(
+    warped: &'a Warped,
+    tempo: &'a TempoMap,
+    rate: f64,
+    origin: i64,
+    level: fn(&PlacedClip, u64) -> f64,
+) -> impl Fn(&PlacedClip, u64) -> f64 + 'a {
+    let ticks = tempo.seconds_to_ticks_exact(origin as f64 / rate);
+    move |clip, elapsed| {
+        level(clip, elapsed) * warped.groove_gain(tempo, rate, ticks, origin + elapsed as i64)
+    }
+}
+
 /// Adds the frames `range` of the block, which are `elapsed` frames into the
 /// warped `clip` and start at song frame `frame`, read from `source` through
 /// the clip's positions and warp mode, to the block, through `level`.
@@ -1670,7 +1701,7 @@ impl Node for ClipPlayer {
                     (elapsed, from),
                     &mut self.warp,
                     histories[at].as_deref_mut(),
-                    PlacedClip::launch_level,
+                    with_groove(warped, tempo, rate, launch, PlacedClip::launch_level),
                     stretchers,
                     clip.lane as usize,
                 );
@@ -1769,6 +1800,7 @@ impl Node for ClipPlayer {
             let range = (start - from) as usize..(end - from) as usize;
             let elapsed = (start - clip.geometry.start) as u64;
             if let Some(warped) = &clip.geometry.warped {
+                let (tempo, rate) = (block.tempo(), block.sample_rate().as_f64());
                 render_warped(
                     clip,
                     &warped.positions(),
@@ -1780,7 +1812,7 @@ impl Node for ClipPlayer {
                     (elapsed, start),
                     warp,
                     history.as_deref_mut(),
-                    PlacedClip::level,
+                    with_groove(warped, tempo, rate, clip.geometry.start, PlacedClip::level),
                     stretchers,
                     clip.lane as usize,
                 );
@@ -2004,6 +2036,7 @@ mod tests {
     /// What a Beats clip's plan asks of the media: nothing in these tests.
     fn no_media() -> BeatsMedia<'static> {
         BeatsMedia {
+            groove: None,
             transients: &[],
             samples: &|| None,
         }

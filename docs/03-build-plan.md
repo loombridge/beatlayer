@@ -699,7 +699,7 @@ Total to 1.0: 256 packages planned in Phases 0 to 6, and about 110 estimated in 
 | 6.49 | todo |  | Waits on IMP-34, IMP-35 and IMP-36's acceptance |
 | 6.49b | done | 22 October 2026 | [#315](https://github.com/loombridge/beatlayer/pull/315); holding the middle mouse button and dragging pans the area under the pointer in the Arrangement's lanes, the Session View's grid, both mixers, the MIDI Note Editor, the Sample Editor, the Device View's chain and the browser's lists, selecting and moving nothing, and a note is drawn in its clip's colour, paler the softer its velocity and grey while deactivated ([view options](specs/view-options.md) R1, [the piano roll](specs/piano-roll.md) R43 and R44) |
 | 6.50 | todo |  | Waits on IMP-37's acceptance |
-| 6.51 | todo |  |  |
+| 6.51 | done | 23 October 2026 | [#330](https://github.com/loombridge/beatlayer/pull/330); fade curves, crossfades between audio clips that meet (with the 4 ms crossfade that edits leave under Create Fades on Clip Edges), fade handles, Create Fade and Delete Fades on Cmd+Option+F and Cmd+Option+Delete, and the engine reading each crossfaded clip past its edge ([audio clips](specs/audio-clips.md) R23 to R31) |
 | 6.52 | todo |  |  |
 | 6.53 | done | 22 October 2026 | [#302](https://github.com/loombridge/beatlayer/pull/302); the MIDI Note Editor's insert marker and time selection, its keyboard selection and moves, Shift-click and the piano ruler's keys, the note clipboard with Option-drag copies, and the editor's context menus ([the spec](specs/piano-roll.md) R23 to R31) |
 | 6.54 | todo |  |  |

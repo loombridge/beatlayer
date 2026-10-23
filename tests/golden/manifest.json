@@ -161,6 +161,14 @@
       "bits": 24,
       "render_hash": "fnv1a64:cfff1f06f74d8b9d"
     },
+    "clip-crossfade": {
+      "made_on": "macos-aarch64",
+      "sample_rate": 48000,
+      "channels": 2,
+      "frames": 228000,
+      "bits": 24,
+      "render_hash": "fnv1a64:75fb5958b453216d"
+    },
     "clip-fades": {
       "made_on": "macos-aarch64",
       "sample_rate": 48000,
@@ -176,6 +184,14 @@
       "frames": 192000,
       "bits": 24,
       "render_hash": "fnv1a64:77f37aad45f97154"
+    },
+    "clip-split-crossfade": {
+      "made_on": "macos-aarch64",
+      "sample_rate": 48000,
+      "channels": 2,
+      "frames": 144000,
+      "bits": 24,
+      "render_hash": "fnv1a64:f16fa6f9074d7bee"
     },
     "clip-tempo-change": {
       "made_on": "macos-aarch64",
@@ -408,6 +424,14 @@
       "frames": 204000,
       "bits": 24,
       "render_hash": "fnv1a64:bccff9f00f3060c9"
+    },
+    "warped-clip-crossfade": {
+      "made_on": "macos-aarch64",
+      "sample_rate": 48000,
+      "channels": 2,
+      "frames": 156000,
+      "bits": 24,
+      "render_hash": "fnv1a64:19a3e3cb872ef041"
     },
     "warped-loop-120": {
       "made_on": "macos-aarch64",

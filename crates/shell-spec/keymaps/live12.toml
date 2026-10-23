@@ -1068,8 +1068,8 @@ trigger = "held"
 milestone = "M1"
 mac = ["F"]
 win = ["F"]
-status = "pending"
-package = "WP-6.51"
+status = "widget"
+handler = "the Arrangement View: as S-ARR-010, F held shows every clip's fade handles, over an automation lane in Automation Mode too (audio clips R27)"
 
 [[shortcut]]
 id = "S-ENV-005"
@@ -2610,8 +2610,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["Cmd+Option+F"]
 win = ["Ctrl+Alt+F"]
-status = "pending"
-package = "WP-6.51"
+status = "bound"
+commands = [
+  { id = "arrangement.create_fade", contexts = ["arrangement"] },
+]
 
 [[shortcut]]
 id = "S-ARR-009"
@@ -2622,8 +2624,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["Cmd+Option+Delete"]
 win = ["Ctrl+Alt+Backspace"]
-status = "pending"
-package = "WP-6.51"
+status = "bound"
+commands = [
+  { id = "arrangement.delete_fades", contexts = ["arrangement"] },
+]
 
 [[shortcut]]
 id = "S-ARR-010"
@@ -2634,8 +2638,8 @@ trigger = "held"
 milestone = "M1"
 mac = ["F"]
 win = ["F"]
-status = "pending"
-package = "WP-6.51"
+status = "widget"
+handler = "the Arrangement View: F held shows every clip's fade handles (audio clips R27)"
 
 [[shortcut]]
 id = "S-ARR-011"

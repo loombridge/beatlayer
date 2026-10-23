@@ -822,10 +822,14 @@ fn clip_marker_command(id: &str) -> bool {
 
 /// Whether `id` is one of the Arrangement's own clip drags, which the
 /// document runs per frame as gestures: stretching a warped clip's edge (the
-/// warping spec, R47) and sliding a clip's contents (R54), each one undo step
-/// however far the drag goes.
+/// warping spec, R47), sliding a clip's contents (R54) and dragging a fade's
+/// handles (the audio clips spec, R27), each one undo step however far the drag
+/// goes.
 fn arrangement_clip_command(id: &str) -> bool {
-    matches!(id, "clip.stretch" | "clip.slide_contents")
+    matches!(
+        id,
+        "clip.stretch" | "clip.slide_contents" | "clip.set_fades" | "arrangement.set_crossfade"
+    )
 }
 
 /// Whether `id` is an edit the Sample Editor makes to an audio clip's
@@ -847,6 +851,7 @@ fn marker_label(id: &str) -> &'static str {
     match id {
         "clip.stretch" => "Stretch clip",
         "clip.slide_contents" => "Slide clip contents",
+        "clip.set_fades" | "arrangement.set_crossfade" => "Change Fade",
         model::SET_MIDI_REGION | "clip.set_region" => "Change clip region",
         model::SET_MIDI_LOOP | "clip.set_loop" => "Change clip loop",
         "clip.insert_warp_marker" | "clip.move_warp_markers" => "Move warp markers",
@@ -5042,6 +5047,7 @@ impl Shell {
         }
         self.editor.begin(label);
         let launch = self.launch_settings();
+        let edge_fades = self.create_fades_on_clip_edges();
         let run = |editor: &mut Editor,
                    arrangement: &mut ArrangementView,
                    clip_view: &mut ClipView,
@@ -5099,6 +5105,7 @@ impl Shell {
                     editor,
                     arrangement,
                     clipboard,
+                    edge_fades,
                 )
             }
         };
@@ -5190,6 +5197,7 @@ impl Shell {
                     &mut self.editor,
                     &mut self.arrangement,
                     &mut self.clipboard,
+                    self.prefs.create_fades_on_clip_edges.0,
                 )
                 .map(|_| ())
             };
@@ -5722,6 +5730,7 @@ impl Shell {
                     .map(|(track, ..)| *track)
                     .chain(midi.iter().map(|take| take.track))
                     .collect();
+                let before = self.editor.document().clone();
                 self.editor.transact(label, |editor| {
                     for (track, hash, path, _) in &imported {
                         let id = editor.new_id();
@@ -5751,7 +5760,10 @@ impl Shell {
                         })?;
                     }
                     crate::recording::place_midi(editor, &midi, take, rate, overdub, &mut placed)?;
-                    crate::session_capture::place(editor, &watch, &runs, &armed, end)
+                    crate::session_capture::place(editor, &watch, &runs, &armed, end)?;
+                    // Spec: audio-clips R26. A take that meets a clip
+                    // already there is crossfaded with it.
+                    crate::arrangement::fades::settle(editor, &before, edge_fades)
                 })
             }
             Some(_) => {
@@ -6195,6 +6207,11 @@ impl Shell {
             // Spec: time-editing R4. The Create menu's Add Locator reads
             // Delete Locator while a locator is selected.
             locator_ids::DELETE => Some("Delete Locator".to_owned()),
+            // Spec: audio-clips R28. Create ▸ Create Fade reads Create Fade
+            // In/Out or Create Crossfade as the selection gives one.
+            edit_ids::CREATE_FADE => Some(
+                editing::create_fade_label(self.editor.document(), &self.arrangement).to_owned(),
+            ),
             model::UNDO => Some(self.editor.undo_history().next().map_or_else(
                 || "Nothing to Undo".to_owned(),
                 |step| format!("Undo {step}"),
@@ -6574,7 +6591,11 @@ impl Shell {
                 .is_some_and(|schema| bl_commands::validate(schema, &args).is_ok())
                 // Spec: time-editing R4. The Delete key deletes the
                 // selected locators while there are any.
-                && !(id == edit_ids::DELETE && !self.arrangement.selected_locators().is_empty())
+                && !(id == edit_ids::DELETE
+                    && (!self.arrangement.selected_locators().is_empty()
+                        // Spec: audio-clips R29. Delete deletes the selected
+                        // fade handle's fade instead.
+                        || self.arrangement.selected_fade().is_some()))
                 && editing::can_run(
                     id,
                     &args,
@@ -7890,6 +7911,7 @@ impl Shell {
                 &mut self.editor,
                 &mut self.arrangement,
                 &mut self.clipboard,
+                self.prefs.create_fades_on_clip_edges.0,
             )
             .map_err(|failure| edit_error(id, failure));
             if *self.editor.document() != before {

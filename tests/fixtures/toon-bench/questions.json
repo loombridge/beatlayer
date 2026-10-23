@@ -192,7 +192,7 @@
     "question": "What is the sum of the velocity of all notes?"
   },
   {
-    "answer": "69",
+    "answer": "70",
     "fixture": "commands_clip",
     "id": "commands-total",
     "question": "How many commands are listed?"
@@ -204,7 +204,7 @@
     "question": "How many commands have the permission destructive?"
   },
   {
-    "answer": "clip.delete, clip.edit_sample, clip.save_default",
+    "answer": "clip.delete, clip.edit_sample, clip.save_default, clip.save_file",
     "fixture": "commands_clip",
     "id": "commands-refused",
     "question": "Which commands are refused to agents? Give their ids, in the order they are listed."

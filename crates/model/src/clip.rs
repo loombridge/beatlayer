@@ -426,6 +426,84 @@ impl ClipData {
 /// setting is on: 4 ms (the audio clips spec, R7).
 pub const EDGE_FADE_SECONDS: f64 = 0.004;
 
+/// The exponent of a fade's curve (the audio clips spec, R23): *p* =
+/// 4^(−`curve`), so a fade-in's gain at a fraction *x* of the way through it
+/// is *x*^*p*. A curve of 0 is 1, the straight line.
+#[must_use]
+pub fn fade_power(curve: f64) -> f64 {
+    4f64.powf(-curve)
+}
+
+/// A crossfade between two audio clips on one track (the audio clips spec,
+/// R24), as the clips' fade fields hold it.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[schemars(
+    description = "A crossfade: the earlier of two audio clips that meet fades out, and the later \
+                   fades in, over a span from `before` seconds before their boundary to `after` \
+                   seconds after it, with one curve."
+)]
+pub struct Crossfade {
+    /// The clip that ends at the boundary.
+    pub earlier: ClipId,
+    /// The clip that starts at the boundary.
+    pub later: ClipId,
+    /// Where the clips meet.
+    pub boundary: Ticks,
+    /// How many seconds before the boundary the span starts.
+    pub before: f64,
+    /// How many seconds after the boundary the span ends.
+    pub after: f64,
+    /// The curve of both fades, from −1 to 1.
+    pub curve: f64,
+}
+
+/// The crossfades among `clips`, a track's clips (R24): each pair of audio
+/// clips where one ends exactly where the other starts and whose fade fields
+/// agree on a span and a curve, with a span that reaches past the boundary on
+/// at least one side. Fields that disagree, or that name a neighbour the clip
+/// no longer meets, are no crossfade, and the engine plays the clip's own
+/// fades alone. In order of boundary.
+#[must_use]
+pub fn crossfades<'a>(clips: impl IntoIterator<Item = &'a Clip>) -> Vec<Crossfade> {
+    let mut audio: Vec<(&Clip, &AudioData)> = clips
+        .into_iter()
+        .filter_map(|clip| match &clip.data {
+            ClipData::Audio(data) => Some((clip, data)),
+            ClipData::Midi(_) => None,
+        })
+        .collect();
+    audio.sort_by_key(|(clip, _)| (clip.start, clip.id));
+    let mut found = Vec::new();
+    for (earlier, before_data) in &audio {
+        let boundary = earlier.end();
+        let first = audio.partition_point(|(clip, _)| clip.start < boundary);
+        let Some((later, after_data)) = audio[first..]
+            .iter()
+            .take_while(|(clip, _)| clip.start == boundary)
+            .find(|(clip, _)| clip.id != earlier.id)
+        else {
+            continue;
+        };
+        let reaches = before_data.fade_out_after > 0.0 || after_data.fade_in_before > 0.0;
+        if reaches
+            && before_data.fade_out_after == after_data.fade_in
+            && before_data.fade_out == after_data.fade_in_before
+            && before_data.fade_out_curve == after_data.fade_in_curve
+        {
+            found.push(Crossfade {
+                earlier: earlier.id,
+                later: later.id,
+                boundary,
+                before: after_data.fade_in_before,
+                after: after_data.fade_in,
+                curve: after_data.fade_in_curve,
+            });
+        }
+    }
+    found.sort_by_key(|c| (c.boundary, c.earlier));
+    found
+}
+
 /// An audio clip's data: the file it plays and how it plays it
 /// (the audio clips spec).
 ///
@@ -489,6 +567,29 @@ pub struct AudioData {
     #[serde(default, skip_serializing_if = "is_zero")]
     #[schemars(range(min = 0.0))]
     pub fade_out: f64,
+    /// The fade-in's curve (the audio clips spec, R23), from −1 to 1: 0, the
+    /// straight line, unless given.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    #[schemars(range(min = -1.0, max = 1.0))]
+    pub fade_in_curve: f64,
+    /// The fade-out's curve, from −1 to 1: 0 unless given.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    #[schemars(range(min = -1.0, max = 1.0))]
+    pub fade_out_curve: f64,
+    /// How many seconds before the clip's start a crossfade (R24) begins its
+    /// fade-in, over the clip that ends where this one starts: 0 unless this
+    /// clip is the later of two crossfaded ones. The fade-in's length is then
+    /// this much before the start and `fade_in` after it.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    #[schemars(range(min = 0.0))]
+    pub fade_in_before: f64,
+    /// How many seconds past the clip's end a crossfade (R24) ends its
+    /// fade-out, under the clip that starts where this one ends: 0 unless this
+    /// clip is the earlier of two crossfaded ones. The fade-out's length is
+    /// then `fade_out` before the end and this much after it.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    #[schemars(range(min = 0.0))]
+    pub fade_out_after: f64,
     /// The Warp switch (the warping spec, R1): off unless given. On, the
     /// clip follows the set's tempo through its warp map, and `start`, `end`,
     /// `loop_start` and `loop_end` are whole ticks of its contents, counted
@@ -562,6 +663,10 @@ impl AudioData {
             gain: 1.0,
             fade_in: 0.0,
             fade_out: 0.0,
+            fade_in_curve: 0.0,
+            fade_out_curve: 0.0,
+            fade_in_before: 0.0,
+            fade_out_after: 0.0,
             warp: false,
             warp_markers: Vec::new(),
             tempo: None,
@@ -614,6 +719,26 @@ impl AudioData {
             start,
             ..self.clone()
         }
+    }
+
+    /// Gives this clip's end and the start of `later`, which meets it, a
+    /// crossfade over `before` seconds before their boundary and `after`
+    /// seconds past it, with `curve` (the audio clips spec, R24): the fade
+    /// fields of both clips are set to agree.
+    pub fn crossfade_into(&mut self, later: &mut Self, before: f64, after: f64, curve: f64) {
+        self.fade_out = before;
+        self.fade_out_after = after;
+        self.fade_out_curve = curve;
+        later.fade_in = after;
+        later.fade_in_before = before;
+        later.fade_in_curve = curve;
+    }
+
+    /// Ends the crossfade between this clip's end and the start of `later`,
+    /// leaving neither a fade there (R29, with Create Fades on Clip Edges
+    /// off).
+    pub fn end_crossfade(&mut self, later: &mut Self) {
+        self.crossfade_into(later, 0.0, 0.0, 0.0);
     }
 
     /// The same data with [`EDGE_FADE_SECONDS`] fades at both edges: what a

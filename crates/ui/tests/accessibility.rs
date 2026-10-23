@@ -4067,7 +4067,29 @@ fn paths() -> BTreeMap<&'static str, Path> {
             Exception(Live(
                 "Live doesn't support editing audio clip fades with a screen reader (manual \
                  41.4.1.3); its fade keys, Cmd-Option-F and Cmd-Option-Delete (S-ARR-008, \
-                 S-ARR-009), aren't bound yet",
+                 S-ARR-009), make and delete fades from the keyboard, and the handles don't \
+                 reach a screen reader",
+            )),
+        ),
+        (
+            "arrangement.set_crossfade",
+            Exception(Live(
+                "Live doesn't support editing audio clip fades with a screen reader (manual \
+                 41.4.1.3); Create Fade (S-ARR-008) makes a crossfade from the keyboard",
+            )),
+        ),
+        (
+            "arrangement.delete_crossfade",
+            Exception(Live(
+                "Live doesn't support editing audio clip fades with a screen reader (manual \
+                 41.4.1.3); Delete Fades (S-ARR-009) deletes a crossfade from the keyboard",
+            )),
+        ),
+        (
+            "arrangement.select_fade_handle",
+            Exception(Live(
+                "a fade handle is a pointer target Live doesn't expose to a screen reader \
+                 (manual 41.4.1.3)",
             )),
         ),
         // MIDI file import and export (WP-2.21): the menus show them, and a

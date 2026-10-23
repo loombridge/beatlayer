@@ -204,6 +204,7 @@ impl Shell {
             automation: Vec::new(),
             delay: from.delay(),
             keep_monitoring_latency: from.keep_monitoring_latency(),
+            tuning_bypass: false,
             frozen: None,
             children: Vec::new(),
         }];

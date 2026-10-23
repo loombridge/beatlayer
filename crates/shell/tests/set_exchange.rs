@@ -775,7 +775,7 @@ fn a_file_known_from_another_set_is_saved_with_the_merge() {
             json!({ "path": text(&scratch.path("Merged.blset")) }),
         )
         .unwrap();
-    let (project, _) = bl_project::load(&scratch.path("Merged Project/Merged.blset")).unwrap();
+    let (project, _) = bl_project::load(scratch.path("Merged Project/Merged.blset")).unwrap();
     let hash = bl_media::ContentHash::of_file(&source.sample).unwrap();
     assert!(
         project.media.get(&ContentHash(*hash.as_bytes())).is_some(),

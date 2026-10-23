@@ -3,13 +3,10 @@
 //! the sample their timestamps give, matched by source and channel, with
 //! every block a real-time section under the allocation trap.
 //!
-//! `cargo test -p bl-engine --test midi_input -- --nocapture` prints the
+//! `cargo test -p bl-engine --test engine_tests -- midi_input:: --nocapture` prints the
 //! timing measurements.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering::Relaxed};
 use std::thread;

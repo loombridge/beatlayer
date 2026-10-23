@@ -4,8 +4,6 @@
 //! goes back to the engine afterwards, however the render ends. Every block
 //! of a render runs under the allocation trap.
 
-bl_rt::install_trap!();
-
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering::Relaxed};

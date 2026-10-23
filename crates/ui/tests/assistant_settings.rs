@@ -4,8 +4,7 @@
 //! change a registered command. The key is stored in the keychain and never
 //! echoed back.
 
-mod common;
-
+use crate::common;
 use std::collections::VecDeque;
 use std::sync::Mutex;
 

@@ -4,8 +4,7 @@
 //! Shaper's display adds, moves, curves and deletes breakpoints. Spec:
 //! modulation R15, R19, R23.
 
-mod common;
-
+use crate::common;
 use bl_devices::testing::{self, UTILITY_GAIN};
 use bl_model::DeviceId;
 use bl_model::modulator::{ModTarget, ShapePoint, default_shape_of};

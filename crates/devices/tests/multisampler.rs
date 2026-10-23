@@ -5,10 +5,7 @@
 //! output controls. Every block runs as a real-time section under the
 //! allocation trap, at block sizes 1, 100, 512 and 4,096.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use std::sync::Arc;
 
 use bl_core::time::{Bpm, Frames, TempoMap};

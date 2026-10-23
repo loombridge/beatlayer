@@ -3,10 +3,7 @@
 //! that end with their source, and each added note's own ID. Every block is a
 //! real-time section under the allocation trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_devices::stack::{
     CRESCENDO, DUPLICATES, PER_NOTE, STACK, STRUM, TENSION, USE_SCALE, chance, learn, shift,
     strum_position, velocity,

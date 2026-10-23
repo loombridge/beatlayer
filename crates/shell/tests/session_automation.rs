@@ -12,8 +12,6 @@
 //!   clip.
 //! - With Automation Arm off, nothing is recorded.
 
-bl_rt::install_trap!();
-
 use bl_audio_io::{BackendKind, NullBackend, NullControl, NullOptions, Pacing};
 use bl_core::time::Ticks;
 use bl_model::{AutomationTarget, Clip, EnvelopeKind, MixerParam, SceneId, TrackId};

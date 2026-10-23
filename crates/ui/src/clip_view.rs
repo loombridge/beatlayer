@@ -54,6 +54,7 @@ use crate::clip_envelope::{self, EnvelopeEditor};
 use crate::keymap::{Keymap, Platform};
 use crate::launch_panel;
 use crate::main_window::UiEvent;
+use crate::note_filters;
 use crate::note_lanes::{self, Cancelled, LaneUi, NoteLayout};
 use crate::sample_editor::SampleEditorUi;
 use crate::theme::Theme;
@@ -1131,6 +1132,11 @@ fn toolbar(
     let shown = shell.clip_view().tab();
     ui.painter()
         .rect_filled(toolbar_rect(view), 0.0, colours.bar.0);
+    // Find and Select Notes' switch leads the Notes tab's toolbar
+    // (L-CLIP-010).
+    if !audio && shown == ClipTab::Notes {
+        note_filters::magnifier(ui, shell, theme, view, events);
+    }
     for (index, (tab, name)) in TABS.iter().enumerate() {
         // An audio clip has the Sample and Envelopes tabs (sample editor R1).
         if audio && tab.is_none() {
@@ -1256,6 +1262,9 @@ pub struct ClipViewUi {
     lanes: LaneUi,
     /// The marquee under way: where it began, and where it is now.
     marquee: Option<(Pos2, Pos2)>,
+    /// The tick a Shift-drag with the filter bar showing began at, which
+    /// sets the Time filter's window as it goes (I-DRAG-042).
+    time_drag: Option<Ticks>,
     /// The chop Cmd-E opened, while Cmd is held.
     chop: Option<ChopRun>,
     /// The E-drag under way that splits notes.
@@ -1291,6 +1300,7 @@ impl Default for ClipViewUi {
             strip_drag: None,
             lanes: LaneUi::default(),
             marquee: None,
+            time_drag: None,
             chop: None,
             split_drag: None,
             chop_drag: None,
@@ -1391,6 +1401,7 @@ impl ClipViewUi {
             self.strip_drag = None;
             self.lanes.reset();
             self.marquee = None;
+            self.time_drag = None;
             self.end_chop(events);
             self.split_drag = None;
             self.chop_drag = None;
@@ -1428,6 +1439,7 @@ impl ClipViewUi {
             self.strip_drag = None;
             self.lanes.reset();
             self.marquee = None;
+            self.time_drag = None;
             self.end_chop(events);
             self.split_drag = None;
             self.chop_drag = None;
@@ -1443,18 +1455,26 @@ impl ClipViewUi {
             return;
         }
         self.bar_drag = None;
+        // Find and Select Notes' bar sits above the editor's ruler and moves
+        // everything below it down (L-CLIP-019).
+        let bar = !envelopes && shell.clip_view().note_filters().visible;
+        let body = note_filters::body_rect(rect, bar);
         let shown = shell.clip_view().lanes().shown();
-        let layout = note_lanes::note_layout(rect, &self.lanes.heights(&shown));
+        let layout = note_lanes::note_layout(body, &self.lanes.heights(&shown));
         let grid = if envelopes {
             grid_rect(rect)
         } else {
             layout.grid
         };
-        let strip = strip_rect(rect);
+        let strip = strip_rect(body);
         if grid.width() < 1.0 || grid.height() < KEY_HEIGHT || strip.height() < 1.0 {
             return;
         }
         toolbar(ui, shell, theme, rect, false, events);
+        if bar {
+            let frame = note_filters::frame(shell, clip, &midi);
+            note_filters::show(ui, shell, theme, rect, clip, &frame, events);
+        }
         if envelopes && let Some(value) = doc.clip(clip) {
             let target = clip_envelope::shown_target(shell, doc, clip);
             let axis = match self.strip_drag {
@@ -1739,6 +1759,7 @@ impl ClipViewUi {
             self.strip_drag = None;
             self.lanes.reset();
             self.marquee = None;
+            self.time_drag = None;
             self.end_chop(events);
             self.split_drag = None;
             self.chop_drag = None;
@@ -2111,12 +2132,24 @@ impl ClipViewUi {
             self.lanes.leave_focus();
         }
 
+        // Spec: find-and-select-notes R6. With the bar showing, Shift-dragging
+        // sideways sets the Time filter's window instead of selecting or
+        // moving notes.
+        let shift_drag = shell.clip_view().note_filters().visible && keys.extend;
         // Spec: note-editing R33, R37. With Draw Mode off, E held changes
         // what the pointer does: a click or drag splits the notes it crosses,
         // and with Option (Cmd, Ctrl on Windows) held, a drag on a selected
         // note chops the selected notes into parts.
         let e_down = !draw_mode && ui.input(|i| i.key_down(Key::E));
         if response.drag_started()
+            && shift_drag
+            && let Some(press) = ui.input(|i| i.pointer.press_origin())
+        {
+            let at = tick_at(grid, start, length, press.x);
+            self.time_drag = Some(arrangement.snap_drag(doc, at, keys.bypass));
+        }
+        if response.drag_started()
+            && self.time_drag.is_none()
             && let Some(press) = ui.input(|i| i.pointer.press_origin())
             && e_down
         {
@@ -2134,6 +2167,7 @@ impl ClipViewUi {
                 });
             }
         } else if response.drag_started()
+            && self.time_drag.is_none()
             && let Some(press) = ui.input(|i| i.pointer.press_origin())
             && !draw_mode
         {
@@ -2210,7 +2244,17 @@ impl ClipViewUi {
             }
         }
         if response.dragged() {
-            if let (Some(drag), Some(pos)) = (self.split_drag.as_ref(), pointer) {
+            if let (Some(from), Some(pos)) = (self.time_drag, pointer) {
+                let to =
+                    arrangement.snap_drag(doc, tick_at(grid, start, length, pos.x), keys.bypass);
+                let filter_frame = note_filters::frame(shell, clip, midi);
+                if let Some((start, length)) = note_filters::time_window(&filter_frame, from, to) {
+                    events.push(UiEvent::Invoke(Invocation::new(
+                        ids::NOTE_FILTERS,
+                        json!({ "clip": clip, "time": { "start": start, "length": length } }),
+                    )));
+                }
+            } else if let (Some(drag), Some(pos)) = (self.split_drag.as_ref(), pointer) {
                 let args = drag.args(arrangement, doc, keys, grid, rows, start, length, pos);
                 gesture(events, GesturePhase::Update, ids::SPLIT, args);
             } else if let (Some(drag), Some(pos)) = (self.chop_drag, pointer) {
@@ -2323,6 +2367,7 @@ impl ClipViewUi {
                 });
             }
             self.marquee = None;
+            self.time_drag = None;
         }
         if let Some(hover) = response.hover_pos()
             && !draw_mode
@@ -2336,6 +2381,9 @@ impl ClipViewUi {
         if response.clicked()
             && let Some(pos) = response.interact_pointer_pos()
         {
+            // Spec: find-and-select-notes R3. A click switches every filter
+            // off and deselects, then does what a click does.
+            note_filters::clear(shell, clip, events);
             let place = hit(pos).map(|(place, _)| place);
             if e_down {
                 // Spec: note-editing R33. E and a click splits the note

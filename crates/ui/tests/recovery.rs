@@ -4,8 +4,7 @@
 //! the next launch; the switch on File & Folder turns Save Continuously on
 //! and `settings.state` reads it.
 
-mod common;
-
+use crate::common;
 use std::path::PathBuf;
 
 use bl_project::Project;

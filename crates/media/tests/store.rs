@@ -1,8 +1,7 @@
 //! The media store: import, content checks, shared loading, sample-rate
 //! conversion on load, and relinking moved files by content.
 
-mod common;
-
+use crate::common;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

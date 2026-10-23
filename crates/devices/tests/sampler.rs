@@ -6,10 +6,7 @@
 //! sync, and the sample the engine gets from the set. Every block runs as
 //! a real-time section under the allocation trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use std::sync::Arc;
 
 use bl_core::time::{Bpm, TICKS_PER_QUARTER, TempoMap, Ticks};

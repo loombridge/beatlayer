@@ -1362,6 +1362,73 @@ fn an_agent_copies_pastes_and_duplicates_notes_by_command() {
     assert_eq!(notes.len(), 4, "the cut notes are gone: {notes:?}");
 }
 
+#[test]
+fn an_agent_sets_the_note_filters_and_inverts_the_selection_by_command() {
+    // Spec: find-and-select-notes R14. Both commands run by ID, and
+    // `view.state` reads the bar and the filters back.
+    let mut client = headless(false);
+    let created = call(
+        &mut client,
+        "run",
+        json!({ "label": "A clip of notes", "commands": [
+            { "command": "track.create",
+              "args": { "id": {"$new": "notes"}, "kind": "midi", "name": "Notes",
+                        "index": 0 } },
+            { "command": "clip.create",
+              "args": { "track": {"$ref": "notes"},
+                        "clip": { "id": {"$new": "clip"}, "name": "Notes", "start": 0,
+                                  "length": 2_822_400, "mute": false,
+                                  "data": { "midi": { "notes": [
+                                      { "key": 60, "velocity": 100, "start": 0,
+                                        "length": 705_600 },
+                                      { "key": 61, "velocity": 100, "start": 705_600,
+                                        "length": 705_600 },
+                                      { "key": 72, "velocity": 100, "start": 1_411_200,
+                                        "length": 705_600 }
+                                  ] } } } } },
+        ] }),
+    );
+    let clip = created["ids"]["clip"].as_u64().unwrap();
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [
+            { "command": "arrangement.select_clips", "args": { "clips": [clip] } },
+        ] }),
+    );
+    let ran = call(
+        &mut client,
+        "run",
+        json!({ "commands": [
+            { "command": "clip_view.note_filters",
+              "args": { "visible": true, "shown": "pitch", "pitch": { "classes": [0] } } },
+        ] }),
+    );
+    let result = &ran["results"][0]["result"];
+    assert_eq!(result["selected"], json!([0, 2]), "C in both octaves");
+    assert_eq!(result["filters"]["pitch"]["on"], true);
+    assert!(
+        ran["undo_step"].is_null(),
+        "selecting is never an undo step"
+    );
+    let state = call(
+        &mut client,
+        "run",
+        json!({ "commands": [ { "command": "view.state" } ] }),
+    );
+    let view = &state["results"][0]["result"]["clip_view"];
+    assert_eq!(view["filters"]["visible"], true);
+    assert_eq!(view["filters"]["pitch"]["classes"], json!([0]));
+    assert_eq!(view["selected"], json!([0, 2]));
+    let inverted = call(
+        &mut client,
+        "run",
+        json!({ "commands": [ { "command": "clip_view.invert_selection" } ] }),
+    );
+    assert_eq!(inverted["results"][0]["result"]["selected"], json!([1]));
+    assert!(inverted["undo_step"].is_null());
+}
+
 /// The MIDI clips' notes, as (key, start) pairs by start then key.
 fn agent_notes(client: &mut Client<InProcess>) -> Vec<(u8, i64)> {
     let document = client.transport().shell.editor().document();

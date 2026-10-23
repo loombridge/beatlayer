@@ -9,15 +9,13 @@
 //! other tests:
 //!
 //! ```text
-//! cargo nextest run --release -p bl-cli --test capacity --run-ignored only --no-capture
+//! cargo nextest run --release -p bl-cli --run-ignored only --no-capture -E 'test(/^capacity::/)'
 //! ```
 //!
 //! `BL_CAPACITY_SECONDS` sets how long it plays (600, ten minutes, by
 //! default), `BL_CAPACITY_WORKERS` how many workers run beside the audio
 //! thread (as many as the machine suggests by default; `0` plays on the
 //! audio thread alone), and `BL_CAPACITY_TRACKS` the tracks (128).
-
-bl_rt::install_trap!();
 
 use std::time::{Duration, Instant};
 

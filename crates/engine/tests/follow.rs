@@ -4,10 +4,7 @@
 //! draw makes two renders of one set alike. Every block runs as a real-time
 //! section under the allocation trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_core::time::{Bpm, TempoMap, Ticks};
 use bl_engine::{SessionCommand, SlotState, TransportCommand, testing};
 use bl_model::{

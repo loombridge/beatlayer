@@ -3,10 +3,7 @@
 //! per cent feedback with Freeze sustains, and the time-change modes glide,
 //! crossfade, and cut.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_core::time::{Bpm, Frames, TempoMap};
 use bl_devices::delay::{
     DRY_WET, FEEDBACK, FILTER, FREEZE, FREQ, L_OFFSET, L_SYNC, L_TIME, LINK, PING_PONG, R_SYNC,

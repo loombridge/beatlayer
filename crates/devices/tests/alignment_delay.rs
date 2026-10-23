@@ -3,10 +3,7 @@
 //! latency. Every block runs as a real-time section under the allocation
 //! trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_core::time::{Bpm, SampleRate, TempoMap};
 use bl_devices::alignment_delay::{
     DISTANCE_UNIT, FEET, LINK, METRES, MODE, SAMPLES, TEMPERATURE_C, TEMPERATURE_F,

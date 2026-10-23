@@ -879,6 +879,11 @@ impl LaneUi {
                 });
             });
             let response = ui.interact(plot, id, Sense::click_and_drag());
+            // Spec: find-and-select-notes R3. A click in a lane switches
+            // every filter off.
+            if response.clicked() {
+                crate::note_filters::clear(shell, clip, events);
+            }
             let pointer = response
                 .interact_pointer_pos()
                 .or_else(|| ui.input(|i| i.pointer.interact_pos()));

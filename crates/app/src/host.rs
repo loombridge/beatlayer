@@ -1579,6 +1579,11 @@ impl Host {
                     main.window.request_redraw();
                 }
             }
+            Effect::RaiseDeviceWindow(device) => {
+                if let Some((Some(surface), _)) = self.devices.get(&device) {
+                    surface.window.focus_window();
+                }
+            }
             Effect::FocusArea(area) => {
                 if let Some(main) = &self.main {
                     main.window.focus_window();

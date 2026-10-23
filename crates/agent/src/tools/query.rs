@@ -728,6 +728,13 @@ fn target_label(target: &AutomationTarget) -> String {
         AutomationTarget::ChainSend { chain, to } => {
             format!("chain {} send {}", chain.0.get(), to.0.get())
         }
+        AutomationTarget::Clip { param } => format!(
+            "clip {}",
+            serde_json::to_value(param)
+                .ok()
+                .and_then(|name| name.as_str().map(str::to_owned))
+                .unwrap_or_default()
+        ),
         AutomationTarget::MidiCc { number } => format!("midi cc {number}"),
         AutomationTarget::MidiPitchBend => "midi pitch bend".to_owned(),
         AutomationTarget::MidiChannelPressure => "midi channel pressure".to_owned(),

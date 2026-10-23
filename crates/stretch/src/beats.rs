@@ -178,11 +178,19 @@ impl Plan {
     /// next segment's beginning if that comes first.
     #[must_use]
     pub fn level(&self, frame: i64) -> f64 {
+        self.level_with(frame, f64::from(self.envelope))
+    }
+
+    /// The same for a transient envelope of `envelope` (0 to 100) instead of
+    /// the plan's own: what a clip whose Transient Envelope is automated
+    /// plays.
+    #[must_use]
+    pub fn level_with(&self, frame: i64, envelope: f64) -> f64 {
         let Some(segment) = self.at(frame) else {
             return 1.0;
         };
         let span = (segment.until - segment.frame) as f64;
-        let hold = span * f64::from(self.envelope) / 100.0;
+        let hold = span * envelope / 100.0;
         let offset = (frame - segment.frame) as f64;
         if offset <= hold {
             return 1.0;
@@ -200,9 +208,17 @@ impl Plan {
     /// is NaN plays silence.
     #[must_use]
     pub fn stretches(&self, ratio: f64) -> Vec<Stretch> {
+        self.stretches_by(|_| ratio)
+    }
+
+    /// The same where each segment reads at its own pitch ratio, `ratio`
+    /// says: a clip whose Transpose or Detune moves is read at the ratio it
+    /// has where each segment begins (the warp modes spec, R17, R29).
+    #[must_use]
+    pub fn stretches_by(&self, ratio: impl Fn(&Segment) -> f64) -> Vec<Stretch> {
         let mut out = Vec::new();
         for segment in &self.segments {
-            self.segment_stretches(&mut out, segment, ratio);
+            self.segment_stretches(&mut out, segment, ratio(segment));
         }
         out
     }

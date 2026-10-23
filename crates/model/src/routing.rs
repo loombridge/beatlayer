@@ -120,9 +120,10 @@ impl Document {
             if envelope.kind == crate::EnvelopeKind::Automation && envelope.target.is_midi() {
                 return Err(ModelError::MidiControllerNotAParameter);
             }
+            crate::command::check_clip_setting_kind(envelope.target, envelope.kind)?;
             self.check_clip_target(id, clip, envelope.target)?;
             envelope.envelope.check()?;
-            if envelope.target.is_midi() {
+            if envelope.target.is_midi() || envelope.target.is_clip() {
                 for point in envelope.envelope.points() {
                     check_clip_envelope_value(envelope.target, point.value)?;
                 }

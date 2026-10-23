@@ -49,6 +49,7 @@ use crate::commands::{
     UserLibraryResult, ViewResult, ViewState, ZoomArgs,
 };
 use crate::commands::{AppearanceArgs, BrightnessArgs, HueArgs, PercentArgs, ToneArgs};
+use crate::detail::DetailArea;
 use crate::devices::{self, DeviceError, DeviceView};
 use crate::files::{ProjectFiles, SetStore, new_set_from};
 use crate::midi::MidiHost;
@@ -73,6 +74,7 @@ use bl_shell_spec::autosampler as autosampler_ids;
 use bl_shell_spec::bounce as bounce_ids;
 use bl_shell_spec::browser as browser_ids;
 use bl_shell_spec::capture_midi as capture_ids;
+use bl_shell_spec::commands::DetailView;
 use bl_shell_spec::dawproject as dawproject_ids;
 use bl_shell_spec::devices as device_ids;
 use bl_shell_spec::editing as edit_ids;
@@ -545,6 +547,9 @@ pub struct Shell {
     /// What the Clip View shows (WP-2.3): whether it's open, Draw Mode, and
     /// the notes selected in its MIDI Note Editor.
     clip_view: ClipView,
+    /// Which of the Clip View and the Device View show, and how tall the
+    /// Clip View is (WP-6.27). View state, like the Clip View's own.
+    detail: DetailArea,
     /// The File Manager (WP-6.63): whether it shows, which files it shows,
     /// and the Automatic Search's switches. View state, never part of the
     /// set, like the browser's.
@@ -1111,6 +1116,7 @@ impl Shell {
                 view.set_preview(note_preview);
                 view
             },
+            detail: DetailArea::default(),
             file_manager: FileManager::default(),
             search: crate::search::Field::default(),
             plugin_list: plugin_list::PluginList::default(),
@@ -4572,6 +4578,13 @@ impl Shell {
         &self.clip_view
     }
 
+    /// Which of the Clip View and the Device View show, and where the
+    /// detail area's focus is (WP-6.27).
+    #[must_use]
+    pub fn detail(&self) -> &DetailArea {
+        &self.detail
+    }
+
     /// The list of the set's plug-ins (IMP-29, WP-6.41).
     #[must_use]
     pub fn plugin_list(&self) -> &plugin_list::PluginList {
@@ -6189,6 +6202,40 @@ impl Shell {
         Ok(())
     }
 
+    /// Split Clip (note-editing R41): `arrangement.split` on the clip the
+    /// Clip View shows at the editor's time selection, then the part
+    /// inside the selection is selected.
+    fn split_shown_clip(&mut self) -> Result<Value, ShellError> {
+        let id = note_ids::SPLIT_CLIP;
+        let (args, clip, (from, to)) =
+            clip_view::split_clip_plan(self.editor.document(), &self.clip_view, &self.arrangement)
+                .map_err(|failure| edit_error(id, failure))?;
+        let track = self.editor.document().clip_track(clip);
+        let mut result = self.run_command(edit_ids::SPLIT, args)?;
+        let doc = self.editor.document();
+        let inside: Vec<_> = track
+            .and_then(|track| doc.track(track))
+            .map(|track| {
+                track
+                    .clips()
+                    .filter(|part| part.start >= from && part.end() <= to)
+                    .map(|part| part.id)
+                    .collect()
+            })
+            .unwrap_or_default();
+        if !inside.is_empty() {
+            if let Some(fields) = result.as_object_mut() {
+                fields.insert(
+                    "selected_clips".to_owned(),
+                    serde_json::to_value(&inside).unwrap_or(Value::Null),
+                );
+            }
+            self.arrangement.select_clips(doc, inside);
+        }
+        self.touch();
+        Ok(result)
+    }
+
     /// Opens a gesture, such as a drag on a value field: the document
     /// commands it runs until [`Shell::end_gesture`] are one undo step,
     /// named `label` (such as "Change tempo"). A gesture already open
@@ -6274,7 +6321,7 @@ impl Shell {
                     Area::Detail if self.value_focused => contexts.push(Context::ValueField),
                     // Spec: piano-roll. With the Clip View open, its MIDI
                     // Note Editor holds the detail area's keys.
-                    Area::Detail if self.clip_view.visible() => {
+                    Area::Detail if self.detail.focus_in_clip() => {
                         contexts.push(Context::ClipView);
                         if self.clip_view.tab() == ClipTab::Envelopes {
                             contexts.push(Context::Envelope);
@@ -6350,7 +6397,9 @@ impl Shell {
             }
             ids::VIEW_FULL_SCREEN => Some(self.full_screen),
             ids::VIEW_TOGGLE_BROWSER => Some(self.browser),
-            ids::VIEW_TOGGLE_CLIP_VIEW => Some(self.clip_view.visible()),
+            ids::VIEW_TOGGLE_CLIP_VIEW => Some(self.detail.clip_shown()),
+            ids::VIEW_TOGGLE_DEVICE_VIEW => Some(self.detail.device_shown()),
+            ids::VIEW_EXPAND_CLIP_VIEW => Some(self.detail.expanded()),
             ids::VIEW_TOGGLE_PLUGIN_LIST => Some(self.plugin_list.visible()),
             ids::VIEW_DRAW_MODE => Some(self.clip_view.draw_mode()),
             note_ids::SET_PREVIEW => Some(self.clip_view.preview()),
@@ -6491,6 +6540,17 @@ impl Shell {
                     _ => "Use as MIDI Effect".to_owned(),
                 })
             }
+            // Spec: detail-views R6. Hide Device View reads for the views it
+            // would hide, or the ones it would bring back.
+            ids::VIEW_TOGGLE_DETAIL_AREA => {
+                let (hiding, views) = self.detail.toggle_area_views();
+                let names = match views[..] {
+                    [DetailView::Clip] => "Clip View",
+                    [DetailView::Device] => "Device View",
+                    _ => "Clip and Device View",
+                };
+                Some(format!("{} {names}", if hiding { "Hide" } else { "Show" }))
+            }
             // Spec: note-editing R18. The item reads Activate Note(s) when
             // every selected note is deactivated already.
             note_ids::DEACTIVATE => Some(
@@ -6627,6 +6687,12 @@ impl Shell {
         if self.edit_gesture.is_some() {
             // A drag is under way; keys wait for it (Esc cancels it).
             return false;
+        }
+        // Spec: detail-views R11. The menu item is enabled while the Clip
+        // View shows, whichever area has the focus; the key is the Clip
+        // View's own.
+        if id == ids::VIEW_EXPAND_CLIP_VIEW {
+            return self.detail.clip_shown();
         }
         if !spec.contexts.iter().any(|context| active.contains(context)) {
             return false;
@@ -8247,6 +8313,9 @@ impl Shell {
             // preferences and the focus.
             return self.run_step_input(id, args);
         }
+        if id == note_ids::SPLIT_CLIP {
+            return self.split_shown_clip();
+        }
         if note_ids::handles(id) {
             let keys = id == note_ids::SELECT_NOTES
                 && args["select"]
@@ -9206,6 +9275,21 @@ impl Shell {
         to_value(&self.view_window())
     }
 
+    /// What the detail area's commands return. The Clip View's own copy of
+    /// whether it shows follows the detail area here, the one place every
+    /// change passes.
+    fn detail_result(&mut self) -> Value {
+        self.clip_view.set_visible(self.detail.clip_shown());
+        to_value(&self.detail.state())
+    }
+
+    /// Gives the detail area the keyboard focus.
+    fn focus_detail(&mut self) {
+        self.focused_window = WindowKind::Main;
+        self.focused_area = Area::Detail;
+        self.effects.push(Effect::FocusArea(Area::Detail));
+    }
+
     fn set_result(&self) -> Value {
         to_value(&SetResult {
             path: self
@@ -9789,14 +9873,70 @@ impl Shell {
                 Ok(self.view_result())
             }
             ids::VIEW_TOGGLE_CLIP_VIEW => {
-                // Spec: piano-roll; L-STAT-004. View state only.
+                // Spec: detail-views R1; L-STAT-004. View state only.
                 Self::args::<NoArgs>(id, args)?;
-                self.clip_view.toggle();
-                Ok(to_value(
-                    &self
-                        .clip_view
-                        .state(self.editor.document(), &self.arrangement),
-                ))
+                self.detail.toggle(DetailView::Clip);
+                Ok(self.detail_result())
+            }
+            ids::VIEW_TOGGLE_DEVICE_VIEW => {
+                // Spec: detail-views R1; L-STAT-006.
+                Self::args::<NoArgs>(id, args)?;
+                self.detail.toggle(DetailView::Device);
+                Ok(self.detail_result())
+            }
+            ids::VIEW_SHOW_DETAIL_VIEWS => {
+                // Spec: detail-views R2; I-CLICK-027.
+                Self::args::<NoArgs>(id, args)?;
+                self.detail.both();
+                Ok(self.detail_result())
+            }
+            ids::VIEW_SWITCH_DETAIL_VIEW => {
+                // Spec: detail-views R5; S-VIEW-004.
+                Self::args::<NoArgs>(id, args)?;
+                if self.detail.switch() {
+                    self.focus_detail();
+                }
+                Ok(self.detail_result())
+            }
+            ids::VIEW_TOGGLE_DETAIL_AREA => {
+                // Spec: detail-views R6; S-VIEW-022.
+                Self::args::<NoArgs>(id, args)?;
+                self.detail.toggle_area();
+                Ok(self.detail_result())
+            }
+            ids::VIEW_EXPAND_CLIP_VIEW => {
+                // Spec: detail-views R11; S-NOTE-030.
+                Self::args::<NoArgs>(id, args)?;
+                if !self.detail.toggle_expanded() {
+                    return Err(ShellError::Unavailable {
+                        command: id.to_owned(),
+                        reason: "the Clip View is hidden".to_owned(),
+                    });
+                }
+                Ok(self.detail_result())
+            }
+            ids::VIEW_SET_DETAIL_HEIGHT => {
+                // Spec: detail-views R10, R18.
+                let ids::DetailHeightArgs { points } = Self::args(id, args)?;
+                if !points.is_finite() {
+                    return Err(ShellError::InvalidArgs {
+                        command: id.to_owned(),
+                        message: "`points` must be a number".to_owned(),
+                    });
+                }
+                self.detail.set_clip_height(points);
+                Ok(self.detail_result())
+            }
+            ids::FOCUS_CLIP_VIEW | ids::FOCUS_DEVICE_VIEW => {
+                // Spec: detail-views R14; S-FOCUS-004, S-FOCUS-005.
+                Self::args::<NoArgs>(id, args)?;
+                self.detail.focus_view(if id == ids::FOCUS_CLIP_VIEW {
+                    DetailView::Clip
+                } else {
+                    DetailView::Device
+                });
+                self.focus_detail();
+                Ok(self.detail_result())
             }
             ids::VIEW_TOGGLE_PLUGIN_LIST => {
                 // Spec: plugin-list R1, R3. View state only.
@@ -9959,6 +10099,7 @@ impl Shell {
                     clip_view: self
                         .clip_view
                         .state(self.editor.document(), &self.arrangement),
+                    detail: self.detail.state(),
                     plugin_list: self.plugin_list.state(),
                     assistant: self.assistant_panel_state(),
                     undo_history: self.undo_history_open,

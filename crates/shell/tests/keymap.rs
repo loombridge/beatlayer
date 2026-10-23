@@ -403,7 +403,7 @@ fn a_bind_keeps_the_arguments_it_fixes() {
             json!({
                 "command": "track.create",
                 "args": { "kind": "audio" },
-                "keys": ["Cmd+Option+E"],
+                "keys": ["Cmd+Option+Y"],
                 "platform": "mac",
                 "context": "global",
             }),

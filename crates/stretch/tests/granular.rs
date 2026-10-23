@@ -35,6 +35,7 @@ fn a_pitch_change_resamples_the_next_grain() {
         neutral: false,
         high_quality: true,
         beats: &empty_plan,
+        transient_envelope: 100.0,
         pitch: 1.0,
         clip: 1,
     };
@@ -54,6 +55,7 @@ fn a_pitch_change_resamples_the_next_grain() {
         neutral: false,
         high_quality: true,
         beats: &empty_plan,
+        transient_envelope: 100.0,
         pitch: 2.0,
         clip: 1,
     };

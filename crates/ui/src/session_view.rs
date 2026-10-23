@@ -76,6 +76,11 @@ pub fn track_stop_id(track: TrackId) -> Id {
     Id::new(("session-track-stop", track))
 }
 
+/// The ID of a track's status field in the status row.
+fn status_field_id(track: TrackId) -> Id {
+    Id::new(("session-track-status", track))
+}
+
 /// The ID of Stop All Clips, at the Main column's left in the status row.
 #[must_use]
 pub fn stop_all_id() -> Id {
@@ -421,6 +426,11 @@ impl GridUi {
                 json!({ "track": track, "scene": scene }),
             )));
         }
+        // Spec: detail-views R4 (I-CLICK-005): double-clicking a clip's slot
+        // selects it, which the click already did, and shows the Clip View.
+        if response.double_clicked() && clip.is_some() {
+            show_clip_view(shell, events);
+        }
         // I-DRAG-001, I-DRAG-002: dragging a clip moves it to another slot;
         // Option-drag (Ctrl-drag on Windows and Linux) copies it.
         if response.drag_started()
@@ -531,7 +541,8 @@ impl GridUi {
             let playing = states
                 .iter()
                 .find(|s| s.track == track && s.state != SlotState::Queued);
-            if let Some(clip) = playing.and_then(|s| doc.slot(track, s.scene)) {
+            if let Some((state, clip)) = playing.and_then(|s| Some((s, doc.slot(track, s.scene)?)))
+            {
                 let beats = clip.length.get() as f64 / TICKS_PER_QUARTER as f64;
                 let beats = (beats * 100.0).round() / 100.0;
                 painter.text(
@@ -541,6 +552,17 @@ impl GridUi {
                     theme.small_font(),
                     colours.text.0,
                 );
+                // Spec: detail-views R4 (L-SES-014). A click on the field
+                // selects the clip that plays and shows the Clip View.
+                let field = ui.interact(
+                    cells.field.intersect(tracks),
+                    status_field_id(track),
+                    Sense::click(),
+                );
+                if field.clicked() {
+                    select(events, Some(track), Some(state.scene), "replace");
+                    show_clip_view(shell, events);
+                }
             }
         }
 
@@ -948,6 +970,15 @@ fn slot_at(
         .iter()
         .find(|column| pos.x >= column.rect.left() && pos.x < column.rect.right())
         .map(|column| (columns[column.index], *scene))
+}
+
+/// Shows the Clip View, as a click on its selector does (R4).
+fn show_clip_view(shell: &Shell, events: &mut Vec<UiEvent>) {
+    events.extend(
+        crate::main_window::open_view(shell, bl_shell::commands::DetailView::Clip)
+            .into_iter()
+            .map(UiEvent::Invoke),
+    );
 }
 
 fn click_mode(modifiers: egui::Modifiers) -> &'static str {

@@ -2083,4 +2083,62 @@ mod tests {
         );
         assert!(load(broken).is_err(), "a value outside 0 to 1 doesn't load");
     }
+
+    // Spec: warp-modes R32
+    #[test]
+    fn clip_targets_save_and_load() {
+        use crate::ClipParam;
+        let (mut doc, [_, audio, _]) = song();
+        let clip = doc.track(audio).unwrap().clips().next().unwrap().id;
+        let setting = |param| AutomationTarget::Clip { param };
+        for command in [
+            Command::SetAutomationBreakpoint {
+                track: audio,
+                target: setting(ClipParam::Formants),
+                at: Ticks::ZERO,
+                value: 40.0,
+            },
+            Command::SetClipEnvelopeBreakpoint {
+                clip,
+                kind: crate::EnvelopeKind::Modulation,
+                target: setting(ClipParam::Transpose),
+                at: Ticks::QUARTER,
+                value: -7.5,
+            },
+        ] {
+            doc.apply(&command).unwrap();
+        }
+        let value = serde_json::to_value(&doc).unwrap();
+        let text = value.to_string();
+        assert!(
+            text.contains(r#""type":"clip""#) && text.contains(r#""param":"formants""#),
+            "the track's automation is saved by the setting's name"
+        );
+        let saved = find_clip(&value, clip);
+        assert_eq!(
+            saved["envelopes"][0]["target"],
+            json!({ "type": "clip", "param": "transpose" })
+        );
+        let loaded = load(value.clone()).unwrap();
+        assert_eq!(loaded, doc);
+        loaded.check_invariants().unwrap();
+
+        // A set saved before these targets existed has neither, and loads
+        // unchanged.
+        let mut old = value.clone();
+        find_clip_mut(&mut old, clip)
+            .as_object_mut()
+            .unwrap()
+            .remove("envelopes");
+        assert_eq!(
+            load(old).unwrap().clip(clip).unwrap().envelopes().count(),
+            0
+        );
+
+        // A value outside the setting's envelope range doesn't load.
+        let mut broken = value;
+        find_clip_mut(&mut broken, clip)["envelopes"][0]["envelope"]["points"] =
+            json!([{ "at": 0, "value": 99.0 }]);
+        assert!(load(broken).unwrap_err().contains("out of range"));
+    }
 }

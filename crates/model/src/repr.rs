@@ -485,12 +485,15 @@ impl Loader {
                 return Err(ModelError::DuplicateId(slot.scene.0));
             }
         }
-        for lane in repr.take_lanes {
+        for mut lane in repr.take_lanes {
             self.claim(lane.id.0)?;
-            for clip in &lane.clips {
+            for clip in lane.clips.iter_mut() {
                 self.claim(clip.id.0)?;
                 check_clip_fits(&track, &clip.data)?;
                 check_extent(clip.start, clip.length)?;
+                if let ClipData::Midi(midi) = &mut clip.data {
+                    midi.repair_groups();
+                }
                 check_clip(clip)?;
                 self.index.clip_track.insert(clip.id, id);
             }

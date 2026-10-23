@@ -442,6 +442,7 @@ fn probability_groups_are_saved_with_the_clip_and_broken_ones_load_ungrouped() {
             ),
         })
         .unwrap();
+    let lane: bl_model::TakeLaneId = editor.new_id();
     let project = Project {
         document: editor.document().clone(),
         ids: editor.ids(),
@@ -508,11 +509,37 @@ fn probability_groups_are_saved_with_the_clip_and_broken_ones_load_ungrouped() {
         .as_object_mut()
         .unwrap()
         .remove("group");
-    for (name, broken) in [("differ", differ), ("missing", missing), ("single", single)] {
+    for (name, broken) in [
+        ("differ", differ.clone()),
+        ("missing", missing),
+        ("single", single),
+    ] {
         let loaded = midi_of(&broken);
         assert!(loaded.groups.is_empty(), "{name}");
         assert!(loaded.notes.iter().all(|n| n.group.is_none()), "{name}");
     }
+
+    // A take lane's clip with a broken group loads it ungrouped too.
+    let mut taken = differ;
+    let track_value = taken.pointer_mut("/document/tracks/0").unwrap();
+    let moved = track_value["clips"].as_array_mut().unwrap().remove(0);
+    track_value["take_lanes"] = json!([{ "id": lane, "name": "Take 1", "clips": [moved] }]);
+    let (loaded, _) = decode_json(
+        &serde_json::to_vec(&taken).unwrap(),
+        &LoadOptions::default(),
+    )
+    .unwrap();
+    let lanes: Vec<_> = loaded
+        .document
+        .tracks()
+        .next()
+        .unwrap()
+        .take_lanes()
+        .collect();
+    let ClipData::Midi(midi) = &lanes[0].clips[0].data else {
+        panic!("a MIDI clip");
+    };
+    assert!(midi.groups.is_empty() && midi.notes.iter().all(|n| n.group.is_none()));
 }
 
 /// A one-bar MIDI clip, on the track from the start of the song.

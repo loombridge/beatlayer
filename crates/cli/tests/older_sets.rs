@@ -321,6 +321,95 @@ fn a_set_saved_before_the_scales_loads_unchanged() {
     assert_eq!(encode_json(&loaded, 1).unwrap(), saved);
 }
 
+// Spec: scales R16, midi-scale-map R10, arpeggiator R15. A set saved before
+// the scale-aware devices had a Use Current Scale switch, a Scale Name, and a
+// Root and Scale loads with the switch off, Scale on User and Arpeggiator on C
+// and Chromatic, and saves nothing for them until they are set.
+#[test]
+fn a_set_saved_before_use_current_scale_loads_its_devices_unchanged() {
+    use bl_devices::{arpeggiator, dice, lift, remap, stack};
+
+    let mut editor = Editor::new();
+    let track = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: track,
+            kind: TrackKind::Midi,
+            name: "Keys".to_owned(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    let types = [
+        (arpeggiator::ARPEGGIATOR, arpeggiator::USE_SCALE),
+        (stack::STACK, stack::USE_SCALE),
+        (lift::LIFT, lift::USE_SCALE),
+        (dice::DICE, dice::USE_SCALE),
+        (remap::REMAP, remap::USE_SCALE),
+    ];
+    let mut devices = Vec::new();
+    for (index, (device_type, _)) in types.iter().enumerate() {
+        let id = editor.new_id();
+        let mut device = Device::new(
+            id,
+            "",
+            DeviceKind::Native {
+                device_type: (*device_type).to_owned(),
+            },
+        );
+        // The parameters of the day: a few set, none of the new ones.
+        device.params.insert(ParamId(0), 1.0);
+        editor
+            .apply(Command::InsertDevice {
+                track,
+                index,
+                device,
+            })
+            .unwrap();
+        devices.push(id);
+    }
+    let project = Project {
+        document: editor.document().clone(),
+        ids: editor.ids(),
+        media: Media::default(),
+        windows: bl_model::DeviceWindows::new(),
+        rack_views: bl_model::RackViewMap::new(),
+        folds: bl_model::ClipFolds::new(),
+        launch: bl_model::LaunchSettings::default(),
+        multisamplers: bl_model::MultisamplerViews::new(),
+    };
+    let saved = encode_json(&project, 1).unwrap();
+    let (loaded, _) = decode_json(&saved, &LoadOptions::default()).unwrap();
+    assert_eq!(loaded.document, project.document);
+    let mut registry = Registry::new();
+    bl_devices::register(&mut registry);
+    for ((device_type, switch), id) in types.iter().zip(&devices) {
+        let device = loaded.document.device(*id).unwrap();
+        let description = &registry
+            .device_type(&device.kind)
+            .expect("the device is registered")
+            .description;
+        let read = |param: ParamId| description.value(&device.params, param).unwrap();
+        assert_eq!(
+            read(*switch),
+            0.0,
+            "{device_type}: Use Current Scale is off"
+        );
+        assert!(
+            !device.params.contains_key(switch),
+            "{device_type}: nothing saved"
+        );
+        if *device_type == remap::REMAP {
+            assert_eq!(read(remap::SCALE_NAME), 0.0, "Scale is on User");
+        }
+        if *device_type == arpeggiator::ARPEGGIATOR {
+            assert_eq!(read(arpeggiator::ROOT), 0.0, "C");
+            assert_eq!(read(arpeggiator::SCALE), 0.0, "Chromatic");
+        }
+    }
+    assert_eq!(encode_json(&loaded, 1).unwrap(), saved);
+}
+
 // Spec: note-editing R20. The lanes, the footer and the value keys save
 // nothing new: a set saved before them loads unchanged, and every note value
 // a lane edits is saved in the shape it always was and read back.
@@ -1126,6 +1215,56 @@ fn the_grooves_are_saved_with_the_set_and_load_again() {
     .unwrap();
     assert_eq!(loaded.document.clip(clip).unwrap().groove, None);
     assert_eq!(loaded.document.settings().grooves.auto_load_groove, None);
+}
+
+// Spec: tunings R11, R14
+#[test]
+fn a_set_saved_before_tunings_loads_with_none_and_a_set_with_one_keeps_it() {
+    let (mut editor, _clip) = midi_clip_song();
+    let track = editor.document().track_order()[0];
+    let saved = encode_json(&project_of(&editor), 1).unwrap();
+    let value: Value = serde_json::from_slice(&saved).unwrap();
+    assert!(
+        value["document"]["settings"].get("tuning").is_none(),
+        "a set with no tuning writes none"
+    );
+    assert!(
+        !String::from_utf8_lossy(&saved).contains("tuning_bypass"),
+        "nor does a track that plays the tuning"
+    );
+    let (loaded, _) = decode_json(&saved, &LoadOptions::default()).unwrap();
+    assert_eq!(loaded.document, *editor.document());
+    assert!(loaded.document.settings().tuning.is_none());
+    assert_eq!(encode_json(&loaded, 1).unwrap(), saved, "written the same");
+
+    // A set with a tuning and a bypassing track saves both, and opens with
+    // them: the tuning is inside the set, not read from a file.
+    let tuning = bl_model::Tuning::new(
+        "Thirteen".to_owned(),
+        "13 equal steps of 3/1".to_owned(),
+        (1..=13)
+            .map(|i| 1200.0 * 3f64.log2() * f64::from(i) / 13.0)
+            .collect(),
+    )
+    .unwrap();
+    editor
+        .apply(Command::SetTuning {
+            tuning: tuning.clone(),
+            retune: false,
+        })
+        .unwrap();
+    editor
+        .apply(Command::SetTuningBypass {
+            track,
+            bypass: true,
+        })
+        .unwrap();
+    let saved = encode_json(&project_of(&editor), 1).unwrap();
+    let (loaded, _) = decode_json(&saved, &LoadOptions::default()).unwrap();
+    assert_eq!(loaded.document.settings().tuning.as_ref(), Some(&tuning));
+    assert!(loaded.document.track(track).unwrap().tuning_bypass());
+    assert_eq!(loaded.document, *editor.document());
+    assert_eq!(encode_json(&loaded, 1).unwrap(), saved);
 }
 
 // Spec: comping R3. A set saved with WP-2.13's take lanes, whose passes had no

@@ -9,7 +9,7 @@
 
 use bl_model::{Monitor, TrackId};
 use bl_shell::Invocation;
-use bl_shell::routing::{Chooser, Entry, InOut, MonitorSwitch};
+use bl_shell::routing::{Chooser, Entry, InOut, MonitorSwitch, TuningBypass};
 use egui::accesskit::Role;
 use egui::{Align2, Id, Rect, Response, Sense, Shape, Stroke, StrokeKind, Ui, pos2, vec2};
 
@@ -56,6 +56,7 @@ impl InOutParts<'_> {
                 monitor,
                 output,
                 output_channel,
+                tuning_bypass,
             } => {
                 if labels {
                     rows.push(Row::Label("From"));
@@ -68,6 +69,9 @@ impl InOutParts<'_> {
                 }
                 rows.push(Row::Chooser(output, Slot::OutputType));
                 rows.push(Row::Chooser(output_channel, Slot::OutputChannel));
+                if let Some(switch) = tuning_bypass {
+                    rows.push(Row::TuningBypass(switch));
+                }
             }
             InOut::Output {
                 output,
@@ -108,6 +112,7 @@ impl InOutParts<'_> {
                     self.chooser(ui, rect, chooser, slot, events);
                 }
                 Row::Monitor(switch) => self.monitor(ui, rect, switch, events),
+                Row::TuningBypass(switch) => self.tuning_bypass(ui, rect, switch, events),
             }
         }
     }
@@ -260,6 +265,61 @@ impl InOutParts<'_> {
             });
     }
 
+    /// Bypass Tuning (the tunings spec, R14): one button, lit while the
+    /// track plays twelve equal steps. On a track that holds a Drum Rack it
+    /// is lit and can't be changed.
+    fn tuning_bypass(
+        &self,
+        ui: &mut Ui,
+        rect: Rect,
+        switch: &TuningBypass,
+        events: &mut Vec<UiEvent>,
+    ) {
+        let id = control_id(self.place, self.track, Slot::TuningBypass, 0);
+        let response = ui.interact(
+            rect,
+            id,
+            if switch.locked {
+                Sense::focusable_noninteractive()
+            } else {
+                Sense::click()
+            },
+        );
+        self.register(ui, id, Slot::TuningBypass);
+        if response.clicked() {
+            response.request_focus();
+            events.push(UiEvent::Invoke(switch.run.clone()));
+        }
+        let c = &self.theme.colors;
+        let painter = ui.painter_at(rect.expand(2.0));
+        let face = if switch.on { c.accent.0 } else { c.control.0 };
+        painter.rect_filled(
+            rect,
+            self.theme.sizes.corner,
+            if switch.locked {
+                face.gamma_multiply(0.6)
+            } else {
+                face
+            },
+        );
+        painter.text(
+            rect.center(),
+            Align2::CENTER_CENTER,
+            "Bypass Tuning",
+            self.theme.small_font(),
+            if switch.on { c.accent_text.0 } else { c.text.0 },
+        );
+        focus_ring(&painter, self.theme, rect, &response);
+        describe(
+            ui,
+            &response,
+            Role::CheckBox,
+            "Bypass Tuning",
+            if switch.on { "on" } else { "off" },
+            None,
+        );
+    }
+
     /// The Monitor switch: In, Auto, and Off side by side, the chosen one
     /// lit. It's one stop in the keyboard's order, as Live's Monitoring is
     /// (observed); with the focus on it, Left and Right choose the state
@@ -371,6 +431,7 @@ enum Row<'a> {
     Label(&'static str),
     Chooser(&'a Chooser, Slot),
     Monitor(&'a MonitorSwitch),
+    TuningBypass(&'a TuningBypass),
 }
 
 /// What a Monitor button reads.

@@ -404,12 +404,34 @@ pub struct ArrangementState {
     /// `target` `null` means the lane draws no envelope.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub automation_lanes: Vec<AutomationLane>,
+    /// The automation lane that has the keyboard (WP-6.26): the one the
+    /// last click, or Up and Down, selected, while Automation Mode is on.
+    /// The keys of the automation editing spec's R20 to R26 act on its
+    /// envelope.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_lane: Option<Lane>,
+    /// The breakpoint selected in that lane (WP-6.26), if any:
+    /// `automation.select_breakpoint` sets it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_breakpoint: Option<SelectedBreakpoint>,
     /// Whether the track headers show their In/Out column.
     pub show_in_out: bool,
     /// Whether the track headers show their volume, pan, and sends.
     pub show_volume: bool,
     /// Whether the return tracks' rows show in the lanes.
     pub show_return_tracks: bool,
+}
+
+/// The breakpoint selected in an automation lane, with the edit it opens
+/// (the automation editing spec, R22, R23).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SelectedBreakpoint {
+    /// The track.
+    pub track: TrackId,
+    /// The parameter the lane shows.
+    pub target: AutomationTarget,
+    /// The breakpoint's position.
+    pub at: Ticks,
 }
 
 /// One track's automation lane and the parameter it shows, as
@@ -590,6 +612,11 @@ pub struct InsertMarkerArgs {
     /// comping spec, R26).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lane: Option<TakeLaneId>,
+    /// Select the track's automation lane too, as clicking the lane's
+    /// background does (the automation editing spec, R1): the lane gets the
+    /// keyboard.
+    #[serde(default)]
+    pub automation_lane: bool,
 }
 
 /// Arguments of `arrangement.select_tracks`.
@@ -605,6 +632,11 @@ pub struct SelectTracksArgs {
     /// and hide grouped tracks) apply, as clicking a title bar does.
     #[serde(default)]
     pub title_bars: bool,
+    /// Select the track's automation lane, as Up and Down do through the
+    /// lanes while Automation Mode is on (the automation editing spec,
+    /// R20): the lane gets the keyboard. One track only.
+    #[serde(default)]
+    pub automation_lane: bool,
 }
 
 /// Arguments of `arrangement.select_time`.
@@ -965,8 +997,9 @@ fn specs() -> Vec<CommandSpec> {
             "Set Insert Marker",
             "Places the Arrangement's insert marker at `at` and, with `track`, selects that \
              track, as clicking in a track's lane does; a click also snaps to the grid when Snap \
-             to Grid is on, and resumes Follow. Clears the time selection. Not an undo step; \
-             changes only the view.",
+             to Grid is on, and resumes Follow. Clears the time selection. With \
+             `automation_lane`, the track's automation lane is selected too, as clicking its \
+             background does, and gets the keyboard. Not an undo step; changes only the view.",
         )
         .context(Arrangement)
         .args::<InsertMarkerArgs>(),
@@ -975,7 +1008,9 @@ fn specs() -> Vec<CommandSpec> {
             "Select Tracks",
             "Selects tracks in the Arrangement, replacing the selection or, with `add`, adding \
              to it; with `title_bars`, their title bars, as clicking a title bar does, so the \
-             fold and grouped-track keys apply. Changes only the view.",
+             fold and grouped-track keys apply; with `automation_lane` and one track, its \
+             automation lane, as Up and Down select it while Automation Mode is on, and the \
+             lane gets the keyboard. Changes only the view.",
         )
         .context(Arrangement)
         .args::<SelectTracksArgs>(),

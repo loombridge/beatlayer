@@ -90,6 +90,9 @@ pub struct Preferences {
     /// spec, R7 and R22). On by default, as observed in Live 12.4.6, and on
     /// for preferences saved before the setting existed.
     pub create_fades_on_clip_edges: OnByDefault,
+    /// Retune Set On Loading Tuning Systems (Options, M-OPT-022; the
+    /// tunings spec, R15). Off in a new install.
+    pub retune_on_tuning_load: bool,
     /// Warp recorded audio (Record, Warp & Launch, Warp/Fades; IMP-02, the
     /// recording spec, R13): whether a recorded clip will be warped, once
     /// warping arrives; clips have no warp fields until then. On by default,

@@ -599,6 +599,9 @@ pub struct SettingsState {
     /// Record, Warp & Launch: Create Fades on Clip Edges, as
     /// `settings.set_create_fades_on_clip_edges` sets it.
     pub create_fades_on_clip_edges: bool,
+    /// Options ▸ Retune Set On Loading Tuning Systems, as
+    /// `settings.set_retune_on_tuning_load` sets it (the tunings spec, R15).
+    pub retune_on_tuning_load: bool,
     /// Record, Warp & Launch: Warp Recorded Audio, as
     /// `settings.set_warp_recorded_audio` sets it.
     pub warp_recorded_audio: bool,

@@ -29,8 +29,8 @@ use bl_model::{
 use bl_shell_spec::arrangement::{
     self as ids, ArrangementState, AutomationLane, FadeHandle, FadeHandleState, FoldArgs,
     FoldGroupsArgs, FollowArgs, InsertMarkerArgs, Lane, ScrollArgs, SelectFadeHandleArgs,
-    SelectTimeArgs, SelectTracksArgs, SetGridArgs, ShowAutomationArgs, ShowRangeArgs,
-    ShowTrackArgs, SwitchArgs, TimeRange, TrackHeightArgs, ZoomArgs,
+    SelectTimeArgs, SelectTracksArgs, SelectedBreakpoint, SetGridArgs, ShowAutomationArgs,
+    ShowRangeArgs, ShowTrackArgs, SwitchArgs, TimeRange, TrackHeightArgs, ZoomArgs,
 };
 use bl_shell_spec::editing::Edge;
 use serde::de::DeserializeOwned;
@@ -220,6 +220,12 @@ pub struct ArrangementView {
     /// it shows and the breakpoint the segment starts at (the automation
     /// editing spec, R4).
     automation_segment: BTreeMap<TrackId, (AutomationTarget, Ticks)>,
+    /// The track whose automation lane is selected, and so has the keyboard
+    /// while it is the only selected track (the automation editing spec,
+    /// R1, R20).
+    selected_lane: Option<TrackId>,
+    /// The breakpoint selected in the lane that has the keyboard (R22).
+    selected_breakpoint: Option<(TrackId, AutomationTarget, Ticks)>,
     /// Whether the track headers show their In/Out column (WP-6.64).
     show_in_out: bool,
     /// Whether the track headers show their volume, pan, and sends
@@ -279,6 +285,8 @@ impl ArrangementView {
             automation_lanes: BTreeMap::new(),
             returns_scroll: false,
             automation_segment: BTreeMap::new(),
+            selected_lane: None,
+            selected_breakpoint: None,
             show_in_out: true,
             show_volume: true,
             show_return_tracks: true,
@@ -503,6 +511,64 @@ impl ArrangementView {
             None => {
                 self.automation_segment.remove(&track);
             }
+        }
+    }
+
+    /// The automation lane that has the keyboard: the selected lane's track
+    /// and the parameter it shows, while Automation Mode is on, the track is
+    /// the only one selected and unfolded, and its lane draws an envelope
+    /// (the automation editing spec, R20).
+    #[must_use]
+    pub fn keyboard_lane(&self) -> Option<(TrackId, AutomationTarget)> {
+        let track = self.selected_lane?;
+        (self.automation_mode && self.selected == [track] && !self.is_folded(track))
+            .then(|| self.automation_lane(track).map(|target| (track, target)))
+            .flatten()
+    }
+
+    /// Gives a track's automation lane the keyboard, or takes it from
+    /// whichever has it with `None`. Taking it away also deselects the
+    /// breakpoint.
+    pub fn select_lane(&mut self, track: Option<TrackId>) {
+        if self.selected_lane != track {
+            self.selected_breakpoint = None;
+        }
+        self.selected_lane = track;
+    }
+
+    /// Lets go of the selected breakpoint.
+    pub fn deselect_breakpoint(&mut self) {
+        self.selected_breakpoint = None;
+    }
+
+    /// The breakpoint selected in the lane that has the keyboard: its track,
+    /// the parameter and its position (R22).
+    #[must_use]
+    pub fn selected_breakpoint(&self) -> Option<(TrackId, AutomationTarget, Ticks)> {
+        let (track, target) = self.keyboard_lane()?;
+        self.selected_breakpoint
+            .filter(|(t, g, _)| *t == track && *g == target)
+    }
+
+    /// Selects the breakpoint at `at` in a track's automation lane, or none
+    /// with `None`. Selecting gives the lane the keyboard and puts the insert
+    /// marker on the breakpoint.
+    pub fn select_breakpoint(
+        &mut self,
+        track: TrackId,
+        target: AutomationTarget,
+        at: Option<Ticks>,
+    ) {
+        match at {
+            Some(at) => {
+                self.selected_lane = Some(track);
+                self.selected = vec![track];
+                self.selected_clips.clear();
+                self.title_bars = false;
+                self.insert_marker = at;
+                self.selected_breakpoint = Some((track, target, at));
+            }
+            None => self.selected_breakpoint = None,
         }
     }
 
@@ -1148,7 +1214,12 @@ impl ArrangementView {
                 };
             }
             ids::SET_INSERT_MARKER => {
-                let InsertMarkerArgs { at, track, lane } = parse(args)?;
+                let InsertMarkerArgs {
+                    at,
+                    track,
+                    lane,
+                    automation_lane,
+                } = parse(args)?;
                 self.selected_fade = None;
                 self.selected_take_lanes.clear();
                 // Spec: comping R26. A click on a take lane selects the lane
@@ -1164,6 +1235,13 @@ impl ArrangementView {
                     self.selected = vec![track];
                     self.title_bars = false;
                 }
+                // Spec: automation-editing R1. A click on an automation
+                // lane's background selects the lane.
+                let automation = automation_lane
+                    .then(|| self.selected.first().copied())
+                    .flatten();
+                self.select_lane(automation);
+                self.selected_breakpoint = None;
                 self.insert_marker = at;
                 self.time_selection = None;
                 // Spec: automation-editing R1. A selection with no lanes
@@ -1182,6 +1260,7 @@ impl ArrangementView {
                     tracks,
                     add,
                     title_bars,
+                    automation_lane,
                 } = parse(args)?;
                 let tracks = self.targets(doc, Some(tracks))?;
                 self.selected_clips.clear();
@@ -1191,6 +1270,8 @@ impl ArrangementView {
                 // lanes the selection was on.
                 self.time_selection_lanes
                     .retain(|lane| !matches!(lane, Lane::Take { .. }));
+                self.selected_lane = None;
+                self.selected_breakpoint = None;
                 if add {
                     for track in tracks {
                         if !self.selected.contains(&track) {
@@ -1201,6 +1282,11 @@ impl ArrangementView {
                     self.selected = tracks;
                 }
                 self.title_bars = title_bars;
+                // Spec: automation-editing R20. Up and Down select the
+                // lane of the one track they land on.
+                if automation_lane && !title_bars && self.selected.len() == 1 {
+                    self.selected_lane = self.selected.first().copied();
+                }
                 if let Some(first) = self.selected.last().copied() {
                     self.show_track(doc, first);
                 }
@@ -1256,6 +1342,7 @@ impl ArrangementView {
                 self.title_bars = false;
                 // Spec: arrangement-editing R2.
                 self.selected_clips.clear();
+                self.select_lane_of_selection();
             }
             ids::FOLD_TRACKS => {
                 let FoldArgs { tracks, fold } = parse(args)?;
@@ -1376,6 +1463,14 @@ impl ArrangementView {
                 let ShowAutomationArgs { track, target } = parse(args)?;
                 self.targets(doc, Some(vec![track]))?;
                 self.automation_lanes.insert(track, target);
+                // The breakpoint selected in the lane belongs to what it
+                // showed.
+                if self
+                    .selected_breakpoint
+                    .is_some_and(|(t, shown, _)| t == track && Some(shown) != target)
+                {
+                    self.selected_breakpoint = None;
+                }
                 self.clamp_scroll(doc);
             }
             ids::SHOW_IN_OUT => {
@@ -1460,6 +1555,12 @@ impl ArrangementView {
                     target: *target,
                 })
                 .collect(),
+            selected_lane: self
+                .keyboard_lane()
+                .map(|(track, target)| Lane::Automation { track, target }),
+            selected_breakpoint: self
+                .selected_breakpoint()
+                .map(|(track, target, at)| SelectedBreakpoint { track, target, at }),
             show_in_out: self.show_in_out,
             show_volume: self.show_volume,
             show_return_tracks: self.show_return_tracks,

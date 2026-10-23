@@ -761,6 +761,35 @@ fn quantize_and_quantize_settings_are_bound_in_the_sample_editor() {
     assert_eq!(entry_002.status, Status::Bound);
 }
 
+// Spec: find-and-select-notes R1, R13. Cmd+Shift+F (Ctrl+Shift+F on Windows;
+// S-NOTE-037) shows the note filters and Cmd+Shift+A (S-NOTE-034) inverts the
+// selection, in the note editor.
+#[test]
+fn the_note_filters_and_invert_selection_are_bound_in_the_note_editor() {
+    let keymap = Keymap::live12();
+    let contexts = [Context::NoteEditor, Context::Global];
+    for (platform, shift) in [
+        (Platform::Mac, mods(true, false, false, true)),
+        (Platform::Other, mods(false, true, false, true)),
+    ] {
+        let filters = keymap
+            .resolve(platform, Key::F, shift, &contexts)
+            .expect("Shift with Cmd or Ctrl and F is bound");
+        assert_eq!(filters.command.id, "clip_view.note_filters", "{platform:?}");
+        assert_eq!(filters.command.args["toggle"], true);
+        let invert = keymap
+            .resolve(platform, Key::A, shift, &contexts)
+            .expect("and so is A");
+        assert_eq!(
+            invert.command.id, "clip_view.invert_selection",
+            "{platform:?}"
+        );
+    }
+    for id in ["S-NOTE-034", "S-NOTE-037"] {
+        assert_eq!(keymap.entry_for(id).unwrap().status, Status::Bound, "{id}");
+    }
+}
+
 // Spec: piano-roll R23 to R31 (WP-6.53).
 #[test]
 fn the_note_editors_keys_are_all_handled() {

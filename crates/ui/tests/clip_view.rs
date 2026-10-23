@@ -14,6 +14,7 @@ use bl_ui::clip_view::{
     KEY_HEIGHT, KEY_WIDTH, note_rect, shown_keys, strip_rect, tick_at, x_of_tick, y_of_key,
     y_of_value,
 };
+use bl_ui::note_filters::{BAR_HEIGHT, bar_rect, body_rect, magnifier_rect};
 use bl_ui::note_lanes::{NoteLayout, note_layout};
 use common::{Harness, Node, Window, command};
 use egui::{Event, Modifiers, MouseWheelUnit, PointerButton, Pos2, Rect, TouchPhase, pos2, vec2};
@@ -129,7 +130,11 @@ impl Notes {
     fn layout(&mut self) -> NoteLayout {
         let view = self.view();
         let shown = self.h.shell.clip_view().lanes().shown();
-        note_layout(view, &self.h.main.clip_view().lane_heights(&shown))
+        let bar = self.h.shell.clip_view().note_filters().visible;
+        note_layout(
+            body_rect(view, bar),
+            &self.h.main.clip_view().lane_heights(&shown),
+        )
     }
 
     /// The note area's rectangle.
@@ -182,7 +187,8 @@ impl Notes {
             pos2(bounds.x0 as f32, bounds.y0 as f32),
             pos2(bounds.x1 as f32, bounds.y1 as f32),
         );
-        strip_rect(view)
+        let bar = self.h.shell.clip_view().note_filters().visible;
+        strip_rect(body_rect(view, bar))
     }
 
     /// A point in the marker strip at `tick`: in the strip's upper part for
@@ -1033,13 +1039,13 @@ fn the_context_menu_lists_the_items_in_order() {
         "Paste",
         "Duplicate",
         "Delete",
+        "Invert Selection",
         "Deactivate Note(s)",
     ] {
         let node = menu_item(&nodes, label);
         assert!(!node.disabled, "{label} works");
     }
     for (label, package) in [
-        ("Invert Selection", "WP-6.4"),
         ("Group Notes", "WP-6.2"),
         ("Ungroup Notes", "WP-6.2"),
         ("Split Note(s)", "WP-6.3"),
@@ -1972,4 +1978,177 @@ fn the_notes_are_paler_the_softer_their_velocity() {
             "velocity 64 is between the palest and the full colour"
         );
     }
+}
+
+/// The middle of the control labelled `label` in the filter bar.
+fn control(n: &mut Notes, label: &str) -> Pos2 {
+    let output = n.h.settle();
+    let nodes = Harness::nodes(&output);
+    let bounds = Harness::node(&nodes, label)
+        .bounds
+        .unwrap_or_else(|| panic!("{label} has bounds"));
+    pos2(
+        ((bounds.x0 + bounds.x1) / 2.0) as f32,
+        ((bounds.y0 + bounds.y1) / 2.0) as f32,
+    )
+}
+
+/// The filters the shell holds.
+fn filters(n: &Notes) -> bl_shell::note_filter_commands::NoteFilters {
+    n.h.shell.clip_view().note_filters().clone()
+}
+
+#[test]
+fn the_magnifier_and_cmd_shift_f_show_the_bar_above_the_ruler() {
+    // Spec: find-and-select-notes R1, R15. The switch and the key show and
+    // hide the bar between the toolbar and the ruler, and the keyboard stays
+    // in the editor so the key works after a click on the switch.
+    let step = n_step();
+    let mut n = set(vec![Note::new(60, Ticks::ZERO, step, 100)]);
+    let view = n.view();
+    let ruler = n.strip();
+    assert!(!filters(&n).visible);
+    let switch = control(&mut n, "Find and Select Notes");
+    assert_eq!(
+        switch,
+        magnifier_rect(view).center(),
+        "the magnifier leads the toolbar"
+    );
+    n.h.click(switch);
+    n.h.settle();
+    assert!(filters(&n).visible, "the magnifier shows the bar");
+    assert_eq!(
+        n.strip().top(),
+        ruler.top() + BAR_HEIGHT,
+        "the ruler moves down by the bar's height"
+    );
+    assert_eq!(
+        n.strip().top(),
+        bar_rect(view).bottom(),
+        "just under the bar"
+    );
+    let output = n.h.settle();
+    let nodes = Harness::nodes(&output);
+    let node = Harness::node(&nodes, "Find and Select Notes");
+    assert_eq!(node.toggled, Some(true), "read as a switch with its state");
+    assert_eq!(Harness::node(&nodes, "Filter").value, "Pitch");
+    n.h.key(egui::Key::F, command() | Modifiers::SHIFT);
+    assert!(
+        !filters(&n).visible,
+        "Cmd-Shift-F hides it, focus in the editor"
+    );
+    n.h.key(egui::Key::F, command() | Modifiers::SHIFT);
+    assert!(filters(&n).visible, "and shows it");
+    assert_eq!(n.steps(), 0, "the bar is view state, no undo step");
+}
+
+#[test]
+fn a_control_selects_live_and_a_click_switches_the_filters_off() {
+    // Spec: find-and-select-notes R3, R5, R2. A pitch class selects its
+    // notes as it's clicked, the chooser's dot follows, and a click in the
+    // note area switches the filter off and deselects.
+    let step = n_step();
+    let mut n = set(vec![
+        Note::new(60, Ticks::ZERO, step, 100),
+        Note::new(62, 2 * step, step, 100),
+        Note::new(72, 4 * step, step, 100),
+        Note::new(64, 6 * step, step, 100),
+    ]);
+    n.h.shell
+        .run("clip_view.note_filters", json!({ "visible": true }))
+        .unwrap();
+    n.h.settle();
+    let steps = n.steps();
+    let output = n.h.settle();
+    let nodes = Harness::nodes(&output);
+    assert_eq!(Harness::node(&nodes, "Note Filters").description, "All off");
+    let c = control(&mut n, "C");
+    n.h.click(c);
+    let output = n.h.settle();
+    let nodes = Harness::nodes(&output);
+    assert_eq!(
+        Harness::node(&nodes, "Note Filters").description,
+        "On: Pitch"
+    );
+    assert!(filters(&n).pitch.on);
+    assert_eq!(filters(&n).pitch.classes, [0]);
+    assert_eq!(n.selected(), [0, 2], "C in both octaves");
+    let d = control(&mut n, "D");
+    n.h.click(d);
+    assert_eq!(n.selected(), [0, 1, 2], "and D too");
+    let invert = control(&mut n, "Invert");
+    n.h.click(invert);
+    assert_eq!(n.selected(), [3], "inverted: only the E is left");
+    // A click in the note area switches every filter off, keeping the
+    // settings, and deselects before doing what a click does.
+    let empty = n.at(64, 8 * step);
+    n.click(empty, Modifiers::NONE);
+    assert!(!filters(&n).any_on());
+    assert_eq!(filters(&n).pitch.classes, [0, 2], "the settings stay");
+    assert!(n.selected().is_empty());
+    assert_eq!(n.steps(), steps, "none of it is an undo step");
+    // Select switches the shown filter back on and selects again.
+    let select = control(&mut n, "Select");
+    n.h.click(select);
+    assert!(filters(&n).pitch.on);
+    assert_eq!(n.selected(), [3], "Invert was still on");
+}
+
+#[test]
+fn a_shift_drag_sets_the_time_filters_window() {
+    // Spec: find-and-select-notes R6, I-DRAG-042. With the bar showing,
+    // Shift-dragging sideways sets Start to where the drag began and Length
+    // to the span, on the grid, and selects live.
+    let step = n_step();
+    let mut n = set(vec![
+        Note::new(60, Ticks::ZERO, step, 100),
+        Note::new(60, step, step, 100),
+        Note::new(60, 2 * step, step, 100),
+        Note::new(60, 3 * step, step, 100),
+    ]);
+    n.h.shell
+        .run(
+            "clip_view.note_filters",
+            json!({ "visible": true, "time": { "repeat": 0 } }),
+        )
+        .unwrap();
+    n.h.settle();
+    let from = n.at(62, step);
+    let to = n.at(62, 3 * step);
+    let steps = n.steps();
+    n.drag(from, to, Modifiers::SHIFT);
+    let time = filters(&n).time;
+    let beats = step.get() as f64 / Ticks::QUARTER.get() as f64;
+    assert!(time.on);
+    assert_eq!(
+        (time.start, time.length),
+        (1.0 + beats, 2.0 * beats),
+        "from where the drag began, as long as it ran"
+    );
+    assert_eq!(n.selected(), [1, 2], "the notes in the window");
+    assert_eq!(n.steps(), steps);
+}
+
+#[test]
+fn invert_selection_runs_from_the_key_and_the_context_menu() {
+    // Spec: find-and-select-notes R13. Cmd-Shift-A swaps the selection.
+    let step = n_step();
+    let mut n = set(vec![
+        Note::new(60, Ticks::ZERO, step, 100),
+        Note::new(62, 2 * step, step, 100),
+        Note::new(64, 4 * step, step, 100),
+    ]);
+    let at = n.at(62, 2 * step + step / 2);
+    n.click(at, Modifiers::NONE);
+    assert_eq!(n.selected(), [1]);
+    n.h.key(egui::Key::A, command() | Modifiers::SHIFT);
+    assert_eq!(n.selected(), [0, 2]);
+    assert_eq!(
+        n.time(),
+        Some((Ticks::ZERO, 5 * step)),
+        "the time selection follows"
+    );
+    let nodes = right_click(&mut n, at);
+    let item = menu_item(&nodes, "Invert Selection");
+    assert!(!item.disabled);
 }

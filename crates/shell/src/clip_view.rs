@@ -22,6 +22,9 @@ use bl_core::time::{Ticks, TimeSignature, TimeSignatureMap};
 use bl_model::{
     AutomationTarget, ClipData, ClipFolds, ClipId, Command, Document, Editor, MidiData, Note,
 };
+use bl_shell_spec::note_filters::{
+    InvertSelectionArgs, NoteFilter, NoteFilters, NoteFiltersArgs, NoteFiltersResult,
+};
 use bl_shell_spec::notes::{
     self as ids, AddNoteArgs, AdjustValueArgs, ClipTab, ClipViewState, CopyNotesArgs,
     DeactivateArgs, DeleteNotesArgs, DuplicateNotesArgs, MoveNotesArgs, NoteClipboardState,
@@ -38,6 +41,7 @@ use serde_json::Value;
 use crate::arrangement::ArrangementView;
 use crate::arrangement::editing::{EditFailure, transaction};
 use crate::arrangement::grid::{Step, snap};
+use crate::note_filters;
 use crate::sample_editor::SampleView;
 
 fn invalid(message: impl Into<String>) -> EditFailure {
@@ -550,6 +554,10 @@ pub struct ClipView {
     tab: ClipTab,
     /// The parameter whose envelope the Envelopes tab shows.
     envelope: Option<AutomationTarget>,
+    /// Find and Select Notes: the filter bar and the filters' settings,
+    /// which belong to the editor and aren't saved with the set (Spec:
+    /// find-and-select-notes R12).
+    filters: NoteFilters,
     /// The Session slot's clip most recently selected, which the Clip View
     /// shows until an Arrangement selection replaces it.
     session_clip: Option<ClipId>,
@@ -907,6 +915,25 @@ impl ClipView {
         &self.clipboard
     }
 
+    /// Find and Select Notes' filter bar and the filters' settings.
+    #[must_use]
+    pub fn note_filters(&self) -> &NoteFilters {
+        &self.filters
+    }
+
+    /// Keeps `filters`.
+    pub fn set_note_filters(&mut self, filters: NoteFilters) {
+        self.filters = filters;
+    }
+
+    /// Switches every filter off, keeping their settings: the editor shows
+    /// another clip (Spec: find-and-select-notes R12).
+    pub fn switch_filters_off(&mut self) {
+        for filter in NoteFilter::ALL {
+            self.filters.set_on(filter, false);
+        }
+    }
+
     /// What the view shows, as a command reports it.
     #[must_use]
     pub fn state(&self, doc: &Document, arrangement: &ArrangementView) -> ClipViewState {
@@ -925,6 +952,7 @@ impl ClipView {
             folded: clip.is_some_and(|clip| self.is_folded(clip)),
             tab: self.tab,
             envelope: self.envelope,
+            filters: self.filters.clone(),
         }
     }
 
@@ -937,7 +965,27 @@ impl ClipView {
         self.time = None;
         self.session_clip = None;
         self.envelope = None;
+        self.switch_filters_off();
         self.sample = SampleView::default();
+    }
+}
+
+/// What the note filters read of a clip (Spec: find-and-select-notes R3).
+#[must_use]
+pub fn filter_frame(
+    doc: &Document,
+    arrangement: &ArrangementView,
+    clip: ClipId,
+    midi: &MidiData,
+) -> note_filters::Frame {
+    let value = doc.clip(clip);
+    let start = value.map_or(Ticks::ZERO, |value| value.start);
+    let scale = value.map(|value| value.scale).unwrap_or_default();
+    note_filters::Frame {
+        span: span(midi, value.map_or(Ticks::ZERO, |value| value.length)),
+        signature: doc.settings().time_signatures.signature_at(start),
+        grid: arrangement.grid_ticks(doc),
+        scale: (scale.root, scale.name),
     }
 }
 
@@ -1179,6 +1227,74 @@ pub fn run(
             if let Some(span) = span_of(doc, clip, &selected) {
                 view.set_time_selection(clip, Some(span));
             }
+            Ok(to_value(&view.state(doc, arrangement)))
+        }
+        ids::NOTE_FILTERS => {
+            let args: NoteFiltersArgs = parse(args)?;
+            let found = clip_and_data(doc, view, arrangement, args.clip);
+            let mut filters = view.note_filters().clone();
+            if let Some(visible) = args.visible {
+                filters.visible = visible;
+            } else if args.toggle {
+                filters.visible = !filters.visible;
+            }
+            if let Some(shown) = args.shown {
+                filters.shown = shown;
+            }
+            for filter in &args.off {
+                filters.set_on(*filter, false);
+            }
+            let frame = found
+                .as_ref()
+                .ok()
+                .map(|(clip, midi)| filter_frame(doc, arrangement, *clip, midi));
+            let span_beats = frame.as_ref().map_or(0.0, note_filters::span_beats);
+            let touched = note_filters::apply(&mut filters, &args, span_beats)?;
+            for filter in &args.select {
+                filters.set_on(*filter, true);
+            }
+            if touched || !args.select.is_empty() {
+                // The selection is worked out again, and the time selection
+                // follows it (Spec: find-and-select-notes R3).
+                let (clip, midi) = found?;
+                let places = note_filters::select(
+                    &filters,
+                    &notes_in_order(&midi),
+                    &filter_frame(doc, arrangement, clip, &midi),
+                );
+                view.select(clip, places.clone());
+                view.set_time_selection(clip, span_of(doc, clip, &places));
+            }
+            view.set_note_filters(filters.clone());
+            Ok(to_value(&NoteFiltersResult {
+                filters,
+                selected: view.selected_notes(doc, arrangement).to_vec(),
+            }))
+        }
+        ids::INVERT_SELECTION => {
+            let InvertSelectionArgs { clip } = parse(args)?;
+            let (clip, midi) = clip_and_data(doc, view, arrangement, clip)?;
+            if midi.notes.is_empty() {
+                return Err(unavailable("the clip holds no notes"));
+            }
+            let (from, to) = filter_frame(doc, arrangement, clip, &midi).span;
+            let selected = if view.selected_clip == Some(clip) {
+                view.selected.as_slice()
+            } else {
+                &[]
+            };
+            // Spec: find-and-select-notes R13.
+            let inverted: Vec<u32> = notes_in_order(&midi)
+                .iter()
+                .enumerate()
+                .filter_map(|(place, note)| {
+                    let place = u32::try_from(place).ok()?;
+                    (note.start >= from && note.start < to && !selected.contains(&place))
+                        .then_some(place)
+                })
+                .collect();
+            view.select(clip, inverted.clone());
+            view.set_time_selection(clip, span_of(doc, clip, &inverted));
             Ok(to_value(&view.state(doc, arrangement)))
         }
         ids::ADD_NOTE => {

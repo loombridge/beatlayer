@@ -173,11 +173,11 @@ fn the_menu_lists_lives_items_and_names_later_packages() {
         // It shows its key after the name.
         assert!(node.label.len() > label.len(), "{label} shows a key");
     }
-    // No clip or time selection: the edit items have nothing to act on.
+    // The track's own items work on the selected tracks (R3, R12 to R14).
     for label in ["Cut", "Copy", "Duplicate"] {
         assert!(
-            item(&nodes, label).disabled,
-            "{label} waits for a selection"
+            !item(&nodes, label).disabled,
+            "{label} works on the selected track"
         );
     }
     // WP-4.14: Freeze Track works, but this track holds no clips, so it waits
@@ -518,8 +518,8 @@ fn the_keys_open_the_selected_title_bar_s_menu() {
         h.settle()
     };
     assert!(egui::Popup::is_any_open(&h.ctx));
-    // The first item that can be chosen is focused: Cut, Copy and Duplicate
-    // have nothing to act on.
+    // The first item that can be chosen is focused: Cut, which works on
+    // the selected track.
     let nodes = Harness::nodes(&output);
     assert!(!item(&nodes, "Duplicate Track Without Clips").disabled);
     let focus = output
@@ -533,15 +533,23 @@ fn the_keys_open_the_selected_title_bar_s_menu() {
         .find(|n| n.id == focus)
         .map(|n| n.label.clone())
         .unwrap_or_default();
-    assert_eq!(focused, "Duplicate Track Without Clips");
-    // Down moves to Delete; Enter runs it.
+    let cut = if cfg!(target_os = "macos") {
+        "Cut ⌘X"
+    } else {
+        "Cut Ctrl+X"
+    };
+    assert_eq!(focused, cut);
+    // Down moves to Copy; Enter runs it.
     h.key(Key::ArrowDown, Modifiers::NONE);
     h.settle();
     h.take_events();
     h.key(Key::Enter, Modifiers::NONE);
     h.settle();
-    assert!(invoked(&mut h, "track.delete"));
-    assert!(h.shell.editor().document().track(audio).is_none());
+    assert!(invoked(&mut h, "track.copy"));
+    assert!(
+        h.shell.editor().document().track(audio).is_some(),
+        "Copy leaves the track where it was"
+    );
 }
 
 // Spec: accessibility R8 (S-CTX-002), track-context-menu R9 (the Session View)
@@ -561,4 +569,82 @@ fn the_keys_open_a_session_column_s_title_menu() {
     assert!(egui::Popup::is_any_open(&h.ctx));
     assert!(!item(&nodes, "Delete").disabled);
     assert_eq!(h.shell.arrangement().selected_tracks(), [audio]);
+}
+
+// Spec: track-context-menu R3, R12 to R16 (the whole-track commands)
+#[test]
+fn the_menu_copies_cuts_and_duplicates_the_selected_tracks() {
+    let mut h = arrangement();
+    let audio = tracks(&h)[2];
+    let at = header_title(&mut h, "3 Audio");
+    right_click(&mut h, at);
+    h.take_events();
+
+    // Duplicate: a copy straight after its track, selected.
+    choose(&mut h, "Duplicate");
+    assert!(invoked(&mut h, "track.duplicate"));
+    let after = tracks(&h);
+    assert_eq!(after.len(), 5);
+    assert_eq!(last_step(&h), "Duplicate Track(s)");
+    assert_eq!(h.shell.arrangement().selected_tracks(), [after[3]]);
+
+    // Copy: nothing changes in the set.
+    let at = header_title(&mut h, "3 Audio");
+    right_click(&mut h, at);
+    h.take_events();
+    choose(&mut h, "Copy");
+    assert!(invoked(&mut h, "track.copy"));
+    assert_eq!(tracks(&h).len(), 5);
+
+    // Cut: the track goes, in one undo step.
+    let at = header_title(&mut h, "3 Audio");
+    right_click(&mut h, at);
+    h.take_events();
+    choose(&mut h, "Cut");
+    assert!(invoked(&mut h, "track.cut"));
+    assert!(h.shell.editor().document().track(audio).is_none());
+    assert_eq!(last_step(&h), "Cut Track(s)");
+}
+
+// Spec: track-context-menu R16 (the keys on a title bar)
+#[test]
+fn the_keys_on_a_title_bar_cut_copy_paste_and_duplicate_the_tracks() {
+    let mut h = arrangement();
+    let audio = tracks(&h)[2];
+    h.shell
+        .run(
+            "arrangement.select_tracks",
+            json!({ "tracks": [audio], "title_bars": true }),
+        )
+        .unwrap();
+    h.settle();
+    h.ctx.memory_mut(|m| m.request_focus(main_view_id()));
+    h.settle();
+
+    let cmd = if cfg!(target_os = "macos") {
+        Modifiers::MAC_CMD | Modifiers::COMMAND
+    } else {
+        Modifiers::CTRL
+    };
+    // Duplicate (Cmd-D).
+    h.key(Key::D, cmd);
+    h.settle();
+    assert_eq!(tracks(&h).len(), 5);
+    assert_eq!(last_step(&h), "Duplicate Track(s)");
+
+    // Copy (Cmd-C) and Paste (Cmd-V) put a copy after the track.
+    h.key(Key::C, cmd);
+    h.settle();
+    assert_eq!(tracks(&h).len(), 5, "Copy changes nothing");
+    h.key(Key::V, cmd);
+    h.settle();
+    assert_eq!(tracks(&h).len(), 6);
+    assert_eq!(last_step(&h), "Paste Track(s)");
+
+    // Cut (Cmd-X) takes the selected track away.
+    let selected = h.shell.arrangement().selected_tracks()[0];
+    h.key(Key::X, cmd);
+    h.settle();
+    assert!(h.shell.editor().document().track(selected).is_none());
+    assert_eq!(last_step(&h), "Cut Track(s)");
 }

@@ -972,3 +972,47 @@ fn the_detail_views_shortcuts_reach_their_commands() {
         );
     }
 }
+
+// Spec: track-context-menu R16. The whole-track commands have their keys
+// on the track headers, and the Arrangement's own edits keep them where
+// clips or time are selected.
+#[test]
+fn the_track_headers_keys_reach_the_track_commands() {
+    let keymap = Keymap::live12();
+    let headers = [Context::TrackHeaders, Context::Arrangement, Context::Global];
+    let arrangement = [Context::Arrangement, Context::Global];
+    // The Session View has no title-bar keys (R16: track headers only).
+    let session = [Context::Session, Context::Global];
+    let resolve = |platform, key, m, contexts: &[Context]| {
+        keymap
+            .resolve(platform, key, m, contexts)
+            .map(|hit| hit.command.id.clone())
+    };
+    for (platform, cmd) in [
+        (Platform::Mac, mods(true, false, false, false)),
+        (Platform::Other, mods(false, true, false, false)),
+    ] {
+        for (key, command, edit) in [
+            (Key::X, "track.cut", "arrangement.cut"),
+            (Key::C, "track.copy", "arrangement.copy"),
+            (Key::V, "track.paste", "arrangement.paste"),
+            (Key::D, "track.duplicate", "arrangement.duplicate"),
+        ] {
+            assert_eq!(
+                resolve(platform, key, cmd, &headers).as_deref(),
+                Some(command),
+                "{platform:?}: {command}"
+            );
+            assert_eq!(
+                resolve(platform, key, cmd, &arrangement).as_deref(),
+                Some(edit),
+                "{platform:?}: {edit}"
+            );
+            assert_ne!(
+                resolve(platform, key, cmd, &session).as_deref(),
+                Some(command),
+                "{platform:?}: {command} is not bound in the Session View"
+            );
+        }
+    }
+}

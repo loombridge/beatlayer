@@ -4,13 +4,10 @@
 //! touch the heap or drop out, and a counter node must keep its state
 //! through every swap.
 //!
-//! `cargo test -p bl-engine --test stress -- --nocapture` prints the run's
+//! `cargo test -p bl-engine --test engine_tests -- stress:: --nocapture` prints the run's
 //! figures.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 use std::thread;

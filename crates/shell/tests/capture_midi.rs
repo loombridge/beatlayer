@@ -11,8 +11,6 @@
 //! - The clip plays, and a later capture adds to it.
 //! - The whole path allocates nothing on the audio thread.
 
-bl_rt::install_trap!();
-
 use bl_audio_io::{BackendKind, NullBackend, NullControl, NullOptions, Pacing};
 use bl_core::time::{Bpm, TempoMap, Ticks};
 use bl_engine::SlotState;

@@ -5,8 +5,6 @@
 //! another. The expected set is written here from the DAWproject spec, apart
 //! from the importer's code: each clip is worked out from the file's times.
 
-bl_rt::install_trap!();
-
 use std::io::Cursor;
 use std::path::PathBuf;
 use std::sync::Arc;

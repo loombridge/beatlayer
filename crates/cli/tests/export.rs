@@ -11,8 +11,6 @@
 //! the default for local runs and pull requests, each fixture exports as one
 //! of the three in turn, so every fixture and every format is still checked.
 
-bl_rt::install_trap!();
-
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -241,7 +239,7 @@ fn every_fixture_exports_as_its_golden_reference_to_the_bit() {
         exported += 1;
     }
     // Every fixture a saved set can hold, but the loop's.
-    assert_eq!(exported, 50);
+    assert_eq!(exported, 65);
     assert!(
         !temp.names().iter().any(|name| name.starts_with('.')),
         "no hidden files left: {:?}",

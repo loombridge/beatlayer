@@ -3,10 +3,7 @@
 //! Freeze and Clear act on the display. Every block is a real-time section
 //! under the allocation trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_devices::midi_monitor::{CLEAR, FREEZE, MIDI_MONITOR, chord, display, note_name};
 use bl_engine::{NoteEvent, NoteExpression, NoteKind};
 use bl_model::OrdMap;

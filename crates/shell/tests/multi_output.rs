@@ -5,8 +5,6 @@
 //! The plug-in offers its extra output only where `BL_TEST_CLAP_OUTPUTS`
 //! says so, and nextest runs each test in a process of its own.
 
-bl_rt::install_trap!();
-
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};

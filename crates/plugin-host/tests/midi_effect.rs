@@ -6,10 +6,7 @@
 //!
 //! Spec: device-chains R3, R36; clap-hosting R1, R4.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use std::sync::Arc;
 
 use bl_core::time::Ticks;

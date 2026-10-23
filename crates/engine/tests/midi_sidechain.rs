@@ -7,10 +7,7 @@
 //! runs as a real-time section under the allocation trap, and the commands
 //! run by ID with JSON arguments, as an agent runs them.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_commands::Registry as Commands;
 use bl_core::time::{TICKS_PER_QUARTER, Ticks};
 use bl_engine::routing::Graph;

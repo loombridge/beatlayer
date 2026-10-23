@@ -4,8 +4,6 @@
 //! through `Shell::run`, as an agent drives it, on bl-project's real set
 //! files.
 
-bl_rt::install_trap!();
-
 use std::path::PathBuf;
 
 use bl_devices::multiband_dynamics::{MULTIBAND_DYNAMICS, multiband_dynamics_type};

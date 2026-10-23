@@ -1,33 +1,69 @@
 //! The interpolators a clip is read through wherever it plays at a rate other
-//! than 1 (the warp modes spec, R12): HiQ on reads through a band-limited
-//! windowed sinc, off through a cubic.
+//! than 1 (the warp modes spec, R12): HiQ on reads through a long
+//! band-limited windowed sinc, off through a short one.
 //!
 //! Both read a window of file frames around the position, which the caller
 //! has made ready ([`Interpolation::reach`] says how far each way), and give
-//! the frame at the position's fractional place between two of them. A
-//! position on a whole frame is that frame, unchanged, so a clip at rate 1
-//! is not touched.
+//! the frame at the position's fractional place between two of them. At a
+//! speed of 1, a position on a whole frame is that frame, unchanged, so a
+//! clip at rate 1 is not touched. At any other speed every output frame goes
+//! through the kernel, a whole-frame position too: a clip read twice as fast
+//! lands on whole frames only, and would otherwise skip the filter that keeps
+//! what the output can't carry out of it.
+//!
+//! The kernels are Kaiser-windowed sincs, and their numbers are chosen against
+//! R36's targets (WP-4.19). A kernel's *cutoff* is the middle of its
+//! transition from pass to stop, in fractions of the sampling rate, and the
+//! transition is `(attenuation - 7.95) / (14.36 * taps)` wide (Kaiser, 1974),
+//! so each is placed to pass what its target asks to be flat and to stop
+//! everything from the Nyquist frequency up:
+//!
+//! - Long (HiQ on): 128 taps and 90 dB, cutoff 0.475: passes to 0.4526, which
+//!   is past 90 % of the band, and stops from 0.4974.
+//! - Short (HiQ off): 28 taps and 60 dB, cutoff 0.425: passes to 0.36, past
+//!   70 % of the band, and stops from 0.49.
 
 use std::sync::OnceLock;
 
-/// The sinc kernel's reach, in input frames each side of the position, at
-/// rate 1.
-const SINC_HALF: usize = 32;
-/// How far a speed above 1 widens it (to keep the cutoff below the output's
-/// Nyquist frequency): up to eight times; a faster clip is read through the
-/// eight-times kernel.
-const SINC_WIDEN: f64 = 8.0;
+/// How far a speed above 1 widens a kernel (to keep the cutoff below the
+/// output's Nyquist frequency): up to sixteen times, which is 48 semitones, the
+/// most a clip is transposed (R25); a faster clip is read through the
+/// sixteen-times kernel.
+const SINC_WIDEN: f64 = 16.0;
 /// Kernel table entries per input frame.
 const SINC_RESOLUTION: usize = 512;
-/// The Kaiser window's shape, for about 90 dB of attenuation.
-const KAISER_BETA: f64 = 9.0;
+
+/// One kernel's shape: its reach in input frames each side of the position at
+/// rate 1, the Kaiser window's β, and its cutoff in fractions of the rate;
+/// and its table, made the first time it is wanted.
+struct Shape {
+    half: usize,
+    beta: f64,
+    cutoff: f64,
+    table: OnceLock<Vec<f32>>,
+}
+
+/// HiQ on: about 90 dB of attenuation.
+static LONG: Shape = Shape {
+    half: 64,
+    beta: 9.0,
+    cutoff: 0.475,
+    table: OnceLock::new(),
+};
+/// HiQ off: about 60 dB.
+static SHORT: Shape = Shape {
+    half: 14,
+    beta: 5.65,
+    cutoff: 0.425,
+    table: OnceLock::new(),
+};
 
 /// Which interpolator reads the file.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Interpolation {
-    /// Four-point cubic: HiQ off.
-    Cubic,
-    /// Windowed sinc, with its cutoff held below the output's Nyquist
+    /// A short windowed sinc: HiQ off.
+    Short,
+    /// A long windowed sinc, with its cutoff held below the output's Nyquist
     /// frequency when it reads faster than the file's rate: HiQ on.
     Sinc,
 }
@@ -39,28 +75,23 @@ impl Interpolation {
         if high_quality {
             Self::Sinc
         } else {
-            Self::Cubic
+            Self::Short
         }
     }
 
-    /// Prepares the kernel the sinc reads through, which takes a moment the
-    /// first time: call it off the audio thread, before the interpolator is
-    /// first used.
+    /// Prepares the kernels the interpolators read through, which takes a
+    /// moment the first time: call it off the audio thread, before an
+    /// interpolator is first used.
     pub fn warm() {
-        let _ = kernel();
+        let _ = (kernel(&LONG), kernel(&SHORT));
     }
 
     /// How many file frames the interpolator reads before and after the
     /// frame a position falls in, at `speed` file frames per output frame.
     #[must_use]
     pub fn reach(self, speed: f64) -> (usize, usize) {
-        match self {
-            Self::Cubic => (1, 2),
-            Self::Sinc => {
-                let half = sinc_half(speed);
-                (half - 1, half)
-            }
-        }
+        let half = half(self.shape(), speed);
+        (half - 1, half)
     }
 
     /// The frame at `position + fraction` (0 to under 1) of `channel`, from
@@ -68,44 +99,31 @@ impl Interpolation {
     /// The window must hold the frames [`reach`](Self::reach) says.
     #[must_use]
     pub fn sample(self, window: &[f32], at: usize, fraction: f64, speed: f64) -> f32 {
-        if fraction == 0.0 {
+        if fraction == 0.0 && speed == 1.0 {
             return window[at];
         }
+        interpolate(self.shape(), window, at, fraction, speed)
+    }
+
+    fn shape(self) -> &'static Shape {
         match self {
-            Self::Cubic => cubic(&window[at - 1..at + 3], fraction),
-            Self::Sinc => sinc(window, at, fraction, speed),
+            Self::Short => &SHORT,
+            Self::Sinc => &LONG,
         }
     }
 }
 
-/// The kernel's half width in frames at `speed`.
-fn sinc_half(speed: f64) -> usize {
-    (SINC_HALF as f64 * speed.clamp(1.0, SINC_WIDEN)).ceil() as usize
-}
-
-/// Catmull-Rom through the four frames `p`, at `t` between `p[1]` and `p[2]`.
-fn cubic(p: &[f32], t: f64) -> f32 {
-    let (a, b, c, d) = (
-        f64::from(p[0]),
-        f64::from(p[1]),
-        f64::from(p[2]),
-        f64::from(p[3]),
-    );
-    let m1 = 0.5 * (c - a);
-    let m2 = 0.5 * (d - b);
-    let (t2, t3) = (t * t, t * t * t);
-    ((2.0 * t3 - 3.0 * t2 + 1.0) * b
-        + (t3 - 2.0 * t2 + t) * m1
-        + (-2.0 * t3 + 3.0 * t2) * c
-        + (t3 - t2) * m2) as f32
+/// A kernel's half width in frames at `speed`.
+fn half(shape: &Shape, speed: f64) -> usize {
+    (shape.half as f64 * speed.clamp(1.0, SINC_WIDEN)).ceil() as usize
 }
 
 /// The windowed sinc at `position + fraction`, its weights scaled to sum to 1
 /// so a steady level passes unchanged.
-fn sinc(window: &[f32], at: usize, fraction: f64, speed: f64) -> f32 {
+fn interpolate(shape: &Shape, window: &[f32], at: usize, fraction: f64, speed: f64) -> f32 {
     let widen = speed.clamp(1.0, SINC_WIDEN);
-    let half = sinc_half(speed);
-    let table = kernel();
+    let half = half(shape, speed);
+    let table = kernel(shape);
     // The kernel is the prototype stretched by `widen` in frames: a tap `k`
     // frames from the position sits `(k - fraction) / widen` along it.
     let step = SINC_RESOLUTION as f64 / widen;
@@ -115,7 +133,9 @@ fn sinc(window: &[f32], at: usize, fraction: f64, speed: f64) -> f32 {
         // The tap's distance from the position, in input frames.
         let distance = ((first + offset) as f64 - at as f64 - fraction).abs() * step;
         let i = distance as usize;
-        let weight = if i + 1 < table.len() {
+        // Beyond the kernel's reach the weight is nothing, so the taps that
+        // count are symmetric about the position and a ramp reads exactly.
+        let weight = if i < shape.half * SINC_RESOLUTION {
             let along = distance - i as f64;
             f64::from(table[i]) * (1.0 - along) + f64::from(table[i + 1]) * along
         } else {
@@ -127,24 +147,24 @@ fn sinc(window: &[f32], at: usize, fraction: f64, speed: f64) -> f32 {
     (sum / weights) as f32
 }
 
-/// The prototype kernel: a Kaiser-windowed sinc with its cutoff at the
-/// Nyquist frequency, one frame wide per unit, sampled at
-/// [`SINC_RESOLUTION`] entries per frame, from 0 to its reach.
-fn kernel() -> &'static [f32] {
-    static KERNEL: OnceLock<Vec<f32>> = OnceLock::new();
-    KERNEL.get_or_init(|| {
-        let reach = SINC_HALF;
-        let denominator = bessel_i0(KAISER_BETA);
+/// The prototype kernel of `shape`: a Kaiser-windowed sinc with its cutoff at
+/// the shape's, one frame wide per unit, sampled at [`SINC_RESOLUTION`]
+/// entries per frame, from 0 to its reach.
+fn kernel(shape: &Shape) -> &[f32] {
+    shape.table.get_or_init(|| {
+        let reach = shape.half;
+        let denominator = bessel_i0(shape.beta);
         (0..=reach * SINC_RESOLUTION + 1)
             .map(|i| {
                 let x = i as f64 / SINC_RESOLUTION as f64;
                 let sinc = if x == 0.0 {
                     1.0
                 } else {
-                    (std::f64::consts::PI * x).sin() / (std::f64::consts::PI * x)
+                    let t = 2.0 * shape.cutoff * x * std::f64::consts::PI;
+                    t.sin() / t
                 };
                 let along = (x / reach as f64).min(1.0);
-                let window = bessel_i0(KAISER_BETA * (1.0 - along * along).sqrt()) / denominator;
+                let window = bessel_i0(shape.beta * (1.0 - along * along).sqrt()) / denominator;
                 (sinc * window) as f32
             })
             .collect()
@@ -178,41 +198,54 @@ mod tests {
     // Spec: warp-modes R12
     #[test]
     fn a_whole_frame_is_returned_unchanged() {
-        let window = sine(0.1, 200);
-        for kind in [Interpolation::Cubic, Interpolation::Sinc] {
-            assert_eq!(kind.sample(&window, 100, 0.0, 1.0), window[100]);
+        let window = sine(0.1, 400);
+        for kind in [Interpolation::Short, Interpolation::Sinc] {
+            assert_eq!(kind.sample(&window, 200, 0.0, 1.0), window[200]);
+        }
+    }
+
+    // Spec: warp-modes R12. A clip read twice as fast lands on whole frames,
+    // and they go through the filter all the same.
+    #[test]
+    fn a_whole_frame_is_filtered_at_any_other_speed() {
+        // A tone of 0.4 of the rate, which a read at twice the speed can't
+        // carry: the filter takes it out where a bare read would keep it.
+        let window = sine(0.4, 1_200);
+        for kind in [Interpolation::Short, Interpolation::Sinc] {
+            let got = kind.sample(&window, 600, 0.0, 2.0);
+            assert!(got.abs() < 1e-3, "{kind:?}: {got}");
         }
     }
 
     #[test]
     fn both_interpolators_find_a_slow_sine_between_its_frames() {
         let window = sine(0.02, 400);
-        for kind in [Interpolation::Cubic, Interpolation::Sinc] {
+        for kind in [Interpolation::Short, Interpolation::Sinc] {
             let got = kind.sample(&window, 200, 0.37, 1.0);
             let want = (2.0 * std::f64::consts::PI * 0.02 * 200.37).sin() as f32;
             assert!((got - want).abs() < 2e-4, "{kind:?}: {got} {want}");
         }
     }
 
-    // Spec: warp-modes R12. The sinc is the better of the two near the top
-    // of the band.
+    // Spec: warp-modes R12. The long kernel passes a tone the short one has
+    // begun to take down.
     #[test]
-    fn the_sinc_follows_a_high_tone_closer_than_the_cubic() {
-        let window = sine(0.3, 400);
-        let want = (2.0 * std::f64::consts::PI * 0.3 * 200.5).sin() as f32;
+    fn the_long_kernel_follows_a_high_tone_closer_than_the_short_one() {
+        let window = sine(0.44, 400);
+        let want = (2.0 * std::f64::consts::PI * 0.44 * 200.5).sin() as f32;
         let error = |kind: Interpolation| (kind.sample(&window, 200, 0.5, 1.0) - want).abs();
         assert!(error(Interpolation::Sinc) < 1e-3);
-        assert!(error(Interpolation::Sinc) < error(Interpolation::Cubic) / 10.0);
+        assert!(error(Interpolation::Sinc) < error(Interpolation::Short) / 10.0);
     }
 
     #[test]
     fn reading_faster_widens_the_kernel_and_keeps_a_steady_level() {
         let (before, after) = Interpolation::Sinc.reach(1.0);
-        assert_eq!((before, after), (SINC_HALF - 1, SINC_HALF));
+        assert_eq!((before, after), (LONG.half - 1, LONG.half));
         assert!(Interpolation::Sinc.reach(2.0).1 > after);
-        assert_eq!(Interpolation::Sinc.reach(100.0).1, SINC_HALF * 8);
-        let steady = vec![0.5_f32; 600];
-        let level = Interpolation::Sinc.sample(&steady, 300, 0.3, 2.0);
+        assert_eq!(Interpolation::Sinc.reach(100.0).1, LONG.half * 16);
+        let steady = vec![0.5_f32; 1_200];
+        let level = Interpolation::Sinc.sample(&steady, 600, 0.3, 2.0);
         assert!((level - 0.5).abs() < 1e-6);
     }
 }

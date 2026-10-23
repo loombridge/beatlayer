@@ -1,8 +1,7 @@
 //! Separate Stems to New Audio Tracks from an audio clip's menu, and its
 //! dialog (IMP-11; the stem separation spec, R1 to R7).
 
-mod common;
-
+use crate::common;
 use bl_core::time::Ticks;
 use bl_model::{AudioData, Clip, ClipData, ClipId, Command, TrackId};
 use bl_shell::files::factory_default_set;

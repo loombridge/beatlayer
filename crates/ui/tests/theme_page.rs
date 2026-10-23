@@ -3,8 +3,7 @@
 //!
 //! Spec: themes R1, R3, R5, R7, R12, R13.
 
-mod common;
-
+use crate::common;
 use bl_shell::settings::{Appearance, SettingsPage, Tone};
 use common::{Harness, Window};
 use egui::accesskit::{Action, Role};

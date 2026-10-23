@@ -3,8 +3,7 @@
 //! running the commands that change a clip's scale or the set's current
 //! scale. The behaviour is in the scales spec.
 
-mod common;
-
+use crate::common;
 use bl_model::{ClipId, Scale, ScaleName, TrackId};
 use bl_ui::layout::{Element, REFERENCE, ShellLayout};
 use bl_ui::main_window::element_id;

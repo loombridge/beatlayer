@@ -2,8 +2,7 @@
 //! R23): the waiting period counts down, and Restart, Skip and Cancel do
 //! what they say.
 
-mod common;
-
+use crate::common;
 use bl_shell::export_commands::RealtimePhase;
 use common::{Harness, Window};
 use egui::{FullOutput, pos2};

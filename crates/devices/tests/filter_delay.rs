@@ -3,10 +3,7 @@
 //! Feedback and one Dry. Every block runs as a real-time section under the
 //! allocation trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_core::time::{Bpm, Frames, TempoMap};
 use bl_devices::filter_delay::{
     DIVISION, DRY, FEEDBACK, FILTER, FREQ, ON, PAN, SYNC, TIME, VOLUME, WIDTH, filter_delay_type,

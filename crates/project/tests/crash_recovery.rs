@@ -18,8 +18,7 @@
 //! kills twelve children and makes 400 edits in one process; `quick`, the
 //! default for local runs and pull requests, kills four and makes 100.
 
-mod common;
-
+use crate::common;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -216,7 +215,8 @@ impl Run {
         let mut command = Command::new(std::env::current_exe().unwrap());
         command
             .args([
-                "child_edits_until_killed",
+                // The test's name in the crate's one test binary.
+                "crash_recovery::child_edits_until_killed",
                 "--exact",
                 "--nocapture",
                 "--test-threads=1",

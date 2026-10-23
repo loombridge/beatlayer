@@ -15,6 +15,7 @@ mod keymap;
 mod private_terms;
 mod progress;
 mod test_clock;
+mod test_targets;
 mod ui_parity;
 mod wiki;
 
@@ -325,6 +326,10 @@ fn check(root: &Path, options: &CheckOptions) -> Result<(), String> {
             }),
         ),
         ("keymap", Box::new(|| keymap::check(root))),
+        (
+            "one test binary per crate",
+            Box::new(|| test_targets::check(root)),
+        ),
         (
             "licences, advisories, bans, sources",
             Box::new(|| cargo(root, &["deny", "--locked", "check"])),

@@ -2,8 +2,7 @@
 //! auto-filter spec, R12 and R13), headless: its own items in the device's
 //! menu, no expand toggle, and its display cell drawn from the newest data.
 
-mod common;
-
+use crate::common;
 use bl_devices::auto_filter::{AUTO_FILTER, HI_QUALITY, MONO_SIDECHAIN};
 use bl_model::{DeviceId, TrackId};
 use bl_shell::device_commands::DeviceAdded;

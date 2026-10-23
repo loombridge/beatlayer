@@ -4,10 +4,7 @@
 //! repeats, Chance and Variation draw from a seeded source, and a render is
 //! the same at any block size.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_core::time::{Bpm, Frames, TempoMap, TempoSegment, Ticks};
 use bl_devices::beat_repeat::{
     CHANCE, DECAY, FILTER, FREQ, GATE, GRID, INTERVAL, MODE, NO_TRIPLETS, OFFSET, PITCH,

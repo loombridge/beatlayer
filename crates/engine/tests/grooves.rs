@@ -2,10 +2,7 @@
 //! frame by frame at several block sizes, under the allocation trap.
 //! Spec: grooves R6 to R11, R14 and R15.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_core::time::{TICKS_PER_QUARTER, TempoMap, Ticks};
 use bl_engine::testing;
 use bl_engine::{NoteKind, TransportCommand};

@@ -3,8 +3,6 @@
 //! renders in real time, on the running engine, and the file holds exactly
 //! the range's frames.
 
-bl_rt::install_trap!();
-
 use std::path::PathBuf;
 use std::thread;
 

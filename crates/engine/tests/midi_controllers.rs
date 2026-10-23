@@ -3,10 +3,7 @@
 //! messages and polyphonic pressure, on their exact frames, in any block
 //! size. Every block runs as a real-time section under the allocation trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_core::time::{TICKS_PER_QUARTER, Ticks};
 use bl_engine::{NoteExpression, NoteKind, TransportCommand, testing};
 use bl_model::{

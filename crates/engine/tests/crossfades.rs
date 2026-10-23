@@ -4,10 +4,7 @@
 //! whole, and a render the same at any block size, across a tempo ramp, with
 //! warped and unwarped clips. Every block runs under the allocation trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use std::sync::Arc;
 
 use bl_core::time::{Bpm, TempoMap, Ticks};

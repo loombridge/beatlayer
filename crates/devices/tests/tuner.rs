@@ -1,9 +1,6 @@
 //! Tuner acceptance tests under the real-time allocation trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use std::f64::consts::TAU;
 
 use bl_core::time::SampleRate;

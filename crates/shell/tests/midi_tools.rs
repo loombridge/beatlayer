@@ -294,6 +294,31 @@ fn r5_r6_settings_are_checked_reset_and_never_undo_steps() {
 }
 
 #[test]
+fn a_tool_that_takes_part_of_a_probability_group_ends_the_group() {
+    // Spec: midi-tools R14; note-editing R21, R22. A written note joins no
+    // group, and a group left with one note ends, so the edit isn't refused.
+    let mut notes = three();
+    notes[0].group = Some(1);
+    notes[1].group = Some(1);
+    let midi = MidiData {
+        groups: vec![bl_model::NoteGroup {
+            id: 1,
+            kind: bl_model::GroupKind::PlayAll,
+        }],
+        ..MidiData::new(notes)
+    };
+    let mut song = song_with(midi, Scale::default());
+    song.select_notes(&[0]);
+    song.apply_transpose(12);
+    assert_eq!(song.keys(), [72, 62, 64]);
+    assert!(song.notes().iter().all(|note| note.group.is_none()));
+    let ClipData::Midi(midi) = &song.doc().clip(song.clip).unwrap().data else {
+        panic!("the clip is MIDI");
+    };
+    assert!(midi.groups.is_empty());
+}
+
+#[test]
 fn r10_r11_a_transformation_acts_on_the_selected_notes_first() {
     // Spec: midi-tools R10, R11. The selected notes, else the notes that
     // start in the time selection, else those that start in the loop.

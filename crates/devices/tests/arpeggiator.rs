@@ -4,10 +4,7 @@
 //! steps and distance, velocity decay, and random styles.
 //! Every block is a real-time section under the allocation trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_core::time::Bpm;
 use bl_devices::arpeggiator::{
     ARPEGGIATOR, DECAY, DISTANCE, GATE, GROOVE, HOLD, OFFSET, RATE_MS, RATE_SYNC, REPEATS,

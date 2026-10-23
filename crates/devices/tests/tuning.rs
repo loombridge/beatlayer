@@ -6,10 +6,7 @@
 //! doesn't follow it. Every block runs as a real-time section under the
 //! allocation trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use std::sync::Arc;
 
 use bl_devices::multisampler::multisampler_type;

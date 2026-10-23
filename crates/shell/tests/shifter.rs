@@ -5,8 +5,6 @@
 //! and reopens with every parameter and the source. Driven through
 //! `Shell::run`, as an agent drives it.
 
-bl_rt::install_trap!();
-
 use std::path::PathBuf;
 
 use bl_devices::shifter::{SHIFTER, shifter_type};

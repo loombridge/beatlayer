@@ -2,10 +2,7 @@
 //! gain on what the engine brings back from the interface, with nothing
 //! in its own sound.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_devices::hardware::{GAIN, hardware_instrument_type};
 use bl_engine::{Block, Registry, TransportInfo};
 use bl_model::param::db_to_gain;

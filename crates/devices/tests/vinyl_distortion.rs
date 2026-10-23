@@ -2,10 +2,7 @@
 //! spec): the tracing model's even harmonics, the pinch's odd ones, the
 //! overall drive, Soft and Hard, and the crackle.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_devices::wax::{
     CRACKLE_DENSITY, CRACKLE_VOLUME, DRIVE, PINCH_DRIVE, PINCH_FREQ, PINCH_MODE, SOFT_HARD,
     TRACING_DRIVE, TRACING_FREQ, wax_type,

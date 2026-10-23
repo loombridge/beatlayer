@@ -1,4 +1,5 @@
 [package]
+autotests = false
 name = "bl-cli"
 description = "Headless tool: render, inspect, convert, and benchmark projects, and serve the agent API."
 version.workspace = true
@@ -65,6 +66,14 @@ bl-analysis.workspace = true
 # The agent API's MIDI file tests write and read Standard MIDI Files
 # (WP-2.21).
 bl-interop.workspace = true
+
+[[test]]
+name = "cli_tests"
+path = "tests/main.rs"
+
+[[test]]
+name = "toon_bench"
+path = "tests/toon_bench/main.rs"
 
 [lints]
 workspace = true

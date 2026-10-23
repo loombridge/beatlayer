@@ -16,8 +16,6 @@
 //!   headless through the engine's queue, with scheduled transport commands
 //!   among them, and every frame plays where the transport's rules put it.
 
-bl_rt::install_trap!();
-
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;

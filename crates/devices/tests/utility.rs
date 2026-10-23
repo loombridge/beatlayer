@@ -6,10 +6,7 @@
 //! ([`install_trap`](bl_rt)), so the audio thread's rules are checked here
 //! too.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_devices::utility::{
     BALANCE, BASS_MONO, BASS_MONO_FREQUENCY, CHANNEL_MODE, DC, GAIN, MONO, MUTE, PHASE_LEFT,
     PHASE_RIGHT, WIDTH, utility_type,

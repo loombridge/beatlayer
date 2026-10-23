@@ -3,8 +3,7 @@
 //! reach its commands, that the preview strip follows the preview, and that
 //! dragging files from it into the Arrangement places them. Spec: browser.
 
-mod common;
-
+use crate::common;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 

@@ -3,8 +3,7 @@
 //! on a row's number makes that articulation current, as one undo step named
 //! Change "Articulation".
 
-mod common;
-
+use crate::common;
 use bl_devices::articulation_map::{ARTICULATION, ARTICULATION_MAP};
 use bl_model::{DeviceId, TrackId};
 use bl_shell::device_commands::DeviceAdded;

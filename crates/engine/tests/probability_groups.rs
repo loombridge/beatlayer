@@ -5,10 +5,7 @@
 //! member is never chosen, and a render is the same at any block size.
 //! Every block runs as a real-time section under the allocation trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_core::time::{Bpm, Frames, TICKS_PER_QUARTER, TempoMap, Ticks};
 use bl_engine::{NoteKind, SessionCommand, TransportCommand, testing};
 use bl_model::{

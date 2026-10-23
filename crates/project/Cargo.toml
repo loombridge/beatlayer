@@ -1,4 +1,5 @@
 [package]
+autotests = false
 name = "bl-project"
 description = "Project files: schema versions and migrations, autosave, crash recovery, and sample collection."
 version.workspace = true
@@ -39,6 +40,10 @@ windows-sys = { version = "0.52", features = [
 
 [dev-dependencies]
 proptest = { version = "1.11", default-features = false, features = ["std"] }
+
+[[test]]
+name = "project_tests"
+path = "tests/main.rs"
 
 [lints]
 workspace = true

@@ -8,10 +8,7 @@
 //! sidechain's source lines up with the device's own input. Every block
 //! runs as a real-time section under the allocation trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering::Relaxed};
 

@@ -3,10 +3,7 @@
 //! player's read path gives, following the clip's own timeline or its own.
 //! Every block runs as a real-time section under the allocation trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_core::time::{Bpm, TempoMap, Ticks};
 use bl_engine::TransportCommand;
 use bl_model::fader::{fader_gain, fader_position};

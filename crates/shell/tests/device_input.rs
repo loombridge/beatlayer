@@ -8,8 +8,6 @@
 //! counters show the whole path allocates nothing: every block, input
 //! included, runs under the allocation trap.
 
-bl_rt::install_trap!();
-
 use std::time::{Duration, Instant};
 
 use bl_audio_io::{BackendKind, NullBackend, NullControl, NullOptions};

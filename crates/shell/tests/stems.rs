@@ -17,8 +17,6 @@ use bl_shell::settings::Preferences;
 use bl_shell::{Shell, ShellError};
 use serde_json::{Value, json};
 
-bl_rt::install_trap!();
-
 /// A folder for one test's files, removed when the test ends.
 struct Scratch(PathBuf);
 

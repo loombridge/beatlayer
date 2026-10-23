@@ -3,8 +3,6 @@
 //! parameter, and `device.parameters` reads them back. Driven through
 //! `Shell::run`, as an agent drives it, on bl-project's real set files.
 
-bl_rt::install_trap!();
-
 use std::path::PathBuf;
 
 use bl_devices::beat_repeat::{BEAT_REPEAT, beat_repeat_type};

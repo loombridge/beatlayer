@@ -3,10 +3,7 @@
 //! shelf's plateaus and changing shape, the mid peak's gain across its
 //! sweep, the high band's shelf and low-pass, Output, and the display.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_devices::NativeNode;
 use bl_devices::channel_eq::{
     CHANNEL_EQ, HIGH, HIGH_PASS, HIGH_SHELF_HZ, LOW, LOW_SHELF_HZ, MID, MID_FREQ, MID_Q, OUTPUT,

@@ -1,8 +1,7 @@
 //! Peaks: what they hold, how they're laid out for the GPU, building them in
 //! parallel, the peak file, and the background cache with its invalidation.
 
-mod common;
-
+use crate::common;
 use std::fs;
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};

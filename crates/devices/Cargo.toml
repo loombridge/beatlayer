@@ -1,4 +1,5 @@
 [package]
+autotests = false
 name = "bl-devices"
 description = "Native instruments, audio effects, and MIDI effects."
 version.workspace = true
@@ -50,6 +51,10 @@ lspk-example-sine.workspace = true
 # The polysynth's aliasing test measures the spectrum with an FFT, the
 # version the analysis and media crates already bring in.
 realfft = "3.5.0"
+
+[[test]]
+name = "devices_tests"
+path = "tests/main.rs"
 
 [lints]
 workspace = true

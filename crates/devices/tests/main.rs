@@ -1,0 +1,80 @@
+//! Every integration test of this crate, in one test binary (23 October 2026).
+//! One binary per test file linked the whole crate graph into each: about
+//! 1,700 binaries and 170 GB a worktree. Add a test file here as `mod`;
+//! `cargo xtask check` fails on a file in tests/ that isn't listed.
+
+// The real-time allocation trap, once for the whole binary: a test file
+// can't install its own global allocator.
+bl_rt::install_trap!();
+
+mod alignment_delay;
+mod arpeggiator;
+mod articulation_map;
+mod auto_filter;
+mod auto_pan_tremolo;
+mod automation;
+mod beat_repeat;
+mod bit_crusher;
+mod bus_compressor;
+mod channel_eq;
+mod channel_messages;
+mod chorus_ensemble;
+mod clip_envelopes;
+mod common;
+mod compressor;
+mod curve_mod;
+mod delay;
+mod device_compare;
+mod dice;
+mod digital_degradation;
+mod drum_bus;
+mod drum_sampler;
+mod effect_parts;
+mod eq;
+mod filter_delay;
+mod framework;
+mod gate;
+mod gate_mod;
+mod grain_delay;
+mod hardware;
+mod hold;
+mod kit;
+mod kitbag;
+mod level_mod;
+mod lift;
+mod limiter;
+mod looper;
+mod midi_cc;
+mod midi_monitor;
+mod midi_mpe;
+mod modulation;
+mod modulators;
+mod multiband_dynamics;
+mod multisampler;
+mod note_echo;
+mod oscilloscope;
+mod overdrive;
+mod phaser_flanger;
+mod play_mod;
+mod polysynth;
+mod remap;
+mod reverb;
+mod rules;
+mod sampler;
+mod saturator;
+mod scales;
+mod session_automation;
+mod shifter;
+mod signal_modulation;
+mod spectrum_analyser;
+mod stack;
+mod strike_mod;
+mod three_band_eq;
+mod touch;
+mod tube_distortion;
+mod tuner;
+mod tuning;
+mod tuning_engine;
+mod utility;
+mod vinyl_distortion;
+mod wave_mod;

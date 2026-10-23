@@ -423,7 +423,7 @@
       "channels": 2,
       "frames": 108000,
       "bits": 24,
-      "render_hash": "fnv1a64:1cccf3ffff80a665"
+      "render_hash": "fnv1a64:6d185d2464de2909"
     },
     "transposition-envelope-tones": {
       "made_on": "macos-aarch64",
@@ -431,7 +431,7 @@
       "channels": 2,
       "frames": 108000,
       "bits": 24,
-      "render_hash": "fnv1a64:b0f9ec2e978ab9a9"
+      "render_hash": "fnv1a64:2d897b7154eab5a9"
     },
     "volume-modulation": {
       "made_on": "macos-aarch64",
@@ -687,7 +687,7 @@
       "channels": 2,
       "frames": 156000,
       "bits": 24,
-      "render_hash": "fnv1a64:19a3e3cb872ef041"
+      "render_hash": "fnv1a64:4270a2d7cb4f7735"
     },
     "warped-loop-120": {
       "made_on": "macos-aarch64",

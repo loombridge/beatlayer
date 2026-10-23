@@ -322,7 +322,7 @@ The View menu is taller than the screen at 1600 × 1000 and scrolls.
 | M-OPT-005 | MIDI Note Editor Preview | | | | The editor's Preview switch (L-CLIP-012) |
 | M-OPT-006 | Browser File Preview | | | | Same as the browser's preview switch |
 | | — | | | | |
-| M-OPT-007 | External Sync | | | disabled | |
+| M-OPT-007 | External Sync | | | disabled | Enabled while any MIDI input has Sync on, and ticked while EXT (L-CTRL-028) is on ([MIDI clock](../specs/midi-clock.md)) |
 | M-OPT-008 | Delay Compensation | | | ticked | On in a new set; Beatlayer's switch ([delay compensation](../specs/delay-compensation.md) R7), live since WP-5.36 |
 | M-OPT-009 | Reduced Latency When Monitoring | | | | Enabled only while Delay Compensation is on; Beatlayer's switch ([delay compensation](../specs/delay-compensation.md) R8), live since WP-5.36 |
 | | — | | | | |
@@ -739,7 +739,7 @@ Other states:
 | ID | Command | Source |
 |---|---|---|
 | C-DEVICE-013 | Group to Drum Rack (several devices selected) | manual 25.2 |
-| C-DEVICE-014 | Lock to (a control surface) | manual 34 |
+| C-DEVICE-014 | Lock to (a control surface): one Lock to <surface> item per running surface that can lock, ticked while locked, after Save as Default Preset and a separator; one disabled Lock to Control Surface with none ([device chains](../specs/device-chains.md) R41) | manual 34.1.1.1 |
 | C-DEVICE-015 | Device-specific options (for example Mono Sidechain on the filter device; on plug-ins, MPE Mode, ticked while on, and MPE Settings…, and on MPE-capable plug-ins the tuning item; the Drum Sampler's Enable Per-Note Pitch Bend, Envelope Follows Pitch, a swap to Simpler, and Save as Default Pad; and Beatlayer's Autosample… on an instrument, IMP-27) | manual 23.2.1, 12.5, 12.6, 12.6.1, 31.4.5; release notes 12.1 |
 
 ### Crossfader (C-XFADE)
@@ -940,3 +940,23 @@ Beatlayer's addition, opened on the Control Bar's Automation Arm button (L-CTRL-
 | ID | Command | Source |
 |---|---|---|
 | IMP-23 | Touch, Latch, Write: the Arrangement's automation recording mode, the current one ticked; Touch, Live's behaviour, on a new install (the names are Beatlayer's own) | Beatlayer |
+
+### Link menu (C-LINK)
+
+Opened from the arrow beside the Control Bar's Link toggle (L-CTRL-002; [Link](../specs/link.md)). The order is the manual's reading.
+
+| ID | Command | Source |
+|---|---|---|
+| C-LINK-001 | Link, ticked while on | manual 37.1.1 |
+| C-LINK-002 | Start Stop Sync, ticked while on | manual 37.1.1 |
+| C-LINK-003 | Link Audio, ticked while on | manual 37.1.1 |
+| C-LINK-004 | The Link Audio peers, by name (not clickable) | manual 37.1.1 |
+| C-LINK-005 | Configure Link…: opens Settings ▸ Link (L-SET-013) | manual 37.1.1 |
+
+### Mapping Browser row (C-MAP)
+
+Opened on a mapping in the Mapping Browser (L-OTH-007; [the map modes](../specs/map-modes.md)).
+
+| ID | Command | Source |
+|---|---|---|
+| C-MAP-001 | Invert Range: swaps the mapping's Min and Max | manual 34.2, 25.7.1 |

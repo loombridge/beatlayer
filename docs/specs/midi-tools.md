@@ -1,7 +1,7 @@
 # MIDI Tools: the Transform and Generate panels, applying a tool, what it acts on, and chains
 
 - **Status:** draft
-- **Work packages:** WP-6.11 (the panels, choosing a tool, its settings, what a tool acts on, applying and Auto, undo, seeds, the commands: R1 to R26); WP-6.15 (chained MIDI Tools: R27 to R33). Each tool's own parameters and what it does are [midi-transformations.md](midi-transformations.md)'s (WP-6.12, WP-6.13, WP-6.13b) and [midi-generators.md](midi-generators.md)'s (WP-6.14, WP-6.14b); the Pitch and Time Utilities panel's controls are [pitch-and-time-utilities.md](pitch-and-time-utilities.md)'s (WP-6.16). Mapping a tool's parameters or a chain to keys or MIDI comes with milestone M7's map modes
+- **Work packages:** WP-6.11 (the panels, choosing a tool, its settings, what a tool acts on, applying and Auto, undo, seeds, the commands: R1 to R26); WP-6.15 (chained MIDI Tools: R27 to R33); WP-7.3b (mapping tools and chains to keys and MIDI: R34 to R36). Each tool's own parameters and what it does are [midi-transformations.md](midi-transformations.md)'s (WP-6.12, WP-6.13, WP-6.13b) and [midi-generators.md](midi-generators.md)'s (WP-6.14, WP-6.14b); the Pitch and Time Utilities panel's controls are [pitch-and-time-utilities.md](pitch-and-time-utilities.md)'s (WP-6.16). Which of a tool's controls the map modes offer, and how a mapping is made, are [map modes](map-modes.md)'s (R11, R12 and R23); what a mapped message does to them is R34 to R36 here
 - **Parity-matrix row:** MIDI editing: "MIDI Tools, transformations (…)", "MIDI Tools, generators (…)" and "Chained MIDI Tools, mapped to keys or MIDI"
 - **Checked against:** the Live 12 reference manual (online edition), read 20 October 2026: chapter 8 (8.1.2, 8.2.4, 8.6), chapter 10 (10.5.2, 10.5.10) and chapter 11 (its introduction and 11.1); the Live 12 release notes, 12.0, 12.0.5, 12.1, 12.1.5 and 12.2; the UI parity reference's L-CLIP-003, L-CLIP-006, L-CLIP-007, L-STAT-002, M-EDIT-023 and S-NOTE-033
 
@@ -36,6 +36,7 @@ This spec covers the panels, choosing a tool, its settings, what it acts on, app
 | S11 | Beatlayer | [scales.md](scales.md) R2, R3 and R15; [drum-racks.md](drum-racks.md) R1 and R2; [mpe.md](mpe.md) R1 and R4 | A clip's Scale Mode, root and scale; how a key moves by scale degrees, and the scale note nearest a key; the chromatic scale where none is active; a Drum Rack's chains and the keys they receive; a note's expression envelopes and how edits carry them |
 | S12 | Beatlayer | [piano-roll.md](piano-roll.md) R3, R4, R11, R13, R16 and R19; [device-framework.md](device-framework.md) R16 and R17; [info-view.md](info-view.md) R4 and R6; [accessibility.md](accessibility.md) R1 | Notes are named by their place in the clip's notes in order; positions are ticks in the clip's contents; a gesture is one undo step and Esc puts it back; the note commands and their classes; Fold is saved beside the song without being an undo step; the grid step quantise uses; how controls look, drag and step; the Info View shows a control's registered description; controls reach assistive technology |
 | S13 | Beatlayer | [The architecture](../02-architecture.md), "The document", "Agent control" and "Extensions", decisions D12 and D17; [agent-permissions.md](agent-permissions.md) R1, R4 and R11 | Edits are commands in transactions, one undo step each; every action is a registered command with a schema, a description and a permission class, and what an agent sets it reads back; a call that leaves a MIDI clip fewer notes is destructive as well as an edit; extensions, MIDI tools among them, are WebAssembly components |
+| S14 | Beatlayer | [Map modes](map-modes.md) R11, R12 and R23; [remote mapping](remote-mapping.md) R11 and R12 | A tool's parameters, Auto, apply and Reset are mappable controls named by tool and parameter; a mapped message runs the control's own command, and a run of messages to one control is one gesture |
 
 ## Rules
 
@@ -84,6 +85,12 @@ This spec covers the panels, choosing a tool, its settings, what it acts on, app
 - **R32.** A chain closes as R21 says for an application. A note command that isn't a MIDI Tool closes it: Split and Chop (S8), the Pitch and Time Utilities, and every other note edit (Beatlayer's own for those but Split and Chop). A chain isn't saved with the set (Beatlayer's own). (S8)
 - **R33.** `midi_tool.state` reports the open chain: its clip, how many input notes it has, its range, and each step's tool, settings and seed, in order. (S13)
 
+**Mapping tools and chains to keys and MIDI (WP-7.3b)**
+
+- **R34.** Each tool's parameters, its Auto switch, its apply button and its Reset button are mappable controls, named by the tool and the parameter as `midi_tool.set` names them, so one mapping acts on the tool's settings whichever MIDI clip the Clip View shows, and whether or not the tool's panel shows. A mapped apply button or Auto switch with no MIDI clip in the Clip View does nothing. (S7, S14; acting with the panel hidden is Beatlayer's own)
+- **R35.** A mapped change to a tool's parameter is a change of its settings as a drag on its control is: with Auto on it applies the tool (R17), and a run of messages to one parameter is one gesture, one undo step named after the tool (R22). A mapped apply button applies the tool once with a new seed (R19 and R20), a mapped Auto switch switches Auto (R18), and a mapped Reset resets the tool (R6). (S7, S14)
+- **R36.** A mapped change to a tool that is in the open chain changes that tool's step and runs the chain again from it, as R28 says, and a mapped change is never an outside edit that closes the chain (R21, R32); a mapped transformation applied while the chain's output is the target joins the chain (R27). (S7, S14)
+
 ## Tests
 
 | Rule | Test | Kind |
@@ -121,3 +128,6 @@ This spec covers the panels, choosing a tool, its settings, what it acts on, app
 | R31 | to be written in WP-6.15 | |
 | R32 | to be written in WP-6.15 | |
 | R33 | to be written in WP-6.15 | |
+| R34 | to be written in WP-7.3b | integration, UI script |
+| R35 | to be written in WP-7.3b | integration |
+| R36 | to be written in WP-7.3b | integration |

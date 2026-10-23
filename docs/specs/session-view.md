@@ -1,9 +1,9 @@
 # Session View: clip slots and scenes
 
-- **Status:** implemented (every rule has a passing test)
-- **Work packages:** WP-3.1, WP-3.7, WP-3.6, WP-3.5, WP-3.8, WP-3.16 (R33); WP-6.38 (R34: the return tracks scrolling with the tracks, IMP-01); WP-6.49b (R35: panning with the middle button)
+- **Status:** partial (R36 to R38 have no tests yet)
+- **Work packages:** WP-3.1, WP-3.7, WP-3.6, WP-3.5, WP-3.8, WP-3.16 (R33); WP-6.38 (R34: the return tracks scrolling with the tracks, IMP-01); WP-6.49b (R35: panning with the middle button); WP-7.6 (R36 to R38: the control surfaces' session rings drawn over the grid, [control surfaces](control-surfaces.md) R28 to R32)
 - **Parity-matrix row:** Views and workflow: Session View; Clips and launching; [the improvements](../05-improvements.md), IMP-01 (return tracks scrolling with tracks)
-- **Checked against:** the Live 12 reference manual, chapter 7 "Session View", read 15 October 2026, and Live 12.4.3 on macOS, observed on 15 October 2026; for R34 and R35, the manual's chapter 18 and the Live 12 release notes, read 20 October 2026.
+- **Checked against:** the Live 12 reference manual, chapter 7 "Session View", read 15 October 2026, and Live 12.4.3 on macOS, observed on 15 October 2026; for R34 and R35, the manual's chapter 18 and the Live 12 release notes, read 20 October 2026; for R36 to R38, the manual's chapter 36 section 36.15 and chapter 34 section 34.1.1, read 23 October 2026.
 
 ## The behaviour
 
@@ -29,6 +29,7 @@ This spec covers the grid's structure in the document, the scenes, the clips in 
 | S10 | Decision | The decisions of 17 October 2026 on scene tempo and time signature, from the manual (S1) and S2 | Capture and Insert Scene with nothing playing inserts an empty scene with the current tempo and signature, after the scene launched last or, when none has launched since the set opened, after the selected scene, and launches nothing; a scene's signature applies at its launch point like its tempo, writes no marker into the set's time-signature map, and overrides it as the tempo overrides tempo automation; the override holds through clip stops, transport stop and restart until Re-Enable Automation or Back to Arrangement, which give back the set's maps at the playhead, and isn't saved; launching while the Arrangement plays does the same on the same frame; Duplicate Scene copies a scene's tempo and signature; the scene fields read typed values as the Control Bar's do. |
 | S11 | Beatlayer | [The improvements](../05-improvements.md), IMP-01; [mixer-view.md](mixer-view.md) R21 and R22; [interactions.md](../ui-parity/interactions.md) I-SCROLL-005 | A View option lets the return tracks scroll with the other tracks, off by default so they stay pinned at the right as in Live; the Session View's columns are the mixer's |
 | S12 | Release notes | Live 12 release notes, 12.0, "Feature Improvements", "Interface", read 20 October 2026, recorded in [interactions.md](../ui-parity/interactions.md) I-DRAG-058; [view-options.md](view-options.md) R1 | Holding the mouse wheel down pans views, the Session View among them |
+| S13 | Manual | Live 12 reference manual, chapter 36 "Using Push 2", section 36.15 "Controlling Live's Session View"; chapter 34, section 34.1.1; with the vendors' user guides that [control surfaces](control-surfaces.md) S11 lists | The clip slots a control surface's grid controls are outlined with a coloured border in the Session View; each controller has its own outline, which its arrows move |
 
 ## Rules
 
@@ -67,6 +68,9 @@ This spec covers the grid's structure in the document, the scenes, the clips in 
 - **R33.** Selecting a Session slot that holds a MIDI clip (`session.select` with a click, I-CLICK-002, or its keys) shows that clip in the Clip View, in place of the Arrangement's selection, and selecting a clip in the Arrangement shows that one instead: the Clip View follows the clip most recently selected, from either view ([piano-roll.md](piano-roll.md) R1). Selecting a slot again shows its clip again, and a slot that holds no MIDI clip leaves the Clip View as it was. (S1)
 - **R34.** While Return Tracks Scroll with Tracks is on ([mixer-view.md](mixer-view.md) R21), the return tracks' columns in the grid sit after the drop area and scroll sideways with the track columns, as the mixer's do (mixer-view R22), and only the Main column stays pinned at the right edge; the drop area between the last track and the first return is at least one column (94 points) wide. With the switch off, as on a new install, the returns stay pinned as R15 and I-SCROLL-005 say. (S11)
 - **R35.** Dragging with the middle mouse button held over the grid pans it, the content moving with the pointer, sideways through the columns and up and down through the scenes, within the limits the wheel and `session.scroll` keep ([view-options.md](view-options.md) R1); it selects nothing and launches nothing. (S12)
+- **R36.** Each running control surface's session ring ([control surfaces](control-surfaces.md) R28) is drawn over the grid as a border round its slots: a 2-point line round the rectangle from the top of its first scene's row to the bottom of its last, across its tracks' columns, drawn over the slots and under a drag's insertion line. A ring zero scenes tall draws a line under its tracks' title bars instead. Each row of the Control Surfaces table has its own colour, in Beatlayer's own order of six theme colours, the first red; rings that overlap are each drawn, the lower row's on top. The part of a ring outside the grid's view is clipped, and a ring past the last scene or track draws only round what exists. (S13)
+- **R37.** When a surface moves its ring, the grid scrolls the least it needs to show the ring's first track and first scene, and no further, unless a drag is under way; a ring moved by the set's own changes ([control surfaces](control-surfaces.md) R30) scrolls nothing. (S13; Beatlayer's own)
+- **R38.** A slot inside a ring tells assistive technology which surfaces' rings hold it, in its description ("in the ring of Launchpad X"), and `session.state` reports each ring's rows and columns by scene and track ID, so agents read the rings without a window (Beatlayer's own). (S13)
 ## Tests
 
 | Rule | Test | Kind |
@@ -106,6 +110,9 @@ This spec covers the grid's structure in the document, the scenes, the clips in 
 | R33 | `crates/shell/tests/clip_view_tabs.rs`, `the_clip_view_follows_the_clip_most_recently_selected_in_either_view` | unit |
 | R34 | `crates/ui/tests/session_view.rs`, `the_return_tracks_scroll_with_the_tracks_in_the_grid` | UI script |
 | R35 | `crates/ui/tests/session_view.rs`, `the_middle_button_pans_the_grid` | UI script |
+| R36 | to be written in WP-7.6 | UI script |
+| R37 | to be written in WP-7.6 | UI script |
+| R38 | to be written in WP-7.6 | UI script, agent |
 ## Not built yet
 
 - The Arrangement's per-track and scrub-area Back to Arrangement buttons (L-ARR-007, L-ARR-019) aren't drawn yet; F10, both commands and the Main column's button (R25) work, and `Shell::session_over` gives the buttons their state.

@@ -348,6 +348,156 @@ pub(super) const FIXTURES: &[Fixture] = &[
         about: "The same tone in a 240 BPM song, in Complex Pro.",
         build: complex_pro_240,
     },
+    Fixture {
+        name: "warp-beats-60",
+        about: "The first two beats of the drum loop warped at 120 BPM in Beats, in a 60 BPM song: it plays at 0.5 times its speed (warp-modes R34, R37).",
+        build: warp_beats_60,
+    },
+    Fixture {
+        name: "warp-beats-90",
+        about: "The first two beats of the drum loop warped at 120 BPM in Beats, in a 90 BPM song: it plays at 0.75 times its speed (warp-modes R34, R37).",
+        build: warp_beats_90,
+    },
+    Fixture {
+        name: "warp-beats-120",
+        about: "The first two beats of the drum loop warped at 120 BPM in Beats, in a 120 BPM song: it plays at 1 times its speed (warp-modes R34, R37).",
+        build: warp_beats_120,
+    },
+    Fixture {
+        name: "warp-beats-180",
+        about: "The first two beats of the drum loop warped at 120 BPM in Beats, in a 180 BPM song: it plays at 1.5 times its speed (warp-modes R34, R37).",
+        build: warp_beats_180,
+    },
+    Fixture {
+        name: "warp-beats-240",
+        about: "The first two beats of the drum loop warped at 120 BPM in Beats, in a 240 BPM song: it plays at 2 times its speed (warp-modes R34, R37).",
+        build: warp_beats_240,
+    },
+    Fixture {
+        name: "warp-tones-60",
+        about: "The first two beats of the drum loop warped at 120 BPM in Tones, in a 60 BPM song: it plays at 0.5 times its speed (warp-modes R34, R37).",
+        build: warp_tones_60,
+    },
+    Fixture {
+        name: "warp-tones-90",
+        about: "The first two beats of the drum loop warped at 120 BPM in Tones, in a 90 BPM song: it plays at 0.75 times its speed (warp-modes R34, R37).",
+        build: warp_tones_90,
+    },
+    Fixture {
+        name: "warp-tones-120",
+        about: "The first two beats of the drum loop warped at 120 BPM in Tones, in a 120 BPM song: it plays at 1 times its speed (warp-modes R34, R37).",
+        build: warp_tones_120,
+    },
+    Fixture {
+        name: "warp-tones-180",
+        about: "The first two beats of the drum loop warped at 120 BPM in Tones, in a 180 BPM song: it plays at 1.5 times its speed (warp-modes R34, R37).",
+        build: warp_tones_180,
+    },
+    Fixture {
+        name: "warp-tones-240",
+        about: "The first two beats of the drum loop warped at 120 BPM in Tones, in a 240 BPM song: it plays at 2 times its speed (warp-modes R34, R37).",
+        build: warp_tones_240,
+    },
+    Fixture {
+        name: "warp-texture-60",
+        about: "The first two beats of the drum loop warped at 120 BPM in Texture, in a 60 BPM song: it plays at 0.5 times its speed (warp-modes R34, R37).",
+        build: warp_texture_60,
+    },
+    Fixture {
+        name: "warp-texture-90",
+        about: "The first two beats of the drum loop warped at 120 BPM in Texture, in a 90 BPM song: it plays at 0.75 times its speed (warp-modes R34, R37).",
+        build: warp_texture_90,
+    },
+    Fixture {
+        name: "warp-texture-120",
+        about: "The first two beats of the drum loop warped at 120 BPM in Texture, in a 120 BPM song: it plays at 1 times its speed (warp-modes R34, R37).",
+        build: warp_texture_120,
+    },
+    Fixture {
+        name: "warp-texture-180",
+        about: "The first two beats of the drum loop warped at 120 BPM in Texture, in a 180 BPM song: it plays at 1.5 times its speed (warp-modes R34, R37).",
+        build: warp_texture_180,
+    },
+    Fixture {
+        name: "warp-texture-240",
+        about: "The first two beats of the drum loop warped at 120 BPM in Texture, in a 240 BPM song: it plays at 2 times its speed (warp-modes R34, R37).",
+        build: warp_texture_240,
+    },
+    Fixture {
+        name: "warp-re-pitch-60",
+        about: "The first two beats of the drum loop warped at 120 BPM in Re-Pitch, in a 60 BPM song: it plays at 0.5 times its speed (warp-modes R34, R37).",
+        build: warp_re_pitch_60,
+    },
+    Fixture {
+        name: "warp-re-pitch-90",
+        about: "The first two beats of the drum loop warped at 120 BPM in Re-Pitch, in a 90 BPM song: it plays at 0.75 times its speed (warp-modes R34, R37).",
+        build: warp_re_pitch_90,
+    },
+    Fixture {
+        name: "warp-re-pitch-120",
+        about: "The first two beats of the drum loop warped at 120 BPM in Re-Pitch, in a 120 BPM song: it plays at 1 times its speed (warp-modes R34, R37).",
+        build: warp_re_pitch_120,
+    },
+    Fixture {
+        name: "warp-re-pitch-180",
+        about: "The first two beats of the drum loop warped at 120 BPM in Re-Pitch, in a 180 BPM song: it plays at 1.5 times its speed (warp-modes R34, R37).",
+        build: warp_re_pitch_180,
+    },
+    Fixture {
+        name: "warp-re-pitch-240",
+        about: "The first two beats of the drum loop warped at 120 BPM in Re-Pitch, in a 240 BPM song: it plays at 2 times its speed (warp-modes R34, R37).",
+        build: warp_re_pitch_240,
+    },
+    Fixture {
+        name: "warp-complex-60",
+        about: "The first two beats of the drum loop warped at 120 BPM in Complex, in a 60 BPM song: it plays at 0.5 times its speed (warp-modes R34, R37).",
+        build: warp_complex_60,
+    },
+    Fixture {
+        name: "warp-complex-90",
+        about: "The first two beats of the drum loop warped at 120 BPM in Complex, in a 90 BPM song: it plays at 0.75 times its speed (warp-modes R34, R37).",
+        build: warp_complex_90,
+    },
+    Fixture {
+        name: "warp-complex-120",
+        about: "The first two beats of the drum loop warped at 120 BPM in Complex, in a 120 BPM song: it plays at 1 times its speed (warp-modes R34, R37).",
+        build: warp_complex_120,
+    },
+    Fixture {
+        name: "warp-complex-180",
+        about: "The first two beats of the drum loop warped at 120 BPM in Complex, in a 180 BPM song: it plays at 1.5 times its speed (warp-modes R34, R37).",
+        build: warp_complex_180,
+    },
+    Fixture {
+        name: "warp-complex-240",
+        about: "The first two beats of the drum loop warped at 120 BPM in Complex, in a 240 BPM song: it plays at 2 times its speed (warp-modes R34, R37).",
+        build: warp_complex_240,
+    },
+    Fixture {
+        name: "warp-complex-pro-60",
+        about: "The first two beats of the drum loop warped at 120 BPM in Complex Pro, in a 60 BPM song: it plays at 0.5 times its speed (warp-modes R34, R37).",
+        build: warp_complex_pro_60,
+    },
+    Fixture {
+        name: "warp-complex-pro-90",
+        about: "The first two beats of the drum loop warped at 120 BPM in Complex Pro, in a 90 BPM song: it plays at 0.75 times its speed (warp-modes R34, R37).",
+        build: warp_complex_pro_90,
+    },
+    Fixture {
+        name: "warp-complex-pro-120",
+        about: "The first two beats of the drum loop warped at 120 BPM in Complex Pro, in a 120 BPM song: it plays at 1 times its speed (warp-modes R34, R37).",
+        build: warp_complex_pro_120,
+    },
+    Fixture {
+        name: "warp-complex-pro-180",
+        about: "The first two beats of the drum loop warped at 120 BPM in Complex Pro, in a 180 BPM song: it plays at 1.5 times its speed (warp-modes R34, R37).",
+        build: warp_complex_pro_180,
+    },
+    Fixture {
+        name: "warp-complex-pro-240",
+        about: "The first two beats of the drum loop warped at 120 BPM in Complex Pro, in a 240 BPM song: it plays at 2 times its speed (warp-modes R34, R37).",
+        build: warp_complex_pro_240,
+    },
 ];
 
 /// A song under construction.
@@ -1587,4 +1737,108 @@ fn complex_pro_180() -> Scene {
 
 fn complex_pro_240() -> Scene {
     complex(240.0, true)
+}
+
+/// Spec: warp-modes R34, R37. The first two beats of the drum loop (`drum_bar`, 4/4 at 120
+/// BPM) warped at 120 BPM in `mode` at its settings' defaults, played in a song
+/// at `song_bpm`: the reference of each mode at each of R34's speeds.
+fn warp_mode(mode: WarpMode, song_bpm: f64) -> Scene {
+    let mut song = Song::new();
+    song.apply(Command::SetTempo {
+        tempo: TempoMap::constant(bpm(song_bpm)),
+    });
+    let bar = drum_bar();
+    let file = song.file("drums.wav", 48_000, &[bar.clone(), bar]);
+    // The loop's hits, a transient every eighth, which Beats cuts at.
+    song.media
+        .set_transients(file, (0..8).map(|n| f64::from(n) * 0.25).collect());
+    let track = song.track(TrackKind::Audio, "Drums", None);
+    let audio = AudioData {
+        warp: true,
+        warp_markers: vec![
+            WarpMarker {
+                time: 0.0,
+                beat: Ticks::ZERO,
+            },
+            WarpMarker {
+                time: 2.0,
+                beat: Ticks::WHOLE,
+            },
+        ],
+        tempo: Some(120.0),
+        warp_mode: mode,
+        ..AudioData::new(file)
+    };
+    // The bar's first two beats: a kick, two hats and a snare, short enough
+    // for a reference of the noisiest mode to stay small.
+    song.audio_clip(track, Ticks::ZERO, Ticks::QUARTER * 2, audio);
+    let seconds = song.to_last_clip();
+    song.finish(seconds)
+}
+
+/// The goldens of every warp mode at every speed (R37), each a build over
+/// [`warp_mode`].
+macro_rules! warp_mode_fixtures {
+    ($($name:ident, $mode:ident, $bpm:expr;)*) => {
+        $(
+            fn $name() -> Scene {
+                warp_mode(WarpMode::$mode, $bpm)
+            }
+        )*
+    };
+}
+
+/// Beats at its defaults, over [`beats`] (R14 to R17). The fixture hands the
+/// clip its transients, which a saved set doesn't have until the analysis
+/// reaches the engine, so the scene stops the transport on its last frame
+/// to be one `bl-cli render` doesn't play as saved.
+macro_rules! warp_beats_fixtures {
+    ($($name:ident, $bpm:expr;)*) => {
+        $(
+            fn $name() -> Scene {
+                let mut scene = beats($bpm, Preserve::Transients, TransientLoopMode::LoopForward);
+                scene.cues.push(Cue {
+                    at: scene.frames - 1,
+                    command: TransportCommand::Stop,
+                });
+                scene
+            }
+        )*
+    };
+}
+
+warp_beats_fixtures! {
+    warp_beats_60, 60.0;
+    warp_beats_90, 90.0;
+    warp_beats_120, 120.0;
+    warp_beats_180, 180.0;
+    warp_beats_240, 240.0;
+}
+
+warp_mode_fixtures! {
+    warp_tones_60, Tones, 60.0;
+    warp_tones_90, Tones, 90.0;
+    warp_tones_120, Tones, 120.0;
+    warp_tones_180, Tones, 180.0;
+    warp_tones_240, Tones, 240.0;
+    warp_texture_60, Texture, 60.0;
+    warp_texture_90, Texture, 90.0;
+    warp_texture_120, Texture, 120.0;
+    warp_texture_180, Texture, 180.0;
+    warp_texture_240, Texture, 240.0;
+    warp_re_pitch_60, RePitch, 60.0;
+    warp_re_pitch_90, RePitch, 90.0;
+    warp_re_pitch_120, RePitch, 120.0;
+    warp_re_pitch_180, RePitch, 180.0;
+    warp_re_pitch_240, RePitch, 240.0;
+    warp_complex_60, Complex, 60.0;
+    warp_complex_90, Complex, 90.0;
+    warp_complex_120, Complex, 120.0;
+    warp_complex_180, Complex, 180.0;
+    warp_complex_240, Complex, 240.0;
+    warp_complex_pro_60, ComplexPro, 60.0;
+    warp_complex_pro_90, ComplexPro, 90.0;
+    warp_complex_pro_120, ComplexPro, 120.0;
+    warp_complex_pro_180, ComplexPro, 180.0;
+    warp_complex_pro_240, ComplexPro, 240.0;
 }

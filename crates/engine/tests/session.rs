@@ -540,9 +540,11 @@ fn a_launched_warped_clip_plays_its_start_beat_on_its_launch_frame() {
         // a beat left of it: 18,000 song frames. The loop then starts again
         // from the file's start, and wraps every beat, 24,000 frames.
         assert!((position(out[96_000 + 17_999]) - 47_998.0).abs() < 0.02);
-        assert!(position(out[96_000 + 18_000]).abs() < 0.02);
-        assert!((position(out[96_000 + 18_001]) - 2.0).abs() < 0.02);
-        assert!(position(out[96_000 + 18_000 + 24_000]).abs() < 0.02);
+        // Reads this close to the file's start are within reach of the
+        // interpolator's filter, which finds nothing before it: half a frame.
+        assert!(position(out[96_000 + 18_000]).abs() < 0.5);
+        assert!((position(out[96_000 + 18_001]) - 2.0).abs() < 0.5);
+        assert!(position(out[96_000 + 18_000 + 24_000]).abs() < 0.5);
         match &reference {
             None => reference = Some(out),
             Some(reference) => assert_eq!(&out, reference, "blocks of {block}"),

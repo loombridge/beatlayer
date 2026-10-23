@@ -211,16 +211,16 @@ mod tests {
     // Spec: warp-modes R9
     #[test]
     fn re_pitch_reads_the_file_at_the_clips_speed() {
-        let data = ramp(200);
+        let data = ramp(400);
         let window = Window {
             data: &data,
-            stride: 200,
+            stride: 400,
             channels: 1,
-            frames: 200,
+            frames: 400,
             first: 10,
         };
         // Twice as fast: every other frame, at whole positions.
-        let positions: Vec<f64> = (0..20).map(|i| 50.0 + 2.0 * f64::from(i)).collect();
+        let positions: Vec<f64> = (0..20).map(|i| 100.0 + 2.0 * f64::from(i)).collect();
         let request = Request {
             positions: &positions,
             first: 0,
@@ -234,9 +234,14 @@ mod tests {
         let mut out = vec![0.0; 20];
         RePitch.render(&request, &window, &mut out, 20);
         let want: Vec<f32> = positions.iter().map(|&p| (p - 10.0) as f32).collect();
-        assert_eq!(out, want);
+        // A read at twice the speed goes through the interpolator's filter
+        // even on whole frames (R12), which leaves a ramp's frames within a
+        // hundredth.
+        for (got, want) in out.iter().zip(&want) {
+            assert!((got - want).abs() < 0.01, "{out:?} against {want:?}");
+        }
         // Between frames, a ramp is found exactly by either interpolator.
-        let positions: Vec<f64> = (0..20).map(|i| 50.25 + 0.5 * f64::from(i)).collect();
+        let positions: Vec<f64> = (0..20).map(|i| 100.25 + 0.5 * f64::from(i)).collect();
         for high_quality in [false, true] {
             let request = Request {
                 positions: &positions,

@@ -37,8 +37,12 @@ use bl_stretch::{
 use crate::clip_source::WINDOW_FRAMES as NARROW_WINDOW;
 
 /// How many file frames before a position a warped clip may read: the widest
-/// interpolator's reach, so a point a jump lands on is cued that far early.
-pub(crate) const CUE_BACK: u64 = 264;
+/// interpolator's reach (the long kernel's 64 frames, widened sixteen times),
+/// so a point a jump lands on is cued that far early.
+pub(crate) const CUE_BACK: u64 = 1_032;
+
+/// The frames between the grid frames a launched clip's speed is read at.
+const SPEED_GRID: i64 = 4_096;
 
 /// The file frames a mode's reads need at `rate`: a grain mode's own window
 /// (Tones and Texture, R18 and R19), the frequency-domain modes' read-ahead
@@ -770,13 +774,26 @@ impl Positions<'_> {
                     frames = i + 1;
                 }
                 let span = out[frames - 1] - out[0];
-                let (speed, neutral) = if frames > 1 {
-                    (
-                        span / (frames - 1) as f64,
-                        (span - (frames - 1) as f64).abs() < 1e-6,
-                    )
-                } else {
-                    (1.0, false)
+                let neutral = frames > 1 && (span - (frames - 1) as f64).abs() < 1e-6;
+                // The speed the interpolator's filter widens by is read where
+                // a fixed grid puts it, not from this run, so that it doesn't
+                // depend on how the blocks fall (R6): the file frames the
+                // grid frame at or after the launch advances by in one song
+                // frame. A run with no such frame reads at the run's own.
+                let grid = first.div_euclid(SPEED_GRID) * SPEED_GRID;
+                let at = |frame: i64| {
+                    let now = tempo.seconds_to_ticks_exact(frame as f64 / rate);
+                    let played = (now - started).max(0.0);
+                    warped
+                        .contents
+                        .beat_after(played)
+                        .map(|(beat, passes)| (warped.contents.position(beat), passes))
+                };
+                let grid = grid.max(*launch);
+                let speed = match (at(grid), at(grid + 1)) {
+                    (Some((a, before)), Some((b, after))) if before == after && b > a => b - a,
+                    _ if frames > 1 => span / (frames - 1) as f64,
+                    _ => 1.0,
                 };
                 Fill {
                     frames,

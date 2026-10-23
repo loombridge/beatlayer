@@ -148,7 +148,7 @@ fn last_step(h: &Harness) -> String {
         .to_owned()
 }
 
-// Spec: track-context-menu R1, R6 (C-TRACK-001 to C-TRACK-016)
+// Spec: track-context-menu R1, R6, R10 (C-TRACK-001 to C-TRACK-016)
 #[test]
 fn the_menu_lists_lives_items_and_names_later_packages() {
     let mut h = arrangement();
@@ -196,9 +196,6 @@ fn the_menu_lists_lives_items_and_names_later_packages() {
         ("Save as Default MIDI Track", "not planned"),
         ("Assign Track Color to Clips", "track colours"),
         ("Colour palette", "track colours"),
-        ("Show Take Lanes", "Phase 6"),
-        ("Insert Take Lane", "Phase 6"),
-        ("Delete All Take Lanes", "Phase 6"),
     ] {
         let node = item(&nodes, label);
         assert!(node.disabled, "{label} waits");
@@ -206,6 +203,19 @@ fn the_menu_lists_lives_items_and_names_later_packages() {
             node.description.contains(package),
             "{label}: {}",
             node.description
+        );
+    }
+    // WP-6.22: the take-lane items work (track-context-menu R10): Show Take
+    // Lanes and Insert Take Lane on an audio track, the deletes waiting for
+    // a take lane.
+    for label in ["Show Take Lanes", "Insert Take Lane"] {
+        assert!(!item(&nodes, label).disabled, "{label} works");
+    }
+    assert!(item(&nodes, "Insert Take Lane").label.len() > "Insert Take Lane".len());
+    for label in ["Delete All Take Lanes", "Delete All Unused Take Lanes"] {
+        assert!(
+            item(&nodes, label).disabled,
+            "{label} waits for a take lane"
         );
     }
     // The other states' items are absent from a single audio track.
@@ -646,4 +656,47 @@ fn the_keys_on_a_title_bar_cut_copy_paste_and_duplicate_the_tracks() {
     h.settle();
     assert!(h.shell.editor().document().track(selected).is_none());
     assert_eq!(last_step(&h), "Cut Track(s)");
+}
+
+// Spec: track-context-menu R10, comping R24. Show Take Lanes shows the
+// selected track's take lanes and is ticked while they show; with a take
+// lane, the deletes work.
+#[test]
+fn the_take_lane_items_show_the_lanes_and_delete_them() {
+    let mut h = arrangement();
+    let audio = tracks(&h)[2];
+    let lane: bl_model::TakeLaneId = h.shell.new_id();
+    h.shell
+        .run(
+            "track.add_take_lane",
+            json!({ "track": audio, "lane": { "id": lane, "name": "Take 1", "clips": [] } }),
+        )
+        .unwrap();
+    let at = header_title(&mut h, "3 Audio");
+    let nodes = Harness::nodes(&right_click(&mut h, at));
+    assert!(!item(&nodes, "Delete All Take Lanes").disabled);
+    assert!(!item(&nodes, "Delete All Unused Take Lanes").disabled);
+    assert!(!h.shell.arrangement().shows_take_lanes(audio));
+    choose(&mut h, "Show Take Lanes");
+    assert!(h.shell.arrangement().shows_take_lanes(audio));
+    // Ticked while they show.
+    let at = header_title(&mut h, "3 Audio");
+    let nodes = Harness::nodes(&right_click(&mut h, at));
+    assert!(
+        nodes
+            .iter()
+            .any(|n| n.role == Role::Button && n.label.starts_with("✔ Show Take Lanes")),
+        "ticked while the take lanes show"
+    );
+    choose(&mut h, "Delete All Take Lanes");
+    assert_eq!(
+        h.shell
+            .editor()
+            .document()
+            .track(audio)
+            .unwrap()
+            .take_lanes()
+            .len(),
+        0
+    );
 }

@@ -10,6 +10,11 @@
 //!   items that carry them.
 //! - [`tags`]: the tag groups, the tags in them, and the items that carry
 //!   them.
+//! - [`filter`]: the Filter View's groups and the tags selected in them.
+//! - [`labels`]: saved labels, and the Library labels' order, names and
+//!   icons.
+//! - [`columns`]: the content pane's columns and sort.
+//! - [`history`]: the steps Browse Back and Browse Forward go through.
 //! - [`places`]: the User Library's place and starting folders.
 //! - [`preview`]: decoding previews in the background.
 //! - [`arrange`]: putting files into the Arrangement.
@@ -18,10 +23,14 @@
 //! The behaviour is in the browser spec.
 
 pub mod arrange;
+pub mod columns;
 pub mod db;
 pub mod drop;
+pub mod filter;
 pub mod hash;
+pub mod history;
 pub mod index;
+pub mod labels;
 pub mod listing;
 pub mod places;
 pub mod preview;
@@ -29,7 +38,7 @@ pub mod tags;
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
 use bl_core::time::Ticks;
@@ -37,13 +46,15 @@ use bl_media::MediaStore;
 use bl_model::{Editor, TrackId};
 pub use bl_shell_spec::browser::Part;
 use bl_shell_spec::browser::{
-    self as ids, AddTagArgs, AddTagGroupArgs, AddToArrangementArgs, BrowserState, ClipFileKind,
-    DeleteTagArgs, FocusArgs, FolderArgs, IndexState, Item, ItemKind, ItemTag, Label, LabelInfo,
-    MAX_PREVIEW_VOLUME, MoveTagArgs, OpenFolderArgs, OpenPlaceArgs, PreviewArgs, PreviewState,
-    QuickTag, RenameFileArgs, RenameTagArgs, SaveClipFileArgs, SaveClipFileResult,
-    ScrubPreviewArgs, SearchArgs, Section, SelectArgs, SetPreviewArgs, SetRawArgs, ShowFileArgs,
-    ShowQuickTagsArgs, ShowTagEditorArgs, StateArgs, TagEditorRow, TagEditorRowKind, TagGroupInfo,
-    TagInfo, TagItemsArgs, TagSource, TagState, TaggedItem, TagsArgs, TagsState,
+    self as ids, AddTagArgs, AddTagGroupArgs, AddToArrangementArgs, BrowserState, ClearFiltersArgs,
+    ClipFileKind, ColumnsState, DeleteTagArgs, FilterArgs, FocusArgs, FolderArgs, IndexState, Item,
+    ItemKind, ItemTag, Label, LabelInfo, MAX_PREVIEW_VOLUME, MoveLabelArgs, MoveTagArgs,
+    OpenFolderArgs, OpenPlaceArgs, PreviewArgs, PreviewState, QuickTag, RemoveLabelArgs,
+    RenameFileArgs, RenameLabelArgs, RenameTagArgs, SaveClipFileArgs, SaveClipFileResult,
+    ScrubPreviewArgs, SearchArgs, Section, SelectArgs, SetColumnsArgs, SetFilterGroupsArgs,
+    SetFilterViewArgs, SetLabelIconArgs, SetLabelShownArgs, SetPreviewArgs, SetRawArgs,
+    ShowFileArgs, ShowQuickTagsArgs, ShowTagEditorArgs, StateArgs, TagEditorRow, TagEditorRowKind,
+    TagGroupInfo, TagInfo, TagItemsArgs, TagSource, TagState, TaggedItem, TagsArgs, TagsState,
 };
 use bl_shell_spec::settings::CollectFiles;
 use serde::de::DeserializeOwned;
@@ -51,9 +62,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use self::arrange::{AddError, MediaFile};
+use self::columns::DetailsCache;
 use self::db::{Db, FileOp, FileRow};
+use self::filter::FilterPrefs;
 use self::hash::{Hashed, Hasher};
+use self::history::{History, Step};
 use self::index::{Index, Scope, Snapshot};
+use self::labels::{LabelPrefs, SavedLabel};
 use self::listing::{Entry, file_kind};
 use self::preview::{Loader, MediaSamples};
 use self::tags::{Source, TagStore};
@@ -113,6 +128,18 @@ pub struct BrowserPrefs {
     /// Whether Quick Tags shows at the content pane's bottom (spec:
     /// browser-tags R13). On in a new install.
     pub quick_tags: bool,
+    /// The Filter View and the groups each label shows (spec: browser-tags
+    /// R18, R21).
+    pub filters: FilterPrefs,
+    /// The Library labels' order, visibility, names and icons (spec:
+    /// browser-tags R25, R26).
+    pub labels: LabelPrefs,
+    /// The content pane's columns, sort and file extensions (spec:
+    /// browser-tags R27, R28).
+    pub columns: ColumnsState,
+    /// Whether the browser runs down to the Status Bar (Full-Height
+    /// Browser; spec: browser R26).
+    pub full_height: bool,
 }
 
 impl Default for BrowserPrefs {
@@ -125,6 +152,10 @@ impl Default for BrowserPrefs {
             raw: false,
             tag_editor: false,
             quick_tags: true,
+            filters: FilterPrefs::default(),
+            labels: LabelPrefs::default(),
+            columns: ColumnsState::default(),
+            full_height: false,
         }
     }
 }
@@ -288,7 +319,36 @@ pub struct BrowserView {
     /// The file whose name is open for editing after `clip.save_file` saved
     /// it (clip files R4).
     renaming: Option<PathBuf>,
+    /// The tags selected in the Filter View (spec: browser-tags R20).
+    filter: BTreeSet<i64>,
+    /// The Filter View and the groups each label shows.
+    filter_prefs: FilterPrefs,
+    /// The saved labels (spec: browser-tags R24).
+    saved: Vec<SavedLabel>,
+    /// The Library labels' order, visibility, names and icons.
+    label_prefs: LabelPrefs,
+    /// The label whose name is open for editing.
+    renaming_label: Option<Label>,
+    /// The content pane's columns, sort and file extensions.
+    columns: ColumnsState,
+    /// The steps Browse Back and Browse Forward go through (spec:
+    /// browser-tags R29).
+    history: History,
+    /// A number that goes up when what the labels hold may have changed,
+    /// so what was worked out about them is worked out again.
+    generation: u64,
+    /// The tags some item under a label carries, worked out for one
+    /// generation and label.
+    available: Mutex<Option<AvailableTags>>,
+    /// What was read from disk about files for the columns.
+    details: Mutex<DetailsCache>,
+    /// Whether the browser runs down to the Status Bar.
+    full_height: bool,
 }
+
+/// The tags some item under a label carries, with the generation and label
+/// they were worked out for.
+type AvailableTags = ((u64, String), BTreeSet<i64>);
 
 /// A tagged file's size and content hash, so the tags pass to the same
 /// content found at a new path (spec: browser-tags R5).
@@ -484,6 +544,23 @@ impl BrowserView {
             quick_tags: prefs.quick_tags,
             message: None,
             renaming: None,
+            filter: BTreeSet::new(),
+            filter_prefs: prefs.filters.clone(),
+            saved: Vec::new(),
+            label_prefs: prefs.labels.clone(),
+            renaming_label: None,
+            columns: prefs.columns.clone(),
+            history: History::new(Step {
+                label: Label::All,
+                search: String::new(),
+                tags: BTreeSet::new(),
+                open: BTreeSet::new(),
+                selected: Vec::new(),
+            }),
+            generation: 0,
+            available: Mutex::new(None),
+            details: Mutex::new(DetailsCache::default()),
+            full_height: prefs.full_height,
         };
         view.user_library.clone_from(&prefs.user_library);
         view.places_changed();
@@ -501,6 +578,7 @@ impl BrowserView {
     /// format preferences.
     pub fn set_plugins(&mut self, plugins: Vec<ScannedPlugin>) {
         self.plugins = plugins;
+        self.generation += 1;
         // Beatlayer gives each plug-in's vendor a tag in the Creator group
         // (spec: browser-tags R7).
         let mut ops = Vec::new();
@@ -545,6 +623,8 @@ impl BrowserView {
         // The files the file holds, so search finds them from the first
         // frame.
         self.db_files = loaded.files.clone();
+        // The saved labels the file holds (spec: browser-tags R24).
+        self.saved = loaded.saved_labels.clone();
         // The files that carried a tag keep their hash, so a file moved
         // outside Beatlayer finds them again (spec: browser-tags R5).
         for row in &loaded.files {
@@ -621,6 +701,7 @@ impl BrowserView {
         };
         let (groups, tags, _) = db.load_tags();
         self.tags.merge(groups, tags);
+        self.generation += 1;
     }
 
     /// Writes the changes to the tags to the database.
@@ -628,6 +709,7 @@ impl BrowserView {
         if ops.is_empty() {
             return;
         }
+        self.generation += 1;
         if let Some(db) = &self.db {
             db.save_tags(ops);
         }
@@ -1156,6 +1238,10 @@ impl BrowserView {
             raw: self.raw,
             tag_editor: self.tag_editor,
             quick_tags: self.quick_tags,
+            filters: self.filter_prefs.clone(),
+            labels: self.label_prefs.clone(),
+            columns: self.columns.clone(),
+            full_height: self.full_height,
         }
     }
 
@@ -1270,16 +1356,37 @@ impl BrowserView {
         }
     }
 
-    /// The sidebar's Library labels and places, in order (spec: browser R2).
+    /// The name a label has in the sidebar: the person's, a saved label's
+    /// own, or the label's.
+    fn label_name(&self, label: &Label) -> String {
+        match label {
+            Label::Saved(id) => self
+                .saved
+                .iter()
+                .find(|saved| saved.id == *id)
+                .map_or_else(|| label.name(), |saved| saved.name.clone()),
+            other => self
+                .label_prefs
+                .name(other)
+                .map_or_else(|| other.name(), str::to_owned),
+        }
+    }
+
+    /// The sidebar's Library labels, saved labels and places, in order
+    /// (spec: browser R2, browser-tags R24 to R26).
     #[must_use]
     pub fn labels(&self) -> Vec<LabelInfo> {
-        let mut labels: Vec<LabelInfo> = Label::LIBRARY
+        let mut labels: Vec<LabelInfo> = self
+            .label_prefs
+            .ordered(&self.saved)
             .into_iter()
             .map(|label| LabelInfo {
                 available: label.pending().is_none(),
-                name: label.name(),
+                name: self.label_name(&label),
                 section: Section::Library,
                 path: None,
+                icon: self.label_icon(&label),
+                shown: self.label_prefs.shown(&label),
                 label,
             })
             .collect();
@@ -1296,15 +1403,31 @@ impl BrowserView {
                 name: label.name(),
                 section: Section::Places,
                 path: path.map(|p| p.to_string_lossy().into_owned()),
+                icon: self.label_icon(&label),
+                shown: true,
                 label,
             });
         }
         labels
     }
 
+    /// The icon a label has: a saved label's own, or the person's.
+    fn label_icon(&self, label: &Label) -> Option<String> {
+        match label {
+            Label::Saved(id) => self
+                .saved
+                .iter()
+                .find(|saved| saved.id == *id)
+                .and_then(|saved| saved.icon.clone()),
+            other => self.label_prefs.icon(other).map(str::to_owned),
+        }
+    }
+
     /// Files were written or renamed in the places: index them again and
     /// list the label afresh.
     fn files_changed(&mut self) {
+        self.generation += 1;
+        self.forget_details();
         self.index.refresh();
         self.indexing = self.index.indexing();
         self.listings.clear();
@@ -1313,6 +1436,8 @@ impl BrowserView {
 
     /// The places changed: index them again and list the label afresh.
     fn places_changed(&mut self) {
+        self.generation += 1;
+        self.forget_details();
         let roots = self.roots().into_iter().map(|(_, path)| path).collect();
         self.index.set_roots(roots);
         self.indexing = self.index.indexing();
@@ -1354,11 +1479,15 @@ impl BrowserView {
 
     /// A folder's listing, read now if it isn't known.
     fn listing(&mut self, folder: &Path) -> Option<Vec<Entry>> {
-        if let Some(entries) = self.listings.get(folder) {
-            return Some(entries.clone());
-        }
-        let entries = listing::list(folder).ok()?;
-        self.listings.insert(folder.to_path_buf(), entries.clone());
+        let mut entries = if let Some(entries) = self.listings.get(folder) {
+            entries.clone()
+        } else {
+            let entries = listing::list(folder).ok()?;
+            self.listings.insert(folder.to_path_buf(), entries.clone());
+            entries
+        };
+        // Spec: browser-tags R28. The column the list is sorted by.
+        self.sort_entries(&mut entries);
         Some(entries)
     }
 
@@ -1378,6 +1507,7 @@ impl BrowserView {
                 folder: None,
                 format: None,
                 clip_kind: entry.clip,
+                details: None,
             });
             if open {
                 self.list_into(&entry.path, depth.saturating_add(1), out);
@@ -1388,8 +1518,18 @@ impl BrowserView {
     /// Works out the content pane's rows again, keeping the selection.
     fn rebuild(&mut self) {
         self.note = None;
-        let label = self.label.clone();
+        // A saved label lists what its words and tags find under the label
+        // it was made under (spec: browser-tags R24).
+        let label = self.base_label();
         let (_, tags, _) = self.search_terms();
+        // The selected filter tags in the groups the label shows (spec:
+        // browser-tags R20).
+        let selection = self.applied_selection();
+        let builtin = if selection.is_empty() {
+            filter::BuiltinIds::default()
+        } else {
+            self.builtin_ids()
+        };
         if !label_devices(&label).is_empty() {
             // Spec: modulation R12, racks R43. These labels list devices.
             let query = self.search.trim().to_ascii_lowercase();
@@ -1406,7 +1546,9 @@ impl BrowserView {
                     folder: None,
                     format: None,
                     clip_kind: None,
+                    details: None,
                 })
+                .filter(|item| self.item_passes(&selection, &builtin, item))
                 .collect();
             if items.is_empty() {
                 self.note = Some(format!(
@@ -1425,19 +1567,36 @@ impl BrowserView {
                 .filter(|item| {
                     tags.is_empty() || self.carries_all(&self.tag_key(&item.path), &tags)
                 })
+                .filter(|item| self.item_passes(&selection, &builtin, item))
                 .collect();
             self.rows = Rows::Items(items);
             self.cursor = self.selected.last().and_then(|path| self.position_of(path));
             return;
         }
-        if !self.search.trim().is_empty() || matches!(label, Label::Samples | Label::Clips) {
+        if !self.search.trim().is_empty()
+            || !selection.is_empty()
+            || matches!(label, Label::Samples | Label::Clips)
+        {
             match self.scope(&label) {
                 Some((scope, only)) => {
                     let snapshot = Arc::clone(self.index.snapshot());
-                    let hits = self.search_hits(&snapshot, scope, only);
+                    let mut hits = self.search_hits(&snapshot, scope, only);
+                    if !selection.is_empty() {
+                        hits.retain(|&hit| {
+                            let ids = self.file_ids(
+                                &snapshot.path(hit),
+                                snapshot.entry(hit).kind,
+                                &builtin,
+                            );
+                            selection.matches(&ids)
+                        });
+                    }
+                    self.sort_hits(&snapshot, &mut hits);
                     if hits.is_empty() {
                         self.note = Some(if self.index.indexing() {
                             "Indexing the places\u{2026}".to_owned()
+                        } else if self.search.trim().is_empty() && !selection.is_empty() {
+                            "Nothing carries the selected tags.".to_owned()
                         } else if self.search.trim().is_empty() && label == Label::Clips {
                             "No clip files in the places yet. Drag a clip here to save it."
                                 .to_owned()
@@ -1460,6 +1619,7 @@ impl BrowserView {
                     }
                     let needle = self.search.trim().to_lowercase();
                     items.retain(|item| item.name.to_lowercase().contains(&needle));
+                    items.retain(|item| self.item_passes(&selection, &builtin, item));
                     if items.is_empty() {
                         self.note = Some(format!("Nothing matches \u{201c}{needle}\u{201d}."));
                     }
@@ -1488,6 +1648,7 @@ impl BrowserView {
                             folder: None,
                             format: None,
                             clip_kind: None,
+                            details: None,
                         });
                         if open {
                             self.list_into(&path, 1, &mut items);
@@ -1565,9 +1726,10 @@ impl BrowserView {
             folder,
             format: Some(p.format),
             clip_kind: None,
+            details: None,
         };
         let mut items = Vec::new();
-        if !query.is_empty() {
+        if !query.is_empty() || !self.applied_selection().is_empty() {
             items.extend(
                 self.plugins
                     .iter()
@@ -1597,6 +1759,7 @@ impl BrowserView {
                 folder: None,
                 format: None,
                 clip_kind: None,
+                details: None,
             });
             if open {
                 items.extend(
@@ -1659,12 +1822,12 @@ impl BrowserView {
     /// The row at `index`.
     #[must_use]
     pub fn row(&self, index: usize) -> Option<Item> {
-        match &self.rows {
-            Rows::Items(items) => items.get(index).cloned(),
+        let mut item = match &self.rows {
+            Rows::Items(items) => items.get(index).cloned()?,
             Rows::Hits { snapshot, hits } => {
                 let hit = *hits.get(index)?;
                 let entry = snapshot.entry(hit);
-                Some(Item {
+                Item {
                     path: snapshot.path(hit).to_string_lossy().into_owned(),
                     name: entry.name.to_string(),
                     kind: entry.kind,
@@ -1673,9 +1836,13 @@ impl BrowserView {
                     folder: Some(snapshot.folder_label(hit)),
                     format: None,
                     clip_kind: clip_kind_of(entry.kind, &snapshot.path(hit)),
-                })
+                    details: None,
+                }
             }
-        }
+        };
+        // Spec: browser-tags R27. What the shown columns say about it.
+        item.details = self.details_for(&item);
+        Some(item)
     }
 
     /// Where an item is in the content pane.
@@ -1792,7 +1959,25 @@ impl BrowserView {
                 .map(|p| p.to_string_lossy().into_owned()),
             tag_editor: self.tag_editor,
             quick_tags: self.quick_tags,
+            filter_view: self.filter_view(),
+            saved_labels: self.saved_labels(),
+            renaming_label: self.renaming_label.clone(),
+            columns: self.columns.clone(),
+            can_back: self.can_back(),
+            can_forward: self.can_forward(),
         }
+    }
+
+    /// Whether the browser runs down to the Status Bar (Full-Height
+    /// Browser; spec: browser R26).
+    #[must_use]
+    pub fn full_height(&self) -> bool {
+        self.full_height
+    }
+
+    /// Runs the browser down to the Status Bar, or back.
+    pub fn set_full_height(&mut self, on: bool) {
+        self.full_height = on;
     }
 
     /// Takes background work's news: a newer index, a decoded preview, a
@@ -1806,6 +1991,7 @@ impl BrowserView {
     ) -> Polled {
         let mut polled = Polled::default();
         if self.index.poll() {
+            self.generation += 1;
             if matches!(self.rows, Rows::Hits { .. }) {
                 self.rebuild();
             }
@@ -2238,6 +2424,14 @@ impl BrowserView {
                     || self.selected_audio().len() == 1
                     || self.selected_clip_files().len() == 1
             }
+            ids::RENAME_LABEL => args
+                .get("label")
+                .and_then(|label| serde_json::from_value::<Label>(label.clone()).ok())
+                .unwrap_or_else(|| self.label.clone())
+                .is_library(),
+            ids::BACK => self.can_back(),
+            ids::FORWARD => self.can_forward(),
+            ids::ADD_LABEL => self.results_bar(),
             ids::REMOVE_FOLDER => args
                 .get("path")
                 .and_then(Value::as_str)
@@ -2267,6 +2461,12 @@ impl BrowserView {
         let state = |view: &Self, audio: &AudioHost| {
             to_value(&view.state(audio, 0, ids::DEFAULT_ROW_LIMIT))
         };
+        // The open folders and the selection belong to the step the browser
+        // is at until the command moves it on (spec: browser-tags R29).
+        let walks = matches!(id, ids::BACK | ids::FORWARD);
+        if !walks {
+            self.keep_step();
+        }
         match id {
             ids::STATE => {
                 let StateArgs { offset, limit } = parse(args)?;
@@ -2298,6 +2498,9 @@ impl BrowserView {
             ids::FOCUS_SEARCH => {
                 parse::<bl_commands::NoArgs>(args)?;
                 self.label = Label::All;
+                // Spec: browser-tags R22. The tags selected come off under
+                // All; the search field's text is selected, not cleared.
+                self.filter.clear();
                 self.focus = Part::Search;
                 self.focus_requests += 1;
                 self.rebuild();
@@ -2314,8 +2517,14 @@ impl BrowserView {
             ids::OPEN_PLACE => {
                 let OpenPlaceArgs { label } = parse(args)?;
                 self.check_label(&label)?;
-                self.label = label;
-                self.search.clear();
+                if let Label::Saved(id) = label {
+                    // Spec: browser-tags R24. Its words and tags are the
+                    // search and the selected tags now.
+                    self.choose_saved(id)?;
+                } else {
+                    self.label = label;
+                    self.search.clear();
+                }
                 // A place is read afresh when it's chosen.
                 if let Some(path) = self.place_path(&self.label) {
                     self.listings.remove(&path);
@@ -2887,7 +3096,22 @@ impl BrowserView {
             }
             ids::DELETE_TAG => {
                 self.reload_tags();
-                let DeleteTagArgs { tag, group } = parse(args)?;
+                let DeleteTagArgs {
+                    tag,
+                    group,
+                    confirm,
+                } = parse(args)?;
+                // Spec: browser-tags R8. A saved label that uses what is
+                // deleted is named first, and then leaves it out.
+                let doomed = self.doomed_tags(tag.as_deref(), group.as_deref())?;
+                let using = self.labels_using(&doomed);
+                if !using.is_empty() && !confirm {
+                    return Err(BrowserError::Unavailable(format!(
+                        "the saved labels {} use it. Ask the person, then run the command again \
+                         with `confirm` true: the labels then leave it out",
+                        using.join(", ")
+                    )));
+                }
                 let ops = match (tag, group) {
                     (Some(tag), None) => {
                         let id = self.tag_id(&tag)?;
@@ -2903,13 +3127,10 @@ impl BrowserView {
                             .delete_group(id)
                             .map_err(BrowserError::InvalidArgs)?
                     }
-                    _ => {
-                        return Err(BrowserError::InvalidArgs(
-                            "give `tag` or `group`, not both".to_owned(),
-                        ));
-                    }
+                    _ => unreachable!("checked above"),
                 };
                 self.save_tags(ops);
+                self.forget_gone_tags();
                 outcome.value = to_value(&self.tags_state(&[]));
                 self.rebuild();
             }
@@ -2925,9 +3146,134 @@ impl BrowserView {
                 outcome.prefs_changed = true;
                 outcome.value = json!({ "quick_tags": self.quick_tags });
             }
+            ids::SET_FILTER_VIEW => {
+                let SetFilterViewArgs { show } = parse(args)?;
+                self.set_filter_view(show);
+                outcome.prefs_changed = true;
+                outcome.value = to_value(&self.filter_view());
+            }
+            ids::SET_FILTER_GROUPS => {
+                let args: SetFilterGroupsArgs = parse(args)?;
+                self.set_filter_groups(args)?;
+                self.rebuild();
+                outcome.prefs_changed = true;
+                outcome.value = to_value(&self.filter_view());
+            }
+            ids::FILTER => {
+                let FilterArgs { tags, add } = parse(args)?;
+                self.select_filter_tags(&tags, add)?;
+                self.rebuild();
+                outcome.value = state(self, ctx.audio);
+            }
+            ids::CLEAR_FILTERS => {
+                let ClearFiltersArgs { words, tags } = parse(args)?;
+                if words.unwrap_or(true) {
+                    self.search.clear();
+                }
+                if tags.unwrap_or(true) {
+                    self.filter.clear();
+                }
+                self.rebuild();
+                outcome.value = state(self, ctx.audio);
+            }
+            ids::ADD_LABEL => {
+                parse::<bl_commands::NoArgs>(args)?;
+                self.add_label()?;
+                outcome.value = state(self, ctx.audio);
+            }
+            ids::RENAME_LABEL => {
+                let args: RenameLabelArgs = parse(args)?;
+                outcome.prefs_changed = self.rename_label(args)?;
+                outcome.value = state(self, ctx.audio);
+            }
+            ids::SET_LABEL_ICON => {
+                let args: SetLabelIconArgs = parse(args)?;
+                outcome.prefs_changed = self.set_label_icon(args)?;
+                outcome.value = state(self, ctx.audio);
+            }
+            ids::SET_LABEL_SHOWN => {
+                let args: SetLabelShownArgs = parse(args)?;
+                self.set_label_shown(args)?;
+                outcome.prefs_changed = true;
+                outcome.value = state(self, ctx.audio);
+            }
+            ids::MOVE_LABEL => {
+                let args: MoveLabelArgs = parse(args)?;
+                self.move_label(args)?;
+                outcome.prefs_changed = true;
+                outcome.value = state(self, ctx.audio);
+            }
+            ids::RESET_LABEL_ORDER => {
+                parse::<bl_commands::NoArgs>(args)?;
+                self.reset_label_order();
+                outcome.prefs_changed = true;
+                outcome.value = state(self, ctx.audio);
+            }
+            ids::REMOVE_LABEL => {
+                let args: RemoveLabelArgs = parse(args)?;
+                self.remove_label(args)?;
+                outcome.prefs_changed = true;
+                outcome.value = state(self, ctx.audio);
+            }
+            ids::SET_COLUMNS => {
+                let args: SetColumnsArgs = parse(args)?;
+                self.set_columns(args)?;
+                self.rebuild();
+                outcome.prefs_changed = true;
+                outcome.value = state(self, ctx.audio);
+            }
+            ids::BACK | ids::FORWARD => {
+                parse::<bl_commands::NoArgs>(args)?;
+                self.go_step(id == ids::BACK)?;
+                outcome.value = state(self, ctx.audio);
+            }
             _ => return Err(BrowserError::InvalidArgs(format!("no command is `{id}`"))),
         }
+        if !walks {
+            self.record_step();
+        }
         Ok(outcome)
+    }
+
+    /// The tags deleting a tag (and its subtags) or a group (and its tags)
+    /// deletes.
+    fn doomed_tags(
+        &self,
+        tag: Option<&str>,
+        group: Option<&str>,
+    ) -> Result<Vec<i64>, BrowserError> {
+        match (tag, group) {
+            (Some(tag), None) => {
+                let id = self.tag_id(tag)?;
+                let mut doomed = vec![id];
+                doomed.extend(self.tags.subtags(id).iter().map(|sub| sub.id));
+                Ok(doomed)
+            }
+            (None, Some(group)) => {
+                let id = self.tags.group_id(group).ok_or_else(|| {
+                    BrowserError::InvalidArgs(format!("there's no group called {group}"))
+                })?;
+                Ok(self
+                    .tags
+                    .all_tags()
+                    .iter()
+                    .filter(|t| t.group == id)
+                    .map(|t| t.id)
+                    .collect())
+            }
+            _ => Err(BrowserError::InvalidArgs(
+                "give `tag` or `group`, not both".to_owned(),
+            )),
+        }
+    }
+
+    /// The names of the saved labels that use a tag or a group's tags,
+    /// which deleting it asks about first (spec: browser-tags R8).
+    #[must_use]
+    pub fn labels_using_tag(&self, tag: Option<&str>, group: Option<&str>) -> Vec<String> {
+        self.doomed_tags(tag, group)
+            .map(|doomed| self.labels_using(&doomed))
+            .unwrap_or_default()
     }
 
     /// The tag a name names: its full name, or its own name.
@@ -3091,6 +3437,7 @@ impl BrowserView {
         };
         self.label = label;
         self.search.clear();
+        self.filter.clear();
         for folder in path.ancestors().skip(1) {
             if folder == root {
                 break;
@@ -3143,6 +3490,13 @@ impl BrowserView {
     }
 
     fn check_label(&self, label: &Label) -> Result<(), BrowserError> {
+        if let Label::Saved(id) = label
+            && !self.saved.iter().any(|saved| saved.id == *id)
+        {
+            return Err(BrowserError::InvalidArgs(format!(
+                "no saved label has the ID {id}"
+            )));
+        }
         if let Label::Folder(path) = label
             && !self
                 .folders

@@ -1,7 +1,7 @@
 # The metronome: switch, settings, click, and count-in
 
-- **Status:** implemented
-- **Work packages:** WP-2.15
+- **Status:** partial (R1 to R9 each have a passing test; R10 is WP-7.14's)
+- **Work packages:** WP-2.15 (R1 to R9); WP-7.14 (the count-in under Link, R10)
 - **Parity-matrix row:** Views and workflow: Control Bar; Recording
 - **Checked against:** the Live 12 reference manual, read 15 October 2026 (chapter 19), and Live 12.4.3 on macOS, 13 October 2026 (the Control Bar's metronome).
 
@@ -21,6 +21,7 @@ This spec covers the metronome switch and its settings, the clicks the engine pl
 | S4 | Manual | The same manual, section 19.6 "Recording with Count-in" | The count-in is set in the pull-down menu next to the Metronome switch. With any value other than None, Live doesn't begin recording until the count-in is complete; the Control Bar's Arrangement Position fields show it in blue as bars-beats-sixteenths, running from negative bars-beats-sixteenths (for example −2.1.1 with 2 bars) up to 1.1.1, where recording starts. |
 | S5 | Decision | D17 in the architecture | Every user-facing action is a registered command with a schema, a description, and a permission class, reachable through the agent API. |
 | S6 | Spec | [transport.md](transport.md) R20 and the architecture's real-time rules | The engine publishes transport state without a lock, and its audio callback allocates nothing, takes no lock, and blocks on nothing. |
+| S7 | Manual | The Live 12 reference manual (online edition, read 23 October 2026), chapter 37, section 37.1.2 "Using Link"; [Link](link.md) R1 and R7 | The metronome's recording count-in can't be used while Link is on; with peers, a start waits for the session's quantum |
 
 ## Rules
 
@@ -33,6 +34,7 @@ This spec covers the metronome switch and its settings, the clicks the engine pl
 - **R7.** Enable Only While Recording (off by default): with the switch on and the metronome on, clicks sound only while the transport is recording, and stop when the recording does, however the take ended (WP-2.13). With Punch-In on, they start at the punch-in point, not at play start ([recording](recording.md) R9; the Live 12 manual, 19.4.1). (S1, S2)
 - **R8.** Every metronome setting is a registered command an agent can run — `transport.set_metronome_enabled`, `transport.set_metronome_count_in`, `transport.set_metronome_sound`, `transport.set_metronome_rhythm`, `transport.set_metronome_only_while_recording` — and each is saved with the set and reversed by undo. (S1, S5)
 - **R9.** The metronome renders on the audio thread without allocating, taking a lock, or blocking. (S6)
+- **R10.** While Link is on ([Link](link.md) R1), no count-in plays: playback and recording start as they would with Count-In set to None, a start with peers waiting for the session's quantum instead ([Link](link.md) R7). The Count-In setting is kept in the set, its menu items stay enabled with the chosen one ticked, and it plays again once Link is off. `transport.state` reports `counting_in` false throughout. (S7; keeping the setting and the items enabled are Beatlayer's own)
 
 ## Tests
 
@@ -47,3 +49,4 @@ This spec covers the metronome switch and its settings, the clicks the engine pl
 | R7 | `crates/engine/tests/metronome.rs`, `only_while_recording_silences_playback_unless_recording`, `a_locate_that_ends_the_take_ends_the_recording_only_clicks`, `with_punch_in_the_recording_only_clicks_start_at_the_punch_in_point` | unit |
 | R8 | `crates/model/tests/metronome.rs`, `metronome_commands_and_undo_redo`, `metronome_set_roundtrip`, `metronome_registered_commands`; `crates/agent/tests/tools.rs`, `the_metronome_settings_run_through_the_agent_api`; `crates/shell/tests/transport.rs`, `the_shell_registers_the_transport_and_runs_it_on_the_engine` | unit, agent API |
 | R9 | `crates/engine/tests/metronome.rs` (every block runs under `bl_rt::install_trap!()`) | unit, real-time (allocation trap) |
+| R10 | to be written in WP-7.14 | engine test |

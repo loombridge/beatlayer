@@ -16,7 +16,7 @@ use crate::automation::{
     override_device,
 };
 use crate::clip::{
-    AudioData, Clip, ClipData, ClipEnvelope, EnvelopeKind, MidiData, NewTakeLane, Note, TakeLane,
+    AudioData, Clip, ClipData, ClipEnvelope, EnvelopeKind, MidiData, NewTakeLane, TakeLane,
     clip_entry, crossfades,
 };
 use crate::clip_param::ClipParam;
@@ -813,6 +813,20 @@ pub enum Command {
         clip: ClipId,
         /// The track it moves to.
         track: TrackId,
+        /// Its new start.
+        start: Ticks,
+    },
+    /// Moves a clip to a new start on a track's main lane or on one of its
+    /// take lanes, out of the lane or Session slot it sits in. The track
+    /// must be the take lane's own.
+    MoveClipToLane {
+        /// The clip.
+        clip: ClipId,
+        /// The track it moves to.
+        track: TrackId,
+        /// The take lane it moves to; the track's main lane when left out.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        lane: Option<TakeLaneId>,
         /// Its new start.
         start: Ticks,
     },
@@ -2689,7 +2703,7 @@ impl Command {
             Self::MoveTakeLanes { .. } => "Move Take Lane(s)",
             Self::SetAudition { .. } => "Audition Take Lane",
             Self::DeleteClip { .. } => "Delete clip",
-            Self::MoveClip { .. } => "Move clip",
+            Self::MoveClip { .. } | Self::MoveClipToLane { .. } => "Move clip",
             Self::MoveClips { .. } => "Move clips",
             Self::SetClipLength { .. } => "Resize clip",
             Self::RenameClip { .. } => "Rename clip",
@@ -3613,6 +3627,12 @@ impl Document {
             Command::SetAudition { lane, on } => self.set_audition(*lane, *on),
             Command::DeleteClip { clip } => self.remove_clip(*clip),
             Command::MoveClip { clip, track, start } => self.move_clip(*clip, *track, *start),
+            Command::MoveClipToLane {
+                clip,
+                track,
+                lane,
+                start,
+            } => self.move_clip_to_lane(*clip, *track, *lane, *start),
             Command::MoveClips { clips, by } => self.move_clips(clips, *by),
             Command::SetClipLength { clip, length } => {
                 let current = self.clip_ref(*clip)?;
@@ -5713,6 +5733,40 @@ impl Document {
         }
         self.remove_clip(id)?;
         self.track_mut(track)?.clips.insert(id, Shared::new(moved));
+        self.index.clip_track.insert(id, track);
+        Ok(())
+    }
+
+    /// Moves a clip to `start` on `track`'s main lane, or on its take lane
+    /// `lane`, out of wherever it sits (the comping spec, R27).
+    fn move_clip_to_lane(
+        &mut self,
+        id: ClipId,
+        track: TrackId,
+        lane: Option<TakeLaneId>,
+        start: Ticks,
+    ) -> Result<(), ModelError> {
+        let owner = self.clip_owner(id)?;
+        let clip = self.clip_ref(id)?;
+        check_clip_fits(self.track_ref(track)?, &clip.data)?;
+        check_extent(start, clip.length)?;
+        if let Some(lane) = lane
+            && self.take_lane_owner(lane)? != track
+        {
+            return Err(ModelError::TakeLanesNotOnOneTrack);
+        }
+        let mut moved = clip.clone();
+        moved.start = start;
+        if owner != track {
+            self.keep_fitting_envelopes(track, &mut moved);
+        }
+        self.remove_clip(id)?;
+        match lane {
+            Some(lane) => self.lane_mut(lane)?.clips.push(moved),
+            None => {
+                self.track_mut(track)?.clips.insert(id, Shared::new(moved));
+            }
+        }
         self.index.clip_track.insert(id, track);
         Ok(())
     }
@@ -8149,16 +8203,6 @@ pub(crate) fn check_clip_fits(track: &Track, data: &ClipData) -> Result<(), Mode
     }
 }
 
-/// Whether a note's pressure points obey the MIDI controller data spec's R2:
-/// each from the note's start to before its end, 0 to 127, in order with none
-/// at the same place.
-fn pressure_fits(note: &Note) -> bool {
-    note.pressure
-        .iter()
-        .all(|point| point.value <= 127 && point.at >= Ticks::ZERO && point.at < note.length)
-        && note.pressure.windows(2).all(|pair| pair[0].at < pair[1].at)
-}
-
 /// Checks a clip or note's start and length.
 pub(crate) fn check_extent(start: Ticks, length: Ticks) -> Result<(), ModelError> {
     if start.is_negative() {
@@ -8205,7 +8249,7 @@ pub(crate) fn check_clip_data(data: &ClipData) -> Result<(), ModelError> {
                     || !(1..=127).contains(&note.release_velocity)
                     || !note.probability.is_finite()
                     || !(0.0..=1.0).contains(&note.probability)
-                    || !pressure_fits(note)
+                    || !note.expressions_fit()
                 {
                     return Err(ModelError::InvalidNote { index });
                 }

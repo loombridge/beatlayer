@@ -24,6 +24,7 @@ use rtrb::Producer;
 
 use crate::controller_take::is_controller;
 use crate::midi::MidiEvent;
+use crate::mpe::MpeRole;
 use crate::program::EngineProgram;
 use crate::session::SessionEvent;
 
@@ -44,7 +45,7 @@ pub struct RecordTrack {
 
 /// A note or controller message an armed MIDI track received, and the song
 /// frame it landed on.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RecordedMidi {
     /// The song frame, to the sample the input placed the message on. In a
     /// take that went round the loop it runs on past the loop's end instead
@@ -54,6 +55,10 @@ pub struct RecordedMidi {
     /// A note-on or a note-off, or a controller message
     /// ([`is_recorded`]).
     pub message: MidiMessage,
+    /// What it is from an MPE port: a note of its own, or one note's
+    /// expression, which carries its value (the MPE spec, R12). Otherwise
+    /// [`MpeRole::Plain`].
+    pub mpe: MpeRole,
 }
 
 /// One recorded MIDI track: the ring its messages go to.
@@ -164,7 +169,9 @@ impl RecordingPlan {
         );
         let in_part = |event: &&MidiEvent| {
             let at = event.offset as usize;
-            at >= offset && at < offset + frames && is_recorded(&event.message)
+            at >= offset
+                && at < offset + frames
+                && (event.mpe != MpeRole::Plain || is_recorded(&event.message))
         };
         let mut fits = true;
         for track in &mut self.tracks {
@@ -220,6 +227,7 @@ impl RecordingPlan {
                 let _ = track.producer.push(RecordedMidi {
                     frame: position + Frames((event.offset as usize - offset) as i64),
                     message: event.message,
+                    mpe: event.mpe,
                 });
             }
         }

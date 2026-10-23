@@ -169,6 +169,19 @@ impl Snapshot {
         self.folders[entry.folder as usize].join(&*entry.name)
     }
 
+    /// The folder an item is in, as an index that is the same for every item
+    /// in that folder.
+    #[must_use]
+    pub fn folder_of(&self, index: u32) -> u32 {
+        self.entry(index).folder
+    }
+
+    /// A folder by the index [`Snapshot::folder_of`] gives.
+    #[must_use]
+    pub fn folder_path(&self, folder: u32) -> &Path {
+        &self.folders[folder as usize]
+    }
+
     /// The folder an item is in, relative to its place, with the place's
     /// name first, as search results show it.
     #[must_use]

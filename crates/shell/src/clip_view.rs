@@ -35,8 +35,8 @@ use bl_shell_spec::notes::{
     JoinNotesArgs, MoveNotesArgs, NoteClipboardState, NoteEditResult, NoteField, NoteSelectMode,
     NoteSelection, PasteNotesArgs, QuantizeNotesArgs, QuantizeSettings, QuantizeSettingsArgs,
     QuantizeTarget, RampValueArgs, RandomizeAmounts, RandomizeArgs, ResizeNotesArgs,
-    SelectLoopBarsArgs, SelectNotesArgs, SetValueArgs, SplitNotesArgs, StepRecordArgs,
-    StepRecordResult, StretchNotesArgs, UngroupNotesArgs,
+    SelectLoopBarsArgs, SelectNotesArgs, SetExpressionArgs, SetValueArgs, SplitNotesArgs,
+    StepRecordArgs, StepRecordResult, StretchNotesArgs, UngroupNotesArgs,
 };
 use bl_shell_spec::sample_editor as sample_ids;
 use bl_shell_spec::sample_editor::{SelectTimeArgs, SetInsertMarkerArgs};
@@ -1784,6 +1784,7 @@ pub fn label(id: &str) -> &'static str {
         ids::RESIZE_NOTES => "Resize notes",
         ids::QUANTIZE_NOTES => "Quantize notes",
         ids::SET_VALUE => "Set note values",
+        ids::SET_EXPRESSION => "Set Note Expression",
         ids::RAMP_VALUE => "Ramp note values",
         ids::SPLIT => "Split Notes",
         ids::CHOP => "Chop Notes",
@@ -1857,7 +1858,8 @@ fn step_notes(
                 continue;
             };
             if notes[place].length > step {
-                notes[place].length -= step;
+                let length = notes[place].length - step;
+                notes[place].set_length(length);
                 out.shortened += 1;
                 out.just.push(recorded);
             } else {
@@ -2434,12 +2436,12 @@ pub fn run(
                 let mut places_after = Vec::with_capacity(places.len());
                 for place in &places {
                     let mut note = resized[*place as usize].clone();
-                    note.length += by;
-                    if note.length <= Ticks::ZERO {
+                    let length = note.length + by;
+                    if length <= Ticks::ZERO {
                         return Err(refused("a note would be shorter than a tick"));
                     }
-                    // Pressure past the note's new end goes with that part.
-                    note.pressure.retain(|point| point.at < note.length);
+                    // Spec: mpe R4. Its envelopes end where it does.
+                    note.set_length(length);
                     resized[*place as usize] = note.clone();
                     places_after.push(place_of(&resized, &note));
                 }
@@ -2552,6 +2554,44 @@ pub fn run(
                 }
                 if field == NoteField::Chance {
                     share_chance(&mut edited, &places);
+                }
+                set_notes(editor, clip, &midi, edited)?;
+                Ok(places.clone())
+            })?;
+            view.select(clip, after.clone());
+            Ok(to_value(&NoteEditResult {
+                notes: after.clone(),
+                selected: after,
+                undo_step: recorded,
+                clips: Vec::new(),
+            }))
+        }
+        ids::SET_EXPRESSION => {
+            let SetExpressionArgs {
+                clip,
+                notes,
+                envelope,
+                breakpoints,
+            } = parse(args)?;
+            let (clip, midi) = clip_and_data(doc, view, arrangement, clip)?;
+            let ordered = notes_in_order(&midi);
+            let places = places_or_selected(view, clip, notes, ordered.len())?;
+            // Spec: mpe R3. A value, a position or a bend out of range, or
+            // two breakpoints at one position, changes nothing.
+            for place in &places {
+                let length = ordered[*place as usize].length;
+                if !bl_model::note_expression::points_fit(&breakpoints, length, envelope) {
+                    return Err(invalid(format!(
+                        "the breakpoints must be in order of position, none twice, from 0 to the \
+                         note's length ({length}), with values and bends in the {envelope:?} \
+                         envelope's range"
+                    )));
+                }
+            }
+            let (after, recorded) = transaction(editor, label(ids::SET_EXPRESSION), |editor| {
+                let mut edited = ordered.clone();
+                for place in &places {
+                    *edited[*place as usize].envelope_mut(envelope) = breakpoints.clone();
                 }
                 set_notes(editor, clip, &midi, edited)?;
                 Ok(places.clone())
@@ -3587,13 +3627,11 @@ fn quantize_note(
         QuantizeTarget::NoteEnd => {
             let end = note.start + note.length;
             let moved = toward(end, snap(signatures, step, end), amount);
-            quantized.length = moved - note.start;
-            if quantized.length <= Ticks::ZERO {
+            let length = moved - note.start;
+            if length <= Ticks::ZERO {
                 return Err(refused("a note would be shorter than a tick"));
             }
-            quantized
-                .pressure
-                .retain(|point| point.at < quantized.length);
+            quantized.set_length(length);
         }
     }
     Ok(quantized)
@@ -3641,7 +3679,7 @@ fn note_key(note: &Note, semitones: i32) -> Result<u8, EditFailure> {
 
 #[cfg(test)]
 mod tests {
-    use bl_model::PressurePoint;
+    use bl_model::Breakpoint;
 
     use super::*;
 
@@ -3658,16 +3696,20 @@ mod tests {
         assert_eq!(step_parts(64, ChopStep::NextPower), 64);
     }
 
-    // Spec: midi-controller-data R2. A note made shorter loses the pressure
-    // points past its new end, so the edit isn't refused for them.
+    // Spec: mpe R4. A note made shorter loses the pressure past its new
+    // end and holds the value it had there, so the edit isn't refused for it.
     #[test]
-    fn shortening_a_note_drops_the_pressure_past_its_new_end() {
-        let point = |at: Ticks, value| PressurePoint { at, value };
+    fn shortening_a_note_ends_the_pressure_at_its_new_end() {
+        let point = |at: Ticks, value| Breakpoint {
+            at,
+            value,
+            bend: 0.0,
+        };
         let note = Note {
             pressure: vec![
-                point(Ticks::ZERO, 10),
-                point(Ticks::QUARTER - Ticks(1), 20),
-                point(Ticks::QUARTER + Ticks(50_000), 30),
+                point(Ticks::ZERO, 10.0),
+                point(Ticks::QUARTER - Ticks(1), 20.0),
+                point(Ticks::QUARTER + Ticks(50_000), 30.0),
             ],
             ..Note::new(60, Ticks::ZERO, Ticks::QUARTER + Ticks(100_000), 100)
         };
@@ -3676,9 +3718,11 @@ mod tests {
         let quantized =
             quantize_note(&note, QuantizeTarget::NoteEnd, step, &signatures, 100).unwrap();
         assert_eq!(quantized.length, Ticks::QUARTER);
-        assert_eq!(
-            quantized.pressure,
-            vec![point(Ticks::ZERO, 10), point(Ticks::QUARTER - Ticks(1), 20)]
-        );
+        assert_eq!(quantized.pressure.len(), 3);
+        assert_eq!(quantized.pressure[..2], note.pressure[..2]);
+        let end = quantized.pressure[2];
+        assert_eq!(end.at, Ticks::QUARTER);
+        assert!((end.value - 20.0).abs() < 0.001, "{}", end.value);
+        assert!(quantized.expressions_fit());
     }
 }

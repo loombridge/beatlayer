@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-767 commands in 46 areas.
+787 commands in 46 areas.
 
 ## Permission classes
 
@@ -71,6 +71,7 @@ Each command has:
 | [`arrangement.select_clips`](#arrangementselect_clips) | Select Clips | `read` | `Cmd+click`; `Cmd+click`; `Shift+click`; `Shift+click`; `Shift+click`, `Shift+drag` | `Ctrl+click`; `Ctrl+click`; `Shift+click`; `Shift+click`; `Shift+click`, `Shift+drag` |
 | [`arrangement.select_fade_handle`](#arrangementselect_fade_handle) | Select Fade Handle | `read` |  |  |
 | [`arrangement.select_loop`](#arrangementselect_loop) | Select Loop | `read` | `Cmd+Shift+L`; `Cmd+Shift+L` | `Ctrl+Shift+L`; `Ctrl+Shift+L` |
+| [`arrangement.select_take_lanes`](#arrangementselect_take_lanes) | Select Take Lanes | `read` |  |  |
 | [`arrangement.select_time`](#arrangementselect_time) | Select Time | `read` |  |  |
 | [`arrangement.select_tracks`](#arrangementselect_tracks) | Select Tracks | `read` |  |  |
 | [`arrangement.set_crossfade`](#arrangementset_crossfade) | Set Crossfade | `edit` |  |  |
@@ -81,6 +82,7 @@ Each command has:
 | [`arrangement.show_in_out`](#arrangementshow_in_out) | Arrangement Track Controls In/Out | `read` |  |  |
 | [`arrangement.show_range`](#arrangementshow_range) | Show Time Range | `read` |  |  |
 | [`arrangement.show_return_tracks`](#arrangementshow_return_tracks) | Arrangement Track Controls Return Tracks | `read` |  |  |
+| [`arrangement.show_take_lanes`](#arrangementshow_take_lanes) | Show Take Lanes | `read` | `Cmd+Option+U`; `Left` | `Ctrl+Alt+U`; `Left` |
 | [`arrangement.show_track`](#arrangementshow_track) | Show Track | `read` |  |  |
 | [`arrangement.show_volume`](#arrangementshow_volume) | Arrangement Track Controls Volume | `read` |  |  |
 | [`arrangement.snap_to_grid`](#arrangementsnap_to_grid) | Snap to Grid | `read` | `Cmd+4` | `Ctrl+4` |
@@ -130,23 +132,37 @@ Each command has:
 | [`automation.set_curve`](#automationset_curve) | Curve Automation Segment | `edit` |  |  |
 | [`automation.set_envelope`](#automationset_envelope) | Set Automation Envelope | `edit` |  |  |
 | [`browser.add_folder`](#browseradd_folder) | Add Folder to Browser... | `external` |  |  |
+| [`browser.add_label`](#browseradd_label) | Add Label | `edit` |  |  |
 | [`browser.add_tag`](#browseradd_tag) | Add Browser Tag | `edit` |  |  |
 | [`browser.add_tag_group`](#browseradd_tag_group) | Add Browser Tag Group | `edit` |  |  |
 | [`browser.add_to_arrangement`](#browseradd_to_arrangement) | Add Files to Arrangement | `external` |  |  |
+| [`browser.back`](#browserback) | Browser History Back | `external` | `Cmd+LeftBracket` | `Ctrl+LeftBracket` |
+| [`browser.clear_filters`](#browserclear_filters) | Clear Browser Filters | `external` |  |  |
 | [`browser.delete_tag`](#browserdelete_tag) | Delete Browser Tag | `destructive` |  |  |
+| [`browser.filter`](#browserfilter) | Filter Browser | `external` |  |  |
 | [`browser.focus_search`](#browserfocus_search) | Search in Browser | `read` | `Cmd+F` | `Ctrl+F` |
+| [`browser.forward`](#browserforward) | Browser History Forward | `external` | `Cmd+RightBracket` | `Ctrl+RightBracket` |
 | [`browser.load_selected`](#browserload_selected) | Load Selected Item | `external` | `Enter` | `Enter` |
+| [`browser.move_label`](#browsermove_label) | Move Label | `edit` |  |  |
 | [`browser.move_tag`](#browsermove_tag) | Move Browser Tag | `edit` |  |  |
 | [`browser.open_folder`](#browseropen_folder) | Open Folder | `external` |  |  |
 | [`browser.open_place`](#browseropen_place) | Open Browser Label | `external` |  |  |
 | [`browser.preview`](#browserpreview) | Preview | `external` |  |  |
 | [`browser.remove_folder`](#browserremove_folder) | Remove from Sidebar | `edit` |  |  |
+| [`browser.remove_label`](#browserremove_label) | Remove Label | `destructive` |  |  |
 | [`browser.rename_file`](#browserrename_file) | Rename Browser File | `external` |  |  |
+| [`browser.rename_label`](#browserrename_label) | Rename Label | `edit` | `Cmd+R` | `Ctrl+R` |
 | [`browser.rename_tag`](#browserrename_tag) | Rename Browser Tag | `edit` |  |  |
+| [`browser.reset_label_order`](#browserreset_label_order) | Reset Label Order | `edit` |  |  |
 | [`browser.reset_tag_order`](#browserreset_tag_order) | Reset Browser Tag Order | `edit` |  |  |
 | [`browser.scrub_preview`](#browserscrub_preview) | Scrub Preview | `external` |  |  |
 | [`browser.search`](#browsersearch) | Browser Search | `external` |  |  |
 | [`browser.select`](#browserselect) | Select in Browser | `external` |  |  |
+| [`browser.set_columns`](#browserset_columns) | Set Browser Columns | `edit` |  |  |
+| [`browser.set_filter_groups`](#browserset_filter_groups) | Set Filter Groups | `edit` |  |  |
+| [`browser.set_filter_view`](#browserset_filter_view) | Show Filter View | `edit` | `Cmd+Option+G` | `Ctrl+Alt+G` |
+| [`browser.set_label_icon`](#browserset_label_icon) | Choose Label Icon | `edit` |  |  |
+| [`browser.set_label_shown`](#browserset_label_shown) | Show Label in Sidebar | `edit` |  |  |
 | [`browser.set_preview`](#browserset_preview) | Browser File Preview | `edit` |  |  |
 | [`browser.set_raw`](#browserset_raw) | Raw Preview | `edit` |  |  |
 | [`browser.show_file`](#browsershow_file) | Show in Browser | `external` |  |  |
@@ -207,6 +223,7 @@ Each command has:
 | [`clip.move`](#clipmove) | Move Clip | `edit` |  |  |
 | [`clip.move_by`](#clipmove_by) | Move Clips | `edit` |  |  |
 | [`clip.move_envelope_breakpoint`](#clipmove_envelope_breakpoint) | Move Envelope Breakpoint | `edit` |  |  |
+| [`clip.move_to_lane`](#clipmove_to_lane) | Move Clip to Lane | `edit` |  |  |
 | [`clip.move_to_slot`](#clipmove_to_slot) | Move Clip to Slot | `edit` |  |  |
 | [`clip.move_transient`](#clipmove_transient) | Move Transient | `edit` |  |  |
 | [`clip.move_warp_markers`](#clipmove_warp_markers) | Move Warp Markers | `edit` |  |  |
@@ -501,6 +518,7 @@ Each command has:
 | [`note.ramp_value`](#noteramp_value) | Ramp Note Values | `edit` |  |  |
 | [`note.randomize`](#noterandomize) | Randomize Note Values | `edit` |  |  |
 | [`note.resize`](#noteresize) | Resize Notes | `edit` |  |  |
+| [`note.set_expression`](#noteset_expression) | Set Note Expression | `edit` |  |  |
 | [`note.set_value`](#noteset_value) | Set Note Value | `edit` |  |  |
 | [`note.split`](#notesplit) | Split Note(s) | `edit` |  |  |
 | [`note.split_clip`](#notesplit_clip) | Split Clip | `edit` | `Cmd+Shift+E` | `Ctrl+Shift+E` |
@@ -702,14 +720,15 @@ Each command has:
 | [`stems.open`](#stemsopen) | Separate Stems to New Audio Tracks | `read` |  |  |
 | [`stems.separate`](#stemsseparate) | Separate Stems | `edit` |  |  |
 | [`stems.status`](#stemsstatus) | Stem Separation Status | `read` |  |  |
+| [`take_lane.audition`](#take_laneaudition) | Audition Take Lane | `edit` | `T` | `T` |
 | [`take_lane.comp_sources`](#take_lanecomp_sources) | Comp Sources | `read` |  |  |
-| [`take_lane.copy_to_main_lane`](#take_lanecopy_to_main_lane) | Copy Selection to Main Lane | `edit` |  |  |
+| [`take_lane.copy_to_main_lane`](#take_lanecopy_to_main_lane) | Copy Selection to Main Lane | `edit` | `Enter` | `Enter` |
 | [`take_lane.create_clip`](#take_lanecreate_clip) | Create Clip on Take Lane | `edit` |  |  |
 | [`take_lane.delete`](#take_lanedelete) | Delete Take Lane(s) | `destructive` |  |  |
 | [`take_lane.delete_all`](#take_lanedelete_all) | Delete All Take Lanes | `destructive` |  |  |
 | [`take_lane.delete_unused`](#take_lanedelete_unused) | Delete All Unused Take Lanes | `destructive` |  |  |
-| [`take_lane.duplicate`](#take_laneduplicate) | Duplicate Take Lane(s) | `edit` |  |  |
-| [`take_lane.insert`](#take_laneinsert) | Insert Take Lane | `edit` |  |  |
+| [`take_lane.duplicate`](#take_laneduplicate) | Duplicate Take Lane(s) | `edit` | `Cmd+D` | `Ctrl+D` |
+| [`take_lane.insert`](#take_laneinsert) | Insert Take Lane | `edit` | `Shift+Option+T` | `Shift+Alt+T` |
 | [`take_lane.move`](#take_lanemove) | Move Take Lane(s) | `edit` |  |  |
 | [`take_lane.move_comp_edge`](#take_lanemove_comp_edge) | Move Comp Edge | `edit` |  |  |
 | [`take_lane.rename`](#take_lanerename) | Rename Take Lane | `edit` |  |  |
@@ -786,6 +805,7 @@ Each command has:
 | [`view.toggle_detail_area`](#viewtoggle_detail_area) | Hide Device View | `read` | `Cmd+Option+L` | `Ctrl+Alt+L` |
 | [`view.toggle_device_view`](#viewtoggle_device_view) | Device View | `read` | `Cmd+Option+4` | `Ctrl+Alt+4` |
 | [`view.toggle_file_manager`](#viewtoggle_file_manager) | File Manager | `read` |  |  |
+| [`view.toggle_full_height_browser`](#viewtoggle_full_height_browser) | Full-Height Browser | `edit` |  |  |
 | [`view.toggle_info_view`](#viewtoggle_info_view) | Info | `read` | `Shift+Slash` | `Shift+Slash` |
 | [`view.toggle_plug_in_windows`](#viewtoggle_plug_in_windows) | Plug-In Windows | `read` | `Cmd+Option+P` | `Ctrl+Alt+P` |
 | [`view.toggle_plugin_list`](#viewtoggle_plugin_list) | Plug-In List | `read` |  |  |
@@ -1018,6 +1038,7 @@ Arguments:
 |---|---|---|---|
 | `clips` | array or null | no | Whole clips to act on. Give either `clips` or a span of time, not both. |
 | `end` | [`Position`](#position) or null | no | Where the span ends, after `start`. Left out, the time selection's end. |
+| `lanes` | array or null | no | The lanes a span of time covers, each a track's own lane or one of its take lanes (the comping spec, R27). Left out, the lanes of the time selection, or `tracks`' own lanes. |
 | `start` | [`Position`](#position) or null | no | Where the span starts. Left out, the time selection's start. |
 | `tracks` | array or null | no | The tracks a span of time covers. Left out, the selected tracks. |
 
@@ -1060,6 +1081,7 @@ Arguments:
 |---|---|---|---|
 | `clips` | array or null | no | Whole clips to act on. Give either `clips` or a span of time, not both. |
 | `end` | [`Position`](#position) or null | no | Where the span ends, after `start`. Left out, the time selection's end. |
+| `lanes` | array or null | no | The lanes a span of time covers, each a track's own lane or one of its take lanes (the comping spec, R27). Left out, the lanes of the time selection, or `tracks`' own lanes. |
 | `start` | [`Position`](#position) or null | no | Where the span starts. Left out, the time selection's start. |
 | `tracks` | array or null | no | The tracks a span of time covers. Left out, the selected tracks. |
 
@@ -1083,6 +1105,7 @@ Arguments:
 |---|---|---|---|
 | `clips` | array or null | no | Whole clips to act on. Give either `clips` or a span of time, not both. |
 | `end` | [`Position`](#position) or null | no | Where the span ends, after `start`. Left out, the time selection's end. |
+| `lanes` | array or null | no | The lanes a span of time covers, each a track's own lane or one of its take lanes (the comping spec, R27). Left out, the lanes of the time selection, or `tracks`' own lanes. |
 | `start` | [`Position`](#position) or null | no | Where the span starts. Left out, the time selection's start. |
 | `tracks` | array or null | no | The tracks a span of time covers. Left out, the selected tracks. |
 
@@ -1106,6 +1129,7 @@ Arguments:
 |---|---|---|---|
 | `clips` | array or null | no | Whole clips to act on. Give either `clips` or a span of time, not both. |
 | `end` | [`Position`](#position) or null | no | Where the span ends, after `start`. Left out, the time selection's end. |
+| `lanes` | array or null | no | The lanes a span of time covers, each a track's own lane or one of its take lanes (the comping spec, R27). Left out, the lanes of the time selection, or `tracks`' own lanes. |
 | `start` | [`Position`](#position) or null | no | Where the span starts. Left out, the time selection's start. |
 | `tracks` | array or null | no | The tracks a span of time covers. Left out, the selected tracks. |
 
@@ -1129,6 +1153,7 @@ Arguments:
 |---|---|---|---|
 | `clips` | array or null | no | Whole clips to act on. Give either `clips` or a span of time, not both. |
 | `end` | [`Position`](#position) or null | no | Where the span ends, after `start`. Left out, the time selection's end. |
+| `lanes` | array or null | no | The lanes a span of time covers, each a track's own lane or one of its take lanes (the comping spec, R27). Left out, the lanes of the time selection, or `tracks`' own lanes. |
 | `start` | [`Position`](#position) or null | no | Where the span starts. Left out, the time selection's start. |
 | `tracks` | array or null | no | The tracks a span of time covers. Left out, the selected tracks. |
 
@@ -1174,7 +1199,7 @@ Result: [`EditResult`](#editresult).
 
 #### `arrangement.duplicate`
 
-**Duplicate**. Permission: `edit`. Contexts: `arrangement`.
+**Duplicate**. Permission: `edit`. Contexts: `arrangement`, `take-lanes`.
 
 Places a copy of clips (`clips`, or the selected clips) right after the span they cover, on the same tracks, or a copy of the material in a span of time on tracks right after the span, and selects the copy, so running it again repeats the material. The copy replaces whatever it covers; when that's part of another clip, it's destructive, so an agent asks first. Cmd-D (Ctrl-D) runs this on the Arrangement's selection.
 
@@ -1190,6 +1215,7 @@ Arguments:
 |---|---|---|---|
 | `clips` | array or null | no | Whole clips to act on. Give either `clips` or a span of time, not both. |
 | `end` | [`Position`](#position) or null | no | Where the span ends, after `start`. Left out, the time selection's end. |
+| `lanes` | array or null | no | The lanes a span of time covers, each a track's own lane or one of its take lanes (the comping spec, R27). Left out, the lanes of the time selection, or `tracks`' own lanes. |
 | `start` | [`Position`](#position) or null | no | Where the span starts. Left out, the time selection's start. |
 | `tracks` | array or null | no | The tracks a span of time covers. Left out, the selected tracks. |
 
@@ -1333,6 +1359,7 @@ Arguments:
 | `by` | [`Ticks`](#ticks) or null | no | How far to move them in time, in ticks; negative is earlier. Give `by` or `to`, or neither to move them only between tracks. |
 | `clips` | array or null | no | The clips. Left out, the selected clips. |
 | `copy` | boolean | no | Copy the clips instead, leaving the originals where they are. |
+| `lane` | [`Lane`](#lane) or null | no | The lane `anchor` moves to, a track's own lane or one of its take lanes (the comping spec, R27); the other clips keep their distance from it among the track's lanes. Give `track` or `lane`, not both. |
 | `to` | [`Position`](#position) or null | no | Where `anchor` starts after the move; the other clips keep their distance from it. |
 | `track` | [`TrackId`](#trackid) or null | no | The track `anchor` moves to; the other clips keep their distance from it in the track list. Left out, every clip stays on its track. |
 
@@ -1448,6 +1475,7 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `at` | [`Position`](#position) or null | no | Where the material starts. Left out, the time selection's start, or the insert marker. |
+| `lane` | [`Lane`](#lane) or null | no | The lane the clipboard's first lane goes to, a track's own lane or one of its take lanes (the comping spec, R27); its other lanes keep their distance from it, among the tracks and among a track's lanes. Left out, the first lane selected, or the first selected track's main lane. |
 | `track` | [`TrackId`](#trackid) or null | no | The track the clipboard's first track goes to; its other tracks go to the tracks after it, keeping their spacing. Left out, the first selected track, or the track the material was copied from. |
 
 Result: [`EditResult`](#editresult).
@@ -1597,11 +1625,29 @@ Arguments: none (send `{}`).
 
 Result: [`ArrangementState`](#arrangementstate).
 
+#### `arrangement.select_take_lanes`
+
+**Select Take Lanes**. Permission: `read`. Contexts: `arrangement`.
+
+Selects take lanes by their headers, as clicking a take lane's header does, replacing the lane headers selected or, with `add`, adding to them; with `toggle`, Cmd-clicking: each lane selected is taken away and the others added. Their tracks become the selected tracks, and the clips and time selected are let go, so Enter, T, Cmd+D, Delete and Cmd+Up and Cmd+Down act on the lanes. An empty list clears the selection of lane headers. Changes only the view.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `lanes` | array of [`TakeLaneId`](#takelaneid) | yes | The take lanes whose headers to select. Empty clears the selection of lane headers. |
+| `add` | boolean | no | Add them to the lanes already selected instead of replacing them. |
+| `toggle` | boolean | no | Take away from the selection each of them that is selected, as Cmd-clicking a header does, and add the others. |
+
+Result: [`ArrangementState`](#arrangementstate).
+
 #### `arrangement.select_time`
 
 **Select Time**. Permission: `read`. Contexts: `arrangement`.
 
-Selects the span from `start` to `end` on `tracks` (or the selected tracks), as dragging across track lanes does. `lanes` names the lanes the selection covers, each a track's own lane or its automation lane; left out, the tracks' own lanes. `arrangement.zoom_to_selection` zooms to it. Changes only the view.
+Selects the span from `start` to `end` on `tracks` (or the selected tracks), as dragging across track lanes does. `lanes` names the lanes the selection covers, each a track's own lane, one of its take lanes or its automation lane; left out, the tracks' own lanes. `arrangement.zoom_to_selection` zooms to it. Changes only the view.
 
 Default keys: none.
 
@@ -1611,7 +1657,7 @@ Arguments:
 |---|---|---|---|
 | `start` | [`Ticks`](#ticks) | yes | Where the selection starts. |
 | `end` | [`Ticks`](#ticks) | yes | Where it ends. Before `start` is fine: the two are swapped. |
-| `lanes` | array or null | no | The lanes it covers: each a track's own lane or its automation lane (the automation editing spec, R1). Left out, the tracks' own lanes. |
+| `lanes` | array or null | no | The lanes it covers: each a track's own lane, a take lane under it, or its automation lane (the automation editing spec, R1; the comping spec, R26). Left out, the tracks' own lanes. |
 | `tracks` | array or null | no | The tracks it covers. Left out, the selected tracks. |
 
 Result: [`ArrangementState`](#arrangementstate).
@@ -1688,6 +1734,7 @@ Arguments:
 |---|---|---|---|
 | `at` | [`Ticks`](#ticks) | yes | Where to put it. It isn't snapped: snap first if you want the grid. |
 | `automation_lane` | boolean | no | Select the track's automation lane too, as clicking the lane's background does (the automation editing spec, R1): the lane gets the keyboard. |
+| `lane` | [`TakeLaneId`](#takelaneid) or null | no | The take lane the click was on, as clicking a take lane's lane does: the lane is selected with the marker, and its track with it (the comping spec, R26). |
 | `track` | [`TrackId`](#trackid) or null | no | The track to select with it, as clicking a track's lane does. Left out, the selected tracks stay selected. |
 
 Result: [`ArrangementState`](#arrangementstate).
@@ -1696,7 +1743,7 @@ Result: [`ArrangementState`](#arrangementstate).
 
 **Set Track Height**. Permission: `read`. Contexts: `arrangement`.
 
-Sets the height of unfolded tracks (`tracks`, or the selected ones) to `height` points, or changes it by `delta`, from 18 to 800, as dragging a track's lower edge and Option with + or - (Alt on Windows) do. Turns Optimize Height off. Changes only the view.
+Sets the height of unfolded tracks (`tracks`, or the selected ones) and take lanes (`take_lanes`, or the selected ones when they are) to `height` points, or changes it by `delta`, from 18 to 800, as dragging a track's lower edge and Option with + or - (Alt on Windows) do. Turns Optimize Height off. Changes only the view.
 
 Default keys: none.
 
@@ -1705,8 +1752,9 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `delta` | number or null | no | Points to add to each track's height (negative makes it shorter). |
-| `height` | number or null | no | The new height of each unfolded track, in points, from 18 to 800. |
-| `tracks` | array or null | no | The tracks. Left out, the selected tracks. |
+| `height` | number or null | no | The new height of each unfolded track or take lane, in points, from 18 to 800. |
+| `take_lanes` | array or null | no | Take lanes to resize as well (the comping spec, R28). |
+| `tracks` | array or null | no | The tracks. Left out, the selected take lanes if any are, otherwise the selected tracks. |
 
 Result: [`ArrangementState`](#arrangementstate).
 
@@ -1773,6 +1821,29 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `on` | boolean or null | no | On or off. Left out, the switch toggles. |
+
+Result: [`ArrangementState`](#arrangementstate).
+
+#### `arrangement.show_take_lanes`
+
+**Show Take Lanes**. Permission: `read`. Contexts: `arrangement`, `take-lanes`.
+
+Shows or hides the take lanes of `tracks` (or the selected tracks) under their main lanes, as the track header's Show Take Lanes item and the Show/Hide Take Lanes toggle do; left without `on`, they toggle. Showing take lanes switches Automation Mode off, which hides them. With `title_bars`, the tracks' title bars are selected too and the take lane headers are let go, as Left does from a take lane's header. Never an undo step; changes only the view.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-COMP-001 | `Cmd+Option+U` | `Ctrl+Alt+U` | `arrangement` | Show the take lanes | runs it |
+| S-COMP-007 | `Left` | `Left` | `take-lanes` | Go from a take lane to its track's main lane and fold the take lanes | fixes `on` = `false`; fixes `title_bars` = `true` |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean or null | no | Show (true) or hide (false) their take lanes. Left out, they toggle, taking the first track's new state. |
+| `title_bars` | boolean | no | Also select the tracks' title bars and leave the take lanes' headers, as Left does from a take lane's header. |
+| `tracks` | array or null | no | The tracks. Left out, the selected tracks. |
 
 Result: [`ArrangementState`](#arrangementstate).
 
@@ -1846,6 +1917,7 @@ Arguments:
 |---|---|---|---|
 | `at` | array or null | no | Where to split. Left out, the time selection's start and end, or the insert marker. |
 | `clips` | array or null | no | The clips to split. Left out, the clips on `tracks`. |
+| `lanes` | array or null | no | The lanes whose clips are split, each a track's own lane or one of its take lanes (the comping spec, R27). Left out, `tracks`' own lanes, or the lanes the time selection covers. |
 | `tracks` | array or null | no | The tracks whose clips are split. Left out, the selected clips, or the clips on the selected tracks. |
 
 Result: [`EditResult`](#editresult).
@@ -2610,6 +2682,18 @@ Arguments:
 
 Result: [`BrowserState`](#browserstate).
 
+#### `browser.add_label`
+
+**Add Label**. Permission: `edit`. Contexts: `global`, `browser`.
+
+Keeps what the browser shows as a saved label, as the Results bar's Add Label button does: the label it was made under, the search words and the selected tags. It goes at the end of the Library section, named after its words and tags, with its name open for editing (`browser.state`'s `renaming_label`); `browser.rename_label` finishes it. Choosing it lists what those words and tags find under that label now. Refused when there are no search words and no selected tags. Kept in the browser's database.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`BrowserState`](#browserstate).
+
 #### `browser.add_tag`
 
 **Add Browser Tag**. Permission: `edit`. Contexts: `global`, `browser`.
@@ -2663,11 +2747,27 @@ Arguments:
 
 Result: [`AddResult`](#addresult).
 
-#### `browser.delete_tag`
+#### `browser.back`
 
-**Delete Browser Tag**. Permission: `destructive`. Contexts: `global`, `browser`.
+**Browser History Back**. Permission: `external`. Contexts: `global`, `browser`.
 
-Deletes a tag or a group in the browser: `tag` for a tag, by its full name (`Format|CLAP`) or its own name, `group` for a group, by its name. Deleting a group deletes its tags. Beatlayer's own tags and groups can't be deleted. A deleted tag is gone from every item that carried it, and undo can't bring it back.
+Goes back one step in the browser's history, as Browse Back and Cmd-[ (Ctrl-[) do, showing that step's label, search words, selected tags, open folders and selection. A step is taken when the label changes, when the selected tags change, and when a search starts or its words change (changes in a row make one step); the history holds 100 steps and isn't kept between launches. Refused at the first step (`browser.state`'s `can_back`).
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-BRW-011 | `Cmd+LeftBracket` | `Ctrl+LeftBracket` | `browser` | Go back in the browser's history | runs it |
+
+Arguments: none (send `{}`).
+
+Result: [`BrowserState`](#browserstate).
+
+#### `browser.clear_filters`
+
+**Clear Browser Filters**. Permission: `external`. Contexts: `global`, `browser`, `browser-search`.
+
+Clears the selected filter tags and the search words (`words` and `tags`, both true if left out), as the Results bar's Clear button and Esc in the search field do. Changes nothing, but lists files outside the project.
 
 Default keys: none.
 
@@ -2675,10 +2775,45 @@ Arguments:
 
 | Name | Type | Required | Description |
 |---|---|---|---|
+| `tags` | boolean or null | no | Clear the selected tags. Left out, true. |
+| `words` | boolean or null | no | Clear the search words. Left out, true. |
+
+Result: [`BrowserState`](#browserstate).
+
+#### `browser.delete_tag`
+
+**Delete Browser Tag**. Permission: `destructive`. Contexts: `global`, `browser`.
+
+Deletes a tag or a group in the browser: `tag` for a tag, by its full name (`Format|CLAP`) or its own name, `group` for a group, by its name. Deleting a group deletes its tags. Beatlayer's own tags and groups can't be deleted. A deleted tag is gone from every item that carried it, and undo can't bring it back. When saved labels use the tag (or the group's tags) the command is refused, naming them, unless `confirm` is true; the labels then leave it out.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `confirm` | boolean | no | Delete although saved labels use the tag or the group's tags: they then leave it out. Otherwise the command is refused, naming them (spec: browser-tags R8). |
 | `group` | string or null | no | The group to delete, by its name. |
 | `tag` | string or null | no | The tag to delete, by its full name or its own name. |
 
 Result: [`TagsState`](#tagsstate).
+
+#### `browser.filter`
+
+**Filter Browser**. Permission: `external`. Contexts: `global`, `browser`.
+
+Selects filter tags, as clicking tag buttons in the Filter View does. Without `add`, each tag in `tags` becomes the only one selected in its group (a tag that is already the only one is cleared). With `add`, each tag is added to its group's selection, or taken out if it is in it already. The list then holds the items under the label that carry, for each group with a selection, at least one of its selected tags, and match every search word. Selected tags stay when another Library label is chosen. Changes nothing, but lists files outside the project.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `tags` | array of string | yes | The tags, by their full names or their own names. |
+| `add` | boolean | no | Add the tags to their groups' selections, or take a selected one out, as Cmd-click (Ctrl-click) does. Otherwise each tag is the only one selected in its group, and a tag that is already the only one is cleared. |
+
+Result: [`BrowserState`](#browserstate).
 
 #### `browser.focus_search`
 
@@ -2696,6 +2831,22 @@ Arguments: none (send `{}`).
 
 Result: nothing (`null`).
 
+#### `browser.forward`
+
+**Browser History Forward**. Permission: `external`. Contexts: `global`, `browser`.
+
+Goes forward one step in the browser's history, as Browse Forward and Cmd-] (Ctrl-]) do. Refused at the last step (`browser.state`'s `can_forward`).
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-BRW-012 | `Cmd+RightBracket` | `Ctrl+RightBracket` | `browser` | Go forward in the browser's history | runs it |
+
+Arguments: none (send `{}`).
+
+Result: [`BrowserState`](#browserstate).
+
 #### `browser.load_selected`
 
 **Load Selected Item**. Permission: `external`. Contexts: `browser`.
@@ -2711,6 +2862,23 @@ Default keys:
 Arguments: none (send `{}`).
 
 Result: [`AddResult`](#addresult).
+
+#### `browser.move_label`
+
+**Move Label**. Permission: `edit`. Contexts: `global`, `browser`, `browser-sidebar`.
+
+Moves a Library label or a saved label to `position` within the Library section, as dragging it does; All stays first, so 1 is the earliest place another label can take. Kept for the next start.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `label` | [`Label`](#label) | yes | The Library label or saved label to move. |
+| `position` | integer, at least 0 | yes | Where it goes in the Library section: 0 is the first place, which All keeps, so 1 is the first place anything else can take. |
+
+Result: [`BrowserState`](#browserstate).
 
 #### `browser.move_tag`
 
@@ -2796,6 +2964,22 @@ Arguments:
 
 Result: [`BrowserState`](#browserstate).
 
+#### `browser.remove_label`
+
+**Remove Label**. Permission: `destructive`. Contexts: `global`, `browser`, `browser-sidebar`.
+
+Deletes a saved label, as Remove in its context menu does. Nothing else is deleted: not the files, the tags or the search words it kept. It can't be brought back.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `label` | [`Label`](#label) | yes | The saved label to delete. |
+
+Result: [`BrowserState`](#browserstate).
+
 #### `browser.rename_file`
 
 **Rename Browser File**. Permission: `external`. Contexts: `browser`.
@@ -2810,6 +2994,27 @@ Arguments:
 |---|---|---|---|
 | `name` | string or null | no | The new name, without the extension. Left out (or `null`), the name is kept and editing ends, as Esc does. |
 | `path` | string or null | no | The file to rename. Left out, the file whose name is open for editing. |
+
+Result: [`BrowserState`](#browserstate).
+
+#### `browser.rename_label`
+
+**Rename Label**. Permission: `edit`. Contexts: `browser-sidebar`.
+
+Renames a saved label or a Library label, as Rename (Cmd-R) in its context menu does (`label`, or the chosen label). With `name`, the label has that name (empty gives a Library label its own name back). Without it, the name opens for editing, or, if it is open already, editing ends and the name is kept. A place's label (the User Library, Current Project, an added folder) takes its folder's name and isn't renamed. Kept for the next start.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-EDIT-008 | `Cmd+R` | `Ctrl+R` | `global` | Rename the selection | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `label` | [`Label`](#label) or null | no | The label to rename. Left out, the chosen label. |
+| `name` | string or null | no | The new name; empty gives a Library label its own name back. Left out, the label's name opens for editing, or, if it's open already, editing ends and the name is kept. |
 
 Result: [`BrowserState`](#browserstate).
 
@@ -2830,6 +3035,18 @@ Arguments:
 | `tag` | string or null | no | The tag to rename, by its full name or its own name. |
 
 Result: [`TagsState`](#tagsstate).
+
+#### `browser.reset_label_order`
+
+**Reset Label Order**. Permission: `edit`. Contexts: `global`, `browser`, `browser-sidebar`.
+
+Puts the Library labels back in their first order, the saved labels after them, as Reset Label Order in the Library heading's context menu does. Hidden labels stay hidden.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`BrowserState`](#browserstate).
 
 #### `browser.reset_tag_order`
 
@@ -2891,6 +3108,99 @@ Arguments:
 |---|---|---|---|
 | `paths` | array of string | yes | The items to select, by path, as rows of the content pane give them. Empty clears the selection. |
 | `add` | boolean | no | Add them to the selection instead of replacing it. |
+
+Result: [`BrowserState`](#browserstate).
+
+#### `browser.set_columns`
+
+**Set Browser Columns**. Permission: `edit`. Contexts: `global`, `browser`.
+
+Sets the content pane's columns: `shown`, the optional columns after Name (date_modified, size, kind, length, sample_rate, channels) in their order; `sort`, the column the list is sorted by, with `descending` to reverse it (folders stay first; ties go by name); and `file_extensions`, whether names show their extensions. Fields left out keep their values. Kept for the next start.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `descending` | boolean or null | no | Reverse the order. |
+| `file_extensions` | boolean or null | no | Show file extensions in names. |
+| `shown` | array or null | no | The optional columns shown, in their order after Name. |
+| `sort` | [`Column`](#column) or null | no | The column to sort by. |
+
+Result: [`BrowserState`](#browserstate).
+
+#### `browser.set_filter_groups`
+
+**Set Filter Groups**. Permission: `edit`. Contexts: `global`, `browser`.
+
+Chooses which filter groups a label shows in the Filter View (`label`, or the chosen one): `group` with `shown` true (the default) or false shows or hides that group; `show_all` shows every group; `reset` puts the label's groups back to the default ones. Give one of `group`, `show_all` and `reset`. Kept for the next start.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `group` | string or null | no | The group to show or hide, by its name. |
+| `label` | [`Label`](#label) or null | no | The label whose groups change. Left out, the chosen label. |
+| `reset` | boolean | no | Put the label's groups back to its default ones. |
+| `show_all` | boolean | no | Show every group. |
+| `shown` | boolean or null | no | Show (true) or hide (false) `group`. Left out, true. |
+
+Result: [`FilterViewState`](#filterviewstate).
+
+#### `browser.set_filter_view`
+
+**Show Filter View**. Permission: `edit`. Contexts: `global`, `browser`.
+
+Shows or hides the Filter View, the tag groups at the top of the browser's content pane, as Cmd-Option-G (Ctrl-Alt-G) and View > Show Filter View do. It shows in a new install. Left out, `show` toggles. Kept for the next start. Read the Filter View in `browser.state`'s `filter_view`.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-BRW-013 | `Cmd+Option+G` | `Ctrl+Alt+G` | `browser` | Show or hide the filter view | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `show` | boolean or null | no | Whether the Filter View shows. Left out, it toggles. |
+
+Result: [`FilterViewState`](#filterviewstate).
+
+#### `browser.set_label_icon`
+
+**Choose Label Icon**. Permission: `edit`. Contexts: `global`, `browser`, `browser-sidebar`.
+
+Gives a label one of Beatlayer's icons (`icon`: star, heart, circle, square, triangle, diamond, bolt, note, wave or cross), or takes it away (Reset Icon) when `icon` is left out. All, User Library and Current Project keep theirs. Kept for the next start.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `label` | [`Label`](#label) | yes | The label to give an icon. |
+| `icon` | string or null | no | One of [`LABEL_ICONS`]. Left out (or `null`), Reset Icon. |
+
+Result: [`BrowserState`](#browserstate).
+
+#### `browser.set_label_shown`
+
+**Show Label in Sidebar**. Permission: `edit`. Contexts: `global`, `browser`, `browser-sidebar`.
+
+Shows or hides a Library label or a saved label in the sidebar, as the check boxes in the Library section's Edit mode do. All can't be hidden. Hiding the chosen label chooses All. Kept for the next start.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `label` | [`Label`](#label) | yes | The Library label or saved label. |
+| `shown` | boolean | yes | Whether the sidebar shows it. |
 
 Result: [`BrowserState`](#browserstate).
 
@@ -3979,6 +4289,25 @@ Arguments:
 | `to` | [`Ticks`](#ticks) | yes | Where it goes: 0 or later, and not where another breakpoint of the same envelope already is. |
 | `kind` | [`EnvelopeKind`](#envelopekind) | no | Which of the clip's envelopes for the parameter: `modulation` (the default) or a Session clip's `automation`. |
 | `value` | number or null | no | The value it takes there, in the parameter's own units, or `null` (or nothing) to keep the value it has. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `clip.move_to_lane`
+
+**Move Clip to Lane**. Permission: `edit`. Contexts: `arrangement`.
+
+Moves a clip so it starts at `start` on the main lane of `track`, or, with `lane`, on that take lane of the track, out of the lane or Session slot it sat in. The track must be an audio or MIDI track of the clip's kind. It does not clear what the destination holds there; to move clips as the Arrangement does, replacing what they land on, use `arrangement.move_clips`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The clip. |
+| `track` | [`TrackId`](#trackid) | yes | The track it moves to. |
+| `start` | [`Ticks`](#ticks) | yes | Its new start. |
+| `lane` | [`TakeLaneId`](#takelaneid) or null | no | The take lane it moves to; the track's main lane when left out. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -8120,7 +8449,7 @@ Result: [`MidiImportResult`](#midiimportresult).
 
 **MIDI Ports**. Permission: `read`. Contexts: `global`.
 
-Lists every MIDI input and output port the computer offers, each with its Track, Sync, and Remote switches as the Settings window's Tempo & MIDI page shows them, and the computer MIDI keyboard's state. Changes nothing.
+Lists every MIDI input and output port the computer offers, each with its Track, Sync, Remote and MPE switches as the Settings window's Tempo & MIDI page shows them, and the computer MIDI keyboard's state. Changes nothing.
 
 Default keys: none.
 
@@ -8132,7 +8461,7 @@ Result: [`MidiPortsResult`](#midiportsresult).
 
 **Set MIDI Port**. Permission: `external`. Contexts: `global`.
 
-Changes a MIDI port's Track, Sync, and Remote switches, as the Settings window's MIDI ports table does; switches left out stay as they are. A port is open while any of its switches is on and closed when all are off. An input's notes and controllers reach tracks only while its Track switch is on; Sync and Remote are kept and act when sync and MIDI mapping are built. The port's switches are kept for the next start, and aren't part of the set or an undo step. Opens or closes a device outside Beatlayer. Fails if the computer doesn't offer the port now.
+Changes a MIDI port's Track, Sync, Remote and MPE switches, as the Settings window's MIDI ports table does; switches left out stay as they are. A port is open while its Track, Sync or Remote switch is on and closed when all three are off; MPE opens nothing by itself. An input's notes and controllers reach tracks only while its Track switch is on, and as MPE, each note on a channel of its own with its own pitch, slide and pressure, while its MPE switch is on too; Sync and Remote are kept and act when sync and MIDI mapping are built. Output ports have no MPE switch, and `mpe` on one is refused. The port's switches are kept for the next start, and aren't part of the set or an undo step. Opens or closes a device outside Beatlayer. Fails if the computer doesn't offer the port now.
 
 Default keys: none.
 
@@ -8142,6 +8471,7 @@ Arguments:
 |---|---|---|---|
 | `direction` | [`PortDirection`](#portdirection) | yes | Input or output. |
 | `name` | string | yes | The port's name, as `midi.ports` lists it. |
+| `mpe` | boolean or null | no | MPE on or off, for an input. Left out, it stays as it is. |
 | `remote` | boolean or null | no | Remote on or off. Left out, it stays as it is. |
 | `sync` | boolean or null | no | Sync on or off. Left out, it stays as it is. |
 | `track` | boolean or null | no | Track on or off. Left out, it stays as it is. |
@@ -9261,6 +9591,25 @@ Arguments:
 | `by` | [`Ticks`](#ticks) | yes | How far each note's end moves, in ticks; negative is shorter. A note keeps at least one tick of length. |
 | `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows (the Arrangement's selected clip). |
 | `clips` | array or null | no | The clips, each with its notes, in place of `clip` and `notes` (Spec: multi-clip-editing R18). Left out with `clip` and `notes`, the selected notes of every clip shown, or of the active clip alone in Focus Mode. |
+| `notes` | array or null | no | The notes, by their place in the clip's notes in order (by start, then pitch). Left out, the selected notes. |
+
+Result: [`NoteEditResult`](#noteeditresult).
+
+#### `note.set_expression`
+
+**Set Note Expression**. Permission: `edit`. Contexts: `note-editor`, `note-selection`.
+
+Replaces one expression envelope of notes (`notes`, or the selected notes) with `breakpoints`, as editing the Clip View's MPE tab does: `envelope` is `pitch` (the note's own pitch bend in semitones from its key, -48 to 48), `slide` (0 to 127) or `pressure` (0 to 127). Each breakpoint is an `at` in ticks counted from the note's start, from 0 to the note's length, a `value` in the envelope's range, and a `bend` from -1 to 1 for the segment starting there (0 is straight); they go in order of `at`, none twice. An empty list clears the envelope. Nothing changes if a value, a position or a bend is out of range, two breakpoints share a position, or the clip isn't a MIDI clip. One undo step, Set Note Expression; the notes stay selected. The clip query's notes read each envelope back.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `envelope` | [`Expression`](#expression) | yes | Which envelope to replace: `pitch` (semitones from the note's key, −48 to 48), `slide` or `pressure` (0 to 127). |
+| `breakpoints` | array of [`Breakpoint`](#breakpoint) | yes | The breakpoints every one of the notes gets, each at a position in ticks counted from the note's start (0 to its length, in order, none twice), with a value in the envelope's range and an optional `bend` from −1 to 1 for the segment starting there. An empty list clears the envelope. |
+| `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows (the Arrangement's selected clip). |
 | `notes` | array or null | no | The notes, by their place in the clip's notes in order (by start, then pitch). Left out, the selected notes. |
 
 Result: [`NoteEditResult`](#noteeditresult).
@@ -12640,6 +12989,27 @@ Result: [`StemsStatus`](#stemsstatus).
 
 ### Area `take_lane`
 
+#### `take_lane.audition`
+
+**Audition Take Lane**. Permission: `edit`. Contexts: `arrangement`, `take-lanes`.
+
+Switches the audition of the take `lanes` (left out, the take lanes the selection is on: the headers, the time selection or the clips selected are on them) on or off, one lane for each track: of the lanes listed on one track, the last. Left without `on`, it switches them on, or off when each is auditioned already. While a take lane is auditioned its track plays it in place of its main lane (`take_lane.set_audition`). One undo step, `Audition Take Lane`. T runs it.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-COMP-003 | `T` | `T` | `take-lanes` | Audition the selected take lane | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `lanes` | array or null | no | The take lanes to audition; of those on one track, the last listed is the one. Left out, the take lanes the selection is on. |
+| `on` | boolean or null | no | Switch them on (true) or off (false). Left out, they switch on, or off when every one of them is auditioned already. |
+
+Result: [`LanesResult`](#lanesresult).
+
 #### `take_lane.comp_sources`
 
 **Comp Sources**. Permission: `read`. Contexts: `arrangement`.
@@ -12658,19 +13028,23 @@ Result: [`CompSourcesResult`](#compsourcesresult).
 
 #### `take_lane.copy_to_main_lane`
 
-**Copy Selection to Main Lane**. Permission: `edit`. Contexts: `arrangement`.
+**Copy Selection to Main Lane**. Permission: `edit`. Contexts: `arrangement`, `take-lanes`.
 
-Copies a take lane's material in `start`..`end` to its track's main lane, at the same place: each of the lane's clips the range reaches, cut at the range's edges as Split cuts, is copied under a new ID onto the main lane, where it replaces what it covers. Where the lane has no clip in the range, the main lane is left as it was. Of several `lanes` on one track, the last listed is copied from; lanes on several tracks each copy to their own track. The copies are independent of the take-lane clips. It is one undo step, an edit, and destructive as well when it replaces or shortens a main-lane clip. A frozen track refuses it.
+Copies a take lane's material in `start`..`end` to its track's main lane, at the same place (with `lanes`, `start` and `end` left out, it takes them from the selection: the take lanes the headers, the time selection or the clips selected are on, and the time or the clips' span; Enter runs it so): each of the lane's clips the range reaches, cut at the range's edges as Split cuts, is copied under a new ID onto the main lane, where it replaces what it covers. Where the lane has no clip in the range, the main lane is left as it was. Of several `lanes` on one track, the last listed is copied from; lanes on several tracks each copy to their own track. The copies are independent of the take-lane clips. It is one undo step, an edit, and destructive as well when it replaces or shortens a main-lane clip. A frozen track refuses it.
 
-Default keys: none.
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-COMP-002 | `Enter` | `Enter` | `take-lanes` | Copy the selected take-lane area to the main lane | runs it |
 
 Arguments:
 
 | Name | Type | Required | Description |
 |---|---|---|---|
-| `lanes` | array of [`TakeLaneId`](#takelaneid) | yes | The take lanes to copy from. Of those on one track, the last listed is copied from. |
-| `start` | [`Position`](#position) | yes | Where the range starts, in ticks or as `bar.beat.sixteenth` text. |
-| `end` | [`Position`](#position) | yes | Where the range ends, after `start`. |
+| `end` | [`Position`](#position) or null | no | Where the range ends, after `start`. Left out, the selection's end. |
+| `lanes` | array or null | no | The take lanes to copy from. Of those on one track, the last listed is copied from. Left out, the take lanes the selection is on: the headers selected, the lanes the time selection covers, or the lanes of the selected clips. |
+| `start` | [`Position`](#position) or null | no | Where the range starts, in ticks or as `bar.beat.sixteenth` text. Left out, the time selection's start, or the selected clips'. |
 
 Result: [`CompResult`](#compresult).
 
@@ -12741,17 +13115,21 @@ Result: [`ChangeSet`](#changeset).
 
 #### `take_lane.duplicate`
 
-**Duplicate Take Lane(s)**. Permission: `edit`. Contexts: `arrangement`.
+**Duplicate Take Lane(s)**. Permission: `edit`. Contexts: `arrangement`, `take-lanes`.
 
-Puts a copy of each of the take `lanes` directly after it, with its name and a copy of each of its clips under a new ID, in one undo step. The result's `lanes` are the copies' IDs.
+Puts a copy of each of the take `lanes` (left out, the take lanes whose headers are selected) directly after it, with its name and a copy of each of its clips under a new ID, in one undo step, and selects the copies. The result's `lanes` are the copies' IDs.
 
-Default keys: none.
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-COMP-005 | `Cmd+D` | `Ctrl+D` | `take-lanes` | Duplicate the selected take lane | runs it |
 
 Arguments:
 
 | Name | Type | Required | Description |
 |---|---|---|---|
-| `lanes` | array of [`TakeLaneId`](#takelaneid) | yes | The take lanes to copy. |
+| `lanes` | array or null | no | The take lanes to copy. Left out, the take lanes whose headers are selected. |
 
 Result: [`LanesResult`](#lanesresult).
 
@@ -12759,9 +13137,13 @@ Result: [`LanesResult`](#lanesresult).
 
 **Insert Take Lane**. Permission: `edit`. Contexts: `arrangement`.
 
-Adds an empty take lane to each of the audio or MIDI `tracks` (left out, the selected tracks): directly after the take lane of that track listed in `after`, or after its last take lane. Each is named `Take N`, one more than the highest number of a lane of the track named `Take` and a number, `Take 1` on a track with none. All of them are one undo step. The result's `lanes` are the new lanes' IDs.
+Adds an empty take lane to each of the audio or MIDI `tracks` (left out, the selected tracks): directly after the take lane of that track listed in `after` (left out, the take lanes whose headers are selected), or after its last take lane. Each is named `Take N`, one more than the highest number of a lane of the track named `Take` and a number, `Take 1` on a track with none. All of them are one undo step. The tracks' take lanes show afterwards, and Automation Mode is switched off to show them. The result's `lanes` are the new lanes' IDs.
 
-Default keys: none.
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-COMP-004 | `Shift+Option+T` | `Shift+Alt+T` | `arrangement` | Add a take lane | runs it |
 
 Arguments:
 
@@ -12828,7 +13210,7 @@ Result: [`ChangeSet`](#changeset).
 
 **Replace with Next or Previous Take**. Permission: `edit`. Contexts: `arrangement`.
 
-Replaces a track's main-lane material in `start`..`end` with the next take's (`direction` `next`, the take lane below) or the previous take's (`previous`, the one above), placed as `take_lane.copy_to_main_lane` places it, skipping take lanes with no clip in the range. With `lane` given, the selection is on that take lane and the next or previous take is counted from it; left out, the selection is on the main lane, and each main-lane clip's part of the range is counted from the take lane it uses (`take_lane.comp_sources`), a part that uses none from before the first take lane. A part with no take lane left in that direction is left as it was. It is one undo step, an edit, and destructive as well when it replaces or shortens a main-lane clip. A frozen track refuses it.
+Replaces a track's main-lane material in `start`..`end` with the next take's (`direction` `next`, the take lane below) or the previous take's (`previous`, the one above). With `track`, `start`, `end` and `lane` left out it takes them from the selection, on each audio or MIDI track the selection is on, as Cmd+Down and Cmd+Up do. The take is placed as `take_lane.copy_to_main_lane` places it, skipping take lanes with no clip in the range. With `lane` given, the selection is on that take lane and the next or previous take is counted from it; left out, the selection is on the main lane, and each main-lane clip's part of the range is counted from the take lane it uses (`take_lane.comp_sources`), a part that uses none from before the first take lane. A part with no take lane left in that direction is left as it was. It is one undo step, an edit, and destructive as well when it replaces or shortens a main-lane clip. A frozen track refuses it.
 
 Default keys: none.
 
@@ -12836,11 +13218,11 @@ Arguments:
 
 | Name | Type | Required | Description |
 |---|---|---|---|
-| `track` | [`TrackId`](#trackid) | yes | The audio or MIDI track whose main lane is changed. |
-| `start` | [`Position`](#position) | yes | Where the range starts, in ticks or as `bar.beat.sixteenth` text. |
-| `end` | [`Position`](#position) | yes | Where the range ends, after `start`. |
 | `direction` | [`TakeDirection`](#takedirection) | yes | Whether to take the next or the previous take. |
-| `lane` | [`TakeLaneId`](#takelaneid) or null | no | The take lane the selection is on, from which the next or previous take is counted. Left out, the selection is on the main lane, and each of its clips counts from the take lane it uses. |
+| `end` | [`Position`](#position) or null | no | Where the range ends, after `start`. Left out, the selection's end. |
+| `lane` | [`TakeLaneId`](#takelaneid) or null | no | The take lane the selection is on, from which the next or previous take is counted. Left out with `track` given, the selection is on the main lane, and each of its clips counts from the take lane it uses; left out with `track`, the selection says. |
+| `start` | [`Position`](#position) or null | no | Where the range starts, in ticks or as `bar.beat.sixteenth` text. Left out, the time selection's start, or the selected clips'. |
+| `track` | [`TrackId`](#trackid) or null | no | The audio or MIDI track whose main lane is changed. Left out, each audio or MIDI track the selection is on. |
 
 Result: [`CompResult`](#compresult).
 
@@ -14110,6 +14492,18 @@ Arguments:
 
 Result: [`FileManagerState`](#filemanagerstate).
 
+#### `view.toggle_full_height_browser`
+
+**Full-Height Browser**. Permission: `edit`. Contexts: `global`.
+
+Runs the browser column from under the Control Bar down to the Status Bar, instead of to the detail area's top; the Info View and the Clip or Device View stay open, under the main view to the browser's right. Calling it again puts the column back. Kept for the next start. Read in `view.state`'s `window.full_height_browser`. Changes nothing in the set.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`ViewResult`](#viewresult).
+
 #### `view.toggle_info_view`
 
 **Info**. Permission: `read`. Contexts: `global`.
@@ -14392,6 +14786,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`clip.move`](#clipmove) | the query tool's `clip` | `start` |
 | [`clip.move_by`](#clipmove_by) | the query tool's `clip` | `start` |
 | [`clip.move_envelope_breakpoint`](#clipmove_envelope_breakpoint) | the query tool's `clip` | `envelopes` |
+| [`clip.move_to_lane`](#clipmove_to_lane) | the query tool's `clip` | `start` |
 | [`clip.move_to_slot`](#clipmove_to_slot) | the query tool's `track` | `slots` |
 | [`clip.move_transient`](#clipmove_transient) | `clip.transients` | `transients` |
 | [`clip.move_warp_markers`](#clipmove_warp_markers) | the query tool's `clip` | `data.audio.warp_markers` |
@@ -14593,6 +14988,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`note.ramp_value`](#noteramp_value) | the query tool's `clip` | `data.midi.notes` |
 | [`note.randomize`](#noterandomize) | the query tool's `clip` | `data.midi.notes` |
 | [`note.resize`](#noteresize) | the query tool's `clip` | `data.midi.notes` |
+| [`note.set_expression`](#noteset_expression) | the query tool's `clip` | `data.midi.notes` |
 | [`note.set_value`](#noteset_value) | the query tool's `clip` | `data.midi.notes` |
 | [`note.split`](#notesplit) | the query tool's `clip` | `data.midi.notes` |
 | [`note.split_clip`](#notesplit_clip) | the query tool's `track` | `clips` |
@@ -14729,6 +15125,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`stems.cancel`](#stemscancel) | `stems.status` | `separation` |
 | [`stems.install`](#stemsinstall) | `stems.status` | `install` |
 | [`stems.separate`](#stemsseparate) | the query tool's `song` | `tracks` |
+| [`take_lane.audition`](#take_laneaudition) | the query tool's `track` | `take_lanes` |
 | [`take_lane.copy_to_main_lane`](#take_lanecopy_to_main_lane) | the query tool's `track` | `clips` |
 | [`take_lane.create_clip`](#take_lanecreate_clip) | the query tool's `track` | `take_lanes` |
 | [`take_lane.delete`](#take_lanedelete) | the query tool's `track` | `take_lanes` |
@@ -14780,6 +15177,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`tuning.set_range`](#tuningset_range) | `tuning.state` | `tuning` |
 | [`tuning.set_reference`](#tuningset_reference) | `tuning.state` | `tuning` |
 | [`view.set_zoom`](#viewset_zoom) | `view.state` | `window.zoom` |
+| [`view.toggle_full_height_browser`](#viewtoggle_full_height_browser) | `view.state` | `window.full_height_browser` |
 | [`view.zoom_in`](#viewzoom_in) | `view.state` | `window.zoom` |
 | [`view.zoom_out`](#viewzoom_out) | `view.state` | `window.zoom` |
 | [`view.zoom_reset`](#viewzoom_reset) | `view.state` | `window.zoom` |
@@ -14792,20 +15190,34 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`agent.new_token`](#agentnew_token) | a new random token, which an agent is never told: the Settings window shows it to the person |
 | [`app.quit`](#appquit) | the app ends, so there is nothing left to read from |
 | [`browser.add_folder`](#browseradd_folder) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
+| [`browser.add_label`](#browseradd_label) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.add_tag`](#browseradd_tag) | the browser's tags are read with `browser.tags`, which is `external` because it lists files outside the project |
 | [`browser.add_tag_group`](#browseradd_tag_group) | the browser's tags are read with `browser.tags`, which is `external` because it lists files outside the project |
+| [`browser.back`](#browserback) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
+| [`browser.clear_filters`](#browserclear_filters) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.delete_tag`](#browserdelete_tag) | the browser's tags are read with `browser.tags`, which is `external` because it lists files outside the project |
+| [`browser.filter`](#browserfilter) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
+| [`browser.forward`](#browserforward) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
+| [`browser.move_label`](#browsermove_label) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.move_tag`](#browsermove_tag) | the browser's tags are read with `browser.tags`, which is `external` because it lists files outside the project |
 | [`browser.open_folder`](#browseropen_folder) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.open_place`](#browseropen_place) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.preview`](#browserpreview) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.remove_folder`](#browserremove_folder) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
+| [`browser.remove_label`](#browserremove_label) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.rename_file`](#browserrename_file) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
+| [`browser.rename_label`](#browserrename_label) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.rename_tag`](#browserrename_tag) | the browser's tags are read with `browser.tags`, which is `external` because it lists files outside the project |
+| [`browser.reset_label_order`](#browserreset_label_order) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.reset_tag_order`](#browserreset_tag_order) | the browser's tags are read with `browser.tags`, which is `external` because it lists files outside the project |
 | [`browser.scrub_preview`](#browserscrub_preview) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.search`](#browsersearch) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.select`](#browserselect) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
+| [`browser.set_columns`](#browserset_columns) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
+| [`browser.set_filter_groups`](#browserset_filter_groups) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
+| [`browser.set_filter_view`](#browserset_filter_view) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
+| [`browser.set_label_icon`](#browserset_label_icon) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
+| [`browser.set_label_shown`](#browserset_label_shown) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.set_preview`](#browserset_preview) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.set_raw`](#browserset_raw) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.show_file`](#browsershow_file) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
@@ -15290,7 +15702,9 @@ What the Arrangement View shows: every view command returns it.
 | `selected_breakpoint` | [`SelectedBreakpoint`](#selectedbreakpoint) or null | no | The breakpoint selected in that lane (WP-6.26), if any: `automation.select_breakpoint` sets it. |
 | `selected_fade` | [`FadeHandleState`](#fadehandlestate) or null | no | The selected fade handle (WP-6.51), if any: Delete deletes its fade. |
 | `selected_lane` | [`Lane`](#lane) or null | no | The automation lane that has the keyboard (WP-6.26): the one the last click, or Up and Down, selected, while Automation Mode is on. The keys of the automation editing spec's R20 to R26 act on its envelope. |
-| `time_selection_lanes` | array of [`Lane`](#lane) | no | The lanes the time selection covers: each a track's own lane or its automation lane (the automation editing spec, R1). Empty when the selection names no lane. |
+| `selected_take_lanes` | array of [`TakeLaneId`](#takelaneid) | no | The take lanes whose headers are selected (the comping spec, R26), in the order they were selected. Their tracks are selected tracks too. |
+| `shown_take_lanes` | array of [`TrackId`](#trackid) | no | The tracks whose take lanes show (the comping spec, R24). |
+| `time_selection_lanes` | array of [`Lane`](#lane) | no | The lanes the time selection covers: each a track's own lane, a take lane under it, or its automation lane (the automation editing spec, R1; the comping spec, R26). Empty when the selection names no lane. |
 
 <details><summary>JSON Schema</summary>
 
@@ -15402,6 +15816,13 @@ What the Arrangement View shows: every view command returns it.
       },
       "type": "array"
     },
+    "selected_take_lanes": {
+      "description": "The take lanes whose headers are selected (the comping spec, R26), in the order they were selected. Their tracks are selected tracks too.",
+      "items": {
+        "$ref": "#/$defs/TakeLaneId"
+      },
+      "type": "array"
+    },
     "selected_tracks": {
       "description": "The selected tracks, top to bottom.",
       "items": {
@@ -15421,6 +15842,13 @@ What the Arrangement View shows: every view command returns it.
       "description": "Whether the track headers show their volume, pan, and sends.",
       "type": "boolean"
     },
+    "shown_take_lanes": {
+      "description": "The tracks whose take lanes show (the comping spec, R24).",
+      "items": {
+        "$ref": "#/$defs/TrackId"
+      },
+      "type": "array"
+    },
     "ticks_per_point": {
       "description": "The zoom: ticks of song time per point of screen.",
       "format": "double",
@@ -15438,7 +15866,7 @@ What the Arrangement View shows: every view command returns it.
       "description": "The selected span of time on the selected tracks, if any."
     },
     "time_selection_lanes": {
-      "description": "The lanes the time selection covers: each a track's own lane or its automation lane (the automation editing spec, R1). Empty when the selection names no lane.",
+      "description": "The lanes the time selection covers: each a track's own lane, a take lane under it, or its automation lane (the automation editing spec, R1; the comping spec, R26). Empty when the selection names no lane.",
       "items": {
         "$ref": "#/$defs/Lane"
       },
@@ -17643,8 +18071,14 @@ What the browser shows: most browser commands return it.
 | `index` | [`IndexState`](#indexstate) | yes | The index. |
 | `tag_editor` | boolean | yes | Whether the Tag Editor is open beside the content pane. |
 | `quick_tags` | boolean | yes | Whether Quick Tags shows at the content pane's bottom. |
+| `filter_view` | [`FilterViewState`](#filterviewstate) | yes | The Filter View: whether it shows, its groups under the chosen label, and the tags selected (spec: browser-tags R18 to R22). |
+| `saved_labels` | array of [`SavedLabelInfo`](#savedlabelinfo) | yes | The saved labels, in the order they were made (spec: browser-tags R24). |
+| `columns` | [`ColumnsState`](#columnsstate) | yes | The content pane's columns and sort (spec: browser-tags R27, R28). |
+| `can_back` | boolean | yes | Whether Browse Back can go back a step (spec: browser-tags R30). |
+| `can_forward` | boolean | yes | Whether Browse Forward can go forward a step. |
 | `note` | string or null | no | What the content pane says when it has no rows, such as which package fills an empty Library label. |
 | `renaming` | string or null | no | The file whose name is open for editing, after `clip.save_file` saved it: `browser.rename_file` gives it its new name. |
+| `renaming_label` | [`Label`](#label) or null | no | The label whose name is open for editing, after `browser.add_label` or `browser.rename_label` without a name. |
 
 <details><summary>JSON Schema</summary>
 
@@ -17652,6 +18086,22 @@ What the browser shows: most browser commands return it.
 {
   "description": "What the browser shows: most browser commands return it.",
   "properties": {
+    "can_back": {
+      "description": "Whether Browse Back can go back a step (spec: browser-tags R30).",
+      "type": "boolean"
+    },
+    "can_forward": {
+      "description": "Whether Browse Forward can go forward a step.",
+      "type": "boolean"
+    },
+    "columns": {
+      "$ref": "#/$defs/ColumnsState",
+      "description": "The content pane's columns and sort (spec: browser-tags R27, R28)."
+    },
+    "filter_view": {
+      "$ref": "#/$defs/FilterViewState",
+      "description": "The Filter View: whether it shows, its groups under the chosen label, and the tags selected (spec: browser-tags R18 to R22)."
+    },
     "first_row": {
       "description": "The index of the first row returned.",
       "format": "uint",
@@ -17695,10 +18145,29 @@ What the browser shows: most browser commands return it.
         "null"
       ]
     },
+    "renaming_label": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Label"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The label whose name is open for editing, after `browser.add_label` or `browser.rename_label` without a name."
+    },
     "rows": {
       "description": "Rows of the content pane, from `first_row`: the label's contents, with open folders' contents under them, or the search results.",
       "items": {
         "$ref": "#/$defs/Item"
+      },
+      "type": "array"
+    },
+    "saved_labels": {
+      "default": [],
+      "description": "The saved labels, in the order they were made (spec: browser-tags R24).",
+      "items": {
+        "$ref": "#/$defs/SavedLabelInfo"
       },
       "type": "array"
     },
@@ -17735,7 +18204,12 @@ What the browser shows: most browser commands return it.
     "preview",
     "index",
     "tag_editor",
-    "quick_tags"
+    "quick_tags",
+    "filter_view",
+    "saved_labels",
+    "columns",
+    "can_back",
+    "can_forward"
   ],
   "type": "object"
 }
@@ -19975,6 +20449,116 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `Column`
+
+A column of the content pane (spec: browser-tags R27). Name always shows, first.
+
+One of:
+
+- `"name"`: The item's name.
+- `"date_modified"`: When it changed.
+- `"size"`: Its size.
+- `"kind"`: What it is.
+- `"length"`: An audio file's length.
+- `"sample_rate"`: An audio file's sample rate.
+- `"channels"`: An audio file's channels.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A column of the content pane (spec: browser-tags R27). Name always shows, first.",
+  "oneOf": [
+    {
+      "const": "name",
+      "description": "The item's name.",
+      "type": "string"
+    },
+    {
+      "const": "date_modified",
+      "description": "When it changed.",
+      "type": "string"
+    },
+    {
+      "const": "size",
+      "description": "Its size.",
+      "type": "string"
+    },
+    {
+      "const": "kind",
+      "description": "What it is.",
+      "type": "string"
+    },
+    {
+      "const": "length",
+      "description": "An audio file's length.",
+      "type": "string"
+    },
+    {
+      "const": "sample_rate",
+      "description": "An audio file's sample rate.",
+      "type": "string"
+    },
+    {
+      "const": "channels",
+      "description": "An audio file's channels.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `ColumnsState`
+
+The content pane's columns, sort and file extensions (spec: browser-tags R27, R28).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `shown` | array of [`Column`](#column) | yes | The optional columns shown, in their order, after Name. |
+| `sort` | [`Column`](#column) | yes | The column the list is sorted by. |
+| `descending` | boolean | yes | Whether the order is reversed. |
+| `file_extensions` | boolean | yes | Whether names show their extensions. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The content pane's columns, sort and file extensions (spec: browser-tags R27, R28).",
+  "properties": {
+    "descending": {
+      "description": "Whether the order is reversed.",
+      "type": "boolean"
+    },
+    "file_extensions": {
+      "description": "Whether names show their extensions.",
+      "type": "boolean"
+    },
+    "shown": {
+      "description": "The optional columns shown, in their order, after Name.",
+      "items": {
+        "$ref": "#/$defs/Column"
+      },
+      "type": "array"
+    },
+    "sort": {
+      "$ref": "#/$defs/Column",
+      "description": "The column the list is sorted by."
+    }
+  },
+  "required": [
+    "shown",
+    "sort",
+    "descending",
+    "file_extensions"
+  ],
+  "type": "object"
 }
 ```
 
@@ -24308,6 +24892,43 @@ What `plugin.export_list` returns: the file it wrote.
 
 </details>
 
+### `Expression`
+
+Which of a note's three expression envelopes.
+
+One of:
+
+- `"pitch"`: The note's own pitch bend, in semitones from its key, −48 to +48.
+- `"slide"`: The finger's movement along the key, 0 to 127.
+- `"pressure"`: The note's own pressure, 0 to 127.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Which of a note's three expression envelopes.",
+  "oneOf": [
+    {
+      "const": "pitch",
+      "description": "The note's own pitch bend, in semitones from its key, −48 to +48.",
+      "type": "string"
+    },
+    {
+      "const": "slide",
+      "description": "The finger's movement along the key, 0 to 127.",
+      "type": "string"
+    },
+    {
+      "const": "pressure",
+      "description": "The note's own pressure, 0 to 127.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `External`
 
 An external device's routing: `port` (MIDI To, the MIDI output port's name as the MIDI settings list it; absent for No Output), `channel` (the MIDI channel, 1 to 16), `audio_from` (the audio interface's inputs it comes back on, a channel or a pair), and `hardware_latency`.
@@ -25080,6 +25701,172 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `FilterGroup`
+
+A filter group as the Filter View shows it: its tags that some item under the label carries.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | The group's name. |
+| `tags` | array of [`FilterTag`](#filtertag) | yes | Its tag buttons, in the Tag Editor's order. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A filter group as the Filter View shows it: its tags that some item under the label carries.",
+  "properties": {
+    "name": {
+      "description": "The group's name.",
+      "type": "string"
+    },
+    "tags": {
+      "description": "Its tag buttons, in the Tag Editor's order.",
+      "items": {
+        "$ref": "#/$defs/FilterTag"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "name",
+    "tags"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `FilterGroupChoice`
+
+A group the chosen label can show, as the Filter View Menu lists it.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | The group's name. |
+| `shown` | boolean | yes | Whether the label shows it. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A group the chosen label can show, as the Filter View Menu lists it.",
+  "properties": {
+    "name": {
+      "description": "The group's name.",
+      "type": "string"
+    },
+    "shown": {
+      "description": "Whether the label shows it.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "name",
+    "shown"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `FilterTag`
+
+A tag button in the Filter View.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | What the button says: the tag's name, a subtag's with its tag's. |
+| `full_name` | string | yes | The tag's full name. |
+| `selected` | boolean | yes | Whether the tag is selected. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A tag button in the Filter View.",
+  "properties": {
+    "full_name": {
+      "description": "The tag's full name.",
+      "type": "string"
+    },
+    "name": {
+      "description": "What the button says: the tag's name, a subtag's with its tag's.",
+      "type": "string"
+    },
+    "selected": {
+      "description": "Whether the tag is selected.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "name",
+    "full_name",
+    "selected"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `FilterViewState`
+
+The Filter View (spec: browser-tags R18 to R22).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `shown` | boolean | yes | Whether the Filter View shows. |
+| `groups` | array of [`FilterGroup`](#filtergroup) | yes | The groups it shows under the chosen label that have tags to show. |
+| `menu` | array of [`FilterGroupChoice`](#filtergroupchoice) | yes | Every group the chosen label can show, with whether it shows. |
+| `selected` | array of string | yes | The selected tags' full names. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The Filter View (spec: browser-tags R18 to R22).",
+  "properties": {
+    "groups": {
+      "description": "The groups it shows under the chosen label that have tags to show.",
+      "items": {
+        "$ref": "#/$defs/FilterGroup"
+      },
+      "type": "array"
+    },
+    "menu": {
+      "description": "Every group the chosen label can show, with whether it shows.",
+      "items": {
+        "$ref": "#/$defs/FilterGroupChoice"
+      },
+      "type": "array"
+    },
+    "selected": {
+      "description": "The selected tags' full names.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "shown": {
+      "description": "Whether the Filter View shows.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "shown",
+    "groups",
+    "menu",
+    "selected"
+  ],
+  "type": "object"
 }
 ```
 
@@ -26939,6 +27726,7 @@ One row of the content pane.
 | `depth` | integer from 0 to 65535 | yes | How deep it's indented: 0 at the top of the list. |
 | `open` | boolean | yes | For a folder, whether it's open. |
 | `clip_kind` | [`ClipFileKind`](#clipfilekind) or null | no | For a clip file, what it holds; `null` when its first bytes don't say (a damaged file), which placing refuses (clip files R6). |
+| `details` | [`ItemDetails`](#itemdetails) or null | no | What the optional columns show for it, left out while none shows (spec: browser-tags R27). |
 | `folder` | string or null | no | In search results, the folder it's in, relative to its place. |
 | `format` | [`PluginFormat`](#pluginformat) or null | no | For a plug-in, its format, which the row's badge shows (the plug-in scanning spec, R11). |
 
@@ -26965,6 +27753,17 @@ One row of the content pane.
       "maximum": 65535,
       "minimum": 0,
       "type": "integer"
+    },
+    "details": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ItemDetails"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "What the optional columns show for it, left out while none shows (spec: browser-tags R27)."
     },
     "folder": {
       "description": "In search results, the folder it's in, relative to its place.",
@@ -27009,6 +27808,83 @@ One row of the content pane.
     "depth",
     "open"
   ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ItemDetails`
+
+What an item's optional columns show (spec: browser-tags R27); a value the item doesn't have, such as a folder's length, is left out.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `channels` | integer or null | no | For an audio file, its number of channels. |
+| `kind` | string or null | no | What it is, in words: `Folder`, `Audio File`. |
+| `length_seconds` | number or null | no | For an audio file, how long it plays, in seconds. |
+| `modified` | integer or null | no | When it changed, in seconds since the epoch. |
+| `sample_rate` | integer or null | no | For an audio file, its sample rate in hertz. |
+| `size` | integer or null | no | Its size in bytes. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What an item's optional columns show (spec: browser-tags R27); a value the item doesn't have, such as a folder's length, is left out.",
+  "properties": {
+    "channels": {
+      "description": "For an audio file, its number of channels.",
+      "format": "uint16",
+      "maximum": 65535,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "kind": {
+      "description": "What it is, in words: `Folder`, `Audio File`.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "length_seconds": {
+      "description": "For an audio file, how long it plays, in seconds.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "modified": {
+      "description": "When it changed, in seconds since the epoch.",
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "sample_rate": {
+      "description": "For an audio file, its sample rate in hertz.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "size": {
+      "description": "Its size in bytes.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
   "type": "object"
 }
 ```
@@ -27490,7 +28366,7 @@ One of:
 
 ### `Label`
 
-A label in the browser's sidebar: `all`, a Library category (`sounds`, `drums`, `instruments`, `audio_effects`, `midi_effects`, `modulators`, `plug_ins`, `clips`, `samples`, `grooves`, `tunings`, `templates`), a place (`user_library`, `current_project`), or a folder added to Places, as `{"folder": "/its/path"}`.
+A label in the browser's sidebar: `all`, a Library category (`sounds`, `drums`, `instruments`, `audio_effects`, `midi_effects`, `modulators`, `plug_ins`, `clips`, `samples`, `grooves`, `tunings`, `templates`), a place (`user_library`, `current_project`), or a folder added to Places, as `{"folder": "/its/path"}`, or a saved label, as `{"saved": 3}`.
 
 One of:
 
@@ -27510,12 +28386,13 @@ One of:
 - `"user_library"`: The User Library folder.
 - `"current_project"`: The open set's project folder.
 - an object with `folder` (string): A folder the person added to Places, by its path.
+- an object with `saved` (integer): A saved label, by its ID (spec: browser-tags R24).
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "A label in the browser's sidebar: `all`, a Library category (`sounds`, `drums`, `instruments`, `audio_effects`, `midi_effects`, `modulators`, `plug_ins`, `clips`, `samples`, `grooves`, `tunings`, `templates`), a place (`user_library`, `current_project`), or a folder added to Places, as `{\"folder\": \"/its/path\"}`.",
+  "description": "A label in the browser's sidebar: `all`, a Library category (`sounds`, `drums`, `instruments`, `audio_effects`, `midi_effects`, `modulators`, `plug_ins`, `clips`, `samples`, `grooves`, `tunings`, `templates`), a place (`user_library`, `current_project`), or a folder added to Places, as `{\"folder\": \"/its/path\"}`, or a saved label, as `{\"saved\": 3}`.",
   "oneOf": [
     {
       "const": "all",
@@ -27604,6 +28481,20 @@ One of:
         "folder"
       ],
       "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "A saved label, by its ID (spec: browser-tags R24).",
+      "properties": {
+        "saved": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "saved"
+      ],
+      "type": "object"
     }
   ]
 }
@@ -27621,6 +28512,8 @@ A label as the sidebar lists it.
 | `name` | string | yes | Its name. |
 | `section` | [`Section`](#section) | yes | Its section. |
 | `available` | boolean | yes | Whether its folder can be read now (a place) or it has content (a Library label). A missing folder is listed greyed, as in Live. |
+| `shown` | boolean | yes | Whether the sidebar shows it: the person can hide Library labels and saved labels (spec: browser-tags R26). |
+| `icon` | string or null | no | The icon the person gave it, from [`LABEL_ICONS`] (spec: browser-tags R25). |
 | `path` | string or null | no | For a place, its folder; `null` for Current Project while the set has never been saved. |
 
 <details><summary>JSON Schema</summary>
@@ -27632,6 +28525,13 @@ A label as the sidebar lists it.
     "available": {
       "description": "Whether its folder can be read now (a place) or it has content (a Library label). A missing folder is listed greyed, as in Live.",
       "type": "boolean"
+    },
+    "icon": {
+      "description": "The icon the person gave it, from [`LABEL_ICONS`] (spec: browser-tags R25).",
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "label": {
       "$ref": "#/$defs/Label",
@@ -27651,13 +28551,19 @@ A label as the sidebar lists it.
     "section": {
       "$ref": "#/$defs/Section",
       "description": "Its section."
+    },
+    "shown": {
+      "default": true,
+      "description": "Whether the sidebar shows it: the person can hide Library labels and saved labels (spec: browser-tags R26).",
+      "type": "boolean"
     }
   },
   "required": [
     "label",
     "name",
     "section",
-    "available"
+    "available",
+    "shown"
   ],
   "type": "object"
 }
@@ -27667,18 +28573,19 @@ A label as the sidebar lists it.
 
 ### `Lane`
 
-Which lane a selection covers: `track` for a track's own lane, where its clips are, and `automation` for the automation lane under it, which shows a parameter.
+Which lane a selection covers: `track` for a track's own lane, where its clips are, `take` for one of its take lanes, and `automation` for the automation lane under it, which shows a parameter.
 
 One of:
 
 - an object with `type` = `"track"`, `track` ([`TrackId`](#trackid)): A track's own lane, where its clips are.
+- an object with `type` = `"take"`, `track` ([`TrackId`](#trackid)), `lane` ([`TakeLaneId`](#takelaneid)): One of a track's take lanes.
 - an object with `type` = `"automation"`, `track` ([`TrackId`](#trackid)), `target` ([`AutomationTarget`](#automationtarget)): A track's automation lane, which shows a parameter.
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "Which lane a selection covers: `track` for a track's own lane, where its clips are, and `automation` for the automation lane under it, which shows a parameter.",
+  "description": "Which lane a selection covers: `track` for a track's own lane, where its clips are, `take` for one of its take lanes, and `automation` for the automation lane under it, which shows a parameter.",
   "oneOf": [
     {
       "description": "A track's own lane, where its clips are.",
@@ -27695,6 +28602,29 @@ One of:
       "required": [
         "type",
         "track"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "One of a track's take lanes.",
+      "properties": {
+        "lane": {
+          "$ref": "#/$defs/TakeLaneId",
+          "description": "The take lane."
+        },
+        "track": {
+          "$ref": "#/$defs/TrackId",
+          "description": "The track."
+        },
+        "type": {
+          "const": "take",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "track",
+        "lane"
       ],
       "type": "object"
     },
@@ -31204,9 +32134,11 @@ A note in a MIDI clip.
 | `length` | [`Ticks`](#ticks) | yes | How long the note lasts. Always positive. |
 | `group` | integer or null | no | The probability group the note belongs to, an ID in the clip's `groups` (Spec: note-editing R21). |
 | `mute` | boolean | no | Whether the note is switched off, so it stays in place but doesn't play. |
-| `pressure` | array of [`PressurePoint`](#pressurepoint) | no | The note's own pressure, played as polyphonic pressure over its length: points in order of `at`, none at the same place. A note with none plays no pressure. |
+| `pitch` | array of [`Breakpoint`](#breakpoint) | no | The note's own pitch bend in semitones from its key, from −48 to +48 (WP-6.17; the MPE spec, R1): breakpoints counted from the note's start, in order of position with none at the same place. A note with none bends nowhere. |
+| `pressure` | array of [`Breakpoint`](#breakpoint) | no | The note's own pressure, from 0 to 127, as `pitch` is kept (the MIDI controller data spec, R2). A note with none plays no pressure. |
 | `probability` | number from 0 to 1 | no | The chance the note will play, from 0 to 1: 1 (100 %) unless given. |
 | `release_velocity` | integer from 1 to 127 | no | The release velocity, from 1 to 127; 64 unless given. |
+| `slide` | array of [`Breakpoint`](#breakpoint) | no | The finger's movement along the key, from 0 to 127, as `pitch` is kept. |
 | `velocity_deviation` | integer from -127 to 127 | no | How far velocity may deviate randomly, from -127 to +127: 0 unless given. |
 
 <details><summary>JSON Schema</summary>
@@ -31239,10 +32171,17 @@ A note in a MIDI clip.
       "description": "Whether the note is switched off, so it stays in place but doesn't play.",
       "type": "boolean"
     },
-    "pressure": {
-      "description": "The note's own pressure, played as polyphonic pressure over its length: points in order of `at`, none at the same place. A note with none plays no pressure.",
+    "pitch": {
+      "description": "The note's own pitch bend in semitones from its key, from −48 to +48 (WP-6.17; the MPE spec, R1): breakpoints counted from the note's start, in order of position with none at the same place. A note with none bends nowhere.",
       "items": {
-        "$ref": "#/$defs/PressurePoint"
+        "$ref": "#/$defs/Breakpoint"
+      },
+      "type": "array"
+    },
+    "pressure": {
+      "description": "The note's own pressure, from 0 to 127, as `pitch` is kept (the MIDI controller data spec, R2). A note with none plays no pressure.",
+      "items": {
+        "$ref": "#/$defs/Breakpoint"
       },
       "type": "array"
     },
@@ -31259,6 +32198,13 @@ A note in a MIDI clip.
       "maximum": 127,
       "minimum": 1,
       "type": "integer"
+    },
+    "slide": {
+      "description": "The finger's movement along the key, from 0 to 127, as `pitch` is kept.",
+      "items": {
+        "$ref": "#/$defs/Breakpoint"
+      },
+      "type": "array"
     },
     "start": {
       "$ref": "#/$defs/Ticks",
@@ -33430,6 +34376,7 @@ One MIDI port as the Settings window's table shows it.
 | `track` | boolean | yes | Track: an input's notes and controllers reach tracks; an output takes tracks' MIDI. |
 | `sync` | boolean | yes | Sync: an input's clock and transport messages are followed; an output sends clock. Kept now, acted on when sync is built. |
 | `remote` | boolean | yes | Remote: an input controls Beatlayer through MIDI mapping; an output sends feedback. Kept now, acted on when MIDI mapping is built. |
+| `mpe` | boolean | yes | MPE: an input's messages reach tracks as MPE, each note on a channel of its own; an output has no MPE switch, and reads false. |
 | `present` | boolean | yes | Whether the MIDI system offers the port now. |
 | `open` | boolean | yes | Whether it is open: any of its switches is on. |
 | `error` | string or null | no | Why it couldn't be opened, if it couldn't. |
@@ -33450,6 +34397,11 @@ One MIDI port as the Settings window's table shows it.
         "string",
         "null"
       ]
+    },
+    "mpe": {
+      "default": false,
+      "description": "MPE: an input's messages reach tracks as MPE, each note on a channel of its own; an output has no MPE switch, and reads false.",
+      "type": "boolean"
     },
     "name": {
       "description": "The name the MIDI system gives it.",
@@ -33482,6 +34434,7 @@ One MIDI port as the Settings window's table shows it.
     "track",
     "sync",
     "remote",
+    "mpe",
     "present",
     "open"
   ],
@@ -33613,43 +34566,6 @@ What the preset commands return.
     "device",
     "path",
     "name"
-  ],
-  "type": "object"
-}
-```
-
-</details>
-
-### `PressurePoint`
-
-One point of a note's pressure (WP-2.29): from `at` after the note's start the note's key is pressed to `value`, until the next point.
-
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `at` | [`Ticks`](#ticks) | yes | Where it takes effect, counted from the note's start: 0 or more and before the note's length. |
-| `value` | integer from 0 to 127 | yes | The pressure, from 0 to 127. |
-
-<details><summary>JSON Schema</summary>
-
-```json
-{
-  "description": "One point of a note's pressure (WP-2.29): from `at` after the note's start the note's key is pressed to `value`, until the next point.",
-  "properties": {
-    "at": {
-      "$ref": "#/$defs/Ticks",
-      "description": "Where it takes effect, counted from the note's start: 0 or more and before the note's length."
-    },
-    "value": {
-      "description": "The pressure, from 0 to 127.",
-      "format": "uint8",
-      "maximum": 127,
-      "minimum": 0,
-      "type": "integer"
-    }
-  },
-  "required": [
-    "at",
-    "value"
   ],
   "type": "object"
 }
@@ -36326,6 +37242,69 @@ What `clip.save_default` and `clip.defaults` return.
     "clip",
     "file",
     "defaults"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `SavedLabelInfo`
+
+A saved label (spec: browser-tags R24).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `label` | [`Label`](#label) | yes | The label, `{"saved": id}`. |
+| `name` | string | yes | Its name. |
+| `base` | [`Label`](#label) | yes | The label it was made under. |
+| `search` | string | yes | The search words it keeps. |
+| `tags` | array of string | yes | The tags it keeps, by their full names. |
+| `icon` | string or null | no | The icon it was given. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A saved label (spec: browser-tags R24).",
+  "properties": {
+    "base": {
+      "$ref": "#/$defs/Label",
+      "description": "The label it was made under."
+    },
+    "icon": {
+      "description": "The icon it was given.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "label": {
+      "$ref": "#/$defs/Label",
+      "description": "The label, `{\"saved\": id}`."
+    },
+    "name": {
+      "description": "Its name.",
+      "type": "string"
+    },
+    "search": {
+      "description": "The search words it keeps.",
+      "type": "string"
+    },
+    "tags": {
+      "description": "The tags it keeps, by their full names.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "label",
+    "name",
+    "base",
+    "search",
+    "tags"
   ],
   "type": "object"
 }
@@ -41756,6 +42735,7 @@ What the view commands return: the window's view state afterwards.
 |---|---|---|---|
 | `main_view` | string | yes | The main view: `arrangement` or `session`. |
 | `browser` | boolean | yes | Whether the browser shows. |
+| `full_height_browser` | boolean | yes | Whether the browser runs down to the Status Bar (Full-Height Browser, spec: browser R26). |
 | `info_view` | boolean | yes | Whether the Info View shows. |
 | `full_screen` | boolean | yes | Whether the main window is in full-screen mode. |
 | `zoom` | number | yes | The interface zoom, where 1 is 100%. |
@@ -41768,6 +42748,11 @@ What the view commands return: the window's view state afterwards.
   "properties": {
     "browser": {
       "description": "Whether the browser shows.",
+      "type": "boolean"
+    },
+    "full_height_browser": {
+      "default": false,
+      "description": "Whether the browser runs down to the Status Bar (Full-Height Browser, spec: browser R26).",
       "type": "boolean"
     },
     "full_screen": {
@@ -41791,6 +42776,7 @@ What the view commands return: the window's view state afterwards.
   "required": [
     "main_view",
     "browser",
+    "full_height_browser",
     "info_view",
     "full_screen",
     "zoom"

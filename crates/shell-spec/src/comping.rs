@@ -8,7 +8,7 @@
 //!
 //! [`register`] adds their specs, and `bl-shell` runs them.
 
-use bl_commands::Context::Arrangement;
+use bl_commands::Context::{Arrangement, TakeLanes};
 use bl_commands::{CommandSpec, Permission, RegisterError, Registry};
 use bl_model::{ClipId, TakeLaneId, TrackId};
 use schemars::JsonSchema;
@@ -30,6 +30,8 @@ pub const REPLACE_WITH_TAKE: &str = "take_lane.replace_with_take";
 pub const MOVE_COMP_EDGE: &str = "take_lane.move_comp_edge";
 /// `take_lane.comp_sources`: which take-lane material the main lane uses.
 pub const COMP_SOURCES: &str = "take_lane.comp_sources";
+/// `take_lane.audition`: audition the selected take lanes (T).
+pub const AUDITION: &str = "take_lane.audition";
 
 /// Every command [`register`] adds, so a host knows which IDs to send to
 /// `bl-shell`'s `Shell::run`.
@@ -40,6 +42,7 @@ pub const IDS: &[&str] = &[
     REPLACE_WITH_TAKE,
     MOVE_COMP_EDGE,
     COMP_SOURCES,
+    AUDITION,
 ];
 
 /// Whether `id` is one of the comping commands.
@@ -67,8 +70,10 @@ pub struct InsertArgs {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DuplicateArgs {
-    /// The take lanes to copy.
-    pub lanes: Vec<TakeLaneId>,
+    /// The take lanes to copy. Left out, the take lanes whose headers are
+    /// selected.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lanes: Option<Vec<TakeLaneId>>,
 }
 
 /// Arguments of `take_lane.copy_to_main_lane`.
@@ -76,12 +81,18 @@ pub struct DuplicateArgs {
 #[serde(deny_unknown_fields)]
 pub struct CopyToMainLaneArgs {
     /// The take lanes to copy from. Of those on one track, the last listed
-    /// is copied from.
-    pub lanes: Vec<TakeLaneId>,
+    /// is copied from. Left out, the take lanes the selection is on: the
+    /// headers selected, the lanes the time selection covers, or the lanes
+    /// of the selected clips.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lanes: Option<Vec<TakeLaneId>>,
     /// Where the range starts, in ticks or as `bar.beat.sixteenth` text.
-    pub start: Position,
-    /// Where the range ends, after `start`.
-    pub end: Position,
+    /// Left out, the time selection's start, or the selected clips'.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start: Option<Position>,
+    /// Where the range ends, after `start`. Left out, the selection's end.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end: Option<Position>,
 }
 
 /// Which way `take_lane.replace_with_take` goes.
@@ -98,19 +109,39 @@ pub enum TakeDirection {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ReplaceWithTakeArgs {
-    /// The audio or MIDI track whose main lane is changed.
-    pub track: TrackId,
+    /// The audio or MIDI track whose main lane is changed. Left out, each
+    /// audio or MIDI track the selection is on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub track: Option<TrackId>,
     /// Where the range starts, in ticks or as `bar.beat.sixteenth` text.
-    pub start: Position,
-    /// Where the range ends, after `start`.
-    pub end: Position,
+    /// Left out, the time selection's start, or the selected clips'.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start: Option<Position>,
+    /// Where the range ends, after `start`. Left out, the selection's end.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end: Option<Position>,
     /// Whether to take the next or the previous take.
     pub direction: TakeDirection,
     /// The take lane the selection is on, from which the next or previous
-    /// take is counted. Left out, the selection is on the main lane, and each
-    /// of its clips counts from the take lane it uses.
+    /// take is counted. Left out with `track` given, the selection is on the
+    /// main lane, and each of its clips counts from the take lane it uses;
+    /// left out with `track`, the selection says.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lane: Option<TakeLaneId>,
+}
+
+/// Arguments of `take_lane.audition`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AuditionArgs {
+    /// The take lanes to audition; of those on one track, the last listed
+    /// is the one. Left out, the take lanes the selection is on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lanes: Option<Vec<TakeLaneId>>,
+    /// Switch them on (true) or off (false). Left out, they switch on, or
+    /// off when every one of them is auditioned already.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on: Option<bool>,
 }
 
 /// Arguments of `take_lane.move_comp_edge`.
@@ -193,29 +224,36 @@ fn specs() -> Vec<CommandSpec> {
             .description(
                 "Adds an empty take lane to each of the audio or MIDI `tracks` (left out, the \
                  selected tracks): directly after the take lane of that track listed in \
-                 `after`, or after its last take lane. Each is named `Take N`, one more than \
-                 the highest number of a lane of the track named `Take` and a number, `Take 1` \
-                 on a track with none. All of them are one undo step. The result's `lanes` are \
-                 the new lanes' IDs.",
+                 `after` (left out, the take lanes whose headers are selected), or after its \
+                 last take lane. Each is named `Take N`, one more than the highest number of a \
+                 lane of the track named `Take` and a number, `Take 1` on a track with none. \
+                 All of them are one undo step. The tracks' take lanes show afterwards, and \
+                 Automation Mode is switched off to show them. The result's `lanes` are the new \
+                 lanes' IDs.",
             )
             .permission(Permission::Edit)
             .context(Arrangement)
+            .binding("S-COMP-004")
             .args::<InsertArgs>()
             .result::<LanesResult>(),
         CommandSpec::new(DUPLICATE, "Duplicate Take Lane(s)")
             .description(
-                "Puts a copy of each of the take `lanes` directly after it, with its name and a \
-                 copy of each of its clips under a new ID, in one undo step. The result's \
-                 `lanes` are the copies' IDs.",
+                "Puts a copy of each of the take `lanes` (left out, the take lanes whose headers \
+                 are selected) directly after it, with its name and a copy of each of its clips \
+                 under a new ID, in one undo step, and selects the copies. The result's `lanes` \
+                 are the copies' IDs.",
             )
             .permission(Permission::Edit)
-            .context(Arrangement)
+            .contexts([Arrangement, TakeLanes])
+            .binding("S-COMP-005")
             .args::<DuplicateArgs>()
             .result::<LanesResult>(),
         CommandSpec::new(COPY_TO_MAIN_LANE, "Copy Selection to Main Lane")
             .description(
                 "Copies a take lane's material in `start`..`end` to its track's main lane, at \
-                 the same place: each of the lane's clips the range reaches, cut at the range's \
+                 the same place (with `lanes`, `start` and `end` left out, it takes them from \
+                 the selection: the take lanes the headers, the time selection or the clips \
+                 selected are on, and the time or the clips' span; Enter runs it so): each of the lane's clips the range reaches, cut at the range's \
                  edges as Split cuts, is copied under a new ID onto the main lane, where it \
                  replaces what it covers. Where the lane has no clip in the range, the main \
                  lane is left as it was. Of several `lanes` on one track, the last listed is \
@@ -225,14 +263,17 @@ fn specs() -> Vec<CommandSpec> {
                  track refuses it.",
             )
             .permission(Permission::Edit)
-            .context(Arrangement)
+            .contexts([Arrangement, TakeLanes])
+            .binding("S-COMP-002")
             .args::<CopyToMainLaneArgs>()
             .result::<CompResult>(),
         CommandSpec::new(REPLACE_WITH_TAKE, "Replace with Next or Previous Take")
             .description(
                 "Replaces a track's main-lane material in `start`..`end` with the next take's \
                  (`direction` `next`, the take lane below) or the previous take's (`previous`, \
-                 the one above), placed as `take_lane.copy_to_main_lane` places it, skipping \
+                 the one above). With `track`, `start`, `end` and `lane` left out it takes them \
+                 from the selection, on each audio or MIDI track the selection is on, as \
+                 Cmd+Down and Cmd+Up do. The take is placed as `take_lane.copy_to_main_lane` places it, skipping \
                  take lanes with no clip in the range. With `lane` given, the selection is on \
                  that take lane and the next or previous take is counted from it; left out, \
                  the selection is on the main lane, and each main-lane clip's part of the \
@@ -259,6 +300,21 @@ fn specs() -> Vec<CommandSpec> {
             .context(Arrangement)
             .args::<MoveCompEdgeArgs>()
             .result::<CompResult>(),
+        CommandSpec::new(AUDITION, "Audition Take Lane")
+            .description(
+                "Switches the audition of the take `lanes` (left out, the take lanes the \
+                 selection is on: the headers, the time selection or the clips selected are on \
+                 them) on or off, one lane for each track: of the lanes listed on one track, the \
+                 last. Left without `on`, it switches them on, or off when each is auditioned \
+                 already. While a take lane is auditioned its track plays it in place of its \
+                 main lane (`take_lane.set_audition`). One undo step, `Audition Take Lane`. T \
+                 runs it.",
+            )
+            .permission(Permission::Edit)
+            .contexts([Arrangement, TakeLanes])
+            .binding("S-COMP-003")
+            .args::<AuditionArgs>()
+            .result::<LanesResult>(),
         CommandSpec::new(COMP_SOURCES, "Comp Sources")
             .description(
                 "Reports which take-lane material a track's main lane uses: a main-lane clip \

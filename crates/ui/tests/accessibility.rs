@@ -1726,6 +1726,21 @@ fn search_tracks(h: &mut Harness) {
 
 /// The list of the set's plug-ins, open in the detail area, with the
 /// keyboard in it (IMP-29, WP-6.41).
+/// The Clip View showing, as Cmd+Option+3 shows it.
+fn clip_view_shown(h: &mut Harness) {
+    h.shell.run("view.toggle_clip_view", json!({})).unwrap();
+}
+
+/// The keyboard focus in the detail area, off any control.
+fn detail_area(h: &mut Harness) {
+    h.shell.set_focused_area(bl_shell::Area::Detail);
+    h.ctx.memory_mut(|m| {
+        if let Some(id) = m.focused() {
+            m.surrender_focus(id);
+        }
+    });
+}
+
 fn plugin_list(h: &mut Harness) {
     h.shell
         .run("view.toggle_plugin_list", json!({}))
@@ -3010,6 +3025,25 @@ fn paths() -> BTreeMap<&'static str, Path> {
         (
             "view.set_plugin_list_only_missing",
             main(nothing, plugin_list, "Show Only Missing", Key::Enter),
+        ),
+        // The detail views (WP-6.27): Option-click on a view's toggle shows
+        // both, and the keys of the two toggles do the same one after the
+        // other; the Clip View's top edge is a splitter the keyboard reaches
+        // and the arrow keys move.
+        (
+            "view.show_detail_views",
+            Exception(Equivalent(
+                "Option-click on a view's toggle; Cmd+Option+3 and Cmd+Option+4 show both views in turn",
+            )),
+        ),
+        (
+            "view.set_detail_height",
+            main(
+                clip_view_shown,
+                detail_area,
+                "Clip View Height",
+                Key::ArrowUp,
+            ),
         ),
         // The search field (WP-6.42): Tab reaches its scope buttons and Show
         // Only Matches, and Enter presses them; the text, the arrows, Return

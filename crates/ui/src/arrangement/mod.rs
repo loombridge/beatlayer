@@ -934,6 +934,21 @@ impl ArrangementUi {
                 let _ = self
                     .automation
                     .double_click(view, doc, &lane, pos, modifiers, events);
+            } else if let Some(pos) = response.interact_pointer_pos()
+                && let Some(hit) = clip_lanes.hit(pos)
+            {
+                // Spec: detail-views R4 (I-CLICK-005). Double-clicking a clip
+                // selects it and shows the Clip View.
+                invoke(
+                    events,
+                    bl_shell::editing_commands::SELECT_CLIPS,
+                    json!({ "clips": [hit.clip] }),
+                );
+                events.extend(
+                    crate::main_window::open_view(shell, bl_shell::commands::DetailView::Clip)
+                        .into_iter()
+                        .map(UiEvent::Invoke),
+                );
             }
         } else if response.clicked()
             && let Some(pos) = response.interact_pointer_pos()

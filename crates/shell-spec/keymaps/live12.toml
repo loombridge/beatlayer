@@ -58,7 +58,10 @@ trigger = "press"
 milestone = "M2"
 mac = ["Shift+Tab", "F12"]
 win = ["Shift+Tab", "F12"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "view.switch_detail_view", contexts = ["global"] },
+]
 
 [[shortcut]]
 id = "S-VIEW-005"
@@ -69,7 +72,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Option+click a view toggle"]
 win = ["Alt+click a view toggle"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "view.show_detail_views", contexts = ["global"] },
+]
 
 [[shortcut]]
 id = "S-VIEW-006"
@@ -217,7 +223,10 @@ trigger = "press"
 milestone = "M2"
 mac = ["Cmd+Option+4"]
 win = ["Ctrl+Alt+4"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "view.toggle_device_view", contexts = ["global"] },
+]
 
 [[shortcut]]
 id = "S-VIEW-017"
@@ -320,7 +329,10 @@ trigger = "press"
 milestone = "M2"
 mac = ["Option+3"]
 win = ["Alt+3"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "focus.clip_view", contexts = ["global"] },
+]
 
 [[shortcut]]
 id = "S-FOCUS-005"
@@ -331,7 +343,10 @@ trigger = "press"
 milestone = "M2"
 mac = ["Option+4"]
 win = ["Alt+4"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "focus.device_view", contexts = ["global"] },
+]
 
 [[shortcut]]
 id = "S-FOCUS-006"
@@ -1977,7 +1992,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+Option+E"]
 win = ["Ctrl+Alt+E"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "view.expand_clip_view", contexts = ["clip-view"] },
+]
 
 [[shortcut]]
 id = "S-NOTE-031"
@@ -4418,7 +4436,10 @@ trigger = "press"
 milestone = "M2"
 mac = ["Cmd+Option+L"]
 win = ["Ctrl+Alt+L"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "view.toggle_detail_area", contexts = ["global"] },
+]
 
 [[shortcut]]
 id = "S-VIEW-023"

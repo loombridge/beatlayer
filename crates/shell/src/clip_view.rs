@@ -513,7 +513,8 @@ impl NoteClipboard {
 /// settings.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ClipView {
-    /// Whether the Clip View shows in the detail area.
+    /// Whether the Clip View shows in the detail area, as the shell's
+    /// detail area has it (detail-views R1).
     visible: bool,
     /// Whether Draw Mode is on (B).
     draw_mode: bool,
@@ -673,9 +674,10 @@ impl ClipView {
         }
     }
 
-    /// Shows the Clip View, or hides it.
-    pub fn toggle(&mut self) {
-        self.visible = !self.visible;
+    /// Records whether the Clip View shows: the detail area decides, and
+    /// the shell passes it on.
+    pub(crate) fn set_visible(&mut self, visible: bool) {
+        self.visible = visible;
     }
 
     /// Switches Draw Mode on or off.

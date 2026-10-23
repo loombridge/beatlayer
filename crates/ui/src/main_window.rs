@@ -11,7 +11,8 @@ use bl_model::{CountIn, MetronomeRhythm, MetronomeSound};
 use bl_shell::midi_io_commands as midi_ids;
 use bl_shell::settings::AutomationRecordMode;
 use bl_shell::{
-    Area, Effect, GesturePhase, Invocation, MainView, Shell, commands as ids, transport_commands,
+    Area, Effect, GesturePhase, Invocation, MainView, Shell, commands as ids, commands::DetailView,
+    transport_commands,
 };
 use egui::accesskit::Role;
 use egui::{
@@ -155,6 +156,8 @@ pub struct MainWindowUi {
     assistant: crate::assistant_panel::AssistantPanelUi,
     /// The Undo History panel (WP-6.28): the row the keyboard has moved to.
     undo_history: crate::undo_history_panel::UndoHistoryPanelUi,
+    /// The detail area's top edge (detail-views R10).
+    detail_edge: crate::detail_area::DetailEdge,
     /// The File Manager's switches (WP-6.63).
     file_manager: crate::file_manager::FileManagerUi,
     /// The search field (WP-6.42).
@@ -239,6 +242,7 @@ impl MainWindowUi {
             chain_names: Vec::new(),
             assistant: crate::assistant_panel::AssistantPanelUi::default(),
             undo_history: crate::undo_history_panel::UndoHistoryPanelUi::default(),
+            detail_edge: crate::detail_area::DetailEdge::default(),
         }
     }
 
@@ -446,12 +450,13 @@ impl MainWindowUi {
             let undo_history = shell
                 .undo_history_open()
                 .then_some(crate::layout::UNDO_HISTORY_WIDTH);
-            let layout = ShellLayout::compute_with_panes(
+            let layout = ShellLayout::compute_with_detail(
                 area.size(),
                 shell.browser_visible(),
                 shell.info_view_visible(),
                 assistant,
                 undo_history,
+                crate::layout::DetailViews::of(shell.detail()),
             )
             .translate(area.min.to_vec2());
             self.track_area_clicks(ctx, &layout, &mut events);
@@ -484,15 +489,14 @@ impl MainWindowUi {
             // land in the Arrangement (WP-1.10).
             // The zone editor, which sits over the foot of the Arrangement,
             // takes the files dropped on it itself.
+            let device_detail = layout.device_view.map_or(layout.detail, |device| {
+                Rect::from_min_max(pos2(layout.detail.left(), device.top()), layout.detail.max)
+            });
             let zone_editor =
-                crate::device_view::DeviceViewUi::zone_editor_rect(shell, layout.detail);
+                crate::device_view::DeviceViewUi::zone_editor_rect(shell, device_detail);
             // The Clip View takes a file dropped on it: it replaces the
             // clip's sample (R18).
-            let clip_view = if shell.clip_view().visible() {
-                layout.device_view
-            } else {
-                Rect::NOTHING
-            };
+            let clip_view = layout.clip_view.unwrap_or(Rect::NOTHING);
             self.browser.drop_overlay(
                 ui,
                 shell,
@@ -504,6 +508,7 @@ impl MainWindowUi {
             // under the pointer are known by the time it reads them.
             self.status_bar(ui, shell, theme, &layout, &mut events);
             self.info_view(ui, theme, shell, layout.info_view);
+            let scene = shell.scene_view_scene();
             if shell.file_manager_open() {
                 // Spec: file-management R10. The File Manager takes the
                 // detail area's place, in front of the Clip or Device View,
@@ -512,7 +517,7 @@ impl MainWindowUi {
                     ui,
                     shell,
                     theme,
-                    layout.device_view,
+                    layout.views(),
                     &mut self.file_manager,
                     &mut events,
                 );
@@ -521,37 +526,38 @@ impl MainWindowUi {
                 // the detail area's place, where the File Manager opens
                 // (L-OTH-002), in front of the Clip or Device View.
                 self.plugin_list
-                    .show(ui, shell, theme, layout.device_view, &mut events);
-            } else if let Some(scene) = shell.scene_view_scene() {
-                // Spec: session-view R21. A selected scene takes the detail
-                // area for the Scene View (L-SES-011).
-                crate::scene_view::show(ui, shell, theme, layout.device_view, scene, &mut events);
-            } else if shell.clip_view().visible() {
-                // Spec: piano-roll. The Clip View takes the detail area in
-                // place of the Device View.
-                let arrangement = &mut self.arrangement;
-                self.clip_view.show(
-                    ui,
-                    shell,
-                    theme,
-                    layout.device_view,
-                    &mut events,
-                    &mut |media| arrangement.peaks_of(media),
-                );
+                    .show(ui, shell, theme, layout.views(), &mut events);
             } else {
-                self.devices
-                    .show(ui, shell, theme, layout.device_view, &mut events);
+                // Spec: detail-views R13. A selected scene's Scene View
+                // (session-view R21) takes the place of the top view that
+                // shows, and waits while neither does.
+                let top = layout.clip_view.or(layout.device_view);
+                if let (Some(scene), Some(rect)) = (scene, top) {
+                    crate::scene_view::show(ui, shell, theme, rect, scene, &mut events);
+                }
+                if let Some(rect) = layout.clip_view
+                    && scene.is_none()
+                {
+                    // Spec: detail-views R7, R8. The Clip View takes its own
+                    // place, alone or above the Device View.
+                    let arrangement = &mut self.arrangement;
+                    self.clip_view
+                        .show(ui, shell, theme, rect, &mut events, &mut |media| {
+                            arrangement.peaks_of(media)
+                        });
+                }
+                if let Some(rect) = layout.device_view
+                    && (scene.is_none() || layout.clip_view.is_some())
+                {
+                    self.devices.show(ui, shell, theme, rect, &mut events);
+                    // Spec: multisampler R1. The zone editor sits above the
+                    // Device View.
+                    self.devices
+                        .show_zone_editor(ui, shell, theme, device_detail, &mut events);
+                }
             }
-            if !shell.plugin_list().visible()
-                && !shell.clip_view().visible()
-                && shell.scene_view_scene().is_none()
-                && !shell.file_manager_open()
-            {
-                // Spec: multisampler R1. The zone editor sits above the
-                // Device View.
-                self.devices
-                    .show_zone_editor(ui, shell, theme, layout.detail, &mut events);
-            }
+            self.detail_edge
+                .show(ui, theme, shell, &layout, &mut events);
             let shown = shell.device_view_state().devices;
             self.chain_names.clear();
             for device in &shown {
@@ -821,6 +827,20 @@ impl MainWindowUi {
             .find(|(_, rect)| rect.is_some_and(|r| r.contains(pos)))
         {
             events.push(UiEvent::FocusArea(*area));
+            // Spec: detail-views R14 (I-FOCUS-001). With both views showing,
+            // a click in one gives that view the focus.
+            if *area == Area::Detail
+                && let (Some(clip), Some(device)) = (layout.clip_view, layout.device_view)
+            {
+                let view = if clip.contains(pos) {
+                    ids::FOCUS_CLIP_VIEW
+                } else if device.contains(pos) {
+                    ids::FOCUS_DEVICE_VIEW
+                } else {
+                    return;
+                };
+                events.push(UiEvent::Invoke(Invocation::new(view, json!({}))));
+            }
         }
     }
 
@@ -874,10 +894,11 @@ impl MainWindowUi {
             if response.hovered() {
                 self.hovered = Some(*el);
             }
-            if response.clicked()
-                && let Some(invocation) = click(*el, shell)
-            {
-                events.push(UiEvent::Invoke(invocation));
+            if response.clicked() {
+                let option = ui.input(|input| input.modifiers.alt);
+                let invocations = detail_click(*el, shell, option)
+                    .unwrap_or_else(|| click(*el, shell).into_iter().collect());
+                events.extend(invocations.into_iter().map(UiEvent::Invoke));
             }
             if *el == Element::Metronome {
                 response.context_menu(|ui| {
@@ -1376,7 +1397,13 @@ fn outline_focused_area(ui: &Ui, shell: &Shell, theme: &Theme, layout: &ShellLay
         Area::ControlBar => Some(layout.control_bar),
         Area::Browser => layout.browser,
         Area::MainView => Some(layout.main_view),
-        Area::Detail => Some(layout.detail),
+        // Spec: detail-views R15. With both views showing, the outline goes
+        // round the one that has the focus.
+        Area::Detail => match (layout.clip_view, layout.device_view) {
+            (Some(clip), Some(_)) if shell.detail().focus() == DetailView::Clip => Some(clip),
+            (Some(_), Some(device)) => Some(device),
+            _ => Some(layout.detail),
+        },
         Area::StatusBar => Some(layout.status_bar),
         Area::Assistant => layout.assistant,
         Area::UndoHistory => layout.undo_history,
@@ -1502,18 +1529,29 @@ fn look(element: Element, shell: &Shell) -> Look {
                 ..Look::default()
             }
         }
-        Element::ClipViewToggle => Look {
-            on: shell.clip_view().visible(),
-            value: Some(
-                if shell.clip_view().visible() {
-                    "shown"
-                } else {
-                    "hidden"
-                }
-                .to_owned(),
-            ),
-            ..Look::default()
-        },
+        // Spec: detail-views R3 (L-STAT-004 to L-STAT-007). The toggles are
+        // on while their view shows; the Clip View's selector reads the name
+        // of the clip it shows.
+        Element::ClipViewToggle | Element::DeviceViewToggle => {
+            let on = if element == Element::ClipViewToggle {
+                shell.detail().clip_shown()
+            } else {
+                shell.detail().device_shown()
+            };
+            Look {
+                on,
+                value: Some(if on { "on" } else { "off" }.to_owned()),
+                ..Look::default()
+            }
+        }
+        Element::ClipSelector => {
+            let doc = shell.editor().document();
+            shell
+                .clip_view()
+                .shown_any_clip(doc, shell.arrangement())
+                .and_then(|clip| doc.clip(clip))
+                .map_or_else(Look::default, |clip| text(&clip.name))
+        }
         Element::DrawMode => Look {
             on: shell.clip_view().draw_mode(),
             value: Some(
@@ -1720,6 +1758,7 @@ fn command_of(element: Element) -> Option<&'static str> {
         Element::InfoToggle => Some(ids::VIEW_TOGGLE_INFO_VIEW),
         Element::AssistantToggle => Some(bl_shell::assistant::VIEW_TOGGLE_ASSISTANT),
         Element::ClipViewToggle => Some(ids::VIEW_TOGGLE_CLIP_VIEW),
+        Element::DeviceViewToggle => Some(ids::VIEW_TOGGLE_DEVICE_VIEW),
         Element::DrawMode => Some(ids::VIEW_DRAW_MODE),
         Element::ComputerKeyboard => Some(midi_ids::TOGGLE_COMPUTER_KEYBOARD),
         Element::SessionView | Element::ArrangementView => {
@@ -1728,6 +1767,65 @@ fn command_of(element: Element) -> Option<&'static str> {
         Element::MixerToggle => Some(bl_shell::mixer_view_commands::TOGGLE),
         _ => control_bar::command(element),
     }
+}
+
+/// What double-clicking a clip, a slot or a title bar, or a click on the
+/// Session View's status field, runs (detail-views R4): what a click on
+/// `view`'s selector runs, except that with both views showing neither is
+/// hidden.
+pub(crate) fn open_view(shell: &Shell, view: DetailView) -> Vec<Invocation> {
+    if shell.detail().clip_shown() && shell.detail().device_shown() {
+        Vec::new()
+    } else {
+        show_only(shell, view)
+    }
+}
+
+/// What a click on a view's selector runs (detail-views R3): the commands
+/// that show `view` and hide the other.
+fn show_only(shell: &Shell, view: DetailView) -> Vec<Invocation> {
+    let detail = shell.detail();
+    let command = |toggle| Invocation::new(toggle, json!({}));
+    let (own, own_shown, other, other_shown) = match view {
+        DetailView::Clip => (
+            ids::VIEW_TOGGLE_CLIP_VIEW,
+            detail.clip_shown(),
+            ids::VIEW_TOGGLE_DEVICE_VIEW,
+            detail.device_shown(),
+        ),
+        DetailView::Device => (
+            ids::VIEW_TOGGLE_DEVICE_VIEW,
+            detail.device_shown(),
+            ids::VIEW_TOGGLE_CLIP_VIEW,
+            detail.clip_shown(),
+        ),
+    };
+    let mut commands = Vec::new();
+    if !own_shown {
+        commands.push(command(own));
+    }
+    if other_shown {
+        commands.push(command(other));
+    }
+    commands
+}
+
+/// What clicking one of the detail area's toggles or selectors runs, or
+/// `None` for another element (detail-views R1 to R3): a toggle shows or
+/// hides its view, and Option-click on either shows both; a selector shows
+/// its view and hides the other.
+fn detail_click(element: Element, shell: &Shell, option: bool) -> Option<Vec<Invocation>> {
+    let toggle = |id| vec![Invocation::new(id, json!({}))];
+    Some(match element {
+        Element::ClipViewToggle | Element::DeviceViewToggle if option => {
+            toggle(ids::VIEW_SHOW_DETAIL_VIEWS)
+        }
+        Element::ClipViewToggle => toggle(ids::VIEW_TOGGLE_CLIP_VIEW),
+        Element::DeviceViewToggle => toggle(ids::VIEW_TOGGLE_DEVICE_VIEW),
+        Element::ClipSelector => show_only(shell, DetailView::Clip),
+        Element::DeviceSelector => show_only(shell, DetailView::Device),
+        _ => return None,
+    })
 }
 
 /// What clicking a live element runs.
@@ -1739,7 +1837,6 @@ fn click(element: Element, shell: &Shell) -> Option<Invocation> {
             bl_shell::assistant::VIEW_TOGGLE_ASSISTANT,
             json!({}),
         )),
-        Element::ClipViewToggle => Some(Invocation::new(ids::VIEW_TOGGLE_CLIP_VIEW, json!({}))),
         Element::DrawMode => Some(Invocation::new(ids::VIEW_DRAW_MODE, json!({}))),
         Element::ComputerKeyboard => Some(Invocation::new(
             midi_ids::TOGGLE_COMPUTER_KEYBOARD,

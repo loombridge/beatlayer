@@ -921,6 +921,11 @@ impl Positions<'_> {
                 rate,
             } => {
                 let started = tempo.seconds_to_ticks_exact(*launch as f64 / rate);
+                // A run ends at the next line of the speed grid, so each of
+                // its frames reads at its own grid frame's speed.
+                let grid = first.div_euclid(SPEED_GRID) * SPEED_GRID;
+                let until = out.len().min((grid + SPEED_GRID - first) as usize);
+                let out = &mut out[..until];
                 let mut frames = 0;
                 let mut wraps = 0;
                 let mut view = None;
@@ -959,7 +964,6 @@ impl Positions<'_> {
                 // depend on how the blocks fall (R6): the file frames the
                 // grid frame at or after the launch advances by in one song
                 // frame. A run with no such frame reads at the run's own.
-                let grid = first.div_euclid(SPEED_GRID) * SPEED_GRID;
                 let at = |frame: i64| {
                     let now = tempo.seconds_to_ticks_exact(frame as f64 / rate);
                     let played = (now - started).max(0.0);

@@ -667,7 +667,7 @@ Total to 1.0: 256 packages planned in Phases 0 to 6, and about 110 estimated in 
 | 6.25b | todo |  |  |
 | 6.25c | todo |  |  |
 | 6.26 | todo |  |  |
-| 6.27 | todo |  |  |
+| 6.27 | done | 23 October 2026 | [#325](https://github.com/loombridge/beatlayer/pull/325); the Clip View and the Device View with their own switches, shown alone, stacked or neither, with the Status Bar's toggles and selectors, Option-click, the double-clicks, Toggle Clip/Device View, Hide Device View, the top edge's drag, Expand Clip View and the focus between the two views |
 | 6.28 | done | 22 October 2026 | [#296](https://github.com/loombridge/beatlayer/pull/296); the Undo History panel lists the set's steps newest first in the Learn View's column, and a click or Enter on a row returns the set to that point in one jump that is no step of its own, with an agent's step marked with the agent's name ([undo history](specs/undo-history.md)) |
 | 6.29 | todo |  |  |
 | 6.29b | todo |  |  |

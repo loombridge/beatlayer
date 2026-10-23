@@ -116,6 +116,16 @@ impl Song {
         .unwrap()
     }
 
+    /// The detail area's state a detail command reports.
+    fn detail(&mut self, id: &str) -> bl_shell::commands::DetailState {
+        serde_json::from_value(
+            self.shell
+                .run(id, json!({}))
+                .unwrap_or_else(|e| panic!("{id} failed: {e}")),
+        )
+        .unwrap()
+    }
+
     /// The Quantize settings a settings command reports.
     fn settings(&mut self, id: &str, args: Value) -> QuantizeSettings {
         serde_json::from_value(
@@ -310,16 +320,17 @@ fn the_clip_view_and_draw_mode_are_view_switches() {
     // result says what they show.
     let mut song = song(Vec::new());
     let steps = song.steps();
-    let state = song.view("view.toggle_clip_view", json!({}));
-    assert!(state.visible);
-    assert_eq!(state.clip, Some(song.clip), "the selected MIDI clip shows");
+    let detail = song.detail("view.toggle_clip_view");
+    assert!(detail.clip_view);
     assert!(song.shell.clip_view().visible());
     assert!(!song.shell.is_dirty(), "the set doesn't change");
     let state = song.view("view.draw_mode", json!({}));
+    assert!(state.visible);
+    assert_eq!(state.clip, Some(song.clip), "the selected MIDI clip shows");
     assert!(state.draw_mode);
     assert!(song.shell.clip_view().draw_mode());
     assert_eq!(song.steps(), steps, "neither is an undo step");
-    assert!(!song.view("view.toggle_clip_view", json!({})).visible);
+    assert!(!song.detail("view.toggle_clip_view").clip_view);
 }
 
 #[test]

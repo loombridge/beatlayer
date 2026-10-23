@@ -47,6 +47,20 @@ pub fn create_user_library(path: &Path) -> io::Result<bool> {
     Ok(true)
 }
 
+/// Makes the starting folders in the User Library at `path`, and the
+/// library itself, where they aren't; what's already there is left alone
+/// (browser R24).
+///
+/// # Errors
+///
+/// If a folder can't be made.
+pub fn make_user_library(path: &Path) -> io::Result<()> {
+    for folder in USER_LIBRARY_FOLDERS {
+        std::fs::create_dir_all(path.join(folder))?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

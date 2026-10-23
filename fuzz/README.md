@@ -5,6 +5,7 @@ Fuzz targets for Beatlayer's file readers, run with [cargo-fuzz](https://github.
 | Target | What it feeds | Checks |
 |---|---|---|
 | `audio_header` | Bytes as read from an audio file of any format Beatlayer imports: the format probe, the header readers, and the limits on what a header may declare, then the first 4096 frames | No panic. Anything opened declares no more than `bl_media::limits` allows. |
+| `clip_file` | Bytes as read from a `.blclip` file: zstd, its checksum, the JSON, and the clip file's rules (kind, device IDs, racks) | No panic. Anything the reader accepts saves again and decodes to the same clip file. |
 | `dawproject` | Bytes as read from a `.dawproject` container, and `project.xml` alone: the ZIP reader, the XML reader and the import | No panic. Whatever the import makes obeys the document model's rules. |
 | `midi_file` | Bytes as read from a `.mid` or RMID file: the size cap, header and track chunks, events, tempo and time signatures | No panic. Every note has a length, a key and velocity in range, ends within its track, and comes in order. |
 | `peak_file` | Bytes as read from a `.blpeaks` file: magic, header, run table, data block, and BLAKE3 checksum | No panic. Anything the reader accepts saves again and loads back as the same peaks. |
@@ -40,6 +41,8 @@ cargo +nightly fuzz run audio_header corpus/audio_header -- \
 cargo +nightly fuzz run midi_file corpus/midi_file -- \
   -dict=dictionaries/midi_file.dict -max_total_time=300
 cargo +nightly fuzz run peak_file corpus/peak_file -- \
+  -max_total_time=300
+cargo +nightly fuzz run clip_file corpus/clip_file -- \
   -max_total_time=300
 cargo +nightly fuzz run preset corpus/preset -- \
   -max_total_time=300

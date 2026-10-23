@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-678 commands in 42 areas.
+687 commands in 42 areas.
 
 ## Permission classes
 
@@ -45,8 +45,11 @@ Each command has:
 | [`arrangement.consolidate`](#arrangementconsolidate) | Consolidate | `destructive` | `Cmd+J` | `Ctrl+J` |
 | [`arrangement.consolidate_to_scene`](#arrangementconsolidate_to_scene) | Consolidate Time to New Scene | `edit` |  |  |
 | [`arrangement.copy`](#arrangementcopy) | Copy | `read` | `Cmd+C` | `Ctrl+C` |
+| [`arrangement.create_fade`](#arrangementcreate_fade) | Create Fade | `edit` | `Cmd+Option+F` | `Ctrl+Alt+F` |
 | [`arrangement.cut`](#arrangementcut) | Cut | `destructive` | `Cmd+X` | `Ctrl+X` |
 | [`arrangement.delete`](#arrangementdelete) | Delete | `destructive` | `Delete` | `Delete` |
+| [`arrangement.delete_crossfade`](#arrangementdelete_crossfade) | Delete Crossfade | `edit` |  |  |
+| [`arrangement.delete_fades`](#arrangementdelete_fades) | Delete Fades | `edit` | `Cmd+Option+Delete` | `Ctrl+Alt+Backspace` |
 | [`arrangement.duplicate`](#arrangementduplicate) | Duplicate | `edit` | `Cmd+D` | `Ctrl+D` |
 | [`arrangement.fixed_grid`](#arrangementfixed_grid) | Fixed Grid | `read` | `Cmd+5` | `Ctrl+5` |
 | [`arrangement.focus_title_bar`](#arrangementfocus_title_bar) | Go to Track Title Bar | `read` | `Esc` | `Esc` |
@@ -66,9 +69,11 @@ Each command has:
 | [`arrangement.scroll`](#arrangementscroll) | Scroll Arrangement | `read` | `Shift+scroll`; `Cmd+Option+drag`; `Cmd+Option+drag` | `Shift+scroll`; `Ctrl+Alt+drag`; `Ctrl+Alt+drag` |
 | [`arrangement.select_all`](#arrangementselect_all) | Select All | `read` | `Cmd+A` | `Ctrl+A` |
 | [`arrangement.select_clips`](#arrangementselect_clips) | Select Clips | `read` | `Cmd+click`; `Cmd+click`; `Shift+click`; `Shift+click`; `Shift+click`, `Shift+drag` | `Ctrl+click`; `Ctrl+click`; `Shift+click`; `Shift+click`; `Shift+click`, `Shift+drag` |
+| [`arrangement.select_fade_handle`](#arrangementselect_fade_handle) | Select Fade Handle | `read` |  |  |
 | [`arrangement.select_loop`](#arrangementselect_loop) | Select Loop | `read` | `Cmd+Shift+L`; `Cmd+Shift+L` | `Ctrl+Shift+L`; `Ctrl+Shift+L` |
 | [`arrangement.select_time`](#arrangementselect_time) | Select Time | `read` |  |  |
 | [`arrangement.select_tracks`](#arrangementselect_tracks) | Select Tracks | `read` |  |  |
+| [`arrangement.set_crossfade`](#arrangementset_crossfade) | Set Crossfade | `edit` |  |  |
 | [`arrangement.set_grid`](#arrangementset_grid) | Grid | `read` |  |  |
 | [`arrangement.set_insert_marker`](#arrangementset_insert_marker) | Set Insert Marker | `read` |  |  |
 | [`arrangement.set_track_height`](#arrangementset_track_height) | Set Track Height | `read` |  |  |
@@ -135,6 +140,7 @@ Each command has:
 | [`browser.open_place`](#browseropen_place) | Open Browser Label | `external` |  |  |
 | [`browser.preview`](#browserpreview) | Preview | `external` |  |  |
 | [`browser.remove_folder`](#browserremove_folder) | Remove from Sidebar | `edit` |  |  |
+| [`browser.rename_file`](#browserrename_file) | Rename Browser File | `external` |  |  |
 | [`browser.rename_tag`](#browserrename_tag) | Rename Browser Tag | `edit` |  |  |
 | [`browser.reset_tag_order`](#browserreset_tag_order) | Reset Browser Tag Order | `edit` |  |  |
 | [`browser.scrub_preview`](#browserscrub_preview) | Scrub Preview | `external` |  |  |
@@ -210,6 +216,7 @@ Each command has:
 | [`clip.reverse`](#clipreverse) | Reverse Clip | `edit` |  |  |
 | [`clip.reverse_file`](#clipreverse_file) | Reverse Clip | `edit` |  |  |
 | [`clip.save_default`](#clipsave_default) | Save Default Clip | `external` |  |  |
+| [`clip.save_file`](#clipsave_file) | Save Clip as File | `external` |  |  |
 | [`clip.scale_tempo`](#clipscale_tempo) | Scale Clip Tempo | `edit` |  |  |
 | [`clip.set_1_1_1_here`](#clipset_1_1_1_here) | Set 1.1.1 Here | `edit` |  |  |
 | [`clip.set_data`](#clipset_data) | Replace Clip Contents | `edit` |  |  |
@@ -594,6 +601,7 @@ Each command has:
 | [`settings.set_auto_warp_long_samples`](#settingsset_auto_warp_long_samples) | Auto-Warp Long Samples | `edit` |  |  |
 | [`settings.set_automation_record_mode`](#settingsset_automation_record_mode) | Automation Record Mode | `edit` |  |  |
 | [`settings.set_brightness`](#settingsset_brightness) | Brightness | `edit` |  |  |
+| [`settings.set_collect_files_on_export`](#settingsset_collect_files_on_export) | Collect Files on Export | `edit` |  |  |
 | [`settings.set_color_hue`](#settingsset_color_hue) | Color Hue | `edit` |  |  |
 | [`settings.set_color_intensity`](#settingsset_color_intensity) | Color Intensity | `edit` |  |  |
 | [`settings.set_continuous_save`](#settingsset_continuous_save) | Save Continuously | `edit` |  |  |
@@ -613,6 +621,7 @@ Each command has:
 | [`settings.set_temporary_folder`](#settingsset_temporary_folder) | Temporary Folder | `edit` |  |  |
 | [`settings.set_theme`](#settingsset_theme) | Theme | `edit` |  |  |
 | [`settings.set_tone`](#settingsset_tone) | Tone | `edit` |  |  |
+| [`settings.set_user_library`](#settingsset_user_library) | User Library | `edit` |  |  |
 | [`settings.set_warp_recorded_audio`](#settingsset_warp_recorded_audio) | Warp Recorded Audio | `edit` |  |  |
 | [`settings.state`](#settingsstate) | Settings State | `read` |  |  |
 | [`slot.set_stop_button`](#slotset_stop_button) | Add Stop Button | `edit` | `Cmd+E` | `Ctrl+E` |
@@ -976,6 +985,29 @@ Arguments:
 
 Result: [`ClipboardState`](#clipboardstate).
 
+#### `arrangement.create_fade`
+
+**Create Fade**. Permission: `edit`. Contexts: `arrangement`.
+
+Makes fades and crossfades from the Arrangement's selection, as Create Fade (Cmd-Option-F) does, on the selected audio clips (`clips`) or the time selection on its audio tracks (`tracks`, `start`, `end`). With a span of time: a clip whose start the span holds, and not its end, gets a fade-in from its start to the span's end; a clip whose end it holds, and not its start, gets a fade-out from the span's start to its end; two audio clips that meet inside the span get a crossfade over it; a clip the span holds whole, or holds neither edge of, is left as it is. With clips, each boundary where two of them meet gets a 4 ms crossfade, 2 ms each side, whatever the Create Fades on Clip Edges setting. Each fade is kept within its clip's limits, so a span longer than a clip allows makes the longest fade there is. One undo step, named Create Fade or Create Crossfade. Refused where the selection gives no fade. Read the result back from the clips' `data` with the query tool: `fade_in`, `fade_out`, their curves, `fade_in_before` and `fade_out_after`.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-ARR-008 | `Cmd+Option+F` | `Ctrl+Alt+F` | `arrangement` | Create a fade or crossfade from the selection | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clips` | array or null | no | Whole clips to act on. Give either `clips` or a span of time, not both. |
+| `end` | [`Position`](#position) or null | no | Where the span ends, after `start`. Left out, the time selection's end. |
+| `start` | [`Position`](#position) or null | no | Where the span starts. Left out, the time selection's start. |
+| `tracks` | array or null | no | The tracks a span of time covers. Left out, the selected tracks. |
+
+Result: [`EditResult`](#editresult).
+
 #### `arrangement.cut`
 
 **Cut**. Permission: `destructive`. Contexts: `arrangement`.
@@ -1019,6 +1051,44 @@ Arguments:
 | `end` | [`Position`](#position) or null | no | Where the span ends, after `start`. Left out, the time selection's end. |
 | `start` | [`Position`](#position) or null | no | Where the span starts. Left out, the time selection's start. |
 | `tracks` | array or null | no | The tracks a span of time covers. Left out, the selected tracks. |
+
+Result: [`EditResult`](#editresult).
+
+#### `arrangement.delete_crossfade`
+
+**Delete Crossfade**. Permission: `edit`. Contexts: `arrangement`.
+
+Ends the crossfade between the two audio clips on a track that meet at `boundary`, leaving neither a fade there. Refused where they have no crossfade. The shell's `arrangement.delete_fades` does what Delete does on a selected fade handle, which with Create Fades on Clip Edges on gives the clips a 4 ms crossfade instead.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track. |
+| `boundary` | [`Ticks`](#ticks) | yes | Where the earlier clip ends and the later one starts. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `arrangement.delete_fades`
+
+**Delete Fades**. Permission: `edit`. Contexts: `arrangement`.
+
+Deletes the fades and crossfades of audio clips (`clips`, or the selected clips), or only those at one `edge` of each, as Delete does with a fade handle selected. With Create Fades on Clip Edges on, a fade goes back to 4 ms and a crossfade to the 4 ms crossfade of two clips that meet; with it off, fades go, and a crossfade with them, leaving the clips meeting with no fade. One undo step, named Delete Fade or Delete Fades. Cmd-Option-Delete (Ctrl-Alt-Backspace) runs this.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-ARR-009 | `Cmd+Option+Delete` | `Ctrl+Alt+Backspace` | `arrangement` | Delete the fades in the selected clips | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clips` | array or null | no | The audio clips. Left out, the selected clips. |
+| `edge` | [`Edge`](#edge) or null | no | Only the fade at this edge of each clip, as Delete does with one fade handle selected. Left out, both edges. |
 
 Result: [`EditResult`](#editresult).
 
@@ -1412,6 +1482,24 @@ Arguments:
 
 Result: [`ArrangementState`](#arrangementstate).
 
+#### `arrangement.select_fade_handle`
+
+**Select Fade Handle**. Permission: `read`. Contexts: `arrangement`.
+
+Selects one of an audio clip's fade handles, as clicking it does: the `peak` handle where the fade reaches full level, the `outer` handle where it reaches silence, or the `curve` handle, of the fade-in at the clip's `start` or the fade-out at its `end`. A selected handle shows how far it can go, and Delete deletes its fade (`arrangement.delete_fades`). Left without `clip`, it clears the selection. Changes only the view.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) or null | no | The audio clip. Left out, no handle is selected. |
+| `edge` | [`Edge`](#edge) or null | no | Which edge's fade: the fade-in at `start`, the fade-out at `end`. |
+| `handle` | [`FadeHandle`](#fadehandle) or null | no | Which of the fade's handles; `peak` if left out. |
+
+Result: [`ArrangementState`](#arrangementstate).
+
 #### `arrangement.select_loop`
 
 **Select Loop**. Permission: `read`. Contexts: `arrangement`, `loop-brace`.
@@ -1465,6 +1553,26 @@ Arguments:
 | `title_bars` | boolean | no | Select their title bars, so the track-header shortcuts (fold, show and hide grouped tracks) apply, as clicking a title bar does. |
 
 Result: [`ArrangementState`](#arrangementstate).
+
+#### `arrangement.set_crossfade`
+
+**Set Crossfade**. Permission: `edit`. Contexts: `arrangement`.
+
+Makes or changes the crossfade between two audio clips on a track that meet, the earlier one ending exactly where the later one starts: `boundary` is that position. The crossfade runs from `before` seconds before the boundary to `after` seconds past it, at least one of them above 0; over it the earlier clip fades out and the later one fades in, each playing what it would play there if its edge were moved to the span's far end, as resizing it would. `curve`, from -1 to 1, shapes both fades; 0, the default, is a straight line, so the two gains add to 1. Refused where no two audio clips meet at the boundary, or past a clip's fade limits: a crossfade reaches no further into a clip than the clip's other fade allows, takes in no point where a clip goes round its loop brace, and reads nothing before the start of a file. Read it back with the query tool's `clip` field `data`: the earlier clip's `fade_out` and `fade_out_after` and the later clip's `fade_in` and `fade_in_before`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track. |
+| `boundary` | [`Ticks`](#ticks) | yes | Where the earlier clip ends and the later one starts. |
+| `before` | number, at least 0 | yes | How many seconds before the boundary the crossfade starts. |
+| `after` | number, at least 0 | yes | How many seconds after the boundary the crossfade ends. |
+| `curve` | number from -1 to 1 | no | The curve of both fades, from −1 to 1: 0 is a straight line, so the two gains add to 1. |
+
+Result: [`ChangeSet`](#changeset).
 
 #### `arrangement.set_grid`
 
@@ -2585,6 +2693,23 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `path` | string | yes | The folder's path. |
+
+Result: [`BrowserState`](#browserstate).
+
+#### `browser.rename_file`
+
+**Rename Browser File**. Permission: `external`. Contexts: `browser`.
+
+Renames the file whose name is open for editing in the browser (or the file at `path`) to `name`, keeping its extension, as typing a name and pressing Enter does after a clip is saved. A name another file in the folder has is refused. Without a `name` the name is kept and editing ends, as Esc does. Renames a file outside the project.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `name` | string or null | no | The new name, without the extension. Left out (or `null`), the name is kept and editing ends, as Esc does. |
+| `path` | string or null | no | The file to rename. Left out, the file whose name is open for editing. |
 
 Result: [`BrowserState`](#browserstate).
 
@@ -3936,6 +4061,25 @@ Arguments:
 
 Result: [`SavedDefaults`](#saveddefaults).
 
+#### `clip.save_file`
+
+**Save Clip as File**. Permission: `external`. Contexts: `arrangement`, `browser`, `session`.
+
+Saves a clip from the Arrangement or a Session slot as a clip file (`.blclip`) in `folder` (the User Library's `Clips` folder if left out), as dragging the clip onto a folder in the browser does. The file keeps the clip as the set saves it (its notes or its warp markers, envelopes and launch settings) and the devices of its track with their state. It is named `name`, the clip's name, or its track's when the clip has none, with " 2", " 3" added for a name already taken, and written whole or not at all. The audio the clip and the devices play is copied into the `Samples/Imported` folder of the project the file lands in or left where it is, as Collect Files on Export says (`settings.state`'s `library.collect_files_on_export`); under Ask, `copy` answers for the person and leaving it out refuses the command. The new row is selected with its name open for editing (`browser.state`'s `renaming`; `browser.rename_file` finishes it). Changes nothing in the set. Writes files outside the project.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The clip to save: one in the Arrangement or in a Session slot. |
+| `copy` | boolean or null | no | Answers Collect Files on Export when it is set to Ask: `true` copies the audio files the clip and its track's devices play, `false` leaves the clip file naming them where they are. Under Always and Never it is ignored; under Ask, leaving it out refuses the command. |
+| `folder` | string or null | no | The folder to save it in. Left out, the User Library's `Clips` folder. |
+| `name` | string or null | no | The file's name, without the extension. Left out, the clip's name, or its track's when the clip has none. A name already taken in the folder gets " 2", " 3" and so on. |
+
+Result: [`SaveClipFileResult`](#saveclipfileresult).
+
 #### `clip.scale_tempo`
 
 **Scale Clip Tempo**. Permission: `edit`. Contexts: `clip-view`, `sample-editor`.
@@ -4052,7 +4196,7 @@ Result: [`ChangeSet`](#changeset).
 
 **Set Clip Fades**. Permission: `edit`. Contexts: `arrangement`.
 
-Sets the lengths, in seconds, of an audio clip's fade-in, from silence at the clip's start in the arrangement, and its fade-out, to silence at its end; 0 is no fade. Each fade is a straight line in amplitude. Short fades stop a clip that starts or ends mid-waveform from clicking: 0.004 (4 ms) is the length that Create Fades on Clip Edges gives new clips. Lengths must be finite and at least 0.
+Sets the lengths, in seconds, of an audio clip's fade-in, from silence at the clip's start in the arrangement, and its fade-out, to silence at its end; 0 is no fade. `fade_in_curve` and `fade_out_curve`, from -1 to 1, shape each: 0, the default, is a straight line in amplitude, a positive curve bows the fade towards full level and a negative one towards silence; left out, a curve stays as it is. Short fades stop a clip that starts or ends mid-waveform from clicking: 0.004 (4 ms) is the length that Create Fades on Clip Edges gives new clips. Lengths must be finite, at least 0 and within the clip's limits: a fade-in ends no later than the fade-out begins, and a fade takes in no point where the clip goes round its loop brace. Where a crossfade begins or ends at the clip, this sets the crossfade's part inside the clip and its curve, and the clip it meets follows; if it can't (its file doesn't reach back that far), the crossfade ends and each clip keeps its own fade. Read the result back with the query tool's `clip` field `data` and the clip's `fade_in_before` and `fade_out_after`.
 
 Default keys: none.
 
@@ -4061,8 +4205,10 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `clip` | [`ClipId`](#clipid) | yes | The audio clip. |
-| `fade_in` | number, at least 0 | yes | The fade-in's length in seconds from the clip's start: 0 for none. |
-| `fade_out` | number, at least 0 | yes | The fade-out's length in seconds up to the clip's end: 0 for none. |
+| `fade_in` | number, at least 0 | yes | The fade-in's length in seconds from the clip's start: 0 for none. Where a crossfade begins at the clip's start, this is how far past the start it runs. |
+| `fade_out` | number, at least 0 | yes | The fade-out's length in seconds up to the clip's end: 0 for none. Where a crossfade ends at the clip's end, this is how far before the end it begins. |
+| `fade_in_curve` | number or null | no | The fade-in's curve, from −1 to 1: 0 is a straight line, a positive curve bows towards full level and a negative one towards silence. Left out, the curve stays as it is. |
+| `fade_out_curve` | number or null | no | The fade-out's curve, from −1 to 1. Left out, the curve stays as it is. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -9801,7 +9947,7 @@ Result: [`ChangeSet`](#changeset).
 
 **Drop Files into a Slot**. Permission: `external`. Contexts: `session`.
 
-Puts audio files dropped from the browser, Finder, or Explorer into the Session slot at `track` and `scene`, as dropping them on a slot does: one after another down that track's scenes, or, with `spread` (Cmd, Ctrl on Windows and Linux, held while dropping), across the tracks at `scene`. Each target slot must be empty. Each file becomes a Session clip of its length, starting at the clip's beginning. One undo step. Reads the files, outside the project, and registers them so the set keeps them.
+Puts audio files dropped from the browser, Finder, or Explorer into the Session slot at `track` and `scene`, as dropping them on a slot does: one after another down that track's scenes, or, with `spread` (Cmd, Ctrl on Windows and Linux, held while dropping), across the tracks at `scene`. Each target slot must be empty. Each file becomes a Session clip of its length, starting at the clip's beginning. One undo step. Reads the files, outside the project, and registers them so the set keeps them. Clip files (`.blclip`) are placed as clips: in an empty slot on a track of their kind, bringing the track's devices when it has no clips and no devices; with no `track` (the Session's drop area), each on a new track of its kind in the scene, named after the file, with its devices; with `spread`, each on a track of its own across the tracks at `scene`. A track of the other kind, a group, return or Main track, and a slot holding a clip take none, and the command is refused.
 
 Default keys: none.
 
@@ -9810,9 +9956,9 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `paths` | array of string | yes | The files' paths, in the order dropped. |
-| `track` | [`TrackId`](#trackid) | yes | The track whose slot they go in. |
 | `scene` | [`SceneId`](#sceneid) | yes | The scene whose slot the first one goes in. |
 | `spread` | boolean | no | With the command modifier (Cmd, Ctrl on Windows and Linux) held, spread them across the tracks instead of down the scenes. |
+| `track` | [`TrackId`](#trackid) or null | no | The track whose slot they go in. Left out, the Session's drop area: clip files make a new track of their kind each, in the scene (audio files need a track). |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -10666,6 +10812,22 @@ Arguments:
 
 Result: nothing (`null`).
 
+#### `settings.set_collect_files_on_export`
+
+**Collect Files on Export**. Permission: `edit`. Contexts: `settings`.
+
+Chooses Collect Files on Export on the Settings window's Library page: what happens to the audio files a clip or a set uses when it is saved to the browser as a clip file or a set. `always` (a new install's choice) copies every such file that isn't already in the saved file's project into its `Samples/Imported` folder; `never` copies none, and the saved file names each file where it is; `ask` asks first, with Copy, Don't Copy and Cancel, and the commands that save to the browser refuse to run under it without their `copy` argument, so an agent asks the person first. Collect All and Save and device presets don't follow it. The setting is kept for the next start, and isn't part of the set or an undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `mode` | [`CollectFiles`](#collectfiles) | yes | `always`, `never` or `ask`. |
+
+Result: nothing (`null`).
+
 #### `settings.set_color_hue`
 
 **Color Hue**. Permission: `edit`. Contexts: `settings`.
@@ -10969,6 +11131,22 @@ Arguments:
 | `tone` | [`Tone`](#tone) | yes | `neutral`, `warm` or `cool`. |
 
 Result: nothing (`null`).
+
+#### `settings.set_user_library`
+
+**User Library**. Permission: `edit`. Contexts: `settings`.
+
+Chooses the User Library's folder on the Settings window's Library page. `path` is an absolute path, or `null` for the default. The folder becomes the User Library at once: its starting folders (Clips, Defaults, Grooves, Presets, Samples, Tunings) are made in it if it has none, and it is indexed in the background. Nothing is moved from the folder before. Run by a person from the Browse button without a `path`, it asks for a folder. The setting is kept for the next start, and isn't part of the set or an undo step. The result's `path` is the User Library in use afterwards.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `path` | string or null | no | The folder's absolute path, or `null` for the default: a `User Library` folder in a Beatlayer folder in the Music folder (the Documents folder on Windows). |
+
+Result: [`UserLibraryResult`](#userlibraryresult).
 
 #### `settings.set_warp_recorded_audio`
 
@@ -12569,8 +12747,11 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`agent.set_server`](#agentset_server) | `settings.state` | `agents.server` |
 | [`arrangement.consolidate`](#arrangementconsolidate) | the query tool's `track` | `clips` |
 | [`arrangement.consolidate_to_scene`](#arrangementconsolidate_to_scene) | the query tool's `song` | `scenes` |
+| [`arrangement.create_fade`](#arrangementcreate_fade) | the query tool's `clip` | `data.audio.fade_in` |
 | [`arrangement.cut`](#arrangementcut) | the query tool's `track` | `clips` |
 | [`arrangement.delete`](#arrangementdelete) | the query tool's `track` | `clips` |
+| [`arrangement.delete_crossfade`](#arrangementdelete_crossfade) | the query tool's `clip` | `data.audio.fade_in_before` |
+| [`arrangement.delete_fades`](#arrangementdelete_fades) | the query tool's `clip` | `data.audio.fade_in` |
 | [`arrangement.duplicate`](#arrangementduplicate) | the query tool's `track` | `clips` |
 | [`arrangement.loop_selection`](#arrangementloop_selection) | `transport.state` | `loop_start` |
 | [`arrangement.move_clips`](#arrangementmove_clips) | the query tool's `track` | `clips` |
@@ -12578,6 +12759,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`arrangement.paste`](#arrangementpaste) | the query tool's `track` | `clips` |
 | [`arrangement.resize_clips`](#arrangementresize_clips) | the query tool's `track` | `clips` |
 | [`arrangement.reverse`](#arrangementreverse) | the query tool's `track` | `clips` |
+| [`arrangement.set_crossfade`](#arrangementset_crossfade) | the query tool's `clip` | `data.audio.fade_in_before` |
 | [`arrangement.split`](#arrangementsplit) | the query tool's `track` | `clips` |
 | [`articulation.add`](#articulationadd) | `articulation.list` | `articulations` |
 | [`articulation.delete`](#articulationdelete) | `articulation.list` | `articulations` |
@@ -12908,6 +13090,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`settings.set_auto_warp_long_samples`](#settingsset_auto_warp_long_samples) | `settings.state` | `warp.auto_warp_long_samples` |
 | [`settings.set_automation_record_mode`](#settingsset_automation_record_mode) | `settings.state` | `automation_record_mode` |
 | [`settings.set_brightness`](#settingsset_brightness) | `settings.state` | `theme_colors.brightness` |
+| [`settings.set_collect_files_on_export`](#settingsset_collect_files_on_export) | `settings.state` | `library.collect_files_on_export` |
 | [`settings.set_color_hue`](#settingsset_color_hue) | `settings.state` | `theme_colors.color_hue` |
 | [`settings.set_color_intensity`](#settingsset_color_intensity) | `settings.state` | `theme_colors.color_intensity` |
 | [`settings.set_continuous_save`](#settingsset_continuous_save) | `settings.state` | `file_folder.save_continuously` |
@@ -12927,6 +13110,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`settings.set_temporary_folder`](#settingsset_temporary_folder) | `settings.state` | `file_folder.temporary_folder` |
 | [`settings.set_theme`](#settingsset_theme) | `settings.state` | `theme_colors.theme` |
 | [`settings.set_tone`](#settingsset_tone) | `settings.state` | `theme_colors.tone` |
+| [`settings.set_user_library`](#settingsset_user_library) | `settings.state` | `library.user_library` |
 | [`settings.set_warp_recorded_audio`](#settingsset_warp_recorded_audio) | `settings.state` | `warp_recorded_audio` |
 | [`slot.set_stop_button`](#slotset_stop_button) | the query tool's `track` | `removed_stop_buttons` |
 | [`song.add_locator`](#songadd_locator) | the query tool's `song` | `settings.locators` |
@@ -13004,6 +13188,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`browser.open_place`](#browseropen_place) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.preview`](#browserpreview) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.remove_folder`](#browserremove_folder) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
+| [`browser.rename_file`](#browserrename_file) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.rename_tag`](#browserrename_tag) | the browser's tags are read with `browser.tags`, which is `external` because it lists files outside the project |
 | [`browser.reset_tag_order`](#browserreset_tag_order) | the browser's tags are read with `browser.tags`, which is `external` because it lists files outside the project |
 | [`browser.scrub_preview`](#browserscrub_preview) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
@@ -13017,6 +13202,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`browser.tag_items`](#browsertag_items) | the browser's tags are read with `browser.tags`, which is `external` because it lists files outside the project |
 | [`browser.tags`](#browsertags) | a query of its own: it reads the tags, and is `external` for the files it lists |
 | [`chain.save_preset`](#chainsave_preset) | writes a file outside the set; the set doesn't change |
+| [`clip.save_file`](#clipsave_file) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`device.autosample_cancel`](#deviceautosample_cancel) | it stops a running autosample |
 | [`device.save_default_preset`](#devicesave_default_preset) | writes a file outside the set; the set doesn't change |
 | [`device.save_preset`](#devicesave_preset) | writes a file outside the set; the set doesn't change |
@@ -13487,6 +13673,7 @@ What the Arrangement View shows: every view command returns it.
 | `show_volume` | boolean | yes | Whether the track headers show their volume, pan, and sends. |
 | `show_return_tracks` | boolean | yes | Whether the return tracks' rows show in the lanes. |
 | `automation_lanes` | array of [`AutomationLane`](#automationlane) | no | The parameter each track's automation lane shows, for the tracks whose lane isn't showing the default (their volume): the choosers' choice. `target` `null` means the lane draws no envelope. |
+| `selected_fade` | [`FadeHandleState`](#fadehandlestate) or null | no | The selected fade handle (WP-6.51), if any: Delete deletes its fade. |
 | `time_selection_lanes` | array of [`Lane`](#lane) | no | The lanes the time selection covers: each a track's own lane or its automation lane (the automation editing spec, R1). Empty when the selection names no lane. |
 
 <details><summary>JSON Schema</summary>
@@ -13557,6 +13744,17 @@ What the Arrangement View shows: every view command returns it.
         "$ref": "#/$defs/ClipId"
       },
       "type": "array"
+    },
+    "selected_fade": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/FadeHandleState"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The selected fade handle (WP-6.51), if any: Delete deletes its fade."
     },
     "selected_locators": {
       "default": [],
@@ -14104,7 +14302,11 @@ An audio clip's data: the audio file it plays, named by content hash, and how it
 | `detune` | number from -50 to 50 | no | The clip's Detune, in cents, from −50 to 50 (R2): 0 unless given. It shifts the clip's pitch in every mode but Re-Pitch (R10, R26). |
 | `end` | number or null | no | The End marker: where in the file, in seconds, a clip whose loop is off stops playing, after the Start marker; `null` (or nothing) for the end of the file. |
 | `fade_in` | number, at least 0 | no | The fade-in's length in seconds, from the clip's start in the Arrangement: 0 (no fade) unless given. |
+| `fade_in_before` | number, at least 0 | no | How many seconds before the clip's start a crossfade (R24) begins its fade-in, over the clip that ends where this one starts: 0 unless this clip is the later of two crossfaded ones. The fade-in's length is then this much before the start and `fade_in` after it. |
+| `fade_in_curve` | number from -1 to 1 | no | The fade-in's curve (the audio clips spec, R23), from −1 to 1: 0, the straight line, unless given. |
 | `fade_out` | number, at least 0 | no | The fade-out's length in seconds, up to the clip's end in the Arrangement: 0 (no fade) unless given. |
+| `fade_out_after` | number, at least 0 | no | How many seconds past the clip's end a crossfade (R24) ends its fade-out, under the clip that starts where this one ends: 0 unless this clip is the earlier of two crossfaded ones. The fade-out's length is then `fade_out` before the end and this much after it. |
+| `fade_out_curve` | number from -1 to 1 | no | The fade-out's curve, from −1 to 1: 0 unless given. |
 | `gain` | number, at least 0 | no | The clip's gain, as a linear gain: 1 (0 dB) unless given, 0.5 about −6 dB, and 0 silence (−∞ dB). Finite and 0 or more. |
 | `high_quality` | boolean | no | The HiQ switch (R12): on unless given. On, the clip is resampled by a band-limited interpolator wherever it is read at another rate than 1. |
 | `loop_end` | number or null | no | Where the loop brace ends in the file, in seconds, after its start; `null` (or nothing) for the end of the file. While the loop is on, the Start marker must be before it. |
@@ -14149,10 +14351,36 @@ An audio clip's data: the audio file it plays, named by content hash, and how it
       "minimum": 0.0,
       "type": "number"
     },
+    "fade_in_before": {
+      "description": "How many seconds before the clip's start a crossfade (R24) begins its fade-in, over the clip that ends where this one starts: 0 unless this clip is the later of two crossfaded ones. The fade-in's length is then this much before the start and `fade_in` after it.",
+      "format": "double",
+      "minimum": 0.0,
+      "type": "number"
+    },
+    "fade_in_curve": {
+      "description": "The fade-in's curve (the audio clips spec, R23), from −1 to 1: 0, the straight line, unless given.",
+      "format": "double",
+      "maximum": 1.0,
+      "minimum": -1.0,
+      "type": "number"
+    },
     "fade_out": {
       "description": "The fade-out's length in seconds, up to the clip's end in the Arrangement: 0 (no fade) unless given.",
       "format": "double",
       "minimum": 0.0,
+      "type": "number"
+    },
+    "fade_out_after": {
+      "description": "How many seconds past the clip's end a crossfade (R24) ends its fade-out, under the clip that starts where this one ends: 0 unless this clip is the earlier of two crossfaded ones. The fade-out's length is then `fade_out` before the end and this much after it.",
+      "format": "double",
+      "minimum": 0.0,
+      "type": "number"
+    },
+    "fade_out_curve": {
+      "description": "The fade-out's curve, from −1 to 1: 0 unless given.",
+      "format": "double",
+      "maximum": 1.0,
+      "minimum": -1.0,
       "type": "number"
     },
     "gain": {
@@ -15716,6 +15944,7 @@ What the browser shows: most browser commands return it.
 | `tag_editor` | boolean | yes | Whether the Tag Editor is open beside the content pane. |
 | `quick_tags` | boolean | yes | Whether Quick Tags shows at the content pane's bottom. |
 | `note` | string or null | no | What the content pane says when it has no rows, such as which package fills an empty Library label. |
+| `renaming` | string or null | no | The file whose name is open for editing, after `clip.save_file` saved it: `browser.rename_file` gives it its new name. |
 
 <details><summary>JSON Schema</summary>
 
@@ -15758,6 +15987,13 @@ What the browser shows: most browser commands return it.
     "quick_tags": {
       "description": "Whether Quick Tags shows at the content pane's bottom.",
       "type": "boolean"
+    },
+    "renaming": {
+      "description": "The file whose name is open for editing, after `clip.save_file` saved it: `browser.rename_file` gives it its new name.",
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "rows": {
       "description": "Rows of the content pane, from `first_row`: the label's contents, with open folders' contents under them, or the search results.",
@@ -17146,6 +17382,37 @@ An envelope a clip carries for a parameter of its track: the parameter it modula
 
 </details>
 
+### `ClipFileKind`
+
+What a clip file holds.
+
+One of:
+
+- `"audio"`: An audio clip.
+- `"midi"`: A MIDI clip.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a clip file holds.",
+  "oneOf": [
+    {
+      "const": "audio",
+      "description": "An audio clip.",
+      "type": "string"
+    },
+    {
+      "const": "midi",
+      "description": "A MIDI clip.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `ClipId`
 
 The ID of a clip: a positive integer, unique within the project and never reused.
@@ -17542,6 +17809,43 @@ What `view.close_plug_in_windows` returns: how many editor windows it closed.
     "closed"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `CollectFiles`
+
+What happens to the audio files a clip or a set uses when it is saved to the browser (file-management R7): Collect Files on Export.
+
+One of:
+
+- `"always"`: Copy the files into the saved file's project. A new install's choice.
+- `"never"`: Copy nothing: the saved file names each file where it is.
+- `"ask"`: Ask first, with Copy, Don't Copy and Cancel.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What happens to the audio files a clip or a set uses when it is saved to the browser (file-management R7): Collect Files on Export.",
+  "oneOf": [
+    {
+      "const": "always",
+      "description": "Copy the files into the saved file's project. A new install's choice.",
+      "type": "string"
+    },
+    {
+      "const": "never",
+      "description": "Copy nothing: the saved file names each file where it is.",
+      "type": "string"
+    },
+    {
+      "const": "ask",
+      "description": "Ask first, with Copy, Don't Copy and Cancel.",
+      "type": "string"
+    }
+  ]
 }
 ```
 
@@ -21580,6 +21884,83 @@ What `chain.extract` and `chain.extract_return` return.
 
 </details>
 
+### `FadeHandle`
+
+A fade's handle: `peak`, where it reaches full level; `outer`, where it reaches silence, at the clip's edge or a crossfade's far end; or `curve`, between them.
+
+One of:
+
+- `"peak"`: Where the fade reaches full level.
+- `"outer"`: Where it reaches silence.
+- `"curve"`: The handle that shapes it.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A fade's handle: `peak`, where it reaches full level; `outer`, where it reaches silence, at the clip's edge or a crossfade's far end; or `curve`, between them.",
+  "oneOf": [
+    {
+      "const": "peak",
+      "description": "Where the fade reaches full level.",
+      "type": "string"
+    },
+    {
+      "const": "outer",
+      "description": "Where it reaches silence.",
+      "type": "string"
+    },
+    {
+      "const": "curve",
+      "description": "The handle that shapes it.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `FadeHandleState`
+
+A selected fade handle.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The audio clip. |
+| `edge` | [`Edge`](#edge) | yes | Which edge's fade: the fade-in at `start`, the fade-out at `end`. |
+| `handle` | [`FadeHandle`](#fadehandle) | yes | Which of its handles. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A selected fade handle.",
+  "properties": {
+    "clip": {
+      "$ref": "#/$defs/ClipId",
+      "description": "The audio clip."
+    },
+    "edge": {
+      "$ref": "#/$defs/Edge",
+      "description": "Which edge's fade: the fade-in at `start`, the fade-out at `end`."
+    },
+    "handle": {
+      "$ref": "#/$defs/FadeHandle",
+      "description": "Which of its handles."
+    }
+  },
+  "required": [
+    "clip",
+    "edge",
+    "handle"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `FileBeats`
 
 A file's tempo and beats from its analysis, as `clip.transients` reports readiness: `seconds` is the file's length, `bpm` its tempo, `beats` the times in seconds of its beats, in order.
@@ -23194,6 +23575,7 @@ One row of the content pane.
 | `kind` | [`ItemKind`](#itemkind) | yes | What it is. |
 | `depth` | integer from 0 to 65535 | yes | How deep it's indented: 0 at the top of the list. |
 | `open` | boolean | yes | For a folder, whether it's open. |
+| `clip_kind` | [`ClipFileKind`](#clipfilekind) or null | no | For a clip file, what it holds; `null` when its first bytes don't say (a damaged file), which placing refuses (clip files R6). |
 | `folder` | string or null | no | In search results, the folder it's in, relative to its place. |
 | `format` | [`PluginFormat`](#pluginformat) or null | no | For a plug-in, its format, which the row's badge shows (the plug-in scanning spec, R11). |
 
@@ -23203,6 +23585,17 @@ One row of the content pane.
 {
   "description": "One row of the content pane.",
   "properties": {
+    "clip_kind": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ClipFileKind"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "For a clip file, what it holds; `null` when its first bytes don't say (a damaged file), which placing refuses (clip files R6)."
+    },
     "depth": {
       "description": "How deep it's indented: 0 at the top of the list.",
       "format": "uint16",
@@ -23272,6 +23665,7 @@ One of:
 - `"preset"`: A Beatlayer device preset, which loads into the device being hot-swapped (WP-2.4).
 - `"plugin"`: A plug-in the scanner found (WP-2.9).
 - `"device"`: One of Beatlayer's own devices, listed under a device label (the Modulators label, WP-5.10); its path is the device type's ID.
+- `"clip"`: A clip file (WP-6.34); the row's `clip_kind` says whether it holds an audio clip or a MIDI clip.
 
 <details><summary>JSON Schema</summary>
 
@@ -23312,6 +23706,11 @@ One of:
     {
       "const": "device",
       "description": "One of Beatlayer's own devices, listed under a device label (the Modulators label, WP-5.10); its path is the device type's ID.",
+      "type": "string"
+    },
+    {
+      "const": "clip",
+      "description": "A clip file (WP-6.34); the row's `clip_kind` says whether it holds an audio clip or a MIDI clip.",
       "type": "string"
     }
   ]
@@ -24951,6 +25350,40 @@ Sample peak and RMS level.
     "rms_dbfs",
     "crest_factor_db",
     "channels"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `LibrarySettings`
+
+The Library page's settings (L-SET-016).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `collect_files_on_export` | [`CollectFiles`](#collectfiles) | yes | Collect Files on Export, as `settings.set_collect_files_on_export` sets it. |
+| `user_library` | string | yes | The User Library's folder, as `settings.set_user_library` sets it; empty when there is none. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The Library page's settings (L-SET-016).",
+  "properties": {
+    "collect_files_on_export": {
+      "$ref": "#/$defs/CollectFiles",
+      "description": "Collect Files on Export, as `settings.set_collect_files_on_export` sets it."
+    },
+    "user_library": {
+      "description": "The User Library's folder, as `settings.set_user_library` sets it; empty when there is none.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "collect_files_on_export",
+    "user_library"
   ],
   "type": "object"
 }
@@ -31667,6 +32100,54 @@ One of:
 
 </details>
 
+### `SaveClipFileResult`
+
+What `clip.save_file` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | The clip file's path. |
+| `name` | string | yes | Its name, without the extension. |
+| `kind` | [`ClipFileKind`](#clipfilekind) | yes | Whether it holds an audio clip or a MIDI clip. |
+| `copied` | integer, at least 0 | yes | How many audio files were copied beside it. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `clip.save_file` returns.",
+  "properties": {
+    "copied": {
+      "description": "How many audio files were copied beside it.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "kind": {
+      "$ref": "#/$defs/ClipFileKind",
+      "description": "Whether it holds an audio clip or a MIDI clip."
+    },
+    "name": {
+      "description": "Its name, without the extension.",
+      "type": "string"
+    },
+    "path": {
+      "description": "The clip file's path.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "path",
+    "name",
+    "kind",
+    "copied"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `SavedCopy`
 
 What `set.save_copy` returns.
@@ -32815,6 +33296,7 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
 | `record_session_automation_in` | [`SessionAutomationTracks`](#sessionautomationtracks) | yes | Record, Warp & Launch: Record Session automation in, as `settings.set_record_session_automation_in` sets it. |
 | `automation_record_mode` | [`AutomationRecordMode`](#automationrecordmode) | yes | The mode an Arrangement recording writes control moves in, as `settings.set_automation_record_mode` sets it (the automation spec, R18). |
 | `file_folder` | [`FileFolderSettings`](#filefoldersettings) | yes | File & Folder: the Temporary Folder, as `settings.set_temporary_folder` sets it. |
+| `library` | [`LibrarySettings`](#librarysettings) | yes | Library: Collect Files on Export and the User Library's folder. |
 | `auto_hide_plug_in_windows` | boolean | yes | Plug-Ins: Auto-Hide Plug-In Windows, as `settings.set_auto_hide_plug_in_windows` sets it. |
 | `plug_ins` | [`PluginSettings`](#pluginsettings) | yes | Plug-Ins: how the Browser shows plug-ins, as `plugin.settings` sets it. |
 | `agents` | [`AgentsPageSettings`](#agentspagesettings) | yes | Agents. |
@@ -32862,6 +33344,10 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
       "$ref": "#/$defs/LaunchPrefs",
       "description": "Record, Warp & Launch: the Launch section, as the `settings.set_default_launch_*`, `settings.set_select_on_launch`, `settings.set_select_next_scene_on_launch` and `settings.set_start_recording_on_scene_launch` commands set it."
     },
+    "library": {
+      "$ref": "#/$defs/LibrarySettings",
+      "description": "Library: Collect Files on Export and the User Library's folder."
+    },
     "page": {
       "$ref": "#/$defs/SettingsPage",
       "description": "The page the Settings window shows, or showed last."
@@ -32904,6 +33390,7 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
     "record_session_automation_in",
     "automation_record_mode",
     "file_folder",
+    "library",
     "auto_hide_plug_in_windows",
     "plug_ins",
     "agents",
@@ -35965,6 +36452,34 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `UserLibraryResult`
+
+What `settings.set_user_library` returns: the User Library in use afterwards.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | The User Library's path; empty when there is none. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `settings.set_user_library` returns: the User Library in use afterwards.",
+  "properties": {
+    "path": {
+      "description": "The User Library's path; empty when there is none.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "path"
+  ],
+  "type": "object"
 }
 ```
 

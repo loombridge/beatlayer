@@ -188,17 +188,17 @@ impl Snapshot {
     }
 
     /// The items whose names hold every word of `query` (ignoring case), in
-    /// name order, within `scope`, only audio files if `audio_only`. An
-    /// empty query matches everything.
+    /// name order, within `scope`, only items of kind `only` if it is given.
+    /// An empty query matches everything.
     #[must_use]
-    pub fn search(&self, query: &str, scope: Scope, audio_only: bool) -> Vec<u32> {
+    pub fn search(&self, query: &str, scope: Scope, only: Option<ItemKind>) -> Vec<u32> {
         let words: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
         self.order
             .iter()
             .copied()
             .filter(|&index| {
                 let entry = &self.entries[index as usize];
-                (!audio_only || entry.kind == ItemKind::Audio)
+                only.is_none_or(|kind| entry.kind == kind)
                     && match scope {
                         Scope::All => true,
                         Scope::Place(place) => entry.place == place,
@@ -600,17 +600,20 @@ mod tests {
             ]
             .map(|(p, k)| (PathBuf::from(p), k)),
         );
-        let hits = snapshot.search("kick", Scope::All, false);
+        let hits = snapshot.search("kick", Scope::All, None);
         assert_eq!(
             names(&snapshot, &hits),
             ["Kick 808.wav", "KICK acoustic.aif"]
         );
-        let hits = snapshot.search("808 KICK", Scope::All, false);
+        let hits = snapshot.search("808 KICK", Scope::All, None);
         assert_eq!(names(&snapshot, &hits), ["Kick 808.wav"]);
-        assert_eq!(snapshot.search("", Scope::All, true).len(), 3);
-        assert_eq!(snapshot.search("drums", Scope::All, false).len(), 1);
-        assert!(snapshot.search("kick", Scope::Place(1), false).is_empty());
-        let hit = snapshot.search("snare", Scope::Place(0), false)[0];
+        assert_eq!(
+            snapshot.search("", Scope::All, Some(ItemKind::Audio)).len(),
+            3
+        );
+        assert_eq!(snapshot.search("drums", Scope::All, None).len(), 1);
+        assert!(snapshot.search("kick", Scope::Place(1), None).is_empty());
+        let hit = snapshot.search("snare", Scope::Place(0), None)[0];
         assert_eq!(snapshot.path(hit), Path::new("/lib/Drums/Snare 808.wav"));
         assert_eq!(snapshot.folder_label(hit), "lib/Drums");
         assert_eq!(
@@ -653,7 +656,7 @@ mod tests {
             "kick ba",
             "kick bass",
         ] {
-            let hits = snapshot.search(query, Scope::All, false);
+            let hits = snapshot.search(query, Scope::All, None);
             assert!(!hits.is_empty(), "{query}");
         }
         let each = started.elapsed() / 8;
@@ -662,7 +665,7 @@ mod tests {
         }
         let expected = (0..100_000).filter(|i| i % 64 == 32 || i % 64 == 4).count();
         assert_eq!(
-            snapshot.search("kick bass", Scope::All, false).len(),
+            snapshot.search("kick bass", Scope::All, None).len(),
             expected
         );
     }
@@ -700,7 +703,7 @@ mod tests {
             "kick ba",
             "kick bass",
         ] {
-            let hits = snapshot.search(query, Scope::All, false);
+            let hits = snapshot.search(query, Scope::All, None);
             assert!(!hits.is_empty(), "{query}");
         }
         let each = started.elapsed() / 8;
@@ -713,7 +716,7 @@ mod tests {
         // multiple of 64.
         let expected = (0..100_000).filter(|i| i % 64 == 32 || i % 64 == 4).count();
         assert_eq!(
-            snapshot.search("kick bass", Scope::All, false).len(),
+            snapshot.search("kick bass", Scope::All, None).len(),
             expected
         );
     }

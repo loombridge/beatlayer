@@ -385,6 +385,27 @@ impl MediaStore {
         Ok(self.candidates(&wanted, folders))
     }
 
+    /// Looks for files holding the given contents, each a hash and a length,
+    /// under the folders and their subfolders, and returns the first file
+    /// found for each. Unlike [`MediaStore::relink`] it needs the store to
+    /// know nothing of the hashes, so a file a clip file names can be found
+    /// before it is imported (file-management R6).
+    #[must_use]
+    pub fn find_by_content(
+        &self,
+        wanted: &[(ContentHash, u64)],
+        folders: &[impl AsRef<Path>],
+    ) -> Vec<(ContentHash, PathBuf)> {
+        let mut sizes: HashMap<u64, Vec<ContentHash>> = HashMap::new();
+        for &(hash, size) in wanted {
+            sizes.entry(size).or_default().push(hash);
+        }
+        self.candidates(&sizes, folders)
+            .into_iter()
+            .filter_map(|(hash, mut paths)| (!paths.is_empty()).then(|| (hash, paths.remove(0))))
+            .collect()
+    }
+
     /// Walks the folders, hashing files whose length is wanted, and returns
     /// every file found with each wanted content, in the order the folders
     /// are searched.

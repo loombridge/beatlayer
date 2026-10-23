@@ -3,10 +3,7 @@
 //! Fold and the window. Every block is a real-time section under the
 //! allocation trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_devices::remap::{BASE, FOLD, LOWEST, RANGE, REMAP, SCALE_NAME, TRANSPOSE, USE_SCALE, map};
 use bl_engine::NoteKind;
 use bl_engine::scales::ScaleRuns;

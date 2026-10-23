@@ -6,8 +6,6 @@
 //! effect one 32-frame step late, the same at any block size. Every block
 //! runs as a real-time section under the allocation trap.
 
-bl_rt::install_trap!();
-
 use std::sync::Arc;
 
 use bl_core::time::{SampleRate, Ticks};

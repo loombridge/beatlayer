@@ -7,8 +7,7 @@
 //!
 //! Run with `--nocapture` to print the measurements.
 
-mod common;
-
+use crate::common;
 use std::collections::BTreeSet;
 use std::io::Cursor;
 

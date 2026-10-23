@@ -2,8 +2,7 @@
 //! R65): the settings it holds, how many samples they make, and how long
 //! the render takes.
 
-mod common;
-
+use crate::common;
 use bl_model::TrackId;
 use common::{Harness, Window};
 use serde_json::json;

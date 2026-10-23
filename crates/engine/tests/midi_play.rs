@@ -5,10 +5,7 @@
 //! that stops monitoring ends the notes the devices hold. Every block is a
 //! real-time section under the allocation trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use std::time::{Duration, Instant};
 
 use bl_core::midi::{MidiInputEvent, MidiMessage, MidiSource};

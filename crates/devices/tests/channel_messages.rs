@@ -4,10 +4,7 @@
 //! effect and a switched-off device, and a block of hundreds allocates
 //! nothing. Every block is a real-time section under the allocation trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_devices::lift::{LIFT, PITCH};
 use bl_devices::{Audio, NativeDevice, ParamBank, add};
 use bl_engine::{DeviceType, NoteEvent, NoteKind};

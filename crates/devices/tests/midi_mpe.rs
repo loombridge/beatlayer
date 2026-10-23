@@ -3,10 +3,7 @@
 //! a channel message. Every block is a real-time section under the
 //! allocation trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_devices::midi_mpe::{
     NOTEPB_TO_PB, PITCH_RANGE, PRESS, PRESS_DEFAULT, PRESS_DEFAULT_VALUE, PRESS_TO_AT,
     SLIDE_CENTERED, SLIDE_DEFAULT, SLIDE_DEFAULT_VALUE, SLIDE_MODE, SLIDE_TO_MOD, SWAP_TO_SLIDE,

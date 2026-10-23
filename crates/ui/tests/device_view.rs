@@ -6,8 +6,7 @@
 //!
 //! Spec: device-chains R6, R10, R11, R19, R21 to R25.
 
-mod common;
-
+use crate::common;
 use bl_engine::testing;
 use bl_model::{DeviceId, TrackId};
 use bl_shell::Area;

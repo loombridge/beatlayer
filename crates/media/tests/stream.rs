@@ -6,13 +6,10 @@
 //! Every read, seek, and stop on a source runs as a real-time section under
 //! the allocation trap (`rt_test!`), as the audio thread runs it.
 //!
-//! `cargo test -p bl-media --test stream -- --nocapture` prints the
+//! `cargo test -p bl-media --test media_tests -- stream:: --nocapture` prints the
 //! discontinuity measurements.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use std::f64::consts::PI;
 use std::io::{self, Cursor, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};

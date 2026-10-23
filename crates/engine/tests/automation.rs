@@ -3,10 +3,7 @@
 //! and Re-Enable Automation hands it over again. Every block runs as a
 //! real-time section under the allocation trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_core::time::Ticks;
 use bl_engine::TransportCommand;
 use bl_model::{AutomationTarget, Command, MixerParam, Output, TrackKind};

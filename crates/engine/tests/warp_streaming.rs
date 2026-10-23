@@ -29,10 +29,6 @@ use bl_model::{
     AudioData, Clip, ClipData, ClipId, Command, ContentHash, Editor, TrackKind, WarpMarker,
     WarpMode,
 };
-use bl_rt::trap::TrapAllocator;
-
-#[global_allocator]
-static ALLOCATOR: TrapAllocator<std::alloc::System> = TrapAllocator::new(std::alloc::System);
 
 const RATE: SampleRate = SampleRate::HZ_48000;
 const BLOCK: usize = 256;

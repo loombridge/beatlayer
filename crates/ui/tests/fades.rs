@@ -4,8 +4,7 @@
 //! go with Delete. Create Fade and Delete Fades run from their keys. Every
 //! drag is one undo step, `Change Fade`.
 
-mod common;
-
+use crate::common;
 use bl_core::time::Ticks;
 use bl_model::{AudioData, Clip, ClipData, ClipId, Command, Document, TrackId};
 use bl_shell::arrangement_commands::{self as view_ids, ArrangementState, FadeHandle};

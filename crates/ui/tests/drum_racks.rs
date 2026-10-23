@@ -4,8 +4,7 @@
 //! button, Auto Select, and the view column's switches. Each gesture runs
 //! the registered command an agent runs.
 
-mod common;
-
+use crate::common;
 use bl_model::{ChainId, DeviceId, RackView, TrackKind};
 use bl_shell::device_commands::{DeviceAdded, DeviceFrame, RackFrame};
 use bl_shell::pad_commands::{PadFrame, PadKind, PadSwitch};

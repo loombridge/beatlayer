@@ -8,10 +8,7 @@
 //!
 //! Spec: vst3-hosting R1 to R12, which mirrors clap-hosting's.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_core::time::{Frames, Ticks};
 use bl_engine::{AutomationList, Node, NodeData, NodeFactory, NoteEvent, NoteKind, TransportInfo};
 use bl_model::modulation::Travel;

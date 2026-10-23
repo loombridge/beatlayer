@@ -3,10 +3,7 @@
 //! under a steady tempo and a ramp, exactly the same at any block size, with
 //! every block a real-time section under the allocation trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use std::sync::Arc;
 
 use bl_core::time::{Bpm, TempoMap, Ticks};

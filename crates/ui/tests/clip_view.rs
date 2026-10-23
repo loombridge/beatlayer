@@ -1049,15 +1049,13 @@ fn the_context_menu_lists_the_items_in_order() {
     for label in ["Group Notes", "Ungroup Notes"] {
         assert!(menu_item(&nodes, label).disabled, "{label} has no use here");
     }
-    for (label, package) in [("Highlight Scales", "WP-6.7b")] {
-        let node = menu_item(&nodes, label);
-        assert!(node.disabled, "{label} waits");
-        assert!(
-            node.description.contains(package),
-            "{label} names {package}: {:?}",
-            node.description
-        );
-    }
+    let node = menu_item(&nodes, "Highlight Scales");
+    assert!(node.disabled, "Highlight Scales waits");
+    assert!(
+        node.description.contains("WP-6.7b"),
+        "Highlight Scales names WP-6.7b: {:?}",
+        node.description
+    );
     // Spec: note-editing R35, R39, R40, R41. WP-6.3's items run their
     // commands; Split Note(s) shows only while a note would be split.
     for label in [

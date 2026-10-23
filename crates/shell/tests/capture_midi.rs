@@ -217,6 +217,33 @@ fn a_captured_clip_takes_the_current_scale() {
     );
 }
 
+// Spec: grooves R20. A clip made by recording takes the set's auto-load
+// groove while Auto Load Groove is on.
+#[test]
+fn a_captured_clip_takes_the_auto_load_groove() {
+    let (mut shell, control) = rig();
+    let keys = midi_track(&mut shell, &control, "Keys");
+    let scene = scenes(&shell)[0];
+    let groove: bl_model::GrooveId = shell.new_id();
+    shell
+        .run(
+            "groove.add",
+            json!({ "groove": { "id": groove, "name": "Swing", "length": Ticks::WHOLE.get() * 4,
+                "notes": [{ "position": 0, "velocity": 100 }] } }),
+        )
+        .unwrap();
+    shell
+        .run(
+            "groove.set_auto_load",
+            json!({ "enabled": true, "groove": groove }),
+        )
+        .unwrap();
+    play_a(&control, &mut shell, 2);
+    shell.run("midi.capture", json!({})).unwrap();
+    let clip = slot_clip(&shell, keys, scene).expect("the captured clip");
+    assert_eq!(clip.groove, Some(groove));
+}
+
 // Spec: capture-midi R4. A taken slot sends the clip to the next empty one
 // below it; with none left, a scene is added at the end.
 #[test]

@@ -45,6 +45,7 @@ fn frozen_output_clip(output: crate::freeze::FrozenOutput) -> Clip {
         envelopes: Vec::new(),
         launch: crate::launch::ClipLaunch::default(),
         scale: crate::scale::Scale::default(),
+        groove: None,
     }
 }
 

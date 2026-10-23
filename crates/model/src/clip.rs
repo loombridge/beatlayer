@@ -30,7 +30,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::automation::{AutomationTarget, Breakpoint, Envelope};
 use crate::error::ModelError;
-use crate::ids::{ClipId, ContentHash, TakeLaneId};
+use crate::ids::{ClipId, ContentHash, GrooveId, TakeLaneId};
 use crate::launch::ClipLaunch;
 use crate::scale::Scale;
 use crate::warp::{TransientEdits, WarpMarker};
@@ -82,6 +82,11 @@ pub struct Clip {
     /// nothing, so a set saved before the scales loads unchanged.
     #[serde(default, skip_serializing_if = "Scale::is_default")]
     pub scale: Scale,
+    /// The clip's groove (WP-6.19): one of the set's Groove Pool, or none.
+    /// It changes when the clip's notes play, or where its audio plays, and
+    /// nothing in the clip itself until it is committed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub groove: Option<GrooveId>,
 }
 
 impl Clip {
@@ -99,7 +104,15 @@ impl Clip {
             envelopes: Vec::new(),
             launch: ClipLaunch::default(),
             scale: Scale::default(),
+            groove: None,
         }
+    }
+
+    /// The clip with `groove` as its groove: what a new MIDI clip is given
+    /// from the set's Auto Load Groove (the grooves spec, R20).
+    #[must_use]
+    pub fn with_groove(self, groove: Option<GrooveId>) -> Self {
+        Self { groove, ..self }
     }
 
     /// The clip's envelopes, in target order.
@@ -1308,6 +1321,7 @@ pub fn consolidated_midi(
         // Spec: scales R7. A consolidated clip takes the scale of the first
         // clip it was made from.
         scale: clips.first().map_or_else(Scale::default, |clip| clip.scale),
+        groove: None,
     }
 }
 

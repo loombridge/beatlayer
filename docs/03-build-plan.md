@@ -655,7 +655,7 @@ Total to 1.0: 256 packages planned in Phases 0 to 6, and about 110 estimated in 
 | 6.17 | todo |  |  |
 | 6.17b | todo |  |  |
 | 6.18 | todo |  |  |
-| 6.19 | todo |  |  |
+| 6.19 | done | 23 October 2026 | [#329](https://github.com/loombridge/beatlayer/pull/329); the Groove Pool, `.blgroove` files and a clip's groove, played on MIDI clips and warped audio clips (Base, Quantize, Timing, Random, Velocity and the Global Amount) as node data at any block size, with Commit, Extract, groove to clip and Auto Load Groove ([grooves](specs/grooves.md) R1 to R23) |
 | 6.20 | todo |  |  |
 | 6.21 | todo |  |  |
 | 6.22 | todo |  |  |
@@ -700,7 +700,7 @@ Total to 1.0: 256 packages planned in Phases 0 to 6, and about 110 estimated in 
 | 6.49b | done | 22 October 2026 | [#315](https://github.com/loombridge/beatlayer/pull/315); holding the middle mouse button and dragging pans the area under the pointer in the Arrangement's lanes, the Session View's grid, both mixers, the MIDI Note Editor, the Sample Editor, the Device View's chain and the browser's lists, selecting and moving nothing, and a note is drawn in its clip's colour, paler the softer its velocity and grey while deactivated ([view options](specs/view-options.md) R1, [the piano roll](specs/piano-roll.md) R43 and R44) |
 | 6.50 | todo |  | Waits on IMP-37's acceptance |
 | 6.51 | done | 23 October 2026 | [#330](https://github.com/loombridge/beatlayer/pull/330); fade curves, crossfades between audio clips that meet (with the 4 ms crossfade that edits leave under Create Fades on Clip Edges), fade handles, Create Fade and Delete Fades on Cmd+Option+F and Cmd+Option+Delete, and the engine reading each crossfaded clip past its edge ([audio clips](specs/audio-clips.md) R23 to R31) |
-| 6.52 | todo |  |  |
+| 6.52 | done | 23 October 2026 | [#318](https://github.com/loombridge/beatlayer/pull/318); Cut, Copy, Paste and Duplicate on whole tracks from the track menu and the title bars' keys, copying clips, take lanes, devices, routing, automation and frozen audio under new IDs, and pasting into another set with references settled by place and files added to its media table ([track context menu](specs/track-context-menu.md) R12 to R16; colour waits on tracks having one) |
 | 6.53 | done | 22 October 2026 | [#302](https://github.com/loombridge/beatlayer/pull/302); the MIDI Note Editor's insert marker and time selection, its keyboard selection and moves, Shift-click and the piano ruler's keys, the note clipboard with Option-drag copies, and the editor's context menus ([the spec](specs/piano-roll.md) R23 to R31) |
 | 6.54 | todo |  |  |
 | 6.55 | todo |  |  |

@@ -3304,6 +3304,97 @@ const ENTRIES: &[Entry] = &[
             marker. One undo step, `Set Song Start Time`.",
     },
     Entry {
+        id: "groove.add",
+        action: Action::Apply("add_groove"),
+        label: "Add Groove",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Adds a groove to the end of the set's Groove Pool: a `groove` with a \
+            new ID, a name, a `length` in ticks, its `notes` (each a `position` from 0 to \
+            before the length and a `velocity` from 1 to 127, none two at one position) and \
+            its parameters, which are Base `1/16`, Quantize 0, Timing 100, Random 0 and \
+            Velocity 0 where left out. It changes no clip: use `clip.set_groove` to give a \
+            clip the groove. A groove that breaks those limits is refused. One undo step, \
+            `Add Groove`. To make a groove from a clip, use `groove.extract`; from a file, \
+            `groove.load`.",
+    },
+    Entry {
+        id: "groove.delete",
+        action: Action::Apply("delete_groove"),
+        label: "Delete Groove",
+        permission: Permission::Destructive,
+        contexts: &[Global],
+        keys: &[],
+        description: "Takes a groove out of the Groove Pool, as the Delete key does in the pool: \
+            every clip that used it is set to no groove, and if it was the auto-load groove \
+            nothing is auto-loaded any more. One undo step, `Delete Groove`. Because it \
+            removes the person's work, an agent asks first.",
+    },
+    Entry {
+        id: "groove.rename",
+        action: Action::Apply("rename_groove"),
+        label: "Rename Groove",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Renames a groove in the Groove Pool. One undo step, `Rename Groove`.",
+    },
+    Entry {
+        id: "groove.set",
+        action: Action::Apply("set_groove"),
+        label: "Set Groove",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Sets any of a groove's parameters, as its row in the Groove Pool does, and \
+            keeps those left out: `base` (`1/4`, `1/8`, `1/8T`, `1/16`, `1/16T` or `1/32`), \
+            `quantize` (0 to 100 percent), `timing` (0 to 100), `random` (0 to 100) and \
+            `velocity` (-100 to +100). A value out of range refuses them all. A change reaches \
+            every clip playing the groove from the next block. One undo step, named for the \
+            parameter when one is set: `Change Base`, `Change Quantize`, `Change Timing`, \
+            `Change Random` or `Change Velocity`.",
+    },
+    Entry {
+        id: "groove.set_global_amount",
+        action: Action::Apply("set_global_groove_amount"),
+        label: "Set Global Groove Amount",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Sets the Global Amount, from 0 to 130 percent: it scales Timing, Random \
+            and Velocity for every groove in the set at once, and not Quantize; 100 plays each \
+            groove as set. The set holds one. It reaches every clip playing a groove from the \
+            next block. One undo step, `Change Global Amount`.",
+    },
+    Entry {
+        id: "groove.set_auto_load",
+        action: Action::Apply("set_auto_load_groove"),
+        label: "Set Auto Load Groove",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Sets the Auto Load Groove switch (`enabled`) and the groove a new MIDI clip \
+            takes while it is on (`groove`, one of the pool's), and keeps what is left out. A \
+            MIDI clip made new, empty or by recording takes that groove; a clip made by \
+            copying, pasting or importing keeps its own. One undo step, `Change Auto Load \
+            Groove`.",
+    },
+    Entry {
+        id: "clip.set_groove",
+        action: Action::Apply("set_clip_groove"),
+        label: "Set Clip Groove",
+        permission: Permission::Edit,
+        contexts: &[Global, ClipView],
+        keys: &[],
+        description: "Sets the Clip Groove of MIDI or audio clips to a groove of the Groove \
+            Pool (`groove`), or to none when `groove` is left out. `clips` names the clips; \
+            left out, the selected ones are set. The groove changes when a clip's notes play \
+            and how loud, or where its audio plays, and changes nothing in the clip until \
+            `groove.commit`; an audio clip plays its groove only while it is warped. One undo \
+            step, `Change Clip Groove`, however many clips it sets.",
+    },
+    Entry {
         id: UNDO,
         action: Action::Undo,
         label: "Undo",

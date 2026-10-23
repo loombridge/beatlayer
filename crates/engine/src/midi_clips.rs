@@ -12,8 +12,12 @@
 //! from an allocation-free PRNG, and sends note-offs for all sounding notes
 //! when stopping, looping, or deleting a clip.
 
+use std::sync::Arc;
+
 use bl_core::time::{Frames, SampleRate, TempoMap, Ticks};
-use bl_model::{ClipData, ClipId, Note, SceneId, Track, TrackId};
+use bl_model::{
+    Clip, ClipData, ClipId, GroovePlay, GroovePool, Note, SceneId, Track, TrackId, clip_seed, noise,
+};
 
 use crate::midi_controllers::{PlacedController, Sounding, Stretch, play_pressure};
 use crate::node::{Block, Node, NodeConfig, NodeData, NodeEvent, NoteEvent, NoteKind, ParamValue};
@@ -94,6 +98,9 @@ pub struct PlacedMidiClip {
     pub notes: Vec<Note>,
     /// The clip's MIDI controller envelopes (WP-2.29).
     pub controllers: Vec<PlacedController>,
+    /// The clip's groove at the set's Global Amount, if it has one that
+    /// changes anything (the grooves spec, R6 to R11).
+    pub groove: Option<Arc<GroovePlay>>,
 }
 
 /// The list of MIDI clips for a track, sent to [`MidiClipPlayer`] as [`NodeData`].
@@ -107,9 +114,21 @@ pub struct MidiClipList {
 }
 
 impl MidiClipList {
-    /// Builds the placed MIDI clips for `track`.
+    /// Builds the placed MIDI clips for `track`, with the grooves of `grooves`
+    /// they use.
     #[must_use]
-    pub fn build(track: &Track, _tempo: &TempoMap, _rate: SampleRate) -> Self {
+    pub fn build(
+        track: &Track,
+        _tempo: &TempoMap,
+        _rate: SampleRate,
+        grooves: &GroovePool,
+    ) -> Self {
+        let groove = |clip: &Clip| {
+            clip.groove
+                .and_then(|id| grooves.play(id))
+                .filter(|play| !play.is_inert())
+                .map(Arc::new)
+        };
         let mut clips = Vec::new();
         for clip in track.played_clips() {
             if clip.mute {
@@ -136,6 +155,7 @@ impl MidiClipList {
                 loop_end: midi.loop_end,
                 notes,
                 controllers: PlacedController::of(clip),
+                groove: groove(clip),
             });
         }
         // The track's Session slot clips (WP-3.2): they play only when the
@@ -162,6 +182,7 @@ impl MidiClipList {
                 loop_end: midi.loop_end,
                 notes,
                 controllers: PlacedController::of(clip),
+                groove: groove(clip),
             });
         }
         clips.sort_by_key(|c| c.start);
@@ -225,6 +246,7 @@ fn play_session_clip(
             start_marker,
             launch_tick,
             end,
+            0,
             from_frame,
             to_frame,
             tempo,
@@ -256,7 +278,7 @@ fn play_session_clip(
     let first_len = loop_end - start_marker;
     let mut start = launch_tick;
     let mut first = true;
-    for _ in 0..MAX_SESSION_REPEATS {
+    for pass in 0..MAX_SESSION_REPEATS as u64 {
         let (clip_start, repeat_len) = if first {
             (start_marker, first_len)
         } else {
@@ -274,6 +296,7 @@ fn play_session_clip(
                 clip_start,
                 start,
                 end,
+                pass,
                 from_frame,
                 to_frame,
                 tempo,
@@ -432,6 +455,7 @@ fn process_clip_segment(
     segment_clip_start: Ticks,
     segment_song_start: Ticks,
     segment_song_end: Ticks,
+    pass: u64,
     from_frame: i64,
     to_frame: i64,
     tempo: &TempoMap,
@@ -444,6 +468,17 @@ fn process_clip_segment(
 ) {
     let segment_len = segment_song_end - segment_song_start;
     let segment_clip_end = segment_clip_start + segment_len;
+    // Spec: grooves R7. A groove moves a note by less than a Base step, so
+    // only the notes that start within one of the block need working out.
+    let reach = clip.groove.as_ref().map(|play| {
+        let slack = Ticks(play.base() as i64 + 1);
+        let from_tick = tempo.frames_to_ticks(Frames(from_frame), sample_rate) - slack;
+        let to_tick = tempo.frames_to_ticks(Frames(to_frame), sample_rate) + slack;
+        (from_tick, to_tick)
+    });
+    // A note held to the tick before its pass ends can round onto the pass's
+    // last frame's end, which isn't in it.
+    let end_frame = tempo.ticks_to_frames(segment_song_end, sample_rate).get();
 
     // Spec: midi-controller-data R3
     let stretch = Stretch {
@@ -459,11 +494,40 @@ fn process_clip_segment(
         if note.start < segment_clip_start || note.start >= segment_clip_end {
             continue;
         }
-        let note_song_start = segment_song_start + (note.start - segment_clip_start);
-        let note_on_frame = tempo.ticks_to_frames(note_song_start, sample_rate).get();
+        let mut note_song_start = segment_song_start + (note.start - segment_clip_start);
+        let mut grooved_velocity = note.velocity;
+        if let (Some(play), Some((from_tick, to_tick))) = (&clip.groove, reach) {
+            if note_song_start < from_tick || note_song_start >= to_tick {
+                continue;
+            }
+            // Spec: grooves R7 to R11. The note plays where the groove puts
+            // it, held inside its pass, and at the velocity it gives.
+            let at = play.note_start(note.start, note.key, clip_seed(clip.id), pass);
+            let held = (at.round() as i64)
+                .max(segment_clip_start.get())
+                .min(segment_clip_end.get() - 1);
+            note_song_start = segment_song_start + (Ticks(held) - segment_clip_start);
+            grooved_velocity = play.note_velocity(note.start, note.velocity);
+        }
+        let mut note_on_frame = tempo.ticks_to_frames(note_song_start, sample_rate).get();
+        if reach.is_some() {
+            note_on_frame = note_on_frame.min(end_frame - 1);
+        }
         if note_on_frame < from_frame || note_on_frame >= to_frame {
             continue;
         }
+
+        // Spec: grooves R15. A groove can reorder notes, so a grooved clip's
+        // chance and deviation draw from the note itself, not from the order
+        // the block meets them in, and a render is the same at any block size.
+        let mut own;
+        let rng: &mut Rng = if clip.groove.is_some() {
+            let key = ((note.start.get() as u64) << 8) | u64::from(note.key);
+            own = Rng::new(noise(clip_seed(clip.id), pass, !key).to_bits());
+            &mut own
+        } else {
+            &mut *rng
+        };
 
         // Probability check
         if note.probability < 1.0 && (note.probability <= 0.0 || rng.next_f64() > note.probability)
@@ -473,12 +537,13 @@ fn process_clip_segment(
 
         // Velocity deviation
         let dev = note.velocity_deviation as i32;
+        let base = i32::from(grooved_velocity);
         let vel = if dev == 0 {
-            note.velocity
+            grooved_velocity
         } else if dev > 0 {
-            rng.next_in_range(note.velocity as i32, (note.velocity as i32 + dev).min(127)) as u8
+            rng.next_in_range(base, (base + dev).min(127)) as u8
         } else {
-            rng.next_in_range((note.velocity as i32 + dev).max(1), note.velocity as i32) as u8
+            rng.next_in_range((base + dev).max(1), base) as u8
         };
 
         let note_id = Some(*next_note_id);
@@ -814,6 +879,7 @@ impl Node for MidiClipPlayer {
                         start_marker,
                         clip.start,
                         rep_end_tick,
+                        0,
                         from_frame,
                         to_frame,
                         tempo,
@@ -854,6 +920,7 @@ impl Node for MidiClipPlayer {
                             start_marker,
                             clip.start,
                             rep0_end_tick,
+                            0,
                             from_frame,
                             to_frame,
                             tempo,
@@ -909,6 +976,7 @@ impl Node for MidiClipPlayer {
                                     loop_start,
                                     rep_k_start_tick,
                                     rep_k_end_tick,
+                                    k as u64,
                                     from_frame,
                                     to_frame,
                                     tempo,

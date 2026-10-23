@@ -110,6 +110,11 @@ object_id!(
     LocatorId,
     "locator"
 );
+object_id!(
+    /// The ID of a groove in the Groove Pool (WP-6.19).
+    GrooveId,
+    "groove"
+);
 
 // A parameter of a device, numbered by the device: the plug-in kit's
 // `lspk-params` defines it, with the parameter descriptors.

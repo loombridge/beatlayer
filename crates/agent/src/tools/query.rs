@@ -355,6 +355,10 @@ impl View<'_> {
         if let Some(lane) = self.document.clip_lane(clip.id) {
             value["lane"] = json!(lane);
         }
+        // Only a clip with a groove shows one.
+        if let Some(groove) = clip.groove {
+            value["groove"] = json!(groove);
+        }
         value
     }
 

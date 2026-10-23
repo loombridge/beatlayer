@@ -81,7 +81,7 @@ pub struct EnvelopeMaterial {
 /// Material copied from the Arrangement, for pasting: each track's clips,
 /// placed from the material's start.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct Clipboard {
+pub struct Material {
     /// Each track's clips, with the track's distance from the first in the
     /// track list. A clip's `start` counts from the material's start.
     pub tracks: Vec<(usize, Vec<Clip>)>,
@@ -99,7 +99,7 @@ pub struct Clipboard {
     pub envelopes: Vec<EnvelopeMaterial>,
 }
 
-impl Clipboard {
+impl Material {
     /// What it holds, as `arrangement.copy` reports it.
     #[must_use]
     pub fn state(&self) -> ClipboardState {
@@ -107,6 +107,29 @@ impl Clipboard {
             clips: self.tracks.iter().map(|(_, clips)| clips.len()).sum(),
             tracks: self.tracks.len(),
             length: self.length,
+        }
+    }
+}
+
+/// What the clipboard holds: the Arrangement's material, or whole tracks
+/// copied from the track headers (the track context menu spec, R14).
+/// Whichever was copied last is what it holds.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Clipboard {
+    /// The Arrangement's material: each track's clips, placed from the
+    /// material's start.
+    Material(Material),
+    /// Whole tracks, with everything they hold.
+    Tracks(crate::tracks::CopiedTracks),
+}
+
+impl Clipboard {
+    /// The Arrangement's material, if the clipboard holds it.
+    #[must_use]
+    pub fn material(&self) -> Option<&Material> {
+        match self {
+            Self::Material(material) => Some(material),
+            Self::Tracks(_) => None,
         }
     }
 }
@@ -298,6 +321,11 @@ fn place_clip(
     placed: &mut BTreeSet<ClipId>,
 ) -> Result<ClipId, EditFailure> {
     clip.id = editor.new_id();
+    // Spec: grooves R3, R5. A copy keeps its groove while the pool still
+    // holds it; one deleted since the copy leaves it none.
+    clip.groove = clip
+        .groove
+        .filter(|groove| editor.document().settings().grooves.get(*groove).is_some());
     clear_on(editor, track, lane, clip.start, clip.end(), placed)?;
     placed.insert(clip.id);
     // Spec: scales R7. A copy keeps its source's scale, which the clip takes
@@ -495,7 +523,7 @@ pub(crate) fn material(
 }
 
 /// The clipboard holding a target's material.
-fn clipboard_of(doc: &Document, target: &Target) -> Clipboard {
+fn clipboard_of(doc: &Document, target: &Target) -> Material {
     let lanes = lanes(doc);
     let (by_track, start, end) = material(doc, target);
     let first = by_track
@@ -518,7 +546,7 @@ fn clipboard_of(doc: &Document, target: &Target) -> Clipboard {
         .collect();
     // Spec: automation-editing R9. The material's envelopes go with it.
     let envelopes = envelope_material(doc, target, &by_track, start, end);
-    Clipboard {
+    Material {
         tracks,
         length: end - start,
         start,
@@ -1000,7 +1028,7 @@ pub fn can_run(
         ids::CREATE_FADE => create_fade_plan(doc, view, args).is_some_and(|plan| !plan.is_empty()),
         ids::DELETE_FADES => given("clips") || !view.selected_clips.is_empty(),
         ids::PASTE => {
-            clipboard.is_some_and(|c| !c.tracks.is_empty())
+            clipboard.is_some_and(|c| c.material().is_some_and(|m| !m.tracks.is_empty()))
                 && (given("track") || !view.selected.is_empty() || !lanes(doc).is_empty())
         }
         _ => false,
@@ -1479,7 +1507,7 @@ pub fn run(
             let target = target(doc, view, parse(args)?)?;
             let copied = clipboard_of(doc, &target);
             let state = copied.state();
-            *clipboard = Some(copied);
+            *clipboard = Some(Clipboard::Material(copied));
             Ok(to_value(&state))
         }
         ids::CUT => {
@@ -1488,13 +1516,17 @@ pub fn run(
             let (_, recorded) = settled(editor, "Cut", (doc, edge_fades), |editor| {
                 delete_target(editor, &target)
             })?;
-            *clipboard = Some(copied);
+            *clipboard = Some(Clipboard::Material(copied));
             view.selected_clips.clear();
             Ok(to_value(&result(doc, editor, view, recorded)))
         }
         ids::PASTE => {
             let PasteArgs { at, track } = parse(args)?;
-            let Some(copied) = clipboard.as_ref().filter(|c| !c.tracks.is_empty()) else {
+            let Some(copied) = clipboard
+                .as_ref()
+                .and_then(Clipboard::material)
+                .filter(|c| !c.tracks.is_empty())
+            else {
                 return Err(unavailable("there's nothing on the clipboard to paste"));
             };
             let at = match at {

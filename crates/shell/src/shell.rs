@@ -114,6 +114,7 @@ mod export_dialog;
 pub use export_dialog::ExportPrefs;
 mod file_manager;
 mod freeze;
+mod grooves;
 mod keymap;
 mod multisampler;
 mod plugin_list;
@@ -3946,10 +3947,225 @@ impl Shell {
         }))
     }
 
+    /// Selects tracks, as the Arrangement's selection. The title bars stay
+    /// selected when they were, so the keys that act on a title bar keep
+    /// working (the track context menu spec, R12, R14).
+    fn select_tracks(&mut self, tracks: &[TrackId]) {
+        let title_bars = self.arrangement.title_bars_selected();
+        self.arrangement
+            .run(
+                view_ids::SELECT_TRACKS,
+                json!({ "tracks": tracks, "title_bars": title_bars }),
+                self.editor.document(),
+            )
+            .ok();
+    }
+
+    /// Copies the tracks to the clipboard, with everything they hold (the
+    /// track context menu spec, R13, R14), and returns their IDs. The
+    /// clipboard holds whichever was copied last, these tracks or the
+    /// Arrangement's material.
+    fn copy_tracks(&mut self, id: &str, tracks: &[TrackId]) -> Result<Vec<TrackId>, ShellError> {
+        let originals = crate::tracks::duplicated(self.editor.document(), tracks);
+        if originals.is_empty() {
+            return Err(ShellError::Unavailable {
+                command: id.to_owned(),
+                reason: "there's no track to copy".to_owned(),
+            });
+        }
+        let doc = self.editor.document();
+        let tracks: Vec<crate::tracks::TrackData> = originals
+            .iter()
+            .filter_map(|&track| crate::tracks::snapshot(doc, track))
+            .collect();
+        // The files the tracks play go with them (R15; the set exchange
+        // spec, R7), for a paste into a set that doesn't list them.
+        let media = self
+            .store
+            .media_files()
+            .into_iter()
+            .filter(|(hash, ..)| tracks.iter().any(|track| track.plays(hash)))
+            .collect();
+        self.clipboard = Some(Clipboard::Tracks(crate::tracks::CopiedTracks {
+            tracks,
+            returns: doc.returns().collect(),
+            set: self.editor_generation,
+            media,
+        }));
+        Ok(originals)
+    }
+
+    /// The last selected track, in display order: where a paste goes.
+    fn last_selected_track(&self) -> Option<TrackId> {
+        let order = self.editor.document().track_order();
+        self.arrangement
+            .selected_tracks()
+            .iter()
+            .copied()
+            .filter(|track| order.contains(track))
+            .max_by_key(|track| order.iter().position(|t| t == track).unwrap_or(0))
+    }
+
+    /// Pastes the tracks on the clipboard, straight after the track to
+    /// paste after, at its level and inside its group when it's in one, or
+    /// after the last track when none is selected (R14).
+    fn paste_tracks(
+        &mut self,
+        id: &str,
+        copied: &crate::tracks::CopiedTracks,
+        after: Option<TrackId>,
+    ) -> Result<Vec<TrackId>, ShellError> {
+        let doc = self.editor.document();
+        let returns: Vec<TrackId> = doc.returns().collect();
+        let place = match after {
+            Some(track) => {
+                let parent = doc.parent(track);
+                if doc
+                    .track(track)
+                    .is_some_and(|track| track.kind() == bl_model::TrackKind::Return)
+                {
+                    // A return track goes among the returns.
+                    let at = returns
+                        .iter()
+                        .position(|&r| r == track)
+                        .map_or(returns.len(), |i| i + 1);
+                    crate::tracks::Place {
+                        parent: None,
+                        index: doc.top_level().len(),
+                        returns: at,
+                    }
+                } else {
+                    let siblings: Vec<TrackId> = match parent {
+                        Some(group) => doc
+                            .track(group)
+                            .map(|g| g.children().collect())
+                            .unwrap_or_default(),
+                        None => doc.top_level().collect(),
+                    };
+                    let at = siblings
+                        .iter()
+                        .position(|&t| t == track)
+                        .map_or(siblings.len(), |i| i + 1);
+                    crate::tracks::Place {
+                        parent,
+                        index: at,
+                        returns: returns.len(),
+                    }
+                }
+            }
+            None => crate::tracks::Place {
+                parent: None,
+                index: doc.top_level().len(),
+                returns: returns.len(),
+            },
+        };
+        // Tracks from another set: their files join this set's media table
+        // (R15), and the IDs they name mean nothing here (R15; the set
+        // exchange spec, R6).
+        let source_returns = (copied.set != self.editor_generation).then(|| copied.returns.clone());
+        if source_returns.is_some() {
+            for (hash, path, size) in &copied.media {
+                self.store.add_media(*hash, path, *size);
+                let hash = bl_media::ContentHash::from_bytes(hash.0);
+                if self.media.entry(hash).is_none() {
+                    let _ = self.media.import(path);
+                }
+            }
+        }
+        crate::tracks::copy_tracks(
+            &mut self.editor,
+            &copied.tracks,
+            place,
+            source_returns,
+            track_ids::PASTE_STEP,
+        )
+        .map_err(|reason| ShellError::Unavailable {
+            command: id.to_owned(),
+            reason,
+        })
+    }
+
     /// Runs a track command that needs the shell: Duplicate Track Without
-    /// Clips (WP-2.19b, IMP-12), Group Tracks (T24), or Ungroup Tracks (T24).
+    /// Clips (WP-2.19b, IMP-12), Group Tracks (T24), Ungroup Tracks (T24),
+    /// and the whole-track copies of WP-6.52.
     fn run_tracks(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
         match id {
+            track_ids::DUPLICATE => {
+                let track_ids::DuplicateTracksArgs { tracks } = Self::args(id, args)?;
+                let tracks = tracks.unwrap_or_else(|| self.arrangement.selected_tracks().to_vec());
+                let copies = crate::tracks::duplicate_tracks(
+                    &mut self.editor,
+                    &tracks,
+                    track_ids::DUPLICATE_STEP,
+                )
+                .map_err(|reason| ShellError::Unavailable {
+                    command: id.to_owned(),
+                    reason,
+                })?;
+                self.select_tracks(&copies);
+                self.dirty = true;
+                self.document_changed();
+                self.touch();
+                Ok(to_value(&track_ids::TracksDuplicated { tracks: copies }))
+            }
+            track_ids::COPY => {
+                let track_ids::DuplicateTracksArgs { tracks } = Self::args(id, args)?;
+                let tracks = tracks.unwrap_or_else(|| self.arrangement.selected_tracks().to_vec());
+                let copied = self.copy_tracks(id, &tracks)?;
+                self.touch();
+                Ok(to_value(&track_ids::TracksCopied { tracks: copied }))
+            }
+            track_ids::CUT => {
+                let track_ids::DuplicateTracksArgs { tracks } = Self::args(id, args)?;
+                let tracks = tracks.unwrap_or_else(|| self.arrangement.selected_tracks().to_vec());
+                let copied = self.copy_tracks(id, &tracks)?;
+                // The tracks go as Delete does (R4): every selected track
+                // but Main, and a track inside a deleted group with it.
+                let doomed = crate::tracks::duplicated(self.editor.document(), &tracks);
+                if !doomed.is_empty() {
+                    self.editor
+                        .transact(track_ids::CUT_STEP, |editor| {
+                            for track in &doomed {
+                                editor.apply(bl_model::Command::DeleteTrack { track: *track })?;
+                            }
+                            Ok::<_, bl_model::EditError>(())
+                        })
+                        .map_err(|error| ShellError::Failed {
+                            command: id.to_owned(),
+                            message: error.to_string(),
+                        })?;
+                }
+                self.dirty = true;
+                self.document_changed();
+                self.touch();
+                Ok(to_value(&track_ids::TracksCopied { tracks: copied }))
+            }
+            track_ids::PASTE => {
+                let track_ids::PasteTracksArgs { track } = Self::args(id, args)?;
+                // The clipboard holds whichever was copied last: the tracks,
+                // or the Arrangement's material (R14).
+                let Some(clipboard) = self.clipboard.clone() else {
+                    return Err(ShellError::Unavailable {
+                        command: id.to_owned(),
+                        reason: "there's nothing on the clipboard to paste".to_owned(),
+                    });
+                };
+                let Clipboard::Tracks(copied) = clipboard else {
+                    return Err(ShellError::Unavailable {
+                        command: id.to_owned(),
+                        reason: "the clipboard holds Arrangement material; paste it with \
+                                 arrangement.paste"
+                            .to_owned(),
+                    });
+                };
+                let after = track.or_else(|| self.last_selected_track());
+                let copies = self.paste_tracks(id, &copied, after)?;
+                self.select_tracks(&copies);
+                self.dirty = true;
+                self.document_changed();
+                self.touch();
+                Ok(to_value(&track_ids::TracksCopied { tracks: copies }))
+            }
             track_ids::DUPLICATE_WITHOUT_CLIPS => {
                 let track_ids::DuplicateTracksArgs { tracks } = Self::args(id, args)?;
                 let tracks = tracks.unwrap_or_else(|| self.arrangement.selected_tracks().to_vec());
@@ -6475,6 +6691,17 @@ impl Shell {
             .filter(|track| doc.track(*track).is_some_and(|t| t.is_frozen()))
     }
 
+    /// Whether a track can be copied: one is selected, and it isn't Main
+    /// (the track context menu spec, R3).
+    fn can_copy_tracks(&self) -> bool {
+        self.arrangement.selected_tracks().iter().any(|track| {
+            self.editor
+                .document()
+                .track(*track)
+                .is_some_and(|track| track.kind() != bl_model::TrackKind::Main)
+        })
+    }
+
     /// [`Shell::can_invoke`] with `active` as the contexts that apply.
     #[must_use]
     pub fn can_invoke_in(&self, id: &str, args: &Value, active: &[Context]) -> bool {
@@ -6513,6 +6740,21 @@ impl Shell {
         match id {
             model::UNDO => return self.editor.can_undo(),
             model::REDO => return self.editor.can_redo(),
+            // The whole-track copies (the track context menu spec, R3):
+            // Cut, Copy and Duplicate work on the selected tracks, and
+            // Paste on the tracks on the clipboard.
+            track_ids::COPY | track_ids::CUT | track_ids::DUPLICATE => {
+                return self.can_copy_tracks();
+            }
+            track_ids::PASTE => {
+                return self
+                    .clipboard
+                    .as_ref()
+                    .is_some_and(|clipboard| match clipboard {
+                        Clipboard::Tracks(copied) => !copied.tracks.is_empty(),
+                        Clipboard::Material(_) => false,
+                    });
+            }
             ids::APP_HIDE => return cfg!(target_os = "macos"),
             ids::SET_OPEN | ids::SET_SAVE | ids::SET_SAVE_AS | ids::APP_SETTINGS => return true,
             ids::SET_DISCARD_CHANGES => return self.unsaved_changes(),
@@ -7798,6 +8040,7 @@ impl Shell {
         self.check_warp_files(id, &args)?;
         let args = self.prepare_device_role(id, args)?;
         let args = self.prepare_scale_clips(id, args)?;
+        let args = self.prepare_groove_clips(id, args)?;
         self.prepare_warping(id, args)
     }
 
@@ -8631,6 +8874,9 @@ impl Shell {
         }
         if bl_shell_spec::warping::handles(id) {
             return self.run_warping(id, args);
+        }
+        if bl_shell_spec::groove::handles(id) {
+            return self.run_grooves(id, args);
         }
         if bl_shell_spec::audio_panel::handles(id) {
             return self.run_audio_panel(id, args);

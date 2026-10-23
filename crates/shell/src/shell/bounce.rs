@@ -22,7 +22,7 @@ use serde_json::Value;
 
 use super::freeze::{frames_to_ticks, prepared_track, render_doc, seconds_between};
 use super::*;
-use crate::arrangement::editing::{self, Target};
+use crate::arrangement::editing::{self, Clipboard, Target};
 use crate::arrangement::placing;
 use crate::processed::{Kind, Request, Written};
 
@@ -88,6 +88,7 @@ impl Shell {
                 };
                 self.clipboard
                     .as_ref()
+                    .and_then(Clipboard::material)
                     .is_some_and(|copied| !copied.tracks.is_empty())
                     && self.paste_destination(&args).is_ok()
             }
@@ -241,6 +242,8 @@ impl Shell {
                     // Spec: scales R7. A bounced clip keeps its source's
                     // scale.
                     scale: clip.scale,
+                    // A bounce plays the groove, so the audio holds it already.
+                    groove: None,
                 },
             ));
         }
@@ -306,6 +309,8 @@ impl Shell {
                 launch: clip.launch,
                 // Spec: scales R7. A bounced clip keeps its source's scale.
                 scale: clip.scale,
+                // A bounce plays the groove, so the audio holds it already.
+                groove: None,
             });
         }
         Ok(lane)
@@ -356,6 +361,8 @@ impl Shell {
             // Spec: scales R7. A clip made from nothing takes the set's
             // current scale.
             scale: doc.settings().scale,
+            // A bounce plays the groove, so the audio holds it already.
+            groove: None,
         };
         Ok(BouncedTrack {
             name: bounced_name(name),
@@ -676,6 +683,8 @@ impl Shell {
                         // Spec: scales R7. A bounced clip keeps its source's
                         // scale.
                         scale: clip.scale,
+                        // A bounce plays the groove, so the audio holds it already.
+                        groove: None,
                     },
                 ));
             }
@@ -707,6 +716,7 @@ impl Shell {
         let Some(copied) = self
             .clipboard
             .as_ref()
+            .and_then(Clipboard::material)
             .filter(|copied| !copied.tracks.is_empty())
         else {
             return Err(unavailable(id, "there's nothing on the clipboard to paste"));
@@ -773,6 +783,8 @@ impl Shell {
                     // Spec: scales R7. A clip made from nothing takes the
                     // set's current scale.
                     scale: self.editor.document().settings().scale,
+                    // A bounce plays the groove, so the audio holds it already.
+                    groove: None,
                 },
             ));
         }

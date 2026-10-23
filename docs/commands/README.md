@@ -536,7 +536,9 @@ What the Arrangement View shows: every view command returns it.
 | `selected_breakpoint` | [`SelectedBreakpoint`](#selectedbreakpoint) or null | no | The breakpoint selected in that lane (WP-6.26), if any: `automation.select_breakpoint` sets it. |
 | `selected_fade` | [`FadeHandleState`](#fadehandlestate) or null | no | The selected fade handle (WP-6.51), if any: Delete deletes its fade. |
 | `selected_lane` | [`Lane`](#lane) or null | no | The automation lane that has the keyboard (WP-6.26): the one the last click, or Up and Down, selected, while Automation Mode is on. The keys of the automation editing spec's R20 to R26 act on its envelope. |
-| `time_selection_lanes` | array of [`Lane`](#lane) | no | The lanes the time selection covers: each a track's own lane or its automation lane (the automation editing spec, R1). Empty when the selection names no lane. |
+| `selected_take_lanes` | array of [`TakeLaneId`](#takelaneid) | no | The take lanes whose headers are selected (the comping spec, R26), in the order they were selected. Their tracks are selected tracks too. |
+| `shown_take_lanes` | array of [`TrackId`](#trackid) | no | The tracks whose take lanes show (the comping spec, R24). |
+| `time_selection_lanes` | array of [`Lane`](#lane) | no | The lanes the time selection covers: each a track's own lane, a take lane under it, or its automation lane (the automation editing spec, R1; the comping spec, R26). Empty when the selection names no lane. |
 
 <details><summary>JSON Schema</summary>
 
@@ -648,6 +650,13 @@ What the Arrangement View shows: every view command returns it.
       },
       "type": "array"
     },
+    "selected_take_lanes": {
+      "description": "The take lanes whose headers are selected (the comping spec, R26), in the order they were selected. Their tracks are selected tracks too.",
+      "items": {
+        "$ref": "#/$defs/TakeLaneId"
+      },
+      "type": "array"
+    },
     "selected_tracks": {
       "description": "The selected tracks, top to bottom.",
       "items": {
@@ -667,6 +676,13 @@ What the Arrangement View shows: every view command returns it.
       "description": "Whether the track headers show their volume, pan, and sends.",
       "type": "boolean"
     },
+    "shown_take_lanes": {
+      "description": "The tracks whose take lanes show (the comping spec, R24).",
+      "items": {
+        "$ref": "#/$defs/TrackId"
+      },
+      "type": "array"
+    },
     "ticks_per_point": {
       "description": "The zoom: ticks of song time per point of screen.",
       "format": "double",
@@ -684,7 +700,7 @@ What the Arrangement View shows: every view command returns it.
       "description": "The selected span of time on the selected tracks, if any."
     },
     "time_selection_lanes": {
-      "description": "The lanes the time selection covers: each a track's own lane or its automation lane (the automation editing spec, R1). Empty when the selection names no lane.",
+      "description": "The lanes the time selection covers: each a track's own lane, a take lane under it, or its automation lane (the automation editing spec, R1; the comping spec, R26). Empty when the selection names no lane.",
       "items": {
         "$ref": "#/$defs/Lane"
       },
@@ -13308,18 +13324,19 @@ A label as the sidebar lists it.
 
 ### `Lane`
 
-Which lane a selection covers: `track` for a track's own lane, where its clips are, and `automation` for the automation lane under it, which shows a parameter.
+Which lane a selection covers: `track` for a track's own lane, where its clips are, `take` for one of its take lanes, and `automation` for the automation lane under it, which shows a parameter.
 
 One of:
 
 - an object with `type` = `"track"`, `track` ([`TrackId`](#trackid)): A track's own lane, where its clips are.
+- an object with `type` = `"take"`, `track` ([`TrackId`](#trackid)), `lane` ([`TakeLaneId`](#takelaneid)): One of a track's take lanes.
 - an object with `type` = `"automation"`, `track` ([`TrackId`](#trackid)), `target` ([`AutomationTarget`](#automationtarget)): A track's automation lane, which shows a parameter.
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "Which lane a selection covers: `track` for a track's own lane, where its clips are, and `automation` for the automation lane under it, which shows a parameter.",
+  "description": "Which lane a selection covers: `track` for a track's own lane, where its clips are, `take` for one of its take lanes, and `automation` for the automation lane under it, which shows a parameter.",
   "oneOf": [
     {
       "description": "A track's own lane, where its clips are.",
@@ -13336,6 +13353,29 @@ One of:
       "required": [
         "type",
         "track"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "One of a track's take lanes.",
+      "properties": {
+        "lane": {
+          "$ref": "#/$defs/TakeLaneId",
+          "description": "The take lane."
+        },
+        "track": {
+          "$ref": "#/$defs/TrackId",
+          "description": "The track."
+        },
+        "type": {
+          "const": "take",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "track",
+        "lane"
       ],
       "type": "object"
     },

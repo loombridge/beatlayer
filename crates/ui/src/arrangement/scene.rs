@@ -15,10 +15,10 @@ use std::collections::{HashMap, HashSet};
 
 use bl_core::time::{TempoMap, Ticks};
 use bl_media::Peaks;
-use bl_model::{ClipData, ClipId, ContentHash, Document, Track, TrackId, WarpMap};
-use bl_shell::arrangement::Horizontal;
+use bl_model::{ClipData, ClipId, ContentHash, Document, TakeLaneId, Track, TrackId, WarpMap};
 use bl_shell::arrangement::grid::{self, Step};
 use bl_shell::arrangement::rows::{Row, rows_between};
+use bl_shell::arrangement::{ArrangementView, Horizontal};
 use egui::{Color32, Rect, pos2};
 
 use super::gpu::{RectInst, SlotData, WaveInst};
@@ -69,10 +69,14 @@ impl TrackClips {
 }
 
 impl TrackClips {
-    /// A track's clips, sorted by start, placed under `tempo`.
+    /// A track's main-lane clips, sorted by start, placed under `tempo`.
     fn of(track: &Track, tempo: &TempoMap) -> Self {
-        let mut clips: Vec<ClipSpan> = track
-            .clips()
+        Self::of_clips(track.clips(), tempo)
+    }
+
+    /// Clips sorted by start, placed under `tempo`.
+    fn of_clips<'a>(clips: impl Iterator<Item = &'a bl_model::Clip>, tempo: &TempoMap) -> Self {
+        let mut clips: Vec<ClipSpan> = clips
             .map(|clip| ClipSpan {
                 start: clip.start.get(),
                 end: clip.end().get(),
@@ -105,6 +109,8 @@ pub struct ClipIndex {
     /// The version of the document the index holds.
     doc: Option<Document>,
     tracks: HashMap<TrackId, TrackClips>,
+    /// Each track's take lanes' clips, in the lanes' order (WP-6.22).
+    lanes: HashMap<TrackId, Vec<(TakeLaneId, TrackClips)>>,
     total: usize,
 }
 
@@ -118,6 +124,7 @@ impl ClipIndex {
         self.revision = Some(revision);
         let old = self.doc.replace(doc.clone());
         self.tracks.retain(|id, _| doc.track(*id).is_some());
+        self.lanes.retain(|id, _| doc.track(*id).is_some());
         self.total = 0;
         // A new tempo map moves where every audio clip's file starts.
         let tempo = &doc.settings().tempo;
@@ -138,8 +145,20 @@ impl ClipIndex {
                 } else {
                     self.tracks.insert(id, TrackClips::of(track, tempo));
                 }
+                if track.take_lanes().len() == 0 {
+                    self.lanes.remove(&id);
+                } else {
+                    let lanes = track
+                        .take_lanes()
+                        .map(|lane| (lane.id, TrackClips::of_clips(lane.clips.iter(), tempo)))
+                        .collect();
+                    self.lanes.insert(id, lanes);
+                }
             }
             self.total += self.tracks.get(&id).map_or(0, |t| t.clips.len());
+            self.total += self.lanes.get(&id).map_or(0, |lanes| {
+                lanes.iter().map(|(_, clips)| clips.clips.len()).sum()
+            });
         }
         true
     }
@@ -148,6 +167,16 @@ impl ClipIndex {
     #[must_use]
     pub fn track(&self, track: TrackId) -> Option<&TrackClips> {
         self.tracks.get(&track)
+    }
+
+    /// A take lane's clips.
+    #[must_use]
+    pub fn take_lane(&self, track: TrackId, lane: TakeLaneId) -> Option<&TrackClips> {
+        self.lanes
+            .get(&track)?
+            .iter()
+            .find(|(id, _)| *id == lane)
+            .map(|(_, clips)| clips)
     }
 
     /// Every clip in the document.
@@ -194,6 +223,10 @@ pub struct ShownClip {
     pub clip: ClipId,
     /// Its track.
     pub track: TrackId,
+    /// The take lane it sits on, or `None` for the track's main lane.
+    pub lane: Option<TakeLaneId>,
+    /// The height of the lane it sits on.
+    pub lane_height: f32,
 }
 
 /// Everything a frame's lanes need.
@@ -212,8 +245,12 @@ pub struct LanesInput<'a> {
     pub pixels_per_point: f32,
     /// The theme.
     pub theme: &'a Theme,
+    /// The view, for its take lanes' rows.
+    pub view: &'a ArrangementView,
     /// The selected tracks.
     pub selected: &'a [TrackId],
+    /// The take lanes the selection is on (WP-6.22): their rows highlight.
+    pub selected_lanes: &'a [TakeLaneId],
     /// The selected clips (WP-1.8b).
     pub selected_clips: &'a [ClipId],
     /// The grid's spacing.
@@ -289,7 +326,9 @@ pub fn build_lanes(
         scroll_y,
         pixels_per_point,
         theme,
+        view,
         selected,
+        selected_lanes,
         selected_clips,
         grid_step,
     } = *input;
@@ -385,6 +424,31 @@ pub fn build_lanes(
                 colors.lane_line.0,
             );
         }
+        // Spec: comping R23. A take lane is a row under the main lane,
+        // tinted with the track's colour, with a line under it.
+        for lane in view.take_lane_rows(doc, row) {
+            let top = lanes.top() + lane.top - scroll_y;
+            let fill = if selected_lanes.contains(&lane.lane) {
+                colors.lane_selected.0
+            } else {
+                track_colour(theme, row.track).gamma_multiply(0.12)
+            };
+            rect(
+                out,
+                [lanes.left(), top, lanes.right(), top + lane.height],
+                fill,
+            );
+            rect(
+                out,
+                [
+                    lanes.left(),
+                    top + lane.height - px,
+                    lanes.right(),
+                    top + lane.height,
+                ],
+                colors.lane_line.0,
+            );
+        }
     }
 
     // Clips. A big selection is looked up through a set (WP-1.8b).
@@ -400,107 +464,120 @@ pub fn build_lanes(
     let left_limit = lanes.left() - 2.0;
     let right_limit = lanes.right() + 2.0;
     for row in &rows[visible] {
-        let Some(clips) = index.track(row.track) else {
-            continue;
-        };
-        let y0 = row_y(row);
-        let h = row.height;
         let track_colour = track_colour(theme, row.track);
-        for span in clips.overlapping(from, to) {
-            stats.clips += 1;
-            let x0 = lanes.left() + horizontal.x(Ticks(span.start)) as f32;
-            let x1 = lanes.left() + horizontal.x(Ticks(span.end)) as f32;
-            let (dx0, dx1) = (x0.max(left_limit), x1.min(right_limit).max(x0 + px));
-            let colour = if span.muted {
-                colors.clip_muted.0
-            } else {
-                track_colour
+        // The main lane, then its take lanes (comping R23): each lane's
+        // clips are drawn alike.
+        let main = std::iter::once((None, row_y(row), row.height, index.track(row.track)));
+        let takes = view.take_lane_rows(doc, row).map(|lane| {
+            (
+                Some(lane.lane),
+                lanes.top() + lane.top - scroll_y,
+                lane.height,
+                index.take_lane(row.track, lane.lane),
+            )
+        });
+        for (lane, y0, h, clips) in main.chain(takes) {
+            let Some(clips) = clips else {
+                continue;
             };
-            let inset = if h >= 6.0 { px } else { 0.0 };
-            let (top, bottom) = (y0 + inset, y0 + h - inset.max(px));
-            let clip_rect = Rect::from_min_max(pos2(x0, top), pos2(x1, bottom));
-            shown.push(ShownClip {
-                rect: clip_rect,
-                clip: span.id,
-                track: row.track,
-            });
-            if row.folded || h < 2.0 {
-                // Folded: a bar of the clip's colour.
-                rect(out, [dx0, top, dx1, bottom], colour);
-            } else {
-                let title = title_height(h);
-                rect(
-                    out,
-                    [dx0, top, dx1, bottom],
-                    if h >= 20.0 {
-                        body_colour(colour, colors.lane.0, theme.dark)
-                    } else {
-                        colour
-                    },
-                );
-                if title > 0.0 {
-                    rect(out, [dx0, top, dx1, top + title], colour);
-                }
-                // The clip's left edge, on lanes tall enough to show it.
-                let edge = if h >= 6.0 { px } else { 0.0 };
-                if edge > 0.0 && x0 >= left_limit {
-                    rect(out, [x0, top, x0 + px, bottom], colors.lane_line.0);
-                }
-                if let Some(media) = span.media {
-                    // Down to a line on the shortest lanes, as Optimize
-                    // Height makes them with 200 tracks.
-                    let band = (top + title + edge, bottom - edge);
-                    let warp = warp_of(doc, span.id);
-                    if band.1 - band.0 >= 1.0
-                        && let Known::Ready { peaks, base } = library.get(media, atlas)
-                    {
-                        stats.waveforms += waveform(
-                            out,
-                            &WaveClip {
-                                peaks,
-                                base: *base,
-                                start: Ticks(span.origin),
-                                draw: (dx0.max(x0), dx1.min(x1)),
-                                band,
-                                warp: warp.as_ref().map(|(map, shift)| (map, *shift)),
-                            },
-                            tempo,
-                            horizontal,
-                            lanes,
-                            pixels_per_point,
-                            if span.muted {
-                                colors.lane.0
-                            } else {
-                                ink(colour, colors.waveform.0, h)
-                            },
-                        );
+            for span in clips.overlapping(from, to) {
+                stats.clips += 1;
+                let x0 = lanes.left() + horizontal.x(Ticks(span.start)) as f32;
+                let x1 = lanes.left() + horizontal.x(Ticks(span.end)) as f32;
+                let (dx0, dx1) = (x0.max(left_limit), x1.min(right_limit).max(x0 + px));
+                let colour = if span.muted {
+                    colors.clip_muted.0
+                } else {
+                    track_colour
+                };
+                let inset = if h >= 6.0 { px } else { 0.0 };
+                let (top, bottom) = (y0 + inset, y0 + h - inset.max(px));
+                let clip_rect = Rect::from_min_max(pos2(x0, top), pos2(x1, bottom));
+                shown.push(ShownClip {
+                    rect: clip_rect,
+                    clip: span.id,
+                    track: row.track,
+                    lane,
+                    lane_height: h,
+                });
+                if row.folded || h < 2.0 {
+                    // Folded: a bar of the clip's colour.
+                    rect(out, [dx0, top, dx1, bottom], colour);
+                } else {
+                    let title = title_height(h);
+                    rect(
+                        out,
+                        [dx0, top, dx1, bottom],
+                        if h >= 20.0 {
+                            body_colour(colour, colors.lane.0, theme.dark)
+                        } else {
+                            colour
+                        },
+                    );
+                    if title > 0.0 {
+                        rect(out, [dx0, top, dx1, top + title], colour);
+                    }
+                    // The clip's left edge, on lanes tall enough to show it.
+                    let edge = if h >= 6.0 { px } else { 0.0 };
+                    if edge > 0.0 && x0 >= left_limit {
+                        rect(out, [x0, top, x0 + px, bottom], colors.lane_line.0);
+                    }
+                    if let Some(media) = span.media {
+                        // Down to a line on the shortest lanes, as Optimize
+                        // Height makes them with 200 tracks.
+                        let band = (top + title + edge, bottom - edge);
+                        let warp = warp_of(doc, span.id);
+                        if band.1 - band.0 >= 1.0
+                            && let Known::Ready { peaks, base } = library.get(media, atlas)
+                        {
+                            stats.waveforms += waveform(
+                                out,
+                                &WaveClip {
+                                    peaks,
+                                    base: *base,
+                                    start: Ticks(span.origin),
+                                    draw: (dx0.max(x0), dx1.min(x1)),
+                                    band,
+                                    warp: warp.as_ref().map(|(map, shift)| (map, *shift)),
+                                },
+                                tempo,
+                                horizontal,
+                                lanes,
+                                pixels_per_point,
+                                if span.muted {
+                                    colors.lane.0
+                                } else {
+                                    ink(colour, colors.waveform.0, h)
+                                },
+                            );
+                        }
                     }
                 }
-            }
-            if is_selected(span.id) && !row.folded && h >= 2.0 {
-                // Spec: arrangement-editing R15. The title row, or a band
-                // along the top of a short clip, and an outline.
-                let band = title_height(h).max((h * 0.25).clamp(px, 4.0));
-                let highlight = colors.time_selection.0;
-                rect(out, [dx0, top, dx1, top + band], highlight);
-                let line = (2.0 * px).min((bottom - top) / 2.0);
-                rect(out, [dx0, bottom - line, dx1, bottom], highlight);
-                if x0 >= left_limit {
-                    rect(out, [x0, top, x0 + line, bottom], highlight);
+                if is_selected(span.id) && !row.folded && h >= 2.0 {
+                    // Spec: arrangement-editing R15. The title row, or a band
+                    // along the top of a short clip, and an outline.
+                    let band = title_height(h).max((h * 0.25).clamp(px, 4.0));
+                    let highlight = colors.time_selection.0;
+                    rect(out, [dx0, top, dx1, top + band], highlight);
+                    let line = (2.0 * px).min((bottom - top) / 2.0);
+                    rect(out, [dx0, bottom - line, dx1, bottom], highlight);
+                    if x0 >= left_limit {
+                        rect(out, [x0, top, x0 + line, bottom], highlight);
+                    }
+                    if x1 <= right_limit {
+                        rect(out, [x1 - line, top, x1, bottom], highlight);
+                    }
                 }
-                if x1 <= right_limit {
-                    rect(out, [x1 - line, top, x1, bottom], highlight);
+                if x1 - x0 >= 20.0 && h >= 12.0 {
+                    let title = title_height(h).max(h.min(14.0));
+                    labels.push(Label {
+                        rect: Rect::from_min_max(
+                            pos2(x0.max(lanes.left()), top),
+                            pos2(x1.min(lanes.right()), (top + title).min(bottom)),
+                        ),
+                        clip: span.id,
+                    });
                 }
-            }
-            if x1 - x0 >= 20.0 && h >= 12.0 {
-                let title = title_height(h).max(h.min(14.0));
-                labels.push(Label {
-                    rect: Rect::from_min_max(
-                        pos2(x0.max(lanes.left()), top),
-                        pos2(x1.min(lanes.right()), (top + title).min(bottom)),
-                    ),
-                    clip: span.id,
-                });
             }
         }
     }

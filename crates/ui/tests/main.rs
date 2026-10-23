@@ -63,6 +63,7 @@ mod session_view;
 mod settings_window;
 mod slice_to_midi;
 mod stems_dialog;
+mod take_lanes;
 mod theme_page;
 mod track_menu;
 mod transport;

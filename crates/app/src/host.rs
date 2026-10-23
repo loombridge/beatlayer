@@ -1777,7 +1777,8 @@ impl Host {
             | Effect::RenameMacro(_, _)
             | Effect::RenameVariation(_, _)
             | Effect::RenameTrack(_)
-            | Effect::RenameLocator(_) => {
+            | Effect::RenameLocator(_)
+            | Effect::RenameTakeLane(_) => {
                 // The renaming happens in the window in front.
                 let (surface, ui) = if self.shell.acting_window() == WindowKind::Second {
                     (&self.second, &mut self.second_ui)

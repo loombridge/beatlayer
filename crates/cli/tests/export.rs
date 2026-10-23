@@ -241,7 +241,7 @@ fn every_fixture_exports_as_its_golden_reference_to_the_bit() {
         exported += 1;
     }
     // Every fixture a saved set can hold, but the loop's.
-    assert_eq!(exported, 44);
+    assert_eq!(exported, 47);
     assert!(
         !temp.names().iter().any(|name| name.starts_with('.')),
         "no hidden files left: {:?}",

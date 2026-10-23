@@ -677,7 +677,7 @@ Total to 1.0: 256 packages planned in Phases 0 to 6, and about 110 estimated in 
 | 6.32 | todo |  |  |
 | 6.32b | todo |  |  |
 | 6.33 | todo |  |  |
-| 6.34 | todo |  |  |
+| 6.34 | done | 23 October 2026 | [#326](https://github.com/loombridge/beatlayer/pull/326); `.blclip` clip files saved from the Session View or the Arrangement into the browser, listed under the Clips label, placed with their track's devices on an empty or new track, and previewed through their own warp settings, with Collect Files on Export and the User Library's location on the Library settings page ([clip files](specs/clip-files.md) R1 to R15, [file management](specs/file-management.md) R7 to R9) |
 | 6.34b | todo |  |  |
 | 6.35 | todo |  |  |
 | 6.35b | todo |  |  |

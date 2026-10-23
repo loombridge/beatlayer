@@ -344,7 +344,6 @@ fn lanes_are_deleted_moved_and_auditioned_one_undo_step_each() {
     assert_eq!(editor.undo_history().next(), Some("Delete All Take Lanes"));
 }
 
-// Spec: comping R8. Lanes of different tracks can't be moved together.
 // Spec: comping R27. A clip moves between a track's main lane and its take
 // lanes, out of wherever it sat, with its ID kept; the lane must be the
 // track's own, and the clip's kind the track's.
@@ -391,6 +390,7 @@ fn a_clip_moves_between_the_main_lane_and_take_lanes() {
     assert_eq!(editor.document().clip_lane(id), None);
 }
 
+// Spec: comping R8. Lanes of different tracks can't be moved together.
 #[test]
 fn lanes_of_two_tracks_are_not_moved_together() {
     let (mut editor, audio, midi) = song();

@@ -66,12 +66,16 @@ impl Shell {
                 Ok(args) => self.reverse_range(id, &args).is_ok(),
                 Err(_) => false,
             },
-            ids::CONSOLIDATE | ids::CONSOLIDATE_TO_SCENE => {
-                match Self::args::<TargetArgs>(id, args.clone()) {
-                    Ok(args) => self.material_of(id, &args).is_ok(),
-                    Err(_) => false,
-                }
-            }
+            // Consolidate works on take lanes too (R29); to a scene, on
+            // main lanes only.
+            ids::CONSOLIDATE => match Self::args::<TargetArgs>(id, args.clone()) {
+                Ok(args) => self.lane_material_of(id, &args).is_ok(),
+                Err(_) => false,
+            },
+            ids::CONSOLIDATE_TO_SCENE => match Self::args::<TargetArgs>(id, args.clone()) {
+                Ok(args) => self.material_of(id, &args).is_ok(),
+                Err(_) => false,
+            },
             _ => false,
         }
     }

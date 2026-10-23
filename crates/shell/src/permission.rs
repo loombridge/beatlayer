@@ -384,8 +384,9 @@ fn paste_bounced(args: &Value, registered: Permission, scene: Scene<'_>) -> Call
     let Some(base) = lanes.iter().position(|id| *id == track) else {
         return unchanged;
     };
-    for held in &clipboard.lanes {
-        let distance = held.distance;
+    let mut distances: Vec<usize> = clipboard.lanes.iter().map(|lane| lane.distance).collect();
+    distances.dedup();
+    for distance in distances {
         let Some(destination) = lanes.get(base + distance) else {
             return unchanged;
         };

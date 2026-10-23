@@ -732,7 +732,10 @@ impl Shell {
             }
         }
         let destination = self.paste_destination(&args)?;
-        let distances: Vec<usize> = copied.lanes.iter().map(|lane| lane.distance).collect();
+        // One destination per source track: a track's take lanes share its
+        // distance, and the lanes run top to bottom.
+        let mut distances: Vec<usize> = copied.lanes.iter().map(|lane| lane.distance).collect();
+        distances.dedup();
         let tracks = self.destination_tracks(&destination, &distances)?;
         let mut files = Vec::new();
         let mut rendered = Vec::new();

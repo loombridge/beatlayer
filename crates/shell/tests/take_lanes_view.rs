@@ -829,6 +829,10 @@ fn consolidate_works_on_a_take_lane() {
         0,
         2,
     );
+    assert!(
+        s.shell.can_invoke("arrangement.consolidate", &json!({})),
+        "Consolidate is enabled on a take lane"
+    );
     s.one_step("arrangement.consolidate", json!({}));
     assert_eq!(s.on_lane(lane), [(0, 2)], "one clip, on the lane");
     let clip = &s.doc().take_lane(lane).unwrap().clips[0];

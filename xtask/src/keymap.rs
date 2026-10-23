@@ -56,6 +56,13 @@ const SYSTEM: &[(&str, &str)] = &[
 /// its key means.
 const WIDGET: &[(&str, &str)] = &[
     (
+        "S-EDIT-015",
+        "the Arrangement: Shift with Cut, Copy, Paste, Duplicate or Delete is S-ARR-015 to \
+         S-ARR-019, which run `arrangement.cut_time`, `arrangement.copy_time`, \
+         `arrangement.paste_time`, `arrangement.duplicate_time` and `arrangement.delete_time` \
+         (the time editing spec, R21)",
+    ),
+    (
         "S-EDIT-016",
         "the Arrangement's automation lane: the edit keys with Option (Alt on Windows) held \
          apply to the envelopes (the automation editing spec, R6)",

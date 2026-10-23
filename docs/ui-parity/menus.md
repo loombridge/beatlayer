@@ -700,7 +700,7 @@ Other states, including the scrub area's own menu:
 
 | ID | Command | Source |
 |---|---|---|
-| C-TIME-018 | Paste, Delete, and the ... Time commands | manual 6.9, 6.11 |
+| C-TIME-018 | Paste, Delete, and the ... Time commands | manual 6.9, 6.11. Beatlayer's time selection menu shows Cut, Copy, Paste, Duplicate and Delete Time after Duplicate, a placement of its own ([time editing](../specs/time-editing.md) R22) |
 | C-TIME-019 | Split, Consolidate, Crop Clip (a selection that holds clips) | manual 6.12, 6.13, 22.2 |
 | C-TIME-020 | Consolidate Time to New Scene | manual 7.5 |
 | C-TIME-021 | Insert automation shapes, Simplify Envelope (automation lanes) | manual 25.5.5, 25.5.4 |

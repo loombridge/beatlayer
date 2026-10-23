@@ -6540,6 +6540,9 @@ impl Shell {
             // Spec: time-editing R4. The Create menu's Add Locator reads
             // Delete Locator while a locator is selected.
             locator_ids::DELETE => Some("Delete Locator".to_owned()),
+            // Spec: time-editing R17. Create ▸ Insert Scene reads Insert
+            // Silence with the Arrangement focused.
+            edit_ids::INSERT_SILENCE => Some("Insert Silence".to_owned()),
             // Spec: audio-clips R28. Create ▸ Create Fade reads Create Fade
             // In/Out or Create Crossfade as the selection gives one.
             edit_ids::CREATE_FADE => Some(
@@ -6869,7 +6872,7 @@ impl Shell {
                     .as_ref()
                     .is_some_and(|clipboard| match clipboard {
                         Clipboard::Tracks(copied) => !copied.tracks.is_empty(),
-                        Clipboard::Material(_) => false,
+                        Clipboard::Material(_) | Clipboard::Time(_) => false,
                     });
             }
             ids::APP_HIDE => return cfg!(target_os = "macos"),

@@ -198,7 +198,10 @@ fn selection_menu(shell: &Shell) -> SelectionMenu {
     } else {
         !view.selected_clips().is_empty()
     };
-    SelectionMenu { clips }
+    SelectionMenu {
+        clips,
+        time_commands: true,
+    }
 }
 
 /// Whether the selected clips are audio clips, whose menu adds the

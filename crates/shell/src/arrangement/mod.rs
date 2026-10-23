@@ -18,6 +18,7 @@ pub mod grid;
 pub mod locator;
 pub mod placing;
 pub mod rows;
+pub mod time_commands;
 
 use std::collections::{BTreeMap, BTreeSet};
 

@@ -263,6 +263,41 @@ fn pasting_over_clips_asks_and_into_empty_space_doesn_t() {
 }
 
 #[test]
+fn an_agent_s_delete_time_asks_first_and_copy_time_and_insert_silence_don_t() {
+    // Spec: agent-permissions R1; time-editing R15, R17, R18. Removing time
+    // from every track removes the person's work whatever it holds; copying
+    // it changes nothing, and opening silence only moves.
+    let (mut client, ..) = two_clips(4);
+    let span = json!({ "start": "2.1.1", "end": "4.1.1" });
+    let went = attempt(&mut client, "arrangement.delete_time", &span);
+    assert_eq!(
+        went,
+        Went {
+            asked: true,
+            permission: "destructive".to_owned()
+        }
+    );
+    let went = attempt(&mut client, "arrangement.cut_time", &span);
+    assert!(went.asked, "{went:?}");
+    let went = attempt(&mut client, "arrangement.copy_time", &span);
+    assert_eq!(
+        went,
+        Went {
+            asked: false,
+            permission: "read".to_owned()
+        }
+    );
+    let went = attempt(&mut client, "arrangement.insert_silence", &span);
+    assert_eq!(
+        went,
+        Went {
+            asked: false,
+            permission: "edit".to_owned()
+        }
+    );
+}
+
+#[test]
 fn a_drop_from_the_browser_over_clips_is_destructive_as_well_as_external() {
     // Spec: agent-permissions R3. Its files aren't read before the person
     // allows it, so a drop is destructive when a clip on its track ends

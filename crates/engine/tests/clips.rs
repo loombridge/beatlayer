@@ -18,7 +18,8 @@ use bl_engine::{
 };
 use bl_media::{MediaStore, MemorySource, SampleData, convert_sample_rate};
 use bl_model::{
-    AudioData, Clip, ClipData, ClipId, Command, ContentHash, Editor, TrackId, TrackKind,
+    AudioData, AutomationTarget, Breakpoint, Clip, ClipData, ClipId, Command, ContentHash, Editor,
+    MixerParam, TrackId, TrackKind,
 };
 use common::{RATE, Rig, track};
 
@@ -1116,5 +1117,89 @@ fn an_auditioned_take_lane_plays_in_place_of_the_main_lane_with_no_program() {
             "no new program, block {block}"
         );
         assert_eq!(rig.monitor.state().counters.data_unrouted, 0);
+    }
+}
+
+// Spec: time-editing R15, R23. A set with a span deleted from every track
+// plays, sample for sample at any block size, what the same set built
+// closed-up by hand plays: the clips either side keep their contents, the
+// volume envelope steps from its value at the span's start to the one at its
+// end, and nothing else moves.
+#[test]
+fn a_set_after_delete_time_plays_what_the_same_set_built_closed_up_does() {
+    let bar = Ticks::WHOLE;
+    let tempo = TempoMap::constant(Bpm::new(240.0).unwrap());
+    let mut media = MediaMap::new();
+    media.insert(hash(1), ramp(480_000, 48_000));
+    media.insert(hash(2), ramp(480_000, 48_000));
+    let volume = AutomationTarget::Mixer {
+        param: MixerParam::Volume,
+    };
+    let point = |at: Ticks, value: f64| Breakpoint {
+        at,
+        value,
+        bend: 0.0,
+    };
+    let song = |build: &dyn Fn(&mut Editor, TrackId, TrackId)| {
+        let mut editor = Editor::new();
+        editor
+            .apply(Command::SetTempo {
+                tempo: tempo.clone(),
+            })
+            .unwrap();
+        let a = track(&mut editor, TrackKind::Audio, None);
+        let b = track(&mut editor, TrackKind::Audio, None);
+        build(&mut editor, a, b);
+        editor
+    };
+    let marker = |hash_n, start| AudioData {
+        start,
+        ..AudioData::new(hash(hash_n))
+    };
+    // Before: A holds one clip over bars 0 to 6 with a volume ramp across
+    // them, B one over bars 3 to 5. Bars 2 to 4 are deleted.
+    let mut closed = song(&|editor, a, b| {
+        clip(editor, a, Ticks::ZERO, bar * 6, marker(1, 0.25));
+        clip(editor, b, bar * 3, bar * 2, marker(2, 0.0));
+        editor
+            .apply(Command::SetAutomationEnvelope {
+                track: a,
+                target: volume,
+                points: vec![point(Ticks::ZERO, 0.0), point(bar * 6, 1.0)],
+            })
+            .unwrap();
+    });
+    closed
+        .apply(Command::DeleteTime {
+            start: bar * 2,
+            end: bar * 4,
+            clips: Vec::new(),
+        })
+        .unwrap();
+    // By hand: at 240 BPM a bar is a second, so the part of A that was at
+    // bars 4 to 6 starts 4 s further into its file, and B's last bar 1 s.
+    let by_hand = song(&|editor, a, b| {
+        clip(editor, a, Ticks::ZERO, bar * 2, marker(1, 0.25));
+        clip(editor, a, bar * 2, bar * 2, marker(1, 4.25));
+        clip(editor, b, bar * 2, bar, marker(2, 1.0));
+        editor
+            .apply(Command::SetAutomationEnvelope {
+                track: a,
+                target: volume,
+                points: vec![
+                    point(Ticks::ZERO, 0.0),
+                    point(bar * 2, 1.0 / 3.0),
+                    point(bar * 2 + Ticks(1), 2.0 / 3.0),
+                    point(bar * 4, 1.0),
+                ],
+            })
+            .unwrap();
+    });
+    let frames = 4 * 48_000;
+    let expected = play(&by_hand, &media, frames, 512, &[]);
+    assert!(expected[0].iter().any(|&s| s != 0.0));
+    for block in [1, 512, 4_096] {
+        let got = play(&closed, &media, frames, block, &[]);
+        assert_eq!(got, expected, "block size {block}");
     }
 }

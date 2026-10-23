@@ -269,6 +269,38 @@ pub enum Command {
         /// Where the song starts; nothing clears it.
         start: Option<SongStart>,
     },
+    /// Opens empty time on every track: a clip across `at` is split there,
+    /// and every clip, take-lane clip, breakpoint, tempo breakpoint,
+    /// time-signature marker and locator at or after it moves later by
+    /// `length` (Insert Silence; time editing R17). The envelopes, the
+    /// tempo and the signature hold across the new time what they had at
+    /// `at`.
+    InsertTime {
+        /// Where the time opens: 0 (1.1.1) or later.
+        at: Ticks,
+        /// How much time opens; more than 0.
+        length: Ticks,
+        /// One new ID for each clip the time opens inside, which the part
+        /// after the split takes, in track order; left out, the editor
+        /// issues them.
+        #[serde(default)]
+        clips: Vec<ClipId>,
+    },
+    /// Closes a span of time on every track (Delete Time; time editing
+    /// R15): clips inside it go, a clip across an edge is cut or split
+    /// there, and everything at or after `end` moves earlier by the span's
+    /// length. Time-signature markers and locators inside it go.
+    DeleteTime {
+        /// Where the span starts: 0 (1.1.1) or later.
+        start: Ticks,
+        /// Where it ends, after `start`.
+        end: Ticks,
+        /// One new ID for each clip the span lies inside, which the part
+        /// after the split takes, in track order; left out, the editor
+        /// issues them.
+        #[serde(default)]
+        clips: Vec<ClipId>,
+    },
     /// Switches Punch-In on or off: with it on, recording into the
     /// Arrangement starts at the loop brace's start, whether or not the Loop
     /// switch is on.
@@ -2618,6 +2650,8 @@ impl Command {
             Self::SetLocatorInfoText { .. } => "Edit Info Text",
             Self::LoopToNextLocator { .. } => "Loop to Next Locator",
             Self::SetSongStart { .. } => "Set Song Start Time",
+            Self::InsertTime { .. } => "Insert Silence",
+            Self::DeleteTime { .. } => "Delete Time",
             Self::SetPunchIn { .. } => "Punch-In",
             Self::SetPunchOut { .. } => "Punch-Out",
             Self::SetMetronomeEnabled { .. } => "Metronome",
@@ -2959,7 +2993,22 @@ impl Command {
 
     /// Fills the IDs a command leaves out with ones from `issue`: a take
     /// lane and clips handed to `AddTakeLane` without them.
-    pub fn issue_missing_ids(&mut self, issue: &mut dyn FnMut() -> Id) {
+    pub fn issue_missing_ids(&mut self, doc: &Document, issue: &mut dyn FnMut() -> Id) {
+        match self {
+            Self::InsertTime { at, clips, .. } if clips.is_empty() => {
+                *clips = (doc.clips_split_by_insert(*at).iter())
+                    .map(|_| issue().into())
+                    .collect();
+            }
+            Self::DeleteTime {
+                start, end, clips, ..
+            } if clips.is_empty() => {
+                *clips = (doc.clips_split_by_delete(*start, *end).iter())
+                    .map(|_| issue().into())
+                    .collect();
+            }
+            _ => {}
+        }
         if let Self::AddTakeLane { lane, .. } = self {
             if lane.id.is_none() {
                 lane.id = Some(issue().into());
@@ -2994,6 +3043,9 @@ impl Command {
             Self::GroupDevices { rack, .. } => rack.ids(),
             Self::CreateScene { id, .. } => vec![id.0],
             Self::AddLocator { locator } => vec![locator.id.0],
+            Self::InsertTime { clips, .. } | Self::DeleteTime { clips, .. } => {
+                clips.iter().map(|clip| clip.0).collect()
+            }
             Self::AddGroove { groove } => vec![groove.id.0],
             Self::BounceTrackInPlace { bounced, .. } => {
                 bounced.clip_ids().iter().map(|clip| clip.0).collect()
@@ -3086,6 +3138,8 @@ impl Document {
                 self.settings.arrangement_loop.enabled = *enabled;
                 Ok(())
             }
+            Command::InsertTime { at, length, clips } => self.insert_time(*at, *length, clips),
+            Command::DeleteTime { start, end, clips } => self.delete_time(*start, *end, clips),
             Command::AddLocator { locator } => self.add_locator(locator.clone()),
             Command::DeleteLocator { locator } => self.delete_locator(*locator),
             Command::MoveLocator { locator, to } => self.move_locator(*locator, *to),
@@ -8492,6 +8546,9 @@ fn check_index(index: usize, len: usize) -> Result<(), ModelError> {
 fn position_in<T: Clone>(list: &Vector<T>, matches: impl Fn(&T) -> bool) -> Option<usize> {
     list.iter().position(matches)
 }
+
+mod time_edit;
+pub use time_edit::{tempo_shape, write_tempo_shape};
 
 #[cfg(test)]
 mod tests {

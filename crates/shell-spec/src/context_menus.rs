@@ -496,6 +496,8 @@ pub fn pending_package(row: &str) -> Option<&'static str> {
 pub struct SelectionMenu {
     /// The selection holds clips.
     pub clips: bool,
+    /// A time selection's menu brings the …Time commands (C-TIME-018).
+    pub time_commands: bool,
 }
 
 /// The rows a selection that holds clips adds to a clip's menu.
@@ -503,6 +505,19 @@ const CLIP_SELECTION: &[Row] = &[
     SEPARATOR,
     ("C-CLIP-ARR-025", "Split", Key(&["S-ARR-001"])),
     ("C-CLIP-ARR-026", "Consolidate", Key(&["S-ARR-002"])),
+];
+
+/// The …Time commands a time selection's menu adds after Duplicate
+/// (C-TIME-018; time editing R22). menus.md doesn't place them in the
+/// observed menu, so [`SelectionMenu::time_commands`] brings them and the
+/// base menu stays as observed.
+const TIME_COMMANDS: &[Row] = &[
+    SEPARATOR,
+    ("C-TIME-018a", "Cut Time", Key(&["S-ARR-015"])),
+    ("C-TIME-018b", "Copy Time", Key(&["S-ARR-016"])),
+    ("C-TIME-018c", "Paste Time", Key(&["S-ARR-017"])),
+    ("C-TIME-018d", "Duplicate Time", Key(&["S-ARR-018"])),
+    ("C-TIME-018e", "Delete Time", Key(&["S-ARR-019"])),
 ];
 
 /// The rows a time selection that holds clips adds to its menu.
@@ -602,7 +617,11 @@ pub fn arrangement_time() -> Vec<MenuItem> {
 /// adds.
 #[must_use]
 pub fn arrangement_time_in(state: SelectionMenu) -> Vec<MenuItem> {
-    items(&with_selection(TIME, TIME_SELECTION, "C-TIME-007", state))
+    let mut rows = with_selection(TIME, TIME_SELECTION, "C-TIME-007", state);
+    if state.time_commands {
+        rows = insert_after(&rows, TIME_COMMANDS, "C-TIME-003");
+    }
+    items(&rows)
 }
 
 /// The scrub area's menu (C-TIME-022).
@@ -629,6 +648,11 @@ fn with_selection(base: &[Row], extra: &[Row], after: &str, state: SelectionMenu
     if !state.clips {
         return base.to_vec();
     }
+    insert_after(base, extra, after)
+}
+
+/// `base` with `extra` inserted after the row `after`.
+fn insert_after(base: &[Row], extra: &[Row], after: &str) -> Vec<Row> {
     let mut rows = Vec::with_capacity(base.len() + extra.len());
     for &row in base {
         rows.push(row);
@@ -798,6 +822,30 @@ mod tests {
                 .unwrap_or_else(|| panic!("{} isn't in menus.md", item.row));
             assert!(line.contains(item.label), "{}: {line}", item.label);
         }
+    }
+
+    // Spec: time-editing R22
+    #[test]
+    fn a_time_selections_menu_brings_the_time_commands_after_duplicate() {
+        let base = arrangement_time();
+        assert!(!base.iter().any(|i| i.row.starts_with("C-TIME-018")));
+        let with = arrangement_time_in(SelectionMenu {
+            time_commands: true,
+            ..SelectionMenu::default()
+        });
+        let labels: Vec<_> = with.iter().map(|i| i.label).collect();
+        let duplicate = labels.iter().position(|l| *l == "Duplicate").unwrap();
+        assert_eq!(
+            labels[duplicate + 2..duplicate + 7],
+            [
+                "Cut Time",
+                "Copy Time",
+                "Paste Time",
+                "Duplicate Time",
+                "Delete Time"
+            ]
+        );
+        assert!(with[duplicate + 1].is_separator() && with[duplicate + 7].is_separator());
     }
 
     #[test]

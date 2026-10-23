@@ -41,6 +41,12 @@ pub struct DeviceDescription {
     /// for them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub menu_options: Vec<ParamId>,
+    /// The switch the device draws in its title bar instead of its panel
+    /// (L-DEV-004): Use Current Scale, on the five scale-aware devices. It
+    /// is a parameter like any other, which the layout places no control
+    /// for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title_switch: Option<ParamId>,
 }
 
 // Every value in a description is a finite number (`check`), so equality is
@@ -58,6 +64,7 @@ impl DeviceDescription {
             layout,
             views: Vec::new(),
             menu_options: Vec::new(),
+            title_switch: None,
         }
     }
 
@@ -81,7 +88,7 @@ impl DeviceDescription {
     /// without them.
     #[must_use]
     pub fn with_menu_options(mut self, options: &[ParamId]) -> Self {
-        let generic = self.layout == DeviceLayout::generic(&self.params);
+        let generic = self.layout == DeviceLayout::generic(&self.placed());
         self.menu_options = options.to_vec();
         if generic {
             self.layout = DeviceLayout::generic(&self.placed());
@@ -89,12 +96,24 @@ impl DeviceDescription {
         self
     }
 
+    /// The same, with the switch `id` drawn in the device's title bar. A
+    /// device with the generic layout gets it again without the switch.
+    #[must_use]
+    pub fn with_title_switch(mut self, id: ParamId) -> Self {
+        let generic = self.layout == DeviceLayout::generic(&self.placed());
+        self.title_switch = Some(id);
+        if generic {
+            self.layout = DeviceLayout::generic(&self.placed());
+        }
+        self
+    }
+
     /// The parameters the layout places a control for: all but the menu
-    /// options.
+    /// options and the title bar's switch.
     fn placed(&self) -> Vec<ParamDescriptor> {
         self.params
             .iter()
-            .filter(|p| !self.menu_options.contains(&p.id))
+            .filter(|p| !self.menu_options.contains(&p.id) && self.title_switch != Some(p.id))
             .cloned()
             .collect()
     }
@@ -150,6 +169,17 @@ impl DeviceDescription {
                     option.0
                 ));
             }
+        }
+        if let Some(id) = self.title_switch
+            && (!self
+                .param(id)
+                .is_some_and(|p| matches!(p.kind, ParamKind::Toggle))
+                || self.menu_options.contains(&id))
+        {
+            return Err(format!(
+                "title switch {} isn't a switch of the device, or is also a menu option",
+                id.0
+            ));
         }
         self.layout.check(&self.placed())
     }
@@ -207,6 +237,29 @@ mod tests {
         let mut placed = DeviceDescription::new(params);
         placed.menu_options = vec![id(1)];
         assert!(placed.check().is_err(), "a control for a menu option");
+    }
+
+    // Spec: scales R16
+    #[test]
+    fn a_title_switch_is_a_switch_the_layout_places_no_control_for() {
+        let params = vec![
+            ParamDescriptor::gain(id(0), "Gain", 6.0, 0.0),
+            ParamDescriptor::toggle(id(1), "Use Current Scale", false),
+        ];
+        let described = DeviceDescription::new(params.clone()).with_title_switch(id(1));
+        described.check().unwrap();
+        assert_eq!(described.layout, DeviceLayout::generic(&params[..1]));
+        // One that isn't a switch, or isn't there, or is a menu option too,
+        // is refused.
+        for bad in [
+            DeviceDescription::new(params.clone()).with_title_switch(id(0)),
+            DeviceDescription::new(params.clone()).with_title_switch(id(7)),
+            DeviceDescription::new(params.clone())
+                .with_menu_options(&[id(1)])
+                .with_title_switch(id(1)),
+        ] {
+            assert!(bad.check().is_err());
+        }
     }
 
     // Spec: device-framework R7

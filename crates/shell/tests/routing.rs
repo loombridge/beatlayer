@@ -55,6 +55,7 @@ fn clips(shell: &Shell, track: TrackId) -> (Chooser, Chooser, Monitor, Chooser, 
             monitor,
             output,
             output_channel,
+            ..
         } => (input, input_channel, monitor.chosen, output, output_channel),
         other => panic!("not a clip track's section: {other:?}"),
     }

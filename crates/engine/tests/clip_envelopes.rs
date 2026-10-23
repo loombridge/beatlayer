@@ -51,6 +51,7 @@ fn looping_clip(rig: &mut Rig, track: TrackId, start: Ticks, bars: i64) -> ClipI
         loop_start: Ticks::ZERO,
         loop_end: Some(Ticks::WHOLE),
         signature: None,
+        groups: Vec::new(),
     };
     rig.apply(Command::CreateClip {
         track,
@@ -215,6 +216,7 @@ fn an_envelope_plays_only_where_its_clip_does() {
         loop_start: Ticks::ZERO,
         loop_end: None,
         signature: None,
+        groups: Vec::new(),
     };
     rig.apply(Command::CreateClip {
         track: a,

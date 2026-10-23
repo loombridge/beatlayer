@@ -834,7 +834,20 @@ impl ArrangementView {
                 .copied()
                 .map(|track| Lane::Track { track })
                 .collect();
+            self.select_lane_of_selection();
         }
+    }
+
+    /// Gives the keyboard to the automation lane the time selection names,
+    /// when it names one lane and no track's own (the automation editing
+    /// spec, R1, R20), and takes it from the lane otherwise.
+    pub(crate) fn select_lane_of_selection(&mut self) {
+        let lane = match self.time_selection_lanes.as_slice() {
+            [Lane::Automation { track, .. }] => Some(*track),
+            _ => None,
+        };
+        self.select_lane(lane);
+        self.selected_breakpoint = None;
     }
 
     /// Selects time on tracks, with no clips, as dragging across the lanes
@@ -859,6 +872,7 @@ impl ArrangementView {
         // Spec: automation-editing R1. The selection names the lanes it
         // covers.
         self.time_selection_lanes = lanes;
+        self.select_lane_of_selection();
     }
 
     /// Takes the selection from another view: the clips, tracks, time, and
@@ -872,6 +886,8 @@ impl ArrangementView {
             .clone_from(&from.time_selection_lanes);
         self.insert_marker = from.insert_marker;
         self.title_bars = from.title_bars;
+        self.selected_lane = from.selected_lane;
+        self.selected_breakpoint = from.selected_breakpoint;
     }
 
     /// Drops selected clips the document no longer has.

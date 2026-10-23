@@ -769,6 +769,35 @@ fn quantize_and_quantize_settings_are_bound_in_the_sample_editor() {
     assert_eq!(entry_002.status, Status::Bound);
 }
 
+// Spec: find-and-select-notes R1, R13. Cmd+Shift+F (Ctrl+Shift+F on Windows;
+// S-NOTE-037) shows the note filters and Cmd+Shift+A (S-NOTE-034) inverts the
+// selection, in the note editor.
+#[test]
+fn the_note_filters_and_invert_selection_are_bound_in_the_note_editor() {
+    let keymap = Keymap::live12();
+    let contexts = [Context::NoteEditor, Context::Global];
+    for (platform, shift) in [
+        (Platform::Mac, mods(true, false, false, true)),
+        (Platform::Other, mods(false, true, false, true)),
+    ] {
+        let filters = keymap
+            .resolve(platform, Key::F, shift, &contexts)
+            .expect("Shift with Cmd or Ctrl and F is bound");
+        assert_eq!(filters.command.id, "clip_view.note_filters", "{platform:?}");
+        assert_eq!(filters.command.args["toggle"], true);
+        let invert = keymap
+            .resolve(platform, Key::A, shift, &contexts)
+            .expect("and so is A");
+        assert_eq!(
+            invert.command.id, "clip_view.invert_selection",
+            "{platform:?}"
+        );
+    }
+    for id in ["S-NOTE-034", "S-NOTE-037"] {
+        assert_eq!(keymap.entry_for(id).unwrap().status, Status::Bound, "{id}");
+    }
+}
+
 // Spec: piano-roll R23 to R31 (WP-6.53).
 #[test]
 fn the_note_editors_keys_are_all_handled() {
@@ -787,6 +816,10 @@ fn the_note_editors_keys_are_all_handled() {
         "S-NOTE-043",
         "S-NOTE-045",
         "S-NOTE-046",
+        // WP-6.5: Step Input Mode, and the arrows that step-record.
+        "S-NOTE-044",
+        "S-NOTE-048",
+        "S-NOTE-049",
         // WP-6.1: the value keys, the typed velocity, the Cmd-drag, and
         // deactivating.
         "S-NOTE-016",
@@ -795,6 +828,9 @@ fn the_note_editors_keys_are_all_handled() {
         "S-NOTE-028",
         "S-NOTE-029",
         "S-NOTE-041",
+        // WP-6.2: Group Notes and Ungroup Notes.
+        "S-NOTE-031",
+        "S-NOTE-032",
         "S-NOTE-050",
         "S-NOTE-051",
         "S-A11Y-004",
@@ -819,6 +855,79 @@ fn the_note_editors_keys_are_all_handled() {
             matches!(entry.status, Status::Bound | Status::Widget(_)),
             "{id} is handled: {:?}",
             entry.status
+        );
+    }
+}
+
+// Spec: step-recording R4, R6, R9. Cmd-Shift-B (Ctrl-Shift-B) runs Step Input
+// Mode in the note editor (S-NOTE-044; the Options menu's item reaches it from
+// anywhere), and Right and Left are the note editor's own while it
+// step-records.
+#[test]
+fn cmd_shift_b_runs_step_input_mode_and_the_arrows_step_in_the_note_editor() {
+    let keymap = Keymap::live12();
+    let entry = keymap.entry_for("S-NOTE-044").unwrap();
+    assert_eq!(entry.status, Status::Bound);
+    for (platform, mods) in [
+        (Platform::Mac, mods(true, false, false, true)),
+        (Platform::Other, mods(false, true, false, true)),
+    ] {
+        let hit = keymap
+            .resolve(
+                platform,
+                Key::B,
+                mods,
+                &[Context::NoteEditor, Context::Global],
+            )
+            .expect("Cmd-Shift-B is bound in the note editor");
+        assert_eq!(hit.command.id, "clip_view.step_input_mode", "{platform:?}");
+    }
+    for id in ["S-NOTE-048", "S-NOTE-049"] {
+        let entry = keymap.entry_for(id).unwrap();
+        assert!(matches!(entry.status, Status::Widget(_)), "{id}");
+    }
+}
+
+// Spec: note-editing R22, R23. Cmd-G and Cmd-Shift-G group and ungroup the
+// selected notes (S-NOTE-031, S-NOTE-032); with devices or tracks in front
+// they are those windows' own.
+#[test]
+fn cmd_g_and_cmd_shift_g_group_and_ungroup_notes_while_notes_are_selected() {
+    let keymap = Keymap::live12();
+    let notes = [Context::NoteEditor, Context::NoteSelection, Context::Global];
+    for (platform, group, ungroup) in [
+        (
+            Platform::Mac,
+            mods(true, false, false, false),
+            mods(true, false, false, true),
+        ),
+        (
+            Platform::Other,
+            mods(false, true, false, false),
+            mods(false, true, false, true),
+        ),
+    ] {
+        let hit = |mods, contexts: &[Context]| {
+            keymap
+                .resolve(platform, Key::G, mods, contexts)
+                .map(|hit| hit.command.id.clone())
+        };
+        assert_eq!(
+            hit(group, &notes).as_deref(),
+            Some("note.group"),
+            "{platform:?}"
+        );
+        assert_eq!(
+            hit(ungroup, &notes).as_deref(),
+            Some("note.ungroup"),
+            "{platform:?}"
+        );
+        // With no notes selected, the keys are not the notes'.
+        let none = [Context::NoteEditor, Context::Global];
+        assert_ne!(
+            hit(group, &none).as_deref(),
+            Some("note.group"),
+            "{platform:?}"
         );
     }
 }
@@ -857,6 +966,46 @@ fn zero_deactivates_the_selected_notes_and_the_value_keys_are_the_editors() {
         "the Chord Selector Pad's keys wait for Stacks: {:?}",
         entry.status
     );
+}
+
+// Spec: multi-clip-editing R11, R13. N is Focus Mode's latch (S-NOTE-040) in
+// the note editor, and Cmd-D duplicates the loop (S-LOOP-012) when the loop
+// brace or loop bars are selected, ahead of the notes' Duplicate.
+#[test]
+fn n_switches_focus_mode_and_cmd_d_duplicates_the_loop_of_selected_bars() {
+    let keymap = Keymap::live12();
+    for id in ["S-NOTE-040", "S-LOOP-012"] {
+        let entry = keymap.entry_for(id).unwrap();
+        assert_eq!(entry.status, Status::Bound, "{id}");
+    }
+    let none = mods(false, false, false, false);
+    let hit = keymap
+        .resolve(
+            Platform::Mac,
+            Key::N,
+            none,
+            &[Context::NoteEditor, Context::Global],
+        )
+        .expect("N is bound in the note editor");
+    assert_eq!(hit.command.id, "clip_view.focus_mode");
+    assert_eq!(hit.entry.trigger, bl_ui::keymap::Trigger::Latch);
+    let command = mods(true, false, false, false);
+    let contexts = [
+        Context::LoopBrace,
+        Context::ClipView,
+        Context::NoteEditor,
+        Context::NoteSelection,
+        Context::Global,
+    ];
+    let hit = keymap
+        .resolve(Platform::Mac, Key::D, command, &contexts)
+        .expect("Cmd-D is bound");
+    assert_eq!(hit.command.id, "clip.duplicate_loop");
+    // Without a selected brace or bar it still duplicates the notes.
+    let hit = keymap
+        .resolve(Platform::Mac, Key::D, command, &contexts[1..])
+        .expect("Cmd-D is bound");
+    assert_eq!(hit.command.id, "note.duplicate");
 }
 
 #[test]
@@ -1132,4 +1281,108 @@ fn the_track_headers_keys_reach_the_track_commands() {
             );
         }
     }
+}
+
+// Spec: automation-editing R29. Every key of R21 to R26 is bound or read by
+// the lane and the Envelope Editor, which the keymap names.
+#[test]
+fn the_envelope_keys_are_bound_or_read_by_the_lane_and_the_envelope_editor() {
+    let keymap = Keymap::live12();
+    for id in [
+        "S-A11Y-018",
+        "S-A11Y-019",
+        "S-A11Y-020",
+        "S-A11Y-021",
+        "S-A11Y-022",
+        "S-A11Y-023",
+        "S-A11Y-024",
+        "S-A11Y-025",
+        "S-A11Y-026",
+        "S-A11Y-027",
+        "S-A11Y-028",
+        "S-A11Y-029",
+        "S-A11Y-030",
+        "S-ENV-005",
+    ] {
+        let entry = keymap
+            .entry_for(id)
+            .unwrap_or_else(|| panic!("{id} is in the keymap"));
+        assert!(
+            matches!(entry.status, Status::Bound | Status::Widget(_)),
+            "{id} is handled: {:?}",
+            entry.status
+        );
+    }
+    let envelope = [Context::Envelope, Context::Arrangement, Context::Global];
+    let resolve = |key, m| {
+        keymap
+            .resolve(Platform::Other, key, m, &envelope)
+            .map(|hit| hit.command.id.clone())
+    };
+    let none = mods(false, false, false, false);
+    assert_eq!(resolve(Key::Enter, none).as_deref(), Some("envelope.enter"));
+    assert_eq!(
+        resolve(Key::Escape, none).as_deref(),
+        Some("envelope.cancel")
+    );
+    assert_eq!(
+        resolve(Key::Delete, none).as_deref(),
+        Some("envelope.delete_breakpoint")
+    );
+    assert_eq!(
+        resolve(Key::Delete, mods(false, true, false, false)).as_deref(),
+        Some("envelope.delete")
+    );
+    assert_eq!(
+        resolve(Key::Tab, none).as_deref(),
+        Some("envelope.select_adjacent")
+    );
+    assert_eq!(
+        resolve(Key::Tab, mods(false, false, false, true)).as_deref(),
+        Some("envelope.select_adjacent")
+    );
+    // The keys with two directions are read by the lane itself, so no wider
+    // context runs a command for them.
+    assert_eq!(resolve(Key::ArrowLeft, none), None);
+    assert_eq!(resolve(Key::ArrowUp, mods(false, false, true, false)), None);
+}
+
+// Spec: automation-editing R22 to R24. Tab, Esc and Delete decline when the
+// envelope has nothing for them, and fall through to the wider contexts.
+#[test]
+fn tab_esc_and_delete_in_the_envelope_context_fall_through_when_they_cannot_run() {
+    let keymap = Keymap::live12();
+    let contexts = [Context::Envelope, Context::TabFocus, Context::Global];
+    let never = |hit: &bl_ui::keymap::Hit<'_>| !hit.command.id.starts_with("envelope.");
+    let hit = keymap
+        .resolve_with(
+            Platform::Other,
+            Key::Tab,
+            mods(false, false, false, false),
+            &contexts,
+            never,
+        )
+        .expect("Tab still does something");
+    assert_eq!(hit.command.id, "focus.next");
+    let hit = keymap
+        .resolve_with(
+            Platform::Other,
+            Key::Tab,
+            mods(false, false, false, true),
+            &contexts,
+            never,
+        )
+        .expect("Shift-Tab still does something");
+    assert_eq!(hit.command.id, "focus.previous");
+    // Enter doesn't decline: it always makes or selects a breakpoint.
+    let hit = keymap
+        .resolve_with(
+            Platform::Other,
+            Key::Enter,
+            mods(false, false, false, false),
+            &contexts,
+            never,
+        )
+        .expect("Enter is the envelope's");
+    assert_eq!(hit.command.id, "envelope.enter");
 }

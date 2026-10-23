@@ -436,6 +436,7 @@ impl DeviceView {
                 .collect(),
             articulations: device.articulations.clone(),
             learning: self.learning.get(&device.id).map(|learn| learn.row),
+            locked: Vec::new(),
         })
     }
 
@@ -511,6 +512,7 @@ impl DeviceView {
                 layout,
                 views: Vec::new(),
                 menu_options: Vec::new(),
+                title_switch: None,
             },
             plugin: true,
             configured: knob_params,
@@ -520,6 +522,7 @@ impl DeviceView {
             slot_keys: Vec::new(),
             articulations: Vec::new(),
             learning: None,
+            locked: Vec::new(),
         }
     }
 
@@ -611,6 +614,7 @@ impl DeviceView {
                             value,
                             text: p.format(value),
                             menu_option: description.menu_options.contains(&p.id),
+                            title_switch: description.title_switch == Some(p.id),
                             configured: configured.contains(&p.id),
                             other: device.can_compare().then(|| {
                                 description
@@ -1403,7 +1407,9 @@ impl DeviceView {
             selected: self.selected == Some(d.id),
             hot_swap: self.hot_swap == Some(d.id),
             multisampler: self.multisampler_state(d),
-            panel: self.panel(d),
+            panel: self
+                .panel(d)
+                .map(|panel| follow_current_scale(panel, d, doc.settings().scale)),
             sidechain: d.sidechain.as_ref().map(|sidechain| {
                 let (source, tap) = match &sidechain.input {
                     bl_model::Input::Track { track, tap, .. } => {
@@ -3542,4 +3548,47 @@ fn map_inner_copies(
         }
     }
     Ok(())
+}
+
+/// Scale and Arpeggiator while Use Current Scale is on (the scales spec, R16;
+/// the scale-map spec, R12): the choosers that the current scale replaces are
+/// drawn disabled, and Scale's show the set's current scale, which follows
+/// the clip that plays.
+fn follow_current_scale(
+    mut panel: DevicePanel,
+    device: &Device,
+    scale: bl_model::Scale,
+) -> DevicePanel {
+    use bl_devices::{arpeggiator, remap};
+    let DeviceKind::Native { device_type } = &device.kind else {
+        return panel;
+    };
+    let (switch, locked) = match device_type.as_str() {
+        remap::REMAP => (remap::USE_SCALE, [remap::BASE, remap::SCALE_NAME]),
+        arpeggiator::ARPEGGIATOR => (
+            arpeggiator::USE_SCALE,
+            [arpeggiator::ROOT, arpeggiator::SCALE],
+        ),
+        _ => return panel,
+    };
+    let position = |id| panel.description.params.iter().position(|p| p.id == id);
+    if position(switch).is_none_or(|at| panel.value(at) < 0.5) {
+        return panel;
+    }
+    if device_type == remap::REMAP && scale.enabled {
+        let entry = 1 + bl_model::ScaleName::ALL
+            .iter()
+            .position(|name| *name == scale.name)
+            .unwrap_or(0);
+        for (id, value) in [
+            (remap::BASE, f64::from(scale.root)),
+            (remap::SCALE_NAME, entry as f64),
+        ] {
+            if let Some(at) = position(id) {
+                panel.values[at] = value;
+            }
+        }
+    }
+    panel.locked = locked.to_vec();
+    panel
 }

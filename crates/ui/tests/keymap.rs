@@ -76,6 +76,14 @@ const SHELL: &[&str] = &[
     "S-VIEW-019",
     "S-VIEW-020",
     "S-VIEW-021",
+    "S-VIEW-004",
+    "S-VIEW-005",
+    "S-VIEW-015",
+    "S-VIEW-016",
+    "S-VIEW-022",
+    "S-NOTE-030",
+    "S-FOCUS-004",
+    "S-FOCUS-005",
     "S-FOCUS-001",
     "S-FOCUS-003",
     "S-FOCUS-011",
@@ -779,6 +787,10 @@ fn the_note_editors_keys_are_all_handled() {
         "S-NOTE-043",
         "S-NOTE-045",
         "S-NOTE-046",
+        // WP-6.5: Step Input Mode, and the arrows that step-record.
+        "S-NOTE-044",
+        "S-NOTE-048",
+        "S-NOTE-049",
         // WP-6.1: the value keys, the typed velocity, the Cmd-drag, and
         // deactivating.
         "S-NOTE-016",
@@ -787,6 +799,9 @@ fn the_note_editors_keys_are_all_handled() {
         "S-NOTE-028",
         "S-NOTE-029",
         "S-NOTE-041",
+        // WP-6.2: Group Notes and Ungroup Notes.
+        "S-NOTE-031",
+        "S-NOTE-032",
         "S-NOTE-050",
         "S-NOTE-051",
         "S-A11Y-004",
@@ -811,6 +826,79 @@ fn the_note_editors_keys_are_all_handled() {
             matches!(entry.status, Status::Bound | Status::Widget(_)),
             "{id} is handled: {:?}",
             entry.status
+        );
+    }
+}
+
+// Spec: step-recording R4, R6, R9. Cmd-Shift-B (Ctrl-Shift-B) runs Step Input
+// Mode in the note editor (S-NOTE-044; the Options menu's item reaches it from
+// anywhere), and Right and Left are the note editor's own while it
+// step-records.
+#[test]
+fn cmd_shift_b_runs_step_input_mode_and_the_arrows_step_in_the_note_editor() {
+    let keymap = Keymap::live12();
+    let entry = keymap.entry_for("S-NOTE-044").unwrap();
+    assert_eq!(entry.status, Status::Bound);
+    for (platform, mods) in [
+        (Platform::Mac, mods(true, false, false, true)),
+        (Platform::Other, mods(false, true, false, true)),
+    ] {
+        let hit = keymap
+            .resolve(
+                platform,
+                Key::B,
+                mods,
+                &[Context::NoteEditor, Context::Global],
+            )
+            .expect("Cmd-Shift-B is bound in the note editor");
+        assert_eq!(hit.command.id, "clip_view.step_input_mode", "{platform:?}");
+    }
+    for id in ["S-NOTE-048", "S-NOTE-049"] {
+        let entry = keymap.entry_for(id).unwrap();
+        assert!(matches!(entry.status, Status::Widget(_)), "{id}");
+    }
+}
+
+// Spec: note-editing R22, R23. Cmd-G and Cmd-Shift-G group and ungroup the
+// selected notes (S-NOTE-031, S-NOTE-032); with devices or tracks in front
+// they are those windows' own.
+#[test]
+fn cmd_g_and_cmd_shift_g_group_and_ungroup_notes_while_notes_are_selected() {
+    let keymap = Keymap::live12();
+    let notes = [Context::NoteEditor, Context::NoteSelection, Context::Global];
+    for (platform, group, ungroup) in [
+        (
+            Platform::Mac,
+            mods(true, false, false, false),
+            mods(true, false, false, true),
+        ),
+        (
+            Platform::Other,
+            mods(false, true, false, false),
+            mods(false, true, false, true),
+        ),
+    ] {
+        let hit = |mods, contexts: &[Context]| {
+            keymap
+                .resolve(platform, Key::G, mods, contexts)
+                .map(|hit| hit.command.id.clone())
+        };
+        assert_eq!(
+            hit(group, &notes).as_deref(),
+            Some("note.group"),
+            "{platform:?}"
+        );
+        assert_eq!(
+            hit(ungroup, &notes).as_deref(),
+            Some("note.ungroup"),
+            "{platform:?}"
+        );
+        // With no notes selected, the keys are not the notes'.
+        let none = [Context::NoteEditor, Context::Global];
+        assert_ne!(
+            hit(group, &none).as_deref(),
+            Some("note.group"),
+            "{platform:?}"
         );
     }
 }
@@ -918,6 +1006,161 @@ fn the_tags_shortcuts_reach_their_commands() {
     );
     assert_eq!(entry.mac, vec!["Cmd+E".to_owned()]);
     assert_eq!(entry.win, vec!["Ctrl+E".to_owned()]);
+}
+
+// Spec: note-editing R35 to R41, R47 (WP-6.3). Join, Fit to Time Range and
+// Split Clip are bound in the note editor, ahead of the Arrangement's keys
+// they share (Consolidate on Cmd-J); the keys that run differently with
+// what is selected or held down are the note editor's own.
+#[test]
+fn the_note_operations_keys_reach_their_commands() {
+    let keymap = Keymap::live12();
+    let contexts = [
+        Context::NoteSelection,
+        Context::NoteEditor,
+        Context::ClipView,
+        Context::Global,
+    ];
+    for (platform, command, command_alt, command_shift) in [
+        (
+            Platform::Mac,
+            mods(true, false, false, false),
+            mods(true, false, true, false),
+            mods(true, false, false, true),
+        ),
+        (
+            Platform::Other,
+            mods(false, true, false, false),
+            mods(false, true, true, false),
+            mods(false, true, false, true),
+        ),
+    ] {
+        for (key, mods, expected) in [
+            (Key::J, command, "note.join"),
+            (Key::J, command_alt, "note.fit_to_time"),
+            (Key::E, command_shift, "note.split_clip"),
+        ] {
+            let hit = keymap
+                .resolve(platform, key, mods, &contexts)
+                .map(|hit| hit.command.id.clone());
+            assert_eq!(hit.as_deref(), Some(expected), "{platform:?} {key:?}");
+        }
+    }
+    for (id, status) in [
+        ("S-NOTE-007", "bound"),
+        ("S-NOTE-008", "bound"),
+        ("S-NOTE-036", "bound"),
+    ] {
+        let entry = keymap.entry_for(id).unwrap();
+        assert_eq!(entry.status, Status::Bound, "{id} is {status}");
+    }
+    for id in [
+        "S-NOTE-003",
+        "S-NOTE-004",
+        "S-NOTE-005",
+        "S-NOTE-006",
+        "S-NOTE-047",
+    ] {
+        let entry = keymap.entry_for(id).unwrap();
+        assert!(
+            matches!(entry.status, Status::Widget(_)),
+            "{id} is read by the note editor: {:?}",
+            entry.status
+        );
+    }
+    // Cmd-E isn't taken by anything wider in the note editor.
+    let plain = keymap.resolve(
+        Platform::Mac,
+        Key::E,
+        mods(true, false, false, false),
+        &contexts,
+    );
+    assert!(plain.is_none(), "the note editor reads Cmd-E itself");
+}
+
+// Spec: detail-views R1, R2, R5, R6, R11, R14. The detail views' seven
+// shortcuts, and Cmd+Option+3, are bound to the commands that carry them
+// out, on both platforms, in the contexts the spec gives.
+#[test]
+fn the_detail_views_shortcuts_reach_their_commands() {
+    let keymap = Keymap::live12();
+    for (id, command, contexts) in [
+        (
+            "S-VIEW-004",
+            "view.switch_detail_view",
+            &[Context::Global][..],
+        ),
+        (
+            "S-VIEW-005",
+            "view.show_detail_views",
+            &[Context::Global][..],
+        ),
+        (
+            "S-VIEW-015",
+            "view.toggle_clip_view",
+            &[Context::Global][..],
+        ),
+        (
+            "S-VIEW-016",
+            "view.toggle_device_view",
+            &[Context::Global][..],
+        ),
+        (
+            "S-VIEW-022",
+            "view.toggle_detail_area",
+            &[Context::Global][..],
+        ),
+        (
+            "S-NOTE-030",
+            "view.expand_clip_view",
+            &[Context::ClipView][..],
+        ),
+        ("S-FOCUS-004", "focus.clip_view", &[Context::Global][..]),
+        ("S-FOCUS-005", "focus.device_view", &[Context::Global][..]),
+    ] {
+        let entry = keymap.entry_for(id).unwrap();
+        assert_eq!(entry.status, Status::Bound, "{id}");
+        assert_eq!(entry.commands.len(), 1, "{id}");
+        assert_eq!(entry.commands[0].id, command, "{id}");
+        assert_eq!(entry.commands[0].contexts, contexts, "{id}");
+    }
+    let plain = mods(false, false, false, false);
+    for platform in [Platform::Mac, Platform::Other] {
+        // Shift+Tab and F12 switch the views in the global context, which
+        // Tab's own setting (the `tab-focus` context) comes before.
+        let at = |key, m, contexts: &[Context]| {
+            keymap
+                .resolve(platform, key, m, contexts)
+                .map(|hit| hit.command.id.clone())
+        };
+        let shift = mods(false, false, false, true);
+        assert_eq!(
+            at(Key::F12, plain, &[Context::Global]).as_deref(),
+            Some("view.switch_detail_view")
+        );
+        assert_eq!(
+            at(Key::Tab, shift, &[Context::Global]).as_deref(),
+            Some("view.switch_detail_view")
+        );
+        assert_eq!(
+            at(Key::Tab, shift, &[Context::TabFocus, Context::Global]).as_deref(),
+            Some("focus.previous")
+        );
+        // Expand Clip View is the Clip View's own key.
+        let (cmd, ctrl) = match platform {
+            Platform::Mac => (true, false),
+            Platform::Other => (false, true),
+        };
+        let expand = mods(cmd, ctrl, true, false);
+        assert_eq!(
+            at(Key::E, expand, &[Context::ClipView, Context::Global]).as_deref(),
+            Some("view.expand_clip_view")
+        );
+        assert_eq!(
+            at(Key::E, expand, &[Context::DeviceView, Context::Global]),
+            None
+        );
+    }
 }
 
 // Spec: track-context-menu R16. The whole-track commands have their keys

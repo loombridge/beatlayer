@@ -17,6 +17,7 @@ use crate::devices::{
     COMPARE_COPY, COMPARE_SWITCH, SAVE_DEFAULT_PRESET, SET_FLOATING, SET_ROLE, UNGROUP,
 };
 use crate::menus::{Action, IMP_12, MenuItem, Row, SEPARATOR, items};
+use crate::notes::{CHOP as CHOP_NOTES, SPLIT as SPLIT_NOTES};
 use crate::slice::OPEN as SLICE_TO_MIDI;
 use crate::stems::OPEN as SEPARATE_STEMS;
 use crate::tracks::{DUPLICATE_WITHOUT_CLIPS, SET_DEVICES_ENABLED};
@@ -416,20 +417,12 @@ const NOTE: &[Row] = &[
         Pending(Some("S-NOTE-034")),
     ),
     ("C-NOTE-007", "Deactivate Note(s)", Key(&["S-NOTE-041"])),
-    ("C-NOTE-008", "Group Notes", Pending(Some("S-NOTE-031"))),
-    ("C-NOTE-009", "Ungroup Notes", Pending(Some("S-NOTE-032"))),
-    ("C-NOTE-010", "Split Note(s)", Pending(Some("S-NOTE-003"))),
-    (
-        "C-NOTE-011",
-        "Chop Note(s) on Grid",
-        Pending(Some("S-NOTE-003")),
-    ),
-    ("C-NOTE-012", "Join Notes", Pending(Some("S-NOTE-007"))),
-    (
-        "C-NOTE-013",
-        "Fit to Time Range",
-        Pending(Some("S-NOTE-008")),
-    ),
+    ("C-NOTE-008", "Group Notes", Key(&["S-NOTE-031"])),
+    ("C-NOTE-009", "Ungroup Notes", Key(&["S-NOTE-032"])),
+    ("C-NOTE-010", "Split Note(s)", Cmd(SPLIT_NOTES)),
+    ("C-NOTE-011", "Chop Note(s) on Grid", Cmd(CHOP_NOTES)),
+    ("C-NOTE-012", "Join Notes", Key(&["S-NOTE-007"])),
+    ("C-NOTE-013", "Fit to Time Range", Key(&["S-NOTE-008"])),
     ("C-NOTE-014", "Clip Markers", Submenu),
     (
         "C-NOTE-014a",
@@ -439,7 +432,7 @@ const NOTE: &[Row] = &[
     ("C-NOTE-014b", "Set Loop Start", Pending(Some("S-LOOP-002"))),
     ("C-NOTE-014c", "Set Loop End", Pending(Some("S-LOOP-003"))),
     ("C-NOTE-014d", "Set End Marker", Pending(Some("S-LOOP-004"))),
-    ("C-NOTE-015", "Split Clip", Pending(Some("S-NOTE-036"))),
+    ("C-NOTE-015", "Split Clip", Key(&["S-NOTE-036"])),
     (
         "C-NOTE-016",
         "Highlight Scales",
@@ -497,10 +490,6 @@ pub fn pending_package(row: &str) -> Option<&'static str> {
         }
         // The MIDI Note Editor's own items (piano-roll R30).
         "C-NOTE-006" => Some("WP-6.4 (Invert Selection and the note filters)"),
-        "C-NOTE-008" | "C-NOTE-009" => Some("WP-6.2 (probability groups)"),
-        "C-NOTE-010" | "C-NOTE-011" | "C-NOTE-012" | "C-NOTE-013" | "C-NOTE-015" => {
-            Some("WP-6.3 (split, chop, join and fit notes)")
-        }
         "C-NOTE-014" | "C-NOTE-014a" | "C-NOTE-014b" | "C-NOTE-014c" | "C-NOTE-014d" => {
             Some("WP-6.54 (the clip markers from the keys)")
         }

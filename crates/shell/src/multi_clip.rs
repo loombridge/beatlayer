@@ -6,7 +6,7 @@
 //! are `clip_view::run`'s. Spec: multi-clip-editing.
 
 use bl_core::time::Ticks;
-use bl_model::{ClipData, ClipId, Command, Document, Editor, MidiData};
+use bl_model::{ClipData, ClipId, Command, Document, Editor, MidiData, Note};
 
 use crate::arrangement::editing::EditFailure;
 
@@ -200,20 +200,30 @@ pub fn duplicate_loop(editor: &mut Editor, clip: ClipId) -> Result<(), EditFailu
         return Err(EditFailure::Refused("the clip's loop is empty".to_owned()));
     }
     let mut data = midi.clone();
+    // The copies in the new half are in groups of their own, as pasted
+    // notes are (Spec: note-editing R31).
+    let mut copies: Vec<Note> = midi
+        .notes
+        .iter()
+        .filter(|note| note.start >= from && note.start < to)
+        .map(|note| {
+            let mut copy = note.clone();
+            copy.start += span;
+            copy
+        })
+        .collect();
+    crate::clip_view::regroup(&mut data, &mut copies, &midi.groups);
     data.notes = midi
         .notes
         .iter()
-        .flat_map(|note| {
-            let mut later = note.clone();
-            later.start += span;
+        .map(|note| {
+            let mut kept = note.clone();
             if note.start >= to {
-                vec![later]
-            } else if note.start >= from {
-                vec![note.clone(), later]
-            } else {
-                vec![note.clone()]
+                kept.start += span;
             }
+            kept
         })
+        .chain(copies)
         .collect();
     data.loop_end = Some(to + span);
     data.end = midi.end.map(|end| if end >= to { end + span } else { end });

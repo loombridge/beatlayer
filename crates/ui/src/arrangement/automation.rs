@@ -15,7 +15,8 @@
 
 use bl_core::time::Ticks;
 use bl_model::{
-    AutomationTarget, Breakpoint, Device, DeviceId, Document, Envelope, MixerParam, TrackId,
+    AutomationTarget, Breakpoint, ClipParam, Device, DeviceId, Document, Envelope, MixerParam,
+    TrackId,
 };
 use bl_shell::arrangement::automation::{Travel as LaneScale, selected_breakpoints, travel};
 use bl_shell::arrangement::rows::Row;
@@ -249,6 +250,9 @@ pub enum AutomationDevice {
     /// A MIDI clip's controllers: pitch bend, channel pressure and the
     /// continuous controllers (WP-2.29). Only a clip's envelopes name them.
     MidiCtrl,
+    /// An audio clip's sound settings: Gain, Transposition, Sample Offset and
+    /// the rest (WP-4.8, the warp modes spec R29).
+    Clip,
     /// No envelope: the lane stays, with nothing drawn.
     None,
 }
@@ -262,6 +266,7 @@ pub(crate) fn device_of(target: AutomationTarget) -> AutomationDevice {
         | AutomationTarget::Chain { .. }
         | AutomationTarget::ChainSend { .. } => AutomationDevice::Mixer,
         AutomationTarget::Device { device, .. } => AutomationDevice::Device(device),
+        AutomationTarget::Clip { .. } => AutomationDevice::Clip,
         AutomationTarget::MidiCc { .. }
         | AutomationTarget::MidiPitchBend
         | AutomationTarget::MidiChannelPressure => AutomationDevice::MidiCtrl,
@@ -385,9 +390,54 @@ pub fn control_choices(
                 leds: NO_LEDS,
             }));
         }
+        AutomationDevice::Clip => choices.extend(ClipParam::ALL.map(clip_choice)),
         AutomationDevice::None => {}
     }
     choices
+}
+
+/// The chooser's entry for a clip sound setting. The manual calls the
+/// envelope that adds to Transpose "Transposition" (R29).
+fn clip_choice(param: ClipParam) -> Choice<AutomationTarget> {
+    // The chooser lists one mode's controls at a time, so Grain Size needs no
+    // mode before it.
+    let label = match param {
+        ClipParam::Transpose => "Transposition".to_owned(),
+        ClipParam::TonesGrainSize | ClipParam::TextureGrainSize => "Grain Size".to_owned(),
+        _ => param.descriptor().name,
+    };
+    Choice {
+        label,
+        value: AutomationTarget::Clip { param },
+        leds: NO_LEDS,
+    }
+}
+
+/// The controls the "Clip" entry offers for an audio clip (R29): Gain,
+/// Transposition and, in Beats, Sample Offset, then Detune, HiQ and the
+/// controls of the clip's warp mode. A mode's other controls keep their
+/// envelopes with the clip, unlisted.
+pub fn clip_choices(audio: &bl_model::AudioData) -> Vec<Choice<AutomationTarget>> {
+    use bl_model::WarpMode;
+    let mode: &[ClipParam] = match audio.warp_mode {
+        WarpMode::Beats => &[
+            ClipParam::Preserve,
+            ClipParam::TransientLoopMode,
+            ClipParam::TransientEnvelope,
+        ],
+        WarpMode::Tones => &[ClipParam::TonesGrainSize],
+        WarpMode::Texture => &[ClipParam::TextureGrainSize, ClipParam::TextureFlux],
+        WarpMode::ComplexPro => &[ClipParam::Formants, ClipParam::ComplexProEnvelope],
+        WarpMode::RePitch | WarpMode::Complex => &[],
+    };
+    let beats = audio.warp_mode == WarpMode::Beats;
+    [ClipParam::Gain, ClipParam::Transpose]
+        .into_iter()
+        .chain(beats.then_some(ClipParam::SampleOffset))
+        .chain([ClipParam::Detune, ClipParam::HighQuality])
+        .chain(mode.iter().copied())
+        .map(clip_choice)
+        .collect()
 }
 
 /// The target a newly chosen device shows: the mixer's volume, a device's
@@ -406,6 +456,9 @@ pub(crate) fn default_target(
             .next()
             .map(|choice| choice.value),
         AutomationDevice::MidiCtrl => Some(AutomationTarget::MidiPitchBend),
+        AutomationDevice::Clip => Some(AutomationTarget::Clip {
+            param: ClipParam::Gain,
+        }),
         AutomationDevice::None => None,
     }
 }
@@ -1034,6 +1087,7 @@ pub(crate) fn target_label(shell: &Shell, doc: &Document, target: AutomationTarg
                     .map(|descriptor| descriptor.name.clone())
             })
             .unwrap_or_else(|| "Device parameter".to_owned()),
+        AutomationTarget::Clip { param } => clip_choice(param).label,
         AutomationTarget::MidiCc { number } => {
             format!("{number} {}", AutomationTarget::controller_name(number))
         }

@@ -58,7 +58,10 @@ trigger = "press"
 milestone = "M2"
 mac = ["Shift+Tab", "F12"]
 win = ["Shift+Tab", "F12"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "view.switch_detail_view", contexts = ["global"] },
+]
 
 [[shortcut]]
 id = "S-VIEW-005"
@@ -69,7 +72,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Option+click a view toggle"]
 win = ["Alt+click a view toggle"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "view.show_detail_views", contexts = ["global"] },
+]
 
 [[shortcut]]
 id = "S-VIEW-006"
@@ -217,7 +223,10 @@ trigger = "press"
 milestone = "M2"
 mac = ["Cmd+Option+4"]
 win = ["Ctrl+Alt+4"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "view.toggle_device_view", contexts = ["global"] },
+]
 
 [[shortcut]]
 id = "S-VIEW-017"
@@ -320,7 +329,10 @@ trigger = "press"
 milestone = "M2"
 mac = ["Option+3"]
 win = ["Alt+3"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "focus.clip_view", contexts = ["global"] },
+]
 
 [[shortcut]]
 id = "S-FOCUS-005"
@@ -331,7 +343,10 @@ trigger = "press"
 milestone = "M2"
 mac = ["Option+4"]
 win = ["Alt+4"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "focus.device_view", contexts = ["global"] },
+]
 
 [[shortcut]]
 id = "S-FOCUS-006"
@@ -1658,7 +1673,8 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+E"]
 win = ["Ctrl+E"]
-status = "pending"
+status = "widget"
+handler = "the Clip View's note editor: Cmd-E splits the notes the insert marker or the time selection's edges cross, or with notes selected chops them on the grid (`note.split`, `note.chop`)"
 
 [[shortcut]]
 id = "S-NOTE-004"
@@ -1669,7 +1685,8 @@ trigger = "held"
 milestone = "M6"
 mac = ["Cmd+E (hold) and drag", "Option+E (hold) and drag"]
 win = ["Ctrl+E (hold) and drag"]
-status = "pending"
+status = "widget"
+handler = "the Clip View's note editor: Option-E (Ctrl-E) or Cmd-E held with a drag up or down chops the selected notes into more or fewer equal parts (`note.chop` with `parts`)"
 
 [[shortcut]]
 id = "S-NOTE-005"
@@ -1680,7 +1697,8 @@ trigger = "held"
 milestone = "M6"
 mac = ["Cmd+Shift+E (hold) and drag", "Option+Shift+E (hold) and drag"]
 win = ["Ctrl+Shift+E (hold) and drag"]
-status = "pending"
+status = "widget"
+handler = "the Clip View's note editor: with Shift too, the drag chops by powers of two (`note.chop` with `parts`)"
 
 [[shortcut]]
 id = "S-NOTE-006"
@@ -1691,7 +1709,8 @@ trigger = "held"
 milestone = "M6"
 mac = ["E (hold) and click"]
 win = ["E (hold) and click"]
-status = "pending"
+status = "widget"
+handler = "the Clip View's note editor: E held with a click or drag splits the notes the pointer crosses (`note.split`)"
 
 [[shortcut]]
 id = "S-NOTE-007"
@@ -1702,7 +1721,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+J"]
 win = ["Ctrl+J"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "note.join", contexts = ["note-editor"] },
+]
 
 [[shortcut]]
 id = "S-NOTE-008"
@@ -1713,7 +1735,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+Option+J"]
 win = ["Ctrl+Alt+J"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "note.fit_to_time", contexts = ["note-editor"] },
+]
 
 [[shortcut]]
 id = "S-NOTE-009"
@@ -1967,7 +1992,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+Option+E"]
 win = ["Ctrl+Alt+E"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "view.expand_clip_view", contexts = ["clip-view"] },
+]
 
 [[shortcut]]
 id = "S-NOTE-031"
@@ -1978,7 +2006,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+G"]
 win = ["Ctrl+G"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "note.group", contexts = ["note-selection"] },
+]
 
 [[shortcut]]
 id = "S-NOTE-032"
@@ -1989,7 +2020,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+Shift+G"]
 win = ["Ctrl+Shift+G"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "note.ungroup", contexts = ["note-selection"] },
+]
 
 [[shortcut]]
 id = "S-NOTE-033"
@@ -2033,7 +2067,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+Shift+E"]
 win = ["Ctrl+Shift+E"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "note.split_clip", contexts = ["note-editor"] },
+]
 
 [[shortcut]]
 id = "S-NOTE-037"
@@ -4408,7 +4445,10 @@ trigger = "press"
 milestone = "M2"
 mac = ["Cmd+Option+L"]
 win = ["Ctrl+Alt+L"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "view.toggle_detail_area", contexts = ["global"] },
+]
 
 [[shortcut]]
 id = "S-VIEW-023"
@@ -4567,7 +4607,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+Shift+B"]
 win = ["Ctrl+Shift+B"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "clip_view.step_input_mode", contexts = ["note-editor"] },
+]
 
 [[shortcut]]
 id = "S-MENU-006"
@@ -4614,7 +4657,8 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+Up", "Cmd+Down", "Cmd+Shift+Up", "Cmd+Shift+Down"]
 win = ["Ctrl+Up", "Ctrl+Down", "Ctrl+Shift+Up", "Ctrl+Shift+Down"]
-status = "pending"
+status = "widget"
+handler = "the Clip View's note editor: Cmd held after a chop, Up and Down chop into one part more or fewer, with Shift into the next or previous power of two (`note.chop` with `steps`)"
 
 [[shortcut]]
 id = "S-NOTE-048"
@@ -4625,7 +4669,8 @@ trigger = "press"
 milestone = "M6"
 mac = ["Right"]
 win = ["Right"]
-status = "pending"
+status = "widget"
+handler = "the Clip View's note editor: Right adds the held notes at the insert marker and steps on, or lengthens the notes just added, while step recording (`note.step_record`)"
 
 [[shortcut]]
 id = "S-NOTE-049"
@@ -4636,7 +4681,8 @@ trigger = "press"
 milestone = "M6"
 mac = ["Left"]
 win = ["Left"]
-status = "pending"
+status = "widget"
+handler = "the Clip View's note editor: Left shortens the notes just added and steps back, while step recording (`note.step_record`)"
 
 [[shortcut]]
 id = "S-NOTE-050"

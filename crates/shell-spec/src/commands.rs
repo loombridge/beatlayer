@@ -60,6 +60,27 @@ pub const VIEW_FULL_SCREEN: &str = "view.full_screen";
 pub const VIEW_TOGGLE_BROWSER: &str = "view.toggle_browser";
 /// `view.toggle_clip_view`: show or hide the Clip View (WP-2.3).
 pub const VIEW_TOGGLE_CLIP_VIEW: &str = "view.toggle_clip_view";
+/// `view.toggle_device_view`: show or hide the Device View (WP-6.27).
+pub const VIEW_TOGGLE_DEVICE_VIEW: &str = "view.toggle_device_view";
+/// `view.show_detail_views`: show the Clip View and the Device View together
+/// (WP-6.27).
+pub const VIEW_SHOW_DETAIL_VIEWS: &str = "view.show_detail_views";
+/// `view.switch_detail_view`: switch between the Clip View and the Device
+/// View, or move the focus between them (WP-6.27).
+pub const VIEW_SWITCH_DETAIL_VIEW: &str = "view.switch_detail_view";
+/// `view.toggle_detail_area`: hide the detail views, or bring them back
+/// (WP-6.27).
+pub const VIEW_TOGGLE_DETAIL_AREA: &str = "view.toggle_detail_area";
+/// `view.expand_clip_view`: give the Clip View its largest height, or put it
+/// back (WP-6.27).
+pub const VIEW_EXPAND_CLIP_VIEW: &str = "view.expand_clip_view";
+/// `view.set_detail_height`: set the Clip View's height (WP-6.27).
+pub const VIEW_SET_DETAIL_HEIGHT: &str = "view.set_detail_height";
+/// `focus.clip_view`: move the keyboard focus to the Clip View (WP-6.27).
+pub const FOCUS_CLIP_VIEW: &str = "focus.clip_view";
+/// `focus.device_view`: move the keyboard focus to the Device View
+/// (WP-6.27).
+pub const FOCUS_DEVICE_VIEW: &str = "focus.device_view";
 /// `view.toggle_plugin_list`: show or hide the list of the set's plug-ins
 /// (IMP-29, WP-6.41).
 pub const VIEW_TOGGLE_PLUGIN_LIST: &str = "view.toggle_plugin_list";
@@ -237,6 +258,14 @@ pub const IDS: &[&str] = &[
     VIEW_FULL_SCREEN,
     VIEW_TOGGLE_BROWSER,
     VIEW_TOGGLE_CLIP_VIEW,
+    VIEW_TOGGLE_DEVICE_VIEW,
+    VIEW_SHOW_DETAIL_VIEWS,
+    VIEW_SWITCH_DETAIL_VIEW,
+    VIEW_TOGGLE_DETAIL_AREA,
+    VIEW_EXPAND_CLIP_VIEW,
+    VIEW_SET_DETAIL_HEIGHT,
+    FOCUS_CLIP_VIEW,
+    FOCUS_DEVICE_VIEW,
     VIEW_TOGGLE_PLUGIN_LIST,
     VIEW_SET_PLUGIN_LIST_ONLY_MISSING,
     VIEW_DRAW_MODE,
@@ -740,6 +769,63 @@ pub struct ClosedPlugInWindows {
     pub closed: usize,
 }
 
+/// The Device View's height in the detail area, in points at 100%
+/// (detail-views R7).
+pub const DEVICE_VIEW_HEIGHT: f32 = 188.0;
+/// The Clip View's height until it's resized, in points at 100%
+/// (detail-views R7).
+pub const CLIP_VIEW_HEIGHT: f32 = 225.0;
+/// The Clip View's smallest height, in points at 100% (detail-views R10).
+pub const CLIP_VIEW_MIN_HEIGHT: f32 = 100.0;
+/// The least height the main view keeps, in points at 100% (detail-views
+/// R10).
+pub const MAIN_VIEW_MIN_HEIGHT: f32 = 80.0;
+/// The gap between the Clip View and the Device View stacked, and between
+/// the main view and the detail area, in points at 100% (detail-views R8).
+pub const DETAIL_GAP: f32 = 8.0;
+
+/// One of the detail area's two views.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DetailView {
+    /// The Clip View, which edits the selected clip.
+    Clip,
+    /// The Device View, which shows the selected track's devices.
+    Device,
+}
+
+/// What the detail area's commands return, and `view.state` reports under
+/// `detail` (detail-views R17): which views show, where the focus is and
+/// how tall the Clip View is.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct DetailState {
+    /// Whether the Clip View shows.
+    pub clip_view: bool,
+    /// Whether the Device View shows.
+    pub device_view: bool,
+    /// The view that showed alone last, which `view.switch_detail_view`
+    /// brings back when neither shows.
+    pub alone_last: DetailView,
+    /// The views `view.toggle_detail_area` hid, which it brings back; empty
+    /// when it hid nothing.
+    pub hidden: Vec<DetailView>,
+    /// The Clip View's height in points at 100%, as it was set; it is
+    /// squeezed in a window too short for it.
+    pub clip_height: f64,
+    /// Whether the Clip View is expanded to its largest height.
+    pub expanded: bool,
+    /// The view the detail area's keys go to while both show.
+    pub focus: DetailView,
+}
+
+/// Arguments of `view.set_detail_height`.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DetailHeightArgs {
+    /// The Clip View's height in points at 100%, at least 100.
+    pub points: f64,
+}
+
 /// What the view commands return: the window's view state afterwards.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ViewResult {
@@ -765,6 +851,9 @@ pub struct ViewState {
     /// The Clip View and its note editor: whether it shows, Draw Mode, the
     /// clip it holds, the selected notes, the lane and Fold.
     pub clip_view: ClipViewState,
+    /// The detail area: which of the Clip View and the Device View show, the
+    /// Clip View's height, and where the focus is.
+    pub detail: DetailState,
     /// The list of the set's plug-ins: whether it shows, and whether Show
     /// Only Missing is on.
     pub plugin_list: crate::plugins::PluginListState,
@@ -1056,7 +1145,13 @@ fn specs() -> Vec<CommandSpec> {
                  the zoom (`view.toggle_session_arrangement`, `view.toggle_browser`, \
                  `view.toggle_info_view`, `view.full_screen`, `view.set_zoom`), the Clip View \
                  with Draw Mode, the lane, Fold and the selected notes (`view.toggle_clip_view`, \
-                 `view.draw_mode`, `view.lane`, `view.fold_notes`), the assistant's panel, the \
+                 `view.draw_mode`, `view.lane`, `view.fold_notes`), the detail area under \
+                 `detail`: which of the Clip View and the Device View show, the Clip View's \
+                 height and where the focus is (`view.toggle_clip_view`, \
+                 `view.toggle_device_view`, `view.show_detail_views`, \
+                 `view.switch_detail_view`, `view.toggle_detail_area`, \
+                 `view.expand_clip_view`, `view.set_detail_height`, `focus.clip_view`, \
+                 `focus.device_view`), the assistant's panel, the \
                  Undo History (`view.toggle_undo_history`), and whether plug-in windows are \
                  shown (`view.toggle_plug_in_windows`). Changes \
                  nothing. The Arrangement's own view is in `arrangement.state`, the Mixer's in \
@@ -1070,18 +1165,120 @@ fn specs() -> Vec<CommandSpec> {
         CommandSpec::new(VIEW_TOGGLE_CLIP_VIEW, "Clip View")
             .description(
                 "Shows or hides the Clip View in the detail area, which holds the MIDI Note \
-                 Editor for the Arrangement's selected MIDI clip; while it shows, it takes \
-                 the detail area in place of the Device View. It shows the clip the \
-                 Arrangement has selected, with its notes, and selecting another MIDI clip \
-                 switches the editor to it, clearing the note selection. Changes nothing in \
-                 the set and isn't an undo step. The result says whether it shows, what clip \
-                 the editor holds, and which notes are selected.",
+                 Editor for the Arrangement's selected MIDI clip, and leaves the Device View \
+                 as it is: with the Device View showing, showing the Clip View stacks it above \
+                 the Device View. It shows the clip the Arrangement has selected, with its \
+                 notes, and selecting another MIDI clip switches the editor to it, clearing \
+                 the note selection. Changes nothing in the set and isn't an undo step. The \
+                 result is the detail area's state, as `view.state` reports it under \
+                 `detail`.",
             )
             .permission(Permission::Read)
             .context(Global)
             .binding("S-VIEW-015")
             .args::<NoArgs>()
-            .result::<ClipViewState>(),
+            .result::<DetailState>(),
+        CommandSpec::new(VIEW_TOGGLE_DEVICE_VIEW, "Device View")
+            .description(
+                "Shows or hides the Device View in the detail area, which shows the selected \
+                 track's devices, and leaves the Clip View as it is: with the Clip View \
+                 showing, showing the Device View stacks it below the Clip View. Changes \
+                 nothing in the set and isn't an undo step. The result is the detail area's \
+                 state, as `view.state` reports it under `detail`.",
+            )
+            .permission(Permission::Read)
+            .context(Global)
+            .binding("S-VIEW-016")
+            .args::<NoArgs>()
+            .result::<DetailState>(),
+        CommandSpec::new(VIEW_SHOW_DETAIL_VIEWS, "Show Clip and Device View")
+            .description(
+                "Shows the Clip View and the Device View together, the Clip View above the \
+                 Device View, as Option-click (Alt-click) on either view's toggle does. With \
+                 both showing already it changes nothing. Changes nothing in the set and isn't \
+                 an undo step. The result is the detail area's state.",
+            )
+            .permission(Permission::Read)
+            .context(Global)
+            .binding("S-VIEW-005")
+            .args::<NoArgs>()
+            .result::<DetailState>(),
+        CommandSpec::new(VIEW_SWITCH_DETAIL_VIEW, "Toggle Clip/Device View")
+            .description(
+                "With one of the Clip View and the Device View showing, shows the other in its \
+                 place; with both showing, moves the keyboard focus to the Clip View's editor if \
+                 the Device View has it, and to the Device View otherwise; with neither \
+                 showing, shows the view that showed alone last, the Device View in a new \
+                 session. Shift+Tab does this while Use Tab Key to Move Focus is off; F12 does \
+                 it always. Changes nothing in the set and isn't an undo step. The result is \
+                 the detail area's state.",
+            )
+            .permission(Permission::Read)
+            .context(Global)
+            .binding("S-VIEW-004")
+            .args::<NoArgs>()
+            .result::<DetailState>(),
+        CommandSpec::new(VIEW_TOGGLE_DETAIL_AREA, "Hide Device View")
+            .description(
+                "Hides whichever of the Clip View and the Device View show, and run again shows \
+                 the same ones again; with neither showing and nothing hidden this way, shows \
+                 the Device View. The View menu's item reads Hide or Show followed by the views \
+                 it would hide or bring back. Changes nothing in the set and isn't an undo \
+                 step. The result is the detail area's state.",
+            )
+            .permission(Permission::Read)
+            .context(Global)
+            .binding("S-VIEW-022")
+            .args::<NoArgs>()
+            .result::<DetailState>(),
+        CommandSpec::new(VIEW_EXPAND_CLIP_VIEW, "Expand Clip View")
+            .description(
+                "Gives the Clip View its largest height, the one that leaves the main view \
+                 80 points, and run again gives back the height it had before. Refused while \
+                 the Clip View is hidden. Dragging the detail area's top edge, or hiding the \
+                 Clip View, ends the expansion. Changes nothing in the set and isn't an undo \
+                 step. The result is the detail area's state, whose `expanded` says which way \
+                 it went.",
+            )
+            .permission(Permission::Read)
+            .context(ClipView)
+            .binding("S-NOTE-030")
+            .args::<NoArgs>()
+            .result::<DetailState>(),
+        CommandSpec::new(VIEW_SET_DETAIL_HEIGHT, "Set Clip View Height")
+            .description(
+                "Sets the Clip View's height to `points`, in points at 100% zoom and at least \
+                 100, as dragging the detail area's top edge does one frame at a time; a \
+                 window too short for it shows the Clip View less tall, down to 100 points. \
+                 Ends an expansion. The Device View's height doesn't change. Changes nothing \
+                 in the set and isn't an undo step. The result is the detail area's state.",
+            )
+            .permission(Permission::Read)
+            .context(Global)
+            .args::<DetailHeightArgs>()
+            .result::<DetailState>(),
+        CommandSpec::new(FOCUS_CLIP_VIEW, "Clip View")
+            .description(
+                "Moves the keyboard focus to the Clip View's editor, so the Clip View's \
+                 shortcuts apply, showing the Clip View first if it is hidden. Changes nothing \
+                 in the set and isn't an undo step. The result is the detail area's state.",
+            )
+            .permission(Permission::Read)
+            .context(Global)
+            .binding("S-FOCUS-004")
+            .args::<NoArgs>()
+            .result::<DetailState>(),
+        CommandSpec::new(FOCUS_DEVICE_VIEW, "Device View")
+            .description(
+                "Moves the keyboard focus to the Device View, so its shortcuts apply, showing \
+                 the Device View first if it is hidden. Changes nothing in the set and isn't \
+                 an undo step. The result is the detail area's state.",
+            )
+            .permission(Permission::Read)
+            .context(Global)
+            .binding("S-FOCUS-005")
+            .args::<NoArgs>()
+            .result::<DetailState>(),
         CommandSpec::new(VIEW_TOGGLE_PLUGIN_LIST, "Plug-In List")
             .description(
                 "Shows or hides the list of the set's plug-ins in the detail area's place, \

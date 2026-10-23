@@ -181,6 +181,7 @@ fn a_take_holds_each_armed_tracks_input_from_the_frame_playback_started_on() {
             start: Frames(48_000),
             end: Frames(49_024),
             wrap: None,
+            frames: 1_024,
         }),
         "four blocks of 256 frames from the frame playback started on"
     );
@@ -224,6 +225,7 @@ fn a_full_ring_ends_the_take_and_counts_its_dropped_frames() {
             start: Frames::ZERO,
             end: Frames(16),
             wrap: None,
+            frames: 16,
         }),
         "the two blocks the ring took"
     );
@@ -272,6 +274,7 @@ fn a_take_goes_on_through_the_loops_wraps() {
             start: Frames::ZERO,
             end: Frames(25_000),
             wrap: Some((Frames(24_000), Frames(48_000))),
+            frames: 73_000,
         }),
         "one take, 1,000 frames into the third pass"
     );
@@ -471,6 +474,7 @@ fn punch_records_only_between_the_brace_ends_and_playback_carries_on() {
             start: Frames(24_000),
             end: Frames(48_000),
             wrap: None,
+            frames: 24_000,
         })
     );
     rig.collector.collect();
@@ -507,6 +511,7 @@ fn each_punch_switch_alone_moves_only_its_own_end() {
             start: Frames::ZERO,
             end: Frames(48_000),
             wrap: None,
+            frames: 48_000,
         }
     );
     assert_eq!(drain(&mut ring).len(), 48_000);
@@ -532,6 +537,7 @@ fn the_loops_wrap_ends_a_take_that_has_punch_out_on() {
             start: Frames::ZERO,
             end: Frames(48_000),
             wrap: None,
+            frames: 48_000,
         })
     );
     assert_eq!(drain(&mut ring).len(), 48_000);
@@ -563,6 +569,7 @@ fn playing_from_inside_the_brace_records_from_play_start() {
             start: Frames(36_000),
             end: Frames(48_000),
             wrap: None,
+            frames: 12_000,
         })
     );
     assert_eq!(drain(&mut rings[0]).len(), 12_000);

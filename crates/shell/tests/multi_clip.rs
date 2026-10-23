@@ -722,3 +722,71 @@ fn a_note_in_a_later_pass_is_the_clips_one_note() {
     assert_eq!(song.notes(a)[0].key, 63);
     assert_eq!(song.notes(a).len(), 1);
 }
+
+// Spec: multi-clip-editing R7, R8. Notes selected in two clips can't share a
+// probability group, and an edit reaches the notes selected in a clip that
+// isn't the foreground clip.
+#[test]
+fn grouping_across_clips_is_refused_and_an_edit_reaches_a_background_clip() {
+    let (mut song, a, b) = two_clips();
+    song.view(
+        "clip_view.select_notes",
+        json!({ "clips": [{ "clip": a, "notes": [0] }, { "clip": b, "notes": [0] }] }),
+    );
+    let steps = song.steps();
+    assert!(
+        song.shell
+            .run("note.group", json!({ "kind": "play_all" }))
+            .is_err()
+    );
+    assert_eq!(song.steps(), steps, "nothing grouped");
+    assert!(song.midi(a).groups.is_empty() && song.midi(b).groups.is_empty());
+
+    // The foreground clip is b, the one selected last; a's notes alone are
+    // selected.
+    song.view(
+        "clip_view.select_notes",
+        json!({ "clips": [{ "clip": a, "notes": [0, 1] }] }),
+    );
+    song.edit("note.move", json!({ "semitones": 1 }));
+    assert_eq!(
+        song.notes(a).iter().map(|n| n.key).collect::<Vec<_>>(),
+        [61, 65]
+    );
+    assert_eq!(
+        song.notes(b).iter().map(|n| n.key).collect::<Vec<_>>(),
+        [67, 71]
+    );
+    // Within one clip they group.
+    song.edit(
+        "note.group",
+        json!({ "clip": a, "notes": [0, 1], "kind": "play_all" }),
+    );
+    assert_eq!(song.midi(a).groups.len(), 1);
+}
+
+// Spec: multi-clip-editing R11; note-editing R31. Duplicate Loop puts the
+// copied notes in a group of their own.
+#[test]
+fn duplicate_loop_gives_the_copies_groups_of_their_own() {
+    let mut build = build();
+    let a = build.arranged(0, 0, 2 * BAR, vec![note(60, 0), note(64, BAR / 2)]);
+    let mut song = build.open();
+    song.run(
+        "clip.set_midi_loop",
+        json!({ "clips": [a], "start": 0, "end": BAR }),
+    );
+    song.select_arranged(&[a]);
+    song.edit(
+        "note.group",
+        json!({ "clip": a, "notes": [0, 1], "kind": "play_one" }),
+    );
+    song.run("clip.duplicate_loop", json!({ "clips": [a] }));
+    let midi = song.midi(a);
+    assert_eq!(midi.groups.len(), 2, "{:?}", midi.groups);
+    let notes = song.notes(a);
+    assert_eq!(notes.len(), 4);
+    assert_eq!(notes[0].group, notes[1].group);
+    assert_eq!(notes[2].group, notes[3].group);
+    assert_ne!(notes[0].group, notes[2].group);
+}

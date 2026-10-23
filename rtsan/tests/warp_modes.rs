@@ -15,8 +15,9 @@ use bl_core::time::{Bpm, SampleRate, TempoMap, Ticks};
 use bl_engine::{Collector, Compiler, EngineConfig, MediaMap, Registry, TransportCommand, channel};
 use bl_media::SampleData;
 use bl_model::{
-    AudioData, BeatsUpdate, Clip, ClipData, Command, ComplexProUpdate, ContentHash, Editor,
-    TextureUpdate, TonesUpdate, TrackKind, TransientLoopMode, WarpMarker, WarpMode,
+    AudioData, AutomationTarget, BeatsUpdate, Clip, ClipData, ClipParam, Command, ComplexProUpdate,
+    ContentHash, Editor, EnvelopeKind, TextureUpdate, TonesUpdate, TrackKind, TransientLoopMode,
+    WarpMarker, WarpMode,
 };
 
 // Without `--cfg lspk_rtsan` (`rtsan/.cargo/config.toml`), this doesn't build.
@@ -204,5 +205,125 @@ fn beats_playback_passes_under_rtsan() {
         state.counters.data_delivered,
         state.swaps,
         state.cpu_load_max * 100.0
+    );
+}
+
+// Spec: warp-modes R29, R31, R33. A clip whose every sound setting is
+// automated on its track and drawn as a clip envelope plays in each warp mode
+// under the sanitizer, with the mode changing and the playhead located into
+// it while it plays.
+#[test]
+fn automated_clip_settings_pass_under_rtsan() {
+    let media_hash = ContentHash([2; 32]);
+    let mut media = MediaMap::new();
+    media.insert(media_hash, file(96_000, 0.001));
+    media.set_transients(media_hash, (0..8).map(|n| f64::from(n) * 0.25).collect());
+    let registry = Registry::new().with_media(Arc::new(media));
+    let config = EngineConfig::new(SampleRate::HZ_48000, 256);
+    let mut collector = Collector::new();
+    let mut compiler = Compiler::new(config, registry, collector.handle());
+    let (mut sender, mut processor, mut monitor) = channel(&config);
+
+    let mut editor = Editor::new();
+    let track = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: track,
+            kind: TrackKind::Audio,
+            name: String::new(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    let audio = AudioData {
+        warp: true,
+        warp_markers: vec![WarpMarker {
+            time: 0.0,
+            beat: Ticks::ZERO,
+        }],
+        tempo: Some(120.0),
+        warp_mode: WarpMode::Beats,
+        ..AudioData::new(media_hash)
+    };
+    let clip = editor.new_id();
+    editor
+        .apply(Command::CreateClip {
+            track,
+            clip: Clip::new(clip, Ticks::ZERO, Ticks::WHOLE * 4, ClipData::Audio(audio)),
+        })
+        .unwrap();
+    // Every setting moves along the clip: on the track from its default to
+    // the top of its range, and on the clip by a third of the way up.
+    for param in ClipParam::ALL {
+        let descriptor = param.descriptor();
+        let target = AutomationTarget::Clip { param };
+        for (at, value) in [
+            (Ticks::ZERO, descriptor.default),
+            (Ticks::WHOLE * 2, descriptor.max()),
+        ] {
+            editor
+                .apply(Command::SetAutomationBreakpoint {
+                    track,
+                    target,
+                    at,
+                    value,
+                })
+                .unwrap();
+        }
+        let (low, high) = param.envelope_range();
+        for (at, value) in [
+            (Ticks::ZERO, low),
+            (Ticks::WHOLE * 3, low + (high - low) / 3.0),
+        ] {
+            editor
+                .apply(Command::SetClipEnvelopeBreakpoint {
+                    clip,
+                    target,
+                    kind: EnvelopeKind::Modulation,
+                    at,
+                    value,
+                })
+                .unwrap();
+        }
+    }
+    sender.send_update(compiler.sync(editor.document()));
+    sender.transport(TransportCommand::Play);
+
+    let mut programs = 1;
+    for round in 0..1_200u64 {
+        if round % 60 == 0 {
+            let mode = match (round / 60) % 6 {
+                0 => WarpMode::Beats,
+                1 => WarpMode::Tones,
+                2 => WarpMode::Texture,
+                3 => WarpMode::RePitch,
+                4 => WarpMode::Complex,
+                _ => WarpMode::ComplexPro,
+            };
+            editor
+                .apply(Command::SetClipWarpMode { clip, mode })
+                .unwrap();
+            let update = compiler.sync(editor.document());
+            programs += u64::from(update.program.is_some());
+            sender.send_update(update);
+        }
+        if round % 100 == 50 {
+            sender.transport(TransportCommand::Locate(Ticks(98_765 * (round % 7) as i64)));
+        }
+        assert!(sender.flush());
+        bl_rt::rt_test!({
+            processor.process(256);
+        });
+        if round % 50 == 0 {
+            collector.collect();
+        }
+    }
+
+    let state = monitor.state().clone();
+    assert_eq!(state.counters.data_unrouted, 0);
+    assert_eq!(state.swaps, programs);
+    assert!(
+        state.meter(track).is_some_and(|[left, _]| left > 0.0),
+        "the clip plays"
     );
 }

@@ -398,6 +398,7 @@ impl ClipViewUi {
             start: axis.0,
             length: axis.1,
             notes: &moved,
+            groups: &fg.midi.groups,
             selected: &fg.selected,
             face: fg.colour,
             hovered: None,
@@ -844,6 +845,7 @@ impl ClipViewUi {
                             grab: at_press - origin,
                             copy: keys.copy,
                             targets: targets.clone(),
+                            grabbed: note.map_or((60, 100), |note| (note.key, note.velocity)),
                         };
                         if keys.bypass {
                             NoteDrag::Undecided {

@@ -135,6 +135,11 @@ pub fn travel(doc: &Document, devices: &DeviceView, target: AutomationTarget) ->
                 None => Travel::Linear { min: 0.0, max: 1.0 },
             }
         }
+        // A clip setting's lane runs over the setting's own range.
+        AutomationTarget::Clip { param } => {
+            let (min, max) = param.limits();
+            Travel::Linear { min, max }
+        }
         AutomationTarget::MidiCc { .. }
         | AutomationTarget::MidiPitchBend
         | AutomationTarget::MidiChannelPressure => {

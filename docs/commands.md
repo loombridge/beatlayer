@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-700 commands in 43 areas.
+704 commands in 43 areas.
 
 ## Permission classes
 
@@ -671,13 +671,17 @@ Each command has:
 | [`track.bounce_in_place`](#trackbounce_in_place) | Bounce Track in Place | `destructive` |  |  |
 | [`track.bounce_to_new_track`](#trackbounce_to_new_track) | Bounce to New Track | `edit` | `Cmd+B` | `Ctrl+B` |
 | [`track.clear_frozen`](#trackclear_frozen) | Clear Tracks Frozen | `edit` |  |  |
+| [`track.copy`](#trackcopy) | Copy Track(s) | `read` | `Cmd+C` | `Ctrl+C` |
 | [`track.create`](#trackcreate) | Insert Track | `edit` | `Cmd+T`; `Cmd+Shift+T`; `Cmd+Option+T` | `Ctrl+T`; `Ctrl+Shift+T`; `Ctrl+Alt+T` |
 | [`track.create_bounced_track`](#trackcreate_bounced_track) | Create Bounced Track | `edit` |  |  |
+| [`track.cut`](#trackcut) | Cut Track(s) | `destructive` | `Cmd+X` | `Ctrl+X` |
 | [`track.delete`](#trackdelete) | Delete Track | `destructive` | `Delete` | `Delete` |
+| [`track.duplicate`](#trackduplicate) | Duplicate Track(s) | `edit` | `Cmd+D` | `Ctrl+D` |
 | [`track.duplicate_without_clips`](#trackduplicate_without_clips) | Duplicate Track Without Clips | `edit` |  |  |
 | [`track.freeze`](#trackfreeze) | Freeze Track | `edit` | `Cmd+Option+Shift+F` | `Ctrl+Alt+Shift+F` |
 | [`track.group`](#trackgroup) | Group Tracks | `edit` | `Cmd+G` | `Ctrl+G` |
 | [`track.move`](#trackmove) | Move Track | `edit` |  |  |
+| [`track.paste`](#trackpaste) | Paste Track(s) | `edit` | `Cmd+V` | `Ctrl+V` |
 | [`track.paste_bounced_audio`](#trackpaste_bounced_audio) | Paste Bounced Audio | `edit` | `Cmd+Option+V` | `Ctrl+Alt+V` |
 | [`track.rename`](#trackrename) | Rename Track | `edit` | `Cmd+R` | `Ctrl+R` |
 | [`track.set_bounced`](#trackset_bounced) | Set Track Bounced | `destructive` |  |  |
@@ -11982,6 +11986,26 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `track.copy`
+
+**Copy Track(s)**. Permission: `read`. Contexts: `track-headers`.
+
+Copies the selected tracks (`tracks`, or the tracks named) to the clipboard, with everything they hold under new IDs, and changes nothing in the set. The clipboard holds whichever was copied last, these tracks or the Arrangement's material. Copying is never an undo step.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-EDIT-002 | `Cmd+C` | `Ctrl+C` | `global` | Copy | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `tracks` | array or null | no | The tracks; the selected tracks if left out. |
+
+Result: [`TracksCopied`](#trackscopied).
+
 #### `track.create`
 
 **Insert Track**. Permission: `edit`. Contexts: `global`.
@@ -12026,6 +12050,26 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `track.cut`
+
+**Cut Track(s)**. Permission: `destructive`. Contexts: `track-headers`.
+
+Copies the selected tracks (`tracks`, or the tracks named) to the clipboard, with everything they hold under new IDs, and deletes them as Delete does, as one undo step named Cut Track(s). The clipboard holds whichever was copied last, these tracks or the Arrangement's material.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-EDIT-001 | `Cmd+X` | `Ctrl+X` | `global` | Cut | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `tracks` | array or null | no | The tracks; the selected tracks if left out. |
+
+Result: [`TracksCopied`](#trackscopied).
+
 #### `track.delete`
 
 **Delete Track**. Permission: `destructive`. Contexts: `track-headers`.
@@ -12045,6 +12089,26 @@ Arguments:
 | `track` | [`TrackId`](#trackid) | yes | The track. |
 
 Result: [`ChangeSet`](#changeset).
+
+#### `track.duplicate`
+
+**Duplicate Track(s)**. Permission: `edit`. Contexts: `track-headers`.
+
+Duplicates the selected tracks (`tracks`, or the tracks named), each straight after itself, with everything it holds: its name (the next number where the name starts with the track's number), colour, mixer, sends, routing, devices with their states and sidechains, its Arrangement clips, take lanes and Session clips, its automation and clip envelopes, and its frozen state, all under new IDs. A reference between tracks copied together points at the copies; a reference to a track not copied stays as it is. The copies become the selected tracks. One undo step, named Duplicate Track(s). Main can't be duplicated.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-EDIT-004 | `Cmd+D` | `Ctrl+D` | `global` | Duplicate | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `tracks` | array or null | no | The tracks; the selected tracks if left out. |
+
+Result: [`TracksDuplicated`](#tracksduplicated).
 
 #### `track.duplicate_without_clips`
 
@@ -12119,6 +12183,26 @@ Arguments:
 | `parent` | [`TrackId`](#trackid) or null | no | The group to move it into, or `null` (or nothing) for the top level. |
 
 Result: [`ChangeSet`](#changeset).
+
+#### `track.paste`
+
+**Paste Track(s)**. Permission: `edit`. Contexts: `track-headers`.
+
+Pastes the tracks on the clipboard, with everything they hold under new IDs, straight after the last selected track, at its level and inside its group when it is in one, or after the last track when none is selected. Each paste makes new copies, and the tracks pasted are selected afterwards. One undo step, named Paste Track(s). References to tracks that are not in the set are settled as a set added from another set settles them. The files the tracks play go into the set's media table. With the Arrangement's material on the clipboard it is unavailable: that is pasted with `arrangement.paste`.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-EDIT-003 | `Cmd+V` | `Ctrl+V` | `global` | Paste | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) or null | no | The track to paste after; the last selected track if left out. |
+
+Result: [`TracksCopied`](#trackscopied).
 
 #### `track.paste_bounced_audio`
 
@@ -13391,11 +13475,14 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`track.clear_frozen`](#trackclear_frozen) | the query tool's `track` | `frozen` |
 | [`track.create`](#trackcreate) | the query tool's `song` | `tracks` |
 | [`track.create_bounced_track`](#trackcreate_bounced_track) | the query tool's `song` | `tracks` |
+| [`track.cut`](#trackcut) | the query tool's `song` | `tracks` |
 | [`track.delete`](#trackdelete) | the query tool's `song` | `tracks` |
+| [`track.duplicate`](#trackduplicate) | the query tool's `song` | `tracks` |
 | [`track.duplicate_without_clips`](#trackduplicate_without_clips) | the query tool's `song` | `tracks` |
 | [`track.freeze`](#trackfreeze) | the query tool's `track` | `frozen` |
 | [`track.group`](#trackgroup) | the query tool's `song` | `tracks` |
 | [`track.move`](#trackmove) | the query tool's `song` | `tracks` |
+| [`track.paste`](#trackpaste) | the query tool's `song` | `tracks` |
 | [`track.paste_bounced_audio`](#trackpaste_bounced_audio) | the query tool's `track` | `clips` |
 | [`track.rename`](#trackrename) | the query tool's `track` | `name` |
 | [`track.set_bounced`](#trackset_bounced) | the query tool's `song` | `tracks` |
@@ -36700,6 +36787,37 @@ What `search.tracks` returns.
   },
   "required": [
     "rows"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `TracksCopied`
+
+What `track.copy`, `track.cut` and `track.paste` return.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `tracks` | array of [`TrackId`](#trackid) | yes | The new tracks: the copies `track.copy` puts on the clipboard, the copies `track.cut` puts on the clipboard, and the tracks `track.paste` makes. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `track.copy`, `track.cut` and `track.paste` return.",
+  "properties": {
+    "tracks": {
+      "description": "The new tracks: the copies `track.copy` puts on the clipboard, the copies `track.cut` puts on the clipboard, and the tracks `track.paste` makes.",
+      "items": {
+        "$ref": "#/$defs/TrackId"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "tracks"
   ],
   "type": "object"
 }

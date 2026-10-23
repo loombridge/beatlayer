@@ -184,7 +184,7 @@ Each row's **Notes** name the work packages that build it ("Built in WP-1.8a, WP
 
 | Live device | Milestone | Notes |
 |---|---|---|
-| Simpler | M2 (Sampler v1), M7 (the region with S Start, S Length and S Loop Length; Slice mode's Playback; Slice to Drum Rack) | [Spec](specs/sampler.md). Built in WP-2.16, WP-7.33 |
+| Simpler | M2 (Sampler v1), M7 (the region with S Start, S Length and S Loop Length; Slice mode's Playback; Slice to Drum Rack) | [Spec](specs/sampler.md). Built in WP-2.16, WP-7.33, WP-7.33b |
 | Drift | M2 | Polysynth v1. Built in WP-2.17 |
 | Impulse, Drum Sampler | M5 | Built in WP-5.17, WP-5.18 |
 | Sampler (multisample, zones, modulation) | M5 | Plus SFZ import. Built in WP-5.13, WP-5.14 |

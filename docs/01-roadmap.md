@@ -58,7 +58,7 @@ These come from being open and cross-platform. None of them is a reason to delay
 
 ## Size
 
-The build plan holds about 385 work packages to 1.0, each one agent session: 292 planned in Phases 0 to 7 and about 95 estimated in Phases 8 to 10.
+The build plan holds about 390 work packages to 1.0, each one agent session: 293 planned in Phases 0 to 7 and about 95 estimated in Phases 8 to 10.
 
 ## How the roadmap changes
 

@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-678 commands in 42 areas.
+683 commands in 42 areas.
 
 ## Permission classes
 
@@ -45,8 +45,11 @@ Each command has:
 | [`arrangement.consolidate`](#arrangementconsolidate) | Consolidate | `destructive` | `Cmd+J` | `Ctrl+J` |
 | [`arrangement.consolidate_to_scene`](#arrangementconsolidate_to_scene) | Consolidate Time to New Scene | `edit` |  |  |
 | [`arrangement.copy`](#arrangementcopy) | Copy | `read` | `Cmd+C` | `Ctrl+C` |
+| [`arrangement.create_fade`](#arrangementcreate_fade) | Create Fade | `edit` | `Cmd+Option+F` | `Ctrl+Alt+F` |
 | [`arrangement.cut`](#arrangementcut) | Cut | `destructive` | `Cmd+X` | `Ctrl+X` |
 | [`arrangement.delete`](#arrangementdelete) | Delete | `destructive` | `Delete` | `Delete` |
+| [`arrangement.delete_crossfade`](#arrangementdelete_crossfade) | Delete Crossfade | `edit` |  |  |
+| [`arrangement.delete_fades`](#arrangementdelete_fades) | Delete Fades | `edit` | `Cmd+Option+Delete` | `Ctrl+Alt+Backspace` |
 | [`arrangement.duplicate`](#arrangementduplicate) | Duplicate | `edit` | `Cmd+D` | `Ctrl+D` |
 | [`arrangement.fixed_grid`](#arrangementfixed_grid) | Fixed Grid | `read` | `Cmd+5` | `Ctrl+5` |
 | [`arrangement.focus_title_bar`](#arrangementfocus_title_bar) | Go to Track Title Bar | `read` | `Esc` | `Esc` |
@@ -66,9 +69,11 @@ Each command has:
 | [`arrangement.scroll`](#arrangementscroll) | Scroll Arrangement | `read` | `Shift+scroll`; `Cmd+Option+drag`; `Cmd+Option+drag` | `Shift+scroll`; `Ctrl+Alt+drag`; `Ctrl+Alt+drag` |
 | [`arrangement.select_all`](#arrangementselect_all) | Select All | `read` | `Cmd+A` | `Ctrl+A` |
 | [`arrangement.select_clips`](#arrangementselect_clips) | Select Clips | `read` | `Cmd+click`; `Cmd+click`; `Shift+click`; `Shift+click`; `Shift+click`, `Shift+drag` | `Ctrl+click`; `Ctrl+click`; `Shift+click`; `Shift+click`; `Shift+click`, `Shift+drag` |
+| [`arrangement.select_fade_handle`](#arrangementselect_fade_handle) | Select Fade Handle | `read` |  |  |
 | [`arrangement.select_loop`](#arrangementselect_loop) | Select Loop | `read` | `Cmd+Shift+L`; `Cmd+Shift+L` | `Ctrl+Shift+L`; `Ctrl+Shift+L` |
 | [`arrangement.select_time`](#arrangementselect_time) | Select Time | `read` |  |  |
 | [`arrangement.select_tracks`](#arrangementselect_tracks) | Select Tracks | `read` |  |  |
+| [`arrangement.set_crossfade`](#arrangementset_crossfade) | Set Crossfade | `edit` |  |  |
 | [`arrangement.set_grid`](#arrangementset_grid) | Grid | `read` |  |  |
 | [`arrangement.set_insert_marker`](#arrangementset_insert_marker) | Set Insert Marker | `read` |  |  |
 | [`arrangement.set_track_height`](#arrangementset_track_height) | Set Track Height | `read` |  |  |
@@ -976,6 +981,29 @@ Arguments:
 
 Result: [`ClipboardState`](#clipboardstate).
 
+#### `arrangement.create_fade`
+
+**Create Fade**. Permission: `edit`. Contexts: `arrangement`.
+
+Makes fades and crossfades from the Arrangement's selection, as Create Fade (Cmd-Option-F) does, on the selected audio clips (`clips`) or the time selection on its audio tracks (`tracks`, `start`, `end`). With a span of time: a clip whose start the span holds, and not its end, gets a fade-in from its start to the span's end; a clip whose end it holds, and not its start, gets a fade-out from the span's start to its end; two audio clips that meet inside the span get a crossfade over it; a clip the span holds whole, or holds neither edge of, is left as it is. With clips, each boundary where two of them meet gets a 4 ms crossfade, 2 ms each side, whatever the Create Fades on Clip Edges setting. Each fade is kept within its clip's limits, so a span longer than a clip allows makes the longest fade there is. One undo step, named Create Fade or Create Crossfade. Refused where the selection gives no fade. Read the result back from the clips' `data` with the query tool: `fade_in`, `fade_out`, their curves, `fade_in_before` and `fade_out_after`.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-ARR-008 | `Cmd+Option+F` | `Ctrl+Alt+F` | `arrangement` | Create a fade or crossfade from the selection | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clips` | array or null | no | Whole clips to act on. Give either `clips` or a span of time, not both. |
+| `end` | [`Position`](#position) or null | no | Where the span ends, after `start`. Left out, the time selection's end. |
+| `start` | [`Position`](#position) or null | no | Where the span starts. Left out, the time selection's start. |
+| `tracks` | array or null | no | The tracks a span of time covers. Left out, the selected tracks. |
+
+Result: [`EditResult`](#editresult).
+
 #### `arrangement.cut`
 
 **Cut**. Permission: `destructive`. Contexts: `arrangement`.
@@ -1019,6 +1047,44 @@ Arguments:
 | `end` | [`Position`](#position) or null | no | Where the span ends, after `start`. Left out, the time selection's end. |
 | `start` | [`Position`](#position) or null | no | Where the span starts. Left out, the time selection's start. |
 | `tracks` | array or null | no | The tracks a span of time covers. Left out, the selected tracks. |
+
+Result: [`EditResult`](#editresult).
+
+#### `arrangement.delete_crossfade`
+
+**Delete Crossfade**. Permission: `edit`. Contexts: `arrangement`.
+
+Ends the crossfade between the two audio clips on a track that meet at `boundary`, leaving neither a fade there. Refused where they have no crossfade. The shell's `arrangement.delete_fades` does what Delete does on a selected fade handle, which with Create Fades on Clip Edges on gives the clips a 4 ms crossfade instead.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track. |
+| `boundary` | [`Ticks`](#ticks) | yes | Where the earlier clip ends and the later one starts. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `arrangement.delete_fades`
+
+**Delete Fades**. Permission: `edit`. Contexts: `arrangement`.
+
+Deletes the fades and crossfades of audio clips (`clips`, or the selected clips), or only those at one `edge` of each, as Delete does with a fade handle selected. With Create Fades on Clip Edges on, a fade goes back to 4 ms and a crossfade to the 4 ms crossfade of two clips that meet; with it off, fades go, and a crossfade with them, leaving the clips meeting with no fade. One undo step, named Delete Fade or Delete Fades. Cmd-Option-Delete (Ctrl-Alt-Backspace) runs this.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-ARR-009 | `Cmd+Option+Delete` | `Ctrl+Alt+Backspace` | `arrangement` | Delete the fades in the selected clips | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clips` | array or null | no | The audio clips. Left out, the selected clips. |
+| `edge` | [`Edge`](#edge) or null | no | Only the fade at this edge of each clip, as Delete does with one fade handle selected. Left out, both edges. |
 
 Result: [`EditResult`](#editresult).
 
@@ -1412,6 +1478,24 @@ Arguments:
 
 Result: [`ArrangementState`](#arrangementstate).
 
+#### `arrangement.select_fade_handle`
+
+**Select Fade Handle**. Permission: `read`. Contexts: `arrangement`.
+
+Selects one of an audio clip's fade handles, as clicking it does: the `peak` handle where the fade reaches full level, the `outer` handle where it reaches silence, or the `curve` handle, of the fade-in at the clip's `start` or the fade-out at its `end`. A selected handle shows how far it can go, and Delete deletes its fade (`arrangement.delete_fades`). Left without `clip`, it clears the selection. Changes only the view.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) or null | no | The audio clip. Left out, no handle is selected. |
+| `edge` | [`Edge`](#edge) or null | no | Which edge's fade: the fade-in at `start`, the fade-out at `end`. |
+| `handle` | [`FadeHandle`](#fadehandle) or null | no | Which of the fade's handles; `peak` if left out. |
+
+Result: [`ArrangementState`](#arrangementstate).
+
 #### `arrangement.select_loop`
 
 **Select Loop**. Permission: `read`. Contexts: `arrangement`, `loop-brace`.
@@ -1465,6 +1549,26 @@ Arguments:
 | `title_bars` | boolean | no | Select their title bars, so the track-header shortcuts (fold, show and hide grouped tracks) apply, as clicking a title bar does. |
 
 Result: [`ArrangementState`](#arrangementstate).
+
+#### `arrangement.set_crossfade`
+
+**Set Crossfade**. Permission: `edit`. Contexts: `arrangement`.
+
+Makes or changes the crossfade between two audio clips on a track that meet, the earlier one ending exactly where the later one starts: `boundary` is that position. The crossfade runs from `before` seconds before the boundary to `after` seconds past it, at least one of them above 0; over it the earlier clip fades out and the later one fades in, each playing what it would play there if its edge were moved to the span's far end, as resizing it would. `curve`, from -1 to 1, shapes both fades; 0, the default, is a straight line, so the two gains add to 1. Refused where no two audio clips meet at the boundary, or past a clip's fade limits: a crossfade reaches no further into a clip than the clip's other fade allows, takes in no point where a clip goes round its loop brace, and reads nothing before the start of a file. Read it back with the query tool's `clip` field `data`: the earlier clip's `fade_out` and `fade_out_after` and the later clip's `fade_in` and `fade_in_before`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track. |
+| `boundary` | [`Ticks`](#ticks) | yes | Where the earlier clip ends and the later one starts. |
+| `before` | number, at least 0 | yes | How many seconds before the boundary the crossfade starts. |
+| `after` | number, at least 0 | yes | How many seconds after the boundary the crossfade ends. |
+| `curve` | number from -1 to 1 | no | The curve of both fades, from −1 to 1: 0 is a straight line, so the two gains add to 1. |
+
+Result: [`ChangeSet`](#changeset).
 
 #### `arrangement.set_grid`
 
@@ -4088,7 +4192,7 @@ Result: [`ChangeSet`](#changeset).
 
 **Set Clip Fades**. Permission: `edit`. Contexts: `arrangement`.
 
-Sets the lengths, in seconds, of an audio clip's fade-in, from silence at the clip's start in the arrangement, and its fade-out, to silence at its end; 0 is no fade. Each fade is a straight line in amplitude. Short fades stop a clip that starts or ends mid-waveform from clicking: 0.004 (4 ms) is the length that Create Fades on Clip Edges gives new clips. Lengths must be finite and at least 0.
+Sets the lengths, in seconds, of an audio clip's fade-in, from silence at the clip's start in the arrangement, and its fade-out, to silence at its end; 0 is no fade. `fade_in_curve` and `fade_out_curve`, from -1 to 1, shape each: 0, the default, is a straight line in amplitude, a positive curve bows the fade towards full level and a negative one towards silence; left out, a curve stays as it is. Short fades stop a clip that starts or ends mid-waveform from clicking: 0.004 (4 ms) is the length that Create Fades on Clip Edges gives new clips. Lengths must be finite, at least 0 and within the clip's limits: a fade-in ends no later than the fade-out begins, and a fade takes in no point where the clip goes round its loop brace. Where a crossfade begins or ends at the clip, this sets the crossfade's part inside the clip and its curve, and the clip it meets follows; if it can't (its file doesn't reach back that far), the crossfade ends and each clip keeps its own fade. Read the result back with the query tool's `clip` field `data` and the clip's `fade_in_before` and `fade_out_after`.
 
 Default keys: none.
 
@@ -4097,8 +4201,10 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `clip` | [`ClipId`](#clipid) | yes | The audio clip. |
-| `fade_in` | number, at least 0 | yes | The fade-in's length in seconds from the clip's start: 0 for none. |
-| `fade_out` | number, at least 0 | yes | The fade-out's length in seconds up to the clip's end: 0 for none. |
+| `fade_in` | number, at least 0 | yes | The fade-in's length in seconds from the clip's start: 0 for none. Where a crossfade begins at the clip's start, this is how far past the start it runs. |
+| `fade_out` | number, at least 0 | yes | The fade-out's length in seconds up to the clip's end: 0 for none. Where a crossfade ends at the clip's end, this is how far before the end it begins. |
+| `fade_in_curve` | number or null | no | The fade-in's curve, from −1 to 1: 0 is a straight line, a positive curve bows towards full level and a negative one towards silence. Left out, the curve stays as it is. |
+| `fade_out_curve` | number or null | no | The fade-out's curve, from −1 to 1. Left out, the curve stays as it is. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -12557,8 +12663,11 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`agent.set_server`](#agentset_server) | `settings.state` | `agents.server` |
 | [`arrangement.consolidate`](#arrangementconsolidate) | the query tool's `track` | `clips` |
 | [`arrangement.consolidate_to_scene`](#arrangementconsolidate_to_scene) | the query tool's `song` | `scenes` |
+| [`arrangement.create_fade`](#arrangementcreate_fade) | the query tool's `clip` | `data.audio.fade_in` |
 | [`arrangement.cut`](#arrangementcut) | the query tool's `track` | `clips` |
 | [`arrangement.delete`](#arrangementdelete) | the query tool's `track` | `clips` |
+| [`arrangement.delete_crossfade`](#arrangementdelete_crossfade) | the query tool's `clip` | `data.audio.fade_in_before` |
+| [`arrangement.delete_fades`](#arrangementdelete_fades) | the query tool's `clip` | `data.audio.fade_in` |
 | [`arrangement.duplicate`](#arrangementduplicate) | the query tool's `track` | `clips` |
 | [`arrangement.loop_selection`](#arrangementloop_selection) | `transport.state` | `loop_start` |
 | [`arrangement.move_clips`](#arrangementmove_clips) | the query tool's `track` | `clips` |
@@ -12566,6 +12675,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`arrangement.paste`](#arrangementpaste) | the query tool's `track` | `clips` |
 | [`arrangement.resize_clips`](#arrangementresize_clips) | the query tool's `track` | `clips` |
 | [`arrangement.reverse`](#arrangementreverse) | the query tool's `track` | `clips` |
+| [`arrangement.set_crossfade`](#arrangementset_crossfade) | the query tool's `clip` | `data.audio.fade_in_before` |
 | [`arrangement.split`](#arrangementsplit) | the query tool's `track` | `clips` |
 | [`articulation.add`](#articulationadd) | `articulation.list` | `articulations` |
 | [`articulation.delete`](#articulationdelete) | `articulation.list` | `articulations` |
@@ -13476,6 +13586,7 @@ What the Arrangement View shows: every view command returns it.
 | `show_volume` | boolean | yes | Whether the track headers show their volume, pan, and sends. |
 | `show_return_tracks` | boolean | yes | Whether the return tracks' rows show in the lanes. |
 | `automation_lanes` | array of [`AutomationLane`](#automationlane) | no | The parameter each track's automation lane shows, for the tracks whose lane isn't showing the default (their volume): the choosers' choice. `target` `null` means the lane draws no envelope. |
+| `selected_fade` | [`FadeHandleState`](#fadehandlestate) or null | no | The selected fade handle (WP-6.51), if any: Delete deletes its fade. |
 | `time_selection_lanes` | array of [`Lane`](#lane) | no | The lanes the time selection covers: each a track's own lane or its automation lane (the automation editing spec, R1). Empty when the selection names no lane. |
 
 <details><summary>JSON Schema</summary>
@@ -13546,6 +13657,17 @@ What the Arrangement View shows: every view command returns it.
         "$ref": "#/$defs/ClipId"
       },
       "type": "array"
+    },
+    "selected_fade": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/FadeHandleState"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The selected fade handle (WP-6.51), if any: Delete deletes its fade."
     },
     "selected_locators": {
       "default": [],
@@ -14093,7 +14215,11 @@ An audio clip's data: the audio file it plays, named by content hash, and how it
 | `detune` | number from -50 to 50 | no | The clip's Detune, in cents, from −50 to 50 (R2): 0 unless given. It shifts the clip's pitch in every mode but Re-Pitch (R10, R26). |
 | `end` | number or null | no | The End marker: where in the file, in seconds, a clip whose loop is off stops playing, after the Start marker; `null` (or nothing) for the end of the file. |
 | `fade_in` | number, at least 0 | no | The fade-in's length in seconds, from the clip's start in the Arrangement: 0 (no fade) unless given. |
+| `fade_in_before` | number, at least 0 | no | How many seconds before the clip's start a crossfade (R24) begins its fade-in, over the clip that ends where this one starts: 0 unless this clip is the later of two crossfaded ones. The fade-in's length is then this much before the start and `fade_in` after it. |
+| `fade_in_curve` | number from -1 to 1 | no | The fade-in's curve (the audio clips spec, R23), from −1 to 1: 0, the straight line, unless given. |
 | `fade_out` | number, at least 0 | no | The fade-out's length in seconds, up to the clip's end in the Arrangement: 0 (no fade) unless given. |
+| `fade_out_after` | number, at least 0 | no | How many seconds past the clip's end a crossfade (R24) ends its fade-out, under the clip that starts where this one ends: 0 unless this clip is the earlier of two crossfaded ones. The fade-out's length is then `fade_out` before the end and this much after it. |
+| `fade_out_curve` | number from -1 to 1 | no | The fade-out's curve, from −1 to 1: 0 unless given. |
 | `gain` | number, at least 0 | no | The clip's gain, as a linear gain: 1 (0 dB) unless given, 0.5 about −6 dB, and 0 silence (−∞ dB). Finite and 0 or more. |
 | `high_quality` | boolean | no | The HiQ switch (R12): on unless given. On, the clip is resampled by a band-limited interpolator wherever it is read at another rate than 1. |
 | `loop_end` | number or null | no | Where the loop brace ends in the file, in seconds, after its start; `null` (or nothing) for the end of the file. While the loop is on, the Start marker must be before it. |
@@ -14138,10 +14264,36 @@ An audio clip's data: the audio file it plays, named by content hash, and how it
       "minimum": 0.0,
       "type": "number"
     },
+    "fade_in_before": {
+      "description": "How many seconds before the clip's start a crossfade (R24) begins its fade-in, over the clip that ends where this one starts: 0 unless this clip is the later of two crossfaded ones. The fade-in's length is then this much before the start and `fade_in` after it.",
+      "format": "double",
+      "minimum": 0.0,
+      "type": "number"
+    },
+    "fade_in_curve": {
+      "description": "The fade-in's curve (the audio clips spec, R23), from −1 to 1: 0, the straight line, unless given.",
+      "format": "double",
+      "maximum": 1.0,
+      "minimum": -1.0,
+      "type": "number"
+    },
     "fade_out": {
       "description": "The fade-out's length in seconds, up to the clip's end in the Arrangement: 0 (no fade) unless given.",
       "format": "double",
       "minimum": 0.0,
+      "type": "number"
+    },
+    "fade_out_after": {
+      "description": "How many seconds past the clip's end a crossfade (R24) ends its fade-out, under the clip that starts where this one ends: 0 unless this clip is the earlier of two crossfaded ones. The fade-out's length is then `fade_out` before the end and this much after it.",
+      "format": "double",
+      "minimum": 0.0,
+      "type": "number"
+    },
+    "fade_out_curve": {
+      "description": "The fade-out's curve, from −1 to 1: 0 unless given.",
+      "format": "double",
+      "maximum": 1.0,
+      "minimum": -1.0,
       "type": "number"
     },
     "gain": {
@@ -21638,6 +21790,83 @@ What `chain.extract` and `chain.extract_return` return.
     "track",
     "devices",
     "clips"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `FadeHandle`
+
+A fade's handle: `peak`, where it reaches full level; `outer`, where it reaches silence, at the clip's edge or a crossfade's far end; or `curve`, between them.
+
+One of:
+
+- `"peak"`: Where the fade reaches full level.
+- `"outer"`: Where it reaches silence.
+- `"curve"`: The handle that shapes it.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A fade's handle: `peak`, where it reaches full level; `outer`, where it reaches silence, at the clip's edge or a crossfade's far end; or `curve`, between them.",
+  "oneOf": [
+    {
+      "const": "peak",
+      "description": "Where the fade reaches full level.",
+      "type": "string"
+    },
+    {
+      "const": "outer",
+      "description": "Where it reaches silence.",
+      "type": "string"
+    },
+    {
+      "const": "curve",
+      "description": "The handle that shapes it.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `FadeHandleState`
+
+A selected fade handle.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The audio clip. |
+| `edge` | [`Edge`](#edge) | yes | Which edge's fade: the fade-in at `start`, the fade-out at `end`. |
+| `handle` | [`FadeHandle`](#fadehandle) | yes | Which of its handles. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A selected fade handle.",
+  "properties": {
+    "clip": {
+      "$ref": "#/$defs/ClipId",
+      "description": "The audio clip."
+    },
+    "edge": {
+      "$ref": "#/$defs/Edge",
+      "description": "Which edge's fade: the fade-in at `start`, the fade-out at `end`."
+    },
+    "handle": {
+      "$ref": "#/$defs/FadeHandle",
+      "description": "Which of its handles."
+    }
+  },
+  "required": [
+    "clip",
+    "edge",
+    "handle"
   ],
   "type": "object"
 }

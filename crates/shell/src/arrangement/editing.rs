@@ -22,14 +22,15 @@ use bl_model::{
 };
 use bl_shell_spec::arrangement::{Lane, TimeRange};
 use bl_shell_spec::editing::{
-    self as ids, ClipboardState, Direction, Edge, EditResult, LoopSelectionArgs, MoveClipsArgs,
-    NudgeArgs, PasteArgs, Position, ResizeClipsArgs, SelectClipsArgs, SelectMode, SplitArgs,
-    TargetArgs,
+    self as ids, ClipboardState, DeleteFadesArgs, Direction, Edge, EditResult, LoopSelectionArgs,
+    MoveClipsArgs, NudgeArgs, PasteArgs, Position, ResizeClipsArgs, SelectClipsArgs, SelectMode,
+    SplitArgs, TargetArgs,
 };
 use serde::Serialize;
 use serde_json::Value;
 
 use super::automation;
+use super::fades;
 use super::placing::{clear, clear_spans, piece, split_off};
 use super::{ArrangementView, parse};
 
@@ -170,7 +171,7 @@ pub(crate) fn refused(reason: impl Into<String>) -> EditFailure {
     EditFailure::Refused(reason.into())
 }
 
-fn apply(editor: &mut Editor, command: Command) -> Result<(), EditFailure> {
+pub(crate) fn apply(editor: &mut Editor, command: Command) -> Result<(), EditFailure> {
     editor.apply(command).map(|_| ())?;
     Ok(())
 }
@@ -260,6 +261,21 @@ pub(crate) fn transaction<T>(
             Err(error)
         }
     }
+}
+
+/// Runs `edit` as [`transaction`] does, then settles the fades the edit left
+/// (R26) in the same undo step: `before` is the document the edit began from.
+fn settled<T>(
+    editor: &mut Editor,
+    label: &'static str,
+    (before, edge_fades): (&Document, bool),
+    edit: impl FnOnce(&mut Editor) -> Result<T, EditFailure>,
+) -> Result<(T, bool), EditFailure> {
+    transaction(editor, label, |editor| {
+        let value = edit(editor)?;
+        fades::settle(editor, before, edge_fades)?;
+        Ok(value)
+    })
 }
 
 /// The clips to act on: those given, or the selected ones. Each must exist;
@@ -701,6 +717,7 @@ impl ArrangementView {
     /// leaves the rest.
     pub(crate) fn select_clips(&mut self, doc: &Document, clips: Vec<ClipId>) {
         self.selected_clips = clips;
+        self.selected_fade = None;
         if let Some((start, end, tracks)) = span_of(doc, &self.selected_clips) {
             self.time_selection = Some((start, end));
             self.insert_marker = start;
@@ -758,6 +775,12 @@ impl ArrangementView {
     /// Drops selected clips the document no longer has.
     pub(crate) fn forget_missing_clips(&mut self, doc: &Document) {
         self.selected_clips.retain(|id| doc.clip(*id).is_some());
+        if self
+            .selected_fade
+            .is_some_and(|fade| doc.clip(fade.clip).is_none())
+        {
+            self.selected_fade = None;
+        }
     }
 
     /// The editing grid's spacing at the current zoom, in ticks: how far
@@ -868,6 +891,8 @@ pub fn label(id: &str, args: &Value) -> &'static str {
         ids::CUT => "Cut",
         ids::PASTE => "Paste",
         ids::LOOP_SELECTION => "Loop selection",
+        ids::CREATE_FADE => "Create Fade",
+        ids::DELETE_FADES => "Delete Fades",
         _ => "Select",
     }
 }
@@ -898,6 +923,8 @@ pub fn can_run(
         ids::DELETE | ids::DUPLICATE | ids::COPY | ids::CUT => {
             given("clips") || given("start") || has_selection
         }
+        ids::CREATE_FADE => create_fade_plan(doc, view, args).is_some_and(|plan| !plan.is_empty()),
+        ids::DELETE_FADES => given("clips") || !view.selected_clips.is_empty(),
         ids::PASTE => {
             clipboard.is_some_and(|c| !c.tracks.is_empty())
                 && (given("track") || !view.selected.is_empty() || !lanes(doc).is_empty())
@@ -923,6 +950,7 @@ pub fn run(
     editor: &mut Editor,
     view: &mut ArrangementView,
     clipboard: &mut Option<Clipboard>,
+    edge_fades: bool,
 ) -> Result<Value, EditFailure> {
     let before = editor.document().clone();
     let doc = &before;
@@ -1098,7 +1126,7 @@ pub fn run(
             }
             let label = if copy { "Copy clips" } else { "Move clips" };
             let locked = doc.settings().lock_envelopes;
-            let (moved, recorded) = transaction(editor, label, |editor| {
+            let (moved, recorded) = settled(editor, label, (doc, edge_fades), |editor| {
                 let moved = if copy {
                     let placements = moves
                         .iter()
@@ -1223,7 +1251,7 @@ pub fn run(
                     _ => {}
                 }
             }
-            let (_, recorded) = transaction(editor, "Resize clips", |editor| {
+            let (_, recorded) = settled(editor, "Resize clips", (doc, edge_fades), |editor| {
                 let keep: BTreeSet<ClipId> = clips.iter().copied().collect();
                 for clip in &clips {
                     let value = editor
@@ -1293,21 +1321,22 @@ pub fn run(
                     clips_on(doc, &view.selected)
                 }
             };
-            let (created, recorded) = transaction(editor, "Split clips", |editor| {
-                let mut created = Vec::new();
-                for clip in &targets {
-                    // Right to left, so the clip keeps its first part.
-                    for at in positions.iter().rev() {
-                        let Some(value) = editor.document().clip(*clip) else {
-                            continue;
-                        };
-                        if value.start < *at && *at < value.end() {
-                            created.push(split_off(editor, *clip, *at)?);
+            let (created, recorded) =
+                settled(editor, "Split clips", (doc, edge_fades), |editor| {
+                    let mut created = Vec::new();
+                    for clip in &targets {
+                        // Right to left, so the clip keeps its first part.
+                        for at in positions.iter().rev() {
+                            let Some(value) = editor.document().clip(*clip) else {
+                                continue;
+                            };
+                            if value.start < *at && *at < value.end() {
+                                created.push(split_off(editor, *clip, *at)?);
+                            }
                         }
                     }
-                }
-                Ok(created)
-            })?;
+                    Ok(created)
+                })?;
             // With time selected, the parts inside it become the selection.
             if let (Some((start, end)), true) =
                 (view.time_selection, view.selected_clips.is_empty())
@@ -1330,8 +1359,9 @@ pub fn run(
         }
         ids::DELETE => {
             let target = target(doc, view, parse(args)?)?;
-            let (_, recorded) =
-                transaction(editor, "Delete", |editor| delete_target(editor, &target))?;
+            let (_, recorded) = settled(editor, "Delete", (doc, edge_fades), |editor| {
+                delete_target(editor, &target)
+            })?;
             view.selected_clips.clear();
             Ok(to_value(&result(doc, editor, view, recorded)))
         }
@@ -1357,7 +1387,7 @@ pub fn run(
                     (track, clips)
                 })
                 .collect();
-            let (created, recorded) = transaction(editor, "Duplicate", |editor| {
+            let (created, recorded) = settled(editor, "Duplicate", (doc, edge_fades), |editor| {
                 let created = place(editor, placements)?;
                 if !locked {
                     write_envelopes(editor, &materials, &tracks, start + length)?;
@@ -1380,8 +1410,9 @@ pub fn run(
         ids::CUT => {
             let target = target(doc, view, parse(args)?)?;
             let copied = clipboard_of(doc, &target);
-            let (_, recorded) =
-                transaction(editor, "Cut", |editor| delete_target(editor, &target))?;
+            let (_, recorded) = settled(editor, "Cut", (doc, edge_fades), |editor| {
+                delete_target(editor, &target)
+            })?;
             *clipboard = Some(copied);
             view.selected_clips.clear();
             Ok(to_value(&result(doc, editor, view, recorded)))
@@ -1446,7 +1477,7 @@ pub fn run(
             // envelopes over the same spans.
             let materials = copied.envelopes.clone();
             let locked = doc.settings().lock_envelopes;
-            let (created, recorded) = transaction(editor, "Paste", |editor| {
+            let (created, recorded) = settled(editor, "Paste", (doc, edge_fades), |editor| {
                 let created = place(editor, placements)?;
                 if !locked {
                     write_envelopes(editor, &materials, &landed, at)?;
@@ -1480,7 +1511,35 @@ pub fn run(
                 by: Some(by),
                 ..MoveClipsArgs::default()
             });
-            run(ids::MOVE_CLIPS, args, editor, view, clipboard)
+            run(ids::MOVE_CLIPS, args, editor, view, clipboard, edge_fades)
+        }
+        ids::CREATE_FADE => {
+            let target = target(doc, view, parse(args)?)?;
+            let plan = fades::plan(doc, &target);
+            if plan.is_empty() {
+                return Err(unavailable("the selection gives no fade"));
+            }
+            let label = if plan.has_crossfade() {
+                "Create Crossfade"
+            } else {
+                "Create Fade"
+            };
+            let (_, recorded) = transaction(editor, label, |editor| fades::create(editor, &plan))?;
+            Ok(to_value(&result(doc, editor, view, recorded)))
+        }
+        ids::DELETE_FADES => {
+            let DeleteFadesArgs { clips, edge } = parse(args)?;
+            let clips = clips_or_selected(doc, view, clips)?;
+            let label = if clips.len() == 1 && edge.is_some() {
+                "Delete Fade"
+            } else {
+                "Delete Fades"
+            };
+            let (_, recorded) = transaction(editor, label, |editor| {
+                fades::delete_fades(editor, &clips, edge, edge_fades)
+            })?;
+            view.selected_fade = None;
+            Ok(to_value(&result(doc, editor, view, recorded)))
         }
         ids::LOOP_SELECTION => {
             let LoopSelectionArgs { start, end } = parse(args)?;
@@ -1531,6 +1590,26 @@ pub fn run(
             Ok(to_value(&view.state(doc)))
         }
         other => Err(invalid(format!("`{other}` isn't an editing command"))),
+    }
+}
+
+/// What Create Fade would make from the selection or the arguments, if they
+/// name something to act on.
+fn create_fade_plan(doc: &Document, view: &ArrangementView, args: &Value) -> Option<fades::Plan> {
+    let args: TargetArgs = serde_json::from_value(args.clone()).ok()?;
+    let target = target(doc, view, args).ok()?;
+    Some(fades::plan(doc, &target))
+}
+
+/// The name Edit ▸ Create ▸ Create Fade shows now (M-CREATE-010): Create
+/// Fade In/Out when the selection gives a fade, Create Crossfade when it
+/// gives a crossfade, and Create Fade when it gives neither.
+#[must_use]
+pub fn create_fade_label(doc: &Document, view: &ArrangementView) -> &'static str {
+    match create_fade_plan(doc, view, &Value::Object(serde_json::Map::new())) {
+        Some(plan) if plan.has_crossfade() => "Create Crossfade",
+        Some(plan) if !plan.is_empty() => "Create Fade In/Out",
+        _ => "Create Fade",
     }
 }
 

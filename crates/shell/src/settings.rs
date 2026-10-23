@@ -81,11 +81,18 @@ pub struct Preferences {
     /// not saved with the set. Off in a new install, so the returns stay
     /// pinned, as in Live.
     pub return_tracks_scroll: bool,
+    /// The MIDI Note Editor's Preview switch (Options > MIDI Note Editor
+    /// Preview; WP-6.5, the step recording spec, R1): one switch for every
+    /// MIDI clip, off in a new install.
+    pub note_preview: bool,
     /// Create Fades on Clip Edges (Record, Warp & Launch, L-SET-018): new
     /// audio clips get 4 ms fades at their edges (WP-1.4b; the audio clips
     /// spec, R7 and R22). On by default, as observed in Live 12.4.6, and on
     /// for preferences saved before the setting existed.
     pub create_fades_on_clip_edges: OnByDefault,
+    /// Retune Set On Loading Tuning Systems (Options, M-OPT-022; the
+    /// tunings spec, R15). Off in a new install.
+    pub retune_on_tuning_load: bool,
     /// Warp recorded audio (Record, Warp & Launch, Warp/Fades; IMP-02, the
     /// recording spec, R13): whether a recorded clip will be warped, once
     /// warping arrives; clips have no warp fields until then. On by default,

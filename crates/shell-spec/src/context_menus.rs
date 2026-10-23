@@ -417,8 +417,8 @@ const NOTE: &[Row] = &[
         Pending(Some("S-NOTE-034")),
     ),
     ("C-NOTE-007", "Deactivate Note(s)", Key(&["S-NOTE-041"])),
-    ("C-NOTE-008", "Group Notes", Pending(Some("S-NOTE-031"))),
-    ("C-NOTE-009", "Ungroup Notes", Pending(Some("S-NOTE-032"))),
+    ("C-NOTE-008", "Group Notes", Key(&["S-NOTE-031"])),
+    ("C-NOTE-009", "Ungroup Notes", Key(&["S-NOTE-032"])),
     ("C-NOTE-010", "Split Note(s)", Cmd(SPLIT_NOTES)),
     ("C-NOTE-011", "Chop Note(s) on Grid", Cmd(CHOP_NOTES)),
     ("C-NOTE-012", "Join Notes", Key(&["S-NOTE-007"])),
@@ -445,6 +445,16 @@ const KEYS: &[Row] = &[
     ("C-KEYS-001", "Deactivate Note(s)", Key(&["S-NOTE-041"])),
     ("C-KEYS-002", "Note spelling", Pending(None)),
 ];
+
+/// The menu a loop bar above the note editor opens while it shows several
+/// clips (C-LOOPBAR).
+const LOOP_BAR: &[Row] = &[("C-LOOPBAR-001", "Duplicate", Key(&["S-LOOP-012"]))];
+
+/// The menu a loop bar opens (C-LOOPBAR).
+#[must_use]
+pub fn loop_bar() -> Vec<MenuItem> {
+    items(LOOP_BAR)
+}
 
 /// The menu a note or the empty grid in the MIDI Note Editor opens
 /// (C-NOTE).
@@ -480,7 +490,6 @@ pub fn pending_package(row: &str) -> Option<&'static str> {
         }
         // The MIDI Note Editor's own items (piano-roll R30).
         "C-NOTE-006" => Some("WP-6.4 (Invert Selection and the note filters)"),
-        "C-NOTE-008" | "C-NOTE-009" => Some("WP-6.2 (probability groups)"),
         "C-NOTE-014" | "C-NOTE-014a" | "C-NOTE-014b" | "C-NOTE-014c" | "C-NOTE-014d" => {
             Some("WP-6.54 (the clip markers from the keys)")
         }
@@ -810,6 +819,7 @@ mod tests {
             (track(TrackMenu::default()), "(C-TRACK)"),
             (note(), "(C-NOTE)"),
             (keys(), "(C-KEYS)"),
+            (loop_bar(), "(C-LOOPBAR)"),
         ] {
             let Some(theirs) = reference(heading) else {
                 return;

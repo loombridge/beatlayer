@@ -168,3 +168,93 @@ fn an_agent_reaches_every_parameter_of_every_midi_effect() {
     }
     std::fs::remove_dir_all(&library).ok();
 }
+
+// Spec: scales R16, midi-scale-map R10, arpeggiator R15. An agent turns Use
+// Current Scale on by ID on each of the five scale-aware devices and reads it
+// back as the device's title bar switch, as one undo step, and sets Scale
+// Name, Root and Scale by ID.
+#[test]
+fn an_agent_sets_the_use_current_scale_switches_and_the_new_choosers_by_id() {
+    use bl_devices::{arpeggiator, dice, lift, remap, stack};
+
+    let mut client = client();
+    let track = midi_track(&client.transport().shell);
+    for (device_type, switch) in [
+        (arpeggiator_type(), arpeggiator::USE_SCALE),
+        (stack_type(), stack::USE_SCALE),
+        (lift_type(), lift::USE_SCALE),
+        (dice_type(), dice::USE_SCALE),
+        (remap_type(), remap::USE_SCALE),
+    ] {
+        let name = &device_type.name;
+        let added = run(
+            &mut client,
+            "device.add",
+            json!({
+                "device": {
+                    "kind": device_type.kind,
+                    "name": device_type.name,
+                    "role": device_type.role,
+                },
+                "track": track,
+            }),
+        );
+        let device: DeviceId = serde_json::from_value(added["device"].clone()).unwrap();
+        let read = |client: &mut Client<InProcess>| {
+            let described = run(client, "device.parameters", json!({ "device": device }));
+            described["params"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|p| p["id"] == json!(switch.0))
+                .cloned()
+                .unwrap_or_else(|| panic!("{name}: no switch"))
+        };
+        let before = read(&mut client);
+        assert_eq!(before["value"], json!(0.0), "{name}: off in a new device");
+        assert_eq!(before["title_switch"], json!(true), "{name}");
+        run(
+            &mut client,
+            "device.set_param",
+            json!({ "device": device, "param": switch.0, "value": 1.0 }),
+        );
+        assert_eq!(read(&mut client)["value"], json!(1.0), "{name}");
+        run(&mut client, "edit.undo", json!({}));
+        assert_eq!(
+            held(&mut client, device, switch.0),
+            None,
+            "{name}: one step"
+        );
+    }
+    // The new choosers: Scale's Scale Name, and Arpeggiator's Root and Scale.
+    let added = run(
+        &mut client,
+        "device.add",
+        json!({
+            "device": {
+                "kind": remap_type().kind,
+                "name": remap_type().name,
+                "role": remap_type().role,
+            },
+            "track": track,
+        }),
+    );
+    let device: DeviceId = serde_json::from_value(added["device"].clone()).unwrap();
+    run(
+        &mut client,
+        "device.set_param",
+        json!({ "device": device, "param": remap::SCALE_NAME.0, "value": 3.0 }),
+    );
+    let described = run(
+        &mut client,
+        "device.parameters",
+        json!({ "device": device }),
+    );
+    let chooser = described["params"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["id"] == json!(remap::SCALE_NAME.0))
+        .unwrap();
+    assert_eq!(chooser["text"], json!("Dorian"));
+}

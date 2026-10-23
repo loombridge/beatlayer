@@ -7,7 +7,9 @@ use std::path::{Path, PathBuf};
 
 use bl_commands::Permission;
 use bl_core::time::Ticks;
-use bl_model::{Clip, ClipData, ClipId, Command, Document, Editor, MidiData, Note, TrackId};
+use bl_model::{
+    Clip, ClipData, ClipId, Command, Document, Editor, GroupKind, MidiData, Note, TrackId,
+};
 use bl_shell::Shell;
 use bl_shell::audio::AudioHost;
 use bl_shell::clip_view::notes_in_order;
@@ -1871,4 +1873,334 @@ fn split_clip_refuses_a_session_clip_and_no_time_selection() {
     let before = song.doc().clone();
     assert!(song.shell.run(ids::SPLIT_CLIP, json!({})).is_err());
     assert_eq!(*song.doc(), before);
+}
+
+/// Four notes a quarter apart, chances 1, 0.8, 0.6 and 0.4.
+fn four_with_chances() -> Vec<Note> {
+    [1.0, 0.8, 0.6, 0.4]
+        .into_iter()
+        .enumerate()
+        .map(|(place, chance)| {
+            let mut note = song_note(60 + place as u8, QUARTER * place as i64, QUARTER);
+            note.probability = chance;
+            note
+        })
+        .collect()
+}
+
+impl Song {
+    fn midi(&self) -> MidiData {
+        match &self.doc().clip(self.clip).unwrap().data {
+            ClipData::Midi(midi) => midi.clone(),
+            ClipData::Audio(_) => panic!("the clip is MIDI"),
+        }
+    }
+
+    /// Each note's group, in the clip's order.
+    fn groups_of(&self) -> Vec<Option<u32>> {
+        self.notes().iter().map(|note| note.group).collect()
+    }
+}
+
+// Spec: note-editing R21, R22, R23. Grouping puts the notes in a group of
+// one chance, the first note's; ungrouping lets each keep it; each is one
+// undo step.
+#[test]
+fn grouping_and_ungrouping_are_one_undo_step_each() {
+    let mut song = song(four_with_chances());
+    song.view(ids::SELECT_NOTES, json!({ "notes": [1, 2, 3] }));
+    assert_eq!(
+        song.shell.dynamic_label(ids::GROUP).as_deref(),
+        Some("Group Notes")
+    );
+    let result = song.one_step(ids::GROUP, json!({}));
+    assert_eq!(result.selected, [1, 2, 3]);
+    assert_eq!(song.groups_of(), [None, Some(1), Some(1), Some(1)]);
+    let chances: Vec<f64> = song.notes().iter().map(|note| note.probability).collect();
+    assert_eq!(chances, [1.0, 0.8, 0.8, 0.8], "the first note's chance");
+    let midi = song.midi();
+    assert_eq!(midi.groups.len(), 1);
+    assert_eq!(midi.groups[0].kind, GroupKind::PlayAll, "play all to begin");
+    assert_eq!(
+        song.shell.editor().undo_history().next(),
+        Some("Group Notes")
+    );
+
+    // Ungrouping some of them leaves the others a group; each keeps the
+    // chance.
+    song.one_step(ids::UNGROUP, json!({ "notes": [1] }));
+    assert_eq!(song.groups_of(), [None, None, Some(1), Some(1)]);
+    assert_eq!(song.notes()[1].probability, 0.8);
+    // Ungrouping one more ends the group.
+    song.one_step(ids::UNGROUP, json!({ "notes": [2] }));
+    assert_eq!(song.groups_of(), [None; 4]);
+    assert!(song.midi().groups.is_empty(), "a group of one ends");
+    assert_eq!(song.notes()[2].probability, 0.8);
+}
+
+// Spec: note-editing R22. With fewer than two notes the command is refused;
+// the kind made last is kept, and the notes leave their old groups.
+#[test]
+fn group_notes_needs_two_notes_and_remembers_the_kind_made_last() {
+    let mut song = song(four_with_chances());
+    song.view(ids::SELECT_NOTES, json!({ "notes": [0] }));
+    let selected = [bl_commands::Context::NoteSelection];
+    assert!(!song.shell.can_invoke_in(ids::GROUP, &json!({}), &selected));
+    assert!(song.shell.run(ids::GROUP, json!({})).is_err());
+    assert!(song.midi().groups.is_empty());
+    song.view(ids::SELECT_NOTES, json!({ "notes": [0, 1] }));
+    assert!(song.shell.can_invoke_in(ids::GROUP, &json!({}), &selected));
+    assert!(
+        !song
+            .shell
+            .can_invoke_in(ids::UNGROUP, &json!({}), &selected)
+    );
+    song.one_step(ids::GROUP, json!({ "kind": "play_one" }));
+    assert!(
+        song.shell
+            .can_invoke_in(ids::UNGROUP, &json!({}), &selected)
+    );
+    assert_eq!(song.midi().groups[0].kind, GroupKind::PlayOne);
+    // The next group made without a kind is a Play One group too.
+    song.view(ids::SELECT_NOTES, json!({ "notes": [2, 3] }));
+    song.one_step(ids::GROUP, json!({}));
+    let midi = song.midi();
+    assert_eq!(midi.groups.len(), 2);
+    assert!(midi.groups.iter().all(|g| g.kind == GroupKind::PlayOne));
+    // Notes leave the group they were in, and one left with a single note
+    // ends: note 1 joins notes 2 and 3, leaving note 0 alone.
+    song.view(ids::SELECT_NOTES, json!({ "notes": [1, 2, 3] }));
+    song.one_step(ids::GROUP, json!({ "kind": "play_all" }));
+    let midi = song.midi();
+    assert_eq!(midi.groups.len(), 1, "{:?}", midi.groups);
+    assert_eq!(midi.groups[0].kind, GroupKind::PlayAll);
+    assert_eq!(song.notes()[0].group, None);
+    assert_eq!(song.groups_of()[1..], [Some(midi.groups[0].id); 3]);
+}
+
+// Spec: note-editing R23. Naming every note of a group changes its kind, as
+// the group marker's menu does, and ungrouping them all ends it.
+#[test]
+fn changing_a_group_s_kind_is_a_step_of_its_own() {
+    let mut song = song(four_with_chances());
+    song.view(ids::SELECT_NOTES, json!({ "notes": [0, 1, 2] }));
+    song.one_step(ids::GROUP, json!({}));
+    song.one_step(
+        ids::GROUP,
+        json!({ "notes": [0, 1, 2], "kind": "play_one" }),
+    );
+    assert_eq!(
+        song.shell.editor().undo_history().next(),
+        Some("Change Group")
+    );
+    let midi = song.midi();
+    assert_eq!(midi.groups.len(), 1);
+    assert_eq!(midi.groups[0].kind, GroupKind::PlayOne);
+    assert_eq!(song.notes()[3].group, None);
+    song.one_step(ids::UNGROUP, json!({ "notes": [0, 1, 2] }));
+    assert!(song.midi().groups.is_empty());
+}
+
+// Spec: note-editing R25. Any chance edit of a grouped note reaches its
+// whole group, and Randomize draws once for each group.
+#[test]
+fn a_chance_edit_reaches_the_whole_group() {
+    let mut song = song(four_with_chances());
+    song.view(ids::SELECT_NOTES, json!({ "notes": [0, 1, 2] }));
+    song.one_step(ids::GROUP, json!({}));
+    let chances =
+        |song: &Song| -> Vec<f64> { song.notes().iter().map(|note| note.probability).collect() };
+    song.one_step(
+        ids::SET_VALUE,
+        json!({ "notes": [1], "field": "chance", "value": 0.5 }),
+    );
+    assert_eq!(chances(&song), [0.5, 0.5, 0.5, 0.4]);
+    song.one_step(
+        ids::ADJUST_VALUE,
+        json!({ "notes": [2], "field": "chance", "by": 0.25 }),
+    );
+    assert_eq!(chances(&song), [0.75, 0.75, 0.75, 0.4]);
+    song.one_step(
+        ids::RAMP_VALUE,
+        json!({ "notes": [0, 1, 2, 3], "field": "chance", "from": 0.4, "to": 0.8 }),
+    );
+    let ramped = chances(&song);
+    assert!(
+        ramped[0] == ramped[1] && ramped[1] == ramped[2] && ramped[2] != ramped[3],
+        "{ramped:?}"
+    );
+    // Randomize draws once for the group: the three move together, and the
+    // note outside it draws on its own.
+    song.view(ids::SELECT_NOTES, json!({ "notes": [0, 1, 2, 3] }));
+    song.one_step(
+        ids::RANDOMIZE,
+        json!({ "field": "chance", "amount": 0.1, "seed": 7 }),
+    );
+    let random = chances(&song);
+    assert!(
+        random[0] == random[1] && random[1] == random[2],
+        "{random:?}"
+    );
+    assert_ne!(random[0], ramped[0]);
+    // Other values are the note's own.
+    song.one_step(
+        ids::SET_VALUE,
+        json!({ "notes": [1], "field": "velocity", "value": 20 }),
+    );
+    assert_eq!(song.notes()[1].velocity, 20);
+    assert_eq!(song.notes()[0].velocity, 100);
+}
+
+// Spec: note-editing R31. Deleting grouped notes leaves the rest of the
+// group, which ends below two notes; moving keeps the group.
+#[test]
+fn deleting_and_moving_grouped_notes() {
+    let mut song = song(four_with_chances());
+    song.view(ids::SELECT_NOTES, json!({ "notes": [0, 1, 2] }));
+    song.one_step(ids::GROUP, json!({}));
+    song.one_step(ids::MOVE_NOTES, json!({ "notes": [0], "by": QUARTER * 8 }));
+    assert_eq!(song.midi().groups.len(), 1, "moving keeps the group");
+    assert_eq!(song.notes()[3].group, Some(1));
+    song.one_step(ids::DELETE_NOTES, json!({ "notes": [0] }));
+    assert_eq!(song.midi().groups.len(), 1, "two notes are a group still");
+    song.one_step(ids::DELETE_NOTES, json!({ "notes": [0] }));
+    assert!(
+        song.midi().groups.is_empty(),
+        "a note left alone is no group"
+    );
+    assert_eq!(song.groups_of(), [None, None]);
+}
+
+// Spec: note-editing R31. Copies by paste, Duplicate and Option-drag form
+// new groups of the same kinds, one for each group they came from.
+#[test]
+fn copies_of_grouped_notes_form_groups_of_their_own() {
+    let mut song = song(four_with_chances());
+    song.view(ids::SELECT_NOTES, json!({ "notes": [0, 1] }));
+    song.one_step(ids::GROUP, json!({ "kind": "play_one" }));
+    song.view(ids::SELECT_NOTES, json!({ "notes": [2, 3] }));
+    song.one_step(ids::GROUP, json!({ "kind": "play_all" }));
+    let kinds = |song: &Song| -> Vec<GroupKind> {
+        let midi = song.midi();
+        let mut seen = Vec::new();
+        for note in song.notes() {
+            if let Some(kind) = note.group.and_then(|id| midi.group_kind(id))
+                && !seen.contains(&(note.group, kind))
+            {
+                seen.push((note.group, kind));
+            }
+        }
+        seen.into_iter().map(|(_, kind)| kind).collect()
+    };
+    assert_eq!(kinds(&song), [GroupKind::PlayOne, GroupKind::PlayAll]);
+
+    // Option-drag: the copies of both groups land later in the clip.
+    let before = song.groups_of();
+    song.view(ids::SELECT_NOTES, json!({ "notes": [0, 1, 2, 3] }));
+    song.one_step(ids::MOVE_NOTES, json!({ "by": QUARTER * 8, "copy": true }));
+    let groups = song.midi().groups;
+    assert_eq!(groups.len(), 4, "a group of its own for each");
+    let ids_now = song.groups_of();
+    assert_eq!(ids_now[..4], before, "the originals are as they were");
+    assert_ne!(ids_now[0], ids_now[4]);
+    assert_eq!(ids_now[4], ids_now[5]);
+    assert_eq!(kinds(&song).len(), 4);
+
+    // Paste: the second group's notes, copied before anything lands among
+    // them.
+    song.shell
+        .run(ids::COPY, json!({ "notes": [2, 3] }))
+        .unwrap();
+    song.one_step(ids::PASTE, json!({ "at": QUARTER * 40 }));
+    let midi = song.midi();
+    assert_eq!(midi.groups.len(), 5);
+    let last = song.notes().last().unwrap().group;
+    assert_eq!(midi.group_kind(last.unwrap()), Some(GroupKind::PlayAll));
+    // Duplicate.
+    song.view(ids::SELECT_NOTES, json!({ "notes": [0, 1] }));
+    song.one_step(ids::DUPLICATE, json!({}));
+    assert_eq!(song.midi().groups.len(), 6);
+    // One member of a group, copied alone, is no group.
+    song.shell.run(ids::COPY, json!({ "notes": [2] })).unwrap();
+    song.one_step(ids::PASTE, json!({ "at": QUARTER * 60 }));
+    assert_eq!(song.notes().last().unwrap().group, None);
+    assert_eq!(song.midi().groups.len(), 6);
+}
+
+// Spec: note-editing R30. Groups are saved with the clip and come back.
+#[test]
+fn groups_survive_a_save_and_load() {
+    let mut song = song(four_with_chances());
+    song.view(ids::SELECT_NOTES, json!({ "notes": [0, 1] }));
+    song.one_step(ids::GROUP, json!({ "kind": "play_one" }));
+    let saved = serde_json::to_value(song.doc()).unwrap();
+    let loaded: Document = serde_json::from_value(saved).unwrap();
+    assert_eq!(loaded, *song.doc());
+    let ClipData::Midi(midi) = &loaded.clip(song.clip).unwrap().data else {
+        panic!("a MIDI clip");
+    };
+    assert_eq!(midi.groups, song.midi().groups);
+}
+
+// Spec: note-editing R32. The commands are in the edit class.
+#[test]
+fn the_group_commands_are_registered_in_the_edit_class() {
+    let mut registry = bl_commands::Registry::new();
+    bl_shell::register(&mut registry).unwrap();
+    for id in [ids::GROUP, ids::UNGROUP] {
+        assert_eq!(registry.get(id).unwrap().permission, Some(Permission::Edit));
+    }
+}
+
+// Spec: note-editing R31, R34, R39. A part made by Split or Chop stays in its
+// note's group; a joined note keeps its first note's group, and a group
+// Join leaves with one note ends.
+#[test]
+fn parts_and_joins_keep_their_groups() {
+    let notes = vec![
+        song_note(60, 0, QUARTER),
+        song_note(62, QUARTER, QUARTER),
+        song_note(60, 2 * QUARTER, QUARTER),
+    ];
+    let mut song = song(notes);
+    song.one_step(ids::GROUP, json!({ "notes": [0, 1], "kind": "play_one" }));
+    let group = song.notes()[0].group;
+    assert!(group.is_some());
+
+    // Split the first note in two and chop the second in four: every part
+    // stays in the group.
+    song.one_step(ids::SPLIT, json!({ "notes": [0], "at": [QUARTER / 2] }));
+    assert_eq!(song.notes().len(), 4);
+    song.one_step(ids::CHOP, json!({ "notes": [2], "parts": 4 }));
+    let grouped: Vec<_> = song.notes().iter().map(|n| (n.key, n.group)).collect();
+    assert_eq!(
+        grouped.iter().filter(|(_, g)| *g == group).count(),
+        6,
+        "{grouped:?}"
+    );
+    assert_eq!(song.midi().groups.len(), 1);
+
+    // Join the two parts of the first note with the ungrouped note of the
+    // same pitch: the joined note keeps the first part's group.
+    let places: Vec<u32> = song
+        .notes()
+        .iter()
+        .enumerate()
+        .filter(|(_, n)| n.key == 60)
+        .map(|(place, _)| place as u32)
+        .collect();
+    song.one_step(ids::JOIN, json!({ "notes": places }));
+    let joined = song.notes().into_iter().find(|n| n.key == 60).unwrap();
+    assert_eq!(joined.group, group);
+
+    // Joining a group's only two notes leaves one, and the group ends.
+    let mut two = self::song(vec![
+        song_note(60, 0, QUARTER),
+        song_note(60, 2 * QUARTER, QUARTER),
+    ]);
+    two.one_step(ids::GROUP, json!({ "notes": [0, 1] }));
+    two.one_step(ids::JOIN, json!({ "notes": [0, 1] }));
+    assert_eq!(two.notes().len(), 1);
+    assert_eq!(two.notes()[0].group, None, "a group of one ends");
+    assert!(two.midi().groups.is_empty());
 }

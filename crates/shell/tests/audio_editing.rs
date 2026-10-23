@@ -389,6 +389,57 @@ fn consolidate_makes_one_clip_per_track_over_the_range() {
     assert!(shell.editor().document().clip(source_clip).is_some());
 }
 
+// Spec: note-editing R31. Consolidate keeps groups, and each repetition of a
+// looped clip that it writes out holds groups of its own.
+#[test]
+fn consolidating_a_looped_clip_gives_each_repetition_groups_of_its_own() {
+    let scratch = Scratch::new("consolidate-groups");
+    let mut shell = new_shell(&scratch);
+    saved(&scratch, &mut shell);
+    let midi_track = track(&shell, TrackKind::Midi);
+    let clip: ClipId = shell.edit(|editor| editor.new_id());
+    shell
+        .run(
+            "clip.create",
+            json!({ "track": midi_track, "clip": {
+                "id": clip, "name": "Riff", "start": 0, "length": 1_411_200,
+                "mute": false,
+                "data": { "midi": {
+                    "notes": [
+                        { "key": 60, "velocity": 100, "start": 0, "length": 100_000, "group": 1 },
+                        { "key": 62, "velocity": 100, "start": 200_000, "length": 100_000, "group": 1 },
+                        { "key": 64, "velocity": 100, "start": 400_000, "length": 100_000 }
+                    ],
+                    "groups": [{ "id": 1, "kind": "play_one" }],
+                    "looping": true,
+                    "loop_end": 705_600
+                } } } }),
+        )
+        .unwrap();
+    let value = shell
+        .run(
+            ids::CONSOLIDATE,
+            json!({ "tracks": [midi_track], "start": 0, "end": 1_411_200 }),
+        )
+        .unwrap();
+    let made: ClipId = serde_json::from_value(value["created"][0].clone()).unwrap();
+    let ClipData::Midi(midi) = &shell.editor().document().clip(made).unwrap().data else {
+        panic!("a MIDI clip");
+    };
+    assert_eq!(midi.notes.len(), 6, "two repetitions of three notes");
+    assert_eq!(midi.groups.len(), 2, "a group for each repetition");
+    assert!(
+        midi.groups
+            .iter()
+            .all(|g| g.kind == bl_model::GroupKind::PlayOne)
+    );
+    let grouped: Vec<Option<u32>> = midi.notes.iter().map(|note| note.group).collect();
+    assert_eq!(grouped[0], grouped[1]);
+    assert_eq!(grouped[2], None);
+    assert_ne!(grouped[0], grouped[3], "the second repetition's own");
+    assert_eq!(grouped[3], grouped[4]);
+}
+
 // Spec: scales R7. A consolidated clip takes the scale of the first clip it
 // was made from, not the set's current scale.
 #[test]

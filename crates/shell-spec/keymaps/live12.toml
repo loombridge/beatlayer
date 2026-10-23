@@ -2009,7 +2009,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+G"]
 win = ["Ctrl+G"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "note.group", contexts = ["note-selection"] },
+]
 
 [[shortcut]]
 id = "S-NOTE-032"
@@ -2020,7 +2023,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+Shift+G"]
 win = ["Ctrl+Shift+G"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "note.ungroup", contexts = ["note-selection"] },
+]
 
 [[shortcut]]
 id = "S-NOTE-033"
@@ -4371,7 +4377,10 @@ trigger = "latch"
 milestone = "M6"
 mac = ["N"]
 win = ["N"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "clip_view.focus_mode", contexts = ["note-editor"] },
+]
 
 [[shortcut]]
 id = "S-NOTE-041"
@@ -4619,7 +4628,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+Shift+B"]
 win = ["Ctrl+Shift+B"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "clip_view.step_input_mode", contexts = ["note-editor"] },
+]
 
 [[shortcut]]
 id = "S-MENU-006"
@@ -4678,7 +4690,8 @@ trigger = "press"
 milestone = "M6"
 mac = ["Right"]
 win = ["Right"]
-status = "pending"
+status = "widget"
+handler = "the Clip View's note editor: Right adds the held notes at the insert marker and steps on, or lengthens the notes just added, while step recording (`note.step_record`)"
 
 [[shortcut]]
 id = "S-NOTE-049"
@@ -4689,7 +4702,8 @@ trigger = "press"
 milestone = "M6"
 mac = ["Left"]
 win = ["Left"]
-status = "pending"
+status = "widget"
+handler = "the Clip View's note editor: Left shortens the notes just added and steps back, while step recording (`note.step_record`)"
 
 [[shortcut]]
 id = "S-NOTE-050"
@@ -4746,7 +4760,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+D"]
 win = ["Ctrl+D"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "clip.duplicate_loop", contexts = ["loop-brace"] },
+]
 
 [[shortcut]]
 id = "S-COMP-007"

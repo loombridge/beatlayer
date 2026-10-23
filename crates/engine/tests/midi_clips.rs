@@ -671,6 +671,52 @@ fn clip_region_and_loop_edits_play_back_as_edited() {
     assert_eq!(ons, [(0, 60)], "the End marker silences the note past it");
 }
 
+// Spec: multi-clip-editing R18. An edit to the clips of two tracks together,
+// as the note editor's edits across clips are, reaches the engine as each
+// track's node data with no new program, and plays as edited.
+#[test]
+fn an_edit_across_two_tracks_clips_plays_as_edited_without_a_new_program() {
+    let mut rig = Rig::new(256);
+    let mut clips = Vec::new();
+    for key in [60u8, 64] {
+        let trk = midi_track(&mut rig.editor);
+        instrument(&mut rig.editor, trk);
+        clips.push(midi_clip(
+            &mut rig.editor,
+            trk,
+            Ticks::ZERO,
+            BAR,
+            MidiData::new([Note::new(key, Ticks::ZERO, BEAT, 100)]),
+        ));
+    }
+    assert!(rig.sync().program, "the first sync builds the program");
+    // Transpose both clips' notes up two semitones in one undo step.
+    rig.editor.begin("Move notes");
+    for (clip, key) in clips.iter().zip([62u8, 66]) {
+        rig.editor
+            .apply(Command::SetClipData {
+                clip: *clip,
+                data: ClipData::Midi(MidiData::new([Note::new(key, Ticks::ZERO, BEAT, 100)])),
+            })
+            .unwrap();
+    }
+    rig.editor.commit().unwrap();
+    let synced = rig.sync();
+    assert!(!synced.program, "a note edit needs no new program");
+    assert!(synced.data > 0, "the clip lists go as node data");
+    rig.sender.transport(TransportCommand::Play);
+    play(&mut rig, 96_000, 256);
+    let mut keys: Vec<u8> = rig
+        .probe
+        .recorded_notes()
+        .iter()
+        .filter(|note| note.event.kind == NoteKind::On)
+        .map(|note| note.event.key)
+        .collect();
+    keys.sort_unstable();
+    assert_eq!(keys, [62, 66], "both tracks play the edited notes");
+}
+
 /// The notes a clip with a C#4 in it plays, with a scale on the clip or
 /// off.
 fn played_with_a_scale(scale: bool) -> Vec<(i64, u8)> {

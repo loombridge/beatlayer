@@ -4,10 +4,7 @@
 //! R, and random parts that start again with the transport. Every block runs
 //! as a real-time section under the allocation trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_core::time::{Frames, TempoMap};
 use bl_devices::modulator::{
     HOLD, PHASE, RATE_BEATS, RATE_HZ, RESTART, SHAPE, STEPS, TIME_MODE, WAVE, WAVES, wave_mod_type,

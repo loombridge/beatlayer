@@ -6,10 +6,7 @@
 //! before the transport moves; and the recording-only setting silences it.
 //! Every block runs under the real-time allocation trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_core::time::{Bpm, Frames, SampleRate, TempoMap, Ticks, TimeSignature, TimeSignatureMap};
 use bl_engine::TransportCommand;
 use bl_model::{Command, CountIn, MetronomeRhythm, MetronomeSettings, MetronomeSound, TrackKind};

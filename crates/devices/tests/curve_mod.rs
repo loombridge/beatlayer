@@ -4,10 +4,7 @@
 //! node data. Every block runs as a real-time section under the allocation
 //! trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_core::time::{Frames, TempoMap};
 use bl_devices::modulator::{MANUAL, RATE_HZ, TRIGGER, TRIGGER_MODE, curve_mod_type};
 use bl_engine::modbus::Shape;

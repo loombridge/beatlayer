@@ -4,10 +4,7 @@
 //! Every block runs under the allocation trap, at blocks of 1, 64 and 512
 //! frames.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_core::time::Ticks;
 use bl_engine::TransportCommand;
 use bl_engine::testing::{GAIN_DESCRIBED, GAIN_PARAM};

@@ -4,10 +4,7 @@
 //! feedback, MPE expression feedback, and ending notes cleanly on stop.
 //! Every block is a real-time section under the allocation trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_core::time::Bpm;
 use bl_devices::note_echo::{
     FEEDBACK, INPUT, MPE, NOTE_ECHO, PITCH, PRESS_FEEDBACK, SYNC, TIME_MS, TIME_SYNC,

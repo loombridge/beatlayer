@@ -7,8 +7,7 @@
 //!
 //! Spec: mixer-view R1 to R19.
 
-mod common;
-
+use crate::common;
 use std::path::PathBuf;
 
 use bl_engine::TrackMeter;
@@ -1197,7 +1196,7 @@ fn the_view_menu_and_keys_show_and_hide_the_mixer_and_its_sections() {
     key(&mut h, Key::M, both);
     assert!(!state(&mut h.shell).arrangement.shown);
     // The submenus' separators, as observed: Volume | Track Options ...
-    // Performance Impact | Return Tracks; and In/Out, Volume, Track Options |
+    // Performance Impact, then Beatlayer's Devices | Return Tracks; and In/Out, Volume, Track Options |
     // Return Tracks.
     let menus = menu_bar(MenuPlatform::current());
     let shape = |row: &str| -> Vec<&str> {
@@ -1227,6 +1226,7 @@ fn the_view_menu_and_keys_show_and_hide_the_mixer_and_its_sections() {
             "Track Options",
             "Crossfader",
             "Performance Impact",
+            "Devices",
             "—",
             "Return Tracks",
             "Return Tracks Scroll with Tracks"
@@ -1648,6 +1648,22 @@ fn mixer_rows(size: Vec2) -> Vec<Row> {
         )
         .rows(),
     );
+    // The Devices section, Beatlayer's own (IMP-25), in a mixer that shows it.
+    let devices = Sections {
+        devices: true,
+        ..Sections::DEFAULT
+    };
+    let taller = SessionLayout::compute(shell.main_view, Some(devices));
+    rows.extend(
+        MixerLayout::compute(
+            taller.mixer.unwrap(),
+            &[TrackColumn::track(); 4],
+            2,
+            devices,
+            0.0,
+        )
+        .rows(),
+    );
     let arrangement =
         ArrangementLayout::compute_with_mixer(shell.main_view, true, 3, Sections::DEFAULT);
     rows.extend(arrangement.rows());
@@ -1777,7 +1793,7 @@ fn gesture_file() -> PathBuf {
 
 // Spec: mixer-view R18. The gesture the `fader-gesture` golden render plays
 // is the one this drag makes through the window and the shell. Rewrite it
-// with `BL_UPDATE_GESTURES=1 cargo test -p bl-ui --test mixer`, then remake
+// with `BL_UPDATE_GESTURES=1 cargo test -p bl-ui --test ui_tests -- mixer::`, then remake
 // the reference with `cargo xtask golden --update fader-gesture`.
 #[test]
 fn a_fader_drag_runs_the_recorded_gesture() {
@@ -2775,4 +2791,453 @@ fn the_return_tracks_scroll_with_the_tracks_when_the_switch_is_on() {
             .unwrap(),
     );
     assert_eq!((main.left(), main.right()), (1487.0, 1591.0));
+}
+
+/// Adds a test effect, or the device `json` describes, to the selected
+/// track's chain.
+fn add_device(h: &mut Harness, device: serde_json::Value) -> DeviceId {
+    let added: Added = serde_json::from_value(
+        h.shell
+            .run("device.add", json!({ "device": device }))
+            .unwrap(),
+    )
+    .unwrap();
+    h.settle();
+    added.device
+}
+
+fn effect(t: bl_engine::DeviceType) -> serde_json::Value {
+    json!({ "kind": t.kind, "name": t.name, "role": t.role })
+}
+
+fn select_track(h: &mut Harness, track: TrackId) {
+    h.shell
+        .invoke("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    h.settle();
+}
+
+/// A MIDI track holding an instrument, an effect, a rack and another
+/// effect, with the Devices section showing in the Session View.
+fn devices_session() -> (Harness, TrackId, Vec<DeviceId>) {
+    let mut h = session();
+    let track = tracks(&h.shell)[0];
+    select_track(&mut h, track);
+    let mut devices = vec![
+        add_device(&mut h, effect(bl_devices::polysynth_type())),
+        add_device(&mut h, effect(bl_engine::testing::gain_type())),
+    ];
+    devices.push(add_rack(&mut h, "audio_effect", "audio_effect", &["A", "B"]).0);
+    devices.push(add_device(
+        &mut h,
+        effect(bl_engine::testing::through_type()),
+    ));
+    h.shell.run(ids::DEVICES, json!({})).unwrap();
+    h.settle();
+    (h, track, devices)
+}
+
+/// A column's Devices rows, top to bottom: each device's name and whether
+/// its activator reads on.
+fn device_rows(h: &mut Harness, within: &str, column: &str) -> Vec<(String, bool)> {
+    let nodes = tree(h);
+    let mixer = Harness::node(&nodes, within).id;
+    let column = nodes
+        .iter()
+        .find(|n| {
+            n.label == column
+                && n.role == Role::Group
+                && Harness::descends_from(&nodes, n.id, mixer)
+        })
+        .unwrap_or_else(|| panic!("{within}: {column}"));
+    let list = nodes
+        .iter()
+        .find(|n| {
+            n.label == "Devices"
+                && n.role == Role::List
+                && Harness::descends_from(&nodes, n.id, column.id)
+        })
+        .unwrap_or_else(|| panic!("{column:?} has no Devices list", column = column.label));
+    let mut rows: Vec<&Node> = nodes
+        .iter()
+        .filter(|n| n.role == Role::Button && Harness::descends_from(&nodes, n.id, list.id))
+        .collect();
+    rows.sort_by(|a, b| rect_of(a).top().total_cmp(&rect_of(b).top()));
+    rows.iter()
+        .map(|name| {
+            let switch = nodes
+                .iter()
+                .find(|n| {
+                    n.role == Role::Switch
+                        && n.value.starts_with(&format!("{}, ", name.label))
+                        && Harness::descends_from(&nodes, n.id, list.id)
+                        && (rect_of(n).center().y - rect_of(name).center().y).abs() < 1.0
+                })
+                .unwrap_or_else(|| panic!("no activator by {}", name.label));
+            (name.label.clone(), switch.toggled == Some(true))
+        })
+        .collect()
+}
+
+/// The rectangle of a device's name in a column's list.
+fn device_name(h: &mut Harness, column: &str, name: &str) -> Rect {
+    let nodes = tree(h);
+    let column = Harness::node(&nodes, column).id;
+    rect_of(
+        nodes
+            .iter()
+            .find(|n| {
+                n.role == Role::Button
+                    && n.label == name
+                    && Harness::descends_from(&nodes, n.id, column)
+            })
+            .unwrap_or_else(|| panic!("no row named {name}")),
+    )
+}
+
+fn titles(shell: &Shell, track: TrackId) -> Vec<(String, bool)> {
+    shell
+        .editor()
+        .document()
+        .track(track)
+        .unwrap()
+        .devices()
+        .map(|d| (d.title().to_owned(), d.enabled))
+        .collect()
+}
+
+// Spec: mixer-view R24, R25, R26, R19.
+#[test]
+fn a_tracks_devices_list_in_its_column_in_chain_order_in_both_mixers() {
+    let (mut h, track, devices) = devices_session();
+    assert!(state(&mut h.shell).devices);
+    // The instrument, an effect, the rack as one row, and an effect.
+    let expected = titles(&h.shell, track);
+    assert_eq!(expected.len(), 4);
+    assert_eq!(device_rows(&mut h, "Session Mixer", "1 MIDI"), expected);
+    // The section sits between In/Out and Sends, 112 points tall, over the
+    // 14-point rows.
+    let nodes = tree(&mut h);
+    let list = rect_of(inside(&nodes, "1 MIDI", "Devices").unwrap());
+    let mixer = rect_of(Harness::node(&nodes, "Session Mixer"));
+    assert_eq!(mixer.top(), 465.5 - 112.0);
+    assert_eq!((list.top(), list.height()), (mixer.top() + 115.0, 112.0));
+    let first = device_name(&mut h, "1 MIDI", &expected[0].0);
+    let second = device_name(&mut h, "1 MIDI", &expected[1].0);
+    assert_eq!(
+        (first.top(), second.top() - first.top()),
+        (list.top(), 14.0)
+    );
+    // Returns and Main list theirs too, empty here.
+    for column in ["A Return", "Main"] {
+        assert!(device_rows(&mut h, "Session Mixer", column).is_empty());
+    }
+    // A device added or removed shows on the next frame.
+    let added = add_device(&mut h, effect(bl_engine::testing::gain_type()));
+    assert_eq!(device_rows(&mut h, "Session Mixer", "1 MIDI").len(), 5);
+    h.shell
+        .run("device.remove", json!({ "device": added }))
+        .unwrap();
+    h.shell
+        .run("device.remove", json!({ "device": devices[1] }))
+        .unwrap();
+    let expected = titles(&h.shell, track);
+    assert_eq!(expected.len(), 3);
+    assert_eq!(device_rows(&mut h, "Session Mixer", "1 MIDI"), expected);
+    // Switching a device off reads in its row.
+    h.shell
+        .run(
+            "device.set_enabled",
+            json!({ "device": devices[3], "enabled": false }),
+        )
+        .unwrap();
+    let rows = device_rows(&mut h, "Session Mixer", "1 MIDI");
+    assert_eq!(rows.iter().filter(|(_, on)| !on).count(), 1);
+    // The Arrangement's mixer lists the same.
+    h.shell
+        .run("view.toggle_session_arrangement", json!({}))
+        .unwrap();
+    h.shell.run(ids::TOGGLE, json!({})).unwrap();
+    assert_eq!(
+        device_rows(&mut h, "Arrangement Mixer", "1 MIDI"),
+        titles(&h.shell, track)
+    );
+}
+
+// Spec: mixer-view R19, R25.
+#[test]
+fn the_devices_section_keeps_its_place_at_every_zoom() {
+    for percent in ZOOM_STEPS {
+        let zoom = zoom_factor(percent);
+        let (mut h, track, _) = devices_session();
+        h.shell
+            .run("view.set_zoom", json!({ "percent": percent }))
+            .unwrap();
+        h.size = vec2(1600.0 * zoom, (1000.0 - TITLE_BAR) * zoom + TITLE_BAR);
+        let expected = titles(&h.shell, track);
+        assert_eq!(
+            device_rows(&mut h, "Session Mixer", "1 MIDI"),
+            expected,
+            "{percent}%"
+        );
+        let nodes = tree(&mut h);
+        let list = rect_of(inside(&nodes, "1 MIDI", "Devices").unwrap());
+        let mixer = rect_of(Harness::node(&nodes, "Session Mixer"));
+        assert!(
+            (list.top() - mixer.top() - 115.0).abs() < 0.1 && (list.height() - 112.0).abs() < 0.1,
+            "{percent}%: {list:?}"
+        );
+        let first = device_name(&mut h, "1 MIDI", &expected[0].0);
+        let second = device_name(&mut h, "1 MIDI", &expected[1].0);
+        assert!(
+            (second.top() - first.top() - 14.0).abs() < 0.1
+                && (first.top() - list.top()).abs() < 0.1,
+            "{percent}%"
+        );
+    }
+}
+
+// Spec: mixer-view R28.
+#[test]
+fn a_click_on_a_name_selects_the_device_and_shows_the_device_view() {
+    let (mut h, track, devices) = devices_session();
+    // Another track is selected and the detail area is hidden.
+    let audio = tracks(&h.shell)[2];
+    select_track(&mut h, audio);
+    h.shell.run("view.toggle_detail_area", json!({})).unwrap();
+    h.settle();
+    assert!(!h.shell.detail().device_shown());
+    let name = titles(&h.shell, track)[1].0.clone();
+    let before = h.shell.editor().undo_history().count();
+    let at = device_name(&mut h, "1 MIDI", &name).center();
+    click(&mut h, at, Modifiers::NONE);
+    assert_eq!(h.shell.device_view_state().track, Some(track));
+    assert_eq!(h.shell.device_view_state().selected, Some(devices[1]));
+    assert!(h.shell.detail().device_shown(), "the detail area opens");
+    // Selecting is view state, never an undo step.
+    assert_eq!(h.shell.editor().undo_history().count(), before);
+}
+
+// Spec: mixer-view R29.
+#[test]
+fn a_click_on_an_activator_switches_only_that_device_as_one_undo_step() {
+    let (mut h, track, devices) = devices_session();
+    // Both tracks selected: the switch changes only the device clicked.
+    let other = tracks(&h.shell)[2];
+    h.shell
+        .invoke(
+            "arrangement.select_tracks",
+            json!({ "tracks": [track, other] }),
+        )
+        .unwrap();
+    h.settle();
+    let other_device = add_device_on(&mut h, other);
+    let before = h.shell.editor().undo_history().count();
+    let nodes = tree(&mut h);
+    let column = Harness::node(&nodes, "1 MIDI").id;
+    let switch = nodes
+        .iter()
+        .filter(|n| n.role == Role::Switch && Harness::descends_from(&nodes, n.id, column))
+        .nth(1)
+        .unwrap();
+    click(&mut h, rect_of(switch).center(), Modifiers::NONE);
+    let doc = h.shell.editor().document();
+    assert!(!doc.device(devices[1]).unwrap().enabled);
+    assert!(doc.device(devices[0]).unwrap().enabled);
+    assert!(doc.device(other_device).unwrap().enabled);
+    assert_eq!(h.shell.editor().undo_history().count(), before + 1);
+    assert_eq!(
+        h.shell.editor().undo_history().next(),
+        Some("Change \"Device On\"")
+    );
+    assert!(!device_rows(&mut h, "Session Mixer", "1 MIDI")[1].1);
+    // The click didn't select the device or move the Device View.
+    h.shell.invoke("edit.undo", json!({})).unwrap();
+    assert!(
+        h.shell
+            .editor()
+            .document()
+            .device(devices[1])
+            .unwrap()
+            .enabled
+    );
+    assert!(device_rows(&mut h, "Session Mixer", "1 MIDI")[1].1);
+}
+
+fn add_device_on(h: &mut Harness, track: TrackId) -> DeviceId {
+    let held = h.shell.arrangement().selected_tracks().to_vec();
+    select_track(h, track);
+    let device = add_device(h, effect(bl_engine::testing::gain_type()));
+    h.shell
+        .invoke("arrangement.select_tracks", json!({ "tracks": held }))
+        .unwrap();
+    h.settle();
+    device
+}
+
+// Spec: mixer-view R28.
+#[test]
+fn a_double_click_on_a_plug_ins_row_opens_and_closes_its_editor() {
+    let mut h = session();
+    let track = tracks(&h.shell)[2];
+    select_track(&mut h, track);
+    let loaded: bl_shell::plugin_commands::PluginLoaded = serde_json::from_value(
+        h.shell
+            .run(
+                "plugin.load",
+                json!({ "path": bl_test_clap::bundle(), "track": track }),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    h.wait("the plug-in's editor", |h| {
+        h.shell
+            .plugin_info(loaded.device)
+            .is_some_and(|i| i.has_window)
+    });
+    h.shell.run(ids::DEVICES, json!({})).unwrap();
+    h.settle();
+    let before = h.shell.editor().undo_history().count();
+    let at = device_name(&mut h, "3 Audio", bl_test_clap::PLUGIN_NAME).center();
+    assert!(!h.shell.plugin_info(loaded.device).unwrap().window_open);
+    double_click(&mut h, at);
+    assert!(h.shell.plugin_info(loaded.device).unwrap().window_open);
+    double_click(&mut h, at);
+    assert!(!h.shell.plugin_info(loaded.device).unwrap().window_open);
+    assert_eq!(h.shell.editor().undo_history().count(), before);
+}
+
+// Spec: mixer-view R27.
+#[test]
+fn a_column_with_twelve_devices_scrolls_its_rows_on_its_own() {
+    let (mut h, track, _) = devices_session();
+    for _ in 0..8 {
+        add_device(&mut h, effect(bl_engine::testing::gain_type()));
+    }
+    let other = tracks(&h.shell)[2];
+    select_track(&mut h, other);
+    for _ in 0..12 {
+        add_device(&mut h, effect(bl_engine::testing::through_type()));
+    }
+    assert_eq!(titles(&h.shell, track).len(), 12);
+    let first_of = |h: &mut Harness, column: &str| {
+        let nodes = tree(h);
+        let column = Harness::node(&nodes, column).id;
+        let list = nodes
+            .iter()
+            .find(|n| n.label == "Devices" && Harness::descends_from(&nodes, n.id, column))
+            .unwrap();
+        let rows: Vec<f32> = nodes
+            .iter()
+            .filter(|n| n.role == Role::Button && Harness::descends_from(&nodes, n.id, list.id))
+            .map(|n| rect_of(n).top())
+            .collect();
+        (rect_of(list), rows)
+    };
+    let (list, rows) = first_of(&mut h, "1 MIDI");
+    let (_, other_rows) = first_of(&mut h, "3 Audio");
+    // A row in view is wholly in the section's 112 points.
+    assert!(rows.iter().all(|top| *top < list.bottom()));
+    let wheel = |h: &mut Harness, over: Pos2, dy: f32| {
+        h.frame(vec![Event::PointerMoved(over)]);
+        h.frame(vec![Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(0.0, dy),
+            modifiers: Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+        }]);
+        // Let egui's smoothing finish.
+        for _ in 0..10 {
+            h.frame(vec![]);
+        }
+    };
+    for _ in 0..3 {
+        wheel(&mut h, list.center(), -10.0);
+    }
+    let (_, scrolled) = first_of(&mut h, "1 MIDI");
+    let moved = scrolled.iter().copied().fold(f32::MAX, f32::min);
+    assert!(moved < list.top(), "the first row scrolled out of view");
+    // The other column and the mixer's columns stayed.
+    let (_, other_now) = first_of(&mut h, "3 Audio");
+    assert_eq!(other_now, other_rows);
+    assert_eq!(state(&mut h.shell).session.scroll, 0.0);
+    // Down to the last row and no further.
+    for _ in 0..10 {
+        wheel(&mut h, list.center(), -40.0);
+    }
+    let (_, end) = first_of(&mut h, "1 MIDI");
+    let bottom = end.iter().copied().fold(f32::MIN, f32::max) + 14.0;
+    assert!((bottom - list.bottom()).abs() < 0.1, "{bottom}");
+    // And back to the first.
+    for _ in 0..10 {
+        wheel(&mut h, list.center(), 40.0);
+    }
+    let (_, top) = first_of(&mut h, "1 MIDI");
+    assert_eq!(top, rows);
+}
+
+// Spec: mixer-view R30.
+#[test]
+fn every_device_row_reaches_assistive_technology() {
+    let (mut h, track, _) = devices_session();
+    let expected = titles(&h.shell, track);
+    let nodes = tree(&mut h);
+    let column = Harness::node(&nodes, "1 MIDI").id;
+    let list = nodes
+        .iter()
+        .find(|n| n.label == "Devices" && Harness::descends_from(&nodes, n.id, column))
+        .unwrap();
+    assert_eq!(list.role, Role::List);
+    for (name, on) in &expected {
+        let button = nodes
+            .iter()
+            .find(|n| {
+                n.role == Role::Button
+                    && &n.label == name
+                    && Harness::descends_from(&nodes, n.id, list.id)
+            })
+            .unwrap_or_else(|| panic!("a button named {name}"));
+        assert!(!button.disabled);
+        let state = if *on { "on" } else { "off" };
+        let switch = nodes
+            .iter()
+            .find(|n| {
+                n.role == Role::Switch
+                    && n.label == "Device Activator"
+                    && n.value == format!("{name}, {state}")
+                    && Harness::descends_from(&nodes, n.id, list.id)
+            })
+            .unwrap_or_else(|| panic!("a Device Activator for {name}"));
+        assert_eq!(switch.toggled, Some(*on));
+    }
+}
+
+// Spec: mixer-view R24, R16, R31.
+#[test]
+fn the_devices_section_switches_by_menu_command_and_agent_and_is_not_saved() {
+    let mut h = session();
+    let item = menu_item(&h, "IMP-25");
+    assert_eq!(item.label, "Devices");
+    assert!(item.enabled && item.checked == Some(false) && item.chord.is_none());
+    assert!(!state(&mut h.shell).devices);
+    let nodes = tree(&mut h);
+    assert!(nodes.iter().all(|n| n.label != "Devices"));
+    // By the menu's own item.
+    let invocation = item.invocation.expect("the item runs a command");
+    assert_eq!(invocation.id, ids::DEVICES);
+    h.shell.invoke(&invocation.id, invocation.args).unwrap();
+    assert!(state(&mut h.shell).devices);
+    assert_eq!(menu_item(&h, "IMP-25").checked, Some(true));
+    assert_eq!(h.shell.switch_state(ids::DEVICES), Some(true));
+    // By command ID, with and without `shown`.
+    h.shell
+        .run(ids::DEVICES, json!({ "shown": false }))
+        .unwrap();
+    assert!(!state(&mut h.shell).devices);
+    let on = h.shell.run(ids::DEVICES, json!({})).unwrap();
+    assert_eq!(on["devices"], true);
+    // View state: no undo step, and not saved with the set.
+    assert_eq!(h.shell.editor().undo_history().count(), 0);
+    h.shell.run("set.new", json!({})).unwrap();
+    assert!(!state(&mut h.shell).devices);
 }

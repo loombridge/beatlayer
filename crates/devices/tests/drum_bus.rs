@@ -4,10 +4,7 @@
 //! Meter, Dry/Wet and Output, and renders that don't depend on the block
 //! size.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_devices::drum_bus::{
     BOOM, BOOM_AUDITION, COMP, CRUNCH, DAMP, DECAY, DRIVE, DRUM_BUSS, DRY_WET, FORCE_TO_NOTE, FREQ,
     OUTPUT, TRANSIENTS, TRIM, TYPE, drum_buss_type, nearest_note_hz,

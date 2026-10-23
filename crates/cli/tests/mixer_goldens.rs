@@ -3,8 +3,6 @@
 //!
 //! The null tests against the stored references are in `golden.rs`.
 
-bl_rt::install_trap!();
-
 use bl_cli::golden::{BLOCK, Render, SAMPLE_RATE, fixture};
 use bl_cli::render::{self, Settings};
 use bl_engine::mixer::SMOOTHING_SECONDS;

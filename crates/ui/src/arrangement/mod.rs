@@ -2145,8 +2145,7 @@ impl ArrangementUi {
         lanes: Rect,
         events: &mut Vec<UiEvent>,
     ) {
-        let focused = shell.focused_area() == bl_shell::Area::MainView
-            && shell.focused_window() == bl_shell::WindowKind::Main
+        let focused = crate::window::has_focus(ui.ctx(), shell, bl_shell::Area::MainView)
             && !ui.ctx().text_edit_focused()
             && ui.ctx().memory(|m| {
                 // The view, a track's title bar in its Tab order, or a

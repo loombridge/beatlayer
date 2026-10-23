@@ -3,8 +3,7 @@
 //! rows assistive technology reaches (the custom shortcuts spec, R7 to
 //! R13).
 
-mod common;
-
+use crate::common;
 use bl_shell::keymap::{Origin, Platform};
 use bl_shell::settings::SettingsPage;
 use common::{Harness, Window, command};

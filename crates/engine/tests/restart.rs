@@ -5,8 +5,6 @@
 //! null device. Blocks that check the transport run as real-time sections
 //! under the allocation trap.
 
-bl_rt::install_trap!();
-
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 

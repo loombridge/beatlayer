@@ -585,8 +585,6 @@ fn pasting_a_clip_onto_another_track_leaves_the_device_envelopes_behind() {
 // Envelopes off plays its automation at its new place. Every block of a
 // render runs under the allocation trap.
 
-bl_rt::install_trap!();
-
 /// A folder of its own under the system's temporary folder, removed when
 /// dropped.
 struct Scratch(PathBuf);

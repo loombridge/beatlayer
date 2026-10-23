@@ -4,8 +4,7 @@
 //! the arrow keys move a highlight and Enter jumps to it, and the
 //! accessibility tree holds the list and its rows.
 
-mod common;
-
+use crate::common;
 use bl_shell::Shell;
 use bl_shell::menus::{Action, MenuPlatform, menu_bar};
 use bl_ui::layout::ShellLayout;

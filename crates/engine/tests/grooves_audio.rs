@@ -3,10 +3,7 @@
 //! and off the generated drum loop, and the gain steps of Velocity, at
 //! several block sizes under the allocation trap. Spec: grooves R12 to R15.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use std::sync::Arc;
 
 use bl_core::time::{Bpm, TICKS_PER_QUARTER, TempoMap, Ticks};

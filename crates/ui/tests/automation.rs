@@ -5,8 +5,7 @@
 //!
 //! The behaviour is in the automation spec.
 
-mod common;
-
+use crate::common;
 use bl_core::time::Ticks;
 use bl_model::{AutomationTarget, Breakpoint, Document, MixerParam, TrackId};
 use bl_shell::device_commands::DeviceAdded;

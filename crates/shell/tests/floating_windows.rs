@@ -440,3 +440,40 @@ fn in_a_floating_window_float_s_key_docks_its_device() {
     assert!(!floating(&shell, utility));
     assert_eq!(history(&shell)[0], "Dock Device");
 }
+
+// Spec: mixer-view R28
+#[test]
+fn selecting_a_floating_device_brings_its_window_to_the_front() {
+    let (mut shell, _) = shell();
+    let types = testing::device_types();
+    let docked = add_type(&mut shell, &types[0]);
+    let floats = add_type(&mut shell, &types[1]);
+    shell
+        .invoke(
+            "device.set_floating",
+            json!({ "device": floats, "floating": true }),
+        )
+        .unwrap();
+    let _ = shell.take_effects();
+    // A docked device has no window to raise.
+    shell
+        .invoke("device.select", json!({ "device": docked }))
+        .unwrap();
+    assert!(
+        !shell
+            .take_effects()
+            .contains(&bl_shell::Effect::RaiseDeviceWindow(docked))
+    );
+    shell
+        .invoke("device.select", json!({ "device": floats }))
+        .unwrap();
+    assert_eq!(
+        shell.take_effects(),
+        vec![bl_shell::Effect::RaiseDeviceWindow(floats)]
+    );
+    // None selected raises nothing.
+    shell
+        .invoke("device.select", json!({ "device": null }))
+        .unwrap();
+    assert!(shell.take_effects().is_empty());
+}

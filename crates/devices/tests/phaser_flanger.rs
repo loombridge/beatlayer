@@ -1,9 +1,6 @@
 //! Tests for Phaser-Flanger (WP-5.20b; the phaser-flanger spec).
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_devices::phaser_flanger::{
     AMOUNT, BLEND, CENTER, DOUBLER_TIME, DRY_WET, ENV_AMOUNT, ENV_ATTACK, ENV_ON, ENV_RELEASE,
     FEEDBACK, FEEDBACK_INVERT, FLANGER_TIME, LFO_DUTY, LFO_HZ, LFO_WAVE, LFO2_HZ, LFO2_MIX, MODE,

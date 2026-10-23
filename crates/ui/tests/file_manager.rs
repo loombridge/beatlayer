@@ -4,8 +4,7 @@
 //!
 //! Spec: file-management R10, R21.
 
-mod common;
-
+use crate::common;
 use common::{Harness, Window};
 use egui::accesskit::Role;
 use serde_json::json;

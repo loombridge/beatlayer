@@ -9,10 +9,7 @@
 //! the allocation trap. The stream reads in blocking mode, as an offline
 //! render's do, so the run doesn't depend on the disk thread's timing.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use std::f64::consts::PI;
 use std::sync::{Arc, Mutex};
 

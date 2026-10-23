@@ -5,10 +5,7 @@
 //! hand move turns the envelope off. Every block runs as a real-time section
 //! under the allocation trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_core::time::Ticks;
 use bl_engine::{SessionCommand, TransportCommand};
 use bl_model::{

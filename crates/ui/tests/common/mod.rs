@@ -5,7 +5,7 @@
 
 use bl_audio_io::NullControl;
 use bl_shell::testing;
-use bl_shell::{Effect, Shell};
+use bl_shell::{Effect, Shell, WindowKind};
 use bl_ui::input::KeyDispatcher;
 use bl_ui::keymap::{Keymap, Platform};
 use bl_ui::layout::{REFERENCE, apply_zoom, follow_zoom};
@@ -16,11 +16,14 @@ use egui::accesskit::{self, Role};
 use egui::{
     Color32, Context, Event, FullOutput, Id, Modifiers, PointerButton, Pos2, RawInput, Rect, vec2,
 };
+use serde_json::json;
 
 /// Which window a harness draws.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Window {
     Main,
+    /// The second window (WP-6.29), on a shell where it is open.
+    Second,
     Settings,
     /// A floating device's window (WP-2.5b).
     Device(bl_model::DeviceId),
@@ -50,6 +53,20 @@ pub struct Node {
     pub bounds: Option<accesskit::Rect>,
 }
 
+/// The other main window beside the harness's own (WP-6.29): its context and
+/// what it draws, over the same shell.
+pub struct Side {
+    pub window: WindowKind,
+    pub ctx: Context,
+    pub ui: MainWindowUi,
+    pub dispatcher: KeyDispatcher,
+    pub size: egui::Vec2,
+    pub time: f64,
+    /// Whether it draws Live's title bar itself, as the harness' own window
+    /// does.
+    pub title_bar: bool,
+}
+
 pub struct Harness {
     pub ctx: Context,
     pub shell: Shell,
@@ -63,6 +80,9 @@ pub struct Harness {
     /// What the floating assistant's window draws.
     pub assistant_window: bl_ui::assistant_panel::AssistantPanelUi,
     pub window: Window,
+    /// The other of the two main windows, once [`Harness::open_other`] has
+    /// made it.
+    pub other: Option<Side>,
     pub time: f64,
     /// The window's size in window points: at a zoom other than 100%, egui
     /// lays out `size / zoom` layout points, as in the app.
@@ -89,6 +109,17 @@ pub struct Harness {
     /// runs one: the engine advances only as the test asks or as its
     /// [`frame`](Self::frame)s run, never on the wall clock.
     control: Option<NullControl>,
+}
+
+/// Whether these events press a button or a key, which gives the window
+/// they arrive in the focus.
+fn takes_focus(events: &[Event]) -> bool {
+    events.iter().any(|event| {
+        matches!(
+            event,
+            Event::PointerButton { pressed: true, .. } | Event::Key { pressed: true, .. }
+        )
+    })
 }
 
 /// The blocks one frame runs on a manually paced stream: a few, so a window
@@ -125,7 +156,11 @@ impl Harness {
         Self::with_shell(window, shell)
     }
 
-    fn with_shell(window: Window, shell: Shell) -> Self {
+    fn with_shell(window: Window, mut shell: Shell) -> Self {
+        if window == Window::Second {
+            // The second window of a set opens on the other main view.
+            shell.run("view.toggle_second_window", json!({})).unwrap();
+        }
         let ctx = Context::default();
         ctx.set_fonts(fonts());
         ctx.enable_accesskit();
@@ -135,6 +170,7 @@ impl Harness {
         apply_zoom(&ctx, zoom);
         let size = match window {
             Window::Main => REFERENCE,
+            Window::Second => bl_ui::layout::SECOND_WINDOW - vec2(0.0, bl_ui::layout::TITLE_BAR),
             Window::Settings => {
                 bl_ui::layout::SETTINGS_WINDOW - vec2(0.0, bl_ui::layout::TITLE_BAR)
             }
@@ -147,7 +183,12 @@ impl Harness {
             theme,
             keymap: Keymap::live12(),
             dispatcher: KeyDispatcher::new(Platform::current()),
-            main: MainWindowUi::new(),
+            main: if window == Window::Second {
+                MainWindowUi::second()
+            } else {
+                MainWindowUi::new()
+            },
+            other: None,
             settings: SettingsUi::new(),
             device_window: bl_ui::device_view::DeviceViewUi::new(),
             assistant_window: bl_ui::assistant_panel::AssistantPanelUi::default(),
@@ -222,8 +263,19 @@ impl Harness {
                 apply_zoom(&self.ctx, zoom);
                 zoom
             }
+            // Spec: interface-zoom R11. The second window has a zoom of its
+            // own.
+            Window::Second => {
+                let zoom = self.shell.zoom_of(WindowKind::Second);
+                apply_zoom(&self.ctx, zoom);
+                zoom
+            }
             Window::Settings => follow_zoom(&self.ctx, self.zoom, zoom),
         };
+        // A press in a window gives it the focus, as the OS does.
+        if self.other.is_some() && takes_focus(&events) {
+            self.shell.set_focused_window(self.kind());
+        }
         let mut input = RawInput {
             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, self.size / self.zoom)),
             time: Some(self.time),
@@ -272,7 +324,7 @@ impl Harness {
         let mut ui_events = Vec::new();
         let mut output = self.ctx.run_ui(input, |ui| {
             ui_events = match window {
-                Window::Main => main.show(ui, shell, theme, title_bar, drawn),
+                Window::Main | Window::Second => main.show(ui, shell, theme, title_bar, drawn),
                 Window::Settings => settings.show(ui, shell, theme, title_bar),
                 Window::Assistant => {
                     let mut events = Vec::new();
@@ -304,7 +356,7 @@ impl Harness {
                 UiEvent::Invoke(invocation) => {
                     let _ = self.shell.invoke(&invocation.id, invocation.args.clone());
                 }
-                UiEvent::FocusArea(area) => self.shell.set_focused_area(*area),
+                UiEvent::FocusArea(area) => self.shell.set_focused_area_in(self.kind(), *area),
                 UiEvent::FocusTrack(track) => self.shell.set_focused_track(*track),
                 UiEvent::FocusValue(focused) => self.shell.set_value_focused(*focused),
                 UiEvent::FocusControl(focused) => {
@@ -324,18 +376,202 @@ impl Harness {
             }
             self.events.push(event);
         }
+        self.apply_effects();
+        self.share_hover();
+        output
+    }
+
+    /// Tells the main window's Info View what the pointer is over in the
+    /// other window (info-view R8), as the app does.
+    fn share_hover(&mut self) {
+        let Some(side) = &mut self.other else {
+            return;
+        };
+        if self.window == Window::Main {
+            self.main.set_other_hovered(side.ui.hovered());
+        } else if side.window == WindowKind::Main {
+            side.ui.set_other_hovered(self.main.hovered());
+        }
+    }
+
+    /// The kind of main window this harness draws.
+    pub fn kind(&self) -> WindowKind {
+        match self.window {
+            Window::Second => WindowKind::Second,
+            _ => WindowKind::Main,
+        }
+    }
+
+    /// Carries out the effects the shell asked for, in the window each is
+    /// for.
+    fn apply_effects(&mut self) {
         for effect in self.shell.take_effects() {
             self.effects.push(effect.clone());
-            match self.window {
-                Window::Main => self.main.apply_effect(&self.ctx, &effect),
-                Window::Settings => self.settings.apply_effect(&effect),
-                Window::Device(_) | Window::Assistant => {}
+            let target = match effect {
+                Effect::FocusSecondArea(_) => WindowKind::Second,
+                Effect::MoveFocus { .. } => self.shell.focused_window(),
+                _ => WindowKind::Main,
+            };
+            if let Some(other) = &mut self.other
+                && other.window == target
+            {
+                other.ui.apply_effect(&other.ctx, &effect);
+            } else if matches!(self.window, Window::Main | Window::Second) && self.kind() == target
+            {
+                self.main.apply_effect(&self.ctx, &effect);
+            } else if self.window == Window::Settings {
+                self.settings.apply_effect(&effect);
             }
             if matches!(effect, Effect::OpenSettings) {
                 self.settings.refresh();
             }
         }
+    }
+
+    /// Opens the other main window beside this one, on the same shell: the
+    /// second window beside the main one, or the main one beside the second.
+    pub fn open_other(&mut self) {
+        let window = if self.kind() == WindowKind::Main {
+            if !self.shell.second_window_open() {
+                self.shell
+                    .run("view.toggle_second_window", json!({}))
+                    .unwrap();
+            }
+            WindowKind::Second
+        } else {
+            WindowKind::Main
+        };
+        let ctx = Context::default();
+        ctx.set_fonts(fonts());
+        ctx.enable_accesskit();
+        self.theme.apply(&ctx);
+        apply_zoom(&ctx, self.shell.zoom_of(window));
+        let size = if window == WindowKind::Main {
+            REFERENCE
+        } else {
+            bl_ui::layout::SECOND_WINDOW - vec2(0.0, bl_ui::layout::TITLE_BAR)
+        };
+        self.other = Some(Side {
+            window,
+            ctx,
+            ui: if window == WindowKind::Main {
+                MainWindowUi::new()
+            } else {
+                MainWindowUi::second()
+            },
+            dispatcher: KeyDispatcher::new(Platform::current()),
+            size,
+            time: 0.0,
+            title_bar: self.title_bar,
+        });
+    }
+
+    /// Runs one frame of the other main window with these input events;
+    /// input gives it the keyboard focus, as the OS does.
+    pub fn other_frame(&mut self, events: Vec<Event>) -> FullOutput {
+        let side = self.other.as_mut().expect("open_other first");
+        let window = side.window;
+        if takes_focus(&events) {
+            self.shell.set_focused_window(window);
+        }
+        side.time += 1.0 / 60.0;
+        let zoom = self.shell.zoom_of(window);
+        apply_zoom(&side.ctx, zoom);
+        let mut input = RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, side.size / zoom)),
+            time: Some(side.time),
+            events,
+            ..Default::default()
+        };
+        bl_ui::middle::take(&mut input, &side.ctx);
+        let text_focused = side.ctx.text_edit_focused() || side.ui.is_typing();
+        let invocations =
+            side.dispatcher
+                .take_bound_keys(&mut input, &self.keymap, &self.shell, text_focused);
+        let (shell, theme, title_bar) = (&self.shell, &self.theme, side.title_bar);
+        let ui = &mut side.ui;
+        let mut ui_events = Vec::new();
+        let mut output = side.ctx.run_ui(input, |root| {
+            ui_events = ui.show(root, shell, theme, title_bar, None);
+        });
+        output.textures_delta.clear();
+        for invocation in invocations {
+            let _ = self.shell.invoke(&invocation.id, invocation.args.clone());
+            self.events.push(UiEvent::Invoke(invocation));
+        }
+        for event in ui_events {
+            match &event {
+                UiEvent::Invoke(invocation) => {
+                    let _ = self.shell.invoke(&invocation.id, invocation.args.clone());
+                }
+                UiEvent::FocusArea(area) => self.shell.set_focused_area_in(window, *area),
+                UiEvent::FocusTrack(track) => self.shell.set_focused_track(*track),
+                UiEvent::FocusValue(focused) => self.shell.set_value_focused(*focused),
+                UiEvent::FocusControl(focused) => {
+                    self.shell.set_envelope_control_focused(*focused);
+                }
+                UiEvent::StatusHint(hint) => self.shell.set_hint(hint.clone()),
+                UiEvent::SearchRun(index) => self.shell.search_run_row(*index),
+                UiEvent::ArrangementViewport { width, height } => {
+                    self.shell.set_arrangement_viewport(*width, *height);
+                }
+                UiEvent::Gesture { phase, invocation } => {
+                    let _ = self.shell.gesture(*phase, invocation.as_ref());
+                }
+                UiEvent::BeginGesture(label) => self.shell.begin_gesture(label),
+                UiEvent::BeginNamedGesture(label) => self.shell.begin_gesture(label),
+                UiEvent::EndGesture => self.shell.end_gesture(),
+            }
+            self.events.push(event);
+        }
+        self.apply_effects();
+        self.share_hover();
         output
+    }
+
+    /// A click in the other main window.
+    pub fn other_click(&mut self, at: Pos2) -> FullOutput {
+        self.other_frame(vec![Event::PointerMoved(at)]);
+        self.other_frame(vec![Event::PointerButton {
+            pos: at,
+            button: PointerButton::Primary,
+            pressed: true,
+            modifiers: Modifiers::NONE,
+        }]);
+        self.other_frame(vec![Event::PointerButton {
+            pos: at,
+            button: PointerButton::Primary,
+            pressed: false,
+            modifiers: Modifiers::NONE,
+        }])
+    }
+
+    /// A key press and release in the other main window.
+    pub fn other_key(&mut self, key: egui::Key, modifiers: Modifiers) -> FullOutput {
+        for pressed in [true, false] {
+            self.other_frame(vec![Event::Key {
+                key,
+                physical_key: None,
+                pressed,
+                repeat: false,
+                modifiers,
+            }]);
+        }
+        self.other_frame(vec![])
+    }
+
+    /// Runs frames of the other main window until egui has settled.
+    pub fn other_settle(&mut self) -> FullOutput {
+        self.other_frame(vec![]);
+        self.other_frame(vec![])
+    }
+
+    /// The layout the other main window drew last.
+    pub fn other_layout(&self) -> &bl_ui::layout::ShellLayout {
+        self.other
+            .as_ref()
+            .and_then(|side| side.ui.drawn_layout())
+            .expect("the other window drew a frame")
     }
 
     /// Runs frames until egui has settled (popups placed, focus applied).

@@ -3,10 +3,7 @@
 //! out on its channel, and the device's own controls work. Every block is a
 //! real-time section under the allocation trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_devices::articulation_map::{
     ARTICULATION, ARTICULATION_MAP, PASS_TRIGGERS, articulation_map_type,
 };

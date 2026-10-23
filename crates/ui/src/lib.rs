@@ -93,3 +93,4 @@ pub mod theme_look;
 pub mod track_menu;
 pub mod undo_history_panel;
 pub mod widgets;
+pub mod window;

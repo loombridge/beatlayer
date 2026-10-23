@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-766 commands in 46 areas.
+768 commands in 46 areas.
 
 ## Permission classes
 
@@ -467,6 +467,7 @@ Each command has:
 | [`mixer.set_volume`](#mixerset_volume) | Set Track Volume | `edit` |  |  |
 | [`mixer.solo_exclusive`](#mixersolo_exclusive) | Solo Track Exclusively | `edit` |  |  |
 | [`mixer_view.crossfader`](#mixer_viewcrossfader) | Mixer Crossfader | `read` |  |  |
+| [`mixer_view.devices`](#mixer_viewdevices) | Mixer Devices | `read` |  |  |
 | [`mixer_view.focus`](#mixer_viewfocus) | Move Focus to Mixer | `read` | `Option+Shift+M` | `Alt+Shift+M` |
 | [`mixer_view.fold_chains`](#mixer_viewfold_chains) | Fold Rack Chains | `read` |  |  |
 | [`mixer_view.in_out`](#mixer_viewin_out) | Mixer In/Out | `read` | `Cmd+Option+I` | `Ctrl+Alt+I` |
@@ -790,6 +791,7 @@ Each command has:
 | [`view.toggle_info_view`](#viewtoggle_info_view) | Info | `read` | `Shift+Slash` | `Shift+Slash` |
 | [`view.toggle_plug_in_windows`](#viewtoggle_plug_in_windows) | Plug-In Windows | `read` | `Cmd+Option+P` | `Ctrl+Alt+P` |
 | [`view.toggle_plugin_list`](#viewtoggle_plugin_list) | Plug-In List | `read` |  |  |
+| [`view.toggle_second_window`](#viewtoggle_second_window) | Second Window | `read` | `Cmd+Shift+W` | `Ctrl+Shift+W` |
 | [`view.toggle_session_arrangement`](#viewtoggle_session_arrangement) | Toggle Arrangement/Session View | `read` | `Tab` | `Tab` |
 | [`view.toggle_undo_history`](#viewtoggle_undo_history) | Undo History | `read` | `Cmd+Option+Z` | `Ctrl+Alt+Z` |
 | [`view.zoom_in`](#viewzoom_in) | Zoom In | `edit` | `Cmd+Plus` | `Ctrl+Plus` |
@@ -6250,7 +6252,7 @@ Result: [`ChangeSet`](#changeset).
 
 **Select Device**. Permission: `read`. Contexts: `device-view`.
 
-Selects a device, as clicking its title bar does, or none with `null`. The Device View's keys (Delete, Cmd-C, Cmd-D, Cmd-R) act on it. Selecting changes nothing in the set.
+Selects a device, as clicking its title bar does, or none with `null`. The Device View's keys (Delete, Cmd-C, Cmd-D, Cmd-R) act on it. A device that floats in its own window also brings that window to the front. Selecting changes nothing in the set.
 
 Default keys: none.
 
@@ -7476,7 +7478,7 @@ Result: [`FileManagerState`](#filemanagerstate).
 
 **Arrangement View**. Permission: `read`. Contexts: `global`.
 
-Shows the Arrangement View if the Session View is in front, and moves the keyboard focus to it, so its shortcuts apply. Changes nothing in the set.
+Shows the Arrangement View if the Session View is in front, and moves the keyboard focus to it, so its shortcuts apply. With the second window open, moves the focus to the window that shows the Arrangement View and brings it to the front, without changing either window's view. Changes nothing in the set.
 
 Default keys:
 
@@ -7512,7 +7514,7 @@ Result: nothing (`null`).
 
 **Clip View**. Permission: `read`. Contexts: `global`.
 
-Moves the keyboard focus to the Clip View's editor, so the Clip View's shortcuts apply, showing the Clip View first if it is hidden. Changes nothing in the set and isn't an undo step. The result is the detail area's state.
+Moves the keyboard focus to the Clip View's editor, so the Clip View's shortcuts apply, showing the Clip View first if it is hidden. Changes nothing in the set and isn't an undo step. The result is the detail area's state. With the second window open it acts on the window `window` names, `main` or `second`, and on the window with the focus without it.
 
 Default keys:
 
@@ -7520,7 +7522,11 @@ Default keys:
 |---|---|---|---|---|---|
 | S-FOCUS-004 | `Option+3` | `Alt+3` | `global` | Move focus to the Clip View's editor | runs it |
 
-Arguments: none (send `{}`).
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `window` | [`WindowName`](#windowname) or null | no | The window to act on, `main` or `second`. Left out, the window with the focus. |
 
 Result: [`DetailState`](#detailstate).
 
@@ -7544,7 +7550,7 @@ Result: nothing (`null`).
 
 **Device View**. Permission: `read`. Contexts: `global`.
 
-Moves the keyboard focus to the Device View, so its shortcuts apply, showing the Device View first if it is hidden. Changes nothing in the set and isn't an undo step. The result is the detail area's state.
+Moves the keyboard focus to the Device View, so its shortcuts apply, showing the Device View first if it is hidden. Changes nothing in the set and isn't an undo step. The result is the detail area's state. With the second window open it acts on the window `window` names, `main` or `second`, and on the window with the focus without it.
 
 Default keys:
 
@@ -7552,7 +7558,11 @@ Default keys:
 |---|---|---|---|---|---|
 | S-FOCUS-005 | `Option+4` | `Alt+4` | `global` | Move focus to the Device View | runs it |
 
-Arguments: none (send `{}`).
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `window` | [`WindowName`](#windowname) or null | no | The window to act on, `main` or `second`. Left out, the window with the focus. |
 
 Result: [`DetailState`](#detailstate).
 
@@ -8613,6 +8623,22 @@ Arguments:
 
 Result: [`MixerViewState`](#mixerviewstate).
 
+#### `mixer_view.devices`
+
+**Mixer Devices**. Permission: `read`. Contexts: `global`.
+
+Shows or hides the mixers' Devices section, as View > Mixer Controls > Devices does: between In/Out and Sends, each track's top-level devices in chain order, each with its activator and name. A click on a name selects the device and shows the Device View; a click on an activator switches the device. Hidden in a new install. Switches unless `shown` says which. Changes only the view; the devices and whether each is on are in the query tool's `track` devices, as `enabled`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `shown` | boolean or null | no | Show it (true) or hide it (false); switches it if left out. |
+
+Result: [`MixerViewState`](#mixerviewstate).
+
 #### `mixer_view.focus`
 
 **Move Focus to Mixer**. Permission: `read`. Contexts: `arrangement`.
@@ -8775,7 +8801,7 @@ Result: [`MixerViewState`](#mixerviewstate).
 
 **Mixer View State**. Permission: `read`. Contexts: `global`.
 
-Reports what the mixers show: whether the Session View's and the Arrangement View's mixers are shown and how far each is scrolled, and which sections (In/Out, Sends, the volume strips, the return tracks, the Performance Impact) show. The Performance Impact values are the engine's last, one entry per track: how many of the six segments are lit and the track's share of the set's processing time. Track values (volume, pan, the activator, Solo, Arm, routing, sends, the crossfader assignment) are in the set; read them with the query tool: a track with `detail: "full"` returns them as the set saves them. Changes nothing.
+Reports what the mixers show: whether the Session View's and the Arrangement View's mixers are shown and how far each is scrolled, and which sections (In/Out, Sends, the volume strips, the return tracks, the Performance Impact, the Devices) show. The Performance Impact values are the engine's last, one entry per track: how many of the six segments are lit and the track's share of the set's processing time. Track values (volume, pan, the activator, Solo, Arm, routing, sends, the crossfader assignment) are in the set; read them with the query tool: a track with `detail: "full"` returns them as the set saves them. Changes nothing.
 
 Default keys: none.
 
@@ -11012,7 +11038,7 @@ Result: [`ChangeSet`](#changeset).
 
 **Move Focus to the Session View**. Permission: `read`. Contexts: `global`.
 
-Shows the Session View if the Arrangement View is in front, and moves the keyboard focus to it, as Navigate > Session View (Option-1, Alt-1) does, so its shortcuts apply. Changes only the view.
+Shows the Session View if the Arrangement View is in front, and moves the keyboard focus to it, as Navigate > Session View (Option-1, Alt-1) does, so its shortcuts apply. With the second window open, moves the focus to the window that shows the Session View and brings it to the front, without changing either window's view. Changes only the view.
 
 Default keys:
 
@@ -13855,7 +13881,7 @@ Result: [`ClipViewState`](#clipviewstate).
 
 **Expand Clip View**. Permission: `read`. Contexts: `clip-view`.
 
-Gives the Clip View its largest height, the one that leaves the main view 80 points, and run again gives back the height it had before. Refused while the Clip View is hidden. Dragging the detail area's top edge, or hiding the Clip View, ends the expansion. Changes nothing in the set and isn't an undo step. The result is the detail area's state, whose `expanded` says which way it went.
+Gives the Clip View its largest height, the one that leaves the main view 80 points, and run again gives back the height it had before. Refused while the Clip View is hidden. Dragging the detail area's top edge, or hiding the Clip View, ends the expansion. Changes nothing in the set and isn't an undo step. The result is the detail area's state, whose `expanded` says which way it went. With the second window open it acts on the window `window` names, `main` or `second`, and on the window with the focus without it.
 
 Default keys:
 
@@ -13863,7 +13889,11 @@ Default keys:
 |---|---|---|---|---|---|
 | S-NOTE-030 | `Cmd+Option+E` | `Ctrl+Alt+E` | `clip-view` | Expand the Clip View to full size | runs it |
 
-Arguments: none (send `{}`).
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `window` | [`WindowName`](#windowname) or null | no | The window to act on, `main` or `second`. Left out, the window with the focus. |
 
 Result: [`DetailState`](#detailstate).
 
@@ -13892,7 +13922,7 @@ Result: [`ClipViewState`](#clipviewstate).
 
 **Full Screen**. Permission: `read`. Contexts: `global`.
 
-Switches the main window into or out of full-screen mode. Changes nothing in the set.
+Switches the main window into or out of full-screen mode. Changes nothing in the set. With the second window open it acts on the window `window` names, `main` or `second`, and on the window with the focus without it.
 
 Default keys:
 
@@ -13900,7 +13930,11 @@ Default keys:
 |---|---|---|---|---|---|
 | S-VIEW-001 | `Ctrl+Cmd+F` | `F11` | `global` | Toggle full-screen mode | runs it |
 
-Arguments: none (send `{}`).
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `window` | [`WindowName`](#windowname) or null | no | The window to act on, `main` or `second`. Left out, the window with the focus. |
 
 Result: [`ViewResult`](#viewresult).
 
@@ -13944,7 +13978,7 @@ Result: [`ClipViewState`](#clipviewstate).
 
 **Set Clip View Height**. Permission: `read`. Contexts: `global`.
 
-Sets the Clip View's height to `points`, in points at 100% zoom and at least 100, as dragging the detail area's top edge does one frame at a time; a window too short for it shows the Clip View less tall, down to 100 points. Ends an expansion. The Device View's height doesn't change. Changes nothing in the set and isn't an undo step. The result is the detail area's state.
+Sets the Clip View's height to `points`, in points at 100% zoom and at least 100, as dragging the detail area's top edge does one frame at a time; a window too short for it shows the Clip View less tall, down to 100 points. Ends an expansion. The Device View's height doesn't change. Changes nothing in the set and isn't an undo step. The result is the detail area's state. With the second window open it acts on the window `window` names, `main` or `second`, and on the window with the focus without it.
 
 Default keys: none.
 
@@ -13953,6 +13987,7 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `points` | number | yes | The Clip View's height in points at 100%, at least 100. |
+| `window` | [`WindowName`](#windowname) or null | no | The window whose detail area it sets, `main` or `second`. Left out, the window with the focus. |
 
 Result: [`DetailState`](#detailstate).
 
@@ -13976,7 +14011,7 @@ Result: [`PluginListState`](#pluginliststate).
 
 **Zoom**. Permission: `edit`. Contexts: `global`, `settings`.
 
-Sets the interface zoom to `percent`, a whole percentage from 50 to 200, as the Zoom setting on the Settings window's Display & Input page does: every window's panes, controls, and text scale together and keep their places, and the main window grows if it's smaller than its minimum size at that zoom (as far as the screen allows). The result's `zoom` is the new zoom as a factor, 1.5 for 150%. The zoom is kept for the next start. Changes nothing in the set and isn't an undo step.
+Sets the interface zoom to `percent`, a whole percentage from 50 to 200, as the Zoom setting on the Settings window's Display & Input page does: every window's panes, controls, and text scale together and keep their places, and the main window grows if it's smaller than its minimum size at that zoom (as far as the screen allows). The result's `zoom` is the new zoom as a factor, 1.5 for 150%. The zoom is kept for the next start. Changes nothing in the set and isn't an undo step. With the second window open it acts on the window `window` names, `main` or `second`, and on the window with the focus without it.
 
 Default keys: none.
 
@@ -13985,6 +14020,7 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `percent` | integer from 50 to 200 | yes | The interface zoom as a whole percentage, from 50 to 200; 100 is the size layout.md measures Live at. |
+| `window` | [`WindowName`](#windowname) or null | no | The window to zoom, `main` or `second`; `second` while the second window is closed sets the zoom it opens at. Left out, the window with the focus. |
 
 Result: [`ViewResult`](#viewresult).
 
@@ -13992,7 +14028,7 @@ Result: [`ViewResult`](#viewresult).
 
 **Show Clip and Device View**. Permission: `read`. Contexts: `global`.
 
-Shows the Clip View and the Device View together, the Clip View above the Device View, as Option-click (Alt-click) on either view's toggle does. With both showing already it changes nothing. Changes nothing in the set and isn't an undo step. The result is the detail area's state.
+Shows the Clip View and the Device View together, the Clip View above the Device View, as Option-click (Alt-click) on either view's toggle does. With both showing already it changes nothing. Changes nothing in the set and isn't an undo step. The result is the detail area's state. With the second window open it acts on the window `window` names, `main` or `second`, and on the window with the focus without it.
 
 Default keys:
 
@@ -14000,7 +14036,11 @@ Default keys:
 |---|---|---|---|---|---|
 | S-VIEW-005 | `Option+click a view toggle` | `Alt+click a view toggle` | `global` | Show Device View and Clip View together (stack them) | runs it |
 
-Arguments: none (send `{}`).
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `window` | [`WindowName`](#windowname) or null | no | The window to act on, `main` or `second`. Left out, the window with the focus. |
 
 Result: [`DetailState`](#detailstate).
 
@@ -14008,7 +14048,7 @@ Result: [`DetailState`](#detailstate).
 
 **View State**. Permission: `read`. Contexts: `global`.
 
-Reports what the view commands switch: the main view (Arrangement or Session), whether the browser and the Info View show, full-screen mode and the zoom (`view.toggle_session_arrangement`, `view.toggle_browser`, `view.toggle_info_view`, `view.full_screen`, `view.set_zoom`), the Clip View with Draw Mode, the lane, Fold and the selected notes (`view.toggle_clip_view`, `view.draw_mode`, `view.lane`, `view.fold_notes`), the detail area under `detail`: which of the Clip View and the Device View show, the Clip View's height and where the focus is (`view.toggle_clip_view`, `view.toggle_device_view`, `view.show_detail_views`, `view.switch_detail_view`, `view.toggle_detail_area`, `view.expand_clip_view`, `view.set_detail_height`, `focus.clip_view`, `focus.device_view`), the assistant's panel, the Undo History (`view.toggle_undo_history`), and whether plug-in windows are shown (`view.toggle_plug_in_windows`). Changes nothing. The Arrangement's own view is in `arrangement.state`, the Mixer's in `mixer_view.state`, the Session View's in `session.state` and the Device View's in `device_view.state`.
+Reports what the view commands switch: the main view (Arrangement or Session), whether the browser and the Info View show, full-screen mode and the zoom (`view.toggle_session_arrangement`, `view.toggle_browser`, `view.toggle_info_view`, `view.full_screen`, `view.set_zoom`), the Clip View with Draw Mode, the lane, Fold and the selected notes (`view.toggle_clip_view`, `view.draw_mode`, `view.lane`, `view.fold_notes`), the detail area under `detail`: which of the Clip View and the Device View show, the Clip View's height and where the focus is (`view.toggle_clip_view`, `view.toggle_device_view`, `view.show_detail_views`, `view.switch_detail_view`, `view.toggle_detail_area`, `view.expand_clip_view`, `view.set_detail_height`, `focus.clip_view`, `focus.device_view`), the assistant's panel, the Undo History (`view.toggle_undo_history`), whether plug-in windows are shown (`view.toggle_plug_in_windows`), the second window under `second_window`: whether it is open, its main view, browser, full-screen mode, zoom, frame and detail area (`view.toggle_second_window`, and the commands above with `window` set to `second`), and `focused_window`, `main` or `second`, the window the commands that act on one window act on without `window`. Changes nothing. The Arrangement's own view is in `arrangement.state`, the Mixer's in `mixer_view.state`, the Session View's in `session.state` and the Device View's in `device_view.state`.
 
 Default keys: none.
 
@@ -14020,7 +14060,7 @@ Result: [`ViewState`](#viewstate).
 
 **Toggle Clip/Device View**. Permission: `read`. Contexts: `global`.
 
-With one of the Clip View and the Device View showing, shows the other in its place; with both showing, moves the keyboard focus to the Clip View's editor if the Device View has it, and to the Device View otherwise; with neither showing, shows the view that showed alone last, the Device View in a new session. Shift+Tab does this while Use Tab Key to Move Focus is off; F12 does it always. Changes nothing in the set and isn't an undo step. The result is the detail area's state.
+With one of the Clip View and the Device View showing, shows the other in its place; with both showing, moves the keyboard focus to the Clip View's editor if the Device View has it, and to the Device View otherwise; with neither showing, shows the view that showed alone last, the Device View in a new session. Shift+Tab does this while Use Tab Key to Move Focus is off; F12 does it always. Changes nothing in the set and isn't an undo step. The result is the detail area's state. With the second window open it acts on the window `window` names, `main` or `second`, and on the window with the focus without it.
 
 Default keys:
 
@@ -14028,7 +14068,11 @@ Default keys:
 |---|---|---|---|---|---|
 | S-VIEW-004 | `Shift+Tab`, `F12` | `Shift+Tab`, `F12` | `global` | Switch the detail area between Device View and Clip View | runs it |
 
-Arguments: none (send `{}`).
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `window` | [`WindowName`](#windowname) or null | no | The window to act on, `main` or `second`. Left out, the window with the focus. |
 
 Result: [`DetailState`](#detailstate).
 
@@ -14048,7 +14092,7 @@ Result: [`AssistantPanelState`](#assistantpanelstate).
 
 **Browser**. Permission: `read`. Contexts: `global`.
 
-Shows or hides the browser at the left of the main window; the main view widens to fill its place. Changes nothing in the set.
+Shows or hides the browser at the left of the main window; the main view widens to fill its place. Changes nothing in the set. With the second window open it acts on the window `window` names, `main` or `second`, and on the window with the focus without it.
 
 Default keys:
 
@@ -14057,7 +14101,11 @@ Default keys:
 | S-VIEW-010 | `Cmd+Option+B`, `Cmd+Option+5` | `Ctrl+Alt+B`, `Ctrl+Alt+5` | `global` | Show or hide the browser | runs it |
 | S-BRW-002 | `Cmd+Option+B` | `Ctrl+Alt+B` | `global` | Show or hide the browser | runs it |
 
-Arguments: none (send `{}`).
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `window` | [`WindowName`](#windowname) or null | no | The window to act on, `main` or `second`. Left out, the window with the focus. |
 
 Result: [`ViewResult`](#viewresult).
 
@@ -14065,7 +14113,7 @@ Result: [`ViewResult`](#viewresult).
 
 **Clip View**. Permission: `read`. Contexts: `global`.
 
-Shows or hides the Clip View in the detail area, which holds the MIDI Note Editor for the Arrangement's selected MIDI clip, and leaves the Device View as it is: with the Device View showing, showing the Clip View stacks it above the Device View. It shows the clip the Arrangement has selected, with its notes, and selecting another MIDI clip switches the editor to it, clearing the note selection. Changes nothing in the set and isn't an undo step. The result is the detail area's state, as `view.state` reports it under `detail`.
+Shows or hides the Clip View in the detail area, which holds the MIDI Note Editor for the Arrangement's selected MIDI clip, and leaves the Device View as it is: with the Device View showing, showing the Clip View stacks it above the Device View. It shows the clip the Arrangement has selected, with its notes, and selecting another MIDI clip switches the editor to it, clearing the note selection. Changes nothing in the set and isn't an undo step. The result is the detail area's state, as `view.state` reports it under `detail`. With the second window open it acts on the window `window` names, `main` or `second`, and on the window with the focus without it.
 
 Default keys:
 
@@ -14073,7 +14121,11 @@ Default keys:
 |---|---|---|---|---|---|
 | S-VIEW-015 | `Cmd+Option+3` | `Ctrl+Alt+3` | `global` | Show or hide the Clip View | runs it |
 
-Arguments: none (send `{}`).
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `window` | [`WindowName`](#windowname) or null | no | The window to act on, `main` or `second`. Left out, the window with the focus. |
 
 Result: [`DetailState`](#detailstate).
 
@@ -14081,7 +14133,7 @@ Result: [`DetailState`](#detailstate).
 
 **Hide Device View**. Permission: `read`. Contexts: `global`.
 
-Hides whichever of the Clip View and the Device View show, and run again shows the same ones again; with neither showing and nothing hidden this way, shows the Device View. The View menu's item reads Hide or Show followed by the views it would hide or bring back. Changes nothing in the set and isn't an undo step. The result is the detail area's state.
+Hides whichever of the Clip View and the Device View show, and run again shows the same ones again; with neither showing and nothing hidden this way, shows the Device View. The View menu's item reads Hide or Show followed by the views it would hide or bring back. Changes nothing in the set and isn't an undo step. The result is the detail area's state. With the second window open it acts on the window `window` names, `main` or `second`, and on the window with the focus without it.
 
 Default keys:
 
@@ -14089,7 +14141,11 @@ Default keys:
 |---|---|---|---|---|---|
 | S-VIEW-022 | `Cmd+Option+L` | `Ctrl+Alt+L` | `global` | Hide or show the detail area (the Clip View or Device View) | runs it |
 
-Arguments: none (send `{}`).
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `window` | [`WindowName`](#windowname) or null | no | The window to act on, `main` or `second`. Left out, the window with the focus. |
 
 Result: [`DetailState`](#detailstate).
 
@@ -14097,7 +14153,7 @@ Result: [`DetailState`](#detailstate).
 
 **Device View**. Permission: `read`. Contexts: `global`.
 
-Shows or hides the Device View in the detail area, which shows the selected track's devices, and leaves the Clip View as it is: with the Clip View showing, showing the Device View stacks it below the Clip View. Changes nothing in the set and isn't an undo step. The result is the detail area's state, as `view.state` reports it under `detail`.
+Shows or hides the Device View in the detail area, which shows the selected track's devices, and leaves the Clip View as it is: with the Clip View showing, showing the Device View stacks it below the Clip View. Changes nothing in the set and isn't an undo step. The result is the detail area's state, as `view.state` reports it under `detail`. With the second window open it acts on the window `window` names, `main` or `second`, and on the window with the focus without it.
 
 Default keys:
 
@@ -14105,7 +14161,11 @@ Default keys:
 |---|---|---|---|---|---|
 | S-VIEW-016 | `Cmd+Option+4` | `Ctrl+Alt+4` | `global` | Show or hide the Device View | runs it |
 
-Arguments: none (send `{}`).
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `window` | [`WindowName`](#windowname) or null | no | The window to act on, `main` or `second`. Left out, the window with the focus. |
 
 Result: [`DetailState`](#detailstate).
 
@@ -14175,11 +14235,27 @@ Arguments: none (send `{}`).
 
 Result: [`PluginListState`](#pluginliststate).
 
+#### `view.toggle_second_window`
+
+**Second Window**. Permission: `read`. Contexts: `global`.
+
+Opens the second window, or closes it if it is open: a window with its own Control Bar, main view, detail area and Status Bar, showing the main view the main window doesn't (the Arrangement View while the main window shows the Session View), without the browser. It opens at 990 by 703 points the first time and afterwards where and as big as it was. Both windows show one set. Closing it moves its Clip and Device Views into the main window. Whether it is open is saved with the set, but isn't an undo step and doesn't change the set. The result is the second window's state, as `view.state` reports it under `second_window`.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-VIEW-002 | `Cmd+Shift+W` | `Ctrl+Shift+W` | `global` | Show or hide the second window | runs it |
+
+Arguments: none (send `{}`).
+
+Result: [`SecondWindowState`](#secondwindowstate).
+
 #### `view.toggle_session_arrangement`
 
 **Toggle Arrangement/Session View**. Permission: `read`. Contexts: `global`.
 
-Switches the main view between the Arrangement View and the Session View. A new set opens in the Arrangement View. Changes nothing in the set.
+Switches the main view between the Arrangement View and the Session View. A new set opens in the Arrangement View. With the second window open, the two windows swap their main views. Which main view the main window shows is saved with the set, but switching it isn't an undo step and doesn't change the set.
 
 Default keys:
 
@@ -14211,7 +14287,7 @@ Result: [`UndoHistoryState`](#undohistorystate).
 
 **Zoom In**. Permission: `edit`. Contexts: `global`.
 
-Makes the whole interface larger by one step of 10%, up to 200%: every window's panes, controls, and text scale together and keep their places. From a zoom between steps it goes to the next step up. The zoom is kept for the next start. Changes nothing in the set and isn't an undo step.
+Makes the whole interface larger by one step of 10%, up to 200%: every window's panes, controls, and text scale together and keep their places. From a zoom between steps it goes to the next step up. The zoom is kept for the next start. Changes nothing in the set and isn't an undo step. With the second window open it acts on the window `window` names, `main` or `second`, and on the window with the focus without it.
 
 Default keys:
 
@@ -14219,7 +14295,11 @@ Default keys:
 |---|---|---|---|---|---|
 | S-ZOOM-001 | `Cmd+Plus` | `Ctrl+Plus` | `global` | Zoom the interface in | runs it |
 
-Arguments: none (send `{}`).
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `window` | [`WindowName`](#windowname) or null | no | The window to act on, `main` or `second`. Left out, the window with the focus. |
 
 Result: [`ViewResult`](#viewresult).
 
@@ -14227,7 +14307,7 @@ Result: [`ViewResult`](#viewresult).
 
 **Zoom Out**. Permission: `edit`. Contexts: `global`.
 
-Makes the whole interface smaller by one step of 10%, down to 50%: every window's panes, controls, and text scale together and keep their places. From a zoom between steps it goes to the next step down. The zoom is kept for the next start. Changes nothing in the set and isn't an undo step.
+Makes the whole interface smaller by one step of 10%, down to 50%: every window's panes, controls, and text scale together and keep their places. From a zoom between steps it goes to the next step down. The zoom is kept for the next start. Changes nothing in the set and isn't an undo step. With the second window open it acts on the window `window` names, `main` or `second`, and on the window with the focus without it.
 
 Default keys:
 
@@ -14235,7 +14315,11 @@ Default keys:
 |---|---|---|---|---|---|
 | S-ZOOM-002 | `Cmd+Minus` | `Ctrl+Minus` | `global` | Zoom the interface out | runs it |
 
-Arguments: none (send `{}`).
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `window` | [`WindowName`](#windowname) or null | no | The window to act on, `main` or `second`. Left out, the window with the focus. |
 
 Result: [`ViewResult`](#viewresult).
 
@@ -14243,11 +14327,15 @@ Result: [`ViewResult`](#viewresult).
 
 **Reset Zoom to 100%**. Permission: `edit`. Contexts: `global`.
 
-Returns the interface zoom to 100%, the size Live's layout is measured at. The zoom is kept for the next start. Changes nothing in the set and isn't an undo step.
+Returns the interface zoom to 100%, the size Live's layout is measured at. The zoom is kept for the next start. Changes nothing in the set and isn't an undo step. With the second window open it acts on the window `window` names, `main` or `second`, and on the window with the focus without it.
 
 Default keys: none.
 
-Arguments: none (send `{}`).
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `window` | [`WindowName`](#windowname) or null | no | The window to act on, `main` or `second`. Left out, the window with the focus. |
 
 Result: [`ViewResult`](#viewresult).
 
@@ -22873,6 +22961,7 @@ The Display & Input page's settings.
 | `outline_view_in_focus` | boolean | yes | Outline View in Focus, as `settings.set_outline_view_in_focus` sets it. |
 | `use_tab_key_to_move_focus` | boolean | yes | Use Tab Key to Move Focus, as `focus.toggle_tab_navigation` toggles it. |
 | `wrap_tab_navigation` | boolean | yes | Wrap Tab Navigation, as `focus.toggle_wrap_navigation` toggles it. |
+| `second_window_zoom_percent` | integer or null | no | The second window's zoom in percent, as `view.set_zoom` takes it with `window` set to `second`: only while the second window is open, when the page shows Second Window Zoom (interface-zoom R12). |
 
 <details><summary>JSON Schema</summary>
 
@@ -22883,6 +22972,16 @@ The Display & Input page's settings.
     "outline_view_in_focus": {
       "description": "Outline View in Focus, as `settings.set_outline_view_in_focus` sets it.",
       "type": "boolean"
+    },
+    "second_window_zoom_percent": {
+      "description": "The second window's zoom in percent, as `view.set_zoom` takes it with `window` set to `second`: only while the second window is open, when the page shows Second Window Zoom (interface-zoom R12).",
+      "format": "uint16",
+      "maximum": 65535,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
     },
     "use_tab_key_to_move_focus": {
       "description": "Use Tab Key to Move Focus, as `focus.toggle_tab_navigation` toggles it.",
@@ -30396,6 +30495,7 @@ What `mixer_view.state` and the other view commands return.
 | `return_tracks_scroll` | boolean | yes | Whether the return tracks scroll with the tracks (IMP-01, the mixer view spec R21): they come after the drop area and only Main stays pinned. Off in a new install, so the returns stay pinned, as in Live. |
 | `track_options` | boolean | yes | Whether the tracks' Track Options sections show (track delay and Keep Monitoring Latency). Shown only while this shows; hidden in a new set. |
 | `performance_impact` | boolean | yes | Whether the Performance Impact section shows: under each strip, the six segments that light up from the left with the track's share of the set's processing time. Hidden in a new set. |
+| `devices` | boolean | yes | Whether the Devices section shows: between In/Out and Sends, each track's top-level devices with their activators (IMP-25, the mixer view spec R24). Hidden in a new install; the devices and whether each is on are the query tool's `track` devices with their `enabled`. |
 | `performance_impact_values` | array of [`TrackImpact`](#trackimpact) | yes | Each track's Performance Impact, as the engine last published it: the track, how many of its six segments are lit, and its share of the set's processing time (the mixer spec, R31). |
 | `gain_reduction` | array of [`TrackGainReduction`](#trackgainreduction) | yes | Each track's gain reduction, in the order the tracks run (IMP-25, R40); empty when no engine has published meters. |
 | `chains` | array of [`ChainStrip`](#chainstrip) | no | The chains folded out as strips, in the mixers' column order (racks spec, R27). |
@@ -30420,6 +30520,11 @@ What `mixer_view.state` and the other view commands return.
     },
     "crossfader": {
       "description": "Whether the Crossfader section shows: the tracks' A and B assign buttons and Main's crossfader. Hidden in a new set.",
+      "type": "boolean"
+    },
+    "devices": {
+      "default": false,
+      "description": "Whether the Devices section shows: between In/Out and Sends, each track's top-level devices with their activators (IMP-25, the mixer view spec R24). Hidden in a new install; the devices and whether each is on are the query tool's `track` devices with their `enabled`.",
       "type": "boolean"
     },
     "gain_reduction": {
@@ -30494,6 +30599,7 @@ What `mixer_view.state` and the other view commands return.
     "return_tracks_scroll",
     "track_options",
     "performance_impact",
+    "devices",
     "performance_impact_values",
     "gain_reduction"
   ],
@@ -36769,6 +36875,77 @@ What the search field shows (R15).
 
 </details>
 
+### `SecondWindowState`
+
+What `view.toggle_second_window` returns and `view.state` reports under `second_window` (second-window R15).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `open` | boolean | yes | Whether the second window is open. |
+| `main_view` | string | yes | The main view it shows, or would show: the one the main window doesn't. |
+| `browser` | boolean | yes | Whether its browser shows; it opens without. |
+| `full_screen` | boolean | yes | Whether it is in full-screen mode. |
+| `zoom` | number | yes | Its interface zoom, where 1 is 100%, kept while it is closed. |
+| `detail` | [`DetailState`](#detailstate) | yes | Its detail area. |
+| `frame` | [`WindowFrame`](#windowframe) or null | no | Where it sat and how big it was when it was last open, in points; none before it has been opened. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `view.toggle_second_window` returns and `view.state` reports under `second_window` (second-window R15).",
+  "properties": {
+    "browser": {
+      "description": "Whether its browser shows; it opens without.",
+      "type": "boolean"
+    },
+    "detail": {
+      "$ref": "#/$defs/DetailState",
+      "description": "Its detail area."
+    },
+    "frame": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/WindowFrame"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Where it sat and how big it was when it was last open, in points; none before it has been opened."
+    },
+    "full_screen": {
+      "description": "Whether it is in full-screen mode.",
+      "type": "boolean"
+    },
+    "main_view": {
+      "description": "The main view it shows, or would show: the one the main window doesn't.",
+      "type": "string"
+    },
+    "open": {
+      "description": "Whether the second window is open.",
+      "type": "boolean"
+    },
+    "zoom": {
+      "description": "Its interface zoom, where 1 is 100%, kept while it is closed.",
+      "format": "float",
+      "type": "number"
+    }
+  },
+  "required": [
+    "open",
+    "main_view",
+    "browser",
+    "full_screen",
+    "zoom",
+    "detail"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `Section`
 
 A sidebar section.
@@ -41538,6 +41715,8 @@ What `view.state` returns: what the view commands switch, without switching any 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `window` | [`ViewResult`](#viewresult) | yes | The main window: the main view, the browser, the Info View, full-screen mode and the interface zoom. |
+| `second_window` | [`SecondWindowState`](#secondwindowstate) | yes | The second window: whether it is open, the main view it shows, its browser, zoom, frame and detail area. |
+| `focused_window` | [`WindowName`](#windowname) | yes | The window the commands that act on one window act on when they aren't told which: the one with the focus. |
 | `clip_view` | [`ClipViewState`](#clipviewstate) | yes | The Clip View and its note editor: whether it shows, Draw Mode, the clip it holds, the selected notes, the lane and Fold. |
 | `detail` | [`DetailState`](#detailstate) | yes | The detail area: which of the Clip View and the Device View show, the Clip View's height, and where the focus is. |
 | `plugin_list` | [`PluginListState`](#pluginliststate) | yes | The list of the set's plug-ins: whether it shows, and whether Show Only Missing is on. |
@@ -41563,6 +41742,10 @@ What `view.state` returns: what the view commands switch, without switching any 
       "$ref": "#/$defs/DetailState",
       "description": "The detail area: which of the Clip View and the Device View show, the Clip View's height, and where the focus is."
     },
+    "focused_window": {
+      "$ref": "#/$defs/WindowName",
+      "description": "The window the commands that act on one window act on when they aren't told which: the one with the focus."
+    },
     "plug_in_windows": {
       "description": "Whether floating devices' and plug-ins' windows are shown, as `view.toggle_plug_in_windows` sets it.",
       "type": "boolean"
@@ -41570,6 +41753,10 @@ What `view.state` returns: what the view commands switch, without switching any 
     "plugin_list": {
       "$ref": "#/$defs/PluginListState",
       "description": "The list of the set's plug-ins: whether it shows, and whether Show Only Missing is on."
+    },
+    "second_window": {
+      "$ref": "#/$defs/SecondWindowState",
+      "description": "The second window: whether it is open, the main view it shows, its browser, zoom, frame and detail area."
     },
     "undo_history": {
       "description": "Whether the Undo History panel shows.",
@@ -41582,6 +41769,8 @@ What `view.state` returns: what the view commands switch, without switching any 
   },
   "required": [
     "window",
+    "second_window",
+    "focused_window",
     "clip_view",
     "detail",
     "plugin_list",
@@ -41901,6 +42090,37 @@ Where a floating device's window sits and how big it is (IMP-14, WP-2.5b), in po
     "height"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `WindowName`
+
+One of the two main windows (second-window R15).
+
+One of:
+
+- `"main"`: The main window.
+- `"second"`: The second window.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One of the two main windows (second-window R15).",
+  "oneOf": [
+    {
+      "const": "main",
+      "description": "The main window.",
+      "type": "string"
+    },
+    {
+      "const": "second",
+      "description": "The second window.",
+      "type": "string"
+    }
+  ]
 }
 ```
 

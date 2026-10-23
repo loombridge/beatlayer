@@ -2218,6 +2218,20 @@ fn paths() -> BTreeMap<&'static str, Path> {
             )),
         ),
         (
+            "song.insert_time",
+            Exception(Equivalent(
+                "arrangement.insert_silence, which Cmd-I and Create ▸ Insert Silence run on the \
+                 time selection (the time editing spec, R17 and R24)",
+            )),
+        ),
+        (
+            "song.delete_time",
+            Exception(Equivalent(
+                "arrangement.delete_time, which Cmd-Shift-Delete and Edit ▸ Delete Time run on \
+                 the time selection (the time editing spec, R15 and R24)",
+            )),
+        ),
+        (
             "song.move_locator",
             Exception(Equivalent(
                 "the shell's locator.move, which dragging a locator and the arrow keys run (the \
@@ -2920,6 +2934,21 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("clip.set_loop", Exception(clip_view)),
         ("clip.set_loop_enabled", Exception(clip_view)),
         ("clip.set_midi_loop", Exception(clip_view)),
+        ("clip.set_signature", Exception(clip_view)),
+        (
+            "clip_view.foreground",
+            Exception(Equivalent(
+                "clicking a note, or a loop bar, which assistive technology reads by name and \
+                 activates (multi-clip editing R3, R10)",
+            )),
+        ),
+        (
+            "clip_view.select_loop_bars",
+            Exception(Equivalent(
+                "the loop bars above the note editor, which assistive technology reads by \
+                 name and activates (multi-clip editing R10)",
+            )),
+        ),
         ("clip.set_midi_region", Exception(clip_view)),
         ("clip.set_data", Exception(clip_view)),
         // The crop's document-level commands (WP-4.13): `clip.crop` is the

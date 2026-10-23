@@ -1016,6 +1016,15 @@ pub enum Command {
         #[serde(default)]
         end: Option<Ticks>,
     },
+    /// Sets a MIDI clip's time signature, the Clip View's Signature fields.
+    SetMidiClipSignature {
+        /// The MIDI clip.
+        clip: ClipId,
+        /// The clip's signature; `null` (or nothing) follows the song's at
+        /// the clip's position.
+        #[serde(default)]
+        signature: Option<TimeSignature>,
+    },
     /// Switches an audio or MIDI clip's loop on or off, leaving its brace where it
     /// is.
     SetClipLoopEnabled {
@@ -2728,6 +2737,7 @@ impl Command {
             Self::SetClipLoop { .. } => "Change clip loop",
             Self::SetMidiClipRegion { .. } => "Change clip region",
             Self::SetMidiClipLoop { .. } => "Change clip loop",
+            Self::SetMidiClipSignature { .. } => "Change clip signature",
             Self::SetClipLoopEnabled { .. } => "Switch clip loop",
             Self::SetClipGain { .. } => "Change clip gain",
             Self::SetClipFades { .. } => "Change Fade",
@@ -3900,6 +3910,9 @@ impl Document {
                     midi.loop_start = *start;
                     midi.loop_end = *end;
                 })
+            }
+            Command::SetMidiClipSignature { clip, signature } => {
+                self.edit_midi(*clip, |midi| midi.signature = *signature)
             }
             Command::SetClipLoopEnabled { clip, enabled } => match &self.clip_ref(*clip)?.data {
                 // Spec: warping R14. Only a warped audio clip can switch its

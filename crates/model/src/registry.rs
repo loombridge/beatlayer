@@ -68,6 +68,20 @@ pub const GO_TO_STEP: &str = "edit.go_to_step";
 pub const SET_MIDI_REGION: &str = "clip.set_midi_region";
 /// The ID of `clip.set_midi_loop`: a MIDI clip's loop brace.
 pub const SET_MIDI_LOOP: &str = "clip.set_midi_loop";
+/// The ID of the command that sets a MIDI clip's time signature.
+pub const SET_SIGNATURE: &str = "clip.set_signature";
+
+/// The commands that take `clips` in place of `clip`, and make the same
+/// change to each of those clips as one undo step (a clip given as an object
+/// carries the arguments that differ for it): the Clip View's clip
+/// properties for several selected clips (Spec: multi-clip-editing R9).
+pub const FAN_OUT: &[&str] = &[
+    SET_MIDI_LOOP,
+    SET_SIGNATURE,
+    "clip.set_loop_enabled",
+    "clip.set_mute",
+    "clip.rename",
+];
 
 /// Adds every document command, and undo and redo, to a registry.
 ///
@@ -106,7 +120,19 @@ pub fn handles(id: &str) -> bool {
 pub fn run(editor: &mut Editor, id: &str, args: Value) -> Result<ChangeSet, RunError> {
     let entry = entry(id)?;
     match entry.action {
-        Action::Apply(_) => Ok(editor.apply(command_from_args(id, args)?)?),
+        Action::Apply(_) => {
+            let mut commands = commands_from_args(entry, args)?;
+            if commands.len() == 1 {
+                return Ok(editor.apply(commands.remove(0))?);
+            }
+            let before = editor.document().clone();
+            editor.transact(entry.label, |editor| {
+                commands
+                    .into_iter()
+                    .try_for_each(|command| editor.apply(command).map(|_| ()))
+            })?;
+            Ok(ChangeSet::between(&before, editor.document()))
+        }
         Action::Undo => {
             no_args(entry.id, args)?;
             Ok(editor.undo()?)
@@ -130,6 +156,42 @@ pub struct GoToStepArgs {
     /// before any step, and the newest step is the number of steps there
     /// are.
     pub index: usize,
+}
+
+/// The commands a document command's arguments describe: one, or for a
+/// [`FAN_OUT`] command given `clips`, one for each of those clips.
+fn commands_from_args(entry: &'static Entry, args: Value) -> Result<Vec<Command>, RunError> {
+    let id = entry.id;
+    let clips = match &args {
+        Value::Object(fields) if FAN_OUT.contains(&id) => fields.get("clips"),
+        _ => None,
+    };
+    let Some(Value::Array(clips)) = clips else {
+        return Ok(vec![command_from_args(id, args)?]);
+    };
+    let invalid = |message: String| RunError::InvalidArgs {
+        command: id,
+        message,
+    };
+    if clips.is_empty() {
+        return Err(invalid("`clips` is empty".to_owned()));
+    }
+    let clips = clips.clone();
+    let mut commands = Vec::with_capacity(clips.len());
+    for clip in clips {
+        let mut fields = args.as_object().cloned().unwrap_or_default();
+        fields.remove("clips");
+        match clip {
+            // A clip with arguments of its own, such as a loop bar's drag
+            // moving each bar by the same amount.
+            Value::Object(own) => fields.extend(own),
+            clip => {
+                fields.insert("clip".to_owned(), clip);
+            }
+        }
+        commands.push(command_from_args(id, Value::Object(fields))?);
+    }
+    Ok(commands)
 }
 
 /// The [`Command`] a document command's ID and JSON arguments describe,
@@ -278,7 +340,12 @@ impl Entry {
             // A tag missing from the enum's schema leaves the spec without
             // arguments, which the registry reports.
             Action::Apply(op) => match tagged_variant(commands, "op", op) {
-                Some(args) => spec.args_schema(args),
+                Some(mut args) => {
+                    if FAN_OUT.contains(&self.id) {
+                        accept_clips(&mut args);
+                    }
+                    spec.args_schema(args)
+                }
                 None => spec,
             },
             Action::Undo | Action::Redo => spec.args::<NoArgs>(),
@@ -292,6 +359,41 @@ impl Entry {
             });
         }
         spec
+    }
+}
+
+/// The schema of a [`FAN_OUT`] command given the schema of its [`Command`]
+/// variant: the same, taking `clips` in place of `clip`.
+#[must_use]
+pub fn with_clips(variant: &Schema) -> Schema {
+    let mut schema = variant.clone();
+    accept_clips(&mut schema);
+    schema
+}
+
+/// Lets a [`FAN_OUT`] command's schema take `clips` in place of `clip`.
+fn accept_clips(schema: &mut Schema) {
+    if let Some(properties) = schema.get_mut("properties").and_then(Value::as_object_mut) {
+        properties.insert(
+            "clips".to_owned(),
+            serde_json::json!({
+                "description": "Clips to make the same change to, as one undo step, in place \
+                                of `clip`.",
+                "type": "array",
+                "items": {
+                    "oneOf": [
+                        { "type": "integer", "minimum": 1 },
+                        {
+                            "type": "object",
+                            "description": "A clip (`clip`) and the arguments that differ for it.",
+                        },
+                    ],
+                },
+            }),
+        );
+    }
+    if let Some(required) = schema.get_mut("required").and_then(Value::as_array_mut) {
+        required.retain(|name| name != "clip");
     }
 }
 
@@ -1552,6 +1654,16 @@ const ENTRIES: &[Entry] = &[
             `clip.set_loop_enabled`. While the loop is on, the clip plays from its Start \
             marker into the brace, then repeats the brace until the clip ends in the \
             arrangement; make the clip longer with `clip.set_length` to hear more repeats.",
+    },
+    Entry {
+        id: SET_SIGNATURE,
+        action: Action::Apply("set_midi_clip_signature"),
+        label: "Set MIDI Clip Signature",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Sets a MIDI clip's time signature, as the Clip View's Signature fields \
+            do; `signature` `null` makes the clip follow the song's signature at its position.",
     },
     Entry {
         id: "clip.set_loop_enabled",

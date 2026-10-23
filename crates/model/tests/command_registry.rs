@@ -55,7 +55,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        250,
+        251,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
              the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
              routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -100,9 +100,13 @@ fn every_document_command_is_registered() {
 
     for op in &ops {
         let variant = tagged_variant(&enum_schema, "op", op).unwrap();
+        // The fan-out commands (WP-6.6) also take `clips` in place of `clip`.
+        let fanned = registry::with_clips(&variant);
         let registered: Vec<&str> = commands
             .iter()
-            .filter(|spec| spec.args.as_ref() == Some(&variant))
+            .filter(|spec| {
+                spec.args.as_ref() == Some(&variant) || spec.args.as_ref() == Some(&fanned)
+            })
             .map(|spec| spec.id.as_ref())
             .collect();
         assert_eq!(
@@ -648,6 +652,10 @@ fn every_command_runs_by_id() {
     agent.run(
         "clip.set_midi_loop",
         json!({ "clip": riff, "start": quarter, "end": bar * 2 }),
+    );
+    agent.run(
+        "clip.set_signature",
+        json!({ "clip": riff, "signature": { "numerator": 3, "denominator": 4 } }),
     );
     // Trimming the left edge keeps the end and the contents in place: an
     // audio clip's Start marker moves on by the time of a quarter note.
@@ -3043,6 +3051,13 @@ fn schemas_match_what_commands_serialise() {
                 clip,
                 start: Ticks::QUARTER,
                 end: None,
+            },
+        ),
+        (
+            "clip.set_signature",
+            Command::SetMidiClipSignature {
+                clip,
+                signature: None,
             },
         ),
         ("clip.set_gain", Command::SetClipGain { clip, gain: 2.0 }),

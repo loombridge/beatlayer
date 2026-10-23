@@ -1221,6 +1221,12 @@ impl ArrangementUi {
                             .request_repaint_after(crate::envelope_keys::PULSE_FRAME);
                     }
                 }
+                let outline = ui.input(|i| {
+                    let pointer = i.pointer.interact_pos()?;
+                    self.automation
+                        .outline(row.track, view, doc, pointer, i.modifiers)
+                });
+                automation::paint_handles(&painter, ui, &lane, theme, outline);
             }
             // The lane's accessible node, a group named for the parameter
             // it shows and valued as the envelope is at the insert marker,

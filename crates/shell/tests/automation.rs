@@ -766,3 +766,260 @@ fn a_clip_moved_with_lock_envelopes_off_plays_its_automation_at_its_new_place() 
     );
     assert_ne!(still, golden, "the envelope stayed where it was");
 }
+
+// Shapes, stretching, skewing and Simplify Envelope (WP-6.25b).
+
+impl Song {
+    /// Where the envelope sits on the fader's travel at a position.
+    fn position(&self, at: Ticks) -> f64 {
+        let target = AutomationTarget::Mixer {
+            param: MixerParam::Volume,
+        };
+        let value = self
+            .doc()
+            .track(self.track)
+            .unwrap()
+            .automation_for(&target)
+            .unwrap()
+            .envelope
+            .value_at(at)
+            .unwrap();
+        bl_shell::arrangement::automation::travel(self.doc(), self.shell.devices(), target)
+            .position(value)
+    }
+
+    /// The labels of the undo steps, newest first.
+    fn undo_steps(&self) -> Vec<String> {
+        self.shell
+            .editor()
+            .undo_history()
+            .map(str::to_owned)
+            .collect()
+    }
+
+    /// Puts a breakpoint on the volume envelope.
+    fn put(&mut self, at: Ticks, value: f64) {
+        self.run(
+            "automation.set_breakpoint",
+            json!({
+                "track": self.track,
+                "target": { "type": "mixer", "param": "volume" },
+                "at": at,
+                "value": value,
+            }),
+        );
+    }
+}
+
+// Spec: automation-editing R11, R19.
+#[test]
+fn every_shape_is_inserted_by_its_command_as_one_undo_step_with_its_name() {
+    for shape in bl_model::Shape::ALL {
+        let mut song = song();
+        song.select();
+        let (before, steps) = (song.envelope(), song.undo_steps().len());
+        song.run(ids::INSERT_SHAPE, json!({ "shape": shape }));
+        let history = song.undo_steps();
+        assert_eq!(history.len(), steps + 1, "{shape:?} is one step");
+        assert_eq!(history[0], "Insert Shape");
+        assert_ne!(song.envelope(), before, "{shape:?} wrote something");
+        song.run("edit.undo", json!({}));
+        assert_eq!(song.envelope(), before, "{shape:?} undoes");
+    }
+}
+
+// Spec: automation-editing R12.
+#[test]
+fn a_sawtooth_rises_across_the_span_on_the_faders_travel_and_the_rest_stays() {
+    let mut song = song();
+    let (outside, after) = (song.position(Ticks(BAR / 2)), song.position(Ticks(BAR * 2)));
+    song.select();
+    song.run(ids::INSERT_SHAPE, json!({ "shape": "sawtooth" }));
+    assert!(song.position(Ticks(BAR)) < 0.01);
+    assert!((song.position(Ticks(BAR + BAR / 2)) - 0.5).abs() < 0.01);
+    assert!(song.position(Ticks(BAR * 2 - 1)) > 0.99);
+    assert!((song.position(Ticks(BAR / 2)) - outside).abs() < 1e-6);
+    assert!((song.position(Ticks(BAR * 2)) - after).abs() < 1e-6);
+}
+
+// Spec: automation-editing R11. With no time selection, one grid step from
+// the insert marker.
+#[test]
+fn a_shape_with_no_time_selection_goes_one_grid_step_from_the_insert_marker() {
+    let mut song = song();
+    song.run(view_ids::SET_INSERT_MARKER, json!({ "at": Ticks(BAR * 4) }));
+    let lane = song.lane();
+    song.run(
+        ids::INSERT_SHAPE,
+        json!({ "shape": "square", "lanes": [lane] }),
+    );
+    let step = song.shell.arrangement().grid_step(song.doc()).ticks;
+    assert!(song.position(Ticks(BAR * 4)) > 0.99, "the top first");
+    assert!(
+        song.position(Ticks(BAR * 4) + step - Ticks(1)) < 0.01,
+        "then the bottom"
+    );
+}
+
+// Spec: automation-editing R15.
+#[test]
+fn stretching_values_maps_each_breakpoint_between_the_new_edges_and_clips_at_the_travel() {
+    let mut song = song();
+    song.select();
+    let was = song.position(Ticks(BAR));
+    let steps = song.undo_steps().len();
+    song.run(ids::STRETCH_VALUES, json!({ "bottom": 0.0, "top": 0.5 }));
+    assert!((song.position(Ticks(BAR)) - was * 0.5).abs() < 1e-9);
+    assert_eq!(song.undo_steps().len(), steps + 1);
+    song.run("edit.undo", json!({}));
+    let edge = song.position(Ticks(BAR * 2));
+    song.run(ids::STRETCH_VALUES, json!({ "bottom": 0.0, "top": 2.0 }));
+    assert!(
+        (song.position(Ticks(BAR)) - 1.0).abs() < 1e-9,
+        "clipped at the top"
+    );
+    // The breakpoint at the span's end stays.
+    assert!((song.position(Ticks(BAR * 2)) - edge).abs() < 1e-9);
+    let refused = song
+        .shell
+        .run(ids::STRETCH_VALUES, json!({ "bottom": 0.8, "top": 0.2 }));
+    assert!(refused.is_err(), "the bottom can't pass the top");
+}
+
+// Spec: automation-editing R16.
+#[test]
+fn stretching_in_time_moves_the_selection_with_it_and_removes_what_the_end_passes() {
+    let mut song = song();
+    song.put(Ticks(BAR * 5 / 2), 0.7);
+    song.select();
+    song.run(ids::STRETCH_TIME, json!({ "to_end": Ticks(BAR * 3) }));
+    // The breakpoint at bar 2 went to bar 3; the one at two and a half bars
+    // lay in the way.
+    assert_eq!(song.envelope(), vec![(0, 0.0), (1, 1.0), (3, 0.5)]);
+    let state: ArrangementState =
+        serde_json::from_value(song.run(view_ids::STATE, json!({}))).unwrap();
+    assert_eq!(
+        state.time_selection.map(|range| (range.start, range.end)),
+        Some((Ticks(BAR), Ticks(BAR * 3)))
+    );
+    assert_eq!(song.undo_steps()[0], "Stretch Automation in Time");
+}
+
+// Spec: automation-editing R16. Shift carries the breakpoints beyond.
+#[test]
+fn stretching_in_time_with_carry_moves_the_breakpoints_beyond_the_end_along() {
+    let mut song = song();
+    song.select();
+    song.run(
+        ids::STRETCH_TIME,
+        json!({ "to_end": Ticks(BAR * 3), "carry": true }),
+    );
+    assert_eq!(song.envelope(), vec![(0, 0.0), (1, 1.0), (3, 0.5)]);
+    song.run("edit.undo", json!({}));
+    song.put(Ticks(BAR * 3), 0.2);
+    song.select();
+    song.run(
+        ids::STRETCH_TIME,
+        json!({ "to_end": Ticks(BAR * 3), "carry": true }),
+    );
+    assert_eq!(
+        song.envelope(),
+        vec![(0, 0.0), (1, 1.0), (3, 0.5), (4, 0.2)]
+    );
+}
+
+// Spec: automation-editing R17.
+#[test]
+fn skewing_tilts_an_edge_across_the_span() {
+    let mut song = song();
+    song.put(Ticks(BAR + BAR / 2), 1.0);
+    song.select();
+    let was = song.position(Ticks(BAR + BAR / 2));
+    song.run(
+        ids::SKEW,
+        json!({ "edge": "top", "at_start": 1.0, "at_end": 0.0 }),
+    );
+    // Half way along, the top edge has come down to the middle.
+    assert!((song.position(Ticks(BAR + BAR / 2)) - was * 0.5).abs() < 1e-9);
+    // At the start nothing moved.
+    assert!((song.position(Ticks(BAR)) - was).abs() < 1e-9);
+    assert_eq!(song.undo_steps()[0], "Skew Automation");
+}
+
+// Spec: automation-editing R18.
+#[test]
+fn simplifying_keeps_the_edges_adds_nothing_and_is_one_undo_step() {
+    let mut song = song();
+    song.run(
+        "automation.delete",
+        json!({
+            "track": song.track,
+            "target": { "type": "mixer", "param": "volume" },
+        }),
+    );
+    let target = AutomationTarget::Mixer {
+        param: MixerParam::Volume,
+    };
+    let points: Vec<(Ticks, f64)> = (0..=200)
+        .map(|i| {
+            let along = f64::from(i) / 200.0;
+            (
+                Ticks((along * (BAR * 4) as f64) as i64),
+                0.5 + 0.4 * (along * 6.0).sin(),
+            )
+        })
+        .collect();
+    for (at, value) in &points {
+        song.put(*at, *value);
+    }
+    assert!(
+        !song.shell.can_invoke(ids::SIMPLIFY, &json!({})),
+        "no selection"
+    );
+    song.run(
+        view_ids::SELECT_TIME,
+        json!({ "start": Ticks::ZERO, "end": Ticks(BAR * 4 + 1), "lanes": [song.lane()] }),
+    );
+    assert!(song.shell.can_invoke(ids::SIMPLIFY, &json!({})));
+    let before = song
+        .doc()
+        .track(song.track)
+        .unwrap()
+        .automation_for(&target)
+        .unwrap()
+        .envelope
+        .clone();
+    let steps = song.undo_steps().len();
+    song.run(ids::SIMPLIFY, json!({}));
+    let after = &song
+        .doc()
+        .track(song.track)
+        .unwrap()
+        .automation_for(&target)
+        .unwrap()
+        .envelope;
+    assert!(after.points().len() < before.points().len());
+    assert_eq!(
+        after.points().next(),
+        before.points().next(),
+        "the first stays"
+    );
+    assert_eq!(
+        after.points().last(),
+        before.points().last(),
+        "the last stays"
+    );
+    let travel =
+        bl_shell::arrangement::automation::travel(song.doc(), song.shell.devices(), target);
+    for i in 0..400 {
+        let at = Ticks(i * BAR * 4 / 400);
+        let (a, b) = (after.value_at(at).unwrap(), before.value_at(at).unwrap());
+        assert!(
+            (travel.position(a) - travel.position(b)).abs() <= 0.005,
+            "at {at:?}"
+        );
+    }
+    let history = song.undo_steps();
+    assert_eq!(history.len(), steps + 1);
+    assert_eq!(history[0], "Simplify Envelope");
+}

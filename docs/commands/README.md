@@ -23506,6 +23506,85 @@ A region the import left out.
 
 </details>
 
+### `Shape`
+
+An automation shape: the waveforms `sine`, `triangle`, `sawtooth`, `inverse_sawtooth` and `square`, which run one cycle across the span between the bottom and top of the parameter's range; the ramps `rise` (from the value at the span's start to the top), `fall` (to the bottom), `rise_to` (from the bottom to the value at the span's end) and `fall_to` (from the top); and `adsr`.
+
+One of:
+
+- `"sine"`: One sine cycle, from the middle, rising first.
+- `"triangle"`: Bottom to top at the span's middle and back.
+- `"sawtooth"`: Bottom rising to top.
+- `"inverse_sawtooth"`: Top falling to bottom.
+- `"square"`: Top for the first half, bottom for the second.
+- `"rise"`: The value at the span's start, rising to the top.
+- `"fall"`: The value at the span's start, falling to the bottom.
+- `"rise_to"`: The bottom, rising to the value at the span's end.
+- `"fall_to"`: The top, falling to the value at the span's end.
+- `"adsr"`: Attack, decay, sustain and release.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "An automation shape: the waveforms `sine`, `triangle`, `sawtooth`, `inverse_sawtooth` and `square`, which run one cycle across the span between the bottom and top of the parameter's range; the ramps `rise` (from the value at the span's start to the top), `fall` (to the bottom), `rise_to` (from the bottom to the value at the span's end) and `fall_to` (from the top); and `adsr`.",
+  "oneOf": [
+    {
+      "const": "sine",
+      "description": "One sine cycle, from the middle, rising first.",
+      "type": "string"
+    },
+    {
+      "const": "triangle",
+      "description": "Bottom to top at the span's middle and back.",
+      "type": "string"
+    },
+    {
+      "const": "sawtooth",
+      "description": "Bottom rising to top.",
+      "type": "string"
+    },
+    {
+      "const": "inverse_sawtooth",
+      "description": "Top falling to bottom.",
+      "type": "string"
+    },
+    {
+      "const": "square",
+      "description": "Top for the first half, bottom for the second.",
+      "type": "string"
+    },
+    {
+      "const": "rise",
+      "description": "The value at the span's start, rising to the top.",
+      "type": "string"
+    },
+    {
+      "const": "fall",
+      "description": "The value at the span's start, falling to the bottom.",
+      "type": "string"
+    },
+    {
+      "const": "rise_to",
+      "description": "The bottom, rising to the value at the span's end.",
+      "type": "string"
+    },
+    {
+      "const": "fall_to",
+      "description": "The top, falling to the value at the span's end.",
+      "type": "string"
+    },
+    {
+      "const": "adsr",
+      "description": "Attack, decay, sustain and release.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `ShapePoint`
 
 One breakpoint of a Shaper's shape (R23): a place in the cycle, the output there, and the bend of the segment starting at it.
@@ -23774,6 +23853,37 @@ A device's sidechain section, as its left strip and the section show it (WP-2.19
     "listen"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `SkewEdge`
+
+Which edge of the box `automation.skew` tilts.
+
+One of:
+
+- `"top"`: The top edge, which starts at 1.
+- `"bottom"`: The bottom edge, which starts at 0.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Which edge of the box `automation.skew` tilts.",
+  "oneOf": [
+    {
+      "const": "top",
+      "description": "The top edge, which starts at 1.",
+      "type": "string"
+    },
+    {
+      "const": "bottom",
+      "description": "The bottom edge, which starts at 0.",
+      "type": "string"
+    }
+  ]
 }
 ```
 

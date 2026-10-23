@@ -888,6 +888,76 @@ fn the_tags_shortcuts_reach_their_commands() {
     assert_eq!(entry.win, vec!["Ctrl+E".to_owned()]);
 }
 
+// Spec: note-editing R35 to R41, R47 (WP-6.3). Join, Fit to Time Range and
+// Split Clip are bound in the note editor, ahead of the Arrangement's keys
+// they share (Consolidate on Cmd-J); the keys that run differently with
+// what is selected or held down are the note editor's own.
+#[test]
+fn the_note_operations_keys_reach_their_commands() {
+    let keymap = Keymap::live12();
+    let contexts = [
+        Context::NoteSelection,
+        Context::NoteEditor,
+        Context::ClipView,
+        Context::Global,
+    ];
+    for (platform, command, command_alt, command_shift) in [
+        (
+            Platform::Mac,
+            mods(true, false, false, false),
+            mods(true, false, true, false),
+            mods(true, false, false, true),
+        ),
+        (
+            Platform::Other,
+            mods(false, true, false, false),
+            mods(false, true, true, false),
+            mods(false, true, false, true),
+        ),
+    ] {
+        for (key, mods, expected) in [
+            (Key::J, command, "note.join"),
+            (Key::J, command_alt, "note.fit_to_time"),
+            (Key::E, command_shift, "note.split_clip"),
+        ] {
+            let hit = keymap
+                .resolve(platform, key, mods, &contexts)
+                .map(|hit| hit.command.id.clone());
+            assert_eq!(hit.as_deref(), Some(expected), "{platform:?} {key:?}");
+        }
+    }
+    for (id, status) in [
+        ("S-NOTE-007", "bound"),
+        ("S-NOTE-008", "bound"),
+        ("S-NOTE-036", "bound"),
+    ] {
+        let entry = keymap.entry_for(id).unwrap();
+        assert_eq!(entry.status, Status::Bound, "{id} is {status}");
+    }
+    for id in [
+        "S-NOTE-003",
+        "S-NOTE-004",
+        "S-NOTE-005",
+        "S-NOTE-006",
+        "S-NOTE-047",
+    ] {
+        let entry = keymap.entry_for(id).unwrap();
+        assert!(
+            matches!(entry.status, Status::Widget(_)),
+            "{id} is read by the note editor: {:?}",
+            entry.status
+        );
+    }
+    // Cmd-E isn't taken by anything wider in the note editor.
+    let plain = keymap.resolve(
+        Platform::Mac,
+        Key::E,
+        mods(true, false, false, false),
+        &contexts,
+    );
+    assert!(plain.is_none(), "the note editor reads Cmd-E itself");
+}
+
 // Spec: detail-views R1, R2, R5, R6, R11, R14. The detail views' seven
 // shortcuts, and Cmd+Option+3, are bound to the commands that carry them
 // out, on both platforms, in the contexts the spec gives.

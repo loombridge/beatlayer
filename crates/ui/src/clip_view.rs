@@ -41,7 +41,7 @@ use bl_shell::clip_view::{move_limits, notes_in_order, resize_limit, span};
 use bl_shell::context_menus;
 use bl_shell::menus::{Action, MenuItem, shown};
 use bl_shell::note_commands as ids;
-use bl_shell::note_commands::{ClipTab, NoteField};
+use bl_shell::note_commands::{ChopStep, ClipTab, NoteField};
 use bl_shell::{Area, GesturePhase, Invocation, Shell};
 use egui::{
     Align2, CursorIcon, Id, Key, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, WidgetInfo, WidgetType,
@@ -614,6 +614,57 @@ struct StripDrag {
     length: Ticks,
 }
 
+/// A chop Cmd-E opened: the notes were chopped on the grid, and Cmd with
+/// Up and Down keeps changing the parts, all one undo step until Cmd is
+/// released (note-editing R36).
+#[derive(Clone, Debug, PartialEq)]
+struct ChopRun {
+    /// The steps pressed since the chop.
+    steps: Vec<ChopStep>,
+}
+
+/// A drag of E across the note area: the line from where it began splits
+/// each note it crosses, where it crosses it (note-editing R33).
+#[derive(Clone, Debug, PartialEq)]
+struct SplitDrag {
+    clip: ClipId,
+    from: Pos2,
+    /// The clip's notes in order when the drag began, which the frames'
+    /// places name (the set changes under the drag as it goes).
+    notes: Vec<Note>,
+}
+
+/// A drag up or down with E and Option (Cmd, Ctrl on Windows) held, which
+/// chops the selected notes into more or fewer equal parts (note-editing
+/// R37).
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct ChopDrag {
+    clip: ClipId,
+    /// The height the drag began at.
+    from: f32,
+}
+
+/// What a drag in the stretch markers' band grabs (note-editing R43,
+/// R44).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StretchPart {
+    /// The marker at the time selection's start.
+    First,
+    /// The marker at its end.
+    Second,
+    /// The pseudo marker, at this tick between them.
+    Pseudo(Ticks),
+}
+
+/// A drag of a stretch marker: the time selection when it began, which
+/// every frame's `note.stretch` is measured from.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct StretchDrag {
+    clip: ClipId,
+    part: StretchPart,
+    range: (Ticks, Ticks),
+}
+
 /// The MIDI Note Editor's context menus: the one a note or the empty grid
 /// opens (C-NOTE) and the one a key in the piano ruler opens (C-KEYS). Each
 /// item runs the command its shortcut runs, and an item whose command isn't
@@ -638,9 +689,23 @@ impl NoteMenus {
     /// it, and the rest are drawn disabled and name their package.
     fn show(&self, ui: &mut Ui, shell: &Shell, menu: &[MenuItem], events: &mut Vec<UiEvent>) {
         let contexts = shell.note_menu_contexts();
+        let doc = shell.editor().document();
         for item in shown(menu) {
             if item.is_separator() {
                 ui.separator();
+                continue;
+            }
+            // Spec: note-editing R35, R41. Split Note(s) shows only while a
+            // note would be split, and Split Clip only for an Arrangement
+            // clip.
+            if (item.row == "C-NOTE-010"
+                && !bl_shell::clip_view::would_split(doc, shell.clip_view(), shell.arrangement()))
+                || (item.row == "C-NOTE-015"
+                    && shell
+                        .clip_view()
+                        .shown_session_clip(doc, shell.arrangement())
+                        .is_some())
+            {
                 continue;
             }
             // Spec: piano-roll R30, menus.md C-NOTE-014. Clip Markers is a
@@ -771,6 +836,148 @@ fn hit_strip(
             (x0.min(x1)..=x0.max(x1))
                 .contains(&pos.x)
                 .then_some(StripPart::LoopBody)
+        }
+    }
+}
+
+/// The band of the strip the stretch markers sit in: between the clip
+/// markers' flags and the loop brace (L-CLIP-020).
+fn stretch_band(strip: Rect) -> Rect {
+    Rect::from_min_max(
+        pos2(strip.left(), strip.top() + FLAG),
+        pos2(strip.right(), strip.bottom() - BRACE),
+    )
+}
+
+/// What a press in the stretch markers' band grabs: a marker at an end of
+/// `range`, or between them the pseudo marker under the pointer.
+fn hit_stretch(
+    strip: Rect,
+    grid: Rect,
+    start: Ticks,
+    length: Ticks,
+    range: (Ticks, Ticks),
+    pos: Pos2,
+) -> Option<StretchPart> {
+    if !stretch_band(strip).contains(pos) {
+        return None;
+    }
+    let x_of = |tick: Ticks| x_of_tick(grid, start, length, tick);
+    let near = |tick: Ticks| (x_of(tick) - pos.x).abs() <= HANDLE_GRAB;
+    if near(range.0) {
+        Some(StretchPart::First)
+    } else if near(range.1) {
+        Some(StretchPart::Second)
+    } else {
+        let at = tick_at(grid, start, length, pos.x);
+        (at > range.0 && at < range.1).then_some(StretchPart::Pseudo(at))
+    }
+}
+
+/// Where a split lands: at the pointer, or at the nearest grid line with
+/// Cmd (Ctrl on Windows) held (note-editing R33).
+fn split_tick(arrangement: &ArrangementView, doc: &Document, keys: EditKeys, at: Ticks) -> Ticks {
+    if keys.toggle {
+        arrangement.nearest_line(doc, at)
+    } else {
+        at
+    }
+}
+
+impl SplitDrag {
+    /// The drag's `note.split` for the pointer at `pos`: each note the line
+    /// from the press to the pointer crosses is split where it crosses the
+    /// note's row, or, where the line stays within the row, under the
+    /// pointer (note-editing R33).
+    #[expect(clippy::too_many_arguments, reason = "the drag's whole geometry")]
+    fn args(
+        &self,
+        arrangement: &ArrangementView,
+        doc: &Document,
+        keys: EditKeys,
+        grid: Rect,
+        rows: &KeyRows,
+        start: Ticks,
+        length: Ticks,
+        pos: Pos2,
+    ) -> Value {
+        let (low, high) = (self.from.y.min(pos.y), self.from.y.max(pos.y));
+        let cuts: Vec<Value> = self
+            .notes
+            .iter()
+            .enumerate()
+            .filter_map(|(place, note)| {
+                let rect = rows
+                    .y_of(grid, note.key)
+                    .map(|y| note_rect_at(grid, start, length, y, note))?;
+                if high < rect.top() || low > rect.bottom() {
+                    return None;
+                }
+                let middle = rect.center().y;
+                let x = if low < middle && middle < high {
+                    self.from.x
+                        + (pos.x - self.from.x) * (middle - self.from.y) / (pos.y - self.from.y)
+                } else {
+                    pos.x
+                };
+                let at = split_tick(arrangement, doc, keys, tick_at(grid, start, length, x));
+                Some(json!({ "note": place, "at": at }))
+            })
+            .collect();
+        json!({ "clip": self.clip, "cuts": cuts })
+    }
+}
+
+impl ChopDrag {
+    /// The number of parts the pointer at height `y` asks for: one more
+    /// for each 8 points dragged up, one fewer for each dragged down, from
+    /// 1 to 64, or with Shift the powers of two (note-editing R37).
+    fn parts(&self, y: f32, powers: bool) -> u32 {
+        let steps = ((self.from - y) / 8.0).floor() as i32;
+        if powers {
+            1 << steps.clamp(0, 6)
+        } else {
+            (1 + steps).clamp(1, 64) as u32
+        }
+    }
+}
+
+impl StretchDrag {
+    /// The drag's `note.stretch` for the pointer at tick `at`, measured from
+    /// the time selection the drag began on. A marker moves freely until it
+    /// reaches a grid line either side of where it began, and then snaps;
+    /// Cmd (Alt on Windows) or the grid off doesn't snap (R43).
+    fn args(
+        &self,
+        arrangement: &ArrangementView,
+        doc: &Document,
+        keys: EditKeys,
+        at: Ticks,
+    ) -> Value {
+        let (a, b) = self.range;
+        let target = |origin: Ticks| {
+            let (before, after) = arrangement.lines_around(doc, origin);
+            if at >= before && at <= after {
+                at
+            } else {
+                arrangement.snap_drag(doc, at, keys.bypass)
+            }
+        };
+        let from = json!({ "start": a, "end": b });
+        match self.part {
+            StretchPart::First => json!({
+                "clip": self.clip, "from": from, "to": { "start": target(a), "end": b },
+            }),
+            StretchPart::Second => json!({
+                "clip": self.clip, "from": from, "to": { "start": a, "end": target(b) },
+            }),
+            StretchPart::Pseudo(grab) => {
+                let point = target(grab).clamp(a + Ticks(1), (b - Ticks(1)).max(a + Ticks(1)));
+                json!({
+                    "clip": self.clip, "from": from, "to": from,
+                    "point": { "from": grab, "to": point },
+                })
+            }
         }
     }
 }
@@ -959,6 +1166,14 @@ pub struct ClipViewUi {
     lanes: LaneUi,
     /// The marquee under way: where it began, and where it is now.
     marquee: Option<(Pos2, Pos2)>,
+    /// The chop Cmd-E opened, while Cmd is held.
+    chop: Option<ChopRun>,
+    /// The E-drag under way that splits notes.
+    split_drag: Option<SplitDrag>,
+    /// The drag under way that chops notes into parts.
+    chop_drag: Option<ChopDrag>,
+    /// The drag under way in a stretch marker.
+    stretch_drag: Option<StretchDrag>,
     /// The Envelopes tab's editor.
     envelope: EnvelopeEditor,
     /// The Sample Editor, for an audio clip (WP-4.10).
@@ -978,6 +1193,10 @@ impl Default for ClipViewUi {
             strip_drag: None,
             lanes: LaneUi::default(),
             marquee: None,
+            chop: None,
+            split_drag: None,
+            chop_drag: None,
+            stretch_drag: None,
             envelope: EnvelopeEditor::default(),
             sample: SampleEditorUi::default(),
             menus: NoteMenus::default(),
@@ -986,6 +1205,16 @@ impl Default for ClipViewUi {
 }
 
 impl ClipViewUi {
+    /// Ends the chop Cmd-E opened, if one is open, as one undo step.
+    fn end_chop(&mut self, events: &mut Vec<UiEvent>) {
+        if self.chop.take().is_some() {
+            events.push(UiEvent::Gesture {
+                phase: GesturePhase::Commit,
+                invocation: None,
+            });
+        }
+    }
+
     /// What the Sample Editor built in its last frame (R22).
     #[must_use]
     pub fn sample_stats(&self) -> crate::sample_editor::Stats {
@@ -1060,6 +1289,10 @@ impl ClipViewUi {
             self.strip_drag = None;
             self.lanes.reset();
             self.marquee = None;
+            self.end_chop(events);
+            self.split_drag = None;
+            self.chop_drag = None;
+            self.stretch_drag = None;
             self.envelope.reset();
             return;
         };
@@ -1097,6 +1330,10 @@ impl ClipViewUi {
             self.strip_drag = None;
             self.lanes.reset();
             self.marquee = None;
+            self.end_chop(events);
+            self.split_drag = None;
+            self.chop_drag = None;
+            self.stretch_drag = None;
             self.envelope.reset();
         }
         let envelopes = shell.clip_view().tab() == ClipTab::Envelopes;
@@ -1129,6 +1366,7 @@ impl ClipViewUi {
                 &midi,
                 axis,
                 length,
+                None,
                 events,
             );
             let frame = clip_envelope::Frame {
@@ -1265,6 +1503,10 @@ impl ClipViewUi {
             self.strip_drag = None;
             self.lanes.reset();
             self.marquee = None;
+            self.end_chop(events);
+            self.split_drag = None;
+            self.chop_drag = None;
+            self.stretch_drag = None;
             self.envelope.reset();
             self.sample.reset();
         }
@@ -1316,6 +1558,12 @@ impl ClipViewUi {
         let grid = frame.layout.grid;
 
         self.paint_strip(painter, theme, strip, grid, midi, axis, length);
+        let range = shell
+            .clip_view()
+            .time_selection(shell.editor().document(), shell.arrangement());
+        if let Some(range) = range {
+            self.paint_stretch_markers(ui, theme, strip, grid, axis, length, range);
+        }
 
         // The key track: white and black keys, each named when its row has
         // the room, the C rows otherwise. Folded, only the rows that hold
@@ -1568,6 +1816,51 @@ impl ClipViewUi {
         );
     }
 
+    /// The stretch markers at the time selection's ends, and the pseudo
+    /// marker under the pointer while it is between them (note-editing
+    /// R42, R44).
+    #[expect(clippy::too_many_arguments, reason = "the strip's whole layout")]
+    fn paint_stretch_markers(
+        &self,
+        ui: &Ui,
+        theme: &Theme,
+        strip: Rect,
+        grid: Rect,
+        axis: Ticks,
+        length: Ticks,
+        range: (Ticks, Ticks),
+    ) {
+        let painter = ui.painter();
+        let band = stretch_band(strip);
+        let marker = |x: f32, colour: egui::Color32| {
+            painter.add(egui::Shape::convex_polygon(
+                vec![
+                    pos2(x - 3.0, band.top()),
+                    pos2(x + 3.0, band.top()),
+                    pos2(x, band.bottom()),
+                ],
+                colour,
+                Stroke::NONE,
+            ));
+        };
+        for tick in [range.0, range.1] {
+            marker(x_of_tick(grid, axis, length, tick), theme.colors.accent.0);
+        }
+        let pointer = ui.input(|i| i.pointer.hover_pos());
+        let pseudo = match (self.stretch_drag, pointer) {
+            (Some(drag), Some(pos)) if matches!(drag.part, StretchPart::Pseudo(_)) => Some(pos.x),
+            (None, Some(pos)) => matches!(
+                hit_stretch(strip, grid, axis, length, range, pos),
+                Some(StretchPart::Pseudo(_))
+            )
+            .then_some(pos.x),
+            _ => None,
+        };
+        if let Some(x) = pseudo {
+            marker(x, theme.colors.text_dim.0);
+        }
+    }
+
     /// The marker strip's, the note area's and the lanes' clicks, drags, and
     /// wheel, and the note-selection keys.
     #[expect(clippy::too_many_arguments, reason = "the editor's whole input")]
@@ -1592,6 +1885,7 @@ impl ClipViewUi {
         let grid = frame.layout.grid;
         // Spec: piano-roll R11. The marker strip's drags run the document's
         // clip commands, one gesture each.
+        let time = shell.clip_view().time_selection(doc, arrangement);
         self.strip_input(
             ui,
             doc,
@@ -1602,8 +1896,17 @@ impl ClipViewUi {
             midi,
             axis,
             length,
+            time,
             events,
         );
+        // Spec: note-editing R36. Releasing Cmd ends the chop Cmd-E opened.
+        if self.chop.is_some() && self.chop_drag.is_none() && !ui.input(|i| i.modifiers.command) {
+            self.chop = None;
+            events.push(UiEvent::Gesture {
+                phase: GesturePhase::Commit,
+                invocation: None,
+            });
+        }
         let response = ui.interact(
             grid,
             Id::new(("clip-view-grid", clip)),
@@ -1619,7 +1922,29 @@ impl ClipViewUi {
             self.lanes.leave_focus();
         }
 
+        // Spec: note-editing R33, R37. With Draw Mode off, E held changes
+        // what the pointer does: a click or drag splits the notes it crosses,
+        // and with Option (Cmd, Ctrl on Windows) held, a drag on a selected
+        // note chops the selected notes into parts.
+        let e_down = !draw_mode && ui.input(|i| i.key_down(Key::E));
         if response.drag_started()
+            && let Some(press) = ui.input(|i| i.pointer.press_origin())
+            && e_down
+        {
+            let on_selected = matches!(hit(press), Some((place, _)) if selected.contains(&place));
+            if (keys.copy || keys.toggle) && on_selected {
+                self.chop_drag = Some(ChopDrag {
+                    clip,
+                    from: press.y,
+                });
+            } else {
+                self.split_drag = Some(SplitDrag {
+                    clip,
+                    from: press,
+                    notes: notes.to_vec(),
+                });
+            }
+        } else if response.drag_started()
             && let Some(press) = ui.input(|i| i.pointer.press_origin())
             && !draw_mode
         {
@@ -1698,7 +2023,19 @@ impl ClipViewUi {
             }
         }
         if response.dragged() {
-            if let (Some(drag), Some(pos)) = (self.drag.as_ref(), pointer) {
+            if let (Some(drag), Some(pos)) = (self.split_drag.as_ref(), pointer) {
+                let args = drag.args(arrangement, doc, keys, grid, rows, start, length, pos);
+                gesture(events, GesturePhase::Update, ids::SPLIT, args);
+            } else if let (Some(drag), Some(pos)) = (self.chop_drag, pointer) {
+                let parts = drag.parts(pos.y, keys.extend);
+                gesture(
+                    events,
+                    GesturePhase::Update,
+                    ids::CHOP,
+                    json!({ "clip": drag.clip, "parts": parts }),
+                );
+                events.push(UiEvent::StatusHint(Some(format!("Chop: {parts} parts"))));
+            } else if let (Some(drag), Some(pos)) = (self.drag.as_ref(), pointer) {
                 let (id, args) =
                     drag.invocation(arrangement, doc, keys, grid, rows, start, length, pos);
                 gesture(events, GesturePhase::Update, id, args);
@@ -1738,7 +2075,13 @@ impl ClipViewUi {
             // A drag on a MIDI Tool's control that Esc ended (the MIDI Tools
             // spec, R22) has put the notes back already.
             let tool = crate::tool_panel::took_escape(ui.ctx());
-            if note || lanes == Cancelled::Gesture {
+            let split = self.split_drag.take().is_some();
+            let chopping = self.chop_drag.take().is_some();
+            let chopped = self.chop.take().is_some();
+            if chopping {
+                events.push(UiEvent::StatusHint(None));
+            }
+            if note || lanes == Cancelled::Gesture || split || chopping || chopped {
                 events.push(UiEvent::Gesture {
                     phase: GesturePhase::Cancel,
                     invocation: None,
@@ -1759,6 +2102,28 @@ impl ClipViewUi {
             }
         }
         if response.drag_stopped() {
+            if let Some(drag) = self.split_drag.take() {
+                let last = pointer.map(|pos| {
+                    let args = drag.args(arrangement, doc, keys, grid, rows, start, length, pos);
+                    Invocation::new(ids::SPLIT, args)
+                });
+                events.push(UiEvent::Gesture {
+                    phase: GesturePhase::Commit,
+                    invocation: last,
+                });
+            }
+            if let Some(drag) = self.chop_drag.take() {
+                let last = pointer.map(|pos| {
+                    let parts = drag.parts(pos.y, keys.extend);
+                    Invocation::new(ids::CHOP, json!({ "clip": drag.clip, "parts": parts }))
+                });
+                self.chop = None;
+                events.push(UiEvent::StatusHint(None));
+                events.push(UiEvent::Gesture {
+                    phase: GesturePhase::Commit,
+                    invocation: last,
+                });
+            }
             let last = match (self.drag.as_ref(), pointer) {
                 (Some(drag), Some(pos)) => {
                     let (id, args) =
@@ -1788,59 +2153,73 @@ impl ClipViewUi {
             && let Some(pos) = response.interact_pointer_pos()
         {
             let place = hit(pos).map(|(place, _)| place);
-            match (draw_mode, place) {
-                // Spec: piano-roll R8. With Draw Mode on, clicking a note
-                // removes it and clicking empty grid draws one grid step
-                // long.
-                (true, Some(place)) => events.push(UiEvent::Invoke(Invocation::new(
-                    ids::DELETE_NOTES,
-                    json!({ "clip": clip, "notes": [place] }),
-                ))),
-                (true, None) => {
-                    let step = arrangement.grid_ticks(doc);
-                    let at = arrangement.snap_drag(
-                        doc,
-                        tick_at(grid, start, length, pos.x),
-                        keys.bypass,
-                    );
-                    // Folded, a click draws on the rows that show.
-                    if let Some(key) = rows.key_at(grid, pos.y) {
-                        let key = key.round().clamp(0.0, 127.0) as u8;
+            if e_down {
+                // Spec: note-editing R33. E and a click splits the note
+                // where it was clicked, at the nearest grid line with Cmd
+                // (Ctrl on Windows) held.
+                if let Some(place) = place {
+                    let at =
+                        split_tick(arrangement, doc, keys, tick_at(grid, start, length, pos.x));
+                    events.push(UiEvent::Invoke(Invocation::new(
+                        ids::SPLIT,
+                        json!({ "clip": clip, "cuts": [{ "note": place, "at": at }] }),
+                    )));
+                }
+            } else {
+                match (draw_mode, place) {
+                    // Spec: piano-roll R8. With Draw Mode on, clicking a note
+                    // removes it and clicking empty grid draws one grid step
+                    // long.
+                    (true, Some(place)) => events.push(UiEvent::Invoke(Invocation::new(
+                        ids::DELETE_NOTES,
+                        json!({ "clip": clip, "notes": [place] }),
+                    ))),
+                    (true, None) => {
+                        let step = arrangement.grid_ticks(doc);
+                        let at = arrangement.snap_drag(
+                            doc,
+                            tick_at(grid, start, length, pos.x),
+                            keys.bypass,
+                        );
+                        // Folded, a click draws on the rows that show.
+                        if let Some(key) = rows.key_at(grid, pos.y) {
+                            let key = key.round().clamp(0.0, 127.0) as u8;
+                            events.push(UiEvent::Invoke(Invocation::new(
+                                ids::ADD_NOTE,
+                                json!({ "clip": clip, "key": key, "start": at, "length": step }),
+                            )));
+                        }
+                    }
+                    // Spec: piano-roll R5, R26. With Draw Mode off, clicking a
+                    // note selects it alone, Cmd-click (Ctrl-click) and
+                    // Shift-click add or remove it, and clicking empty grid
+                    // clears the selection.
+                    (false, Some(place)) => events.push(UiEvent::Invoke(Invocation::new(
+                        ids::SELECT_NOTES,
+                        json!({
+                            "clip": clip,
+                            "notes": [place],
+                            "mode": if keys.toggle || keys.extend { "toggle" } else { "replace" },
+                        }),
+                    ))),
+                    // Spec: piano-roll R23. Clicking empty grid places the
+                    // insert marker on the nearest grid line, and clears the
+                    // time selection.
+                    (false, None) => {
+                        let at = arrangement.snap_drag(
+                            doc,
+                            tick_at(grid, start, length, pos.x),
+                            keys.bypass,
+                        );
                         events.push(UiEvent::Invoke(Invocation::new(
-                            ids::ADD_NOTE,
-                            json!({ "clip": clip, "key": key, "start": at, "length": step }),
+                            ids::SELECT_NOTES,
+                            json!({ "clip": clip, "notes": [], "mode": "replace" }),
+                        )));
+                        events.push(UiEvent::Invoke(Invocation::new(
+                            "clip_view.set_insert_marker",
+                            json!({ "clip": clip, "beat": at }),
                         )));
                     }
-                }
-                // Spec: piano-roll R5, R26. With Draw Mode off, clicking a
-                // note selects it alone, Cmd-click (Ctrl-click) and
-                // Shift-click add or remove it, and clicking empty grid
-                // clears the selection.
-                (false, Some(place)) => events.push(UiEvent::Invoke(Invocation::new(
-                    ids::SELECT_NOTES,
-                    json!({
-                        "clip": clip,
-                        "notes": [place],
-                        "mode": if keys.toggle || keys.extend { "toggle" } else { "replace" },
-                    }),
-                ))),
-                // Spec: piano-roll R23. Clicking empty grid places the
-                // insert marker on the nearest grid line, and clears the
-                // time selection.
-                (false, None) => {
-                    let at = arrangement.snap_drag(
-                        doc,
-                        tick_at(grid, start, length, pos.x),
-                        keys.bypass,
-                    );
-                    events.push(UiEvent::Invoke(Invocation::new(
-                        ids::SELECT_NOTES,
-                        json!({ "clip": clip, "notes": [], "mode": "replace" }),
-                    )));
-                    events.push(UiEvent::Invoke(Invocation::new(
-                        "clip_view.set_insert_marker",
-                        json!({ "clip": clip, "beat": at }),
-                    )));
                 }
             }
         }
@@ -2037,6 +2416,45 @@ impl ClipViewUi {
             // The key that adds to the selection while jumping (S-NOTE-043).
             let adding = if mac { alt && shift } else { ctrl && shift };
             match key {
+                // Spec: note-editing R35, R36. Cmd-E splits at the insert
+                // marker or the time selection's edges, or with notes
+                // selected chops them on the grid and opens the chop the
+                // arrows then change while Cmd stays held.
+                Key::E if modifiers.command && !alt && !shift => {
+                    if selected.is_empty() {
+                        events.push(UiEvent::Invoke(Invocation::new(
+                            ids::SPLIT,
+                            json!({ "clip": clip }),
+                        )));
+                    } else {
+                        self.chop = Some(ChopRun { steps: Vec::new() });
+                        gesture(
+                            events,
+                            GesturePhase::Update,
+                            ids::CHOP,
+                            json!({ "clip": clip }),
+                        );
+                    }
+                }
+                Key::ArrowUp | Key::ArrowDown
+                    if modifiers.command && !alt && self.chop.is_some() =>
+                {
+                    let step = match (key == Key::ArrowUp, shift) {
+                        (true, false) => ChopStep::More,
+                        (false, false) => ChopStep::Fewer,
+                        (true, true) => ChopStep::NextPower,
+                        (false, true) => ChopStep::PreviousPower,
+                    };
+                    if let Some(run) = self.chop.as_mut() {
+                        run.steps.push(step);
+                        gesture(
+                            events,
+                            GesturePhase::Update,
+                            ids::CHOP,
+                            json!({ "clip": clip, "steps": run.steps }),
+                        );
+                    }
+                }
                 Key::ArrowLeft | Key::ArrowRight => {
                     let forward = key == Key::ArrowRight;
                     if jump && shift {
@@ -2231,6 +2649,7 @@ impl ClipViewUi {
         midi: &MidiData,
         axis: Ticks,
         length: Ticks,
+        stretch: Option<(Ticks, Ticks)>,
         events: &mut Vec<UiEvent>,
     ) {
         let response = ui.interact(
@@ -2239,7 +2658,16 @@ impl ClipViewUi {
             Sense::click_and_drag(),
         );
         let keys = EditKeys::from(ui.input(|i| i.modifiers));
+        // Spec: note-editing R42 to R44. The stretch markers sit at the
+        // time selection's ends, in the band between the clip markers and
+        // the loop brace; a pointer between them shows the pseudo marker.
         if response.drag_started()
+            && let Some(press) = ui.input(|i| i.pointer.press_origin())
+            && let Some(range) = stretch
+            && let Some(part) = hit_stretch(strip, grid, axis, length, range, press)
+        {
+            self.stretch_drag = Some(StretchDrag { clip, part, range });
+        } else if response.drag_started()
             && let Some(press) = ui.input(|i| i.pointer.press_origin())
             && let Some(part) = hit_strip(strip, grid, axis, length, midi, press)
         {
@@ -2259,19 +2687,38 @@ impl ClipViewUi {
             .interact_pointer_pos()
             .or_else(|| ui.input(|i| i.pointer.interact_pos()));
         if response.dragged()
+            && let (Some(drag), Some(pos)) = (self.stretch_drag, pointer)
+        {
+            let args = drag.args(arrangement, doc, keys, tick_at(grid, axis, length, pos.x));
+            gesture(events, GesturePhase::Update, ids::STRETCH, args);
+        } else if response.dragged()
             && let (Some(drag), Some(pos)) = (self.strip_drag, pointer)
         {
             let (id, args) = drag.invocation(arrangement, doc, keys, grid, pos);
             gesture(events, GesturePhase::Update, id, args);
         }
-        if self.strip_drag.is_some() && ui.input(|i| i.key_pressed(Key::Escape)) {
+        if (self.strip_drag.is_some() || self.stretch_drag.is_some())
+            && ui.input(|i| i.key_pressed(Key::Escape))
+        {
             self.strip_drag = None;
+            self.stretch_drag = None;
             events.push(UiEvent::Gesture {
                 phase: GesturePhase::Cancel,
                 invocation: None,
             });
         }
-        if response.drag_stopped() {
+        if response.drag_stopped()
+            && let Some(drag) = self.stretch_drag.take()
+        {
+            let last = pointer.map(|pos| {
+                let args = drag.args(arrangement, doc, keys, tick_at(grid, axis, length, pos.x));
+                Invocation::new(ids::STRETCH, args)
+            });
+            events.push(UiEvent::Gesture {
+                phase: GesturePhase::Commit,
+                invocation: last,
+            });
+        } else if response.drag_stopped() {
             let last = match (self.strip_drag, pointer) {
                 (Some(drag), Some(pos)) => {
                     let (id, args) = drag.invocation(arrangement, doc, keys, grid, pos);
@@ -2287,7 +2734,9 @@ impl ClipViewUi {
             }
         }
         if let Some(hover) = response.hover_pos()
-            && hit_strip(strip, grid, axis, length, midi, hover).is_some()
+            && (stretch.is_some_and(|range| {
+                hit_stretch(strip, grid, axis, length, range, hover).is_some()
+            }) || hit_strip(strip, grid, axis, length, midi, hover).is_some())
         {
             ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
         }

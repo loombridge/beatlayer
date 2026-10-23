@@ -6215,6 +6215,40 @@ impl Shell {
         Ok(())
     }
 
+    /// Split Clip (note-editing R41): `arrangement.split` on the clip the
+    /// Clip View shows at the editor's time selection, then the part
+    /// inside the selection is selected.
+    fn split_shown_clip(&mut self) -> Result<Value, ShellError> {
+        let id = note_ids::SPLIT_CLIP;
+        let (args, clip, (from, to)) =
+            clip_view::split_clip_plan(self.editor.document(), &self.clip_view, &self.arrangement)
+                .map_err(|failure| edit_error(id, failure))?;
+        let track = self.editor.document().clip_track(clip);
+        let mut result = self.run_command(edit_ids::SPLIT, args)?;
+        let doc = self.editor.document();
+        let inside: Vec<_> = track
+            .and_then(|track| doc.track(track))
+            .map(|track| {
+                track
+                    .clips()
+                    .filter(|part| part.start >= from && part.end() <= to)
+                    .map(|part| part.id)
+                    .collect()
+            })
+            .unwrap_or_default();
+        if !inside.is_empty() {
+            if let Some(fields) = result.as_object_mut() {
+                fields.insert(
+                    "selected_clips".to_owned(),
+                    serde_json::to_value(&inside).unwrap_or(Value::Null),
+                );
+            }
+            self.arrangement.select_clips(doc, inside);
+        }
+        self.touch();
+        Ok(result)
+    }
+
     /// Opens a gesture, such as a drag on a value field: the document
     /// commands it runs until [`Shell::end_gesture`] are one undo step,
     /// named `label` (such as "Change tempo"). A gesture already open
@@ -8291,6 +8325,9 @@ impl Shell {
             }
             self.touch();
             return result;
+        }
+        if id == note_ids::SPLIT_CLIP {
+            return self.split_shown_clip();
         }
         if note_ids::handles(id) {
             // Spec: piano-roll. The Clip View's note edits.

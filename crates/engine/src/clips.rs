@@ -36,14 +36,15 @@ use bl_core::time::{SampleRate, TempoMap, Ticks};
 use bl_media::stream::{AudioSource, MemorySource, PlanarMut, Source, StreamConfig, Transition};
 use bl_media::{MediaStore, SampleData, StreamId, Streamer, StreamerStats, convert_sample_rate};
 use bl_model::{
-    AudioData, Clip, ClipData, ClipId, ContentHash, SampleEdit, SampleEditKind, SceneId, Track,
-    TrackId, WarpMode,
+    AudioData, Clip, ClipData, ClipId, ContentHash, SampleEdit, SampleEditKind, Scale, SceneId,
+    Track, TrackId, WarpMode,
 };
 
 use crate::clip_sound::ClipSound;
 use crate::clip_source::ClipSource;
 use crate::mixer::{Ramp, scale, smoothing_frames};
 use crate::node::{Block, Node, NodeConfig, NodeData, NodeEvent, ParamValue, segments};
+use crate::scales::{ScaleRuns, Span, TrackScale};
 use crate::sources::{Bank, ClipSources, Handoff, Supply};
 use crate::warped::{
     BeatsMedia, CUE_BACK, Flat, Histories, History, Past, Playing, PoolSpec, Positions, Stretchers,
@@ -720,6 +721,9 @@ pub(crate) struct PlacedClip {
     /// of the track's clips that can sound at once have different lanes, so
     /// they never share a stretcher.
     lane: u16,
+    /// The clip's scale, which the devices on its track read while it plays
+    /// (the scales spec, R15). It changes none of the clip's audio.
+    scale: Scale,
 }
 
 /// How a clip's fades are shaped and where they reach (R23, R24). A clip with
@@ -1163,6 +1167,7 @@ impl ClipList {
                     playing: Playing::of(clip.id.0.get(), audio),
                     past,
                     lane: 0,
+                    scale: clip.scale,
                 },
                 source,
                 history,
@@ -1246,6 +1251,7 @@ impl ClipList {
                     playing: Playing::of(clip.id.0.get(), audio),
                     past,
                     lane: 0,
+                    scale: clip.scale,
                 },
                 source,
                 history,
@@ -1382,6 +1388,10 @@ pub struct ClipPlayer {
     audible: bool,
     gate: Ramp,
     smoothing: u32,
+    /// What the player keeps of its track's scale between blocks, and the
+    /// scale it worked out for the last block (the scales spec, R15).
+    scale: TrackScale,
+    runs: Option<ScaleRuns>,
 }
 
 /// A clip player's parameters.
@@ -1412,7 +1422,30 @@ impl ClipPlayer {
             audible: true,
             gate: Ramp::at(1.0),
             smoothing: smoothing_frames(config.sample_rate),
+            scale: TrackScale::default(),
+            runs: None,
         }
+    }
+
+    /// Works out the track's scale over `block` from the clips it plays.
+    fn work_out_scale(&mut self, block: &Block<'_>) {
+        let Self {
+            clips, scale, runs, ..
+        } = self;
+        *runs = Some(
+            match clips.as_ref().and_then(|d| d.downcast_ref::<ClipList>()) {
+                Some(list) => {
+                    let spans = list.clips.iter().map(|clip| Span {
+                        scene: clip.scene,
+                        start: clip.geometry.start + clip.shape.lead as i64,
+                        end: clip.geometry.end - clip.shape.tail as i64,
+                        scale: clip.scale,
+                    });
+                    scale.runs(list.track, spans, block)
+                }
+                None => ScaleRuns::of(block.set_scale()),
+            },
+        );
     }
 
     /// The same player, its clips heard or not, resting there.
@@ -1646,6 +1679,7 @@ fn render_warped(
 
 impl Node for ClipPlayer {
     fn process(&mut self, block: &mut Block<'_>) {
+        self.work_out_scale(block);
         let transport = block.transport();
         // Spec: audio-clips R1
         if !transport.playing {
@@ -2029,6 +2063,10 @@ impl Node for ClipPlayer {
     fn playing_clip(&self) -> bool {
         self.playing_clip
     }
+
+    fn track_scale(&self) -> Option<ScaleRuns> {
+        self.runs
+    }
 }
 
 #[cfg(test)]
@@ -2079,6 +2117,7 @@ mod tests {
             },
             past: None,
             lane: 0,
+            scale: Scale::default(),
         }
     }
 

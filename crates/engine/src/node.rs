@@ -7,11 +7,12 @@ use std::sync::LazyLock;
 
 use bl_core::midi::MidiMessage;
 use bl_core::time::{Frames, SampleRate, TempoMap, TimeSignatureMap};
-use bl_model::{ChainId, DeviceId, ParamId, TrackId};
+use bl_model::{ChainId, DeviceId, ParamId, Scale, TrackId};
 use rtgc::{ArcGc, LocalRtGc};
 
 use crate::display::DisplayReader;
 use crate::modbus::{Bus, Control, ROWS};
+use crate::scales::{OFF, ScaleRuns};
 use crate::session::SessionPlayback;
 
 /// What a node is in the document, which stays the same from one compile to
@@ -504,6 +505,14 @@ pub trait Node: Send + 'static {
         false
     }
 
+    /// The scale of the clip playing on the node's track over the block it
+    /// last processed (the scales spec, R15): a track's clip player says so,
+    /// and the engine hands it to every device on the track. The default is
+    /// none, which leaves the set's current scale.
+    fn track_scale(&self) -> Option<ScaleRuns> {
+        None
+    }
+
     /// Calls `report` for each parameter the node's last block played under
     /// modulation (WP-5.9), with its base and the value it played, so the
     /// engine can publish them. The default reports none.
@@ -582,6 +591,12 @@ pub struct Block<'a> {
     /// The set's Global Amount of groove, 1 at 100 % and up to 1.3 (the
     /// grooves spec, R21).
     pub(crate) groove_amount: f32,
+    /// The set's current scale (the scales spec, R9): what a track with no
+    /// clip playing on it reads.
+    pub(crate) set_scale: Scale,
+    /// The scale of the clip playing on the node's track over this block, or
+    /// the set's where none plays (the scales spec, R15).
+    pub(crate) scale: ScaleRuns,
     /// What the modulators wrote for the frames of this block (WP-5.10).
     pub(crate) modulation: Bus<'a>,
     /// Where a modulator driven by audio, notes or MIDI writes its rows
@@ -646,6 +661,8 @@ impl<'a> Block<'a> {
             notes_out: None,
             session: &[],
             groove_amount: 1.0,
+            set_scale: OFF,
+            scale: ScaleRuns::of(OFF),
             modulation: Bus::EMPTY,
             rows: None,
         }
@@ -713,6 +730,24 @@ impl<'a> Block<'a> {
             groove_amount,
             ..self
         }
+    }
+
+    /// The same block with the set's current scale, which a track with no
+    /// clip playing reads as its own. For tests of nodes outside a program.
+    #[must_use]
+    pub fn with_set_scale(self, set_scale: Scale) -> Self {
+        Self {
+            set_scale,
+            scale: ScaleRuns::of(set_scale),
+            ..self
+        }
+    }
+
+    /// The same block with the scale of the track's playing clip over it.
+    /// For tests of nodes outside a program.
+    #[must_use]
+    pub fn with_scale(self, scale: ScaleRuns) -> Self {
+        Self { scale, ..self }
     }
 
     /// The same block with a sidechain signal: planar, with the block's
@@ -835,6 +870,22 @@ impl<'a> Block<'a> {
     /// as the Arpeggiator's does, reads it here, with every block.
     pub fn groove_amount(&self) -> f32 {
         self.groove_amount
+    }
+
+    /// The set's current scale (the scales spec, R9).
+    #[must_use]
+    pub fn set_scale(&self) -> Scale {
+        self.set_scale
+    }
+
+    /// The node's current scale at `offset` frames into the block (the
+    /// scales spec, R15): the scale of the clip playing on its track, or
+    /// the set's current scale, or the chromatic one where Scale Mode is
+    /// off. It changes on the frame a clip starts or stops. Reading it
+    /// allocates, locks and blocks nothing.
+    #[must_use]
+    pub fn scale_at(&self, offset: usize) -> Scale {
+        self.scale.at(offset)
     }
 
     /// The Session clip that sets `list`'s parameters in this block

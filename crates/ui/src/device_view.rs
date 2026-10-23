@@ -133,7 +133,7 @@ pub fn window_frame_id(device: DeviceId) -> Id {
 /// Where a floating device's Dock button sits in its window at `rect`.
 #[must_use]
 pub fn dock_rect(rect: Rect) -> Rect {
-    window_layout(rect, false, false)
+    window_layout(rect, false, false, false)
         .1
         .dock
         .expect("a window has a Dock button")
@@ -558,12 +558,13 @@ impl DeviceViewUi {
         };
         let text_colour = if frame.selected { c.window.0 } else { c.text.0 };
         let plugin = is_plugin(frame);
+        let switch = frame.title_switch().is_some();
         let (bar, mut controls) = if strip {
             folded_layout(rect)
         } else if window {
-            window_layout(rect, frame.expandable, plugin)
+            window_layout(rect, frame.expandable, plugin, switch)
         } else {
-            unfolded_layout(rect, frame.expandable, plugin)
+            unfolded_layout(rect, frame.expandable, plugin, switch)
         };
         if strip && frame.rack.is_some() {
             // A rack's strip holds its view selectors under the activator.
@@ -666,6 +667,9 @@ impl DeviceViewUi {
                 }
                 if let Some(configure) = controls.configure {
                     self.configure_switch(ui, theme, frame, configure, events);
+                }
+                if let (Some(rect), Some(switch)) = (controls.switch, frame.title_switch()) {
+                    self.title_switch(ui, theme, frame, &switch, rect, events);
                 }
                 self.round_button(ui, theme, frame, "hot_swap", controls.hot_swap, events);
                 self.round_button(ui, theme, frame, "save", controls.save, events);
@@ -921,6 +925,78 @@ impl DeviceViewUi {
             }
             node.set_description(
                 "Shows or hides the plug-in's own panel in a floating window".to_owned(),
+            );
+        });
+    }
+
+    /// The switch a device draws in its title bar (L-DEV-004): Use Current
+    /// Scale on Arpeggiator, Chord, Pitch, Random and Scale. A round button
+    /// lit while the parameter is on; clicking it runs `device.set_param`,
+    /// and assistive technology reads it as a switch.
+    fn title_switch(
+        &self,
+        ui: &mut Ui,
+        theme: &Theme,
+        frame: &DeviceFrame,
+        switch: &bl_shell::device_commands::TitleSwitch<'_>,
+        rect: Rect,
+        events: &mut Vec<UiEvent>,
+    ) {
+        let id = control_id(frame.id, "title_switch");
+        let response = ui.interact(rect, id, Sense::click());
+        crate::focus::register(ui.ctx(), id, Area::Detail, None);
+        if response.clicked() || (response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter))) {
+            let value = if switch.on { 0.0 } else { 1.0 };
+            invoke(
+                events,
+                "device.set_param",
+                json!({ "device": frame.id, "param": switch.param, "value": value }),
+            );
+        }
+        let c = &theme.colors;
+        let painter = ui.painter_at(rect.expand(2.0));
+        let centre = rect.center();
+        let r = rect.width() / 2.0;
+        let face = if switch.on {
+            c.accent.0
+        } else if response.hovered() {
+            c.control_hover.0
+        } else {
+            c.window.0
+        };
+        painter.circle_filled(centre, r, face);
+        let ink = if switch.on {
+            c.accent_text.0
+        } else {
+            c.text_dim.0
+        };
+        let stroke = Stroke::new(1.0, ink);
+        // Three rising steps, standing for the notes of a scale.
+        for step in 0..3 {
+            let x = centre.x - r * 0.5 + step as f32 * r * 0.5;
+            painter.line_segment(
+                [
+                    pos2(x, centre.y + r * 0.45),
+                    pos2(x, centre.y + r * 0.45 - (step + 1) as f32 * r * 0.35),
+                ],
+                stroke,
+            );
+        }
+        focus_ring(ui, theme, rect, &response);
+        let name = switch.name.to_owned();
+        let on = switch.on;
+        response.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, true, on, &name));
+        ui.ctx().accesskit_node_builder(id, |node| {
+            node.set_role(Role::Switch);
+            node.set_label(switch.name.to_owned());
+            node.set_value(if on { "on" } else { "off" }.to_owned());
+            node.set_toggled(if on {
+                egui::accesskit::Toggled::True
+            } else {
+                egui::accesskit::Toggled::False
+            });
+            node.set_description(
+                "Counts the device's pitch controls in degrees of the current scale".to_owned(),
             );
         });
     }
@@ -1559,6 +1635,9 @@ struct Controls {
     /// A plug-in device's Configure switch, after the window button and
     /// before the name (L-DEV-010, manual 24.1.2; WP-5.40).
     configure: Option<Rect>,
+    /// The switch a device draws in its title bar, such as Use Current Scale
+    /// (L-DEV-004), before the name.
+    switch: Option<Rect>,
     title: Rect,
     hot_swap: Rect,
     save: Rect,
@@ -1574,7 +1653,7 @@ const BUTTON: f32 = 11.0;
 /// toggle where the device has an expanded part, a plug-in's window button,
 /// the name, then Hot-Swap Presets, Save Preset, and Show Options at the
 /// right.
-fn unfolded_layout(rect: Rect, expandable: bool, plugin: bool) -> (Rect, Controls) {
+fn unfolded_layout(rect: Rect, expandable: bool, plugin: bool, switch: bool) -> (Rect, Controls) {
     let bar = Rect::from_min_size(rect.min, vec2(rect.width(), TITLE_BAR_HEIGHT));
     let y = bar.center().y;
     let button = |x: f32| Rect::from_center_size(pos2(x, y), vec2(BUTTON, BUTTON));
@@ -1587,9 +1666,18 @@ fn unfolded_layout(rect: Rect, expandable: bool, plugin: bool) -> (Rect, Control
     let wrench = plugin.then(|| button(expand.unwrap_or(activator).right() + 3.0 + BUTTON / 2.0));
     let configure =
         plugin.then(|| button(wrench.unwrap_or(activator).right() + 3.0 + BUTTON / 2.0));
+    let switch = switch.then(|| {
+        button(configure.or(wrench).or(expand).unwrap_or(activator).right() + 3.0 + BUTTON / 2.0)
+    });
     let title = Rect::from_min_max(
         pos2(
-            configure.or(wrench).or(expand).unwrap_or(activator).right() + 4.0,
+            switch
+                .or(configure)
+                .or(wrench)
+                .or(expand)
+                .unwrap_or(activator)
+                .right()
+                + 4.0,
             bar.top(),
         ),
         pos2(hot_swap.left() - 4.0, bar.bottom()),
@@ -1601,6 +1689,7 @@ fn unfolded_layout(rect: Rect, expandable: bool, plugin: bool) -> (Rect, Control
             expand,
             wrench,
             configure,
+            switch,
             title,
             hot_swap,
             save,
@@ -1612,11 +1701,11 @@ fn unfolded_layout(rect: Rect, expandable: bool, plugin: bool) -> (Rect, Control
 
 /// A floating window's frame: the unfolded title bar along its top, with
 /// the Dock button at its right end, after Show Options.
-fn window_layout(rect: Rect, expandable: bool, plugin: bool) -> (Rect, Controls) {
+fn window_layout(rect: Rect, expandable: bool, plugin: bool, switch: bool) -> (Rect, Controls) {
     let step = BUTTON + 3.0;
     let mut narrower = rect;
     narrower.max.x -= step;
-    let (_, mut controls) = unfolded_layout(narrower, expandable, plugin);
+    let (_, mut controls) = unfolded_layout(narrower, expandable, plugin, switch);
     let bar = Rect::from_min_size(rect.min, vec2(rect.width(), TITLE_BAR_HEIGHT));
     controls.dock = Some(Rect::from_center_size(
         pos2(bar.right() - 2.0 - BUTTON / 2.0, bar.center().y),
@@ -1646,6 +1735,7 @@ fn folded_layout(rect: Rect) -> (Rect, Controls) {
             expand: None,
             wrench: None,
             configure: None,
+            switch: None,
             title,
             hot_swap,
             save,
@@ -1782,7 +1872,7 @@ pub fn activator_rect(frame: Rect, folded: bool) -> Rect {
     if folded {
         folded_layout(frame).1.activator
     } else {
-        unfolded_layout(frame, false, false).1.activator
+        unfolded_layout(frame, false, false, false).1.activator
     }
 }
 
@@ -1792,7 +1882,7 @@ pub fn title_rect(frame: Rect, folded: bool) -> Rect {
     if folded {
         folded_layout(frame).1.title
     } else {
-        unfolded_layout(frame, false, false).1.title
+        unfolded_layout(frame, false, false, false).1.title
     }
 }
 
@@ -1803,7 +1893,7 @@ pub fn button_rects(frame: Rect, folded: bool) -> [Rect; 3] {
     let controls = if folded {
         folded_layout(frame).1
     } else {
-        unfolded_layout(frame, false, false).1
+        unfolded_layout(frame, false, false, false).1
     };
     [controls.hot_swap, controls.save, controls.options]
 }
@@ -1812,7 +1902,7 @@ pub fn button_rects(frame: Rect, folded: bool) -> [Rect; 3] {
 /// L-DEV-010) sits in its unfolded frame.
 #[must_use]
 pub fn plugin_window_rect(frame: Rect, expandable: bool) -> Rect {
-    unfolded_layout(frame, expandable, true)
+    unfolded_layout(frame, expandable, true, false)
         .1
         .wrench
         .expect("a plug-in's title bar has the window button")
@@ -1822,10 +1912,20 @@ pub fn plugin_window_rect(frame: Rect, expandable: bool) -> Rect {
 /// L-DEV-010, manual 24.1.2).
 #[must_use]
 pub fn plugin_configure_rect(frame: Rect, expandable: bool) -> Rect {
-    unfolded_layout(frame, expandable, true)
+    unfolded_layout(frame, expandable, true, false)
         .1
         .configure
         .expect("a plug-in's title bar has the Configure switch")
+}
+
+/// The rect of the switch in a device's title bar (L-DEV-004), such as Use
+/// Current Scale, in its unfolded frame.
+#[must_use]
+pub fn title_switch_rect(frame: Rect, expandable: bool) -> Rect {
+    unfolded_layout(frame, expandable, false, true)
+        .1
+        .switch
+        .expect("a title bar asked for a switch has it")
 }
 
 /// Whether a frame is a plug-in device's, whose title bar has the window

@@ -13,7 +13,7 @@ use schemars::{JsonSchema, Schema, schema_for};
 use serde::{Deserialize, Serialize};
 
 use crate::automation::{AutomationTarget, Breakpoint, Envelope};
-use crate::clip::{Clip, TakeLane};
+use crate::clip::{Clip, ClipData, TakeLane};
 use crate::command::{
     check_chain, check_clip, check_clip_fits, check_crossfader, check_device, check_extent,
     check_mixer, check_send_level,
@@ -87,6 +87,10 @@ struct TrackRepr {
     /// WP-5.36 have none, which loads as on.
     #[serde(default = "on", skip_serializing_if = "is_on")]
     keep_monitoring_latency: bool,
+    /// Bypass Tuning (the tunings spec, R14). Off in a new track, so a set
+    /// writes it only when it's on.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    tuning_bypass: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     children: Vec<TrackRepr>,
     /// The track's frozen audio (WP-4.14). Sets saved before it have none,
@@ -221,6 +225,7 @@ impl TrackRepr {
             audition: track.audition(),
             delay: track.delay(),
             keep_monitoring_latency: track.keep_monitoring_latency(),
+            tuning_bypass: track.tuning_bypass(),
             frozen: track.frozen.clone(),
             children: if with_children {
                 track
@@ -256,6 +261,9 @@ impl TryFrom<DocumentRepr> for Document {
         }
         check_crossfader(settings.crossfader)?;
         check_locators(&settings.locators)?;
+        if let Some(tuning) = &settings.tuning {
+            tuning.check()?;
+        }
         for groove in &settings.grooves.pool {
             groove.check()?;
             loader.claim(groove.id.0)?;
@@ -412,6 +420,7 @@ impl Loader {
             });
         }
         track.keep_monitoring_latency = repr.keep_monitoring_latency;
+        track.tuning_bypass = repr.tuning_bypass;
         track.frozen = repr.frozen;
         if let Some(routing) = repr.routing {
             track.routing = routing;
@@ -454,21 +463,27 @@ impl Loader {
             track.devices.push_back(Shared::new(device));
         }
         check_chain(&track)?;
-        for clip in repr.clips {
+        for mut clip in repr.clips {
             self.claim(clip.id.0)?;
             check_clip_fits(&track, &clip.data)?;
             check_extent(clip.start, clip.length)?;
+            if let ClipData::Midi(midi) = &mut clip.data {
+                midi.repair_groups();
+            }
             check_clip(&clip)?;
             self.index.clip_track.insert(clip.id, id);
             track.clips.insert(clip.id, Shared::new(clip));
         }
-        for slot in repr.slots {
+        for mut slot in repr.slots {
             self.claim(slot.clip.id.0)?;
             check_clip_fits(&track, &slot.clip.data)?;
             if slot.clip.start != Ticks::ZERO {
                 return Err(ModelError::SlotClipPosition(slot.clip.start));
             }
             check_extent(slot.clip.start, slot.clip.length)?;
+            if let ClipData::Midi(midi) = &mut slot.clip.data {
+                midi.repair_groups();
+            }
             check_clip(&slot.clip)?;
             self.index.clip_track.insert(slot.clip.id, id);
             if track
@@ -479,12 +494,15 @@ impl Loader {
                 return Err(ModelError::DuplicateId(slot.scene.0));
             }
         }
-        for lane in repr.take_lanes {
+        for mut lane in repr.take_lanes {
             self.claim(lane.id.0)?;
-            for clip in &lane.clips {
+            for clip in lane.clips.iter_mut() {
                 self.claim(clip.id.0)?;
                 check_clip_fits(&track, &clip.data)?;
                 check_extent(clip.start, clip.length)?;
+                if let ClipData::Midi(midi) = &mut clip.data {
+                    midi.repair_groups();
+                }
                 check_clip(clip)?;
                 self.index.clip_track.insert(clip.id, id);
             }

@@ -1881,6 +1881,7 @@ fn paths() -> BTreeMap<&'static str, Path> {
         key,
     };
     let clip_view = LaterView("the Clip View (milestone M2)");
+    let tuning_section = LaterView("the browser's Tunings label and the Tuning section (WP-6.10)");
     let groove_pool = LaterView(
         "the Groove Pool, the Clip View's groove controls and the browser's Grooves label (WP-6.20)",
     );
@@ -2009,6 +2010,22 @@ fn paths() -> BTreeMap<&'static str, Path> {
         (
             "clip.set_scale",
             main(a_clip_selected, control_bar, "Scale Mode", Key::Enter),
+        ),
+        // Tuning systems (WP-6.9): the browser's Tunings label and the
+        // Tuning section, which load, change and remove the tuning, come with
+        // WP-6.10; until then agents reach these.
+        ("tuning.load", Exception(tuning_section)),
+        ("tuning.remove", Exception(tuning_section)),
+        ("tuning.set", Exception(tuning_section)),
+        ("tuning.set_range", Exception(tuning_section)),
+        ("tuning.set_reference", Exception(tuning_section)),
+        ("tuning.state", Exception(Query)),
+        (
+            "track.set_tuning_bypass",
+            Exception(LaterView(
+                "the In/Out section's row for it, which the mixers' section has no room for \
+                 yet; the Arrangement's headers show it where they have the height (WP-6.9)",
+            )),
         ),
         // Grooves (WP-6.19): the Groove Pool, the Clip View's groove controls
         // and the browser's Grooves label come with WP-6.20; until then
@@ -2903,6 +2920,21 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("clip.set_loop", Exception(clip_view)),
         ("clip.set_loop_enabled", Exception(clip_view)),
         ("clip.set_midi_loop", Exception(clip_view)),
+        ("clip.set_signature", Exception(clip_view)),
+        (
+            "clip_view.foreground",
+            Exception(Equivalent(
+                "clicking a note, or a loop bar, which assistive technology reads by name and \
+                 activates (multi-clip editing R3, R10)",
+            )),
+        ),
+        (
+            "clip_view.select_loop_bars",
+            Exception(Equivalent(
+                "the loop bars above the note editor, which assistive technology reads by \
+                 name and activates (multi-clip editing R10)",
+            )),
+        ),
         ("clip.set_midi_region", Exception(clip_view)),
         ("clip.set_data", Exception(clip_view)),
         // The crop's document-level commands (WP-4.13): `clip.crop` is the
@@ -3082,6 +3114,15 @@ fn paths() -> BTreeMap<&'static str, Path> {
         // note-selection keys (S-A11Y-010, S-A11Y-011), Delete
         // (S-EDIT-005) and Cmd-A (S-NOTE-001).
         ("note.ramp_value", Exception(note_editor)),
+        // Spec: step-recording R2. The pointer's press plays a preview; from
+        // the keyboard, selecting a note with the note-jump keys sounds it.
+        (
+            "note.preview",
+            Exception(Equivalent(
+                "the pointer's press on a piano ruler key or a note; a note selected from the \
+                 keys sounds as a preview too (`clip_view.select_notes`)",
+            )),
+        ),
         // The stretch markers are dragged (I-DRAG-040); Live has no key
         // for stretching notes, so a keyboard path needs the maintainer's
         // choice of keys.

@@ -106,6 +106,7 @@ use bl_shell_spec::stems as stems_ids;
 use bl_shell_spec::tracks as track_ids;
 use bl_shell_spec::transport as transport_ids;
 use bl_shell_spec::transport::{RecordedFileReport, RecordingReport, RunningRecording};
+use bl_shell_spec::tunings as tuning_ids;
 
 pub(crate) mod audio_editing;
 mod audio_panel;
@@ -128,6 +129,8 @@ mod search;
 mod session_recording;
 mod slice;
 mod stems;
+mod step_input;
+mod tunings;
 mod warping;
 
 use file_manager::FileManager;
@@ -227,6 +230,13 @@ impl Invocation {
 /// drains these after each command with [`Shell::take_effects`].
 #[derive(Clone, Debug, PartialEq)]
 pub enum Effect {
+    /// Ask whether to retune the set's notes to the tuning about to be
+    /// loaded or removed (the tunings spec, R15), then run `then` with
+    /// `retune` true if the person says Retune. Cancel changes nothing.
+    ConfirmRetune {
+        /// The load or removal.
+        then: Invocation,
+    },
     /// Ask whether to save the set's unsaved changes, then run `then`. The
     /// person can save first, discard the changes, or cancel.
     ConfirmDiscard {
@@ -467,6 +477,9 @@ pub struct Shell {
     midi_lit: [Option<std::time::Instant>; 2],
     /// The chord a Chord device's Learn is hearing.
     chord_learn: crate::chord_learn::ChordLearn,
+    /// The keys held on the MIDI input and the previews sounding, for the
+    /// MIDI Note Editor's step recording and Preview (WP-6.5).
+    step: step_input::StepInput,
     /// The keymap in use: Live 12's shortcuts with the person's own layered
     /// over them (the custom-shortcuts spec, R3).
     keymap: crate::keymap::Keymap,
@@ -1035,6 +1048,7 @@ impl Shell {
         audio.sync(editor.document());
         let saved = snapshot(&editor);
         let plugin_panels = prefs.plugin_panels.clone();
+        let note_preview = prefs.note_preview;
         let mut shell = Self {
             browser_view,
             media,
@@ -1072,6 +1086,7 @@ impl Shell {
             midi_seen: (0, 0),
             midi_lit: [None; 2],
             chord_learn: crate::chord_learn::ChordLearn::default(),
+            step: step_input::StepInput::default(),
             keymap: crate::keymap::Keymap::live12(),
             user_keymap: crate::keymap::UserKeymap::default(),
             keymap_revision: 0,
@@ -1106,7 +1121,11 @@ impl Shell {
             assistant_stop_flag: Arc::default(),
             undo_history_open: false,
             arrangement: ArrangementView::new(),
-            clip_view: ClipView::default(),
+            clip_view: {
+                let mut view = ClipView::default();
+                view.set_preview(note_preview);
+                view
+            },
             detail: DetailArea::default(),
             file_manager: FileManager::default(),
             search: crate::search::Field::default(),
@@ -2072,7 +2091,9 @@ impl Shell {
         use bl_devices::midi_cc::{
             CC_CONTROL, DIALS, LEARN as CC_LEARN, cc_is_listed, cc_type_for, dial_cc, dial_value,
         };
-        use bl_devices::stack::{LEARN as CHORD_LEARN, STACK, shift};
+        use bl_devices::stack::{
+            LEARN as CHORD_LEARN, STACK, USE_SCALE as CHORD_USE_SCALE, learn, shift,
+        };
         use bl_model::{Command, DeviceId, DeviceKind, ParamId};
         let devices: Vec<(DeviceId, String)> = self
             .editor
@@ -2102,7 +2123,13 @@ impl Shell {
         let chords = learning(STACK, CHORD_LEARN);
         let senders = learning(CC_CONTROL, CC_LEARN);
         let sender = self.midi.sender().clone();
-        if chords.is_empty() && senders.is_empty() {
+        // Spec: step-recording R3, R8. Step recording reads the keys held
+        // through the same copy of the input.
+        let stepping = self.step_recording();
+        if !stepping {
+            self.forget_held();
+        }
+        if chords.is_empty() && senders.is_empty() && !stepping {
             if self.chord_learn.tapping {
                 sender.set_tap(false);
                 self.chord_learn.tapping = false;
@@ -2116,13 +2143,36 @@ impl Shell {
         }
         let mut heard = Vec::new();
         sender.take_notes(&mut heard);
+        if stepping {
+            self.hear_held(&heard);
+        }
         let mut changed = false;
         if !chords.is_empty()
-            && let Some(shifts) = self.chord_learn.listen_from(&heard)
+            && let Some(held) = self.chord_learn.listen_from(&heard)
         {
+            // Spec: midi-chord R17. A Chord counting degrees learns the
+            // degrees from the root to each key, in the current scale.
+            let set_scale = self.editor.document().settings().scale;
+            let shifts: Vec<(DeviceId, [i32; 6])> = chords
+                .iter()
+                .map(|device| {
+                    let degrees = self
+                        .editor
+                        .document()
+                        .device(*device)
+                        .and_then(|device| device.params.get(&CHORD_USE_SCALE).copied())
+                        .is_some_and(|on| on >= 0.5);
+                    let scale = if degrees {
+                        set_scale
+                    } else {
+                        bl_model::Scale::default()
+                    };
+                    (*device, learn(&held, &scale))
+                })
+                .collect();
             self.edit(|editor| {
                 editor.begin("Learn Chord");
-                for device in &chords {
+                for (device, shifts) in &shifts {
                     for (n, value) in shifts.iter().enumerate() {
                         editor
                             .apply(Command::SetDeviceParam {
@@ -2354,6 +2404,13 @@ impl Shell {
         self.prefs.create_fades_on_clip_edges.0
     }
 
+    /// Whether Retune Set On Loading Tuning Systems is on (the tunings spec,
+    /// R15).
+    #[must_use]
+    pub fn retune_on_tuning_load(&self) -> bool {
+        self.prefs.retune_on_tuning_load
+    }
+
     /// Loop/Warp Short Samples, Auto-Warp Long Samples and Default Warp
     /// Mode (WP-4.9).
     #[must_use]
@@ -2397,6 +2454,7 @@ impl Shell {
             },
             tempo_midi: self.midi.report(),
             create_fades_on_clip_edges: self.create_fades_on_clip_edges(),
+            retune_on_tuning_load: self.retune_on_tuning_load(),
             warp_recorded_audio: self.warp_recorded_audio(),
             warp: self.prefs.warp,
             file_folder: FileFolderSettings {
@@ -2623,6 +2681,14 @@ impl Shell {
     #[must_use]
     pub fn hint(&self) -> Option<&str> {
         self.hint.as_deref()
+    }
+
+    /// What the Status Bar says of the selected notes' probability groups,
+    /// when they belong to any (Spec: note-editing R24).
+    #[must_use]
+    pub fn note_group_status(&self) -> Option<String> {
+        self.clip_view
+            .group_status(self.editor.document(), &self.arrangement)
     }
 
     /// Sets, or with `None` clears, the Status Bar's hint.
@@ -4799,6 +4865,7 @@ impl Shell {
             changed |= self.refresh_midi();
         }
         changed |= self.learn_midi();
+        self.expire_previews();
         changed |= self.track_midi_activity();
         // Plug-ins' main-thread work (WP-2.6 to WP-2.8), and the changes
         // they made themselves.
@@ -6324,6 +6391,15 @@ impl Shell {
                     // Spec: piano-roll. With the Clip View open, its MIDI
                     // Note Editor holds the detail area's keys.
                     Area::Detail if self.detail.focus_in_clip() => {
+                        // Spec: multi-clip-editing R11. With loop bars
+                        // selected, Cmd-D duplicates their loops.
+                        if !self
+                            .clip_view
+                            .loop_bars(self.editor.document(), &self.arrangement)
+                            .is_empty()
+                        {
+                            contexts.push(Context::LoopBrace);
+                        }
                         contexts.push(Context::ClipView);
                         if self.clip_view.tab() == ClipTab::Envelopes {
                             contexts.push(Context::Envelope);
@@ -6337,10 +6413,11 @@ impl Shell {
                             contexts.push(Context::SampleEditor);
                         } else {
                             contexts.push(Context::NoteEditor);
-                            if !self
+                            if self
                                 .clip_view
-                                .selected_notes(self.editor.document(), &self.arrangement)
-                                .is_empty()
+                                .active_clips(self.editor.document(), &self.arrangement)
+                                .iter()
+                                .any(|clip| !self.clip_view.selection_of(*clip).is_empty())
                             {
                                 contexts.push(Context::NoteSelection);
                             }
@@ -6404,6 +6481,7 @@ impl Shell {
             ids::VIEW_EXPAND_CLIP_VIEW => Some(self.detail.expanded()),
             ids::VIEW_TOGGLE_PLUGIN_LIST => Some(self.plugin_list.visible()),
             ids::VIEW_DRAW_MODE => Some(self.clip_view.draw_mode()),
+            note_ids::SET_PREVIEW => Some(self.clip_view.preview()),
             ids::VIEW_FOLD_NOTES => Some(
                 self.clip_view
                     .shown_clip(self.editor.document(), &self.arrangement)
@@ -6415,6 +6493,7 @@ impl Shell {
             ids::VIEW_TOGGLE_PLUG_IN_WINDOWS => Some(self.plug_in_windows),
             ids::FOCUS_TOGGLE_TAB_NAVIGATION => Some(self.prefs.tab_navigation),
             ids::FOCUS_TOGGLE_WRAP_NAVIGATION => Some(self.prefs.wrap_navigation.0),
+            ids::SETTINGS_SET_RETUNE_ON_TUNING_LOAD => Some(self.prefs.retune_on_tuning_load),
             session_launch_ids::SET_QUANTIZATION_ENABLED => Some(self.store.launch().enabled),
             SOLO_IN_PLACE => Some(self.editor.document().settings().solo_in_place),
             DELAY_COMPENSATION => Some(self.editor.document().settings().delay_compensation),
@@ -6565,6 +6644,10 @@ impl Shell {
                 }
                 .to_owned(),
             ),
+            // Spec: note-editing R22. M-EDIT-014 and M-EDIT-015 read Group
+            // Notes and Ungroup Notes with notes selected.
+            note_ids::GROUP => Some("Group Notes".to_owned()),
+            note_ids::UNGROUP => Some("Ungroup Notes".to_owned()),
             // The Playback menu's first item toggles with Stop (M-PLAY-001).
             transport_ids::PLAY_STOP => {
                 Some(if self.playing() { "Stop" } else { "Play" }.to_owned())
@@ -6830,6 +6913,27 @@ impl Shell {
             REDUCED_LATENCY_MONITORING => {
                 return self.editor.document().settings().delay_compensation;
             }
+            // Spec: note-editing R22, R23. Group Notes needs two notes, and
+            // Ungroup Notes a grouped one.
+            note_ids::GROUP | note_ids::UNGROUP => {
+                let named = args.get("notes").and_then(Value::as_array).map(Vec::len);
+                return if id == note_ids::GROUP {
+                    named.unwrap_or_else(|| {
+                        self.clip_view
+                            .selected_notes(self.editor.document(), &self.arrangement)
+                            .len()
+                    }) >= 2
+                } else {
+                    named.is_some()
+                        || self
+                            .clip_view
+                            .selection_group_kinds(self.editor.document(), &self.arrangement)
+                            != (false, false)
+                };
+            }
+            // Spec: step-recording R9. Step Input Mode is available while the
+            // editor shows a MIDI clip.
+            note_ids::STEP_INPUT_MODE => return self.editor_track().is_some(),
             ids::FOCUS_NEXT_NEIGHBOR => return self.has_neighbor(false),
             ids::FOCUS_PREVIOUS_NEIGHBOR => return self.has_neighbor(true),
             // Spec: time-editing R8. Cmd-R renames the selected locators
@@ -7498,6 +7602,26 @@ impl Shell {
                 self.effects.push(Effect::PickFolder);
                 Ok(Value::Null)
             }
+            // Spec: tunings R15. With Retune Set On Loading Tuning Systems
+            // on, a person who loads a tuning, or removes it, is asked
+            // first; Cancel changes nothing.
+            tuning_ids::LOAD | tuning_ids::REMOVE
+                if !has("retune")
+                    && self.tuning_change_asks()
+                    && (id == tuning_ids::LOAD
+                        || self.editor.document().settings().tuning.is_some()) =>
+            {
+                self.effects.push(Effect::ConfirmRetune {
+                    then: Invocation::new(id, args),
+                });
+                Ok(Value::Null)
+            }
+            ids::SETTINGS_SET_RETUNE_ON_TUNING_LOAD if !has("on") => {
+                // Options ▸ Retune Set On Loading Tuning Systems switches
+                // the setting to the other state.
+                let on = !self.prefs.retune_on_tuning_load;
+                self.run(id, json!({ "on": on }))
+            }
             ids::SETTINGS_SET_TEMPORARY_FOLDER if !has("path") => {
                 self.effects.push(Effect::PickTemporaryFolder);
                 Ok(Value::Null)
@@ -7743,6 +7867,7 @@ impl Shell {
         self.poll_capture();
         let arranged = self.arrangement.selected_clips().to_vec();
         let slot = self.selected_slot_clip();
+        let slots = self.selected_slot_clips();
         let shown = self.shown_clip();
         let revision = self.document_revision;
         let generation = self.editor_generation;
@@ -7753,7 +7878,7 @@ impl Shell {
             self.refresh_search();
         }
         if result.is_ok() {
-            self.follow_clip_selection(id, &arranged, slot);
+            self.follow_clip_selection(id, &arranged, slot, &slots);
             // Spec: scales R10. Selecting a clip makes its scale the
             // current scale, and a change to that clip's scale changes it
             // with it.
@@ -7813,10 +7938,40 @@ impl Shell {
             .map(|clip| clip.id)
     }
 
+    /// The clips in the selected Session slots, in track then scene order.
+    fn selected_slot_clips(&self) -> Vec<bl_model::ClipId> {
+        let doc = self.editor.document();
+        let order = doc.track_order();
+        let mut slots = self.session.selected_slots().to_vec();
+        // Spec: multi-clip-editing R2. By track, then scene.
+        slots.sort_by_key(|slot| {
+            (
+                order.iter().position(|track| *track == slot.track),
+                doc.scene_position(slot.scene),
+            )
+        });
+        slots
+            .iter()
+            .filter_map(|slot| doc.slot(slot.track, slot.scene).map(|clip| clip.id))
+            .collect()
+    }
+
     /// The clips the Control Bar's scale controls change (the scales spec,
     /// R12): the Arrangement's selected clips, or the Session slot's clip.
     #[must_use]
     pub fn scale_targets(&self) -> Vec<bl_model::ClipId> {
+        // Spec: multi-clip-editing R9, R15. Every clip the note editor
+        // shows, or with Focus Mode on the active clip alone.
+        let active = self
+            .clip_view
+            .active_clips(self.editor.document(), &self.arrangement);
+        if active.len() > 1
+            || self
+                .clip_view
+                .focus_active(self.editor.document(), &self.arrangement)
+        {
+            return active;
+        }
         let arranged = self.arrangement.selected_clips();
         if !arranged.is_empty() {
             return arranged.to_vec();
@@ -7842,14 +7997,25 @@ impl Shell {
         id: &str,
         arranged: &[bl_model::ClipId],
         slot: Option<bl_model::ClipId>,
+        slots: &[bl_model::ClipId],
     ) {
         let now = self.selected_slot_clip();
+        let all = self.selected_slot_clips();
         let picked = matches!(
             id,
             session_ids::SELECT | session_ids::SELECT_ALL | session_ids::SELECT_EDGE
-        ) || now != slot;
-        if let Some(clip) = now.filter(|_| picked) {
-            self.clip_view.show_session_clip(clip);
+        ) || now != slot
+            || all != slots;
+        if now.is_some() && picked {
+            // Spec: multi-clip-editing R1, R3. Every selected slot's clip
+            // shows, the one clicked last being the foreground clip.
+            let doc = self.editor.document();
+            let last = self
+                .session
+                .anchor()
+                .and_then(|anchor| doc.slot(anchor.track, anchor.scene))
+                .map(|clip| clip.id);
+            self.clip_view.show_session_clips(all, last);
         } else if (matches!(id, edit_ids::SELECT_CLIPS | edit_ids::SELECT_ALL)
             || self.arrangement.selected_clips() != arranged)
             && !self.arrangement.selected_clips().is_empty()
@@ -8107,6 +8273,9 @@ impl Shell {
         let args = self.prepare_device_role(id, args)?;
         let args = self.prepare_scale_clips(id, args)?;
         let args = self.prepare_groove_clips(id, args)?;
+        // Spec: tunings R15. A tuning set or removed without `retune`
+        // follows Retune Set On Loading Tuning Systems.
+        let args = self.with_retune(id, args);
         self.prepare_warping(id, args)
     }
 
@@ -8405,25 +8574,26 @@ impl Shell {
             self.touch();
             return result;
         }
+        if note_ids::is_preview_or_mode(id) || id == note_ids::STEP_RECORD {
+            // Spec: step-recording. The Preview switch, previews, step
+            // recording and Step Input Mode reach the MIDI input, the
+            // preferences and the focus.
+            return self.run_step_input(id, args);
+        }
         if id == note_ids::SPLIT_CLIP {
             return self.split_shown_clip();
         }
         if note_ids::handles(id) {
-            // Spec: piano-roll. The Clip View's note edits.
-            let before = self.editor.document().clone();
-            let result = clip_view::run(
-                id,
-                args,
-                &mut self.editor,
-                &mut self.clip_view,
-                &self.arrangement,
-            )
-            .map_err(|failure| edit_error(id, failure));
-            if *self.editor.document() != before {
-                self.dirty = true;
-                self.document_changed();
+            let keys = id == note_ids::SELECT_NOTES
+                && args["select"]
+                    .as_str()
+                    .is_some_and(|select| select != "all");
+            let result = self.run_note_edit(id, args);
+            if keys && result.is_ok() {
+                // Spec: step-recording R2. A note selected from the keys
+                // sounds, when Preview is on.
+                self.preview_selected();
             }
-            self.touch();
             return result;
         }
         if sample_ids::handles(id) {
@@ -8982,6 +9152,9 @@ impl Shell {
         if midi_ids::handles(id) {
             return self.run_midi_files(id, args);
         }
+        if tuning_ids::handles(id) {
+            return self.run_tunings(id, args);
+        }
         if dawproject_ids::handles(id) {
             return self.run_dawproject(id, args);
         }
@@ -9328,6 +9501,26 @@ impl Shell {
     /// Arguments as a JSON object: `null` is no arguments.
     fn object(args: Value) -> Value {
         if args.is_null() { json!({}) } else { args }
+    }
+
+    /// Runs one of the Clip View's note edits, as one undo step.
+    fn run_note_edit(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        // Spec: piano-roll. The Clip View's note edits.
+        let before = self.editor.document().clone();
+        let result = clip_view::run(
+            id,
+            args,
+            &mut self.editor,
+            &mut self.clip_view,
+            &self.arrangement,
+        )
+        .map_err(|failure| edit_error(id, failure));
+        if *self.editor.document() != before {
+            self.dirty = true;
+            self.document_changed();
+        }
+        self.touch();
+        result
     }
 
     fn args<T: DeserializeOwned>(id: &str, args: Value) -> Result<T, ShellError> {
@@ -10050,6 +10243,7 @@ impl Shell {
                 // Spec: piano-roll; M-VIEW-039, S-NOTE-038. View state only,
                 // saved with the set.
                 let FoldNotesArgs { clip, folded } = Self::args(id, args)?;
+                let args_clip_named = clip.is_some();
                 let clip = match clip {
                     Some(clip) => clip,
                     None => self
@@ -10068,6 +10262,14 @@ impl Shell {
                 }
                 let folded = folded.unwrap_or(!self.clip_view.is_folded(clip));
                 self.clip_view.set_folded(clip, folded);
+                if !args_clip_named {
+                    for other in self
+                        .clip_view
+                        .shown(self.editor.document(), &self.arrangement)
+                    {
+                        self.clip_view.set_folded(other, folded);
+                    }
+                }
                 Ok(to_value(
                     &self
                         .clip_view
@@ -10378,6 +10580,12 @@ impl Shell {
             ids::SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES => {
                 let SwitchArgs { on } = Self::args(id, args)?;
                 self.prefs.create_fades_on_clip_edges = OnByDefault(on);
+                self.save_preferences();
+                Ok(to_value(&SwitchResult { on }))
+            }
+            ids::SETTINGS_SET_RETUNE_ON_TUNING_LOAD => {
+                let SwitchArgs { on } = Self::args(id, args)?;
+                self.prefs.retune_on_tuning_load = on;
                 self.save_preferences();
                 Ok(to_value(&SwitchResult { on }))
             }

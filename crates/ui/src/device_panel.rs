@@ -302,11 +302,24 @@ pub fn show(
             })
             .flatten(),
         };
-        match widget {
+        // Spec: scales R16. A parameter the device takes from its current
+        // scale is drawn disabled.
+        let locked = panel.locked.contains(&param);
+        let mut draw = |ui: &mut Ui| match widget {
             Widget::Knob => control.knob(ui, theme, events),
             Widget::Number => control.number(ui, theme, events),
             Widget::Toggle => control.toggle(ui, theme, events),
             Widget::Chooser => control.chooser(ui, theme, events),
+        };
+        if locked {
+            ui.add_enabled_ui(false, draw);
+            ui.painter().rect_filled(
+                rect,
+                theme.sizes.corner,
+                theme.colors.window.0.gamma_multiply(0.55),
+            );
+        } else {
+            draw(ui);
         }
         // Spec: modulation R15. While a Map button is lit, every parameter
         // but the modulator's own is a target.

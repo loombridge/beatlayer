@@ -28,8 +28,10 @@ use serde_json::json;
 const BAR: i64 = Ticks::WHOLE.get();
 
 /// The list's first row's top, in window coordinates: the content pane
-/// starts at y 84 and its header row is 19 points tall.
-const LIST_TOP: f32 = 103.0;
+/// starts at y 84, the Filter View (shown in a new install) fills it to
+/// y 204, and the header row, 19 points tall, sits at y 208 (L-BRW-007,
+/// L-BRW-009).
+const LIST_TOP: f32 = 227.0;
 
 /// A folder of its own under the system's temporary folder, removed when
 /// dropped.
@@ -220,11 +222,17 @@ fn the_browser_sits_where_live_puts_it() {
     for (label, expected) in [
         ("Browser", (9.0, 61.0, 311.0, 766.0)),
         ("Browser Sidebar", (9.0, 84.0, 109.0, 766.0)),
-        // The list ends above the Quick Tags section, which is shown by
+        // The Filter View, shown in a new install, fills the content pane
+        // from y 84 to y 204 (L-BRW-007, browser-tags R18); the header row
+        // sits at y 208 and the list from y 227 (L-BRW-009, L-BRW-010). The
+        // list ends above the Quick Tags section, which is shown by
         // default (L-BRW-012); Live's measurement (L-BRW-010) is of the
         // browser with the section hidden.
-        ("Browser Items", (110.0, 103.0, 311.0, 682.0)),
-        ("Name", (110.0, 84.0, 311.0, 103.0)),
+        ("Filter View", (110.0, 84.0, 311.0, 204.0)),
+        ("Browser Items", (110.0, 227.0, 311.0, 682.0)),
+        // The Content Options menu's button takes the header row's
+        // last 16 points (browser-tags R27).
+        ("Name", (110.0, 208.0, 295.0, 227.0)),
     ] {
         assert!(
             near(bounds(label), expected),
@@ -232,6 +240,22 @@ fn the_browser_sits_where_live_puts_it() {
             bounds(label)
         );
     }
+    // Hidden, the header row sits at the content pane's top (browser R1).
+    h.shell
+        .run(ids::SET_FILTER_VIEW, json!({ "show": false }))
+        .unwrap();
+    let hidden = Harness::nodes(&h.settle());
+    let name = Harness::node(&hidden, "Name").bounds.expect("Name");
+    assert_eq!((name.y0, name.y1), (84.0, 103.0));
+    let items = Harness::node(&hidden, "Browser Items")
+        .bounds
+        .expect("list");
+    assert_eq!(items.y0, 103.0);
+    assert!(!hidden.iter().any(|n| n.label == "Filter View"));
+    h.shell
+        .run(ids::SET_FILTER_VIEW, json!({ "show": true }))
+        .unwrap();
+    h.settle();
     // L-BRW-001: Back, Forward, the search field, the filters.
     assert!((bounds("Browse Back").0 - 9.0).abs() < 0.51);
     assert!((bounds("Browse Forward").0 - 29.0).abs() < 0.51);

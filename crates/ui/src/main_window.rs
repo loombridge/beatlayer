@@ -515,7 +515,7 @@ impl MainWindowUi {
                     shell.info_view_of(self.window),
                     assistant,
                     undo_history,
-                    detail,
+                    detail.with_full_height_browser(shell.browser_view().full_height()),
                 )
             }
             .translate(area.min.to_vec2());
@@ -1035,6 +1035,9 @@ impl MainWindowUi {
             if *el == Element::MixerMenu {
                 self.mixer_menu(&response, shell, events);
             }
+            if *el == Element::BrowserMenu {
+                self.browser_menu(&response, shell, events);
+            }
             if *el == Element::RootNote {
                 // Spec: scales R9. The Root Note chooser lists the twelve
                 // pitch classes.
@@ -1219,6 +1222,35 @@ impl MainWindowUi {
         };
         egui::Popup::menu(response).show(|ui| {
             for item in bl_shell::menus::shown(&controls.items) {
+                let _ = crate::menus::item(ui, item, shell, keymap, platform, events);
+            }
+        });
+    }
+
+    /// The Browser Config Menu (L-CTRL-001): Full-Height Browser, Groove
+    /// Pool and Tuning, as the View menu's rows give them (spec: browser
+    /// R26).
+    fn browser_menu(
+        &mut self,
+        response: &egui::Response,
+        shell: &Shell,
+        events: &mut Vec<UiEvent>,
+    ) {
+        let keymap =
+            crate::keymap::keymap_in_use(&mut self.keymap, &mut self.keymap_revision, shell);
+        let platform = crate::keymap::Platform::current();
+        let menus = bl_shell::menus::menu_bar(bl_shell::menus::MenuPlatform::current());
+        let rows: Vec<&bl_shell::menus::MenuItem> = ["M-VIEW-024", "M-VIEW-022", "M-VIEW-023"]
+            .iter()
+            .filter_map(|row| {
+                menus
+                    .iter()
+                    .flat_map(bl_shell::menus::Menu::walk)
+                    .find(|item| item.row == *row)
+            })
+            .collect();
+        egui::Popup::menu(response).show(|ui| {
+            for item in rows {
                 let _ = crate::menus::item(ui, item, shell, keymap, platform, events);
             }
         });

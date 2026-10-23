@@ -3887,6 +3887,7 @@ impl Shell {
         let user_library = self.browser_view.user_library().map(Path::to_path_buf);
         let zoom = self.zoom();
         let auto_hide = self.prefs.auto_hide_plug_in_windows.0;
+        let swapping = self.devices.hot_swap_targets();
         let result = self.devices.run(
             id,
             args,
@@ -3901,6 +3902,12 @@ impl Shell {
             },
         );
         let outcome = result.map_err(|error| device_error(id, error))?;
+        // Spec: browser-tags R31. Starting hot-swap clears the search words
+        // and the selected tags as a new step.
+        let now_swapping = self.devices.hot_swap_targets();
+        if now_swapping != swapping && now_swapping != Default::default() {
+            self.browser_view.hot_swap_started();
+        }
         // Spec: drum-racks R5. A held Preview button plays its chain.
         for &(chain, on) in &outcome.previews {
             self.audio.send_param(
@@ -6596,6 +6603,7 @@ impl Shell {
             ids::VIEW_FULL_SCREEN => Some(self.full_screen_of(self.acting_window())),
             ids::VIEW_TOGGLE_SECOND_WINDOW => Some(self.second.open),
             ids::VIEW_TOGGLE_BROWSER => Some(self.browser_of(self.acting_window())),
+            ids::VIEW_TOGGLE_FULL_HEIGHT_BROWSER => Some(self.browser_view.full_height()),
             ids::VIEW_TOGGLE_CLIP_VIEW => Some(self.detail_of(self.acting_window()).clip_shown()),
             ids::VIEW_TOGGLE_DEVICE_VIEW => {
                 Some(self.detail_of(self.acting_window()).device_shown())
@@ -6636,6 +6644,7 @@ impl Shell {
             ),
             ids::AUDIO_TOGGLE_ENGINE => Some(self.audio.engine_on()),
             browser_ids::SET_PREVIEW => Some(self.browser_view.preview_on()),
+            browser_ids::SET_FILTER_VIEW => Some(self.browser_view.filter_view_shown()),
             "device.set_show_preset_name" => self
                 .devices
                 .selected()
@@ -10281,6 +10290,18 @@ impl Shell {
                 let closed = self.close_plug_in_windows();
                 self.touch();
                 Ok(to_value(&ids::ClosedPlugInWindows { closed }))
+            }
+            ids::VIEW_TOGGLE_FULL_HEIGHT_BROWSER => {
+                // Spec: browser R26. The column runs down to the Status Bar;
+                // kept between launches.
+                Self::args::<NoArgs>(id, args)?;
+                let on = !self.browser_view.full_height();
+                self.browser_view.set_full_height(on);
+                self.prefs.browser = self
+                    .browser_view
+                    .prefs(self.prefs.browser.user_library.clone());
+                self.save_preferences();
+                Ok(self.view_result())
             }
             ids::VIEW_TOGGLE_PLUGIN_LIST => {
                 // Spec: plugin-list R1, R3. View state only.

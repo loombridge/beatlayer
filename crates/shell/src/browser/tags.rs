@@ -270,6 +270,12 @@ impl TagStore {
             .map_or_else(Vec::new, |tags| tags.iter().copied().collect())
     }
 
+    /// The tags an item carries in its own right, without copying them.
+    #[must_use]
+    pub fn item_tags_ref(&self, key: &str) -> Option<&BTreeSet<i64>> {
+        self.items.get(key)
+    }
+
     /// The items that carry a tag in their own right.
     #[must_use]
     pub fn items_with_tag(&self, tag: i64) -> Vec<String> {

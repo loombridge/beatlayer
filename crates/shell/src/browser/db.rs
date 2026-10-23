@@ -20,11 +20,12 @@ use std::thread;
 
 use bl_shell_spec::browser::ItemKind;
 
+use super::labels::SavedLabel;
 use super::tags::{Tag, TagGroup};
 
 /// The schema version this build writes. A file with a higher version is
 /// left alone.
-pub const SCHEMA_VERSION: i64 = 1;
+pub const SCHEMA_VERSION: i64 = 2;
 
 /// The file's schema, as SQLite statements.
 const SCHEMA: &str = "
@@ -56,6 +57,18 @@ CREATE TABLE IF NOT EXISTS item_tags (
     item_key TEXT NOT NULL,
     tag_id INTEGER NOT NULL,
     PRIMARY KEY (item_key, tag_id)
+);
+CREATE TABLE IF NOT EXISTS saved_labels (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    base TEXT NOT NULL,
+    search TEXT NOT NULL,
+    icon TEXT
+);
+CREATE TABLE IF NOT EXISTS saved_label_tags (
+    label_id INTEGER NOT NULL,
+    tag_id INTEGER NOT NULL,
+    PRIMARY KEY (label_id, tag_id)
 );
 ";
 
@@ -126,6 +139,15 @@ pub enum TagOp {
     SetItemTags { key: String, tags: Vec<i64> },
 }
 
+/// A change to the saved labels.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LabelOp {
+    /// A label that was made or changed.
+    Save(SavedLabel),
+    /// A label that was removed.
+    Delete { id: i64 },
+}
+
 /// What the database holds when it's opened.
 #[derive(Clone, Debug, Default)]
 pub struct Loaded {
@@ -137,6 +159,8 @@ pub struct Loaded {
     pub tags: Vec<Tag>,
     /// The tags each item carries, by its key.
     pub item_tags: Vec<(String, Vec<i64>)>,
+    /// The saved labels, in the order they were made.
+    pub saved_labels: Vec<SavedLabel>,
 }
 
 /// The tags the database holds: the groups, the tags, and the items that
@@ -153,6 +177,8 @@ enum Request {
     Files(Vec<FileOp>),
     /// Write the changes to the tags.
     Tags(Vec<TagOp>),
+    /// Write the changes to the saved labels.
+    Labels(Vec<LabelOp>),
     /// Write everything that's waiting, and answer when it's done.
     Flush(Sender<()>),
 }
@@ -322,6 +348,13 @@ impl Db {
         }
     }
 
+    /// Writes the changes to the saved labels.
+    pub fn save_labels(&self, ops: Vec<LabelOp>) {
+        if let Some(sender) = &self.requests {
+            let _ = sender.send(Request::Labels(ops));
+        }
+    }
+
     /// Writes everything that's waiting, and waits for it, for tests.
     pub fn flush(&self) {
         let Some(sender) = &self.requests else {
@@ -404,6 +437,7 @@ fn write_loop(connection: rusqlite::Connection, requests: Receiver<Request>) {
             }
             Request::Files(ops) => write_files(&connection, &ops),
             Request::Tags(ops) => write_tags(&connection, &ops),
+            Request::Labels(ops) => write_labels(&connection, &ops),
             Request::Flush(reply) => {
                 let _ = reply.send(());
             }
@@ -435,7 +469,82 @@ fn read_all(connection: &rusqlite::Connection) -> Loaded {
         groups,
         tags,
         item_tags,
+        saved_labels: read_labels(connection),
     }
+}
+
+/// Reads the saved labels the file holds.
+fn read_labels(connection: &rusqlite::Connection) -> Vec<SavedLabel> {
+    let mut labels: Vec<SavedLabel> = rows(
+        connection,
+        "SELECT id, name, base, search, icon FROM saved_labels ORDER BY id",
+        |row| {
+            let base: String = row.get(2)?;
+            Ok(SavedLabel {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                base: serde_json::from_str(&base).unwrap_or(bl_shell_spec::browser::Label::All),
+                search: row.get(3)?,
+                icon: row.get(4)?,
+                tags: Vec::new(),
+            })
+        },
+    );
+    for (label, tag) in rows(
+        connection,
+        "SELECT label_id, tag_id FROM saved_label_tags ORDER BY label_id, tag_id",
+        |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+    ) {
+        if let Some(saved) = labels.iter_mut().find(|saved| saved.id == label) {
+            saved.tags.push(tag);
+        }
+    }
+    labels
+}
+
+/// Writes the changes to the saved labels, in one transaction.
+fn write_labels(connection: &rusqlite::Connection, ops: &[LabelOp]) {
+    if ops.is_empty() {
+        return;
+    }
+    let Ok(transaction) = connection.unchecked_transaction() else {
+        return;
+    };
+    for op in ops {
+        match op {
+            LabelOp::Save(label) => {
+                let base = serde_json::to_string(&label.base).unwrap_or_default();
+                let _ = transaction.execute(
+                    "INSERT INTO saved_labels (id, name, base, search, icon) \
+                     VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(id) DO UPDATE SET \
+                     name = excluded.name, base = excluded.base, search = excluded.search, \
+                     icon = excluded.icon",
+                    rusqlite::params![label.id, label.name, base, label.search, label.icon],
+                );
+                let _ = transaction.execute(
+                    "DELETE FROM saved_label_tags WHERE label_id = ?1",
+                    rusqlite::params![label.id],
+                );
+                for tag in &label.tags {
+                    let _ = transaction.execute(
+                        "INSERT OR IGNORE INTO saved_label_tags (label_id, tag_id) VALUES (?1, ?2)",
+                        rusqlite::params![label.id, tag],
+                    );
+                }
+            }
+            LabelOp::Delete { id } => {
+                let _ = transaction.execute(
+                    "DELETE FROM saved_label_tags WHERE label_id = ?1",
+                    rusqlite::params![id],
+                );
+                let _ = transaction.execute(
+                    "DELETE FROM saved_labels WHERE id = ?1",
+                    rusqlite::params![id],
+                );
+            }
+        }
+    }
+    let _ = transaction.commit();
 }
 
 /// The rows of a query, read into a vector. A query that can't be run or
@@ -598,12 +707,21 @@ fn write_tags(connection: &rusqlite::Connection, ops: &[TagOp]) {
                     "DELETE FROM item_tags WHERE tag_id = ?1",
                     rusqlite::params![id],
                 );
+                let _ = transaction.execute(
+                    "DELETE FROM saved_label_tags WHERE tag_id = ?1",
+                    rusqlite::params![id],
+                );
                 let _ =
                     transaction.execute("DELETE FROM tags WHERE id = ?1", rusqlite::params![id]);
             }
             TagOp::DeleteGroup { id } => {
                 let _ = transaction.execute(
                     "DELETE FROM item_tags WHERE tag_id IN (SELECT id FROM tags WHERE group_id = ?1)",
+                    rusqlite::params![id],
+                );
+                let _ = transaction.execute(
+                    "DELETE FROM saved_label_tags WHERE tag_id IN \
+                     (SELECT id FROM tags WHERE group_id = ?1)",
                     rusqlite::params![id],
                 );
                 let _ = transaction.execute(

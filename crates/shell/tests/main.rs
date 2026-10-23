@@ -23,6 +23,7 @@ mod autosample;
 mod beat_repeat;
 mod bounce;
 mod browser;
+mod browser_filters;
 mod browser_tags;
 mod capture_midi;
 mod clip_files;

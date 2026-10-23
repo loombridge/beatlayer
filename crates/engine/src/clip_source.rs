@@ -24,7 +24,7 @@ pub(crate) const WINDOW_FRAMES: usize = 10_240;
 
 /// How many frames of what it has read a streamed clip keeps: the most a
 /// window reaches back, with room to spare.
-const TAIL_FRAMES: usize = 1_024;
+const TAIL_FRAMES: usize = 2_048;
 
 /// The most frames a read may skip ahead and still go on forwards, reading
 /// the gap through rather than jumping over it.

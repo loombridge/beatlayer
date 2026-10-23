@@ -122,6 +122,11 @@ pub struct KeyCommand {
     pub args: Map<String, Value>,
     /// The boolean argument it toggles, if any.
     pub toggles: Option<String>,
+    /// Whether the key falls through to the wider contexts when the command
+    /// can't run now, instead of the shortcut keeping it (Tab in the
+    /// Envelope Editor selects the next breakpoint only while one is
+    /// selected, and otherwise moves the focus).
+    pub declines: bool,
 }
 
 /// One key chord: a key and its modifiers. The key is named, the way the
@@ -303,6 +308,8 @@ struct RawCommand {
     #[serde(default)]
     args: Map<String, Value>,
     toggles: Option<String>,
+    #[serde(default)]
+    declines: bool,
 }
 
 /// The keymap: every shortcut of the UI parity reference.
@@ -376,6 +383,7 @@ impl Keymap {
                     contexts,
                     args: command.args,
                     toggles: command.toggles,
+                    declines: command.declines,
                 })
             })
             .collect::<Result<_, String>>()?;
@@ -427,9 +435,10 @@ impl Keymap {
     }
 
     /// [`Keymap::resolve`], where a context's first shortcut that `runs`
-    /// decides, and the first one at all if none does. Two shortcuts that
-    /// share keys in one context, such as Hide Chains and Fold on Minus,
-    /// then each act where the other can't.
+    /// decides, and the first one at all if none does, unless its command
+    /// `declines` the key, which then falls through to the next context. Two
+    /// shortcuts that share keys in one context, such as Hide Chains and Fold
+    /// on Minus, then each act where the other can't.
     ///
     /// A shortcut the focused control reads itself (a `widget` row) stops
     /// the search: the note editor's Home moves its own insert marker, not
@@ -483,7 +492,9 @@ impl Keymap {
                     if runs(&hit) {
                         return Some(hit);
                     }
-                    first.get_or_insert(hit);
+                    if !hit.command.declines {
+                        first.get_or_insert(hit);
+                    }
                 }
             }
             if first.is_some() {
@@ -674,6 +685,7 @@ impl Keymap {
                     contexts: vec![Context::from_id(&context).unwrap_or(Context::Global)],
                     args: bind.args.clone(),
                     toggles: None,
+                    declines: false,
                 }],
                 mac_origin: Origin::User,
                 win_origin: Origin::User,

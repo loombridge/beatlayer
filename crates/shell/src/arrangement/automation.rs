@@ -104,6 +104,49 @@ impl ParamScale for Travel {
     }
 }
 
+/// The scale a clip's modulation envelope is drawn and edited on: shares of
+/// the parameter's travel, 0 to 100 % for a level (Volume and sends) and
+/// −100 % to 100 % for the rest, not the parameter's own units; a MIDI
+/// controller's own range, pitch bend centred, and a clip setting's own.
+// Spec: modulation R9, midi-controller-data R8, warp-modes R29
+#[must_use]
+pub fn share_scale(target: AutomationTarget) -> Travel {
+    if let Some((min, max)) = target.midi_range().or_else(|| target.clip_range()) {
+        return Travel::Linear { min, max };
+    }
+    let travel = if is_level(target) {
+        bl_model::modulation::Travel::Fader
+    } else {
+        bl_model::modulation::Travel::Pan
+    };
+    let (min, max) = travel.clip_range();
+    Travel::Linear { min, max }
+}
+
+/// Whether a parameter is a level, whose modulation is a share of its base.
+#[must_use]
+pub fn is_level(target: AutomationTarget) -> bool {
+    matches!(
+        target,
+        AutomationTarget::Mixer {
+            param: MixerParam::Volume
+        } | AutomationTarget::Send { .. }
+    )
+}
+
+/// Where a clip envelope for `target` modulates nothing: the top of a share
+/// (a level, or a clip's Gain), and zero for the rest.
+#[must_use]
+pub fn rest_of(target: AutomationTarget) -> f64 {
+    match target {
+        _ if is_level(target) => 1.0,
+        AutomationTarget::Clip {
+            param: bl_model::ClipParam::Gain,
+        } => 100.0,
+        _ => 0.0,
+    }
+}
+
 /// The travel of a parameter: where its values sit on its control. A
 /// device parameter's travel is the range its descriptor gives.
 #[must_use]

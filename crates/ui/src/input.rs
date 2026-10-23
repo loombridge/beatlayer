@@ -184,6 +184,12 @@ impl KeyDispatcher {
                 if let (Some(index), Some(_)) = (hit.index, hit.command.toggles.as_ref()) {
                     fields.insert(bl_shell::KEY_TRACK_NUMBER.to_owned(), Value::from(index));
                 }
+                // Tab and Shift-Tab select the next and previous breakpoint:
+                // the key's Shift is the command's `reverse` (the automation
+                // editing spec, R22).
+                if hit.command.id == bl_shell::envelope_commands::SELECT_ADJACENT {
+                    fields.insert("reverse".to_owned(), Value::from(mods.shift));
+                }
                 Value::Object(fields)
             };
             let Some(hit) = keymap.resolve_with(self.platform, *key, mods, &contexts, |hit| {

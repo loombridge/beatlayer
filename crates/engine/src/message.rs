@@ -112,6 +112,9 @@ pub enum TransportCommand {
     /// Sets the Global Amount of groove every device's block carries, in
     /// tenths of a percent: 1,000 is 100 % (the grooves spec, R21).
     SetGrooveAmount(u16),
+    /// Sets the set's current scale, which the devices of a track with no
+    /// clip playing read (the scales spec, R9 and R15).
+    SetScale(bl_model::Scale),
     /// Sets whether the transport is recording.
     SetRecording(bool),
     /// Sets where recording punches in and out (WP-2.13).

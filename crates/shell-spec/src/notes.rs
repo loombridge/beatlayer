@@ -20,6 +20,7 @@
 //! by ID. The behaviour they follow is in the piano roll spec.
 
 use crate::editing::EditResult;
+use crate::note_filters::{InvertSelectionArgs, NoteFilters, NoteFiltersArgs, NoteFiltersResult};
 use bl_commands::Context::{
     ClipView, Global, LoopBrace, NoteEditor, NoteSelection as NoteSelectionContext, SampleEditor,
 };
@@ -31,6 +32,10 @@ use serde::{Deserialize, Serialize};
 
 /// `clip_view.select_notes`: select notes in the MIDI Note Editor.
 pub const SELECT_NOTES: &str = "clip_view.select_notes";
+/// `clip_view.note_filters`: Find and Select Notes' filter bar and filters.
+pub const NOTE_FILTERS: &str = "clip_view.note_filters";
+/// `clip_view.invert_selection`: swap the selected and unselected notes.
+pub const INVERT_SELECTION: &str = "clip_view.invert_selection";
 /// `note.add`: add a note to a MIDI clip.
 pub const ADD_NOTE: &str = "note.add";
 /// `note.delete`: delete notes from a MIDI clip.
@@ -101,6 +106,8 @@ pub const SPLIT_CLIP: &str = "note.split_clip";
 /// `bl-shell`'s `Shell::run`.
 pub const IDS: &[&str] = &[
     SELECT_NOTES,
+    NOTE_FILTERS,
+    INVERT_SELECTION,
     ADD_NOTE,
     DELETE_NOTES,
     MOVE_NOTES,
@@ -1057,7 +1064,7 @@ impl RandomizeAmounts {
 /// What the Clip View shows: which clip it is editing, the notes selected in
 /// it, its insert marker and time selection, its expression lanes, and the
 /// tab with the envelope it shows.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ClipViewState {
     /// Whether the Clip View shows in the detail area.
     pub visible: bool,
@@ -1108,6 +1115,18 @@ pub struct ClipViewState {
     /// The parameter whose envelope the Envelopes tab shows; `null` when it
     /// shows none.
     pub envelope: Option<AutomationTarget>,
+    /// Find and Select Notes: whether the filter bar shows, and every
+    /// filter's settings, with which are on.
+    pub filters: NoteFilters,
+    /// The Envelope Editor's insert marker, in ticks from the beginning of
+    /// the clip's contents (WP-6.26), which Left and Right move along the
+    /// envelope; `null` until it has been moved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub envelope_marker: Option<Ticks>,
+    /// The breakpoint selected in the Envelope Editor (WP-6.26), if any:
+    /// `clip.select_envelope_breakpoint` sets it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub envelope_breakpoint: Option<Ticks>,
 }
 
 /// Arguments of `clip_view.foreground`.
@@ -1198,6 +1217,44 @@ fn specs() -> Vec<CommandSpec> {
             .binding(Binding::new("S-NOTE-001").arg("select", "all"))
             .binding(Binding::new("S-EDIT-009").arg("select", "all"))
             .args::<SelectNotesArgs>()
+            .result::<ClipViewState>(),
+        CommandSpec::new(NOTE_FILTERS, "Note Filters")
+            .description(
+                "Find and Select Notes. Shows or hides the filter bar (`visible`, or `toggle`, \
+                 as Cmd-Shift-F does), chooses the filter whose controls it shows (`shown`), \
+                 and sets the controls and Invert of any filter (`pitch`, `time`, `chance`, \
+                 `condition`, `count`, `duration`, `scale`, `velocity`). Setting a control, or \
+                 Invert, switches that filter on, and while any filter is on the selection is \
+                 the notes in the clip's span that every filter that is on lets through, worked \
+                 out again each time, with the time selection following it. `select` presses \
+                 the Select button of each filter it lists: it is switched on and the notes are \
+                 selected again. `off` switches filters off, keeping their settings; a click in \
+                 the note area switches all eight off. Time's Start, Length and Repeat are in \
+                 beats of the clip's time signature, to a hundredth, Start from 1; a Repeat of \
+                 `null` is one bar. Duration's Min and Max are in beats too, a Max of `null` \
+                 being the clip's span. Chance is in percent. Moving Min past Max takes Max \
+                 with it, and the other way round. The settings belong to the editor: they are \
+                 kept while the app runs, every filter is switched off when the editor shows \
+                 another clip, and none of it is saved with the set or is an undo step. The \
+                 result is every filter's settings and the selected notes.",
+            )
+            .permission(Permission::Read)
+            .contexts([NoteEditor, NoteSelectionContext])
+            .binding(Binding::new("S-NOTE-037").arg("toggle", true))
+            .args::<NoteFiltersArgs>()
+            .result::<NoteFiltersResult>(),
+        CommandSpec::new(INVERT_SELECTION, "Invert Selection")
+            .description(
+                "Selects every note in the clip's span that was not selected and deselects \
+                 those that were, as Edit \u{25b8} Invert Selection does (Cmd-Shift-A, \
+                 Ctrl-Shift-A on Windows). The time selection follows the new selection. It \
+                 needs a clip that holds notes, is never an undo step, and changes nothing \
+                 in the set.",
+            )
+            .permission(Permission::Read)
+            .contexts([NoteEditor, NoteSelectionContext])
+            .binding("S-NOTE-034")
+            .args::<InvertSelectionArgs>()
             .result::<ClipViewState>(),
         edit(
             ADD_NOTE,

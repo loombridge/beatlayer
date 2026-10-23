@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-755 commands in 45 areas.
+767 commands in 46 areas.
 
 ## Permission classes
 
@@ -125,6 +125,7 @@ Each command has:
 | [`automation.paste`](#automationpaste) | Paste Automation | `edit` |  |  |
 | [`automation.re_enable`](#automationre_enable) | Re-Enable Automation | `edit` |  |  |
 | [`automation.re_enable_for`](#automationre_enable_for) | Re-Enable Automation for a Parameter | `edit` |  |  |
+| [`automation.select_breakpoint`](#automationselect_breakpoint) | Select Automation Breakpoint | `read` |  |  |
 | [`automation.select_segment`](#automationselect_segment) | Select Automation Segment | `read` |  |  |
 | [`automation.set_breakpoint`](#automationset_breakpoint) | Set Automation Breakpoint | `edit` |  |  |
 | [`automation.set_curve`](#automationset_curve) | Curve Automation Segment | `edit` |  |  |
@@ -224,6 +225,7 @@ Each command has:
 | [`clip.save_default`](#clipsave_default) | Save Default Clip | `external` |  |  |
 | [`clip.save_file`](#clipsave_file) | Save Clip as File | `external` |  |  |
 | [`clip.scale_tempo`](#clipscale_tempo) | Scale Clip Tempo | `edit` |  |  |
+| [`clip.select_envelope_breakpoint`](#clipselect_envelope_breakpoint) | Select Envelope Breakpoint | `read` |  |  |
 | [`clip.set_1_1_1_here`](#clipset_1_1_1_here) | Set 1.1.1 Here | `edit` |  |  |
 | [`clip.set_data`](#clipset_data) | Replace Clip Contents | `edit` |  |  |
 | [`clip.set_envelope_breakpoint`](#clipset_envelope_breakpoint) | Add Envelope Breakpoint | `edit` |  |  |
@@ -265,6 +267,8 @@ Each command has:
 | [`clip.warp_selection_as_loop`](#clipwarp_selection_as_loop) | Warp Selection as Loop | `edit` |  |  |
 | [`clip_view.focus_mode`](#clip_viewfocus_mode) | Focus Mode | `read` | `N` | `N` |
 | [`clip_view.foreground`](#clip_viewforeground) | Foreground Clip | `read` |  |  |
+| [`clip_view.invert_selection`](#clip_viewinvert_selection) | Invert Selection | `read` | `Cmd+Shift+A` | `Ctrl+Shift+A` |
+| [`clip_view.note_filters`](#clip_viewnote_filters) | Note Filters | `read` | `Cmd+Shift+F` | `Ctrl+Shift+F` |
 | [`clip_view.quantize_settings`](#clip_viewquantize_settings) | Quantize Settings | `read` | `Cmd+Shift+U` | `Ctrl+Shift+U` |
 | [`clip_view.sample_editor`](#clip_viewsample_editor) | Sample Editor State | `read` |  |  |
 | [`clip_view.sample_view`](#clip_viewsample_view) | Zoom Sample Editor | `read` | `Z`; `X`; `W`; `H` | `Z`; `X`; `W`; `H` |
@@ -371,6 +375,14 @@ Each command has:
 | [`edit.go_to_step`](#editgo_to_step) | Go to Step | `edit` |  |  |
 | [`edit.redo`](#editredo) | Redo | `edit` | `Cmd+Shift+Z` | `Ctrl+Y` |
 | [`edit.undo`](#editundo) | Undo | `edit` | `Cmd+Z` | `Ctrl+Z` |
+| [`envelope.cancel`](#envelopecancel) | Envelope Cancel | `edit` | `Esc` | `Esc` |
+| [`envelope.delete`](#envelopedelete) | Delete Shown Envelope | `destructive` | `Cmd+Delete` | `Ctrl+Delete` |
+| [`envelope.delete_breakpoint`](#envelopedelete_breakpoint) | Delete Envelope Breakpoint | `destructive` | `Delete` | `Delete` |
+| [`envelope.enter`](#envelopeenter) | Envelope Enter | `edit` | `Enter` | `Enter` |
+| [`envelope.move_marker`](#envelopemove_marker) | Move Insert Marker Along Envelope | `read` |  |  |
+| [`envelope.move_selected`](#envelopemove_selected) | Move Selected Breakpoint | `edit` |  |  |
+| [`envelope.select_adjacent`](#envelopeselect_adjacent) | Select Adjacent Breakpoint | `read` | `Tab`, `Shift+Tab` | `Tab`, `Shift+Tab` |
+| [`envelope.set_value`](#envelopeset_value) | Set Breakpoint Value | `edit` |  |  |
 | [`export.audio`](#exportaudio) | Export Audio | `external` |  |  |
 | [`export.cancel`](#exportcancel) | Cancel Export | `read` |  |  |
 | [`export.close_dialog`](#exportclose_dialog) | Close Export Dialog | `read` |  |  |
@@ -1608,7 +1620,7 @@ Result: [`ArrangementState`](#arrangementstate).
 
 **Select Tracks**. Permission: `read`. Contexts: `arrangement`.
 
-Selects tracks in the Arrangement, replacing the selection or, with `add`, adding to it; with `title_bars`, their title bars, as clicking a title bar does, so the fold and grouped-track keys apply. Changes only the view.
+Selects tracks in the Arrangement, replacing the selection or, with `add`, adding to it; with `title_bars`, their title bars, as clicking a title bar does, so the fold and grouped-track keys apply; with `automation_lane` and one track, its automation lane, as Up and Down select it while Automation Mode is on, and the lane gets the keyboard. Changes only the view.
 
 Default keys: none.
 
@@ -1618,6 +1630,7 @@ Arguments:
 |---|---|---|---|
 | `tracks` | array of [`TrackId`](#trackid) | yes | The tracks to select. Empty clears the track selection. |
 | `add` | boolean | no | Add them to the tracks already selected instead of replacing them. |
+| `automation_lane` | boolean | no | Select the track's automation lane, as Up and Down do through the lanes while Automation Mode is on (the automation editing spec, R20): the lane gets the keyboard. One track only. |
 | `title_bars` | boolean | no | Select their title bars, so the track-header shortcuts (fold, show and hide grouped tracks) apply, as clicking a title bar does. |
 
 Result: [`ArrangementState`](#arrangementstate).
@@ -1665,7 +1678,7 @@ Result: [`ArrangementState`](#arrangementstate).
 
 **Set Insert Marker**. Permission: `read`. Contexts: `arrangement`.
 
-Places the Arrangement's insert marker at `at` and, with `track`, selects that track, as clicking in a track's lane does; a click also snaps to the grid when Snap to Grid is on, and resumes Follow. Clears the time selection. Not an undo step; changes only the view.
+Places the Arrangement's insert marker at `at` and, with `track`, selects that track, as clicking in a track's lane does; a click also snaps to the grid when Snap to Grid is on, and resumes Follow. Clears the time selection. With `automation_lane`, the track's automation lane is selected too, as clicking its background does, and gets the keyboard. Not an undo step; changes only the view.
 
 Default keys: none.
 
@@ -1674,6 +1687,7 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `at` | [`Ticks`](#ticks) | yes | Where to put it. It isn't snapped: snap first if you want the grid. |
+| `automation_lane` | boolean | no | Select the track's automation lane too, as clicking the lane's background does (the automation editing spec, R1): the lane gets the keyboard. |
 | `track` | [`TrackId`](#trackid) or null | no | The track to select with it, as clicking a track's lane does. Left out, the selected tracks stay selected. |
 
 Result: [`ArrangementState`](#arrangementstate).
@@ -2504,6 +2518,24 @@ Arguments:
 | `target` | [`AutomationTarget`](#automationtarget) | yes | The parameter. |
 
 Result: [`ChangeSet`](#changeset).
+
+#### `automation.select_breakpoint`
+
+**Select Automation Breakpoint**. Permission: `read`. Contexts: `arrangement`, `envelope`.
+
+Selects a breakpoint in a track's automation lane, as Enter or Option-click does: the lane gets the keyboard, the insert marker moves to the breakpoint, and an edit begins that ends when the selection is cleared with `at` `null` (keeping the changes) or the focus leaves; every change in between is one undo step. `at` may be a position where no breakpoint is yet, for `automation.set_breakpoint` to make one there as part of the same edit. `arrangement.state` reports the selection. Changes nothing in the set itself.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track whose automation lane holds the breakpoint. |
+| `target` | [`AutomationTarget`](#automationtarget) | yes | The parameter the lane shows. |
+| `at` | [`Ticks`](#ticks) or null | no | The position of the breakpoint to select, or `null` to keep the edit and select none. |
+
+Result: [`EnvelopeKeyState`](#envelopekeystate).
 
 #### `automation.select_segment`
 
@@ -4285,6 +4317,24 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `clip.select_envelope_breakpoint`
+
+**Select Envelope Breakpoint**. Permission: `read`. Contexts: `clip-view`, `envelope`.
+
+Selects a breakpoint of a clip's envelope in the Clip View's Envelope Editor, as `automation.select_breakpoint` does in an automation lane: the insert marker moves to it, and an edit begins that ends when the selection is cleared with `at` `null` or the focus leaves; every change in between is one undo step. `clip_view.state` reports the selection. Changes nothing in the set itself.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The clip whose envelope holds the breakpoint. |
+| `target` | [`AutomationTarget`](#automationtarget) | yes | The parameter of the clip's track the envelope modulates. |
+| `at` | [`Ticks`](#ticks) or null | no | The position of the breakpoint to select, in ticks from the beginning of the clip's contents, or `null` to keep the edit and select none. |
+
+Result: [`EnvelopeKeyState`](#envelopekeystate).
+
 #### `clip.set_1_1_1_here`
 
 **Set 1.1.1 Here**. Permission: `edit`. Contexts: `clip-view`.
@@ -5044,6 +5094,59 @@ Arguments:
 | `clip` | [`ClipId`](#clipid) | yes | The shown clip to make the foreground clip. |
 
 Result: [`ClipViewState`](#clipviewstate).
+
+#### `clip_view.invert_selection`
+
+**Invert Selection**. Permission: `read`. Contexts: `note-editor`, `note-selection`.
+
+Selects every note in the clip's span that was not selected and deselects those that were, as Edit ▸ Invert Selection does (Cmd-Shift-A, Ctrl-Shift-A on Windows). The time selection follows the new selection. It needs a clip that holds notes, is never an undo step, and changes nothing in the set.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-NOTE-034 | `Cmd+Shift+A` | `Ctrl+Shift+A` | `note-editor` | Invert the note selection | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows. |
+
+Result: [`ClipViewState`](#clipviewstate).
+
+#### `clip_view.note_filters`
+
+**Note Filters**. Permission: `read`. Contexts: `note-editor`, `note-selection`.
+
+Find and Select Notes. Shows or hides the filter bar (`visible`, or `toggle`, as Cmd-Shift-F does), chooses the filter whose controls it shows (`shown`), and sets the controls and Invert of any filter (`pitch`, `time`, `chance`, `condition`, `count`, `duration`, `scale`, `velocity`). Setting a control, or Invert, switches that filter on, and while any filter is on the selection is the notes in the clip's span that every filter that is on lets through, worked out again each time, with the time selection following it. `select` presses the Select button of each filter it lists: it is switched on and the notes are selected again. `off` switches filters off, keeping their settings; a click in the note area switches all eight off. Time's Start, Length and Repeat are in beats of the clip's time signature, to a hundredth, Start from 1; a Repeat of `null` is one bar. Duration's Min and Max are in beats too, a Max of `null` being the clip's span. Chance is in percent. Moving Min past Max takes Max with it, and the other way round. The settings belong to the editor: they are kept while the app runs, every filter is switched off when the editor shows another clip, and none of it is saved with the set or is an undo step. The result is every filter's settings and the selected notes.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-NOTE-037 | `Cmd+Shift+F` | `Ctrl+Shift+F` | `note-editor` | Show or hide the note filters | fixes `toggle` = `true` |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `chance` | [`ChanceArgs`](#chanceargs) or null | no | Chance controls. |
+| `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows. |
+| `condition` | [`ConditionArgs`](#conditionargs) or null | no | Condition controls. |
+| `count` | [`CountArgs`](#countargs) or null | no | Count controls. |
+| `duration` | [`DurationArgs`](#durationargs) or null | no | Duration controls. |
+| `off` | array of [`NoteFilter`](#notefilter) | no | Filters to switch off, keeping their settings. |
+| `pitch` | [`PitchArgs`](#pitchargs) or null | no | Pitch controls. |
+| `scale` | [`ScaleArgs`](#scaleargs) or null | no | Scale controls. |
+| `select` | array of [`NoteFilter`](#notefilter) | no | Filters whose Select button is pressed: each is switched on, and the notes are selected again. |
+| `shown` | [`NoteFilter`](#notefilter) or null | no | Chooses the filter whose controls the bar shows. |
+| `time` | [`TimeArgs`](#timeargs) or null | no | Time controls. |
+| `toggle` | boolean | no | Switches the bar, as Cmd-Shift-F does; `visible` wins if both are given. |
+| `velocity` | [`VelocityArgs`](#velocityargs) or null | no | Velocity controls. |
+| `visible` | boolean or null | no | Shows or hides the filter bar. |
+
+Result: [`NoteFiltersResult`](#notefiltersresult).
 
 #### `clip_view.quantize_settings`
 
@@ -6967,6 +7070,142 @@ Default keys:
 Arguments: none (send `{}`).
 
 Result: [`ChangeSet`](#changeset).
+
+### Area `envelope`
+
+#### `envelope.cancel`
+
+**Envelope Cancel**. Permission: `edit`. Contexts: `envelope`.
+
+Drops the edit of the selected breakpoint of the envelope that has the keyboard: it goes back to how it was when it was selected, a breakpoint `envelope.enter` made is removed, and nothing is selected. No undo step is recorded.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-A11Y-024 | `Esc` | `Esc` | `envelope` | Cancel the breakpoint edit and deselect | runs it |
+
+Arguments: none (send `{}`).
+
+Result: [`EnvelopeKeyState`](#envelopekeystate).
+
+#### `envelope.delete`
+
+**Delete Shown Envelope**. Permission: `destructive`. Contexts: `envelope`.
+
+Deletes the automation of the parameter the selected automation lane shows, as `automation.delete` does, or clears the envelope the Envelope Editor shows, as `clip.delete_envelope` does. One undo step. Because it removes the person's work, an agent asks first.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-ENV-005 | `Cmd+Delete` | `Ctrl+Delete` | `envelope` | Delete the selected envelope | runs it |
+
+Arguments: none (send `{}`).
+
+Result: [`EnvelopeKeyState`](#envelopekeystate).
+
+#### `envelope.delete_breakpoint`
+
+**Delete Envelope Breakpoint**. Permission: `destructive`. Contexts: `envelope`.
+
+Deletes the selected breakpoint of the envelope that has the keyboard, or with none selected the one at the insert marker, if there is one. One undo step. Because it removes the person's work, an agent asks first.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-A11Y-025 | `Delete` | `Delete` | `envelope` | Delete the selected breakpoint | runs it |
+
+Arguments: none (send `{}`).
+
+Result: [`EnvelopeKeyState`](#envelopekeystate).
+
+#### `envelope.enter`
+
+**Envelope Enter**. Permission: `edit`. Contexts: `envelope`.
+
+With no breakpoint selected, selects the breakpoint at the insert marker of the envelope that has the keyboard, or makes one there at the envelope's value at that point (the parameter's value when there is no envelope) and selects it. With one selected, keeps the changes made since it was selected and deselects it. All of it is one undo step.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-A11Y-019 | `Enter` | `Enter` | `envelope` | Create or select a breakpoint at the insert marker, or confirm an edit | runs it |
+
+Arguments: none (send `{}`).
+
+Result: [`EnvelopeKeyState`](#envelopekeystate).
+
+#### `envelope.move_marker`
+
+**Move Insert Marker Along Envelope**. Permission: `read`. Contexts: `arrangement`, `clip-view`, `envelope`.
+
+Moves the insert marker along the envelope that has the keyboard, one grid step to the `left` or `right` with `by` `grid`, or to the previous or next breakpoint with `by` `breakpoint`; it stays at the end if there is none further. The result says the envelope's value at the marker. Does nothing while a breakpoint is selected: `envelope.move_selected` moves that. Changes only the view.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `direction` | [`ArrowKey`](#arrowkey) | yes | `left` for earlier, `right` for later. |
+| `by` | [`MarkerStep`](#markerstep) | yes | `grid` for one grid step, or `breakpoint` for the previous or next breakpoint. |
+
+Result: [`EnvelopeKeyState`](#envelopekeystate).
+
+#### `envelope.move_selected`
+
+**Move Selected Breakpoint**. Permission: `edit`. Contexts: `arrangement`, `clip-view`, `envelope`.
+
+Moves the selected breakpoint of the envelope that has the keyboard: `left` and `right` one grid step in time, not past its neighbours, and `up` and `down` by one step of the parameter's control (1% of its travel, or one step of a stepped value), within its range. The insert marker goes with it. It is part of the edit that began when the breakpoint was selected.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `direction` | [`ArrowKey`](#arrowkey) | yes | `left` and `right` move it one grid step in time, `up` and `down` change its value by the step its parameter's control takes for an arrow key. |
+
+Result: [`EnvelopeKeyState`](#envelopekeystate).
+
+#### `envelope.select_adjacent`
+
+**Select Adjacent Breakpoint**. Permission: `read`. Contexts: `envelope`.
+
+While a breakpoint of the envelope that has the keyboard is selected, selects the next one (the previous one with `reverse`) and moves the insert marker to it; it stays on the last or first. Part of the edit that began when the first breakpoint was selected. Does nothing with none selected.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-A11Y-022 | `Tab`, `Shift+Tab` | `Tab`, `Shift+Tab` | `envelope` | Select the next or previous breakpoint | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `reverse` | boolean | no | Select the previous breakpoint instead of the next. |
+
+Result: [`EnvelopeKeyState`](#envelopekeystate).
+
+#### `envelope.set_value`
+
+**Set Breakpoint Value**. Permission: `edit`. Contexts: `arrangement`, `clip-view`, `envelope`.
+
+Types a value for the selected breakpoint of the envelope that has the keyboard, as its parameter's control reads it (`-6 dB`, `25L`, `50%`); the other selected breakpoints of a lane move by the same share of the travel. With `at`, makes a new breakpoint there with the value instead. A value the parameter doesn't read is refused. Part of the edit that began when the breakpoint was selected, or one undo step on its own.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `text` | string | yes | The value, as the parameter's control shows it: `-6` or `-6 dB` for a volume, `25L` for a pan, `50%` for a clip envelope. |
+| `at` | [`Ticks`](#ticks) or null | no | Where to make a new breakpoint with the value. Left out, the value goes to the selected breakpoint. |
+
+Result: [`EnvelopeKeyState`](#envelopekeystate).
 
 ### Area `export`
 
@@ -14256,6 +14495,12 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`edit.go_to_step`](#editgo_to_step) | the query tool's `song` | `undo.current` |
 | [`edit.redo`](#editredo) | the query tool's `song` | `undo.next_redo` |
 | [`edit.undo`](#editundo) | the query tool's `song` | `undo.next_undo` |
+| [`envelope.cancel`](#envelopecancel) | the query tool's `track` | `automation` |
+| [`envelope.delete`](#envelopedelete) | the query tool's `track` | `automation` |
+| [`envelope.delete_breakpoint`](#envelopedelete_breakpoint) | the query tool's `track` | `automation` |
+| [`envelope.enter`](#envelopeenter) | the query tool's `track` | `automation` |
+| [`envelope.move_selected`](#envelopemove_selected) | the query tool's `track` | `automation` |
+| [`envelope.set_value`](#envelopeset_value) | the query tool's `track` | `automation` |
 | [`export.realtime.auto_restart`](#exportrealtimeauto_restart) | `export.realtime.status` | `auto_restart` |
 | [`export.realtime.cancel`](#exportrealtimecancel) | `export.realtime.status` | `phase` |
 | [`export.realtime.restart`](#exportrealtimerestart) | `export.realtime.status` | `phase` |
@@ -15019,7 +15264,9 @@ What the Arrangement View shows: every view command returns it.
 | `show_volume` | boolean | yes | Whether the track headers show their volume, pan, and sends. |
 | `show_return_tracks` | boolean | yes | Whether the return tracks' rows show in the lanes. |
 | `automation_lanes` | array of [`AutomationLane`](#automationlane) | no | The parameter each track's automation lane shows, for the tracks whose lane isn't showing the default (their volume): the choosers' choice. `target` `null` means the lane draws no envelope. |
+| `selected_breakpoint` | [`SelectedBreakpoint`](#selectedbreakpoint) or null | no | The breakpoint selected in that lane (WP-6.26), if any: `automation.select_breakpoint` sets it. |
 | `selected_fade` | [`FadeHandleState`](#fadehandlestate) or null | no | The selected fade handle (WP-6.51), if any: Delete deletes its fade. |
+| `selected_lane` | [`Lane`](#lane) or null | no | The automation lane that has the keyboard (WP-6.26): the one the last click, or Up and Down, selected, while Automation Mode is on. The keys of the automation editing spec's R20 to R26 act on its envelope. |
 | `time_selection_lanes` | array of [`Lane`](#lane) | no | The lanes the time selection covers: each a track's own lane or its automation lane (the automation editing spec, R1). Empty when the selection names no lane. |
 
 <details><summary>JSON Schema</summary>
@@ -15083,6 +15330,17 @@ What the Arrangement View shows: every view command returns it.
       "format": "double",
       "type": "number"
     },
+    "selected_breakpoint": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SelectedBreakpoint"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The breakpoint selected in that lane (WP-6.26), if any: `automation.select_breakpoint` sets it."
+    },
     "selected_clips": {
       "default": [],
       "description": "The selected clips (WP-1.8b), in the order they were selected. The editing commands act on these when there are any, and on the time selection otherwise.",
@@ -15101,6 +15359,17 @@ What the Arrangement View shows: every view command returns it.
         }
       ],
       "description": "The selected fade handle (WP-6.51), if any: Delete deletes its fade."
+    },
+    "selected_lane": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Lane"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The automation lane that has the keyboard (WP-6.26): the one the last click, or Up and Down, selected, while Automation Mode is on. The keys of the automation editing spec's R20 to R26 act on its envelope."
     },
     "selected_locators": {
       "default": [],
@@ -15195,6 +15464,49 @@ What the Arrangement View shows: every view command returns it.
     "show_return_tracks"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `ArrowKey`
+
+A direction a key points.
+
+One of:
+
+- `"left"`: Earlier in time.
+- `"right"`: Later in time.
+- `"up"`: A higher value.
+- `"down"`: A lower value.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A direction a key points.",
+  "oneOf": [
+    {
+      "const": "left",
+      "description": "Earlier in time.",
+      "type": "string"
+    },
+    {
+      "const": "right",
+      "description": "Later in time.",
+      "type": "string"
+    },
+    {
+      "const": "up",
+      "description": "A higher value.",
+      "type": "string"
+    },
+    {
+      "const": "down",
+      "description": "A lower value.",
+      "type": "string"
+    }
+  ]
 }
 ```
 
@@ -18214,6 +18526,101 @@ A chain's zones, each `low`, `high` and the `fade_low` and `fade_high` values it
 
 </details>
 
+### `ChanceArgs`
+
+The Chance filter's controls in `clip_view.note_filters`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `invert` | boolean or null | no | Switches the filter's Invert. |
+| `max` | number or null | no | Max, 0 to 100 percent. Moving it past Min takes Min with it. |
+| `min` | number or null | no | Min, 0 to 100 percent. Moving it past Max takes Max with it. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "additionalProperties": false,
+  "description": "The Chance filter's controls in `clip_view.note_filters`.",
+  "properties": {
+    "invert": {
+      "description": "Switches the filter's Invert.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "max": {
+      "description": "Max, 0 to 100 percent. Moving it past Min takes Min with it.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "min": {
+      "description": "Min, 0 to 100 percent. Moving it past Max takes Max with it.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    }
+  },
+  "type": "object"
+}
+```
+
+</details>
+
+### `ChanceFilter`
+
+The Chance filter, in percent.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean | yes | Whether the filter is on. |
+| `invert` | boolean | yes | Whether it lets through the notes it would hold back. |
+| `min` | number | yes | The lowest chance let through, 0 to 100 percent. |
+| `max` | number | yes | The highest chance let through, 0 to 100 percent. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The Chance filter, in percent.",
+  "properties": {
+    "invert": {
+      "description": "Whether it lets through the notes it would hold back.",
+      "type": "boolean"
+    },
+    "max": {
+      "description": "The highest chance let through, 0 to 100 percent.",
+      "format": "double",
+      "type": "number"
+    },
+    "min": {
+      "description": "The lowest chance let through, 0 to 100 percent.",
+      "format": "double",
+      "type": "number"
+    },
+    "on": {
+      "description": "Whether the filter is on.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "on",
+    "invert",
+    "min",
+    "max"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `Change`
 
 How one object differs between two versions.
@@ -19252,6 +19659,9 @@ What the Clip View shows: which clip it is editing, the notes selected in it, it
 | `tab` | [`ClipTab`](#cliptab) | yes | The tab the Clip View shows. |
 | `preview` | boolean | yes | Whether the Preview switch is on (Spec: step-recording R1): one switch for every MIDI clip's editor, kept between launches. |
 | `envelope` | [`AutomationTarget`](#automationtarget) or null | yes | The parameter whose envelope the Envelopes tab shows; `null` when it shows none. |
+| `filters` | [`NoteFilters`](#notefilters) | yes | Find and Select Notes: whether the filter bar shows, and every filter's settings, with which are on. |
+| `envelope_breakpoint` | [`Ticks`](#ticks) or null | no | The breakpoint selected in the Envelope Editor (WP-6.26), if any: `clip.select_envelope_breakpoint` sets it. |
+| `envelope_marker` | [`Ticks`](#ticks) or null | no | The Envelope Editor's insert marker, in ticks from the beginning of the clip's contents (WP-6.26), which Left and Right move along the envelope; `null` until it has been moved. |
 
 <details><summary>JSON Schema</summary>
 
@@ -19298,6 +19708,32 @@ What the Clip View shows: which clip it is editing, the notes selected in it, it
         }
       ],
       "description": "The parameter whose envelope the Envelopes tab shows; `null` when it shows none."
+    },
+    "envelope_breakpoint": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Ticks"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The breakpoint selected in the Envelope Editor (WP-6.26), if any: `clip.select_envelope_breakpoint` sets it."
+    },
+    "envelope_marker": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Ticks"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The Envelope Editor's insert marker, in ticks from the beginning of the clip's contents (WP-6.26), which Left and Right move along the envelope; `null` until it has been moved."
+    },
+    "filters": {
+      "$ref": "#/$defs/NoteFilters",
+      "description": "Find and Select Notes: whether the filter bar shows, and every filter's settings, with which are on."
     },
     "focus_mode": {
       "description": "Whether Focus Mode is on (Spec: multi-clip-editing R13).",
@@ -19401,7 +19837,8 @@ What the Clip View shows: which clip it is editing, the notes selected in it, it
     "folded",
     "tab",
     "preview",
-    "envelope"
+    "envelope",
+    "filters"
   ],
   "type": "object"
 }
@@ -19768,6 +20205,111 @@ Changes to Complex Pro's controls.
 
 </details>
 
+### `ConditionArgs`
+
+The Condition filter's controls in `clip_view.note_filters`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `active` | boolean or null | no | The Active switch. |
+| `chance` | boolean or null | no | The Chance switch. |
+| `invert` | boolean or null | no | Switches the filter's Invert. |
+| `velocity_deviation` | boolean or null | no | The Velocity Deviation switch. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "additionalProperties": false,
+  "description": "The Condition filter's controls in `clip_view.note_filters`.",
+  "properties": {
+    "active": {
+      "description": "The Active switch.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "chance": {
+      "description": "The Chance switch.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "invert": {
+      "description": "Switches the filter's Invert.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "velocity_deviation": {
+      "description": "The Velocity Deviation switch.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    }
+  },
+  "type": "object"
+}
+```
+
+</details>
+
+### `ConditionFilter`
+
+The Condition filter: a note must pass each switch that is on.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean | yes | Whether the filter is on. |
+| `invert` | boolean | yes | Whether it lets through the notes it would hold back. |
+| `active` | boolean | yes | Let through the notes that aren't deactivated. |
+| `chance` | boolean | yes | Let through the notes whose chance is below 100 percent. |
+| `velocity_deviation` | boolean | yes | Let through the notes whose velocity deviation isn't 0. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The Condition filter: a note must pass each switch that is on.",
+  "properties": {
+    "active": {
+      "description": "Let through the notes that aren't deactivated.",
+      "type": "boolean"
+    },
+    "chance": {
+      "description": "Let through the notes whose chance is below 100 percent.",
+      "type": "boolean"
+    },
+    "invert": {
+      "description": "Whether it lets through the notes it would hold back.",
+      "type": "boolean"
+    },
+    "on": {
+      "description": "Whether the filter is on.",
+      "type": "boolean"
+    },
+    "velocity_deviation": {
+      "description": "Let through the notes whose velocity deviation isn't 0.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "on",
+    "invert",
+    "active",
+    "chance",
+    "velocity_deviation"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `ConfiguredParam`
 
 One parameter a plug-in device's panel can show (clap-hosting R5, configure mode): its ID and the name its right-click menu lists it by.
@@ -20124,6 +20666,123 @@ What `device.convert` returns.
     "device",
     "to",
     "dropped"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `CountArgs`
+
+The Count filter's controls in `clip_view.note_filters`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `every` | integer or null | no | Every, 1 to 16. |
+| `invert` | boolean or null | no | Switches the filter's Invert. |
+| `offset` | integer or null | no | Offset, 0 to one less than Every. |
+| `quantized` | boolean or null | no | The Quantized switch. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "additionalProperties": false,
+  "description": "The Count filter's controls in `clip_view.note_filters`.",
+  "properties": {
+    "every": {
+      "description": "Every, 1 to 16.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "invert": {
+      "description": "Switches the filter's Invert.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "offset": {
+      "description": "Offset, 0 to one less than Every.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "quantized": {
+      "description": "The Quantized switch.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    }
+  },
+  "type": "object"
+}
+```
+
+</details>
+
+### `CountFilter`
+
+The Count filter.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean | yes | Whether the filter is on. |
+| `invert` | boolean | yes | Whether it lets through the notes it would hold back. |
+| `every` | integer from 0 to 255 | yes | Let through each nth note, chord or step, 1 to 16. |
+| `offset` | integer from 0 to 255 | yes | Where counting starts, 0 to one less than `every`. |
+| `quantized` | boolean | yes | Count the editing grid's steps instead of the notes. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The Count filter.",
+  "properties": {
+    "every": {
+      "description": "Let through each nth note, chord or step, 1 to 16.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "invert": {
+      "description": "Whether it lets through the notes it would hold back.",
+      "type": "boolean"
+    },
+    "offset": {
+      "description": "Where counting starts, 0 to one less than `every`.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "on": {
+      "description": "Whether the filter is on.",
+      "type": "boolean"
+    },
+    "quantized": {
+      "description": "Count the editing grid's steps instead of the notes.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "on",
+    "invert",
+    "every",
+    "offset",
+    "quantized"
   ],
   "type": "object"
 }
@@ -20771,6 +21430,7 @@ What a kind of device is to the framework: its parameters' descriptors, in the o
 | `params` | array of [`ParamDescriptor`](#paramdescriptor) | yes | Its parameters. |
 | `layout` | [`DeviceLayout`](#devicelayout) | yes | Where its controls and display cells sit (IMP-14). |
 | `menu_options` | array of [`ParamId`](#paramid) | no | The switches the device lists as its own items in its Show Options menu, after Save as Default Preset (C-DEVICE-015), in this order. They are parameters like any other, but the layout places no control for them. |
+| `title_switch` | [`ParamId`](#paramid) or null | no | The switch the device draws in its title bar instead of its panel (L-DEV-004): Use Current Scale, on the five scale-aware devices. It is a parameter like any other, which the layout places no control for. |
 | `views` | array of string | no | The views its display offers, such as `Transfer Curve`, the first being the one it starts in; empty for a display with one view. Which is shown is view state (`device.set_display_view`). |
 
 <details><summary>JSON Schema</summary>
@@ -20796,6 +21456,17 @@ What a kind of device is to the framework: its parameters' descriptors, in the o
         "$ref": "#/$defs/ParamDescriptor"
       },
       "type": "array"
+    },
+    "title_switch": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ParamId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The switch the device draws in its title bar instead of its panel (L-DEV-004): Use Current Scale, on the five scale-aware devices. It is a parameter like any other, which the layout places no control for."
     },
     "views": {
       "description": "The views its display offers, such as `Transfer Curve`, the first being the one it starts in; empty for a display with one view. Which is shown is view state (`device.set_display_view`).",
@@ -21487,6 +22158,7 @@ What the generic UI needs to draw a device (WP-2.5): its type's description and 
 | `knobs` | array of integer, at least 0 | no | The knob each of the panel's parameters is drawn on, 0 to 7, parallel to `description`'s parameters (clap-hosting R5, WP-5.40): a knob's context menu remaps the knob it is right-clicked on. Empty for a device that isn't a plug-in. |
 | `learning` | integer or null | no | The articulation whose Learn button is lit, counted from 0: the panel's state, not the set's. |
 | `loaded_slots` | array of boolean | no | For a device with sample slots: whether each slot holds a sample. |
+| `locked` | array of [`ParamId`](#paramid) | no | The parameters drawn disabled because the device takes them from its current scale: Scale's Base and Scale Name and Arpeggiator's Root and Scale, while Use Current Scale is on (the scales spec, R16). |
 | `slot_keys` | array of string | no | For a device with sample slots: the key each slot plays, as Live names notes (`C3`). |
 
 <details><summary>JSON Schema</summary>
@@ -21536,6 +22208,13 @@ What the generic UI needs to draw a device (WP-2.5): its type's description and 
       "description": "For a device with sample slots: whether each slot holds a sample.",
       "items": {
         "type": "boolean"
+      },
+      "type": "array"
+    },
+    "locked": {
+      "description": "The parameters drawn disabled because the device takes them from its current scale: Scale's Base and Scale Name and Arpeggiator's Root and Scale, while Use Current Scale is on (the scales spec, R16).",
+      "items": {
+        "$ref": "#/$defs/ParamId"
       },
       "type": "array"
     },
@@ -22629,6 +23308,104 @@ A drum chain's row in the chain list (drum racks spec, R21).
 
 </details>
 
+### `DurationArgs`
+
+The Duration filter's controls in `clip_view.note_filters`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `invert` | boolean or null | no | Switches the filter's Invert. |
+| `max` | number or null | no | Max, in beats; `null` for the length of the clip's span. Moving it past Min takes Min with it. |
+| `min` | number or null | no | Min, in beats. Moving it past Max takes Max with it. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "additionalProperties": false,
+  "description": "The Duration filter's controls in `clip_view.note_filters`.",
+  "properties": {
+    "invert": {
+      "description": "Switches the filter's Invert.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "max": {
+      "description": "Max, in beats; `null` for the length of the clip's span. Moving it past Min takes Min with it.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "min": {
+      "description": "Min, in beats. Moving it past Max takes Max with it.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    }
+  },
+  "type": "object"
+}
+```
+
+</details>
+
+### `DurationFilter`
+
+The Duration filter, in beats of the clip's time signature.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean | yes | Whether the filter is on. |
+| `invert` | boolean | yes | Whether it lets through the notes it would hold back. |
+| `min` | number | yes | The shortest note let through, in beats. |
+| `max` | number or null | yes | The longest note let through, in beats. `null` is the length of the clip's span. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The Duration filter, in beats of the clip's time signature.",
+  "properties": {
+    "invert": {
+      "description": "Whether it lets through the notes it would hold back.",
+      "type": "boolean"
+    },
+    "max": {
+      "description": "The longest note let through, in beats. `null` is the length of the clip's span.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "min": {
+      "description": "The shortest note let through, in beats.",
+      "format": "double",
+      "type": "number"
+    },
+    "on": {
+      "description": "Whether the filter is on.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "on",
+    "invert",
+    "min",
+    "max"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `Edge`
 
 A clip's `start` (left) edge, which shows more or less of its beginning, or its `end` (right) edge.
@@ -22937,6 +23714,90 @@ What `automation.copy` put on the clipboard.
     "length"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `EnvelopeKeyState`
+
+What the envelope keys' commands report: the envelope they acted on, the insert marker, the selected breakpoint, and the envelope's value at the marker as its parameter reads.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `envelope` | [`EnvelopeKeys`](#envelopekeys) | yes | The envelope that has the keyboard. |
+| `marker` | [`Ticks`](#ticks) | yes | The insert marker, in ticks (from the beginning of the clip's contents in the Envelope Editor). |
+| `selected` | [`Ticks`](#ticks) or null | yes | The selected breakpoint's position, or `null` when none is selected. |
+| `value` | string | yes | The envelope's value at the insert marker, in the parameter's own units as its control shows it. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What the envelope keys' commands report: the envelope they acted on, the insert marker, the selected breakpoint, and the envelope's value at the marker as its parameter reads.",
+  "properties": {
+    "envelope": {
+      "$ref": "#/$defs/EnvelopeKeys",
+      "description": "The envelope that has the keyboard."
+    },
+    "marker": {
+      "$ref": "#/$defs/Ticks",
+      "description": "The insert marker, in ticks (from the beginning of the clip's contents in the Envelope Editor)."
+    },
+    "selected": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Ticks"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The selected breakpoint's position, or `null` when none is selected."
+    },
+    "value": {
+      "description": "The envelope's value at the insert marker, in the parameter's own units as its control shows it.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "envelope",
+    "marker",
+    "selected",
+    "value"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `EnvelopeKeys`
+
+Which envelope has the keyboard.
+
+One of:
+
+- `"lane"`: An automation lane in the Arrangement.
+- `"clip"`: The Clip View's Envelope Editor.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Which envelope has the keyboard.",
+  "oneOf": [
+    {
+      "const": "lane",
+      "description": "An automation lane in the Arrangement.",
+      "type": "string"
+    },
+    {
+      "const": "clip",
+      "description": "The Clip View's Envelope Editor.",
+      "type": "string"
+    }
+  ]
 }
 ```
 
@@ -28715,6 +29576,37 @@ One slot's mapping as its panel names it.
 
 </details>
 
+### `MarkerStep`
+
+How far `envelope.move_marker` moves the insert marker.
+
+One of:
+
+- `"grid"`: One grid step.
+- `"breakpoint"`: To the previous or next breakpoint.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "How far `envelope.move_marker` moves the insert marker.",
+  "oneOf": [
+    {
+      "const": "grid",
+      "description": "One grid step.",
+      "type": "string"
+    },
+    {
+      "const": "breakpoint",
+      "description": "To the previous or next breakpoint.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `Measure`
 
 One kind of analysis.
@@ -30449,6 +31341,194 @@ One of:
 
 </details>
 
+### `NoteFilter`
+
+A note filter: `pitch`, `time`, `chance`, `condition`, `count`, `duration`, `scale` or `velocity`.
+
+One of:
+
+- `"pitch"`: Pitch classes, in every octave.
+- `"time"`: A window of beats, optionally repeating.
+- `"chance"`: A range of note chance.
+- `"condition"`: Whether a note is active, has a chance, or has a velocity deviation.
+- `"count"`: Every nth note, chord or grid step.
+- `"duration"`: A range of note lengths.
+- `"scale"`: Notes in a scale.
+- `"velocity"`: A range of velocities.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A note filter: `pitch`, `time`, `chance`, `condition`, `count`, `duration`, `scale` or `velocity`.",
+  "oneOf": [
+    {
+      "const": "pitch",
+      "description": "Pitch classes, in every octave.",
+      "type": "string"
+    },
+    {
+      "const": "time",
+      "description": "A window of beats, optionally repeating.",
+      "type": "string"
+    },
+    {
+      "const": "chance",
+      "description": "A range of note chance.",
+      "type": "string"
+    },
+    {
+      "const": "condition",
+      "description": "Whether a note is active, has a chance, or has a velocity deviation.",
+      "type": "string"
+    },
+    {
+      "const": "count",
+      "description": "Every nth note, chord or grid step.",
+      "type": "string"
+    },
+    {
+      "const": "duration",
+      "description": "A range of note lengths.",
+      "type": "string"
+    },
+    {
+      "const": "scale",
+      "description": "Notes in a scale.",
+      "type": "string"
+    },
+    {
+      "const": "velocity",
+      "description": "A range of velocities.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `NoteFilters`
+
+Find and Select Notes, as the editor holds it and `view.state` reports it: whether the bar shows, the filter it shows, and every filter's settings.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `visible` | boolean | yes | Whether the filter bar shows above the editor's ruler. |
+| `shown` | [`NoteFilter`](#notefilter) | yes | The filter whose controls the bar shows. |
+| `pitch` | [`PitchFilter`](#pitchfilter) | yes | The Pitch filter. |
+| `time` | [`TimeFilter`](#timefilter) | yes | The Time filter. |
+| `chance` | [`ChanceFilter`](#chancefilter) | yes | The Chance filter. |
+| `condition` | [`ConditionFilter`](#conditionfilter) | yes | The Condition filter. |
+| `count` | [`CountFilter`](#countfilter) | yes | The Count filter. |
+| `duration` | [`DurationFilter`](#durationfilter) | yes | The Duration filter. |
+| `scale` | [`ScaleFilter`](#scalefilter) | yes | The Scale filter. |
+| `velocity` | [`VelocityFilter`](#velocityfilter) | yes | The Velocity filter. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Find and Select Notes, as the editor holds it and `view.state` reports it: whether the bar shows, the filter it shows, and every filter's settings.",
+  "properties": {
+    "chance": {
+      "$ref": "#/$defs/ChanceFilter",
+      "description": "The Chance filter."
+    },
+    "condition": {
+      "$ref": "#/$defs/ConditionFilter",
+      "description": "The Condition filter."
+    },
+    "count": {
+      "$ref": "#/$defs/CountFilter",
+      "description": "The Count filter."
+    },
+    "duration": {
+      "$ref": "#/$defs/DurationFilter",
+      "description": "The Duration filter."
+    },
+    "pitch": {
+      "$ref": "#/$defs/PitchFilter",
+      "description": "The Pitch filter."
+    },
+    "scale": {
+      "$ref": "#/$defs/ScaleFilter",
+      "description": "The Scale filter."
+    },
+    "shown": {
+      "$ref": "#/$defs/NoteFilter",
+      "description": "The filter whose controls the bar shows."
+    },
+    "time": {
+      "$ref": "#/$defs/TimeFilter",
+      "description": "The Time filter."
+    },
+    "velocity": {
+      "$ref": "#/$defs/VelocityFilter",
+      "description": "The Velocity filter."
+    },
+    "visible": {
+      "description": "Whether the filter bar shows above the editor's ruler.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "visible",
+    "shown",
+    "pitch",
+    "time",
+    "chance",
+    "condition",
+    "count",
+    "duration",
+    "scale",
+    "velocity"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `NoteFiltersResult`
+
+What `clip_view.note_filters` returns: the filters and the selection.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `filters` | [`NoteFilters`](#notefilters) | yes | The filters' settings, with which are on. |
+| `selected` | array of integer, at least 0 | yes | The selected notes, by their place in the clip's notes in order. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `clip_view.note_filters` returns: the filters and the selection.",
+  "properties": {
+    "filters": {
+      "$ref": "#/$defs/NoteFilters",
+      "description": "The filters' settings, with which are on."
+    },
+    "selected": {
+      "description": "The selected notes, by their place in the clip's notes in order.",
+      "items": {
+        "format": "uint32",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "filters",
+    "selected"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `NoteGroup`
 
 A probability group of a MIDI clip: its ID and kind. Its notes name it by `group` and hold its chance as their own.
@@ -31451,6 +32531,7 @@ One of a device's parameters as `device.parameters` reports it.
 | `value` | number | yes | Its value now, in its own units: what `device.set_param` takes. |
 | `text` | string | yes | How the value reads, as its control shows it, such as `-6.0 dB`. |
 | `menu_option` | boolean | yes | Whether it's one of the device's own items in its Show Options menu rather than a control in its body (C-DEVICE-015). |
+| `title_switch` | boolean | yes | Whether it's the switch the device draws in its title bar rather than in its body (L-DEV-004), such as Use Current Scale. |
 | `configured` | boolean | yes | Whether it's one of the parameters the device's panel is configured to show (clap-hosting R5, configure mode). True for every parameter of a device that isn't a plug-in, since its panel shows them all. |
 | `description` | string | no | What it does, for the Info View (WP-2.24) and agents. |
 | `other` | number or null | no | Its value in the A and B state that isn't active (device compare R11); left out for a device without two states. |
@@ -31508,6 +32589,11 @@ One of a device's parameters as `device.parameters` reports it.
       "description": "How the value reads, as its control shows it, such as `-6.0 dB`.",
       "type": "string"
     },
+    "title_switch": {
+      "default": false,
+      "description": "Whether it's the switch the device draws in its title bar rather than in its body (L-DEV-004), such as Use Current Scale.",
+      "type": "boolean"
+    },
     "value": {
       "description": "Its value now, in its own units: what `device.set_param` takes.",
       "format": "double",
@@ -31523,6 +32609,7 @@ One of a device's parameters as `device.parameters` reports it.
     "value",
     "text",
     "menu_option",
+    "title_switch",
     "configured"
   ],
   "type": "object"
@@ -31563,6 +32650,95 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `PitchArgs`
+
+The Pitch filter's controls in `clip_view.note_filters`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `classes` | array or null | no | The pitch classes switched on, 0 (C) to 11 (B). |
+| `invert` | boolean or null | no | Switches the filter's Invert. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "additionalProperties": false,
+  "description": "The Pitch filter's controls in `clip_view.note_filters`.",
+  "properties": {
+    "classes": {
+      "description": "The pitch classes switched on, 0 (C) to 11 (B).",
+      "items": {
+        "format": "uint8",
+        "maximum": 255,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "invert": {
+      "description": "Switches the filter's Invert.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    }
+  },
+  "type": "object"
+}
+```
+
+</details>
+
+### `PitchFilter`
+
+The Pitch filter: pitch classes C to B.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean | yes | Whether the filter is on. |
+| `invert` | boolean | yes | Whether it lets through the notes it would hold back. |
+| `classes` | array of integer from 0 to 255 | yes | The pitch classes that are switched on, 0 (C) to 11 (B), in order. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The Pitch filter: pitch classes C to B.",
+  "properties": {
+    "classes": {
+      "description": "The pitch classes that are switched on, 0 (C) to 11 (B), in order.",
+      "items": {
+        "format": "uint8",
+        "maximum": 255,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": "array"
+    },
+    "invert": {
+      "description": "Whether it lets through the notes it would hold back.",
+      "type": "boolean"
+    },
+    "on": {
+      "description": "Whether the filter is on.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "on",
+    "invert",
+    "classes"
+  ],
+  "type": "object"
 }
 ```
 
@@ -34960,6 +36136,66 @@ A scale: whether Scale Mode is on (`enabled`), the root note (0 is C, 11 is B), 
 
 </details>
 
+### `ScaleArgs`
+
+The Scale filter's controls in `clip_view.note_filters`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `invert` | boolean or null | no | Switches the filter's Invert. |
+| `name` | [`ScaleName`](#scalename) or null | no | The Scale Name chooser. |
+| `root` | integer or null | no | The Scale Root chooser, 0 (C) to 11 (B). |
+| `use_clip_scale` | boolean or null | no | The Use Clip Scale switch. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "additionalProperties": false,
+  "description": "The Scale filter's controls in `clip_view.note_filters`.",
+  "properties": {
+    "invert": {
+      "description": "Switches the filter's Invert.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "name": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ScaleName"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The Scale Name chooser."
+    },
+    "root": {
+      "description": "The Scale Root chooser, 0 (C) to 11 (B).",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "use_clip_scale": {
+      "description": "The Use Clip Scale switch.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    }
+  },
+  "type": "object"
+}
+```
+
+</details>
+
 ### `ScaleEntry`
 
 One scale in the list.
@@ -34993,6 +36229,61 @@ One scale in the list.
   "required": [
     "name",
     "steps"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ScaleFilter`
+
+The Scale filter.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean | yes | Whether the filter is on. |
+| `invert` | boolean | yes | Whether it lets through the notes it would hold back. |
+| `use_clip_scale` | boolean | yes | Use the clip's scale, whether or not its Scale Mode is on. |
+| `root` | integer from 0 to 255 | yes | The filter's own root, 0 (C) to 11 (B), while `use_clip_scale` is off. |
+| `name` | [`ScaleName`](#scalename) | yes | The filter's own scale, while `use_clip_scale` is off. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The Scale filter.",
+  "properties": {
+    "invert": {
+      "description": "Whether it lets through the notes it would hold back.",
+      "type": "boolean"
+    },
+    "name": {
+      "$ref": "#/$defs/ScaleName",
+      "description": "The filter's own scale, while `use_clip_scale` is off."
+    },
+    "on": {
+      "description": "Whether the filter is on.",
+      "type": "boolean"
+    },
+    "root": {
+      "description": "The filter's own root, 0 (C) to 11 (B), while `use_clip_scale` is off.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "use_clip_scale": {
+      "description": "Use the clip's scale, whether or not its Scale Mode is on.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "on",
+    "invert",
+    "use_clip_scale",
+    "root",
+    "name"
   ],
   "type": "object"
 }
@@ -35543,6 +36834,46 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `SelectedBreakpoint`
+
+The breakpoint selected in an automation lane, with the edit it opens (the automation editing spec, R22, R23).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track. |
+| `target` | [`AutomationTarget`](#automationtarget) | yes | The parameter the lane shows. |
+| `at` | [`Ticks`](#ticks) | yes | The breakpoint's position. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The breakpoint selected in an automation lane, with the edit it opens (the automation editing spec, R22, R23).",
+  "properties": {
+    "at": {
+      "$ref": "#/$defs/Ticks",
+      "description": "The breakpoint's position."
+    },
+    "target": {
+      "$ref": "#/$defs/AutomationTarget",
+      "description": "The parameter the lane shows."
+    },
+    "track": {
+      "$ref": "#/$defs/TrackId",
+      "description": "The track."
+    }
+  },
+  "required": [
+    "track",
+    "target",
+    "at"
+  ],
+  "type": "object"
 }
 ```
 
@@ -38171,6 +39502,120 @@ Type: integer.
 
 </details>
 
+### `TimeArgs`
+
+The Time filter's controls in `clip_view.note_filters`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `invert` | boolean or null | no | Switches the filter's Invert. |
+| `length` | number or null | no | Length, in beats; above 0. |
+| `repeat` | number or null | no | Repeat, in beats; 0 for none, `null` for one bar of the clip's time signature. |
+| `start` | number or null | no | Start, in beats from 1; hundredths of a beat. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "additionalProperties": false,
+  "description": "The Time filter's controls in `clip_view.note_filters`.",
+  "properties": {
+    "invert": {
+      "description": "Switches the filter's Invert.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "length": {
+      "description": "Length, in beats; above 0.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "repeat": {
+      "description": "Repeat, in beats; 0 for none, `null` for one bar of the clip's time signature.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "start": {
+      "description": "Start, in beats from 1; hundredths of a beat.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    }
+  },
+  "type": "object"
+}
+```
+
+</details>
+
+### `TimeFilter`
+
+The Time filter, in beats of the clip's time signature.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean | yes | Whether the filter is on. |
+| `invert` | boolean | yes | Whether it lets through the notes it would hold back. |
+| `start` | number | yes | Where the window starts, in beats from 1, the clip's 1.1.1. |
+| `length` | number | yes | How long the window is, in beats; above 0. |
+| `repeat` | number or null | yes | How far later the window repeats, in beats; 0 for no repeat. `null` is one bar of the clip's time signature. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The Time filter, in beats of the clip's time signature.",
+  "properties": {
+    "invert": {
+      "description": "Whether it lets through the notes it would hold back.",
+      "type": "boolean"
+    },
+    "length": {
+      "description": "How long the window is, in beats; above 0.",
+      "format": "double",
+      "type": "number"
+    },
+    "on": {
+      "description": "Whether the filter is on.",
+      "type": "boolean"
+    },
+    "repeat": {
+      "description": "How far later the window repeats, in beats; 0 for no repeat. `null` is one bar of the clip's time signature.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "start": {
+      "description": "Where the window starts, in beats from 1, the clip's 1.1.1.",
+      "format": "double",
+      "type": "number"
+    }
+  },
+  "required": [
+    "on",
+    "invert",
+    "start",
+    "length",
+    "repeat"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `TimeRange`
 
 A span of time.
@@ -39896,6 +41341,109 @@ One stored macro variation as `rack.macros` reports it.
   "required": [
     "name",
     "values"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `VelocityArgs`
+
+The Velocity filter's controls in `clip_view.note_filters`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `invert` | boolean or null | no | Switches the filter's Invert. |
+| `max` | integer or null | no | Max, 1 to 127. Moving it past Min takes Min with it. |
+| `min` | integer or null | no | Min, 1 to 127. Moving it past Max takes Max with it. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "additionalProperties": false,
+  "description": "The Velocity filter's controls in `clip_view.note_filters`.",
+  "properties": {
+    "invert": {
+      "description": "Switches the filter's Invert.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "max": {
+      "description": "Max, 1 to 127. Moving it past Min takes Min with it.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "min": {
+      "description": "Min, 1 to 127. Moving it past Max takes Max with it.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "type": "object"
+}
+```
+
+</details>
+
+### `VelocityFilter`
+
+The Velocity filter.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean | yes | Whether the filter is on. |
+| `invert` | boolean | yes | Whether it lets through the notes it would hold back. |
+| `min` | integer from 0 to 255 | yes | The lowest velocity let through, 1 to 127. |
+| `max` | integer from 0 to 255 | yes | The highest velocity let through, 1 to 127. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The Velocity filter.",
+  "properties": {
+    "invert": {
+      "description": "Whether it lets through the notes it would hold back.",
+      "type": "boolean"
+    },
+    "max": {
+      "description": "The highest velocity let through, 1 to 127.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "min": {
+      "description": "The lowest velocity let through, 1 to 127.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "on": {
+      "description": "Whether the filter is on.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "on",
+    "invert",
+    "min",
+    "max"
   ],
   "type": "object"
 }

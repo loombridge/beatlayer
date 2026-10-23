@@ -1141,6 +1141,17 @@ impl AutomationGestures {
         events: &mut Vec<UiEvent>,
     ) -> bool {
         match lane.hit(pos) {
+            // Spec: automation-editing R22 (S-A11Y-021). Option-click
+            // (Alt-click) selects the breakpoint and puts the insert marker
+            // on it.
+            LaneHit::Breakpoint(at) if modifiers.alt => {
+                invoke(
+                    events,
+                    bl_shell::envelope_commands::SELECT_BREAKPOINT,
+                    json!({ "track": lane.track, "target": lane.target, "at": at }),
+                );
+                true
+            }
             LaneHit::Breakpoint(at) => {
                 invoke(
                     events,
@@ -1220,7 +1231,7 @@ impl AutomationGestures {
 
 /// The position a click lands on: on the editing grid, unless Cmd (Alt on
 /// Windows) is held to bypass snapping (S-ENV-006).
-fn click_at(
+pub(super) fn click_at(
     view: &ArrangementView,
     doc: &Document,
     lane: &Lane<'_>,
@@ -1244,8 +1255,17 @@ pub(super) fn paint_lane(painter: &Painter, rect: Rect, theme: &Theme) {
     );
 }
 
-/// Paints a lane's envelope and its breakpoints.
-pub(super) fn paint_envelope(painter: &Painter, lane: &Lane<'_>, theme: &Theme) {
+/// Paints a lane's envelope and its breakpoints. With `keys`, the lane has
+/// the keyboard: the focused breakpoint is drawn in the hover colour and a
+/// selected one pulses (the automation editing spec, R21, R22); `time` is
+/// the clock that pulse runs on.
+pub(super) fn paint_envelope(
+    painter: &Painter,
+    lane: &Lane<'_>,
+    theme: &Theme,
+    keys: Option<&bl_shell::envelope_commands::EnvelopeKeyState>,
+    time: f64,
+) {
     let Some(envelope) = lane.envelope() else {
         return;
     };
@@ -1274,17 +1294,19 @@ pub(super) fn paint_envelope(painter: &Painter, lane: &Lane<'_>, theme: &Theme) 
         // Spec: automation-editing R2. A selected breakpoint is drawn in
         // the selection colour.
         let selected = lane.selected.contains(&point.at);
+        let keyed = keys
+            .and_then(|keys| crate::envelope_keys::breakpoint_colour(theme, point.at, keys, time));
         painter.rect_filled(
             Rect::from_center_size(
                 lane.point_pos(point),
                 vec2(BREAKPOINT_SIZE, BREAKPOINT_SIZE),
             ),
             0.0,
-            if selected {
+            keyed.unwrap_or(if selected {
                 theme.colors.time_selection.0
             } else {
                 theme.colors.text.0
-            },
+            }),
         );
     }
 }
@@ -1327,6 +1349,54 @@ pub(super) fn paint_handles(
             ui.ctx().set_cursor_icon(handle.cursor());
         }
     }
+}
+
+/// The ID of the accessible node of the breakpoint at `at` in a track's
+/// automation lane.
+fn breakpoint_id(track: TrackId, at: Ticks) -> egui::Id {
+    egui::Id::new(("arrangement-automation-breakpoint", track, at.get()))
+}
+
+/// Draws what the keyboard has in a lane: the insert marker with the value
+/// beside it (or what is being typed), and the node of the focused or
+/// selected breakpoint, which is returned for the lane's group to name as
+/// its active descendant (the automation editing spec, R21, R28).
+pub(super) fn paint_keys(
+    ui: &Ui,
+    painter: &Painter,
+    theme: &Theme,
+    shell: &Shell,
+    lane: &Lane<'_>,
+    keys: &bl_shell::envelope_commands::EnvelopeKeyState,
+    typed: Option<&str>,
+) -> Option<egui::Id> {
+    let x = lane.rect.left() + lane.horizontal.x(keys.marker) as f32;
+    if (lane.rect.left()..=lane.rect.right()).contains(&x) {
+        crate::envelope_keys::paint_marker(
+            painter,
+            theme,
+            lane.rect,
+            x,
+            typed.unwrap_or(&keys.value),
+            typed.is_some(),
+        );
+    }
+    let at = keys.selected.unwrap_or(keys.marker);
+    let point = lane.envelope()?.point(at)?;
+    let id = breakpoint_id(lane.track, at);
+    let rect = Rect::from_center_size(
+        lane.point_pos(point),
+        vec2(BREAKPOINT_SIZE * 2.0, BREAKPOINT_SIZE * 2.0),
+    );
+    crate::envelope_keys::describe_breakpoint(
+        ui,
+        id,
+        rect,
+        lane.doc.settings().time_signatures.to_bbs(at).to_string(),
+        shell.keyboard_breakpoint_text(at).unwrap_or_default(),
+        keys.selected == Some(at),
+    );
+    Some(id)
 }
 
 /// Draws a track's automation lane header in the header column: the device
@@ -1401,6 +1471,67 @@ pub(super) fn lane_header(
             json!({ "track": track, "target": chosen }),
         );
     }
+}
+
+/// Every parameter a track's lane choosers list, in their order: the
+/// mixer's controls and sends, then each device's parameters.
+pub(crate) fn lane_parameters(
+    shell: &Shell,
+    doc: &Document,
+    track: TrackId,
+) -> Vec<AutomationTarget> {
+    device_choices(doc, track)
+        .into_iter()
+        .filter(|choice| choice.value != AutomationDevice::None)
+        .flat_map(|choice| control_choices(shell, doc, choice.value))
+        .map(|choice| choice.value)
+        .collect()
+}
+
+/// The parameter after (or before) `current` in `all`, going round at the
+/// ends, that `keep` accepts and that isn't `current` itself (the
+/// automation editing spec, R25).
+pub(crate) fn cycle_target(
+    all: &[AutomationTarget],
+    current: Option<AutomationTarget>,
+    forward: bool,
+    keep: impl Fn(&AutomationTarget) -> bool,
+) -> Option<AutomationTarget> {
+    let count = all.len();
+    let at = current.and_then(|current| all.iter().position(|target| *target == current));
+    // With nothing shown that the list holds, the search starts from just
+    // outside the end it moves away from.
+    let from = at.unwrap_or(if forward { count.wrapping_sub(1) } else { 0 });
+    (1..=count)
+        .map(|step| {
+            let step = if forward { step } else { count - step };
+            all[from.wrapping_add(step) % count]
+        })
+        .find(|target| Some(*target) != current && keep(target))
+}
+
+/// The invocation that shows the previous or next parameter in a track's
+/// lane (S-A11Y-026, S-A11Y-027): the one with an envelope, or with `all`,
+/// any the choosers list.
+pub(crate) fn cycle_lane(
+    shell: &Shell,
+    track: TrackId,
+    forward: bool,
+    all: bool,
+) -> Option<Invocation> {
+    let doc = shell.editor().document();
+    let list = lane_parameters(shell, doc, track);
+    let owner = doc.track(track)?;
+    let target = cycle_target(
+        &list,
+        shell.arrangement().automation_lane(track),
+        forward,
+        |target| all || owner.automation_for(target).is_some(),
+    )?;
+    Some(Invocation::new(
+        view_ids::SHOW_AUTOMATION,
+        json!({ "track": track, "target": target }),
+    ))
 }
 
 /// A label for a target, for assistive technology.

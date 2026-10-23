@@ -36,6 +36,10 @@ pub enum MenuKind {
     Locator,
     /// The loop brace's (C-TIME-023).
     Brace,
+    /// An automation breakpoint's: Edit Value (C-TIME-026).
+    Breakpoint,
+    /// An envelope's line: Add Value (C-TIME-026).
+    Line,
 }
 
 /// The two menus and which one is open.
@@ -45,6 +49,13 @@ pub(super) struct ContextMenus {
     /// Where the scrub area was right-clicked, so its Add Locator adds one
     /// there (the time editing spec, R3).
     scrub_at: Option<bl_core::time::Ticks>,
+    /// The automation lane's breakpoint, or the place on its line, that was
+    /// right-clicked: the track, the parameter and the position.
+    envelope: Option<(
+        bl_model::TrackId,
+        bl_model::AutomationTarget,
+        bl_core::time::Ticks,
+    )>,
 }
 
 impl ContextMenus {
@@ -53,7 +64,72 @@ impl ContextMenus {
             platform: Platform::current(),
             kind: MenuKind::default(),
             scrub_at: None,
+            envelope: None,
         }
+    }
+
+    /// A right-click on a breakpoint of an automation lane (`line` false),
+    /// or on its envelope's line (`line` true): Edit Value or Add Value.
+    pub fn open_envelope(
+        &mut self,
+        track: bl_model::TrackId,
+        target: bl_model::AutomationTarget,
+        at: bl_core::time::Ticks,
+        line: bool,
+    ) {
+        self.kind = if line {
+            MenuKind::Line
+        } else {
+            MenuKind::Breakpoint
+        };
+        self.envelope = Some((track, target, at));
+    }
+
+    /// Edit Value and Add Value (the automation editing spec, R27): each
+    /// types a value, which Return sets, sharing the lane's typed-value
+    /// entry.
+    fn show_value(&self, ui: &mut Ui, events: &mut Vec<UiEvent>) {
+        use bl_shell::envelope_commands::SELECT_BREAKPOINT;
+        let Some((track, target, at)) = self.envelope else {
+            return;
+        };
+        let line = self.kind == MenuKind::Line;
+        let response = ui.button(if line { "Add Value" } else { "Edit Value" });
+        crate::menus::register_item(ui.ctx(), &response);
+        crate::menus::take_focus_first(ui, &response);
+        if !response.clicked() {
+            return;
+        }
+        let typed = if line {
+            // The lane has the keyboard, with the insert marker where the
+            // value goes.
+            invoke(
+                events,
+                view_ids::SET_INSERT_MARKER,
+                json!({ "at": at, "track": track, "automation_lane": true }),
+            );
+            crate::envelope_keys::Typed {
+                text: String::new(),
+                add_at: Some(at),
+                release: None,
+            }
+        } else {
+            invoke(
+                events,
+                SELECT_BREAKPOINT,
+                json!({ "track": track, "target": target, "at": at }),
+            );
+            crate::envelope_keys::Typed {
+                text: String::new(),
+                add_at: None,
+                release: Some((
+                    SELECT_BREAKPOINT.to_owned(),
+                    json!({ "track": track, "target": target, "at": null }),
+                )),
+            }
+        };
+        crate::envelope_keys::set_typed(ui.ctx(), Some(typed));
+        ui.close();
     }
 
     /// A right-click at `pos`: picks the menu and selects what it acts on.
@@ -111,6 +187,10 @@ impl ContextMenus {
     /// rows menus.md records for those states (C-CLIP-ARR-025, C-CLIP-ARR-026,
     /// C-TIME-019, C-TIME-020).
     pub fn show(&self, ui: &mut Ui, shell: &Shell, events: &mut Vec<UiEvent>) {
+        if matches!(self.kind, MenuKind::Breakpoint | MenuKind::Line) {
+            self.show_value(ui, events);
+            return;
+        }
         // The keymap in use, so the menu shows the keys in use (R10).
         let keymap = Keymap::from_data(shell.keymap().clone());
         let state = selection_menu(shell);
@@ -123,6 +203,7 @@ impl ContextMenus {
             MenuKind::Scrub => context_menus::arrangement_scrub_in(),
             MenuKind::Locator => context_menus::arrangement_locator_in(),
             MenuKind::Brace => context_menus::arrangement_brace_in(),
+            MenuKind::Breakpoint | MenuKind::Line => return,
         };
         let menu = &menu;
         let grid = shell.arrangement().grid();

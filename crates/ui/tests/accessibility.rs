@@ -3004,6 +3004,14 @@ fn paths() -> BTreeMap<&'static str, Path> {
         // note-selection keys (S-A11Y-010, S-A11Y-011), Delete
         // (S-EDIT-005) and Cmd-A (S-NOTE-001).
         ("note.ramp_value", Exception(note_editor)),
+        // The Clip View's MPE tab, where a note's expression envelopes are
+        // edited by the pointer and the keyboard, is WP-6.18's.
+        (
+            "note.set_expression",
+            Exception(LaterView(
+                "the Clip View's MPE tab, where a note's expression envelopes are edited (WP-6.18)",
+            )),
+        ),
         // The stretch markers are dragged (I-DRAG-040); Live has no key
         // for stretching notes, so a keyboard path needs the maintainer's
         // choice of keys.

@@ -169,7 +169,7 @@ fn the_ports_mpe_switch_is_set_by_id_read_back_and_kept() {
     assert_eq!(port["name"], PORT);
     assert_eq!(port["mpe"], json!(true));
     assert_eq!(port["track"], json!(true), "Track stays as it was");
-    assert_eq!(shell.preferences().midi.ports[0].mpe, true);
+    assert!(shell.preferences().midi.ports[0].mpe);
     // Off again, and the other switches are left alone.
     let port = shell
         .run(

@@ -77,6 +77,35 @@ pub const DELETE_TAG: &str = "browser.delete_tag";
 pub const SHOW_TAG_EDITOR: &str = "browser.show_tag_editor";
 /// `browser.show_quick_tags`: show or hide Quick Tags.
 pub const SHOW_QUICK_TAGS: &str = "browser.show_quick_tags";
+/// `browser.set_filter_view`: show or hide the Filter View (Cmd-Option-G).
+pub const SET_FILTER_VIEW: &str = "browser.set_filter_view";
+/// `browser.set_filter_groups`: which filter groups a label shows.
+pub const SET_FILTER_GROUPS: &str = "browser.set_filter_groups";
+/// `browser.filter`: select filter tags.
+pub const FILTER: &str = "browser.filter";
+/// `browser.clear_filters`: clear the selected tags and the search words.
+pub const CLEAR_FILTERS: &str = "browser.clear_filters";
+/// `browser.add_label`: keep what the browser shows as a saved label.
+pub const ADD_LABEL: &str = "browser.add_label";
+/// `browser.rename_label`: rename a label, or open its name for editing.
+pub const RENAME_LABEL: &str = "browser.rename_label";
+/// `browser.set_label_icon`: give a label an icon, or take it away.
+pub const SET_LABEL_ICON: &str = "browser.set_label_icon";
+/// `browser.set_label_shown`: show or hide a Library label in the sidebar.
+pub const SET_LABEL_SHOWN: &str = "browser.set_label_shown";
+/// `browser.move_label`: move a Library or saved label within its section.
+pub const MOVE_LABEL: &str = "browser.move_label";
+/// `browser.reset_label_order`: put the Library labels back in their order.
+pub const RESET_LABEL_ORDER: &str = "browser.reset_label_order";
+/// `browser.remove_label`: delete a saved label.
+pub const REMOVE_LABEL: &str = "browser.remove_label";
+/// `browser.set_columns`: the content pane's columns, sort and file
+/// extensions.
+pub const SET_COLUMNS: &str = "browser.set_columns";
+/// `browser.back`: go back one step in the browser's history.
+pub const BACK: &str = "browser.back";
+/// `browser.forward`: go forward one step in the browser's history.
+pub const FORWARD: &str = "browser.forward";
 /// `focus.browser`: move the keyboard focus to the browser (Option-5).
 pub const FOCUS_BROWSER: &str = "focus.browser";
 
@@ -111,6 +140,20 @@ pub const IDS: &[&str] = &[
     DELETE_TAG,
     SHOW_TAG_EDITOR,
     SHOW_QUICK_TAGS,
+    SET_FILTER_VIEW,
+    SET_FILTER_GROUPS,
+    FILTER,
+    CLEAR_FILTERS,
+    ADD_LABEL,
+    RENAME_LABEL,
+    SET_LABEL_ICON,
+    SET_LABEL_SHOWN,
+    MOVE_LABEL,
+    RESET_LABEL_ORDER,
+    REMOVE_LABEL,
+    SET_COLUMNS,
+    BACK,
+    FORWARD,
     FOCUS_BROWSER,
 ];
 
@@ -136,7 +179,7 @@ pub const MAX_PREVIEW_VOLUME: f64 = 1.995_262_314_968_879_5;
                    `drums`, `instruments`, `audio_effects`, `midi_effects`, `modulators`, \
                    `plug_ins`, `clips`, `samples`, `grooves`, `tunings`, `templates`), a place \
                    (`user_library`, `current_project`), or a folder added to Places, as \
-                   `{\"folder\": \"/its/path\"}`."
+                   `{\"folder\": \"/its/path\"}`, or a saved label, as `{\"saved\": 3}`."
 )]
 pub enum Label {
     /// Everything: the places as folders, searched together.
@@ -171,6 +214,8 @@ pub enum Label {
     CurrentProject,
     /// A folder the person added to Places, by its path.
     Folder(String),
+    /// A saved label, by its ID (spec: browser-tags R24).
+    Saved(i64),
 }
 
 impl Label {
@@ -215,7 +260,44 @@ impl Label {
             Self::Folder(path) => std::path::Path::new(path)
                 .file_name()
                 .map_or_else(|| path.clone(), |n| n.to_string_lossy().into_owned()),
+            Self::Saved(_) => "Saved Label".to_owned(),
         }
+    }
+
+    /// The key the browser keeps the label's settings under: the order of
+    /// the labels, the ones hidden, the names and icons, and the filter
+    /// groups each shows.
+    #[must_use]
+    pub fn key(&self) -> String {
+        match self {
+            Self::All => "all".to_owned(),
+            Self::Sounds => "sounds".to_owned(),
+            Self::Drums => "drums".to_owned(),
+            Self::Instruments => "instruments".to_owned(),
+            Self::AudioEffects => "audio_effects".to_owned(),
+            Self::MidiEffects => "midi_effects".to_owned(),
+            Self::Modulators => "modulators".to_owned(),
+            Self::PlugIns => "plug_ins".to_owned(),
+            Self::Clips => "clips".to_owned(),
+            Self::Samples => "samples".to_owned(),
+            Self::Grooves => "grooves".to_owned(),
+            Self::Tunings => "tunings".to_owned(),
+            Self::Templates => "templates".to_owned(),
+            Self::UserLibrary => "user_library".to_owned(),
+            Self::CurrentProject => "current_project".to_owned(),
+            Self::Folder(path) => format!("folder:{path}"),
+            Self::Saved(id) => format!("saved:{id}"),
+        }
+    }
+
+    /// Whether it's in the Library section: a Library label or a saved
+    /// label.
+    #[must_use]
+    pub const fn is_library(&self) -> bool {
+        !matches!(
+            self,
+            Self::UserLibrary | Self::CurrentProject | Self::Folder(_)
+        )
     }
 
     /// For a Library label Beatlayer has no content for yet, what will fill
@@ -271,7 +353,25 @@ pub struct LabelInfo {
     /// Whether its folder can be read now (a place) or it has content (a
     /// Library label). A missing folder is listed greyed, as in Live.
     pub available: bool,
+    /// The icon the person gave it, from [`LABEL_ICONS`] (spec:
+    /// browser-tags R25).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    /// Whether the sidebar shows it: the person can hide Library labels and
+    /// saved labels (spec: browser-tags R26).
+    #[serde(default = "shown_by_default")]
+    pub shown: bool,
 }
+
+fn shown_by_default() -> bool {
+    true
+}
+
+/// The icons a label can be given: Beatlayer's own set (spec: browser-tags
+/// R25).
+pub const LABEL_ICONS: [&str; 10] = [
+    "star", "heart", "circle", "square", "triangle", "diamond", "bolt", "note", "wave", "cross",
+];
 
 /// What an item in the content pane is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -336,6 +436,34 @@ pub struct Item {
     /// (a damaged file), which placing refuses (clip files R6).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clip_kind: Option<ClipFileKind>,
+    /// What the optional columns show for it, left out while none shows
+    /// (spec: browser-tags R27).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub details: Option<ItemDetails>,
+}
+
+/// What an item's optional columns show (spec: browser-tags R27); a value
+/// the item doesn't have, such as a folder's length, is left out.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ItemDetails {
+    /// When it changed, in seconds since the epoch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modified: Option<i64>,
+    /// Its size in bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<u64>,
+    /// What it is, in words: `Folder`, `Audio File`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    /// For an audio file, how long it plays, in seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub length_seconds: Option<f64>,
+    /// For an audio file, its sample rate in hertz.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sample_rate: Option<u32>,
+    /// For an audio file, its number of channels.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channels: Option<u16>,
 }
 
 /// The preview: the switch, the volume, and what plays.
@@ -406,6 +534,158 @@ pub struct BrowserState {
     pub tag_editor: bool,
     /// Whether Quick Tags shows at the content pane's bottom.
     pub quick_tags: bool,
+    /// The Filter View: whether it shows, its groups under the chosen label,
+    /// and the tags selected (spec: browser-tags R18 to R22).
+    pub filter_view: FilterViewState,
+    /// The saved labels, in the order they were made (spec: browser-tags
+    /// R24).
+    #[serde(default)]
+    pub saved_labels: Vec<SavedLabelInfo>,
+    /// The label whose name is open for editing, after `browser.add_label`
+    /// or `browser.rename_label` without a name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub renaming_label: Option<Label>,
+    /// The content pane's columns and sort (spec: browser-tags R27, R28).
+    pub columns: ColumnsState,
+    /// Whether Browse Back can go back a step (spec: browser-tags R30).
+    pub can_back: bool,
+    /// Whether Browse Forward can go forward a step.
+    pub can_forward: bool,
+}
+
+/// A column of the content pane (spec: browser-tags R27). Name always shows,
+/// first.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum Column {
+    /// The item's name.
+    Name,
+    /// When it changed.
+    DateModified,
+    /// Its size.
+    Size,
+    /// What it is.
+    Kind,
+    /// An audio file's length.
+    Length,
+    /// An audio file's sample rate.
+    SampleRate,
+    /// An audio file's channels.
+    Channels,
+}
+
+impl Column {
+    /// The columns the Content Options menu lists, in its order.
+    pub const OPTIONAL: [Self; 6] = [
+        Self::DateModified,
+        Self::Size,
+        Self::Kind,
+        Self::Length,
+        Self::SampleRate,
+        Self::Channels,
+    ];
+
+    /// The column's name in the header row and the menu.
+    #[must_use]
+    pub const fn title(self) -> &'static str {
+        match self {
+            Self::Name => "Name",
+            Self::DateModified => "Date Modified",
+            Self::Size => "Size",
+            Self::Kind => "Kind",
+            Self::Length => "Length",
+            Self::SampleRate => "Sample Rate",
+            Self::Channels => "Channels",
+        }
+    }
+}
+
+/// The content pane's columns, sort and file extensions (spec: browser-tags
+/// R27, R28).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ColumnsState {
+    /// The optional columns shown, in their order, after Name.
+    pub shown: Vec<Column>,
+    /// The column the list is sorted by.
+    pub sort: Column,
+    /// Whether the order is reversed.
+    pub descending: bool,
+    /// Whether names show their extensions.
+    pub file_extensions: bool,
+}
+
+impl Default for ColumnsState {
+    fn default() -> Self {
+        Self {
+            shown: Vec::new(),
+            sort: Column::Name,
+            descending: false,
+            file_extensions: true,
+        }
+    }
+}
+
+/// A tag button in the Filter View.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct FilterTag {
+    /// What the button says: the tag's name, a subtag's with its tag's.
+    pub name: String,
+    /// The tag's full name.
+    pub full_name: String,
+    /// Whether the tag is selected.
+    pub selected: bool,
+}
+
+/// A filter group as the Filter View shows it: its tags that some item
+/// under the label carries.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct FilterGroup {
+    /// The group's name.
+    pub name: String,
+    /// Its tag buttons, in the Tag Editor's order.
+    pub tags: Vec<FilterTag>,
+}
+
+/// A group the chosen label can show, as the Filter View Menu lists it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct FilterGroupChoice {
+    /// The group's name.
+    pub name: String,
+    /// Whether the label shows it.
+    pub shown: bool,
+}
+
+/// The Filter View (spec: browser-tags R18 to R22).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct FilterViewState {
+    /// Whether the Filter View shows.
+    pub shown: bool,
+    /// The groups it shows under the chosen label that have tags to show.
+    pub groups: Vec<FilterGroup>,
+    /// Every group the chosen label can show, with whether it shows.
+    pub menu: Vec<FilterGroupChoice>,
+    /// The selected tags' full names.
+    pub selected: Vec<String>,
+}
+
+/// A saved label (spec: browser-tags R24).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SavedLabelInfo {
+    /// The label, `{"saved": id}`.
+    pub label: Label,
+    /// Its name.
+    pub name: String,
+    /// The icon it was given.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    /// The label it was made under.
+    pub base: Label,
+    /// The search words it keeps.
+    pub search: String,
+    /// The tags it keeps, by their full names.
+    pub tags: Vec<String>,
 }
 
 /// How a tag sits on the selection (spec: browser-tags R11).
@@ -631,6 +911,11 @@ pub struct DeleteTagArgs {
     /// The group to delete, by its name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group: Option<String>,
+    /// Delete although saved labels use the tag or the group's tags: they
+    /// then leave it out. Otherwise the command is refused, naming them
+    /// (spec: browser-tags R8).
+    #[serde(default)]
+    pub confirm: bool,
 }
 
 /// Arguments of `browser.show_tag_editor`.
@@ -649,6 +934,135 @@ pub struct ShowQuickTagsArgs {
     /// Whether it shows. Left out, it toggles.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub show: Option<bool>,
+}
+
+/// Arguments of `browser.set_filter_view`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetFilterViewArgs {
+    /// Whether the Filter View shows. Left out, it toggles.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub show: Option<bool>,
+}
+
+/// Arguments of `browser.set_filter_groups`. Give `group`, `show_all` or
+/// `reset`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetFilterGroupsArgs {
+    /// The label whose groups change. Left out, the chosen label.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<Label>,
+    /// The group to show or hide, by its name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
+    /// Show (true) or hide (false) `group`. Left out, true.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shown: Option<bool>,
+    /// Show every group.
+    #[serde(default)]
+    pub show_all: bool,
+    /// Put the label's groups back to its default ones.
+    #[serde(default)]
+    pub reset: bool,
+}
+
+/// Arguments of `browser.filter`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FilterArgs {
+    /// The tags, by their full names or their own names.
+    pub tags: Vec<String>,
+    /// Add the tags to their groups' selections, or take a selected one out,
+    /// as Cmd-click (Ctrl-click) does. Otherwise each tag is the only one
+    /// selected in its group, and a tag that is already the only one is
+    /// cleared.
+    #[serde(default)]
+    pub add: bool,
+}
+
+/// Arguments of `browser.clear_filters`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ClearFiltersArgs {
+    /// Clear the search words. Left out, true.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub words: Option<bool>,
+    /// Clear the selected tags. Left out, true.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tags: Option<bool>,
+}
+
+/// Arguments of `browser.rename_label`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RenameLabelArgs {
+    /// The label to rename. Left out, the chosen label.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<Label>,
+    /// The new name; empty gives a Library label its own name back. Left
+    /// out, the label's name opens for editing, or, if it's open already,
+    /// editing ends and the name is kept.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+/// Arguments of `browser.set_label_icon`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetLabelIconArgs {
+    /// The label to give an icon.
+    pub label: Label,
+    /// One of [`LABEL_ICONS`]. Left out (or `null`), Reset Icon.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+}
+
+/// Arguments of `browser.set_label_shown`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetLabelShownArgs {
+    /// The Library label or saved label.
+    pub label: Label,
+    /// Whether the sidebar shows it.
+    pub shown: bool,
+}
+
+/// Arguments of `browser.move_label`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MoveLabelArgs {
+    /// The Library label or saved label to move.
+    pub label: Label,
+    /// Where it goes in the Library section: 0 is the first place, which
+    /// All keeps, so 1 is the first place anything else can take.
+    pub position: usize,
+}
+
+/// Arguments of `browser.remove_label`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RemoveLabelArgs {
+    /// The saved label to delete.
+    pub label: Label,
+}
+
+/// Arguments of `browser.set_columns`. Fields left out keep their values.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetColumnsArgs {
+    /// The optional columns shown, in their order after Name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shown: Option<Vec<Column>>,
+    /// The column to sort by.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sort: Option<Column>,
+    /// Reverse the order.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub descending: Option<bool>,
+    /// Show file extensions in names.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_extensions: Option<bool>,
 }
 
 /// A part of the browser that takes the keyboard focus.
@@ -1242,7 +1656,9 @@ fn specs() -> Vec<CommandSpec> {
                  (`Format|CLAP`) or its own name, `group` for a group, by its name. Deleting a \
                  group deletes its tags. Beatlayer's own tags and groups can't be deleted. \
                  A deleted tag is gone from every item that carried it, and undo can't bring \
-                 it back.",
+                 it back. When saved labels use the tag (or the group's tags) the command is \
+                 refused, naming them, unless `confirm` is true; the labels then leave it \
+                 out.",
             )
             .permission(Permission::Destructive)
             .contexts([Global, Browser])
@@ -1270,6 +1686,171 @@ fn specs() -> Vec<CommandSpec> {
             .contexts([Global, Browser])
             .args::<ShowQuickTagsArgs>()
             .result::<()>(),
+        CommandSpec::new(SET_FILTER_VIEW, "Show Filter View")
+            .description(
+                "Shows or hides the Filter View, the tag groups at the top of the browser's \
+                 content pane, as Cmd-Option-G (Ctrl-Alt-G) and View > Show Filter View do. It \
+                 shows in a new install. Left out, `show` toggles. Kept for the next start. \
+                 Read the Filter View in `browser.state`'s `filter_view`.",
+            )
+            .permission(Permission::Edit)
+            .contexts([Global, Browser])
+            .binding("S-BRW-013")
+            .args::<SetFilterViewArgs>()
+            .result::<FilterViewState>(),
+        CommandSpec::new(SET_FILTER_GROUPS, "Set Filter Groups")
+            .description(
+                "Chooses which filter groups a label shows in the Filter View (`label`, or the \
+                 chosen one): `group` with `shown` true (the default) or false shows or hides \
+                 that group; `show_all` shows every group; `reset` puts the label's groups \
+                 back to the default ones. Give one of `group`, `show_all` and `reset`. Kept \
+                 for the next start.",
+            )
+            .permission(Permission::Edit)
+            .contexts([Global, Browser])
+            .args::<SetFilterGroupsArgs>()
+            .result::<FilterViewState>(),
+        CommandSpec::new(FILTER, "Filter Browser")
+            .description(
+                "Selects filter tags, as clicking tag buttons in the Filter View does. Without \
+                 `add`, each tag in `tags` becomes the only one selected in its group (a tag \
+                 that is already the only one is cleared). With `add`, each tag is added to \
+                 its group's selection, or taken out if it is in it already. The list then \
+                 holds the items under the label that carry, for each group with a selection, \
+                 at least one of its selected tags, and match every search word. Selected tags \
+                 stay when another Library label is chosen. Changes nothing, but lists files \
+                 outside the project.",
+            )
+            .permission(Permission::External)
+            .contexts([Global, Browser])
+            .args::<FilterArgs>()
+            .result::<BrowserState>(),
+        CommandSpec::new(CLEAR_FILTERS, "Clear Browser Filters")
+            .description(
+                "Clears the selected filter tags and the search words (`words` and `tags`, both \
+                 true if left out), as the Results bar's Clear button and Esc in the search \
+                 field do. Changes nothing, but lists files outside the project.",
+            )
+            .permission(Permission::External)
+            .contexts([Global, Browser, BrowserSearch])
+            .args::<ClearFiltersArgs>()
+            .result::<BrowserState>(),
+        CommandSpec::new(ADD_LABEL, "Add Label")
+            .description(
+                "Keeps what the browser shows as a saved label, as the Results bar's Add Label \
+                 button does: the label it was made under, the search words and the selected \
+                 tags. It goes at the end of the Library section, named after its words and \
+                 tags, with its name open for editing (`browser.state`'s `renaming_label`); \
+                 `browser.rename_label` finishes it. Choosing it lists what those words and \
+                 tags find under that label now. Refused when there are no search words and \
+                 no selected tags. Kept in the browser's database.",
+            )
+            .permission(Permission::Edit)
+            .contexts([Global, Browser])
+            .args::<NoArgs>()
+            .result::<BrowserState>(),
+        CommandSpec::new(RENAME_LABEL, "Rename Label")
+            .description(
+                "Renames a saved label or a Library label, as Rename (Cmd-R) in its context \
+                 menu does (`label`, or the chosen label). With `name`, the label has that name (empty gives a Library label \
+                 its own name back). Without it, the name opens for editing, or, if it is open \
+                 already, editing ends and the name is kept. A place's label (the User Library, \
+                 Current Project, an added folder) takes its folder's name and isn't renamed. \
+                 Kept for the next start.",
+            )
+            .permission(Permission::Edit)
+            .contexts([BrowserSidebar])
+            .binding("S-EDIT-008")
+            .args::<RenameLabelArgs>()
+            .result::<BrowserState>(),
+        CommandSpec::new(SET_LABEL_ICON, "Choose Label Icon")
+            .description(
+                "Gives a label one of Beatlayer's icons (`icon`: star, heart, circle, square, \
+                 triangle, diamond, bolt, note, wave or cross), or takes it away (Reset Icon) \
+                 when `icon` is left out. All, User Library and Current Project keep theirs. \
+                 Kept for the next start.",
+            )
+            .permission(Permission::Edit)
+            .contexts([Global, Browser, BrowserSidebar])
+            .args::<SetLabelIconArgs>()
+            .result::<BrowserState>(),
+        CommandSpec::new(SET_LABEL_SHOWN, "Show Label in Sidebar")
+            .description(
+                "Shows or hides a Library label or a saved label in the sidebar, as the check \
+                 boxes in the Library section's Edit mode do. All can't be hidden. Hiding the \
+                 chosen label chooses All. Kept for the next start.",
+            )
+            .permission(Permission::Edit)
+            .contexts([Global, Browser, BrowserSidebar])
+            .args::<SetLabelShownArgs>()
+            .result::<BrowserState>(),
+        CommandSpec::new(MOVE_LABEL, "Move Label")
+            .description(
+                "Moves a Library label or a saved label to `position` within the Library \
+                 section, as dragging it does; All stays first, so 1 is the earliest place \
+                 another label can take. Kept for the next start.",
+            )
+            .permission(Permission::Edit)
+            .contexts([Global, Browser, BrowserSidebar])
+            .args::<MoveLabelArgs>()
+            .result::<BrowserState>(),
+        CommandSpec::new(RESET_LABEL_ORDER, "Reset Label Order")
+            .description(
+                "Puts the Library labels back in their first order, the saved labels after \
+                 them, as Reset Label Order in the Library heading's context menu does. Hidden \
+                 labels stay hidden.",
+            )
+            .permission(Permission::Edit)
+            .contexts([Global, Browser, BrowserSidebar])
+            .args::<NoArgs>()
+            .result::<BrowserState>(),
+        CommandSpec::new(REMOVE_LABEL, "Remove Label")
+            .description(
+                "Deletes a saved label, as Remove in its context menu does. Nothing else is \
+                 deleted: not the files, the tags or the search words it kept. It can't be \
+                 brought back.",
+            )
+            .permission(Permission::Destructive)
+            .contexts([Global, Browser, BrowserSidebar])
+            .args::<RemoveLabelArgs>()
+            .result::<BrowserState>(),
+        CommandSpec::new(SET_COLUMNS, "Set Browser Columns")
+            .description(
+                "Sets the content pane's columns: `shown`, the optional columns after Name \
+                 (date_modified, size, kind, length, sample_rate, channels) in their order; \
+                 `sort`, the column the list is sorted by, with `descending` to reverse it \
+                 (folders stay first; ties go by name); and `file_extensions`, whether names \
+                 show their extensions. Fields left out keep their values. Kept for the next \
+                 start.",
+            )
+            .permission(Permission::Edit)
+            .contexts([Global, Browser])
+            .args::<SetColumnsArgs>()
+            .result::<BrowserState>(),
+        CommandSpec::new(BACK, "Browser History Back")
+            .description(
+                "Goes back one step in the browser's history, as Browse Back and Cmd-[ (Ctrl-[) \
+                 do, showing that step's label, search words, selected tags, open folders and \
+                 selection. A step is taken when the label changes, when the selected tags \
+                 change, and when a search starts or its words change (changes in a row make \
+                 one step); the history holds 100 steps and isn't kept between launches. \
+                 Refused at the first step (`browser.state`'s `can_back`).",
+            )
+            .permission(Permission::External)
+            .contexts([Global, Browser])
+            .binding("S-BRW-011")
+            .args::<NoArgs>()
+            .result::<BrowserState>(),
+        CommandSpec::new(FORWARD, "Browser History Forward")
+            .description(
+                "Goes forward one step in the browser's history, as Browse Forward and Cmd-] \
+                 (Ctrl-]) do. Refused at the last step (`browser.state`'s `can_forward`).",
+            )
+            .permission(Permission::External)
+            .contexts([Global, Browser])
+            .binding("S-BRW-012")
+            .args::<NoArgs>()
+            .result::<BrowserState>(),
         CommandSpec::new(FOCUS_BROWSER, "Browser")
             .description(
                 "Moves the keyboard focus to the browser (to `part`: the sidebar, the list, or \
@@ -1333,10 +1914,25 @@ mod tests {
             MOVE_TAG,
             RESET_TAG_ORDER,
             SHOW_QUICK_TAGS,
+            SET_FILTER_VIEW,
+            SET_FILTER_GROUPS,
+            ADD_LABEL,
+            RENAME_LABEL,
+            SET_LABEL_ICON,
+            SET_LABEL_SHOWN,
+            MOVE_LABEL,
+            RESET_LABEL_ORDER,
+            SET_COLUMNS,
         ] {
             assert_eq!(class(id), Permission::Edit, "{id}");
         }
-        assert_eq!(class(DELETE_TAG), Permission::Destructive);
+        // Spec: browser-tags R32. These change what the browser lists.
+        for id in [FILTER, CLEAR_FILTERS, BACK, FORWARD] {
+            assert_eq!(class(id), Permission::External, "{id} lists files outside");
+        }
+        for id in [DELETE_TAG, REMOVE_LABEL] {
+            assert_eq!(class(id), Permission::Destructive, "{id}");
+        }
         assert_eq!(class(TAGS), Permission::External);
         assert_eq!(class(SHOW_TAG_EDITOR), Permission::Read);
         for id in [FOCUS_SEARCH, STOP_PREVIEW, FOCUS_BROWSER] {

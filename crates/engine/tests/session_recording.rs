@@ -170,6 +170,7 @@ fn a_take_starts_and_ends_on_grid_lines() {
             start: Frames(0),
             end: Frames(2 * BAR_FRAMES),
             wrap: None,
+            frames: 2 * BAR_FRAMES as u64,
         })
     );
     assert_eq!(
@@ -265,6 +266,7 @@ fn the_arrangement_loop_does_not_break_a_take() {
             start: Frames::ZERO,
             end: Frames(3 * BAR_FRAMES),
             wrap: None,
+            frames: 3 * BAR_FRAMES as u64,
         })
     );
     assert_eq!(
@@ -339,6 +341,7 @@ fn without_quantisation_a_take_runs_from_press_to_press() {
             start: Frames(10 * BLOCK as i64),
             end: Frames(40 * BLOCK as i64),
             wrap: None,
+            frames: 30 * BLOCK as u64,
         })
     );
 }

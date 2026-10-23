@@ -10,9 +10,10 @@ use bl_model::{
     AudioData, AutomationTarget, Channel, Clip, ClipData, Command, ContentHash, CountIn,
     CrossfadeAssign, Device, DeviceId, DeviceKind, DeviceOutput, DeviceRole, DeviceWarp, Editor,
     External, HardwareLatency, Input, LaunchMode, LaunchQuantization, LaunchSettings,
-    MetronomeRhythm, MetronomeSound, MidiData, MidiTo, MixerParam, Monitor, Note, Output, PanMode,
-    ParamId, PressurePoint, SendTap, Sidechain, TakeClip, TakeLane, Tap, TonesSettings, TrackDelay,
-    TrackId, TrackKind, TransientEdits, WarpMarker, WarpMode, WarpSettings,
+    MetronomeRhythm, MetronomeSound, MidiData, MidiTo, MixerParam, Monitor, NewTakeLane, Note,
+    Output, PanMode, ParamId, PressurePoint, SendTap, Sidechain, TakeClip, TakeClipData, Tap,
+    TonesSettings, TrackDelay, TrackId, TrackKind, TransientEdits, WarpMarker, WarpMode,
+    WarpSettings,
 };
 use bl_project::{Media, Project};
 use bl_shell::Shell;
@@ -304,30 +305,54 @@ fn fixture() -> Project {
         },
     );
 
-    // Two take lanes, the first with two passes.
-    let pass = |name: &str, start: i64, from: f64| TakeClip {
+    // Two take lanes, the first with two clips.
+    let pass = |editor: &mut Editor, name: &str, start: i64, from: f64| TakeClip {
+        id: Some(editor.new_id()),
         name: name.to_owned(),
         start: Ticks(start),
         length: Ticks(BAR),
-        data: AudioData {
+        data: TakeClipData::Audio(AudioData {
             start: from,
             end: Some(from + 2.0),
             gain: 0.7,
             ..AudioData::new(ContentHash([3; 32]))
-        },
+        }),
     };
-    for lane in [
-        TakeLane {
-            name: "Take 1".to_owned(),
-            clips: vec![pass("a", 0, 0.0), pass("b", BAR, 1.0)],
-        },
-        TakeLane {
-            name: "Take 2".to_owned(),
-            clips: vec![pass("c", 0, 0.5)],
-        },
+    let mut lanes = Vec::new();
+    for (name, clips) in [
+        (
+            "Take 1",
+            vec![
+                pass(&mut editor, "a", 0, 0.0),
+                pass(&mut editor, "b", BAR, 1.0),
+            ],
+        ),
+        ("Take 2", vec![pass(&mut editor, "c", 0, 0.5)]),
     ] {
-        apply(&mut editor, Command::AddTakeLane { track: vox, lane });
+        let id = editor.new_id();
+        lanes.push(id);
+        let lane = NewTakeLane {
+            id: Some(id),
+            name: name.to_owned(),
+            clips,
+        };
+        apply(
+            &mut editor,
+            Command::AddTakeLane {
+                track: vox,
+                lane,
+                index: None,
+            },
+        );
     }
+    // The second is auditioned.
+    apply(
+        &mut editor,
+        Command::SetAudition {
+            lane: lanes[1],
+            on: true,
+        },
+    );
 
     // A device with a sidechain, parameters, a window and its own name.
     let compressor: bl_model::DeviceId = editor.new_id();
@@ -961,7 +986,7 @@ fn the_fixture_sets_a_non_default_value_of_every_saved_field() {
                 "automation.0.target",
                 "devices.0.sidechain.input",
                 "devices.0.midi_sidechain.source",
-                "take_lanes.0.clips.1.data.gain",
+                "take_lanes.0.clips.1.data.audio.gain",
                 "clips.0",
             ][..],
         ),
@@ -1185,9 +1210,10 @@ fn scenes_slots_and_automation_are_reached_by_path() {
         json!({ "path": "track \"Vox\" / lane \"Take 1\"", "limit": 1 }),
     );
     assert_eq!(lane["number"], 1);
-    assert_eq!(lane["passes"]["total"], 2);
-    assert_eq!(lane["passes"]["items"].as_array().unwrap().len(), 1);
-    assert_eq!(lane["passes"]["items"][0]["data"]["gain"], 0.7);
+    assert_eq!(lane["clips"]["total"], 2);
+    assert_eq!(lane["clips"]["items"].as_array().unwrap().len(), 1);
+    assert_eq!(lane["clips"]["items"][0]["data"]["audio"]["gain"], 0.7);
+    assert_eq!(lane["audition"], false);
     let second_lane = query(&mut client, json!({ "path": "track \"Vox\" / lane 2" }));
     assert_eq!(second_lane["name"], "Take 2");
 

@@ -380,6 +380,12 @@ impl Compiler {
             .flat_map(|&clip| [old.clip_track(clip), document.clip_track(clip)])
             .flatten()
             .collect();
+        // Auditioning a take lane swaps the clips the track plays (the
+        // comping spec, R14): its player gets them again.
+        tracks.extend(changes.tracks.keys().copied().filter(|&id| {
+            matches!((old.track(id), document.track(id)),
+                (Some(was), Some(now)) if was.audition() != now.audition())
+        }));
         // Spec: grooves R15. A groove's parameters, the Global Amount and the
         // pool reach the clips that use them as node data: their tracks'
         // lists are sent again, and no program is made.
@@ -389,7 +395,7 @@ impl Compiler {
                     .tracks()
                     .filter(|track| {
                         track
-                            .clips()
+                            .played_clips()
                             .chain(track.slots().map(|(_, clip)| clip))
                             .any(|clip| clip.groove.is_some())
                     })
@@ -1228,7 +1234,7 @@ impl Compiler {
         for track in document.tracks() {
             let id = track.id();
             let send = if build.new_players.contains(&id) {
-                track.clips().next().is_some() || track.slots().next().is_some()
+                track.played_clips().next().is_some() || track.slots().next().is_some()
             } else {
                 resend.all || resend.tracks.contains(&id)
             };

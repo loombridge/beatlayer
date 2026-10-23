@@ -356,3 +356,107 @@ fn the_zstd_tool_reads_sets() {
         std::fs::metadata(&path).unwrap().len()
     );
 }
+
+// Spec: comping R3. Each take-lane command is one undo step, and a set
+// saved after any of them loads back as it was, with the lanes, their clips
+// and the audition.
+#[test]
+fn take_lanes_and_their_commands_survive_a_save_and_a_load() {
+    use bl_core::time::Ticks;
+    use bl_model::{
+        AudioData, Clip, ClipData, ContentHash, NewTakeLane, TakeClip, TakeClipData, TakeLaneId,
+        TrackId,
+    };
+    let mut editor = Editor::new();
+    let track: TrackId = editor.new_id();
+    editor
+        .apply(Edit::CreateTrack {
+            id: track,
+            kind: TrackKind::Audio,
+            name: "Guitar".to_owned(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    let steps = |editor: &Editor| editor.undo_history().len();
+    let check = |editor: &Editor| {
+        let project = Project::from_editor(editor, Media::new());
+        let bytes = encode(&project, 1).unwrap();
+        let (loaded, _) = decode(&bytes, &LoadOptions::default()).unwrap();
+        assert_eq!(loaded, project);
+        assert_eq!(
+            encode_json(&loaded, 1).unwrap(),
+            encode_json(&project, 1).unwrap()
+        );
+    };
+    let lane: TakeLaneId = editor.new_id();
+    let first = steps(&editor);
+    editor
+        .apply(Edit::AddTakeLane {
+            track,
+            lane: NewTakeLane {
+                id: Some(lane),
+                name: "Take 1".to_owned(),
+                clips: vec![TakeClip {
+                    id: None,
+                    name: "Pass".to_owned(),
+                    start: Ticks::ZERO,
+                    length: Ticks::WHOLE,
+                    data: TakeClipData::Audio(AudioData::new(ContentHash([5; 32]))),
+                }],
+            },
+            index: None,
+        })
+        .unwrap();
+    assert_eq!(steps(&editor), first + 1);
+    check(&editor);
+    let clip = Clip::new(
+        editor.new_id(),
+        Ticks::WHOLE,
+        Ticks::WHOLE,
+        ClipData::Audio(AudioData::new(ContentHash([6; 32]))),
+    );
+    for command in [
+        Edit::CreateTakeClip { lane, clip },
+        Edit::RenameTakeLane {
+            lane,
+            name: "Verse".to_owned(),
+        },
+        Edit::SetAudition { lane, on: true },
+    ] {
+        let before = steps(&editor);
+        editor.apply(command).unwrap();
+        assert_eq!(steps(&editor), before + 1);
+        check(&editor);
+    }
+    let second: TakeLaneId = editor.new_id();
+    editor
+        .apply(Edit::AddTakeLane {
+            track,
+            lane: NewTakeLane {
+                id: Some(second),
+                name: "Take 2".to_owned(),
+                clips: Vec::new(),
+            },
+            index: None,
+        })
+        .unwrap();
+    for command in [
+        Edit::MoveTakeLanes {
+            lanes: vec![second],
+            index: 0,
+        },
+        Edit::DeleteUnusedTakeLanes {
+            tracks: vec![track],
+        },
+    ] {
+        let before = steps(&editor);
+        editor.apply(command).unwrap();
+        assert_eq!(steps(&editor), before + 1);
+        check(&editor);
+    }
+    assert!(editor.document().take_lane(lane).is_none());
+    editor.undo().unwrap();
+    check(&editor);
+    assert!(editor.document().take_lane(lane).is_some());
+}

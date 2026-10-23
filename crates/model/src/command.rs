@@ -816,6 +816,20 @@ pub enum Command {
         /// Its new start.
         start: Ticks,
     },
+    /// Moves a clip to a new start on a track's main lane or on one of its
+    /// take lanes, out of the lane or Session slot it sits in. The track
+    /// must be the take lane's own.
+    MoveClipToLane {
+        /// The clip.
+        clip: ClipId,
+        /// The track it moves to.
+        track: TrackId,
+        /// The take lane it moves to; the track's main lane when left out.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        lane: Option<TakeLaneId>,
+        /// Its new start.
+        start: Ticks,
+    },
     /// Moves several clips in time by the same amount, all or none.
     MoveClips {
         /// The clips, each listed once.
@@ -2689,7 +2703,7 @@ impl Command {
             Self::MoveTakeLanes { .. } => "Move Take Lane(s)",
             Self::SetAudition { .. } => "Audition Take Lane",
             Self::DeleteClip { .. } => "Delete clip",
-            Self::MoveClip { .. } => "Move clip",
+            Self::MoveClip { .. } | Self::MoveClipToLane { .. } => "Move clip",
             Self::MoveClips { .. } => "Move clips",
             Self::SetClipLength { .. } => "Resize clip",
             Self::RenameClip { .. } => "Rename clip",
@@ -3613,6 +3627,12 @@ impl Document {
             Command::SetAudition { lane, on } => self.set_audition(*lane, *on),
             Command::DeleteClip { clip } => self.remove_clip(*clip),
             Command::MoveClip { clip, track, start } => self.move_clip(*clip, *track, *start),
+            Command::MoveClipToLane {
+                clip,
+                track,
+                lane,
+                start,
+            } => self.move_clip_to_lane(*clip, *track, *lane, *start),
             Command::MoveClips { clips, by } => self.move_clips(clips, *by),
             Command::SetClipLength { clip, length } => {
                 let current = self.clip_ref(*clip)?;
@@ -5713,6 +5733,40 @@ impl Document {
         }
         self.remove_clip(id)?;
         self.track_mut(track)?.clips.insert(id, Shared::new(moved));
+        self.index.clip_track.insert(id, track);
+        Ok(())
+    }
+
+    /// Moves a clip to `start` on `track`'s main lane, or on its take lane
+    /// `lane`, out of wherever it sits (the comping spec, R27).
+    fn move_clip_to_lane(
+        &mut self,
+        id: ClipId,
+        track: TrackId,
+        lane: Option<TakeLaneId>,
+        start: Ticks,
+    ) -> Result<(), ModelError> {
+        let owner = self.clip_owner(id)?;
+        let clip = self.clip_ref(id)?;
+        check_clip_fits(self.track_ref(track)?, &clip.data)?;
+        check_extent(start, clip.length)?;
+        if let Some(lane) = lane
+            && self.take_lane_owner(lane)? != track
+        {
+            return Err(ModelError::TakeLanesNotOnOneTrack);
+        }
+        let mut moved = clip.clone();
+        moved.start = start;
+        if owner != track {
+            self.keep_fitting_envelopes(track, &mut moved);
+        }
+        self.remove_clip(id)?;
+        match lane {
+            Some(lane) => self.lane_mut(lane)?.clips.push(moved),
+            None => {
+                self.track_mut(track)?.clips.insert(id, Shared::new(moved));
+            }
+        }
         self.index.clip_track.insert(id, track);
         Ok(())
     }

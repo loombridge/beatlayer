@@ -12,12 +12,12 @@
 //! The behaviour is in the arrangement editing spec.
 
 use bl_core::time::Ticks;
-use bl_model::{ClipData, ClipId, Document, TrackId};
+use bl_model::{ClipData, ClipId, Document, TakeLaneId, TrackId};
 use bl_shell::arrangement::editing::{earliest_move, resize_limits};
 use bl_shell::arrangement::rows::{Row, first_row_at};
 use bl_shell::arrangement::{ArrangementView, Horizontal};
 use bl_shell::arrangement_commands as view_ids;
-use bl_shell::arrangement_commands::{FadeHandle, FadeHandleState};
+use bl_shell::arrangement_commands::{FadeHandle, FadeHandleState, Lane};
 use bl_shell::editing_commands::{self as ids, Edge};
 use bl_shell::locator_commands as locator_ids;
 use bl_shell::{GesturePhase, Invocation};
@@ -66,6 +66,8 @@ pub struct Hit {
     pub clip: ClipId,
     /// Its track.
     pub track: TrackId,
+    /// The take lane it sits on, or `None` for the track's main lane.
+    pub lane: Option<TakeLaneId>,
     /// Where on it.
     pub zone: Zone,
 }
@@ -94,9 +96,27 @@ impl Lanes<'_> {
         (index < self.rows.len() && self.rows[index].top <= y).then_some(index)
     }
 
-    /// The track whose lane is under a point, if any.
-    pub(super) fn track_at(&self, pos: Pos2) -> Option<TrackId> {
-        self.row_at(pos).map(|row| self.rows[row].track)
+    /// The lane under a point: its row, and the take lane in it, or `None`
+    /// for the row's own lane (the comping spec, R23).
+    pub(super) fn place_at(&self, pos: Pos2) -> Option<(usize, Option<TakeLaneId>)> {
+        let row = self.row_at(pos)?;
+        let y = pos.y - self.rect.top() + self.scroll_y;
+        let lane = self
+            .view
+            .take_lane_rows(self.doc, &self.rows[row])
+            .find(|lane| y >= lane.top && y < lane.top + lane.height)
+            .map(|lane| lane.lane);
+        Some((row, lane))
+    }
+
+    /// The lane under a point as a selection names it.
+    pub(super) fn lane_at(&self, pos: Pos2) -> Option<Lane> {
+        let (row, lane) = self.place_at(pos)?;
+        let track = self.rows[row].track;
+        Some(match lane {
+            Some(lane) => Lane::Take { track, lane },
+            None => Lane::Track { track },
+        })
     }
 
     /// The clip under a point, and where on it.
@@ -113,7 +133,7 @@ impl Lanes<'_> {
         let title = if row.folded {
             rect.height()
         } else {
-            title_height(row.height)
+            title_height(shown.lane_height)
         };
         let zone = if pos.x - rect.left() <= grab {
             Zone::Start
@@ -127,6 +147,7 @@ impl Lanes<'_> {
         Some(Hit {
             clip: shown.clip,
             track: shown.track,
+            lane: shown.lane,
             zone,
         })
     }
@@ -194,6 +215,8 @@ enum ClipDrag {
         start: Ticks,
         /// The anchor's track when the drag began.
         track: TrackId,
+        /// The anchor's take lane when the drag began.
+        lane: Option<TakeLaneId>,
         /// The furthest the clips may go earlier.
         earliest: Ticks,
     },
@@ -354,6 +377,7 @@ impl ClipGestures {
                     grab: at - clip.start,
                     start: clip.start,
                     track: hit.track,
+                    lane: hit.lane,
                 });
             }
             Zone::Start | Zone::End => {
@@ -414,25 +438,34 @@ impl ClipGestures {
                 grab,
                 start,
                 track,
+                lane,
                 earliest,
             } => {
                 // Spec: arrangement-editing R4: the grabbed clip's start
                 // lands on the grid.
                 let snapped = lanes.view.snap_drag(lanes.doc, at - *grab, keys.bypass);
                 let by = (snapped - *start).max(*earliest);
-                let to_track = lanes
-                    .row_at(pointer)
-                    .map_or(*track, |row| lanes.rows[row].track);
-                Some((
-                    ids::MOVE_CLIPS,
-                    json!({
-                        "clips": clips,
-                        "anchor": anchor,
-                        "by": by,
-                        "track": to_track,
-                        "copy": keys.copy,
-                    }),
-                ))
+                // Spec: comping R27. The clip goes to the lane under the
+                // pointer, a take lane or the track's main lane.
+                let (to_track, to_lane) = lanes
+                    .place_at(pointer)
+                    .map_or((*track, *lane), |(row, lane)| (lanes.rows[row].track, lane));
+                let mut args = json!({
+                    "clips": clips,
+                    "anchor": anchor,
+                    "by": by,
+                    "copy": keys.copy,
+                });
+                match to_lane {
+                    Some(lane) => {
+                        args["lane"] = json!(Lane::Take {
+                            track: to_track,
+                            lane
+                        });
+                    }
+                    None => args["track"] = json!(to_track),
+                }
+                Some((ids::MOVE_CLIPS, args))
             }
             ClipDrag::Resize {
                 anchor,
@@ -555,12 +588,87 @@ impl ClipGestures {
             );
             return true;
         }
+        // Spec: comping R26. Cmd-clicking inside a time selection adds the
+        // clicked lane to the lanes it covers, or takes it away; when it's
+        // the only lane, the insert marker moves there instead.
+        if keys.toggle
+            && let Some((start, end)) = lanes.view.time_selection()
+            && (start..=end).contains(&lanes.at(pos))
+            && let Some(clicked) = lanes.lane_at(pos)
+        {
+            let mut covered: Vec<Lane> = lanes
+                .view
+                .time_selection_lanes()
+                .iter()
+                .copied()
+                .filter(|lane| !matches!(lane, Lane::Automation { .. }))
+                .collect();
+            if covered.is_empty() {
+                covered = lanes
+                    .view
+                    .selected_tracks()
+                    .iter()
+                    .map(|track| Lane::Track { track: *track })
+                    .collect();
+            }
+            match covered.iter().position(|lane| *lane == clicked) {
+                Some(_) if covered.len() == 1 => {
+                    let mut args = json!({
+                        "at": lanes.view.snap(lanes.doc, lanes.at(pos)),
+                        "track": clicked.track(),
+                    });
+                    if let Lane::Take { lane, .. } = clicked {
+                        args["lane"] = json!(lane);
+                    }
+                    invoke(events, view_ids::SET_INSERT_MARKER, args);
+                    return true;
+                }
+                Some(at) => {
+                    covered.remove(at);
+                }
+                None => covered.push(clicked),
+            }
+            invoke(
+                events,
+                view_ids::SELECT_TIME,
+                json!({ "start": start, "end": end, "lanes": covered }),
+            );
+            return true;
+        }
         if keys.extend {
             // Spec: arrangement-editing R2: Shift-click extends the time
             // selection to the click.
             let at = lanes.view.snap(lanes.doc, lanes.at(pos));
             let (from, row) = extend_from(lanes, at);
             let here = lanes.row_at(pos).or(row);
+            // Spec: comping R26. It takes in the take lanes between, as
+            // well as the tracks.
+            let flat = lane_rows(lanes);
+            let anchor = lanes
+                .view
+                .time_selection_lanes()
+                .iter()
+                .filter(|lane| !matches!(lane, Lane::Automation { .. }))
+                .filter_map(|lane| flat.iter().position(|held| held == lane))
+                .min()
+                .or_else(|| {
+                    row.and_then(|row| {
+                        let track = lanes.rows[row].track;
+                        flat.iter().position(|held| *held == Lane::Track { track })
+                    })
+                });
+            let clicked = lanes
+                .lane_at(pos)
+                .and_then(|lane| flat.iter().position(|held| *held == lane));
+            if let (Some(a), Some(b)) = (anchor, clicked) {
+                let (a, b) = (a.min(b), a.max(b));
+                invoke(
+                    events,
+                    view_ids::SELECT_TIME,
+                    json!({ "start": from, "end": at, "lanes": &flat[a..=b] }),
+                );
+                return true;
+            }
             invoke(
                 events,
                 view_ids::SELECT_TIME,
@@ -674,7 +782,12 @@ impl ClipGestures {
             }
             return;
         }
-        if pressed(Key::Enter, false, false) && !view.selected_clips().is_empty() {
+        // Enter on take lane headers copies to the main lane (S-COMP-002); it
+        // starts a resize only of clips selected on their own.
+        if pressed(Key::Enter, false, false)
+            && !view.selected_clips().is_empty()
+            && view.selected_take_lanes().is_empty()
+        {
             let clips = view.selected_clips().to_vec();
             // Open the gesture straight away, so Esc reaches it rather than
             // its other binding.
@@ -800,6 +913,25 @@ pub(super) fn extend_from(lanes: &Lanes<'_>, at: Ticks) -> (Ticks, Option<usize>
         .filter_map(|t| lanes.rows.iter().position(|r| r.track == *t))
         .min();
     (from, row)
+}
+
+/// Every lane the rows hold, top to bottom: each track's own lane, then its
+/// take lanes.
+fn lane_rows(lanes: &Lanes<'_>) -> Vec<Lane> {
+    let mut out = Vec::with_capacity(lanes.rows.len());
+    for row in lanes.rows {
+        out.push(Lane::Track { track: row.track });
+        out.extend(
+            lanes
+                .view
+                .take_lane_rows(lanes.doc, row)
+                .map(|lane| Lane::Take {
+                    track: row.track,
+                    lane: lane.lane,
+                }),
+        );
+    }
+    out
 }
 
 /// The tracks of the rows from `a` to `b`.

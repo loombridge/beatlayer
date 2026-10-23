@@ -53,12 +53,8 @@ fn band(shown: &ShownClip, height: f32) -> (f32, f32) {
 }
 
 /// The row height of a clip's lane.
-fn lane_height(lanes: &Lanes<'_>, shown: &ShownClip) -> f32 {
-    lanes
-        .rows
-        .iter()
-        .find(|row| row.track == shown.track)
-        .map_or(0.0, |row| row.height)
+fn lane_height(_lanes: &Lanes<'_>, shown: &ShownClip) -> f32 {
+    shown.lane_height
 }
 
 /// The song position `seconds` after `from` under the tempo map.

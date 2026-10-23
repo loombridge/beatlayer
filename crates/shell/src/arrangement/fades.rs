@@ -244,8 +244,9 @@ pub(crate) fn plan(doc: &Document, target: &Target) -> Plan {
                 }
             }
         }
-        Target::Time { tracks, start, end } => {
-            for &track in tracks {
+        Target::Time { places, start, end } => {
+            // Fades are made on the main lanes' clips.
+            for track in super::editing::main_tracks(places) {
                 let clips = audio_clips(doc, track);
                 let mut crossfaded = BTreeSet::new();
                 for earlier in &clips {

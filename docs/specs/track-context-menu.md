@@ -1,6 +1,6 @@
 # The track header's context menu
 
-- **Status:** partial (R1 to R9 and R12 to R16 are implemented; R10 is WP-6.22's and R11 WP-6.23's)
+- **Status:** partial (R1 to R10 and R12 to R16 are implemented; R11 is WP-6.23's)
 - **Work packages:** WP-4.22 (R1 to R9); WP-6.22 (the take-lane items, R10); WP-6.23 (Link Tracks and Unlink Track(s), R11); WP-6.52 (Cut, Copy, Paste and Duplicate on whole tracks: R3 as changed, R12 to R16); Deactivate All Devices is WP-5.29 (IMP-25, R7)
 - **Parity-matrix row:** Menu bar and context menus: structure, order, and wording of generic commands
 - **Checked against:** Live 12.4.3 on macOS, observed on 10 October 2026 (the menu as opened on a MIDI track's title bar), and the Live 12 reference manual, chapters 6, 8, 18, 20, 21, and 22
@@ -59,7 +59,7 @@ This spec covers the track title bar's menu, Delete and Rename on the selected t
 | R7 | `crates/shell-spec/src/context_menus.rs`, `the_track_menus_other_states_add_the_items_menus_md_lists`; `crates/ui/tests/track_menu.rs`, `a_group_and_a_time_selection_add_their_items`, `deactivate_all_devices_switches_the_selected_tracks_devices` | unit, UI script |
 | R8 | `crates/shell/tests/shell_commands.rs`, `delete_and_rename_from_a_key_or_menu_act_on_the_selected_tracks`; `crates/ui/tests/track_menu.rs`, `the_session_view_s_title_bars_open_the_same_menu` | headless, UI script |
 | R9 | `crates/ui/tests/track_menu.rs`, `the_keys_open_the_selected_title_bar_s_menu`, `the_keys_open_a_session_column_s_title_menu` | UI script |
-| R10 | to be written in WP-6.22 | unit, UI script |
+| R10 | `crates/shell-spec/src/context_menus.rs`, `the_track_menu_in_the_arrangement_holds_the_take_lane_items_after_group_tracks`; `crates/ui/tests/track_menu.rs`, `the_menu_lists_lives_items_and_names_later_packages`, `the_take_lane_items_show_the_lanes_and_delete_them`; `crates/shell/tests/take_lanes_view.rs`, `the_track_menus_deletes_act_on_the_selected_tracks` | unit, UI script |
 | R11 | to be written in WP-6.23 | unit, UI script |
 | R12 | `crates/shell/src/tracks.rs`, `a_duplicate_holds_what_its_track_holds_under_new_ids`, `a_duplicated_group_holds_copies_of_its_tracks_and_a_return_among_the_returns`; `crates/shell/tests/shell_commands.rs`, `duplicating_a_track_copies_it_with_everything_it_holds`, `a_duplicated_track_saves_and_loads_back_whole`; `crates/ui/tests/track_menu.rs`, `the_menu_copies_cuts_and_duplicates_the_selected_tracks` | unit, headless, UI script |
 | R13 | `crates/shell/src/tracks.rs`, `a_duplicate_holds_what_its_track_holds_under_new_ids`, `a_sidechain_between_two_copied_tracks_points_at_the_copies`; `crates/shell/tests/shell_commands.rs`, `a_pasted_track_keeps_its_clips_devices_and_automation`; `crates/shell/tests/whole_tracks.rs`, `a_copied_track_plays_as_its_source_does`, `a_frozen_tracks_copy_keeps_its_frozen_audio` | unit, headless, golden render |

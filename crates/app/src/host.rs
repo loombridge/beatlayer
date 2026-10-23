@@ -44,7 +44,10 @@ use bl_ui::assistant_panel::AssistantPanelUi;
 use bl_ui::device_view::DeviceViewUi;
 use bl_ui::input::KeyDispatcher;
 use bl_ui::keymap::{Keymap, Platform};
-use bl_ui::layout::{TITLE_BAR, apply_zoom, fit_main_window, follow_zoom, settings_window};
+use bl_ui::layout::{
+    SECOND_WINDOW, TITLE_BAR, apply_zoom, fit_main_window, fit_second_window, follow_zoom,
+    settings_window,
+};
 use bl_ui::main_window::{DrawnMenuBar, MainWindowUi, UiEvent};
 use bl_ui::settings_window::SettingsUi;
 use bl_ui::theme::{Theme, fonts};
@@ -149,6 +152,29 @@ fn resize_main_window(window: &Window, zoom: f32, drawn_menus: bool) {
     if (wanted - inner).length() > 0.5 {
         let _ = window.request_inner_size(LogicalSize::new(wanted.x, wanted.y));
     }
+}
+
+/// The same for the second window: its smallest size at `zoom`
+/// (interface-zoom R15), and grown to it if it's smaller.
+fn resize_second_window(window: &Window, zoom: f32) {
+    let inner = window.inner_size().to_logical::<f32>(window.scale_factor());
+    let inner = egui::vec2(inner.width, inner.height);
+    let (minimum, wanted) =
+        fit_second_window(inner, zoom, DRAWN_TITLE_BAR, window_screen_limit(window));
+    window.set_min_inner_size(Some(LogicalSize::new(minimum.x, minimum.y)));
+    if window.fullscreen().is_none() && (wanted - inner).length() > 0.5 {
+        let _ = window.request_inner_size(LogicalSize::new(wanted.x, wanted.y));
+    }
+}
+
+/// Whether the point (`x`, `y`) lies on one of the screens, in points.
+fn on_a_screen(event_loop: &ActiveEventLoop, x: f64, y: f64) -> bool {
+    event_loop.available_monitors().any(|monitor| {
+        let scale = monitor.scale_factor();
+        let at = monitor.position().to_logical::<f64>(scale);
+        let size = monitor.size().to_logical::<f64>(scale);
+        x >= at.x && x < at.x + size.width && y >= at.y && y < at.y + size.height
+    })
 }
 
 /// Sizes the Settings window for `zoom`: Live's 562 × 617 points at 100%,
@@ -345,6 +371,8 @@ struct Host {
     menus: Vec<Menu>,
     proxy: EventLoopProxy<UserEvent>,
     main: Option<Surface>,
+    /// The second window, while it is open (WP-6.29).
+    second: Option<Surface>,
     settings: Option<Surface>,
     /// The assistant's panel in a window of its own, while it floats open
     /// (WP-2.23, part 3; D24), with what it draws.
@@ -358,8 +386,10 @@ struct Host {
     device_keys: KeyDispatcher,
     assistant_keys: KeyDispatcher,
     main_ui: MainWindowUi,
+    second_ui: MainWindowUi,
     settings_ui: SettingsUi,
     main_keys: KeyDispatcher,
+    second_keys: KeyDispatcher,
     settings_keys: KeyDispatcher,
     #[cfg(any(target_os = "macos", windows))]
     native_menu: Option<crate::native_menu::NativeMenu>,
@@ -440,6 +470,7 @@ pub fn run(args: Args) -> Result<(), String> {
         AudioHost::new(prefs.audio.clone())
     };
     let mut main_ui = MainWindowUi::new();
+    let mut second_ui = MainWindowUi::second();
     let mut shell = if args.benchmark_scene {
         // The Arrangement benchmark scene (WP-1.8a), with its peaks in
         // memory.
@@ -496,7 +527,7 @@ pub fn run(args: Args) -> Result<(), String> {
         .map_err(|e| format!("couldn't start the event loop: {e}"))?;
     let proxy = event_loop.create_proxy();
     if !args.benchmark_scene {
-        start_peaks(&shell, &mut main_ui, &proxy);
+        start_peaks(&shell, &mut [&mut main_ui, &mut second_ui], &proxy);
     }
     {
         // The browser's index and preview decoder wake the loop.
@@ -566,6 +597,7 @@ pub fn run(args: Args) -> Result<(), String> {
         menus,
         proxy,
         main: None,
+        second: None,
         settings: None,
         assistant: None,
         assistant_ui: AssistantPanelUi::default(),
@@ -574,8 +606,10 @@ pub fn run(args: Args) -> Result<(), String> {
         device_keys: KeyDispatcher::new(platform),
         assistant_keys: KeyDispatcher::new(platform),
         main_ui,
+        second_ui,
         settings_ui: SettingsUi::new(),
         main_keys: KeyDispatcher::new(platform),
+        second_keys: KeyDispatcher::new(platform),
         settings_keys: KeyDispatcher::new(platform),
         #[cfg(any(target_os = "macos", windows))]
         native_menu: None,
@@ -635,7 +669,11 @@ fn open_user_library(shell: &mut Shell, args: &Args) {
 /// shell's media store, which the browser (WP-1.10) and set loading fill. A
 /// thread passes the cache's events on and wakes the loop, so a waveform
 /// appears when its peaks are ready and is redrawn when they're invalidated.
-fn start_peaks(shell: &Shell, main_ui: &mut MainWindowUi, proxy: &EventLoopProxy<UserEvent>) {
+fn start_peaks(
+    shell: &Shell,
+    windows: &mut [&mut MainWindowUi],
+    proxy: &EventLoopProxy<UserEvent>,
+) {
     let store = shell.media_store();
     let cache =
         match bl_media::PeakCache::new(store, bl_media::PeakCacheOptions::platform_default()) {
@@ -645,23 +683,27 @@ fn start_peaks(shell: &Shell, main_ui: &mut MainWindowUi, proxy: &EventLoopProxy
                 return;
             }
         };
-    let events = cache.subscribe();
-    let (forward, received) = std::sync::mpsc::channel();
-    let proxy = proxy.clone();
-    let spawned = std::thread::Builder::new()
-        .name("bl-peak-events".to_owned())
-        .spawn(move || {
-            // Ends when the cache, and with it the sender, is dropped.
-            for event in events {
-                if forward.send(event).is_err() || proxy.send_event(UserEvent::Peaks).is_err() {
-                    break;
+    // Each window's Arrangement takes the cache's news on a channel of its
+    // own.
+    for window in windows {
+        let events = cache.subscribe();
+        let (forward, received) = std::sync::mpsc::channel();
+        let proxy = proxy.clone();
+        let spawned = std::thread::Builder::new()
+            .name("bl-peak-events".to_owned())
+            .spawn(move || {
+                // Ends when the cache, and with it the sender, is dropped.
+                for event in events {
+                    if forward.send(event).is_err() || proxy.send_event(UserEvent::Peaks).is_err() {
+                        break;
+                    }
                 }
-            }
-        });
-    let events = spawned.is_ok().then_some(received);
-    main_ui
-        .arrangement_mut()
-        .set_peak_source(Box::new(cache), events);
+            });
+        let events = spawned.is_ok().then_some(received);
+        window
+            .arrangement_mut()
+            .set_peak_source(Box::new(Arc::clone(&cache)), events);
+    }
 }
 
 impl Host {
@@ -675,6 +717,7 @@ impl Host {
         event_loop: &ActiveEventLoop,
         attributes: WindowAttributes,
         share: Option<&Surface>,
+        zoom: f32,
     ) -> Result<Surface, String> {
         // AccessKit's adapter must exist before the window is first shown.
         let window = Arc::new(
@@ -685,7 +728,6 @@ impl Host {
         let ctx = egui::Context::default();
         ctx.set_fonts(fonts());
         self.theme.apply(&ctx);
-        let zoom = self.shell.zoom();
         apply_zoom(&ctx, zoom);
         let mut state = egui_winit::State::new(
             ctx.clone(),
@@ -763,7 +805,12 @@ impl Host {
             .with_title(self.shell.set_name())
             .with_inner_size(LogicalSize::new(width, height))
             .with_min_inner_size(LogicalSize::new(minimum.x, minimum.y));
-        let surface = self.create_surface(event_loop, with_title_bar(attributes), None)?;
+        let surface = self.create_surface(
+            event_loop,
+            with_title_bar(attributes),
+            None,
+            self.shell.zoom(),
+        )?;
         if let Some(render) = surface.painter.render_state() {
             // The Arrangement View's own pipelines (WP-1.8a).
             bl_ui::arrangement::gpu::install(
@@ -848,7 +895,12 @@ impl Host {
             .with_title("Settings")
             .with_inner_size(LogicalSize::new(size.x, size.y))
             .with_resizable(false);
-        match self.create_surface(event_loop, with_title_bar(attributes), self.main.as_ref()) {
+        match self.create_surface(
+            event_loop,
+            with_title_bar(attributes),
+            self.main.as_ref(),
+            self.shell.zoom(),
+        ) {
             Ok(surface) => {
                 fit_title_bar(&surface.window);
                 surface.window.focus_window();
@@ -863,9 +915,114 @@ impl Host {
         }
     }
 
+    /// Opens the second window at the size and place it was last closed at,
+    /// the first time at 990 by 703 points (second-window R1).
+    fn open_second_window(&mut self, event_loop: &ActiveEventLoop) {
+        let zoom = self.shell.zoom_of(WindowKind::Second);
+        let limit = event_loop
+            .primary_monitor()
+            .map(|monitor| screen_limit(monitor.size().to_logical(monitor.scale_factor())));
+        let frame = self.shell.second_window_frame();
+        let inner = frame.map_or(
+            egui::vec2(SECOND_WINDOW.x, content_height(SECOND_WINDOW.y)),
+            |frame| egui::vec2(frame.width as f32, frame.height as f32),
+        );
+        let (minimum, size) = fit_second_window(within(inner, limit), zoom, DRAWN_TITLE_BAR, limit);
+        let mut attributes = Window::default_attributes()
+            .with_title(bl_ui::main_window::window_title(
+                &self.shell,
+                WindowKind::Second,
+            ))
+            .with_inner_size(LogicalSize::new(size.x, size.y))
+            .with_min_inner_size(LogicalSize::new(minimum.x, minimum.y));
+        // A frame kept on screens that have gone is brought back: the
+        // system places the window.
+        if let Some(frame) = frame
+            && on_a_screen(event_loop, frame.x, frame.y)
+        {
+            attributes = attributes.with_position(LogicalPosition::new(frame.x, frame.y));
+        }
+        match self.create_surface(
+            event_loop,
+            with_title_bar(attributes),
+            self.main.as_ref(),
+            zoom,
+        ) {
+            Ok(surface) => {
+                if let Some(render) = surface.painter.render_state() {
+                    // The Arrangement View's own pipelines (WP-1.8a).
+                    bl_ui::arrangement::gpu::install(
+                        &render.device,
+                        render.target_format,
+                        &mut render.renderer.write().callback_resources,
+                    );
+                }
+                fit_title_bar(&surface.window);
+                surface.window.focus_window();
+                self.second = Some(surface);
+            }
+            Err(error) => {
+                // No window: the shell's switch goes back off.
+                self.invoke(&Invocation::new(ids::VIEW_TOGGLE_SECOND_WINDOW, json!({})));
+                self.shell.set_message(error, true);
+            }
+        }
+    }
+
+    /// Records where the second window sits and how big it is, for the next
+    /// time it opens.
+    fn record_second_frame(&mut self) {
+        let Some(second) = &self.second else {
+            return;
+        };
+        let window = &second.window;
+        let scale = window.scale_factor();
+        let Ok(position) = window.outer_position() else {
+            return;
+        };
+        if window.fullscreen().is_some() || window.is_minimized() == Some(true) {
+            return;
+        }
+        let position = position.to_logical::<f64>(scale);
+        let size = window.inner_size().to_logical::<f64>(scale);
+        self.shell.set_second_window_frame(bl_model::WindowFrame {
+            x: position.x,
+            y: position.y,
+            width: size.width,
+            height: size.height,
+        });
+    }
+
+    /// Opens and closes the second window to match the shell's.
+    fn sync_second_window(&mut self, event_loop: &ActiveEventLoop) {
+        match (self.shell.second_window_open(), self.second.is_some()) {
+            (true, false) => self.open_second_window(event_loop),
+            (false, true) => {
+                self.record_second_frame();
+                self.second = None;
+                // Nothing is under the pointer in a closed window
+                // (info-view R8).
+                self.main_ui.set_other_hovered(None);
+                if let Some(main) = &self.main {
+                    main.window.focus_window();
+                }
+            }
+            (true, true) => {
+                if let Some(second) = &self.second {
+                    second.window.set_title(&bl_ui::main_window::window_title(
+                        &self.shell,
+                        WindowKind::Second,
+                    ));
+                }
+            }
+            (false, false) => {}
+        }
+    }
+
     fn surface(&mut self, kind: WindowKind) -> &mut Option<Surface> {
         match kind {
             WindowKind::Main => &mut self.main,
+            WindowKind::Second => &mut self.second,
             WindowKind::Settings => &mut self.settings,
             WindowKind::Assistant => &mut self.assistant,
             WindowKind::Device(device) => match self.devices.get_mut(&device) {
@@ -881,6 +1038,8 @@ impl Host {
     fn kind_of(&self, id: WindowId) -> Option<WindowKind> {
         if self.main.as_ref().is_some_and(|s| s.window.id() == id) {
             Some(WindowKind::Main)
+        } else if self.second.as_ref().is_some_and(|s| s.window.id() == id) {
+            Some(WindowKind::Second)
         } else if self.settings.as_ref().is_some_and(|s| s.window.id() == id) {
             Some(WindowKind::Settings)
         } else if self.assistant.as_ref().is_some_and(|s| s.window.id() == id) {
@@ -907,7 +1066,7 @@ impl Host {
 
     /// Every open window's surface.
     fn surfaces(&self) -> impl Iterator<Item = &Surface> {
-        [&self.main, &self.settings, &self.assistant]
+        [&self.main, &self.second, &self.settings, &self.assistant]
             .into_iter()
             .flatten()
             .chain(self.devices.values().filter_map(|(s, _)| s.as_ref()))
@@ -998,7 +1157,12 @@ impl Host {
                 .with_visible(floating.shown);
             let attributes =
                 device_window_attributes(attributes, self.main.as_ref().map(|m| &*m.window));
-            match self.create_surface(event_loop, attributes, self.main.as_ref()) {
+            match self.create_surface(
+                event_loop,
+                attributes,
+                self.main.as_ref(),
+                self.shell.zoom(),
+            ) {
                 Ok(surface) => {
                     if !floating.shown {
                         surface.window.set_visible(false);
@@ -1036,7 +1200,12 @@ impl Host {
             .with_title("Assistant")
             .with_inner_size(LogicalSize::new(380.0, 600.0))
             .with_min_inner_size(LogicalSize::new(240.0, 240.0));
-        match self.create_surface(event_loop, attributes, self.main.as_ref()) {
+        match self.create_surface(
+            event_loop,
+            attributes,
+            self.main.as_ref(),
+            self.shell.zoom(),
+        ) {
             Ok(surface) => self.assistant = Some(surface),
             Err(error) => self.shell.set_message(error, true),
         }
@@ -1098,9 +1267,11 @@ impl Host {
         // A value being typed into the Control Bar takes the keys as a
         // text field does (control-bar-transport R10).
         let text_focused = surface.ctx.text_edit_focused()
-            || (kind == WindowKind::Main && self.main_ui.is_typing());
+            || (kind == WindowKind::Main && self.main_ui.is_typing())
+            || (kind == WindowKind::Second && self.second_ui.is_typing());
         let keys = match kind {
             WindowKind::Main => &mut self.main_keys,
+            WindowKind::Second => &mut self.second_keys,
             WindowKind::Settings => &mut self.settings_keys,
             WindowKind::Assistant => &mut self.assistant_keys,
             WindowKind::Device(_) => &mut self.device_keys,
@@ -1134,6 +1305,7 @@ impl Host {
         let shell = &self.shell;
         let theme = &self.theme;
         let main_ui = &mut self.main_ui;
+        let second_ui = &mut self.second_ui;
         let settings_ui = &mut self.settings_ui;
         let assistant_ui = &mut self.assistant_ui;
         let mut device_ui = match kind {
@@ -1153,6 +1325,7 @@ impl Host {
         let output = surface.ctx.run_ui(input, |ui| {
             ui_events = match kind {
                 WindowKind::Main => main_ui.show(ui, shell, theme, title_bar, drawn),
+                WindowKind::Second => second_ui.show(ui, shell, theme, title_bar, None),
                 WindowKind::Settings => settings_ui.show(ui, shell, theme, title_bar),
                 WindowKind::Assistant => {
                     let mut events = Vec::new();
@@ -1214,13 +1387,21 @@ impl Host {
         }
         *self.surface(kind) = Some(surface);
 
+        // Spec: info-view R8. The main window's Info View describes what the
+        // pointer is over in the second window too.
+        if kind == WindowKind::Second
+            && self.main_ui.set_other_hovered(self.second_ui.hovered())
+            && let Some(main) = &self.main
+        {
+            main.window.request_redraw();
+        }
         for invocation in invocations {
             self.invoke(&invocation);
         }
         for event in ui_events {
             match event {
                 UiEvent::Invoke(invocation) => self.invoke(&invocation),
-                UiEvent::FocusArea(area) => self.shell.set_focused_area(area),
+                UiEvent::FocusArea(area) => self.shell.set_focused_area_in(kind, area),
                 UiEvent::FocusTrack(track) => self.shell.set_focused_track(track),
                 UiEvent::FocusValue(focused) => self.shell.set_value_focused(focused),
                 UiEvent::FocusControl(focused) => {
@@ -1293,6 +1474,18 @@ impl Host {
             resize_main_window(&main.window, zoom, drawn_menus);
             main.window.request_redraw();
         }
+        // Spec: interface-zoom R11, R15. The second window zooms on its own,
+        // and keeps its size unless that's under its smallest at the new
+        // zoom.
+        let second_zoom = self.shell.zoom_of(WindowKind::Second);
+        if let Some(second) = &mut self.second
+            && (second.zoom - second_zoom).abs() > 1e-6
+        {
+            apply_zoom(&second.ctx, second_zoom);
+            second.zoom = second_zoom;
+            resize_second_window(&second.window, second_zoom);
+            second.window.request_redraw();
+        }
         let mut rezoomed = false;
         for surface in self
             .devices
@@ -1330,6 +1523,7 @@ impl Host {
         if self.shown_revision != Some(self.shell.revision()) {
             self.sync_device_windows(event_loop);
             self.sync_assistant_window(event_loop);
+            self.sync_second_window(event_loop);
             self.shown_revision = Some(self.shell.revision());
             #[cfg(any(target_os = "macos", windows))]
             if let Some(menu) = &self.native_menu {
@@ -1571,15 +1765,40 @@ impl Host {
                         .set_fullscreen(on.then_some(Fullscreen::Borderless(None)));
                 }
             }
+            Effect::SetSecondFullScreen(on) => {
+                if let Some(second) = &self.second {
+                    second
+                        .window
+                        .set_fullscreen(on.then_some(Fullscreen::Borderless(None)));
+                }
+            }
             Effect::RenameDevice(_)
             | Effect::RenameChain(_)
             | Effect::RenameMacro(_, _)
             | Effect::RenameVariation(_, _)
             | Effect::RenameTrack(_)
             | Effect::RenameLocator(_) => {
-                if let Some(main) = &self.main {
-                    self.main_ui.apply_effect(&main.ctx, &effect);
-                    main.window.request_redraw();
+                // The renaming happens in the window in front.
+                let (surface, ui) = if self.shell.acting_window() == WindowKind::Second {
+                    (&self.second, &mut self.second_ui)
+                } else {
+                    (&self.main, &mut self.main_ui)
+                };
+                if let Some(surface) = surface {
+                    ui.apply_effect(&surface.ctx, &effect);
+                    surface.window.request_redraw();
+                }
+            }
+            Effect::FocusSecondArea(area) => {
+                if let Some(second) = &self.second {
+                    second.window.focus_window();
+                    self.second_ui
+                        .apply_effect(&second.ctx, &Effect::FocusSecondArea(area));
+                }
+            }
+            Effect::RaiseDeviceWindow(device) => {
+                if let Some((Some(surface), _)) = self.devices.get(&device) {
+                    surface.window.focus_window();
                 }
             }
             Effect::FocusArea(area) => {
@@ -1594,6 +1813,12 @@ impl Host {
                     if let Some(main) = &self.main {
                         self.main_ui.apply_effect(&main.ctx, &effect);
                         main.window.request_redraw();
+                    }
+                }
+                WindowKind::Second => {
+                    if let Some(second) = &self.second {
+                        self.second_ui.apply_effect(&second.ctx, &effect);
+                        second.window.request_redraw();
                     }
                 }
                 WindowKind::Settings => {
@@ -1733,6 +1958,7 @@ impl Host {
                     .and_then(|window| {
                         let surface = match window {
                             WindowKind::Main => self.main.as_ref(),
+                            WindowKind::Second => self.second.as_ref(),
                             WindowKind::Settings => self.settings.as_ref(),
                             WindowKind::Assistant => self.assistant.as_ref(),
                             WindowKind::Device(device) => {
@@ -1802,9 +2028,13 @@ impl Host {
             })
             .map(Arc::new);
         for capture in mine {
+            let ui = if kind == WindowKind::Second {
+                &self.second_ui
+            } else {
+                &self.main_ui
+            };
             let job = frame.clone().and_then(|image| {
-                crate::capture::region(capture.view, &self.shell, &self.main_ui)
-                    .map(|region| (image, region))
+                crate::capture::region(capture.view, &self.shell, ui).map(|region| (image, region))
             });
             let (image, region) = match job {
                 Ok(job) => job,
@@ -2078,6 +2308,11 @@ impl ApplicationHandler<UserEvent> for Host {
             WindowEvent::CloseRequested => {
                 match kind {
                     WindowKind::Main => self.invoke(&Invocation::new(ids::APP_QUIT, json!({}))),
+                    // The close button closes the second window (R1).
+                    WindowKind::Second => {
+                        self.record_second_frame();
+                        self.invoke(&Invocation::new(ids::VIEW_TOGGLE_SECOND_WINDOW, json!({})));
+                    }
                     WindowKind::Settings => self.shell.close_settings(),
                     // Closing the floating assistant closes the panel.
                     WindowKind::Assistant => self.invoke(&Invocation::new(
@@ -2103,6 +2338,13 @@ impl ApplicationHandler<UserEvent> for Host {
                     if window.is_visible() != Some(false) {
                         self.record_device_frame(device, &window);
                     }
+                }
+            }
+            WindowEvent::Moved(_) | WindowEvent::Resized(_) if kind == WindowKind::Second => {
+                self.record_second_frame();
+                if let Some(second) = &self.second {
+                    let full = second.window.fullscreen().is_some();
+                    self.shell.set_second_full_screen_state(full);
                 }
             }
             // Follow System (themes R3).
@@ -2167,14 +2409,14 @@ impl ApplicationHandler<UserEvent> for Host {
                 self.after_commands(event_loop);
             }
             UserEvent::Peaks => {
-                if let Some(main) = &self.main {
-                    main.window.request_redraw();
+                for surface in [&self.main, &self.second].into_iter().flatten() {
+                    surface.window.request_redraw();
                 }
             }
             UserEvent::Browser => {
                 self.shell.poll();
-                if let Some(main) = &self.main {
-                    main.window.request_redraw();
+                for surface in [&self.main, &self.second].into_iter().flatten() {
+                    surface.window.request_redraw();
                 }
             }
             UserEvent::Captured => {
@@ -2205,10 +2447,10 @@ impl ApplicationHandler<UserEvent> for Host {
         let now = Instant::now();
         if now >= self.next_cpu_sample {
             self.next_cpu_sample = now + CPU_METER_PERIOD;
-            if self.shell.audio_mut().sample_cpu_load().is_some()
-                && let Some(main) = &self.main
-            {
-                main.window.request_redraw();
+            if self.shell.audio_mut().sample_cpu_load().is_some() {
+                for surface in [&self.main, &self.second].into_iter().flatten() {
+                    surface.window.request_redraw();
+                }
             }
         }
         let mut wake = self
@@ -2243,6 +2485,7 @@ impl ApplicationHandler<UserEvent> for Host {
                 capture.redrawn = now;
                 let surface = match capture.window {
                     WindowKind::Main => self.main.as_ref(),
+                    WindowKind::Second => self.second.as_ref(),
                     WindowKind::Settings => self.settings.as_ref(),
                     WindowKind::Assistant => self.assistant.as_ref(),
                     WindowKind::Device(device) => {
@@ -2275,7 +2518,7 @@ impl ApplicationHandler<UserEvent> for Host {
             }
         }
         let devices = self.devices.values_mut().filter_map(|(s, _)| s.as_mut());
-        for surface in [&mut self.main, &mut self.settings]
+        for surface in [&mut self.main, &mut self.second, &mut self.settings]
             .into_iter()
             .flatten()
             .chain(devices)

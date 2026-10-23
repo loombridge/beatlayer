@@ -1,6 +1,6 @@
 # Info View
 
-- **Status:** partial (R1 to R7 implemented; R8 comes with WP-6.29, R9 to R12 with WP-6.58)
+- **Status:** partial (R1 to R8 implemented; R9 to R12 come with WP-6.58)
 - **Work packages:** WP-2.24 (R1 to R6), WP-6.27 (R7, the Info View beside stacked and hidden detail views), WP-6.29 (R8, the Info View with the second window open), WP-6.58 (R9 to R12, the user's own info text and Edit Info Text)
 - **Parity-matrix row:** Info View (M2, "Built in WP-2.24")
 - **Checked against:** Live 12.4.3, on 10 October 2026; for R9 to R12, the Live 12 reference manual (online edition), read 20 October 2026, and the UI parity reference's menu rows (M-EDIT-025, C-TRACK-006, C-SCENE-006, C-CLIP-SES-006, C-CLIP-ARR-008, C-DEVICE-005, C-TIME-025)
@@ -50,7 +50,7 @@ This spec covers the Info View's place, its show and hide, and what it shows whi
 | R5 | `crates/ui/tests/info_view.rs`, `hovering_a_control_reads_the_command_registered_for_it`, `hovering_empty_space_clears_it` (the content changes only when the pointer moves) | UI script |
 | R6 | `crates/devices/tests/rules.rs`, `every_parameter_has_a_description` (parameters); the command registry's own completeness check, which the `cargo xtask commands` and `cargo xtask check` steps run (commands) | unit |
 | R7 | `crates/ui/src/layout.rs` (tests), `stacked_views_keep_the_device_view_at_the_bottom`, `with_neither_view_the_main_view_runs_to_the_detail_areas_bottom` | unit |
-| R8 | to be written in WP-6.29 | |
+| R8 | `crates/ui/tests/second_window.rs`, `the_main_windows_info_view_describes_what_the_pointer_is_over_in_the_second_window`, `it_has_no_assistant_toggle_and_no_info_view`; `crates/shell/tests/second_window.rs`, `the_info_view_and_the_undo_history_stay_in_the_main_window` | UI script |
 | R9 | to be written in WP-6.58 | |
 | R10 | to be written in WP-6.58 | |
 | R11 | to be written in WP-6.58 | |

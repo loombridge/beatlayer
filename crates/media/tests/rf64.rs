@@ -5,7 +5,6 @@
 //! The last writes a real sparse file over 4 GB on macOS and Linux, where a
 //! file with a hole takes no space.
 
-use crate::common;
 use std::io::{self, Read, Seek, SeekFrom};
 
 use bl_media::{Codec, Container, Decoder};
@@ -186,7 +185,7 @@ fn opens_a_sparse_file_over_4_gb_from_disk() {
     // Spec: audio-import R2
     use std::io::Write;
 
-    let dir = common::TempDir::new("rf64");
+    let dir = crate::common::TempDir::new("rf64");
     let path = dir.path().join("long.wav");
     let header = header(b"BW64", FRAMES * BLOCK);
     let tail_frames = 50_000u64;

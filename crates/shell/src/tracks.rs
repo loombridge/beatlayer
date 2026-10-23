@@ -323,7 +323,8 @@ fn settle_target(
             chain: copies.chain_or_same(doc, *chain)?,
             to: copies.chain_or_same(doc, *to)?,
         }),
-        AutomationTarget::MidiCc { .. }
+        AutomationTarget::Clip { .. }
+        | AutomationTarget::MidiCc { .. }
         | AutomationTarget::MidiPitchBend
         | AutomationTarget::MidiChannelPressure => Some(*target),
     }

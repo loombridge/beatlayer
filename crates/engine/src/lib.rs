@@ -84,6 +84,7 @@ bl_rt::install_trap!();
 
 mod automation;
 pub mod capture;
+mod clip_sound;
 mod clip_source;
 pub mod clips;
 mod compiler;

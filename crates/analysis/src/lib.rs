@@ -10,6 +10,7 @@
 //! | [`loudness`] | Integrated, momentary, and short-term loudness (LUFS), loudness range (LU), and true peak (dBTP) | ITU-R BS.1770-4 with EBU R 128's gating and windows (EBU Tech 3341, 3342) |
 //! | [`levels`] | Sample peak and RMS (dBFS), per channel and overall | Their definitions |
 //! | [`spectrum`] | The level in each octave band, 31.5 Hz to 16 kHz | Welch-averaged Hann-windowed FFTs, summed per band (IEC 61260's base-2 band edges) |
+//! | [`measure`] | A steady tone's pitch, a vowel's first two formants, how far below its harmonics the rest of a tone lies, and a swept tone's level against the rest of the output (warp-modes R34 to R36) | The strongest peak of one-second Hann frames with a parabolic refinement; the peaks of an all-pole fit to the average spectrum; the power outside the harmonics' bins; Kaiser-windowed frames around the swept frequency |
 //! | [`onsets`] | Transient times | Spectral flux with adaptive peak picking (after Böck, Krebs and Schedl, 2012), refined in the waveform |
 //! | [`tempo`] | Tempo (BPM) | The onset function's autocorrelation, weighted towards 120 BPM (after Ellis, 2007), refined by a line through the transients |
 //! | [`key`] | Key and mode | A chromagram correlated with Krumhansl and Kessler's key profiles (1982) |
@@ -29,6 +30,7 @@ pub mod key;
 pub mod levels;
 pub mod loops;
 pub mod loudness;
+pub mod measure;
 pub mod onsets;
 pub mod spectrum;
 pub mod stems;

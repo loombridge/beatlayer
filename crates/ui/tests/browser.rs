@@ -339,18 +339,18 @@ fn clicks_select_and_double_clicks_open() {
     assert_eq!(
         names(&h),
         [
-            "Clips", "Defaults", "Grooves", "Presets", "Samples", "Loop.wav"
+            "Clips", "Defaults", "Grooves", "Presets", "Samples", "Tunings", "Loop.wav"
         ]
     );
-    h.click(row(5));
+    h.click(row(6));
     assert_eq!(selected(&h), ["Loop.wav"]);
     assert_eq!(h.shell.focused_area(), Area::Browser);
     assert_eq!(h.shell.browser_view().focus(), Part::Content);
     // Shift-click selects the range; Cmd-click adds and removes.
     click_with(&mut h, row(3), Modifiers::SHIFT);
-    assert_eq!(selected(&h), ["Loop.wav", "Samples", "Presets"]);
+    assert_eq!(selected(&h), ["Loop.wav", "Tunings", "Samples", "Presets"]);
     click_with(&mut h, row(4), command());
-    assert_eq!(selected(&h), ["Loop.wav", "Presets"]);
+    assert_eq!(selected(&h), ["Loop.wav", "Tunings", "Presets"]);
     // A double-click on a folder opens it.
     let double = |h: &mut Harness, at: Pos2| {
         // Long enough after the clicks above that this isn't a triple click.
@@ -377,8 +377,8 @@ fn clicks_select_and_double_clicks_open() {
     // A double-click on a file loads it onto a new track (no track is
     // selected).
     let before = top_level(&h).len();
-    h.frame(vec![Event::PointerMoved(row(6))]);
-    double(&mut h, row(6));
+    h.frame(vec![Event::PointerMoved(row(7))]);
+    double(&mut h, row(7));
     assert_eq!(top_level(&h).len(), before + 1);
 }
 
@@ -406,10 +406,10 @@ fn keys_move_through_the_sidebar_and_the_list() {
     h.key(Key::ArrowLeft, Modifiers::NONE);
     assert_eq!(selected(&h), ["Samples"]);
     h.key(Key::ArrowLeft, Modifiers::NONE);
-    assert_eq!(names(&h).len(), 6, "closed");
+    assert_eq!(names(&h).len(), 7, "closed");
     // Shift-Down extends the selection.
     h.key(Key::ArrowDown, Modifiers::SHIFT);
-    assert_eq!(selected(&h), ["Samples", "Loop.wav"]);
+    assert_eq!(selected(&h), ["Samples", "Tunings"]);
     h.key(Key::ArrowUp, Modifiers::NONE);
     assert_eq!(selected(&h), ["Samples"]);
     // Left at the top level moves to the sidebar, where Up and Down choose
@@ -426,7 +426,7 @@ fn keys_move_through_the_sidebar_and_the_list() {
     h.key(Key::ArrowRight, Modifiers::NONE);
     assert_eq!(h.shell.browser_view().focus(), Part::Content);
     // Enter loads the selected file.
-    h.click(row(5));
+    h.click(row(6));
     let before = top_level(&h).len();
     h.key(Key::Enter, Modifiers::NONE);
     assert_eq!(top_level(&h).len(), before + 1, "Enter loaded Loop.wav");
@@ -530,7 +530,7 @@ fn the_preview_strip_follows_the_preview() {
     let scratch = Scratch::new("preview");
     let (mut h, _) = harness(&scratch);
     assert!(h.shell.audio().is_running(), "the null device");
-    h.click(row(5));
+    h.click(row(6));
     h.wait("the preview to play", |h| {
         h.shell.browser_preview().position_seconds > 0.0
     });
@@ -594,7 +594,7 @@ fn dragging_a_file_below_the_last_track_creates_a_track() {
     let before = top_level(&h);
     assert_eq!(before.len(), 4);
     // Four tracks of 88 points end at y 471; the drop area is below.
-    drag(&mut h, row(5), lanes_point(2.3, 520.0), Modifiers::NONE);
+    drag(&mut h, row(6), lanes_point(2.3, 520.0), Modifiers::NONE);
     let after = top_level(&h);
     assert_eq!(after.len(), 5, "a new track");
     let doc = h.shell.editor().document();
@@ -617,14 +617,14 @@ fn dragging_onto_a_track_places_a_clip_at_the_drop() {
         .unwrap();
     let audio = top_level(&h)[2];
     // "3 Audio" spans y 295 to 383; 4.3 bars snaps to the nearest bar.
-    drag(&mut h, row(5), lanes_point(4.3, 340.0), Modifiers::NONE);
+    drag(&mut h, row(6), lanes_point(4.3, 340.0), Modifiers::NONE);
     let doc = h.shell.editor().document();
     assert_eq!(top_level(&h).len(), 4, "no new track");
     let clip = doc.track(audio).unwrap().clips().next().expect("a clip");
     assert_eq!(clip.start, Ticks(4 * BAR));
     assert_eq!(clip.name, "Loop");
     // Onto a MIDI track: refused, nothing changes.
-    drag(&mut h, row(5), lanes_point(1.0, 160.0), Modifiers::NONE);
+    drag(&mut h, row(6), lanes_point(1.0, 160.0), Modifiers::NONE);
     assert_eq!(h.shell.editor().document().clip_count(), 1);
     // Two files with Cmd (Ctrl) held: a track each.
     h.shell

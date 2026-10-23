@@ -87,6 +87,8 @@ pub mod midi_files;
 pub mod mixer_controls;
 pub mod mixer_view;
 mod modulation;
+pub mod multi_clip;
+pub mod note_filters;
 pub mod perception;
 pub mod permission;
 pub mod placeholders;
@@ -133,6 +135,9 @@ pub use bl_shell_spec::devices as device_commands;
 /// The Arrangement's editing command IDs and their argument and result
 /// types (WP-1.8b).
 pub use bl_shell_spec::editing as editing_commands;
+/// The envelope keys' command IDs and their argument and result types
+/// (WP-6.26).
+pub use bl_shell_spec::envelope_keys as envelope_commands;
 /// The export command's ID and its argument and result types (WP-1.12).
 pub use bl_shell_spec::export as export_commands;
 /// The File Manager's command IDs and their argument and result types
@@ -149,6 +154,9 @@ pub use bl_shell_spec::midi_io as midi_io_commands;
 pub use bl_shell_spec::mixer_view as mixer_view_commands;
 /// The multisampler's commands that run on the shell (WP-5.13).
 pub use bl_shell_spec::multisampler as multisampler_commands;
+/// Find and Select Notes' filters and the arguments of
+/// `clip_view.note_filters` (WP-6.4).
+pub use bl_shell_spec::note_filters as note_filter_commands;
 /// The Clip View's note-editing command IDs and their argument and result
 /// types (WP-2.3).
 pub use bl_shell_spec::notes as note_commands;

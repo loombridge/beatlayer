@@ -138,6 +138,19 @@ pub struct MonitorSwitch {
     pub runs: [(Monitor, Invocation); 3],
 }
 
+/// A MIDI track's Bypass Tuning switch (WP-6.9; the tunings spec, R14),
+/// shown while the set has a tuning.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TuningBypass {
+    /// Whether the track plays twelve equal steps: its switch is on, or it
+    /// holds a Drum Rack, which always does.
+    pub on: bool,
+    /// Whether the switch can't be changed: the track holds a Drum Rack.
+    pub locked: bool,
+    /// The command that flips the switch.
+    pub run: Invocation,
+}
+
 /// One track's In/Out section, top to bottom.
 #[derive(Clone, Debug, PartialEq)]
 #[expect(
@@ -159,6 +172,8 @@ pub enum InOut {
         output: Chooser,
         /// Its channel.
         output_channel: Chooser,
+        /// A MIDI track's Bypass Tuning, while the set has a tuning.
+        tuning_bypass: Option<TuningBypass>,
     },
     /// A group or a return: Audio To and its channel.
     Output {
@@ -280,6 +295,7 @@ pub fn in_out(doc: &Document, track: TrackId, interface: &Interface) -> Option<I
             monitor: monitor(track, t.routing().monitor),
             output: audio_to(doc, track),
             output_channel: output_channel(track, t.routing().output, interface.outputs),
+            tuning_bypass: None,
         },
         TrackKind::Midi => InOut::Clips {
             input: midi_from(doc, track, &interface.midi_inputs),
@@ -294,6 +310,20 @@ pub fn in_out(doc: &Document, track: TrackId, interface: &Interface) -> Option<I
             monitor: monitor(track, t.routing().monitor),
             output: midi_to(doc, track, &interface.midi_outputs),
             output_channel: midi_to_channel(track, t.routing().midi_output.as_ref()),
+            // Spec: tunings R14. A Drum Rack's track shows the switch on
+            // and can't change it.
+            tuning_bypass: doc.settings().tuning.is_some().then(|| {
+                let drums = t.holds_drum_rack();
+                let on = t.tuning_bypass() || drums;
+                TuningBypass {
+                    on,
+                    locked: drums,
+                    run: Invocation::new(
+                        "track.set_tuning_bypass",
+                        json!({ "track": track, "bypass": !on }),
+                    ),
+                }
+            }),
         },
         TrackKind::Group | TrackKind::Return => InOut::Output {
             output: audio_to(doc, track),

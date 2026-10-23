@@ -995,3 +995,61 @@ fn extracting_takes_session_clips_notes_and_keeps_all_notes_pitches() {
     };
     assert!(left.notes.is_empty(), "the source clip lost them");
 }
+
+// Spec: drum-racks R23, note-editing R31. A probability group whose notes
+// extracting splits between the clips ends on both sides.
+#[test]
+fn extracting_ends_a_probability_group_it_splits() {
+    let scratch = Scratch::new("extract-group");
+    let mut drums = kit();
+    let a = drop_on(
+        &mut drums,
+        36,
+        json!({ "samples": [scratch.wav("A.wav", 1_000)] }),
+    )
+    .chains[0];
+    let scene = drums.shell.editor().document().scenes().next().unwrap().id;
+    let clip: bl_model::ClipId = drums.shell.new_id();
+    let beat = bl_core::time::Ticks(bl_core::time::TICKS_PER_QUARTER);
+    let grouped = |key, start| bl_model::Note {
+        group: Some(1),
+        ..bl_model::Note::new(key, start, beat, 100)
+    };
+    let mut data =
+        bl_model::MidiData::new([grouped(36, bl_core::time::Ticks::ZERO), grouped(38, beat)]);
+    data.groups = vec![bl_model::NoteGroup {
+        id: 1,
+        kind: bl_model::GroupKind::PlayOne,
+    }];
+    drums
+        .shell
+        .run(
+            "clip.create_in_slot",
+            json!({
+                "track": drums.track,
+                "scene": scene,
+                "clip": bl_model::Clip::new(
+                    clip,
+                    bl_core::time::Ticks::ZERO,
+                    beat * 4,
+                    bl_model::ClipData::Midi(data),
+                ),
+            }),
+        )
+        .unwrap();
+    let extracted: Extracted = serde_json::from_value(
+        drums
+            .shell
+            .invoke("chain.extract", json!({ "chain": a }))
+            .unwrap(),
+    )
+    .unwrap();
+    let doc = drums.shell.editor().document();
+    for track in [extracted.track, drums.track] {
+        let bl_model::ClipData::Midi(data) = &doc.slot(track, scene).unwrap().data else {
+            panic!("a MIDI clip");
+        };
+        assert_eq!(data.notes.len(), 1);
+        assert!(data.groups.is_empty() && data.notes[0].group.is_none());
+    }
+}

@@ -439,7 +439,12 @@ impl MixerUi {
                     &mut column_ui,
                     &section,
                     true,
-                    |i| Some(in_out_row(column.rect, span, i)),
+                    // A row past the section's seven is left out: Bypass
+                    // Tuning has no row of its own in the mixer yet.
+                    |i| {
+                        let row = in_out_row(column.rect, span, i);
+                        (row.bottom() <= span.1).then_some(row)
+                    },
                     events,
                 );
             }

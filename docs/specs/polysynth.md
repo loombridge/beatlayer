@@ -1,6 +1,6 @@
 # The polysynth
 
-- **Status:** partial (part 1: the oscillators, the filter and the envelopes; part 2: the LFO, the modulation routes and MPE; the voice modes, the Drift control, Legato and Glide, and Envelope 2's cycling mode are still to come; R24 and R25, tuning systems, are WP-6.9's)
+- **Status:** partial (part 1: the oscillators, the filter and the envelopes; part 2: the LFO, the modulation routes and MPE; the voice modes, the Drift control, Legato and Glide, and Envelope 2's cycling mode are still to come)
 - **Work packages:** WP-2.17 (parts 1 and 2); WP-6.9 (tuning systems: R24 and R25)
 - **Parity-matrix row:** Devices: Drift (Live's compact polyphonic instrument)
 - **Checked against:** Live 12's reference manual, section 31.3 "Drift", and the device framework spec; the parameter ranges, defaults, waveform drawings and modulation laws are Beatlayer's own
@@ -80,5 +80,5 @@ This spec covers the instrument's behaviour. The framework every native device i
 | R21 | `crates/devices/tests/polysynth.rs`, `mpe_pressure_and_slide_are_modulation_sources`, `the_lfo_ratio_mode_modulates_the_note_at_its_own_rate`, `the_mod_wheel_moves_the_modwheel_source` | render, real-time trap |
 | R22 | `crates/devices/tests/polysynth.rs`, `mpe_pitch_bend_bends_one_note_only`, `the_pitch_wheel_bends_every_note_by_the_pb_range`, `mpe_pressure_and_slide_are_modulation_sources` | render, real-time trap |
 | R23 | `crates/agent/tests/polysynth.rs`, `every_lfo_route_and_mpe_setting_is_reachable_by_command` | agent |
-| R24 | to be written in WP-6.9 | |
-| R25 | to be written in WP-6.9 | |
+| R24 | `crates/devices/tests/tuning.rs`, `keys_play_at_the_tunings_frequencies_at_any_block_size`, `a_sounding_note_does_not_move_when_the_tuning_changes`, `keys_above_the_range_are_silent`; `crates/devices/tests/tuning_engine.rs`, `a_changed_tuning_reaches_the_next_notes_with_no_new_program` | unit |
+| R25 | `crates/devices/tests/tuning.rs`, `a_per_note_bend_moves_by_steps_of_the_tuning` | unit |

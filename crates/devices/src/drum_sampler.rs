@@ -15,7 +15,8 @@ use std::f64::consts::TAU;
 use std::sync::Arc;
 
 use bl_engine::{
-    DeviceType, NodeConfig, NodeData, NoteEvent, NoteExpression, NoteKind, Registry, SlotSample,
+    DeviceType, KeyPitches, NodeConfig, NodeData, NoteEvent, NoteExpression, NoteKind, Registry,
+    SlotSample,
 };
 use bl_media::SampleData;
 use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Widget};
@@ -462,6 +463,9 @@ struct Settings {
     destination: Destination,
     bend: bool,
     follows_pitch: bool,
+    /// The pitch of every key under the set's tuning (the tunings spec,
+    /// R12); filled in by the caller.
+    keys: KeyPitches,
 }
 
 impl Settings {
@@ -486,6 +490,7 @@ impl Settings {
             },
             bend: at(PER_NOTE_BEND) >= 0.5,
             follows_pitch: at(ENV_FOLLOWS_PITCH) >= 0.5,
+            keys: KeyPitches::twelve(),
         }
     }
 }
@@ -643,6 +648,9 @@ struct Voice {
     active: bool,
     fading: bool,
     key: u8,
+    /// Its key's pitch under the set's tuning, in semitones: C3's
+    /// twelve-step pitch plays the sample at its own pitch (R25).
+    tuned: f64,
     note_id: Option<u32>,
     /// When it started: the oldest voice is stolen first.
     counter: u64,
@@ -692,6 +700,7 @@ impl Voice {
             active: false,
             fading: false,
             key: 0,
+            tuned: 0.0,
             note_id: None,
             counter: 0,
             velocity: 1.0,
@@ -732,12 +741,20 @@ impl Voice {
     /// The semitones from C3 the note and the pitch controls give it,
     /// without the effect's own movement.
     fn semitones(&self, s: &Settings, live: &Live) -> f64 {
-        let bend = if s.bend {
-            f64::from(self.bend) * BEND_SEMITONES
-        } else {
+        // Spec: one-shot drum sampler R25. Under a tuning a per-note bend
+        // moves the note by steps of the tuning.
+        let steps = f64::from(self.bend) * BEND_SEMITONES;
+        let bend = if !s.bend {
             0.0
+        } else if s.keys.is_tuned() && steps != 0.0 {
+            s.keys
+                .bent(self.key, steps)
+                .zip(s.keys.pitch(self.key))
+                .map_or(0.0, |(bent, at)| bent - at)
+        } else {
+            steps
         };
-        f64::from(self.key) - 60.0 + s.transpose + live.detune + bend
+        self.tuned - 60.0 + s.transpose + live.detune + bend
     }
 
     /// The modulation route's value, from -1 to 1.
@@ -767,6 +784,8 @@ fn one_pole(hz: f64, rate: f64) -> f32 {
 /// Drum Sampler's state between blocks: the sample and its voices.
 pub struct DrumSampler {
     data: Option<NodeData>,
+    /// The pitch of every key under the set's tuning.
+    keys: KeyPitches,
     voices: [Voice; SLOTS],
     /// How many notes have been played.
     counter: u64,
@@ -777,6 +796,7 @@ impl DrumSampler {
     fn new(_config: &NodeConfig) -> Self {
         Self {
             data: None,
+            keys: KeyPitches::twelve(),
             voices: [Voice::idle(); SLOTS],
             counter: 0,
         }
@@ -832,6 +852,10 @@ impl DrumSampler {
     }
 
     fn note_on(&mut self, note: NoteEvent, s: &Settings, live: &Live, sample: &SampleData) {
+        // A key past the tuning's range plays nothing.
+        let Some(tuned) = s.keys.pitch(note.key) else {
+            return;
+        };
         let frames = sample.frames() as f64;
         let region_start = (live.start * frames).floor();
         let region_end = ((live.start + live.length).min(1.0) * frames).floor();
@@ -874,6 +898,7 @@ impl DrumSampler {
         let mut voice = Voice::idle();
         voice.active = true;
         voice.key = note.key;
+        voice.tuned = tuned;
         voice.note_id = note.note_id;
         voice.counter = self.counter;
         voice.velocity = note.velocity.clamp(0.0, 1.0);
@@ -1231,7 +1256,8 @@ impl NativeDevice for DrumSampler {
                 return;
             }
         };
-        let settings = Settings::read(params, audio.sample_rate().as_f64());
+        let mut settings = Settings::read(params, audio.sample_rate().as_f64());
+        settings.keys = self.keys;
         let ramps = Ramps::new(params);
         let mut notes = audio.notes().peekable();
         let mut channels = audio.channels_mut();
@@ -1260,6 +1286,10 @@ impl NativeDevice for DrumSampler {
     }
 
     fn receive_data(&mut self, data: NodeData) {
+        if let Some(keys) = data.downcast_ref::<KeyPitches>() {
+            self.keys = *keys;
+            return;
+        }
         // Drum Sampler has one sample slot.
         if data
             .downcast_ref::<SlotSample>()

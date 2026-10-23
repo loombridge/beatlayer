@@ -1,6 +1,6 @@
 # The eight-slot drum sampler
 
-- **Status:** partial (the individual outputs are T192's, a slot's Play button and the sample display wait for the audition path and the sample display; every other rule has a passing test; R21, tuning systems, is WP-6.9's)
+- **Status:** partial (the individual outputs are T192's, a slot's Play button and the sample display wait for the audition path and the sample display; every other rule has a passing test)
 - **Work packages:** WP-5.17; WP-6.9 (tuning systems: R21)
 - **Parity-matrix row:** Instruments: Impulse, Drum Sampler
 - **Checked against:** Live 12's reference manual, chapter 31 "Live Instrument Reference", section 31.7 "Impulse" (31.7.1 "Sample Slots", 31.7.2 "Start, Transpose and Stretch", 31.7.3 "Filter", 31.7.4 "Saturator and Envelope", 31.7.5 "Pan and Volume", 31.7.6 "Global Controls"), read October 2026
@@ -78,7 +78,7 @@ This spec covers the device, its parameters and its panel. It leaves to [the dev
 | R18 | `crates/shell/tests/kitbag.rs`, `a_sample_with_no_slot_goes_into_the_selected_one_and_the_panel_says_so`; `crates/ui/tests/device_view.rs`, `clicking_a_slot_cell_shows_that_slots_controls`; `crates/ui/tests/accessibility.rs`, `every_m1_command_is_reachable_from_the_keyboard` (`device.select_slot`) | shell test; UI script |
 | R19 | `crates/cli/tests/agent_drum_sampler.rs`, `an_agent_loads_selects_and_clears_slots_by_command_id_and_reads_them_back`; `crates/agent/tests/readback.rs` | MCP script |
 | R20 | `crates/devices/tests/rules.rs`, `every_gain_parameter_reaches_minus_infinity`, `every_parameter_is_automatable_to_the_frame`, `every_parameter_has_a_description` | unit, real-time trap |
-| R21 | to be written in WP-6.9 | |
+| R21 | `crates/devices/tests/tuning_engine.rs`, `impulse_renders_as_without_a_tuning` | unit |
 
 ## Not built yet
 

@@ -1,6 +1,6 @@
 # Multi-clip editing: several MIDI clips in one note editor, the loop bars, and Focus Mode
 
-- **Status:** draft
+- **Status:** partial (R1 to R4, R6, R8, R10 to R16 and R18 have passing tests; R5's shading, R7's time selections across clips and the newer note operations across clips, R9's clip colour, Main Properties controls and Fold to Scale, and R17 wait on the packages named under "Not built yet")
 - **Work packages:** WP-6.6 (R1 to R18). One clip in the editor is [piano-roll.md](piano-roll.md)'s; the lanes, the footer and the note operations [note-editing.md](note-editing.md)'s; each clip's scale and how its controls show for several clips [scales.md](scales.md)'s; a clip's groove WP-6.19's; Expand Clip View (Cmd-Option-E) [detail-views.md](detail-views.md)'s
 - **Parity-matrix row:** MIDI editing: Multi-clip editing and focus mode
 - **Checked against:** the Live 12 reference manual (online edition), read 20 October 2026; the Live 12 release notes, 12.0, 12.1 and 12.3; the UI parity reference's rows L-CLIP-002, L-CLIP-004, L-CLIP-010, S-NOTE-040 and I-HOLD-003, recorded from Live 12.4.3 on macOS
@@ -61,21 +61,29 @@ This spec covers showing and editing several clips, the loop bars, the foregroun
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1 | to be written in WP-6.6 | |
-| R2 | to be written in WP-6.6 | |
-| R3 | to be written in WP-6.6 | |
-| R4 | to be written in WP-6.6 | |
-| R5 | to be written in WP-6.6 | |
-| R6 | to be written in WP-6.6 | |
-| R7 | to be written in WP-6.6 | |
-| R8 | to be written in WP-6.6 | |
-| R9 | to be written in WP-6.6 | |
-| R10 | to be written in WP-6.6 | |
-| R11 | to be written in WP-6.6 | |
-| R12 | to be written in WP-6.6 | |
-| R13 | to be written in WP-6.6 | |
-| R14 | to be written in WP-6.6 | |
-| R15 | to be written in WP-6.6 | |
-| R16 | to be written in WP-6.6 | |
-| R17 | to be written in WP-6.6 | |
-| R18 | to be written in WP-6.6 | |
+| R1 | `crates/shell/tests/multi_clip.rs`, `three_looped_session_clips_show_a_six_bar_span_with_their_passes`, `the_shown_clips_are_limited_as_the_spec_says` | unit |
+| R2 | `crates/shell/tests/multi_clip.rs`, `three_looped_session_clips_show_a_six_bar_span_with_their_passes`; `crates/ui/tests/multi_clip.rs`, `each_clip_has_a_loop_bar_and_the_foreground_clip_wears_the_led`, `dragging_above_the_title_bar_changes_the_height_of_the_loop_bars` | unit, UI script |
+| R3 | `crates/shell/tests/multi_clip.rs`, `the_foreground_clip_and_the_loop_bars_are_view_state`; `crates/ui/tests/multi_clip.rs`, `each_clip_has_a_loop_bar_and_the_foreground_clip_wears_the_led` | unit, UI script |
+| R4 | `crates/shell/tests/multi_clip.rs`, `two_tracks_arrangement_clips_show_from_the_first_start_to_the_last_end` | unit |
+| R5 | `crates/shell/tests/multi_clip.rs`, `three_looped_session_clips_show_a_six_bar_span_with_their_passes`, `the_session_span_stops_at_64_times_the_longest_loop` | unit |
+| R6 | `crates/shell/tests/multi_clip.rs`, `a_note_in_a_later_pass_is_the_clips_one_note` | unit |
+| R7 | `crates/shell/tests/multi_clip.rs`, `edits_across_two_clips_are_one_undo_step_each_and_keep_each_note_in_its_clip`; `crates/ui/tests/multi_clip.rs`, `dragging_a_selected_note_moves_the_selection_in_every_clip_in_one_step`; `crates/engine/tests/midi_clips.rs`, `an_edit_across_two_tracks_clips_plays_as_edited_without_a_new_program`; `crates/shell/tests/multi_clip.rs`, `grouping_across_clips_is_refused_and_an_edit_reaches_a_background_clip` | unit, UI script, engine |
+| R8 | `crates/ui/tests/multi_clip.rs`, `a_drawn_note_belongs_to_the_clip_its_start_lies_in` | UI script |
+| R9 | `crates/shell/tests/multi_clip.rs`, `loop_and_signature_changes_reach_every_clip_in_one_step`; `crates/agent/tests/readback.rs`, `the_multi_clip_commands_run_by_id_and_read_back` | unit, agent |
+| R10 | `crates/ui/tests/multi_clip.rs`, `cmd_click_and_shift_click_select_bars`, `dragging_one_of_several_selected_bars_moves_every_loop_in_one_step` | UI script |
+| R11 | `crates/shell/tests/multi_clip.rs`, `duplicate_loop_doubles_each_loop_and_its_notes_in_one_step`, `duplicate_loop_gives_the_copies_groups_of_their_own`; `crates/ui/tests/multi_clip.rs`, `cmd_d_on_a_single_clips_selected_loop_brace_duplicates_the_loop`; `crates/ui/tests/keymap.rs`, `n_switches_focus_mode_and_cmd_d_duplicates_the_loop_of_selected_bars` | unit, UI script |
+| R12 | `crates/shell/tests/multi_clip.rs`, `paste_goes_back_into_the_same_clips_or_else_the_foreground_clip`, `cut_takes_the_notes_of_every_clip_in_one_step` | unit |
+| R13 | `crates/shell/tests/multi_clip.rs`, `with_focus_mode_on_only_the_active_clip_changes`; `crates/ui/tests/multi_clip.rs`, `the_focus_button_and_n_switch_focus_mode` | unit, UI script |
+| R14 | `crates/ui/tests/multi_clip.rs`, `in_focus_mode_a_clicked_bar_becomes_active_and_hovering_reveals_a_clip`; `crates/shell/tests/multi_clip.rs`, `with_focus_mode_on_only_the_active_clip_changes` | UI script, unit |
+| R15 | `crates/shell/tests/multi_clip.rs`, `with_focus_mode_on_only_the_active_clip_changes` | unit |
+| R16 | `crates/ui/tests/multi_clip.rs`, `in_focus_mode_a_clicked_bar_becomes_active_and_hovering_reveals_a_clip` | UI script |
+| R17 | to be written when WP-6.4 and WP-6.5 are merged | |
+| R18 | `crates/shell/tests/multi_clip.rs`, `a_command_can_name_its_clips_and_notes`, `view_state_reads_the_clips_back`; `crates/agent/tests/readback.rs`, `the_multi_clip_commands_run_by_id_and_read_back` | unit, agent |
+
+## Not built yet
+
+- R5: the part of a clip outside its loop brace in a darker shade. Where the Session View's span shows it isn't settled.
+- R7: Split, Chop, Join, Fit to Time Range, Stretch, Group and Ungroup with no clip named act in the foreground clip alone and don't take `clips` yet; a time selection that crosses loop and clip boundaries (the insert marker and time selection stay the foreground clip's).
+- R9: a clip colour (a clip takes its track's colour), the Main Properties panel's Loop switch, Signature and position fields with their ranges and the half-coloured Loop switch (L-CLIP-004), and Fold to Scale; the commands behind them take several clips (`clips`).
+- R15: the active clip's scale shown and folded to, when the scale controls of the Clip View arrive (WP-6.7b).
+- R17: preview from the keyboard in any shown clip, and the filters across clips (WP-6.4). Step recording records into the clip the Clip View shows, the foreground clip, with no test across clips yet.

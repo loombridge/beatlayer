@@ -634,7 +634,7 @@ Total to 1.0: 256 packages planned in Phases 0 to 6, and about 110 estimated in 
 | 5.45 | done | 20 October 2026 | [#239](https://github.com/loombridge/beatlayer/pull/239); a device's extra audio outputs — a CLAP plug-in's ports past its main one — are offered in another track's Audio From after the track's taps and its racks' chain taps, rendered into their own buffers made with the program, saved with the set and held back for delay compensation; [the routing spec](specs/routing.md) R12, R16 |
 | 6.1 | done | 23 October 2026 | [#322](https://github.com/loombridge/beatlayer/pull/322); the note editor has the Velocity, Chance and Release Velocity lanes with the Lane Selector, Swap Lane, marker drags, Draw Mode drawing and deviation, a footer with Randomize, Ramp and Deviation, the value keys and typed velocities, and deactivating notes ([note editing](specs/note-editing.md) R1 to R20). |
 | 6.2 | todo |  |  |
-| 6.3 | todo |  |  |
+| 6.3 | done | 23 October 2026 | [#341](https://github.com/loombridge/beatlayer/pull/341); the note editor splits, chops, joins and fits notes from E-click and E-drag, Cmd-E and its arrows, the chop drags, Cmd-J and Cmd-Option-J, Split Clip cuts the shown Arrangement clip at the time selection, and the stretch markers scale notes and linked envelopes ([note editing](specs/note-editing.md) R33 to R47). |
 | 6.4 | todo |  |  |
 | 6.5 | todo |  |  |
 | 6.6 | todo |  |  |

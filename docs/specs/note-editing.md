@@ -1,6 +1,6 @@
 # Note editing: the expression lanes, deactivating notes, probability groups, and splitting, chopping, joining and stretching notes
 
-- **Status:** partial (R1 to R20 have passing tests; R21 to R32 come with WP-6.2 and R33 to R47 with WP-6.3)
+- **Status:** partial (R1 to R20 and R33 to R37 and R39 to R47 have passing tests; R21 to R32 come with WP-6.2, and R38, the MPE tab, waits for WP-6.18)
 - **Work packages:** WP-6.1 (the Velocity, Chance and Release Velocity lanes, the footer's value controls, the value keys and deactivating notes: R1 to R20), WP-6.2 (probability groups, Play All and Play One, in the document, the engine and the Chance lane: R21 to R32), WP-6.3 (Split, Chop, Join, Fit to Time Range, Split Clip, and the note stretch markers: R33 to R47). Drawing, selecting, moving, the insert marker, the time selection and the note clipboard are [piano-roll.md](piano-roll.md)'s; what a note holds and how a clip plays it [midi-clips.md](midi-clips.md)'s; the MIDI Tools and the Pitch and Time Utilities (the Chop tool, Stretch) WP-6.11 to WP-6.16's; the MPE tab WP-6.18's; several clips in one editor [multi-clip-editing.md](multi-clip-editing.md)'s
 - **Parity-matrix row:** MIDI editing: Release velocity, velocity deviation, mute, note chance (the editing); MIDI editing: Probability groups (Play All, Play One); MIDI editing: Split, chop, join, span notes; note stretch markers; deactivate notes
 - **Checked against:** the Live 12 reference manual (online edition), read 20 October 2026; the Live 12 release notes, 12.0, 12.0.5, 12.1, 12.1.5 and 12.4; the UI parity reference's rows L-CLIP-010 to L-CLIP-015, M-EDIT-008, M-EDIT-014, M-EDIT-015, M-EDIT-034, I-DRAG-025, I-DRAG-026 and the S-NOTE rows named below, recorded from Live 12.4.3 on macOS
@@ -135,18 +135,18 @@ This spec covers the lanes, the footer's value controls, the value keys, deactiv
 | R30 | to be written in WP-6.2 | |
 | R31 | to be written in WP-6.2 | |
 | R32 | to be written in WP-6.2 | |
-| R33 | to be written in WP-6.3 | |
-| R34 | to be written in WP-6.3 | |
-| R35 | to be written in WP-6.3 | |
-| R36 | to be written in WP-6.3 | |
-| R37 | to be written in WP-6.3 | |
-| R38 | to be written in WP-6.3 | |
-| R39 | to be written in WP-6.3 | |
-| R40 | to be written in WP-6.3 | |
-| R41 | to be written in WP-6.3 | |
-| R42 | to be written in WP-6.3 | |
-| R43 | to be written in WP-6.3 | |
-| R44 | to be written in WP-6.3 | |
-| R45 | to be written in WP-6.3 | |
-| R46 | to be written in WP-6.3 | |
-| R47 | to be written in WP-6.3 | |
+| R33 | `crates/ui/tests/clip_view.rs`, `e_click_splits_a_note_where_clicked_and_cmd_snaps_it`, `an_e_drag_splits_each_note_it_crosses_and_esc_puts_them_back`, `an_e_drag_inside_a_note_moves_the_split_with_the_pointer`; `crates/ui/tests/keymap.rs`, `the_note_operations_keys_reach_their_commands` | UI script |
+| R34 | `crates/model/src/note_ops.rs`, `a_split_covers_the_note_and_puts_pressure_in_its_part`; `crates/shell/tests/clip_view.rs`, `a_split_keeps_every_value_and_puts_pressure_in_its_part`; `crates/engine/tests/midi_clips.rs`, `chopped_and_joined_notes_play_on_their_frames` | unit, engine |
+| R35 | `crates/shell/tests/clip_view.rs`, `a_split_keeps_every_value_and_puts_pressure_in_its_part`; `crates/ui/tests/clip_view.rs`, `cmd_e_splits_at_the_insert_marker_with_no_notes_selected`, `split_notes_shows_in_the_menu_while_the_insert_marker_crosses_a_note` | unit, UI script |
+| R36 | `crates/shell/tests/clip_view.rs`, `chopping_on_the_grid_and_the_arrows_re_chop_in_one_step`, `chopping_into_equal_parts_and_its_limits`; `crates/ui/tests/clip_view.rs`, `cmd_e_chops_selected_notes_and_cmd_with_the_arrows_re_chops_in_one_step` | unit, UI script |
+| R37 | `crates/ui/tests/clip_view.rs`, `the_chop_drags_count_parts_in_the_status_bar` | UI script |
+| R38 | to be written in WP-6.18 | |
+| R39 | `crates/shell/tests/clip_view.rs`, `join_fills_the_gap_with_the_first_notes_values`; `crates/ui/tests/clip_view.rs`, `cmd_j_joins_cmd_option_j_fits_and_cmd_shift_e_splits_the_clip`; `crates/engine/tests/midi_clips.rs`, `chopped_and_joined_notes_play_on_their_frames` | unit, UI script, engine |
+| R40 | `crates/shell/tests/clip_view.rs`, `fit_to_time_range_gives_every_note_the_selections_start_and_end`; `crates/ui/tests/clip_view.rs`, `cmd_j_joins_cmd_option_j_fits_and_cmd_shift_e_splits_the_clip` | unit, UI script |
+| R41 | `crates/shell/tests/clip_view.rs`, `split_clip_splits_an_arrangement_clip_at_the_time_selection`, `split_clip_refuses_a_session_clip_and_no_time_selection`; `crates/ui/tests/clip_view.rs`, `cmd_j_joins_cmd_option_j_fits_and_cmd_shift_e_splits_the_clip` | unit, UI script |
+| R42 | `crates/ui/tests/clip_view.rs`, `dragging_a_stretch_marker_scales_the_notes_about_the_other_one` | UI script |
+| R43 | `crates/shell/tests/clip_view.rs`, `a_stretch_scales_starts_and_lengths_and_moves_linked_envelopes`; `crates/ui/tests/clip_view.rs`, `dragging_a_stretch_marker_scales_the_notes_about_the_other_one`, `a_stretch_marker_dragged_with_cmd_does_not_snap_and_the_pseudo_marker_keeps_the_ends` | unit, UI script |
+| R44 | `crates/shell/tests/clip_view.rs`, `a_stretch_scales_starts_and_lengths_and_moves_linked_envelopes`; `crates/ui/tests/clip_view.rs`, `a_stretch_marker_dragged_with_cmd_does_not_snap_and_the_pseudo_marker_keeps_the_ends` | unit, UI script |
+| R45 | `crates/shell/tests/clip_view.rs`, `a_stretch_scales_starts_and_lengths_and_moves_linked_envelopes`; `crates/model/src/note_ops.rs`, `a_mapping_scales_pivots_and_mirrors` | unit |
+| R46 | `crates/shell/tests/clip_view.rs`, `a_stretch_scales_starts_and_lengths_and_moves_linked_envelopes` | unit |
+| R47 | `crates/shell/tests/clip_view.rs`, `the_note_operations_are_edit_class_commands_with_readback`, `a_split_keeps_every_value_and_puts_pressure_in_its_part`; `crates/ui/tests/keymap.rs`, `the_note_operations_keys_reach_their_commands` | unit, UI script |

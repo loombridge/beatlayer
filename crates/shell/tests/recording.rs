@@ -1110,8 +1110,19 @@ fn record_from(control: &NullControl, shell: &mut Shell, start: Ticks, millis: u
         .run("transport.set_recording", json!({ "recording": true }))
         .unwrap();
     shell.run("transport.play", json!({})).unwrap();
+    // The commands reach the audio thread through the compiler's queue, which
+    // may still be compiling the last take's clips: every take records the
+    // same frames only once they're on the audio thread's queue.
+    assert!(
+        shell.audio().flush(std::time::Duration::from_secs(10)),
+        "the engine never took Play"
+    );
     play_for(control, shell, millis);
     shell.run("transport.stop", json!({})).unwrap();
+    assert!(
+        shell.audio().flush(std::time::Duration::from_secs(10)),
+        "the engine never took Stop"
+    );
 }
 
 // Spec: comping R10, R11; recording R16. An audio take goes on a take lane

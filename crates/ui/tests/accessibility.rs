@@ -2857,12 +2857,6 @@ fn paths() -> BTreeMap<&'static str, Path> {
             )),
         ),
         (
-            "take_lane.replace_with_take",
-            Exception(Equivalent(
-                "Cmd+Down and Cmd+Up (S-COMP-006), which the Arrangement reads itself (comping R28)",
-            )),
-        ),
-        (
             "take_lane.set_audition",
             Exception(Equivalent(
                 "the Audition Take Lane switch in a take lane's header, and T (comping R14, R30)",

@@ -355,25 +355,25 @@ fn a_clip_moves_between_the_main_lane_and_take_lanes() {
     let id = clip.id;
     let one = lane(&mut editor, audio, "Take 1", vec![clip]);
     let two = lane(&mut editor, audio, "Take 2", Vec::new());
-    let on = |editor: &Editor, lane: Option<TakeLaneId>, start: i64| Command::MoveClipToLane {
+    let on = |lane: Option<TakeLaneId>, start: i64| Command::MoveClipToLane {
         clip: id,
         track: audio,
         lane,
         start: Ticks(start),
     };
     // To another lane, and to the main lane.
-    editor.apply(on(&editor, Some(two), BAR)).unwrap();
+    editor.apply(on(Some(two), BAR)).unwrap();
     assert_eq!(editor.document().clip_lane(id), Some(two));
     assert_eq!(editor.document().clip(id).unwrap().start, Ticks(BAR));
     assert!(editor.document().take_lane(one).unwrap().clips.is_empty());
-    editor.apply(on(&editor, None, 0)).unwrap();
+    editor.apply(on(None, 0)).unwrap();
     assert_eq!(editor.document().clip_lane(id), None);
     assert_eq!(editor.document().clip_track(id), Some(audio));
     assert!(editor.document().check_invariants().is_ok());
     // Another track's lane, or the wrong kind, is refused and changes nothing.
     let other = lane(&mut editor, midi, "Take 1", Vec::new());
     let before = editor.document().clone();
-    assert!(editor.apply(on(&editor, Some(other), 0)).is_err());
+    assert!(editor.apply(on(Some(other), 0)).is_err());
     assert!(
         editor
             .apply(Command::MoveClipToLane {
@@ -386,7 +386,7 @@ fn a_clip_moves_between_the_main_lane_and_take_lanes() {
     );
     assert_eq!(*editor.document(), before);
     // Undo puts it back where it was, on its lane.
-    editor.apply(on(&editor, Some(one), 0)).unwrap();
+    editor.apply(on(Some(one), 0)).unwrap();
     editor.undo().unwrap();
     assert_eq!(editor.document().clip_lane(id), None);
 }

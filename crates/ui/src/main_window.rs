@@ -363,6 +363,11 @@ impl MainWindowUi {
                 self.devices.start_variation_rename(*rack, *index);
             }
             Effect::RenameTrack(track) => crate::track_menu::start_rename(ctx, *track),
+            Effect::RenameTakeLane(lane) => {
+                // Spec: comping R28. Rename types the name in the take
+                // lane's header.
+                crate::arrangement::take_lanes::start_rename(ctx, *lane);
+            }
             Effect::RenameLocator(locator) => {
                 // Spec: time-editing R8. Rename types the name in the
                 // scrub area.
@@ -604,7 +609,9 @@ impl MainWindowUi {
         // Spec: crash-recovery R22. The recovery prompt sits over the
         // window while there are sets a crash left to offer.
         crate::recovery_dialog::show(ctx, shell, theme, &mut events);
-        self.mixer_typing = crate::mixer::is_typing(ctx) || crate::track_menu::is_renaming(ctx);
+        self.mixer_typing = crate::mixer::is_typing(ctx)
+            || crate::track_menu::is_renaming(ctx)
+            || crate::arrangement::take_lanes::is_renaming(ctx);
         // An open menu, or a dialog, keeps the keys.
         self.menu_open = egui::Popup::is_any_open(ctx)
             || shell.stems_dialog().is_some()

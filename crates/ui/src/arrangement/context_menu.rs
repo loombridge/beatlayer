@@ -65,14 +65,27 @@ impl ContextMenus {
         self.kind = MenuKind::Time;
         let view = lanes.view;
         let at = view.snap(lanes.doc, lanes.at(pos));
-        let track = lanes.track_at(pos);
+        let place = lanes
+            .place_at(pos)
+            .map(|(row, lane)| (lanes.rows[row].track, lane));
+        let track = place.map(|(track, _)| track);
         let inside = view.time_selection().is_some_and(|(start, end)| {
-            at >= start && at <= end && track.is_none_or(|t| view.selected_tracks().contains(&t))
+            at >= start
+                && at <= end
+                && track.is_none_or(|t| view.selected_tracks().contains(&t))
+                // Spec: comping R29. On a take lane, inside the lanes the
+                // selection covers.
+                && place.is_none_or(|(_, lane)| {
+                    lane.is_none_or(|lane| view.selection_take_lanes().contains(&lane))
+                })
         });
         if !inside {
             let mut args = json!({ "at": at });
             if let Some(track) = track {
                 args["track"] = json!(track);
+            }
+            if let Some((_, Some(lane))) = place {
+                args["lane"] = json!(lane);
             }
             invoke(events, view_ids::SET_INSERT_MARKER, args);
         }
@@ -198,7 +211,10 @@ fn selection_menu(shell: &Shell) -> SelectionMenu {
     } else {
         !view.selected_clips().is_empty()
     };
-    SelectionMenu { clips }
+    SelectionMenu {
+        clips,
+        take_lane: view.take_lane_selected(),
+    }
 }
 
 /// Whether the selected clips are audio clips, whose menu adds the

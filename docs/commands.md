@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-735 commands in 44 areas.
+739 commands in 44 areas.
 
 ## Permission classes
 
@@ -71,6 +71,7 @@ Each command has:
 | [`arrangement.select_clips`](#arrangementselect_clips) | Select Clips | `read` | `Cmd+click`; `Cmd+click`; `Shift+click`; `Shift+click`; `Shift+click`, `Shift+drag` | `Ctrl+click`; `Ctrl+click`; `Shift+click`; `Shift+click`; `Shift+click`, `Shift+drag` |
 | [`arrangement.select_fade_handle`](#arrangementselect_fade_handle) | Select Fade Handle | `read` |  |  |
 | [`arrangement.select_loop`](#arrangementselect_loop) | Select Loop | `read` | `Cmd+Shift+L`; `Cmd+Shift+L` | `Ctrl+Shift+L`; `Ctrl+Shift+L` |
+| [`arrangement.select_take_lanes`](#arrangementselect_take_lanes) | Select Take Lanes | `read` |  |  |
 | [`arrangement.select_time`](#arrangementselect_time) | Select Time | `read` |  |  |
 | [`arrangement.select_tracks`](#arrangementselect_tracks) | Select Tracks | `read` |  |  |
 | [`arrangement.set_crossfade`](#arrangementset_crossfade) | Set Crossfade | `edit` |  |  |
@@ -81,6 +82,7 @@ Each command has:
 | [`arrangement.show_in_out`](#arrangementshow_in_out) | Arrangement Track Controls In/Out | `read` |  |  |
 | [`arrangement.show_range`](#arrangementshow_range) | Show Time Range | `read` |  |  |
 | [`arrangement.show_return_tracks`](#arrangementshow_return_tracks) | Arrangement Track Controls Return Tracks | `read` |  |  |
+| [`arrangement.show_take_lanes`](#arrangementshow_take_lanes) | Show Take Lanes | `read` | `Cmd+Option+U`; `Left` | `Ctrl+Alt+U`; `Left` |
 | [`arrangement.show_track`](#arrangementshow_track) | Show Track | `read` |  |  |
 | [`arrangement.show_volume`](#arrangementshow_volume) | Arrangement Track Controls Volume | `read` |  |  |
 | [`arrangement.snap_to_grid`](#arrangementsnap_to_grid) | Snap to Grid | `read` | `Cmd+4` | `Ctrl+4` |
@@ -205,6 +207,7 @@ Each command has:
 | [`clip.move`](#clipmove) | Move Clip | `edit` |  |  |
 | [`clip.move_by`](#clipmove_by) | Move Clips | `edit` |  |  |
 | [`clip.move_envelope_breakpoint`](#clipmove_envelope_breakpoint) | Move Envelope Breakpoint | `edit` |  |  |
+| [`clip.move_to_lane`](#clipmove_to_lane) | Move Clip to Lane | `edit` |  |  |
 | [`clip.move_to_slot`](#clipmove_to_slot) | Move Clip to Slot | `edit` |  |  |
 | [`clip.move_transient`](#clipmove_transient) | Move Transient | `edit` |  |  |
 | [`clip.move_warp_markers`](#clipmove_warp_markers) | Move Warp Markers | `edit` |  |  |
@@ -679,14 +682,15 @@ Each command has:
 | [`stems.open`](#stemsopen) | Separate Stems to New Audio Tracks | `read` |  |  |
 | [`stems.separate`](#stemsseparate) | Separate Stems | `edit` |  |  |
 | [`stems.status`](#stemsstatus) | Stem Separation Status | `read` |  |  |
+| [`take_lane.audition`](#take_laneaudition) | Audition Take Lane | `edit` | `T` | `T` |
 | [`take_lane.comp_sources`](#take_lanecomp_sources) | Comp Sources | `read` |  |  |
-| [`take_lane.copy_to_main_lane`](#take_lanecopy_to_main_lane) | Copy Selection to Main Lane | `edit` |  |  |
+| [`take_lane.copy_to_main_lane`](#take_lanecopy_to_main_lane) | Copy Selection to Main Lane | `edit` | `Enter` | `Enter` |
 | [`take_lane.create_clip`](#take_lanecreate_clip) | Create Clip on Take Lane | `edit` |  |  |
 | [`take_lane.delete`](#take_lanedelete) | Delete Take Lane(s) | `destructive` |  |  |
 | [`take_lane.delete_all`](#take_lanedelete_all) | Delete All Take Lanes | `destructive` |  |  |
 | [`take_lane.delete_unused`](#take_lanedelete_unused) | Delete All Unused Take Lanes | `destructive` |  |  |
-| [`take_lane.duplicate`](#take_laneduplicate) | Duplicate Take Lane(s) | `edit` |  |  |
-| [`take_lane.insert`](#take_laneinsert) | Insert Take Lane | `edit` |  |  |
+| [`take_lane.duplicate`](#take_laneduplicate) | Duplicate Take Lane(s) | `edit` | `Cmd+D` | `Ctrl+D` |
+| [`take_lane.insert`](#take_laneinsert) | Insert Take Lane | `edit` | `Shift+Option+T` | `Shift+Alt+T` |
 | [`take_lane.move`](#take_lanemove) | Move Take Lane(s) | `edit` |  |  |
 | [`take_lane.move_comp_edge`](#take_lanemove_comp_edge) | Move Comp Edge | `edit` |  |  |
 | [`take_lane.rename`](#take_lanerename) | Rename Take Lane | `edit` |  |  |
@@ -986,6 +990,7 @@ Arguments:
 |---|---|---|---|
 | `clips` | array or null | no | Whole clips to act on. Give either `clips` or a span of time, not both. |
 | `end` | [`Position`](#position) or null | no | Where the span ends, after `start`. Left out, the time selection's end. |
+| `lanes` | array or null | no | The lanes a span of time covers, each a track's own lane or one of its take lanes (the comping spec, R27). Left out, the lanes of the time selection, or `tracks`' own lanes. |
 | `start` | [`Position`](#position) or null | no | Where the span starts. Left out, the time selection's start. |
 | `tracks` | array or null | no | The tracks a span of time covers. Left out, the selected tracks. |
 
@@ -1028,6 +1033,7 @@ Arguments:
 |---|---|---|---|
 | `clips` | array or null | no | Whole clips to act on. Give either `clips` or a span of time, not both. |
 | `end` | [`Position`](#position) or null | no | Where the span ends, after `start`. Left out, the time selection's end. |
+| `lanes` | array or null | no | The lanes a span of time covers, each a track's own lane or one of its take lanes (the comping spec, R27). Left out, the lanes of the time selection, or `tracks`' own lanes. |
 | `start` | [`Position`](#position) or null | no | Where the span starts. Left out, the time selection's start. |
 | `tracks` | array or null | no | The tracks a span of time covers. Left out, the selected tracks. |
 
@@ -1051,6 +1057,7 @@ Arguments:
 |---|---|---|---|
 | `clips` | array or null | no | Whole clips to act on. Give either `clips` or a span of time, not both. |
 | `end` | [`Position`](#position) or null | no | Where the span ends, after `start`. Left out, the time selection's end. |
+| `lanes` | array or null | no | The lanes a span of time covers, each a track's own lane or one of its take lanes (the comping spec, R27). Left out, the lanes of the time selection, or `tracks`' own lanes. |
 | `start` | [`Position`](#position) or null | no | Where the span starts. Left out, the time selection's start. |
 | `tracks` | array or null | no | The tracks a span of time covers. Left out, the selected tracks. |
 
@@ -1074,6 +1081,7 @@ Arguments:
 |---|---|---|---|
 | `clips` | array or null | no | Whole clips to act on. Give either `clips` or a span of time, not both. |
 | `end` | [`Position`](#position) or null | no | Where the span ends, after `start`. Left out, the time selection's end. |
+| `lanes` | array or null | no | The lanes a span of time covers, each a track's own lane or one of its take lanes (the comping spec, R27). Left out, the lanes of the time selection, or `tracks`' own lanes. |
 | `start` | [`Position`](#position) or null | no | Where the span starts. Left out, the time selection's start. |
 | `tracks` | array or null | no | The tracks a span of time covers. Left out, the selected tracks. |
 
@@ -1097,6 +1105,7 @@ Arguments:
 |---|---|---|---|
 | `clips` | array or null | no | Whole clips to act on. Give either `clips` or a span of time, not both. |
 | `end` | [`Position`](#position) or null | no | Where the span ends, after `start`. Left out, the time selection's end. |
+| `lanes` | array or null | no | The lanes a span of time covers, each a track's own lane or one of its take lanes (the comping spec, R27). Left out, the lanes of the time selection, or `tracks`' own lanes. |
 | `start` | [`Position`](#position) or null | no | Where the span starts. Left out, the time selection's start. |
 | `tracks` | array or null | no | The tracks a span of time covers. Left out, the selected tracks. |
 
@@ -1142,7 +1151,7 @@ Result: [`EditResult`](#editresult).
 
 #### `arrangement.duplicate`
 
-**Duplicate**. Permission: `edit`. Contexts: `arrangement`.
+**Duplicate**. Permission: `edit`. Contexts: `arrangement`, `take-lanes`.
 
 Places a copy of clips (`clips`, or the selected clips) right after the span they cover, on the same tracks, or a copy of the material in a span of time on tracks right after the span, and selects the copy, so running it again repeats the material. The copy replaces whatever it covers; when that's part of another clip, it's destructive, so an agent asks first. Cmd-D (Ctrl-D) runs this on the Arrangement's selection.
 
@@ -1158,6 +1167,7 @@ Arguments:
 |---|---|---|---|
 | `clips` | array or null | no | Whole clips to act on. Give either `clips` or a span of time, not both. |
 | `end` | [`Position`](#position) or null | no | Where the span ends, after `start`. Left out, the time selection's end. |
+| `lanes` | array or null | no | The lanes a span of time covers, each a track's own lane or one of its take lanes (the comping spec, R27). Left out, the lanes of the time selection, or `tracks`' own lanes. |
 | `start` | [`Position`](#position) or null | no | Where the span starts. Left out, the time selection's start. |
 | `tracks` | array or null | no | The tracks a span of time covers. Left out, the selected tracks. |
 
@@ -1301,6 +1311,7 @@ Arguments:
 | `by` | [`Ticks`](#ticks) or null | no | How far to move them in time, in ticks; negative is earlier. Give `by` or `to`, or neither to move them only between tracks. |
 | `clips` | array or null | no | The clips. Left out, the selected clips. |
 | `copy` | boolean | no | Copy the clips instead, leaving the originals where they are. |
+| `lane` | [`Lane`](#lane) or null | no | The lane `anchor` moves to, a track's own lane or one of its take lanes (the comping spec, R27); the other clips keep their distance from it among the track's lanes. Give `track` or `lane`, not both. |
 | `to` | [`Position`](#position) or null | no | Where `anchor` starts after the move; the other clips keep their distance from it. |
 | `track` | [`TrackId`](#trackid) or null | no | The track `anchor` moves to; the other clips keep their distance from it in the track list. Left out, every clip stays on its track. |
 
@@ -1416,6 +1427,7 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `at` | [`Position`](#position) or null | no | Where the material starts. Left out, the time selection's start, or the insert marker. |
+| `lane` | [`Lane`](#lane) or null | no | The lane the clipboard's first lane goes to, a track's own lane or one of its take lanes (the comping spec, R27); its other lanes keep their distance from it, among the tracks and among a track's lanes. Left out, the first lane selected, or the first selected track's main lane. |
 | `track` | [`TrackId`](#trackid) or null | no | The track the clipboard's first track goes to; its other tracks go to the tracks after it, keeping their spacing. Left out, the first selected track, or the track the material was copied from. |
 
 Result: [`EditResult`](#editresult).
@@ -1565,11 +1577,29 @@ Arguments: none (send `{}`).
 
 Result: [`ArrangementState`](#arrangementstate).
 
+#### `arrangement.select_take_lanes`
+
+**Select Take Lanes**. Permission: `read`. Contexts: `arrangement`.
+
+Selects take lanes by their headers, as clicking a take lane's header does, replacing the lane headers selected or, with `add`, adding to them; with `toggle`, Cmd-clicking: each lane selected is taken away and the others added. Their tracks become the selected tracks, and the clips and time selected are let go, so Enter, T, Cmd+D, Delete and Cmd+Up and Cmd+Down act on the lanes. An empty list clears the selection of lane headers. Changes only the view.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `lanes` | array of [`TakeLaneId`](#takelaneid) | yes | The take lanes whose headers to select. Empty clears the selection of lane headers. |
+| `add` | boolean | no | Add them to the lanes already selected instead of replacing them. |
+| `toggle` | boolean | no | Take away from the selection each of them that is selected, as Cmd-clicking a header does, and add the others. |
+
+Result: [`ArrangementState`](#arrangementstate).
+
 #### `arrangement.select_time`
 
 **Select Time**. Permission: `read`. Contexts: `arrangement`.
 
-Selects the span from `start` to `end` on `tracks` (or the selected tracks), as dragging across track lanes does. `lanes` names the lanes the selection covers, each a track's own lane or its automation lane; left out, the tracks' own lanes. `arrangement.zoom_to_selection` zooms to it. Changes only the view.
+Selects the span from `start` to `end` on `tracks` (or the selected tracks), as dragging across track lanes does. `lanes` names the lanes the selection covers, each a track's own lane, one of its take lanes or its automation lane; left out, the tracks' own lanes. `arrangement.zoom_to_selection` zooms to it. Changes only the view.
 
 Default keys: none.
 
@@ -1579,7 +1609,7 @@ Arguments:
 |---|---|---|---|
 | `start` | [`Ticks`](#ticks) | yes | Where the selection starts. |
 | `end` | [`Ticks`](#ticks) | yes | Where it ends. Before `start` is fine: the two are swapped. |
-| `lanes` | array or null | no | The lanes it covers: each a track's own lane or its automation lane (the automation editing spec, R1). Left out, the tracks' own lanes. |
+| `lanes` | array or null | no | The lanes it covers: each a track's own lane, a take lane under it, or its automation lane (the automation editing spec, R1; the comping spec, R26). Left out, the tracks' own lanes. |
 | `tracks` | array or null | no | The tracks it covers. Left out, the selected tracks. |
 
 Result: [`ArrangementState`](#arrangementstate).
@@ -1654,6 +1684,7 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `at` | [`Ticks`](#ticks) | yes | Where to put it. It isn't snapped: snap first if you want the grid. |
+| `lane` | [`TakeLaneId`](#takelaneid) or null | no | The take lane the click was on, as clicking a take lane's lane does: the lane is selected with the marker, and its track with it (the comping spec, R26). |
 | `track` | [`TrackId`](#trackid) or null | no | The track to select with it, as clicking a track's lane does. Left out, the selected tracks stay selected. |
 
 Result: [`ArrangementState`](#arrangementstate).
@@ -1662,7 +1693,7 @@ Result: [`ArrangementState`](#arrangementstate).
 
 **Set Track Height**. Permission: `read`. Contexts: `arrangement`.
 
-Sets the height of unfolded tracks (`tracks`, or the selected ones) to `height` points, or changes it by `delta`, from 18 to 800, as dragging a track's lower edge and Option with + or - (Alt on Windows) do. Turns Optimize Height off. Changes only the view.
+Sets the height of unfolded tracks (`tracks`, or the selected ones) and take lanes (`take_lanes`, or the selected ones when they are) to `height` points, or changes it by `delta`, from 18 to 800, as dragging a track's lower edge and Option with + or - (Alt on Windows) do. Turns Optimize Height off. Changes only the view.
 
 Default keys: none.
 
@@ -1671,8 +1702,9 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `delta` | number or null | no | Points to add to each track's height (negative makes it shorter). |
-| `height` | number or null | no | The new height of each unfolded track, in points, from 18 to 800. |
-| `tracks` | array or null | no | The tracks. Left out, the selected tracks. |
+| `height` | number or null | no | The new height of each unfolded track or take lane, in points, from 18 to 800. |
+| `take_lanes` | array or null | no | Take lanes to resize as well (the comping spec, R28). |
+| `tracks` | array or null | no | The tracks. Left out, the selected take lanes if any are, otherwise the selected tracks. |
 
 Result: [`ArrangementState`](#arrangementstate).
 
@@ -1739,6 +1771,29 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `on` | boolean or null | no | On or off. Left out, the switch toggles. |
+
+Result: [`ArrangementState`](#arrangementstate).
+
+#### `arrangement.show_take_lanes`
+
+**Show Take Lanes**. Permission: `read`. Contexts: `arrangement`, `take-lanes`.
+
+Shows or hides the take lanes of `tracks` (or the selected tracks) under their main lanes, as the track header's Show Take Lanes item and the Show/Hide Take Lanes toggle do; left without `on`, they toggle. Showing take lanes switches Automation Mode off, which hides them. With `title_bars`, the tracks' title bars are selected too and the take lane headers are let go, as Left does from a take lane's header. Never an undo step; changes only the view.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-COMP-001 | `Cmd+Option+U` | `Ctrl+Alt+U` | `arrangement` | Show the take lanes | runs it |
+| S-COMP-007 | `Left` | `Left` | `take-lanes` | Go from a take lane to its track's main lane and fold the take lanes | fixes `on` = `false`; fixes `title_bars` = `true` |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean or null | no | Show (true) or hide (false) their take lanes. Left out, they toggle, taking the first track's new state. |
+| `title_bars` | boolean | no | Also select the tracks' title bars and leave the take lanes' headers, as Left does from a take lane's header. |
+| `tracks` | array or null | no | The tracks. Left out, the selected tracks. |
 
 Result: [`ArrangementState`](#arrangementstate).
 
@@ -1812,6 +1867,7 @@ Arguments:
 |---|---|---|---|
 | `at` | array or null | no | Where to split. Left out, the time selection's start and end, or the insert marker. |
 | `clips` | array or null | no | The clips to split. Left out, the clips on `tracks`. |
+| `lanes` | array or null | no | The lanes whose clips are split, each a track's own lane or one of its take lanes (the comping spec, R27). Left out, `tracks`' own lanes, or the lanes the time selection covers. |
 | `tracks` | array or null | no | The tracks whose clips are split. Left out, the selected clips, or the clips on the selected tracks. |
 
 Result: [`EditResult`](#editresult).
@@ -3907,6 +3963,25 @@ Arguments:
 | `to` | [`Ticks`](#ticks) | yes | Where it goes: 0 or later, and not where another breakpoint of the same envelope already is. |
 | `kind` | [`EnvelopeKind`](#envelopekind) | no | Which of the clip's envelopes for the parameter: `modulation` (the default) or a Session clip's `automation`. |
 | `value` | number or null | no | The value it takes there, in the parameter's own units, or `null` (or nothing) to keep the value it has. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `clip.move_to_lane`
+
+**Move Clip to Lane**. Permission: `edit`. Contexts: `arrangement`.
+
+Moves a clip so it starts at `start` on the main lane of `track`, or, with `lane`, on that take lane of the track, out of the lane or Session slot it sat in. The track must be an audio or MIDI track of the clip's kind. It does not clear what the destination holds there; to move clips as the Arrangement does, replacing what they land on, use `arrangement.move_clips`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The clip. |
+| `track` | [`TrackId`](#trackid) | yes | The track it moves to. |
+| `start` | [`Ticks`](#ticks) | yes | Its new start. |
+| `lane` | [`TakeLaneId`](#takelaneid) or null | no | The take lane it moves to; the track's main lane when left out. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -12162,6 +12237,27 @@ Result: [`StemsStatus`](#stemsstatus).
 
 ### Area `take_lane`
 
+#### `take_lane.audition`
+
+**Audition Take Lane**. Permission: `edit`. Contexts: `arrangement`, `take-lanes`.
+
+Switches the audition of the take `lanes` (left out, the take lanes the selection is on: the headers, the time selection or the clips selected are on them) on or off, one lane for each track: of the lanes listed on one track, the last. Left without `on`, it switches them on, or off when each is auditioned already. While a take lane is auditioned its track plays it in place of its main lane (`take_lane.set_audition`). One undo step, `Audition Take Lane`. T runs it.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-COMP-003 | `T` | `T` | `take-lanes` | Audition the selected take lane | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `lanes` | array or null | no | The take lanes to audition; of those on one track, the last listed is the one. Left out, the take lanes the selection is on. |
+| `on` | boolean or null | no | Switch them on (true) or off (false). Left out, they switch on, or off when every one of them is auditioned already. |
+
+Result: [`LanesResult`](#lanesresult).
+
 #### `take_lane.comp_sources`
 
 **Comp Sources**. Permission: `read`. Contexts: `arrangement`.
@@ -12180,19 +12276,23 @@ Result: [`CompSourcesResult`](#compsourcesresult).
 
 #### `take_lane.copy_to_main_lane`
 
-**Copy Selection to Main Lane**. Permission: `edit`. Contexts: `arrangement`.
+**Copy Selection to Main Lane**. Permission: `edit`. Contexts: `arrangement`, `take-lanes`.
 
-Copies a take lane's material in `start`..`end` to its track's main lane, at the same place: each of the lane's clips the range reaches, cut at the range's edges as Split cuts, is copied under a new ID onto the main lane, where it replaces what it covers. Where the lane has no clip in the range, the main lane is left as it was. Of several `lanes` on one track, the last listed is copied from; lanes on several tracks each copy to their own track. The copies are independent of the take-lane clips. It is one undo step, an edit, and destructive as well when it replaces or shortens a main-lane clip. A frozen track refuses it.
+Copies a take lane's material in `start`..`end` to its track's main lane, at the same place (with `lanes`, `start` and `end` left out, it takes them from the selection: the take lanes the headers, the time selection or the clips selected are on, and the time or the clips' span; Enter runs it so): each of the lane's clips the range reaches, cut at the range's edges as Split cuts, is copied under a new ID onto the main lane, where it replaces what it covers. Where the lane has no clip in the range, the main lane is left as it was. Of several `lanes` on one track, the last listed is copied from; lanes on several tracks each copy to their own track. The copies are independent of the take-lane clips. It is one undo step, an edit, and destructive as well when it replaces or shortens a main-lane clip. A frozen track refuses it.
 
-Default keys: none.
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-COMP-002 | `Enter` | `Enter` | `take-lanes` | Copy the selected take-lane area to the main lane | runs it |
 
 Arguments:
 
 | Name | Type | Required | Description |
 |---|---|---|---|
-| `lanes` | array of [`TakeLaneId`](#takelaneid) | yes | The take lanes to copy from. Of those on one track, the last listed is copied from. |
-| `start` | [`Position`](#position) | yes | Where the range starts, in ticks or as `bar.beat.sixteenth` text. |
-| `end` | [`Position`](#position) | yes | Where the range ends, after `start`. |
+| `end` | [`Position`](#position) or null | no | Where the range ends, after `start`. Left out, the selection's end. |
+| `lanes` | array or null | no | The take lanes to copy from. Of those on one track, the last listed is copied from. Left out, the take lanes the selection is on: the headers selected, the lanes the time selection covers, or the lanes of the selected clips. |
+| `start` | [`Position`](#position) or null | no | Where the range starts, in ticks or as `bar.beat.sixteenth` text. Left out, the time selection's start, or the selected clips'. |
 
 Result: [`CompResult`](#compresult).
 
@@ -12263,17 +12363,21 @@ Result: [`ChangeSet`](#changeset).
 
 #### `take_lane.duplicate`
 
-**Duplicate Take Lane(s)**. Permission: `edit`. Contexts: `arrangement`.
+**Duplicate Take Lane(s)**. Permission: `edit`. Contexts: `arrangement`, `take-lanes`.
 
-Puts a copy of each of the take `lanes` directly after it, with its name and a copy of each of its clips under a new ID, in one undo step. The result's `lanes` are the copies' IDs.
+Puts a copy of each of the take `lanes` (left out, the take lanes whose headers are selected) directly after it, with its name and a copy of each of its clips under a new ID, in one undo step, and selects the copies. The result's `lanes` are the copies' IDs.
 
-Default keys: none.
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-COMP-005 | `Cmd+D` | `Ctrl+D` | `take-lanes` | Duplicate the selected take lane | runs it |
 
 Arguments:
 
 | Name | Type | Required | Description |
 |---|---|---|---|
-| `lanes` | array of [`TakeLaneId`](#takelaneid) | yes | The take lanes to copy. |
+| `lanes` | array or null | no | The take lanes to copy. Left out, the take lanes whose headers are selected. |
 
 Result: [`LanesResult`](#lanesresult).
 
@@ -12281,9 +12385,13 @@ Result: [`LanesResult`](#lanesresult).
 
 **Insert Take Lane**. Permission: `edit`. Contexts: `arrangement`.
 
-Adds an empty take lane to each of the audio or MIDI `tracks` (left out, the selected tracks): directly after the take lane of that track listed in `after`, or after its last take lane. Each is named `Take N`, one more than the highest number of a lane of the track named `Take` and a number, `Take 1` on a track with none. All of them are one undo step. The result's `lanes` are the new lanes' IDs.
+Adds an empty take lane to each of the audio or MIDI `tracks` (left out, the selected tracks): directly after the take lane of that track listed in `after` (left out, the take lanes whose headers are selected), or after its last take lane. Each is named `Take N`, one more than the highest number of a lane of the track named `Take` and a number, `Take 1` on a track with none. All of them are one undo step. The tracks' take lanes show afterwards, and Automation Mode is switched off to show them. The result's `lanes` are the new lanes' IDs.
 
-Default keys: none.
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-COMP-004 | `Shift+Option+T` | `Shift+Alt+T` | `arrangement` | Add a take lane | runs it |
 
 Arguments:
 
@@ -12350,7 +12458,7 @@ Result: [`ChangeSet`](#changeset).
 
 **Replace with Next or Previous Take**. Permission: `edit`. Contexts: `arrangement`.
 
-Replaces a track's main-lane material in `start`..`end` with the next take's (`direction` `next`, the take lane below) or the previous take's (`previous`, the one above), placed as `take_lane.copy_to_main_lane` places it, skipping take lanes with no clip in the range. With `lane` given, the selection is on that take lane and the next or previous take is counted from it; left out, the selection is on the main lane, and each main-lane clip's part of the range is counted from the take lane it uses (`take_lane.comp_sources`), a part that uses none from before the first take lane. A part with no take lane left in that direction is left as it was. It is one undo step, an edit, and destructive as well when it replaces or shortens a main-lane clip. A frozen track refuses it.
+Replaces a track's main-lane material in `start`..`end` with the next take's (`direction` `next`, the take lane below) or the previous take's (`previous`, the one above). With `track`, `start`, `end` and `lane` left out it takes them from the selection, on each audio or MIDI track the selection is on, as Cmd+Down and Cmd+Up do. The take is placed as `take_lane.copy_to_main_lane` places it, skipping take lanes with no clip in the range. With `lane` given, the selection is on that take lane and the next or previous take is counted from it; left out, the selection is on the main lane, and each main-lane clip's part of the range is counted from the take lane it uses (`take_lane.comp_sources`), a part that uses none from before the first take lane. A part with no take lane left in that direction is left as it was. It is one undo step, an edit, and destructive as well when it replaces or shortens a main-lane clip. A frozen track refuses it.
 
 Default keys: none.
 
@@ -12358,11 +12466,11 @@ Arguments:
 
 | Name | Type | Required | Description |
 |---|---|---|---|
-| `track` | [`TrackId`](#trackid) | yes | The audio or MIDI track whose main lane is changed. |
-| `start` | [`Position`](#position) | yes | Where the range starts, in ticks or as `bar.beat.sixteenth` text. |
-| `end` | [`Position`](#position) | yes | Where the range ends, after `start`. |
 | `direction` | [`TakeDirection`](#takedirection) | yes | Whether to take the next or the previous take. |
-| `lane` | [`TakeLaneId`](#takelaneid) or null | no | The take lane the selection is on, from which the next or previous take is counted. Left out, the selection is on the main lane, and each of its clips counts from the take lane it uses. |
+| `end` | [`Position`](#position) or null | no | Where the range ends, after `start`. Left out, the selection's end. |
+| `lane` | [`TakeLaneId`](#takelaneid) or null | no | The take lane the selection is on, from which the next or previous take is counted. Left out with `track` given, the selection is on the main lane, and each of its clips counts from the take lane it uses; left out with `track`, the selection says. |
+| `start` | [`Position`](#position) or null | no | Where the range starts, in ticks or as `bar.beat.sixteenth` text. Left out, the time selection's start, or the selected clips'. |
+| `track` | [`TrackId`](#trackid) or null | no | The audio or MIDI track whose main lane is changed. Left out, each audio or MIDI track the selection is on. |
 
 Result: [`CompResult`](#compresult).
 
@@ -13723,6 +13831,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`clip.move`](#clipmove) | the query tool's `clip` | `start` |
 | [`clip.move_by`](#clipmove_by) | the query tool's `clip` | `start` |
 | [`clip.move_envelope_breakpoint`](#clipmove_envelope_breakpoint) | the query tool's `clip` | `envelopes` |
+| [`clip.move_to_lane`](#clipmove_to_lane) | the query tool's `clip` | `start` |
 | [`clip.move_to_slot`](#clipmove_to_slot) | the query tool's `track` | `slots` |
 | [`clip.move_transient`](#clipmove_transient) | `clip.transients` | `transients` |
 | [`clip.move_warp_markers`](#clipmove_warp_markers) | the query tool's `clip` | `data.audio.warp_markers` |
@@ -14049,6 +14158,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`stems.cancel`](#stemscancel) | `stems.status` | `separation` |
 | [`stems.install`](#stemsinstall) | `stems.status` | `install` |
 | [`stems.separate`](#stemsseparate) | the query tool's `song` | `tracks` |
+| [`take_lane.audition`](#take_laneaudition) | the query tool's `track` | `take_lanes` |
 | [`take_lane.copy_to_main_lane`](#take_lanecopy_to_main_lane) | the query tool's `track` | `clips` |
 | [`take_lane.create_clip`](#take_lanecreate_clip) | the query tool's `track` | `take_lanes` |
 | [`take_lane.delete`](#take_lanedelete) | the query tool's `track` | `take_lanes` |
@@ -14602,7 +14712,9 @@ What the Arrangement View shows: every view command returns it.
 | `show_return_tracks` | boolean | yes | Whether the return tracks' rows show in the lanes. |
 | `automation_lanes` | array of [`AutomationLane`](#automationlane) | no | The parameter each track's automation lane shows, for the tracks whose lane isn't showing the default (their volume): the choosers' choice. `target` `null` means the lane draws no envelope. |
 | `selected_fade` | [`FadeHandleState`](#fadehandlestate) or null | no | The selected fade handle (WP-6.51), if any: Delete deletes its fade. |
-| `time_selection_lanes` | array of [`Lane`](#lane) | no | The lanes the time selection covers: each a track's own lane or its automation lane (the automation editing spec, R1). Empty when the selection names no lane. |
+| `selected_take_lanes` | array of [`TakeLaneId`](#takelaneid) | no | The take lanes whose headers are selected (the comping spec, R26), in the order they were selected. Their tracks are selected tracks too. |
+| `shown_take_lanes` | array of [`TrackId`](#trackid) | no | The tracks whose take lanes show (the comping spec, R24). |
+| `time_selection_lanes` | array of [`Lane`](#lane) | no | The lanes the time selection covers: each a track's own lane, a take lane under it, or its automation lane (the automation editing spec, R1; the comping spec, R26). Empty when the selection names no lane. |
 
 <details><summary>JSON Schema</summary>
 
@@ -14692,6 +14804,13 @@ What the Arrangement View shows: every view command returns it.
       },
       "type": "array"
     },
+    "selected_take_lanes": {
+      "description": "The take lanes whose headers are selected (the comping spec, R26), in the order they were selected. Their tracks are selected tracks too.",
+      "items": {
+        "$ref": "#/$defs/TakeLaneId"
+      },
+      "type": "array"
+    },
     "selected_tracks": {
       "description": "The selected tracks, top to bottom.",
       "items": {
@@ -14711,6 +14830,13 @@ What the Arrangement View shows: every view command returns it.
       "description": "Whether the track headers show their volume, pan, and sends.",
       "type": "boolean"
     },
+    "shown_take_lanes": {
+      "description": "The tracks whose take lanes show (the comping spec, R24).",
+      "items": {
+        "$ref": "#/$defs/TrackId"
+      },
+      "type": "array"
+    },
     "ticks_per_point": {
       "description": "The zoom: ticks of song time per point of screen.",
       "format": "double",
@@ -14728,7 +14854,7 @@ What the Arrangement View shows: every view command returns it.
       "description": "The selected span of time on the selected tracks, if any."
     },
     "time_selection_lanes": {
-      "description": "The lanes the time selection covers: each a track's own lane or its automation lane (the automation editing spec, R1). Empty when the selection names no lane.",
+      "description": "The lanes the time selection covers: each a track's own lane, a take lane under it, or its automation lane (the automation editing spec, R1; the comping spec, R26). Empty when the selection names no lane.",
       "items": {
         "$ref": "#/$defs/Lane"
       },
@@ -26115,18 +26241,19 @@ A label as the sidebar lists it.
 
 ### `Lane`
 
-Which lane a selection covers: `track` for a track's own lane, where its clips are, and `automation` for the automation lane under it, which shows a parameter.
+Which lane a selection covers: `track` for a track's own lane, where its clips are, `take` for one of its take lanes, and `automation` for the automation lane under it, which shows a parameter.
 
 One of:
 
 - an object with `type` = `"track"`, `track` ([`TrackId`](#trackid)): A track's own lane, where its clips are.
+- an object with `type` = `"take"`, `track` ([`TrackId`](#trackid)), `lane` ([`TakeLaneId`](#takelaneid)): One of a track's take lanes.
 - an object with `type` = `"automation"`, `track` ([`TrackId`](#trackid)), `target` ([`AutomationTarget`](#automationtarget)): A track's automation lane, which shows a parameter.
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "Which lane a selection covers: `track` for a track's own lane, where its clips are, and `automation` for the automation lane under it, which shows a parameter.",
+  "description": "Which lane a selection covers: `track` for a track's own lane, where its clips are, `take` for one of its take lanes, and `automation` for the automation lane under it, which shows a parameter.",
   "oneOf": [
     {
       "description": "A track's own lane, where its clips are.",
@@ -26143,6 +26270,29 @@ One of:
       "required": [
         "type",
         "track"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "One of a track's take lanes.",
+      "properties": {
+        "lane": {
+          "$ref": "#/$defs/TakeLaneId",
+          "description": "The take lane."
+        },
+        "track": {
+          "$ref": "#/$defs/TrackId",
+          "description": "The track."
+        },
+        "type": {
+          "const": "take",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "track",
+        "lane"
       ],
       "type": "object"
     },

@@ -31,7 +31,7 @@ use serde_json::Value;
 
 use super::automation;
 use super::fades;
-use super::placing::{clear, clear_on, clear_spans, piece, split_off};
+use super::placing::{clear_on, clear_spans, piece, split_off};
 use super::{ArrangementView, parse};
 
 /// Why an edit didn't happen. The document is as it was.
@@ -78,13 +78,25 @@ pub struct EnvelopeMaterial {
     pub shapes: Vec<(AutomationTarget, Vec<Breakpoint>)>,
 }
 
-/// Material copied from the Arrangement, for pasting: each track's clips,
+/// One lane's clips in copied material.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MaterialLane {
+    /// The track's distance from the first track of the material in the
+    /// track list.
+    pub distance: usize,
+    /// The take lane's place among its track's take lanes, or `None` for the
+    /// track's main lane.
+    pub slot: Option<usize>,
+    /// The lane's clips; a clip's `start` counts from the material's start.
+    pub clips: Vec<Clip>,
+}
+
+/// Material copied from the Arrangement, for pasting: each lane's clips,
 /// placed from the material's start.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Material {
-    /// Each track's clips, with the track's distance from the first in the
-    /// track list. A clip's `start` counts from the material's start.
-    pub tracks: Vec<(usize, Vec<Clip>)>,
+    /// Each lane's clips, top to bottom.
+    pub lanes: Vec<MaterialLane>,
     /// How long the material is.
     pub length: Ticks,
     /// Where the material starts in the song, so a bounce can render the
@@ -104,8 +116,13 @@ impl Material {
     #[must_use]
     pub fn state(&self) -> ClipboardState {
         ClipboardState {
-            clips: self.tracks.iter().map(|(_, clips)| clips.len()).sum(),
-            tracks: self.tracks.len(),
+            clips: self.lanes.iter().map(|lane| lane.clips.len()).sum(),
+            tracks: self
+                .lanes
+                .iter()
+                .map(|lane| lane.distance)
+                .collect::<BTreeSet<_>>()
+                .len(),
             length: self.length,
         }
     }
@@ -134,14 +151,117 @@ impl Clipboard {
     }
 }
 
+/// A lane an edit acts on: a track's main lane, or one of its take lanes
+/// (the comping spec, R27).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Place {
+    /// The track.
+    pub track: TrackId,
+    /// The take lane, or `None` for the track's main lane.
+    pub lane: Option<TakeLaneId>,
+}
+
+impl Place {
+    /// A track's main lane.
+    #[must_use]
+    pub const fn main(track: TrackId) -> Self {
+        Self { track, lane: None }
+    }
+
+    /// The lane a clip sits on.
+    fn of_clip(doc: &Document, clip: ClipId) -> Option<Self> {
+        Some(Self {
+            track: doc.clip_track(clip)?,
+            lane: doc.clip_lane(clip),
+        })
+    }
+
+    /// The place a selection's lane names; an automation lane isn't one.
+    fn of_lane(lane: &Lane) -> Option<Self> {
+        match *lane {
+            Lane::Track { track } => Some(Self::main(track)),
+            Lane::Take { track, lane } => Some(Self {
+                track,
+                lane: Some(lane),
+            }),
+            Lane::Automation { .. } => None,
+        }
+    }
+
+    /// The place as a selection's lane.
+    #[must_use]
+    pub const fn as_lane(self) -> Lane {
+        match self.lane {
+            None => Lane::Track { track: self.track },
+            Some(lane) => Lane::Take {
+                track: self.track,
+                lane,
+            },
+        }
+    }
+
+    /// Where the place's row is among the Arrangement's: its track's place
+    /// in the track list, then the main lane before the take lanes in order.
+    fn row(self, doc: &Document, positions: &HashMap<TrackId, usize>) -> (usize, usize) {
+        let track = positions.get(&self.track).copied().unwrap_or(usize::MAX);
+        let lane = self.lane.map_or(0, |lane| {
+            1 + doc
+                .track(self.track)
+                .and_then(|held| held.take_lanes().position(|l| l.id == lane))
+                .unwrap_or(usize::MAX - 1)
+        });
+        (track, lane)
+    }
+
+    /// The lane's clips.
+    pub(crate) fn clips(self, doc: &Document) -> Vec<&Clip> {
+        match self.lane {
+            None => doc
+                .track(self.track)
+                .map_or_else(Vec::new, |t| t.clips().collect()),
+            Some(lane) => doc
+                .take_lane(lane)
+                .map_or_else(Vec::new, |l| l.clips.iter().collect()),
+        }
+    }
+
+    /// The lane's place among its track's take lanes, `None` for the main
+    /// lane.
+    fn slot(self, doc: &Document) -> Option<usize> {
+        let lane = self.lane?;
+        doc.track(self.track)?
+            .take_lanes()
+            .position(|l| l.id == lane)
+    }
+}
+
+/// `places` in the order of the Arrangement's rows.
+pub(crate) fn in_row_order(doc: &Document, mut places: Vec<Place>) -> Vec<Place> {
+    let positions = lane_positions(doc);
+    places.sort_by_key(|place| place.row(doc, &positions));
+    places.dedup();
+    places
+}
+
+/// The tracks of `places`' main lanes, in order and once each.
+pub(crate) fn main_tracks(places: &[Place]) -> Vec<TrackId> {
+    let mut tracks: Vec<TrackId> = Vec::new();
+    for place in places.iter().filter(|place| place.lane.is_none()) {
+        if !tracks.contains(&place.track) {
+            tracks.push(place.track);
+        }
+    }
+    tracks
+}
+
 /// What an edit acts on.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Target {
     /// Whole clips.
     Clips(Vec<ClipId>),
-    /// The material in a span of time on tracks.
+    /// The material in a span of time on lanes.
     Time {
-        tracks: Vec<TrackId>,
+        places: Vec<Place>,
         start: Ticks,
         end: Ticks,
     },
@@ -200,62 +320,39 @@ pub(crate) fn apply(editor: &mut Editor, command: Command) -> Result<(), EditFai
 }
 
 /// Clears where moved clips landed, leaving the moved clips alone: each
-/// destination track is looked through once, however many clips land on it.
+/// destination lane is looked through once, however many clips land on it.
 fn clear_moved(
     editor: &mut Editor,
     clips: &[ClipId],
-    moves: &[(ClipId, TrackId, Ticks, Ticks)],
+    moves: &[(ClipId, Place, Ticks, Ticks)],
 ) -> Result<(), EditFailure> {
     let keep: BTreeSet<ClipId> = clips.iter().copied().collect();
-    type Place = (TrackId, Option<TakeLaneId>);
     let mut spans: BTreeMap<Place, Vec<(Ticks, Ticks)>> = BTreeMap::new();
-    for (clip, track, start, end) in moves {
-        // A moved clip keeps its take lane, and so clears on it.
-        let lane = editor.document().clip_lane(*clip);
-        spans
-            .entry((*track, lane))
-            .or_default()
-            .push((*start, *end));
+    for (_, place, start, end) in moves {
+        spans.entry(*place).or_default().push((*start, *end));
     }
-    for ((track, lane), spans) in spans {
-        clear_spans(editor, track, lane, &spans, &keep)?;
+    for (place, spans) in spans {
+        clear_spans(editor, place.track, place.lane, &spans, &keep)?;
     }
     Ok(())
 }
 
-/// Puts new clips on tracks, each replacing what it covers, and returns
-/// their IDs. Each clip's own ID is replaced with a new one. A clip copied
-/// from a take lane of the track it lands on lands on that lane.
+/// Puts new clips on lanes, each replacing what it covers on its lane, and
+/// returns their IDs. Each clip's own ID is replaced with a new one.
 pub(crate) fn place(
     editor: &mut Editor,
-    placements: Vec<(TrackId, Vec<Clip>)>,
-) -> Result<Vec<ClipId>, EditFailure> {
-    place_clips(editor, placements, false)
-}
-
-/// As [`place`], but every clip goes on its track's main lane, whatever lane
-/// the clip it was copied from sat on.
-pub(crate) fn place_on_main(
-    editor: &mut Editor,
-    placements: Vec<(TrackId, Vec<Clip>)>,
-) -> Result<Vec<ClipId>, EditFailure> {
-    place_clips(editor, placements, true)
-}
-
-fn place_clips(
-    editor: &mut Editor,
-    placements: Vec<(TrackId, Vec<Clip>)>,
-    main: bool,
+    placements: Vec<(Place, Vec<Clip>)>,
 ) -> Result<Vec<ClipId>, EditFailure> {
     let doc = editor.document();
-    for (track, clips) in &placements {
-        if let Some(clip) = clips.iter().find(|c| !fits(doc, *track, &c.data)) {
+    for (place, clips) in &placements {
+        let track = place.track;
+        if let Some(clip) = clips.iter().find(|c| !fits(doc, track, &c.data)) {
             let what = if clip.data.is_audio() {
                 "an audio clip"
             } else {
                 "a MIDI clip"
             };
-            let name = doc.track(*track).map_or("", |t| t.name());
+            let name = doc.track(track).map_or("", |t| t.name());
             return Err(refused(format!(
                 "{what} can't go on track \"{name}\" (ID {}): audio clips go on audio tracks \
                  and MIDI clips on MIDI tracks",
@@ -271,44 +368,51 @@ fn place_clips(
     }
     let mut created = Vec::new();
     let mut placed = BTreeSet::new();
-    for (track, clips) in placements {
+    for (place, clips) in placements {
         for clip in clips {
-            let doc = editor.document();
-            let lane = doc
-                .clip_lane(clip.id)
-                .filter(|lane| !main && doc.take_lane_track(*lane) == Some(track));
-            created.push(place_clip(editor, track, lane, clip, &mut placed)?);
+            created.push(place_clip(
+                editor,
+                place.track,
+                place.lane,
+                clip,
+                &mut placed,
+            )?);
         }
     }
     Ok(created)
 }
 
-/// Puts new clips on take lane `lane` of `track`, each replacing what it
-/// covers on that lane, and returns their IDs.
+/// As [`place`], with every clip on take lane `lane` of `track`.
 pub(crate) fn place_on_lane(
     editor: &mut Editor,
     track: TrackId,
     lane: TakeLaneId,
     clips: Vec<Clip>,
 ) -> Result<Vec<ClipId>, EditFailure> {
-    let doc = editor.document();
-    if let Some(clip) = clips.iter().find(|c| !fits(doc, track, &c.data)) {
-        let what = if clip.data.is_audio() {
-            "an audio clip"
-        } else {
-            "a MIDI clip"
-        };
-        return Err(refused(format!(
-            "{what} can't go on take lane {}: audio clips go on audio tracks and MIDI clips on \
-             MIDI tracks",
-            lane.0
-        )));
-    }
-    let mut placed = BTreeSet::new();
-    clips
-        .into_iter()
-        .map(|clip| place_clip(editor, track, Some(lane), clip, &mut placed))
-        .collect()
+    place(
+        editor,
+        vec![(
+            Place {
+                track,
+                lane: Some(lane),
+            },
+            clips,
+        )],
+    )
+}
+
+/// As [`place`], with every clip on its track's main lane.
+pub(crate) fn place_on_main(
+    editor: &mut Editor,
+    placements: Vec<(TrackId, Vec<Clip>)>,
+) -> Result<Vec<ClipId>, EditFailure> {
+    place(
+        editor,
+        placements
+            .into_iter()
+            .map(|(track, clips)| (Place::main(track), clips))
+            .collect(),
+    )
 }
 
 /// Puts one new clip, under a new ID, on `track`'s main lane or its take
@@ -416,6 +520,45 @@ fn tracks_exist(doc: &Document, tracks: &[TrackId]) -> Result<(), EditFailure> {
     }
 }
 
+/// The lanes a command's `tracks` and `lanes` name, or the selection's.
+fn places_of(
+    doc: &Document,
+    view: &ArrangementView,
+    tracks: Option<Vec<TrackId>>,
+    lanes: Option<Vec<Lane>>,
+) -> Result<Vec<Place>, EditFailure> {
+    match (tracks, lanes) {
+        (Some(_), Some(_)) => Err(invalid("give `tracks` or `lanes`, not both")),
+        (Some(tracks), None) => {
+            tracks_exist(doc, &tracks)?;
+            Ok(tracks.into_iter().map(Place::main).collect())
+        }
+        (None, Some(lanes)) => {
+            let mut places = Vec::with_capacity(lanes.len());
+            for lane in &lanes {
+                let place = Place::of_lane(lane)
+                    .ok_or_else(|| invalid("an automation lane isn't a lane of clips"))?;
+                tracks_exist(doc, &[place.track])?;
+                if let Some(held) = place.lane
+                    && doc.take_lane_track(held) != Some(place.track)
+                {
+                    return Err(invalid(format!(
+                        "take lane {} isn't one of track {}'s",
+                        held.0, place.track.0
+                    )));
+                }
+                places.push(place);
+            }
+            Ok(places)
+        }
+        (None, None) => {
+            let places = view.selected_places();
+            tracks_exist(doc, &places.iter().map(|p| p.track).collect::<Vec<_>>())?;
+            Ok(places)
+        }
+    }
+}
+
 /// What a command's target arguments, or the selection, name.
 pub(crate) fn target(
     doc: &Document,
@@ -425,18 +568,24 @@ pub(crate) fn target(
     let TargetArgs {
         clips,
         tracks,
+        lanes,
         start,
         end,
     } = args;
     if let Some(clips) = clips {
-        if tracks.is_some() || start.is_some() || end.is_some() {
+        if tracks.is_some() || lanes.is_some() || start.is_some() || end.is_some() {
             return Err(invalid(
-                "give `clips`, or a span of time (`tracks`, `start`, `end`), not both",
+                "give `clips`, or a span of time (`tracks` or `lanes`, `start`, `end`), not both",
             ));
         }
         return Ok(Target::Clips(clips_or_selected(doc, view, Some(clips))?));
     }
-    if tracks.is_none() && start.is_none() && end.is_none() && !view.selected_clips.is_empty() {
+    if tracks.is_none()
+        && lanes.is_none()
+        && start.is_none()
+        && end.is_none()
+        && !view.selected_clips.is_empty()
+    {
         return Ok(Target::Clips(clips_or_selected(doc, view, None)?));
     }
     let signatures = &doc.settings().time_signatures;
@@ -456,101 +605,126 @@ pub(crate) fn target(
     if end <= start {
         return Err(invalid("the span's `end` must be after its `start`"));
     }
-    let tracks = tracks.unwrap_or_else(|| view.selected.clone());
-    tracks_exist(doc, &tracks)?;
-    if tracks.is_empty() {
+    let places = places_of(doc, view, tracks, lanes)?;
+    if places.is_empty() {
         return Err(unavailable("no track is selected"));
     }
-    Ok(Target::Time { tracks, start, end })
+    Ok(Target::Time { places, start, end })
 }
 
-/// The material a target names, by track in display order, with absolute
+/// The material a target names, by lane in display order, with absolute
 /// positions, and the span it covers.
-pub(crate) fn material(
+pub(crate) fn lane_material(
     doc: &Document,
     target: &Target,
-) -> (Vec<(TrackId, Vec<Clip>)>, Ticks, Ticks) {
-    let lanes = lanes(doc);
-    let order = |track: &TrackId| lane_index(&lanes, *track).unwrap_or(usize::MAX);
+) -> (Vec<(Place, Vec<Clip>)>, Ticks, Ticks) {
+    let positions = lane_positions(doc);
     match target {
         Target::Clips(ids) => {
-            let mut by_track: Vec<(TrackId, Vec<Clip>)> = Vec::new();
+            let mut by_place: Vec<(Place, Vec<Clip>)> = Vec::new();
             let (mut start, mut end) = (Ticks::MAX, Ticks::MIN);
             for id in ids {
-                let (Some(clip), Some(track)) = (doc.clip(*id), doc.clip_track(*id)) else {
+                let (Some(clip), Some(place)) = (doc.clip(*id), Place::of_clip(doc, *id)) else {
                     continue;
                 };
                 start = start.min(clip.start);
                 end = end.max(clip.end());
-                match by_track.iter_mut().find(|(t, _)| *t == track) {
+                match by_place.iter_mut().find(|(p, _)| *p == place) {
                     Some((_, clips)) => clips.push(clip.clone()),
-                    None => by_track.push((track, vec![clip.clone()])),
+                    None => by_place.push((place, vec![clip.clone()])),
                 }
             }
-            by_track.sort_by_key(|(track, _)| order(track));
-            for (_, clips) in &mut by_track {
+            by_place.sort_by_key(|(place, _)| place.row(doc, &positions));
+            for (_, clips) in &mut by_place {
                 clips.sort_by_key(|c| (c.start, c.id));
             }
-            (by_track, start, end)
+            (by_place, start, end)
         }
-        Target::Time { tracks, start, end } => {
-            let mut tracks = tracks.clone();
-            tracks.sort_by_key(order);
-            tracks.dedup();
-            let by_track = tracks
+        Target::Time { places, start, end } => {
+            let mut places = places.clone();
+            places.sort_by_key(|place| place.row(doc, &positions));
+            places.dedup();
+            let by_place = places
                 .into_iter()
-                .map(|track| {
-                    let mut clips: Vec<Clip> = doc.track(track).map_or_else(Vec::new, |t| {
-                        t.clips()
-                            .filter(|c| c.start < *end && c.end() > *start)
-                            .map(|c| {
-                                piece(
-                                    c,
-                                    c.start.max(*start),
-                                    c.end().min(*end),
-                                    &doc.settings().tempo,
-                                )
-                            })
-                            .collect()
-                    });
+                .map(|place| {
+                    let mut clips: Vec<Clip> = place
+                        .clips(doc)
+                        .into_iter()
+                        .filter(|c| c.start < *end && c.end() > *start)
+                        .map(|c| {
+                            piece(
+                                c,
+                                c.start.max(*start),
+                                c.end().min(*end),
+                                &doc.settings().tempo,
+                            )
+                        })
+                        .collect();
                     clips.sort_by_key(|c| (c.start, c.id));
-                    (track, clips)
+                    (place, clips)
                 })
                 .collect();
-            (by_track, *start, *end)
+            (by_place, *start, *end)
         }
     }
+}
+
+/// The material a target names on tracks' main lanes, by track in display
+/// order, with absolute positions, and the span it covers: take lanes hold
+/// no material that bounces, reverses or plays.
+pub(crate) fn material(
+    doc: &Document,
+    target: &Target,
+) -> (Vec<(TrackId, Vec<Clip>)>, Ticks, Ticks) {
+    let (by_place, start, end) = lane_material(doc, target);
+    let by_track = by_place
+        .into_iter()
+        .filter(|(place, _)| place.lane.is_none())
+        .map(|(place, clips)| (place.track, clips))
+        .collect();
+    (by_track, start, end)
+}
+
+/// The tracks of a lane list, in order and once each.
+fn tracks_of(by_place: &[(Place, Vec<Clip>)]) -> Vec<TrackId> {
+    let mut tracks: Vec<TrackId> = Vec::new();
+    for (place, _) in by_place {
+        if !tracks.contains(&place.track) {
+            tracks.push(place.track);
+        }
+    }
+    tracks
 }
 
 /// The clipboard holding a target's material.
 fn clipboard_of(doc: &Document, target: &Target) -> Material {
     let lanes = lanes(doc);
-    let (by_track, start, end) = material(doc, target);
-    let first = by_track
+    let (by_place, start, end) = lane_material(doc, target);
+    let first = by_place
         .first()
-        .and_then(|(track, _)| lane_index(&lanes, *track))
+        .and_then(|(place, _)| lane_index(&lanes, place.track))
         .unwrap_or(0);
-    let tracks = by_track
+    let material = by_place
         .iter()
-        .map(|(track, clips)| {
-            let distance = lane_index(&lanes, *track).unwrap_or(first) - first;
-            let clips = clips
+        .map(|(place, clips)| MaterialLane {
+            distance: lane_index(&lanes, place.track).unwrap_or(first) - first,
+            slot: place.slot(doc),
+            clips: clips
                 .iter()
                 .map(|clip| Clip {
                     start: clip.start - start,
                     ..clip.clone()
                 })
-                .collect();
-            (distance, clips)
+                .collect(),
         })
         .collect();
     // Spec: automation-editing R9. The material's envelopes go with it.
-    let envelopes = envelope_material(doc, target, &by_track, start, end);
+    let envelopes = envelope_material(doc, target, &by_place, start, end);
     Material {
-        tracks,
+        lanes: material,
         length: end - start,
         start,
-        source: by_track.iter().map(|(track, _)| *track).collect(),
+        source: tracks_of(&by_place),
         envelopes,
     }
 }
@@ -575,57 +749,59 @@ fn envelopes_over(
 }
 
 /// The material's tracks, by their distance from the first of them.
-fn tracks_by_distance(
-    doc: &Document,
-    by_track: &[(TrackId, Vec<Clip>)],
-) -> BTreeMap<usize, TrackId> {
+fn tracks_by_distance(doc: &Document, by_place: &[(Place, Vec<Clip>)]) -> BTreeMap<usize, TrackId> {
     let lanes = lanes(doc);
-    let first = by_track
+    let first = by_place
         .first()
-        .and_then(|(track, _)| lane_index(&lanes, *track))
+        .and_then(|(place, _)| lane_index(&lanes, place.track))
         .unwrap_or(0);
-    by_track
+    by_place
         .iter()
-        .map(|(track, _)| (lane_index(&lanes, *track).unwrap_or(first) - first, *track))
+        .map(|(place, _)| {
+            (
+                lane_index(&lanes, place.track).unwrap_or(first) - first,
+                place.track,
+            )
+        })
         .collect()
 }
 
 /// The envelopes over the pieces of a target's material, so a copy and a
-/// paste carry them (the automation editing spec, R9).
+/// paste carry them (the automation editing spec, R9). A take lane's
+/// material carries none: the tracks' envelopes follow their main lanes.
 fn envelope_material(
     doc: &Document,
     target: &Target,
-    by_track: &[(TrackId, Vec<Clip>)],
+    by_place: &[(Place, Vec<Clip>)],
     start: Ticks,
     end: Ticks,
 ) -> Vec<EnvelopeMaterial> {
     let lanes = lanes(doc);
-    let first = by_track
+    let first = by_place
         .first()
-        .and_then(|(track, _)| lane_index(&lanes, *track))
+        .and_then(|(place, _)| lane_index(&lanes, place.track))
         .unwrap_or(0);
     let distance = |track: &TrackId| lane_index(&lanes, *track).unwrap_or(first) - first;
+    let mains = by_place.iter().filter(|(place, _)| place.lane.is_none());
     match target {
-        Target::Clips(_) => by_track
-            .iter()
-            .flat_map(|(track, clips)| {
+        Target::Clips(_) => mains
+            .flat_map(|(place, clips)| {
                 clips.iter().map(|clip| EnvelopeMaterial {
-                    source: *track,
-                    distance: distance(track),
+                    source: place.track,
+                    distance: distance(&place.track),
                     start: clip.start - start,
                     length: clip.length,
-                    shapes: envelopes_over(doc, *track, clip.start, clip.end()),
+                    shapes: envelopes_over(doc, place.track, clip.start, clip.end()),
                 })
             })
             .collect(),
-        Target::Time { .. } => by_track
-            .iter()
-            .map(|(track, _)| EnvelopeMaterial {
-                source: *track,
-                distance: distance(track),
+        Target::Time { .. } => mains
+            .map(|(place, _)| EnvelopeMaterial {
+                source: place.track,
+                distance: distance(&place.track),
                 start: Ticks::ZERO,
                 length: end - start,
-                shapes: envelopes_over(doc, *track, start, end),
+                shapes: envelopes_over(doc, place.track, start, end),
             })
             .collect(),
     }
@@ -759,32 +935,32 @@ fn carry_envelopes(
 fn delete_target(editor: &mut Editor, target: &Target) -> Result<(), EditFailure> {
     let doc = editor.document().clone();
     let locked = doc.settings().lock_envelopes;
+    let (by_place, start, end) = lane_material(&doc, target);
     match target {
         Target::Clips(clips) => {
             for clip in clips {
                 apply(editor, Command::DeleteClip { clip: *clip })?;
             }
-            if !locked {
-                let (by_track, start, end) = material(&doc, target);
-                let materials = envelope_material(&doc, target, &by_track, start, end);
-                let tracks = tracks_by_distance(&doc, &by_track);
-                remove_envelopes(editor, &materials, &tracks, start)?;
-            }
-            Ok(())
         }
-        Target::Time { tracks, start, end } => {
-            for track in tracks {
-                clear(editor, *track, *start, *end, &BTreeSet::new())?;
+        Target::Time { places, start, end } => {
+            for place in places {
+                clear_on(
+                    editor,
+                    place.track,
+                    place.lane,
+                    *start,
+                    *end,
+                    &BTreeSet::new(),
+                )?;
             }
-            if !locked {
-                let (by_track, _, _) = material(&doc, target);
-                let materials = envelope_material(&doc, target, &by_track, *start, *end);
-                let tracks = tracks_by_distance(&doc, &by_track);
-                remove_envelopes(editor, &materials, &tracks, *start)?;
-            }
-            Ok(())
         }
     }
+    if !locked {
+        let materials = envelope_material(&doc, target, &by_place, start, end);
+        let tracks = tracks_by_distance(&doc, &by_place);
+        remove_envelopes(editor, &materials, &tracks, start)?;
+    }
+    Ok(())
 }
 
 /// The span the clips cover and their tracks in display order.
@@ -801,7 +977,40 @@ fn span_of(doc: &Document, clips: &[ClipId]) -> Option<(Ticks, Ticks, Vec<TrackI
     (start <= end).then_some((start, end, tracks))
 }
 
+/// The lanes the clips sit on, in display order.
+fn places_of_clips(doc: &Document, clips: &[ClipId]) -> Vec<Place> {
+    let positions = lane_positions(doc);
+    let mut places: Vec<Place> = clips
+        .iter()
+        .filter_map(|clip| Place::of_clip(doc, *clip))
+        .collect();
+    places.sort_by_key(|place| place.row(doc, &positions));
+    places.dedup();
+    places
+}
+
 impl ArrangementView {
+    /// The lanes the selection's time is on: for each selected track, the
+    /// lanes the time selection names there, or its main lane when it names
+    /// none (the comping spec, R27).
+    pub(crate) fn selected_places(&self) -> Vec<Place> {
+        let mut places = Vec::new();
+        for track in &self.selected {
+            let named: Vec<Place> = self
+                .time_selection_lanes
+                .iter()
+                .filter_map(Place::of_lane)
+                .filter(|place| place.track == *track)
+                .collect();
+            if named.is_empty() {
+                places.push(Place::main(*track));
+            } else {
+                places.extend(named);
+            }
+        }
+        places
+    }
+
     /// The selected clips, in the order they were selected (WP-1.8b).
     #[must_use]
     pub fn selected_clips(&self) -> &[ClipId] {
@@ -820,19 +1029,18 @@ impl ArrangementView {
     pub(crate) fn select_clips(&mut self, doc: &Document, clips: Vec<ClipId>) {
         self.selected_clips = clips;
         self.selected_fade = None;
+        self.selected_take_lanes.clear();
         if let Some((start, end, tracks)) = span_of(doc, &self.selected_clips) {
             self.time_selection = Some((start, end));
             self.insert_marker = start;
             self.selected = tracks;
             self.title_bars = false;
             self.follow_paused = false;
-            // Spec: automation-editing R1. The selection is on the tracks'
-            // own lanes.
-            self.time_selection_lanes = self
-                .selected
-                .iter()
-                .copied()
-                .map(|track| Lane::Track { track })
+            // Spec: automation-editing R1, comping R26. The selection is on
+            // the lanes the clips sit on.
+            self.time_selection_lanes = places_of_clips(doc, &self.selected_clips)
+                .into_iter()
+                .map(Place::as_lane)
                 .collect();
         }
     }
@@ -852,7 +1060,14 @@ impl ArrangementView {
     /// selected tracks.
     pub(crate) fn select_span_on(&mut self, lanes: Vec<Lane>, start: Ticks, end: Ticks) {
         self.selected_clips.clear();
-        self.selected = lanes.iter().map(Lane::track).collect();
+        self.selected_take_lanes.clear();
+        let mut tracks: Vec<TrackId> = Vec::new();
+        for track in lanes.iter().map(Lane::track) {
+            if !tracks.contains(&track) {
+                tracks.push(track);
+            }
+        }
+        self.selected = tracks;
         self.time_selection = (end > start).then_some((start, end));
         self.insert_marker = start;
         self.title_bars = false;
@@ -866,6 +1081,8 @@ impl ArrangementView {
     /// starts each frame from the selection it began with.
     pub(crate) fn restore_selection(&mut self, from: &ArrangementView) {
         self.selected_clips.clone_from(&from.selected_clips);
+        self.selected_take_lanes
+            .clone_from(&from.selected_take_lanes);
         self.selected.clone_from(&from.selected);
         self.time_selection = from.time_selection;
         self.time_selection_lanes
@@ -1044,6 +1261,7 @@ pub fn can_run(
     let has_selection = !view.selected_clips.is_empty()
         || (view.time_selection.is_some() && !view.selected.is_empty());
     let given = |key: &str| args.get(key).is_some();
+    let headers = !view.selected_take_lanes.is_empty();
     match id {
         ids::SELECT_CLIPS | ids::SELECT_ALL | ids::LOOP_SELECTION | ids::SELECT_LOOP => true,
         ids::MOVE_CLIPS | ids::RESIZE_CLIPS => given("clips") || !view.selected_clips.is_empty(),
@@ -1054,14 +1272,18 @@ pub fn can_run(
                 || !view.selected_clips.is_empty()
                 || !view.selected.is_empty()
         }
-        ids::DELETE | ids::DUPLICATE | ids::COPY | ids::CUT => {
-            given("clips") || given("start") || has_selection
+        ids::DELETE | ids::DUPLICATE => {
+            given("clips") || given("start") || has_selection || headers
         }
+        ids::COPY | ids::CUT => given("clips") || given("start") || has_selection,
         ids::CREATE_FADE => create_fade_plan(doc, view, args).is_some_and(|plan| !plan.is_empty()),
         ids::DELETE_FADES => given("clips") || !view.selected_clips.is_empty(),
         ids::PASTE => {
-            clipboard.is_some_and(|c| c.material().is_some_and(|m| !m.tracks.is_empty()))
-                && (given("track") || !view.selected.is_empty() || !lanes(doc).is_empty())
+            clipboard.is_some_and(|c| c.material().is_some_and(|m| !m.lanes.is_empty()))
+                && (given("track")
+                    || given("lane")
+                    || !view.selected.is_empty()
+                    || !lanes(doc).is_empty())
         }
         _ => false,
     }
@@ -1184,8 +1406,12 @@ pub fn run(
                 to,
                 anchor,
                 track,
+                lane,
                 copy,
             } = parse(args)?;
+            if track.is_some() && lane.is_some() {
+                return Err(invalid("give `track` or `lane`, not both"));
+            }
             let clips = clips_or_selected(doc, view, clips)?;
             let lanes = lanes(doc);
             let anchor = match anchor {
@@ -1209,65 +1435,98 @@ pub fn run(
                 }
                 (None, None) => Ticks::ZERO,
             };
-            let shift = match track {
-                None => 0,
-                Some(track) => {
+            // Where the anchor goes: its track's main lane for `track`, the
+            // lane `lane` names (the comping spec, R27). The other clips keep
+            // their distance from it in the track list and among each track's
+            // lanes, the main lane above the take lanes.
+            let slot = |place: Place| place.slot(doc).map_or(-1isize, |at| at as isize);
+            let anchor_place = Place::of_clip(doc, anchor).expect("on a track");
+            let destination = match (track, lane) {
+                (Some(track), None) => {
                     tracks_exist(doc, &[track])?;
-                    let to = lane_index(&lanes, track).ok_or_else(|| {
+                    Some(Place::main(track))
+                }
+                (None, Some(lane)) => places_of(doc, view, None, Some(vec![lane]))?
+                    .first()
+                    .copied(),
+                _ => None,
+            };
+            let (shift, slot_shift) = match destination {
+                None => (0, 0),
+                Some(destination) => {
+                    let to = lane_index(&lanes, destination.track).ok_or_else(|| {
                         refused("clips can't go on a return track or the Main track")
                     })?;
-                    let from = doc
-                        .clip_track(anchor)
-                        .and_then(|t| lane_index(&lanes, t))
-                        .unwrap_or(to);
-                    to as isize - from as isize
+                    let from = lane_index(&lanes, anchor_place.track).unwrap_or(to);
+                    (
+                        to as isize - from as isize,
+                        slot(destination) - slot(anchor_place),
+                    )
                 }
             };
             // Where each clip goes, checked before anything changes, and
             // where it was, so its envelopes can go with it (the automation
             // editing spec, R9).
-            let sources: Vec<Option<(TrackId, Ticks, Ticks)>> = clips
+            let sources: Vec<Option<(Place, Ticks, Ticks)>> = clips
                 .iter()
                 .map(|clip| {
                     let value = doc.clip(*clip).expect("the clips exist");
-                    Some((doc.clip_track(*clip)?, value.start, value.end()))
+                    Some((Place::of_clip(doc, *clip)?, value.start, value.end()))
                 })
                 .collect();
             let positions = lane_positions(doc);
             let mut moves = Vec::with_capacity(clips.len());
             for clip in &clips {
                 let value = doc.clip(*clip).expect("the clips exist");
-                let from = doc
-                    .clip_track(*clip)
-                    .and_then(|t| positions.get(&t).copied())
-                    .unwrap_or(0);
-                let destination = from
+                let source = Place::of_clip(doc, *clip).expect("on a track");
+                let from = positions.get(&source.track).copied().unwrap_or(0);
+                let track = from
                     .checked_add_signed(shift)
                     .and_then(|i| lanes.get(i).copied())
                     .ok_or_else(|| refused("there's no track that far up or down"))?;
-                if !fits(doc, destination, &value.data) {
+                if !fits(doc, track, &value.data) {
                     return Err(refused(
                         "a clip would land on a track of another kind: audio clips go on audio \
                          tracks and MIDI clips on MIDI tracks",
                     ));
                 }
+                let at = slot(source) + slot_shift;
+                let take = match usize::try_from(at) {
+                    Ok(at) => Some(
+                        doc.track(track)
+                            .and_then(|held| held.take_lanes().nth(at))
+                            .map(|held| held.id)
+                            .ok_or_else(|| refused("there's no take lane that far down"))?,
+                    ),
+                    Err(_) if at == -1 => None,
+                    Err(_) => return Err(refused("there's no lane that far up")),
+                };
                 let start = value
                     .start
                     .checked_add(by)
                     .filter(|start| !start.is_negative())
                     .ok_or_else(|| refused("a clip would start before 1.1.1"))?;
-                moves.push((*clip, destination, start, start + value.length));
+                moves.push((
+                    *clip,
+                    Place { track, lane: take },
+                    start,
+                    start + value.length,
+                ));
             }
+            let in_place = clips
+                .iter()
+                .zip(&moves)
+                .all(|(clip, (_, place, ..))| Place::of_clip(doc, *clip) == Some(*place));
             let label = if copy { "Copy clips" } else { "Move clips" };
             let locked = doc.settings().lock_envelopes;
             let (moved, recorded) = settled(editor, label, (doc, edge_fades), |editor| {
                 let moved = if copy {
                     let placements = moves
                         .iter()
-                        .map(|(clip, track, start, _)| {
+                        .map(|(clip, place, start, _)| {
                             let value = editor.document().clip(*clip).expect("the clips exist");
                             (
-                                *track,
+                                *place,
                                 vec![Clip {
                                     start: *start,
                                     ..value.clone()
@@ -1276,7 +1535,7 @@ pub fn run(
                         })
                         .collect();
                     place(editor, placements)?
-                } else if shift == 0 {
+                } else if in_place {
                     // In time only: one command, however many clips.
                     if by != Ticks::ZERO {
                         apply(
@@ -1290,12 +1549,13 @@ pub fn run(
                     clear_moved(editor, &clips, &moves)?;
                     clips.clone()
                 } else {
-                    for (clip, track, start, _) in &moves {
+                    for (clip, place, start, _) in &moves {
                         apply(
                             editor,
-                            Command::MoveClip {
+                            Command::MoveClipToLane {
                                 clip: *clip,
-                                track: *track,
+                                track: place.track,
+                                lane: place.lane,
                                 start: *start,
                             },
                         )?;
@@ -1304,16 +1564,20 @@ pub fn run(
                     clips.clone()
                 };
                 // Spec: automation-editing R9. The tracks' envelopes go
-                // over the clips' spans, in the same undo step.
+                // over the clips' spans, in the same undo step. They follow
+                // the main lanes: a take lane's clips carry none.
                 if !locked {
                     for ((_, to, start, end), source) in moves.iter().zip(&sources) {
                         let Some((from, old_start, old_end)) = source else {
                             continue;
                         };
+                        if from.lane.is_some() || to.lane.is_some() {
+                            continue;
+                        }
                         carry_envelopes(
                             editor,
-                            *from,
-                            *to,
+                            from.track,
+                            to.track,
                             (*old_start, *old_end),
                             (*start, *end),
                             copy,
@@ -1424,7 +1688,12 @@ pub fn run(
             Ok(to_value(&result(doc, editor, view, recorded)))
         }
         ids::SPLIT => {
-            let SplitArgs { clips, tracks, at } = parse(args)?;
+            let SplitArgs {
+                clips,
+                tracks,
+                lanes,
+                at,
+            } = parse(args)?;
             let signatures = &doc.settings().time_signatures;
             let mut positions: Vec<Ticks> = match at {
                 Some(at) => at
@@ -1439,21 +1708,22 @@ pub fn run(
             };
             positions.sort_unstable();
             positions.dedup();
-            let targets: Vec<ClipId> = match (clips, tracks) {
-                (Some(_), Some(_)) => return Err(invalid("give `clips` or `tracks`, not both")),
-                (Some(clips), None) => clips_or_selected(doc, view, Some(clips))?,
-                (None, Some(tracks)) => {
-                    tracks_exist(doc, &tracks)?;
-                    clips_on(doc, &tracks)
-                }
-                (None, None) if !view.selected_clips.is_empty() => {
+            let targets: Vec<ClipId> = match (clips, tracks, lanes) {
+                (Some(clips), None, None) => clips_or_selected(doc, view, Some(clips))?,
+                (None, None, None) if !view.selected_clips.is_empty() => {
                     clips_or_selected(doc, view, None)?
                 }
-                (None, None) => {
+                (None, None, None) => {
                     if view.selected.is_empty() {
                         return Err(unavailable("no track or clip is selected"));
                     }
-                    clips_on(doc, &view.selected)
+                    clips_in(doc, &view.selected_places())
+                }
+                (None, tracks, lanes) => clips_in(doc, &places_of(doc, view, tracks, lanes)?),
+                _ => {
+                    return Err(invalid(
+                        "give `clips`, `tracks` or `lanes`, not more than one",
+                    ));
                 }
             };
             let (created, recorded) =
@@ -1493,7 +1763,18 @@ pub fn run(
             Ok(to_value(&result(doc, editor, view, recorded)))
         }
         ids::DELETE => {
-            let target = target(doc, view, parse(args)?)?;
+            let args: TargetArgs = parse(args)?;
+            // Spec: comping R7, R28. With take lane headers selected, Delete
+            // deletes the lanes.
+            if args == TargetArgs::default() && !view.selected_take_lanes.is_empty() {
+                let lanes = view.selected_take_lanes.clone();
+                let (_, recorded) = transaction(editor, "Delete Take Lane(s)", |editor| {
+                    apply(editor, Command::DeleteTakeLanes { lanes })
+                })?;
+                view.selected_take_lanes.clear();
+                return Ok(to_value(&result(doc, editor, view, recorded)));
+            }
+            let target = target(doc, view, args)?;
             let (_, recorded) = settled(editor, "Delete", (doc, edge_fades), |editor| {
                 delete_target(editor, &target)
             })?;
@@ -1501,17 +1782,30 @@ pub fn run(
             Ok(to_value(&result(doc, editor, view, recorded)))
         }
         ids::DUPLICATE => {
-            let target = target(doc, view, parse(args)?)?;
-            let (by_track, start, end) = material(doc, &target);
+            let args: TargetArgs = parse(args)?;
+            // Spec: comping R5, R28. With take lane headers selected, it
+            // duplicates the lanes.
+            if args == TargetArgs::default() && !view.selected_take_lanes.is_empty() {
+                super::comping::run(
+                    bl_shell_spec::comping::DUPLICATE,
+                    serde_json::json!({}),
+                    editor,
+                    view,
+                )?;
+                let recorded = editor.document() != doc;
+                return Ok(to_value(&result(doc, editor, view, recorded)));
+            }
+            let target = target(doc, view, args)?;
+            let (by_place, start, end) = lane_material(doc, &target);
             let length = end - start;
             // Spec: automation-editing R9. The copy carries the envelopes
             // over the same spans.
-            let materials = envelope_material(doc, &target, &by_track, start, end);
-            let tracks = tracks_by_distance(doc, &by_track);
+            let materials = envelope_material(doc, &target, &by_place, start, end);
+            let tracks = tracks_by_distance(doc, &by_place);
             let locked = doc.settings().lock_envelopes;
-            let placements = by_track
+            let placements = by_place
                 .into_iter()
-                .map(|(track, clips)| {
+                .map(|(place, clips)| {
                     let clips = clips
                         .into_iter()
                         .map(|c| Clip {
@@ -1519,7 +1813,7 @@ pub fn run(
                             ..c
                         })
                         .collect();
-                    (track, clips)
+                    (place, clips)
                 })
                 .collect();
             let (created, recorded) = settled(editor, "Duplicate", (doc, edge_fades), |editor| {
@@ -1531,7 +1825,11 @@ pub fn run(
             })?;
             match target {
                 Target::Clips(_) => view.select_clips(editor.document(), created),
-                Target::Time { tracks, .. } => view.select_span(tracks, end, end + length),
+                Target::Time { places, .. } => view.select_span_on(
+                    places.into_iter().map(Place::as_lane).collect(),
+                    end,
+                    end + length,
+                ),
             }
             Ok(to_value(&result(doc, editor, view, recorded)))
         }
@@ -1553,11 +1851,14 @@ pub fn run(
             Ok(to_value(&result(doc, editor, view, recorded)))
         }
         ids::PASTE => {
-            let PasteArgs { at, track } = parse(args)?;
+            let PasteArgs { at, track, lane } = parse(args)?;
+            if track.is_some() && lane.is_some() {
+                return Err(invalid("give `track` or `lane`, not both"));
+            }
             let Some(copied) = clipboard
                 .as_ref()
                 .and_then(Clipboard::material)
-                .filter(|c| !c.tracks.is_empty())
+                .filter(|c| !c.lanes.is_empty())
             else {
                 return Err(unavailable("there's nothing on the clipboard to paste"));
             };
@@ -1570,46 +1871,73 @@ pub fn run(
                     .map_or(view.insert_marker, |(start, _)| start),
             };
             let lanes = lanes(doc);
-            let first = match track {
-                Some(track) => {
+            let positions = lane_positions(doc);
+            // The lane the material's first lane goes to.
+            let first: Place = match (track, lane) {
+                (Some(track), None) => {
                     tracks_exist(doc, &[track])?;
-                    track
+                    Place::main(track)
                 }
-                None => view
-                    .selected
-                    .iter()
+                (None, Some(lane)) => places_of(doc, view, None, Some(vec![lane]))?
+                    .first()
                     .copied()
-                    .filter(|t| lane_index(&lanes, *t).is_some())
-                    .min_by_key(|t| lane_index(&lanes, *t))
+                    .ok_or_else(|| invalid("`lane` names no lane"))?,
+                _ => view
+                    .selected_places()
+                    .into_iter()
+                    .filter(|place| lane_index(&lanes, place.track).is_some())
+                    .min_by_key(|place| place.row(doc, &positions))
                     .or_else(|| {
                         copied
                             .source
                             .first()
                             .copied()
                             .filter(|t| doc.track(*t).is_some())
+                            .map(Place::main)
                     })
                     .ok_or_else(|| unavailable("no track is selected to paste onto"))?,
             };
-            let base = lane_index(&lanes, first)
+            let base = lane_index(&lanes, first.track)
                 .ok_or_else(|| refused("clips can't go on a return track or the Main track"))?;
-            let mut placements = Vec::with_capacity(copied.tracks.len());
-            let mut destinations = Vec::with_capacity(copied.tracks.len());
+            // The material's lanes keep their distance from its first, among
+            // the tracks and among a track's lanes, the main lane above the
+            // take lanes.
+            let slot_pos = |slot: Option<usize>| slot.map_or(-1isize, |at| at as isize);
+            let slot_shift = first.slot(doc).map_or(-1isize, |at| at as isize)
+                - slot_pos(copied.lanes.first().and_then(|lane| lane.slot));
+            let mut placements = Vec::with_capacity(copied.lanes.len());
+            let mut destinations = Vec::with_capacity(copied.lanes.len());
             let mut landed: BTreeMap<usize, TrackId> = BTreeMap::new();
-            for (distance, clips) in &copied.tracks {
+            for held in &copied.lanes {
                 let track = lanes
-                    .get(base + distance)
+                    .get(base + held.distance)
                     .copied()
                     .ok_or_else(|| refused("there aren't enough tracks below to paste onto"))?;
-                destinations.push(track);
-                landed.insert(*distance, track);
-                let clips = clips
+                let at_slot = slot_pos(held.slot) + slot_shift;
+                let take = match usize::try_from(at_slot) {
+                    Ok(at_slot) => Some(
+                        doc.track(track)
+                            .and_then(|t| t.take_lanes().nth(at_slot))
+                            .map(|t| t.id)
+                            .ok_or_else(|| {
+                                refused("there aren't enough take lanes below to paste onto")
+                            })?,
+                    ),
+                    Err(_) if at_slot == -1 => None,
+                    Err(_) => return Err(refused("there isn't a lane that far up to paste onto")),
+                };
+                let place = Place { track, lane: take };
+                destinations.push(place);
+                landed.insert(held.distance, track);
+                let clips = held
+                    .clips
                     .iter()
                     .map(|c| Clip {
                         start: c.start + at,
                         ..c.clone()
                     })
                     .collect();
-                placements.push((track, clips));
+                placements.push((place, clips));
             }
             let length = copied.length;
             // Spec: automation-editing R9. The pasted material carries the
@@ -1623,7 +1951,11 @@ pub fn run(
                 }
                 Ok(created)
             })?;
-            view.select_span(destinations, at, at + length);
+            view.select_span_on(
+                destinations.into_iter().map(Place::as_lane).collect(),
+                at,
+                at + length,
+            );
             if !created.is_empty() {
                 view.selected_clips = created;
             }
@@ -1782,12 +2114,11 @@ fn earliest(doc: &Document, lanes: &[TrackId], clips: &[ClipId]) -> ClipId {
     best.map_or(clips[0], |(_, clip, _)| clip)
 }
 
-/// Every clip on the tracks.
-fn clips_on(doc: &Document, tracks: &[TrackId]) -> Vec<ClipId> {
-    tracks
+/// Every clip on the lanes.
+fn clips_in(doc: &Document, places: &[Place]) -> Vec<ClipId> {
+    places
         .iter()
-        .filter_map(|t| doc.track(*t))
-        .flat_map(|t| t.clips().map(|c| c.id))
+        .flat_map(|place| place.clips(doc).into_iter().map(|clip| clip.id))
         .collect()
 }
 

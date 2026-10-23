@@ -1307,6 +1307,19 @@ const ENTRIES: &[Entry] = &[
             several clips together, use `clip.move_by`.",
     },
     Entry {
+        id: "clip.move_to_lane",
+        action: Action::Apply("move_clip_to_lane"),
+        label: "Move Clip to Lane",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Moves a clip so it starts at `start` on the main lane of `track`, or, with \
+            `lane`, on that take lane of the track, out of the lane or Session slot it sat in. \
+            The track must be an audio or MIDI track of the clip's kind. It does not clear what \
+            the destination holds there; to move clips as the Arrangement does, replacing what \
+            they land on, use `arrangement.move_clips`.",
+    },
+    Entry {
         id: "clip.move_by",
         action: Action::Apply("move_clips"),
         label: "Move Clips",

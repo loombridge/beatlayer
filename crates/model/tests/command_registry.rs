@@ -2888,6 +2888,15 @@ fn schemas_match_what_commands_serialise() {
             },
         ),
         (
+            "clip.move_to_lane",
+            Command::MoveClipToLane {
+                clip,
+                track,
+                lane: None,
+                start: Ticks::QUARTER,
+            },
+        ),
+        (
             "clip.move_by",
             Command::MoveClips {
                 clips: vec![clip, ClipId(fresh())],

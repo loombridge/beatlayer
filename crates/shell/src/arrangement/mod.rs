@@ -18,11 +18,14 @@ pub mod grid;
 pub mod locator;
 pub mod placing;
 pub mod rows;
+pub mod take_lanes;
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use bl_core::time::{Ticks, TimeSignature};
-use bl_model::{AutomationTarget, ClipId, Document, LocatorId, MixerParam, TrackId, TrackKind};
+use bl_model::{
+    AutomationTarget, ClipId, Document, LocatorId, MixerParam, TakeLaneId, TrackId, TrackKind,
+};
 use bl_shell_spec::arrangement::{
     self as ids, ArrangementState, AutomationLane, FadeHandle, FadeHandleState, FoldArgs,
     FoldGroupsArgs, FollowArgs, InsertMarkerArgs, Lane, ScrollArgs, SelectFadeHandleArgs,
@@ -178,6 +181,14 @@ pub struct ArrangementView {
     selected_clips: Vec<ClipId>,
     /// The selected locators (WP-6.24): see [`locator`].
     selected_locators: Vec<LocatorId>,
+    /// The take lanes whose headers are selected (the comping spec, R26): see
+    /// [`take_lanes`].
+    selected_take_lanes: Vec<TakeLaneId>,
+    /// The tracks whose take lanes show (R24).
+    shown_take_lanes: BTreeSet<TrackId>,
+    /// The heights take lanes were given; the others are
+    /// [`rows::DEFAULT_TAKE_LANE_HEIGHT`] tall (R28).
+    take_heights: BTreeMap<TakeLaneId, f32>,
     /// The selected fade handle (WP-6.51): see [`fades`].
     selected_fade: Option<FadeHandleState>,
     title_bars: bool,
@@ -253,6 +264,9 @@ impl ArrangementView {
             selected: Vec::new(),
             selected_clips: Vec::new(),
             selected_locators: Vec::new(),
+            selected_take_lanes: Vec::new(),
+            shown_take_lanes: BTreeSet::new(),
+            take_heights: BTreeMap::new(),
             selected_fade: None,
             title_bars: false,
             time_selection: None,
@@ -678,6 +692,13 @@ impl ArrangementView {
             } else {
                 self.automation_lane_height(track)
             };
+            // Spec: comping R23, R24. The take lanes under an unfolded
+            // track, while they show and Automation Mode is off.
+            let take = if folded {
+                0.0
+            } else {
+                self.take_lanes_height(doc, track)
+            };
             out.push(Row {
                 track,
                 kind,
@@ -685,15 +706,16 @@ impl ArrangementView {
                 top,
                 height,
                 automation,
+                take,
                 folded,
             });
-            top += height + automation;
+            top += height + automation + take;
         }
         if self.optimize_height && !out.is_empty() {
             let each = (self.viewport.height / out.len() as f32).max(MIN_OPTIMIZED_HEIGHT);
             for (index, row) in out.iter_mut().enumerate() {
                 row.top = each * index as f32;
-                row.height = (each - row.automation).max(MIN_OPTIMIZED_HEIGHT);
+                row.height = (each - row.automation - row.take).max(MIN_OPTIMIZED_HEIGHT);
             }
         }
     }
@@ -871,6 +893,7 @@ impl ArrangementView {
         self.forget_missing_locators(doc);
         self.folded.retain(|id| doc.track(*id).is_some());
         self.heights.retain(|id, _| doc.track(*id).is_some());
+        self.forget_missing_take_lanes(doc);
         self.automation_lanes
             .retain(|id, _| doc.track(*id).is_some());
         self.clamp_scroll(doc);
@@ -906,7 +929,13 @@ impl ArrangementView {
                     .is_some_and(|track| track.kind() == TrackKind::Group)
             }),
             ids::FOLD_TRACKS => args.get("tracks").is_some() || !self.selected.is_empty(),
-            ids::SET_TRACK_HEIGHT => args.get("tracks").is_some() || !self.selected.is_empty(),
+            ids::SET_TRACK_HEIGHT => {
+                args.get("tracks").is_some()
+                    || args.get("take_lanes").is_some()
+                    || !self.selected.is_empty()
+                    || !self.selected_take_lanes.is_empty()
+            }
+            ids::SHOW_TAKE_LANES | ids::SELECT_TAKE_LANES => self.can_run_take_lanes(id, args, doc),
             _ => true,
         }
     }
@@ -1119,8 +1148,17 @@ impl ArrangementView {
                 };
             }
             ids::SET_INSERT_MARKER => {
-                let InsertMarkerArgs { at, track } = parse(args)?;
+                let InsertMarkerArgs { at, track, lane } = parse(args)?;
                 self.selected_fade = None;
+                self.selected_take_lanes.clear();
+                // Spec: comping R26. A click on a take lane selects the lane
+                // with the marker.
+                let track = match lane {
+                    Some(lane) => Some(doc.take_lane_track(lane).ok_or_else(|| {
+                        ViewError::InvalidArgs(format!("no take lane has the ID {}", lane.0))
+                    })?),
+                    None => track,
+                };
                 if let Some(track) = track {
                     self.targets(doc, Some(vec![track]))?;
                     self.selected = vec![track];
@@ -1130,7 +1168,10 @@ impl ArrangementView {
                 self.time_selection = None;
                 // Spec: automation-editing R1. A selection with no lanes
                 // names no lane.
-                self.time_selection_lanes.clear();
+                self.time_selection_lanes = match (lane, track) {
+                    (Some(lane), Some(track)) => vec![Lane::Take { track, lane }],
+                    _ => Vec::new(),
+                };
                 // Spec: arrangement-editing R2.
                 self.selected_clips.clear();
                 // Spec: arrangement-view R10.
@@ -1145,6 +1186,11 @@ impl ArrangementView {
                 let tracks = self.targets(doc, Some(tracks))?;
                 self.selected_clips.clear();
                 self.selected_fade = None;
+                self.selected_take_lanes.clear();
+                // Spec: comping R26. Selecting a track lets go of the take
+                // lanes the selection was on.
+                self.time_selection_lanes
+                    .retain(|lane| !matches!(lane, Lane::Take { .. }));
                 if add {
                     for track in tracks {
                         if !self.selected.contains(&track) {
@@ -1174,11 +1220,26 @@ impl ArrangementView {
                 if let Some(tracks) = tracks {
                     self.selected = self.targets(doc, Some(tracks))?;
                 }
+                self.selected_take_lanes.clear();
                 // Spec: automation-editing R1. The selection names the lanes
-                // it covers: each a track's own lane or its automation lane.
+                // it covers: each a track's own lane, a take lane under it
+                // (comping R26) or its automation lane.
                 self.time_selection_lanes = match lanes {
                     Some(lanes) => {
-                        let tracks: Vec<TrackId> = lanes.iter().map(Lane::track).collect();
+                        let mut tracks: Vec<TrackId> = Vec::new();
+                        for lane in &lanes {
+                            if let Lane::Take { track, lane } = lane
+                                && doc.take_lane_track(*lane) != Some(*track)
+                            {
+                                return Err(ViewError::InvalidArgs(format!(
+                                    "take lane {} isn't one of track {}'s",
+                                    lane.0, track.0
+                                )));
+                            }
+                            if !tracks.contains(&lane.track()) {
+                                tracks.push(lane.track());
+                            }
+                        }
                         self.selected = self.targets(doc, Some(tracks))?;
                         lanes
                     }
@@ -1240,11 +1301,22 @@ impl ArrangementView {
             ids::SET_TRACK_HEIGHT => {
                 let TrackHeightArgs {
                     tracks,
+                    take_lanes,
                     height,
                     delta,
                 } = parse(args)?;
-                let tracks = self.targets(doc, tracks)?;
-                if tracks.is_empty() {
+                // Spec: comping R28. With take lane headers selected, they
+                // are what Option with + or - resizes.
+                let (tracks, take_lanes) = match (tracks, take_lanes) {
+                    (None, None) if !self.selected_take_lanes.is_empty() => {
+                        (Vec::new(), self.selected_take_lanes.clone())
+                    }
+                    (None, Some(take_lanes)) => (Vec::new(), take_lanes),
+                    (tracks, take_lanes) => {
+                        (self.targets(doc, tracks)?, take_lanes.unwrap_or_default())
+                    }
+                };
+                if tracks.is_empty() && take_lanes.is_empty() {
                     return Err(unavailable("no track is selected"));
                 }
                 if height.is_some() == delta.is_some() {
@@ -1252,15 +1324,20 @@ impl ArrangementView {
                         "give `height` or `delta`".to_owned(),
                     ));
                 }
-                for track in tracks {
-                    let now = f64::from(self.track_height(track));
-                    let new = height.unwrap_or(now + delta.unwrap_or(0.0));
-                    if !new.is_finite() {
-                        return Err(ViewError::InvalidArgs(
+                let resized = |now: f32| {
+                    let new = height.unwrap_or(f64::from(now) + delta.unwrap_or(0.0));
+                    if new.is_finite() {
+                        Ok(new as f32)
+                    } else {
+                        Err(ViewError::InvalidArgs(
                             "the height must be a number".to_owned(),
-                        ));
+                        ))
                     }
-                    let new = (new as f32).clamp(MIN_TRACK_HEIGHT, MAX_TRACK_HEIGHT);
+                };
+                self.set_take_lane_heights(doc, &take_lanes, resized)?;
+                for track in tracks {
+                    let new = resized(self.track_height(track))?;
+                    let new = new.clamp(MIN_TRACK_HEIGHT, MAX_TRACK_HEIGHT);
                     self.heights.insert(track, new);
                 }
                 self.optimize_height = false;
@@ -1268,6 +1345,13 @@ impl ArrangementView {
             }
             ids::FOCUS_TITLE_BAR => {
                 parse::<bl_commands::NoArgs>(args)?;
+                // Spec: comping R26. With no time selected, Esc moves to the
+                // headers of the take lanes the selection is on.
+                let lanes = self.selection_take_lanes();
+                if self.time_selection.is_none() && !lanes.is_empty() {
+                    self.select_take_lane_headers(doc, lanes);
+                    return Ok(self.state(doc));
+                }
                 let first = self
                     .selected
                     .first()
@@ -1301,6 +1385,9 @@ impl ArrangementView {
             ids::SHOW_VOLUME => {
                 let SwitchArgs { on } = parse(args)?;
                 self.show_volume = on.unwrap_or(!self.show_volume);
+            }
+            ids::SELECT_TAKE_LANES | ids::SHOW_TAKE_LANES => {
+                self.run_take_lanes(id, args, doc)?;
             }
             ids::SHOW_RETURN_TRACKS => {
                 let SwitchArgs { on } = parse(args)?;
@@ -1354,6 +1441,8 @@ impl ArrangementView {
             selected_tracks: self.selected.clone(),
             selected_clips: self.selected_clips.clone(),
             selected_locators: self.selected_locators.clone(),
+            selected_take_lanes: self.selected_take_lanes.clone(),
+            shown_take_lanes: self.shown_take_lanes.iter().copied().collect(),
             selected_fade: self.selected_fade,
             time_selection: self
                 .time_selection
@@ -1390,6 +1479,13 @@ impl ArrangementView {
             ids::SNAP_TO_GRID => Some(self.grid.snap),
             ids::FIXED_GRID => Some(self.grid.fixed_on),
             ids::AUTOMATION_MODE => Some(self.automation_mode),
+            // Spec: track-context-menu R10. Ticked while the clicked track's
+            // take lanes show; the first selected track stands for it.
+            ids::SHOW_TAKE_LANES => Some(
+                self.selected
+                    .first()
+                    .is_some_and(|track| self.shows_take_lanes(*track)),
+            ),
             ids::AUTOMATION_ARM => Some(self.automation_arm),
             ids::SHOW_IN_OUT => Some(self.show_in_out),
             ids::SHOW_VOLUME => Some(self.show_volume),

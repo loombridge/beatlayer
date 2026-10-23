@@ -25,6 +25,7 @@ pub mod headers;
 pub mod peaks;
 pub mod rulers;
 pub mod scene;
+pub mod take_lanes;
 
 use std::sync::Arc;
 use std::sync::mpsc::Receiver;
@@ -51,6 +52,7 @@ use self::gpu::{ArrangementCallback, Shared, SharedFrame, Slot, lock};
 use self::headers::Header;
 use self::peaks::{PeakLibrary, PeakSource};
 use self::scene::{ClipIndex, FrameStats, Label, LanesInput, ShownClip};
+use self::take_lanes::{Named, TakeLaneMenus};
 use crate::layout::{ArrangementLayout, header_columns};
 use crate::main_window::{UiEvent, main_view_id};
 use crate::theme::Theme;
@@ -194,6 +196,8 @@ pub struct ArrangementUi {
     menus: ContextMenus,
     /// The track header's context menu (WP-4.22).
     track_menus: TrackMenus,
+    /// The take lane header's context menu (WP-6.22).
+    lane_menus: TakeLaneMenus,
     /// The playhead the last frame drew: its position and its x, if it was
     /// in view (WP-1.18).
     playhead: Option<(Ticks, f32)>,
@@ -350,6 +354,7 @@ impl ArrangementUi {
             automation: AutomationGestures::default(),
             menus: ContextMenus::new(),
             track_menus: TrackMenus::default(),
+            lane_menus: TakeLaneMenus::default(),
             playhead: None,
             locator_drag: None,
             locators_drawn: Vec::new(),
@@ -515,6 +520,7 @@ impl ArrangementUi {
             };
             if self.lanes_key != Some(key) || index_changed || peaks_changed {
                 let slot = &mut shared.slots[Slot::Lanes as usize];
+                let selected_lanes = view.selection_take_lanes();
                 self.stats = scene::build_lanes(
                     &LanesInput {
                         doc,
@@ -524,7 +530,9 @@ impl ArrangementUi {
                         scroll_y,
                         pixels_per_point: ppp,
                         theme,
+                        view,
                         selected: view.selected_tracks(),
+                        selected_lanes: &selected_lanes,
                         selected_clips: view.selected_clips(),
                         grid_step: view.grid_step(doc),
                     },
@@ -618,7 +626,7 @@ impl ArrangementUi {
         crate::menus::keyboard_context_menu(&lanes_response, |ui| {
             self.menus.show(ui, shell, events);
         });
-        self.draw_overlays(ui, view, theme, &layout, horizontal);
+        self.draw_overlays(ui, view, doc, theme, &layout, horizontal);
         {
             let clip_lanes = Lanes {
                 view,
@@ -861,6 +869,7 @@ impl ArrangementUi {
                                         y - lanes.top() + scroll_y,
                                         pos.y - lanes.top() + scroll_y,
                                         view,
+                                        doc,
                                     ),
                                 )
                             }
@@ -960,13 +969,17 @@ impl ArrangementUi {
                     .click(view, doc, &lane, pos, modifiers, events)
             });
             if !handled && !self.clips.click(&clip_lanes, pos, keys, events) {
-                // I-CLICK-011: the insert marker, and the track under it.
-                let track = self
-                    .row_at(lanes, scroll_y, pos)
-                    .map(|i| self.rows[i].track);
+                // I-CLICK-011: the insert marker, and the track under it; on
+                // a take lane, the lane with it (the comping spec, R26).
+                let place = clip_lanes.place_at(pos);
                 let mut args = json!({ "at": view.snap(doc, at(pos)) });
-                if let Some(track) = track {
-                    args["track"] = json!(track);
+                match place {
+                    Some((row, Some(lane))) => {
+                        args["track"] = json!(self.rows[row].track);
+                        args["lane"] = json!(lane);
+                    }
+                    Some((row, None)) => args["track"] = json!(self.rows[row].track),
+                    None => {}
                 }
                 invoke(events, ids::SET_INSERT_MARKER, args);
             }
@@ -989,13 +1002,25 @@ impl ArrangementUi {
             } else if scroll != egui::Vec2::ZERO {
                 if modifiers.alt {
                     // I-SCROLL-004: Option (Alt) with the wheel changes the
-                    // height of the track under the pointer.
-                    if let Some(row) = self.row_at(lanes, scroll_y, pos) {
-                        invoke(
-                            events,
-                            ids::SET_TRACK_HEIGHT,
-                            json!({ "tracks": [self.rows[row].track], "delta": scroll.y }),
-                        );
+                    // height of the track under the pointer; over a take
+                    // lane, the selected take lanes' (I-SCROLL-006), or the
+                    // lane under the pointer if none is selected.
+                    if let Some((row, lane)) = clip_lanes.place_at(pos) {
+                        match lane {
+                            Some(lane) if view.selected_take_lanes().is_empty() => invoke(
+                                events,
+                                ids::SET_TRACK_HEIGHT,
+                                json!({ "take_lanes": [lane], "delta": scroll.y }),
+                            ),
+                            Some(_) => {
+                                invoke(events, ids::SET_TRACK_HEIGHT, json!({ "delta": scroll.y }))
+                            }
+                            None => invoke(
+                                events,
+                                ids::SET_TRACK_HEIGHT,
+                                json!({ "tracks": [self.rows[row].track], "delta": scroll.y }),
+                            ),
+                        }
                     }
                 } else {
                     // I-SCROLL-001, S-ZOOM-006: egui turns Shift with the
@@ -1018,6 +1043,7 @@ impl ArrangementUi {
         &self,
         ui: &Ui,
         view: &ArrangementView,
+        doc: &Document,
         theme: &Theme,
         layout: &ArrangementLayout,
         horizontal: Horizontal,
@@ -1027,14 +1053,40 @@ impl ArrangementUi {
         let scroll_y = view.scroll_y() as f32;
         let x_of = |at: Ticks| lanes.left() + horizontal.x(at) as f32;
         let selected = view.selected_tracks();
+        // The selected tracks' lanes: each track's own lane, or the lanes
+        // the selection names there, take lanes among them (the comping
+        // spec, R26).
         let rows_of_selection = || {
-            self.rows
-                .iter()
-                .filter(|row| selected.contains(&row.track))
-                .map(|row| {
-                    let top = lanes.top() + row.top - scroll_y;
-                    (top, top + row.height)
-                })
+            let mut spans: Vec<(f32, f32)> = Vec::new();
+            for row in self.rows.iter().filter(|row| selected.contains(&row.track)) {
+                let top = lanes.top() + row.top - scroll_y;
+                let named: Vec<&Lane> = view
+                    .time_selection_lanes()
+                    .iter()
+                    .filter(|lane| {
+                        lane.track() == row.track && !matches!(lane, Lane::Automation { .. })
+                    })
+                    .collect();
+                if named.is_empty() {
+                    spans.push((top, top + row.height));
+                    continue;
+                }
+                for lane in named {
+                    match lane {
+                        Lane::Take { lane, .. } => {
+                            if let Some(held) = view
+                                .take_lane_rows(doc, row)
+                                .find(|held| held.lane == *lane)
+                            {
+                                let y = lanes.top() + held.top - scroll_y;
+                                spans.push((y, y + held.height));
+                            }
+                        }
+                        _ => spans.push((top, top + row.height)),
+                    }
+                }
+            }
+            spans.into_iter()
         };
         // The time selection, over the selected tracks; selected clips show
         // their own highlight instead (WP-1.8b).
@@ -1597,10 +1649,24 @@ impl ArrangementUi {
         let selected = view.selected_tracks();
         let title_bars = view.title_bars_selected();
         // S-CTX-002 with the view focused opens the selected title bar's
-        // menu (the accessibility spec, R8).
+        // menu (the accessibility spec, R8), or the selected take lane
+        // header's (the comping spec, R29).
         let keys = title_bars && ui.ctx().memory(|m| m.has_focus(main_view_id()));
+        let keys_for_lanes = !view.selected_take_lanes().is_empty()
+            && ui.ctx().memory(|m| m.has_focus(main_view_id()));
         let mut header_ui = ui.new_child(egui::UiBuilder::new().max_rect(column));
         header_ui.set_clip_rect(column);
+        // The names Tab moves between while one is typed, and the take lane
+        // headers in order, for Shift-click (the comping spec, R26, R28).
+        let mut names: Vec<Named> = Vec::new();
+        let mut lane_order: Vec<bl_model::TakeLaneId> = Vec::new();
+        for row in &self.rows {
+            names.push(Named::Track(row.track));
+            for lane in view.take_lane_rows(doc, row) {
+                names.push(Named::Lane(lane.lane));
+                lane_order.push(lane.lane);
+            }
+        }
         for (index, row) in self.rows[visible.clone()].iter().enumerate() {
             let Some(track) = doc.track(row.track) else {
                 continue;
@@ -1628,10 +1694,50 @@ impl ArrangementUi {
                     keys: keys && selected.first() == Some(&row.track),
                     show_in_out: view.show_in_out(),
                     show_volume: view.show_volume(),
+                    take_toggle: view
+                        .take_toggle_shown(doc, row.track)
+                        .then(|| view.shows_take_lanes(row.track)),
                 },
                 &self.every_track,
                 events,
             );
+            // WP-6.22: a header beside each take lane under the track
+            // (L-ARR-020).
+            for lane in view.take_lane_rows(doc, row) {
+                let Some(held) = doc.take_lane(lane.lane) else {
+                    continue;
+                };
+                let top = column.top() + lane.top - scroll_y;
+                if top > column.bottom() || top + lane.height < column.top() {
+                    continue;
+                }
+                take_lanes::header(
+                    &mut header_ui,
+                    theme,
+                    &self.lane_menus,
+                    &take_lanes::LaneHeader {
+                        shell,
+                        track: row.track,
+                        lane: lane.lane,
+                        name: &held.name,
+                        rect: Rect::from_min_max(
+                            pos2(column.left(), top),
+                            pos2(column.right(), top + lane.height),
+                        ),
+                        colour: scene::track_colour(theme, row.track),
+                        selected: view.is_take_lane_selected(lane.lane),
+                        auditioned: doc
+                            .track(row.track)
+                            .is_some_and(|t| t.audition() == Some(lane.lane)),
+                        show_in_out: view.show_in_out(),
+                        keys: keys_for_lanes
+                            && view.selected_take_lanes().first() == Some(&lane.lane),
+                        order: &lane_order,
+                        names: &names,
+                    },
+                    events,
+                );
+            }
             // WP-2.12: the automation lane's device and parameter choosers,
             // in the header column at the lane's row.
             if row.automation > 0.0 {
@@ -1707,6 +1813,7 @@ impl ArrangementUi {
                         keys: keys && selected.first() == Some(id),
                         show_in_out: view.show_in_out(),
                         show_volume: view.show_volume(),
+                        take_toggle: None,
                     },
                     &[],
                     events,
@@ -1757,6 +1864,7 @@ impl ArrangementUi {
                     keys: keys && selected.first() == Some(id),
                     show_in_out: view.show_in_out(),
                     show_volume: view.show_volume(),
+                    take_toggle: None,
                 },
                 &[],
                 events,
@@ -2072,6 +2180,10 @@ impl ArrangementUi {
                 m.focused().is_none_or(|id| {
                     id == main_view_id()
                         || self.rows.iter().any(|r| headers::title_id(r.track) == id)
+                        || view
+                            .selected_take_lanes()
+                            .iter()
+                            .any(|lane| take_lanes::title_id(*lane) == id)
                         || shell
                             .editor()
                             .document()
@@ -2170,7 +2282,87 @@ impl ArrangementUi {
                 invoke(events, command, args);
             }
         }
-        if up || down {
+        // Spec: comping R28. Cmd+Up and Cmd+Down (Ctrl on Windows) move the
+        // take lanes whose headers are selected (S-COMP-008) and otherwise
+        // replace the main lane's material with the previous or next take
+        // (S-COMP-006); each key is the same shortcut's other direction,
+        // which the keymap can't say.
+        let (cmd_up, cmd_down, rename) = ui.input(|i| {
+            let pressed = |key: Key| {
+                i.events.iter().any(|event| {
+                    matches!(
+                        event,
+                        egui::Event::Key { key: k, pressed: true, modifiers, .. }
+                            if *k == key
+                                && modifiers.command
+                                && !modifiers.alt
+                                && !modifiers.shift
+                    )
+                })
+            };
+            (
+                pressed(Key::ArrowUp),
+                pressed(Key::ArrowDown),
+                pressed(Key::R),
+            )
+        });
+        if cmd_up || cmd_down {
+            if view.selected_take_lanes().is_empty() {
+                let args = json!({ "direction": if cmd_down { "next" } else { "previous" } });
+                if shell.can_invoke("take_lane.replace_with_take", &args) {
+                    invoke(events, "take_lane.replace_with_take", args);
+                }
+            } else if let Some((lanes, index)) = moved_lanes(
+                shell.editor().document(),
+                view.selected_take_lanes(),
+                cmd_down,
+            ) {
+                invoke(
+                    events,
+                    "take_lane.move",
+                    json!({ "lanes": lanes, "index": index }),
+                );
+            }
+        }
+        // Spec: comping R28. Cmd+R types a new name in the first selected
+        // take lane's header.
+        if rename && !view.selected_take_lanes().is_empty() {
+            invoke(events, "take_lane.rename", json!({}));
+        }
+        if (up || down) && !view.selected_take_lanes().is_empty() {
+            // Up and Down move through the headers, a track's and its take
+            // lanes' (the accessibility spec, R4).
+            let mut order: Vec<Named> = Vec::new();
+            for row in &self.rows {
+                order.push(Named::Track(row.track));
+                order.extend(
+                    view.take_lane_rows(shell.editor().document(), row)
+                        .map(|lane| Named::Lane(lane.lane)),
+                );
+            }
+            let at = view
+                .selected_take_lanes()
+                .last()
+                .and_then(|lane| order.iter().position(|n| *n == Named::Lane(*lane)));
+            let next = at.and_then(|at| {
+                if up {
+                    at.checked_sub(1)
+                } else {
+                    (at + 1 < order.len()).then_some(at + 1)
+                }
+            });
+            match next.map(|next| order[next]) {
+                Some(Named::Lane(lane)) => {
+                    invoke(events, ids::SELECT_TAKE_LANES, json!({ "lanes": [lane] }));
+                }
+                Some(Named::Track(track)) => invoke(
+                    events,
+                    ids::SELECT_TRACKS,
+                    json!({ "tracks": [track], "title_bars": true }),
+                ),
+                None => {}
+            }
+        } else if up || down {
             let current = view
                 .selected_tracks()
                 .first()
@@ -2253,6 +2445,40 @@ impl ArrangementUi {
     }
 }
 
+/// Where Cmd+Up (`later` false) or Cmd+Down (true) moves the take lanes whose
+/// headers are selected: the lanes, and the place they take among the
+/// track's other take lanes (the comping spec, R8). `None` past the first or
+/// last, or with lanes of several tracks selected.
+fn moved_lanes(
+    doc: &Document,
+    selected: &[bl_model::TakeLaneId],
+    later: bool,
+) -> Option<(Vec<bl_model::TakeLaneId>, usize)> {
+    let track = doc.take_lane_track(*selected.first()?)?;
+    if selected
+        .iter()
+        .any(|lane| doc.take_lane_track(*lane) != Some(track))
+    {
+        return None;
+    }
+    let all: Vec<bl_model::TakeLaneId> = doc.track(track)?.take_lanes().map(|l| l.id).collect();
+    let moving: Vec<bl_model::TakeLaneId> = all
+        .iter()
+        .copied()
+        .filter(|lane| selected.contains(lane))
+        .collect();
+    let rest = all.len() - moving.len();
+    let first = all.iter().position(|lane| selected.contains(lane))?;
+    // Lanes before the first one moved, none of them moving.
+    let index = first;
+    let to = if later {
+        (index < rest).then_some(index + 1)?
+    } else {
+        index.checked_sub(1)?
+    };
+    Some((moving, to.min(rest)))
+}
+
 /// A drag in the beat-time ruler or the Overview: up and down zooms around
 /// `anchor` (down zooms in), sideways scrolls by `scale` lane points to a
 /// dragged point. The ruler is dragged like the lanes it holds (`scale` −1:
@@ -2283,8 +2509,8 @@ pub fn colour_of(theme: &Theme, track: TrackId) -> Color32 {
 }
 
 /// The lanes a drag across the rows passed through: each row's own lane,
-/// and its automation lane where the drag went into it (the automation
-/// editing spec, R1).
+/// its automation lane where the drag went into it (the automation editing
+/// spec, R1), and the take lanes it crossed (the comping spec, R26).
 fn lanes_crossed(
     rows: &[Row],
     from: usize,
@@ -2292,6 +2518,7 @@ fn lanes_crossed(
     press_y: f32,
     now_y: f32,
     view: &ArrangementView,
+    doc: &Document,
 ) -> Vec<Lane> {
     let (lo, hi) = (press_y.min(now_y), press_y.max(now_y));
     let mut out = Vec::new();
@@ -2311,6 +2538,14 @@ fn lanes_crossed(
                 track: row.track,
                 target,
             });
+        }
+        for lane in view.take_lane_rows(doc, row) {
+            if hi > lane.top && lo < lane.top + lane.height {
+                out.push(Lane::Take {
+                    track: row.track,
+                    lane: lane.lane,
+                });
+            }
         }
     }
     out

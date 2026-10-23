@@ -2810,88 +2810,71 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ),
         (
             "track.add_take_lane",
-            Exception(LaterView(
-                "the take lanes' view and comping (milestone M6); loop recording makes the lanes",
+            Exception(Equivalent(
+                "Insert Take Lane (Shift+Option+T), which adds an empty take lane; recording makes the others",
             )),
         ),
         (
             "take_lane.comp_sources",
             Exception(LaterView(
-                "the take lanes' rows, headers, keys and menus (WP-6.22, comping R23 to R30)",
-            )),
-        ),
-        (
-            "take_lane.copy_to_main_lane",
-            Exception(LaterView(
-                "the take lanes' rows, headers, keys and menus (WP-6.22, comping R23 to R30)",
+                "the take lanes' source highlights (WP-6.22b, comping R33)",
             )),
         ),
         (
             "take_lane.create_clip",
-            Exception(LaterView(
-                "the take lanes' rows, headers, keys and menus (WP-6.22, comping R23 to R30)",
+            Exception(Equivalent(
+                "moving, copying and pasting clips onto a take lane in the Arrangement (comping R27)",
             )),
         ),
         (
             "take_lane.delete",
-            Exception(LaterView(
-                "the take lanes' rows, headers, keys and menus (WP-6.22, comping R23 to R30)",
+            Exception(Equivalent(
+                "Delete with take lane headers selected, which runs arrangement.delete (comping R7)",
             )),
         ),
         (
             "take_lane.delete_all",
-            Exception(LaterView(
-                "the take lanes' rows, headers, keys and menus (WP-6.22, comping R23 to R30)",
+            Exception(Equivalent(
+                "Delete All Take Lanes in a track header's or a take lane header's menu (comping R29)",
             )),
         ),
         (
             "take_lane.delete_unused",
-            Exception(LaterView(
-                "the take lanes' rows, headers, keys and menus (WP-6.22, comping R23 to R30)",
-            )),
-        ),
-        (
-            "take_lane.duplicate",
-            Exception(LaterView(
-                "the take lanes' rows, headers, keys and menus (WP-6.22, comping R23 to R30)",
-            )),
-        ),
-        (
-            "take_lane.insert",
-            Exception(LaterView(
-                "the take lanes' rows, headers, keys and menus (WP-6.22, comping R23 to R30)",
-            )),
-        ),
-        (
-            "take_lane.move",
-            Exception(LaterView(
-                "the take lanes' rows, headers, keys and menus (WP-6.22, comping R23 to R30)",
+            Exception(Equivalent(
+                "Delete All Unused Take Lanes in a track header's or a take lane header's menu (comping R29)",
             )),
         ),
         (
             "take_lane.move_comp_edge",
             Exception(LaterView(
-                "the take lanes' rows, headers, keys and menus (WP-6.22, comping R23 to R30)",
+                "dragging a source highlight's edge (WP-6.22b, comping R34)",
             )),
         ),
         (
             "take_lane.rename",
-            Exception(LaterView(
-                "the take lanes' rows, headers, keys and menus (WP-6.22, comping R23 to R30)",
+            Exception(Equivalent(
+                "Cmd+R with a take lane header selected, and Rename in its menu, type the name in the header (comping R28)",
             )),
         ),
         (
             "take_lane.replace_with_take",
-            Exception(LaterView(
-                "the take lanes' rows, headers, keys and menus (WP-6.22, comping R23 to R30)",
+            Exception(Equivalent(
+                "Cmd+Down and Cmd+Up (S-COMP-006), which the Arrangement reads itself (comping R28)",
             )),
         ),
         (
             "take_lane.set_audition",
-            Exception(LaterView(
-                "the take lanes' rows, headers, keys and menus (WP-6.22, comping R23 to R30)",
+            Exception(Equivalent(
+                "the Audition Take Lane switch in a take lane's header, and T (comping R14, R30)",
             )),
         ),
+        (
+            "arrangement.select_take_lanes",
+            Exception(Equivalent(
+                "clicking a take lane's header, or Up and Down through the headers (comping R26)",
+            )),
+        ),
+        ("clip.move_to_lane", Exception(editing)),
         ("clip.delete", Exception(editing)),
         ("clip.move", Exception(editing)),
         ("clip.move_by", Exception(editing)),

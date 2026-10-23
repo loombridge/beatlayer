@@ -29,11 +29,12 @@ use bl_shell_spec::note_filters::{
 };
 use bl_shell_spec::notes::{
     self as ids, AddNoteArgs, AdjustValueArgs, ChopNotesArgs, ChopStep, ClipTab, ClipViewState,
-    CopyNotesArgs, DeactivateArgs, DeleteNotesArgs, DuplicateNotesArgs, FitToTimeArgs,
+    CopyNotesArgs, DeactivateArgs, DeleteNotesArgs, DuplicateNotesArgs, FitToTimeArgs, HeldKey,
     JoinNotesArgs, MoveNotesArgs, NoteClipboardState, NoteEditResult, NoteField, NoteSelectMode,
     NoteSelection, PasteNotesArgs, QuantizeNotesArgs, QuantizeSettings, QuantizeSettingsArgs,
     QuantizeTarget, RampValueArgs, RandomizeAmounts, RandomizeArgs, ResizeNotesArgs,
-    SelectNotesArgs, SetValueArgs, SplitNotesArgs, StretchNotesArgs,
+    SelectNotesArgs, SetValueArgs, SplitNotesArgs, StepRecordArgs, StepRecordResult,
+    StretchNotesArgs,
 };
 use bl_shell_spec::sample_editor as sample_ids;
 use bl_shell_spec::sample_editor::{SelectTimeArgs, SetInsertMarkerArgs};
@@ -568,6 +569,13 @@ pub struct ClipView {
     /// What the Sample Editor has selected and shows for the audio clip the
     /// Clip View shows (WP-4.10).
     sample: SampleView,
+    /// Whether the Preview switch is on (Spec: step-recording R1): the
+    /// shell keeps it as a preference.
+    preview: bool,
+    /// The notes step recording just added or lengthened, as the key and
+    /// start of each, in `stepped_clip` (Spec: step-recording R5, R6).
+    stepped_clip: Option<ClipId>,
+    stepped: Vec<(u8, Ticks)>,
 }
 
 impl ClipView {
@@ -691,6 +699,42 @@ impl ClipView {
     /// Switches Draw Mode on or off.
     pub fn toggle_draw_mode(&mut self) {
         self.draw_mode = !self.draw_mode;
+    }
+
+    /// Whether the Preview switch is on (Spec: step-recording R1).
+    #[must_use]
+    pub fn preview(&self) -> bool {
+        self.preview
+    }
+
+    /// Switches Preview on or off.
+    pub fn set_preview(&mut self, on: bool) {
+        self.preview = on;
+    }
+
+    /// Forgets that the note at `key` was just recorded: its key went up
+    /// (Spec: step-recording R5).
+    pub fn step_release(&mut self, key: u8) {
+        self.stepped.retain(|(k, _)| *k != key);
+    }
+
+    /// The notes step recording just added or lengthened in `clip` whose
+    /// keys are still in `held`, as the key and start of each (Spec:
+    /// step-recording R5, R6).
+    fn just_recorded(&self, clip: ClipId, held: &[HeldKey]) -> Vec<(u8, Ticks)> {
+        if self.stepped_clip != Some(clip) {
+            return Vec::new();
+        }
+        self.stepped
+            .iter()
+            .copied()
+            .filter(|(key, _)| held.iter().any(|h| h.key == *key))
+            .collect()
+    }
+
+    fn set_just_recorded(&mut self, clip: ClipId, just: Vec<(u8, Ticks)>) {
+        self.stepped_clip = Some(clip);
+        self.stepped = just;
     }
 
     /// The Quantize settings `note.quantize` uses when its arguments leave
@@ -956,6 +1000,7 @@ impl ClipView {
             randomize: self.amounts,
             folded: clip.is_some_and(|clip| self.is_folded(clip)),
             tab: self.tab,
+            preview: self.preview,
             envelope: self.envelope,
             filters: self.filters.clone(),
         }
@@ -971,6 +1016,7 @@ impl ClipView {
         self.session_clip = None;
         self.envelope = None;
         self.switch_filters_off();
+        self.stepped.clear();
         self.sample = SampleView::default();
     }
 }
@@ -1320,8 +1366,105 @@ pub fn label(id: &str) -> &'static str {
         ids::ADJUST_VALUE => "Adjust note values",
         ids::RANDOMIZE => "Randomize note values",
         ids::DEACTIVATE => "Deactivate notes",
+        ids::STEP_RECORD => "Step Record",
         _ => "Select notes",
     }
+}
+
+/// What one step of step recording did to a clip's notes (Spec:
+/// step-recording R4 to R6).
+struct Stepped {
+    /// The clip's notes in order afterwards.
+    notes: Vec<Note>,
+    /// The notes just recorded afterwards, as the key and start of each.
+    just: Vec<(u8, Ticks)>,
+    /// The insert marker afterwards.
+    marker: Ticks,
+    added: u32,
+    lengthened: u32,
+    shortened: u32,
+    removed: u32,
+}
+
+impl Stepped {
+    fn changed(&self) -> bool {
+        self.added + self.lengthened + self.shortened + self.removed > 0
+    }
+}
+
+/// Steps forward or `back` from the insert marker `at` with `held` keys
+/// down, `just` being the notes the last step added or lengthened whose keys
+/// are still down. Forward, those notes are lengthened by a grid `step` and
+/// the other held keys are added at `at`, one step long; back, those notes
+/// are shortened a step, and removed when none is left. Nothing held leaves
+/// the notes as they are and moves the marker, a rest. Nothing goes past the
+/// clip's span `(from, to)`.
+fn step_notes(
+    mut notes: Vec<Note>,
+    step: Ticks,
+    (from, to): (Ticks, Ticks),
+    at: Ticks,
+    just: &[(u8, Ticks)],
+    held: &[HeldKey],
+    back: bool,
+) -> Stepped {
+    let mut out = Stepped {
+        notes: Vec::new(),
+        just: Vec::new(),
+        marker: at,
+        added: 0,
+        lengthened: 0,
+        shortened: 0,
+        removed: 0,
+    };
+    let find = |notes: &[Note], (key, start): (u8, Ticks)| {
+        notes
+            .iter()
+            .position(|note| note.key == key && note.start == start)
+    };
+    if back {
+        for &recorded in just {
+            let Some(place) = find(&notes, recorded) else {
+                continue;
+            };
+            if notes[place].length > step {
+                notes[place].length -= step;
+                out.shortened += 1;
+                out.just.push(recorded);
+            } else {
+                notes.remove(place);
+                out.removed += 1;
+            }
+        }
+        out.marker = (at - step).max(from);
+    } else {
+        for &recorded in just {
+            let Some(place) = find(&notes, recorded) else {
+                continue;
+            };
+            let note = &mut notes[place];
+            let end = (note.start + note.length + step).min(to);
+            if end > note.start + note.length {
+                note.length = end - note.start;
+                out.lengthened += 1;
+            }
+            out.just.push(recorded);
+        }
+        for key in held
+            .iter()
+            .filter(|h| !just.iter().any(|(key, _)| *key == h.key))
+        {
+            if at < to {
+                notes.push(Note::new(key.key, at, step.min(to - at), key.velocity));
+                out.added += 1;
+                out.just.push((key.key, at));
+            }
+        }
+        out.marker = (at + step).min(to);
+    }
+    notes.sort_by_key(|note| (note.start, note.key));
+    out.notes = notes;
+    out
 }
 
 /// A tick of a MIDI clip's contents, from the number an argument gives.
@@ -1621,6 +1764,53 @@ pub fn run(
             view.select(clip, inverted.clone());
             view.set_time_selection(clip, span_of(doc, clip, &inverted));
             Ok(to_value(&view.state(doc, arrangement)))
+        }
+        ids::STEP_RECORD => {
+            let StepRecordArgs { clip, back, held } = parse(args)?;
+            let held = held.ok_or_else(|| invalid("`held` must name the keys held"))?;
+            if let Some(key) = held
+                .iter()
+                .find(|h| h.key > 127 || !(1..=127).contains(&h.velocity))
+            {
+                return Err(invalid(format!(
+                    "held key {} needs a key up to 127 and a velocity from 1 to 127",
+                    key.key
+                )));
+            }
+            let (clip, midi) = clip_and_data(doc, view, arrangement, clip)?;
+            let length = doc.clip(clip).map_or(Ticks::ZERO, |clip| clip.length);
+            let (from, to) = span(&midi, length);
+            let at = view.insert_marker(doc, arrangement).unwrap_or(from);
+            let just = view.just_recorded(clip, &held);
+            let stepped = step_notes(
+                notes_in_order(&midi),
+                arrangement.grid_ticks(doc),
+                (from, to),
+                at,
+                &just,
+                &held,
+                back,
+            );
+            let undo_step = if stepped.changed() {
+                transaction(editor, "Step Record", |editor| {
+                    set_notes(editor, clip, &midi, stepped.notes.clone())
+                })?
+                .1
+            } else {
+                false
+            };
+            // The places the selection named may have moved.
+            view.select(clip, Vec::new());
+            view.set_just_recorded(clip, stepped.just.clone());
+            view.set_insert_marker(clip, Some(stepped.marker));
+            Ok(to_value(&StepRecordResult {
+                added: stepped.added,
+                lengthened: stepped.lengthened,
+                shortened: stepped.shortened,
+                removed: stepped.removed,
+                insert_marker: stepped.marker,
+                undo_step,
+            }))
         }
         ids::ADD_NOTE => {
             let AddNoteArgs {

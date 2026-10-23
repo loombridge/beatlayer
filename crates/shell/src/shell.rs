@@ -128,6 +128,7 @@ mod search;
 mod session_recording;
 mod slice;
 mod stems;
+mod step_input;
 mod warping;
 
 use file_manager::FileManager;
@@ -467,6 +468,9 @@ pub struct Shell {
     midi_lit: [Option<std::time::Instant>; 2],
     /// The chord a Chord device's Learn is hearing.
     chord_learn: crate::chord_learn::ChordLearn,
+    /// The keys held on the MIDI input and the previews sounding, for the
+    /// MIDI Note Editor's step recording and Preview (WP-6.5).
+    step: step_input::StepInput,
     /// The keymap in use: Live 12's shortcuts with the person's own layered
     /// over them (the custom-shortcuts spec, R3).
     keymap: crate::keymap::Keymap,
@@ -1035,6 +1039,7 @@ impl Shell {
         audio.sync(editor.document());
         let saved = snapshot(&editor);
         let plugin_panels = prefs.plugin_panels.clone();
+        let note_preview = prefs.note_preview;
         let mut shell = Self {
             browser_view,
             media,
@@ -1072,6 +1077,7 @@ impl Shell {
             midi_seen: (0, 0),
             midi_lit: [None; 2],
             chord_learn: crate::chord_learn::ChordLearn::default(),
+            step: step_input::StepInput::default(),
             keymap: crate::keymap::Keymap::live12(),
             user_keymap: crate::keymap::UserKeymap::default(),
             keymap_revision: 0,
@@ -1106,7 +1112,11 @@ impl Shell {
             assistant_stop_flag: Arc::default(),
             undo_history_open: false,
             arrangement: ArrangementView::new(),
-            clip_view: ClipView::default(),
+            clip_view: {
+                let mut view = ClipView::default();
+                view.set_preview(note_preview);
+                view
+            },
             detail: DetailArea::default(),
             file_manager: FileManager::default(),
             search: crate::search::Field::default(),
@@ -2102,7 +2112,13 @@ impl Shell {
         let chords = learning(STACK, CHORD_LEARN);
         let senders = learning(CC_CONTROL, CC_LEARN);
         let sender = self.midi.sender().clone();
-        if chords.is_empty() && senders.is_empty() {
+        // Spec: step-recording R3, R8. Step recording reads the keys held
+        // through the same copy of the input.
+        let stepping = self.step_recording();
+        if !stepping {
+            self.forget_held();
+        }
+        if chords.is_empty() && senders.is_empty() && !stepping {
             if self.chord_learn.tapping {
                 sender.set_tap(false);
                 self.chord_learn.tapping = false;
@@ -2116,6 +2132,9 @@ impl Shell {
         }
         let mut heard = Vec::new();
         sender.take_notes(&mut heard);
+        if stepping {
+            self.hear_held(&heard);
+        }
         let mut changed = false;
         if !chords.is_empty()
             && let Some(shifts) = self.chord_learn.listen_from(&heard)
@@ -4799,6 +4818,7 @@ impl Shell {
             changed |= self.refresh_midi();
         }
         changed |= self.learn_midi();
+        self.expire_previews();
         changed |= self.track_midi_activity();
         // Plug-ins' main-thread work (WP-2.6 to WP-2.8), and the changes
         // they made themselves.
@@ -6404,6 +6424,7 @@ impl Shell {
             ids::VIEW_EXPAND_CLIP_VIEW => Some(self.detail.expanded()),
             ids::VIEW_TOGGLE_PLUGIN_LIST => Some(self.plugin_list.visible()),
             ids::VIEW_DRAW_MODE => Some(self.clip_view.draw_mode()),
+            note_ids::SET_PREVIEW => Some(self.clip_view.preview()),
             ids::VIEW_FOLD_NOTES => Some(
                 self.clip_view
                     .shown_clip(self.editor.document(), &self.arrangement)
@@ -6841,6 +6862,9 @@ impl Shell {
                         |clip| matches!(&clip.data, ClipData::Midi(midi) if !midi.notes.is_empty()),
                     );
             }
+            // Spec: step-recording R9. Step Input Mode is available while the
+            // editor shows a MIDI clip.
+            note_ids::STEP_INPUT_MODE => return self.editor_track().is_some(),
             ids::FOCUS_NEXT_NEIGHBOR => return self.has_neighbor(false),
             ids::FOCUS_PREVIOUS_NEIGHBOR => return self.has_neighbor(true),
             // Spec: time-editing R8. Cmd-R renames the selected locators
@@ -8421,25 +8445,26 @@ impl Shell {
             self.touch();
             return result;
         }
+        if note_ids::is_preview_or_mode(id) || id == note_ids::STEP_RECORD {
+            // Spec: step-recording. The Preview switch, previews, step
+            // recording and Step Input Mode reach the MIDI input, the
+            // preferences and the focus.
+            return self.run_step_input(id, args);
+        }
         if id == note_ids::SPLIT_CLIP {
             return self.split_shown_clip();
         }
         if note_ids::handles(id) {
-            // Spec: piano-roll. The Clip View's note edits.
-            let before = self.editor.document().clone();
-            let result = clip_view::run(
-                id,
-                args,
-                &mut self.editor,
-                &mut self.clip_view,
-                &self.arrangement,
-            )
-            .map_err(|failure| edit_error(id, failure));
-            if *self.editor.document() != before {
-                self.dirty = true;
-                self.document_changed();
+            let keys = id == note_ids::SELECT_NOTES
+                && args["select"]
+                    .as_str()
+                    .is_some_and(|select| select != "all");
+            let result = self.run_note_edit(id, args);
+            if keys && result.is_ok() {
+                // Spec: step-recording R2. A note selected from the keys
+                // sounds, when Preview is on.
+                self.preview_selected();
             }
-            self.touch();
             return result;
         }
         if sample_ids::handles(id) {
@@ -9344,6 +9369,26 @@ impl Shell {
     /// Arguments as a JSON object: `null` is no arguments.
     fn object(args: Value) -> Value {
         if args.is_null() { json!({}) } else { args }
+    }
+
+    /// Runs one of the Clip View's note edits, as one undo step.
+    fn run_note_edit(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        // Spec: piano-roll. The Clip View's note edits.
+        let before = self.editor.document().clone();
+        let result = clip_view::run(
+            id,
+            args,
+            &mut self.editor,
+            &mut self.clip_view,
+            &self.arrangement,
+        )
+        .map_err(|failure| edit_error(id, failure));
+        if *self.editor.document() != before {
+            self.dirty = true;
+            self.document_changed();
+        }
+        self.touch();
+        result
     }
 
     fn args<T: DeserializeOwned>(id: &str, args: Value) -> Result<T, ShellError> {

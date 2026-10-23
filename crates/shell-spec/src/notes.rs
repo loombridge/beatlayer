@@ -21,7 +21,9 @@
 
 use crate::editing::EditResult;
 use crate::note_filters::{InvertSelectionArgs, NoteFilters, NoteFiltersArgs, NoteFiltersResult};
-use bl_commands::Context::{NoteEditor, NoteSelection as NoteSelectionContext, SampleEditor};
+use bl_commands::Context::{
+    ClipView, Global, NoteEditor, NoteSelection as NoteSelectionContext, SampleEditor,
+};
 use bl_commands::{Binding, CommandSpec, NoArgs, Permission, RegisterError, Registry};
 use bl_core::time::Ticks;
 use bl_model::{AutomationTarget, ClipId};
@@ -66,6 +68,14 @@ pub const PASTE: &str = "note.paste";
 /// `note.duplicate`: put a copy of the notes straight after them.
 pub const DUPLICATE: &str = "note.duplicate";
 
+/// `clip_view.set_preview`: the MIDI Note Editor's Preview switch.
+pub const SET_PREVIEW: &str = "clip_view.set_preview";
+/// `note.preview`: play a note on a MIDI clip's track.
+pub const PREVIEW_NOTE: &str = "note.preview";
+/// `note.step_record`: step-record the held notes at the insert marker.
+pub const STEP_RECORD: &str = "note.step_record";
+/// `clip_view.step_input_mode`: get the editor ready for step recording.
+pub const STEP_INPUT_MODE: &str = "clip_view.step_input_mode";
 /// `note.split`: split notes at ticks.
 pub const SPLIT: &str = "note.split";
 /// `note.chop`: chop notes on the grid or into equal parts.
@@ -101,6 +111,10 @@ pub const IDS: &[&str] = &[
     CUT,
     PASTE,
     DUPLICATE,
+    SET_PREVIEW,
+    PREVIEW_NOTE,
+    STEP_RECORD,
+    STEP_INPUT_MODE,
     SPLIT,
     CHOP,
     JOIN,
@@ -109,10 +123,20 @@ pub const IDS: &[&str] = &[
     SPLIT_CLIP,
 ];
 
-/// Whether `id` is one of the Clip View's note-editing commands.
+/// Whether `id` is one of the Clip View's note-editing commands that edits
+/// the notes, which `bl-shell`'s `clip_view::run` runs. The Preview switch,
+/// a preview and Step Input Mode reach the audio engine, the preferences
+/// and the focus, so the shell runs those itself ([`is_preview_or_mode`]).
 #[must_use]
 pub fn handles(id: &str) -> bool {
-    IDS.contains(&id)
+    IDS.contains(&id) && !is_preview_or_mode(id)
+}
+
+/// Whether `id` is the Preview switch, a preview or Step Input Mode
+/// (Spec: step-recording R1, R2, R9).
+#[must_use]
+pub fn is_preview_or_mode(id: &str) -> bool {
+    matches!(id, SET_PREVIEW | PREVIEW_NOTE | STEP_INPUT_MODE)
 }
 
 /// How `clip_view.select_notes` changes the selection.
@@ -438,6 +462,58 @@ pub struct DuplicateNotesArgs {
     /// notes that start inside the time selection.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<Vec<u32>>,
+}
+
+/// Arguments of `clip_view.set_preview`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetPreviewArgs {
+    /// Whether Preview is on. Left out, the switch flips.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on: Option<bool>,
+}
+
+/// Arguments of `note.preview`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PreviewNoteArgs {
+    /// The MIDI clip whose track plays the note. Left out, the one the Clip
+    /// View shows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<ClipId>,
+    /// The pitch, a MIDI key from 0 to 127; 60 is middle C.
+    pub key: u8,
+    /// The velocity, from 1 to 127; 100 unless given. Used when `on`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub velocity: Option<u8>,
+    /// Press (true) or release (false) the note.
+    pub on: bool,
+}
+
+/// A key held on the track's MIDI input, with the velocity it was played at.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct HeldKey {
+    /// The pitch, a MIDI key from 0 to 127; 60 is middle C.
+    pub key: u8,
+    /// The velocity it was played at, from 1 to 127.
+    pub velocity: u8,
+}
+
+/// Arguments of `note.step_record`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct StepRecordArgs {
+    /// The MIDI clip. Left out, the one the Clip View shows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<ClipId>,
+    /// Step back, as Left does, instead of forward, as Right does.
+    #[serde(default)]
+    pub back: bool,
+    /// The keys held, each with its velocity. Left out, the keys held on the
+    /// track's MIDI input now; an empty list means no key is held.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub held: Option<Vec<HeldKey>>,
 }
 
 /// One cut of `note.split`: a note and the tick it is split at.
@@ -781,6 +857,25 @@ pub struct NoteEditResult {
     pub undo_step: bool,
 }
 
+/// What `note.step_record` did.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct StepRecordResult {
+    /// How many notes it added.
+    pub added: u32,
+    /// How many notes it made one grid step longer.
+    pub lengthened: u32,
+    /// How many notes it made one grid step shorter.
+    pub shortened: u32,
+    /// How many notes it removed, having no length left.
+    pub removed: u32,
+    /// The insert marker afterwards, in ticks from the beginning of the
+    /// clip's contents.
+    pub insert_marker: Ticks,
+    /// Whether the step was recorded as an undo step: false when it changed
+    /// no note.
+    pub undo_step: bool,
+}
+
 /// The Randomize amount of each lane, which the footer's control holds
 /// (Spec: note-editing R13). A new editor has 0 for each.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -851,6 +946,9 @@ pub struct ClipViewState {
     pub folded: bool,
     /// The tab the Clip View shows.
     pub tab: ClipTab,
+    /// Whether the Preview switch is on (Spec: step-recording R1): one
+    /// switch for every MIDI clip's editor, kept between launches.
+    pub preview: bool,
     /// The parameter whose envelope the Envelopes tab shows; `null` when it
     /// shows none.
     pub envelope: Option<AutomationTarget>,
@@ -1142,6 +1240,64 @@ fn specs() -> Vec<CommandSpec> {
         )
         .binding("S-EDIT-004")
         .args::<DuplicateNotesArgs>(),
+        CommandSpec::new(SET_PREVIEW, "MIDI Note Editor Preview")
+            .description(
+                "Sets the MIDI Note Editor's Preview switch (`on`), the one above the piano \
+                 ruler and Options \u{25b8} MIDI Note Editor Preview: with it on, clicking a key, \
+                 drawing, clicking and keyboard-selecting a note, and dragging notes to a new \
+                 pitch play into the clip's track, and an armed track can be step-recorded. \
+                 Left out, `on` flips the switch. It is one switch for every MIDI clip, off in \
+                 a new install and kept between launches as a preference; it is never an undo \
+                 step and changes nothing in the set. Switching it off ends the previews \
+                 sounding.",
+            )
+            .permission(Permission::Edit)
+            .contexts([Global, ClipView, NoteEditor, NoteSelectionContext])
+            .args::<SetPreviewArgs>()
+            .result::<ClipViewState>(),
+        CommandSpec::new(PREVIEW_NOTE, "Preview Note")
+            .description(
+                "Plays a note on the track of a MIDI clip (`clip`, or the one the Clip View \
+                 shows), through its devices and mixer, whether or not the song plays and \
+                 whether or not the track is armed or monitoring: `on` presses it (`velocity`, \
+                 100 unless given) and a later call with `on` false releases it. A press with \
+                 no release plays until the release, so an agent that presses must release. \
+                 Needs the Preview switch on. It changes nothing in the set and is never an \
+                 undo step.",
+            )
+            .permission(Permission::Edit)
+            .contexts([Global, ClipView, NoteEditor, NoteSelectionContext])
+            .args::<PreviewNoteArgs>()
+            .result::<ClipViewState>(),
+        edit(
+            STEP_RECORD,
+            "Step Record",
+            Permission::Edit,
+            "Step-records at the insert marker of a MIDI clip while its track is armed, Preview \
+             is on and the transport is stopped. Forward (Right): each held key (`held`, or \
+             the keys held on the track's MIDI input) is added at the insert marker, one grid \
+             step long at its velocity, and the marker moves one step on; held keys that this \
+             stepping just added are made one step longer instead, and a key let go is left as \
+             it is. Back (`back`, Left): the held notes just added are made one step shorter, a \
+             note left with no length is removed, and the marker moves one step back. With \
+             nothing held, the marker moves a step and leaves a rest. No record quantisation \
+             applies. One undo step, `Step Record`.",
+        )
+        .args::<StepRecordArgs>()
+        .result::<StepRecordResult>(),
+        CommandSpec::new(STEP_INPUT_MODE, "Step Input Mode")
+            .description(
+                "Gets the editor ready for step recording: arms the track of the clip the \
+                 Clip View shows (as the track's arm button does), moves the keyboard focus to \
+                 the Clip View, and switches the computer MIDI keyboard to the other state. It \
+                 is a command, not a switch, and is available while the editor shows a MIDI \
+                 clip. Arming is an undo step, as arming is.",
+            )
+            .permission(Permission::Edit)
+            .contexts([Global, ClipView, NoteEditor, NoteSelectionContext])
+            .binding("S-NOTE-044")
+            .args::<NoArgs>()
+            .result::<ClipViewState>(),
         CommandSpec::new(SPLIT, "Split Note(s)")
             .description(
                 "Splits notes at ticks, as holding E and clicking a note, or Cmd-E (Ctrl-E) \
@@ -1274,6 +1430,12 @@ mod tests {
         assert_eq!(class(CUT), Some(Permission::Destructive));
         assert_eq!(class(PASTE), Some(Permission::Edit));
         assert_eq!(class(DUPLICATE), Some(Permission::Edit));
+        // The Preview switch, a preview, step recording and Step Input Mode
+        // (step-recording R13).
+        for id in [SET_PREVIEW, PREVIEW_NOTE, STEP_RECORD, STEP_INPUT_MODE] {
+            assert_eq!(class(id), Some(Permission::Edit), "{id}");
+        }
+        assert!(handles(STEP_RECORD) && !handles(SET_PREVIEW));
         // The Edit menu's clipboard rows run the note commands in the note
         // editor (S-EDIT-001 to S-EDIT-005).
         for (id, shortcut) in [

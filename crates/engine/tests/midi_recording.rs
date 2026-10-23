@@ -10,10 +10,7 @@
 //! - A ring too full for a part's notes ends the take and counts them.
 //! - Every block runs as a real-time section under the allocation trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};

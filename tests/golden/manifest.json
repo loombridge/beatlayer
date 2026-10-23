@@ -23,7 +23,7 @@
       "channels": 2,
       "frames": 204000,
       "bits": 24,
-      "render_hash": "fnv1a64:04750a6a29542fc9"
+      "render_hash": "fnv1a64:7c11f8bb96722ad9"
     },
     "beats-bar-forward-60": {
       "made_on": "macos-aarch64",
@@ -47,7 +47,7 @@
       "channels": 2,
       "frames": 204000,
       "bits": 24,
-      "render_hash": "fnv1a64:ea6ab955b4b0a0a5"
+      "render_hash": "fnv1a64:a4907d198507c6a1"
     },
     "beats-eighth-forward-60": {
       "made_on": "macos-aarch64",
@@ -71,7 +71,7 @@
       "channels": 2,
       "frames": 204000,
       "bits": 24,
-      "render_hash": "fnv1a64:24b499b5cb3f745d"
+      "render_hash": "fnv1a64:e4e3b4c3d39460f9"
     },
     "beats-half-forward-60": {
       "made_on": "macos-aarch64",
@@ -95,7 +95,7 @@
       "channels": 2,
       "frames": 204000,
       "bits": 24,
-      "render_hash": "fnv1a64:87f985000c5b349d"
+      "render_hash": "fnv1a64:4ee0adfa74f985bd"
     },
     "beats-quarter-forward-60": {
       "made_on": "macos-aarch64",
@@ -119,7 +119,7 @@
       "channels": 2,
       "frames": 204000,
       "bits": 24,
-      "render_hash": "fnv1a64:aa480471f167591d"
+      "render_hash": "fnv1a64:c438970a374e6de1"
     },
     "beats-sixteenth-forward-60": {
       "made_on": "macos-aarch64",
@@ -143,7 +143,7 @@
       "channels": 2,
       "frames": 204000,
       "bits": 24,
-      "render_hash": "fnv1a64:4a2959593b036f55"
+      "render_hash": "fnv1a64:0034458fea172819"
     },
     "beats-thirtysecond-forward-60": {
       "made_on": "macos-aarch64",
@@ -319,7 +319,7 @@
       "channels": 2,
       "frames": 240000,
       "bits": 24,
-      "render_hash": "fnv1a64:2f56772c81370ee9"
+      "render_hash": "fnv1a64:9749396f079fcb11"
     },
     "loop-wraps": {
       "made_on": "macos-aarch64",
@@ -431,7 +431,7 @@
       "channels": 2,
       "frames": 108000,
       "bits": 24,
-      "render_hash": "fnv1a64:1cccf3ffff80a665"
+      "render_hash": "fnv1a64:6d185d2464de2909"
     },
     "transposition-envelope-tones": {
       "made_on": "macos-aarch64",
@@ -439,7 +439,7 @@
       "channels": 2,
       "frames": 108000,
       "bits": 24,
-      "render_hash": "fnv1a64:b0f9ec2e978ab9a9"
+      "render_hash": "fnv1a64:2d897b7154eab5a9"
     },
     "volume-modulation": {
       "made_on": "macos-aarch64",
@@ -449,13 +449,173 @@
       "bits": 24,
       "render_hash": "fnv1a64:bccff9f00f3060c9"
     },
+    "warp-beats-120": {
+      "made_on": "macos-aarch64",
+      "sample_rate": 48000,
+      "channels": 2,
+      "frames": 108000,
+      "bits": 24,
+      "render_hash": "fnv1a64:ffee7cb165bb539d"
+    },
+    "warp-beats-180": {
+      "made_on": "macos-aarch64",
+      "sample_rate": 48000,
+      "channels": 2,
+      "frames": 84000,
+      "bits": 24,
+      "render_hash": "fnv1a64:1be887e312016775"
+    },
+    "warp-beats-240": {
+      "made_on": "macos-aarch64",
+      "sample_rate": 48000,
+      "channels": 2,
+      "frames": 60000,
+      "bits": 24,
+      "render_hash": "fnv1a64:f2f5470b7a7504b5"
+    },
+    "warp-beats-60": {
+      "made_on": "macos-aarch64",
+      "sample_rate": 48000,
+      "channels": 2,
+      "frames": 204000,
+      "bits": 24,
+      "render_hash": "fnv1a64:a0fa97beb373b4e5"
+    },
+    "warp-beats-90": {
+      "made_on": "macos-aarch64",
+      "sample_rate": 48000,
+      "channels": 2,
+      "frames": 144000,
+      "bits": 24,
+      "render_hash": "fnv1a64:ce865c256a4ab595"
+    },
+    "warp-re-pitch-120": {
+      "made_on": "macos-aarch64",
+      "sample_rate": 48000,
+      "channels": 2,
+      "frames": 60000,
+      "bits": 24,
+      "render_hash": "fnv1a64:090240ccdefdbcb9"
+    },
+    "warp-re-pitch-180": {
+      "made_on": "macos-aarch64",
+      "sample_rate": 48000,
+      "channels": 2,
+      "frames": 48000,
+      "bits": 24,
+      "render_hash": "fnv1a64:1fd9c1c3a5214b01"
+    },
+    "warp-re-pitch-240": {
+      "made_on": "macos-aarch64",
+      "sample_rate": 48000,
+      "channels": 2,
+      "frames": 36000,
+      "bits": 24,
+      "render_hash": "fnv1a64:3db912134eb14019"
+    },
+    "warp-re-pitch-60": {
+      "made_on": "macos-aarch64",
+      "sample_rate": 48000,
+      "channels": 2,
+      "frames": 108000,
+      "bits": 24,
+      "render_hash": "fnv1a64:80164b3f539a6af9"
+    },
+    "warp-re-pitch-90": {
+      "made_on": "macos-aarch64",
+      "sample_rate": 48000,
+      "channels": 2,
+      "frames": 84000,
+      "bits": 24,
+      "render_hash": "fnv1a64:a93b573af614ce79"
+    },
+    "warp-texture-120": {
+      "made_on": "macos-aarch64",
+      "sample_rate": 48000,
+      "channels": 2,
+      "frames": 60000,
+      "bits": 24,
+      "render_hash": "fnv1a64:090240ccdefdbcb9"
+    },
+    "warp-texture-180": {
+      "made_on": "macos-aarch64",
+      "sample_rate": 48000,
+      "channels": 2,
+      "frames": 48000,
+      "bits": 24,
+      "render_hash": "fnv1a64:25c16f94f9f59b3d"
+    },
+    "warp-texture-240": {
+      "made_on": "macos-aarch64",
+      "sample_rate": 48000,
+      "channels": 2,
+      "frames": 36000,
+      "bits": 24,
+      "render_hash": "fnv1a64:903d593df1cf9551"
+    },
+    "warp-texture-60": {
+      "made_on": "macos-aarch64",
+      "sample_rate": 48000,
+      "channels": 2,
+      "frames": 108000,
+      "bits": 24,
+      "render_hash": "fnv1a64:e78a0e50f1fdbc75"
+    },
+    "warp-texture-90": {
+      "made_on": "macos-aarch64",
+      "sample_rate": 48000,
+      "channels": 2,
+      "frames": 84000,
+      "bits": 24,
+      "render_hash": "fnv1a64:a005037faab16641"
+    },
+    "warp-tones-120": {
+      "made_on": "macos-aarch64",
+      "sample_rate": 48000,
+      "channels": 2,
+      "frames": 60000,
+      "bits": 24,
+      "render_hash": "fnv1a64:090240ccdefdbcb9"
+    },
+    "warp-tones-180": {
+      "made_on": "macos-aarch64",
+      "sample_rate": 48000,
+      "channels": 2,
+      "frames": 48000,
+      "bits": 24,
+      "render_hash": "fnv1a64:43c9eadb9a4c18f9"
+    },
+    "warp-tones-240": {
+      "made_on": "macos-aarch64",
+      "sample_rate": 48000,
+      "channels": 2,
+      "frames": 36000,
+      "bits": 24,
+      "render_hash": "fnv1a64:2178d2b2cd444f4d"
+    },
+    "warp-tones-60": {
+      "made_on": "macos-aarch64",
+      "sample_rate": 48000,
+      "channels": 2,
+      "frames": 108000,
+      "bits": 24,
+      "render_hash": "fnv1a64:7bd2604716a7c731"
+    },
+    "warp-tones-90": {
+      "made_on": "macos-aarch64",
+      "sample_rate": 48000,
+      "channels": 2,
+      "frames": 84000,
+      "bits": 24,
+      "render_hash": "fnv1a64:c983d407244b9381"
+    },
     "warped-clip-crossfade": {
       "made_on": "macos-aarch64",
       "sample_rate": 48000,
       "channels": 2,
       "frames": 156000,
       "bits": 24,
-      "render_hash": "fnv1a64:19a3e3cb872ef041"
+      "render_hash": "fnv1a64:4270a2d7cb4f7735"
     },
     "warped-loop-120": {
       "made_on": "macos-aarch64",
@@ -463,7 +623,7 @@
       "channels": 2,
       "frames": 156000,
       "bits": 24,
-      "render_hash": "fnv1a64:039e665ec62c6374"
+      "render_hash": "fnv1a64:c0947fb3bd44dbcd"
     },
     "warped-loop-140": {
       "made_on": "macos-aarch64",
@@ -471,7 +631,7 @@
       "channels": 2,
       "frames": 144000,
       "bits": 24,
-      "render_hash": "fnv1a64:a47dbbb60c5813b7"
+      "render_hash": "fnv1a64:2e80162987887c55"
     }
   }
 }

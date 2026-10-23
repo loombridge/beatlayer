@@ -8,8 +8,7 @@
 //!
 //! Spec: clap-hosting R13, R16.
 
-mod common;
-
+use crate::common;
 use std::time::{Duration, Instant};
 
 use bl_model::{DeviceId, TrackId};

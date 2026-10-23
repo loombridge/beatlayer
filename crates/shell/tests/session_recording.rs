@@ -11,8 +11,6 @@
 //! - A slot's record button refuses an occupied slot.
 //! - The whole path allocates nothing on the audio thread.
 
-bl_rt::install_trap!();
-
 use std::path::PathBuf;
 
 use bl_audio_io::{BackendKind, NullBackend, NullControl, NullOptions, Pacing};

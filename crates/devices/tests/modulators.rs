@@ -4,10 +4,7 @@
 //! position to hold in place of a contribution. Every block runs as a
 //! real-time section under the allocation trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_core::time::{Frames, TempoMap};
 use bl_devices::modulator::{RATE_HZ, WAVE, curve_mod_type, wave_mod_type};
 use bl_engine::modbus::NOT_HELD;

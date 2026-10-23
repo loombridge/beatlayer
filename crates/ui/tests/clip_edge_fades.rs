@@ -5,8 +5,7 @@
 //! switch that a screen reader reaches and that runs the registered
 //! command. The page's other rows keep their places, pending.
 
-mod common;
-
+use crate::common;
 use bl_shell::settings::SettingsPage;
 use common::{Harness, Window};
 use egui::Id;

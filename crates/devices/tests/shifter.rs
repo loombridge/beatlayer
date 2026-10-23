@@ -4,10 +4,7 @@
 //! pitch bend, and renders that repeat at any block size. Every block runs
 //! as a real-time section under the allocation trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_core::time::{Bpm, Frames, SampleRate, TempoMap, TempoSegment, Ticks};
 use bl_devices::shifter::{
     self, BEND_RANGE, COARSE, DELAY_DIVISION, DELAY_HZ, DELAY_MODE, DELAY_ON, DRIVE, DRY_WET,

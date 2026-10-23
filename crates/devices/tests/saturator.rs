@@ -4,10 +4,7 @@
 //! latency, the Pre-DC Filter, Dry/Wet, the display, and renders that don't
 //! depend on the block size.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_devices::saturator::{
     AMT_HI, AMT_LO, COLOR, CURVE, CURVES, DRIVE, DRY_WET, FREQUENCY, HI_QUALITY, OUTPUT, POST_CLIP,
     PRE_DC, SATURATOR, THRESHOLD, WIDTH, WS_CURVE, WS_DAMP, WS_DEPTH, WS_DRIVE, WS_LINEAR,

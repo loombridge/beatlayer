@@ -113,6 +113,7 @@ pub mod recording;
 mod registry;
 pub mod render;
 pub mod routing;
+pub mod scales;
 mod sched;
 pub mod session;
 pub mod sidechain;

@@ -3,10 +3,7 @@
 //! and its times, Hi-Quality and its latency, the display, and renders that
 //! don't depend on the block size.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_devices::tube::{
     ATTACK, BIAS, DRIVE, ENVELOPE, HI_QUALITY, MODEL, OUTPUT, RELEASE, TONE, TUBE, tube_type,
 };

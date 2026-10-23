@@ -7,8 +7,7 @@
 //!
 //! Spec: mixer-view R1 to R19.
 
-mod common;
-
+use crate::common;
 use std::path::PathBuf;
 
 use bl_engine::TrackMeter;
@@ -1794,7 +1793,7 @@ fn gesture_file() -> PathBuf {
 
 // Spec: mixer-view R18. The gesture the `fader-gesture` golden render plays
 // is the one this drag makes through the window and the shell. Rewrite it
-// with `BL_UPDATE_GESTURES=1 cargo test -p bl-ui --test mixer`, then remake
+// with `BL_UPDATE_GESTURES=1 cargo test -p bl-ui --test ui_tests -- mixer::`, then remake
 // the reference with `cargo xtask golden --update fader-gesture`.
 #[test]
 fn a_fader_drag_runs_the_recorded_gesture() {

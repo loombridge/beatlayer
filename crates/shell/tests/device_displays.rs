@@ -4,8 +4,6 @@
 //! trap, and the shell reads the newest; `device.display` reports what the
 //! display shows, and the chosen view is view state.
 
-bl_rt::install_trap!();
-
 use std::collections::BTreeMap;
 
 use bl_core::time::SampleRate;

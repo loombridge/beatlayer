@@ -2,10 +2,7 @@
 //! opens and closes it, Attack, Hold and Release, Floor, Flip, Lookahead
 //! and its latency, and a sidechain key with its EQ.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use std::f64::consts::TAU;
 
 use bl_devices::gate::{

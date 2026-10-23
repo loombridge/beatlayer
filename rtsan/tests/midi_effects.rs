@@ -429,3 +429,130 @@ fn the_articulation_map_passes_under_rtsan() {
         "400 blocks through the Articulation Map under RealtimeSanitizer: {keyswitches} keyswitches"
     );
 }
+
+// Spec: scales R15 to R17. Pitch, Random, Chord, Scale and Arpeggiator, each
+// counting degrees of the current scale (Use Current Scale on), play a clip
+// through changes of its scale, the Session clip taking over, and the set's
+// scale on the audio thread.
+#[test]
+fn scale_aware_devices_pass_a_scale_change_under_rtsan() {
+    let config = EngineConfig::new(SampleRate::HZ_48000, 256);
+    let probe = Arc::new(Probe::default());
+    let mut collector = Collector::new();
+    let mut registry = testing::registry(&probe);
+    bl_devices::register(&mut registry);
+    let mut compiler = Compiler::new(config, registry, collector.handle());
+    let (mut sender, mut processor, _monitor) = channel(&config);
+
+    let mut editor = Editor::new();
+    let track = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: track,
+            kind: TrackKind::Midi,
+            name: String::new(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    let switches = [
+        (bl_devices::LIFT, bl_devices::lift::USE_SCALE),
+        (bl_devices::DICE, bl_devices::dice::USE_SCALE),
+        (bl_devices::STACK, bl_devices::stack::USE_SCALE),
+        (bl_devices::REMAP, bl_devices::remap::USE_SCALE),
+        (bl_devices::ARPEGGIATOR, bl_devices::arpeggiator::USE_SCALE),
+    ];
+    for (index, (device_type, switch)) in switches.iter().enumerate() {
+        let id = editor.new_id();
+        let mut device = Device::new(
+            id,
+            "",
+            DeviceKind::Native {
+                device_type: (*device_type).to_owned(),
+            },
+        );
+        device.params.insert(*switch, 1.0);
+        editor
+            .apply(Command::InsertDevice {
+                track,
+                index,
+                device,
+            })
+            .unwrap();
+    }
+    let id = editor.new_id();
+    editor
+        .apply(Command::InsertDevice {
+            track,
+            index: switches.len(),
+            device: Device::new(
+                id,
+                "",
+                DeviceKind::Native {
+                    device_type: testing::INSTRUMENT.to_owned(),
+                },
+            ),
+        })
+        .unwrap();
+    let sixteenth = Ticks(TICKS_PER_QUARTER / 4);
+    let notes = (0..64u8).map(|i| Note::new(36 + i, sixteenth * i64::from(i), sixteenth * 3, 90));
+    let mut arranged = Clip::new(
+        editor.new_id(),
+        Ticks::ZERO,
+        Ticks(TICKS_PER_QUARTER * 16),
+        ClipData::Midi(MidiData::new(notes)),
+    );
+    arranged.scale = bl_model::Scale::new(0, bl_model::ScaleName::Major);
+    let arranged_id = arranged.id;
+    editor
+        .apply(Command::CreateClip {
+            track,
+            clip: arranged,
+        })
+        .unwrap();
+    sender.send_update(compiler.sync(editor.document()));
+    assert!(sender.flush());
+    sender.transport(TransportCommand::Play);
+
+    let mut change = |editor: &mut Editor, command: Command| {
+        editor.apply(command).unwrap();
+        sender.send_update(compiler.sync(editor.document()));
+        assert!(sender.flush());
+    };
+    for round in 0..800u32 {
+        match round {
+            100 | 300 | 500 => change(
+                &mut editor,
+                Command::SetClipScale {
+                    clips: vec![arranged_id],
+                    enabled: Some(round != 300),
+                    root: Some((round / 100) as u8),
+                    name: Some("dorian".to_owned()),
+                },
+            ),
+            200 | 400 => change(
+                &mut editor,
+                Command::SetScale {
+                    enabled: Some(true),
+                    root: Some((round / 100) as u8),
+                    name: Some("minor_pentatonic".to_owned()),
+                },
+            ),
+            _ => {}
+        }
+        bl_rt::rt_test!({
+            processor.process(256);
+        });
+        if round % 50 == 0 {
+            collector.collect();
+        }
+    }
+    let ons = probe
+        .recorded_notes()
+        .iter()
+        .filter(|n| n.event.kind == NoteKind::On)
+        .count();
+    // The arpeggiator turns the clip's chords into steps of its own, so fewer
+    // notes than the clip holds reach the instrument.
+    assert!(ons >= 10, "{ons} notes reached the instrument");
+}

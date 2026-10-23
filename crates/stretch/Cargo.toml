@@ -1,4 +1,5 @@
 [package]
+autotests = false
 name = "bl-stretch"
 description = "Warping: warp maps and every warp mode."
 version.workspace = true
@@ -16,6 +17,10 @@ cc = "1"
 
 [dev-dependencies]
 proptest = { version = "1.11", default-features = false, features = ["std"] }
+
+[[test]]
+name = "stretch_tests"
+path = "tests/main.rs"
 
 [lints]
 workspace = true

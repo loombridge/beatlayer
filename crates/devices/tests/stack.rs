@@ -3,16 +3,19 @@
 //! that end with their source, and each added note's own ID. Every block is a
 //! real-time section under the allocation trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_devices::stack::{
-    CRESCENDO, DUPLICATES, PER_NOTE, STACK, STRUM, TENSION, chance, shift, strum_position, velocity,
+    CRESCENDO, DUPLICATES, PER_NOTE, STACK, STRUM, TENSION, USE_SCALE, chance, learn, shift,
+    strum_position, velocity,
 };
+use bl_engine::scales::ScaleRuns;
 use bl_engine::{NoteExpression, NoteKind};
+use bl_model::{Scale, ScaleName};
 use common::chain::{BEAT_FRAMES, Chain, note, nothing_hangs};
-use common::{node, note_off, note_on, notes_through, registry};
+use common::{
+    bend, bends, device, keys_on, node, note_off, note_on, notes_through, on, registry,
+    scaled_through,
+};
 
 const SIZES: [usize; 4] = [1, 100, 512, 4096];
 
@@ -364,4 +367,102 @@ fn a_strummed_note_due_before_the_key_comes_up_sounds_at_every_block_size() {
             .collect();
         assert_eq!(ons, [(0, 60), (240, 64)], "size {size}");
     }
+}
+
+fn c_major() -> Scale {
+    Scale::new(0, ScaleName::Major)
+}
+
+/// A Chord counting degrees, with its first two shifts `first` and `second`
+/// and the rest 0, run on `notes` under `scale`.
+fn chord(
+    first: f64,
+    second: f64,
+    notes: &[bl_engine::NoteEvent],
+    scale: ScaleRuns,
+) -> Vec<bl_engine::NoteEvent> {
+    let mut params = vec![(USE_SCALE, 1.0), (shift(0), first), (shift(1), second)];
+    params.extend((2..6).map(|n| (shift(n), 0.0)));
+    let device = device(&bl_devices::stack_type(), &params);
+    let mut stack = node(&registry(), &device, 256);
+    scaled_through(stack.as_mut(), notes, 256, scale)
+}
+
+// Spec: midi-chord R16. With Use Current Scale on, the shifts count degrees:
+// a note in the scale gets scale notes, and one outside it has them counted
+// from the scale note below it, while it sounds as it came.
+#[test]
+fn use_current_scale_counts_the_shifts_in_degrees() {
+    let scale = ScaleRuns::of(c_major());
+    // C3 with a third and a fifth, two and four degrees up.
+    let sent = chord(2.0, 4.0, &[on(0, 60, 1)], scale);
+    assert_eq!(keys_on(&sent), [60, 64, 67]);
+    // C#3 sounds as it came, and its shifts are counted from C3.
+    let sent = chord(2.0, 4.0, &[on(0, 61, 1)], scale);
+    assert_eq!(keys_on(&sent), [61, 64, 67]);
+    // Negative shifts count down.
+    let sent = chord(-1.0, -2.0, &[on(0, 60, 1)], scale);
+    assert_eq!(keys_on(&sent), [60, 59, 57]);
+    // A shift of 0, or a repeated one, adds nothing; a note off the keyboard
+    // isn't played.
+    let sent = chord(0.0, 2.0, &[on(0, 60, 1)], scale);
+    assert_eq!(keys_on(&sent), [60, 64]);
+    let sent = chord(2.0, 2.0, &[on(0, 60, 1)], scale);
+    assert_eq!(keys_on(&sent), [60, 64]);
+    let sent = chord(2.0, 36.0, &[on(0, 120, 1)], scale);
+    assert_eq!(keys_on(&sent), [120, 124]);
+    // Scale Mode off counts semitones.
+    let sent = chord(2.0, 4.0, &[on(0, 60, 1)], ScaleRuns::of(Scale::default()));
+    assert_eq!(keys_on(&sent), [60, 62, 64]);
+}
+
+// Spec: midi-chord R17. Learn with Use Current Scale on sets each shift to
+// the degrees from the root, a key outside the scale counting as the scale
+// note below it.
+#[test]
+fn learn_counts_degrees_in_the_scale() {
+    let held = [60, 64, 67, 61, 71];
+    assert_eq!(learn(&held, &c_major()), [2, 4, 0, 6, 0, 0]);
+    // Semitones when the scale is the chromatic one.
+    assert_eq!(learn(&held, &Scale::default()), [4, 7, 1, 11, 0, 0]);
+}
+
+// Spec: midi-chord R18. With Use Current Scale and Per-Note Events on, the
+// bend each added note gets is carried in degrees, so a bent chord stays in
+// the scale; the note itself gets the bend it came with.
+#[test]
+fn a_bent_chord_stays_in_the_scale() {
+    let mut params = vec![
+        (USE_SCALE, 1.0),
+        (PER_NOTE, 1.0),
+        (shift(0), 2.0),
+        (shift(1), 0.0),
+    ];
+    params.extend((2..6).map(|n| (shift(n), 0.0)));
+    let device = device(&bl_devices::stack_type(), &params);
+    let mut stack = node(&registry(), &device, 256);
+    // Two semitones is a degree up from C3, so a degree up from E3: F3.
+    let notes = [on(0, 60, 1), bend(5, 60, 1, 2.0 / 48.0)];
+    let sent = scaled_through(stack.as_mut(), &notes, 256, ScaleRuns::of(c_major()));
+    let carried = bends(&sent);
+    assert_eq!(carried.len(), 2);
+    assert_eq!(carried[0].0, 60);
+    assert!((carried[0].1 - 2.0 / 48.0).abs() < 1e-6, "{carried:?}");
+    assert_eq!(carried[1].0, 64);
+    assert!((carried[1].1 - 1.0 / 48.0).abs() < 1e-6, "{carried:?}");
+}
+
+// Spec: midi-chord R18, scales R17. A change of the current scale while a
+// chord is held moves none of its notes.
+#[test]
+fn a_scale_change_while_a_chord_is_held_moves_none_of_its_notes() {
+    let mut scale = ScaleRuns::of(c_major());
+    scale.push(100, Scale::default());
+    let sent = chord(2.0, 4.0, &[on(0, 60, 1), common::off(200, 60, 1)], scale);
+    let ends: Vec<u8> = sent
+        .iter()
+        .filter(|n| n.kind == NoteKind::Off)
+        .map(|n| n.key)
+        .collect();
+    assert_eq!(ends, [60, 64, 67]);
 }

@@ -4,10 +4,7 @@
 //! thread, and what it renders is the same to the bit as the audio thread
 //! alone renders. The workers' blocks run under the allocation trap too.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_core::time::{TICKS_PER_QUARTER, Ticks};
 use bl_engine::nodes::{TEST_TONE, test_tone};
 use bl_engine::testing::{

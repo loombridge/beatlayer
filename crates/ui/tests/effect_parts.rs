@@ -5,8 +5,7 @@
 //!
 //! Spec: device-chains R34 and R35.
 
-mod common;
-
+use crate::common;
 use bl_devices::testing::{self, EFFECTS_INVERT};
 use bl_model::{DeviceId, TrackId};
 use bl_shell::device_commands::{DeviceAdded, frame_width};

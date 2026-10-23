@@ -3,10 +3,7 @@
 //! pitch ratio, with the loop modes filling a short one — the same sample at
 //! any block size, every block a real-time section under the allocation trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use std::sync::Arc;
 
 use bl_analysis::Audio as Analysed;

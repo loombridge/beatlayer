@@ -4,8 +4,6 @@
 //! the files a cancelled run leaves behind. Every block of a render runs
 //! under the allocation trap.
 
-bl_rt::install_trap!();
-
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 

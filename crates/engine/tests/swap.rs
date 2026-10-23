@@ -2,10 +2,7 @@
 //! thread lets go of is freed elsewhere. Every block runs as a real-time
 //! section under the allocation trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use std::sync::atomic::Ordering::Relaxed;
 
 use bl_engine::{Block, Node, testing};

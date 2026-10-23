@@ -2,10 +2,7 @@
 //! R9): parameters land on their frame, glide or step, stay in range, and
 //! run without allocating; descriptions that break a rule never register.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_devices::testing::{self, DRIVE_OVERSAMPLING, UTILITY_GAIN, UTILITY_MUTE};
 use bl_devices::{NativeDevice, NativeNode, ParamBank};
 use bl_engine::{DeviceType, Registry};

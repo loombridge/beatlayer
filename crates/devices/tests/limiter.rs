@@ -2,10 +2,7 @@
 //! sample peak, the true peak at 4 times the rate, the release time, Auto
 //! Release, the stereo Link, the mid/side routing, and soft clipping.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_devices::limiter::{
     AUTO, CEILING, CEILING_MODE, LIMITER, LINK, LOOKAHEAD, RELEASE, ROUTING, limiter_type,
 };

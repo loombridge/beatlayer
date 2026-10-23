@@ -506,6 +506,11 @@ pub struct DevicePanel {
     /// panel's state, not the set's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub learning: Option<u8>,
+    /// The parameters drawn disabled because the device takes them from its
+    /// current scale: Scale's Base and Scale Name and Arpeggiator's Root and
+    /// Scale, while Use Current Scale is on (the scales spec, R16).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub locked: Vec<ParamId>,
 }
 
 /// One parameter a plug-in device's panel can show (clap-hosting R5,
@@ -539,6 +544,22 @@ impl DevicePanel {
 }
 
 impl DeviceFrame {
+    /// The switch the device draws in its title bar, if its type has one
+    /// (L-DEV-004).
+    #[must_use]
+    pub fn title_switch(&self) -> Option<TitleSwitch<'_>> {
+        let panel = self.panel.as_ref()?;
+        let params = &panel.description.params;
+        let index = params
+            .iter()
+            .position(|p| Some(p.id) == panel.description.title_switch)?;
+        Some(TitleSwitch {
+            param: params[index].id,
+            name: &params[index].name,
+            on: panel.value(index) >= 0.5,
+        })
+    }
+
     /// The device's own items in its Show Options menu, in the order its
     /// type lists them: they follow Save as Default Preset (C-DEVICE-015).
     #[must_use]
@@ -576,6 +597,10 @@ pub struct ParameterState {
     /// rather than a control in its body (C-DEVICE-015).
     #[serde(default)]
     pub menu_option: bool,
+    /// Whether it's the switch the device draws in its title bar rather than
+    /// in its body (L-DEV-004), such as Use Current Scale.
+    #[serde(default)]
+    pub title_switch: bool,
     /// Whether it's one of the parameters the device's panel is configured
     /// to show (clap-hosting R5, configure mode). True for every parameter of
     /// a device that isn't a plug-in, since its panel shows them all.
@@ -599,6 +624,18 @@ pub struct DeviceParameters {
     /// Its parameters, in the order its type lists them; empty if its type
     /// doesn't describe them.
     pub params: Vec<ParameterState>,
+}
+
+/// The switch a device draws in its title bar (L-DEV-004): its type marks one
+/// of its switches for it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TitleSwitch<'a> {
+    /// The parameter pressing the switch turns over (`device.set_param`).
+    pub param: ParamId,
+    /// The switch's name: the parameter's.
+    pub name: &'a str,
+    /// Whether it's on.
+    pub on: bool,
 }
 
 /// One of a device's own items in its Show Options menu: a switch its type

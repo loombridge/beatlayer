@@ -1,6 +1,6 @@
 # The scale-map MIDI effect
 
-- **Status:** partial (R1 to R9 have passing tests; R10 to R12, the scale names and Use Current Scale, are WP-6.8's)
+- **Status:** implemented (every rule below has a passing test)
 - **Work packages:** WP-5.30 (R1 to R9); WP-6.8 (the Scale Name chooser and Use Current Scale: R10 to R12; under a tuning the switch follows [tunings.md](tunings.md) R16). The framework it sits on is WP-2.5 ([the native device framework](device-framework.md)), with the note rules of R30 to R34
 - **Parity-matrix row:** Devices: MIDI effects
 - **Checked against:** the Live 12 reference manual, chapter 30 "Live MIDI Effect Reference", section 30.7 "Scale", read on 17 October 2026; for the scale names and Use Current Scale, the same section and the manual's chapter 3, section 3.13 "Scale Awareness", read 20 October 2026, and the Live 12 release notes, 12.0 and 12.1.5
@@ -51,9 +51,9 @@ The device takes Live's name, Scale; its look is the device framework's generic 
 | R7 | `crates/devices/tests/remap.rs`, `notes_outside_the_window_pass_through` | real-time trap |
 | R8 | `crates/agent/tests/midi_effects.rs`, `an_agent_reaches_every_parameter_of_every_midi_effect` | MCP script |
 | R9 | `crates/devices/tests/rules.rs`, `every_parameter_is_automatable_to_the_frame`, `every_parameter_has_a_description`; every test in `crates/devices/tests/remap.rs` runs its blocks as real-time sections under the allocation trap; `rtsan/tests/midi_effects.rs` | real-time trap |
-| R10 | to be written in WP-6.8 | |
-| R11 | to be written in WP-6.8 | |
-| R12 | to be written in WP-6.8 | |
+| R10 | `crates/devices/tests/remap.rs`, `a_named_scale_sends_each_note_to_the_nearest_scale_note`; `crates/agent/tests/midi_effects.rs`, `an_agent_sets_the_use_current_scale_switches_and_the_new_choosers_by_id`; `crates/shell/tests/macros.rs`, `the_scale_choosers_map_to_macros`; `crates/cli/tests/older_sets.rs`, `a_set_saved_before_use_current_scale_loads_its_devices_unchanged` | real-time trap; MCP script; unit |
+| R11 | `crates/devices/tests/remap.rs`, `fold_acts_as_off_with_a_named_scale` | real-time trap |
+| R12 | `crates/devices/tests/remap.rs`, `use_current_scale_takes_base_and_scale_name_from_the_current_scale`, `a_scale_change_while_a_note_is_held_does_not_move_it`; `crates/ui/tests/device_view.rs`, `the_choosers_a_device_takes_from_the_current_scale_are_disabled` | real-time trap; unit |
 
 ## Defaults, ranges and details
 

@@ -14,10 +14,7 @@
 //! (D17). Every block runs as a real-time section under the allocation
 //! trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_commands::Registry as Commands;
 use bl_engine::mixer::{
     METER_RELEASE_DB_PER_SECOND, Solo, constant_power, db_from_gain, gain_from_db, pan_gains,

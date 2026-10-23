@@ -8,7 +8,7 @@
 //! note 0 on channel 16 (the value byte numbers them), which changes nothing
 //! in any program that sees the port while the test runs.
 //!
-//! `cargo test -p bl-midi-io --test scheduled_output -- --nocapture` prints
+//! `cargo test -p bl-midi-io --test midi_io_tests -- scheduled_output:: --nocapture` prints
 //! the measurements.
 
 use std::sync::{Arc, Mutex};

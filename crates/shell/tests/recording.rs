@@ -12,8 +12,6 @@
 //! - Punch-In and Punch-Out at the loop brace record only between its ends.
 //! - The whole path allocates nothing on the audio thread.
 
-bl_rt::install_trap!();
-
 use std::path::{Path, PathBuf};
 
 use bl_audio_io::{BackendKind, NullBackend, NullControl, NullOptions, Pacing};

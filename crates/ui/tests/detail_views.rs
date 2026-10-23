@@ -5,8 +5,7 @@
 //!
 //! Spec: detail-views R1 to R18.
 
-mod common;
-
+use crate::common;
 use bl_core::time::Ticks;
 use bl_model::{Clip, ClipData, ClipId, Command, MidiData, Note, SceneId, TrackId};
 use bl_shell::commands::DetailView;

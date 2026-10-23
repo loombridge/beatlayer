@@ -2,10 +2,7 @@
 //! degradation spec): a short delay moved by a sine and by band-filtered
 //! noise.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_devices::degrade::{
     AMOUNT, DEGRADE, FILTER_WIDTH, FREQ, LATENCY_SECONDS, NOISE_BLEND, STEREO_WIDTH, degrade_type,
 };

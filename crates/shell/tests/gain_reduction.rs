@@ -3,8 +3,6 @@
 //! the engine publishes the most any of them reported with the track's
 //! meters. Every block runs under the allocation trap.
 
-bl_rt::install_trap!();
-
 use bl_core::time::SampleRate;
 use bl_devices::bus_compressor::{
     ATTACK as BUS_ATTACK, BUS_COMPRESSOR, THRESHOLD as BUS_THRESHOLD,

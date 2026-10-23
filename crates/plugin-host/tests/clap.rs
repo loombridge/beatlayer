@@ -6,10 +6,7 @@
 //!
 //! Spec: clap-hosting R17.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_core::time::{Frames, Ticks};
 use bl_engine::{AutomationList, Node, NodeFactory, NoteEvent, NoteKind, TransportInfo};
 use bl_model::modulation::Travel;

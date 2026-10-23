@@ -1,6 +1,6 @@
 # The chord MIDI effect
 
-- **Status:** partial (R1 to R15 have passing tests; R16 to R18, Use Current Scale, are WP-6.8's)
+- **Status:** implemented (every rule below has a passing test)
 - **Work packages:** WP-5.30 (R1 to R15); WP-6.8 (Use Current Scale: R16 to R18; under a tuning the switch follows [tunings.md](tunings.md) R16). The framework it sits on is WP-2.5 ([the native device framework](device-framework.md)), with the note rules of R30 to R34
 - **Parity-matrix row:** Devices: MIDI effects
 - **Checked against:** the Live 12 reference manual, chapter 30 "Live MIDI Effect Reference", section 30.3 "Chord", read on 17 October 2026; for Use Current Scale, the same manual's chapter 3, section 3.13 "Scale Awareness", and chapter 30's introduction, read 20 October 2026, and the Live 12 release notes, 12.0 and 12.1
@@ -63,9 +63,9 @@ Each note and the notes it made end together: when the key comes up, every added
 | R13 | `crates/shell/tests/midi_io.rs`, `learn_sets_stacks_shifts_from_the_chord_played` | unit |
 | R14 | `crates/agent/tests/midi_effects.rs`, `an_agent_reaches_every_parameter_of_every_midi_effect` | MCP script |
 | R15 | `crates/devices/tests/rules.rs`, `every_parameter_is_automatable_to_the_frame`, `every_parameter_has_a_description`; every test in `crates/devices/tests/stack.rs` runs its blocks as real-time sections under the allocation trap; `rtsan/tests/midi_effects.rs` | real-time trap |
-| R16 | to be written in WP-6.8 | |
-| R17 | to be written in WP-6.8 | |
-| R18 | to be written in WP-6.8 | |
+| R16 | `crates/devices/tests/stack.rs`, `use_current_scale_counts_the_shifts_in_degrees` | real-time trap |
+| R17 | `crates/devices/tests/stack.rs`, `learn_counts_degrees_in_the_scale`; `crates/shell/tests/midi_io.rs`, `learn_counts_degrees_with_use_current_scale_on` | unit |
+| R18 | `crates/devices/tests/stack.rs`, `a_bent_chord_stays_in_the_scale`, `a_scale_change_while_a_chord_is_held_moves_none_of_its_notes` | real-time trap |
 
 ## Defaults, ranges and details
 

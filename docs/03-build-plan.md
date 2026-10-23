@@ -655,7 +655,7 @@ Total to 1.0: 256 packages planned in Phases 0 to 6, and about 110 estimated in 
 | 6.17 | todo |  |  |
 | 6.17b | todo |  |  |
 | 6.18 | todo |  |  |
-| 6.19 | todo |  |  |
+| 6.19 | done | 23 October 2026 | [#329](https://github.com/loombridge/beatlayer/pull/329); the Groove Pool, `.blgroove` files and a clip's groove, played on MIDI clips and warped audio clips (Base, Quantize, Timing, Random, Velocity and the Global Amount) as node data at any block size, with Commit, Extract, groove to clip and Auto Load Groove ([grooves](specs/grooves.md) R1 to R23) |
 | 6.20 | todo |  |  |
 | 6.21 | todo |  |  |
 | 6.22 | todo |  |  |

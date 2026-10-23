@@ -24,7 +24,10 @@ use crate::document::Document;
 use crate::error::ModelError;
 use crate::external::{ExternalPort, HardwareLatency};
 use crate::follow::FollowPatch;
-use crate::ids::{ChainId, ClipId, ContentHash, DeviceId, LocatorId, ParamId, SceneId, TrackId};
+use crate::groove::{GLOBAL_AMOUNT_MAX, Groove, GrooveBase, check_percent};
+use crate::ids::{
+    ChainId, ClipId, ContentHash, DeviceId, GrooveId, LocatorId, ParamId, SceneId, TrackId,
+};
 use crate::launch::{ClipLaunch, LaunchMode, LaunchQuantization};
 use crate::layers::{
     Distribution, Layer, LayerId, LayerSettings, LayerSort, LayerZone, Layers, Zone, ZoneKind,
@@ -2413,6 +2416,69 @@ pub enum Command {
         #[serde(default)]
         name: Option<String>,
     },
+    /// Adds a groove to the end of the Groove Pool (the grooves spec, R1):
+    /// what loading a groove file and extracting a groove make.
+    AddGroove {
+        /// The groove, with a new ID.
+        groove: Groove,
+    },
+    /// Takes a groove out of the pool, sets every clip that used it to none
+    /// and clears the auto-load groove if it was that one (R5).
+    DeleteGroove {
+        /// The groove.
+        groove: GrooveId,
+    },
+    /// Renames a groove (R5).
+    RenameGroove {
+        /// The groove.
+        groove: GrooveId,
+        /// The new name.
+        name: String,
+    },
+    /// Sets any of a groove's parameters, keeping those left out (R5).
+    SetGroove {
+        /// The groove.
+        groove: GrooveId,
+        /// The grid its notes are measured against.
+        #[serde(default)]
+        base: Option<GrooveBase>,
+        /// Quantize, from 0 to 100 percent.
+        #[serde(default)]
+        quantize: Option<f64>,
+        /// Timing, from 0 to 100 percent.
+        #[serde(default)]
+        timing: Option<f64>,
+        /// Random, from 0 to 100 percent.
+        #[serde(default)]
+        random: Option<f64>,
+        /// Velocity, from -100 to +100 percent.
+        #[serde(default)]
+        velocity: Option<f64>,
+    },
+    /// Sets the Global Amount, from 0 to 130 percent (R5).
+    SetGlobalGrooveAmount {
+        /// The amount, in percent.
+        amount: f64,
+    },
+    /// Sets the Auto Load Groove switch and its groove (R20), keeping what
+    /// is left out.
+    SetAutoLoadGroove {
+        /// Whether a new MIDI clip takes the auto-load groove.
+        #[serde(default)]
+        enabled: Option<bool>,
+        /// The auto-load groove, one of the pool's.
+        #[serde(default)]
+        groove: Option<GrooveId>,
+    },
+    /// Sets the groove of clips to one of the pool's, or to none (R3).
+    SetClipGroove {
+        /// The clips; left out, the ones selected.
+        #[serde(default)]
+        clips: Vec<ClipId>,
+        /// The groove; left out, none.
+        #[serde(default)]
+        groove: Option<GrooveId>,
+    },
 }
 
 impl Command {
@@ -2708,6 +2774,15 @@ impl Command {
             // are to observe; Beatlayer's name the edit.
             Self::SetClipScale { .. } => "Change Clip Scale",
             Self::SetScale { .. } => "Change Scale",
+            // Spec: grooves R5, R16, R17, R32. Live's undo names for the
+            // groove edits are to observe; Beatlayer's name the edit.
+            Self::AddGroove { .. } => "Add Groove",
+            Self::DeleteGroove { .. } => "Delete Groove",
+            Self::RenameGroove { .. } => "Rename Groove",
+            Self::SetGroove { .. } => "Change Groove",
+            Self::SetGlobalGrooveAmount { .. } => "Change Global Amount",
+            Self::SetAutoLoadGroove { .. } => "Change Auto Load Groove",
+            Self::SetClipGroove { .. } => "Change Clip Groove",
         }
     }
 
@@ -2729,6 +2804,28 @@ impl Command {
             Self::CompareSwitch { .. } => "Compare: Switch to B",
             Self::CompareCopy { device } if b(device) => "Compare: Copy B to A",
             Self::CompareCopy { .. } => "Compare: Copy A to B",
+            // Spec: grooves R5. A change to one parameter is named for it.
+            Self::SetGroove {
+                base,
+                quantize,
+                timing,
+                random,
+                velocity,
+                ..
+            } => match (
+                base.is_some(),
+                quantize.is_some(),
+                timing.is_some(),
+                random.is_some(),
+                velocity.is_some(),
+            ) {
+                (true, false, false, false, false) => "Change Base",
+                (false, true, false, false, false) => "Change Quantize",
+                (false, false, true, false, false) => "Change Timing",
+                (false, false, false, true, false) => "Change Random",
+                (false, false, false, false, true) => "Change Velocity",
+                _ => self.label(),
+            },
             _ => self.label(),
         }
     }
@@ -2748,6 +2845,7 @@ impl Command {
             Self::GroupDevices { rack, .. } => rack.ids(),
             Self::CreateScene { id, .. } => vec![id.0],
             Self::AddLocator { locator } => vec![locator.id.0],
+            Self::AddGroove { groove } => vec![groove.id.0],
             Self::BounceTrackInPlace { bounced, .. } => {
                 bounced.clip_ids().iter().map(|clip| clip.0).collect()
             }
@@ -3399,6 +3497,52 @@ impl Document {
             } => {
                 let current = self.settings.scale;
                 self.settings.scale = scaled(current, *enabled, *root, name.as_deref())?;
+                Ok(())
+            }
+            Command::AddGroove { groove } => self.add_groove(groove.clone()),
+            Command::DeleteGroove { groove } => self.delete_groove(*groove),
+            Command::RenameGroove { groove, name } => {
+                self.groove_mut(*groove)?.name.clone_from(name);
+                Ok(())
+            }
+            Command::SetGroove {
+                groove,
+                base,
+                quantize,
+                timing,
+                random,
+                velocity,
+            } => self.set_groove(*groove, *base, [*quantize, *timing, *random, *velocity]),
+            Command::SetGlobalGrooveAmount { amount } => {
+                check_percent("the Global Amount", *amount, 0.0, GLOBAL_AMOUNT_MAX)?;
+                self.settings.grooves.global_amount = *amount;
+                Ok(())
+            }
+            Command::SetAutoLoadGroove { enabled, groove } => {
+                if let Some(groove) = groove {
+                    self.groove_mut(*groove)?;
+                }
+                let pool = &mut self.settings.grooves;
+                if let Some(enabled) = enabled {
+                    pool.auto_load = *enabled;
+                }
+                if groove.is_some() {
+                    pool.auto_load_groove = *groove;
+                }
+                Ok(())
+            }
+            Command::SetClipGroove { clips, groove } => {
+                if let Some(groove) = groove {
+                    self.groove_mut(*groove)?;
+                }
+                for clip in clips {
+                    self.clip_ref(*clip)?;
+                }
+                for clip in clips {
+                    if self.clip_ref(*clip)?.groove != *groove {
+                        self.clip_mut(*clip)?.groove = *groove;
+                    }
+                }
                 Ok(())
             }
             Command::SetClipLaunchMode { clip, mode } => {
@@ -5142,6 +5286,7 @@ impl Document {
 
     fn create_clip(&mut self, track: TrackId, clip: &Clip) -> Result<(), ModelError> {
         self.check_fresh(clip.id.0)?;
+        self.check_clip_groove(clip)?;
         check_clip_fits(self.track_ref(track)?, &clip.data)?;
         check_extent(clip.start, clip.length)?;
         check_clip(clip)?;
@@ -5391,6 +5536,7 @@ impl Document {
         clip: &Clip,
     ) -> Result<(), ModelError> {
         self.check_fresh(clip.id.0)?;
+        self.check_clip_groove(clip)?;
         let target = self.track_ref(track)?;
         check_kind(target, TrackKind::holds_clips, AUDIO_OR_MIDI)?;
         self.scene_position(scene)
@@ -7006,6 +7152,64 @@ impl Document {
         brace.start = start;
         brace.length = next - start;
         brace.enabled = true;
+        Ok(())
+    }
+
+    /// The groove with this ID, to change.
+    fn groove_mut(&mut self, id: GrooveId) -> Result<&mut Groove, ModelError> {
+        self.settings
+            .grooves
+            .pool
+            .iter_mut()
+            .find(|groove| groove.id == id)
+            .ok_or(ModelError::NoSuchGroove(id))
+    }
+
+    /// Whether the groove a new clip names is in the pool (R3).
+    fn check_clip_groove(&self, clip: &Clip) -> Result<(), ModelError> {
+        match clip.groove {
+            Some(groove) if self.settings.grooves.get(groove).is_none() => {
+                Err(ModelError::NoSuchGroove(groove))
+            }
+            _ => Ok(()),
+        }
+    }
+
+    /// Adds a groove to the end of the pool (the grooves spec, R1).
+    fn add_groove(&mut self, groove: Groove) -> Result<(), ModelError> {
+        self.check_fresh(groove.id.0)?;
+        groove.check()?;
+        self.settings.grooves.pool.push(groove);
+        Ok(())
+    }
+
+    /// Takes a groove out of the pool and everything that used it (R5, R20).
+    fn delete_groove(&mut self, id: GrooveId) -> Result<(), ModelError> {
+        self.groove_mut(id)?;
+        self.settings.grooves.pool.retain(|groove| groove.id != id);
+        if self.settings.grooves.auto_load_groove == Some(id) {
+            self.settings.grooves.auto_load_groove = None;
+        }
+        self.forget_grooves(|used| used == id);
+        Ok(())
+    }
+
+    /// Sets a groove's parameters: Base, then Quantize, Timing, Random and
+    /// Velocity. A value out of range refuses them all (R2, R5).
+    fn set_groove(
+        &mut self,
+        id: GrooveId,
+        base: Option<GrooveBase>,
+        [quantize, timing, random, velocity]: [Option<f64>; 4],
+    ) -> Result<(), ModelError> {
+        let mut next = self.groove_mut(id)?.clone();
+        next.base = base.unwrap_or(next.base);
+        next.quantize = quantize.unwrap_or(next.quantize);
+        next.timing = timing.unwrap_or(next.timing);
+        next.random = random.unwrap_or(next.random);
+        next.velocity = velocity.unwrap_or(next.velocity);
+        next.check()?;
+        *self.groove_mut(id)? = next;
         Ok(())
     }
 

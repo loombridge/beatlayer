@@ -191,6 +191,8 @@ pub fn place(
             clip.name = source.name;
             clip.mute = source.mute;
             clip.envelopes = source.envelopes;
+            // Spec: grooves R3. A copy keeps its groove.
+            clip.groove = source.groove;
             let track = run.slot.0;
             crate::arrangement::placing::clear(editor, track, from, to, &placed)?;
             placed.insert(id);

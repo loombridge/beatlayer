@@ -347,6 +347,9 @@ impl SessionView {
                 );
                 clip.launch.mode = ctx.launch_mode;
                 clip.launch.quantization = ctx.launch_quantization;
+                // Spec: grooves R20. A new MIDI clip takes the set's
+                // auto-load groove.
+                clip.groove = ctx.editor.document().settings().grooves.auto_loaded();
                 let changes = self.edit(ctx.editor, "Insert Empty MIDI Clip", |editor| {
                     model(
                         editor,

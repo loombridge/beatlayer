@@ -1273,6 +1273,7 @@ impl EngineProgram {
             events,
             transport,
             session,
+            groove_amount,
             ..
         } = *block;
         // Where the block sits in the song, for the automation a route plays
@@ -1318,6 +1319,7 @@ impl EngineProgram {
                     notes: &[],
                     notes_out: Some(turn.notes(notes)),
                     session,
+                    groove_amount,
                     modulation: turn.bus(frames),
                     rows: None,
                 });
@@ -1483,6 +1485,7 @@ impl EngineProgram {
                 notes: &[],
                 notes_out: None,
                 session,
+                groove_amount,
                 modulation: turn.bus(frames),
                 rows: None,
             });
@@ -1814,6 +1817,9 @@ pub(crate) struct Blk<'a> {
     pub(crate) events: &'a [Resolved],
     pub(crate) transport: TransportInfo,
     pub(crate) session: &'a [SessionPlayback],
+    /// The set's Global Amount of groove, 1 at 100 % (the grooves spec,
+    /// R21).
+    pub(crate) groove_amount: f32,
 }
 
 /// A thread's hold on the parts of the program that one task owns, while it
@@ -2217,6 +2223,7 @@ impl EngineProgram {
                 notes: heard_notes.unwrap_or_else(|| in_buf.notes()),
                 notes_out: Some(out_buf),
                 session: block.session,
+                groove_amount: block.groove_amount,
                 // A modulator driven by the signal writes its own rows, and
                 // hears the rows of the modulators before it.
                 modulation: match modulator {
@@ -2455,6 +2462,7 @@ impl EngineProgram {
             notes: &[],
             notes_out: None,
             session: block.session,
+            groove_amount: block.groove_amount,
             modulation: turn.bus(frames),
             rows: None,
             external: None,
@@ -2652,6 +2660,7 @@ impl EngineProgram {
                     notes: &[],
                     notes_out: None,
                     session: block.session,
+                    groove_amount: block.groove_amount,
                     modulation: turn.bus(frames),
                     rows: None,
                 });

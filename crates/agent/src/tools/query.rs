@@ -338,7 +338,7 @@ impl View<'_> {
             ClipData::Audio(audio) => ("audio", json!({ "media": audio.media })),
             ClipData::Midi(midi) => ("midi", json!({ "notes": midi.notes.len() })),
         };
-        json!({
+        let mut value = json!({
             "id": clip.id,
             "name": clip.name,
             "kind": kind,
@@ -349,7 +349,12 @@ impl View<'_> {
             "mute": clip.mute,
             "scale": scale_value(clip.scale),
             "content": content,
-        })
+        });
+        // Only a clip with a groove shows one.
+        if let Some(groove) = clip.groove {
+            value["groove"] = json!(groove);
+        }
+        value
     }
 
     fn clip(&self, clip: &Clip) -> Value {

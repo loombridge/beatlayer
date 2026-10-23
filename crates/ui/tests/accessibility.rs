@@ -2831,6 +2831,84 @@ fn paths() -> BTreeMap<&'static str, Path> {
                 "the take lanes' view and comping (milestone M6); loop recording makes the lanes",
             )),
         ),
+        (
+            "take_lane.comp_sources",
+            Exception(LaterView(
+                "the take lanes' rows, headers, keys and menus (WP-6.22, comping R23 to R30)",
+            )),
+        ),
+        (
+            "take_lane.copy_to_main_lane",
+            Exception(LaterView(
+                "the take lanes' rows, headers, keys and menus (WP-6.22, comping R23 to R30)",
+            )),
+        ),
+        (
+            "take_lane.create_clip",
+            Exception(LaterView(
+                "the take lanes' rows, headers, keys and menus (WP-6.22, comping R23 to R30)",
+            )),
+        ),
+        (
+            "take_lane.delete",
+            Exception(LaterView(
+                "the take lanes' rows, headers, keys and menus (WP-6.22, comping R23 to R30)",
+            )),
+        ),
+        (
+            "take_lane.delete_all",
+            Exception(LaterView(
+                "the take lanes' rows, headers, keys and menus (WP-6.22, comping R23 to R30)",
+            )),
+        ),
+        (
+            "take_lane.delete_unused",
+            Exception(LaterView(
+                "the take lanes' rows, headers, keys and menus (WP-6.22, comping R23 to R30)",
+            )),
+        ),
+        (
+            "take_lane.duplicate",
+            Exception(LaterView(
+                "the take lanes' rows, headers, keys and menus (WP-6.22, comping R23 to R30)",
+            )),
+        ),
+        (
+            "take_lane.insert",
+            Exception(LaterView(
+                "the take lanes' rows, headers, keys and menus (WP-6.22, comping R23 to R30)",
+            )),
+        ),
+        (
+            "take_lane.move",
+            Exception(LaterView(
+                "the take lanes' rows, headers, keys and menus (WP-6.22, comping R23 to R30)",
+            )),
+        ),
+        (
+            "take_lane.move_comp_edge",
+            Exception(LaterView(
+                "the take lanes' rows, headers, keys and menus (WP-6.22, comping R23 to R30)",
+            )),
+        ),
+        (
+            "take_lane.rename",
+            Exception(LaterView(
+                "the take lanes' rows, headers, keys and menus (WP-6.22, comping R23 to R30)",
+            )),
+        ),
+        (
+            "take_lane.replace_with_take",
+            Exception(LaterView(
+                "the take lanes' rows, headers, keys and menus (WP-6.22, comping R23 to R30)",
+            )),
+        ),
+        (
+            "take_lane.set_audition",
+            Exception(LaterView(
+                "the take lanes' rows, headers, keys and menus (WP-6.22, comping R23 to R30)",
+            )),
+        ),
         ("clip.delete", Exception(editing)),
         ("clip.move", Exception(editing)),
         ("clip.move_by", Exception(editing)),
@@ -3021,6 +3099,24 @@ fn paths() -> BTreeMap<&'static str, Path> {
         // note-selection keys (S-A11Y-010, S-A11Y-011), Delete
         // (S-EDIT-005) and Cmd-A (S-NOTE-001).
         ("note.ramp_value", Exception(note_editor)),
+        // Spec: step-recording R2. The pointer's press plays a preview; from
+        // the keyboard, selecting a note with the note-jump keys sounds it.
+        (
+            "note.preview",
+            Exception(Equivalent(
+                "the pointer's press on a piano ruler key or a note; a note selected from the \
+                 keys sounds as a preview too (`clip_view.select_notes`)",
+            )),
+        ),
+        // The stretch markers are dragged (I-DRAG-040); Live has no key
+        // for stretching notes, so a keyboard path needs the maintainer's
+        // choice of keys.
+        (
+            "note.stretch",
+            Exception(LaterView(
+                "keys for the note stretch markers (Live has none; the choice is the maintainer's)",
+            )),
+        ),
         ("view.lane", Exception(note_editor)),
         // The expression lanes and the footer (WP-6.1): the pointer drags
         // the markers and uses the footer's controls and the Lane

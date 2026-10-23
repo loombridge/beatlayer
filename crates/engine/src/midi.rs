@@ -43,6 +43,10 @@ use crate::program::Task;
 /// block, so the work per block is bounded (real-time rule 4).
 pub const MIDI_EVENTS_PER_BLOCK: usize = 1024;
 
+/// The most previews one track's input holds in a block. More are dropped
+/// and counted ([`MidiCounters::dropped`]).
+pub const MIDI_PREVIEWS_PER_TRACK: usize = 32;
+
 /// The most messages one track's input holds in a block. More are dropped
 /// and counted ([`MidiCounters::dropped`]).
 pub const MIDI_EVENTS_PER_TRACK: usize = 256;
@@ -137,6 +141,10 @@ struct Route {
     monitored: bool,
     /// This block's messages, reserved when the program is compiled.
     events: Vec<MidiEvent>,
+    /// This block's previews of the MIDI Note Editor (Spec: step-recording
+    /// R2): played whether or not the track monitors, and kept apart from
+    /// `events` so recording and Capture MIDI never see them.
+    previews: Vec<MidiEvent>,
     /// The `(channel, key)` of every note the track's devices were sent an
     /// on for and no off, room made for all 2,048.
     held: Vec<(u8, u8)>,
@@ -152,6 +160,8 @@ impl Route {
             return false;
         }
         let source = match self.filter {
+            // A preview is for one track alone (see `Route::previews`).
+            _ if matches!(event.source, MidiSource::Preview(_)) => false,
             Filter::All => true,
             Filter::Keyboard => event.source == MidiSource::ComputerKeyboard,
             Filter::Port(port) => event.source == MidiSource::Port(port),
@@ -320,6 +330,7 @@ impl MidiRoutes {
                     channel: routing.channel.map(|c| c.saturating_sub(1)),
                     monitored: routing.monitoring(track.mixer().arm),
                     events: Vec::with_capacity(MIDI_EVENTS_PER_TRACK),
+                    previews: Vec::with_capacity(MIDI_PREVIEWS_PER_TRACK),
                     held: Vec::with_capacity(16 * 128),
                     release: false,
                 })
@@ -462,6 +473,7 @@ impl MidiRoutes {
     fn clear(&mut self) {
         for route in self.routes.iter_mut() {
             route.events.clear();
+            route.previews.clear();
         }
     }
 
@@ -534,6 +546,21 @@ impl MidiRoutes {
             route.release = false;
             for (channel, key) in route.held.drain(..) {
                 notes.insert(note(0, NoteKind::Off, channel, key, 0.0));
+            }
+        }
+        // Spec: step-recording R2. A preview plays on its own frames,
+        // monitored or not; the note-off the shell sends ends it.
+        for event in &route.previews {
+            if event.offset < from || event.offset >= until {
+                continue;
+            }
+            let (offset, message) = (event.offset - from, &event.message);
+            let (channel, key) = (message.channel().unwrap_or(0), message.data1());
+            let velocity = f32::from(message.data2()) / 127.0;
+            if message.is_note_on() {
+                notes.insert(note(offset, NoteKind::On, channel, key, velocity));
+            } else if message.is_note_off() {
+                notes.insert(note(offset, NoteKind::Off, channel, key, velocity));
             }
         }
         if !route.monitored {
@@ -786,6 +813,17 @@ impl MidiIn {
             };
             let mut matched = false;
             if let Some(routes) = routes.as_deref_mut() {
+                if let MidiSource::Preview(track) = event.source {
+                    for route in routes.routes.iter_mut().filter(|r| r.track.0 == track) {
+                        matched = true;
+                        if route.previews.len() < route.previews.capacity() {
+                            route.previews.push(placed);
+                            self.counters.delivered += 1;
+                        } else {
+                            self.counters.dropped += 1;
+                        }
+                    }
+                }
                 for route in routes.routes.iter_mut() {
                     if route.takes(&event) {
                         matched = true;

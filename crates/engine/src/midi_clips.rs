@@ -130,7 +130,7 @@ impl MidiClipList {
                 .map(Arc::new)
         };
         let mut clips = Vec::new();
-        for clip in track.clips() {
+        for clip in track.played_clips() {
             if clip.mute {
                 continue;
             }

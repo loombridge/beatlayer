@@ -634,9 +634,9 @@ Total to 1.0: 256 packages planned in Phases 0 to 6, and about 110 estimated in 
 | 5.45 | done | 20 October 2026 | [#239](https://github.com/loombridge/beatlayer/pull/239); a device's extra audio outputs — a CLAP plug-in's ports past its main one — are offered in another track's Audio From after the track's taps and its racks' chain taps, rendered into their own buffers made with the program, saved with the set and held back for delay compensation; [the routing spec](specs/routing.md) R12, R16 |
 | 6.1 | done | 23 October 2026 | [#322](https://github.com/loombridge/beatlayer/pull/322); the note editor has the Velocity, Chance and Release Velocity lanes with the Lane Selector, Swap Lane, marker drags, Draw Mode drawing and deviation, a footer with Randomize, Ramp and Deviation, the value keys and typed velocities, and deactivating notes ([note editing](specs/note-editing.md) R1 to R20). |
 | 6.2 | todo |  |  |
-| 6.3 | todo |  |  |
+| 6.3 | done | 23 October 2026 | [#341](https://github.com/loombridge/beatlayer/pull/341); the note editor splits, chops, joins and fits notes from E-click and E-drag, Cmd-E and its arrows, the chop drags, Cmd-J and Cmd-Option-J, Split Clip cuts the shown Arrangement clip at the time selection, and the stretch markers scale notes and linked envelopes ([note editing](specs/note-editing.md) R33 to R47). |
 | 6.4 | todo |  |  |
-| 6.5 | todo |  |  |
+| 6.5 | done | 23 October 2026 | [#347](https://github.com/loombridge/beatlayer/pull/347); the Preview switch as a preference with previews on the clip's track that are never input, step recording with Right and Left from the held keys or `note.step_record`, and Step Input Mode; R12 (the map modes' step buttons) waits for M7 |
 | 6.6 | todo |  |  |
 | 6.7 | done | 22 October 2026 | [#299](https://github.com/loombridge/beatlayer/pull/299); each clip carries a scale and the set has a current scale, with the scale list, the `clip.set_scale`, `song.set_scale` and `song.scales` commands, and the Control Bar's scale controls ([the spec](specs/scales.md) R1 to R14) |
 | 6.7b | todo |  |  |
@@ -657,7 +657,7 @@ Total to 1.0: 256 packages planned in Phases 0 to 6, and about 110 estimated in 
 | 6.18 | todo |  |  |
 | 6.19 | done | 23 October 2026 | [#329](https://github.com/loombridge/beatlayer/pull/329); the Groove Pool, `.blgroove` files and a clip's groove, played on MIDI clips and warped audio clips (Base, Quantize, Timing, Random, Velocity and the Global Amount) as node data at any block size, with Commit, Extract, groove to clip and Auto Load Groove ([grooves](specs/grooves.md) R1 to R23) |
 | 6.20 | todo |  |  |
-| 6.21 | todo |  |  |
+| 6.21 | done | 23 October 2026 | [#332](https://github.com/loombridge/beatlayer/pull/332); take lanes with IDs of their own on audio and MIDI tracks, every Arrangement take placed on a take lane and copied to the main lane, auditioning a lane in the engine with no new program, the take-lane and comp commands with comp matching, and schema 8 with a migration for older take lanes ([comping](specs/comping.md) R1 to R14, R16 to R21 and R37, [recording](specs/recording.md) R16, [freeze and bounce](specs/freeze-and-bounce.md) R30) |
 | 6.22 | todo |  |  |
 | 6.22b | todo |  |  |
 | 6.23 | todo |  |  |

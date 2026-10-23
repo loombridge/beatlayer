@@ -87,6 +87,7 @@ pub mod midi_files;
 pub mod mixer_controls;
 pub mod mixer_view;
 mod modulation;
+pub mod multi_clip;
 pub mod note_filters;
 pub mod perception;
 pub mod permission;

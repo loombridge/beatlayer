@@ -161,6 +161,12 @@ impl SessionView {
         &self.slots
     }
 
+    /// The slot clicked last, which a Shift-click extends from.
+    #[must_use]
+    pub fn anchor(&self) -> Option<SlotRef> {
+        self.anchor
+    }
+
     /// The first selected slot, which a single-slot command acts on.
     #[must_use]
     pub fn first_slot(&self) -> Option<SlotRef> {

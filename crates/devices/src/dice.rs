@@ -9,7 +9,7 @@ use bl_engine::{DeviceType, NoteBuffer, NoteEvent, NoteKind, Registry};
 use bl_model::{DeviceDescription, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
 
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
-use crate::midi_fx::{Key, Router, seed, value};
+use crate::midi_fx::{Key, Router, scale_in_use, seed, value};
 
 /// The Random device type's id.
 pub const DICE: &str = "beatlayer.dice";
@@ -24,7 +24,8 @@ pub const INTERVAL: ParamId = ParamId(2);
 pub const MODE: ParamId = ParamId(3);
 /// Which way notes move.
 pub const SIGN: ParamId = ParamId(4);
-/// Keeps moved notes in the clip's scale (Phase 6).
+/// Counts the distances in degrees of the device's current scale, so moved
+/// notes land in it (the random-pitch spec, R10); the title bar draws it.
 pub const USE_SCALE: ParamId = ParamId(5);
 
 /// The Mode choices.
@@ -53,10 +54,11 @@ pub fn dice_type() -> DeviceType {
             ParamDescriptor::choice(SIGN, "Sign", &SIGNS, 0)
                 .describe("Add moves notes up, Sub moves them down, Bi moves them either way."),
             ParamDescriptor::toggle(USE_SCALE, "Use Current Scale", false).describe(
-                "Keeps moved notes in the clip's scale. It does nothing until scales arrive \
-                 in Phase 6.",
+                "Counts the distances in degrees of the current scale instead of semitones, so \
+                 the notes that move land in the scale.",
             ),
-        ]),
+        ])
+        .with_title_switch(USE_SCALE),
     )
 }
 
@@ -69,16 +71,13 @@ pub fn register(registry: &mut Registry) {
     });
 }
 
-/// `key` moved by `semitones`, folded by octaves back onto the keyboard.
-fn folded(key: u8, semitones: i32) -> u8 {
-    let mut at = i32::from(key) + semitones;
-    while at > 127 {
-        at -= 12;
+/// The key `at`, folded by octaves back onto the keyboard.
+fn folded(at: i32) -> u8 {
+    match at {
+        0..=127 => at as u8,
+        128.. => ((at - 116).rem_euclid(12) + 116) as u8,
+        _ => at.rem_euclid(12) as u8,
     }
-    while at < 0 {
-        at += 12;
-    }
-    at as u8
 }
 
 struct Dice {
@@ -124,7 +123,16 @@ impl NativeDevice for Dice {
         for note in audio.notes() {
             match note.kind {
                 NoteKind::On => {
-                    let key = folded(note.key, self.distance(params));
+                    // Spec: midi-random-pitch R10. A note that moves counts
+                    // degrees from the scale note at or below it; one that
+                    // stays is as it came.
+                    let distance = self.distance(params);
+                    let scale = scale_in_use(audio, params, USE_SCALE, note.offset);
+                    let key = match (distance, scale.enabled) {
+                        (0, _) => note.key,
+                        (_, true) => folded(scale.land_off(note.key, distance)),
+                        _ => folded(i32::from(note.key) + distance),
+                    };
                     let made = Key {
                         key,
                         ..Key::of(&note)
@@ -135,7 +143,12 @@ impl NativeDevice for Dice {
                     }
                 }
                 NoteKind::Off | NoteKind::Choke => self.router.end(audio, &note, note.velocity),
-                NoteKind::Expression { .. } => self.router.expression(audio, &note),
+                // Spec: midi-random-pitch R11
+                NoteKind::Expression { .. } => {
+                    let scale = scale_in_use(audio, params, USE_SCALE, note.offset);
+                    self.router
+                        .expression_by(audio, &note, |from, to, bend| scale.bend(from, to, bend));
+                }
                 // Spec: device-framework R39. A channel message passes through.
                 _ => audio.send(note),
             }

@@ -537,10 +537,9 @@ enum NoteZone {
 enum NoteDrag {
     /// Dragging notes in time and pitch.
     Move {
-        /// The clip the drag began on.
-        clip: ClipId,
-        /// The notes, by their places in the clip's notes in order.
-        places: Vec<u32>,
+        /// The notes dragged, by clip and their places in its notes in
+        /// order: one clip's, or the selected notes of several (WP-6.6).
+        targets: Vec<(ClipId, Vec<u32>)>,
         /// The grabbed note's start when the drag began, the key under the
         /// pointer then (continuous), and where the grab fell.
         start: Ticks,
@@ -568,15 +567,13 @@ enum NoteDrag {
     },
     /// Dragging notes up or down with Cmd held: their velocity.
     Velocity {
-        clip: ClipId,
-        places: Vec<u32>,
+        targets: Vec<(ClipId, Vec<u32>)>,
         /// Where the press fell, y.
         from: f32,
     },
     /// Dragging the notes' ends.
     Resize {
-        clip: ClipId,
-        places: Vec<u32>,
+        targets: Vec<(ClipId, Vec<u32>)>,
         /// The grabbed note's end when the drag began, and where the grab
         /// fell.
         end: Ticks,
@@ -752,6 +749,66 @@ impl NoteMenus {
             };
             crate::menus::take_focus_first(ui, &response);
         }
+    }
+}
+
+/// Paints the key track left of `grid`: white and black keys, each named when
+/// its row has the room, the C rows otherwise. Folded, only the rows that
+/// hold notes show, one under the next (F).
+fn paint_key_track(painter: &egui::Painter, theme: &Theme, grid: Rect, rows: &KeyRows) {
+    let colours = &theme.colors;
+    let named = |key: u8| KEY_HEIGHT >= 7.0 || key.is_multiple_of(12);
+    for (row, key) in rows.keys.iter().enumerate() {
+        let y0 = rows.y_of_row(grid, row);
+        if y0 + KEY_HEIGHT < grid.top() || y0 > grid.bottom() {
+            continue;
+        }
+        let key = *key;
+        let rect = Rect::from_min_max(
+            pos2(grid.left() - KEY_WIDTH, y0),
+            pos2(grid.left(), y0 + KEY_HEIGHT),
+        );
+        let black = matches!(key % 12, 1 | 3 | 6 | 8 | 10);
+        painter.rect_filled(
+            rect,
+            0.0,
+            if black {
+                colours.bar.0
+            } else {
+                colours.control.0
+            },
+        );
+        painter.line_segment(
+            [rect.left_bottom(), rect.right_bottom()],
+            Stroke::new(1.0, colours.lane_line.0),
+        );
+        if named(key) {
+            painter.text(
+                pos2(rect.right() - 2.0, rect.center().y),
+                Align2::RIGHT_CENTER,
+                key_name(key),
+                theme.small_font(),
+                colours.text_dim.0,
+            );
+        }
+    }
+}
+
+/// Paints the lines between the key rows across `grid`.
+fn paint_row_lines(ui: &Ui, theme: &Theme, grid: Rect, rows: &KeyRows) {
+    let painter = ui.painter();
+    let colours = &theme.colors;
+    let px = (ui.ctx().pixels_per_point() * 0.5).max(0.5);
+    for row in 0..rows.keys.len() {
+        let y = rows.y_of_row(grid, row) + KEY_HEIGHT;
+        if y < grid.top() || y > grid.bottom() {
+            continue;
+        }
+        painter.rect_filled(
+            Rect::from_min_max(pos2(grid.left(), y), pos2(grid.right(), y + px)),
+            0.0,
+            colours.lane_line.0,
+        );
     }
 }
 
@@ -1027,6 +1084,23 @@ fn notes_at(notes: &[Note], places: &[u32]) -> Vec<Note> {
         .collect()
 }
 
+/// `args` naming the notes `targets` hold: one clip's by `clip` and `notes`,
+/// several clips' by `clips` (Spec: multi-clip-editing R18).
+fn named(targets: &[(ClipId, Vec<u32>)], mut args: Value) -> Value {
+    if let [(clip, places)] = targets {
+        args["clip"] = json!(clip);
+        args["notes"] = json!(places);
+    } else {
+        args["clips"] = Value::Array(
+            targets
+                .iter()
+                .map(|(clip, notes)| json!({ "clip": clip, "notes": notes }))
+                .collect(),
+        );
+    }
+    args
+}
+
 pub(crate) fn gesture(events: &mut Vec<UiEvent>, phase: GesturePhase, id: &str, args: Value) {
     events.push(UiEvent::Gesture {
         phase,
@@ -1164,6 +1238,9 @@ fn toolbar(
     }
 }
 
+mod multi;
+pub use multi::{BAR_HEIGHT, Geometry, geometry};
+
 /// The Clip View's own state: the vertical scroll, the lane's drag, the
 /// note drags, and the marquee.
 #[derive(Clone, Debug, PartialEq)]
@@ -1202,6 +1279,11 @@ pub struct ClipViewUi {
     sample: SampleEditorUi,
     /// The note editor's context menus (C-NOTE, C-KEYS).
     menus: NoteMenus,
+    /// How tall the loop bars of several clips are, which dragging above
+    /// the title bar changes (multi-clip-editing R2).
+    bar_height: f32,
+    /// The drag of loop bars' braces under way, if any.
+    bar_drag: Option<multi::BarDrag>,
     /// The preview the pointer holds: the clip, the key and the velocity
     /// (Spec: step-recording R2).
     preview: Option<(ClipId, u8, u8)>,
@@ -1226,6 +1308,8 @@ impl Default for ClipViewUi {
             envelope: EnvelopeEditor::default(),
             sample: SampleEditorUi::default(),
             menus: NoteMenus::default(),
+            bar_height: BAR_HEIGHT,
+            bar_drag: None,
             preview: None,
         }
     }
@@ -1363,6 +1447,14 @@ impl ClipViewUi {
             self.envelope.reset();
         }
         let envelopes = shell.clip_view().tab() == ClipTab::Envelopes;
+        // Spec: multi-clip-editing R1. Several clips share the note editor,
+        // under loop bars.
+        let several = shell.clip_view().shown(doc, shell.arrangement());
+        if several.len() > 1 && !envelopes {
+            self.show_multi(ui, shell, theme, rect, &several, events);
+            return;
+        }
+        self.bar_drag = None;
         // Find and Select Notes' bar sits above the editor's ruler and moves
         // everything below it down (L-CLIP-019).
         let bar = !envelopes && shell.clip_view().note_filters().visible;
@@ -1730,59 +1822,11 @@ impl ClipViewUi {
             self.paint_stretch_markers(ui, theme, strip, grid, axis, length, range);
         }
 
-        // The key track: white and black keys, each named when its row has
-        // the room, the C rows otherwise. Folded, only the rows that hold
-        // notes show, one under the next (F).
-        let named = |key: u8| KEY_HEIGHT >= 7.0 || key.is_multiple_of(12);
-        for (row, key) in rows.keys.iter().enumerate() {
-            let y0 = rows.y_of_row(grid, row);
-            if y0 + KEY_HEIGHT < grid.top() || y0 > grid.bottom() {
-                continue;
-            }
-            let key = *key;
-            let rect = Rect::from_min_max(
-                pos2(grid.left() - KEY_WIDTH, y0),
-                pos2(grid.left(), y0 + KEY_HEIGHT),
-            );
-            let black = matches!(key % 12, 1 | 3 | 6 | 8 | 10);
-            painter.rect_filled(
-                rect,
-                0.0,
-                if black {
-                    colours.bar.0
-                } else {
-                    colours.control.0
-                },
-            );
-            painter.line_segment(
-                [rect.left_bottom(), rect.right_bottom()],
-                Stroke::new(1.0, colours.lane_line.0),
-            );
-            if named(key) {
-                painter.text(
-                    pos2(rect.right() - 2.0, rect.center().y),
-                    Align2::RIGHT_CENTER,
-                    key_name(key),
-                    theme.small_font(),
-                    colours.text_dim.0,
-                );
-            }
-        }
+        paint_key_track(painter, theme, grid, rows);
 
         // The clip's contents: the grid lines, then the notes over them.
         paint_grid_lines(ui, shell, theme, grid, start, length);
-        let px = (ui.ctx().pixels_per_point() * 0.5).max(0.5);
-        for row in 0..rows.keys.len() {
-            let y = rows.y_of_row(grid, row) + KEY_HEIGHT;
-            if y < grid.top() || y > grid.bottom() {
-                continue;
-            }
-            painter.rect_filled(
-                Rect::from_min_max(pos2(grid.left(), y), pos2(grid.right(), y + px)),
-                0.0,
-                colours.lane_line.0,
-            );
-        }
+        paint_row_lines(ui, theme, grid, rows);
         let face = frame.face;
         for (place, note) in notes.iter().enumerate() {
             let Some(y) = rows.y_of(grid, note.key) else {
@@ -2141,9 +2185,8 @@ impl ClipViewUi {
                         Ticks(1)
                     };
                     self.drag = Some(NoteDrag::Resize {
-                        clip,
                         limit: resize_limit(&notes_at(notes, &places), shortest),
-                        places,
+                        targets: vec![(clip, places)],
                         end,
                         grab: tick_at(grid, start, length, press.x) - end,
                     });
@@ -2154,7 +2197,6 @@ impl ClipViewUi {
                     let places = grabbed(shell, doc, arrangement, clip, place, events);
                     let note = &notes[place as usize];
                     let moving = NoteDrag::Move {
-                        clip,
                         limits: move_limits(&notes_at(notes, &places)),
                         start: note.start,
                         grab_key: rows
@@ -2164,7 +2206,7 @@ impl ClipViewUi {
                         // Spec: piano-roll R29. Option-dragging a note
                         // copies it.
                         copy: keys.copy,
-                        places: places.clone(),
+                        targets: vec![(clip, places.clone())],
                         grabbed: (note.key, note.velocity),
                     };
                     // Spec: note-editing R17. Cmd-dragging a note (Alt on
@@ -2175,8 +2217,7 @@ impl ClipViewUi {
                             press,
                             moving: Box::new(moving),
                             velocity: Box::new(NoteDrag::Velocity {
-                                clip,
-                                places,
+                                targets: vec![(clip, places)],
                                 from: press.y,
                             }),
                         }
@@ -2919,6 +2960,20 @@ impl ClipViewUi {
             let (id, args) = drag.invocation(arrangement, doc, keys, grid, pos);
             gesture(events, GesturePhase::Update, id, args);
         }
+        // Spec: multi-clip-editing R11. A click on the loop brace selects it,
+        // which gives it Cmd-D, Duplicate Loop.
+        if response.clicked()
+            && let Some(pos) = response.interact_pointer_pos()
+            && matches!(
+                hit_strip(strip, grid, axis, length, midi, pos),
+                Some(StripPart::LoopStart | StripPart::LoopEnd | StripPart::LoopBody)
+            )
+        {
+            events.push(UiEvent::Invoke(Invocation::new(
+                ids::SELECT_LOOP_BARS,
+                json!({ "clips": [clip] }),
+            )));
+        }
         if (self.strip_drag.is_some() || self.stretch_drag.is_some())
             && ui.input(|i| i.key_pressed(Key::Escape))
         {
@@ -2983,8 +3038,7 @@ impl NoteDrag {
         let at = tick_at(grid, start, length, pos.x);
         match self {
             Self::Move {
-                clip,
-                places,
+                targets,
                 start: from,
                 grab_key,
                 grab,
@@ -3000,41 +3054,35 @@ impl NoteDrag {
                 let semitones = ((key - *grab_key).round() as i32).clamp(limits.1, limits.2);
                 (
                     ids::MOVE_NOTES,
-                    json!({
-                        "clip": clip,
-                        "notes": places,
-                        "by": by,
-                        "semitones": semitones,
-                        "copy": copy,
-                    }),
+                    named(
+                        targets,
+                        json!({ "by": by, "semitones": semitones, "copy": copy }),
+                    ),
                 )
             }
             Self::Undecided { moving, .. } => {
                 moving.invocation(arrangement, doc, keys, grid, rows, start, length, pos)
             }
-            Self::Velocity { clip, places, from } => (
+            Self::Velocity { targets, from } => (
                 ids::ADJUST_VALUE,
-                json!({
-                    "clip": clip,
-                    "notes": places,
-                    "field": NoteField::Velocity,
-                    // One for each point dragged up (note-editing R17).
-                    "by": (*from - pos.y).round(),
-                }),
+                named(
+                    targets,
+                    json!({
+                        "field": NoteField::Velocity,
+                        // One for each point dragged up (note-editing R17).
+                        "by": (*from - pos.y).round(),
+                    }),
+                ),
             ),
             Self::Resize {
-                clip,
-                places,
+                targets,
                 end,
                 grab,
                 limit,
             } => {
                 let snapped = arrangement.snap_drag(doc, at - *grab, keys.bypass);
                 let by = (snapped - *end).max(*limit);
-                (
-                    ids::RESIZE_NOTES,
-                    json!({ "clip": clip, "notes": places, "by": by }),
-                )
+                (ids::RESIZE_NOTES, named(targets, json!({ "by": by })))
             }
         }
     }

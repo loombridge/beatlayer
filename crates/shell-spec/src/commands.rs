@@ -124,6 +124,8 @@ pub const VIEW_ZOOM_RESET: &str = "view.zoom_reset";
 pub const VIEW_SET_ZOOM: &str = "view.set_zoom";
 /// `view.toggle_undo_history`: show or hide the Undo History panel.
 pub const VIEW_TOGGLE_UNDO_HISTORY: &str = "view.toggle_undo_history";
+/// `view.toggle_save_history`: show or hide the Save History panel (IMP-05).
+pub const VIEW_TOGGLE_SAVE_HISTORY: &str = "view.toggle_save_history";
 /// `focus.control_bar`: move the keyboard focus to the Control Bar.
 pub const FOCUS_CONTROL_BAR: &str = "focus.control_bar";
 /// `focus.arrangement`: move the keyboard focus to the Arrangement View.
@@ -283,6 +285,7 @@ pub const IDS: &[&str] = &[
     VIEW_ZOOM_RESET,
     VIEW_SET_ZOOM,
     VIEW_TOGGLE_UNDO_HISTORY,
+    VIEW_TOGGLE_SAVE_HISTORY,
     FOCUS_CONTROL_BAR,
     FOCUS_ARRANGEMENT,
     FOCUS_NEXT,
@@ -861,6 +864,8 @@ pub struct ViewState {
     pub assistant: crate::assistant::AssistantPanelState,
     /// Whether the Undo History panel shows.
     pub undo_history: bool,
+    /// Whether the Save History panel shows.
+    pub save_history: bool,
     /// Whether floating devices' and plug-ins' windows are shown, as
     /// `view.toggle_plug_in_windows` sets it.
     pub plug_in_windows: bool,
@@ -877,6 +882,18 @@ pub struct UndoHistoryState {
     /// The current row's place in the history, counted up from the set's
     /// start: 0 before any step.
     pub current: usize,
+}
+
+/// What `view.toggle_save_history` returns: the Save History panel's state
+/// afterwards.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SaveHistoryState {
+    /// Whether the panel shows.
+    pub open: bool,
+    /// How many rows the history lists (`set.save_history` lists them).
+    pub rows: usize,
+    /// Whether Save Continuously is on.
+    pub continuous: bool,
 }
 
 /// Adds the shell's commands to a registry, the agent server's
@@ -1152,7 +1169,8 @@ fn specs() -> Vec<CommandSpec> {
                  `view.switch_detail_view`, `view.toggle_detail_area`, \
                  `view.expand_clip_view`, `view.set_detail_height`, `focus.clip_view`, \
                  `focus.device_view`), the assistant's panel, the \
-                 Undo History (`view.toggle_undo_history`), and whether plug-in windows are \
+                 Undo History (`view.toggle_undo_history`), the Save History \
+                 (`view.toggle_save_history`), and whether plug-in windows are \
                  shown (`view.toggle_plug_in_windows`). Changes \
                  nothing. The Arrangement's own view is in `arrangement.state`, the Mixer's in \
                  `mixer_view.state`, the Session View's in `session.state` and the Device \
@@ -1488,6 +1506,19 @@ fn specs() -> Vec<CommandSpec> {
             .binding("S-VIEW-021")
             .args::<NoArgs>()
             .result::<UndoHistoryState>(),
+        CommandSpec::new(VIEW_TOGGLE_SAVE_HISTORY, "Save History")
+            .description(
+                "Shows or hides the Save History panel at the right of the main window, where \
+                 the Undo History opens (showing one hides the other). The panel lists the open \
+                 set's save points, then its saved versions, newest first; `set.save_history` \
+                 lists the same rows and `set.restore` restores one. Whether it shows is view \
+                 state: it isn't saved with the set and isn't an undo step. Changes nothing in \
+                 the set.",
+            )
+            .permission(Permission::Read)
+            .context(Global)
+            .args::<NoArgs>()
+            .result::<SaveHistoryState>(),
         CommandSpec::new(FOCUS_CONTROL_BAR, "Control Bar")
             .description(
                 "Moves the keyboard focus to the Control Bar at the top of the main window, \

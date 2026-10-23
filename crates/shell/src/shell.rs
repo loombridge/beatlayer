@@ -17,6 +17,7 @@ use bl_model::{
 };
 use bl_project::ProjectFolder;
 use bl_project::autosave::{Autosave, Recoverable, Recovered};
+use bl_project::history;
 use bl_project::registry as recovery_ids;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -123,6 +124,7 @@ mod plugin_list;
 mod processed_files;
 mod sample_edits;
 mod sample_keys;
+mod save_history;
 pub use sample_keys::TransientList;
 mod search;
 mod session_recording;
@@ -543,6 +545,9 @@ pub struct Shell {
     /// Whether the Undo History panel shows (WP-6.28): view state, never
     /// part of the set, like the browser's.
     undo_history_open: bool,
+    /// The Save History panel (IMP-05, WP-6.39): whether it shows and the
+    /// rows it lists. View state, like the Undo History's.
+    save_history: save_history::SaveHistory,
     /// What the Arrangement View shows (WP-1.8a).
     arrangement: ArrangementView,
     /// What the Clip View shows (WP-2.3): whether it's open, Draw Mode, and
@@ -1111,6 +1116,7 @@ impl Shell {
             assistant_conversation: Arc::default(),
             assistant_stop_flag: Arc::default(),
             undo_history_open: false,
+            save_history: save_history::SaveHistory::default(),
             arrangement: ArrangementView::new(),
             clip_view: {
                 let mut view = ClipView::default();
@@ -4815,6 +4821,9 @@ impl Shell {
             self.set_message(message, true);
         }
         let mut changed = polled.changed | self.poll_processed() | self.poll_stems();
+        // Spec: crash-recovery R15. The Save History follows new save points
+        // and saves while it shows.
+        changed |= self.refresh_save_history();
         // Spec: export R41. The export on its thread: its share moves the
         // progress window, and its end lands in the Status Bar.
         changed |= self.poll_export();
@@ -6441,6 +6450,7 @@ impl Shell {
             ids::VIEW_TOGGLE_INFO_VIEW => Some(self.info_view),
             assistant_ids::VIEW_TOGGLE_ASSISTANT => Some(self.assistant_open),
             ids::VIEW_TOGGLE_UNDO_HISTORY => Some(self.undo_history_open),
+            ids::VIEW_TOGGLE_SAVE_HISTORY => Some(self.save_history.open),
             ids::VIEW_TOGGLE_PLUG_IN_WINDOWS => Some(self.plug_in_windows),
             ids::FOCUS_TOGGLE_TAB_NAVIGATION => Some(self.prefs.tab_navigation),
             ids::FOCUS_TOGGLE_WRAP_NAVIGATION => Some(self.prefs.wrap_navigation.0),
@@ -8351,6 +8361,10 @@ impl Shell {
     }
 
     fn run_command(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        if history::handles(id) {
+            // Spec: crash-recovery R20.
+            return self.run_save_history(id, args);
+        }
         if recovery_ids::handles(id) {
             // Spec: crash-recovery R26. The recovery commands run against
             // the app's own recovery.
@@ -10255,6 +10269,7 @@ impl Shell {
                     plugin_list: self.plugin_list.state(),
                     assistant: self.assistant_panel_state(),
                     undo_history: self.undo_history_open,
+                    save_history: self.save_history.open,
                     plug_in_windows: self.plug_in_windows,
                 }))
             }
@@ -10263,8 +10278,18 @@ impl Shell {
                 // isn't saved with the set and isn't an undo step.
                 Self::args::<NoArgs>(id, args)?;
                 self.undo_history_open = !self.undo_history_open;
+                if self.undo_history_open {
+                    // They share the right-hand area (crash-recovery R12).
+                    self.save_history.open = false;
+                }
                 self.touch();
                 Ok(to_value(&self.undo_history_state()))
+            }
+            ids::VIEW_TOGGLE_SAVE_HISTORY => {
+                // Spec: crash-recovery R12. View state: not saved with the
+                // set and no undo step.
+                Self::args::<NoArgs>(id, args)?;
+                Ok(self.toggle_save_history())
             }
             ids::VIEW_TOGGLE_INFO_VIEW => {
                 Self::args::<NoArgs>(id, args)?;

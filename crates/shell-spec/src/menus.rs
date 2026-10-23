@@ -29,8 +29,9 @@ use crate::commands::{
     SET_SAVE_AS_DEFAULT, SET_SAVE_AS_TEMPLATE, VIEW_DRAW_MODE, VIEW_EXPAND_CLIP_VIEW,
     VIEW_FULL_SCREEN, VIEW_SWITCH_DETAIL_VIEW, VIEW_TOGGLE_BROWSER, VIEW_TOGGLE_CLIP_VIEW,
     VIEW_TOGGLE_DETAIL_AREA, VIEW_TOGGLE_DEVICE_VIEW, VIEW_TOGGLE_INFO_VIEW,
-    VIEW_TOGGLE_PLUG_IN_WINDOWS, VIEW_TOGGLE_PLUGIN_LIST, VIEW_TOGGLE_SESSION_ARRANGEMENT,
-    VIEW_TOGGLE_UNDO_HISTORY, VIEW_ZOOM_IN, VIEW_ZOOM_OUT, VIEW_ZOOM_RESET, WINDOW_CLOSE,
+    VIEW_TOGGLE_PLUG_IN_WINDOWS, VIEW_TOGGLE_PLUGIN_LIST, VIEW_TOGGLE_SAVE_HISTORY,
+    VIEW_TOGGLE_SESSION_ARRANGEMENT, VIEW_TOGGLE_UNDO_HISTORY, VIEW_ZOOM_IN, VIEW_ZOOM_OUT,
+    VIEW_ZOOM_RESET, WINDOW_CLOSE,
 };
 use crate::devices::COMPARE_COPY;
 use crate::export::OPEN_DIALOG as EXPORT_OPEN_DIALOG;
@@ -129,6 +130,10 @@ pub const IMP_25_CLOSE_WINDOWS: &str = "IMP-25-close-windows";
 /// The row of Beatlayer's own Manage Plug-Ins (IMP-29), after Manage
 /// Files: an improvement, so not a row of menus.md.
 pub const IMP_29: &str = "IMP-29";
+
+/// The row of Beatlayer's own Save History (IMP-05), after Open Beatlayer
+/// Set Backups: an improvement, so not one of menus.md's Live rows.
+pub const IMP_05: &str = "IMP-05";
 
 /// The rows of Beatlayer's own Search Commands… (IMP-16) at the top of Help,
 /// with the separator after it, and Find Track (IMP-18) after Next Neighbor:
@@ -291,6 +296,7 @@ const FILE: &[Row] = &[
     ("M-FILE-007", "Manage Files", Cmd(VIEW_TOGGLE_FILE_MANAGER)),
     (IMP_29, "Manage Plug-Ins", Cmd(VIEW_TOGGLE_PLUGIN_LIST)),
     ("M-FILE-008", "Open Beatlayer Set Backups", Submenu),
+    (IMP_05, "Save History", Cmd(VIEW_TOGGLE_SAVE_HISTORY)),
     SEPARATOR,
     ("M-FILE-009", "Save Beatlayer Set", Cmd(SET_SAVE)),
     ("M-FILE-010", "Save Beatlayer Set As...", Cmd(SET_SAVE_AS)),

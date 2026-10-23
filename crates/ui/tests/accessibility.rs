@@ -2802,6 +2802,20 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ),
         ("clip.create", Exception(editing)),
         (
+            "set.restore",
+            Exception(Equivalent(
+                "the Save History panel's rows: select one with the arrow keys and press Return, \
+                 or press Restore (crash recovery R16, R19)",
+            )),
+        ),
+        (
+            "set.save_history",
+            Exception(Equivalent(
+                "the Save History panel lists the same rows, which reach assistive technology \
+                 (crash recovery R13, R19)",
+            )),
+        ),
+        (
             "edit.go_to_step",
             Exception(Equivalent(
                 "the Undo History panel's rows: click one, or move to it with the arrow keys \

@@ -26,6 +26,7 @@ crates/engine/tests/external_devices.rs # a timeout on a MIDI port
 crates/engine/tests/midi_input.rs # the delay-locked loop measured against a real-time thread and clock
 crates/engine/tests/midi_output.rs # stamps messages with the system's clock
 crates/engine/tests/midi_play.rs # stamps messages with the system's clock
+crates/engine/tests/mpe_input.rs # stamps messages with the system's clock, as midi_play does
 crates/engine/tests/midi_recording.rs # stamps messages with the system's clock
 crates/engine/tests/playhead.rs # tests real-time pacing and dropouts
 crates/engine/tests/restart.rs # a stream restart on the real-time clock

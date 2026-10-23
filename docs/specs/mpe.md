@@ -1,6 +1,6 @@
 # MPE: per-note expression in clips, from controllers, to plug-ins, and the MPE tab
 
-- **Status:** draft
+- **Status:** partial (WP-6.17: R1 to R13, each with a passing test; R14 to R21 are WP-6.17b's, R22 to R32 and R34 WP-6.18's and R33 WP-6.69's)
 - **Work packages:** WP-6.17 (per-note expression in MIDI clips, its playback, MPE controllers and recording them: R1 to R13), WP-6.17b (plug-ins' MPE Mode, MPE MIDI to plug-ins and MIDI ports, the MPE/Multi-channel Settings: R14 to R21), WP-6.18 (the Clip View's MPE tab, its lanes and gestures, and the Drum Rack's pitch-bend lane: R22 to R32 and R34), WP-6.69 (the meter's blue dot: R33, with [MIDI meters](midi-meters.md) R5). The MIDI port's MPE switch is [MIDI I/O](midi-io.md) R27 and R28; what each plug-in format is sent is [CLAP hosting](clap-hosting.md) R21 to R23, [VST3 hosting](vst3-hosting.md) R19 to R21 and [Audio Unit hosting](au-hosting.md) R19 and R20; a drum rack's chains are [drum racks](drum-racks.md) R29; the clip's MIDI Ctrl envelopes and the recording paths they share are [MIDI controller data](midi-controller-data.md)'s; the MIDI Tools that write expression (Glissando, LFO) are WP-6.13b's; tunings played through per-note pitch are the [tunings](tunings.md) spec's
 - **Parity-matrix row:** MIDI editing: MPE lanes (pitch bend, slide, pressure), Drum Rack pitch-bend lane; Plug-ins: Plug-in configure mode, MPE plug-ins, multi-output plug-ins (the MPE plug-ins)
 - **Checked against:** the Live 12 reference manual (online edition), read 20 October 2026 (chapter 8 section 8.1.3, chapter 10 sections 10.1 and 10.5.8.3, chapter 12); the Live 12 release notes, 12.0 and 12.1; the MIDI Polyphonic Expression specification; the CLAP 1.2 headers and the VST3 SDK's headers; the UI parity reference rows L-CLIP-010, L-CLIP-014, L-CLIP-018, L-SET-014, L-OTH-008, M-VIEW-020, M-OPT-017, C-DEVICE-015, C-MPE-001 to C-MPE-003, I-CLICK-045 to I-CLICK-048, I-DRAG-050 to I-DRAG-055, S-CLIPMODE-002, S-CLIPMODE-005, S-GRID-001, S-GRID-005, S-NOTE-023 and S-NOTE-053
@@ -84,19 +84,19 @@ The Clip View's MPE tab (View ▸ Expression Editor) edits the envelopes. Select
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1 | to be written in WP-6.17 | unit |
-| R2 | to be written in WP-6.17 | unit |
-| R3 | to be written in WP-6.17 | unit, agent |
-| R4 | to be written in WP-6.17 | unit |
-| R5 | to be written in WP-6.17 | golden render, real-time trap |
-| R6 | to be written in WP-6.17 | render |
-| R7 | to be written in WP-6.17 | real-time trap |
-| R8 | to be written in WP-6.17 | real-time trap, RealtimeSanitizer |
-| R9 | to be written in WP-6.17 | unit |
-| R10 | to be written in WP-6.17 | frame by frame |
-| R11 | to be written in WP-6.17 | frame by frame, real-time trap |
-| R12 | to be written in WP-6.17 | shell |
-| R13 | to be written in WP-6.17 | real-time trap, RealtimeSanitizer |
+| R1 | `crates/model/src/note_expression.rs`, `an_envelope_fits_while_it_keeps_inside_the_note_and_its_range`; `crates/model/tests/midi_controller_data.rs`, `a_notes_pressure_breakpoints_must_lie_in_order_inside_the_note` | unit |
+| R2 | `crates/project/src/migrate.rs`, `pressure_points_become_steps`; `crates/project/src/clip_file.rs`, `a_schema_1_clip_file_loads_its_pressure_points_as_steps`; `crates/cli/tests/older_sets.rs`, `a_set_saved_with_pressure_points_opens_and_sends_the_same_pressure`; `crates/engine/tests/midi_controllers.rs`, `per_note_pressure_arrives_as_polyphonic_pressure_on_the_note` | unit |
+| R3 | `crates/shell/tests/clip_view.rs`, `note_set_expression_replaces_one_envelope_in_one_undo_step`, `note_set_expression_refuses_each_bad_argument_without_a_change`, `note_set_expression_refuses_an_audio_clip`; `crates/agent/tests/tools.rs`, `an_agent_sets_a_notes_expression_envelopes_and_reads_them_back` | unit, agent |
+| R4 | `crates/model/src/note_expression.rs`, `a_note_made_shorter_ends_each_envelope_at_its_new_end`, `a_window_has_the_stretch_over_its_span_and_the_values_at_its_ends`; `crates/model/src/note_ops.rs`, `a_split_covers_the_note_and_puts_pressure_in_its_part`, `a_join_keeps_the_earliest_values_and_every_pressure_point`; `crates/model/src/clip.rs`, `a_crop_and_a_consolidation_end_a_cut_notes_envelopes_at_the_cut`; `crates/shell/tests/clip_view.rs`, `moves_transposes_nudges_and_copies_keep_the_envelopes`, `copy_cut_and_paste_keep_the_envelopes`, `quantising_and_resizing_cut_the_envelopes_at_the_new_end`, `split_chop_join_and_stretch_carry_the_envelopes`; `crates/shell/tests/drum_racks.rs`, `a_chain_from_the_list_takes_its_devices_and_from_the_mixer_its_notes` | unit |
+| R5 | `crates/engine/tests/midi_controllers.rs`, `a_clip_notes_pitch_slide_and_pressure_reach_the_device_on_their_frames`, `a_note_that_does_not_sound_sends_no_expression`, `stopping_ends_a_notes_expressions_with_it` | golden render, real-time trap |
+| R6 | `crates/cli/tests/mpe_render.rs`, `a_notes_pitch_of_twelve_semitones_is_an_octave_at_48_and_six_semitones_at_24`; `crates/engine/tests/midi_controllers.rs`, `a_clip_notes_pitch_slide_and_pressure_reach_the_device_on_their_frames` | render |
+| R7 | `crates/engine/tests/drum_racks.rs`, `a_bend_reaches_the_chain_the_note_reached_at_its_played_key_only`; `crates/cli/tests/mpe_render.rs`, `a_notes_pitch_of_twelve_semitones_is_an_octave_at_48_and_six_semitones_at_24` | real-time trap |
+| R8 | `crates/engine/tests/midi_controllers.rs` (every test, at block sizes 1, 100, 512 and 4,096 under the allocation trap); `rtsan/tests/clips.rs`, `midi_clip_expressions_pass_under_rtsan` | real-time trap, RealtimeSanitizer |
+| R9 | `crates/model/src/repr.rs`, `controller_envelopes_and_note_pressure_save_with_the_clip_and_load_back`; `crates/agent/tests/readback.rs`, `full_query_results_hold_everything_the_set_format_encodes` | unit |
+| R10 | `crates/engine/src/mpe.rs`, `a_port_starts_as_a_lower_zone_with_a_range_of_48_semitones`, `configuration_messages_set_the_zones_and_the_range`; `crates/engine/tests/mpe_input.rs`, `a_configuration_message_and_a_bend_sensitivity_change_the_reading` | frame by frame |
+| R11 | `crates/engine/tests/mpe_input.rs`, `notes_on_member_channels_arrive_as_notes_with_expressions_of_their_own`, `a_port_that_is_not_mpe_is_read_as_before`, `switching_monitoring_off_ends_an_mpe_note_by_its_id`; `crates/engine/src/mpe.rs`, `a_note_starts_with_the_values_its_channel_received_and_follows_its_messages` | frame by frame, real-time trap |
+| R12 | `crates/shell/tests/mpe_recording.rs`, `an_arrangement_take_gives_the_note_its_envelopes_in_one_undo_step`, `an_arrangement_overdub_adds_the_note_with_its_envelopes_to_the_clip`, `a_session_recording_gives_the_note_its_envelopes_in_one_undo_step`, `a_session_overdub_adds_the_note_with_its_envelopes`, `capture_midi_gives_the_note_its_envelopes`; `crates/engine/src/controller_take.rs`, `expressions_step_from_the_starting_value` | shell |
+| R13 | `crates/engine/tests/mpe_input.rs` (every block under the allocation trap); `rtsan/tests/midi_input.rs`, `midi_input_passes_under_rtsan` | real-time trap, RealtimeSanitizer |
 | R14 | to be written in WP-6.17b | unit, agent |
 | R15 | to be written in WP-6.17b | real-time trap |
 | R16 | to be written in WP-6.17b | real-time trap |

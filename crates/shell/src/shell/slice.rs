@@ -1013,7 +1013,7 @@ fn slice_document(document: &Document, track: TrackId, clip: ClipId) -> Result<D
     // Spec: R6. The clip's audio reaches Main alone, before the track's
     // devices and mixer, as Consolidate renders it (audio clip editing
     // R20).
-    let mut doc = super::audio_editing::consolidate_document(document, track)?;
+    let mut doc = super::audio_editing::consolidate_document(document, track, None)?;
     let extra: Vec<ClipId> = doc
         .track(track)
         .map(|track| {

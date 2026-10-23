@@ -10,10 +10,10 @@
 //! the command reference; `bl-shell` runs them by ID. The behaviour they follow
 //! is in the arrangement view spec.
 
-use bl_commands::Context::{Arrangement, Global, SampleEditor, TrackHeaders};
+use bl_commands::Context::{Arrangement, Global, SampleEditor, TakeLanes, TrackHeaders};
 use bl_commands::{Binding, CommandSpec, NoArgs, Permission, RegisterError, Registry};
 use bl_core::time::Ticks;
-use bl_model::{AutomationTarget, ClipId, LocatorId, TrackId};
+use bl_model::{AutomationTarget, ClipId, LocatorId, TakeLaneId, TrackId};
 
 use crate::editing::Edge;
 use schemars::JsonSchema;
@@ -62,6 +62,11 @@ pub const SELECT_TRACKS: &str = "arrangement.select_tracks";
 pub const SELECT_TIME: &str = "arrangement.select_time";
 /// `arrangement.select_fade_handle`: select an audio clip's fade handle.
 pub const SELECT_FADE_HANDLE: &str = "arrangement.select_fade_handle";
+/// `arrangement.select_take_lanes`: select take lanes by their headers.
+pub const SELECT_TAKE_LANES: &str = "arrangement.select_take_lanes";
+/// `arrangement.show_take_lanes`: show or hide tracks' take lanes
+/// (Cmd+Option+U).
+pub const SHOW_TAKE_LANES: &str = "arrangement.show_take_lanes";
 /// `arrangement.fold_tracks`: fold or unfold tracks.
 pub const FOLD_TRACKS: &str = "arrangement.fold_tracks";
 /// `arrangement.unfold_all`: unfold every track (Option-U).
@@ -115,6 +120,8 @@ pub const IDS: &[&str] = &[
     SELECT_TRACKS,
     SELECT_TIME,
     SELECT_FADE_HANDLE,
+    SELECT_TAKE_LANES,
+    SHOW_TAKE_LANES,
     FOLD_TRACKS,
     UNFOLD_ALL,
     FOLD_GROUPS,
@@ -361,6 +368,13 @@ pub struct ArrangementState {
     /// selection otherwise.
     #[serde(default)]
     pub selected_clips: Vec<ClipId>,
+    /// The take lanes whose headers are selected (the comping spec, R26), in
+    /// the order they were selected. Their tracks are selected tracks too.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub selected_take_lanes: Vec<TakeLaneId>,
+    /// The tracks whose take lanes show (the comping spec, R24).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shown_take_lanes: Vec<TrackId>,
     /// The selected locators (WP-6.24), in the order they were selected.
     /// The locator commands act on these.
     #[serde(default)]
@@ -370,9 +384,9 @@ pub struct ArrangementState {
     pub selected_fade: Option<FadeHandleState>,
     /// The selected span of time on the selected tracks, if any.
     pub time_selection: Option<TimeRange>,
-    /// The lanes the time selection covers: each a track's own lane or its
-    /// automation lane (the automation editing spec, R1). Empty when the
-    /// selection names no lane.
+    /// The lanes the time selection covers: each a track's own lane, a take
+    /// lane under it, or its automation lane (the automation editing spec,
+    /// R1; the comping spec, R26). Empty when the selection names no lane.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub time_selection_lanes: Vec<Lane>,
     /// The folded tracks.
@@ -430,21 +444,28 @@ pub struct AutomationLane {
     pub target: Option<AutomationTarget>,
 }
 
-/// Which lane a selection covers: a track's own lane, where its clips are,
-/// or the automation lane under it, which shows a parameter (the automation
-/// editing spec, R1).
+/// Which lane a selection covers: a track's own lane, where its clips are, a
+/// take lane under it, or the automation lane under it, which shows a
+/// parameter (the automation editing spec, R1; the comping spec, R26).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 #[schemars(
     description = "Which lane a selection covers: `track` for a track's own lane, where its \
-                   clips are, and `automation` for the automation lane under it, which shows a \
-                   parameter."
+                   clips are, `take` for one of its take lanes, and `automation` for the \
+                   automation lane under it, which shows a parameter."
 )]
 pub enum Lane {
     /// A track's own lane, where its clips are.
     Track {
         /// The track.
         track: TrackId,
+    },
+    /// One of a track's take lanes.
+    Take {
+        /// The track.
+        track: TrackId,
+        /// The take lane.
+        lane: TakeLaneId,
     },
     /// A track's automation lane, which shows a parameter.
     Automation {
@@ -460,7 +481,18 @@ impl Lane {
     #[must_use]
     pub const fn track(&self) -> TrackId {
         match *self {
-            Self::Track { track } | Self::Automation { track, .. } => track,
+            Self::Track { track } | Self::Take { track, .. } | Self::Automation { track, .. } => {
+                track
+            }
+        }
+    }
+
+    /// The take lane, for a take lane.
+    #[must_use]
+    pub const fn take_lane(&self) -> Option<TakeLaneId> {
+        match *self {
+            Self::Take { lane, .. } => Some(lane),
+            Self::Track { .. } | Self::Automation { .. } => None,
         }
     }
 
@@ -468,7 +500,7 @@ impl Lane {
     #[must_use]
     pub const fn target(&self) -> Option<AutomationTarget> {
         match *self {
-            Self::Track { .. } => None,
+            Self::Track { .. } | Self::Take { .. } => None,
             Self::Automation { target, .. } => Some(target),
         }
     }
@@ -575,6 +607,11 @@ pub struct InsertMarkerArgs {
     /// out, the selected tracks stay selected.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub track: Option<TrackId>,
+    /// The take lane the click was on, as clicking a take lane's lane does:
+    /// the lane is selected with the marker, and its track with it (the
+    /// comping spec, R26).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lane: Option<TakeLaneId>,
     /// Select the track's automation lane too, as clicking the lane's
     /// background does (the automation editing spec, R1): the lane gets the
     /// keyboard.
@@ -613,8 +650,9 @@ pub struct SelectTimeArgs {
     /// The tracks it covers. Left out, the selected tracks.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tracks: Option<Vec<TrackId>>,
-    /// The lanes it covers: each a track's own lane or its automation lane
-    /// (the automation editing spec, R1). Left out, the tracks' own lanes.
+    /// The lanes it covers: each a track's own lane, a take lane under it, or
+    /// its automation lane (the automation editing spec, R1; the comping spec,
+    /// R26). Left out, the tracks' own lanes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lanes: Option<Vec<Lane>>,
 }
@@ -675,6 +713,39 @@ pub struct FoldArgs {
     pub fold: Option<bool>,
 }
 
+/// Arguments of `arrangement.select_take_lanes`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SelectTakeLanesArgs {
+    /// The take lanes whose headers to select. Empty clears the selection of
+    /// lane headers.
+    pub lanes: Vec<TakeLaneId>,
+    /// Add them to the lanes already selected instead of replacing them.
+    #[serde(default)]
+    pub add: bool,
+    /// Take away from the selection each of them that is selected, as
+    /// Cmd-clicking a header does, and add the others.
+    #[serde(default)]
+    pub toggle: bool,
+}
+
+/// Arguments of `arrangement.show_take_lanes`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ShowTakeLanesArgs {
+    /// The tracks. Left out, the selected tracks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tracks: Option<Vec<TrackId>>,
+    /// Show (true) or hide (false) their take lanes. Left out, they toggle,
+    /// taking the first track's new state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on: Option<bool>,
+    /// Also select the tracks' title bars and leave the take lanes' headers,
+    /// as Left does from a take lane's header.
+    #[serde(default)]
+    pub title_bars: bool,
+}
+
 /// Arguments of `arrangement.fold_groups`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -687,10 +758,15 @@ pub struct FoldGroupsArgs {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TrackHeightArgs {
-    /// The tracks. Left out, the selected tracks.
+    /// The tracks. Left out, the selected take lanes if any are, otherwise
+    /// the selected tracks.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tracks: Option<Vec<TrackId>>,
-    /// The new height of each unfolded track, in points, from 18 to 800.
+    /// Take lanes to resize as well (the comping spec, R28).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub take_lanes: Option<Vec<TakeLaneId>>,
+    /// The new height of each unfolded track or take lane, in points, from 18
+    /// to 800.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub height: Option<f64>,
     /// Points to add to each track's height (negative makes it shorter).
@@ -943,8 +1019,9 @@ fn specs() -> Vec<CommandSpec> {
             "Select Time",
             "Selects the span from `start` to `end` on `tracks` (or the selected tracks), as \
              dragging across track lanes does. `lanes` names the lanes the selection covers, \
-             each a track's own lane or its automation lane; left out, the tracks' own lanes. \
-             `arrangement.zoom_to_selection` zooms to it. Changes only the view.",
+             each a track's own lane, one of its take lanes or its automation lane; left out, \
+             the tracks' own lanes. `arrangement.zoom_to_selection` zooms to it. Changes only \
+             the view.",
         )
         .context(Arrangement)
         .args::<SelectTimeArgs>(),
@@ -960,6 +1037,36 @@ fn specs() -> Vec<CommandSpec> {
         )
         .context(Arrangement)
         .args::<SelectFadeHandleArgs>(),
+        view(
+            SELECT_TAKE_LANES,
+            "Select Take Lanes",
+            "Selects take lanes by their headers, as clicking a take lane's header does, \
+             replacing the lane headers selected or, with `add`, adding to them; with `toggle`, \
+             Cmd-clicking: each lane selected is taken away and the others added. Their tracks \
+             become the selected tracks, and the clips and time selected are let go, so \
+             Enter, T, Cmd+D, Delete and Cmd+Up and Cmd+Down act on the lanes. An empty list \
+             clears the selection of lane headers. Changes only the view.",
+        )
+        .context(Arrangement)
+        .args::<SelectTakeLanesArgs>(),
+        view(
+            SHOW_TAKE_LANES,
+            "Show Take Lanes",
+            "Shows or hides the take lanes of `tracks` (or the selected tracks) under their main \
+             lanes, as the track header's Show Take Lanes item and the Show/Hide Take Lanes \
+             toggle do; left without `on`, they toggle. Showing take lanes switches Automation \
+             Mode off, which hides them. With `title_bars`, the tracks' title bars are selected \
+             too and the take lane headers are let go, as Left does from a take lane's header. \
+             Never an undo step; changes only the view.",
+        )
+        .contexts([Arrangement, TakeLanes])
+        .binding("S-COMP-001")
+        .binding(
+            Binding::new("S-COMP-007")
+                .arg("on", false)
+                .arg("title_bars", true),
+        )
+        .args::<ShowTakeLanesArgs>(),
         view(
             FOLD_TRACKS,
             "Fold Track",
@@ -995,10 +1102,10 @@ fn specs() -> Vec<CommandSpec> {
         view(
             SET_TRACK_HEIGHT,
             "Set Track Height",
-            "Sets the height of unfolded tracks (`tracks`, or the selected ones) to `height` \
-             points, or changes it by `delta`, from 18 to 800, as dragging a track's lower edge \
-             and Option with + or - (Alt on Windows) do. Turns Optimize Height off. Changes \
-             only the view.",
+            "Sets the height of unfolded tracks (`tracks`, or the selected ones) and take lanes \
+             (`take_lanes`, or the selected ones when they are) to `height` points, or changes \
+             it by `delta`, from 18 to 800, as dragging a track's lower edge and Option with + \
+             or - (Alt on Windows) do. Turns Optimize Height off. Changes only the view.",
         )
         .context(Arrangement)
         .args::<TrackHeightArgs>(),

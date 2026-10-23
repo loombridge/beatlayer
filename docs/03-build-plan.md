@@ -652,7 +652,7 @@ Total to 1.0: 256 packages planned in Phases 0 to 6, and about 110 estimated in 
 | 6.14b | todo |  |  |
 | 6.15 | todo |  |  |
 | 6.16 | todo |  |  |
-| 6.17 | todo |  |  |
+| 6.17 | done | 24 October 2026 | [#356](https://github.com/loombridge/beatlayer/pull/356); each MIDI note carries Pitch, Slide and Pressure envelopes (older sets' pressure points load into Pressure), kept through every note edit and set by `note.set_expression`, played to native devices as per-note expression at any block size, read from MIDI ports with the MPE switch on ([the spec](specs/mpe.md) R1 to R13), and recorded into every kind of take; plug-ins and MPE out are WP-6.17b |
 | 6.17b | todo |  |  |
 | 6.18 | todo |  |  |
 | 6.19 | done | 23 October 2026 | [#329](https://github.com/loombridge/beatlayer/pull/329); the Groove Pool, `.blgroove` files and a clip's groove, played on MIDI clips and warped audio clips (Base, Quantize, Timing, Random, Velocity and the Global Amount) as node data at any block size, with Commit, Extract, groove to clip and Auto Load Groove ([grooves](specs/grooves.md) R1 to R23) |

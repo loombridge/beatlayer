@@ -10,9 +10,11 @@ use bl_core::time::Ticks;
 use bl_model::{
     Clip, Command, Document, Editor, NewTakeLane, TakeLaneId, TrackId, TrackKind, comp,
 };
+use bl_shell_spec::arrangement::Lane;
 use bl_shell_spec::comping::{
-    self as ids, CompResult, CompSourcesArgs, CompSourcesResult, CopyToMainLaneArgs, DuplicateArgs,
-    InsertArgs, LanesResult, MoveCompEdgeArgs, ReplaceWithTakeArgs, TakeDirection, UsedStretch,
+    self as ids, AuditionArgs, CompResult, CompSourcesArgs, CompSourcesResult, CopyToMainLaneArgs,
+    DuplicateArgs, InsertArgs, LanesResult, MoveCompEdgeArgs, ReplaceWithTakeArgs, TakeDirection,
+    UsedStretch,
 };
 use bl_shell_spec::editing::Position;
 use serde::Serialize;
@@ -63,6 +65,55 @@ fn span(doc: &Document, start: &Position, end: &Position) -> Result<(Ticks, Tick
     Ok((start, end))
 }
 
+/// The range a command's `start` and `end` give, or the selection's: the
+/// time selection, which selecting clips sets to their span.
+fn range(
+    doc: &Document,
+    view: &ArrangementView,
+    start: Option<Position>,
+    end: Option<Position>,
+) -> Result<(Ticks, Ticks), EditFailure> {
+    match (start, end) {
+        (Some(start), Some(end)) => span(doc, &start, &end),
+        (None, None) => view
+            .time_selection()
+            .ok_or_else(|| unavailable("no time or clip is selected")),
+        _ => Err(invalid("give `start` and `end`, or neither")),
+    }
+}
+
+/// The take lanes a command acts on: those given, or the ones the selection
+/// is on (R15, R17).
+fn lanes_or_selection(
+    view: &ArrangementView,
+    lanes: Option<Vec<TakeLaneId>>,
+) -> Result<Vec<TakeLaneId>, EditFailure> {
+    match lanes {
+        Some(lanes) if lanes.is_empty() => Err(invalid("`lanes` is empty")),
+        Some(lanes) => Ok(lanes),
+        None => {
+            let lanes = view.selection_take_lanes();
+            if lanes.is_empty() {
+                Err(unavailable("no take lane is selected"))
+            } else {
+                Ok(lanes)
+            }
+        }
+    }
+}
+
+/// Of take lanes on one track, the last listed (R15, R17), by track.
+fn last_per_track(
+    doc: &Document,
+    lanes: impl IntoIterator<Item = TakeLaneId>,
+) -> Result<BTreeMap<TrackId, TakeLaneId>, EditFailure> {
+    let mut last = BTreeMap::new();
+    for lane in lanes {
+        last.insert(take_lane_track(doc, lane)?, lane);
+    }
+    Ok(last)
+}
+
 /// A take lane's material in `start..end`: each of its clips the range
 /// reaches, cut at the range's edges as Split cuts.
 fn pieces(doc: &Document, lane: TakeLaneId, start: Ticks, end: Ticks) -> Vec<Clip> {
@@ -90,13 +141,18 @@ pub fn run(
     id: &str,
     args: Value,
     editor: &mut Editor,
-    view: &ArrangementView,
+    view: &mut ArrangementView,
 ) -> Result<Value, EditFailure> {
     let doc = editor.document().clone();
     let doc = &doc;
     match id {
         ids::INSERT => {
-            let InsertArgs { tracks, after } = parse(args)?;
+            let InsertArgs { tracks, mut after } = parse(args)?;
+            // Spec: comping R4. Directly after the take lane selected on the
+            // track, when no track or lane is named.
+            if tracks.is_none() && after.is_empty() {
+                after = view.selection_take_lanes();
+            }
             let tracks = tracks.unwrap_or_else(|| view.selected_tracks().to_vec());
             if tracks.is_empty() {
                 return Err(unavailable("no audio or MIDI track is selected"));
@@ -135,13 +191,23 @@ pub fn run(
                 }
                 Ok(lanes)
             })?;
+            // Spec: comping R24. Inserting shows the track's take lanes, and
+            // leaves Automation Mode to show them.
+            for track in &tracks {
+                view.show_take_lanes_of(*track);
+            }
             Ok(to_value(&LanesResult { lanes }))
         }
         ids::DUPLICATE => {
             let DuplicateArgs { lanes } = parse(args)?;
-            if lanes.is_empty() {
-                return Err(invalid("`lanes` is empty"));
-            }
+            let lanes = match lanes {
+                Some(lanes) if lanes.is_empty() => return Err(invalid("`lanes` is empty")),
+                Some(lanes) => lanes,
+                None if view.selected_take_lanes().is_empty() => {
+                    return Err(unavailable("no take lane header is selected"));
+                }
+                None => view.selected_take_lanes().to_vec(),
+            };
             // Each copy goes directly after its lane: later lanes first, so
             // an earlier place doesn't move.
             let mut places = Vec::with_capacity(lanes.len());
@@ -185,19 +251,45 @@ pub fn run(
                 copies.reverse();
                 Ok(copies)
             })?;
+            // Spec: comping R5. The copies are selected.
+            view.select_take_lane_headers(editor.document(), copies.clone());
             Ok(to_value(&LanesResult { lanes: copies }))
+        }
+        ids::AUDITION => {
+            let AuditionArgs { lanes, on } = parse(args)?;
+            let lanes = lanes_or_selection(view, lanes)?;
+            // Spec: comping R15. One lane for each track, the last listed.
+            let picked = last_per_track(doc, lanes)?;
+            for track in picked.keys() {
+                if doc.track(*track).is_some_and(|held| held.is_frozen()) {
+                    return Err(refused(format!(
+                        "the track {} is frozen; unfreeze it to audition a take lane",
+                        track.0
+                    )));
+                }
+            }
+            let on = on.unwrap_or_else(|| {
+                !picked.iter().all(|(track, lane)| {
+                    doc.track(*track)
+                        .is_some_and(|held| held.audition() == Some(*lane))
+                })
+            });
+            let (_, _) = transaction(editor, "Audition Take Lane", |editor| {
+                for lane in picked.values() {
+                    apply(editor, Command::SetAudition { lane: *lane, on })?;
+                }
+                Ok(())
+            })?;
+            Ok(to_value(&LanesResult {
+                lanes: picked.into_values().collect(),
+            }))
         }
         ids::COPY_TO_MAIN_LANE => {
             let CopyToMainLaneArgs { lanes, start, end } = parse(args)?;
-            let (start, end) = span(doc, &start, &end)?;
-            if lanes.is_empty() {
-                return Err(invalid("`lanes` is empty"));
-            }
+            let (start, end) = range(doc, view, start, end)?;
+            let lanes = lanes_or_selection(view, lanes)?;
             // Of the lanes on one track, the last listed.
-            let mut from: BTreeMap<TrackId, TakeLaneId> = BTreeMap::new();
-            for lane in lanes {
-                from.insert(take_lane_track(doc, lane)?, lane);
-            }
+            let from = last_per_track(doc, lanes)?;
             let (created, recorded) =
                 transaction(editor, "Copy Selection to Main Lane", |editor| {
                     let mut created = Vec::new();
@@ -220,47 +312,108 @@ pub fn run(
                 direction,
                 lane,
             } = parse(args)?;
-            let (start, end) = span(doc, &start, &end)?;
-            let held = clip_track(doc, track)?;
-            if let Some(lane) = lane
-                && held.take_lane(lane).is_none()
-            {
-                return Err(invalid(format!(
-                    "take lane {} isn't on track {}",
-                    lane.0, track.0
-                )));
+            let selecting = track.is_none() && lane.is_none();
+            let (start, end) = range(doc, view, start, end)?;
+            // The tracks to change, each with the take lane the selection is
+            // on there: the last selected of them (R15), or none for the main
+            // lane.
+            let targets: Vec<(TrackId, Option<TakeLaneId>)> = match (track, lane) {
+                (Some(track), lane) => vec![(track, lane)],
+                (None, Some(lane)) => vec![(take_lane_track(doc, lane)?, Some(lane))],
+                (None, None) => {
+                    let on = view.selection_take_lanes();
+                    view.selected_tracks()
+                        .iter()
+                        .filter(|track| clip_track(doc, **track).is_ok())
+                        .map(|track| {
+                            let lane = on
+                                .iter()
+                                .rev()
+                                .find(|lane| doc.take_lane_track(**lane) == Some(*track))
+                                .copied();
+                            (*track, lane)
+                        })
+                        .collect()
+                }
+            };
+            if targets.is_empty() {
+                return Err(unavailable("no audio or MIDI track is selected"));
             }
-            let order: Vec<TakeLaneId> = held.take_lanes().map(|lane| lane.id).collect();
-            // The parts of the range, each with the place it counts from: the
-            // selected lane, or the lane its main-lane clip uses, or before
-            // the first lane.
-            let parts = replacement_parts(doc, track, start, end, lane, &order);
+            for (track, lane) in &targets {
+                let held = clip_track(doc, *track)?;
+                if let Some(lane) = lane
+                    && held.take_lane(*lane).is_none()
+                {
+                    return Err(invalid(format!(
+                        "take lane {} isn't on track {}",
+                        lane.0, track.0
+                    )));
+                }
+                if selecting && held.is_frozen() {
+                    return Err(refused(format!(
+                        "the track {} is frozen; unfreeze it to change its main lane",
+                        track.0
+                    )));
+                }
+            }
             let label = match direction {
                 TakeDirection::Next => "Replace with Next Take",
                 TakeDirection::Previous => "Replace with Previous Take",
             };
-            let (created, recorded) = transaction(editor, label, |editor| {
+            let (outcome, recorded) = transaction(editor, label, |editor| {
                 let mut placements = Vec::new();
-                for (from, part_start, part_end) in &parts {
-                    let candidates: Box<dyn Iterator<Item = &TakeLaneId>> = match direction {
-                        TakeDirection::Next => {
-                            Box::new(order.iter().skip(from.map_or(0, |at| at + 1)))
+                // The lane each target's selection takes its part from.
+                let mut taken: Vec<(TrackId, Option<TakeLaneId>)> = Vec::new();
+                for (track, lane) in &targets {
+                    let held = editor.document().track(*track).expect("checked");
+                    let order: Vec<TakeLaneId> = held.take_lanes().map(|lane| lane.id).collect();
+                    // The parts of the range, each with the place it counts
+                    // from: the selected lane, or the lane its main-lane clip
+                    // uses, or before the first lane.
+                    let parts =
+                        replacement_parts(editor.document(), *track, start, end, *lane, &order);
+                    let mut now = *lane;
+                    for (from, part_start, part_end) in &parts {
+                        let candidates: Box<dyn Iterator<Item = &TakeLaneId>> = match direction {
+                            TakeDirection::Next => {
+                                Box::new(order.iter().skip(from.map_or(0, |at| at + 1)))
+                            }
+                            TakeDirection::Previous => {
+                                Box::new(order.iter().take(from.unwrap_or(0)).rev())
+                            }
+                        };
+                        let doc = editor.document();
+                        let found = candidates
+                            .into_iter()
+                            .map(|lane| (*lane, pieces(doc, *lane, *part_start, *part_end)))
+                            .find(|(_, clips)| !clips.is_empty());
+                        if let Some((found, clips)) = found {
+                            placements.push((*track, clips));
+                            // Spec: comping R19. On a take lane the selection
+                            // moves to the lane taken from.
+                            if lane.is_some() {
+                                now = Some(found);
+                            }
                         }
-                        TakeDirection::Previous => {
-                            Box::new(order.iter().take(from.unwrap_or(0)).rev())
-                        }
-                    };
-                    let doc = editor.document();
-                    let found = candidates
-                        .into_iter()
-                        .map(|lane| (*lane, pieces(doc, *lane, *part_start, *part_end)))
-                        .find(|(_, clips)| !clips.is_empty());
-                    if let Some((_, clips)) = found {
-                        placements.push((track, clips));
                     }
+                    taken.push((*track, now));
                 }
-                place_on_main(editor, placements)
+                Ok((place_on_main(editor, placements)?, taken))
             })?;
+            let (created, taken) = outcome;
+            if selecting && taken.iter().any(|(_, lane)| lane.is_some()) {
+                let lanes = taken
+                    .iter()
+                    .map(|(track, lane)| match lane {
+                        Some(lane) => Lane::Take {
+                            track: *track,
+                            lane: *lane,
+                        },
+                        None => Lane::Track { track: *track },
+                    })
+                    .collect();
+                view.select_span_on(lanes, start, end);
+            }
             Ok(to_value(&CompResult {
                 created,
                 undo_step: recorded,

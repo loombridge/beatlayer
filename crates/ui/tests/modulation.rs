@@ -672,9 +672,9 @@ fn editor(s: &mut Set, target: AutomationTarget) -> (Rect, Ticks) {
     s.run("view.clip_envelope", json!({ "target": json_of(target) }));
     let nodes = Harness::nodes(&s.h.settle());
     let b = Harness::node(&nodes, "Clip View").bounds.unwrap();
-    // The clip is a Session clip: the editor sits beside the Launch
-    // Properties panel.
-    let view = bl_ui::launch_panel::editor_rect(Rect::from_min_max(
+    // The clip is a Session clip: the editor sits beside the panel
+    // groups.
+    let view = bl_ui::clip_view::editor_rect(Rect::from_min_max(
         pos2(b.x0 as f32, b.y0 as f32),
         pos2(b.x1 as f32, b.y1 as f32),
     ));

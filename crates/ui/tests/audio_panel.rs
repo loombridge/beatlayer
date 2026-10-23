@@ -246,6 +246,38 @@ fn the_panel_shows_its_controls_and_each_runs_its_command() {
 
 // In Re-Pitch the Transpose and the Detune don't act, and the panel draws
 // them switched off (warp-modes R10).
+// Spec: midi-tools R1. An audio clip's right group holds Audio Utilities and
+// a Transform panel (empty until Quantize arrives), and no Generate panel.
+#[test]
+fn the_right_group_holds_audio_utilities_and_an_empty_transform_panel() {
+    let mut p = Panel::new("transform");
+    let all = p.nodes();
+    let radio = |all: &[Node], name: &str| {
+        all.iter()
+            .find(|n| n.label == name && n.toggled.is_some())
+            .unwrap_or_else(|| panic!("no button named {name:?}"))
+            .clone()
+    };
+    assert_eq!(radio(&all, "Audio Utilities").toggled, Some(true));
+    assert_eq!(
+        radio(&all, "MIDI Transformation Tools").toggled,
+        Some(false)
+    );
+    assert!(all.iter().all(|n| n.label != "MIDI Generative Tools"));
+    Harness::node(&all, "Warp");
+    p.h.click(centre(&radio(&all, "MIDI Transformation Tools")));
+    let all = p.nodes();
+    assert_eq!(radio(&all, "MIDI Transformation Tools").toggled, Some(true));
+    assert!(
+        all.iter().all(|n| n.label != "Warp"),
+        "the Transform panel is empty"
+    );
+    // Back to the utilities.
+    p.h.click(centre(&radio(&all, "Audio Utilities")));
+    let all = p.nodes();
+    Harness::node(&all, "Warp");
+}
+
 #[test]
 fn re_pitch_switches_the_pitch_controls_off() {
     let mut p = Panel::new("re-pitch");

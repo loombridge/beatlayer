@@ -30,6 +30,7 @@ bl-plugin-host = { path = "crates/plugin-host" }
 bl-audio-io = { path = "crates/audio-io" }
 bl-rt = { path = "crates/rt" }
 bl-midi-io = { path = "crates/midi-io" }
+bl-midi-tools = { path = "crates/midi-tools" }
 bl-control = { path = "crates/control" }
 bl-link = { path = "crates/link" }
 bl-interop = { path = "crates/interop" }

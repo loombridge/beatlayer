@@ -433,6 +433,7 @@ impl Recipe {
             windows: bl_model::DeviceWindows::new(),
             rack_views: bl_model::RackViewMap::new(),
             folds: bl_model::ClipFolds::new(),
+            midi_tools: bl_project::midi_tools::MidiToolSettings::default(),
             // WP-5.13: what each multisampler's views show saves beside the
             // song.
             multisamplers,

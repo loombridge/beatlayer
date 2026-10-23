@@ -46,7 +46,7 @@ The engine and the document have no UI dependency, so the whole product runs hea
 
 | Crate | Responsibility | Depends on |
 |---|---|---|
-| `bl-core` | Time types, tempo map, IDs, units, shared errors | none |
+| `bl-core` | Time types, tempo map, IDs, units, shared errors, and the scale arithmetic the model's scales and the MIDI Tools share | none |
 | `bl-commands` | A facade over the plug-in kit's `lspk-commands` (since 12 October 2026), with Beatlayer's reference wording: the command registry: each command's ID, label, description, permission class, contexts, default bindings, and argument and result schemas; the checks that keep them complete; the generated reference | none |
 | `bl-model` | The document: tracks, clips, devices, automation, scenes, grooves. Commands, transactions, undo. | `bl-core`, `bl-commands`, `bl-stretch` (the warp map's arithmetic) |
 | `bl-project` | Project files, schema versions and migrations, autosave, crash recovery, sample collection | `bl-model` |
@@ -65,7 +65,7 @@ The engine and the document have no UI dependency, so the whole product runs hea
 | `bl-control` | MIDI and key mapping, control surfaces, Push, the scripting host | `bl-model`, `bl-midi-io` |
 | `bl-link` | Ableton Link 4 session: tempo, phase, start and stop, Link Audio. Binds Link's C API (`abl_link`); the `rusty_link` bindings predate Link 4. | `bl-core` |
 | `bl-interop` | MIDI files, Scala tuning files (`.scl`, `.ascl`), Ableton Live set import, DAWproject import and export | `bl-model`, `bl-project` |
-| `bl-ui` | Views, widgets, GPU canvases, theming, accessibility | `bl-model`, `bl-shell`, `bl-media` (peaks for waveforms), engine state types |
+| `bl-ui` | Views, widgets, GPU canvases, theming, accessibility | `bl-model`, `bl-shell`, `bl-media` (peaks for waveforms), `bl-midi-tools` (the tool descriptions the Transform and Generate panels draw their controls from), engine state types |
 | `bl-shell-spec` | The app shell's commands and menu bar as data: each shell command's spec with its argument and result types, and the menu bar in Live's order. `xtask` reads them from here, so no `xtask` task links an audio backend | `bl-commands` |
 | `bl-shell` | The app shell without a window: the shell's state and the one place its commands run (files, windows, views, focus, settings, the audio device, the transport, the browser), set files through `bl-project`, the audio host that runs the engine on the device with the browser's preview voice, the browser's database, and preferences, so every shell action can be driven and tested headless | `bl-commands`, `bl-model`, `bl-project`, `bl-shell-spec`, `bl-audio-io`, `bl-engine` (the engine and the preview voice), `bl-devices` (the native devices its engines run and the Device View draws), `bl-media` (previews and the media store), `bl-analysis` (measuring the agent API's audio previews, WP-1.16), `bl-midi-tools` (MIDI Tools) |
 | `beatlayer` | The application binary: wiring, windows, menus, preferences | all |

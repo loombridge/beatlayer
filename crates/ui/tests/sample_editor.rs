@@ -174,7 +174,7 @@ impl Sample {
         );
         // The Audio Utilities panel is in the panels' right group, so the
         // editor starts after it (WP-4.10b).
-        bl_ui::clip_view::editor_rect(view, true)
+        bl_ui::clip_view::editor_rect(view)
     }
 
     /// Where the editor puts things now.

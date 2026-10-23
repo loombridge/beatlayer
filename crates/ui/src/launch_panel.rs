@@ -52,12 +52,6 @@ pub fn panel_rect(view: Rect) -> Rect {
     Rect::from_min_size(view.min, vec2(panel_width(view), view.height()))
 }
 
-/// The editor's place beside the panel group.
-#[must_use]
-pub fn editor_rect(view: Rect) -> Rect {
-    Rect::from_min_max(pos2(panel_rect(view).right(), view.top()), view.max)
-}
-
 /// A control drawn in place that does nothing yet, announced as disabled
 /// with the reason.
 fn pending(ui: &mut Ui, theme: &Theme, salt: &str, rect: Rect, text: &str, reason: &str) {
@@ -77,6 +71,29 @@ fn pending(ui: &mut Ui, theme: &Theme, salt: &str, rect: Rect, text: &str, reaso
     ui.ctx().accesskit_node_builder(id, |node| {
         node.set_description(reason.to_owned());
         node.set_value(text.to_owned());
+    });
+}
+
+/// Draws the left group of an Arrangement clip in `rect`: the panel selector
+/// row with Main Properties alone (L-CLIP-003), disabled until its package
+/// arrives, over an empty panel.
+pub fn show_main_only(ui: &mut Ui, theme: &Theme, rect: Rect) {
+    let c = &theme.colors;
+    ui.painter().rect_filled(rect, 0.0, c.panel.0);
+    let button = Rect::from_min_size(rect.min, vec2(rect.width() / 2.0 - 2.0, SELECTOR));
+    let id = Id::new(("launch-panel-selector", "main-only"));
+    let response = ui.interact(button, id, Sense::hover());
+    ui.painter()
+        .rect_filled(button, theme.sizes.corner, c.control.0);
+    ui.painter().text(
+        button.center(),
+        Align2::CENTER_CENTER,
+        "Main Properties",
+        theme.small_font(),
+        c.pending.0,
+    );
+    response.widget_info(|| {
+        WidgetInfo::selected(WidgetType::RadioButton, false, false, "Main Properties")
     });
 }
 

@@ -118,10 +118,11 @@ impl Notes {
         let nodes = Harness::nodes(&output);
         let node = Harness::node(&nodes, "Clip View");
         let bounds = node.bounds.expect("the Clip View has bounds");
-        Rect::from_min_max(
+        // The editor sits beside the panel groups (L-CLIP-003).
+        bl_ui::clip_view::editor_rect(Rect::from_min_max(
             pos2(bounds.x0 as f32, bounds.y0 as f32),
             pos2(bounds.x1 as f32, bounds.y1 as f32),
-        )
+        ))
     }
 
     /// Where the note area, the lanes and the footer sit, as the editor
@@ -178,10 +179,10 @@ impl Notes {
         let nodes = Harness::nodes(&output);
         let node = Harness::node(&nodes, "Clip View");
         let bounds = node.bounds.expect("the Clip View has bounds");
-        let view = Rect::from_min_max(
+        let view = bl_ui::clip_view::editor_rect(Rect::from_min_max(
             pos2(bounds.x0 as f32, bounds.y0 as f32),
             pos2(bounds.x1 as f32, bounds.y1 as f32),
-        );
+        ));
         strip_rect(view)
     }
 

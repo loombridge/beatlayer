@@ -54,6 +54,7 @@ pub mod clip_file;
 pub mod format;
 pub mod groove_file;
 pub mod journal;
+pub mod midi_tools;
 pub mod migrate;
 pub mod preset;
 pub mod rack_preset;

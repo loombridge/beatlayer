@@ -95,7 +95,9 @@ fn the_panel_shows_for_session_clips_only() {
     let all = nodes(&mut h);
     assert!(Harness::node(&all, "Clip View").bounds.is_some());
     assert!(all.iter().all(|n| n.label != "Launch Properties"));
-    assert!(all.iter().all(|n| n.label != "Main Properties"));
+    // An Arrangement clip has Main Properties alone in the left group
+    // (L-CLIP-003), disabled until its package arrives.
+    assert!(Harness::node(&all, "Main Properties").disabled);
 }
 
 // The recorded defaults: Trigger, Legato off, Global, 0.0 %; the follow

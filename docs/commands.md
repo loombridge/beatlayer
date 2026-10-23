@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-712 commands in 43 areas.
+722 commands in 44 areas.
 
 ## Permission classes
 
@@ -264,6 +264,7 @@ Each command has:
 | [`clip_view.select_transients`](#clip_viewselect_transients) | Select Transients | `read` |  |  |
 | [`clip_view.select_warp_markers`](#clip_viewselect_warp_markers) | Select Warp Markers | `read` |  |  |
 | [`clip_view.set_insert_marker`](#clip_viewset_insert_marker) | Set Insert Marker | `read` |  |  |
+| [`clip_view.show_panel`](#clip_viewshow_panel) | Show Clip View Panel | `read` |  |  |
 | [`device.add`](#deviceadd) | Add Device | `edit` |  |  |
 | [`device.add_layers`](#deviceadd_layers) | Add Samples | `external` |  |  |
 | [`device.add_preset`](#deviceadd_preset) | Add Preset | `external` |  |  |
@@ -423,6 +424,15 @@ Each command has:
 | [`midi.ports`](#midiports) | MIDI Ports | `read` |  |  |
 | [`midi.set_port`](#midiset_port) | Set MIDI Port | `external` |  |  |
 | [`midi.toggle_computer_keyboard`](#miditoggle_computer_keyboard) | Computer MIDI Keyboard | `edit` | `M` | `M` |
+| [`midi_tool.apply`](#midi_toolapply) | Apply MIDI Tool | `edit` | `Cmd+Enter` | `Ctrl+Enter` |
+| [`midi_tool.choose`](#midi_toolchoose) | Choose MIDI Tool | `edit` |  |  |
+| [`midi_tool.close`](#midi_toolclose) | Close MIDI Tool Application | `read` |  |  |
+| [`midi_tool.list`](#midi_toollist) | List MIDI Tools | `read` |  |  |
+| [`midi_tool.reseed`](#midi_toolreseed) | Reseed MIDI Tool | `edit` |  |  |
+| [`midi_tool.reset`](#midi_toolreset) | Reset MIDI Tool | `edit` |  |  |
+| [`midi_tool.set`](#midi_toolset) | Set MIDI Tool Parameters | `edit` |  |  |
+| [`midi_tool.set_auto`](#midi_toolset_auto) | Set MIDI Tool Auto | `edit` |  |  |
+| [`midi_tool.state`](#midi_toolstate) | MIDI Tool State | `read` |  |  |
 | [`mixer.arm_exclusive`](#mixerarm_exclusive) | Arm Track Exclusively | `edit` |  |  |
 | [`mixer.set_arm`](#mixerset_arm) | Arm Track | `edit` | `C` | `C` |
 | [`mixer.set_crossfade_assign`](#mixerset_crossfade_assign) | Assign Crossfade | `edit` |  |  |
@@ -4985,6 +4995,22 @@ Arguments:
 
 Result: [`SampleEditorState`](#sampleeditorstate).
 
+#### `clip_view.show_panel`
+
+**Show Clip View Panel**. Permission: `read`. Contexts: `note-editor`, `clip-view`.
+
+Shows a panel of the Clip View's right group: `utilities` (Pitch and Time Utilities, or Audio Utilities on an audio clip), `transform` or `generate`, as clicking its button in the panel selector row does. View state: it is no undo step and is not saved with the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `panel` | [`Panel`](#panel) | yes | The panel to show. |
+
+Result: [`MidiToolState`](#miditoolstate).
+
 ### Area `device`
 
 #### `device.add`
@@ -7749,6 +7775,164 @@ Arguments:
 | `on` | boolean or null | no | Switch it on or off. Left out, it switches to the other state. |
 
 Result: [`KeyboardInfo`](#keyboardinfo).
+
+### Area `midi_tool`
+
+#### `midi_tool.apply`
+
+**Apply MIDI Tool**. Permission: `edit`. Contexts: `note-editor`, `clip-view`.
+
+Applies a MIDI Tool once, with its settings, whether Auto is on or off. A transformation replaces its input (the given `notes`, the selected notes, the notes that start in the time selection, or the notes that start in the clip's loop); a generator writes notes into the range, replacing the notes at the same key that overlap them. `values` replace the tool's settings for those parameters and are kept. `seed` (0 to 4294967295) makes the random choices repeatable; left out, a new one is drawn. The notes written are selected afterwards. One undo step named after the tool, even when the notes come out unchanged. Cmd+Enter (S-NOTE-033) and Edit ▸ Apply Transformation/Generator run it. A transformation with no input is refused, and so is a run that would write more than 65536 notes. A call that would leave the clip fewer notes asks first. Read the notes in the query tool's `clip` (`data.midi.notes`).
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-NOTE-033 | `Cmd+Enter` | `Ctrl+Enter` | `note-editor` | Apply the current MIDI tool's settings | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows. |
+| `notes` | array or null | no | The notes a transformation takes as input, by their place in the clip's notes in order. Left out, the Clip View's selection. |
+| `range` | [`RangeArgs`](#rangeargs) or null | no | The range to act on. Left out, the note editor's time selection or the clip's loop. |
+| `seed` | integer or null | no | The seed, from 0 to 4294967295. Left out, a new one is drawn. |
+| `tool` | string or null | no | The tool's ID. Left out, the chosen tool of the panel shown last. |
+| `values` | object or null | no | Parameters to set before applying, by ID. They replace the tool's settings for those parameters and are kept as its settings. |
+
+Result: [`MidiToolState`](#miditoolstate).
+
+#### `midi_tool.choose`
+
+**Choose MIDI Tool**. Permission: `edit`. Contexts: `note-editor`, `clip-view`.
+
+Chooses the tool the Transform or Generate panel shows for the track of a MIDI clip, as the Transformation or Generator Selector does: a transformation or a generator, by its ID from `midi_tool.list`. Each track remembers its choice, saved with the set. Changes no notes and is no undo step; read it back in `midi_tool.state`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `tool` | string | yes | The tool's ID, from `midi_tool.list`. |
+| `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip whose track's panel shows the tool. Left out, the one the Clip View shows. |
+
+Result: [`MidiToolState`](#miditoolstate).
+
+#### `midi_tool.close`
+
+**Close MIDI Tool Application**. Permission: `read`. Contexts: `note-editor`, `clip-view`.
+
+Closes the open MIDI Tool application, so the next change of a tool's parameters starts a new one on the notes as they are then. Leaves the notes as they are. View state: no undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows. |
+
+Result: [`MidiToolState`](#miditoolstate).
+
+#### `midi_tool.list`
+
+**List MIDI Tools**. Permission: `read`. Contexts: `note-editor`, `clip-view`.
+
+Lists the MIDI Tools: every transformation, then every generator, in the order the Transformation and Generator Selectors list them. Each has its ID, name and kind, and its parameters: ID, name, kind (number, whole, choice, switch, pitch, pitch_range, division, breakpoints, levels, toggles or structured), range, default, unit, whether it counts scale degrees, and what it does. Changes nothing.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`ToolList`](#toollist).
+
+#### `midi_tool.reseed`
+
+**Reseed MIDI Tool**. Permission: `edit`. Contexts: `note-editor`, `clip-view`.
+
+Gives the open MIDI Tool application a new seed, or the one it is given, and runs the tool again on the notes it started from, as a tool's Reseed button does. Refused while no application is open. A call that would leave the clip fewer notes asks first. Read the seed in `midi_tool.state`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows. |
+| `seed` | integer or null | no | The seed, from 0 to 4294967295. Left out, a new one is drawn. |
+
+Result: [`MidiToolState`](#miditoolstate).
+
+#### `midi_tool.reset`
+
+**Reset MIDI Tool**. Permission: `edit`. Contexts: `note-editor`, `clip-view`.
+
+Puts every parameter of a MIDI Tool back to its default and leaves its Auto switch as it is. Changes no notes and is no undo step. Closes the open application. Read it back in `midi_tool.state`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows. |
+| `tool` | string or null | no | The tool's ID. Left out, the chosen tool of the panel shown last. |
+
+Result: [`MidiToolState`](#miditoolstate).
+
+#### `midi_tool.set`
+
+**Set MIDI Tool Parameters**. Permission: `edit`. Contexts: `note-editor`, `clip-view`.
+
+Sets one or more parameters of a MIDI Tool, by ID. The settings are one set for the whole set, saved with it, and changing them is no undo step. With the tool's Auto switch on, the change applies the tool at once (a transformation only while notes or a time selection are selected): the first change opens an application on the notes as they are, and each further change runs the tool again on the notes it started from, with the same seed. The application is one undo step named after the tool. A change that would leave the clip fewer notes asks first. Read the settings back in `midi_tool.state` and the notes in the query tool's `clip`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `values` | object | yes | The parameters to set, by ID, each in the form `midi_tool.list` gives its default. |
+| `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows. |
+| `tool` | string or null | no | The tool's ID. Left out, the chosen tool of the panel shown last. |
+
+Result: [`MidiToolState`](#miditoolstate).
+
+#### `midi_tool.set_auto`
+
+**Set MIDI Tool Auto**. Permission: `edit`. Contexts: `note-editor`, `clip-view`.
+
+Switches a MIDI Tool's Auto switch. Switching it off while the tool's application is open puts the notes back as they were before it and closes the application, as one undo step; switching it on applies nothing until a parameter changes. Read it back in `midi_tool.state`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `auto` | boolean | yes | Whether Auto is on. |
+| `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows. |
+| `tool` | string or null | no | The tool's ID. Left out, the chosen tool of the panel shown last. |
+
+Result: [`MidiToolState`](#miditoolstate).
+
+#### `midi_tool.state`
+
+**MIDI Tool State**. Permission: `read`. Contexts: `note-editor`, `clip-view`.
+
+Reports the MIDI Tools: the Clip View's right group's shown panel, the transformation and generator the clip's track shows, every tool's settings (its Auto switch, its parameters' values, whether they are all at their defaults), what a tool would act on now (the range, the time selection, the selected notes and the notes a transformation would take), and the open application with its tool, how many input notes it keeps, its range and its seed. Changes nothing.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) or null | no | The MIDI clip. Left out, the one the Clip View shows. |
+
+Result: [`MidiToolState`](#miditoolstate).
 
 ### Area `mixer`
 
@@ -13440,6 +13624,12 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`midi.import_file`](#midiimport_file) | the query tool's `track` | `clips` |
 | [`midi.set_port`](#midiset_port) | `midi.ports` | `ports` |
 | [`midi.toggle_computer_keyboard`](#miditoggle_computer_keyboard) | `midi.ports` | `keyboard.on` |
+| [`midi_tool.apply`](#midi_toolapply) | the query tool's `clip` | `data.midi.notes` |
+| [`midi_tool.choose`](#midi_toolchoose) | `midi_tool.state` | `transformation` |
+| [`midi_tool.reseed`](#midi_toolreseed) | the query tool's `clip` | `data.midi.notes` |
+| [`midi_tool.reset`](#midi_toolreset) | `midi_tool.state` | `tools[].values` |
+| [`midi_tool.set`](#midi_toolset) | `midi_tool.state` | `tools[].values` |
+| [`midi_tool.set_auto`](#midi_toolset_auto) | `midi_tool.state` | `tools[].auto` |
 | [`mixer.arm_exclusive`](#mixerarm_exclusive) | the query tool's `track` | `mixer.arm` |
 | [`mixer.set_arm`](#mixerset_arm) | the query tool's `track` | `mixer.arm` |
 | [`mixer.set_crossfade_assign`](#mixerset_crossfade_assign) | the query tool's `track` | `mixer.crossfade` |
@@ -14073,6 +14263,72 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `ApplicationState`
+
+The open application.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `tool` | string | yes | The tool. |
+| `clip` | [`ClipId`](#clipid) | yes | The clip. |
+| `input_notes` | integer, at least 0 | yes | How many input notes it keeps. |
+| `range` | pair of [`Ticks`](#ticks) and [`Ticks`](#ticks) | yes | The range it keeps. |
+| `seed` | integer, at least 0 | yes | The seed its random choices come from. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The open application.",
+  "properties": {
+    "clip": {
+      "$ref": "#/$defs/ClipId",
+      "description": "The clip."
+    },
+    "input_notes": {
+      "description": "How many input notes it keeps.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "range": {
+      "description": "The range it keeps.",
+      "maxItems": 2,
+      "minItems": 2,
+      "prefixItems": [
+        {
+          "$ref": "#/$defs/Ticks"
+        },
+        {
+          "$ref": "#/$defs/Ticks"
+        }
+      ],
+      "type": "array"
+    },
+    "seed": {
+      "description": "The seed its random choices come from.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "tool": {
+      "description": "The tool.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "tool",
+    "clip",
+    "input_notes",
+    "range",
+    "seed"
+  ],
+  "type": "object"
 }
 ```
 
@@ -28048,6 +28304,115 @@ One of:
 
 </details>
 
+### `MidiToolState`
+
+What `midi_tool.state` returns, and what the commands that change a tool's choice, settings or application return.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `panel` | [`Panel`](#panel) | yes | The right group's shown panel. |
+| `clip` | [`ClipId`](#clipid) or null | yes | The clip the state is for. |
+| `current_tool` | string or null | yes | The ID of the tool the Transform and Generate panels' Cmd+Enter, Edit menu item and `tool`-less commands act on: the chosen tool of the one of them that showed last. |
+| `transformation` | string | yes | The ID of the transformation the clip's track shows. |
+| `generator` | string | yes | The ID of the generator the clip's track shows. |
+| `tools` | array of [`ToolSettingsState`](#toolsettingsstate) | yes | Every tool's settings. |
+| `target` | [`TargetState`](#targetstate) or null | yes | What a tool would act on now; none without a MIDI clip. |
+| `application` | [`ApplicationState`](#applicationstate) or null | yes | The open application, if there is one. |
+| `run` | [`ToolRun`](#toolrun) or null | no | What the command that returned this state applied, if it applied a tool. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `midi_tool.state` returns, and what the commands that change a tool's choice, settings or application return.",
+  "properties": {
+    "application": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ApplicationState"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The open application, if there is one."
+    },
+    "clip": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ClipId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The clip the state is for."
+    },
+    "current_tool": {
+      "description": "The ID of the tool the Transform and Generate panels' Cmd+Enter, Edit menu item and `tool`-less commands act on: the chosen tool of the one of them that showed last.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "generator": {
+      "description": "The ID of the generator the clip's track shows.",
+      "type": "string"
+    },
+    "panel": {
+      "$ref": "#/$defs/Panel",
+      "description": "The right group's shown panel."
+    },
+    "run": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ToolRun"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "What the command that returned this state applied, if it applied a tool."
+    },
+    "target": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TargetState"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "What a tool would act on now; none without a MIDI clip."
+    },
+    "tools": {
+      "description": "Every tool's settings.",
+      "items": {
+        "$ref": "#/$defs/ToolSettingsState"
+      },
+      "type": "array"
+    },
+    "transformation": {
+      "description": "The ID of the transformation the clip's track shows.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "panel",
+    "clip",
+    "current_tool",
+    "transformation",
+    "generator",
+    "tools",
+    "target",
+    "application"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `Mixer`
 
 A track's mixer settings: its volume, pan, and switches. Its sends are [`Track::sends`]. The rules are in the mixer spec.
@@ -29733,6 +30098,43 @@ One of:
 
 </details>
 
+### `Panel`
+
+A panel of the Clip View's right group: `utilities` (Pitch and Time Utilities on a MIDI clip, Audio Utilities on an audio clip), `transform` (the MIDI Transformation Tools) or `generate` (the MIDI Generative Tools; a MIDI clip's only).
+
+One of:
+
+- `"utilities"`: Pitch and Time Utilities, or Audio Utilities.
+- `"transform"`: The Transform panel.
+- `"generate"`: The Generate panel.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A panel of the Clip View's right group: `utilities` (Pitch and Time Utilities on a MIDI clip, Audio Utilities on an audio clip), `transform` (the MIDI Transformation Tools) or `generate` (the MIDI Generative Tools; a MIDI clip's only).",
+  "oneOf": [
+    {
+      "const": "utilities",
+      "description": "Pitch and Time Utilities, or Audio Utilities.",
+      "type": "string"
+    },
+    {
+      "const": "transform",
+      "description": "The Transform panel.",
+      "type": "string"
+    },
+    {
+      "const": "generate",
+      "description": "The Generate panel.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `ParamDescriptor`
 
 What one of a device's parameters is.
@@ -29805,6 +30207,108 @@ Type: integer, at least 0.
   "format": "uint32",
   "minimum": 0,
   "type": "integer"
+}
+```
+
+</details>
+
+### `ParamInfo`
+
+One parameter of a tool, as `midi_tool.list` gives it.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | string | yes | The parameter's ID, which `midi_tool.set` names it by. |
+| `name` | string | yes | The name the panel shows. |
+| `kind` | string | yes | The kind of value: `number`, `whole`, `choice`, `switch`, `pitch`, `pitch_range`, `division`, `breakpoints`, `levels`, `toggles` or `structured`. |
+| `scale_aware` | boolean | yes | Whether it counts scale degrees where the clip has a scale. |
+| `default` | see the schema | yes | The value a new set starts with, in the form `midi_tool.set` takes. |
+| `description` | string | yes | What the parameter does. |
+| `decimals` | integer or null | no | How many decimals a number shows. |
+| `max` | number or null | no | The greatest value, of a number, a whole number or a display's data. |
+| `min` | number or null | no | The least value, of a number, a whole number or a display's data. |
+| `options` | array of string | no | A choice's options by ID, a note division's names, or how many levels or toggles a display has. |
+| `unit` | string or null | no | The unit the value is shown with. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One parameter of a tool, as `midi_tool.list` gives it.",
+  "properties": {
+    "decimals": {
+      "description": "How many decimals a number shows.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "default": {
+      "description": "The value a new set starts with, in the form `midi_tool.set` takes."
+    },
+    "description": {
+      "description": "What the parameter does.",
+      "type": "string"
+    },
+    "id": {
+      "description": "The parameter's ID, which `midi_tool.set` names it by.",
+      "type": "string"
+    },
+    "kind": {
+      "description": "The kind of value: `number`, `whole`, `choice`, `switch`, `pitch`, `pitch_range`, `division`, `breakpoints`, `levels`, `toggles` or `structured`.",
+      "type": "string"
+    },
+    "max": {
+      "description": "The greatest value, of a number, a whole number or a display's data.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "min": {
+      "description": "The least value, of a number, a whole number or a display's data.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "name": {
+      "description": "The name the panel shows.",
+      "type": "string"
+    },
+    "options": {
+      "description": "A choice's options by ID, a note division's names, or how many levels or toggles a display has.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "scale_aware": {
+      "description": "Whether it counts scale degrees where the clip has a scale.",
+      "type": "boolean"
+    },
+    "unit": {
+      "description": "The unit the value is shown with.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "id",
+    "name",
+    "kind",
+    "scale_aware",
+    "default",
+    "description"
+  ],
+  "type": "object"
 }
 ```
 
@@ -31692,6 +32196,41 @@ The Randomize amount of each lane, which the footer's control holds (Spec: note-
     "velocity",
     "chance",
     "release_velocity"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `RangeArgs`
+
+A range of the clip's contents.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `start` | [`Ticks`](#ticks) | yes | Where it starts, in ticks of the clip's contents. |
+| `end` | [`Ticks`](#ticks) | yes | Where it ends. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "additionalProperties": false,
+  "description": "A range of the clip's contents.",
+  "properties": {
+    "end": {
+      "$ref": "#/$defs/Ticks",
+      "description": "Where it ends."
+    },
+    "start": {
+      "$ref": "#/$defs/Ticks",
+      "description": "Where it starts, in ticks of the clip's contents."
+    }
+  },
+  "required": [
+    "start",
+    "end"
   ],
   "type": "object"
 }
@@ -36042,6 +36581,85 @@ One of:
 
 </details>
 
+### `TargetState`
+
+What a tool would act on now.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `range` | pair of [`Ticks`](#ticks) and [`Ticks`](#ticks) | yes | The range: from its start to its end, in ticks of the clip's contents. |
+| `time_selection` | array or null | yes | The note editor's time selection, if it has one. |
+| `selected` | array of integer, at least 0 | yes | The selected notes' places in the clip's notes in order. |
+| `input` | array of integer, at least 0 | yes | The places of the notes a transformation would take as input. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a tool would act on now.",
+  "properties": {
+    "input": {
+      "description": "The places of the notes a transformation would take as input.",
+      "items": {
+        "format": "uint32",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": "array"
+    },
+    "range": {
+      "description": "The range: from its start to its end, in ticks of the clip's contents.",
+      "maxItems": 2,
+      "minItems": 2,
+      "prefixItems": [
+        {
+          "$ref": "#/$defs/Ticks"
+        },
+        {
+          "$ref": "#/$defs/Ticks"
+        }
+      ],
+      "type": "array"
+    },
+    "selected": {
+      "description": "The selected notes' places in the clip's notes in order.",
+      "items": {
+        "format": "uint32",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": "array"
+    },
+    "time_selection": {
+      "description": "The note editor's time selection, if it has one.",
+      "maxItems": 2,
+      "minItems": 2,
+      "prefixItems": [
+        {
+          "$ref": "#/$defs/Ticks"
+        },
+        {
+          "$ref": "#/$defs/Ticks"
+        }
+      ],
+      "type": [
+        "array",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "range",
+    "time_selection",
+    "selected",
+    "input"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `TempoMap`
 
 The song's tempo over time, as segments in order of position. The first starts at tick 0, each starts after the one before it, and the last is constant. A song at one tempo is a single constant segment.
@@ -36704,6 +37322,231 @@ Changes to Tones' controls.
       ]
     }
   },
+  "type": "object"
+}
+```
+
+</details>
+
+### `ToolInfo`
+
+One tool, as `midi_tool.list` gives it.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | string | yes | The tool's ID. |
+| `name` | string | yes | The tool's name. |
+| `kind` | [`ToolKind`](#toolkind) | yes | Whether it changes notes or writes them. |
+| `parameters` | array of [`ParamInfo`](#paraminfo) | yes | Its parameters, in the order the panel shows them. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One tool, as `midi_tool.list` gives it.",
+  "properties": {
+    "id": {
+      "description": "The tool's ID.",
+      "type": "string"
+    },
+    "kind": {
+      "$ref": "#/$defs/ToolKind",
+      "description": "Whether it changes notes or writes them."
+    },
+    "name": {
+      "description": "The tool's name.",
+      "type": "string"
+    },
+    "parameters": {
+      "description": "Its parameters, in the order the panel shows them.",
+      "items": {
+        "$ref": "#/$defs/ParamInfo"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "id",
+    "name",
+    "kind",
+    "parameters"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ToolKind`
+
+Whether a tool changes notes or writes them.
+
+One of:
+
+- `"transformation"`: Takes notes and changes them.
+- `"generator"`: Writes new notes.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Whether a tool changes notes or writes them.",
+  "oneOf": [
+    {
+      "const": "transformation",
+      "description": "Takes notes and changes them.",
+      "type": "string"
+    },
+    {
+      "const": "generator",
+      "description": "Writes new notes.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `ToolList`
+
+What `midi_tool.list` returns: the tools in the order the selectors list them.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `tools` | array of [`ToolInfo`](#toolinfo) | yes | Every transformation, then every generator. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `midi_tool.list` returns: the tools in the order the selectors list them.",
+  "properties": {
+    "tools": {
+      "description": "Every transformation, then every generator.",
+      "items": {
+        "$ref": "#/$defs/ToolInfo"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "tools"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ToolRun`
+
+What the last application wrote.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `tool` | string | yes | The tool. |
+| `seed` | integer, at least 0 | yes | The seed. |
+| `wrote` | integer, at least 0 | yes | How many notes the tool wrote. |
+| `notes` | array of integer, at least 0 | yes | The written notes' places in the clip's notes in order: the notes selected afterwards. |
+| `undo_step` | boolean | yes | Whether the application recorded an undo step. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What the last application wrote.",
+  "properties": {
+    "notes": {
+      "description": "The written notes' places in the clip's notes in order: the notes selected afterwards.",
+      "items": {
+        "format": "uint32",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": "array"
+    },
+    "seed": {
+      "description": "The seed.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "tool": {
+      "description": "The tool.",
+      "type": "string"
+    },
+    "undo_step": {
+      "description": "Whether the application recorded an undo step.",
+      "type": "boolean"
+    },
+    "wrote": {
+      "description": "How many notes the tool wrote.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "tool",
+    "seed",
+    "wrote",
+    "notes",
+    "undo_step"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ToolSettingsState`
+
+One tool's settings, as `midi_tool.state` gives them.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `tool` | string | yes | The tool's ID. |
+| `kind` | [`ToolKind`](#toolkind) | yes | Whether it changes notes or writes them. |
+| `auto` | boolean | yes | Its Auto switch. |
+| `values` | object | yes | Every parameter's value by ID. |
+| `at_defaults` | boolean | yes | Whether every parameter is at its default, so Reset is disabled. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One tool's settings, as `midi_tool.state` gives them.",
+  "properties": {
+    "at_defaults": {
+      "description": "Whether every parameter is at its default, so Reset is disabled.",
+      "type": "boolean"
+    },
+    "auto": {
+      "description": "Its Auto switch.",
+      "type": "boolean"
+    },
+    "kind": {
+      "$ref": "#/$defs/ToolKind",
+      "description": "Whether it changes notes or writes them."
+    },
+    "tool": {
+      "description": "The tool's ID.",
+      "type": "string"
+    },
+    "values": {
+      "additionalProperties": true,
+      "description": "Every parameter's value by ID.",
+      "type": "object"
+    }
+  },
+  "required": [
+    "tool",
+    "kind",
+    "auto",
+    "values",
+    "at_defaults"
+  ],
   "type": "object"
 }
 ```

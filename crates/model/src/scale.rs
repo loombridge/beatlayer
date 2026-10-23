@@ -18,9 +18,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-/// The chromatic scale's steps: every semitone, so a degree of it is a
-/// semitone (the scales spec, R2).
-pub const CHROMATIC: [u8; 12] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+pub use bl_core::scale::CHROMATIC;
 
 /// The names of the scales in the scale list, in the order the chooser
 /// shows them (the scales spec, R1).
@@ -257,22 +255,13 @@ impl Scale {
     /// scales spec, R2).
     #[must_use]
     pub fn notes(&self) -> Vec<u8> {
-        let mut notes = Vec::new();
-        for key in 0..=127u8 {
-            if self.holds(key) {
-                notes.push(key);
-            }
-        }
-        notes
+        bl_core::scale::notes(self.root, self.steps())
     }
 
     /// Whether the scale holds `key`.
     #[must_use]
     pub fn holds(&self, key: u8) -> bool {
-        let above = key % 12;
-        let root = self.root % 12;
-        let step = (above + 12 - root) % 12;
-        self.steps().contains(&step)
+        bl_core::scale::holds(self.root, self.steps(), key)
     }
 
     /// The key `degrees` degrees from `key` (the scales spec, R2): a key in
@@ -284,45 +273,14 @@ impl Scale {
     /// device or a tool says what it does about.
     #[must_use]
     pub fn move_by(&self, key: u8, degrees: i32) -> Option<u8> {
-        let notes = self.extended_notes();
-        let below = notes
-            .iter()
-            .rposition(|note| *note <= i32::from(key))
-            .expect("the extended scale reaches below the keyboard");
-        let target = below.checked_add_signed(isize::try_from(degrees).ok()?)?;
-        let moved = notes.get(target)?;
-        let key = i32::from(key) + (moved - notes[below]);
-        // A move that leaves the keyboard is off it (the scales spec, R2).
-        if !(0..=127).contains(&key) {
-            return None;
-        }
-        Some(key as u8)
+        bl_core::scale::move_by(self.root, self.steps(), key, degrees)
     }
 
     /// The scale note nearest `key`: the one fewest semitones away, the
     /// lower of two equally near (the scales spec, R2).
     #[must_use]
     pub fn nearest(&self, key: u8) -> u8 {
-        let key = i32::from(key);
-        self.extended_notes()
-            .into_iter()
-            .filter(|note| (0..=127).contains(note))
-            .min_by_key(|note| ((note - key).abs(), *note))
-            .unwrap_or(0) as u8
-    }
-
-    /// The scale's notes from below the keyboard to above it, in order, so
-    /// a move that leaves the scale's range still has a note to land on and
-    /// can be refused for leaving the keyboard.
-    fn extended_notes(&self) -> Vec<i32> {
-        let steps = self.steps();
-        let root = i32::from(self.root % 12);
-        (-36i32..=156)
-            .filter(|key| {
-                let step = ((*key).rem_euclid(12) - root).rem_euclid(12);
-                steps.contains(&(step as u8))
-            })
-            .collect()
+        bl_core::scale::nearest(self.root, self.steps(), key)
     }
 }
 

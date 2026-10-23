@@ -33,6 +33,8 @@ bl-media.workspace = true
 # Seeds the query tests' set, and its own encoding is what they compare with.
 bl-project.workspace = true
 hound = "3.5.1"
+# The test tools the MIDI Tools' agent tests apply (WP-6.11).
+bl-midi-tools = { workspace = true, features = ["testing"] }
 # The kit's plug-ins through both routes: the kit's examples compiled in as native
 # devices, and Example Gain hosted as a CLAP plug-in with the agent interface
 # its own build exports, built into the test binary.

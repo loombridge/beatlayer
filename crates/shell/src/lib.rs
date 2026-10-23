@@ -84,6 +84,7 @@ pub mod export_dialog;
 pub mod files;
 pub mod midi;
 pub mod midi_files;
+pub mod midi_tools;
 pub mod mixer_controls;
 pub mod mixer_view;
 mod modulation;
@@ -143,6 +144,9 @@ pub use bl_shell_spec::locator as locator_commands;
 /// The MIDI ports' and the computer MIDI keyboard's command IDs and their
 /// argument and result types (WP-2.2).
 pub use bl_shell_spec::midi_io as midi_io_commands;
+/// The MIDI Tools' command IDs and their argument and result types
+/// (WP-6.11).
+pub use bl_shell_spec::midi_tools as midi_tool_commands;
 /// The Mixer view's command IDs and their argument and result types
 /// (WP-1.9).
 pub use bl_shell_spec::mixer_view as mixer_view_commands;

@@ -1,0 +1,1341 @@
+//! The MIDI Tools in the Clip View (WP-6.11): the Transform and Generate
+//! panels, the tool each track shows, every tool's settings, and applying a
+//! tool to a clip's notes.
+//!
+//! A tool is a description and a pure function of its input
+//! (`bl-midi-tools`); this module is what surrounds it: what it acts on
+//! (R10 to R12), merging its notes into the clip and selecting them
+//! (R12 to R15), the open application with its kept input and seed (R17 to
+//! R21), and one undo step named after the tool (R22). The choices and
+//! settings sit beside the document like the folds, so they are never an
+//! undo step (R4, R5). The rules are in the MIDI Tools spec.
+
+use std::collections::BTreeMap;
+
+use bl_core::time::Ticks;
+use bl_midi_tools::{
+    Breakpoint, DIVISION_NAMES, MidiTool, ParamKind, ParamSpec, ParamValue, Registry, Rng,
+    ToolDescriptor, ToolError, ToolInput, ToolKind, ToolNote, ToolPressure, ToolScale,
+};
+use bl_model::{
+    Clip, ClipData, ClipId, Document, Editor, MidiData, Note, PressurePoint, RackKind, Receive,
+    TrackId,
+};
+use bl_project::midi_tools::{ChosenTools, MidiToolSettings, SavedTool};
+use bl_shell_spec::midi_tools::{
+    self as ids, ApplicationState, ApplyArgs, ChooseArgs, ClipArgs, MidiToolState, Panel,
+    ParamInfo, RangeArgs, ReseedArgs, ResetArgs, SetArgs, SetAutoArgs, ShowPanelArgs, TargetState,
+    ToolInfo, ToolList, ToolRun, ToolSettingsState,
+};
+use serde::de::DeserializeOwned;
+use serde_json::{Map, Value, json};
+
+use crate::arrangement::ArrangementView;
+use crate::arrangement::editing::{EditFailure, transaction};
+use crate::clip_view::{ClipView, notes_in_order, span_of};
+
+/// The transformation a new track shows (the MIDI Tools spec, R4).
+const DEFAULT_TRANSFORMATION: &str = "arpeggiate";
+/// The generator a new track shows.
+const DEFAULT_GENERATOR: &str = "rhythm";
+
+fn invalid(message: impl Into<String>) -> EditFailure {
+    EditFailure::InvalidArgs(message.into())
+}
+
+fn unavailable(reason: impl Into<String>) -> EditFailure {
+    EditFailure::Unavailable(reason.into())
+}
+
+fn refused(reason: impl Into<String>) -> EditFailure {
+    EditFailure::Refused(reason.into())
+}
+
+fn parse<T: DeserializeOwned>(args: Value) -> Result<T, EditFailure> {
+    let args = if args.is_null() { json!({}) } else { args };
+    serde_json::from_value(args).map_err(|error| invalid(error.to_string()))
+}
+
+fn to_value<T: serde::Serialize>(value: &T) -> Value {
+    serde_json::to_value(value).unwrap_or(Value::Null)
+}
+
+fn failure(error: ToolError) -> EditFailure {
+    match error {
+        ToolError::Values(message) => invalid(message),
+        ToolError::Input(message) => refused(message),
+        error @ ToolError::TooManyNotes(_) => refused(error.to_string()),
+    }
+}
+
+/// One tool's settings: its Auto switch and a value for every parameter.
+#[derive(Clone, Debug, PartialEq)]
+struct Settings {
+    auto: bool,
+    values: Vec<ParamValue>,
+}
+
+impl Settings {
+    fn new(descriptor: &ToolDescriptor) -> Self {
+        Self {
+            auto: true,
+            values: descriptor.defaults(),
+        }
+    }
+
+    fn at_defaults(&self, descriptor: &ToolDescriptor) -> bool {
+        self.values == descriptor.defaults()
+    }
+}
+
+/// The open application (the MIDI Tools spec, R17): the notes and range the
+/// tool started from, its seed, and what it left, which says whether it is
+/// still the one that last changed the clip (R21).
+#[derive(Clone, Debug, PartialEq)]
+struct Application {
+    clip: ClipId,
+    /// The clip the Clip View showed when it began.
+    shown: Option<ClipId>,
+    tool: String,
+    /// The clip's notes in the editor's order before the tool ran.
+    base: Vec<Note>,
+    /// Which of `base` a transformation took as input.
+    input: Vec<usize>,
+    range: (Ticks, Ticks),
+    seed: u32,
+    /// The selection and time selection before the tool ran, which switching
+    /// Auto off puts back (R18).
+    before: (Vec<u32>, Option<(Ticks, Ticks)>),
+    /// The clip's notes, the selection and the time selection the tool left.
+    after: Vec<Note>,
+    selected: Vec<u32>,
+    time: Option<(Ticks, Ticks)>,
+}
+
+/// The tool each track shows, every tool's settings, the Clip View's shown
+/// panel and the open application.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct MidiTools {
+    /// The right group's shown panel: view state (R1).
+    panel: Panel,
+    /// Whether the Generate panel showed after the Transform panel did.
+    generator_last: bool,
+    chosen: BTreeMap<TrackId, ChosenIds>,
+    settings: BTreeMap<String, Settings>,
+    open: Option<Application>,
+    /// How many seeds have been drawn, which makes the next.
+    draws: u64,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct ChosenIds {
+    transformation: Option<String>,
+    generator: Option<String>,
+}
+
+/// Everything a panel draws about one tool.
+#[derive(Clone)]
+pub struct ToolView<'a> {
+    /// The tool's description.
+    pub descriptor: &'a ToolDescriptor,
+    /// Its parameters' values.
+    pub values: Vec<ParamValue>,
+    /// Its Auto switch.
+    pub auto: bool,
+    /// Whether every parameter is at its default, so Reset is disabled.
+    pub at_defaults: bool,
+}
+
+impl MidiTools {
+    /// The right group's shown panel.
+    #[must_use]
+    pub fn panel(&self) -> Panel {
+        self.panel
+    }
+
+    /// Shows a panel of the right group (R1). Showing the Transform or the
+    /// Generate panel makes it the one Cmd+Enter applies from (R19).
+    pub fn show_panel(&mut self, panel: Panel) {
+        self.panel = panel;
+        match panel {
+            Panel::Transform => self.generator_last = false,
+            Panel::Generate => self.generator_last = true,
+            Panel::Utilities => {}
+        }
+    }
+
+    /// The kind of the tool Cmd+Enter applies: the one whose panel showed
+    /// last (R19).
+    #[must_use]
+    pub fn current_kind(&self) -> ToolKind {
+        if self.generator_last {
+            ToolKind::Generator
+        } else {
+            ToolKind::Transformation
+        }
+    }
+
+    /// The tool a track shows in the panel of `kind`: its choice, or what a
+    /// new track shows, or else the first of the kind (R4).
+    #[must_use]
+    pub fn chosen(&self, track: Option<TrackId>, kind: ToolKind) -> Option<&'static dyn MidiTool> {
+        let registry = Registry::native();
+        let saved = track.and_then(|track| self.chosen.get(&track));
+        let (saved, default) = match kind {
+            ToolKind::Transformation => (
+                saved.and_then(|c| c.transformation.as_deref()),
+                DEFAULT_TRANSFORMATION,
+            ),
+            ToolKind::Generator => (
+                saved.and_then(|c| c.generator.as_deref()),
+                DEFAULT_GENERATOR,
+            ),
+        };
+        saved
+            .into_iter()
+            .chain([default])
+            .find_map(|id| registry.get(kind, id))
+            .or_else(|| registry.tools(kind).next())
+    }
+
+    /// The ID of the tool a track has chosen in the panel of `kind`, or the
+    /// one a new track shows, whether or not the registry has it yet.
+    fn chosen_id(&self, track: Option<TrackId>, kind: ToolKind) -> String {
+        let saved = track.and_then(|track| self.chosen.get(&track));
+        match kind {
+            ToolKind::Transformation => saved
+                .and_then(|c| c.transformation.as_deref())
+                .unwrap_or(DEFAULT_TRANSFORMATION),
+            ToolKind::Generator => saved
+                .and_then(|c| c.generator.as_deref())
+                .unwrap_or(DEFAULT_GENERATOR),
+        }
+        .to_owned()
+    }
+
+    /// What a panel draws about `tool`.
+    #[must_use]
+    pub fn view_of<'a>(&self, tool: &'a dyn MidiTool) -> ToolView<'a> {
+        let descriptor = tool.descriptor();
+        let settings = self.settings_of(descriptor);
+        ToolView {
+            descriptor,
+            at_defaults: settings.at_defaults(descriptor),
+            auto: settings.auto,
+            values: settings.values,
+        }
+    }
+
+    /// A tool's settings, which are its defaults until they are changed.
+    fn settings_of(&self, descriptor: &ToolDescriptor) -> Settings {
+        self.settings
+            .get(&descriptor.id)
+            .cloned()
+            .unwrap_or_else(|| Settings::new(descriptor))
+    }
+
+    /// Closes the open application (R21).
+    pub fn close(&mut self) {
+        self.open = None;
+    }
+
+    /// The settings as the set saves them (R4, R5): the choices of tracks,
+    /// and each tool that isn't at its defaults with Auto on.
+    #[must_use]
+    pub fn saved(&self) -> MidiToolSettings {
+        let registry = Registry::native();
+        let tools = self
+            .settings
+            .iter()
+            .filter_map(|(id, settings)| {
+                let descriptor = registry.find(id)?.descriptor();
+                if settings.auto && settings.at_defaults(descriptor) {
+                    return None;
+                }
+                let values = descriptor
+                    .parameters
+                    .iter()
+                    .zip(&settings.values)
+                    .map(|(spec, value)| (spec.id.clone(), value_to_json(spec, value)))
+                    .collect();
+                Some((
+                    id.clone(),
+                    SavedTool {
+                        auto: settings.auto,
+                        values,
+                    },
+                ))
+            })
+            .collect();
+        MidiToolSettings {
+            chosen: self
+                .chosen
+                .iter()
+                .map(|(track, c)| {
+                    (
+                        *track,
+                        ChosenTools {
+                            transformation: c.transformation.clone(),
+                            generator: c.generator.clone(),
+                        },
+                    )
+                })
+                .collect(),
+            tools,
+        }
+    }
+
+    /// Restores settings a set saved, keeping the panel shown. A value
+    /// outside its parameter's range, or for a parameter the tool doesn't
+    /// have, loads as the default (R5).
+    pub fn restore(&mut self, saved: &MidiToolSettings) {
+        let registry = Registry::native();
+        self.open = None;
+        self.chosen = saved
+            .chosen
+            .iter()
+            .map(|(track, c)| {
+                (
+                    *track,
+                    ChosenIds {
+                        transformation: c.transformation.clone(),
+                        generator: c.generator.clone(),
+                    },
+                )
+            })
+            .collect();
+        self.settings = saved
+            .tools
+            .iter()
+            .filter_map(|(id, saved)| {
+                let descriptor = registry.find(id)?.descriptor();
+                let values = descriptor
+                    .parameters
+                    .iter()
+                    .map(|spec| {
+                        saved
+                            .values
+                            .get(&spec.id)
+                            .and_then(|json| value_from_json(spec, json).ok())
+                            .unwrap_or_else(|| spec.default.clone())
+                    })
+                    .collect();
+                Some((
+                    id.clone(),
+                    Settings {
+                        auto: saved.auto,
+                        values,
+                    },
+                ))
+            })
+            .collect();
+    }
+
+    /// The next seed: one a new application takes when it is given none
+    /// (R20).
+    fn draw_seed(&mut self) -> u32 {
+        self.draws += 1;
+        let mut rng = Rng::new(u32::try_from(self.draws % (1 << 32)).unwrap_or(0));
+        (rng.next_u64() >> 32) as u32
+    }
+
+    /// The open application, if it is still the one that last changed
+    /// `clip`: nothing has changed its notes, the selection or the time
+    /// selection since, and the clip still shows (R21).
+    fn open_for(
+        &self,
+        doc: &Document,
+        view: &ClipView,
+        arrangement: &ArrangementView,
+        clip: ClipId,
+    ) -> Option<&Application> {
+        let app = self.open.as_ref().filter(|app| app.clip == clip)?;
+        let Some(ClipData::Midi(midi)) = doc.clip(clip).map(|clip| &clip.data) else {
+            return None;
+        };
+        (view.shown_clip(doc, arrangement) == app.shown
+            && notes_in_order(midi) == app.after
+            && view.selected_notes(doc, arrangement) == app.selected
+            && view.time_selection(doc, arrangement) == app.time)
+            .then_some(app)
+    }
+}
+
+// The values in the commands' form, and the form the set saves them in.
+
+/// A value as JSON, in the form `midi_tool.set` takes.
+fn value_to_json(spec: &ParamSpec, value: &ParamValue) -> Value {
+    match (&spec.kind, value) {
+        (ParamKind::Choice { options }, ParamValue::Choice(n)) => {
+            json!(options.get(*n).map(|option| option.id.as_str()))
+        }
+        (_, ParamValue::Number(n)) => json!(n),
+        (_, ParamValue::Whole(n)) => json!(n),
+        (_, ParamValue::Choice(n)) => json!(n),
+        (_, ParamValue::Switch(on)) => json!(on),
+        (_, ParamValue::Pitch(key)) => json!(key),
+        (_, ParamValue::PitchRange { low, high }) => json!({ "low": low, "high": high }),
+        (_, ParamValue::Division(n)) => json!(DIVISION_NAMES.get(*n)),
+        (_, ParamValue::Breakpoints(points)) => {
+            json!(
+                points
+                    .iter()
+                    .map(|p| json!({ "x": p.x, "y": p.y }))
+                    .collect::<Vec<_>>()
+            )
+        }
+        (_, ParamValue::Levels(levels)) => json!(levels),
+        (_, ParamValue::Toggles(toggles)) => json!(toggles),
+        (_, ParamValue::Structured(text)) => json!(text),
+    }
+}
+
+/// A value from JSON, checked against its parameter.
+fn value_from_json(spec: &ParamSpec, json: &Value) -> Result<ParamValue, String> {
+    let wrong = || format!("`{}` doesn't take {json}", spec.id);
+    let value = match &spec.kind {
+        ParamKind::Number { .. } => ParamValue::Number(json.as_f64().ok_or_else(wrong)?),
+        ParamKind::Whole { .. } => ParamValue::Whole(
+            json.as_i64()
+                .or_else(|| json.as_f64().filter(|n| n.fract() == 0.0).map(|n| n as i64))
+                .ok_or_else(wrong)?,
+        ),
+        ParamKind::Choice { options } => {
+            let id = json.as_str().ok_or_else(wrong)?;
+            ParamValue::Choice(options.iter().position(|o| o.id == id).ok_or_else(|| {
+                let ids: Vec<&str> = options.iter().map(|o| o.id.as_str()).collect();
+                format!("`{}` takes one of {}", spec.id, ids.join(", "))
+            })?)
+        }
+        ParamKind::Switch => ParamValue::Switch(json.as_bool().ok_or_else(wrong)?),
+        ParamKind::Pitch => ParamValue::Pitch(
+            json.as_u64()
+                .and_then(|n| u8::try_from(n).ok())
+                .ok_or_else(wrong)?,
+        ),
+        ParamKind::PitchRange => {
+            let key = |name: &str| {
+                json.get(name)
+                    .and_then(Value::as_u64)
+                    .and_then(|n| u8::try_from(n).ok())
+            };
+            ParamValue::PitchRange {
+                low: key("low").ok_or_else(wrong)?,
+                high: key("high").ok_or_else(wrong)?,
+            }
+        }
+        ParamKind::Division => {
+            let name = json.as_str().ok_or_else(wrong)?;
+            ParamValue::Division(DIVISION_NAMES.iter().position(|n| *n == name).ok_or_else(
+                || format!("`{}` takes one of {}", spec.id, DIVISION_NAMES.join(", ")),
+            )?)
+        }
+        ParamKind::Breakpoints { .. } => ParamValue::Breakpoints(
+            json.as_array()
+                .ok_or_else(wrong)?
+                .iter()
+                .map(|point| {
+                    Some(Breakpoint {
+                        x: point.get("x")?.as_f64()?,
+                        y: point.get("y")?.as_f64()?,
+                    })
+                })
+                .collect::<Option<Vec<_>>>()
+                .ok_or_else(wrong)?,
+        ),
+        ParamKind::Levels { .. } => ParamValue::Levels(
+            json.as_array()
+                .ok_or_else(wrong)?
+                .iter()
+                .map(Value::as_f64)
+                .collect::<Option<Vec<_>>>()
+                .ok_or_else(wrong)?,
+        ),
+        ParamKind::Toggles { .. } => ParamValue::Toggles(
+            json.as_array()
+                .ok_or_else(wrong)?
+                .iter()
+                .map(Value::as_bool)
+                .collect::<Option<Vec<_>>>()
+                .ok_or_else(wrong)?,
+        ),
+        ParamKind::Structured => {
+            ParamValue::Structured(json.as_str().ok_or_else(wrong)?.to_owned())
+        }
+    };
+    spec.check(&value)?;
+    Ok(value)
+}
+
+fn param_info(spec: &ParamSpec) -> ParamInfo {
+    let (kind, min, max, decimals, options) = match &spec.kind {
+        ParamKind::Number { min, max, decimals } => (
+            "number",
+            Some(*min),
+            Some(*max),
+            Some(*decimals),
+            Vec::new(),
+        ),
+        ParamKind::Whole { min, max } => (
+            "whole",
+            Some(*min as f64),
+            Some(*max as f64),
+            None,
+            Vec::new(),
+        ),
+        ParamKind::Choice { options } => (
+            "choice",
+            None,
+            None,
+            None,
+            options.iter().map(|o| o.id.clone()).collect(),
+        ),
+        ParamKind::Switch => ("switch", None, None, None, Vec::new()),
+        ParamKind::Pitch => ("pitch", Some(0.0), Some(127.0), None, Vec::new()),
+        ParamKind::PitchRange => ("pitch_range", Some(0.0), Some(127.0), None, Vec::new()),
+        ParamKind::Division => (
+            "division",
+            None,
+            None,
+            None,
+            DIVISION_NAMES.iter().map(|n| (*n).to_owned()).collect(),
+        ),
+        ParamKind::Breakpoints { min, max } => {
+            ("breakpoints", Some(*min), Some(*max), None, Vec::new())
+        }
+        ParamKind::Levels { count, min, max } => (
+            "levels",
+            Some(*min),
+            Some(*max),
+            None,
+            vec![count.to_string()],
+        ),
+        ParamKind::Toggles { count } => ("toggles", None, None, None, vec![count.to_string()]),
+        ParamKind::Structured => ("structured", None, None, None, Vec::new()),
+    };
+    ParamInfo {
+        id: spec.id.clone(),
+        name: spec.name.clone(),
+        kind: kind.to_owned(),
+        min,
+        max,
+        decimals,
+        options,
+        unit: spec.unit.clone(),
+        scale_aware: spec.scale_aware,
+        default: value_to_json(spec, &spec.default),
+        description: spec.description.clone(),
+    }
+}
+
+fn kind_of(kind: ToolKind) -> ids::ToolKind {
+    match kind {
+        ToolKind::Transformation => ids::ToolKind::Transformation,
+        ToolKind::Generator => ids::ToolKind::Generator,
+    }
+}
+
+fn list() -> ToolList {
+    let registry = Registry::native();
+    ToolList {
+        tools: [ToolKind::Transformation, ToolKind::Generator]
+            .into_iter()
+            .flat_map(|kind| registry.tools(kind))
+            .map(|tool| {
+                let d = tool.descriptor();
+                ToolInfo {
+                    id: d.id.clone(),
+                    name: d.name.clone(),
+                    kind: kind_of(d.kind),
+                    parameters: d.parameters.iter().map(param_info).collect(),
+                }
+            })
+            .collect(),
+    }
+}
+
+// What a tool acts on (R10 to R13).
+
+/// The note editor's notes, selection and range, as a tool would take them.
+struct Target {
+    range: (Ticks, Ticks),
+    time: Option<(Ticks, Ticks)>,
+    selected: Vec<u32>,
+    /// The places of a transformation's input notes.
+    input: Vec<u32>,
+}
+
+/// The range a tool acts on when the editor has no time selection (R10): the
+/// loop brace while the loop is on, else the Start marker to the End marker.
+fn default_range(midi: &MidiData, length: Ticks) -> (Ticks, Ticks) {
+    let end = midi.start + length;
+    if midi.looping {
+        (midi.loop_start, midi.loop_end.unwrap_or(end))
+    } else {
+        (midi.start, midi.end.unwrap_or(end))
+    }
+}
+
+fn target(
+    doc: &Document,
+    view: &ClipView,
+    arrangement: &ArrangementView,
+    clip: &Clip,
+    midi: &MidiData,
+    notes: Option<&[u32]>,
+    range: Option<RangeArgs>,
+) -> Result<Target, EditFailure> {
+    let ordered = notes_in_order(midi);
+    let shown = view.shown_clip(doc, arrangement) == Some(clip.id);
+    let selected = if shown {
+        view.selected_notes(doc, arrangement).to_vec()
+    } else {
+        Vec::new()
+    };
+    let time = shown
+        .then(|| view.time_selection(doc, arrangement))
+        .flatten();
+    // Notes or a range in the arguments stand in for the editor's selection.
+    let explicit = notes.is_some() || range.is_some();
+    let range = match range {
+        Some(RangeArgs { start, end }) => {
+            if start >= end {
+                return Err(invalid("`range` must start before it ends"));
+            }
+            (start, end)
+        }
+        None if explicit => default_range(midi, clip.length),
+        None => time.unwrap_or_else(|| default_range(midi, clip.length)),
+    };
+    let starting_in = |(from, to): (Ticks, Ticks)| -> Vec<u32> {
+        ordered
+            .iter()
+            .enumerate()
+            .filter(|(_, note)| note.start >= from && note.start < to)
+            .map(|(place, _)| place as u32)
+            .collect()
+    };
+    let input = if let Some(notes) = notes {
+        let mut places = Vec::with_capacity(notes.len());
+        for place in notes {
+            if *place as usize >= ordered.len() {
+                return Err(invalid(format!(
+                    "clip {} has no note at place {place}",
+                    clip.id.0
+                )));
+            }
+            if !places.contains(place) {
+                places.push(*place);
+            }
+        }
+        places
+    } else if explicit {
+        starting_in(range)
+    } else if !selected.is_empty() {
+        selected.clone()
+    } else {
+        starting_in(time.unwrap_or(range))
+    };
+    Ok(Target {
+        range,
+        time,
+        selected,
+        input,
+    })
+}
+
+/// A note as a tool sees it.
+fn tool_note(note: &Note) -> ToolNote {
+    ToolNote {
+        key: i16::from(note.key),
+        start: note.start,
+        length: note.length,
+        velocity: note.velocity,
+        release_velocity: note.release_velocity,
+        chance: note.probability,
+        velocity_deviation: note.velocity_deviation,
+        deactivated: note.mute,
+        pressure: note
+            .pressure
+            .iter()
+            .map(|point| ToolPressure {
+                at: point.at,
+                value: point.value,
+            })
+            .collect(),
+    }
+}
+
+/// A note a tool wrote, as the document holds it.
+fn note_of(tool: &ToolNote) -> Note {
+    Note {
+        key: u8::try_from(tool.key.clamp(0, 127)).unwrap_or(0),
+        velocity: tool.velocity.clamp(1, 127),
+        release_velocity: tool.release_velocity.clamp(1, 127),
+        start: tool.start,
+        length: tool.length,
+        probability: tool.chance.clamp(0.0, 1.0),
+        velocity_deviation: tool.velocity_deviation,
+        mute: tool.deactivated,
+        pressure: tool
+            .pressure
+            .iter()
+            .map(|point| PressurePoint {
+                at: point.at,
+                value: point.value.min(127),
+            })
+            .collect(),
+    }
+}
+
+/// The keys the Drum Rack of `track`'s instrument receives, in order (the
+/// MIDI Tools spec, R9); `None` on a track with no Drum Rack.
+fn drum_keys(doc: &Document, track: TrackId) -> Option<Vec<u8>> {
+    let rack = doc
+        .track(track)?
+        .devices()
+        .find(|device| device.rack_kind() == Some(RackKind::Drum))?;
+    let mut keys = Vec::new();
+    for chain in rack.chains.iter().filter(|chain| !chain.is_return) {
+        match chain.receive {
+            Receive::AllNotes => return Some((0..=127).collect()),
+            Receive::Note(key) => keys.push(key),
+        }
+    }
+    keys.sort_unstable();
+    keys.dedup();
+    Some(keys)
+}
+
+/// What a tool's notes depend on (R16).
+fn tool_input(
+    doc: &Document,
+    arrangement: &ArrangementView,
+    clip: &Clip,
+    midi: &MidiData,
+    app: &Application,
+) -> ToolInput {
+    ToolInput {
+        notes: app
+            .input
+            .iter()
+            .map(|at| tool_note(&app.base[*at]))
+            .collect(),
+        range: app.range,
+        grid_step: arrangement.grid_ticks(doc),
+        signature: midi
+            .signature
+            .unwrap_or_else(|| doc.settings().time_signatures.signature_at(clip.start)),
+        scale: clip.scale.enabled.then(|| ToolScale {
+            root: clip.scale.root,
+            steps: clip.scale.steps().to_vec(),
+        }),
+        drum_keys: doc
+            .clip_track(clip.id)
+            .and_then(|track| drum_keys(doc, track)),
+        seed: app.seed,
+    }
+}
+
+/// The clip's notes once `written` replace what the tool took (R11, R12),
+/// in the editor's order, and the places of the written notes.
+fn merged(app: &Application, kind: ToolKind, written: &[Note]) -> (Vec<Note>, Vec<u32>) {
+    let mut taken = vec![false; app.base.len()];
+    match kind {
+        ToolKind::Transformation => {
+            for at in &app.input {
+                taken[*at] = true;
+            }
+        }
+        // A note at a written note's key whose span overlaps it goes (R12).
+        // Per key, the written spans in order of start, each with the
+        // furthest end so far, find an overlap in a binary search.
+        ToolKind::Generator => {
+            let mut spans: BTreeMap<u8, Vec<(Ticks, Ticks)>> = BTreeMap::new();
+            for new in written {
+                spans
+                    .entry(new.key)
+                    .or_default()
+                    .push((new.start, new.start + new.length));
+            }
+            for list in spans.values_mut() {
+                list.sort_unstable();
+                let mut furthest = Ticks::MIN;
+                for span in list.iter_mut() {
+                    furthest = furthest.max(span.1);
+                    span.1 = furthest;
+                }
+            }
+            for (at, note) in app.base.iter().enumerate() {
+                let end = note.start + note.length;
+                taken[at] = spans.get(&note.key).is_some_and(|list| {
+                    let before = list.partition_point(|span| span.0 < end);
+                    before > 0 && list[before - 1].1 > note.start
+                });
+            }
+        }
+    }
+    let mut notes: Vec<(Note, bool)> = app
+        .base
+        .iter()
+        .zip(&taken)
+        .filter(|(_, taken)| !**taken)
+        .map(|(note, _)| (note.clone(), false))
+        .collect();
+    notes.extend(written.iter().map(|note| (note.clone(), true)));
+    notes.sort_by_key(|(note, _)| (note.start, note.key));
+    let places = notes
+        .iter()
+        .enumerate()
+        .filter(|(_, (_, new))| *new)
+        .map(|(place, _)| place as u32)
+        .collect();
+    (notes.into_iter().map(|(note, _)| note).collect(), places)
+}
+
+/// Replaces a MIDI clip's notes, keeping its markers, loop and other data.
+fn set_notes(
+    editor: &mut Editor,
+    clip: ClipId,
+    midi: &MidiData,
+    notes: Vec<Note>,
+) -> Result<(), EditFailure> {
+    let mut data = midi.clone();
+    data.notes = notes.into_iter().collect();
+    editor.apply(bl_model::Command::SetClipData {
+        clip,
+        data: ClipData::Midi(data),
+    })?;
+    Ok(())
+}
+
+/// Runs the tool on the application's kept input and writes what it makes
+/// into the clip: one step named after the tool, recorded even when the
+/// notes come out as they were (R22). The written notes are selected and the
+/// time selection follows them (R15).
+fn execute(
+    editor: &mut Editor,
+    view: &mut ClipView,
+    arrangement: &ArrangementView,
+    tool: &dyn MidiTool,
+    values: &[ParamValue],
+    mut app: Application,
+) -> Result<ToolRun, EditFailure> {
+    let doc = editor.document().clone();
+    let clip = doc
+        .clip(app.clip)
+        .ok_or_else(|| invalid(format!("no clip has the ID {}", app.clip.0)))?;
+    let ClipData::Midi(midi) = &clip.data else {
+        return Err(refused("the clip isn't a MIDI clip"));
+    };
+    let input = tool_input(&doc, arrangement, clip, midi, &app);
+    let output = bl_midi_tools::run(tool, &input, values).map_err(failure)?;
+    let written: Vec<Note> = output.notes.iter().map(note_of).collect();
+    let (notes, places) = merged(&app, tool.descriptor().kind, &written);
+    editor.keep_step();
+    set_notes(editor, app.clip, midi, notes)?;
+    view.select(app.clip, places.clone());
+    if let Some(span) = span_of(editor.document(), app.clip, &places) {
+        view.set_time_selection(app.clip, Some(span));
+    }
+    let doc = editor.document();
+    if let Some(ClipData::Midi(midi)) = doc.clip(app.clip).map(|clip| &clip.data) {
+        app.after = notes_in_order(midi);
+    }
+    app.selected = view.selected_notes(doc, arrangement).to_vec();
+    app.time = view.time_selection(doc, arrangement);
+    let run = ToolRun {
+        tool: tool.descriptor().id.clone(),
+        seed: app.seed,
+        wrote: written.len(),
+        notes: places,
+        undo_step: false,
+    };
+    view.tools.open = Some(app);
+    Ok(run)
+}
+
+/// What a command acts on: the clip, its data and its track.
+struct Subject {
+    clip: ClipId,
+    track: Option<TrackId>,
+}
+
+fn subject(
+    doc: &Document,
+    view: &ClipView,
+    arrangement: &ArrangementView,
+    clip: Option<ClipId>,
+) -> Result<Subject, EditFailure> {
+    let clip = clip
+        .or_else(|| view.shown_clip(doc, arrangement))
+        .ok_or_else(|| unavailable("no MIDI clip is shown in the Clip View"))?;
+    match doc.clip(clip).map(|value| &value.data) {
+        None => Err(invalid(format!("no clip has the ID {}", clip.0))),
+        Some(ClipData::Audio(_)) => Err(refused("the clip isn't a MIDI clip")),
+        Some(ClipData::Midi(_)) => Ok(Subject {
+            clip,
+            track: doc.clip_track(clip),
+        }),
+    }
+}
+
+/// The tool a command names, or the chosen tool of the panel shown last.
+fn resolve_tool(
+    tools: &MidiTools,
+    track: Option<TrackId>,
+    name: Option<&str>,
+) -> Result<&'static dyn MidiTool, EditFailure> {
+    match name {
+        Some(id) => Registry::native().find(id).ok_or_else(|| {
+            invalid(format!(
+                "no MIDI tool has the ID `{id}`; see midi_tool.list"
+            ))
+        }),
+        None => tools
+            .chosen(track, tools.current_kind())
+            .ok_or_else(|| unavailable("there is no MIDI tool to apply")),
+    }
+}
+
+/// Checks `values` against the tool's parameters and makes them its
+/// settings.
+fn set_values(
+    tools: &mut MidiTools,
+    tool: &dyn MidiTool,
+    values: &Map<String, Value>,
+) -> Result<(), EditFailure> {
+    let descriptor = tool.descriptor();
+    let mut settings = tools.settings_of(descriptor);
+    for (id, json) in values {
+        let (at, spec) = descriptor.parameter(id).ok_or_else(|| {
+            let known: Vec<&str> = descriptor
+                .parameters
+                .iter()
+                .map(|p| p.id.as_str())
+                .collect();
+            invalid(format!(
+                "{} has no parameter `{id}`; it has {}",
+                descriptor.name,
+                known.join(", ")
+            ))
+        })?;
+        settings.values[at] = value_from_json(spec, json).map_err(invalid)?;
+    }
+    tools.settings.insert(descriptor.id.clone(), settings);
+    Ok(())
+}
+
+/// What a new application acts on besides the editor's selection, and its
+/// seed.
+#[derive(Clone, Copy)]
+struct Request<'a> {
+    notes: Option<&'a [u32]>,
+    range: Option<RangeArgs>,
+    seed: u32,
+}
+
+/// A new application on the target as it is now (R17, R19).
+fn begin(
+    doc: &Document,
+    view: &ClipView,
+    arrangement: &ArrangementView,
+    clip: ClipId,
+    tool: &dyn MidiTool,
+    request: &Request<'_>,
+) -> Result<Application, EditFailure> {
+    let Request { notes, range, seed } = *request;
+    let value = doc.clip(clip).ok_or_else(|| invalid("no such clip"))?;
+    let ClipData::Midi(midi) = &value.data else {
+        return Err(refused("the clip isn't a MIDI clip"));
+    };
+    let target = target(doc, view, arrangement, value, midi, notes, range)?;
+    Ok(Application {
+        clip,
+        shown: view.shown_clip(doc, arrangement),
+        tool: tool.descriptor().id.clone(),
+        base: notes_in_order(midi),
+        input: if tool.descriptor().kind == ToolKind::Transformation {
+            target.input.iter().map(|place| *place as usize).collect()
+        } else {
+            Vec::new()
+        },
+        range: target.range,
+        seed,
+        before: (target.selected, target.time),
+        after: Vec::new(),
+        selected: Vec::new(),
+        time: None,
+    })
+}
+
+/// The state a command returns, with the run it made.
+fn state(
+    doc: &Document,
+    view: &ClipView,
+    arrangement: &ArrangementView,
+    clip: Option<ClipId>,
+    run: Option<ToolRun>,
+) -> MidiToolState {
+    let tools = &view.tools;
+    let clip = clip.or_else(|| view.shown_clip(doc, arrangement));
+    let value = clip.and_then(|id| doc.clip(id));
+    let midi = value.and_then(|clip| match &clip.data {
+        ClipData::Midi(midi) => Some(midi),
+        ClipData::Audio(_) => None,
+    });
+    let track = clip.and_then(|clip| doc.clip_track(clip));
+    let registry = Registry::native();
+    let current = tools.chosen(track, tools.current_kind());
+    MidiToolState {
+        panel: tools.panel,
+        clip: midi.and(clip),
+        current_tool: current.map(|tool| tool.descriptor().id.clone()),
+        transformation: tools.chosen_id(track, ToolKind::Transformation),
+        generator: tools.chosen_id(track, ToolKind::Generator),
+        tools: [ToolKind::Transformation, ToolKind::Generator]
+            .into_iter()
+            .flat_map(|kind| registry.tools(kind))
+            .map(|tool| {
+                let d = tool.descriptor();
+                let settings = tools.settings_of(d);
+                ToolSettingsState {
+                    tool: d.id.clone(),
+                    kind: kind_of(d.kind),
+                    auto: settings.auto,
+                    values: d
+                        .parameters
+                        .iter()
+                        .zip(&settings.values)
+                        .map(|(spec, value)| (spec.id.clone(), value_to_json(spec, value)))
+                        .collect(),
+                    at_defaults: settings.at_defaults(d),
+                }
+            })
+            .collect(),
+        target: value.zip(midi).and_then(|(value, midi)| {
+            let target = target(doc, view, arrangement, value, midi, None, None).ok()?;
+            Some(TargetState {
+                range: target.range,
+                time_selection: target.time,
+                selected: target.selected,
+                input: target.input,
+            })
+        }),
+        application: clip
+            .and_then(|clip| tools.open_for(doc, view, arrangement, clip))
+            .map(|app| ApplicationState {
+                tool: app.tool.clone(),
+                clip: app.clip,
+                input_notes: app.input.len(),
+                range: app.range,
+                seed: app.seed,
+            }),
+        run,
+    }
+}
+
+/// With Auto on, applies the tool after a change of its parameters (R17): on
+/// the open application's kept input, or on a new one. A transformation does
+/// nothing while it has no input; a generator always runs.
+fn auto_apply(
+    editor: &mut Editor,
+    view: &mut ClipView,
+    arrangement: &ArrangementView,
+    clip: ClipId,
+    tool: &dyn MidiTool,
+) -> Result<Option<ToolRun>, EditFailure> {
+    let doc = editor.document().clone();
+    let descriptor = tool.descriptor();
+    let values = view.tools.settings_of(descriptor).values;
+    let app = match view.tools.open_for(&doc, view, arrangement, clip) {
+        Some(app) if app.tool == descriptor.id => app.clone(),
+        _ => {
+            let seed = view.tools.draw_seed();
+            let request = Request {
+                notes: None,
+                range: None,
+                seed,
+            };
+            let app = begin(&doc, view, arrangement, clip, tool, &request)?;
+            // A transformation starts only while notes or a time are
+            // selected (R17), and has something to take.
+            let selected = !app.before.0.is_empty() || app.before.1.is_some();
+            if descriptor.kind == ToolKind::Transformation && (app.input.is_empty() || !selected) {
+                return Ok(None);
+            }
+            app
+        }
+    };
+    let (run, recorded) = step(editor, descriptor.name.clone(), |editor| {
+        execute(editor, view, arrangement, tool, &values, app)
+    })?;
+    Ok(Some(ToolRun {
+        undo_step: recorded,
+        ..run
+    }))
+}
+
+/// Runs `edit` as one undo step with this name.
+fn step<T>(
+    editor: &mut Editor,
+    name: String,
+    edit: impl FnOnce(&mut Editor) -> Result<T, EditFailure>,
+) -> Result<(T, bool), EditFailure> {
+    transaction(editor, name, edit)
+}
+
+/// The name of the undo step a tool's control makes while it is dragged: the
+/// tool's name (R22). `None` for a command that isn't a tool's.
+#[must_use]
+pub fn gesture_label(
+    id: &str,
+    args: &Value,
+    doc: &Document,
+    view: &ClipView,
+    arrangement: &ArrangementView,
+) -> Option<String> {
+    if !ids::handles(id) {
+        return None;
+    }
+    let clip = args
+        .get("clip")
+        .and_then(|clip| serde_json::from_value::<ClipId>(clip.clone()).ok());
+    let track = clip
+        .or_else(|| view.shown_clip(doc, arrangement))
+        .and_then(|clip| doc.clip_track(clip));
+    let name = args.get("tool").and_then(Value::as_str);
+    resolve_tool(&view.tools, track, name)
+        .ok()
+        .map(|tool| tool.descriptor().name.clone())
+}
+
+/// Runs a MIDI Tools command (`midi_tool.*`, `clip_view.show_panel`).
+///
+/// # Errors
+///
+/// [`EditFailure`] saying why nothing changed.
+#[expect(
+    clippy::too_many_lines,
+    reason = "one arm per command keeps each one's behaviour in sight"
+)]
+pub fn run(
+    id: &str,
+    args: Value,
+    editor: &mut Editor,
+    view: &mut ClipView,
+    arrangement: &ArrangementView,
+) -> Result<Value, EditFailure> {
+    let doc = editor.document().clone();
+    match id {
+        ids::LIST => Ok(to_value(&list())),
+        ids::STATE => {
+            let ClipArgs { clip } = parse(args)?;
+            Ok(to_value(&state(&doc, view, arrangement, clip, None)))
+        }
+        ids::SHOW_PANEL => {
+            let ShowPanelArgs { panel } = parse(args)?;
+            view.tools.show_panel(panel);
+            Ok(to_value(&state(&doc, view, arrangement, None, None)))
+        }
+        ids::CLOSE => {
+            let ClipArgs { clip } = parse(args)?;
+            view.tools.close();
+            Ok(to_value(&state(&doc, view, arrangement, clip, None)))
+        }
+        ids::CHOOSE => {
+            let ChooseArgs { clip, tool } = parse(args)?;
+            let subject = subject(&doc, view, arrangement, clip)?;
+            let found = resolve_tool(&view.tools, subject.track, Some(&tool))?;
+            let track = subject
+                .track
+                .ok_or_else(|| unavailable("the clip has no track"))?;
+            let kind = found.descriptor().kind;
+            let chosen = view.tools.chosen.entry(track).or_default();
+            match kind {
+                ToolKind::Transformation => chosen.transformation = Some(tool),
+                ToolKind::Generator => chosen.generator = Some(tool),
+            }
+            view.tools.generator_last = kind == ToolKind::Generator;
+            Ok(to_value(&state(
+                &doc,
+                view,
+                arrangement,
+                Some(subject.clip),
+                None,
+            )))
+        }
+        ids::SET => {
+            let SetArgs { clip, tool, values } = parse(args)?;
+            let subject = subject(&doc, view, arrangement, clip)?;
+            let found = resolve_tool(&view.tools, subject.track, tool.as_deref())?;
+            if values.is_empty() {
+                return Err(invalid("`values` names no parameter"));
+            }
+            set_values(&mut view.tools, found, &values)?;
+            let run = if view.tools.settings_of(found.descriptor()).auto {
+                auto_apply(editor, view, arrangement, subject.clip, found)?
+            } else {
+                None
+            };
+            let doc = editor.document().clone();
+            Ok(to_value(&state(
+                &doc,
+                view,
+                arrangement,
+                Some(subject.clip),
+                run,
+            )))
+        }
+        ids::SET_AUTO => {
+            let SetAutoArgs { clip, tool, auto } = parse(args)?;
+            let subject = subject(&doc, view, arrangement, clip)?;
+            let found = resolve_tool(&view.tools, subject.track, tool.as_deref())?;
+            let descriptor = found.descriptor();
+            let mut settings = view.tools.settings_of(descriptor);
+            settings.auto = auto;
+            view.tools.settings.insert(descriptor.id.clone(), settings);
+            if !auto {
+                // Auto off puts the notes back as they were before the
+                // application and closes it (R18).
+                let app = view
+                    .tools
+                    .open_for(&doc, view, arrangement, subject.clip)
+                    .filter(|app| app.tool == descriptor.id)
+                    .cloned();
+                if let Some(app) = app {
+                    step(editor, format!("Revert {}", descriptor.name), |editor| {
+                        let ClipData::Midi(midi) = &editor
+                            .document()
+                            .clip(app.clip)
+                            .ok_or_else(|| invalid("no such clip"))?
+                            .data
+                        else {
+                            return Err(refused("the clip isn't a MIDI clip"));
+                        };
+                        let midi = midi.clone();
+                        set_notes(editor, app.clip, &midi, app.base.clone())
+                    })?;
+                    view.select(app.clip, app.before.0.clone());
+                    view.set_time_selection(app.clip, app.before.1);
+                    view.tools.close();
+                }
+            }
+            let doc = editor.document().clone();
+            Ok(to_value(&state(
+                &doc,
+                view,
+                arrangement,
+                Some(subject.clip),
+                None,
+            )))
+        }
+        ids::RESET => {
+            let ResetArgs { clip, tool } = parse(args)?;
+            let subject = subject(&doc, view, arrangement, clip)?;
+            let found = resolve_tool(&view.tools, subject.track, tool.as_deref())?;
+            let descriptor = found.descriptor();
+            let mut settings = view.tools.settings_of(descriptor);
+            settings.values = descriptor.defaults();
+            view.tools.settings.insert(descriptor.id.clone(), settings);
+            view.tools.close();
+            Ok(to_value(&state(
+                &doc,
+                view,
+                arrangement,
+                Some(subject.clip),
+                None,
+            )))
+        }
+        ids::APPLY => {
+            let ApplyArgs {
+                clip,
+                tool,
+                values,
+                notes,
+                range,
+                seed,
+            } = parse(args)?;
+            let subject = subject(&doc, view, arrangement, clip)?;
+            let found = resolve_tool(&view.tools, subject.track, tool.as_deref())?;
+            let descriptor = found.descriptor();
+            if let Some(values) = &values {
+                set_values(&mut view.tools, found, values)?;
+            }
+            let seed = seed.unwrap_or_else(|| view.tools.draw_seed());
+            let request = Request {
+                notes: notes.as_deref(),
+                range,
+                seed,
+            };
+            let app = begin(&doc, view, arrangement, subject.clip, found, &request)?;
+            if descriptor.kind == ToolKind::Transformation && app.input.is_empty() {
+                return Err(unavailable(
+                    "there are no notes to transform: select notes, or a time selection \
+                     holding notes, or give `notes` or a `range` that holds some",
+                ));
+            }
+            let settings = view.tools.settings_of(descriptor);
+            let (run, recorded) = step(editor, descriptor.name.clone(), |editor| {
+                execute(editor, view, arrangement, found, &settings.values, app)
+            })?;
+            let run = ToolRun {
+                undo_step: recorded,
+                ..run
+            };
+            let doc = editor.document().clone();
+            Ok(to_value(&state(
+                &doc,
+                view,
+                arrangement,
+                Some(subject.clip),
+                Some(run),
+            )))
+        }
+        ids::RESEED => {
+            let ReseedArgs { clip, seed } = parse(args)?;
+            let subject = subject(&doc, view, arrangement, clip)?;
+            let mut app = view
+                .tools
+                .open_for(&doc, view, arrangement, subject.clip)
+                .cloned()
+                .ok_or_else(|| unavailable("no MIDI tool application is open"))?;
+            app.seed = seed.unwrap_or_else(|| view.tools.draw_seed());
+            let found = Registry::native()
+                .find(&app.tool)
+                .ok_or_else(|| unavailable("the application's tool is gone"))?;
+            let settings = view.tools.settings_of(found.descriptor());
+            let (run, recorded) = step(editor, found.descriptor().name.clone(), |editor| {
+                execute(editor, view, arrangement, found, &settings.values, app)
+            })?;
+            let run = ToolRun {
+                undo_step: recorded,
+                ..run
+            };
+            let doc = editor.document().clone();
+            Ok(to_value(&state(
+                &doc,
+                view,
+                arrangement,
+                Some(subject.clip),
+                Some(run),
+            )))
+        }
+        other => Err(invalid(format!("`{other}` isn't a MIDI Tools command"))),
+    }
+}
+
+/// Whether Cmd+Enter and Edit ▸ Apply Transformation/Generator can apply
+/// something now: a MIDI clip shows (R19).
+#[must_use]
+pub fn can_apply(doc: &Document, view: &ClipView, arrangement: &ArrangementView) -> bool {
+    view.shown_clip(doc, arrangement).is_some()
+        && view
+            .tools
+            .chosen(
+                view.shown_clip(doc, arrangement)
+                    .and_then(|clip| doc.clip_track(clip)),
+                view.tools.current_kind(),
+            )
+            .is_some()
+}

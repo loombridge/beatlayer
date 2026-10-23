@@ -640,7 +640,7 @@ Total to 1.0: 256 packages planned in Phases 0 to 6, and about 110 estimated in 
 | 6.6 | done | 23 October 2026 | [#350](https://github.com/loombridge/beatlayer/pull/350); the note editor shows up to eight selected MIDI clips on one axis with their loop bars and a foreground clip, note edits, the clipboard, Duplicate Loop and the clip properties reach every clip as one undo step, grouping across clips is refused, and Focus Mode (N) limits edits to the active clip; the newer note operations across clips, clip colour and the filters across clips are still to come |
 | 6.7 | done | 22 October 2026 | [#299](https://github.com/loombridge/beatlayer/pull/299); each clip carries a scale and the set has a current scale, with the scale list, the `clip.set_scale`, `song.set_scale` and `song.scales` commands, and the Control Bar's scale controls ([the spec](specs/scales.md) R1 to R14) |
 | 6.7b | todo |  |  |
-| 6.8 | todo |  |  |
+| 6.8 | done | 23 October 2026 | [#351](https://github.com/loombridge/beatlayer/pull/351); each track's scale-aware devices follow the scale of the clip playing on it, and Arpeggiator, Chord, Pitch, Random and Scale count in its degrees with Use Current Scale in the title bar ([the spec](specs/scales.md) R15 to R18) |
 | 6.9 | done | 23 October 2026 | [#353](https://github.com/loombridge/beatlayer/pull/353); a set holds one tuning read from a `.scl` file (or an `.ascl` file read as one), with its reference pitch, note range, per-track Bypass Tuning and Retune Set On Loading, and Drift, Simpler, Sampler and Drum Sampler play its keys within 0.1 cent at any block size; the `.ascl` extras and `tuning.save` wait on the decision about the ASCL specification |
 | 6.9b | todo |  |  |
 | 6.10 | todo |  |  |

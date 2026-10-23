@@ -240,9 +240,7 @@ impl Shell {
                     .ok_or_else(|| unavailable("no MIDI clip is shown in the Clip View"))?;
                 self.run("mixer.set_arm", json!({ "track": track, "arm": true }))?;
                 let keyboard = self.run("midi.toggle_computer_keyboard", json!({}))?;
-                self.clip_view.show();
-                self.focused_window = WindowKind::Main;
-                self.focused_area = Area::Detail;
+                self.run("focus.clip_view", json!({}))?;
                 self.value_focused = false;
                 let on = keyboard["on"].as_bool().unwrap_or(false);
                 self.set_message(

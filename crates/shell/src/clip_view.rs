@@ -688,11 +688,6 @@ impl ClipView {
         self.visible = visible;
     }
 
-    /// Shows the Clip View if it is hidden.
-    pub fn show(&mut self) {
-        self.visible = true;
-    }
-
     /// Switches Draw Mode on or off.
     pub fn toggle_draw_mode(&mut self) {
         self.draw_mode = !self.draw_mode;

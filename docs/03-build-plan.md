@@ -637,7 +637,7 @@ Total to 1.0: 256 packages planned in Phases 0 to 6, and about 110 estimated in 
 | 6.3 | done | 23 October 2026 | [#341](https://github.com/loombridge/beatlayer/pull/341); the note editor splits, chops, joins and fits notes from E-click and E-drag, Cmd-E and its arrows, the chop drags, Cmd-J and Cmd-Option-J, Split Clip cuts the shown Arrangement clip at the time selection, and the stretch markers scale notes and linked envelopes ([note editing](specs/note-editing.md) R33 to R47). |
 | 6.4 | todo |  |  |
 | 6.5 | done | 23 October 2026 | [#347](https://github.com/loombridge/beatlayer/pull/347); the Preview switch as a preference with previews on the clip's track that are never input, step recording with Right and Left from the held keys or `note.step_record`, and Step Input Mode; R12 (the map modes' step buttons) waits for M7 |
-| 6.6 | todo |  |  |
+| 6.6 | done | 23 October 2026 | [#350](https://github.com/loombridge/beatlayer/pull/350); the note editor shows up to eight selected MIDI clips on one axis with their loop bars and a foreground clip, note edits, the clipboard, Duplicate Loop and the clip properties reach every clip as one undo step, grouping across clips is refused, and Focus Mode (N) limits edits to the active clip; the newer note operations across clips, clip colour and the filters across clips are still to come |
 | 6.7 | done | 22 October 2026 | [#299](https://github.com/loombridge/beatlayer/pull/299); each clip carries a scale and the set has a current scale, with the scale list, the `clip.set_scale`, `song.set_scale` and `song.scales` commands, and the Control Bar's scale controls ([the spec](specs/scales.md) R1 to R14) |
 | 6.7b | todo |  |  |
 | 6.8 | todo |  |  |

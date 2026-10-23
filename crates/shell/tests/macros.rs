@@ -903,3 +903,103 @@ fn a_launch_overrides_automated_macros_and_records_while_armed() {
         "one undo step for the recording"
     );
 }
+
+// Spec: macros R4, scales R16. Scale's Base and Scale Name and Arpeggiator's
+// Root and Scale map to a rack's macros, which drive them across their range.
+#[test]
+fn the_scale_choosers_map_to_macros() {
+    use bl_devices::{arpeggiator, remap};
+
+    let mut shell = Shell::headless();
+    let track: TrackId = shell
+        .editor()
+        .document()
+        .tracks()
+        .find(|track| track.kind() == bl_model::TrackKind::Midi)
+        .map(bl_model::Track::id)
+        .expect("a MIDI track");
+    shell
+        .invoke("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    shell.set_focused_area(Area::Detail);
+    let rack: DeviceAdded = serde_json::from_value(
+        shell
+            .invoke(
+                "device.add",
+                json!({
+                    "device": {
+                        "kind": { "rack": { "kind": "midi_effect" } },
+                        "name": "Rack",
+                        "role": "midi_effect",
+                    },
+                }),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    let chain = shell.new_id::<bl_model::ChainId>();
+    shell
+        .invoke(
+            "chain.add",
+            json!({ "rack": rack.device, "index": 0, "chain": { "id": chain, "name": "Chain", "devices": [] } }),
+        )
+        .unwrap();
+    let add = |shell: &mut Shell, device_type: &str| -> DeviceId {
+        serde_json::from_value::<DeviceAdded>(
+            shell
+                .invoke(
+                    "device.add",
+                    json!({
+                        "chain": chain,
+                        "device": {
+                            "kind": { "native": { "device_type": device_type } },
+                            "name": device_type,
+                            "role": "midi_effect",
+                        },
+                    }),
+                )
+                .unwrap(),
+        )
+        .unwrap()
+        .device
+    };
+    let scale = add(&mut shell, remap::REMAP);
+    let arp = add(&mut shell, arpeggiator::ARPEGGIATOR);
+    let targets = [
+        (scale, remap::BASE, 11.0),
+        (scale, remap::SCALE_NAME, 16.0),
+        (arp, arpeggiator::ROOT, 11.0),
+        (arp, arpeggiator::SCALE, 16.0),
+    ];
+    for (number, (device, param, _)) in targets.iter().enumerate() {
+        let number = number as u8 + 1;
+        shell
+            .invoke(
+                "rack.map_macro",
+                json!({
+                    "rack": rack.device,
+                    "macro_number": number,
+                    "target": { "type": "device", "device": device, "param": param.0 },
+                }),
+            )
+            .unwrap();
+        shell
+            .invoke(
+                "device.set_param",
+                json!({
+                    "device": rack.device,
+                    "param": bl_model::macro_param(number),
+                    "value": 127.0,
+                }),
+            )
+            .unwrap();
+    }
+    for (device, param, top) in targets {
+        let held = shell
+            .editor()
+            .document()
+            .device(device)
+            .and_then(|d| d.params.get(&param).copied());
+        assert_eq!(held, Some(top), "param {}", param.0);
+    }
+}

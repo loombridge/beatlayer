@@ -429,6 +429,12 @@ impl Compiler {
                     .transport
                     .push(TransportCommand::SetGrooveAmount(groove_amount(document)));
             }
+            // Spec: scales R15
+            if old.settings().scale != document.settings().scale {
+                update
+                    .transport
+                    .push(TransportCommand::SetScale(document.settings().scale));
+            }
             if old.settings().metronome != document.settings().metronome {
                 update.transport.push(TransportCommand::SetMetronome(
                     document.settings().metronome,
@@ -1194,6 +1200,7 @@ impl Compiler {
                 TransportCommand::SetPunch(punch(document)),
                 TransportCommand::SetMetronome(document.settings().metronome),
                 TransportCommand::SetGrooveAmount(groove_amount(document)),
+                TransportCommand::SetScale(document.settings().scale),
             ],
             params: build.restate,
             unhosted: build.unhosted,
@@ -1317,6 +1324,12 @@ impl Compiler {
             .is_none_or(|old| groove_amount(old) != groove_amount(document))
         {
             commands.push(TransportCommand::SetGrooveAmount(groove_amount(document)));
+        }
+        if old
+            .as_ref()
+            .is_none_or(|old| old.settings().scale != document.settings().scale)
+        {
+            commands.push(TransportCommand::SetScale(document.settings().scale));
         }
         commands
     }
@@ -3457,6 +3470,8 @@ mod tests {
                 transport: TransportInfo::default(),
                 session: &[],
                 groove_amount: 1.0,
+                set_scale: bl_model::Scale::default(),
+                scale: crate::scales::ScaleRuns::of(bl_model::Scale::default()),
             };
             program.run(None, &mut lane, block);
             program.output(0, 64).to_vec()

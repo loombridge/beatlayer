@@ -475,3 +475,81 @@ pub fn dft_at(signal: &[f32], hz: f64) -> (f64, f64) {
 pub fn db(amplitude: f64) -> f64 {
     20.0 * amplitude.max(1e-12).log10()
 }
+
+/// Runs `notes` through `node` in one block of `frames` frames, a real-time
+/// section, with `scale` as its track's scale over the block, and returns the
+/// notes it sent.
+pub fn scaled_through(
+    node: &mut dyn Node,
+    notes: &[bl_engine::NoteEvent],
+    frames: usize,
+    scale: bl_engine::scales::ScaleRuns,
+) -> Vec<bl_engine::NoteEvent> {
+    let mut out = bl_engine::NoteBuffer::with_capacity(256);
+    let mut data = vec![0.0f32; CHANNELS * frames];
+    let mut block = Block::new(
+        &mut data,
+        CHANNELS,
+        frames,
+        frames,
+        &[],
+        TransportInfo::default(),
+        RATE,
+    )
+    .with_scale(scale)
+    .with_notes(notes, &mut out);
+    bl_rt::rt_test!({ node.process(&mut block) });
+    out.notes().to_vec()
+}
+
+/// A note-on of `key` at `offset` with note ID `id`.
+pub fn on(offset: u32, key: u8, id: u32) -> bl_engine::NoteEvent {
+    bl_engine::NoteEvent {
+        offset,
+        kind: bl_engine::NoteKind::On,
+        channel: 0,
+        key,
+        velocity: 0.8,
+        note_id: Some(id),
+    }
+}
+
+/// The note-off of the note `on` makes, at `offset`.
+pub fn off(offset: u32, key: u8, id: u32) -> bl_engine::NoteEvent {
+    bl_engine::NoteEvent {
+        kind: bl_engine::NoteKind::Off,
+        ..on(offset, key, id)
+    }
+}
+
+/// A per-note bend of `value` for the note `on` makes, at `offset`.
+pub fn bend(offset: u32, key: u8, id: u32, value: f32) -> bl_engine::NoteEvent {
+    bl_engine::NoteEvent {
+        kind: bl_engine::NoteKind::Expression {
+            expression: bl_engine::NoteExpression::Bend,
+            value,
+        },
+        ..on(offset, key, id)
+    }
+}
+
+/// The keys of the note-ons among `sent`.
+pub fn keys_on(sent: &[bl_engine::NoteEvent]) -> Vec<u8> {
+    sent.iter()
+        .filter(|n| n.kind == bl_engine::NoteKind::On)
+        .map(|n| n.key)
+        .collect()
+}
+
+/// The values of the per-note bends among `sent`, with the key each is for.
+pub fn bends(sent: &[bl_engine::NoteEvent]) -> Vec<(u8, f32)> {
+    sent.iter()
+        .filter_map(|n| match n.kind {
+            bl_engine::NoteKind::Expression {
+                expression: bl_engine::NoteExpression::Bend,
+                value,
+            } => Some((n.key, value)),
+            _ => None,
+        })
+        .collect()
+}

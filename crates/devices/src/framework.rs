@@ -206,6 +206,14 @@ impl<'a> Audio<'_, 'a> {
         })
     }
 
+    /// The device's current scale `offset` frames into the stretch (the
+    /// scales spec, R15): the scale of the clip playing on its track, or the
+    /// set's, or the chromatic one where Scale Mode is off.
+    #[must_use]
+    pub fn scale_at(&self, offset: u32) -> bl_model::Scale {
+        self.block.scale_at(self.range.start + offset as usize)
+    }
+
     /// What an external device brings back from the audio interface over
     /// the stretch on `channel` (WP-5.34), or `None` for any other device.
     ///

@@ -19294,6 +19294,7 @@ What a kind of device is to the framework: its parameters' descriptors, in the o
 | `params` | array of [`ParamDescriptor`](#paramdescriptor) | yes | Its parameters. |
 | `layout` | [`DeviceLayout`](#devicelayout) | yes | Where its controls and display cells sit (IMP-14). |
 | `menu_options` | array of [`ParamId`](#paramid) | no | The switches the device lists as its own items in its Show Options menu, after Save as Default Preset (C-DEVICE-015), in this order. They are parameters like any other, but the layout places no control for them. |
+| `title_switch` | [`ParamId`](#paramid) or null | no | The switch the device draws in its title bar instead of its panel (L-DEV-004): Use Current Scale, on the five scale-aware devices. It is a parameter like any other, which the layout places no control for. |
 | `views` | array of string | no | The views its display offers, such as `Transfer Curve`, the first being the one it starts in; empty for a display with one view. Which is shown is view state (`device.set_display_view`). |
 
 <details><summary>JSON Schema</summary>
@@ -19319,6 +19320,17 @@ What a kind of device is to the framework: its parameters' descriptors, in the o
         "$ref": "#/$defs/ParamDescriptor"
       },
       "type": "array"
+    },
+    "title_switch": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ParamId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The switch the device draws in its title bar instead of its panel (L-DEV-004): Use Current Scale, on the five scale-aware devices. It is a parameter like any other, which the layout places no control for."
     },
     "views": {
       "description": "The views its display offers, such as `Transfer Curve`, the first being the one it starts in; empty for a display with one view. Which is shown is view state (`device.set_display_view`).",
@@ -20010,6 +20022,7 @@ What the generic UI needs to draw a device (WP-2.5): its type's description and 
 | `knobs` | array of integer, at least 0 | no | The knob each of the panel's parameters is drawn on, 0 to 7, parallel to `description`'s parameters (clap-hosting R5, WP-5.40): a knob's context menu remaps the knob it is right-clicked on. Empty for a device that isn't a plug-in. |
 | `learning` | integer or null | no | The articulation whose Learn button is lit, counted from 0: the panel's state, not the set's. |
 | `loaded_slots` | array of boolean | no | For a device with sample slots: whether each slot holds a sample. |
+| `locked` | array of [`ParamId`](#paramid) | no | The parameters drawn disabled because the device takes them from its current scale: Scale's Base and Scale Name and Arpeggiator's Root and Scale, while Use Current Scale is on (the scales spec, R16). |
 | `slot_keys` | array of string | no | For a device with sample slots: the key each slot plays, as Live names notes (`C3`). |
 
 <details><summary>JSON Schema</summary>
@@ -20059,6 +20072,13 @@ What the generic UI needs to draw a device (WP-2.5): its type's description and 
       "description": "For a device with sample slots: whether each slot holds a sample.",
       "items": {
         "type": "boolean"
+      },
+      "type": "array"
+    },
+    "locked": {
+      "description": "The parameters drawn disabled because the device takes them from its current scale: Scale's Base and Scale Name and Arpeggiator's Root and Scale, while Use Current Scale is on (the scales spec, R16).",
+      "items": {
+        "$ref": "#/$defs/ParamId"
       },
       "type": "array"
     },
@@ -29723,6 +29743,7 @@ One of a device's parameters as `device.parameters` reports it.
 | `value` | number | yes | Its value now, in its own units: what `device.set_param` takes. |
 | `text` | string | yes | How the value reads, as its control shows it, such as `-6.0 dB`. |
 | `menu_option` | boolean | yes | Whether it's one of the device's own items in its Show Options menu rather than a control in its body (C-DEVICE-015). |
+| `title_switch` | boolean | yes | Whether it's the switch the device draws in its title bar rather than in its body (L-DEV-004), such as Use Current Scale. |
 | `configured` | boolean | yes | Whether it's one of the parameters the device's panel is configured to show (clap-hosting R5, configure mode). True for every parameter of a device that isn't a plug-in, since its panel shows them all. |
 | `description` | string | no | What it does, for the Info View (WP-2.24) and agents. |
 | `other` | number or null | no | Its value in the A and B state that isn't active (device compare R11); left out for a device without two states. |
@@ -29780,6 +29801,11 @@ One of a device's parameters as `device.parameters` reports it.
       "description": "How the value reads, as its control shows it, such as `-6.0 dB`.",
       "type": "string"
     },
+    "title_switch": {
+      "default": false,
+      "description": "Whether it's the switch the device draws in its title bar rather than in its body (L-DEV-004), such as Use Current Scale.",
+      "type": "boolean"
+    },
     "value": {
       "description": "Its value now, in its own units: what `device.set_param` takes.",
       "format": "double",
@@ -29795,6 +29821,7 @@ One of a device's parameters as `device.parameters` reports it.
     "value",
     "text",
     "menu_option",
+    "title_switch",
     "configured"
   ],
   "type": "object"

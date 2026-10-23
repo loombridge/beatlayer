@@ -321,6 +321,95 @@ fn a_set_saved_before_the_scales_loads_unchanged() {
     assert_eq!(encode_json(&loaded, 1).unwrap(), saved);
 }
 
+// Spec: scales R16, midi-scale-map R10, arpeggiator R15. A set saved before
+// the scale-aware devices had a Use Current Scale switch, a Scale Name, and a
+// Root and Scale loads with the switch off, Scale on User and Arpeggiator on C
+// and Chromatic, and saves nothing for them until they are set.
+#[test]
+fn a_set_saved_before_use_current_scale_loads_its_devices_unchanged() {
+    use bl_devices::{arpeggiator, dice, lift, remap, stack};
+
+    let mut editor = Editor::new();
+    let track = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: track,
+            kind: TrackKind::Midi,
+            name: "Keys".to_owned(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    let types = [
+        (arpeggiator::ARPEGGIATOR, arpeggiator::USE_SCALE),
+        (stack::STACK, stack::USE_SCALE),
+        (lift::LIFT, lift::USE_SCALE),
+        (dice::DICE, dice::USE_SCALE),
+        (remap::REMAP, remap::USE_SCALE),
+    ];
+    let mut devices = Vec::new();
+    for (index, (device_type, _)) in types.iter().enumerate() {
+        let id = editor.new_id();
+        let mut device = Device::new(
+            id,
+            "",
+            DeviceKind::Native {
+                device_type: (*device_type).to_owned(),
+            },
+        );
+        // The parameters of the day: a few set, none of the new ones.
+        device.params.insert(ParamId(0), 1.0);
+        editor
+            .apply(Command::InsertDevice {
+                track,
+                index,
+                device,
+            })
+            .unwrap();
+        devices.push(id);
+    }
+    let project = Project {
+        document: editor.document().clone(),
+        ids: editor.ids(),
+        media: Media::default(),
+        windows: bl_model::DeviceWindows::new(),
+        rack_views: bl_model::RackViewMap::new(),
+        folds: bl_model::ClipFolds::new(),
+        launch: bl_model::LaunchSettings::default(),
+        multisamplers: bl_model::MultisamplerViews::new(),
+    };
+    let saved = encode_json(&project, 1).unwrap();
+    let (loaded, _) = decode_json(&saved, &LoadOptions::default()).unwrap();
+    assert_eq!(loaded.document, project.document);
+    let mut registry = Registry::new();
+    bl_devices::register(&mut registry);
+    for ((device_type, switch), id) in types.iter().zip(&devices) {
+        let device = loaded.document.device(*id).unwrap();
+        let description = &registry
+            .device_type(&device.kind)
+            .expect("the device is registered")
+            .description;
+        let read = |param: ParamId| description.value(&device.params, param).unwrap();
+        assert_eq!(
+            read(*switch),
+            0.0,
+            "{device_type}: Use Current Scale is off"
+        );
+        assert!(
+            !device.params.contains_key(switch),
+            "{device_type}: nothing saved"
+        );
+        if *device_type == remap::REMAP {
+            assert_eq!(read(remap::SCALE_NAME), 0.0, "Scale is on User");
+        }
+        if *device_type == arpeggiator::ARPEGGIATOR {
+            assert_eq!(read(arpeggiator::ROOT), 0.0, "C");
+            assert_eq!(read(arpeggiator::SCALE), 0.0, "Chromatic");
+        }
+    }
+    assert_eq!(encode_json(&loaded, 1).unwrap(), saved);
+}
+
 // Spec: note-editing R20. The lanes, the footer and the value keys save
 // nothing new: a set saved before them loads unchanged, and every note value
 // a lane edits is saved in the shape it always was and read back.

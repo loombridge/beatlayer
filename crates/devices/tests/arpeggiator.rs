@@ -10,12 +10,14 @@ mod common;
 
 use bl_core::time::Bpm;
 use bl_devices::arpeggiator::{
-    ARPEGGIATOR, DECAY, DISTANCE, GATE, GROOVE, HOLD, OFFSET, RATE_SYNC, REPEATS, RETRIGGER, STEPS,
-    STYLE, SYNC, TARGET, USE_SCALE, VELOCITY_ON,
+    ARPEGGIATOR, DECAY, DISTANCE, GATE, GROOVE, HOLD, OFFSET, RATE_MS, RATE_SYNC, REPEATS,
+    RETRIGGER, ROOT, SCALE, STEPS, STYLE, SYNC, TARGET, USE_SCALE, VELOCITY_ON,
 };
 use bl_engine::NoteKind;
-use bl_model::Command;
-use common::chain::{BEAT_FRAMES, Chain, note};
+use bl_engine::scales::ScaleRuns;
+use bl_model::{Command, Scale, ScaleName};
+use common::chain::{BEAT_FRAMES, Chain, note, nothing_hangs};
+use common::{bend, bends, device, keys_on, node, on, registry, scaled_through};
 
 const SIZES: [usize; 4] = [1, 100, 512, 4096];
 
@@ -262,4 +264,164 @@ fn a_chord_of_many_held_notes_allocates_nothing() {
         "the arpeggio plays a chord of a hundred notes: {} events",
         heard.len()
     );
+}
+
+fn c_major() -> Scale {
+    Scale::new(0, ScaleName::Major)
+}
+
+/// The chooser's entry for `name`: Chromatic is 0 and the list follows.
+fn entry(name: ScaleName) -> f64 {
+    1.0 + ScaleName::ALL.iter().position(|n| *n == name).unwrap() as f64
+}
+
+/// [`play`] with every clip of the track in `scale`.
+fn play_in(
+    scale: Scale,
+    params: &[(bl_model::ParamId, f64)],
+    notes: impl IntoIterator<Item = bl_model::Note>,
+    size: usize,
+) -> Vec<(i64, NoteKind, u8, f32)> {
+    let mut chain = Chain::new(4096);
+    chain.effect(ARPEGGIATOR, params);
+    chain.clip(8, notes);
+    chain.scale_clips(scale);
+    chain.sync();
+    chain.play();
+    chain.run(8 * BEAT_FRAMES as usize, size);
+    chain.heard()
+}
+
+// Spec: arpeggiator R15. Root and Scale name a scale whose degrees Distance
+// counts from Root; Chromatic, the default, counts semitones.
+#[test]
+fn distance_counts_degrees_of_the_chosen_root_and_scale() {
+    // D Major from D3: two degrees up is F#3, four is A3.
+    let params = [
+        (STEPS, 2.0),
+        (DISTANCE, 2.0),
+        (ROOT, 2.0),
+        (SCALE, entry(ScaleName::Major)),
+    ];
+    let keys_played = keys(&play(&params, [note(62, 0, 4)], 512), NoteKind::On);
+    assert_eq!(&keys_played[0..4], &[62, 66, 69, 62]);
+    // A note outside the scale moves as the scale note below it does: C3 is
+    // outside D Major, B2 is below it and two degrees up is D3, three
+    // semitones.
+    let keys_played = keys(&play(&params, [note(60, 0, 4)], 512), NoteKind::On);
+    assert_eq!(&keys_played[0..2], &[60, 63]);
+    // Chromatic counts semitones whatever Root is.
+    let chromatic = [(STEPS, 2.0), (DISTANCE, 2.0), (ROOT, 2.0)];
+    let keys_played = keys(&play(&chromatic, [note(62, 0, 4)], 512), NoteKind::On);
+    assert_eq!(&keys_played[0..3], &[62, 64, 66]);
+}
+
+// Spec: arpeggiator R16. With Use Current Scale on, Distance counts degrees of
+// the device's current scale and the chosen Root and Scale are not read.
+#[test]
+fn use_current_scale_counts_distance_in_the_current_scale() {
+    let params = [
+        (USE_SCALE, 1.0),
+        (STEPS, 2.0),
+        (DISTANCE, 2.0),
+        (ROOT, 5.0),
+        (SCALE, entry(ScaleName::Locrian)),
+    ];
+    for size in SIZES {
+        let heard = play_in(c_major(), &params, [note(60, 0, 4)], size);
+        let played = keys(&heard, NoteKind::On);
+        assert_eq!(&played[0..4], &[60, 64, 67, 60], "size {size}");
+    }
+    // A current scale with Scale Mode off counts semitones.
+    let heard = play_in(Scale::default(), &params, [note(60, 0, 4)], 512);
+    assert_eq!(&keys(&heard, NoteKind::On)[0..3], &[60, 62, 64]);
+}
+
+// Spec: arpeggiator R17. A held note outside the scale moves as the scale note
+// below it does, and a change of the scale while a note sounds doesn't move
+// it: every note-off goes to its note-on's key.
+#[test]
+fn a_scale_change_while_a_note_sounds_does_not_move_it() {
+    let params = [
+        (USE_SCALE, 1.0),
+        (STEPS, 1.0),
+        (DISTANCE, 2.0),
+        (GATE, 150.0),
+    ];
+    let heard = play_in(c_major(), &params, [note(61, 0, 4)], 512);
+    // C#3 keeps its distance above C3, which two degrees up makes E3.
+    assert_eq!(&keys(&heard, NoteKind::On)[0..4], &[61, 65, 61, 65]);
+    let mut chain = Chain::new(4096);
+    chain.effect(ARPEGGIATOR, &params);
+    chain.clip(8, [note(61, 0, 4)]);
+    chain.scale_clips(c_major());
+    chain.sync();
+    chain.play();
+    for size in SIZES {
+        chain.run(BEAT_FRAMES as usize / 2, size);
+        chain.scale_clips(Scale::new(5, ScaleName::Minor));
+        chain.run(BEAT_FRAMES as usize / 2, size);
+        chain.scale_clips(c_major());
+    }
+    chain.run(4 * BEAT_FRAMES as usize, 512);
+    chain.stop();
+    chain.run(BEAT_FRAMES as usize, 512);
+    assert!(nothing_hangs(&chain.heard()));
+}
+
+// Spec: arpeggiator R17. The per-note bend of a note the arpeggio moved is
+// carried in degrees.
+#[test]
+fn a_bend_is_carried_in_degrees() {
+    let params = [
+        (USE_SCALE, 1.0),
+        (STEPS, 1.0),
+        (DISTANCE, 2.0),
+        (SYNC, 0.0),
+        (RATE_MS, 100.0),
+    ];
+    let device = device(&bl_devices::arpeggiator_type(), &params);
+    let mut arp = node(&registry(), &device, 10_000);
+    // Held from frame 0; the second step, 4,800 frames in, plays E3 (two
+    // degrees above C3). A bend of two semitones on the held C3, a degree,
+    // in the next block is a degree above E3: F3, a semitone.
+    let scale = ScaleRuns::of(c_major());
+    let first = scaled_through(arp.as_mut(), &[on(0, 60, 1)], 6_000, scale);
+    assert_eq!(&keys_on(&first)[0..2], &[60, 64]);
+    let sent = scaled_through(arp.as_mut(), &[bend(100, 60, 1, 2.0 / 48.0)], 4_000, scale);
+    let carried = bends(&sent);
+    assert_eq!(carried.len(), 1, "{sent:?}");
+    assert_eq!(carried[0].0, 64);
+    assert!((carried[0].1 - 1.0 / 48.0).abs() < 1e-6, "{carried:?}");
+}
+
+// Spec: arpeggiator R11, R17. Random styles with the scale repeat bit for bit,
+// at any block size.
+#[test]
+fn random_styles_with_the_scale_repeat_identically() {
+    let notes = [note(60, 0, 4), note(64, 0, 4), note(67, 0, 4)];
+    for style in [15.0, 16.0, 17.0] {
+        let params = [
+            (STYLE, style),
+            (USE_SCALE, 1.0),
+            (STEPS, 3.0),
+            (DISTANCE, 1.0),
+        ];
+        // The same render twice is the same bit for bit, and the notes played
+        // are the same at any block size.
+        let reference = play_in(c_major(), &params, notes.clone(), 512);
+        assert!(!reference.is_empty());
+        assert_eq!(play_in(c_major(), &params, notes.clone(), 512), reference);
+        let ons = |heard: &[(i64, NoteKind, u8, f32)]| -> Vec<(i64, u8)> {
+            heard
+                .iter()
+                .filter(|h| h.1 == NoteKind::On)
+                .map(|h| (h.0, h.2))
+                .collect()
+        };
+        for size in SIZES {
+            let heard = play_in(c_major(), &params, notes.clone(), size);
+            assert_eq!(ons(&heard), ons(&reference), "style {style}, size {size}");
+        }
+    }
 }

@@ -1,6 +1,6 @@
 # The random-pitch MIDI effect
 
-- **Status:** partial (R1 to R9 have passing tests; R10 and R11, Use Current Scale, are WP-6.8's)
+- **Status:** implemented (every rule below has a passing test)
 - **Work packages:** WP-5.30 (R1 to R9); WP-6.8 (Use Current Scale: R10 and R11; under a tuning the switch follows [tunings.md](tunings.md) R16). The framework it sits on is WP-2.5 ([the native device framework](device-framework.md)), with the note rules of R30 to R34
 - **Parity-matrix row:** Devices: MIDI effects
 - **Checked against:** the Live 12 reference manual, chapter 30 "Live MIDI Effect Reference", section 30.6 "Random", read on 17 October 2026; for Use Current Scale, the same manual's chapter 3, section 3.13 "Scale Awareness", and chapter 30's introduction, read 20 October 2026, and the Live 12 release notes, 12.0 and 12.1.10
@@ -50,8 +50,8 @@ The device takes Live's name, Random; its look is the device framework's generic
 | R7 | `crates/devices/tests/dice.rs`, `every_note_ends_on_its_own_key` | real-time trap |
 | R8 | `crates/agent/tests/midi_effects.rs`, `an_agent_reaches_every_parameter_of_every_midi_effect` | MCP script |
 | R9 | `crates/devices/tests/rules.rs`, `every_parameter_is_automatable_to_the_frame`, `every_parameter_has_a_description`; every test in `crates/devices/tests/dice.rs` runs its blocks as real-time sections under the allocation trap; `rtsan/tests/midi_effects.rs` | real-time trap |
-| R10 | to be written in WP-6.8 | |
-| R11 | to be written in WP-6.8 | |
+| R10 | `crates/devices/tests/dice.rs`, `use_current_scale_moves_notes_by_degrees_and_lands_in_the_scale`, `without_a_scale_the_distances_are_semitones`, `two_renders_with_the_scale_are_identical`; `crates/ui/tests/device_view.rs`, `the_use_current_scale_switch_is_drawn_in_the_title_bar_and_not_the_panel` | real-time trap; unit |
+| R11 | `crates/devices/tests/dice.rs`, `a_moved_note_s_bend_is_carried_in_degrees` | real-time trap |
 
 ## Defaults, ranges and details
 

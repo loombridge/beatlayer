@@ -3,8 +3,7 @@
 //! as one undo step, the Sample chooser, the channel views, and the
 //! readout while hovering.
 
-mod common;
-
+use crate::common;
 use bl_model::{DeviceId, LayerId};
 use common::{Harness, Window};
 use egui::{Event, Modifiers, PointerButton, Pos2, pos2, vec2};

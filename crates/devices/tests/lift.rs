@@ -4,16 +4,14 @@
 //! switched off, deleted or moved. Every block is a real-time section under
 //! the allocation trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_core::time::SampleRate;
-use bl_devices::lift::{LIFT, LOWEST, MODE, PITCH, RANGE};
+use bl_devices::lift::{LIFT, LOWEST, MODE, PITCH, RANGE, USE_SCALE};
+use bl_engine::scales::ScaleRuns;
 use bl_engine::{Block, NoteBuffer, NoteEvent, NoteExpression, NoteKind, TransportInfo};
-use bl_model::Command;
+use bl_model::{Command, Scale, ScaleName};
 use common::chain::{BEAT_FRAMES, Chain, note, nothing_hangs};
-use common::{device, node, registry};
+use common::{bend, bends, device, keys_on, node, off, on, registry, scaled_through};
 
 const SIZES: [usize; 4] = [1, 100, 512, 4096];
 
@@ -389,4 +387,107 @@ fn moving_to_another_track_ends_its_notes_on_the_track_it_left() {
         assert_eq!(off.0, BEAT_FRAMES, "size {size}");
         assert_eq!(off.3, 0.0, "size {size}: it ended on the other track");
     }
+}
+
+fn c_major() -> ScaleRuns {
+    ScaleRuns::of(Scale::new(0, ScaleName::Major))
+}
+
+/// A Pitch node counting degrees, moving by `pitch`.
+fn degrees(pitch: f64, window: &[(bl_model::ParamId, f64)]) -> Box<dyn bl_engine::Node> {
+    let mut params = vec![(PITCH, pitch), (USE_SCALE, 1.0)];
+    params.extend_from_slice(window);
+    node(&registry(), &device(&bl_devices::lift_type(), &params), 256)
+}
+
+// Spec: midi-transpose R12. With Use Current Scale on, every note moves by
+// degrees of the scale: a note in it lands on a scale note, one outside it
+// keeps its distance above the scale note below it.
+#[test]
+fn use_current_scale_moves_notes_by_degrees() {
+    let notes = [on(0, 60, 1), on(10, 61, 2), on(20, 64, 3)];
+    let mut pitch = degrees(1.0, &[]);
+    let sent = scaled_through(pitch.as_mut(), &notes, 256, c_major());
+    // C3 to D3, C#3 two semitones up with C3's move, E3 to F3.
+    assert_eq!(keys_on(&sent), [62, 63, 65]);
+    // With the switch off the same notes move by semitones.
+    let mut pitch = node(
+        &registry(),
+        &device(&bl_devices::lift_type(), &[(PITCH, 1.0)]),
+        256,
+    );
+    let sent = scaled_through(pitch.as_mut(), &notes, 256, c_major());
+    assert_eq!(keys_on(&sent), [61, 62, 65]);
+    // A current scale with Scale Mode off is the chromatic one.
+    let mut pitch = degrees(1.0, &[]);
+    let off_scale = ScaleRuns::of(Scale::default());
+    let sent = scaled_through(pitch.as_mut(), &notes, 256, off_scale);
+    assert_eq!(keys_on(&sent), [61, 62, 65]);
+}
+
+// Spec: midi-transpose R12. A value beyond 30 acts as 30 when the switch is on.
+#[test]
+fn use_current_scale_holds_pitch_at_thirty_degrees() {
+    let mut pitch = degrees(100.0, &[]);
+    let sent = scaled_through(pitch.as_mut(), &[on(0, 36, 1)], 256, c_major());
+    // Thirty degrees of C Major: four octaves and two degrees above C1.
+    assert_eq!(keys_on(&sent), [36 + 48 + 4]);
+    let mut pitch = degrees(-100.0, &[]);
+    let sent = scaled_through(pitch.as_mut(), &[on(0, 120, 1)], 256, c_major());
+    assert_eq!(keys_on(&sent), [120 - 48 - 3]);
+}
+
+// Spec: midi-transpose R13. Lowest and Range are keys, and the window takes
+// the key a note's move gives.
+#[test]
+fn the_window_takes_the_key_the_degrees_give() {
+    let mut pitch = degrees(2.0, &[(LOWEST, 60.0), (RANGE, 4.0), (MODE, 0.0)]);
+    // C3 moves up two degrees to E3 (64), inside 60 to 64; D3 to F3 (65),
+    // outside, and blocked.
+    let notes = [on(0, 60, 1), on(10, 62, 2)];
+    let sent = scaled_through(pitch.as_mut(), &notes, 256, c_major());
+    assert_eq!(keys_on(&sent), [64]);
+}
+
+// Spec: midi-transpose R14. A bend is carried in degrees: the bend that takes
+// C3 two semitones up, to D3, takes the E3 it moved to a degree up, to F3.
+#[test]
+fn a_bend_is_carried_in_degrees() {
+    let mut pitch = degrees(2.0, &[]);
+    let notes = [
+        on(0, 60, 7),
+        bend(5, 60, 7, 2.0 / 48.0),
+        bend(6, 60, 7, 1.0 / 48.0),
+    ];
+    let sent = scaled_through(pitch.as_mut(), &notes, 256, c_major());
+    let carried = bends(&sent);
+    assert_eq!(carried.len(), 2);
+    assert!(carried.iter().all(|(key, _)| *key == 64));
+    // Up a degree from E3 is F3, one semitone; halfway to it is half that.
+    assert!((carried[0].1 - 1.0 / 48.0).abs() < 1e-6, "{carried:?}");
+    assert!((carried[1].1 - 0.5 / 48.0).abs() < 1e-6, "{carried:?}");
+}
+
+// Spec: midi-transpose R14, scales R17. A change of the current scale while a
+// note is held doesn't move it: the note-off goes to the key the note-on did.
+#[test]
+fn a_scale_change_while_a_note_is_held_does_not_move_it() {
+    let mut pitch = degrees(2.0, &[]);
+    let mut scale = c_major();
+    scale.push(100, Scale::new(2, ScaleName::Major));
+    let notes = [on(0, 60, 1), off(200, 60, 1)];
+    let sent = scaled_through(pitch.as_mut(), &notes, 256, scale);
+    assert_eq!(
+        sent.iter().map(|n| (n.kind, n.key)).collect::<Vec<_>>(),
+        [(NoteKind::On, 64), (NoteKind::Off, 64)]
+    );
+    // And the next note on a frame after the change counts the new scale.
+    let mut pitch = degrees(2.0, &[]);
+    let mut scale = c_major();
+    scale.push(100, Scale::new(2, ScaleName::Major));
+    let notes = [on(99, 60, 1), on(100, 60, 2)];
+    let sent = scaled_through(pitch.as_mut(), &notes, 256, scale);
+    // C3 is outside D Major: its scale note below is B2, two degrees up from
+    // there is D3, three semitones, and C3 keeps its distance above B2.
+    assert_eq!(keys_on(&sent), [64, 63]);
 }

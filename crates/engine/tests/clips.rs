@@ -4,10 +4,7 @@
 //! audio thread. Every block runs as a real-time section under the
 //! allocation trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -918,9 +915,14 @@ fn an_unwarped_clip_transposed_changes_speed_and_pitch() {
     audio.transpose = 12;
     let clip = clip(&mut editor, track, Ticks::ZERO, Ticks::WHOLE, audio);
     let [left, _] = play(&editor, &media, 512, 64, &[]);
-    // Twice as fast: the song's frame `i` plays the file's frame `2 * i`.
+    // Twice as fast: the song's frame `i` plays the file's frame `2 * i`,
+    // through the interpolator's filter (R12), which reads the ramp as it is
+    // wherever it can reach 128 frames either side of its position, and
+    // within half a frame of it where it reaches back past the file's start.
     for (i, &sample) in left.iter().enumerate() {
-        assert_eq!(sample, at(2 * i as i64), "frame {i}");
+        let off = f64::from(sample - at(2 * i as i64)) / f64::from(STEP);
+        let limit = if i < 64 { 0.5 } else { 0.001 };
+        assert!(off.abs() < limit, "frame {i}: {off} frames off");
     }
     // Untransposed, the file is read frame for frame.
     editor

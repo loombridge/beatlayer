@@ -7,10 +7,7 @@
 //!
 //! Spec: clap-hosting R17.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_core::time::SampleRate;
 use bl_engine::{NodeConfig, NodeFactory, NoteEvent, NoteKind};
 use bl_plugin_host::clap::{ClapError, ClapHost};

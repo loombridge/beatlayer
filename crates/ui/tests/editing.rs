@@ -3,8 +3,7 @@
 //! drag is one undo step however many frames it spans. Spec:
 //! arrangement-editing.
 
-mod common;
-
+use crate::common;
 use std::sync::Arc;
 
 use bl_core::time::Ticks;

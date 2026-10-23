@@ -4,8 +4,7 @@
 //!
 //! Spec: app-shell R5, R6, R7.
 
-mod common;
-
+use crate::common;
 use bl_shell::settings::{Appearance, SettingsPage};
 use common::{Harness, Window};
 use egui::accesskit::{Action, Role};

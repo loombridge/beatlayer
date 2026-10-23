@@ -4,10 +4,7 @@
 //! report what they changed, and every block runs under the allocation
 //! trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_devices::KitHost;
 use bl_engine::{Block, NoteBuffer, NoteEvent, NoteKind, Registry, TransportInfo};
 use bl_model::{DeviceKind, DeviceRole};

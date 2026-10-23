@@ -5,10 +5,7 @@
 //! through untouched. Every block runs as a real-time section under the
 //! allocation trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_core::time::{Frames, TempoMap};
 use bl_devices::modulator::RATE_HZ;
 use bl_devices::strike_mod::{ECHO, ECHO_TIME, LOOP, VELOCITY, strike_mod_type};

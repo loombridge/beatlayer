@@ -3,10 +3,7 @@
 //! note mute, and no stuck notes on stop, loop wrap, or deletion.
 //! Every block runs as a real-time section under the allocation trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_core::time::{Bpm, TICKS_PER_QUARTER, TempoMap, Ticks};
 use bl_engine::NoteKind;
 use bl_engine::TransportCommand;

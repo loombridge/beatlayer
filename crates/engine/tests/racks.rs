@@ -5,10 +5,7 @@
 //! runs as a real-time section under the allocation trap, at block sizes
 //! 1, 64, 512 and 4,096.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_core::time::{TICKS_PER_QUARTER, Ticks};
 use bl_engine::testing::{GAIN, GAIN_PARAM, INSTRUMENT, SEMITONES, THROUGH, TRANSPOSE};
 use bl_engine::{Block, Node, NoteEvent, NoteKind, TransportCommand};

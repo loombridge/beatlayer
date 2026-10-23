@@ -4,10 +4,7 @@
 //! (RT60), Freeze with Flat and Cut, the Stereo width, and the Reflect,
 //! Diffuse and Dry/Wet output controls.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_devices::reverb::{
     CHORUS, CHORUS_AMOUNT, CHORUS_RATE, CUT, DECAY, DENSITY, DIFFUSE, DIFFUSION, DRY_WET, FLAT,
     FREEZE, HIGH, HIGH_CUT, HIGH_CUT_HZ, HIGH_DAMP, LOW, LOW_CUT, LOW_CUT_HZ, LOW_DAMP, PREDELAY,

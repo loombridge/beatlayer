@@ -4,10 +4,7 @@
 //! feedback, MPE expression feedback, and ending notes cleanly on stop.
 //! Every block is a real-time section under the allocation trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_core::time::Bpm;
 use bl_devices::note_echo::{
     FEEDBACK, INPUT, MPE, NOTE_ECHO, PITCH, PRESS_FEEDBACK, SYNC, TIME_MS, TIME_SYNC,
@@ -112,6 +109,27 @@ fn pitch_transposition_applies_per_repeat() {
     assert_eq!(on_keys[0], 60);
     assert_eq!(on_keys[1], 63);
     assert_eq!(on_keys[2], 66);
+}
+
+// Spec: midi-echo R10. Note Echo has no Use Current Scale: its Pitch moves each
+// echo by keys whatever the scale of its track's clip.
+#[test]
+fn pitch_moves_by_keys_whatever_the_clip_s_scale() {
+    for size in SIZES {
+        let mut chain = Chain::new(4096);
+        chain.effect(
+            NOTE_ECHO,
+            &[(PITCH, 3.0), (FEEDBACK, 50.0), (TIME_SYNC, 4.0)],
+        );
+        chain.clip(8, [note(60, 0, 1)]);
+        chain.scale_clips(bl_model::Scale::new(0, bl_model::ScaleName::Major));
+        chain.sync();
+        chain.play();
+        chain.run(8 * BEAT_FRAMES as usize, size);
+        let on_keys = keys(&chain.heard(), NoteKind::On);
+        // Three semitones, not three degrees, which would be 64 and 67.
+        assert_eq!(&on_keys[0..3], &[60, 63, 66], "block size {size}");
+    }
 }
 
 // Spec: midi-echo R4. Velocity decay and feedback diminish repeats.

@@ -8,8 +8,6 @@
 //! step. The renders also null-test against their stored references in
 //! `golden.rs`.
 
-bl_rt::install_trap!();
-
 use bl_cli::golden::{Render, SAMPLE_RATE, Scene, fixture};
 use bl_model::ClipData;
 

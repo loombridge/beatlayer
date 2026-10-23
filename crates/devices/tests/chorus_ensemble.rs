@@ -1,9 +1,6 @@
 //! Tests for Chorus-Ensemble (WP-5.20b; the chorus-ensemble spec).
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_devices::chorus_ensemble::{
     AMOUNT, CHORUS_ENSEMBLE, CHORUS_TAPS, CHORUS_TIME, DRY_WET, FEEDBACK, HP_FREQ, MODE, OUTPUT,
     RATE, WARMTH, WIDTH, chorus_ensemble_type,

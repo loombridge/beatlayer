@@ -5,10 +5,7 @@
 //! and the engine publishes which chains are processing. Every block runs
 //! as a real-time section under the allocation trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_core::time::{TICKS_PER_QUARTER, Ticks};
 use bl_engine::testing::{INSTRUMENT, SEMITONES, THROUGH, TRANSPOSE};
 use bl_engine::{Block, Node, NoteEvent, NoteKind, TransportCommand};

@@ -1,4 +1,5 @@
 [package]
+autotests = false
 name = "bl-engine"
 description = "The real-time engine: compiler, graph, scheduler, transport, clip players, mixer, delay compensation, automation, and metering."
 version.workspace = true
@@ -56,6 +57,16 @@ bl-audio-io.workspace = true
 # The tests of the external effect register the real device, so they show
 # the device's own behaviour and not a stand-in's (WP-5.35).
 bl-devices.workspace = true
+
+[[test]]
+name = "engine_tests"
+path = "tests/main.rs"
+
+# Counts heap use with a global allocator of its own, so it stays a binary
+# of its own.
+[[test]]
+name = "streaming"
+path = "tests/streaming.rs"
 
 [lints]
 workspace = true

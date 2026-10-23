@@ -10,8 +10,7 @@
 //! runs 1,000 encoding cases and 100 saving ones; `quick`, the default for
 //! local runs and pull requests, runs a tenth of each.
 
-mod common;
-
+use crate::common;
 use std::process::Command;
 
 use bl_model::{Command as Edit, Editor, TrackKind};

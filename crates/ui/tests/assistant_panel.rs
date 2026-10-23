@@ -5,8 +5,7 @@
 //! messages and tool calls are drawn in order, Stop cancels, and every
 //! control has an accessible name.
 
-mod common;
-
+use crate::common;
 use std::collections::VecDeque;
 use std::sync::Mutex;
 

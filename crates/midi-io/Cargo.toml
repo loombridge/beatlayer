@@ -1,4 +1,5 @@
 [package]
+autotests = false
 name = "bl-midi-io"
 description = "MIDI device I/O, clock, and MPE."
 version.workspace = true
@@ -32,6 +33,10 @@ alsa = "=0.11.0"
 bl-engine.workspace = true
 bl-model.workspace = true
 bl-rt.workspace = true
+
+[[test]]
+name = "midi_io_tests"
+path = "tests/main.rs"
 
 [lints]
 workspace = true

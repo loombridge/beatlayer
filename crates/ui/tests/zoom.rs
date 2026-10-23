@@ -8,8 +8,7 @@
 //! Spec: interface-zoom R1 to R10. Run with `--nocapture` to print the
 //! minimum window sizes.
 
-mod common;
-
+use crate::common;
 use bl_shell::ZOOM_STEPS;
 use bl_shell::commands as ids;
 use bl_shell::settings::{SettingsPage, ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT, zoom_factor};

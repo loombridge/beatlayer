@@ -3,8 +3,7 @@
 //! the same commands agents run, and each drag is one undo step however many
 //! frames it spans. Spec: sample-editor.
 
-mod common;
-
+use crate::common;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 

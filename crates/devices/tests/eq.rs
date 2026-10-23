@@ -2,10 +2,7 @@
 //! filter type against its analytic curve, the Stereo, L/R, and M/S modes,
 //! Adaptive Q, the oversampled path, and the analyser.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use std::f64::consts::TAU;
 
 use bl_devices::NativeNode;

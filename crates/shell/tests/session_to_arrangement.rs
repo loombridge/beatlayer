@@ -11,8 +11,6 @@
 //! - Ending the recording leaves Back to Arrangement lit.
 //! - The whole path allocates nothing on the audio thread.
 
-bl_rt::install_trap!();
-
 use bl_audio_io::{BackendKind, NullBackend, NullControl, NullOptions, Pacing};
 use bl_core::time::Ticks;
 use bl_model::{AutomationTarget, Clip, ClipData, MixerParam, SceneId, TrackId};

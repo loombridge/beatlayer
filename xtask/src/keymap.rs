@@ -49,6 +49,13 @@ const SYSTEM: &[(&str, &str)] = &[
     ),
 ];
 
+/// Shortcuts whose command lets the key fall through to the wider contexts
+/// when it can't run (`declines` in the keymap): Tab selects the next
+/// breakpoint only while one is selected, Esc drops an edit only while there
+/// is one, and Delete deletes a breakpoint only while one is selected or at
+/// the insert marker (the automation editing spec, R22 to R24).
+const DECLINES: &[&str] = &["S-A11Y-022", "S-A11Y-024", "S-A11Y-025"];
+
 /// Shortcuts the focused control handles, with which control. The
 /// Arrangement View reads three itself because each has keys that act
 /// differently, and the keymap gives a shortcut one command with one set of
@@ -158,6 +165,57 @@ const WIDGET: &[(&str, &str)] = &[
         "S-MAP-007",
         "while the computer MIDI keyboard is on, a letter with Shift runs its shortcut as it \
          would with the keyboard off",
+    ),
+    // WP-6.26: editing envelopes from the keyboard. The lane and the
+    // Envelope Editor read the keys that have two directions themselves,
+    // each running a registered command.
+    (
+        "S-A11Y-018",
+        "the automation lane and the Envelope Editor: Left and Right move the insert marker \
+         one grid step along the envelope (`envelope.move_marker`)",
+    ),
+    (
+        "S-A11Y-020",
+        "the automation lane and the Envelope Editor: Option-Left and Option-Right (Alt) move \
+         the insert marker to the previous or next breakpoint (`envelope.move_marker`)",
+    ),
+    (
+        "S-A11Y-021",
+        "the automation lane and the Envelope Editor: Option-click (Alt-click) a breakpoint \
+         selects it and moves the insert marker to it (`automation.select_breakpoint`, \
+         `clip.select_envelope_breakpoint`)",
+    ),
+    (
+        "S-A11Y-023",
+        "the automation lane and the Envelope Editor: Up and Down change the selected \
+         breakpoint's value by a step of its control (`envelope.move_selected`), and a typed \
+         number sets it (`envelope.set_value`)",
+    ),
+    (
+        "S-A11Y-026",
+        "the Arrangement View: Option-Up and Option-Down (Alt) show the previous or next \
+         parameter that has an envelope in the selected track's automation lane \
+         (`arrangement.show_automation`)",
+    ),
+    (
+        "S-A11Y-027",
+        "the Arrangement View: Shift-Option-Up and Shift-Option-Down (Shift-Alt) show the \
+         previous or next of every parameter the lane's choosers list \
+         (`arrangement.show_automation`)",
+    ),
+    (
+        "S-A11Y-028",
+        "the Envelope Editor: as S-A11Y-026, for the clip's envelopes (`view.clip_envelope`)",
+    ),
+    (
+        "S-A11Y-029",
+        "the Envelope Editor: as S-A11Y-027, for every parameter the choosers list \
+         (`view.clip_envelope`)",
+    ),
+    (
+        "S-A11Y-030",
+        "the automation lane and the Envelope Editor: Left and Right move the selected \
+         breakpoint one grid step in time (`envelope.move_selected`)",
     ),
     // WP-1.8b: keys with two directions, and modifiers a drag reads as it
     // goes, each running a registered command.
@@ -643,6 +701,9 @@ fn render(
                 }
                 if let Some(toggles) = &binding.toggles {
                     let _ = write!(line, ", toggles = {}", quote(toggles));
+                }
+                if DECLINES.contains(&source.id.as_str()) {
+                    line.push_str(", declines = true");
                 }
                 line.push_str(" }");
                 commands.push(line);

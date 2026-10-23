@@ -5,8 +5,7 @@
 //!
 //! Spec: app-shell R1, R9, R11, R12.
 
-mod common;
-
+use crate::common;
 use bl_shell::{Area, MainView, commands as ids};
 use bl_ui::layout::{ELEMENTS, Element, REFERENCE, ShellLayout};
 use bl_ui::main_window::{UiEvent, element_id, main_view_id};

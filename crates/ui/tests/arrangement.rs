@@ -3,8 +3,7 @@
 //! peaks, and that gestures, keys, and assistive technology reach its view
 //! commands. Spec: arrangement-view.
 
-mod common;
-
+use crate::common;
 use std::collections::HashMap;
 use std::sync::mpsc::{Sender, channel};
 use std::sync::{Arc, Mutex};

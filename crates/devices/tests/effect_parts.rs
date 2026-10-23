@@ -4,10 +4,7 @@
 //! random source. Every block runs as a real-time section under the
 //! allocation trap, at block sizes 1, 64, 512, and 4,096.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_core::id::Id;
 use bl_core::time::{Bpm, Frames, TempoMap, TempoSegment, Ticks};
 use bl_devices::lfo::Wave;

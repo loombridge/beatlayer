@@ -2,10 +2,7 @@
 //! the exact frame the song reaches it, and reports when it did. Every block
 //! runs as a real-time section under the allocation trap.
 
-bl_rt::install_trap!();
-
-mod common;
-
+use crate::common;
 use bl_core::time::{Bpm, Frames, TICKS_PER_QUARTER, TempoMap, Ticks};
 use bl_engine::{Action, ParamValue, Report, ScheduledCommand, TransportCommand, testing};
 use bl_model::{Command, TrackKind};

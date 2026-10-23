@@ -10,11 +10,11 @@ use bl_core::time::{SampleRate, TICKS_PER_QUARTER, Ticks};
 use bl_engine::testing::{self, Probe, RecordedNote};
 use bl_engine::{
     Collector, Compiler, EngineConfig, Monitor, NoteKind, Processor, Registry, Sender,
-    TransportCommand, Update, channel,
+    SessionCommand, TransportCommand, Update, channel,
 };
 use bl_model::{
-    Clip, ClipData, Command, Device, DeviceId, DeviceKind, Editor, MidiData, Note, ParamId,
-    TrackId, TrackKind,
+    Clip, ClipData, ClipId, Command, Device, DeviceId, DeviceKind, Editor, LaunchQuantization,
+    LaunchSettings, MidiData, Note, ParamId, Scale, SceneId, TrackId, TrackKind,
 };
 
 pub const RATE: SampleRate = SampleRate::HZ_48000;
@@ -151,6 +151,94 @@ impl Chain {
                 ),
             })
             .unwrap();
+    }
+
+    /// A clip of `notes` from beat `at`, `beats` beats long, in `scale`.
+    pub fn clip_at(
+        &mut self,
+        at: i64,
+        beats: i64,
+        scale: Scale,
+        notes: impl IntoIterator<Item = Note>,
+    ) -> ClipId {
+        let id = self.editor.new_id();
+        let mut clip = Clip::new(
+            id,
+            Ticks(TICKS_PER_QUARTER * at),
+            Ticks(TICKS_PER_QUARTER * beats),
+            ClipData::Midi(MidiData::new(notes)),
+        );
+        clip.scale = scale;
+        self.editor
+            .apply(Command::CreateClip {
+                track: self.track,
+                clip,
+            })
+            .unwrap();
+        id
+    }
+
+    /// A clip of `notes` in the Session slot of the first scene, `beats`
+    /// beats long, in `scale`; the scene.
+    pub fn slot_clip(
+        &mut self,
+        beats: i64,
+        scale: Scale,
+        notes: impl IntoIterator<Item = Note>,
+    ) -> SceneId {
+        let scene = self.editor.document().scenes().next().unwrap().id;
+        let id = self.editor.new_id();
+        let mut clip = Clip::new(
+            id,
+            Ticks::ZERO,
+            Ticks(TICKS_PER_QUARTER * beats),
+            ClipData::Midi(MidiData::new(notes)),
+        );
+        clip.scale = scale;
+        self.editor
+            .apply(Command::CreateSlotClip {
+                track: self.track,
+                scene,
+                clip,
+            })
+            .unwrap();
+        scene
+    }
+
+    /// Launches the slot of `scene` on the next beat line.
+    pub fn launch(&mut self, scene: SceneId) {
+        self.sender
+            .session(SessionCommand::SetQuantization(LaunchSettings {
+                quantization: LaunchQuantization::Quarter,
+                enabled: true,
+                ..LaunchSettings::default()
+            }));
+        self.sender.session(SessionCommand::Launch {
+            track: self.track,
+            scene,
+        });
+    }
+
+    /// Sets the scale of every clip on the track.
+    pub fn scale_clips(&mut self, scale: Scale) {
+        let clips = self
+            .editor
+            .document()
+            .track(self.track)
+            .unwrap()
+            .clips()
+            .map(|clip| clip.id)
+            .collect();
+        self.apply(scale.command(clips));
+    }
+
+    /// Sets the set's current scale.
+    pub fn scale_set(&mut self, scale: Scale) {
+        self.apply(Command::SetScale {
+            enabled: Some(scale.enabled),
+            root: Some(scale.root),
+            name: Some(scale.name.id().to_owned()),
+        });
     }
 
     /// Applies a command.

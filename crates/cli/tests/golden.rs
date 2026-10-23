@@ -5,8 +5,6 @@
 //!
 //! Remake references with `cargo xtask golden --update`, never from here.
 
-bl_rt::install_trap!();
-
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -387,7 +385,7 @@ fn bl_cli_render_writes_what_the_harness_renders() {
         assert!(render.same_bits(&fixture.render()), "{}", fixture.name);
         rendered += 1;
     }
-    assert_eq!(rendered, 51);
+    assert_eq!(rendered, 66);
     assert!(!fs::read_dir(&temp.0).unwrap().any(|entry| {
         entry
             .unwrap()

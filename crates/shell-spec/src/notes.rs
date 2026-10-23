@@ -20,15 +20,22 @@
 //! by ID. The behaviour they follow is in the piano roll spec.
 
 use crate::editing::EditResult;
-use bl_commands::Context::{NoteEditor, NoteSelection as NoteSelectionContext, SampleEditor};
+use crate::note_filters::{InvertSelectionArgs, NoteFilters, NoteFiltersArgs, NoteFiltersResult};
+use bl_commands::Context::{
+    ClipView, Global, LoopBrace, NoteEditor, NoteSelection as NoteSelectionContext, SampleEditor,
+};
 use bl_commands::{Binding, CommandSpec, NoArgs, Permission, RegisterError, Registry};
 use bl_core::time::Ticks;
-use bl_model::{AutomationTarget, Breakpoint, ClipId, Expression};
+use bl_model::{AutomationTarget, Breakpoint, ClipId, Expression, GroupKind};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// `clip_view.select_notes`: select notes in the MIDI Note Editor.
 pub const SELECT_NOTES: &str = "clip_view.select_notes";
+/// `clip_view.note_filters`: Find and Select Notes' filter bar and filters.
+pub const NOTE_FILTERS: &str = "clip_view.note_filters";
+/// `clip_view.invert_selection`: swap the selected and unselected notes.
+pub const INVERT_SELECTION: &str = "clip_view.invert_selection";
 /// `note.add`: add a note to a MIDI clip.
 pub const ADD_NOTE: &str = "note.add";
 /// `note.delete`: delete notes from a MIDI clip.
@@ -63,7 +70,27 @@ pub const CUT: &str = "note.cut";
 pub const PASTE: &str = "note.paste";
 /// `note.duplicate`: put a copy of the notes straight after them.
 pub const DUPLICATE: &str = "note.duplicate";
+/// `clip_view.foreground`: choose the foreground clip of several shown.
+pub const FOREGROUND: &str = "clip_view.foreground";
+/// `clip_view.select_loop_bars`: choose the selected loop bars.
+pub const SELECT_LOOP_BARS: &str = "clip_view.select_loop_bars";
+/// `clip_view.focus_mode`: switch Focus Mode.
+pub const FOCUS_MODE: &str = "clip_view.focus_mode";
+/// `clip.duplicate_loop`: double clips' loops and copy their notes.
+pub const DUPLICATE_LOOP: &str = "clip.duplicate_loop";
+/// `note.group`: put notes in a new probability group.
+pub const GROUP: &str = "note.group";
+/// `note.ungroup`: take notes out of their probability groups.
+pub const UNGROUP: &str = "note.ungroup";
 
+/// `clip_view.set_preview`: the MIDI Note Editor's Preview switch.
+pub const SET_PREVIEW: &str = "clip_view.set_preview";
+/// `note.preview`: play a note on a MIDI clip's track.
+pub const PREVIEW_NOTE: &str = "note.preview";
+/// `note.step_record`: step-record the held notes at the insert marker.
+pub const STEP_RECORD: &str = "note.step_record";
+/// `clip_view.step_input_mode`: get the editor ready for step recording.
+pub const STEP_INPUT_MODE: &str = "clip_view.step_input_mode";
 /// `note.split`: split notes at ticks.
 pub const SPLIT: &str = "note.split";
 /// `note.chop`: chop notes on the grid or into equal parts.
@@ -82,6 +109,8 @@ pub const SPLIT_CLIP: &str = "note.split_clip";
 /// `bl-shell`'s `Shell::run`.
 pub const IDS: &[&str] = &[
     SELECT_NOTES,
+    NOTE_FILTERS,
+    INVERT_SELECTION,
     ADD_NOTE,
     DELETE_NOTES,
     MOVE_NOTES,
@@ -98,6 +127,16 @@ pub const IDS: &[&str] = &[
     CUT,
     PASTE,
     DUPLICATE,
+    FOREGROUND,
+    SELECT_LOOP_BARS,
+    FOCUS_MODE,
+    DUPLICATE_LOOP,
+    GROUP,
+    UNGROUP,
+    SET_PREVIEW,
+    PREVIEW_NOTE,
+    STEP_RECORD,
+    STEP_INPUT_MODE,
     SPLIT,
     CHOP,
     JOIN,
@@ -106,10 +145,32 @@ pub const IDS: &[&str] = &[
     SPLIT_CLIP,
 ];
 
-/// Whether `id` is one of the Clip View's note-editing commands.
+/// Whether `id` is one of the Clip View's note-editing commands that edits
+/// the notes, which `bl-shell`'s `clip_view::run` runs. The Preview switch,
+/// a preview and Step Input Mode reach the audio engine, the preferences
+/// and the focus, so the shell runs those itself ([`is_preview_or_mode`]).
 #[must_use]
 pub fn handles(id: &str) -> bool {
-    IDS.contains(&id)
+    IDS.contains(&id) && !is_preview_or_mode(id)
+}
+
+/// Whether `id` is the Preview switch, a preview or Step Input Mode
+/// (Spec: step-recording R1, R2, R9).
+#[must_use]
+pub fn is_preview_or_mode(id: &str) -> bool {
+    matches!(id, SET_PREVIEW | PREVIEW_NOTE | STEP_INPUT_MODE)
+}
+
+/// Notes of one clip among several shown (Spec: multi-clip-editing R18).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ClipNotes {
+    /// The MIDI clip.
+    pub clip: ClipId,
+    /// The notes, by their place in the clip's notes in order. Left out, the
+    /// clip's selected notes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<Vec<u32>>,
 }
 
 /// How `clip_view.select_notes` changes the selection.
@@ -270,6 +331,12 @@ pub struct SetValueArgs {
     /// then pitch). Left out, the selected notes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<Vec<u32>>,
+    /// The clips, each with its notes, in place of `clip` and `notes`
+    /// (Spec: multi-clip-editing R18). Left out with `clip` and `notes`,
+    /// the selected notes of every clip shown, or of the active clip alone
+    /// in Focus Mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clips: Option<Vec<ClipNotes>>,
     /// Which value to set.
     pub field: NoteField,
     /// The value, within the field's range, for every one of the notes.
@@ -318,6 +385,12 @@ pub struct RampValueArgs {
     /// then pitch). Left out, the selected notes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<Vec<u32>>,
+    /// The clips, each with its notes, in place of `clip` and `notes`
+    /// (Spec: multi-clip-editing R18). Left out with `clip` and `notes`,
+    /// the selected notes of every clip shown, or of the active clip alone
+    /// in Focus Mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clips: Option<Vec<ClipNotes>>,
     /// Which value to ramp.
     pub field: NoteField,
     /// The value the first note takes.
@@ -338,6 +411,12 @@ pub struct AdjustValueArgs {
     /// then pitch). Left out, the selected notes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<Vec<u32>>,
+    /// The clips, each with its notes, in place of `clip` and `notes`
+    /// (Spec: multi-clip-editing R18). Left out with `clip` and `notes`,
+    /// the selected notes of every clip shown, or of the active clip alone
+    /// in Focus Mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clips: Option<Vec<ClipNotes>>,
     /// Which value to change.
     pub field: NoteField,
     /// How much to add to each note's value; negative lowers it. Whole
@@ -359,6 +438,12 @@ pub struct RandomizeArgs {
     /// every note in the clip's span.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<Vec<u32>>,
+    /// The clips, each with its notes, in place of `clip` and `notes`
+    /// (Spec: multi-clip-editing R18). Left out with `clip` and `notes`,
+    /// the selected notes of every clip shown, or of the active clip alone
+    /// in Focus Mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clips: Option<Vec<ClipNotes>>,
     /// Which value to randomise: `velocity`, `release_velocity` or `chance`.
     pub field: NoteField,
     /// How far from its value each note may move, in the field's own units:
@@ -382,11 +467,50 @@ pub struct DeactivateArgs {
     /// then pitch). Left out, the selected notes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<Vec<u32>>,
+    /// The clips, each with its notes, in place of `clip` and `notes`
+    /// (Spec: multi-clip-editing R18). Left out with `clip` and `notes`,
+    /// the selected notes of every clip shown, or of the active clip alone
+    /// in Focus Mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clips: Option<Vec<ClipNotes>>,
     /// Whether the notes end up active (`true`) or deactivated (`false`).
     /// Left out, they are deactivated, or activated when every one of them
     /// is deactivated already.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active: Option<bool>,
+}
+
+/// Arguments of `note.group`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct GroupNotesArgs {
+    /// The MIDI clip. Left out, the one the Clip View shows (the
+    /// Arrangement's selected clip).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<ClipId>,
+    /// The notes, by their place in the clip's notes in order (by start,
+    /// then pitch). Left out, the selected notes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<Vec<u32>>,
+    /// How the group plays. Left out, the kind made last in this session,
+    /// `play_all` until one is chosen.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<GroupKind>,
+}
+
+/// Arguments of `note.ungroup`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct UngroupNotesArgs {
+    /// The MIDI clip. Left out, the one the Clip View shows (the
+    /// Arrangement's selected clip).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<ClipId>,
+    /// The notes, by their place in the clip's notes in order (by start,
+    /// then pitch). Left out, the selected notes. Naming every note of a
+    /// group ends it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<Vec<u32>>,
 }
 
 /// Arguments of `clip_view.select_notes`.
@@ -402,6 +526,12 @@ pub struct SelectNotesArgs {
     /// with `select` chooses the notes `select` names.
     #[serde(default)]
     pub notes: Vec<u32>,
+    /// The clips, each with its notes, in place of `clip` and `notes`
+    /// (Spec: multi-clip-editing R18). Left out with `clip` and `notes`,
+    /// the selected notes of every clip shown, or of the active clip alone
+    /// in Focus Mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clips: Option<Vec<ClipNotes>>,
     /// How to change the selection; `replace` if left out.
     #[serde(default)]
     pub mode: NoteSelectMode,
@@ -429,6 +559,12 @@ pub struct CopyNotesArgs {
     /// notes that start inside the time selection.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<Vec<u32>>,
+    /// The clips, each with its notes, in place of `clip` and `notes`
+    /// (Spec: multi-clip-editing R18). Left out with `clip` and `notes`,
+    /// the selected notes of every clip shown, or of the active clip alone
+    /// in Focus Mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clips: Option<Vec<ClipNotes>>,
 }
 
 /// Arguments of `note.paste`.
@@ -458,6 +594,64 @@ pub struct DuplicateNotesArgs {
     /// notes that start inside the time selection.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<Vec<u32>>,
+    /// The clips, each with its notes, in place of `clip` and `notes`
+    /// (Spec: multi-clip-editing R18). Left out with `clip` and `notes`,
+    /// the selected notes of every clip shown, or of the active clip alone
+    /// in Focus Mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clips: Option<Vec<ClipNotes>>,
+}
+
+/// Arguments of `clip_view.set_preview`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetPreviewArgs {
+    /// Whether Preview is on. Left out, the switch flips.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on: Option<bool>,
+}
+
+/// Arguments of `note.preview`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PreviewNoteArgs {
+    /// The MIDI clip whose track plays the note. Left out, the one the Clip
+    /// View shows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<ClipId>,
+    /// The pitch, a MIDI key from 0 to 127; 60 is middle C.
+    pub key: u8,
+    /// The velocity, from 1 to 127; 100 unless given. Used when `on`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub velocity: Option<u8>,
+    /// Press (true) or release (false) the note.
+    pub on: bool,
+}
+
+/// A key held on the track's MIDI input, with the velocity it was played at.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct HeldKey {
+    /// The pitch, a MIDI key from 0 to 127; 60 is middle C.
+    pub key: u8,
+    /// The velocity it was played at, from 1 to 127.
+    pub velocity: u8,
+}
+
+/// Arguments of `note.step_record`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct StepRecordArgs {
+    /// The MIDI clip. Left out, the one the Clip View shows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<ClipId>,
+    /// Step back, as Left does, instead of forward, as Right does.
+    #[serde(default)]
+    pub back: bool,
+    /// The keys held, each with its velocity. Left out, the keys held on the
+    /// track's MIDI input now; an empty list means no key is held.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub held: Option<Vec<HeldKey>>,
 }
 
 /// One cut of `note.split`: a note and the tick it is split at.
@@ -648,6 +842,12 @@ pub struct DeleteNotesArgs {
     /// then pitch). Left out, the selected notes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<Vec<u32>>,
+    /// The clips, each with its notes, in place of `clip` and `notes`
+    /// (Spec: multi-clip-editing R18). Left out with `clip` and `notes`,
+    /// the selected notes of every clip shown, or of the active clip alone
+    /// in Focus Mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clips: Option<Vec<ClipNotes>>,
 }
 
 /// Arguments of `note.move`.
@@ -662,6 +862,12 @@ pub struct MoveNotesArgs {
     /// then pitch). Left out, the selected notes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<Vec<u32>>,
+    /// The clips, each with its notes, in place of `clip` and `notes`
+    /// (Spec: multi-clip-editing R18). Left out with `clip` and `notes`,
+    /// the selected notes of every clip shown, or of the active clip alone
+    /// in Focus Mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clips: Option<Vec<ClipNotes>>,
     /// How far to move them in time, in ticks; negative is earlier. Give
     /// `by` or `semitones`, or both.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -688,6 +894,12 @@ pub struct ResizeNotesArgs {
     /// then pitch). Left out, the selected notes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<Vec<u32>>,
+    /// The clips, each with its notes, in place of `clip` and `notes`
+    /// (Spec: multi-clip-editing R18). Left out with `clip` and `notes`,
+    /// the selected notes of every clip shown, or of the active clip alone
+    /// in Focus Mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clips: Option<Vec<ClipNotes>>,
     /// How far each note's end moves, in ticks; negative is shorter. A note
     /// keeps at least one tick of length.
     pub by: Ticks,
@@ -749,6 +961,12 @@ pub struct QuantizeNotesArgs {
     /// then pitch). Left out, the selected notes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<Vec<u32>>,
+    /// The clips, each with its notes, in place of `clip` and `notes`
+    /// (Spec: multi-clip-editing R18). Left out with `clip` and `notes`,
+    /// the selected notes of every clip shown, or of the active clip alone
+    /// in Focus Mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clips: Option<Vec<ClipNotes>>,
     /// The grid line spacing in ticks, over the Quantize settings. Lines
     /// are laid out from each bar's start, as the editing grid's are; a
     /// spacing of whole bars counts bars from 1.1.1.
@@ -799,6 +1017,42 @@ pub struct NoteEditResult {
     /// Whether the edit was recorded as an undo step: false when it changed
     /// nothing.
     pub undo_step: bool,
+    /// Across several clips (Spec: multi-clip-editing R18): what the edit
+    /// did in each clip. `notes` and `selected` above are the first
+    /// clip's.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub clips: Vec<ClipEdit>,
+}
+
+/// What an edit across several clips did in one of them.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ClipEdit {
+    /// The clip.
+    pub clip: ClipId,
+    /// The notes the edit created or changed in it, by their place in its
+    /// notes in order afterwards.
+    pub notes: Vec<u32>,
+    /// The notes selected in it afterwards.
+    pub selected: Vec<u32>,
+}
+
+/// What `note.step_record` did.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct StepRecordResult {
+    /// How many notes it added.
+    pub added: u32,
+    /// How many notes it made one grid step longer.
+    pub lengthened: u32,
+    /// How many notes it made one grid step shorter.
+    pub shortened: u32,
+    /// How many notes it removed, having no length left.
+    pub removed: u32,
+    /// The insert marker afterwards, in ticks from the beginning of the
+    /// clip's contents.
+    pub insert_marker: Ticks,
+    /// Whether the step was recorded as an undo step: false when it changed
+    /// no note.
+    pub undo_step: bool,
 }
 
 /// The Randomize amount of each lane, which the footer's control holds
@@ -837,18 +1091,29 @@ impl RandomizeAmounts {
 /// What the Clip View shows: which clip it is editing, the notes selected in
 /// it, its insert marker and time selection, its expression lanes, and the
 /// tab with the envelope it shows.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ClipViewState {
     /// Whether the Clip View shows in the detail area.
     pub visible: bool,
     /// Whether Draw Mode is on (B): clicking the note area adds a note, and
     /// clicking a note removes it.
     pub draw_mode: bool,
-    /// The clip the note editor shows; `null` when none does.
+    /// The clip the note editor shows; `null` when none does. With several
+    /// clips shown, the foreground clip.
     pub clip: Option<ClipId>,
-    /// The selected notes, by their place in the clip's notes in order (by
-    /// start, then pitch).
+    /// The clips the note editor shows, in the loop bars' order (Spec:
+    /// multi-clip-editing R1, R2): none, one, or up to eight.
+    pub clips: Vec<ClipId>,
+    /// The loop bars selected, in the order of `clips`.
+    pub loop_bars: Vec<ClipId>,
+    /// Whether Focus Mode is on (Spec: multi-clip-editing R13).
+    pub focus_mode: bool,
+    /// The selected notes of the foreground clip, by their place in its
+    /// notes in order (by start, then pitch).
     pub selected: Vec<u32>,
+    /// The selected notes of every clip shown, by clip; the foreground
+    /// clip's are `selected` too.
+    pub clip_selections: Vec<ClipEdit>,
     /// The insert marker, in ticks from the beginning of the clip's
     /// contents; `null` when there is none.
     pub insert_marker: Option<Ticks>,
@@ -871,9 +1136,64 @@ pub struct ClipViewState {
     pub folded: bool,
     /// The tab the Clip View shows.
     pub tab: ClipTab,
+    /// Whether the Preview switch is on (Spec: step-recording R1): one
+    /// switch for every MIDI clip's editor, kept between launches.
+    pub preview: bool,
     /// The parameter whose envelope the Envelopes tab shows; `null` when it
     /// shows none.
     pub envelope: Option<AutomationTarget>,
+    /// Find and Select Notes: whether the filter bar shows, and every
+    /// filter's settings, with which are on.
+    pub filters: NoteFilters,
+    /// The Envelope Editor's insert marker, in ticks from the beginning of
+    /// the clip's contents (WP-6.26), which Left and Right move along the
+    /// envelope; `null` until it has been moved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub envelope_marker: Option<Ticks>,
+    /// The breakpoint selected in the Envelope Editor (WP-6.26), if any:
+    /// `clip.select_envelope_breakpoint` sets it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub envelope_breakpoint: Option<Ticks>,
+}
+
+/// Arguments of `clip_view.foreground`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ForegroundArgs {
+    /// The shown clip to make the foreground clip.
+    pub clip: ClipId,
+}
+
+/// Arguments of `clip_view.select_loop_bars`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SelectLoopBarsArgs {
+    /// The clips whose loop bars to select; empty selects none.
+    #[serde(default)]
+    pub clips: Vec<ClipId>,
+    /// Add them to the selected bars, or take out those already selected,
+    /// as Cmd-click does, instead of replacing the selection.
+    #[serde(default)]
+    pub toggle: bool,
+}
+
+/// Arguments of `clip_view.focus_mode`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FocusModeArgs {
+    /// Whether Focus Mode ends up on; left out, it switches.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on: Option<bool>,
+}
+
+/// Arguments of `clip.duplicate_loop`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DuplicateLoopArgs {
+    /// The MIDI clips. Left out, the clips of the selected loop bars, or
+    /// the clip shown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clips: Option<Vec<ClipId>>,
 }
 
 /// Adds the Clip View's note-editing commands to a registry.
@@ -924,6 +1244,44 @@ fn specs() -> Vec<CommandSpec> {
             .binding(Binding::new("S-NOTE-001").arg("select", "all"))
             .binding(Binding::new("S-EDIT-009").arg("select", "all"))
             .args::<SelectNotesArgs>()
+            .result::<ClipViewState>(),
+        CommandSpec::new(NOTE_FILTERS, "Note Filters")
+            .description(
+                "Find and Select Notes. Shows or hides the filter bar (`visible`, or `toggle`, \
+                 as Cmd-Shift-F does), chooses the filter whose controls it shows (`shown`), \
+                 and sets the controls and Invert of any filter (`pitch`, `time`, `chance`, \
+                 `condition`, `count`, `duration`, `scale`, `velocity`). Setting a control, or \
+                 Invert, switches that filter on, and while any filter is on the selection is \
+                 the notes in the clip's span that every filter that is on lets through, worked \
+                 out again each time, with the time selection following it. `select` presses \
+                 the Select button of each filter it lists: it is switched on and the notes are \
+                 selected again. `off` switches filters off, keeping their settings; a click in \
+                 the note area switches all eight off. Time's Start, Length and Repeat are in \
+                 beats of the clip's time signature, to a hundredth, Start from 1; a Repeat of \
+                 `null` is one bar. Duration's Min and Max are in beats too, a Max of `null` \
+                 being the clip's span. Chance is in percent. Moving Min past Max takes Max \
+                 with it, and the other way round. The settings belong to the editor: they are \
+                 kept while the app runs, every filter is switched off when the editor shows \
+                 another clip, and none of it is saved with the set or is an undo step. The \
+                 result is every filter's settings and the selected notes.",
+            )
+            .permission(Permission::Read)
+            .contexts([NoteEditor, NoteSelectionContext])
+            .binding(Binding::new("S-NOTE-037").arg("toggle", true))
+            .args::<NoteFiltersArgs>()
+            .result::<NoteFiltersResult>(),
+        CommandSpec::new(INVERT_SELECTION, "Invert Selection")
+            .description(
+                "Selects every note in the clip's span that was not selected and deselects \
+                 those that were, as Edit \u{25b8} Invert Selection does (Cmd-Shift-A, \
+                 Ctrl-Shift-A on Windows). The time selection follows the new selection. It \
+                 needs a clip that holds notes, is never an undo step, and changes nothing \
+                 in the set.",
+            )
+            .permission(Permission::Read)
+            .contexts([NoteEditor, NoteSelectionContext])
+            .binding("S-NOTE-034")
+            .args::<InvertSelectionArgs>()
             .result::<ClipViewState>(),
         edit(
             ADD_NOTE,
@@ -1091,6 +1449,35 @@ fn specs() -> Vec<CommandSpec> {
         )
         .binding("S-NOTE-041")
         .args::<DeactivateArgs>(),
+        edit(
+            GROUP,
+            "Group Notes",
+            Permission::Edit,
+            "Puts notes (`notes`, or the selected notes) in a new probability group of \
+             `kind`: `play_all` plays all of its notes or none, `play_one` plays one of them, \
+             chosen evenly. Left out, `kind` is the one made last in this session, `play_all` \
+             until one is chosen. Notes leave the group they were in, a group left with fewer \
+             than two notes ends, and the new group's chance is that of its first note in the \
+             clip's order, which every note of it takes. Naming every note of one group \
+             changes its kind. Refused with fewer than two notes. One undo step, named Group \
+             Notes, or Change Group when it changes one group's kind; the notes stay \
+             selected. Read the groups back from the clip's `data.midi.groups` and each note's \
+             `group`.",
+        )
+        .binding("S-NOTE-031")
+        .args::<GroupNotesArgs>(),
+        edit(
+            UNGROUP,
+            "Ungroup Notes",
+            Permission::Edit,
+            "Takes notes (`notes`, or the selected notes) out of their probability groups, \
+             each keeping its group's chance as its own; a group left with fewer than two \
+             notes ends, and naming every note of a group ends it. One undo step, named \
+             Ungroup Notes; the notes stay selected. Read the groups back from the clip's \
+             `data.midi.groups` and each note's `group`.",
+        )
+        .binding("S-NOTE-032")
+        .args::<UngroupNotesArgs>(),
         CommandSpec::new(COPY, "Copy Notes")
             .description(
                 "Copies notes (`notes`, or the selected notes, or with none selected the notes \
@@ -1137,6 +1524,118 @@ fn specs() -> Vec<CommandSpec> {
         )
         .binding("S-EDIT-004")
         .args::<DuplicateNotesArgs>(),
+        CommandSpec::new(FOREGROUND, "Foreground Clip")
+            .description(
+                "Makes one of the clips the note editor shows the foreground clip, as clicking \
+                 its note or its loop bar does: the expression lanes and the footer edit its \
+                 notes alone, and with Focus Mode on it is the active clip. Changes only the \
+                 view: it isn't saved with the set and isn't an undo step. The result is the \
+                 Clip View's state.",
+            )
+            .permission(Permission::Read)
+            .contexts([NoteEditor, NoteSelectionContext])
+            .args::<ForegroundArgs>()
+            .result::<ClipViewState>(),
+        CommandSpec::new(SELECT_LOOP_BARS, "Select Loop Bars")
+            .description(
+                "Selects the loop bars above the note editor of the given clips, in place of \
+                 the selected ones, or with `toggle` adds each to the selection or takes it \
+                 out, as Cmd-click does (Ctrl-click on Windows). The last clip given becomes \
+                 the foreground clip. With Focus Mode on only one bar can be selected. \
+                 Changes only the view: it isn't an undo step. The result is the Clip View's \
+                 state.",
+            )
+            .permission(Permission::Read)
+            .contexts([NoteEditor, NoteSelectionContext])
+            .args::<SelectLoopBarsArgs>()
+            .result::<ClipViewState>(),
+        CommandSpec::new(FOCUS_MODE, "Focus Mode")
+            .description(
+                "Switches Focus Mode (N, or the Focus button): a tap switches it, and holding \
+                 N switches it while it's held. It acts while the note editor shows several \
+                 clips: with it on, edits, drawing and the filters reach the foreground clip \
+                 alone, and the others show grey. It is off when the app starts and isn't \
+                 saved or an undo step. `on` says which way; left out, it switches. The result \
+                 is the Clip View's state.",
+            )
+            .permission(Permission::Read)
+            .contexts([NoteEditor, NoteSelectionContext])
+            .binding("S-NOTE-040")
+            .args::<FocusModeArgs>()
+            .result::<ClipViewState>(),
+        CommandSpec::new(DUPLICATE_LOOP, "Duplicate Loop")
+            .description(
+                "Doubles the loop brace of each MIDI clip (`clips`, or the clips of the \
+                 selected loop bars, or the clip shown) and copies the notes inside it into \
+                 the new half; notes after the loop's end move later with it, keeping their \
+                 distance from the end. Cmd-D (Ctrl-D) with the loop brace or loop bars \
+                 selected, and Duplicate in a loop bar's menu, run it. A clip whose loop \
+                 would reach past the clip's end is refused. One undo step, named Duplicate \
+                 Loop.",
+            )
+            .permission(Permission::Edit)
+            .contexts([LoopBrace])
+            .binding("S-LOOP-012")
+            .args::<DuplicateLoopArgs>()
+            .result::<NoteEditResult>(),
+        CommandSpec::new(SET_PREVIEW, "MIDI Note Editor Preview")
+            .description(
+                "Sets the MIDI Note Editor's Preview switch (`on`), the one above the piano \
+                 ruler and Options \u{25b8} MIDI Note Editor Preview: with it on, clicking a key, \
+                 drawing, clicking and keyboard-selecting a note, and dragging notes to a new \
+                 pitch play into the clip's track, and an armed track can be step-recorded. \
+                 Left out, `on` flips the switch. It is one switch for every MIDI clip, off in \
+                 a new install and kept between launches as a preference; it is never an undo \
+                 step and changes nothing in the set. Switching it off ends the previews \
+                 sounding.",
+            )
+            .permission(Permission::Edit)
+            .contexts([Global, ClipView, NoteEditor, NoteSelectionContext])
+            .args::<SetPreviewArgs>()
+            .result::<ClipViewState>(),
+        CommandSpec::new(PREVIEW_NOTE, "Preview Note")
+            .description(
+                "Plays a note on the track of a MIDI clip (`clip`, or the one the Clip View \
+                 shows), through its devices and mixer, whether or not the song plays and \
+                 whether or not the track is armed or monitoring: `on` presses it (`velocity`, \
+                 100 unless given) and a later call with `on` false releases it. A press with \
+                 no release plays until the release, so an agent that presses must release. \
+                 Needs the Preview switch on. It changes nothing in the set and is never an \
+                 undo step.",
+            )
+            .permission(Permission::Edit)
+            .contexts([Global, ClipView, NoteEditor, NoteSelectionContext])
+            .args::<PreviewNoteArgs>()
+            .result::<ClipViewState>(),
+        edit(
+            STEP_RECORD,
+            "Step Record",
+            Permission::Edit,
+            "Step-records at the insert marker of a MIDI clip while its track is armed, Preview \
+             is on and the transport is stopped. Forward (Right): each held key (`held`, or \
+             the keys held on the track's MIDI input) is added at the insert marker, one grid \
+             step long at its velocity, and the marker moves one step on; held keys that this \
+             stepping just added are made one step longer instead, and a key let go is left as \
+             it is. Back (`back`, Left): the held notes just added are made one step shorter, a \
+             note left with no length is removed, and the marker moves one step back. With \
+             nothing held, the marker moves a step and leaves a rest. No record quantisation \
+             applies. One undo step, `Step Record`.",
+        )
+        .args::<StepRecordArgs>()
+        .result::<StepRecordResult>(),
+        CommandSpec::new(STEP_INPUT_MODE, "Step Input Mode")
+            .description(
+                "Gets the editor ready for step recording: arms the track of the clip the \
+                 Clip View shows (as the track's arm button does), moves the keyboard focus to \
+                 the Clip View, and switches the computer MIDI keyboard to the other state. It \
+                 is a command, not a switch, and is available while the editor shows a MIDI \
+                 clip. Arming is an undo step, as arming is.",
+            )
+            .permission(Permission::Edit)
+            .contexts([Global, ClipView, NoteEditor, NoteSelectionContext])
+            .binding("S-NOTE-044")
+            .args::<NoArgs>()
+            .result::<ClipViewState>(),
         CommandSpec::new(SPLIT, "Split Note(s)")
             .description(
                 "Splits notes at ticks, as holding E and clicking a note, or Cmd-E (Ctrl-E) \
@@ -1261,7 +1760,15 @@ mod tests {
         assert_eq!(class(RESIZE_NOTES), Some(Permission::Edit));
         assert_eq!(class(QUANTIZE_NOTES), Some(Permission::Edit));
         // The value commands the lanes, the footer and the keys run.
-        for id in [SET_VALUE, RAMP_VALUE, ADJUST_VALUE, RANDOMIZE, DEACTIVATE] {
+        for id in [
+            SET_VALUE,
+            RAMP_VALUE,
+            ADJUST_VALUE,
+            RANDOMIZE,
+            DEACTIVATE,
+            GROUP,
+            UNGROUP,
+        ] {
             assert_eq!(class(id), Some(Permission::Edit), "{id}");
         }
         // The note clipboard: copying changes nothing, cutting removes work.
@@ -1269,6 +1776,12 @@ mod tests {
         assert_eq!(class(CUT), Some(Permission::Destructive));
         assert_eq!(class(PASTE), Some(Permission::Edit));
         assert_eq!(class(DUPLICATE), Some(Permission::Edit));
+        // The Preview switch, a preview, step recording and Step Input Mode
+        // (step-recording R13).
+        for id in [SET_PREVIEW, PREVIEW_NOTE, STEP_RECORD, STEP_INPUT_MODE] {
+            assert_eq!(class(id), Some(Permission::Edit), "{id}");
+        }
+        assert!(handles(STEP_RECORD) && !handles(SET_PREVIEW));
         // The Edit menu's clipboard rows run the note commands in the note
         // editor (S-EDIT-001 to S-EDIT-005).
         for (id, shortcut) in [

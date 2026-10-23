@@ -21,6 +21,10 @@
 //! - [`automation`]: the Arrangement's automation editing commands
 //!   (WP-6.25): moving the breakpoints of an envelope, the clipboard of
 //!   envelope shapes, and the edit commands that act on them.
+//! - [`envelope_keys`]: editing envelopes from the keyboard (WP-6.26): the
+//!   insert marker along an envelope, and making, selecting, moving and
+//!   deleting its breakpoints, in the Arrangement's automation lanes and the
+//!   Clip View's Envelope Editor.
 //! - [`groove`]: the grooves' commands that need the shell (WP-6.19): loading
 //!   and saving groove files, extracting, committing, a groove made into a
 //!   clip, and the pool query.
@@ -53,6 +57,8 @@
 //!   what it lists, replacing a file, and the set's backups and copies.
 //! - [`bounce`]: bouncing tracks and pasting bounced audio (`track.bounce_*`,
 //!   WP-4.15).
+//! - [`comping`]: inserting and duplicating take lanes and building a comp
+//!   from them (`take_lane.insert`, `take_lane.copy_to_main_lane`, WP-6.21).
 //! - [`midi_files`]: importing and exporting Standard MIDI Files
 //!   (`midi.import_file`, `midi.export_clip`, WP-2.21).
 //! - [`midi_io`]: MIDI ports and the computer MIDI keyboard (`midi.ports`,
@@ -67,6 +73,7 @@
 //!   (`clip.crop`, `arrangement.consolidate*`, WP-4.13).
 //! - [`audio_panel`]: the Audio Utilities panel's own commands
 //!   (`clip.edit_sample`, `clip.replace_sample`, WP-4.10b).
+//! - [`tunings`]: tuning systems (`tuning.load`, `tuning.state`, WP-6.9).
 //! - [`search`]: the search field's commands (`search.*`, WP-6.42): command
 //!   search and track search.
 //!
@@ -87,10 +94,12 @@ pub mod bounce;
 pub mod browser;
 pub mod capture_midi;
 pub mod commands;
+pub mod comping;
 pub mod context_menus;
 pub mod dawproject;
 pub mod devices;
 pub mod editing;
+pub mod envelope_keys;
 pub mod export;
 pub mod file_manager;
 pub mod freeze;
@@ -103,6 +112,7 @@ pub mod midi_io;
 pub mod mixer_view;
 pub mod modulation;
 pub mod multisampler;
+pub mod note_filters;
 pub mod notes;
 pub mod pads;
 pub mod perception;
@@ -118,6 +128,7 @@ pub mod slice;
 pub mod stems;
 pub mod tracks;
 pub mod transport;
+pub mod tunings;
 pub mod warping;
 
 use bl_commands::{RegisterError, Registry};
@@ -134,6 +145,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     arrangement::register(registry)?;
     editing::register(registry)?;
     automation::register(registry)?;
+    envelope_keys::register(registry)?;
     groove::register(registry)?;
     locator::register(registry)?;
     notes::register(registry)?;
@@ -163,8 +175,10 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     audio_panel::register(registry)?;
     freeze::register(registry)?;
     bounce::register(registry)?;
+    comping::register(registry)?;
     slice::register(registry)?;
     warping::register(registry)?;
     scales::register(registry)?;
+    tunings::register(registry)?;
     search::register(registry)
 }

@@ -16,11 +16,13 @@ use std::sync::Arc;
 
 use bl_core::time::{Frames, SampleRate, TempoMap, Ticks};
 use bl_model::{
-    Clip, ClipData, ClipId, GroovePlay, GroovePool, Note, SceneId, Track, TrackId, clip_seed, noise,
+    Clip, ClipData, ClipId, GroovePlay, GroovePool, GroupKind, MidiData, Note, Scale, SceneId,
+    Track, TrackId, clip_seed, noise,
 };
 
 use crate::midi_controllers::{PlacedController, Sounding, Stretch, play_expressions};
 use crate::node::{Block, Node, NodeConfig, NodeData, NodeEvent, NoteEvent, NoteKind, ParamValue};
+use crate::scales::{ScaleRuns, Span, TrackScale};
 
 /// Simple deterministic xorshift64* pseudo-random number generator.
 /// Zero allocations, real-time safe.
@@ -96,11 +98,75 @@ pub struct PlacedMidiClip {
     pub loop_start: Ticks,
     pub loop_end: Option<Ticks>,
     pub notes: Vec<Note>,
+    /// The clip's probability groups (note-editing R26 to R29), made here so
+    /// the audio thread allocates nothing to roll them.
+    pub groups: Vec<PlacedGroup>,
+    /// For each of `notes`, the place in `groups` of the group it belongs
+    /// to.
+    pub note_groups: Vec<Option<u32>>,
     /// The clip's MIDI controller envelopes (WP-2.29).
     pub controllers: Vec<PlacedController>,
     /// The clip's groove at the set's Global Amount, if it has one that
     /// changes anything (the grooves spec, R6 to R11).
     pub groove: Option<Arc<GroovePlay>>,
+    /// The clip's scale, which the devices on its track read while it plays
+    /// (the scales spec, R15). It changes none of the clip's notes.
+    pub scale: Scale,
+}
+
+/// A probability group of a placed clip: its kind and the places of its
+/// notes in the clip's notes, which are in order of start.
+#[derive(Clone, Debug)]
+pub struct PlacedGroup {
+    /// The group's ID in the clip.
+    pub id: u32,
+    pub kind: GroupKind,
+    pub members: Vec<u32>,
+}
+
+impl PlacedGroup {
+    /// The groups of `midi` among `notes`, the clip's notes that play, and
+    /// each note's group.
+    fn of(midi: &MidiData, notes: &[Note]) -> (Vec<Self>, Vec<Option<u32>>) {
+        let mut groups: Vec<Self> = midi
+            .groups
+            .iter()
+            .map(|g| Self {
+                id: g.id,
+                kind: g.kind,
+                members: Vec::new(),
+            })
+            .collect();
+        let note_groups = notes
+            .iter()
+            .enumerate()
+            .map(|(place, note)| {
+                let at = groups.iter().position(|g| Some(g.id) == note.group)?;
+                groups[at].members.push(place as u32);
+                Some(at as u32)
+            })
+            .collect();
+        (groups, note_groups)
+    }
+}
+
+/// What a pass's rolls depend on besides the clip (note-editing R26, R29).
+#[derive(Clone, Copy, Debug)]
+struct Roll {
+    /// Differs for each play from the Start marker, launch and transport
+    /// start, and follows the player's seed.
+    run: u64,
+    /// The frame this run started playing the Arrangement from: a Play One
+    /// group chooses among the notes from there on. `None` for a Session
+    /// clip, which plays whole from its launch.
+    entry: Option<i64>,
+}
+
+/// The generator for one group in one pass: a pass rolls its group once,
+/// whichever note reaches it first, and a render doesn't depend on the
+/// block size.
+fn group_rng(roll: Roll, clip: ClipId, group: u32, pass: u64) -> Rng {
+    Rng::new(noise(roll.run ^ clip_seed(clip), pass, u64::from(group)).to_bits())
 }
 
 /// The list of MIDI clips for a track, sent to [`MidiClipPlayer`] as [`NodeData`].
@@ -130,7 +196,7 @@ impl MidiClipList {
                 .map(Arc::new)
         };
         let mut clips = Vec::new();
-        for clip in track.clips() {
+        for clip in track.played_clips() {
             if clip.mute {
                 continue;
             }
@@ -142,6 +208,7 @@ impl MidiClipList {
             }
             let mut notes: Vec<Note> = midi.notes.iter().filter(|n| !n.mute).cloned().collect();
             notes.sort_by_key(|n| n.start);
+            let (groups, note_groups) = PlacedGroup::of(midi, &notes);
             clips.push(PlacedMidiClip {
                 id: clip.id,
                 scene: None,
@@ -154,8 +221,11 @@ impl MidiClipList {
                 loop_start: midi.loop_start,
                 loop_end: midi.loop_end,
                 notes,
+                groups,
+                note_groups,
                 controllers: PlacedController::of(clip),
                 groove: groove(clip),
+                scale: clip.scale,
             });
         }
         // The track's Session slot clips (WP-3.2): they play only when the
@@ -169,6 +239,7 @@ impl MidiClipList {
             }
             let mut notes: Vec<Note> = midi.notes.iter().filter(|n| !n.mute).cloned().collect();
             notes.sort_by_key(|n| n.start);
+            let (groups, note_groups) = PlacedGroup::of(midi, &notes);
             clips.push(PlacedMidiClip {
                 id: clip.id,
                 scene: Some(scene),
@@ -181,8 +252,11 @@ impl MidiClipList {
                 loop_start: midi.loop_start,
                 loop_end: midi.loop_end,
                 notes,
+                groups,
+                note_groups,
                 controllers: PlacedController::of(clip),
                 groove: groove(clip),
+                scale: clip.scale,
             });
         }
         clips.sort_by_key(|c| c.start);
@@ -214,6 +288,7 @@ fn play_session_clip(
     to_frame: i64,
     tempo: &TempoMap,
     sample_rate: SampleRate,
+    roll: Roll,
     rng: &mut Rng,
     next_note_id: &mut u32,
     scratch_notes: &mut Vec<NoteEvent>,
@@ -251,6 +326,7 @@ fn play_session_clip(
             to_frame,
             tempo,
             sample_rate,
+            roll,
             rng,
             next_note_id,
             scratch_notes,
@@ -301,6 +377,7 @@ fn play_session_clip(
                 to_frame,
                 tempo,
                 sample_rate,
+                roll,
                 rng,
                 next_note_id,
                 scratch_notes,
@@ -362,7 +439,23 @@ pub struct MidiClipPlayer {
     /// (WP-3.6).
     taken_over: bool,
     rng: Rng,
+    /// The seed `rng` was made with, which the probability groups' rolls
+    /// follow too.
+    seed: u64,
+    /// Counts the starts of playback, locates and returns to the
+    /// Arrangement: each is a new pass for the Arrangement's probability
+    /// groups (note-editing R26).
+    epoch: u64,
+    /// Counts the Session launches, each a new pass for the launched clip's
+    /// groups, which a locate doesn't break.
+    launches: u64,
+    /// The frame the last start or locate played from.
+    entry_frame: i64,
     next_note_id: u32,
+    /// What the player keeps of its track's scale between blocks, and the
+    /// scale it worked out for the last block (the scales spec, R15).
+    scale: TrackScale,
+    runs: Option<ScaleRuns>,
 }
 
 impl MidiClipPlayer {
@@ -379,8 +472,40 @@ impl MidiClipPlayer {
             session: None,
             taken_over: false,
             rng: Rng::new(0x853c_49e6_748f_ea9b),
+            seed: 0x853c_49e6_748f_ea9b,
+            epoch: 0,
+            launches: 0,
+            entry_frame: 0,
             next_note_id: 1,
+            scale: TrackScale::default(),
+            runs: None,
         }
+    }
+
+    /// Works out the track's scale over `block` from the clips it plays.
+    fn work_out_scale(&mut self, block: &Block<'_>) {
+        let Self {
+            clips, scale, runs, ..
+        } = self;
+        let (rate, tempo) = (block.sample_rate(), block.tempo());
+        *runs = Some(
+            match clips
+                .as_ref()
+                .and_then(|d| d.downcast_ref::<MidiClipList>())
+            {
+                Some(list) => {
+                    let frame = |ticks| tempo.ticks_to_frames(ticks, rate).get();
+                    let spans = list.clips.iter().map(|clip| Span {
+                        scene: clip.scene,
+                        start: frame(clip.start),
+                        end: frame(clip.start + clip.length),
+                        scale: clip.scale,
+                    });
+                    scale.runs(list.track, spans, block)
+                }
+                None => ScaleRuns::of(block.set_scale()),
+            },
+        );
     }
 
     /// Sets whether the clips are audible (Monitor In silences them).
@@ -393,13 +518,14 @@ impl MidiClipPlayer {
     /// Configures the PRNG seed.
     #[must_use]
     pub fn with_seed(mut self, seed: u64) -> Self {
-        self.rng = Rng::new(seed);
+        self.set_seed(seed);
         self
     }
 
     /// Sets the PRNG seed in place.
     pub fn set_seed(&mut self, seed: u64) {
         self.rng = Rng::new(seed);
+        self.seed = seed;
     }
 
     fn send_scratch_notes(&mut self, block: &mut Block<'_>) {
@@ -449,6 +575,54 @@ fn stop_clip_sounding(
     }
 }
 
+/// Whether the note at `index`, in `group`, plays in the pass of `content`
+/// (the clip's contents the pass plays), which began at `song_start`:
+/// every note of the pass rolls the group's chance the same, and a Play
+/// One group's one note is chosen from those the pass plays from where it
+/// was entered.
+#[allow(clippy::too_many_arguments)]
+fn group_plays(
+    clip: &PlacedMidiClip,
+    group: &PlacedGroup,
+    index: usize,
+    content: (Ticks, Ticks),
+    song_start: Ticks,
+    pass: u64,
+    roll: Roll,
+    tempo: &TempoMap,
+    sample_rate: SampleRate,
+) -> bool {
+    let mut rng = group_rng(roll, clip.id, group.id, pass);
+    let chance = clip.notes[index].probability;
+    if chance < 1.0 && (chance <= 0.0 || rng.next_f64() > chance) {
+        return false;
+    }
+    if group.kind == GroupKind::PlayAll {
+        return true;
+    }
+    // shortcut: a groove's small shift of a note isn't counted in whether
+    // the pass still plays it; do so if a groove is heard to change a choice.
+    let plays = |place: &&u32| {
+        let note = &clip.notes[**place as usize];
+        note.start >= content.0
+            && note.start < content.1
+            && roll.entry.is_none_or(|entry| {
+                tempo
+                    .ticks_to_frames(song_start + (note.start - content.0), sample_rate)
+                    .get()
+                    >= entry
+            })
+    };
+    let count = group.members.iter().filter(plays).count() as u64;
+    count > 0
+        && group
+            .members
+            .iter()
+            .filter(plays)
+            .nth((rng.next_u64() % count) as usize)
+            == Some(&(index as u32))
+}
+
 #[allow(clippy::too_many_arguments)]
 fn process_clip_segment(
     clip: &PlacedMidiClip,
@@ -460,6 +634,7 @@ fn process_clip_segment(
     to_frame: i64,
     tempo: &TempoMap,
     sample_rate: SampleRate,
+    roll: Roll,
     rng: &mut Rng,
     next_note_id: &mut u32,
     scratch_notes: &mut Vec<NoteEvent>,
@@ -529,9 +704,29 @@ fn process_clip_segment(
             &mut *rng
         };
 
-        // Probability check
-        if note.probability < 1.0 && (note.probability <= 0.0 || rng.next_f64() > note.probability)
-        {
+        // Spec: note-editing R26 to R29. A grouped note's chance is its
+        // group's, rolled once for the pass.
+        let plays = match clip.note_groups[index] {
+            Some(group) => {
+                let group = &clip.groups[group as usize];
+                group_plays(
+                    clip,
+                    group,
+                    index,
+                    (segment_clip_start, segment_clip_end),
+                    segment_song_start,
+                    pass,
+                    roll,
+                    tempo,
+                    sample_rate,
+                )
+            }
+            None => {
+                note.probability >= 1.0
+                    || (note.probability > 0.0 && rng.next_f64() <= note.probability)
+            }
+        };
+        if !plays {
             continue;
         }
 
@@ -610,6 +805,7 @@ fn process_clip_segment(
 
 impl Node for MidiClipPlayer {
     fn process(&mut self, block: &mut Block<'_>) {
+        self.work_out_scale(block);
         for event in block.events() {
             if event.param == crate::clips::player::AUDIBLE {
                 self.audible = match event.value {
@@ -677,6 +873,10 @@ impl Node for MidiClipPlayer {
                     });
                 }
             }
+        }
+        if self.last_position != Some(from_frame) {
+            self.epoch += 1;
+            self.entry_frame = from_frame;
         }
         self.last_position = Some(to_frame);
 
@@ -821,7 +1021,15 @@ impl Node for MidiClipPlayer {
                 stop_clip_sounding(old, 0, &mut self.sounding, &mut self.scratch_notes);
             }
             self.session = launched_id;
+            self.launches += 1;
+            // The Arrangement plays again from here.
+            self.epoch += 1;
+            self.entry_frame = from_frame;
         }
+        let arrangement = Roll {
+            run: noise(self.seed, self.epoch, 0).to_bits(),
+            entry: Some(self.entry_frame),
+        };
         if let Some((entry, clip)) = launched {
             let launch_tick = tempo.frames_to_ticks(Frames(entry.frame.get()), sample_rate);
             play_session_clip(
@@ -831,6 +1039,10 @@ impl Node for MidiClipPlayer {
                 to_frame,
                 tempo,
                 sample_rate,
+                Roll {
+                    run: noise(self.seed, self.launches, 1).to_bits(),
+                    entry: None,
+                },
                 &mut self.rng,
                 &mut self.next_note_id,
                 &mut self.scratch_notes,
@@ -884,6 +1096,7 @@ impl Node for MidiClipPlayer {
                         to_frame,
                         tempo,
                         sample_rate,
+                        arrangement,
                         &mut self.rng,
                         &mut self.next_note_id,
                         &mut self.scratch_notes,
@@ -925,6 +1138,7 @@ impl Node for MidiClipPlayer {
                             to_frame,
                             tempo,
                             sample_rate,
+                            arrangement,
                             &mut self.rng,
                             &mut self.next_note_id,
                             &mut self.scratch_notes,
@@ -981,6 +1195,7 @@ impl Node for MidiClipPlayer {
                                     to_frame,
                                     tempo,
                                     sample_rate,
+                                    arrangement,
                                     &mut self.rng,
                                     &mut self.next_note_id,
                                     &mut self.scratch_notes,
@@ -1019,5 +1234,9 @@ impl Node for MidiClipPlayer {
 
     fn receive_data(&mut self, data: NodeData) {
         self.clips = Some(data);
+    }
+
+    fn track_scale(&self) -> Option<ScaleRuns> {
+        self.runs
     }
 }

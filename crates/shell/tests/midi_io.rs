@@ -927,6 +927,54 @@ fn learn_sets_stacks_shifts_from_the_chord_played() {
     assert_eq!(shifts(&rig), fixed);
 }
 
+// Spec: midi-chord R17
+#[test]
+fn learn_counts_degrees_with_use_current_scale_on() {
+    use bl_devices::stack::{LEARN, STACK, USE_SCALE, shift};
+
+    let mut rig = Rig::new();
+    let track = rig.track;
+    rig.run("arrangement.select_tracks", json!({ "tracks": [track] }));
+    let added = rig.run(
+        "device.add",
+        json!({ "device": {
+            "kind": DeviceKind::Native { device_type: STACK.to_owned() },
+            "name": "Chord",
+            "role": DeviceRole::MidiEffect,
+        } }),
+    );
+    let device = added["device"].clone();
+    rig.run(
+        "song.set_scale",
+        json!({ "enabled": true, "root": 0, "name": "major" }),
+    );
+    for param in [USE_SCALE, LEARN] {
+        rig.run(
+            "device.set_param",
+            json!({ "device": device, "param": param.0, "value": 1.0 }),
+        );
+    }
+    rig.run("midi.toggle_computer_keyboard", json!({ "on": true }));
+    rig.shell.poll();
+    for key in ["A", "G", "H", "J"] {
+        rig.run(
+            "midi.computer_keyboard_key",
+            json!({ "key": key, "pressed": true }),
+        );
+        rig.shell.poll();
+    }
+    let params = &rig
+        .shell
+        .editor()
+        .document()
+        .device(serde_json::from_value(device).unwrap())
+        .unwrap()
+        .params;
+    let learned: Vec<f64> = (0..3).map(|n| params[&shift(n)]).collect();
+    // G, A and B are four, five and six degrees above C in C Major.
+    assert_eq!(learned, [4.0, 5.0, 6.0]);
+}
+
 // Spec: midi-cc-sender R6, R7
 #[test]
 fn learn_assigns_an_incoming_controller_to_a_dial() {

@@ -16,7 +16,8 @@
 //! (WP-5.13) added a multisampler's layers and what its views show; a set
 //! saved before it opens with none. Version 7 (T197) renamed the native
 //! devices to Live's names; a set saved before it opens with the new names.
-//! Version 8 (WP-6.17) made a note's pressure an envelope of breakpoints; a
+//! Version 8 (WP-6.21) gave take lanes and their clips IDs. Version 9
+//! (WP-6.17) made a note's pressure an envelope of breakpoints; a
 //! set saved before it opens with each pressure point a step.
 //! `schema-0-fake.json` is an invented version 0, with a migration to
 //! version 1 defined below, to show the scaffold carries an old file through
@@ -521,6 +522,7 @@ static FAKE_MIGRATIONS: &[Migration] = &[
     MIGRATIONS[4],
     MIGRATIONS[5],
     MIGRATIONS[6],
+    MIGRATIONS[7],
 ];
 
 /// The scaffold migrates an old file: the invented version 0 fixture loads
@@ -591,4 +593,89 @@ fn a_fake_version_0_migrates() {
         matches!(&error, LoadError::Migration { from: 0, message } if message.contains("gain_db")),
         "{error:?}"
     );
+}
+
+// Spec: comping R3. A set saved with WP-2.13's take lanes, whose passes had
+// no IDs, opens with each pass a clip of its lane under a new ID after the
+// set's largest, and each lane with an ID of its own.
+#[test]
+fn a_schema_7_set_with_take_lanes_opens_with_ids_for_its_lanes_and_passes() {
+    let mut value: Value = serde_json::from_slice(&read("schema-7.json")).unwrap();
+    let ids = value["ids"].as_u64().unwrap();
+    let pass = |name: &str, start: i64| {
+        json!({ "name": name, "start": start, "length": 705_600,
+                "data": { "media": "4b".repeat(32), "start": 0.5, "end": 1.5, "gain": 0.7 } })
+    };
+    fn kick(value: &mut Value) -> &mut Value {
+        let group = &mut value["document"]["tracks"][0];
+        group["children"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|track| track["name"] == "Kick")
+            .unwrap()
+    }
+    kick(&mut value)["take_lanes"] = json!([
+        { "name": "Take 1", "clips": [pass("a", 0), pass("b", 705_600)] },
+        { "name": "Take 2", "clips": [pass("c", 0)] },
+    ]);
+    let (project, info) = decode_json(
+        &serde_json::to_vec(&value).unwrap(),
+        &LoadOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(info.schema, 7);
+    let kick = project
+        .document
+        .tracks()
+        .find(|track| track.name() == "Kick")
+        .unwrap();
+    let lanes: Vec<_> = kick.take_lanes().collect();
+    assert_eq!(lanes.len(), 2);
+    assert_eq!(lanes[0].name, "Take 1");
+    assert_eq!(lanes[0].clips.len(), 2);
+    // New IDs, after the set's allocator, in the order they were saved.
+    let new: Vec<u64> = lanes
+        .iter()
+        .flat_map(|lane| {
+            std::iter::once(lane.id.0.get()).chain(lane.clips.iter().map(|c| c.id.0.get()))
+        })
+        .collect();
+    assert_eq!(new, (ids..ids + 5).collect::<Vec<_>>());
+    assert!(
+        project.ids.peek().get() >= ids + 5,
+        "the allocator moved past them"
+    );
+    // A pass plays what it played, as a clip.
+    let second = &lanes[0].clips[1];
+    assert_eq!(
+        (
+            second.name.as_str(),
+            second.start.get(),
+            second.length.get()
+        ),
+        ("b", 705_600, 705_600)
+    );
+    let ClipData::Audio(audio) = &second.data else {
+        panic!("{second:?}");
+    };
+    assert_eq!((audio.start, audio.end, audio.gain), (0.5, Some(1.5), 0.7));
+    assert!(!second.mute);
+    project.document.check_invariants().unwrap();
+
+    // Saved again, it's the current version, and loads back as it is.
+    let saved = encode_json(&project, 8).unwrap();
+    let (again, info) = decode_json(&saved, &LoadOptions::default()).unwrap();
+    assert_eq!(info.schema, SCHEMA_VERSION);
+    assert_eq!(again.document, project.document);
+
+    // An allocator behind the document, which the loader allows, doesn't
+    // hand the passes IDs the set already uses.
+    value["ids"] = json!(1);
+    let (behind, _) = decode_json(
+        &serde_json::to_vec(&value).unwrap(),
+        &LoadOptions::default(),
+    )
+    .unwrap();
+    behind.document.check_invariants().unwrap();
 }

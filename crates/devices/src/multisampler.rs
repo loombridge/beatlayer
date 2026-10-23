@@ -16,7 +16,7 @@ use std::sync::atomic::Ordering::Relaxed;
 
 use bl_core::time::{Frames, SampleRate, TempoMap, Ticks};
 use bl_engine::{
-    Audition, DeviceLayers, DeviceType, LayerSample, NodeConfig, NodeData, NoteEvent,
+    Audition, DeviceLayers, DeviceType, KeyPitches, LayerSample, NodeConfig, NodeData, NoteEvent,
     NoteExpression, NoteKind, Registry,
 };
 use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Widget};
@@ -537,6 +537,9 @@ struct Settings {
     /// The pitch envelope's Amount in semitones.
     pitch_amount: f64,
     bend_range: f64,
+    /// The pitch of every key under the set's tuning (the tunings spec,
+    /// R12; the multisampler spec, R74); filled in by the caller.
+    keys: KeyPitches,
     osc: OscSettings,
     filter: FilterSettings,
     shaper: ShaperSettings,
@@ -1105,6 +1108,9 @@ struct Note {
     /// for (Glide's takeover changes the first).
     key: u8,
     base_key: u8,
+    /// The tuned pitch of the key it was played at (the key's number
+    /// without a tuning): what its voices' pitches were made for.
+    base_pitch: f64,
     velocity: f32,
     release_velocity: f32,
     aftertouch: f32,
@@ -1142,6 +1148,7 @@ impl Note {
             id: 0,
             key: 0,
             base_key: 0,
+            base_pitch: 0.0,
             velocity: 0.0,
             release_velocity: 0.0,
             aftertouch: 0.0,
@@ -1172,7 +1179,7 @@ impl Note {
         s: &Settings,
         ctl: &Controls,
         free: &[f64; 3],
-        (id, key, velocity): (u64, u8, f32),
+        (id, key, tuned, velocity): (u64, u8, f64, f32),
         from: f64,
         seed: u32,
         aftertouch: f32,
@@ -1182,14 +1189,15 @@ impl Note {
         note.id = id;
         note.key = key;
         note.base_key = key;
+        note.base_pitch = tuned;
         note.velocity = velocity;
         note.aftertouch = aftertouch;
         note.pitch = from;
-        note.target = f64::from(key);
-        if s.glide != 0 && s.glide_frames >= 1.0 && from != f64::from(key) {
-            note.glide_step = (f64::from(key) - from) / s.glide_frames;
+        note.target = tuned;
+        if s.glide != 0 && s.glide_frames >= 1.0 && from != tuned {
+            note.glide_step = (tuned - from) / s.glide_frames;
         } else {
-            note.pitch = f64::from(key);
+            note.pitch = tuned;
         }
         note.time_common =
             10f64.powf(s.time) * 2f64.powf(-s.time_key * (f64::from(key) - 60.0) / 12.0);
@@ -1320,9 +1328,22 @@ impl Note {
         // R32 to R36: the pitch, in semitones off the voices' own.
         let l1 = &s.lfos[0];
         let lfo1 = lfo[0][0];
-        let mut delta = (self.pitch - f64::from(self.base_key))
+        // Spec: multisampler R74, tunings R13. Under a tuning the per-note
+        // bend moves the note by steps of the tuning; the wheel's stays in
+        // semitones.
+        let steps = f64::from(self.expr_bend) * s.bend_range;
+        let note_bend = match s
+            .keys
+            .bent(self.base_key, steps)
+            .zip(s.keys.pitch(self.base_key))
+        {
+            Some((bent, at)) if s.keys.is_tuned() && steps != 0.0 => bent - at,
+            _ => steps,
+        };
+        let mut delta = (self.pitch - self.base_pitch)
             + s.tune
-            + f64::from(ctl.bend + self.expr_bend) * s.bend_range
+            + f64::from(ctl.bend) * s.bend_range
+            + note_bend
             + f64::from(mods[dest::PITCH]) * 24.0;
         let env_amount =
             (s.pitch_amount + f64::from(mods[dest::PITCH_ENV]) * 96.0).clamp(-48.0, 48.0);
@@ -1587,6 +1608,8 @@ pub struct Multisampler {
     data: Option<NodeData>,
     /// A click in the Sample tab waiting for the next block (WP-5.15, R54).
     audition: Option<Audition>,
+    /// The pitch of every key under the set's tuning.
+    keys: KeyPitches,
     voices: Vec<Voice>,
     /// How many notes have started: voices are stolen oldest note first.
     counter: u64,
@@ -1616,7 +1639,8 @@ pub struct Multisampler {
     controls: Controls,
     /// Where the free-running LFOs are, 0 to 1 of a cycle (R41).
     free_phase: [f64; 3],
-    /// The key the last note played, where a gliding note starts (R34).
+    /// The tuned pitch of the key the last note played, where a gliding note
+    /// starts (R34).
     last_pitch: Option<f64>,
     /// Whether the transport played in the last stretch.
     was_playing: bool,
@@ -1678,6 +1702,7 @@ impl Multisampler {
             controls: Controls::default(),
             free_phase: [0.0; 3],
             last_pitch: None,
+            keys: KeyPitches::twelve(),
             was_playing: false,
             rate: config.sample_rate.as_f64(),
             index,
@@ -1924,6 +1949,7 @@ impl Multisampler {
             glide_frames: v(GLIDE_TIME) / 1000.0 * hz,
             pitch_amount,
             bend_range: v(BEND_RANGE),
+            keys: KeyPitches::twelve(),
             osc,
             filter,
             shaper,
@@ -2001,6 +2027,17 @@ impl Multisampler {
         let velocity = note.velocity.clamp(0.0, 1.0);
         let vel7 = ((velocity * 127.0).round() as u8).clamp(1, 127);
         let key = note.key;
+        // Spec: multisampler R74. A voice reads its sample at its key's
+        // tuned pitch, and a key past the tuning's range plays nothing; a
+        // click in the Sample tab plays the root key as it is.
+        let tuned = if audition.is_some() {
+            f64::from(key)
+        } else {
+            match s.keys.pitch(key) {
+                Some(tuned) => tuned,
+                None => return,
+            }
+        };
         // R34: Glide's monophonic mode takes the held note over, which goes
         // on from where it is to the new key; a note already released is
         // let go and the new one starts afresh.
@@ -2018,7 +2055,7 @@ impl Multisampler {
             let held = &mut self.notes[usize::from(lane)];
             let old = held.key;
             held.key = key;
-            held.target = f64::from(key);
+            held.target = tuned;
             held.glide_step = if s.glide_frames >= 1.0 {
                 (held.target - held.pitch) / s.glide_frames
             } else {
@@ -2030,22 +2067,22 @@ impl Multisampler {
                     voice.key = key;
                 }
             }
-            self.last_pitch = Some(f64::from(key));
+            self.last_pitch = Some(tuned);
             return;
         }
         self.counter += 1;
         let id = self.counter;
         let from = if s.glide == 2 {
-            self.last_pitch.unwrap_or(f64::from(key))
+            self.last_pitch.unwrap_or(tuned)
         } else {
-            f64::from(key)
+            tuned
         };
-        self.last_pitch = Some(f64::from(key));
+        self.last_pitch = Some(tuned);
         let proto = Note::start(
             s,
             &self.controls,
             &self.free_phase,
-            (id, key, velocity),
+            (id, key, tuned, velocity),
             from,
             self.seed.wrapping_add(id as u32),
             self.controls.pressure,
@@ -2196,7 +2233,7 @@ impl Multisampler {
                     .clamp(1.0, loop_end.max(1.0));
                 loop_end - length
             };
-            let semitones = f64::from(key) - f64::from(layer.root_key) + layer.detune / 100.0;
+            let semitones = tuned - f64::from(layer.root_key) + layer.detune / 100.0;
             let crossfade = (layer.crossfade_ms / 1000.0 * s.rate)
                 .min((loop_end - loop_start) / 2.0)
                 .max(0.0);
@@ -2517,6 +2554,7 @@ impl NativeDevice for Multisampler {
         let rate = audio.sample_rate();
         let mut s = self.settings(params, rate, audio.tempo(), audio.song_position(), playing);
         s.power_loops = !layers.linear_loop_fades;
+        s.keys = self.keys;
         let volume = params.ramp(at(VOLUME));
         let pan = params.ramp(at(PAN));
         if let Some(audition) = self.audition.take() {
@@ -2692,6 +2730,10 @@ impl NativeDevice for Multisampler {
     }
 
     fn receive_data(&mut self, data: NodeData) {
+        if let Some(keys) = data.downcast_ref::<KeyPitches>() {
+            self.keys = *keys;
+            return;
+        }
         if let Some(audition) = data.downcast_ref::<Audition>() {
             self.audition = Some(*audition);
             return;

@@ -204,16 +204,20 @@ pub enum MidiSource {
     MpePort(PortId),
     /// The computer MIDI keyboard.
     ComputerKeyboard,
+    /// A preview of the MIDI Note Editor (Spec: step-recording R2): a note
+    /// played into the chain of the MIDI track with this ID, whatever its
+    /// input and monitoring say. It is neither recorded nor held as a key.
+    Preview(crate::id::Id),
 }
 
 impl MidiSource {
     /// The port the message came from, MPE or not; `None` for the computer
-    /// keyboard.
+    /// keyboard and a preview.
     #[must_use]
     pub const fn port(self) -> Option<PortId> {
         match self {
             Self::Port(port) | Self::MpePort(port) => Some(port),
-            Self::ComputerKeyboard => None,
+            Self::ComputerKeyboard | Self::Preview(_) => None,
         }
     }
 }

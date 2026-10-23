@@ -18,7 +18,7 @@ use serde_json::{Map, Value};
 use crate::error::LoadError;
 
 /// The schema version this build writes, and the newest it can read.
-pub const SCHEMA_VERSION: u32 = 8;
+pub const SCHEMA_VERSION: u32 = 9;
 
 /// The oldest schema version this build can read, through [`MIGRATIONS`].
 pub const OLDEST_SCHEMA_VERSION: u32 = SCHEMA_VERSION - MIGRATIONS.len() as u32;
@@ -78,6 +78,14 @@ pub const MIGRATIONS: &[Migration] = &[
     },
     Migration {
         from: 7,
+        summary: "a take lane has an ID and holds clips, with clip IDs, in place of the recorded \
+                  passes it held, and a track may name the take lane it auditions; each saved \
+                  pass becomes a clip under a new ID, and a lane gets one (the comping spec, \
+                  R3)",
+        apply: passes_become_clips,
+    },
+    Migration {
+        from: 8,
         summary: "a note's pressure is an envelope of breakpoints, beside its new Pitch and Slide \
                   envelopes (the MPE spec, R1 and R2); each pressure point a set saved before \
                   it holds becomes a breakpoint, with one a tick before each later point \
@@ -347,6 +355,84 @@ fn fold_clip(clip: &mut Map<String, Value>, tempo: &TempoMap) -> Result<(), Stri
         );
     }
     clip.remove("offset");
+    Ok(())
+}
+
+/// Version 7 to 8 (WP-6.21): a take lane held recorded passes, which had no
+/// ID, and had no ID itself. Version 8's lane has an ID and holds full
+/// clips. Each lane and each pass is given the next ID after both the set's
+/// allocator and its largest ID (the loader allows an allocator behind the
+/// document), in saved order, and the allocator moves past them, so older
+/// sets play as they did.
+fn passes_become_clips(mut value: Value) -> Result<Value, String> {
+    fn largest_id(value: &Value) -> u64 {
+        match value {
+            Value::Object(map) => map
+                .iter()
+                .map(|(key, v)| match (key.as_str(), v.as_u64()) {
+                    ("id", Some(id)) => id,
+                    _ => largest_id(v),
+                })
+                .max()
+                .unwrap_or(0),
+            Value::Array(items) => items.iter().map(largest_id).max().unwrap_or(0),
+            _ => 0,
+        }
+    }
+    let mut next = value
+        .get("ids")
+        .and_then(Value::as_u64)
+        .ok_or("the set has no ID allocator")?;
+    if let Some(document) = value.get("document") {
+        next = next.max(largest_id(document).saturating_add(1));
+    }
+    let document = value
+        .get_mut("document")
+        .and_then(Value::as_object_mut)
+        .ok_or("the set has no document")?;
+    for list in ["tracks", "returns"] {
+        if let Some(tracks) = document.get_mut(list).and_then(Value::as_array_mut) {
+            for track in tracks {
+                give_ids(track, &mut next)?;
+            }
+        }
+    }
+    if let Some(main) = document.get_mut("main") {
+        give_ids(main, &mut next)?;
+    }
+    value["ids"] = Value::from(next);
+    Ok(value)
+}
+
+/// Gives the take lanes of `track`, and of its children, and their passes
+/// new IDs from `next`.
+fn give_ids(track: &mut Value, next: &mut u64) -> Result<(), String> {
+    let mut issue = || {
+        let id = *next;
+        *next += 1;
+        Value::from(id)
+    };
+    if let Some(lanes) = track.get_mut("take_lanes").and_then(Value::as_array_mut) {
+        for lane in lanes.iter_mut().filter_map(Value::as_object_mut) {
+            lane.insert("id".to_owned(), issue());
+            let passes = lane
+                .get_mut("clips")
+                .and_then(Value::as_array_mut)
+                .ok_or("a take lane's passes aren't a list")?;
+            for pass in passes.iter_mut().filter_map(Value::as_object_mut) {
+                pass.insert("id".to_owned(), issue());
+                pass.insert("mute".to_owned(), Value::Bool(false));
+                // A pass's data was the audio's fields; a clip's is tagged.
+                let data = pass.remove("data").ok_or("a pass has no data")?;
+                pass.insert("data".to_owned(), serde_json::json!({ "audio": data }));
+            }
+        }
+    }
+    if let Some(children) = track.get_mut("children").and_then(Value::as_array_mut) {
+        for child in children {
+            give_ids(child, next)?;
+        }
+    }
     Ok(())
 }
 

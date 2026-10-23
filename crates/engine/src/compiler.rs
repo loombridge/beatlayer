@@ -84,6 +84,15 @@ impl Update {
 /// start held, unless RAM Mode is on (the multisampler spec, R23).
 const LONG_LAYER_SECONDS: u64 = 10;
 
+/// The tuning `track` plays in `document`: the set's, unless the track
+/// bypasses it (the tunings spec, R14).
+fn tuning_of(document: &Document, track: TrackId) -> Option<&bl_model::Tuning> {
+    document
+        .track(track)
+        .filter(|track| track.plays_tuning())
+        .and_then(|_| document.settings().tuning.as_ref())
+}
+
 /// What a node is, beyond its key: a node migrates only if this matches.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Identity {
@@ -380,6 +389,12 @@ impl Compiler {
             .flat_map(|&clip| [old.clip_track(clip), document.clip_track(clip)])
             .flatten()
             .collect();
+        // Auditioning a take lane swaps the clips the track plays (the
+        // comping spec, R14): its player gets them again.
+        tracks.extend(changes.tracks.keys().copied().filter(|&id| {
+            matches!((old.track(id), document.track(id)),
+                (Some(was), Some(now)) if was.audition() != now.audition())
+        }));
         // Spec: grooves R15. A groove's parameters, the Global Amount and the
         // pool reach the clips that use them as node data: their tracks'
         // lists are sent again, and no program is made.
@@ -389,7 +404,7 @@ impl Compiler {
                     .tracks()
                     .filter(|track| {
                         track
-                            .clips()
+                            .played_clips()
                             .chain(track.slots().map(|(_, clip)| clip))
                             .any(|clip| clip.groove.is_some())
                     })
@@ -428,6 +443,12 @@ impl Compiler {
                 update
                     .transport
                     .push(TransportCommand::SetGrooveAmount(groove_amount(document)));
+            }
+            // Spec: scales R15
+            if old.settings().scale != document.settings().scale {
+                update
+                    .transport
+                    .push(TransportCommand::SetScale(document.settings().scale));
             }
             if old.settings().metronome != document.settings().metronome {
                 update.transport.push(TransportCommand::SetMetronome(
@@ -499,6 +520,19 @@ impl Compiler {
                     NodeKey::Device(id),
                     self.gc.data(crate::node::Articulations(list)),
                 ));
+            }
+        }
+        // Spec: tunings R18. A tuning loaded, changed or removed, a new
+        // reference pitch or range, or a track's Bypass Tuning changed
+        // reaches the track's instruments as node data, with no new
+        // program. A new program already sent the tuned pitches; it only
+        // needs to send twelve equal steps to a track that stopped
+        // playing the tuning.
+        for track in document.tracks() {
+            let id = track.id();
+            let (before, after) = (tuning_of(&old, id), tuning_of(document, id));
+            if before != after && (!recompile || after.is_none()) {
+                self.send_key_pitches(document, id, after.is_some(), &mut update);
             }
         }
         for track in document.tracks() {
@@ -1194,6 +1228,7 @@ impl Compiler {
                 TransportCommand::SetPunch(punch(document)),
                 TransportCommand::SetMetronome(document.settings().metronome),
                 TransportCommand::SetGrooveAmount(groove_amount(document)),
+                TransportCommand::SetScale(document.settings().scale),
             ],
             params: build.restate,
             unhosted: build.unhosted,
@@ -1228,7 +1263,7 @@ impl Compiler {
         for track in document.tracks() {
             let id = track.id();
             let send = if build.new_players.contains(&id) {
-                track.clips().next().is_some() || track.slots().next().is_some()
+                track.played_clips().next().is_some() || track.slots().next().is_some()
             } else {
                 resend.all || resend.tracks.contains(&id)
             };
@@ -1239,8 +1274,40 @@ impl Compiler {
             // automation that drives its parameters: a node with none is
             // new too, and has none anyway.
             self.send_automation(document, id, true, &mut update);
+            // Spec: tunings R18. Every node is new too, so each instrument
+            // on a track that plays the tuning is sent its pitches.
+            self.send_key_pitches(document, id, true, &mut update);
         }
         update
+    }
+
+    /// Sends each native device on `track` the pitch of every key (the
+    /// tunings spec, R12 and R18): the set's tuning's with `tuned`, twelve
+    /// equal steps' without. A device that plays no pitch of its own lets
+    /// go of it.
+    fn send_key_pitches(
+        &self,
+        document: &Document,
+        track: TrackId,
+        tuned: bool,
+        update: &mut Update,
+    ) {
+        let Some(track) = document.track(track) else {
+            return;
+        };
+        let tuning = document.settings().tuning.as_ref().filter(|_| tuned);
+        if tuned && !(tuning.is_some() && track.plays_tuning()) {
+            return;
+        }
+        let pitches = crate::KeyPitches::of(tuning);
+        for device in track
+            .devices_deep()
+            .filter(|device| matches!(device.kind, bl_model::DeviceKind::Native { .. }))
+        {
+            update
+                .data
+                .push((NodeKey::Device(device.id), self.gc.data(pitches)));
+        }
     }
 
     /// Sends each of `track`'s nodes the automation driving its parameters
@@ -1317,6 +1384,12 @@ impl Compiler {
             .is_none_or(|old| groove_amount(old) != groove_amount(document))
         {
             commands.push(TransportCommand::SetGrooveAmount(groove_amount(document)));
+        }
+        if old
+            .as_ref()
+            .is_none_or(|old| old.settings().scale != document.settings().scale)
+        {
+            commands.push(TransportCommand::SetScale(document.settings().scale));
         }
         commands
     }
@@ -3457,6 +3530,8 @@ mod tests {
                 transport: TransportInfo::default(),
                 session: &[],
                 groove_amount: 1.0,
+                set_scale: bl_model::Scale::default(),
+                scale: crate::scales::ScaleRuns::of(bl_model::Scale::default()),
             };
             program.run(None, &mut lane, block);
             program.output(0, 64).to_vec()

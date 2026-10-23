@@ -5,11 +5,12 @@
 //!
 //! Its look is the framework's generic layout: Beatlayer's own.
 
+use bl_engine::scales::OFF;
 use bl_engine::{DeviceType, NoteBuffer, NoteEvent, NoteKind, Registry};
-use bl_model::{Device, DeviceDescription, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
+use bl_model::{Device, DeviceDescription, DeviceRole, ParamDescriptor, ParamId, ParamUnit, Scale};
 
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
-use crate::midi_fx::{Key, Router, seed, value};
+use crate::midi_fx::{Key, Router, scale_choices, scale_named, seed, value};
 
 /// The Arpeggiator device type's ID.
 pub const ARPEGGIATOR: &str = "beatlayer.arpeggiator";
@@ -46,10 +47,23 @@ pub const DECAY: ParamId = ParamId(13);
 pub const TARGET: ParamId = ParamId(14);
 /// Retrigger velocity decay when pattern retriggers.
 pub const RETRIGGER_VELOCITY: ParamId = ParamId(15);
-/// Reads Distance in scale degrees (Phase 6).
+/// Counts Distance in degrees of the device's current scale (the arpeggiator
+/// spec, R16); the title bar draws it.
 pub const USE_SCALE: ParamId = ParamId(16);
 /// Groove chooser (Phase 6).
 pub const GROOVE: ParamId = ParamId(17);
+/// The root of the scale Distance counts degrees of (the arpeggiator spec,
+/// R15). A parameter after Groove, so a device saved before keeps its
+/// numbers.
+pub const ROOT: ParamId = ParamId(18);
+/// Chromatic, which counts Distance in semitones, or a scale of the list,
+/// whose degrees Distance counts from Root.
+pub const SCALE: ParamId = ParamId(19);
+
+/// The pitch classes the Root chooser offers.
+pub const ROOTS: [&str; 12] = [
+    "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
+];
 
 /// The Style choices.
 pub const STYLES: [&str; 18] = [
@@ -179,11 +193,20 @@ pub fn arpeggiator_type() -> DeviceType {
                 .describe("Target velocity reached at the end of the decay time."),
             ParamDescriptor::toggle(RETRIGGER_VELOCITY, "Retrig Vel", true)
                 .describe("Restarts the velocity decay slope when the pattern retriggers."),
-            ParamDescriptor::toggle(USE_SCALE, "Use Current Scale", false)
-                .describe("Transposes Distance in scale degrees. Waits for Phase 6 scales."),
+            ParamDescriptor::toggle(USE_SCALE, "Use Current Scale", false).describe(
+                "Counts Distance in degrees of the current scale instead of the Root and Scale \
+                 chosen here.",
+            ),
             ParamDescriptor::choice(GROOVE, "Groove", &GROOVE_CHOICES, 0)
                 .describe("Applies swing groove to pattern timing. Waits for Phase 6 groove pool."),
-        ]),
+            ParamDescriptor::choice(ROOT, "Root", &ROOTS, 0)
+                .describe("The root of the scale Distance counts degrees of."),
+            ParamDescriptor::choice(SCALE, "Scale", &scale_choices("Chromatic"), 0).describe(
+                "Chromatic counts Distance in semitones; a scale of the list counts it in \
+                 degrees of that scale from Root.",
+            ),
+        ])
+        .with_title_switch(USE_SCALE),
     )
 }
 
@@ -624,6 +647,19 @@ impl NativeDevice for Arpeggiator {
         let repeats = value(params, REPEATS) as i32;
         let distance = value(params, DISTANCE) as i32;
         let steps = value(params, STEPS) as i32;
+        // Spec: arpeggiator R15, R16. Distance counts degrees of the current
+        // scale, or of the Root and Scale chosen here, or semitones for
+        // Chromatic.
+        let use_scale = value(params, USE_SCALE) >= 0.5;
+        let chosen_scale = scale_named(value(params, SCALE) as usize)
+            .map_or(OFF, |name| Scale::new(value(params, ROOT) as u8, name));
+        let scale_at = |audio: &Audio<'_, '_>, offset: u32| {
+            if use_scale {
+                audio.scale_at(offset)
+            } else {
+                chosen_scale
+            }
+        };
 
         let vel_on = value(params, VELOCITY_ON) >= 0.5;
         let decay_ms = value(params, DECAY);
@@ -654,8 +690,11 @@ impl NativeDevice for Arpeggiator {
                     self.handle_note_off(&note, hold_mode);
                 }
                 NoteKind::Expression { .. } => {
-                    // Forward expression to router
-                    self.router.expression(audio, &note);
+                    // Forward expression to router; a bend stays in the
+                    // scale (R17).
+                    let scale = scale_at(audio, note.offset);
+                    self.router
+                        .expression_by(audio, &note, |from, to, bend| scale.bend(from, to, bend));
                 }
                 _ => {
                     audio.send(note);
@@ -725,12 +764,13 @@ impl NativeDevice for Arpeggiator {
                 };
 
                 let channel = self.held[0].channel;
+                let scale = scale_at(audio, offset_in_block);
 
                 if style == 14 {
                     // Chord Trigger: play all held notes simultaneously
                     let trans = self.transposition_step * distance;
                     for h in &self.held {
-                        let final_key = (i32::from(h.key) + trans).clamp(0, 127) as u8;
+                        let final_key = scale.move_off(h.key, trans).clamp(0, 127) as u8;
                         let src_key = Key {
                             channel: h.channel,
                             key: h.key,
@@ -828,7 +868,7 @@ impl NativeDevice for Arpeggiator {
 
                     let chosen = self.scratch_notes[picked_idx.min(self.scratch_notes.len() - 1)];
                     let trans = self.transposition_step * distance;
-                    let final_key = (i32::from(chosen.key) + trans).clamp(0, 127) as u8;
+                    let final_key = scale.move_off(chosen.key, trans).clamp(0, 127) as u8;
 
                     let src_key = Key {
                         channel: chosen.channel,

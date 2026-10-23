@@ -9,10 +9,11 @@ use bl_core::time::{Bpm, Ticks, TimeSignature};
 use bl_model::{
     AudioData, AutomationTarget, Breakpoint, Channel, Clip, ClipData, Command, ContentHash,
     CountIn, CrossfadeAssign, Device, DeviceId, DeviceKind, DeviceOutput, DeviceRole, DeviceWarp,
-    Editor, External, HardwareLatency, Input, LaunchMode, LaunchQuantization, LaunchSettings,
-    MetronomeRhythm, MetronomeSound, MidiData, MidiTo, MixerParam, Monitor, Note, Output, PanMode,
-    ParamId, SendTap, Sidechain, TakeClip, TakeLane, Tap, TonesSettings, TrackDelay, TrackId,
-    TrackKind, TransientEdits, WarpMarker, WarpMode, WarpSettings,
+    Editor, External, GroupKind, HardwareLatency, Input, LaunchMode, LaunchQuantization,
+    LaunchSettings, MetronomeRhythm, MetronomeSound, MidiData, MidiTo, MixerParam, Monitor,
+    NewTakeLane, Note, NoteGroup, Output, PanMode, ParamId, SendTap, Sidechain, TakeClip,
+    TakeClipData, Tap, TonesSettings, TrackDelay, TrackId, TrackKind, TransientEdits, WarpMarker,
+    WarpMode, WarpSettings,
 };
 use bl_project::{Media, Project};
 use bl_shell::Shell;
@@ -45,6 +46,7 @@ fn note(key: u8, start: i64) -> Note {
             value: 64.0,
             bend: 0.0,
         }],
+        group: None,
     }
 }
 
@@ -129,6 +131,21 @@ fn fixture() -> Project {
         Command::SetCueMode { enabled: true },
         Command::SetCueVolume { volume: 0.5 },
         Command::SetReducedLatencyMonitoring { enabled: true },
+        // Spec: tunings R2, R14. A tuning inside the set, with a track that
+        // bypasses it.
+        Command::SetTuning {
+            tuning: bl_model::Tuning::new(
+                "Five".to_owned(),
+                "Five equal steps".to_owned(),
+                (1..=5).map(|i| 240.0 * f64::from(i)).collect(),
+            )
+            .unwrap(),
+            retune: false,
+        },
+        Command::SetTuningBypass {
+            track: pad,
+            bypass: true,
+        },
         // Spec: scales R9.
         Command::SetScale {
             enabled: Some(true),
@@ -315,30 +332,54 @@ fn fixture() -> Project {
         },
     );
 
-    // Two take lanes, the first with two passes.
-    let pass = |name: &str, start: i64, from: f64| TakeClip {
+    // Two take lanes, the first with two clips.
+    let pass = |editor: &mut Editor, name: &str, start: i64, from: f64| TakeClip {
+        id: Some(editor.new_id()),
         name: name.to_owned(),
         start: Ticks(start),
         length: Ticks(BAR),
-        data: AudioData {
+        data: TakeClipData::Audio(AudioData {
             start: from,
             end: Some(from + 2.0),
             gain: 0.7,
             ..AudioData::new(ContentHash([3; 32]))
-        },
+        }),
     };
-    for lane in [
-        TakeLane {
-            name: "Take 1".to_owned(),
-            clips: vec![pass("a", 0, 0.0), pass("b", BAR, 1.0)],
-        },
-        TakeLane {
-            name: "Take 2".to_owned(),
-            clips: vec![pass("c", 0, 0.5)],
-        },
+    let mut lanes = Vec::new();
+    for (name, clips) in [
+        (
+            "Take 1",
+            vec![
+                pass(&mut editor, "a", 0, 0.0),
+                pass(&mut editor, "b", BAR, 1.0),
+            ],
+        ),
+        ("Take 2", vec![pass(&mut editor, "c", 0, 0.5)]),
     ] {
-        apply(&mut editor, Command::AddTakeLane { track: vox, lane });
+        let id = editor.new_id();
+        lanes.push(id);
+        let lane = NewTakeLane {
+            id: Some(id),
+            name: name.to_owned(),
+            clips,
+        };
+        apply(
+            &mut editor,
+            Command::AddTakeLane {
+                track: vox,
+                lane,
+                index: None,
+            },
+        );
     }
+    // The second is auditioned.
+    apply(
+        &mut editor,
+        Command::SetAudition {
+            lane: lanes[1],
+            on: true,
+        },
+    );
 
     // A device with a sidechain, parameters, a window and its own name.
     let compressor: bl_model::DeviceId = editor.new_id();
@@ -587,6 +628,10 @@ fn fixture() -> Project {
             value: 0.5,
         },
     );
+    // Spec: note-editing R30. The first two chords' notes make a group.
+    let mut chords = [note(60, 0), note(64, 176_400), note(67, 352_800)];
+    chords[0].group = Some(1);
+    chords[1].group = Some(1);
     let mut midi = Clip::new(
         editor.new_id(),
         Ticks(0),
@@ -598,7 +643,11 @@ fn fixture() -> Project {
             loop_start: Ticks(176_400),
             loop_end: Some(Ticks(BAR)),
             signature: Some(TimeSignature::new(7, 8).unwrap()),
-            ..MidiData::new([note(60, 0), note(64, 176_400), note(67, 352_800)])
+            groups: vec![NoteGroup {
+                id: 1,
+                kind: GroupKind::PlayOne,
+            }],
+            ..MidiData::new(chords)
         }),
     );
     midi.name = "Chords".to_owned();
@@ -957,6 +1006,7 @@ fn the_fixture_sets_a_non_default_value_of_every_saved_field() {
                 "grooves.auto_load",
                 "grooves.auto_load_groove",
                 "scale",
+                "tuning.name",
             ][..],
         ),
         (
@@ -972,7 +1022,7 @@ fn the_fixture_sets_a_non_default_value_of_every_saved_field() {
                 "automation.0.target",
                 "devices.0.sidechain.input",
                 "devices.0.midi_sidechain.source",
-                "take_lanes.0.clips.1.data.gain",
+                "take_lanes.0.clips.1.data.audio.gain",
                 "clips.0",
             ][..],
         ),
@@ -1197,9 +1247,10 @@ fn scenes_slots_and_automation_are_reached_by_path() {
         json!({ "path": "track \"Vox\" / lane \"Take 1\"", "limit": 1 }),
     );
     assert_eq!(lane["number"], 1);
-    assert_eq!(lane["passes"]["total"], 2);
-    assert_eq!(lane["passes"]["items"].as_array().unwrap().len(), 1);
-    assert_eq!(lane["passes"]["items"][0]["data"]["gain"], 0.7);
+    assert_eq!(lane["clips"]["total"], 2);
+    assert_eq!(lane["clips"]["items"].as_array().unwrap().len(), 1);
+    assert_eq!(lane["clips"]["items"][0]["data"]["audio"]["gain"], 0.7);
+    assert_eq!(lane["audition"], false);
     let second_lane = query(&mut client, json!({ "path": "track \"Vox\" / lane 2" }));
     assert_eq!(second_lane["name"], "Take 2");
 
@@ -1452,4 +1503,115 @@ fn the_note_value_commands_run_by_id_and_read_back() {
     assert_eq!(after[1]["mute"], true, "deactivated");
     assert_ne!(after[2]["release_velocity"], before[2]["release_velocity"]);
     assert_eq!(after[0]["mute"], before[0]["mute"], "the others untouched");
+}
+
+// Spec: note-editing R32. Group Notes and Ungroup Notes run by ID through the
+// agent API, and the query tool reads the clip's groups and each note's group
+// back.
+#[test]
+fn the_group_commands_run_by_id_and_read_back() {
+    let mut client = open(&fixture(), "note-groups");
+    let keys = query(
+        &mut client,
+        json!({ "path": "track \"Keys\"", "detail": "full" }),
+    );
+    let clip = keys["saved"]["clips"]["items"][0]["id"].clone();
+    let midi = |client: &mut Client<InProcess>| -> Value {
+        query(client, json!({ "id": clip, "detail": "full" }))["saved"]["data"]["midi"].clone()
+    };
+    let run = |client: &mut Client<InProcess>, label: &str, command: &str, args: Value| {
+        client
+            .call(
+                "run",
+                json!({ "label": label, "commands": [{ "command": command, "args": args }] }),
+            )
+            .unwrap()
+            .ok()
+            .unwrap_or_else(|error| panic!("{command}: {error}"))
+    };
+    let before = midi(&mut client);
+    assert_eq!(before["groups"]["items"][0]["kind"], "play_one");
+    assert_eq!(before["notes"]["items"][0]["group"], 1);
+    // Notes 1 and 2 leave note 0's group, which ends, for a new Play All.
+    run(
+        &mut client,
+        "Group",
+        "note.group",
+        json!({ "clip": clip, "notes": [1, 2], "kind": "play_all" }),
+    );
+    let grouped = midi(&mut client);
+    let groups = grouped["groups"]["items"].as_array().unwrap();
+    assert_eq!(groups.len(), 1, "{groups:?}");
+    assert_eq!(groups[0]["kind"], "play_all");
+    let notes = grouped["notes"]["items"].as_array().unwrap();
+    assert!(notes[0].get("group").is_none(), "note 0 left its group");
+    assert_eq!(notes[1]["group"], groups[0]["id"]);
+    assert_eq!(notes[2]["group"], groups[0]["id"]);
+    run(
+        &mut client,
+        "Ungroup",
+        "note.ungroup",
+        json!({ "clip": clip, "notes": [1, 2] }),
+    );
+    let ungrouped = midi(&mut client);
+    assert!(ungrouped.get("groups").is_none() || ungrouped["groups"]["items"] == json!([]));
+    assert!(
+        ungrouped["notes"]["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|note| note.get("group").is_none())
+    );
+}
+
+// Spec: multi-clip-editing R9, R11, R18. The clip property commands take
+// `clips`, Duplicate Loop runs by ID, and the view commands report Focus Mode;
+// each effect reads back through the query tool.
+#[test]
+fn the_multi_clip_commands_run_by_id_and_read_back() {
+    let mut client = open(&fixture(), "multi-clip");
+    let keys = query(
+        &mut client,
+        json!({ "path": "track \"Keys\"", "detail": "full" }),
+    );
+    let clip = keys["saved"]["clips"]["items"][0]["id"].clone();
+    let midi = |client: &mut Client<InProcess>| -> Value {
+        query(client, json!({ "id": clip, "detail": "full" }))["saved"]["data"]["midi"].clone()
+    };
+    let run = |client: &mut Client<InProcess>, command: &str, args: Value| {
+        client
+            .call(
+                "run",
+                json!({ "label": "Multi", "commands": [{ "command": command, "args": args }] }),
+            )
+            .unwrap()
+            .ok()
+            .unwrap_or_else(|error| panic!("{command}: {error}"))
+    };
+    run(
+        &mut client,
+        "clip.set_midi_loop",
+        json!({ "clips": [clip], "start": 0, "end": BAR }),
+    );
+    run(
+        &mut client,
+        "clip.set_signature",
+        json!({ "clips": [clip], "signature": { "numerator": 3, "denominator": 4 } }),
+    );
+    assert_eq!(midi(&mut client)["loop_end"], BAR);
+    assert_eq!(midi(&mut client)["signature"]["numerator"], 3);
+    run(
+        &mut client,
+        "clip.duplicate_loop",
+        json!({ "clips": [clip] }),
+    );
+    let after = midi(&mut client);
+    assert_eq!(after["loop_end"], 2 * BAR, "the loop doubles");
+    assert_eq!(
+        after["notes"]["items"].as_array().unwrap().len(),
+        6,
+        "the notes in the loop are copied"
+    );
+    let state = run(&mut client, "clip_view.focus_mode", json!({ "on": true }));
+    assert!(state.to_string().contains("\"focus_mode\":true"), "{state}");
 }

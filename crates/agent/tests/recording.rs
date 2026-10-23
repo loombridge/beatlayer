@@ -56,13 +56,36 @@ fn an_agent_adds_a_take_lane_and_reads_it_back() {
     assert_eq!(lane["clips"][0]["length"]["ticks"], 705_600);
     assert_eq!(track["clips"]["total"], 0, "the main lane is untouched");
 
-    // The step is one undo, and a MIDI track has no take lanes to add to.
+    // A MIDI track takes lanes too (the comping spec, R1), with MIDI clips; a
+    // clip of the other kind is refused, and so is a track that holds none.
     let midi = result["ids"]["midi"].as_u64().unwrap();
+    let added = client
+        .call(
+            "run",
+            json!({ "commands": [{ "command": "track.add_take_lane",
+                "args": { "track": midi, "lane": { "name": "Take 1", "clips": [
+                    { "name": "", "start": 0, "length": 705_600,
+                      "data": { "midi": { "notes": [
+                          { "key": 60, "velocity": 100, "start": 0, "length": 705_600 }
+                      ] } } },
+                ] } } }] }),
+        )
+        .unwrap();
+    assert!(!added.is_error, "{added:?}");
+    let keys = call(
+        &mut client,
+        "query",
+        json!({ "path": format!("track {midi}") }),
+    );
+    assert_eq!(keys["take_lanes"][0]["clips"][0]["kind"], "midi");
     let refused = client
         .call(
             "run",
             json!({ "commands": [{ "command": "track.add_take_lane",
-                "args": { "track": midi, "lane": { "name": "Take 1", "clips": [] } } }] }),
+                "args": { "track": midi, "lane": { "name": "Take 2", "clips": [
+                    { "name": "", "start": 0, "length": 705_600,
+                      "data": { "media": "ab".repeat(32) } },
+                ] } } }] }),
         )
         .unwrap();
     assert!(refused.is_error, "{refused:?}");

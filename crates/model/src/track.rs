@@ -12,7 +12,7 @@ use crate::automation::{Automation, AutomationTarget, TrackAutomation};
 use crate::clip::{AudioData, Clip, ClipData, EnvelopeKind, TakeLane};
 use crate::device::Device;
 use crate::freeze::FrozenTrack;
-use crate::ids::{ChainId, ClipId, DeviceId, SceneId, TrackId};
+use crate::ids::{ChainId, ClipId, DeviceId, SceneId, TakeLaneId, TrackId};
 use crate::rack::Chain;
 use crate::shared::Shared;
 
@@ -761,9 +761,12 @@ pub struct Track {
     /// S-SES-005): every audio and MIDI slot has one until then. Return,
     /// group, and Main tracks have none.
     pub(crate) removed_stop_buttons: BTreeSet<SceneId>,
-    /// The take lanes under the Arrangement lane, in order (WP-2.13): one per
-    /// recorded loop pass. Audio tracks only.
+    /// The take lanes under the main lane, in order (WP-6.21): audio tracks'
+    /// hold audio clips and MIDI tracks' MIDI clips.
     pub(crate) take_lanes: Vector<TakeLane>,
+    /// The take lane the track plays in place of its main lane, if one is
+    /// auditioned (the comping spec, R14).
+    pub(crate) audition: Option<TakeLaneId>,
     pub(crate) children: Vector<TrackId>,
     /// One envelope per automated parameter of this track (WP-2.12): a
     /// control of its mixer, one of its sends, or a parameter of a device in
@@ -774,6 +777,10 @@ pub struct Track {
     /// settings, so unfreezing plays them again (the freeze and bounce spec,
     /// R10).
     pub(crate) frozen: Option<FrozenTrack>,
+    /// Bypass Tuning (WP-6.9; the tunings spec, R14): whether the track
+    /// plays twelve equal steps whatever tuning the set holds. Off in a new
+    /// track, and saved only when on.
+    pub(crate) tuning_bypass: bool,
 }
 
 impl Track {
@@ -792,9 +799,11 @@ impl Track {
             slots: OrdMap::new(),
             removed_stop_buttons: BTreeSet::new(),
             take_lanes: Vector::new(),
+            audition: None,
             children: Vector::new(),
             automation: TrackAutomation::new(),
             frozen: None,
+            tuning_bypass: false,
         }
     }
 
@@ -816,7 +825,7 @@ impl Track {
     #[must_use]
     pub fn playback_clips(&self) -> Vec<Clip> {
         let Some(frozen) = &self.frozen else {
-            return self.clips.values().map(|clip| (**clip).clone()).collect();
+            return self.played_clips().cloned().collect();
         };
         if let Some(output) = frozen.output {
             return vec![frozen_output_clip(output)];
@@ -878,6 +887,29 @@ impl Track {
     #[must_use]
     pub const fn keep_monitoring_latency(&self) -> bool {
         self.keep_monitoring_latency
+    }
+
+    /// Whether the track's Bypass Tuning switch is on (the tunings spec,
+    /// R14). A track that holds a Drum Rack bypasses whatever it says; see
+    /// [`plays_tuning`](Self::plays_tuning).
+    #[must_use]
+    pub const fn tuning_bypass(&self) -> bool {
+        self.tuning_bypass
+    }
+
+    /// Whether the track holds a Drum Rack, at any depth, which makes it
+    /// bypass the tuning (the tunings spec, R14).
+    #[must_use]
+    pub fn holds_drum_rack(&self) -> bool {
+        self.devices_deep()
+            .any(|device| device.rack_kind() == Some(crate::RackKind::Drum))
+    }
+
+    /// Whether the track plays the set's tuning (the tunings spec, R14): a
+    /// MIDI track whose Bypass Tuning is off and that holds no Drum Rack.
+    #[must_use]
+    pub fn plays_tuning(&self) -> bool {
+        self.kind == TrackKind::Midi && !self.tuning_bypass && !self.holds_drum_rack()
     }
 
     /// The track's sends that aren't at −∞ dB, as (return track, level) in
@@ -951,6 +983,16 @@ impl Track {
         self.clips.values().map(|clip| &**clip)
     }
 
+    /// The Arrangement clips the track plays: its main lane's, or those of
+    /// the take lane that is auditioned in their place (the comping spec,
+    /// R14).
+    pub fn played_clips(&self) -> Box<dyn Iterator<Item = &Clip> + '_> {
+        match self.audition.and_then(|id| self.take_lane(id)) {
+            Some(lane) => Box::new(lane.clips.iter()),
+            None => Box::new(self.clips()),
+        }
+    }
+
     /// The clips in the track's Session slots, as `(scene, clip)` pairs
     /// ordered by scene ID. Only audio and MIDI tracks hold them.
     pub fn slots(&self) -> impl ExactSizeIterator<Item = (SceneId, &Clip)> + '_ {
@@ -975,14 +1017,24 @@ impl Track {
         self.removed_stop_buttons.iter().copied()
     }
 
-    /// The clip with this ID, whether it sits on the Arrangement lane or in
-    /// a Session slot.
+    /// The clip with this ID, whether it sits on the main lane, on a take
+    /// lane or in a Session slot.
     #[must_use]
     pub fn clip(&self, id: ClipId) -> Option<&Clip> {
         self.clips
             .get(&id)
             .or_else(|| self.slots.values().find(|clip| clip.id == id))
             .map(|clip| &**clip)
+            .or_else(|| self.take_lanes.iter().find_map(|lane| lane.clip(id)))
+    }
+
+    /// The take lane the clip with this ID sits on, if it sits on one.
+    #[must_use]
+    pub fn clip_lane(&self, id: ClipId) -> Option<TakeLaneId> {
+        self.take_lanes
+            .iter()
+            .find(|lane| lane.clip(id).is_some())
+            .map(|lane| lane.id)
     }
 
     /// The clip with this ID, to change in place, whether it sits on the
@@ -993,6 +1045,13 @@ impl Track {
         if let Some(clip) = self.clips.get_mut(&id) {
             return Some(Shared::make_mut(clip));
         }
+        if let Some(lane) = self
+            .take_lanes
+            .iter_mut()
+            .find(|lane| lane.clip(id).is_some())
+        {
+            return lane.clips.iter_mut().find(|clip| clip.id == id);
+        }
         let scene = self
             .slots
             .iter()
@@ -1001,9 +1060,36 @@ impl Track {
         self.slots.get_mut(&scene).map(Shared::make_mut)
     }
 
-    /// The take lanes under the track's Arrangement lane, nearest first.
+    /// The take lanes under the track's main lane, nearest first.
     pub fn take_lanes(&self) -> impl ExactSizeIterator<Item = &TakeLane> + '_ {
         self.take_lanes.iter()
+    }
+
+    /// The take lane with this ID.
+    #[must_use]
+    pub fn take_lane(&self, id: TakeLaneId) -> Option<&TakeLane> {
+        self.take_lanes.iter().find(|lane| lane.id == id)
+    }
+
+    /// The name a take lane added now gets (the comping spec, R4): `Take N`,
+    /// N one more than the highest number of a lane named `Take` and a
+    /// number, 1 on a track with none.
+    #[must_use]
+    pub fn next_take_name(&self) -> String {
+        let highest = self
+            .take_lanes
+            .iter()
+            .filter_map(|lane| lane.name.strip_prefix("Take ")?.parse::<u64>().ok())
+            .max()
+            .unwrap_or(0);
+        format!("Take {}", highest + 1)
+    }
+
+    /// The take lane that is auditioned: the track plays it in place of its
+    /// main lane (the comping spec, R14).
+    #[must_use]
+    pub fn audition(&self) -> Option<TakeLaneId> {
+        self.audition
     }
 
     /// The tracks directly inside this one, in order. Only groups have them.
@@ -1095,8 +1181,10 @@ impl Track {
             || self.routing != other.routing
             || self.delay != other.delay
             || self.keep_monitoring_latency != other.keep_monitoring_latency
+            || self.tuning_bypass != other.tuning_bypass
             || self.removed_stop_buttons != other.removed_stop_buttons
             || self.frozen != other.frozen
+            || self.audition != other.audition
             || !(self.take_lanes.ptr_eq(&other.take_lanes) || self.take_lanes == other.take_lanes)
             || !(self.sends.ptr_eq(&other.sends) || self.sends == other.sends)
             || !(self.children.ptr_eq(&other.children) || self.children == other.children)

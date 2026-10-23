@@ -47,7 +47,10 @@ pub struct RecordTrack {
 /// frame it landed on.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RecordedMidi {
-    /// The song frame, to the sample the input placed the message on.
+    /// The song frame, to the sample the input placed the message on. In a
+    /// take that went round the loop it runs on past the loop's end instead
+    /// of wrapping, like the frames of the take's file, so the shell can tell
+    /// the passes apart.
     pub frame: Frames,
     /// A note-on or a note-off, or a controller message
     /// ([`is_recorded`]).
@@ -132,6 +135,9 @@ pub struct TakeBounds {
     /// once: the file holds the audio from `start` to the loop's end, then
     /// the loop's passes one after another (the recording spec, R11).
     pub wrap: Option<(Frames, Frames)>,
+    /// How many frames the take ran for, whatever the loop did: the audio's
+    /// delay isn't taken off, since MIDI isn't moved by it.
+    pub frames: u64,
 }
 
 impl RecordingPlan {

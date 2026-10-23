@@ -16,13 +16,13 @@ use crate::automation::{AutomationTarget, Breakpoint, Envelope};
 use crate::clip::{Clip, ClipData, TakeLane};
 use crate::command::{
     check_chain, check_clip, check_clip_fits, check_crossfader, check_device, check_extent,
-    check_mixer, check_send_level, check_take_lane,
+    check_mixer, check_send_level,
 };
 use crate::device::Device;
 use crate::document::{Document, Index, Settings};
 use crate::error::ModelError;
 use crate::groove::{GLOBAL_AMOUNT_MAX, check_percent};
-use crate::ids::{SceneId, TrackId};
+use crate::ids::{SceneId, TakeLaneId, TrackId};
 use crate::launch::LaunchSettings;
 use crate::locator::{Locator, SongStart};
 use crate::scene::{Scene, default_scenes};
@@ -71,10 +71,13 @@ struct TrackRepr {
     /// saved before WP-3.2 have none: every slot has one.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     removed_stop_buttons: Vec<SceneId>,
-    /// The take lanes under the Arrangement lane (WP-2.13). Sets saved
+    /// The take lanes under the main lane (WP-2.13, WP-6.21). Sets saved
     /// before it have none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     take_lanes: Vec<TakeLane>,
+    /// The take lane the track plays in place of its main lane (WP-6.21).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    audition: Option<TakeLaneId>,
     /// The track's delay (the mixer spec). Sets saved before WP-5.36 have
     /// none, which loads as 0 frames and milliseconds.
     #[serde(default, skip_serializing_if = "TrackDelay::is_default")]
@@ -84,6 +87,10 @@ struct TrackRepr {
     /// WP-5.36 have none, which loads as on.
     #[serde(default = "on", skip_serializing_if = "is_on")]
     keep_monitoring_latency: bool,
+    /// Bypass Tuning (the tunings spec, R14). Off in a new track, so a set
+    /// writes it only when it's on.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    tuning_bypass: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     children: Vec<TrackRepr>,
     /// The track's frozen audio (WP-4.14). Sets saved before it have none,
@@ -215,8 +222,10 @@ impl TrackRepr {
                 .collect(),
             removed_stop_buttons: track.removed_stop_buttons().collect(),
             take_lanes: track.take_lanes().cloned().collect(),
+            audition: track.audition(),
             delay: track.delay(),
             keep_monitoring_latency: track.keep_monitoring_latency(),
+            tuning_bypass: track.tuning_bypass(),
             frozen: track.frozen.clone(),
             children: if with_children {
                 track
@@ -252,6 +261,9 @@ impl TryFrom<DocumentRepr> for Document {
         }
         check_crossfader(settings.crossfader)?;
         check_locators(&settings.locators)?;
+        if let Some(tuning) = &settings.tuning {
+            tuning.check()?;
+        }
         for groove in &settings.grooves.pool {
             groove.check()?;
             loader.claim(groove.id.0)?;
@@ -342,7 +354,11 @@ impl TryFrom<DocumentRepr> for Document {
             document.check_routing(id)?;
             document.check_automation(id)?;
             let track = document.track_ref(id)?;
-            for clip in track.clips().chain(track.slots().map(|(_, clip)| clip)) {
+            for clip in track
+                .clips()
+                .chain(track.slots().map(|(_, clip)| clip))
+                .chain(track.take_lanes().flat_map(|lane| lane.clips.iter()))
+            {
                 document.check_clip_envelopes(id, clip)?;
             }
         }
@@ -385,8 +401,8 @@ impl Loader {
         {
             return Err(wrong_kind(&repr, "an audio or MIDI track"));
         }
-        if !repr.take_lanes.is_empty() && repr.kind != TrackKind::Audio {
-            return Err(wrong_kind(&repr, "an audio track"));
+        if (!repr.take_lanes.is_empty() || repr.audition.is_some()) && !repr.kind.holds_clips() {
+            return Err(wrong_kind(&repr, "an audio or MIDI track"));
         }
         if !repr.children.is_empty() && repr.kind != TrackKind::Group {
             return Err(wrong_kind(&repr, "a group track"));
@@ -404,6 +420,7 @@ impl Loader {
             });
         }
         track.keep_monitoring_latency = repr.keep_monitoring_latency;
+        track.tuning_bypass = repr.tuning_bypass;
         track.frozen = repr.frozen;
         if let Some(routing) = repr.routing {
             track.routing = routing;
@@ -453,6 +470,9 @@ impl Loader {
             }
             check_clip_fits(&track, &clip.data)?;
             check_extent(clip.start, clip.length)?;
+            if let ClipData::Midi(midi) = &mut clip.data {
+                midi.repair_groups();
+            }
             check_clip(&clip)?;
             self.index.clip_track.insert(clip.id, id);
             track.clips.insert(clip.id, Shared::new(clip));
@@ -467,6 +487,9 @@ impl Loader {
                 return Err(ModelError::SlotClipPosition(slot.clip.start));
             }
             check_extent(slot.clip.start, slot.clip.length)?;
+            if let ClipData::Midi(midi) = &mut slot.clip.data {
+                midi.repair_groups();
+            }
             check_clip(&slot.clip)?;
             self.index.clip_track.insert(slot.clip.id, id);
             if track
@@ -477,9 +500,26 @@ impl Loader {
                 return Err(ModelError::DuplicateId(slot.scene.0));
             }
         }
-        for lane in repr.take_lanes {
-            check_take_lane(&lane)?;
+        for mut lane in repr.take_lanes {
+            self.claim(lane.id.0)?;
+            for clip in lane.clips.iter_mut() {
+                self.claim(clip.id.0)?;
+                check_clip_fits(&track, &clip.data)?;
+                check_extent(clip.start, clip.length)?;
+                if let ClipData::Midi(midi) = &mut clip.data {
+                    midi.repair_groups();
+                }
+                check_clip(clip)?;
+                self.index.clip_track.insert(clip.id, id);
+            }
+            self.index.lane_track.insert(lane.id, id);
             track.take_lanes.push_back(lane);
+        }
+        if let Some(lane) = repr.audition {
+            if track.take_lane(lane).is_none() {
+                return Err(ModelError::NoSuchTakeLane(lane));
+            }
+            track.audition = Some(lane);
         }
         for child in repr.children {
             let child = self.add_grouped(child, Some(id))?;

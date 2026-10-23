@@ -250,15 +250,25 @@ impl MidiHost {
     }
 
     fn send(&self, message: MidiMessage) {
-        let time = self
-            .clock
-            .as_ref()
-            .map_or_else(Instant::now, |clock| clock.now());
+        self.send_as(MidiSource::ComputerKeyboard, message);
+    }
+
+    /// Queues `message` for the engine as coming from `source`, stamped now.
+    pub fn send_as(&self, source: MidiSource, message: MidiMessage) {
         self.sender.send(MidiInputEvent {
-            source: MidiSource::ComputerKeyboard,
-            time,
+            source,
+            time: self.now(),
             message,
         });
+    }
+
+    /// The time messages are stamped with: the test clock's when there is
+    /// one.
+    #[must_use]
+    pub fn now(&self) -> Instant {
+        self.clock
+            .as_ref()
+            .map_or_else(Instant::now, |clock| clock.now())
     }
 
     /// Switches the keyboard on or off (the other state if `on` is `None`).

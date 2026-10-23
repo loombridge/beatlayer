@@ -671,6 +671,52 @@ fn clip_region_and_loop_edits_play_back_as_edited() {
     assert_eq!(ons, [(0, 60)], "the End marker silences the note past it");
 }
 
+// Spec: multi-clip-editing R18. An edit to the clips of two tracks together,
+// as the note editor's edits across clips are, reaches the engine as each
+// track's node data with no new program, and plays as edited.
+#[test]
+fn an_edit_across_two_tracks_clips_plays_as_edited_without_a_new_program() {
+    let mut rig = Rig::new(256);
+    let mut clips = Vec::new();
+    for key in [60u8, 64] {
+        let trk = midi_track(&mut rig.editor);
+        instrument(&mut rig.editor, trk);
+        clips.push(midi_clip(
+            &mut rig.editor,
+            trk,
+            Ticks::ZERO,
+            BAR,
+            MidiData::new([Note::new(key, Ticks::ZERO, BEAT, 100)]),
+        ));
+    }
+    assert!(rig.sync().program, "the first sync builds the program");
+    // Transpose both clips' notes up two semitones in one undo step.
+    rig.editor.begin("Move notes");
+    for (clip, key) in clips.iter().zip([62u8, 66]) {
+        rig.editor
+            .apply(Command::SetClipData {
+                clip: *clip,
+                data: ClipData::Midi(MidiData::new([Note::new(key, Ticks::ZERO, BEAT, 100)])),
+            })
+            .unwrap();
+    }
+    rig.editor.commit().unwrap();
+    let synced = rig.sync();
+    assert!(!synced.program, "a note edit needs no new program");
+    assert!(synced.data > 0, "the clip lists go as node data");
+    rig.sender.transport(TransportCommand::Play);
+    play(&mut rig, 96_000, 256);
+    let mut keys: Vec<u8> = rig
+        .probe
+        .recorded_notes()
+        .iter()
+        .filter(|note| note.event.kind == NoteKind::On)
+        .map(|note| note.event.key)
+        .collect();
+    keys.sort_unstable();
+    assert_eq!(keys, [62, 66], "both tracks play the edited notes");
+}
+
 /// The notes a clip with a C#4 in it plays, with a scale on the clip or
 /// off.
 fn played_with_a_scale(scale: bool) -> Vec<(i64, u8)> {
@@ -716,6 +762,80 @@ fn a_clip_s_scale_doesnt_change_what_it_plays() {
         with, without,
         "the clip's scale doesn't change what it plays"
     );
+}
+
+// Spec: comping R14. An auditioned MIDI take lane plays its notes in place of
+// the main lane's, from the next block, with no new program, at any block
+// size.
+#[test]
+fn an_auditioned_midi_take_lane_plays_in_place_of_the_main_lane_with_no_program() {
+    for block_size in [1, 61, 512, 4_096] {
+        let mut rig = Rig::new(block_size);
+        let trk = midi_track(&mut rig.editor);
+        instrument(&mut rig.editor, trk);
+        midi_clip(
+            &mut rig.editor,
+            trk,
+            Ticks::ZERO,
+            BAR,
+            MidiData::new([Note::new(60, BEAT, BEAT, 100)]),
+        );
+        let lane: bl_model::TakeLaneId = rig.editor.new_id();
+        rig.editor
+            .apply(Command::AddTakeLane {
+                track: trk,
+                lane: bl_model::NewTakeLane {
+                    id: Some(lane),
+                    name: "Take 1".to_owned(),
+                    clips: Vec::new(),
+                },
+                index: None,
+            })
+            .unwrap();
+        let clip = Clip::new(
+            rig.editor.new_id(),
+            Ticks::ZERO,
+            BAR,
+            ClipData::Midi(MidiData::new([Note::new(72, BEAT * 2, BEAT, 100)])),
+        );
+        rig.editor
+            .apply(Command::CreateTakeClip { lane, clip })
+            .unwrap();
+        let synced = rig.sync();
+        assert!(synced.program);
+        // Auditioned before it plays, the lane's notes play alone.
+        let synced = rig.apply(Command::SetAudition { lane, on: true });
+        assert!(!synced.program, "block {block_size}");
+        rig.sender.transport(TransportCommand::Play);
+        play(&mut rig, 96_000, block_size);
+        let keys: Vec<u8> = rig
+            .probe
+            .recorded_notes()
+            .iter()
+            .filter(|n| n.event.kind == NoteKind::On)
+            .map(|n| n.event.key)
+            .collect();
+        assert_eq!(keys, [72], "block {block_size}");
+
+        // Switched off, the main lane plays again, from the next block.
+        let synced = rig.apply(Command::SetAudition { lane, on: false });
+        assert!(!synced.program, "block {block_size}");
+        rig.sender.transport(TransportCommand::Locate(Ticks::ZERO));
+        play(&mut rig, 96_000, block_size);
+        let keys: Vec<u8> = rig
+            .probe
+            .recorded_notes()
+            .iter()
+            .filter(|n| n.event.kind == NoteKind::On)
+            .map(|n| n.event.key)
+            .collect();
+        assert_eq!(keys, [60], "block {block_size}");
+        assert_eq!(
+            rig.monitor.state().swaps,
+            1,
+            "no new program, block {block_size}"
+        );
+    }
 }
 
 /// What `rig` plays of a clip holding `notes` for one bar at 120 BPM: each

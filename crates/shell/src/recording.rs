@@ -37,7 +37,7 @@ use bl_engine::{
 use bl_media::{AudioWriter, BitDepth, Dither, EncodeSpec, FileType};
 use bl_model::{
     AutomationTarget, Channel, Clip, ClipData, ClipId, Command, EditError, Editor, EnvelopeKind,
-    MidiData, Note, TrackId,
+    MidiData, NewTakeLane, Note, TakeLaneId, TrackId,
 };
 use rtrb::{Consumer, RingBuffer};
 use std::collections::BTreeMap;
@@ -70,6 +70,57 @@ pub const UNDO_LABEL: &str = "Recorded Clip";
 /// one a recording that copied Session clips makes (the Session to
 /// Arrangement spec, R6).
 pub const LOOP_UNDO_LABEL: &str = "Record";
+
+/// The take lane a take starting at `start` goes on (the comping spec, R11):
+/// the first of the track's take lanes, nearest the main lane first, with no
+/// clip ending after `start`, or else a new lane after the last, named as
+/// Insert Take Lane names it.
+///
+/// # Errors
+///
+/// [`EditError`] if the document refuses a step.
+pub(crate) fn free_lane(
+    editor: &mut Editor,
+    track: TrackId,
+    start: Ticks,
+) -> Result<TakeLaneId, EditError> {
+    let held = editor.document().track(track);
+    if let Some(lane) = held.and_then(|held| {
+        held.take_lanes()
+            .find(|lane| lane.clips.iter().all(|clip| clip.end() <= start))
+    }) {
+        return Ok(lane.id);
+    }
+    let name = held
+        .map(bl_model::Track::next_take_name)
+        .unwrap_or_default();
+    let id: TakeLaneId = editor.new_id();
+    editor.apply(Command::AddTakeLane {
+        track,
+        lane: NewTakeLane {
+            id: Some(id),
+            name,
+            clips: Vec::new(),
+        },
+        index: None,
+    })?;
+    Ok(id)
+}
+
+/// Puts a recorded clip on the take lane [`free_lane`] finds for it.
+///
+/// # Errors
+///
+/// [`EditError`] if the document refuses a step.
+pub(crate) fn put_on_lane(
+    editor: &mut Editor,
+    track: TrackId,
+    clip: Clip,
+) -> Result<(), EditError> {
+    let lane = free_lane(editor, track, clip.start)?;
+    editor.apply(Command::CreateTakeClip { lane, clip })?;
+    Ok(())
+}
 
 /// One pass of a loop recording: the song frame it starts at, where its
 /// audio starts in the recorded file, and how many frames it holds.
@@ -123,6 +174,33 @@ pub fn passes(take: TakeBounds, file: u64) -> (Option<Pass>, Vec<Pass>) {
         at = start;
     }
     (lead_in, passes)
+}
+
+/// A MIDI take cut to the pass it holds: the messages that fall in the file
+/// frames `pass` covers, with their frames put back to the song frames the
+/// pass plays at. A message's frame in a take that went round the loop is
+/// the take's running frame count, which counts as the take's file does.
+#[must_use]
+pub fn midi_in_pass(takes: &[MidiTake], take: TakeBounds, pass: &Pass) -> Vec<MidiTake> {
+    takes
+        .iter()
+        .map(|recorded| MidiTake {
+            track: recorded.track,
+            messages: recorded
+                .messages
+                .iter()
+                .filter_map(|m| {
+                    let at = u64::try_from((m.frame - take.start).get()).ok()?;
+                    let into = at.checked_sub(pass.file_from)?;
+                    (into < pass.frames).then_some(RecordedMidi {
+                        frame: pass.song_start + Frames(into as i64),
+                        message: m.message,
+                        mpe: m.mpe,
+                    })
+                })
+                .collect(),
+        })
+        .collect()
 }
 
 /// One track to record: where its input comes from, and the name of the
@@ -867,8 +945,9 @@ pub fn overdub_moves(
 /// merged into the MIDI clip it starts in, and the notes that start in no
 /// clip making new clips over the gaps between the track's clips, so nothing
 /// is replaced (WP-2.14). Controllers go the same way, as steps of the
-/// clip's envelopes (WP-2.29b). `placed` holds the clips already made, which clearing leaves
-/// alone.
+/// clip's envelopes (WP-2.29b). With `lane` on, each track's take also goes
+/// whole on a take lane (the comping spec, R12). `placed` holds the clips
+/// already made, which clearing leaves alone.
 ///
 /// # Errors
 ///
@@ -879,6 +958,7 @@ pub fn place_midi(
     take: TakeBounds,
     rate: SampleRate,
     overdub: bool,
+    lane: bool,
     placed: &mut std::collections::BTreeSet<ClipId>,
 ) -> Result<(), EditError> {
     let tempo = editor.document().settings().tempo.clone();
@@ -892,6 +972,22 @@ pub fn place_midi(
         moved.retain(|(_, m)| controller_take::envelope_move(m).is_some());
         if played.is_empty() && moved.is_empty() {
             continue;
+        }
+        // Spec: comping R12. The take also goes on a take lane of its own,
+        // whole, whether or not the main lane merges it.
+        if lane {
+            let id = editor.new_id();
+            let notes = played
+                .iter()
+                .map(|note| Note {
+                    start: note.start - start,
+                    ..note.clone()
+                })
+                .collect::<Vec<_>>();
+            let clip = Clip::new(id, start, end - start, ClipData::Midi(MidiData::new(notes)));
+            put_on_lane(editor, recorded.track, clip)?;
+            let steps: Vec<_> = moved.iter().map(|&(at, m)| (at - start, m)).collect();
+            write_moves(editor, id, &steps, None)?;
         }
         // The spans of the track's clips the take crosses, in order of
         // start: the track holds them in order of ID.
@@ -999,6 +1095,7 @@ mod tests {
             start: Frames(start),
             end: Frames(0),
             wrap: Some((Frames(100), Frames(200))),
+            frames: 0,
         };
         let pass = |song_start: i64, file_from: u64, frames: u64| Pass {
             song_start: Frames(song_start),
@@ -1158,6 +1255,7 @@ mod tests {
             start: Frames(from * 96_000),
             end: Frames(to * 96_000),
             wrap: None,
+            frames: ((to - from) * 96_000) as u64,
         }
     }
 
@@ -1219,7 +1317,16 @@ mod tests {
         );
         let takes = played(track, &[(96_000 + 12_345, on), (96_000 + 20_000, off)]);
         let mut placed = Default::default();
-        place_midi(&mut editor, &takes, take(1, 2), RATE, false, &mut placed).unwrap();
+        place_midi(
+            &mut editor,
+            &takes,
+            take(1, 2),
+            RATE,
+            false,
+            false,
+            &mut placed,
+        )
+        .unwrap();
 
         // The old clip keeps bar 0 and bars 2 to 3; the take is bar 1.
         assert_eq!(
@@ -1262,7 +1369,16 @@ mod tests {
         let off = MidiMessage::note_off(0, 60);
         let takes = played(track, &[(48_000, on), (60_000, off)]);
         let mut placed = Default::default();
-        place_midi(&mut editor, &takes, take(0, 2), RATE, true, &mut placed).unwrap();
+        place_midi(
+            &mut editor,
+            &takes,
+            take(0, 2),
+            RATE,
+            true,
+            false,
+            &mut placed,
+        )
+        .unwrap();
 
         assert_eq!(clips(&editor, track), vec![(0, 2, vec![40, 60])]);
         assert_eq!(
@@ -1298,7 +1414,16 @@ mod tests {
             ],
         );
         let mut placed = Default::default();
-        place_midi(&mut editor, &takes, take(0, 3), RATE, true, &mut placed).unwrap();
+        place_midi(
+            &mut editor,
+            &takes,
+            take(0, 3),
+            RATE,
+            true,
+            false,
+            &mut placed,
+        )
+        .unwrap();
 
         assert_eq!(
             clips(&editor, track),
@@ -1318,7 +1443,16 @@ mod tests {
             &[(96_000 + 48_000, MidiMessage::note_on(0, 60, 100))],
         );
         let mut placed = Default::default();
-        place_midi(&mut editor, &takes, take(0, 4), RATE, true, &mut placed).unwrap();
+        place_midi(
+            &mut editor,
+            &takes,
+            take(0, 4),
+            RATE,
+            true,
+            false,
+            &mut placed,
+        )
+        .unwrap();
 
         assert_eq!(
             clips(&editor, track),
@@ -1331,7 +1465,16 @@ mod tests {
     fn a_take_without_notes_makes_no_clip() {
         let (mut editor, track) = editor_with_track();
         let mut placed = Default::default();
-        place_midi(&mut editor, &[], take(0, 1), RATE, false, &mut placed).unwrap();
+        place_midi(
+            &mut editor,
+            &[],
+            take(0, 1),
+            RATE,
+            false,
+            false,
+            &mut placed,
+        )
+        .unwrap();
         assert!(clips(&editor, track).is_empty());
     }
 
@@ -1474,7 +1617,16 @@ mod tests {
         messages.sort_by_key(|(at, _)| *at);
         let takes = played(track, &messages);
         let mut placed = Default::default();
-        place_midi(&mut editor, &takes, take(0, 3), RATE, false, &mut placed).unwrap();
+        place_midi(
+            &mut editor,
+            &takes,
+            take(0, 3),
+            RATE,
+            false,
+            false,
+            &mut placed,
+        )
+        .unwrap();
 
         let clip = only_clip(&editor, track);
         let one = |frame, value| (tick(frame), value);
@@ -1522,7 +1674,16 @@ mod tests {
             ],
         );
         let mut placed = Default::default();
-        place_midi(&mut editor, &takes, take(0, 1), RATE, false, &mut placed).unwrap();
+        place_midi(
+            &mut editor,
+            &takes,
+            take(0, 1),
+            RATE,
+            false,
+            false,
+            &mut placed,
+        )
+        .unwrap();
         let clip = only_clip(&editor, track);
         assert_eq!(clip.envelopes().len(), 1, "one envelope, no channel");
         assert_eq!(
@@ -1539,7 +1700,16 @@ mod tests {
         add_clip(&mut editor, track, 0, 4, 40);
         let takes = played(track, &[(96_000 + 24_000, cc(1, 77))]);
         let mut placed = Default::default();
-        place_midi(&mut editor, &takes, take(1, 2), RATE, false, &mut placed).unwrap();
+        place_midi(
+            &mut editor,
+            &takes,
+            take(1, 2),
+            RATE,
+            false,
+            false,
+            &mut placed,
+        )
+        .unwrap();
         // The old clip keeps bar 0 and bars 2 to 3; the take is bar 1.
         assert_eq!(
             clips(&editor, track),
@@ -1577,7 +1747,16 @@ mod tests {
             ],
         );
         let mut placed = Default::default();
-        place_midi(&mut editor, &takes, take(0, 1), RATE, false, &mut placed).unwrap();
+        place_midi(
+            &mut editor,
+            &takes,
+            take(0, 1),
+            RATE,
+            false,
+            false,
+            &mut placed,
+        )
+        .unwrap();
         let clip = only_clip(&editor, track);
         let ClipData::Midi(data) = &clip.data else {
             panic!("a MIDI clip")
@@ -1603,6 +1782,7 @@ mod tests {
             &takes,
             take(0, 1),
             RATE,
+            false,
             false,
             &mut Default::default(),
         )
@@ -1657,7 +1837,16 @@ mod tests {
             ],
         );
         let mut placed = Default::default();
-        place_midi(&mut editor, &takes, take(0, 1), RATE, true, &mut placed).unwrap();
+        place_midi(
+            &mut editor,
+            &takes,
+            take(0, 1),
+            RATE,
+            true,
+            false,
+            &mut placed,
+        )
+        .unwrap();
 
         let ids: Vec<_> = editor
             .document()

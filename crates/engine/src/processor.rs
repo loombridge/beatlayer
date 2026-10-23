@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use bl_core::midi::{MidiInputEvent, MidiOutputEvent};
 use bl_core::time::{Frames, SampleRate, TempoMap, Ticks, TimeSignatureMap};
-use bl_model::{LaunchMode, LaunchSettings, ParamId, SceneId, TrackId};
+use bl_model::{LaunchMode, LaunchSettings, ParamId, Scale, SceneId, TrackId};
 use bl_rt::log::{Level, Writer};
 use bl_rt::rt_log;
 use rtrb::{Consumer, Producer};
@@ -23,6 +23,7 @@ use crate::node::{NodeData, NodeKey, ParamValue, TransportInfo};
 use crate::program::{Blk, EngineProgram, Resolved};
 use crate::recording::{RecordingPlan, TakeBounds};
 use crate::render::RenderPlan;
+use crate::scales::ScaleRuns;
 use crate::sched::{Lane, Pool};
 use crate::session::{
     Playhead, SceneOverride, SessionCommand, SessionEvent, SessionLauncher, SessionPlayback,
@@ -274,6 +275,8 @@ pub struct Processor {
     song_start: Option<Ticks>,
     /// The Global Amount of groove, 1 at 100 %.
     groove_amount: f32,
+    /// The set's current scale (the scales spec, R9).
+    scale: Scale,
     /// A jump waiting for the next line of the global launch quantisation
     /// (the transport spec, R22).
     pending_locate: Option<PendingLocate>,
@@ -358,6 +361,7 @@ impl Processor {
             loop_frames: None,
             song_start: None,
             groove_amount: 1.0,
+            scale: Scale::default(),
             pending_locate: None,
             punch: Punch::default(),
             punch_frames: PunchFrames::default(),
@@ -1035,6 +1039,8 @@ impl Processor {
             TransportCommand::SetGrooveAmount(tenths) => {
                 self.groove_amount = f32::from(tenths) / 1000.0;
             }
+            // Spec: scales R15
+            TransportCommand::SetScale(scale) => self.scale = scale,
             TransportCommand::SetPunch(punch) => {
                 self.punch = punch;
                 self.update_loop_frames();
@@ -1106,6 +1112,7 @@ impl Processor {
                 start: take.start,
                 end: take.next,
                 wrap: take.wrap.map(|region| (region.start, region.end)),
+                frames: take.written,
             });
         }
         self.plan = None;
@@ -1768,6 +1775,8 @@ impl Processor {
                         transport,
                         session: &self.session_playback,
                         groove_amount: self.groove_amount,
+                        set_scale: self.scale,
+                        scale: ScaleRuns::of(self.scale),
                     },
                 );
                 // Spec: external-devices R4, R5
@@ -1954,10 +1963,15 @@ impl Processor {
         let skip = (delay.max(0) as u64)
             .saturating_sub(written)
             .min(frames as u64) as usize;
+        // The messages are stamped with the frame the take has run on to, not
+        // the song frame, which a loop's wrap sets back (recording R12).
+        let stamp = self.take.map_or(self.position, |take| {
+            take.start + Frames(take.written as i64)
+        });
         let captured = match (self.program.as_ref(), self.plan.as_mut()) {
             (Some(program), Some(plan)) => {
                 plan.get_mut()
-                    .capture(program.get(), self.position, offset, frames, skip)
+                    .capture(program.get(), stamp, offset, frames, skip)
             }
             _ => false,
         };
@@ -2099,6 +2113,7 @@ impl Processor {
             start: take.start,
             end: take.next,
             wrap: None,
+            frames: take.written,
         });
         state.counting_in = self.metronome.is_counting_in();
         state.take = self.last_take;

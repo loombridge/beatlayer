@@ -5,7 +5,9 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 /// The folders a new User Library starts with, as Live's does.
-pub const USER_LIBRARY_FOLDERS: [&str; 5] = ["Clips", "Defaults", "Grooves", "Presets", "Samples"];
+pub const USER_LIBRARY_FOLDERS: [&str; 6] = [
+    "Clips", "Defaults", "Grooves", "Presets", "Samples", "Tunings",
+];
 
 /// The User Library's name.
 pub const USER_LIBRARY: &str = "User Library";

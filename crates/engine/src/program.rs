@@ -6,7 +6,7 @@ use core::ops::Range;
 use std::panic::{self, AssertUnwindSafe};
 
 use bl_core::time::{Bpm, SampleRate, TempoMap, TimeSignature, TimeSignatureMap};
-use bl_model::{ChainId, Channel, LaunchMode, ParamId, SceneId, Tap, TrackId};
+use bl_model::{ChainId, Channel, LaunchMode, ParamId, Scale, SceneId, Tap, TrackId};
 
 use crate::disjoint::Shared;
 use crate::drum::DrumNotes;
@@ -17,6 +17,7 @@ use crate::node::{
     Block, Node, NodeData, NodeEvent, NodeKey, NoteBuffer, NoteEvent, NoteKind, ParamValue,
     TransportInfo,
 };
+use crate::scales::ScaleRuns;
 use crate::sched::{Lane, Pool, Sched, Wake};
 use crate::session::{SceneMaps, SessionPlayback};
 use crate::sidechain::SidechainKey;
@@ -1274,6 +1275,7 @@ impl EngineProgram {
             transport,
             session,
             groove_amount,
+            set_scale,
             ..
         } = *block;
         // Where the block sits in the song, for the automation a route plays
@@ -1320,6 +1322,8 @@ impl EngineProgram {
                     notes_out: Some(turn.notes(notes)),
                     session,
                     groove_amount,
+                    set_scale,
+                    scale: ScaleRuns::of(set_scale),
                     modulation: turn.bus(frames),
                     rows: None,
                 });
@@ -1356,6 +1360,15 @@ impl EngineProgram {
             },
             None => false,
         };
+        // Spec: scales R15. The player knows which clip plays, and so which
+        // scale the devices of the track, in its racks too, read; a track
+        // without a player reads the set's.
+        let scale = match task.player.map(|slot| turn.slot(slot).node.as_ref()) {
+            Some(Some(Instance::Device(node))) => node.track_scale(),
+            _ => None,
+        }
+        .unwrap_or_else(|| ScaleRuns::of(set_scale));
+        let block = &Blk { scale, ..*block };
         // The interface's input, if the track takes Ext. In: its
         // channels, through the route whose Monitor gate opens and
         // closes it (WP-2.13).
@@ -1486,6 +1499,8 @@ impl EngineProgram {
                 notes_out: None,
                 session,
                 groove_amount,
+                set_scale,
+                scale: ScaleRuns::of(set_scale),
                 modulation: turn.bus(frames),
                 rows: None,
             });
@@ -1820,6 +1835,11 @@ pub(crate) struct Blk<'a> {
     /// The set's Global Amount of groove, 1 at 100 % (the grooves spec,
     /// R21).
     pub(crate) groove_amount: f32,
+    /// The set's current scale (the scales spec, R9).
+    pub(crate) set_scale: Scale,
+    /// The scale of the clip playing on the task's track over the block (the
+    /// scales spec, R15): the set's until the task's clip player has run.
+    pub(crate) scale: ScaleRuns,
 }
 
 /// A thread's hold on the parts of the program that one task owns, while it
@@ -2224,6 +2244,8 @@ impl EngineProgram {
                 notes_out: Some(out_buf),
                 session: block.session,
                 groove_amount: block.groove_amount,
+                set_scale: block.set_scale,
+                scale: block.scale,
                 // A modulator driven by the signal writes its own rows, and
                 // hears the rows of the modulators before it.
                 modulation: match modulator {
@@ -2463,6 +2485,8 @@ impl EngineProgram {
             notes_out: None,
             session: block.session,
             groove_amount: block.groove_amount,
+            set_scale: block.set_scale,
+            scale: block.scale,
             modulation: turn.bus(frames),
             rows: None,
             external: None,
@@ -2661,6 +2685,8 @@ impl EngineProgram {
                     notes_out: None,
                     session: block.session,
                     groove_amount: block.groove_amount,
+                    set_scale: block.set_scale,
+                    scale: block.scale,
                     modulation: turn.bus(frames),
                     rows: None,
                 });

@@ -68,6 +68,20 @@ pub const GO_TO_STEP: &str = "edit.go_to_step";
 pub const SET_MIDI_REGION: &str = "clip.set_midi_region";
 /// The ID of `clip.set_midi_loop`: a MIDI clip's loop brace.
 pub const SET_MIDI_LOOP: &str = "clip.set_midi_loop";
+/// The ID of the command that sets a MIDI clip's time signature.
+pub const SET_SIGNATURE: &str = "clip.set_signature";
+
+/// The commands that take `clips` in place of `clip`, and make the same
+/// change to each of those clips as one undo step (a clip given as an object
+/// carries the arguments that differ for it): the Clip View's clip
+/// properties for several selected clips (Spec: multi-clip-editing R9).
+pub const FAN_OUT: &[&str] = &[
+    SET_MIDI_LOOP,
+    SET_SIGNATURE,
+    "clip.set_loop_enabled",
+    "clip.set_mute",
+    "clip.rename",
+];
 
 /// Adds every document command, and undo and redo, to a registry.
 ///
@@ -106,7 +120,19 @@ pub fn handles(id: &str) -> bool {
 pub fn run(editor: &mut Editor, id: &str, args: Value) -> Result<ChangeSet, RunError> {
     let entry = entry(id)?;
     match entry.action {
-        Action::Apply(_) => Ok(editor.apply(command_from_args(id, args)?)?),
+        Action::Apply(_) => {
+            let mut commands = commands_from_args(entry, args)?;
+            if commands.len() == 1 {
+                return Ok(editor.apply(commands.remove(0))?);
+            }
+            let before = editor.document().clone();
+            editor.transact(entry.label, |editor| {
+                commands
+                    .into_iter()
+                    .try_for_each(|command| editor.apply(command).map(|_| ()))
+            })?;
+            Ok(ChangeSet::between(&before, editor.document()))
+        }
         Action::Undo => {
             no_args(entry.id, args)?;
             Ok(editor.undo()?)
@@ -130,6 +156,42 @@ pub struct GoToStepArgs {
     /// before any step, and the newest step is the number of steps there
     /// are.
     pub index: usize,
+}
+
+/// The commands a document command's arguments describe: one, or for a
+/// [`FAN_OUT`] command given `clips`, one for each of those clips.
+fn commands_from_args(entry: &'static Entry, args: Value) -> Result<Vec<Command>, RunError> {
+    let id = entry.id;
+    let clips = match &args {
+        Value::Object(fields) if FAN_OUT.contains(&id) => fields.get("clips"),
+        _ => None,
+    };
+    let Some(Value::Array(clips)) = clips else {
+        return Ok(vec![command_from_args(id, args)?]);
+    };
+    let invalid = |message: String| RunError::InvalidArgs {
+        command: id,
+        message,
+    };
+    if clips.is_empty() {
+        return Err(invalid("`clips` is empty".to_owned()));
+    }
+    let clips = clips.clone();
+    let mut commands = Vec::with_capacity(clips.len());
+    for clip in clips {
+        let mut fields = args.as_object().cloned().unwrap_or_default();
+        fields.remove("clips");
+        match clip {
+            // A clip with arguments of its own, such as a loop bar's drag
+            // moving each bar by the same amount.
+            Value::Object(own) => fields.extend(own),
+            clip => {
+                fields.insert("clip".to_owned(), clip);
+            }
+        }
+        commands.push(command_from_args(id, Value::Object(fields))?);
+    }
+    Ok(commands)
 }
 
 /// The [`Command`] a document command's ID and JSON arguments describe,
@@ -278,7 +340,12 @@ impl Entry {
             // A tag missing from the enum's schema leaves the spec without
             // arguments, which the registry reports.
             Action::Apply(op) => match tagged_variant(commands, "op", op) {
-                Some(args) => spec.args_schema(args),
+                Some(mut args) => {
+                    if FAN_OUT.contains(&self.id) {
+                        accept_clips(&mut args);
+                    }
+                    spec.args_schema(args)
+                }
                 None => spec,
             },
             Action::Undo | Action::Redo => spec.args::<NoArgs>(),
@@ -292,6 +359,41 @@ impl Entry {
             });
         }
         spec
+    }
+}
+
+/// The schema of a [`FAN_OUT`] command given the schema of its [`Command`]
+/// variant: the same, taking `clips` in place of `clip`.
+#[must_use]
+pub fn with_clips(variant: &Schema) -> Schema {
+    let mut schema = variant.clone();
+    accept_clips(&mut schema);
+    schema
+}
+
+/// Lets a [`FAN_OUT`] command's schema take `clips` in place of `clip`.
+fn accept_clips(schema: &mut Schema) {
+    if let Some(properties) = schema.get_mut("properties").and_then(Value::as_object_mut) {
+        properties.insert(
+            "clips".to_owned(),
+            serde_json::json!({
+                "description": "Clips to make the same change to, as one undo step, in place \
+                                of `clip`.",
+                "type": "array",
+                "items": {
+                    "oneOf": [
+                        { "type": "integer", "minimum": 1 },
+                        {
+                            "type": "object",
+                            "description": "A clip (`clip`) and the arguments that differ for it.",
+                        },
+                    ],
+                },
+            }),
+        );
+    }
+    if let Some(required) = schema.get_mut("required").and_then(Value::as_array_mut) {
+        required.retain(|name| name != "clip");
     }
 }
 
@@ -328,6 +430,70 @@ const ENTRIES: &[Entry] = &[
             scale is what the Control Bar's scale controls show, what the clips made next take, \
             and what a device or a tool reads where no clip plays. It is one undo step, named \
             \"Change Scale\", and the set is saved with it.",
+    },
+    Entry {
+        id: "tuning.set",
+        action: Action::Apply("set_tuning"),
+        label: "Set Tuning",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Makes a tuning, given whole (`tuning`: its name, description, the `cents` \
+            of its degrees above the unison with the pseudo-octave last, optional note `names` \
+            and `link`, its `reference` pitch and its `range` of notes), the set's tuning in \
+            place of any other. `tuning.load` makes one from a `.scl` or `.ascl` file instead. \
+            With `retune` true, every note of the MIDI clips on tracks that play the tuning \
+            moves to the key whose new pitch is nearest the pitch it had (the lower key on a \
+            tie; of two overlapping notes that land on one key the earlier is shortened, and of \
+            two that start together the shorter is deleted); with it false the notes keep \
+            their keys. A tuning that breaks the rules (no pitches, a pseudo-octave at or below \
+            the unison, a range of more than 128 notes) is refused and the set's tuning stays \
+            as it was. It is one undo step, named \"Load Tuning\", and the set is saved with \
+            the tuning inside it. `tuning.state` reads it back.",
+    },
+    Entry {
+        id: "tuning.remove",
+        action: Action::Apply("remove_tuning"),
+        label: "Remove Tuning",
+        permission: Permission::Destructive,
+        contexts: &[Global],
+        keys: &[],
+        description: "Removes the set's tuning, which puts the set back to twelve equal steps. \
+            With `retune` true, every note of the MIDI clips on tracks that play the tuning \
+            moves to the key nearest the pitch it had under the tuning; with it false the \
+            notes keep their keys and may sound other pitches. Refused when the set has no \
+            tuning. It is one undo step, named \"Remove Tuning\", and undo brings the tuning \
+            back. `tuning.state` reads it back.",
+    },
+    Entry {
+        id: "tuning.set_reference",
+        action: Action::Apply("set_tuning_reference"),
+        label: "Set Tuning Reference Pitch",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Sets the set's tuning's reference pitch: an `octave`, a `degree` of the \
+            tuning and a `frequency` in Hz; a value left out stays as it was. Changing the \
+            octave or the degree only names another note as the reference: the frequency \
+            becomes that note's present frequency and nothing sounds different. Changing the \
+            frequency moves every pitch of the set by one ratio. Refused when the set has no \
+            tuning, for a degree the tuning doesn't have, or for a frequency that isn't above \
+            0. It is one undo step, named \"Change Reference Pitch\". `tuning.state` reads it \
+            back.",
+    },
+    Entry {
+        id: "tuning.set_range",
+        action: Action::Apply("set_tuning_range"),
+        label: "Set Tuning Range",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Sets the set's tuning's note range: the `lowest` note, which key 0 plays, \
+            and the `highest`, each an `octave` and a `degree`. Given one, the other moves by \
+            as many notes, so the number of notes stays; given both, they are the range. A \
+            range of more than 128 notes, or one that starts above its end, is refused. Keys \
+            above the highest note play nothing. Refused when the set has no tuning. It is one \
+            undo step, named \"Change Tuning Range\". `tuning.state` reads it back.",
     },
     Entry {
         id: "song.set_time_signatures",
@@ -937,6 +1103,20 @@ const ENTRIES: &[Entry] = &[
             with the set, and each change is one undo step.",
     },
     Entry {
+        id: "track.set_tuning_bypass",
+        action: Action::Apply("set_tuning_bypass"),
+        label: "Bypass Tuning",
+        permission: Permission::Edit,
+        contexts: MIXER,
+        keys: &[],
+        description: "Switches a MIDI track's Bypass Tuning, as its In/Out section's switch \
+            does. On, the track plays twelve equal steps whatever tuning the set holds, and its \
+            clips' editors show twelve-step keys; off (a new track's), it plays the tuning. A \
+            track that holds a Drum Rack plays twelve equal steps whatever the switch says. \
+            Only MIDI tracks have it. The switch is saved with the set only where it's on, and \
+            each change is one undo step, named \"Bypass Tuning\".",
+    },
+    Entry {
         id: "mixer.set_keep_monitoring_latency",
         action: Action::Apply("set_keep_monitoring_latency"),
         label: "Keep Monitoring Latency",
@@ -1188,12 +1368,98 @@ const ENTRIES: &[Entry] = &[
         permission: Permission::Edit,
         contexts: &[Arrangement],
         keys: &[],
-        description: "Adds a take lane under an audio track's arrangement lane, after the lanes \
-            it has. `lane.name` names it and `lane.clips` are the recorded passes it holds, each \
-            with a `name`, a `start` and `length` in ticks (705,600 to the quarter note), and \
-            audio `data` as `clip.create` takes it. The track plays only its arrangement lane: \
-            loop recording adds a lane for every pass and copies the latest pass to the \
-            arrangement lane. Audio tracks only.",
+        description: "Adds a take lane under an audio or MIDI track's main lane, after the \
+            lanes it has, or at `index` among them (0 is the lane nearest the main lane). \
+            `lane.name` names it and `lane.clips` are the clips it holds, each with a `name`, \
+            a `start` and `length` in ticks (705,600 to the quarter note), and `data`: audio \
+            as `clip.create` takes it, or tagged `audio` or `midi`. The lane and its clips are \
+            given IDs when `id` is left out. A lane holds clips of its track's kind. The track \
+            plays only its main lane, or the take lane that is auditioned in its place \
+            (`take_lane.set_audition`); recording adds a lane for every take and copies the \
+            latest to the main lane. Read the lanes back with the query tool's `track` \
+            `take_lanes`.",
+    },
+    Entry {
+        id: "take_lane.create_clip",
+        action: Action::Apply("create_take_clip"),
+        label: "Create Clip on Take Lane",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Puts a new clip on a take lane, at `clip.start` for `clip.length` ticks \
+            (705,600 to the quarter note), as `clip.create` puts one on a main lane: an audio \
+            clip on an audio track's lane and a MIDI clip on a MIDI track's. `clip.id` must be \
+            a new ID the project has issued for it. It does not clear what the lane holds \
+            there. The clip is then edited by its ID with the `clip.*` commands, as a \
+            main-lane clip is.",
+    },
+    Entry {
+        id: "take_lane.rename",
+        action: Action::Apply("rename_take_lane"),
+        label: "Rename Take Lane",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Gives a take lane a new name. An empty name is refused.",
+    },
+    Entry {
+        id: "take_lane.delete",
+        action: Action::Apply("delete_take_lanes"),
+        label: "Delete Take Lane(s)",
+        permission: Permission::Destructive,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Deletes take lanes with their clips. The main lane is left as it was, and \
+            a deleted lane that was auditioned stops being. Undo restores them, but because it \
+            removes the person's work an agent asks first.",
+    },
+    Entry {
+        id: "take_lane.delete_all",
+        action: Action::Apply("delete_all_take_lanes"),
+        label: "Delete All Take Lanes",
+        permission: Permission::Destructive,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Deletes every take lane of each of the audio or MIDI `tracks`, with their \
+            clips. The main lane is left as it was. Undo restores them, but because it \
+            removes the person's work an agent asks first.",
+    },
+    Entry {
+        id: "take_lane.delete_unused",
+        action: Action::Apply("delete_unused_take_lanes"),
+        label: "Delete All Unused Take Lanes",
+        permission: Permission::Destructive,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Deletes each of the audio or MIDI `tracks`' take lanes none of whose \
+            material the main lane uses: a main-lane clip uses a take-lane clip over the stretch \
+            where both lie when they play the same thing there (`take_lane.comp_sources` lists \
+            what is used). The main lane is left as it was. Undo restores them, but because it \
+            removes the person's work an agent asks first.",
+    },
+    Entry {
+        id: "take_lane.move",
+        action: Action::Apply("move_take_lanes"),
+        label: "Move Take Lane(s)",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Moves take lanes, which must all be on one track, to a new place among \
+            that track's take lanes, keeping their order: `index` counts from 0, the lane \
+            nearest the main lane, among the lanes that are not moved. The main lane stays \
+            first.",
+    },
+    Entry {
+        id: "take_lane.set_audition",
+        action: Action::Apply("set_audition"),
+        label: "Audition Take Lane",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Switches the audition of a take lane on or off. While a take lane is \
+            auditioned, its track plays that lane's clips in place of its main lane's, from the \
+            next block; a track has at most one, so switching one on switches off the one \
+            auditioned before. Session clips are unaffected. It is saved with the set.",
     },
     Entry {
         id: "clip.delete",
@@ -1388,6 +1654,16 @@ const ENTRIES: &[Entry] = &[
             `clip.set_loop_enabled`. While the loop is on, the clip plays from its Start \
             marker into the brace, then repeats the brace until the clip ends in the \
             arrangement; make the clip longer with `clip.set_length` to hear more repeats.",
+    },
+    Entry {
+        id: SET_SIGNATURE,
+        action: Action::Apply("set_midi_clip_signature"),
+        label: "Set MIDI Clip Signature",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Sets a MIDI clip's time signature, as the Clip View's Signature fields \
+            do; `signature` `null` makes the clip follow the song's signature at its position.",
     },
     Entry {
         id: "clip.set_loop_enabled",

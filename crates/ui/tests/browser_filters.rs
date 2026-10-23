@@ -3,7 +3,7 @@
 //! Forward, and Full-Height Browser, headless (WP-6.32). Spec: browser-tags
 //! R18 to R33, browser R26.
 
-mod common;
+use crate::common;
 
 use std::path::{Path, PathBuf};
 

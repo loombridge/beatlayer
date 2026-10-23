@@ -52,6 +52,16 @@ pub const REFERENCE: Vec2 = vec2(1600.0, 1000.0 - TITLE_BAR);
 /// D24) close up at 1340 points.
 pub const MINIMUM: Vec2 = vec2(1340.0, 640.0);
 
+/// The second window's content area when it first opens, in points with its
+/// title bar (L-WIN2-001).
+pub const SECOND_WINDOW: Vec2 = vec2(990.0, 703.0);
+
+/// The smallest content area the second window lays out, in layout points
+/// ([`minimum_second_window`] scales it by the zoom). Its Control Bar is cut
+/// off at its right edge rather than setting a smallest width
+/// (interface-zoom R15).
+pub const SECOND_MINIMUM: Vec2 = vec2(640.0, 400.0);
+
 /// The margin between panes and at the window's left and right edges
 /// (L-WIN-009).
 pub const MARGIN: f32 = 9.0;
@@ -104,6 +114,28 @@ pub fn minimum_window(zoom: f32, title_bar: bool, menu_bar: bool) -> Vec2 {
             0.0,
             if title_bar { TITLE_BAR } else { 0.0 } + menu_bar_height,
         )
+}
+
+/// The second window's smallest inner size in window points at `zoom`:
+/// [`SECOND_MINIMUM`] scaled by the zoom, with Live's title bar where
+/// Beatlayer draws it (interface-zoom R15).
+#[must_use]
+pub fn minimum_second_window(zoom: f32, title_bar: bool) -> Vec2 {
+    SECOND_MINIMUM * zoom + vec2(0.0, if title_bar { TITLE_BAR } else { 0.0 })
+}
+
+/// The second window's minimum and its new inner size when the zoom becomes
+/// `zoom`, as [`fit_main_window`] gives the main window's.
+#[must_use]
+pub fn fit_second_window(
+    current: Vec2,
+    zoom: f32,
+    title_bar: bool,
+    screen: Option<Vec2>,
+) -> (Vec2, Vec2) {
+    let minimum = minimum_second_window(zoom, title_bar);
+    let minimum = screen.map_or(minimum, |screen| minimum.min(screen));
+    (minimum, current.max(minimum))
 }
 
 /// The main window's minimum and its new inner size, in window points, when
@@ -611,9 +643,41 @@ impl ShellLayout {
         undo_history: Option<f32>,
         detail_views: DetailViews,
     ) -> Self {
-        let size = size.max(MINIMUM);
+        Self::lay_out(
+            size,
+            false,
+            browser,
+            info_view,
+            assistant,
+            undo_history,
+            detail_views,
+        )
+    }
+
+    /// The second window's layout (second-window R2, R17): no Info View, no
+    /// assistant and no Undo History, which belong to the main window, and
+    /// a Control Bar measured from the window's left edge and cut off at its
+    /// right edge, as it is laid out in the main window's smallest width.
+    #[must_use]
+    pub fn compute_second(size: Vec2, browser: bool, detail_views: DetailViews) -> Self {
+        Self::lay_out(size, true, browser, false, None, None, detail_views)
+    }
+
+    fn lay_out(
+        size: Vec2,
+        second: bool,
+        browser: bool,
+        info_view: bool,
+        assistant: Option<f32>,
+        undo_history: Option<f32>,
+        detail_views: DetailViews,
+    ) -> Self {
+        let size = size.max(if second { SECOND_MINIMUM } else { MINIMUM });
         let (w, h) = (size.x, size.y);
         let extra = w - REFERENCE.x;
+        // The second window's Control Bar is laid out as the main window's
+        // is at its smallest width.
+        let controls_extra = if second { w.max(MINIMUM.x) } else { w } - REFERENCE.x;
         // The panes at the right edge, from the window's margin inwards:
         // the assistant's, then the Undo History's, 9 points apart.
         let edge = w - MARGIN;
@@ -734,6 +798,10 @@ impl ShellLayout {
         let elements = ELEMENTS
             .iter()
             .map(|placement| {
+                let extra = match placement.strip {
+                    Strip::ControlBar => controls_extra,
+                    Strip::StatusBar => extra,
+                };
                 let shift = match placement.anchor {
                     Left => 0.0,
                     Middle => extra * MIDDLE_SHARE,

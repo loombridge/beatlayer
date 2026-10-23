@@ -22,7 +22,7 @@ use bl_shell::browser_commands::{
     self as ids, ClipFileKind, Item, ItemKind, Label, LabelInfo, Part, TagEditorRow,
     TagEditorRowKind, TagState,
 };
-use bl_shell::{Area, Invocation, MainView, Shell, WindowKind};
+use bl_shell::{Area, Invocation, MainView, Shell};
 use egui::accesskit::Role;
 use egui::{
     Align2, Color32, CursorIcon, DragAndDrop, EventFilter, Id, Key, Pos2, Rect, Sense, Shape,
@@ -2076,7 +2076,9 @@ impl BrowserUi {
                     m.request_focus(list_id());
                 }
             });
-            if view.focus() != Part::Content || shell.focused_area() != Area::Browser {
+            if view.focus() != Part::Content
+                || crate::window::focused_area(ui.ctx(), shell) != Area::Browser
+            {
                 invoke(events, ids::FOCUS_BROWSER, json!({ "part": "content" }));
             }
             self.click(shell, index, item, modifiers, events);
@@ -2396,8 +2398,7 @@ impl BrowserUi {
     fn keys(&mut self, ui: &mut Ui, shell: &Shell, events: &mut Vec<UiEvent>) {
         let view = shell.browser_view();
         let part = view.focus();
-        let focused = shell.focused_area() == Area::Browser
-            && shell.focused_window() == WindowKind::Main
+        let focused = crate::window::has_focus(ui.ctx(), shell, Area::Browser)
             && part != Part::Search
             && !ui.ctx().text_edit_focused()
             && ui.memory(|m| {
@@ -2630,7 +2631,7 @@ impl BrowserUi {
         if payload.is_none() && dropped.is_empty() && !hovering {
             return;
         }
-        if shell.main_view() != MainView::Arrangement {
+        if crate::window::main_view(ui.ctx(), shell) != MainView::Arrangement {
             return;
         }
         if pointer.is_some_and(|p| zone_editor.is_some_and(|editor| editor.contains(p))) {

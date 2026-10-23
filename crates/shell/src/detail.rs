@@ -62,6 +62,18 @@ impl DetailArea {
         self.expanded
     }
 
+    /// Whether `view` shows.
+    #[must_use]
+    pub fn shows(&self, view: DetailView) -> bool {
+        self.is_shown(view)
+    }
+
+    /// Whether either view shows.
+    #[must_use]
+    pub fn any_shown(&self) -> bool {
+        self.clip || self.device
+    }
+
     /// The view the detail area's keys go to while both show.
     #[must_use]
     pub fn focus(&self) -> DetailView {
@@ -159,6 +171,45 @@ impl DetailArea {
             self.set(view, true);
             self.focus = view;
         }
+        self.settle();
+    }
+
+    /// A detail area showing neither view, as the second window opens with
+    /// (second-window R7).
+    #[must_use]
+    pub fn empty() -> Self {
+        let mut area = Self {
+            device: false,
+            ..Self::default()
+        };
+        area.settle();
+        area
+    }
+
+    /// Takes the views `other` shows into this detail area, where they show
+    /// as they did, with the Clip View's height and whether it's expanded,
+    /// and leaves `other` showing neither (second-window R8, R9).
+    pub fn take_from(&mut self, other: &mut Self) {
+        self.hidden.clear();
+        other.hidden.clear();
+        for view in other.shown() {
+            if view == DetailView::Clip {
+                self.clip_height = other.clip_height;
+                self.expanded = other.expanded;
+            }
+            self.set(view, true);
+            other.set(view, false);
+            self.focus = view;
+        }
+        self.settle();
+        other.settle();
+    }
+
+    /// Hides `view` because it shows in the other window now
+    /// (second-window R7).
+    pub fn leave(&mut self, view: DetailView) {
+        self.hidden.retain(|hidden| *hidden != view);
+        self.set(view, false);
         self.settle();
     }
 

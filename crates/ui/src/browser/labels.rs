@@ -459,7 +459,9 @@ impl BrowserUi {
             );
         }
         if response.clicked() {
-            if view.focus() != Part::Sidebar || shell.focused_area() != Area::Browser {
+            if view.focus() != Part::Sidebar
+                || crate::window::focused_area(ui.ctx(), shell) != Area::Browser
+            {
                 invoke(events, ids::FOCUS_BROWSER, json!({ "part": "sidebar" }));
             }
             invoke(events, ids::OPEN_PLACE, json!({ "label": info.label }));

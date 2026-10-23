@@ -319,6 +319,11 @@ pub struct ThemeColorsSettings {
 pub struct DisplayInputSettings {
     /// The interface zoom in percent, as `view.set_zoom` takes it.
     pub zoom_percent: u16,
+    /// The second window's zoom in percent, as `view.set_zoom` takes it
+    /// with `window` set to `second`: only while the second window is open,
+    /// when the page shows Second Window Zoom (interface-zoom R12).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub second_window_zoom_percent: Option<u16>,
     /// Outline View in Focus, as `settings.set_outline_view_in_focus` sets it.
     pub outline_view_in_focus: bool,
     /// Use Tab Key to Move Focus, as `focus.toggle_tab_navigation` toggles it.

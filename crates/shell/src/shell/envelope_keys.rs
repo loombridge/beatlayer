@@ -201,7 +201,9 @@ impl Shell {
                 .keyboard_lane()
                 .map(|(track, target)| Keyed::Lane { track, target })
         };
-        if self.focused_area == Area::Detail && self.detail.focus_in_clip() {
+        // The keys are the window in front's (second-window R10).
+        let window = self.acting_window();
+        if self.focused_area_of(window) == Area::Detail && self.detail_of(window).focus_in_clip() {
             clip().or_else(lane)
         } else {
             lane().or_else(clip)

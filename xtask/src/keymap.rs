@@ -301,6 +301,47 @@ const WIDGET: &[(&str, &str)] = &[
         "the Clip View's note editor: Shift-Left and Shift-Right select time, a grid step at a \
          time (`clip_view.select_time`)",
     ),
+    // WP-6.1: the note editor reads the keys that change the selected notes'
+    // values itself, because each has two directions, or reads a number
+    // typed over several presses, or a drag (the keymap gives a shortcut one
+    // command with one set of arguments).
+    (
+        "S-NOTE-016",
+        "the Clip View's note editor: Cmd-dragging a note (Alt-dragging on Windows) up or down \
+         changes its velocity, or every selected note's (`note.adjust_value`)",
+    ),
+    (
+        "S-NOTE-026",
+        "the Clip View's note editor: a digit from 1 to 9 starts a velocity for the selected \
+         notes, more digits add to it, and Enter sets it (`note.set_value`)",
+    ),
+    (
+        "S-NOTE-027",
+        "the Clip View's note editor: Cmd-Up and Cmd-Down raise and lower the selected notes' \
+         velocity by 10 (`note.adjust_value`)",
+    ),
+    (
+        "S-NOTE-028",
+        "the Clip View's note editor: Cmd-Shift-Up and Cmd-Shift-Down raise and lower the \
+         selected notes' velocity deviation by 10 (`note.adjust_value`)",
+    ),
+    (
+        "S-NOTE-029",
+        "the Clip View's note editor: Cmd-Option-Up and Cmd-Option-Down raise and lower the \
+         selected notes' chance by 10 % (`note.adjust_value`)",
+    ),
+    (
+        "S-NOTE-050",
+        "the Clip View's note editor, after a marker in the Velocity or Release Velocity lane \
+         was clicked: Cmd-Up and Cmd-Down change the selected notes' value by 10, and with Shift \
+         by 1 (`note.adjust_value`)",
+    ),
+    (
+        "S-NOTE-051",
+        "the Clip View's note editor, after a marker in the Chance lane was clicked: Up and \
+         Down change the selected notes' chance by 10 %, and with Shift by 1 % \
+         (`note.adjust_value`)",
+    ),
     (
         "S-A11Y-005",
         "the Clip View's note editor: Enter selects the notes that start inside the time \

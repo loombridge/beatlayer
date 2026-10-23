@@ -76,6 +76,7 @@ pub mod fader;
 mod fades;
 mod follow;
 pub mod graph;
+mod groove;
 mod ids;
 mod launch;
 mod layers;
@@ -136,9 +137,13 @@ pub use follow::{
     FollowPatch,
 };
 pub use freeze::{FrozenClip, FrozenOutput, FrozenTail, FrozenTrack};
+pub use groove::{
+    AudioPass, DEFAULT_BASE, GAIN_GLIDE_SECONDS, GLOBAL_AMOUNT_MAX, Groove, GrooveBase, GrooveNote,
+    GroovePlay, GroovePool, MovedTransients, clip_seed, noise,
+};
 pub use ids::{
-    ChainId, ClipId, ContentHash, DeviceId, LocatorId, ParamId, ParseContentHashError, SceneId,
-    TrackId,
+    ChainId, ClipId, ContentHash, DeviceId, GrooveId, LocatorId, ParamId, ParseContentHashError,
+    SceneId, TrackId,
 };
 /// The persistent collections the document's public types hold.
 pub use imbl::{OrdMap, Vector};

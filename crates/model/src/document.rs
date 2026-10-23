@@ -8,7 +8,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::clip::{Clip, ClipData};
 use crate::device::Device;
-use crate::ids::{ChainId, ClipId, DeviceId, LocatorId, SceneId, TrackId};
+use crate::groove::GroovePool;
+use crate::ids::{ChainId, ClipId, DeviceId, GrooveId, LocatorId, SceneId, TrackId};
 use crate::locator::{Locator, SongStart};
 use crate::metronome::MetronomeSettings;
 use crate::rack::Chain;
@@ -101,6 +102,12 @@ pub struct Settings {
     /// A set saved before the song start time has none and loads with none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub song_start: Option<SongStart>,
+    /// The set's grooves (WP-6.19): the Groove Pool, the Global Amount, and
+    /// Auto Load Groove with its groove. A set saved before grooves loads
+    /// with an empty pool, a Global Amount of 100 % and Auto Load Groove off,
+    /// and a set holding none doesn't write them.
+    #[serde(default, skip_serializing_if = "GroovePool::is_default")]
+    pub grooves: GroovePool,
     /// The set's current scale (WP-6.7): its Scale Mode switch, its root and
     /// its scale name, which the Control Bar's scale controls show and which
     /// a new clip takes. Off, at C, in Major, in a new set, and not written
@@ -131,6 +138,7 @@ impl Default for Settings {
             lock_envelopes: false,
             locators: Vec::new(),
             song_start: None,
+            grooves: GroovePool::default(),
             scale: Scale::default(),
         }
     }
@@ -553,6 +561,44 @@ impl Document {
         }
     }
 
+    /// The clips, on any track's Arrangement lane or in a Session slot, whose
+    /// groove is `groove`.
+    #[must_use]
+    pub fn clips_using_groove(&self, groove: GrooveId) -> Vec<ClipId> {
+        self.tracks
+            .values()
+            .flat_map(|track| track.clips().chain(track.slots().map(|(_, clip)| clip)))
+            .filter(|clip| clip.groove == Some(groove))
+            .map(|clip| clip.id)
+            .collect()
+    }
+
+    /// Sets to none the groove of every clip whose groove `gone` picks.
+    pub(crate) fn forget_grooves(&mut self, gone: impl Fn(GrooveId) -> bool) {
+        let owners: Vec<(TrackId, ClipId)> = self
+            .tracks
+            .iter()
+            .flat_map(|(id, track)| {
+                track
+                    .clips()
+                    .chain(track.slots().map(|(_, clip)| clip))
+                    .filter(|clip| clip.groove.is_some_and(&gone))
+                    .map(|clip| (*id, clip.id))
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        for (track, clip) in owners {
+            if let Some(clip) = self
+                .tracks
+                .get_mut(&track)
+                .map(crate::shared::Shared::make_mut)
+                .and_then(|track| track.clip_mut(clip))
+            {
+                clip.groove = None;
+            }
+        }
+    }
+
     /// How many scenes there are.
     #[must_use]
     pub fn scene_count(&self) -> usize {
@@ -744,6 +790,12 @@ impl Document {
                 .locators
                 .iter()
                 .any(|locator| locator.id.0 == id)
+            || self
+                .settings
+                .grooves
+                .pool
+                .iter()
+                .any(|groove| groove.id.0 == id)
     }
 
     /// The largest ID of any track, clip, device, or scene.
@@ -760,7 +812,14 @@ impl Document {
             .iter()
             .map(|locator| locator.id.0)
             .max();
-        [track, clip, device, chain, scene, locator]
+        let groove = self
+            .settings
+            .grooves
+            .pool
+            .iter()
+            .map(|groove| groove.id.0)
+            .max();
+        [track, clip, device, chain, scene, locator, groove]
             .into_iter()
             .flatten()
             .max()

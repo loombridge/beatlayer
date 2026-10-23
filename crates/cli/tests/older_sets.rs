@@ -321,6 +321,79 @@ fn a_set_saved_before_the_scales_loads_unchanged() {
     assert_eq!(encode_json(&loaded, 1).unwrap(), saved);
 }
 
+// Spec: note-editing R20. The lanes, the footer and the value keys save
+// nothing new: a set saved before them loads unchanged, and every note value
+// a lane edits is saved in the shape it always was and read back.
+#[test]
+fn a_set_saved_before_the_lanes_loads_unchanged_and_every_note_value_round_trips() {
+    use bl_model::{MidiData, Note};
+    let mut editor = Editor::new();
+    let track = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: track,
+            kind: TrackKind::Midi,
+            name: "Keys".to_owned(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    let plain = Note::new(60, Ticks::ZERO, Ticks::QUARTER, 100);
+    let mut edited = Note::new(64, Ticks::QUARTER, Ticks::QUARTER, 33);
+    edited.release_velocity = 99;
+    edited.probability = 0.25;
+    edited.velocity_deviation = -20;
+    edited.mute = true;
+    let clip = editor.new_id();
+    editor
+        .apply(Command::CreateClip {
+            track,
+            clip: Clip::new(
+                clip,
+                Ticks::ZERO,
+                Ticks::WHOLE,
+                ClipData::Midi(MidiData::new([plain.clone(), edited.clone()])),
+            ),
+        })
+        .unwrap();
+    let project = Project {
+        document: editor.document().clone(),
+        ids: editor.ids(),
+        media: Media::default(),
+        windows: bl_model::DeviceWindows::new(),
+        rack_views: bl_model::RackViewMap::new(),
+        folds: bl_model::ClipFolds::new(),
+        launch: bl_model::LaunchSettings::default(),
+        multisamplers: bl_model::MultisamplerViews::new(),
+    };
+    let saved = encode_json(&project, 1).unwrap();
+    let value: Value = serde_json::from_slice(&saved).unwrap();
+    let notes = &value["document"]["tracks"][0]["clips"][0]["data"]["midi"]["notes"];
+    for field in [
+        "release_velocity",
+        "probability",
+        "velocity_deviation",
+        "mute",
+    ] {
+        assert!(
+            notes[0].get(field).is_none(),
+            "a plain note writes no {field}"
+        );
+        assert!(
+            notes[1].get(field).is_some(),
+            "an edited note writes {field}"
+        );
+    }
+    let (loaded, _) = decode_json(&saved, &LoadOptions::default()).unwrap();
+    assert_eq!(loaded.document, project.document);
+    let ClipData::Midi(midi) = &loaded.document.clip(clip).unwrap().data else {
+        panic!("a MIDI clip");
+    };
+    let notes: Vec<Note> = midi.notes.iter().cloned().collect();
+    assert_eq!(notes, [plain, edited], "every value comes back");
+    assert_eq!(encode_json(&loaded, 1).unwrap(), saved);
+}
+
 /// A one-bar MIDI clip, on the track from the start of the song.
 fn midi_clip(editor: &mut Editor, track: bl_model::TrackId) -> bl_model::ClipId {
     let clip = editor.new_id();
@@ -775,4 +848,134 @@ fn the_locators_and_the_song_start_time_are_saved_and_load_again() {
     assert_eq!(loaded.document.locators().len(), 1);
     assert_eq!(loaded.document.locators()[0].name, "Intro");
     assert_eq!(loaded.document.song_start_ticks(), Some(Ticks::WHOLE * 2));
+}
+
+/// A project holding `editor`'s document.
+fn project_of(editor: &Editor) -> Project {
+    Project {
+        document: editor.document().clone(),
+        ids: editor.ids(),
+        media: Media::default(),
+        windows: bl_model::DeviceWindows::new(),
+        rack_views: bl_model::RackViewMap::new(),
+        folds: bl_model::ClipFolds::new(),
+        launch: bl_model::LaunchSettings::default(),
+        multisamplers: bl_model::MultisamplerViews::new(),
+    }
+}
+
+/// A MIDI track holding a clip, and the clip's ID.
+fn midi_clip_song() -> (Editor, bl_model::ClipId) {
+    let mut editor = Editor::new();
+    let track = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: track,
+            kind: TrackKind::Midi,
+            name: "Keys".to_owned(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    let clip = editor.new_id();
+    editor
+        .apply(Command::CreateClip {
+            track,
+            clip: bl_model::Clip::new(
+                clip,
+                Ticks::ZERO,
+                Ticks::WHOLE,
+                bl_model::ClipData::Midi(bl_model::MidiData::default()),
+            ),
+        })
+        .unwrap();
+    (editor, clip)
+}
+
+/// A set saved before grooves loads with an empty pool, a Global Amount of
+/// 100 % and Auto Load Groove off, and a clip with no groove (the grooves
+/// spec, R22).
+#[test]
+fn a_set_saved_before_grooves_loads_with_an_empty_pool() {
+    let (editor, clip) = midi_clip_song();
+    let saved = encode_json(&project_of(&editor), 1).unwrap();
+    let value: Value = serde_json::from_slice(&saved).unwrap();
+    assert!(value["document"]["settings"].get("grooves").is_none());
+    assert!(
+        value["document"]["tracks"][0]["clips"][0]
+            .get("groove")
+            .is_none()
+    );
+    let (loaded, _) = decode_json(&saved, &LoadOptions::default()).unwrap();
+    let pool = &loaded.document.settings().grooves;
+    assert!(pool.pool.is_empty());
+    assert_eq!(pool.global_amount, 100.0);
+    assert!(!pool.auto_load && pool.auto_load_groove.is_none());
+    assert_eq!(loaded.document.clip(clip).unwrap().groove, None);
+    loaded.document.check_invariants().unwrap();
+}
+
+/// The pool, each groove's notes and parameters, the Global Amount, Auto Load
+/// Groove and its groove, and each clip's groove are saved with the set and
+/// load again; a clip naming a groove that isn't in the pool loads with none
+/// (the grooves spec, R22).
+#[test]
+fn the_grooves_are_saved_with_the_set_and_load_again() {
+    let (mut editor, clip) = midi_clip_song();
+    let groove: bl_model::GrooveId = editor.new_id();
+    editor
+        .apply(Command::AddGroove {
+            groove: bl_model::Groove::new(
+                groove,
+                "Swing".to_owned(),
+                Ticks::WHOLE,
+                vec![bl_model::GrooveNote {
+                    position: Ticks::SIXTEENTH,
+                    velocity: 90,
+                }],
+            ),
+        })
+        .unwrap();
+    editor
+        .apply(Command::SetGroove {
+            groove,
+            base: Some(bl_model::GrooveBase::EighthTriplet),
+            quantize: Some(25.0),
+            timing: None,
+            random: Some(5.0),
+            velocity: Some(-50.0),
+        })
+        .unwrap();
+    editor
+        .apply(Command::SetClipGroove {
+            clips: vec![clip],
+            groove: Some(groove),
+        })
+        .unwrap();
+    editor
+        .apply(Command::SetGlobalGrooveAmount { amount: 85.0 })
+        .unwrap();
+    editor
+        .apply(Command::SetAutoLoadGroove {
+            enabled: Some(true),
+            groove: Some(groove),
+        })
+        .unwrap();
+    let saved = encode_json(&project_of(&editor), 1).unwrap();
+    let (loaded, _) = decode_json(&saved, &LoadOptions::default()).unwrap();
+    assert_eq!(
+        loaded.document.settings().grooves,
+        editor.document().settings().grooves
+    );
+    assert_eq!(loaded.document.clip(clip).unwrap().groove, Some(groove));
+    // A clip that names a groove the pool doesn't hold loads with none.
+    let mut value: Value = serde_json::from_slice(&saved).unwrap();
+    value["document"]["settings"]["grooves"]["pool"] = serde_json::json!([]);
+    let (loaded, _) = decode_json(
+        &serde_json::to_vec(&value).unwrap(),
+        &LoadOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(loaded.document.clip(clip).unwrap().groove, None);
+    assert_eq!(loaded.document.settings().grooves.auto_load_groove, None);
 }

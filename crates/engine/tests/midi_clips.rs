@@ -371,6 +371,38 @@ fn muted_notes_and_muted_clips_never_sound() {
     );
 }
 
+// Spec: note-editing R18. A note deactivated in the document, as
+// `note.deactivate` does, is silent from the next sync on, and sounds again
+// when it's activated.
+#[test]
+fn a_note_deactivated_in_the_document_is_silent_until_it_is_activated() {
+    let sounded = |mute: bool| {
+        let mut rig = Rig::new(256);
+        let trk = midi_track(&mut rig.editor);
+        instrument(&mut rig.editor, trk);
+        let note = Note::new(60, Ticks::ZERO, BEAT, 100);
+        let id = midi_clip(
+            &mut rig.editor,
+            trk,
+            Ticks::ZERO,
+            BAR,
+            MidiData::new([note.clone()]),
+        );
+        let mut deactivated = note;
+        deactivated.mute = mute;
+        rig.apply(Command::SetClipData {
+            clip: id,
+            data: ClipData::Midi(MidiData::new([deactivated])),
+        });
+        rig.sync();
+        rig.sender.transport(TransportCommand::Play);
+        play(&mut rig, 48_000, 256);
+        !rig.probe.recorded_notes().is_empty()
+    };
+    assert!(!sounded(true), "a deactivated note never sounds");
+    assert!(sounded(false), "an activated note sounds again");
+}
+
 // Acceptance 7: No stuck notes after stop, loop wrap, or clip deletion.
 #[test]
 fn no_stuck_notes_after_stop_or_clip_deletion() {

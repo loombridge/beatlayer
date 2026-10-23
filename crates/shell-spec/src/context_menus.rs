@@ -416,11 +416,7 @@ const NOTE: &[Row] = &[
         "Invert Selection",
         Pending(Some("S-NOTE-034")),
     ),
-    (
-        "C-NOTE-007",
-        "Deactivate Note(s)",
-        Pending(Some("S-NOTE-041")),
-    ),
+    ("C-NOTE-007", "Deactivate Note(s)", Key(&["S-NOTE-041"])),
     ("C-NOTE-008", "Group Notes", Pending(Some("S-NOTE-031"))),
     ("C-NOTE-009", "Ungroup Notes", Pending(Some("S-NOTE-032"))),
     ("C-NOTE-010", "Split Note(s)", Cmd(SPLIT_NOTES)),
@@ -446,11 +442,7 @@ const NOTE: &[Row] = &[
 
 /// The menu a key in the MIDI Note Editor's piano ruler opens (C-KEYS).
 const KEYS: &[Row] = &[
-    (
-        "C-KEYS-001",
-        "Deactivate Note(s)",
-        Pending(Some("S-NOTE-041")),
-    ),
+    ("C-KEYS-001", "Deactivate Note(s)", Key(&["S-NOTE-041"])),
     ("C-KEYS-002", "Note spelling", Pending(None)),
 ];
 
@@ -488,7 +480,6 @@ pub fn pending_package(row: &str) -> Option<&'static str> {
         }
         // The MIDI Note Editor's own items (piano-roll R30).
         "C-NOTE-006" => Some("WP-6.4 (Invert Selection and the note filters)"),
-        "C-NOTE-007" | "C-KEYS-001" => Some("WP-6.1 (the note values and deactivating notes)"),
         "C-NOTE-008" | "C-NOTE-009" => Some("WP-6.2 (probability groups)"),
         "C-NOTE-014" | "C-NOTE-014a" | "C-NOTE-014b" | "C-NOTE-014c" | "C-NOTE-014d" => {
             Some("WP-6.54 (the clip markers from the keys)")

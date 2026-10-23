@@ -1866,11 +1866,17 @@ fn paths() -> BTreeMap<&'static str, Path> {
         key,
     };
     let clip_view = LaterView("the Clip View (milestone M2)");
+    let groove_pool = LaterView(
+        "the Groove Pool, the Clip View's groove controls and the browser's Grooves label (WP-6.20)",
+    );
     // The Clip View's note editing (WP-2.3): the pointer reaches each of
     // these — a click, a marquee, and drags in the note editor — and their
     // keys (shortcuts.md, `note-editor` and `note-selection`) come with a
     // later package.
     let note_editor = LaterView("the note editor's keys (the note-editor shortcuts, milestone M2)");
+    let note_footer = LaterView(
+        "the note editor's footer and Lane Selector in the Tab order (WP-6.1's follow-up)",
+    );
     let clip_launch = LaterView("the Clip View's Launch panel (WP-3.9)");
     let audio_panel = LaterView("the Audio Utilities panel's controls (WP-4.10b)");
     let clip_title_bar = LaterView("the audio clip's title bar Save button (WP-4.10b)");
@@ -1989,6 +1995,22 @@ fn paths() -> BTreeMap<&'static str, Path> {
             "clip.set_scale",
             main(a_clip_selected, control_bar, "Scale Mode", Key::Enter),
         ),
+        // Grooves (WP-6.19): the Groove Pool, the Clip View's groove controls
+        // and the browser's Grooves label come with WP-6.20; until then
+        // agents reach these.
+        ("clip.set_groove", Exception(groove_pool)),
+        ("groove.add", Exception(groove_pool)),
+        ("groove.commit", Exception(groove_pool)),
+        ("groove.delete", Exception(groove_pool)),
+        ("groove.extract", Exception(groove_pool)),
+        ("groove.load", Exception(groove_pool)),
+        ("groove.pool", Exception(Query)),
+        ("groove.rename", Exception(groove_pool)),
+        ("groove.save", Exception(groove_pool)),
+        ("groove.set", Exception(groove_pool)),
+        ("groove.set_auto_load", Exception(groove_pool)),
+        ("groove.set_global_amount", Exception(groove_pool)),
+        ("groove.to_clip", Exception(groove_pool)),
         ("transport.set_recording", Exception(recording)),
         ("transport.stop_recording", Exception(recording)),
         // Tempo breakpoints and time-signature markers (WP-2.20): the
@@ -2966,7 +2988,6 @@ fn paths() -> BTreeMap<&'static str, Path> {
         // `clip_view.select_notes` have keys of their own now: the
         // note-selection keys (S-A11Y-010, S-A11Y-011), Delete
         // (S-EDIT-005) and Cmd-A (S-NOTE-001).
-        ("note.set_value", Exception(note_editor)),
         ("note.ramp_value", Exception(note_editor)),
         // The stretch markers are dragged (I-DRAG-040); Live has no key
         // for stretching notes, so a keyboard path needs the maintainer's
@@ -2978,6 +2999,12 @@ fn paths() -> BTreeMap<&'static str, Path> {
             )),
         ),
         ("view.lane", Exception(note_editor)),
+        // The expression lanes and the footer (WP-6.1): the pointer drags
+        // the markers and uses the footer's controls and the Lane
+        // Selector, which assistive technology reads by name and value
+        // (note-editing R20); Tab doesn't reach them yet.
+        ("note.randomize", Exception(note_footer)),
+        ("view.lanes", Exception(note_footer)),
         // The list of the set's plug-ins (IMP-29, WP-6.41): Enter on its
         // Show Only Missing switch.
         (

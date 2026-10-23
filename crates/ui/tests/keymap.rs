@@ -779,6 +779,16 @@ fn the_note_editors_keys_are_all_handled() {
         "S-NOTE-043",
         "S-NOTE-045",
         "S-NOTE-046",
+        // WP-6.1: the value keys, the typed velocity, the Cmd-drag, and
+        // deactivating.
+        "S-NOTE-016",
+        "S-NOTE-026",
+        "S-NOTE-027",
+        "S-NOTE-028",
+        "S-NOTE-029",
+        "S-NOTE-041",
+        "S-NOTE-050",
+        "S-NOTE-051",
         "S-A11Y-004",
         "S-A11Y-005",
         "S-A11Y-006",
@@ -803,6 +813,42 @@ fn the_note_editors_keys_are_all_handled() {
             entry.status
         );
     }
+}
+
+// Spec: note-editing R14, R15, R18. 0 deactivates the selected notes through
+// the keymap (S-NOTE-041); the keys that read a number or a direction are the
+// note editor's, and Cmd-Up and Cmd-Down with the Chord Selector Pad focused
+// (S-NOTE-052) wait for Stacks.
+#[test]
+fn zero_deactivates_the_selected_notes_and_the_value_keys_are_the_editors() {
+    let keymap = Keymap::live12();
+    let contexts = [Context::NoteEditor, Context::NoteSelection, Context::Global];
+    let none = mods(false, false, false, false);
+    let hit = keymap
+        .resolve(Platform::Mac, Key::Num0, none, &contexts)
+        .expect("0 is bound while notes are selected");
+    assert_eq!(hit.command.id, "note.deactivate");
+    // With no notes selected, 0 doesn't reach it.
+    let hit = keymap.resolve(
+        Platform::Mac,
+        Key::Num0,
+        none,
+        &[Context::NoteEditor, Context::Global],
+    );
+    assert!(
+        hit.is_none_or(|hit| hit.command.id != "note.deactivate"),
+        "no notes, no deactivating"
+    );
+    for id in ["S-NOTE-027", "S-NOTE-028", "S-NOTE-029"] {
+        let entry = keymap.entry_for(id).unwrap();
+        assert!(matches!(entry.status, Status::Widget(_)), "{id}");
+    }
+    let entry = keymap.entry_for("S-NOTE-052").unwrap();
+    assert!(
+        matches!(entry.status, Status::Pending { .. }),
+        "the Chord Selector Pad's keys wait for Stacks: {:?}",
+        entry.status
+    );
 }
 
 #[test]
@@ -902,4 +948,48 @@ fn the_note_operations_keys_reach_their_commands() {
         &contexts,
     );
     assert!(plain.is_none(), "the note editor reads Cmd-E itself");
+}
+
+// Spec: track-context-menu R16. The whole-track commands have their keys
+// on the track headers, and the Arrangement's own edits keep them where
+// clips or time are selected.
+#[test]
+fn the_track_headers_keys_reach_the_track_commands() {
+    let keymap = Keymap::live12();
+    let headers = [Context::TrackHeaders, Context::Arrangement, Context::Global];
+    let arrangement = [Context::Arrangement, Context::Global];
+    // The Session View has no title-bar keys (R16: track headers only).
+    let session = [Context::Session, Context::Global];
+    let resolve = |platform, key, m, contexts: &[Context]| {
+        keymap
+            .resolve(platform, key, m, contexts)
+            .map(|hit| hit.command.id.clone())
+    };
+    for (platform, cmd) in [
+        (Platform::Mac, mods(true, false, false, false)),
+        (Platform::Other, mods(false, true, false, false)),
+    ] {
+        for (key, command, edit) in [
+            (Key::X, "track.cut", "arrangement.cut"),
+            (Key::C, "track.copy", "arrangement.copy"),
+            (Key::V, "track.paste", "arrangement.paste"),
+            (Key::D, "track.duplicate", "arrangement.duplicate"),
+        ] {
+            assert_eq!(
+                resolve(platform, key, cmd, &headers).as_deref(),
+                Some(command),
+                "{platform:?}: {command}"
+            );
+            assert_eq!(
+                resolve(platform, key, cmd, &arrangement).as_deref(),
+                Some(edit),
+                "{platform:?}: {edit}"
+            );
+            assert_ne!(
+                resolve(platform, key, cmd, &session).as_deref(),
+                Some(command),
+                "{platform:?}: {command} is not bound in the Session View"
+            );
+        }
+    }
 }

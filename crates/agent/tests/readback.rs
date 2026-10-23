@@ -610,6 +610,39 @@ fn fixture() -> Project {
             name: Some("minor".to_owned()),
         },
     );
+    // WP-6.19: a groove in the pool, used by the clip, with the Global
+    // Amount and Auto Load Groove off their defaults, so the format writes
+    // `grooves` and the clip's `groove`.
+    let groove: bl_model::GrooveId = editor.new_id();
+    apply(
+        &mut editor,
+        Command::AddGroove {
+            groove: bl_model::Groove::new(
+                groove,
+                "Swing".to_owned(),
+                Ticks::WHOLE,
+                vec![bl_model::GrooveNote {
+                    position: Ticks::SIXTEENTH,
+                    velocity: 90,
+                }],
+            ),
+        },
+    );
+    apply(
+        &mut editor,
+        Command::SetClipGroove {
+            clips: vec![midi_id],
+            groove: Some(groove),
+        },
+    );
+    apply(&mut editor, Command::SetGlobalGrooveAmount { amount: 80.0 });
+    apply(
+        &mut editor,
+        Command::SetAutoLoadGroove {
+            enabled: Some(true),
+            groove: Some(groove),
+        },
+    );
     // MIDI controller envelopes (WP-2.29): a modulation wheel one and an
     // unlinked pitch bend one.
     for (target, value) in [
@@ -908,6 +941,10 @@ fn the_fixture_sets_a_non_default_value_of_every_saved_field() {
                 "midi_overdub",
                 "locators",
                 "song_start",
+                "grooves.pool.0.name",
+                "grooves.global_amount",
+                "grooves.auto_load",
+                "grooves.auto_load_groove",
                 "scale",
             ][..],
         ),
@@ -1049,6 +1086,7 @@ fn the_fixture_sets_a_non_default_value_of_every_saved_field() {
                 "data.midi.signature",
                 "data.midi.notes.0.probability",
                 "scale",
+                "groove",
             ][..],
         ),
     ] {
@@ -1345,4 +1383,61 @@ fn a_chains_zones_read_back() {
     // The rack's own object lists its chains with theirs.
     let object = query(&mut client, json!({ "id": rack["id"] }));
     assert_eq!(object["chains"][0]["zones"], got["zones"]);
+}
+
+// Spec: note-editing R20. The note value commands run by ID through the agent
+// API, and the query tool reads each note's values back.
+#[test]
+fn the_note_value_commands_run_by_id_and_read_back() {
+    let mut client = open(&fixture(), "note-values");
+    let keys = query(
+        &mut client,
+        json!({ "path": "track \"Keys\"", "detail": "full" }),
+    );
+    let clip = keys["saved"]["clips"]["items"][0]["id"].clone();
+    let notes = |client: &mut Client<InProcess>| -> Vec<Value> {
+        let full = query(client, json!({ "id": clip, "detail": "full" }));
+        full["saved"]["data"]["midi"]["notes"]["items"]
+            .as_array()
+            .unwrap_or_else(|| panic!("the clip's notes: {full}"))
+            .clone()
+    };
+    let before = notes(&mut client);
+    assert_eq!(before.len(), 3);
+    let run = |client: &mut Client<InProcess>, label: &str, command: &str, args: Value| {
+        client
+            .call(
+                "run",
+                json!({ "label": label, "commands": [{ "command": command, "args": args }] }),
+            )
+            .unwrap()
+            .ok()
+            .unwrap_or_else(|error| panic!("{command}: {error}"))
+    };
+    run(
+        &mut client,
+        "Quieter",
+        "note.adjust_value",
+        json!({ "clip": clip, "notes": [0], "field": "velocity", "by": -10 }),
+    );
+    run(
+        &mut client,
+        "Deactivate",
+        "note.deactivate",
+        json!({ "clip": clip, "notes": [1] }),
+    );
+    run(
+        &mut client,
+        "Randomize",
+        "note.randomize",
+        json!({
+            "clip": clip, "notes": [2], "field": "release_velocity",
+            "amount": 20, "seed": 5
+        }),
+    );
+    let after = notes(&mut client);
+    assert_eq!(after[0]["velocity"], 80, "adjusted by -10");
+    assert_eq!(after[1]["mute"], true, "deactivated");
+    assert_ne!(after[2]["release_velocity"], before[2]["release_velocity"]);
+    assert_eq!(after[0]["mute"], before[0]["mute"], "the others untouched");
 }

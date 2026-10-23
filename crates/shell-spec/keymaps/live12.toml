@@ -711,6 +711,7 @@ commands = [
   { id = "chain.cut", contexts = ["rack-chains"] },
   { id = "device.cut", contexts = ["device-view"] },
   { id = "note.cut", contexts = ["note-editor", "note-selection"] },
+  { id = "track.cut", contexts = ["track-headers"] },
 ]
 
 [[shortcut]]
@@ -728,6 +729,7 @@ commands = [
   { id = "chain.copy", contexts = ["rack-chains"] },
   { id = "device.copy", contexts = ["device-view"] },
   { id = "note.copy", contexts = ["note-editor", "note-selection"] },
+  { id = "track.copy", contexts = ["track-headers"] },
 ]
 
 [[shortcut]]
@@ -745,6 +747,7 @@ commands = [
   { id = "chain.paste", contexts = ["rack-chains"] },
   { id = "device.paste", contexts = ["device-view"] },
   { id = "note.paste", contexts = ["note-editor", "note-selection"] },
+  { id = "track.paste", contexts = ["track-headers"] },
 ]
 
 [[shortcut]]
@@ -762,6 +765,7 @@ commands = [
   { id = "chain.duplicate", contexts = ["rack-chains"] },
   { id = "device.duplicate", contexts = ["device-view"] },
   { id = "note.duplicate", contexts = ["note-editor", "note-selection"] },
+  { id = "track.duplicate", contexts = ["track-headers"] },
 ]
 
 [[shortcut]]
@@ -1810,7 +1814,8 @@ trigger = "held"
 milestone = "M2"
 mac = ["Cmd+drag"]
 win = ["Alt+drag"]
-status = "pending"
+status = "widget"
+handler = "the Clip View's note editor: Cmd-dragging a note (Alt-dragging on Windows) up or down changes its velocity, or every selected note's (`note.adjust_value`)"
 
 [[shortcut]]
 id = "S-NOTE-017"
@@ -1924,7 +1929,8 @@ trigger = "press"
 milestone = "M2"
 mac = ["0..9 then Enter"]
 win = ["0..9 then Enter"]
-status = "pending"
+status = "widget"
+handler = "the Clip View's note editor: a digit from 1 to 9 starts a velocity for the selected notes, more digits add to it, and Enter sets it (`note.set_value`)"
 
 [[shortcut]]
 id = "S-NOTE-027"
@@ -1935,7 +1941,8 @@ trigger = "press"
 milestone = "M2"
 mac = ["Cmd+Down", "Cmd+Up"]
 win = ["Ctrl+Down", "Ctrl+Up"]
-status = "pending"
+status = "widget"
+handler = "the Clip View's note editor: Cmd-Up and Cmd-Down raise and lower the selected notes' velocity by 10 (`note.adjust_value`)"
 
 [[shortcut]]
 id = "S-NOTE-028"
@@ -1946,7 +1953,8 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+Shift+Down", "Cmd+Shift+Up"]
 win = ["Ctrl+Shift+Down", "Ctrl+Shift+Up"]
-status = "pending"
+status = "widget"
+handler = "the Clip View's note editor: Cmd-Shift-Up and Cmd-Shift-Down raise and lower the selected notes' velocity deviation by 10 (`note.adjust_value`)"
 
 [[shortcut]]
 id = "S-NOTE-029"
@@ -1957,7 +1965,8 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+Option+Down", "Cmd+Option+Up"]
 win = ["Ctrl+Alt+Down", "Ctrl+Alt+Up"]
-status = "pending"
+status = "widget"
+handler = "the Clip View's note editor: Cmd-Option-Up and Cmd-Option-Down raise and lower the selected notes' chance by 10 % (`note.adjust_value`)"
 
 [[shortcut]]
 id = "S-NOTE-030"
@@ -4334,7 +4343,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["0"]
 win = ["0"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "note.deactivate", contexts = ["note-selection"] },
+]
 
 [[shortcut]]
 id = "S-NOTE-042"
@@ -4646,7 +4658,8 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+Up", "Cmd+Down", "Cmd+Shift+Up", "Cmd+Shift+Down"]
 win = ["Ctrl+Up", "Ctrl+Down", "Ctrl+Shift+Up", "Ctrl+Shift+Down"]
-status = "pending"
+status = "widget"
+handler = "the Clip View's note editor, after a marker in the Velocity or Release Velocity lane was clicked: Cmd-Up and Cmd-Down change the selected notes' value by 10, and with Shift by 1 (`note.adjust_value`)"
 
 [[shortcut]]
 id = "S-NOTE-051"
@@ -4657,7 +4670,8 @@ trigger = "press"
 milestone = "M6"
 mac = ["Up", "Down", "Shift+Up", "Shift+Down"]
 win = ["Up", "Down", "Shift+Up", "Shift+Down"]
-status = "pending"
+status = "widget"
+handler = "the Clip View's note editor, after a marker in the Chance lane was clicked: Up and Down change the selected notes' chance by 10 %, and with Shift by 1 % (`note.adjust_value`)"
 
 [[shortcut]]
 id = "S-NOTE-052"

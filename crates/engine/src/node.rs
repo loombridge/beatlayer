@@ -579,6 +579,9 @@ pub struct Block<'a> {
     /// The Session slots playing on the tracks, with the frame each clip
     /// launched on (WP-3.2). Empty for a block outside a program's run.
     pub(crate) session: &'a [SessionPlayback],
+    /// The set's Global Amount of groove, 1 at 100 % and up to 1.3 (the
+    /// grooves spec, R21).
+    pub(crate) groove_amount: f32,
     /// What the modulators wrote for the frames of this block (WP-5.10).
     pub(crate) modulation: Bus<'a>,
     /// Where a modulator driven by audio, notes or MIDI writes its rows
@@ -642,6 +645,7 @@ impl<'a> Block<'a> {
             notes: &[],
             notes_out: None,
             session: &[],
+            groove_amount: 1.0,
             modulation: Bus::EMPTY,
             rows: None,
         }
@@ -699,6 +703,16 @@ impl<'a> Block<'a> {
     #[must_use]
     pub fn with_session(self, session: &'a [SessionPlayback]) -> Self {
         Self { session, ..self }
+    }
+
+    /// The same block with the set's Global Amount of groove, 1 at 100 %.
+    /// For tests of nodes outside a program.
+    #[must_use]
+    pub fn with_groove_amount(self, groove_amount: f32) -> Self {
+        Self {
+            groove_amount,
+            ..self
+        }
     }
 
     /// The same block with a sidechain signal: planar, with the block's
@@ -814,6 +828,13 @@ impl<'a> Block<'a> {
     /// whose track is its own. Empty outside a program's run.
     pub fn session(&self) -> &'a [SessionPlayback] {
         self.session
+    }
+
+    /// The set's Global Amount of groove (the grooves spec, R21): 1 at
+    /// 100 %, 0 at 0 % and up to 1.3. A device whose own groove follows it,
+    /// as the Arpeggiator's does, reads it here, with every block.
+    pub fn groove_amount(&self) -> f32 {
+        self.groove_amount
     }
 
     /// The Session clip that sets `list`'s parameters in this block

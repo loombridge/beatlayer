@@ -386,6 +386,7 @@ mod tests {
             neutral: false,
             high_quality: true,
             beats: &empty,
+            transient_envelope: 100.0,
             pitch: 1.0,
             clip,
         };

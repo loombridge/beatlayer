@@ -962,8 +962,12 @@ const ENTRIES: &[Entry] = &[
             clicking or dragging a breakpoint on an automation lane does. `target` names the \
             parameter: `{\"type\": \"mixer\", \"param\": \"volume\"}`, `{\"type\": \"send\", \
             \"to\": <return track>}`, or `{\"type\": \"device\", \"device\": <device>, \
-            \"param\": <parameter>}`. A parameter with no envelope yet gets its first \
-            breakpoint and its envelope drives it from then on. Values are in the parameter's \
+            \"param\": <parameter>}`, or, on an audio track, a sound setting of its audio clips: \
+            `{\"type\": \"clip\", \"param\": \"formants\"}` (`gain` as linear gain, \
+            `transpose` in semitones, `detune` in cents, `high_quality`, `sample_offset` in \
+            sixteenths, and the warp modes' controls), which drives that setting of every \
+            audio clip on the track as it plays. A parameter with no envelope yet gets its \
+            first breakpoint and its envelope drives it from then on. Values are in the parameter's \
             own units: volume as linear gain, pan from -1 to 1, the Track Activator 1 for \
             muted, and a device parameter as the device's own value. `at` is 0 (1.1.1) or \
             later. The value between two breakpoints follows the segment's shape: the straight \
@@ -1943,7 +1947,10 @@ const ENTRIES: &[Entry] = &[
             breakpoint there or replacing the one that's there, as clicking or dragging a \
             breakpoint in the Envelopes tab does. `clip` is the clip, `target` the parameter of \
             the clip's track the envelope modulates (a control of its mixer, one of its sends, \
-            or a parameter of a device in its chain), `at` the position in ticks from the \
+            or a parameter of a device in its chain; an audio clip's can instead be one of its \
+            sound settings, `{\"type\": \"clip\", \"param\": \"transpose\"}`, whose value \
+            is a share from 0 to 100 for `gain` and otherwise an amount added to the setting, \
+            in its own units), `at` the position in ticks from the \
             beginning of the clip's contents, and `value` the value there, in the parameter's \
             own units. A MIDI clip's `target` can instead be a MIDI controller (MIDI Ctrl in \
             the Envelopes tab): `{\"type\": \"midi.cc\", \"number\": 1}` (a controller from 1 to \

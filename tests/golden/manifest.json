@@ -417,6 +417,22 @@
       "bits": 24,
       "render_hash": "fnv1a64:5c64fa15b51bc1d1"
     },
+    "transposition-envelope-beats": {
+      "made_on": "macos-aarch64",
+      "sample_rate": 48000,
+      "channels": 2,
+      "frames": 108000,
+      "bits": 24,
+      "render_hash": "fnv1a64:1cccf3ffff80a665"
+    },
+    "transposition-envelope-tones": {
+      "made_on": "macos-aarch64",
+      "sample_rate": 48000,
+      "channels": 2,
+      "frames": 108000,
+      "bits": 24,
+      "render_hash": "fnv1a64:b0f9ec2e978ab9a9"
+    },
     "volume-modulation": {
       "made_on": "macos-aarch64",
       "sample_rate": 48000,

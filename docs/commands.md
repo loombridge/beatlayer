@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-704 commands in 43 areas.
+712 commands in 43 areas.
 
 ## Permission classes
 
@@ -379,7 +379,9 @@ Each command has:
 | [`file_manager.state`](#file_managerstate) | File Manager State | `external` |  |  |
 | [`focus.arrangement`](#focusarrangement) | Arrangement View | `read` | `Option+2` | `Alt+2` |
 | [`focus.browser`](#focusbrowser) | Browser | `read` | `Option+5` | `Alt+5` |
+| [`focus.clip_view`](#focusclip_view) | Clip View | `read` | `Option+3` | `Alt+3` |
 | [`focus.control_bar`](#focuscontrol_bar) | Control Bar | `read` | `Option+0` | `Alt+0` |
+| [`focus.device_view`](#focusdevice_view) | Device View | `read` | `Option+4` | `Alt+4` |
 | [`focus.next`](#focusnext) | Next | `read` | `Tab`; `Tab` | `Tab`; `Tab` |
 | [`focus.next_neighbor`](#focusnext_neighbor) | Next Neighbor | `read` | `Option+Tab` | `Ctrl+Tab` |
 | [`focus.previous`](#focusprevious) | Previous | `read` | `Shift+Tab`; `Shift+Tab` | `Shift+Tab`; `Shift+Tab` |
@@ -714,16 +716,22 @@ Each command has:
 | [`view.clip_tab`](#viewclip_tab) | Clip View Tab | `read` | `Option+Tab`; `Option+Tab`; `Option+Shift+1`; `Option+Shift+2` | `Ctrl+Tab`; `Ctrl+Tab`; `Alt+Shift+1`; `Alt+Shift+2` |
 | [`view.close_plug_in_windows`](#viewclose_plug_in_windows) | Close All Plug-in Windows | `read` |  |  |
 | [`view.draw_mode`](#viewdraw_mode) | Draw Mode | `read` | `B` | `B` |
+| [`view.expand_clip_view`](#viewexpand_clip_view) | Expand Clip View | `read` | `Cmd+Option+E` | `Ctrl+Alt+E` |
 | [`view.fold_notes`](#viewfold_notes) | Fold to Notes | `read` | `F` | `F` |
 | [`view.full_screen`](#viewfull_screen) | Full Screen | `read` | `Ctrl+Cmd+F` | `F11` |
 | [`view.lane`](#viewlane) | Note Editor Lane | `read` |  |  |
 | [`view.lanes`](#viewlanes) | Expression Lanes | `read` |  |  |
+| [`view.set_detail_height`](#viewset_detail_height) | Set Clip View Height | `read` |  |  |
 | [`view.set_plugin_list_only_missing`](#viewset_plugin_list_only_missing) | Show Only Missing Plug-Ins | `read` |  |  |
 | [`view.set_zoom`](#viewset_zoom) | Zoom | `edit` |  |  |
+| [`view.show_detail_views`](#viewshow_detail_views) | Show Clip and Device View | `read` | `Option+click a view toggle` | `Alt+click a view toggle` |
 | [`view.state`](#viewstate) | View State | `read` |  |  |
+| [`view.switch_detail_view`](#viewswitch_detail_view) | Toggle Clip/Device View | `read` | `Shift+Tab`, `F12` | `Shift+Tab`, `F12` |
 | [`view.toggle_assistant`](#viewtoggle_assistant) | Assistant | `read` |  |  |
 | [`view.toggle_browser`](#viewtoggle_browser) | Browser | `read` | `Cmd+Option+B`, `Cmd+Option+5`; `Cmd+Option+B` | `Ctrl+Alt+B`, `Ctrl+Alt+5`; `Ctrl+Alt+B` |
 | [`view.toggle_clip_view`](#viewtoggle_clip_view) | Clip View | `read` | `Cmd+Option+3` | `Ctrl+Alt+3` |
+| [`view.toggle_detail_area`](#viewtoggle_detail_area) | Hide Device View | `read` | `Cmd+Option+L` | `Ctrl+Alt+L` |
+| [`view.toggle_device_view`](#viewtoggle_device_view) | Device View | `read` | `Cmd+Option+4` | `Ctrl+Alt+4` |
 | [`view.toggle_file_manager`](#viewtoggle_file_manager) | File Manager | `read` |  |  |
 | [`view.toggle_info_view`](#viewtoggle_info_view) | Info | `read` | `Shift+Slash` | `Shift+Slash` |
 | [`view.toggle_plug_in_windows`](#viewtoggle_plug_in_windows) | Plug-In Windows | `read` | `Cmd+Option+P` | `Ctrl+Alt+P` |
@@ -2457,7 +2465,7 @@ Result: [`AutomationResult`](#automationresult).
 
 **Set Automation Breakpoint**. Permission: `edit`. Contexts: `global`.
 
-Sets one of a track's automatable parameters at `at` on its envelope, adding a breakpoint there or replacing the value of the one that's there, as clicking or dragging a breakpoint on an automation lane does. `target` names the parameter: `{"type": "mixer", "param": "volume"}`, `{"type": "send", "to": <return track>}`, or `{"type": "device", "device": <device>, "param": <parameter>}`. A parameter with no envelope yet gets its first breakpoint and its envelope drives it from then on. Values are in the parameter's own units: volume as linear gain, pan from -1 to 1, the Track Activator 1 for muted, and a device parameter as the device's own value. `at` is 0 (1.1.1) or later. The value between two breakpoints follows the segment's shape: the straight line unless `automation.set_curve` bent it; before the first and after the last the nearest one's value holds.
+Sets one of a track's automatable parameters at `at` on its envelope, adding a breakpoint there or replacing the value of the one that's there, as clicking or dragging a breakpoint on an automation lane does. `target` names the parameter: `{"type": "mixer", "param": "volume"}`, `{"type": "send", "to": <return track>}`, or `{"type": "device", "device": <device>, "param": <parameter>}`, or, on an audio track, a sound setting of its audio clips: `{"type": "clip", "param": "formants"}` (`gain` as linear gain, `transpose` in semitones, `detune` in cents, `high_quality`, `sample_offset` in sixteenths, and the warp modes' controls), which drives that setting of every audio clip on the track as it plays. A parameter with no envelope yet gets its first breakpoint and its envelope drives it from then on. Values are in the parameter's own units: volume as linear gain, pan from -1 to 1, the Track Activator 1 for muted, and a device parameter as the device's own value. `at` is 0 (1.1.1) or later. The value between two breakpoints follows the segment's shape: the straight line unless `automation.set_curve` bent it; before the first and after the last the nearest one's value holds.
 
 Default keys: none.
 
@@ -4154,7 +4162,7 @@ Result: [`ChangeSet`](#changeset).
 
 **Add Envelope Breakpoint**. Permission: `edit`. Contexts: `clip-view`.
 
-Sets the value of one of a clip's envelopes at a position, adding a breakpoint there or replacing the one that's there, as clicking or dragging a breakpoint in the Envelopes tab does. `clip` is the clip, `target` the parameter of the clip's track the envelope modulates (a control of its mixer, one of its sends, or a parameter of a device in its chain), `at` the position in ticks from the beginning of the clip's contents, and `value` the value there, in the parameter's own units. A MIDI clip's `target` can instead be a MIDI controller (MIDI Ctrl in the Envelopes tab): `{"type": "midi.cc", "number": 1}` (a controller from 1 to 31 or 33 to 119, value 0 to 127), `{"type": "midi.pitch_bend"}` (-8192 to 8191, 0 at rest) or `{"type": "midi.channel_pressure"}` (0 to 127); the value is the message the clip sends to its track's devices while it plays, on any channel. A parameter with no clip envelope gets one, linked to the clip, with this breakpoint as its first.
+Sets the value of one of a clip's envelopes at a position, adding a breakpoint there or replacing the one that's there, as clicking or dragging a breakpoint in the Envelopes tab does. `clip` is the clip, `target` the parameter of the clip's track the envelope modulates (a control of its mixer, one of its sends, or a parameter of a device in its chain; an audio clip's can instead be one of its sound settings, `{"type": "clip", "param": "transpose"}`, whose value is a share from 0 to 100 for `gain` and otherwise an amount added to the setting, in its own units), `at` the position in ticks from the beginning of the clip's contents, and `value` the value there, in the parameter's own units. A MIDI clip's `target` can instead be a MIDI controller (MIDI Ctrl in the Envelopes tab): `{"type": "midi.cc", "number": 1}` (a controller from 1 to 31 or 33 to 119, value 0 to 127), `{"type": "midi.pitch_bend"}` (-8192 to 8191, 0 at rest) or `{"type": "midi.channel_pressure"}` (0 to 127); the value is the message the clip sends to its track's devices while it plays, on any channel. A parameter with no clip envelope gets one, linked to the clip, with this breakpoint as its first.
 
 Default keys: none.
 
@@ -7020,6 +7028,22 @@ Arguments:
 
 Result: nothing (`null`).
 
+#### `focus.clip_view`
+
+**Clip View**. Permission: `read`. Contexts: `global`.
+
+Moves the keyboard focus to the Clip View's editor, so the Clip View's shortcuts apply, showing the Clip View first if it is hidden. Changes nothing in the set and isn't an undo step. The result is the detail area's state.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-FOCUS-004 | `Option+3` | `Alt+3` | `global` | Move focus to the Clip View's editor | runs it |
+
+Arguments: none (send `{}`).
+
+Result: [`DetailState`](#detailstate).
+
 #### `focus.control_bar`
 
 **Control Bar**. Permission: `read`. Contexts: `global`.
@@ -7035,6 +7059,22 @@ Default keys:
 Arguments: none (send `{}`).
 
 Result: nothing (`null`).
+
+#### `focus.device_view`
+
+**Device View**. Permission: `read`. Contexts: `global`.
+
+Moves the keyboard focus to the Device View, so its shortcuts apply, showing the Device View first if it is hidden. Changes nothing in the set and isn't an undo step. The result is the detail area's state.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-FOCUS-005 | `Option+4` | `Alt+4` | `global` | Move focus to the Device View | runs it |
+
+Arguments: none (send `{}`).
+
+Result: [`DetailState`](#detailstate).
 
 #### `focus.next`
 
@@ -12731,6 +12771,22 @@ Arguments: none (send `{}`).
 
 Result: [`ClipViewState`](#clipviewstate).
 
+#### `view.expand_clip_view`
+
+**Expand Clip View**. Permission: `read`. Contexts: `clip-view`.
+
+Gives the Clip View its largest height, the one that leaves the main view 80 points, and run again gives back the height it had before. Refused while the Clip View is hidden. Dragging the detail area's top edge, or hiding the Clip View, ends the expansion. Changes nothing in the set and isn't an undo step. The result is the detail area's state, whose `expanded` says which way it went.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-NOTE-030 | `Cmd+Option+E` | `Ctrl+Alt+E` | `clip-view` | Expand the Clip View to full size | runs it |
+
+Arguments: none (send `{}`).
+
+Result: [`DetailState`](#detailstate).
+
 #### `view.fold_notes`
 
 **Fold to Notes**. Permission: `read`. Contexts: `clip-view`, `note-editor`.
@@ -12804,6 +12860,22 @@ Arguments:
 
 Result: [`ClipViewState`](#clipviewstate).
 
+#### `view.set_detail_height`
+
+**Set Clip View Height**. Permission: `read`. Contexts: `global`.
+
+Sets the Clip View's height to `points`, in points at 100% zoom and at least 100, as dragging the detail area's top edge does one frame at a time; a window too short for it shows the Clip View less tall, down to 100 points. Ends an expansion. The Device View's height doesn't change. Changes nothing in the set and isn't an undo step. The result is the detail area's state.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `points` | number | yes | The Clip View's height in points at 100%, at least 100. |
+
+Result: [`DetailState`](#detailstate).
+
 #### `view.set_plugin_list_only_missing`
 
 **Show Only Missing Plug-Ins**. Permission: `read`. Contexts: `global`.
@@ -12836,17 +12908,49 @@ Arguments:
 
 Result: [`ViewResult`](#viewresult).
 
+#### `view.show_detail_views`
+
+**Show Clip and Device View**. Permission: `read`. Contexts: `global`.
+
+Shows the Clip View and the Device View together, the Clip View above the Device View, as Option-click (Alt-click) on either view's toggle does. With both showing already it changes nothing. Changes nothing in the set and isn't an undo step. The result is the detail area's state.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-VIEW-005 | `Option+click a view toggle` | `Alt+click a view toggle` | `global` | Show Device View and Clip View together (stack them) | runs it |
+
+Arguments: none (send `{}`).
+
+Result: [`DetailState`](#detailstate).
+
 #### `view.state`
 
 **View State**. Permission: `read`. Contexts: `global`.
 
-Reports what the view commands switch: the main view (Arrangement or Session), whether the browser and the Info View show, full-screen mode and the zoom (`view.toggle_session_arrangement`, `view.toggle_browser`, `view.toggle_info_view`, `view.full_screen`, `view.set_zoom`), the Clip View with Draw Mode, the lane, Fold and the selected notes (`view.toggle_clip_view`, `view.draw_mode`, `view.lane`, `view.fold_notes`), the assistant's panel, the Undo History (`view.toggle_undo_history`), and whether plug-in windows are shown (`view.toggle_plug_in_windows`). Changes nothing. The Arrangement's own view is in `arrangement.state`, the Mixer's in `mixer_view.state`, the Session View's in `session.state` and the Device View's in `device_view.state`.
+Reports what the view commands switch: the main view (Arrangement or Session), whether the browser and the Info View show, full-screen mode and the zoom (`view.toggle_session_arrangement`, `view.toggle_browser`, `view.toggle_info_view`, `view.full_screen`, `view.set_zoom`), the Clip View with Draw Mode, the lane, Fold and the selected notes (`view.toggle_clip_view`, `view.draw_mode`, `view.lane`, `view.fold_notes`), the detail area under `detail`: which of the Clip View and the Device View show, the Clip View's height and where the focus is (`view.toggle_clip_view`, `view.toggle_device_view`, `view.show_detail_views`, `view.switch_detail_view`, `view.toggle_detail_area`, `view.expand_clip_view`, `view.set_detail_height`, `focus.clip_view`, `focus.device_view`), the assistant's panel, the Undo History (`view.toggle_undo_history`), and whether plug-in windows are shown (`view.toggle_plug_in_windows`). Changes nothing. The Arrangement's own view is in `arrangement.state`, the Mixer's in `mixer_view.state`, the Session View's in `session.state` and the Device View's in `device_view.state`.
 
 Default keys: none.
 
 Arguments: none (send `{}`).
 
 Result: [`ViewState`](#viewstate).
+
+#### `view.switch_detail_view`
+
+**Toggle Clip/Device View**. Permission: `read`. Contexts: `global`.
+
+With one of the Clip View and the Device View showing, shows the other in its place; with both showing, moves the keyboard focus to the Clip View's editor if the Device View has it, and to the Device View otherwise; with neither showing, shows the view that showed alone last, the Device View in a new session. Shift+Tab does this while Use Tab Key to Move Focus is off; F12 does it always. Changes nothing in the set and isn't an undo step. The result is the detail area's state.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-VIEW-004 | `Shift+Tab`, `F12` | `Shift+Tab`, `F12` | `global` | Switch the detail area between Device View and Clip View | runs it |
+
+Arguments: none (send `{}`).
+
+Result: [`DetailState`](#detailstate).
 
 #### `view.toggle_assistant`
 
@@ -12881,7 +12985,7 @@ Result: [`ViewResult`](#viewresult).
 
 **Clip View**. Permission: `read`. Contexts: `global`.
 
-Shows or hides the Clip View in the detail area, which holds the MIDI Note Editor for the Arrangement's selected MIDI clip; while it shows, it takes the detail area in place of the Device View. It shows the clip the Arrangement has selected, with its notes, and selecting another MIDI clip switches the editor to it, clearing the note selection. Changes nothing in the set and isn't an undo step. The result says whether it shows, what clip the editor holds, and which notes are selected.
+Shows or hides the Clip View in the detail area, which holds the MIDI Note Editor for the Arrangement's selected MIDI clip, and leaves the Device View as it is: with the Device View showing, showing the Clip View stacks it above the Device View. It shows the clip the Arrangement has selected, with its notes, and selecting another MIDI clip switches the editor to it, clearing the note selection. Changes nothing in the set and isn't an undo step. The result is the detail area's state, as `view.state` reports it under `detail`.
 
 Default keys:
 
@@ -12891,7 +12995,39 @@ Default keys:
 
 Arguments: none (send `{}`).
 
-Result: [`ClipViewState`](#clipviewstate).
+Result: [`DetailState`](#detailstate).
+
+#### `view.toggle_detail_area`
+
+**Hide Device View**. Permission: `read`. Contexts: `global`.
+
+Hides whichever of the Clip View and the Device View show, and run again shows the same ones again; with neither showing and nothing hidden this way, shows the Device View. The View menu's item reads Hide or Show followed by the views it would hide or bring back. Changes nothing in the set and isn't an undo step. The result is the detail area's state.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-VIEW-022 | `Cmd+Option+L` | `Ctrl+Alt+L` | `global` | Hide or show the detail area (the Clip View or Device View) | runs it |
+
+Arguments: none (send `{}`).
+
+Result: [`DetailState`](#detailstate).
+
+#### `view.toggle_device_view`
+
+**Device View**. Permission: `read`. Contexts: `global`.
+
+Shows or hides the Device View in the detail area, which shows the selected track's devices, and leaves the Clip View as it is: with the Clip View showing, showing the Device View stacks it below the Clip View. Changes nothing in the set and isn't an undo step. The result is the detail area's state, as `view.state` reports it under `detail`.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-VIEW-016 | `Cmd+Option+4` | `Ctrl+Alt+4` | `global` | Show or hide the Device View | runs it |
+
+Arguments: none (send `{}`).
+
+Result: [`DetailState`](#detailstate).
 
 #### `view.toggle_file_manager`
 
@@ -15368,7 +15504,7 @@ What an automation editing command reports: what it changed in the set, and the 
 
 ### `AutomationTarget`
 
-Which parameter of the track an envelope drives: `mixer` with a `param`, `send` with the return track it feeds (`to`), `device` with the device and its `param`, `chain` with a rack's chain and its mixer `param`, or `chain_send` with a drum rack's chain and the return chain it sends to (`to`). A MIDI clip's envelope can instead name a MIDI controller: `midi.cc` with its `number` (1 to 31 or 33 to 119), `midi.pitch_bend` or `midi.channel_pressure`.
+Which parameter of the track an envelope drives: `mixer` with a `param`, `send` with the return track it feeds (`to`), `device` with the device and its `param`, `chain` with a rack's chain and its mixer `param`, or `chain_send` with a drum rack's chain and the return chain it sends to (`to`), or `clip` with a sound setting (`param`) of the track's audio clips (Gain, Transpose, Detune, HiQ and the warp modes' controls). A MIDI clip's envelope can instead name a MIDI controller: `midi.cc` with its `number` (1 to 31 or 33 to 119), `midi.pitch_bend` or `midi.channel_pressure`.
 
 One of:
 
@@ -15377,6 +15513,7 @@ One of:
 - an object with `type` = `"device"`, `device` ([`DeviceId`](#deviceid)), `param` ([`ParamId`](#paramid)): A parameter of a device in the track's chain.
 - an object with `type` = `"chain"`, `chain` ([`ChainId`](#chainid)), `param` ([`MixerParam`](#mixerparam)): A control of a rack chain's mixer (WP-5.1, G2): the chain's Volume, Pan, or Chain Activator (`mute`: 1 muted, 0 not).
 - an object with `type` = `"chain_send"`, `chain` ([`ChainId`](#chainid)), `to` ([`ChainId`](#chainid)): The level of a drum chain's send to a return chain of its rack (drum racks R6, G2).
+- an object with `type` = `"clip"`, `param` ([`ClipParam`](#clipparam)): A sound setting of the track's audio clips (WP-4.8, the warp modes spec R28): a track's envelope for it drives the setting of every audio clip on the track as it plays, and a clip's envelope modulates it.
 - an object with `type` = `"midi.cc"`, `number` (integer from 0 to 255): A continuous controller of a MIDI clip's MIDI Ctrl envelopes (WP-2.29), 1 to 31 or 33 to 119, from 0 to 127. Only a MIDI clip's envelope names it; a track has no automation for it.
 - an object with `type` = `"midi.pitch_bend"`: A MIDI clip's pitch bend envelope, from −8192 to 8191, 0 at rest.
 - an object with `type` = `"midi.channel_pressure"`: A MIDI clip's channel pressure envelope, from 0 to 127.
@@ -15385,7 +15522,7 @@ One of:
 
 ```json
 {
-  "description": "Which parameter of the track an envelope drives: `mixer` with a `param`, `send` with the return track it feeds (`to`), `device` with the device and its `param`, `chain` with a rack's chain and its mixer `param`, or `chain_send` with a drum rack's chain and the return chain it sends to (`to`). A MIDI clip's envelope can instead name a MIDI controller: `midi.cc` with its `number` (1 to 31 or 33 to 119), `midi.pitch_bend` or `midi.channel_pressure`.",
+  "description": "Which parameter of the track an envelope drives: `mixer` with a `param`, `send` with the return track it feeds (`to`), `device` with the device and its `param`, `chain` with a rack's chain and its mixer `param`, or `chain_send` with a drum rack's chain and the return chain it sends to (`to`), or `clip` with a sound setting (`param`) of the track's audio clips (Gain, Transpose, Detune, HiQ and the warp modes' controls). A MIDI clip's envelope can instead name a MIDI controller: `midi.cc` with its `number` (1 to 31 or 33 to 119), `midi.pitch_bend` or `midi.channel_pressure`.",
   "oneOf": [
     {
       "description": "A control of the track's mixer.",
@@ -15489,6 +15626,24 @@ One of:
         "type",
         "chain",
         "to"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A sound setting of the track's audio clips (WP-4.8, the warp modes spec R28): a track's envelope for it drives the setting of every audio clip on the track as it plays, and a clip's envelope modulates it.",
+      "properties": {
+        "param": {
+          "$ref": "#/$defs/ClipParam",
+          "description": "The setting."
+        },
+        "type": {
+          "const": "clip",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "param"
       ],
       "type": "object"
     },
@@ -17836,6 +17991,103 @@ A Session clip's own launch settings (the Clip View's Launch panel, WP-3.4). The
 
 </details>
 
+### `ClipParam`
+
+A sound setting of an audio clip: `gain` (linear, 1 is 0 dB), `transpose` (semitones), `sample_offset` (Beats only, in sixteenth notes, an envelope only), `detune` (cents), `high_quality` (the HiQ switch), `preserve`, `transient_loop_mode` and `transient_envelope` (Beats), `tones_grain_size`, `texture_grain_size` and `texture_flux`, `formants` and `complex_pro_envelope` (Complex Pro).
+
+One of:
+
+- `"gain"`: The clip's gain: a linear gain from silence (−∞ dB) to +24 dB.
+- `"transpose"`: Transpose, in semitones, −48 to 48.
+- `"sample_offset"`: Beats' Sample Offset (R30), in sixteenth notes, −8 to 8. It has no setting of its own: only an envelope or automation moves it.
+- `"detune"`: Detune, in cents, −50 to 50.
+- `"high_quality"`: The HiQ switch.
+- `"preserve"`: Beats' Preserve, by its place in the list.
+- `"transient_loop_mode"`: Beats' Transient Loop Mode, by its place in the list.
+- `"transient_envelope"`: Beats' Transient Envelope, 0 to 100.
+- `"tones_grain_size"`: Tones' Grain Size, in milliseconds.
+- `"texture_grain_size"`: Texture's Grain Size, in milliseconds.
+- `"texture_flux"`: Texture's Flux, in per cent.
+- `"formants"`: Complex Pro's Formants, in per cent.
+- `"complex_pro_envelope"`: Complex Pro's Envelope, 8 to 512.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A sound setting of an audio clip: `gain` (linear, 1 is 0 dB), `transpose` (semitones), `sample_offset` (Beats only, in sixteenth notes, an envelope only), `detune` (cents), `high_quality` (the HiQ switch), `preserve`, `transient_loop_mode` and `transient_envelope` (Beats), `tones_grain_size`, `texture_grain_size` and `texture_flux`, `formants` and `complex_pro_envelope` (Complex Pro).",
+  "oneOf": [
+    {
+      "const": "gain",
+      "description": "The clip's gain: a linear gain from silence (−∞ dB) to +24 dB.",
+      "type": "string"
+    },
+    {
+      "const": "transpose",
+      "description": "Transpose, in semitones, −48 to 48.",
+      "type": "string"
+    },
+    {
+      "const": "sample_offset",
+      "description": "Beats' Sample Offset (R30), in sixteenth notes, −8 to 8. It has no setting of its own: only an envelope or automation moves it.",
+      "type": "string"
+    },
+    {
+      "const": "detune",
+      "description": "Detune, in cents, −50 to 50.",
+      "type": "string"
+    },
+    {
+      "const": "high_quality",
+      "description": "The HiQ switch.",
+      "type": "string"
+    },
+    {
+      "const": "preserve",
+      "description": "Beats' Preserve, by its place in the list.",
+      "type": "string"
+    },
+    {
+      "const": "transient_loop_mode",
+      "description": "Beats' Transient Loop Mode, by its place in the list.",
+      "type": "string"
+    },
+    {
+      "const": "transient_envelope",
+      "description": "Beats' Transient Envelope, 0 to 100.",
+      "type": "string"
+    },
+    {
+      "const": "tones_grain_size",
+      "description": "Tones' Grain Size, in milliseconds.",
+      "type": "string"
+    },
+    {
+      "const": "texture_grain_size",
+      "description": "Texture's Grain Size, in milliseconds.",
+      "type": "string"
+    },
+    {
+      "const": "texture_flux",
+      "description": "Texture's Flux, in per cent.",
+      "type": "string"
+    },
+    {
+      "const": "formants",
+      "description": "Complex Pro's Formants, in per cent.",
+      "type": "string"
+    },
+    {
+      "const": "complex_pro_envelope",
+      "description": "Complex Pro's Envelope, 8 to 512.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `ClipTab`
 
 A tab of the Clip View: `notes` (the MIDI Note Editor) or `envelopes` (the clip's envelopes).
@@ -18968,6 +19220,105 @@ What `file_manager.delete_unused` returns.
     "files"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `DetailState`
+
+What the detail area's commands return, and `view.state` reports under `detail` (detail-views R17): which views show, where the focus is and how tall the Clip View is.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clip_view` | boolean | yes | Whether the Clip View shows. |
+| `device_view` | boolean | yes | Whether the Device View shows. |
+| `alone_last` | [`DetailView`](#detailview) | yes | The view that showed alone last, which `view.switch_detail_view` brings back when neither shows. |
+| `hidden` | array of [`DetailView`](#detailview) | yes | The views `view.toggle_detail_area` hid, which it brings back; empty when it hid nothing. |
+| `clip_height` | number | yes | The Clip View's height in points at 100%, as it was set; it is squeezed in a window too short for it. |
+| `expanded` | boolean | yes | Whether the Clip View is expanded to its largest height. |
+| `focus` | [`DetailView`](#detailview) | yes | The view the detail area's keys go to while both show. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What the detail area's commands return, and `view.state` reports under `detail` (detail-views R17): which views show, where the focus is and how tall the Clip View is.",
+  "properties": {
+    "alone_last": {
+      "$ref": "#/$defs/DetailView",
+      "description": "The view that showed alone last, which `view.switch_detail_view` brings back when neither shows."
+    },
+    "clip_height": {
+      "description": "The Clip View's height in points at 100%, as it was set; it is squeezed in a window too short for it.",
+      "format": "double",
+      "type": "number"
+    },
+    "clip_view": {
+      "description": "Whether the Clip View shows.",
+      "type": "boolean"
+    },
+    "device_view": {
+      "description": "Whether the Device View shows.",
+      "type": "boolean"
+    },
+    "expanded": {
+      "description": "Whether the Clip View is expanded to its largest height.",
+      "type": "boolean"
+    },
+    "focus": {
+      "$ref": "#/$defs/DetailView",
+      "description": "The view the detail area's keys go to while both show."
+    },
+    "hidden": {
+      "description": "The views `view.toggle_detail_area` hid, which it brings back; empty when it hid nothing.",
+      "items": {
+        "$ref": "#/$defs/DetailView"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "clip_view",
+    "device_view",
+    "alone_last",
+    "hidden",
+    "clip_height",
+    "expanded",
+    "focus"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `DetailView`
+
+One of the detail area's two views.
+
+One of:
+
+- `"clip"`: The Clip View, which edits the selected clip.
+- `"device"`: The Device View, which shows the selected track's devices.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One of the detail area's two views.",
+  "oneOf": [
+    {
+      "const": "clip",
+      "description": "The Clip View, which edits the selected clip.",
+      "type": "string"
+    },
+    {
+      "const": "device",
+      "description": "The Device View, which shows the selected track's devices.",
+      "type": "string"
+    }
+  ]
 }
 ```
 
@@ -37667,6 +38018,7 @@ What `view.state` returns: what the view commands switch, without switching any 
 |---|---|---|---|
 | `window` | [`ViewResult`](#viewresult) | yes | The main window: the main view, the browser, the Info View, full-screen mode and the interface zoom. |
 | `clip_view` | [`ClipViewState`](#clipviewstate) | yes | The Clip View and its note editor: whether it shows, Draw Mode, the clip it holds, the selected notes, the lane and Fold. |
+| `detail` | [`DetailState`](#detailstate) | yes | The detail area: which of the Clip View and the Device View show, the Clip View's height, and where the focus is. |
 | `plugin_list` | [`PluginListState`](#pluginliststate) | yes | The list of the set's plug-ins: whether it shows, and whether Show Only Missing is on. |
 | `assistant` | [`AssistantPanelState`](#assistantpanelstate) | yes | The assistant's panel. |
 | `undo_history` | boolean | yes | Whether the Undo History panel shows. |
@@ -37685,6 +38037,10 @@ What `view.state` returns: what the view commands switch, without switching any 
     "clip_view": {
       "$ref": "#/$defs/ClipViewState",
       "description": "The Clip View and its note editor: whether it shows, Draw Mode, the clip it holds, the selected notes, the lane and Fold."
+    },
+    "detail": {
+      "$ref": "#/$defs/DetailState",
+      "description": "The detail area: which of the Clip View and the Device View show, the Clip View's height, and where the focus is."
     },
     "plug_in_windows": {
       "description": "Whether floating devices' and plug-ins' windows are shown, as `view.toggle_plug_in_windows` sets it.",
@@ -37706,6 +38062,7 @@ What `view.state` returns: what the view commands switch, without switching any 
   "required": [
     "window",
     "clip_view",
+    "detail",
     "plugin_list",
     "assistant",
     "undo_history",

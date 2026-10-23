@@ -22,6 +22,7 @@ use imbl::OrdMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::clip_param::ClipParam;
 use crate::error::ModelError;
 use crate::ids::{ChainId, DeviceId, ParamId, TrackId};
 
@@ -61,7 +62,8 @@ pub enum MixerParam {
                    `send` with the return track it feeds (`to`), `device` with the device \
                    and its `param`, `chain` with a rack's chain and its mixer `param`, or \
                    `chain_send` with a drum rack's chain and the return chain it sends to \
-                   (`to`). \
+                   (`to`), or `clip` with a sound setting (`param`) of the track's audio \
+                   clips (Gain, Transpose, Detune, HiQ and the warp modes' controls). \
                    A MIDI clip's envelope can instead name a MIDI controller: `midi.cc` \
                    with its `number` (1 to 31 or 33 to 119), `midi.pitch_bend` or \
                    `midi.channel_pressure`."
@@ -100,6 +102,13 @@ pub enum AutomationTarget {
         /// The return chain.
         to: ChainId,
     },
+    /// A sound setting of the track's audio clips (WP-4.8, the warp modes
+    /// spec R28): a track's envelope for it drives the setting of every audio
+    /// clip on the track as it plays, and a clip's envelope modulates it.
+    Clip {
+        /// The setting.
+        param: ClipParam,
+    },
     /// A continuous controller of a MIDI clip's MIDI Ctrl envelopes
     /// (WP-2.29), 1 to 31 or 33 to 119, from 0 to 127. Only a MIDI clip's
     /// envelope names it; a track has no automation for it.
@@ -126,6 +135,22 @@ impl AutomationTarget {
             Self::MidiPitchBend => Some((-8192.0, 8191.0)),
             _ => None,
         }
+    }
+
+    /// The range of values a clip sound setting's clip envelope holds, or
+    /// `None` for any other target (the warp modes spec, R29).
+    #[must_use]
+    pub fn clip_range(&self) -> Option<(f64, f64)> {
+        match *self {
+            Self::Clip { param } => Some(param.envelope_range()),
+            _ => None,
+        }
+    }
+
+    /// Whether this names a sound setting of the track's audio clips.
+    #[must_use]
+    pub fn is_clip(&self) -> bool {
+        matches!(self, Self::Clip { .. })
     }
 
     /// Whether this names a MIDI controller rather than a parameter.

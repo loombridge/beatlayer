@@ -120,6 +120,7 @@ pub mod sidechain;
 mod sources;
 mod state;
 pub mod transport;
+mod tuned;
 mod warped;
 mod zones;
 
@@ -148,7 +149,8 @@ pub use message::{
     Action, LoopRegion, ParamEvent, Punch, Report, ScheduledCommand, TransportCommand, When,
 };
 pub use midi::{
-    MIDI_EVENTS_PER_BLOCK, MIDI_EVENTS_PER_TRACK, MidiCounters, MidiEvent, TrackMidiInput,
+    MIDI_EVENTS_PER_BLOCK, MIDI_EVENTS_PER_TRACK, MIDI_PREVIEWS_PER_TRACK, MidiCounters, MidiEvent,
+    TrackMidiInput,
 };
 pub use midi_clips::{MidiClipList, MidiClipPlayer};
 pub use mixer::METER_RELEASE_DB_PER_SECOND;
@@ -170,6 +172,7 @@ pub use session::{
     StoppedClip,
 };
 pub use state::{EngineCounters, EngineState, Monitor, PlayedParam, TrackMeter};
+pub use tuned::KeyPitches;
 
 /// An engine's fixed sizes, chosen when it's made. The audio thread works
 /// within them and allocates nothing, so each is a ceiling: what goes over

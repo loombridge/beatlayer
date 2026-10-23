@@ -1112,6 +1112,7 @@ impl Processor {
                 start: take.start,
                 end: take.next,
                 wrap: take.wrap.map(|region| (region.start, region.end)),
+                frames: take.written,
             });
         }
         self.plan = None;
@@ -1962,10 +1963,15 @@ impl Processor {
         let skip = (delay.max(0) as u64)
             .saturating_sub(written)
             .min(frames as u64) as usize;
+        // The messages are stamped with the frame the take has run on to, not
+        // the song frame, which a loop's wrap sets back (recording R12).
+        let stamp = self.take.map_or(self.position, |take| {
+            take.start + Frames(take.written as i64)
+        });
         let captured = match (self.program.as_ref(), self.plan.as_mut()) {
             (Some(program), Some(plan)) => {
                 plan.get_mut()
-                    .capture(program.get(), self.position, offset, frames, skip)
+                    .capture(program.get(), stamp, offset, frames, skip)
             }
             _ => false,
         };
@@ -2105,6 +2111,7 @@ impl Processor {
             start: take.start,
             end: take.next,
             wrap: None,
+            frames: take.written,
         });
         state.counting_in = self.metronome.is_counting_in();
         state.take = self.last_take;

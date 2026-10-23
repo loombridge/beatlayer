@@ -1344,6 +1344,9 @@ impl DeviceView {
                         .filter(|n| !answers(n.key))
                         .cloned()
                         .collect();
+                    // Spec: note-editing R31. A group split between the
+                    // clips ends below two notes on either side.
+                    left.tidy_groups();
                     editor.apply(Command::SetClipData {
                         clip: clip.id,
                         data: ClipData::Midi(left),
@@ -1364,6 +1367,7 @@ impl DeviceView {
                             n
                         })
                         .collect();
+                    data.tidy_groups();
                     copy.data = ClipData::Midi(data);
                     match scene {
                         None => editor.apply(Command::CreateClip {

@@ -11,6 +11,7 @@
 //! the arrangement editing spec.
 
 pub mod automation;
+pub mod comping;
 pub mod editing;
 pub(crate) mod fades;
 pub mod grid;

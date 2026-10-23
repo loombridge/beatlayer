@@ -1,6 +1,6 @@
 # The one-shot drum sampler
 
-- **Status:** partial (the sample display and the effects' X-Y pad are not drawn; similar-sample swapping, Save as Default Pad and a double-click in the browser wait on other work, see "Not built yet"; R25, tuning systems, is WP-6.9's)
+- **Status:** partial (the sample display and the effects' X-Y pad are not drawn; similar-sample swapping, Save as Default Pad and a double-click in the browser wait on other work, see "Not built yet")
 - **Work packages:** WP-5.18; WP-6.9 (tuning systems: R25)
 - **Parity-matrix row:** Instruments: Impulse, Drum Sampler
 - **Checked against:** Live 12's reference manual, chapter 31 "Live Instrument Reference", section 31.4 "Drum Sampler" (31.4.1 to 31.4.5), read 17 October 2026
@@ -92,7 +92,7 @@ This spec covers Drum Sampler's parameters, voices, effects, filter, modulation 
 | R22 | `crates/devices/tests/drum_sampler.rs`, `the_engine_plays_the_sample_the_set_names`; `crates/shell/tests/drum_sampler.rs`, `loading_a_sample_keeps_it_by_hash_through_a_save_and_undoes_as_one_step`; `crates/ui/tests/drum_sampler.rs`, `a_dropped_sample_loads_into_strike_under_the_pointer`; `crates/cli/tests/agent.rs`, `an_agent_switches_strikes_menu_options_and_swaps_it_to_snapshot_by_command_id` | unit, UI script, MCP script |
 | R23 | `crates/shell/tests/drum_sampler.rs`, `swapping_to_snapshot_keeps_the_sample_start_and_length_in_one_undo_step`, `a_strike_inside_a_rack_chain_swaps_in_place`; `crates/ui/tests/drum_sampler.rs`, `the_menu_ends_with_strikes_own_items_and_they_run_their_commands`; `crates/cli/tests/agent.rs`, `an_agent_switches_strikes_menu_options_and_swaps_it_to_snapshot_by_command_id` | unit, UI script, MCP script |
 | R24 | `crates/devices/tests/rules.rs`, `every_parameter_is_automatable_to_the_frame`, `every_parameter_is_modulatable_to_the_frame` | real-time trap |
-| R25 | to be written in WP-6.9 | |
+| R25 | `crates/devices/tests/tuning.rs`, `keys_play_at_the_tunings_frequencies_at_any_block_size`, `a_per_note_bend_moves_by_steps_of_the_tuning`; `crates/devices/tests/tuning_engine.rs`, `a_drum_racks_track_renders_as_without_a_tuning` | unit |
 
 ## Not built yet
 

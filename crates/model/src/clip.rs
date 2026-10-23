@@ -30,7 +30,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::automation::{AutomationTarget, Breakpoint, Envelope};
 use crate::error::ModelError;
-use crate::ids::{ClipId, ContentHash, GrooveId};
+use crate::ids::{ClipId, ContentHash, GrooveId, TakeLaneId};
 use crate::launch::ClipLaunch;
 use crate::scale::Scale;
 use crate::warp::{TransientEdits, WarpMarker};
@@ -869,36 +869,115 @@ fn ending(at: f64, seconds: f64) -> Option<f64> {
     ((at - seconds).abs() > 1e-9).then_some(at)
 }
 
-/// One recorded pass on a take lane: where it sits, how long it is, and the
-/// audio it plays. Unlike an Arrangement [`Clip`] it has no ID and isn't
-/// addressed by any command yet; take-lane editing and comping come later
-/// (the recording spec, R12).
+/// What a pass handed to `track.add_take_lane` plays: audio data as it was
+/// given before take lanes held clips (just the audio's fields), or a clip's
+/// data tagged `audio` or `midi`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[schemars(
-    description = "A recorded pass on a take lane: its `name`, `start` and `length` in ticks \
-                   (705,600 to the quarter note), and the audio clip `data` it plays."
-)]
-pub struct TakeClip {
-    /// The pass's name, which may be empty.
-    pub name: String,
-    /// Where the pass starts in the arrangement. Never negative.
-    pub start: Ticks,
-    /// How long the pass is. Always positive.
-    pub length: Ticks,
-    /// The audio it plays.
-    pub data: AudioData,
+#[serde(untagged)]
+pub enum TakeClipData {
+    /// Audio or MIDI data, tagged as a clip's is.
+    Tagged(ClipData),
+    /// Audio data without the tag.
+    Audio(AudioData),
 }
 
-/// One take lane under a track's main lane: a name and the passes it holds,
-/// in start order. The track plays only its main lane; a take lane's clips
-/// are kept until comping lets a person audition and pick from them.
+impl TakeClipData {
+    /// The clip data it stands for.
+    #[must_use]
+    pub fn into_data(self) -> ClipData {
+        match self {
+            Self::Tagged(data) => data,
+            Self::Audio(audio) => ClipData::Audio(audio),
+        }
+    }
+}
+
+/// A clip handed to `track.add_take_lane`: where it sits, how long it is,
+/// and what it plays. Its ID is issued when it's left out.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[schemars(description = "A take lane under a track's main lane: its `name` and its `clips`.")]
-pub struct TakeLane {
+#[schemars(
+    description = "A clip for a new take lane: its `name`, `start` and `length` in ticks \
+                   (705,600 to the quarter note), and the `data` it plays, audio as \
+                   `clip.create` takes it or tagged `audio` or `midi`. Its `id` is issued when \
+                   it's left out."
+)]
+pub struct TakeClip {
+    /// The clip's ID. Left out, the editor issues one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<ClipId>,
+    /// The clip's name, which may be empty.
+    pub name: String,
+    /// Where the clip starts in the arrangement. Never negative.
+    pub start: Ticks,
+    /// How long the clip is. Always positive.
+    pub length: Ticks,
+    /// What it plays.
+    pub data: TakeClipData,
+}
+
+/// A take lane handed to `track.add_take_lane`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[schemars(
+    description = "A new take lane: its `name`, the `clips` it holds, and its `id`, issued when \
+                   it's left out."
+)]
+pub struct NewTakeLane {
+    /// The lane's ID. Left out, the editor issues one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<TakeLaneId>,
     /// The lane's name, such as `Take 1`.
     pub name: String,
-    /// The passes on the lane.
+    /// The clips on the lane.
+    #[serde(default)]
     pub clips: Vec<TakeClip>,
+}
+
+impl NewTakeLane {
+    /// The lane with its clips as the document holds them. Every ID must be
+    /// there: the editor issues the ones left out before the command runs.
+    pub(crate) fn lane(&self) -> Result<TakeLane, ModelError> {
+        let id = self.id.ok_or(ModelError::MissingId)?;
+        let clips = self
+            .clips
+            .iter()
+            .map(|clip| {
+                let id = clip.id.ok_or(ModelError::MissingId)?;
+                let data = clip.data.clone().into_data();
+                Ok(Clip {
+                    name: clip.name.clone(),
+                    ..Clip::new(id, clip.start, clip.length, data)
+                })
+            })
+            .collect::<Result<Vec<_>, ModelError>>()?;
+        Ok(TakeLane {
+            id,
+            name: self.name.clone(),
+            clips,
+        })
+    }
+}
+
+/// One take lane under a track's main lane (WP-6.21, the comping spec, R1):
+/// an ID that never changes, a name, and clips of its track's kind, which
+/// never overlap. The track plays only its main lane, or the lane that is
+/// auditioned in its place.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[schemars(description = "A take lane under a track's main lane: its `id`, `name` and `clips`.")]
+pub struct TakeLane {
+    /// The lane's ID.
+    pub id: TakeLaneId,
+    /// The lane's name, such as `Take 1`.
+    pub name: String,
+    /// The clips on the lane.
+    pub clips: Vec<Clip>,
+}
+
+impl TakeLane {
+    /// The lane's clip with this ID.
+    #[must_use]
+    pub fn clip(&self, id: ClipId) -> Option<&Clip> {
+        self.clips.iter().find(|clip| clip.id == id)
+    }
 }
 
 fn is_zero(value: &f64) -> bool {
@@ -984,6 +1063,11 @@ pub struct MidiData {
     /// (or nothing) means the song's signature at the clip's position.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signature: Option<TimeSignature>,
+    /// The clip's probability groups and their kinds (Spec: note-editing
+    /// R21): each note's `group` names one. A group holds two or more
+    /// notes, all of one chance.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub groups: Vec<NoteGroup>,
 }
 
 impl MidiData {
@@ -998,7 +1082,75 @@ impl MidiData {
             loop_start: Ticks::ZERO,
             loop_end: None,
             signature: None,
+            groups: Vec::new(),
         }
+    }
+
+    /// The kind of the group `id`, if the clip has it.
+    #[must_use]
+    pub fn group_kind(&self, id: u32) -> Option<GroupKind> {
+        self.groups.iter().find(|g| g.id == id).map(|g| g.kind)
+    }
+
+    /// A group ID no group of the clip holds.
+    #[must_use]
+    pub fn new_group_id(&self) -> u32 {
+        self.groups
+            .iter()
+            .map(|g| g.id)
+            .max()
+            .map_or(1, |id| id + 1)
+    }
+
+    /// Ends the groups left with fewer than two notes, and forgets a group
+    /// no note names or a note names that isn't there (Spec: note-editing
+    /// R22, R31). Edits that remove or regroup notes call it.
+    pub fn tidy_groups(&mut self) {
+        let mut count: BTreeMap<u32, usize> = BTreeMap::new();
+        for id in self.notes.iter().filter_map(|note| note.group) {
+            *count.entry(id).or_default() += 1;
+        }
+        self.groups
+            .retain(|g| count.get(&g.id).is_some_and(|n| *n >= 2));
+        let held: BTreeSet<u32> = self.groups.iter().map(|g| g.id).collect();
+        for note in self.notes.iter_mut() {
+            if note.group.is_some_and(|id| !held.contains(&id)) {
+                note.group = None;
+            }
+        }
+    }
+
+    /// What a set that loads with broken groups gets (Spec: note-editing
+    /// R30): a group ID listed twice, or a group whose notes' chances
+    /// differ, ends, and its notes load ungrouped.
+    pub fn repair_groups(&mut self) {
+        let mut seen = BTreeSet::new();
+        let twice: BTreeSet<u32> = self
+            .groups
+            .iter()
+            .filter(|g| !seen.insert(g.id))
+            .map(|g| g.id)
+            .collect();
+        self.groups.retain(|g| !twice.contains(&g.id));
+        let mut chance: BTreeMap<u32, f64> = BTreeMap::new();
+        let mut differ = BTreeSet::new();
+        for note in self.notes.iter() {
+            if let Some(id) = note.group
+                && *chance.entry(id).or_insert(note.probability) != note.probability
+            {
+                differ.insert(id);
+            }
+        }
+        self.groups.retain(|g| !differ.contains(&g.id));
+        self.tidy_groups();
+    }
+
+    /// Whether the clip's groups are whole: no group repair would end.
+    #[must_use]
+    pub(crate) fn groups_hold(&self) -> bool {
+        let mut repaired = self.clone();
+        repaired.repair_groups();
+        repaired.groups == self.groups && repaired.notes == self.notes
     }
 
     /// Moves the clip's Start marker when its left edge moves from `from`
@@ -1056,14 +1208,16 @@ impl MidiData {
                 ..note.clone()
             })
             .collect();
-        Self {
+        let mut cropped = Self {
             notes,
             start: (self.start - from).max(Ticks::ZERO),
             end: cropped_end(self.end, from, to),
             loop_start: (self.loop_start - from).max(Ticks::ZERO),
             loop_end: cropped_end(self.loop_end, from, to),
             ..self.clone()
-        }
+        };
+        cropped.tidy_groups();
+        cropped
     }
 }
 
@@ -1152,6 +1306,7 @@ pub fn consolidated_midi(
     end: Ticks,
 ) -> Clip {
     let mut notes: Vec<Note> = Vec::new();
+    let mut groups: Vec<NoteGroup> = Vec::new();
     let mut envelopes: Vec<(ClipEnvelope, BTreeMap<Ticks, Breakpoint>)> = Vec::new();
     for clip in clips {
         let ClipData::Midi(midi) = &clip.data else {
@@ -1160,6 +1315,9 @@ pub fn consolidated_midi(
         for (song_start, song_end, content_start, content_end) in
             played_stretches(clip, midi, start, end)
         {
+            // Spec: note-editing R31. Each repetition written out holds
+            // groups of its own.
+            let mut own: BTreeMap<u32, u32> = BTreeMap::new();
             for note in midi.notes.iter() {
                 if note.start < content_start || note.start >= content_end {
                     continue;
@@ -1167,9 +1325,18 @@ pub fn consolidated_midi(
                 let at = song_start + (note.start - content_start);
                 let length = note.length.min(song_end - at);
                 if length > Ticks::ZERO {
+                    let group = note.group.and_then(|old| {
+                        let kind = midi.group_kind(old)?;
+                        Some(*own.entry(old).or_insert_with(|| {
+                            let id = groups.len() as u32 + 1;
+                            groups.push(NoteGroup { id, kind });
+                            id
+                        }))
+                    });
                     notes.push(Note {
                         start: at - start,
                         length,
+                        group,
                         ..note.clone()
                     });
                 }
@@ -1221,6 +1388,18 @@ pub fn consolidated_midi(
             envelope
         })
         .collect();
+    // A note cut at the range's edge can leave a group of one.
+    let mut data = MidiData {
+        notes: notes.into(),
+        start: Ticks::ZERO,
+        end: None,
+        looping: true,
+        loop_start: Ticks::ZERO,
+        loop_end: None,
+        signature: None,
+        groups,
+    };
+    data.tidy_groups();
     Clip {
         id,
         name,
@@ -1228,15 +1407,7 @@ pub fn consolidated_midi(
         length: end - start,
         offset: Ticks::ZERO,
         mute: false,
-        data: ClipData::Midi(MidiData {
-            notes: notes.into(),
-            start: Ticks::ZERO,
-            end: None,
-            looping: true,
-            loop_start: Ticks::ZERO,
-            loop_end: None,
-            signature: None,
-        }),
+        data: ClipData::Midi(data),
         envelopes,
         launch: ClipLaunch::default(),
         // Spec: scales R7. A consolidated clip takes the scale of the first
@@ -1314,6 +1485,35 @@ pub struct Note {
     /// none plays no pressure.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pressure: Vec<PressurePoint>,
+    /// The probability group the note belongs to, an ID in the clip's
+    /// `groups` (Spec: note-editing R21).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<u32>,
+}
+
+/// How a probability group plays (Spec: note-editing R21).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[schemars(
+    description = "How a probability group plays: `play_all` plays all its notes or none, \
+                   `play_one` plays one of them, chosen evenly."
+)]
+pub enum GroupKind {
+    /// All the group's notes play, or none do.
+    #[default]
+    PlayAll,
+    /// One of the group's notes plays, each equally likely.
+    PlayOne,
+}
+
+/// A probability group of a MIDI clip: its ID and kind. Its notes name it
+/// by `group` and hold its chance as their own.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct NoteGroup {
+    /// The ID the group's notes name, unique in the clip.
+    pub id: u32,
+    /// How the group plays.
+    pub kind: GroupKind,
 }
 
 impl Note {
@@ -1330,6 +1530,7 @@ impl Note {
             velocity_deviation: 0,
             mute: false,
             pressure: Vec::new(),
+            group: None,
         }
     }
 }
@@ -1346,6 +1547,7 @@ impl Default for Note {
             velocity_deviation: 0,
             mute: false,
             pressure: Vec::new(),
+            group: None,
         }
     }
 }

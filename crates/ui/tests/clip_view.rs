@@ -1020,7 +1020,8 @@ fn option_dragging_a_note_copies_it() {
 fn the_context_menu_lists_the_items_in_order() {
     // Spec: piano-roll R30. Right-clicking a note opens the editor's
     // context menu: the items whose commands exist run them, and the rest
-    // are drawn disabled and name their packages.
+    // are drawn disabled and name their packages. Group Notes needs two
+    // notes and Ungroup Notes a grouped one.
     let step = n_step();
     let mut n = set(vec![Note::new(60, Ticks::ZERO, step, 100)]);
     let at = n.at(60, step / 2);
@@ -1038,15 +1039,11 @@ fn the_context_menu_lists_the_items_in_order() {
         let node = menu_item(&nodes, label);
         assert!(!node.disabled, "{label} works");
     }
+    for label in ["Group Notes", "Ungroup Notes"] {
+        assert!(menu_item(&nodes, label).disabled, "{label} has no use here");
+    }
     for (label, package) in [
         ("Invert Selection", "WP-6.4"),
-        ("Group Notes", "WP-6.2"),
-        ("Ungroup Notes", "WP-6.2"),
-        ("Split Note(s)", "WP-6.3"),
-        ("Chop Note(s) on Grid", "WP-6.3"),
-        ("Join Notes", "WP-6.3"),
-        ("Fit to Time Range", "WP-6.3"),
-        ("Split Clip", "WP-6.3"),
         ("Highlight Scales", "WP-6.7b"),
     ] {
         let node = menu_item(&nodes, label);
@@ -1057,6 +1054,44 @@ fn the_context_menu_lists_the_items_in_order() {
             node.description
         );
     }
+    // Spec: note-editing R35, R39, R40, R41. WP-6.3's items run their
+    // commands; Split Note(s) shows only while a note would be split.
+    for label in [
+        "Chop Note(s) on Grid",
+        "Join Notes",
+        "Fit to Time Range",
+        "Split Clip",
+    ] {
+        assert!(!menu_item(&nodes, label).disabled, "{label} works");
+    }
+    assert!(
+        !nodes
+            .iter()
+            .any(|node| node.label.starts_with("Split Note(s)")),
+        "no note would split"
+    );
+}
+
+#[test]
+fn split_notes_shows_in_the_menu_while_the_insert_marker_crosses_a_note() {
+    // Spec: note-editing R35. C-NOTE-010 runs `note.split`, and shows only
+    // while a note would be split.
+    let step = n_step();
+    let mut n = set(vec![Note::new(60, Ticks::ZERO, 4 * step, 100)]);
+    let elsewhere = n.at(61, step);
+    let nodes = right_click(&mut n, elsewhere);
+    assert!(
+        !nodes
+            .iter()
+            .any(|node| node.label.starts_with("Split Note(s)")),
+        "nothing crosses the marker yet"
+    );
+    n.h.key(egui::Key::Escape, Modifiers::NONE);
+    let at = n.at(62, 2 * step);
+    n.click(at, Modifiers::NONE);
+    let nodes = right_click(&mut n, elsewhere);
+    let item = menu_item(&nodes, "Split Note(s)");
+    assert!(!item.disabled);
 }
 
 #[test]
@@ -1642,7 +1677,7 @@ fn deactivating_notes_from_the_menus_and_the_piano_ruler() {
 fn the_footer_has_the_active_lanes_controls() {
     // Spec: note-editing R10 to R13. Velocity: Randomize with its amount,
     // Ramp's start and end, Deviation; Chance: Randomize with its amount, and
-    // Play All, Play One and Ungroup, drawn disabled until WP-6.2.
+    // Play All, Play One and Ungroup, which wait for notes to group.
     let mut n = run_of_notes(3, 100);
     let nodes = Harness::nodes(&n.h.settle());
     for label in [
@@ -1663,7 +1698,7 @@ fn the_footer_has_the_active_lanes_controls() {
             .iter()
             .find(|node| node.label == label)
             .unwrap_or_else(|| panic!("{label}"));
-        assert!(node.disabled, "{label} waits for probability groups");
+        assert!(node.disabled, "{label} waits for notes to group");
     }
     assert!(!nodes.iter().any(|node| node.label == "Ramp Start"));
 }
@@ -1972,4 +2007,888 @@ fn the_notes_are_paler_the_softer_their_velocity() {
             "velocity 64 is between the palest and the full colour"
         );
     }
+}
+
+/// Switches Preview on, arms the clip's track and turns the computer MIDI
+/// keyboard on, as step recording needs, and lets a frame pass so the
+/// input's copy is on.
+fn start_step_recording(n: &mut Notes) {
+    let track = n.doc().clip_track(n.clip).unwrap();
+    n.h.shell
+        .run("mixer.set_arm", json!({ "track": track, "arm": true }))
+        .unwrap();
+    n.h.shell
+        .run("clip_view.set_preview", json!({ "on": true }))
+        .unwrap();
+    n.h.shell
+        .run("midi.toggle_computer_keyboard", json!({ "on": true }))
+        .unwrap();
+    n.h.settle();
+    n.h.shell.poll();
+}
+
+#[test]
+fn the_preview_switch_above_the_piano_ruler_runs_set_preview() {
+    // Spec: step-recording R1. L-CLIP-012: the switch sits above the piano
+    // ruler, in the marker strip's left end.
+    let mut n = set(vec![]);
+    assert!(!n.h.shell.clip_view().preview(), "off in a new install");
+    let strip = n.strip();
+    let switch = pos2(strip.left() + KEY_WIDTH / 2.0, strip.center().y);
+    n.click(switch, Modifiers::NONE);
+    assert!(n.h.shell.clip_view().preview());
+    assert_eq!(n.steps(), 0, "no undo step");
+    n.click(switch, Modifiers::NONE);
+    assert!(!n.h.shell.clip_view().preview());
+}
+
+#[test]
+fn a_key_held_in_the_piano_ruler_plays_until_released_with_preview_on() {
+    // Spec: step-recording R2. A click on a key plays it at velocity 100
+    // while the button is held, and only with Preview on.
+    let mut n = set(vec![]);
+    let track = n.doc().clip_track(n.clip).unwrap();
+    let mut queue = n.h.shell.midi().sender().attach(64);
+    let heard = |queue: &mut rtrb::Consumer<bl_core::midi::MidiInputEvent>| {
+        std::iter::from_fn(|| queue.pop().ok())
+            .map(|e| {
+                (
+                    e.source,
+                    e.message.status(),
+                    e.message.data1(),
+                    e.message.data2(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    let source = bl_core::midi::MidiSource::Preview(track.0);
+    let key = n.key_at(57);
+    let press = |n: &mut Notes, pressed: bool| {
+        n.h.frame(vec![Event::PointerButton {
+            pos: key,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        }]);
+        n.h.settle();
+    };
+    n.h.frame(vec![Event::PointerMoved(key)]);
+    press(&mut n, true);
+    press(&mut n, false);
+    assert_eq!(heard(&mut queue), [], "Preview is off");
+
+    n.h.shell
+        .run("clip_view.set_preview", json!({ "on": true }))
+        .unwrap();
+    n.h.settle();
+    press(&mut n, true);
+    assert_eq!(heard(&mut queue), [(source, 0x90, 57, 100)]);
+    press(&mut n, false);
+    assert_eq!(heard(&mut queue), [(source, 0x80, 57, 64)]);
+    assert_eq!(n.steps(), 0, "a preview changes nothing in the set");
+}
+
+#[test]
+fn a_dragged_note_plays_each_pitch_it_reaches_and_ends_on_release() {
+    // Spec: step-recording R2. A drag that moves notes to a new pitch plays
+    // the grabbed note at each new pitch, ending the one before.
+    let step = n_step();
+    let mut n = set(vec![Note::new(60, Ticks::ZERO, step, 90)]);
+    let track = n.doc().clip_track(n.clip).unwrap();
+    n.h.shell
+        .run("clip_view.set_preview", json!({ "on": true }))
+        .unwrap();
+    n.h.settle();
+    let mut queue = n.h.shell.midi().sender().attach(256);
+    let from = n.at(60, step / 2);
+    let to = n.at(63, step / 2);
+    n.drag(from, to, Modifiers::NONE);
+    let heard: Vec<_> = std::iter::from_fn(|| queue.pop().ok())
+        .map(|e| {
+            assert_eq!(e.source, bl_core::midi::MidiSource::Preview(track.0));
+            (e.message.is_note_on(), e.message.data1())
+        })
+        .collect();
+    assert_eq!(heard.first(), Some(&(true, 60)), "the grabbed pitch first");
+    assert!(heard.contains(&(true, 63)), "and the pitch it reached");
+    assert_eq!(heard.last(), Some(&(false, 63)), "ended on release");
+    let on = heard.iter().filter(|(on, _)| *on).count();
+    let off = heard.len() - on;
+    assert_eq!(on, off, "every note-on has its note-off");
+    assert_eq!(n.notes()[0].key, 63);
+}
+
+#[test]
+fn left_and_right_step_while_step_recording_and_move_the_marker_otherwise() {
+    // Spec: step-recording R3, R4, R6, R10. Right with a key held adds the
+    // note at the insert marker and steps on; Left takes it off again.
+    let step = n_step();
+    let mut n = set(vec![]);
+    let at = n.at(60, step / 4);
+    n.click(at, Modifiers::NONE);
+    assert_eq!(n.insert(), Some(Ticks::ZERO));
+    // Not step recording yet: the arrows only move the marker.
+    n.h.key(egui::Key::ArrowRight, Modifiers::NONE);
+    assert_eq!(n.insert(), Some(step));
+    n.h.key(egui::Key::ArrowLeft, Modifiers::NONE);
+
+    start_step_recording(&mut n);
+    // A on the computer MIDI keyboard is C3.
+    n.h.shell
+        .run(
+            "midi.computer_keyboard_key",
+            json!({ "key": "A", "pressed": true }),
+        )
+        .unwrap();
+    n.h.settle();
+    n.h.key(egui::Key::ArrowRight, Modifiers::NONE);
+    assert_eq!(n.notes().len(), 1);
+    assert_eq!(n.notes()[0].start, Ticks::ZERO);
+    assert_eq!(n.notes()[0].length, step);
+    assert_eq!(n.insert(), Some(step));
+    n.h.key(egui::Key::ArrowRight, Modifiers::NONE);
+    assert_eq!(n.notes()[0].length, 2 * step);
+    n.h.key(egui::Key::ArrowLeft, Modifiers::NONE);
+    n.h.key(egui::Key::ArrowLeft, Modifiers::NONE);
+    assert_eq!(n.notes(), []);
+    assert_eq!(n.insert(), Some(Ticks::ZERO));
+    // Shift still selects time, as without step recording.
+    n.h.key(egui::Key::ArrowRight, Modifiers::SHIFT);
+    assert_eq!(n.time(), Some((Ticks::ZERO, step)));
+}
+
+#[test]
+fn cmd_shift_b_arms_the_track_and_switches_the_computer_keyboard() {
+    // Spec: step-recording R9, M-OPT-018. The key runs Step Input Mode in
+    // the note editor, with the Clip View open on a MIDI clip.
+    let mut n = set(vec![]);
+    n.h.shell.set_focused_area(bl_shell::Area::Detail);
+    let track = n.doc().clip_track(n.clip).unwrap();
+    assert!(!n.h.shell.computer_keyboard_on());
+    let chord = if cfg!(target_os = "macos") {
+        Modifiers::MAC_CMD | Modifiers::COMMAND | Modifiers::SHIFT
+    } else {
+        Modifiers::CTRL | Modifiers::COMMAND | Modifiers::SHIFT
+    };
+    n.h.key(egui::Key::B, chord);
+    assert!(n.doc().track(track).unwrap().mixer().arm);
+    assert!(n.h.shell.computer_keyboard_on());
+    assert_eq!(n.steps(), 1, "arming is the one undo step");
+}
+
+/// The modifier that copies while dragging, and with E chops: Option on
+/// macOS, Ctrl elsewhere (S-NOTE-004).
+fn chop_key() -> Modifiers {
+    if cfg!(target_os = "macos") {
+        Modifiers::ALT
+    } else {
+        Modifiers::CTRL | Modifiers::COMMAND
+    }
+}
+
+impl Notes {
+    /// Presses a key and holds it, with modifiers, until `let_go`.
+    fn hold(&mut self, key: egui::Key, modifiers: Modifiers) {
+        self.h.frame(vec![
+            Event::ModifiersChanged(modifiers),
+            Event::Key {
+                key,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers,
+            },
+        ]);
+    }
+
+    /// Lets go of a key held with [`Notes::hold`], and of every modifier.
+    fn let_go(&mut self, key: egui::Key, modifiers: Modifiers) {
+        self.h.frame(vec![
+            Event::Key {
+                key,
+                physical_key: None,
+                pressed: false,
+                repeat: false,
+                modifiers,
+            },
+            Event::ModifiersChanged(Modifiers::NONE),
+        ]);
+        self.h.settle();
+    }
+
+    /// A point in the stretch markers' band, `tick` along.
+    fn at_band(&mut self, tick: Ticks) -> Pos2 {
+        let strip = self.strip();
+        let grid = self.grid();
+        pos2(
+            x_of_tick(grid, self.marker(), self.length(), tick),
+            strip.top() + 7.5,
+        )
+    }
+
+    /// Selects every note, which puts the time selection on their span.
+    fn select_all(&mut self) {
+        self.h
+            .shell
+            .run(
+                "clip_view.select_notes",
+                json!({ "clip": self.clip, "notes": [], "select": "all" }),
+            )
+            .unwrap();
+        self.h.settle();
+    }
+
+    fn starts(&self) -> Vec<(u8, i64, i64)> {
+        self.notes()
+            .iter()
+            .map(|n| (n.key, n.start.get(), n.length.get()))
+            .collect()
+    }
+}
+
+#[test]
+fn e_click_splits_a_note_where_clicked_and_cmd_snaps_it() {
+    // Spec: note-editing R33; S-NOTE-006. E held and a click splits the
+    // note at the pointer, or at the nearest grid line with Cmd held. One
+    // undo step.
+    let step = n_step();
+    let mut n = set(vec![Note::new(60, Ticks::ZERO, 4 * step, 100)]);
+    n.hold(egui::Key::E, Modifiers::NONE);
+    let before = n.doc().clone();
+    let at = n.at(60, step + step / 3);
+    let tick = n.tick(at);
+    n.click(at, Modifiers::NONE);
+    assert_eq!(
+        n.starts(),
+        [
+            (60, 0, tick.get()),
+            (60, tick.get(), 4 * step.get() - tick.get())
+        ],
+        "split where the pointer was"
+    );
+    n.one_step(&before, "Split Notes");
+    assert!(n.selected().is_empty(), "the click selected nothing");
+    // With Cmd held the split snaps to the nearest grid line.
+    n.h.shell.run("edit.undo", json!({})).unwrap();
+    n.h.settle();
+    let at = n.at(60, step + step / 3);
+    n.click(at, command());
+    assert_eq!(
+        n.starts(),
+        [(60, 0, step.get()), (60, step.get(), 3 * step.get())]
+    );
+    n.let_go(egui::Key::E, Modifiers::NONE);
+    // Without E, the same click only selects.
+    let steps = n.steps();
+    let at = n.at(60, 2 * step);
+    n.click(at, Modifiers::NONE);
+    assert_eq!(n.steps(), steps);
+}
+
+#[test]
+fn an_e_drag_splits_each_note_it_crosses_and_esc_puts_them_back() {
+    // Spec: note-editing R33; I-DRAG-026. The line dragged across two
+    // notes splits each where it crosses it: one undo step.
+    let step = n_step();
+    let mut n = set(vec![
+        Note::new(60, step, 6 * step, 100),
+        Note::new(64, step, 6 * step, 100),
+    ]);
+    n.hold(egui::Key::E, Modifiers::NONE);
+    let before = n.doc().clone();
+    // From above the upper note, down and right, to below the lower one.
+    let from = n.at(66, 2 * step);
+    let to = n.at(58, 6 * step);
+    let (from_tick, to_tick) = (n.tick(from), n.tick(to));
+    n.drag(from, to, Modifiers::NONE);
+    let notes = n.notes();
+    assert_eq!(notes.len(), 4, "each note split in two");
+    let cut = |key: u8| {
+        notes
+            .iter()
+            .filter(|note| note.key == key)
+            .map(|note| note.start.get())
+            .max()
+            .unwrap()
+    };
+    // The line runs 8 rows from row 66 to row 58: row 64 is a quarter of
+    // the way down it, and row 60 three quarters.
+    for (key, fraction) in [(64, 0.25), (60, 0.75)] {
+        let expected = from_tick.get() as f64 + (to_tick - from_tick).get() as f64 * fraction;
+        assert!(
+            (cut(key) as f64 - expected).abs() < step.get() as f64 / 4.0,
+            "key {key} cut at {} expected near {expected}",
+            cut(key)
+        );
+    }
+    n.one_step(&before, "Split Notes");
+    // Esc puts the notes back.
+    let steps = n.steps();
+    let now = n.doc().clone();
+    let again = n.at(66, 3 * step);
+    n.drag_frames(again, to, Modifiers::NONE);
+    assert_ne!(*n.doc(), now);
+    n.h.key(egui::Key::Escape, Modifiers::NONE);
+    n.release(to, Modifiers::NONE);
+    assert_eq!(*n.doc(), now, "Esc puts the set back");
+    assert_eq!(n.steps(), steps);
+    n.let_go(egui::Key::E, Modifiers::NONE);
+}
+
+#[test]
+fn an_e_drag_inside_a_note_moves_the_split_with_the_pointer() {
+    // Spec: note-editing R33. Dragging sideways inside a note moves the
+    // split until the button is released.
+    let step = n_step();
+    let mut n = set(vec![Note::new(60, Ticks::ZERO, 8 * step, 100)]);
+    n.hold(egui::Key::E, Modifiers::NONE);
+    let before = n.doc().clone();
+    let from = n.at(60, step);
+    let to = n.at(60, 5 * step);
+    let end = n.tick(to);
+    n.drag(from, to, Modifiers::NONE);
+    assert_eq!(n.notes().len(), 2);
+    assert_eq!(n.notes()[1].start, end, "the split followed the pointer");
+    n.one_step(&before, "Split Notes");
+    n.let_go(egui::Key::E, Modifiers::NONE);
+}
+
+#[test]
+fn cmd_e_splits_at_the_insert_marker_with_no_notes_selected() {
+    // Spec: note-editing R35; S-NOTE-003. One undo step.
+    let step = n_step();
+    let mut n = set(vec![Note::new(60, Ticks::ZERO, 4 * step, 100)]);
+    let at = n.at(61, 2 * step);
+    n.click(at, Modifiers::NONE);
+    assert_eq!(n.insert(), Some(2 * step));
+    let before = n.doc().clone();
+    n.h.key(egui::Key::E, command());
+    assert_eq!(
+        n.starts(),
+        [
+            (60, 0, 2 * step.get()),
+            (60, 2 * step.get(), 2 * step.get())
+        ]
+    );
+    n.one_step(&before, "Split Notes");
+}
+
+#[test]
+fn cmd_e_chops_selected_notes_and_cmd_with_the_arrows_re_chops_in_one_step() {
+    // Spec: note-editing R36; S-NOTE-003, S-NOTE-047. A note four grid
+    // steps long chops into four parts; Up makes five, Down four again,
+    // Shift-Up eight; letting go of Cmd ends it, and one Undo undoes all.
+    let step = n_step();
+    let mut n = set(vec![Note::new(60, Ticks::ZERO, 4 * step, 100)]);
+    let at = n.at(60, step / 2);
+    n.click(at, Modifiers::NONE);
+    assert_eq!(n.selected(), [0]);
+    let before = n.doc().clone();
+    let steps = n.steps();
+    n.hold(egui::Key::E, command());
+    assert_eq!(n.notes().len(), 4, "chopped on the grid");
+    let press = |n: &mut Notes, key: egui::Key, shift: bool| {
+        let modifiers = if shift {
+            command() | Modifiers::SHIFT
+        } else {
+            command()
+        };
+        n.h.frame(vec![
+            Event::ModifiersChanged(modifiers),
+            Event::Key {
+                key,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers,
+            },
+        ]);
+        n.h.frame(vec![
+            Event::Key {
+                key,
+                physical_key: None,
+                pressed: false,
+                repeat: false,
+                modifiers,
+            },
+            Event::ModifiersChanged(command()),
+        ]);
+    };
+    press(&mut n, egui::Key::ArrowUp, false);
+    assert_eq!(n.notes().len(), 5, "Cmd-Up: one part more");
+    press(&mut n, egui::Key::ArrowDown, false);
+    assert_eq!(n.notes().len(), 4, "Cmd-Down: one fewer");
+    press(&mut n, egui::Key::ArrowUp, true);
+    assert_eq!(n.notes().len(), 8, "Cmd-Shift-Up: the next power of two");
+    assert_eq!(n.steps(), steps, "still under way: no step yet");
+    n.let_go(egui::Key::E, command());
+    assert_eq!(n.steps(), steps + 1, "releasing Cmd ends the one step");
+    n.one_step(&before, "Chop Notes");
+    // Without Cmd held, Up and Down transpose as before.
+    n.h.key(egui::Key::ArrowUp, Modifiers::NONE);
+    assert_eq!(n.notes().len(), 8);
+    assert_eq!(n.notes()[0].key, 61);
+}
+
+#[test]
+fn the_chop_drags_count_parts_in_the_status_bar() {
+    // Spec: note-editing R37; S-NOTE-004, S-NOTE-005. E with Option (Ctrl on
+    // Windows) held, dragging up on a selected note: one part more for each
+    // 8 points, and with Shift the powers of two; Esc puts the notes back.
+    let step = n_step();
+    let mut n = set(vec![
+        Note::new(60, Ticks::ZERO, 8 * step, 100),
+        Note::new(64, Ticks::ZERO, 8 * step, 100),
+    ]);
+    // A click in the editor gives it the keyboard, so Cmd-E (Ctrl-E) and
+    // E reach it rather than the Arrangement's keys.
+    let at = n.at(60, step / 2);
+    n.click(at, Modifiers::NONE);
+    n.select_all();
+    let before = n.doc().clone();
+    n.hold(egui::Key::E, chop_key());
+    let from = n.at(60, 4 * step);
+    let up = |by: f32| pos2(from.x, from.y - by);
+    n.drag_frames(from, up(25.0), chop_key());
+    assert_eq!(n.notes().len(), 8, "4 parts of each note after 25 points");
+    assert_eq!(n.h.shell.hint(), Some("Chop: 4 parts"));
+    n.release(up(25.0), chop_key());
+    assert_eq!(n.h.shell.hint(), None);
+    n.one_step(&before, "Chop Notes");
+    // Shift: powers of two.
+    n.drag(from, up(25.0), chop_key() | Modifiers::SHIFT);
+    assert_eq!(n.notes().len(), 64, "each of the 8 parts into 8");
+    // Esc puts them back.
+    let steps = n.steps();
+    let now = n.doc().clone();
+    n.select_all();
+    n.drag_frames(from, up(25.0), chop_key());
+    n.h.key(egui::Key::Escape, Modifiers::NONE);
+    n.release(up(25.0), chop_key());
+    assert_eq!(*n.doc(), now);
+    assert_eq!(n.steps(), steps);
+    n.let_go(egui::Key::E, chop_key());
+}
+
+#[test]
+fn cmd_j_joins_cmd_option_j_fits_and_cmd_shift_e_splits_the_clip() {
+    // Spec: note-editing R39, R40, R41; S-NOTE-007, S-NOTE-008, S-NOTE-036.
+    let step = n_step();
+    let mut n = set(vec![
+        Note::new(60, Ticks::ZERO, step, 100),
+        Note::new(60, 2 * step, step, 100),
+    ]);
+    // A click in the editor gives it the keyboard.
+    let at = n.at(60, step / 2);
+    n.click(at, Modifiers::NONE);
+    n.select_all();
+    let before = n.doc().clone();
+    n.h.key(egui::Key::J, command());
+    assert_eq!(n.starts(), [(60, 0, 3 * step.get())]);
+    n.one_step(&before, "Join Notes");
+    // Fit to Time Range: the selection is the notes' span; widen it.
+    n.h.shell
+        .run(
+            "clip_view.select_time",
+            json!({ "clip": n.clip, "start": 0, "end": 8 * step.get() }),
+        )
+        .unwrap();
+    n.h.settle();
+    let before = n.doc().clone();
+    n.h.key(egui::Key::J, command() | Modifiers::ALT);
+
+    assert_eq!(n.starts(), [(60, 0, 8 * step.get())]);
+    n.one_step(&before, "Fit to Time Range");
+    // Split Clip.
+    n.h.shell
+        .run(
+            "clip_view.select_time",
+            json!({ "clip": n.clip, "start": BAR, "end": 2 * BAR }),
+        )
+        .unwrap();
+    n.h.settle();
+    let clips = |n: &Notes| {
+        n.doc()
+            .clip_ids()
+            .filter(|id| {
+                n.doc()
+                    .clip(*id)
+                    .is_some_and(|c| matches!(c.data, ClipData::Midi(_)))
+            })
+            .count()
+    };
+    assert_eq!(clips(&n), 1);
+    n.h.key(egui::Key::E, command() | Modifiers::SHIFT);
+    assert_eq!(clips(&n), 3, "split at both edges of the time selection");
+}
+
+#[test]
+fn dragging_a_stretch_marker_scales_the_notes_about_the_other_one() {
+    // Spec: note-editing R42, R43, R45; L-CLIP-020, I-DRAG-040. Two or more
+    // notes selected put a marker at each end of the time selection;
+    // dragging one scales the notes about the other, as one undo step.
+    let step = n_step();
+    let mut n = set(vec![
+        Note::new(60, step, step, 100),
+        Note::new(64, 3 * step, 2 * step, 100),
+    ]);
+    n.select_all();
+    assert_eq!(n.time(), Some((step, 5 * step)), "the markers' places");
+    let before = n.doc().clone();
+    let from = n.at_band(5 * step);
+    let to = n.at_band(9 * step);
+    n.drag(from, to, Modifiers::NONE);
+    assert_eq!(
+        n.time(),
+        Some((step, 9 * step)),
+        "the dragged end moved, snapped to the grid"
+    );
+    assert_eq!(
+        n.starts(),
+        [
+            (60, step.get(), 2 * step.get()),
+            (64, 5 * step.get(), 4 * step.get())
+        ],
+        "starts and lengths doubled about the first marker"
+    );
+    n.one_step(&before, "Stretch Notes");
+    // Esc puts them back.
+    let steps = n.steps();
+    let now = n.doc().clone();
+    n.select_all();
+    let first = n.at_band(step);
+    let past = n.at_band(Ticks::ZERO);
+    n.drag_frames(first, past, Modifiers::NONE);
+    n.h.key(egui::Key::Escape, Modifiers::NONE);
+    n.release(past, Modifiers::NONE);
+    assert_eq!(*n.doc(), now);
+    assert_eq!(n.steps(), steps);
+}
+
+#[test]
+fn a_stretch_marker_dragged_with_cmd_does_not_snap_and_the_pseudo_marker_keeps_the_ends() {
+    // Spec: note-editing R43, R44.
+    let step = n_step();
+    let mut n = set(vec![
+        Note::new(60, step, step, 100),
+        Note::new(64, 3 * step, 2 * step, 100),
+    ]);
+    n.select_all();
+    // The pseudo marker: press between the markers and drag.
+    let before = n.doc().clone();
+    let from = n.at_band(3 * step);
+    let to = n.at_band(4 * step);
+    n.drag(from, to, Modifiers::NONE);
+    let notes = n.notes();
+    assert_eq!(n.time(), Some((step, 5 * step)), "both markers stay");
+    assert_eq!(notes[0].start, step, "the first note keeps its start");
+    assert_eq!(
+        notes[1].start + notes[1].length,
+        5 * step,
+        "the last keeps its end"
+    );
+    assert_eq!(
+        notes[1].start,
+        4 * step,
+        "what lay after the point starts at its new place"
+    );
+    n.one_step(&before, "Stretch Notes");
+    // Cmd bypasses snapping: the marker lands where the pointer is.
+    n.h.shell.run("edit.undo", json!({})).unwrap();
+    n.select_all();
+    let from = n.at_band(5 * step);
+    let to = pos2(n.at_band(7 * step).x + 3.0, from.y);
+    let wanted = n.tick(to);
+    n.drag(from, to, bypass_key());
+    let (_, end) = n.time().unwrap();
+    assert!((end - wanted).get().abs() <= 2, "{end:?} near {wanted:?}");
+    assert_ne!(end.get() % step.get(), 0);
+}
+
+// -- Probability groups (WP-6.2) --------------------------------------------
+
+use bl_model::{GroupKind, NoteGroup};
+
+/// A clip of `count` notes one grid step apart, with the Chance lane shown
+/// and active.
+fn chance_notes(count: i64) -> Notes {
+    let step = n_step();
+    let mut n = set((0..count)
+        .map(|i| Note::new(60 + i as u8, 4 * i * step, step, 100))
+        .collect());
+    n.h.shell
+        .run("view.lanes", json!({ "lane": "chance" }))
+        .unwrap();
+    n.h.settle();
+    n
+}
+
+impl Notes {
+    /// The clip's groups.
+    fn groups(&self) -> Vec<NoteGroup> {
+        match &self.doc().clip(self.clip).unwrap().data {
+            ClipData::Midi(midi) => midi.groups.clone(),
+            ClipData::Audio(_) => panic!("the clip is MIDI"),
+        }
+    }
+
+    fn grouped(&self) -> Vec<Option<u32>> {
+        self.notes().iter().map(|note| note.group).collect()
+    }
+}
+
+// Spec: note-editing R22, R23, S-NOTE-031, S-NOTE-032. Cmd-G groups the
+// selected notes, Cmd-Shift-G ungroups them, each in one undo step.
+#[test]
+fn cmd_g_groups_the_selected_notes_and_cmd_shift_g_ungroups_them() {
+    let mut n = run_of_notes(3, 100);
+    n.focus();
+    n.select(&[0, 1, 2]);
+    let before = n.doc().clone();
+    n.h.key(Key::G, command());
+    n.h.settle();
+    assert_eq!(n.grouped(), [Some(1); 3]);
+    assert_eq!(n.groups()[0].kind, GroupKind::PlayAll);
+    assert_eq!(n.selected(), [0, 1, 2], "the notes stay selected");
+    n.one_step(&before, "Group Notes");
+    let before = n.doc().clone();
+    n.h.key(Key::G, command() | Modifiers::SHIFT);
+    n.h.settle();
+    assert_eq!(n.grouped(), [None; 3]);
+    n.one_step(&before, "Ungroup Notes");
+}
+
+// Spec: note-editing R22, R23, R10. The Chance lane's footer groups the
+// selected notes as Play All or Play One, and ungroups them.
+#[test]
+fn the_footer_buttons_group_and_ungroup() {
+    let mut n = chance_notes(4);
+    let nodes = Harness::nodes(&n.h.settle());
+    for label in ["Play All", "Play One", "Ungroup"] {
+        assert!(
+            nodes
+                .iter()
+                .find(|node| node.label == label)
+                .unwrap()
+                .disabled,
+            "{label} needs notes"
+        );
+    }
+    n.select(&[0, 1, 2]);
+    let nodes = Harness::nodes(&n.h.settle());
+    assert!(
+        !nodes
+            .iter()
+            .find(|node| node.label == "Play One")
+            .unwrap()
+            .disabled
+    );
+    assert!(
+        nodes
+            .iter()
+            .find(|node| node.label == "Ungroup")
+            .unwrap()
+            .disabled,
+        "no note is grouped yet"
+    );
+    let before = n.doc().clone();
+    let button = n.footer("Play One").center();
+    n.h.click(button);
+    n.h.settle();
+    assert_eq!(n.groups()[0].kind, GroupKind::PlayOne);
+    assert_eq!(n.grouped(), [Some(1), Some(1), Some(1), None]);
+    n.one_step(&before, "Group Notes");
+    // Play All on the same notes changes the group's kind.
+    let button = n.footer("Play All").center();
+    n.h.click(button);
+    n.h.settle();
+    assert_eq!(n.groups().len(), 1);
+    assert_eq!(n.groups()[0].kind, GroupKind::PlayAll);
+    let before = n.doc().clone();
+    let button = n.footer("Ungroup").center();
+    n.h.click(button);
+    n.h.settle();
+    assert!(n.groups().is_empty());
+    n.one_step(&before, "Ungroup Notes");
+}
+
+// Spec: note-editing R24, R25, R5. A group shows one marker in the Chance
+// lane, at its first note; dragging it sets the group's chance, in one step.
+#[test]
+fn a_group_has_one_marker_in_the_chance_lane_and_dragging_it_sets_the_group() {
+    let step = n_step();
+    let mut n = chance_notes(4);
+    n.h.shell
+        .run(
+            "note.group",
+            json!({ "clip": n.clip, "notes": [0, 1, 2], "kind": "play_one" }),
+        )
+        .unwrap();
+    n.h.settle();
+    let nodes = Harness::nodes(&n.h.settle());
+    // The Chance lane's markers read a percentage.
+    let in_chance = |nodes: &[Node]| {
+        nodes
+            .iter()
+            .filter(|node| {
+                node.role == egui::accesskit::Role::ListItem && node.value.ends_with('%')
+            })
+            .count()
+    };
+    assert_eq!(
+        in_chance(&nodes),
+        2,
+        "one marker for the group, one for the loner"
+    );
+    // A press where the group's other notes start grabs nothing.
+    let before = n.doc().clone();
+    let from = n.lane_at(Ticks::ZERO, NoteField::Chance, 1.0);
+    let to = n.lane_at(Ticks::ZERO, NoteField::Chance, 0.5);
+    n.drag(from, to, Modifiers::NONE);
+    let chances: Vec<f64> = n.notes().iter().map(|note| note.probability).collect();
+    assert!(
+        chances[0] < 1.0 && chances[0] == chances[1] && chances[1] == chances[2],
+        "{chances:?}"
+    );
+    assert_eq!(chances[3], 1.0, "the loner is its own");
+    n.one_step(&before, "Adjust note values");
+    let other = n.lane_at(8 * step, NoteField::Chance, 1.0);
+    let selected = n.selected();
+    n.click(other, Modifiers::NONE);
+    assert_eq!(
+        n.selected(),
+        selected,
+        "no marker there: the group's is at its first note"
+    );
+}
+
+// Spec: note-editing R23, R24, C-PGROUP-001 to C-PGROUP-003. The group
+// marker's menu changes the group's kind, ticked, and ends the group.
+#[test]
+fn the_group_marker_s_menu_changes_its_kind_and_ends_it() {
+    // The menu's kinds are the buttons that can be ticked; the footer has
+    // buttons of the same names.
+    fn kind_item(nodes: &[Node], label: &str) -> Node {
+        nodes
+            .iter()
+            .find(|node| node.label == label && node.toggled.is_some())
+            .unwrap_or_else(|| panic!("no menu item {label:?}"))
+            .clone()
+    }
+    fn click(n: &mut Notes, node: &Node) {
+        let b = node.bounds.expect("bounds");
+        n.h.click(pos2(
+            ((b.x0 + b.x1) / 2.0) as f32,
+            ((b.y0 + b.y1) / 2.0) as f32,
+        ));
+        n.h.settle();
+    }
+    let mut n = chance_notes(3);
+    n.h.shell
+        .run(
+            "note.group",
+            json!({ "clip": n.clip, "kind": "play_all", "notes": [0, 1] }),
+        )
+        .unwrap();
+    n.h.settle();
+    let marker = n.lane_at(Ticks::ZERO, NoteField::Chance, 1.0);
+    let nodes = right_click(&mut n, marker);
+    assert_eq!(
+        kind_item(&nodes, "Play All").toggled,
+        Some(true),
+        "the kind is ticked"
+    );
+    assert_eq!(kind_item(&nodes, "Play One").toggled, Some(false));
+    let before = n.doc().clone();
+    click(&mut n, &kind_item(&nodes, "Play One"));
+    assert_eq!(n.groups().len(), 1);
+    assert_eq!(n.groups()[0].kind, GroupKind::PlayOne);
+    n.one_step(&before, "Change Group");
+    let nodes = right_click(&mut n, marker);
+    assert_eq!(kind_item(&nodes, "Play One").toggled, Some(true));
+    let before = n.doc().clone();
+    n.click_node(&nodes, egui::accesskit::Role::Button, "Ungroup Notes");
+    assert!(n.groups().is_empty(), "the whole group ended");
+    assert_eq!(n.grouped(), [None; 3]);
+    n.one_step(&before, "Ungroup Notes");
+    // The editor's own menu has the items too, when they apply: Ungroup
+    // Notes ended the group, and the notes are still selected.
+    let at = n.at(60, n_step() / 2);
+    let nodes = right_click(&mut n, at);
+    assert_eq!(n.selected(), [0, 1]);
+    assert!(!menu_item(&nodes, "Group Notes").disabled);
+    assert!(
+        menu_item(&nodes, "Ungroup Notes").disabled,
+        "none is grouped"
+    );
+}
+
+// Spec: note-editing R4, R24. A grouped note wears the corner triangle
+// whatever its chance, and hovering a note marks its whole group.
+#[test]
+fn a_grouped_note_wears_the_corner_triangle_and_hovering_marks_the_group() {
+    let mut n = run_of_notes(3, 100);
+    n.h.shell
+        .run("note.group", json!({ "clip": n.clip, "notes": [0, 1] }))
+        .unwrap();
+    n.h.settle();
+    let notes = n.notes();
+    assert!(shows_corner(&notes[0], 12.0) && shows_corner(&notes[1], 12.0));
+    assert!(!shows_corner(&notes[2], 12.0), "the loner always plays");
+    assert!(
+        bl_ui::note_lanes::is_marked(&notes, Some(0), 1),
+        "the group's other note"
+    );
+    assert!(bl_ui::note_lanes::is_marked(&notes, Some(0), 0));
+    assert!(!bl_ui::note_lanes::is_marked(&notes, Some(0), 2));
+    assert!(!bl_ui::note_lanes::is_marked(&notes, Some(2), 1));
+}
+
+// Spec: note-editing R24. While notes are selected the Status Bar names
+// their groups' kind, with an asterisk across kinds.
+#[test]
+fn the_status_bar_names_the_selected_notes_group_kind() {
+    let mut n = run_of_notes(4, 100);
+    assert_eq!(n.h.shell.note_group_status(), None);
+    for (notes, kind) in [([0, 1], "play_all"), ([2, 3], "play_one")] {
+        n.h.shell
+            .run(
+                "note.group",
+                json!({ "clip": n.clip, "notes": notes, "kind": kind }),
+            )
+            .unwrap();
+    }
+    n.select(&[0]);
+    assert_eq!(
+        n.h.shell.note_group_status().as_deref(),
+        Some("Probability group: Play All")
+    );
+    // The Status Bar paints it.
+    let output = n.h.settle();
+    fn painted(shape: &egui::Shape, text: &str) -> bool {
+        match shape {
+            egui::Shape::Text(t) => t.galley.job.text == text,
+            egui::Shape::Vec(shapes) => shapes.iter().any(|shape| painted(shape, text)),
+            _ => false,
+        }
+    }
+    assert!(
+        output
+            .shapes
+            .iter()
+            .any(|clipped| painted(&clipped.shape, "Probability group: Play All")),
+        "the Status Bar reads it"
+    );
+    n.select(&[2]);
+    assert_eq!(
+        n.h.shell.note_group_status().as_deref(),
+        Some("Probability group: Play One")
+    );
+    n.select(&[0, 3]);
+    assert_eq!(
+        n.h.shell.note_group_status().as_deref(),
+        Some("Probability group: Play All, Play One*")
+    );
+    n.select(&[]);
+    assert_eq!(n.h.shell.note_group_status(), None);
 }

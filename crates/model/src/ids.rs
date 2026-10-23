@@ -101,6 +101,11 @@ object_id!(
     "chain"
 );
 object_id!(
+    /// The ID of a take lane under a track's main lane (WP-6.21).
+    TakeLaneId,
+    "take lane"
+);
+object_id!(
     /// The ID of a locator.
     LocatorId,
     "locator"

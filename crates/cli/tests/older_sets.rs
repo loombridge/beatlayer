@@ -483,6 +483,154 @@ fn a_set_saved_before_the_lanes_loads_unchanged_and_every_note_value_round_trips
     assert_eq!(encode_json(&loaded, 1).unwrap(), saved);
 }
 
+// Spec: note-editing R30. A group is saved with its clip and loads again; a
+// set saved before groups loads with none; a group that isn't whole loads
+// its notes ungrouped.
+#[test]
+fn probability_groups_are_saved_with_the_clip_and_broken_ones_load_ungrouped() {
+    use bl_model::{GroupKind, MidiData, Note, NoteGroup};
+    let mut editor = Editor::new();
+    let track = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: track,
+            kind: TrackKind::Midi,
+            name: "Keys".to_owned(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    let mut notes: Vec<Note> = (0..3)
+        .map(|place| {
+            Note::new(
+                60 + place,
+                Ticks::QUARTER * i64::from(place),
+                Ticks::QUARTER,
+                100,
+            )
+        })
+        .collect();
+    for note in &mut notes[..2] {
+        note.probability = 0.5;
+        note.group = Some(7);
+    }
+    let mut data = MidiData::new(notes);
+    data.groups = vec![NoteGroup {
+        id: 7,
+        kind: GroupKind::PlayOne,
+    }];
+    let clip = editor.new_id();
+    editor
+        .apply(Command::CreateClip {
+            track,
+            clip: Clip::new(
+                clip,
+                Ticks::ZERO,
+                Ticks::WHOLE,
+                ClipData::Midi(data.clone()),
+            ),
+        })
+        .unwrap();
+    let lane: bl_model::TakeLaneId = editor.new_id();
+    let project = Project {
+        document: editor.document().clone(),
+        ids: editor.ids(),
+        media: Media::default(),
+        windows: bl_model::DeviceWindows::new(),
+        rack_views: bl_model::RackViewMap::new(),
+        folds: bl_model::ClipFolds::new(),
+        launch: bl_model::LaunchSettings::default(),
+        multisamplers: bl_model::MultisamplerViews::new(),
+    };
+    let saved = encode_json(&project, 1).unwrap();
+    let value: Value = serde_json::from_slice(&saved).unwrap();
+    let midi = &value["document"]["tracks"][0]["clips"][0]["data"]["midi"];
+    assert_eq!(midi["groups"], json!([{ "id": 7, "kind": "play_one" }]));
+    assert_eq!(midi["notes"][0]["group"], json!(7));
+    assert!(midi["notes"][2].get("group").is_none(), "an ungrouped note");
+    let midi_of = |value: &Value| -> MidiData {
+        let (loaded, _) =
+            decode_json(&serde_json::to_vec(value).unwrap(), &LoadOptions::default()).unwrap();
+        match &loaded.document.clip(clip).unwrap().data {
+            ClipData::Midi(midi) => midi.clone(),
+            ClipData::Audio(_) => panic!("a MIDI clip"),
+        }
+    };
+    assert_eq!(midi_of(&value), data, "the group comes back");
+
+    // A set saved before groups has neither field.
+    let mut older = value.clone();
+    let path = "/document/tracks/0/clips/0/data/midi";
+    older
+        .pointer_mut(path)
+        .unwrap()
+        .as_object_mut()
+        .unwrap()
+        .remove("groups");
+    for index in 0..3 {
+        older
+            .pointer_mut(&format!("{path}/notes/{index}"))
+            .unwrap()
+            .as_object_mut()
+            .unwrap()
+            .remove("group");
+    }
+    let loaded = midi_of(&older);
+    assert!(loaded.groups.is_empty() && loaded.notes.iter().all(|n| n.group.is_none()));
+
+    // Groups that aren't whole: chances that differ, a note naming a group
+    // the clip doesn't list, and a group of one note.
+    let mut differ = value.clone();
+    *differ
+        .pointer_mut(&format!("{path}/notes/1/probability"))
+        .unwrap() = json!(0.25);
+    let mut missing = value.clone();
+    missing
+        .pointer_mut(path)
+        .unwrap()
+        .as_object_mut()
+        .unwrap()
+        .remove("groups");
+    let mut single = value.clone();
+    single
+        .pointer_mut(&format!("{path}/notes/1"))
+        .unwrap()
+        .as_object_mut()
+        .unwrap()
+        .remove("group");
+    for (name, broken) in [
+        ("differ", differ.clone()),
+        ("missing", missing),
+        ("single", single),
+    ] {
+        let loaded = midi_of(&broken);
+        assert!(loaded.groups.is_empty(), "{name}");
+        assert!(loaded.notes.iter().all(|n| n.group.is_none()), "{name}");
+    }
+
+    // A take lane's clip with a broken group loads it ungrouped too.
+    let mut taken = differ;
+    let track_value = taken.pointer_mut("/document/tracks/0").unwrap();
+    let moved = track_value["clips"].as_array_mut().unwrap().remove(0);
+    track_value["take_lanes"] = json!([{ "id": lane, "name": "Take 1", "clips": [moved] }]);
+    let (loaded, _) = decode_json(
+        &serde_json::to_vec(&taken).unwrap(),
+        &LoadOptions::default(),
+    )
+    .unwrap();
+    let lanes: Vec<_> = loaded
+        .document
+        .tracks()
+        .next()
+        .unwrap()
+        .take_lanes()
+        .collect();
+    let ClipData::Midi(midi) = &lanes[0].clips[0].data else {
+        panic!("a MIDI clip");
+    };
+    assert!(midi.groups.is_empty() && midi.notes.iter().all(|n| n.group.is_none()));
+}
+
 /// A one-bar MIDI clip, on the track from the start of the song.
 fn midi_clip(editor: &mut Editor, track: bl_model::TrackId) -> bl_model::ClipId {
     let clip = editor.new_id();
@@ -1067,4 +1215,156 @@ fn the_grooves_are_saved_with_the_set_and_load_again() {
     .unwrap();
     assert_eq!(loaded.document.clip(clip).unwrap().groove, None);
     assert_eq!(loaded.document.settings().grooves.auto_load_groove, None);
+}
+
+// Spec: tunings R11, R14
+#[test]
+fn a_set_saved_before_tunings_loads_with_none_and_a_set_with_one_keeps_it() {
+    let (mut editor, _clip) = midi_clip_song();
+    let track = editor.document().track_order()[0];
+    let saved = encode_json(&project_of(&editor), 1).unwrap();
+    let value: Value = serde_json::from_slice(&saved).unwrap();
+    assert!(
+        value["document"]["settings"].get("tuning").is_none(),
+        "a set with no tuning writes none"
+    );
+    assert!(
+        !String::from_utf8_lossy(&saved).contains("tuning_bypass"),
+        "nor does a track that plays the tuning"
+    );
+    let (loaded, _) = decode_json(&saved, &LoadOptions::default()).unwrap();
+    assert_eq!(loaded.document, *editor.document());
+    assert!(loaded.document.settings().tuning.is_none());
+    assert_eq!(encode_json(&loaded, 1).unwrap(), saved, "written the same");
+
+    // A set with a tuning and a bypassing track saves both, and opens with
+    // them: the tuning is inside the set, not read from a file.
+    let tuning = bl_model::Tuning::new(
+        "Thirteen".to_owned(),
+        "13 equal steps of 3/1".to_owned(),
+        (1..=13)
+            .map(|i| 1200.0 * 3f64.log2() * f64::from(i) / 13.0)
+            .collect(),
+    )
+    .unwrap();
+    editor
+        .apply(Command::SetTuning {
+            tuning: tuning.clone(),
+            retune: false,
+        })
+        .unwrap();
+    editor
+        .apply(Command::SetTuningBypass {
+            track,
+            bypass: true,
+        })
+        .unwrap();
+    let saved = encode_json(&project_of(&editor), 1).unwrap();
+    let (loaded, _) = decode_json(&saved, &LoadOptions::default()).unwrap();
+    assert_eq!(loaded.document.settings().tuning.as_ref(), Some(&tuning));
+    assert!(loaded.document.track(track).unwrap().tuning_bypass());
+    assert_eq!(loaded.document, *editor.document());
+    assert_eq!(encode_json(&loaded, 1).unwrap(), saved);
+}
+
+// Spec: comping R3. A set saved with WP-2.13's take lanes, whose passes had no
+// IDs, opens with each pass a clip of its lane under a new ID, and plays as
+// it did: a take lane plays only while it's auditioned.
+#[test]
+fn a_version_7_set_with_take_lanes_loads_and_plays_as_it_did() {
+    let mut editor = Editor::new();
+    let track = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: track,
+            kind: TrackKind::Audio,
+            name: "Audio".to_owned(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    let audio = AudioData::new(MEDIA);
+    let main = Clip::new(
+        editor.new_id(),
+        Ticks::ZERO,
+        Ticks::WHOLE * 2,
+        ClipData::Audio(audio.clone()),
+    );
+    editor
+        .apply(Command::CreateClip { track, clip: main })
+        .unwrap();
+    let expected = render(editor.document());
+    assert!(expected.iter().any(|&s| s != 0.0));
+
+    // As version 7 saved a track with two take lanes of passes.
+    let lane = |editor: &mut Editor, name: &str, start: f64| bl_model::NewTakeLane {
+        id: Some(editor.new_id()),
+        name: name.to_owned(),
+        clips: vec![bl_model::TakeClip {
+            id: Some(editor.new_id()),
+            name: "pass".to_owned(),
+            start: Ticks::QUARTER,
+            length: Ticks::QUARTER * 4,
+            data: bl_model::TakeClipData::Audio(AudioData {
+                start,
+                ..audio.clone()
+            }),
+        }],
+    };
+    for (name, start) in [("Take 1", 0.5), ("Take 2", 1.0)] {
+        let lane = lane(&mut editor, name, start);
+        editor
+            .apply(Command::AddTakeLane {
+                track,
+                lane,
+                index: None,
+            })
+            .unwrap();
+    }
+    let project = project_of(&editor);
+    let mut saved: Value = serde_json::from_slice(&encode_json(&project, 1).unwrap()).unwrap();
+    saved["schema"] = json!(7);
+    for lane in saved["document"]["tracks"][0]["take_lanes"]
+        .as_array_mut()
+        .unwrap()
+    {
+        let lane = lane.as_object_mut().unwrap();
+        lane.remove("id");
+        for pass in lane["clips"].as_array_mut().unwrap() {
+            let pass = pass.as_object_mut().unwrap();
+            pass.remove("id");
+            pass.remove("mute");
+            // The pass's data was the audio's own fields.
+            let data = pass.remove("data").unwrap();
+            pass.insert("data".to_owned(), data["audio"].clone());
+        }
+    }
+
+    let (loaded, info) = decode_json(
+        &serde_json::to_vec(&saved).unwrap(),
+        &LoadOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(info.schema, 7);
+    loaded.document.check_invariants().unwrap();
+    let before = project.document.track(track).unwrap();
+    let after = loaded.document.track(track).unwrap();
+    assert_eq!(after.take_lanes().len(), 2);
+    for (was, now) in before.take_lanes().zip(after.take_lanes()) {
+        assert_eq!(was.name, now.name);
+        assert_eq!(was.clips.len(), now.clips.len());
+        assert_eq!(was.clips[0].data, now.clips[0].data);
+        assert_eq!(
+            (was.clips[0].start, was.clips[0].length),
+            (now.clips[0].start, now.clips[0].length)
+        );
+    }
+    assert_eq!(render(&loaded.document), expected, "plays as it did");
+    // Auditioned, a lane plays in its place.
+    let mut audition = Editor::from_document(loaded.document.clone(), loaded.ids);
+    let lane = after.take_lanes().next().unwrap().id;
+    audition
+        .apply(Command::SetAudition { lane, on: true })
+        .unwrap();
+    assert_ne!(render(audition.document()), expected);
 }

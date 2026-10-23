@@ -13,7 +13,7 @@ use bl_engine::transport as engine_transport;
 use bl_media::MediaStore;
 use bl_model::{
     AudioData, AutomationTarget, ChangeSet, Clip, ClipData, Command, ContentHash, Editor, Input,
-    LaunchSettings, TakeClip, TakeLane, TrackId, TrackKind, registry as model,
+    LaunchSettings, TrackId, TrackKind, registry as model,
 };
 use bl_project::ProjectFolder;
 use bl_project::autosave::{Autosave, Recoverable, Recovered};
@@ -75,6 +75,7 @@ use bl_shell_spec::bounce as bounce_ids;
 use bl_shell_spec::browser as browser_ids;
 use bl_shell_spec::capture_midi as capture_ids;
 use bl_shell_spec::commands::DetailView;
+use bl_shell_spec::comping as comping_ids;
 use bl_shell_spec::dawproject as dawproject_ids;
 use bl_shell_spec::devices as device_ids;
 use bl_shell_spec::editing as edit_ids;
@@ -105,6 +106,7 @@ use bl_shell_spec::stems as stems_ids;
 use bl_shell_spec::tracks as track_ids;
 use bl_shell_spec::transport as transport_ids;
 use bl_shell_spec::transport::{RecordedFileReport, RecordingReport, RunningRecording};
+use bl_shell_spec::tunings as tuning_ids;
 
 pub(crate) mod audio_editing;
 mod audio_panel;
@@ -127,6 +129,8 @@ mod search;
 mod session_recording;
 mod slice;
 mod stems;
+mod step_input;
+mod tunings;
 mod warping;
 
 use file_manager::FileManager;
@@ -226,6 +230,13 @@ impl Invocation {
 /// drains these after each command with [`Shell::take_effects`].
 #[derive(Clone, Debug, PartialEq)]
 pub enum Effect {
+    /// Ask whether to retune the set's notes to the tuning about to be
+    /// loaded or removed (the tunings spec, R15), then run `then` with
+    /// `retune` true if the person says Retune. Cancel changes nothing.
+    ConfirmRetune {
+        /// The load or removal.
+        then: Invocation,
+    },
     /// Ask whether to save the set's unsaved changes, then run `then`. The
     /// person can save first, discard the changes, or cancel.
     ConfirmDiscard {
@@ -466,6 +477,9 @@ pub struct Shell {
     midi_lit: [Option<std::time::Instant>; 2],
     /// The chord a Chord device's Learn is hearing.
     chord_learn: crate::chord_learn::ChordLearn,
+    /// The keys held on the MIDI input and the previews sounding, for the
+    /// MIDI Note Editor's step recording and Preview (WP-6.5).
+    step: step_input::StepInput,
     /// The keymap in use: Live 12's shortcuts with the person's own layered
     /// over them (the custom-shortcuts spec, R3).
     keymap: crate::keymap::Keymap,
@@ -1034,6 +1048,7 @@ impl Shell {
         audio.sync(editor.document());
         let saved = snapshot(&editor);
         let plugin_panels = prefs.plugin_panels.clone();
+        let note_preview = prefs.note_preview;
         let mut shell = Self {
             browser_view,
             media,
@@ -1071,6 +1086,7 @@ impl Shell {
             midi_seen: (0, 0),
             midi_lit: [None; 2],
             chord_learn: crate::chord_learn::ChordLearn::default(),
+            step: step_input::StepInput::default(),
             keymap: crate::keymap::Keymap::live12(),
             user_keymap: crate::keymap::UserKeymap::default(),
             keymap_revision: 0,
@@ -1105,7 +1121,11 @@ impl Shell {
             assistant_stop_flag: Arc::default(),
             undo_history_open: false,
             arrangement: ArrangementView::new(),
-            clip_view: ClipView::default(),
+            clip_view: {
+                let mut view = ClipView::default();
+                view.set_preview(note_preview);
+                view
+            },
             detail: DetailArea::default(),
             file_manager: FileManager::default(),
             search: crate::search::Field::default(),
@@ -2103,7 +2123,13 @@ impl Shell {
         let chords = learning(STACK, CHORD_LEARN);
         let senders = learning(CC_CONTROL, CC_LEARN);
         let sender = self.midi.sender().clone();
-        if chords.is_empty() && senders.is_empty() {
+        // Spec: step-recording R3, R8. Step recording reads the keys held
+        // through the same copy of the input.
+        let stepping = self.step_recording();
+        if !stepping {
+            self.forget_held();
+        }
+        if chords.is_empty() && senders.is_empty() && !stepping {
             if self.chord_learn.tapping {
                 sender.set_tap(false);
                 self.chord_learn.tapping = false;
@@ -2117,6 +2143,9 @@ impl Shell {
         }
         let mut heard = Vec::new();
         sender.take_notes(&mut heard);
+        if stepping {
+            self.hear_held(&heard);
+        }
         let mut changed = false;
         if !chords.is_empty()
             && let Some(held) = self.chord_learn.listen_from(&heard)
@@ -2375,6 +2404,13 @@ impl Shell {
         self.prefs.create_fades_on_clip_edges.0
     }
 
+    /// Whether Retune Set On Loading Tuning Systems is on (the tunings spec,
+    /// R15).
+    #[must_use]
+    pub fn retune_on_tuning_load(&self) -> bool {
+        self.prefs.retune_on_tuning_load
+    }
+
     /// Loop/Warp Short Samples, Auto-Warp Long Samples and Default Warp
     /// Mode (WP-4.9).
     #[must_use]
@@ -2418,6 +2454,7 @@ impl Shell {
             },
             tempo_midi: self.midi.report(),
             create_fades_on_clip_edges: self.create_fades_on_clip_edges(),
+            retune_on_tuning_load: self.retune_on_tuning_load(),
             warp_recorded_audio: self.warp_recorded_audio(),
             warp: self.prefs.warp,
             file_folder: FileFolderSettings {
@@ -2644,6 +2681,14 @@ impl Shell {
     #[must_use]
     pub fn hint(&self) -> Option<&str> {
         self.hint.as_deref()
+    }
+
+    /// What the Status Bar says of the selected notes' probability groups,
+    /// when they belong to any (Spec: note-editing R24).
+    #[must_use]
+    pub fn note_group_status(&self) -> Option<String> {
+        self.clip_view
+            .group_status(self.editor.document(), &self.arrangement)
     }
 
     /// Sets, or with `None` clears, the Status Bar's hint.
@@ -4820,6 +4865,7 @@ impl Shell {
             changed |= self.refresh_midi();
         }
         changed |= self.learn_midi();
+        self.expire_previews();
         changed |= self.track_midi_activity();
         // Plug-ins' main-thread work (WP-2.6 to WP-2.8), and the changes
         // they made themselves.
@@ -6002,14 +6048,26 @@ impl Shell {
                         let mut clip =
                             Clip::new(id, start, end.saturating_sub(start), ClipData::Audio(audio));
                         clip.name = file_stem(path);
+                        // Spec: comping R10. The take goes on a take lane too,
+                        // and the main lane's clip is a copy of it.
+                        crate::recording::put_on_lane(editor, *track, clip.clone())?;
+                        clip.id = editor.new_id();
                         crate::arrangement::placing::clear(editor, *track, start, end, &placed)?;
-                        placed.insert(id);
+                        placed.insert(clip.id);
                         editor.apply(bl_model::Command::CreateClip {
                             track: *track,
                             clip,
                         })?;
                     }
-                    crate::recording::place_midi(editor, &midi, take, rate, overdub, &mut placed)?;
+                    crate::recording::place_midi(
+                        editor,
+                        &midi,
+                        take,
+                        rate,
+                        overdub,
+                        true,
+                        &mut placed,
+                    )?;
                     crate::session_capture::place(editor, &watch, &runs, &armed, end)?;
                     // Spec: audio-clips R26. A take that meets a clip
                     // already there is crossfaded with it.
@@ -6018,7 +6076,7 @@ impl Shell {
             }
             Some(_) => {
                 let frames = files.first().map_or(0, |file| file.frames);
-                self.place_loop_passes(frames, &imported, &midi, take, rate)
+                self.place_loop_passes(frames, &imported, &midi, take, rate, delay)
             }
         };
         if let Err(error) = applied {
@@ -6073,14 +6131,16 @@ impl Shell {
     }
 
     /// Puts a take that went round the loop on its tracks (the recording
-    /// spec, R12): the lead-in before the loop is a clip on the main lane,
-    /// and each pass is an undo step that adds a take lane holding the pass
-    /// and copies the pass to the main lane over what was there, so Undo run
-    /// again and again unrolls the passes from the last. Every clip plays its
-    /// pass of the one recorded file, which holds all of them. `frames` is
-    /// how many frames each track's file holds: the rings fill together. MIDI
-    /// has no take lanes yet: what the passes played merges into one clip over
-    /// the first pass, in the first step.
+    /// spec, R12 and R16): the lead-in before the loop's start is a clip on
+    /// the main lane, and each pass is an undo step that puts the pass on a
+    /// take lane and copies it to the main lane over what was there, so Undo
+    /// run again and again unrolls the passes from the last. Every audio clip
+    /// plays its pass of the one recorded file, which holds all of them.
+    /// `frames` is how many frames each track's file holds: the rings fill
+    /// together. A MIDI track's passes are cut from its messages by the
+    /// frames the take had run for, and go the same way, the main lane
+    /// merging each one with MIDI Arrangement Overdub on. A negative `delay`
+    /// places every pass that much later, as it does a plain take's clip.
     fn place_loop_passes(
         &mut self,
         frames: u64,
@@ -6088,16 +6148,16 @@ impl Shell {
         midi: &[crate::recording::MidiTake],
         take: bl_engine::TakeBounds,
         rate: SampleRate,
+        delay: i64,
     ) -> Result<(), bl_model::EditError> {
-        // shortcut: a negative recording delay, which starts a plain take's
-        // clip later, doesn't shift the passes, so they sit up to that much
-        // early; upgrade by moving each pass by it.
         let tempo = self.editor.document().settings().tempo.clone();
         let edge_fades = self.create_fades_on_clip_edges();
         let warp_recorded = self.warp_recorded_audio();
         let warp_mode = auto_warp::warp_mode(self.prefs.warp.default_warp_mode);
         let overdub = self.editor.document().settings().midi_overdub;
         let (lead_in, passes) = crate::recording::passes(take, frames);
+        let (midi_lead_in, midi_passes) = crate::recording::passes(take, take.frames);
+        let later = Frames((-delay).max(0));
         let seconds = |frames: u64| frames as f64 / rate.as_f64();
         let ticks = |frame: Frames| tempo.frames_to_ticks(frame, rate);
         let audio = |hash: ContentHash, pass: &crate::recording::Pass| {
@@ -6114,8 +6174,8 @@ impl Shell {
             };
             // Spec: warping R37.
             let audio = if warp_recorded {
-                let start = ticks(pass.song_start);
-                let end = ticks(pass.song_start + Frames(pass.frames as i64));
+                let start = ticks(pass.song_start + later);
+                let end = ticks(pass.song_start + later + Frames(pass.frames as i64));
                 auto_warp::warp_recorded(audio, &tempo, start, end, warp_mode)
             } else {
                 audio
@@ -6126,82 +6186,123 @@ impl Shell {
                 audio
             }
         };
-        let place = |editor: &mut Editor,
-                     track: TrackId,
-                     name: &str,
-                     pass: &crate::recording::Pass,
-                     data: AudioData|
-         -> Result<(), bl_model::EditError> {
-            let start = ticks(pass.song_start);
-            let end = ticks(pass.song_start + Frames(pass.frames as i64));
-            let mut clip = Clip::new(
-                editor.new_id(),
-                start,
-                end.saturating_sub(start),
-                ClipData::Audio(data),
-            );
-            clip.name = name.to_owned();
-            crate::arrangement::placing::clear(
-                editor,
-                track,
-                start,
-                end,
-                &std::collections::BTreeSet::new(),
-            )?;
-            editor.apply(bl_model::Command::CreateClip { track, clip })?;
-            Ok(())
+        // The pass's clip, named after its file.
+        let clip_of =
+            |editor: &mut Editor, name: &str, pass: &crate::recording::Pass, data: AudioData| {
+                let start = ticks(pass.song_start + later);
+                let end = ticks(pass.song_start + later + Frames(pass.frames as i64));
+                let mut clip = Clip::new(
+                    editor.new_id(),
+                    start,
+                    end.saturating_sub(start),
+                    ClipData::Audio(data),
+                );
+                clip.name = name.to_owned();
+                clip
+            };
+        let put_on_main =
+            |editor: &mut Editor, track: TrackId, clip: Clip| -> Result<(), bl_model::EditError> {
+                crate::arrangement::placing::clear(
+                    editor,
+                    track,
+                    clip.start,
+                    clip.end(),
+                    &std::collections::BTreeSet::new(),
+                )?;
+                editor.apply(bl_model::Command::CreateClip { track, clip })?;
+                Ok(())
+            };
+        let ends = |pass: &crate::recording::Pass| bl_engine::TakeBounds {
+            start: pass.song_start,
+            end: pass.song_start + Frames(pass.frames as i64),
+            wrap: None,
+            frames: pass.frames,
         };
-        for step in 0..passes.len().max(1) {
+        for step in 0..passes.len().max(midi_passes.len()).max(1) {
             self.editor
                 .transact(crate::recording::LOOP_UNDO_LABEL, |editor| {
                     for (track, hash, path, _) in imported {
                         let name = file_stem(path);
                         if let (0, Some(pass)) = (step, &lead_in) {
-                            place(editor, *track, &name, pass, audio(*hash, pass))?;
+                            let clip = clip_of(editor, &name, pass, audio(*hash, pass));
+                            put_on_main(editor, *track, clip)?;
                         }
                         let Some(pass) = passes.get(step) else {
                             continue;
                         };
-                        let data = audio(*hash, pass);
-                        let lanes = editor
-                            .document()
-                            .track(*track)
-                            .map_or(0, |track| track.take_lanes().len());
-                        let start = ticks(pass.song_start);
-                        editor.apply(bl_model::Command::AddTakeLane {
-                            track: *track,
-                            lane: TakeLane {
-                                name: format!("Take {}", lanes + 1),
-                                clips: vec![TakeClip {
-                                    name: name.clone(),
-                                    start,
-                                    length: ticks(pass.song_start + Frames(pass.frames as i64))
-                                        .saturating_sub(start),
-                                    data: data.clone(),
-                                }],
-                            },
-                        })?;
-                        place(editor, *track, &name, pass, data)?;
-                    }
-                    if step == 0 {
-                        let first_pass = bl_engine::TakeBounds {
-                            end: take.wrap.map_or(take.end, |(_, end)| end),
-                            wrap: None,
-                            ..take
+                        // Spec: comping R10. The pass goes on a take lane and
+                        // is copied to the main lane.
+                        let clip = clip_of(editor, &name, pass, audio(*hash, pass));
+                        crate::recording::put_on_lane(editor, *track, clip.clone())?;
+                        let copy = Clip {
+                            id: editor.new_id(),
+                            ..clip
                         };
+                        put_on_main(editor, *track, copy)?;
+                    }
+                    let mut placed = std::collections::BTreeSet::new();
+                    if let (0, Some(pass)) = (step, &midi_lead_in) {
+                        let cut = crate::recording::midi_in_pass(midi, take, pass);
                         crate::recording::place_midi(
                             editor,
-                            midi,
-                            first_pass,
+                            &cut,
+                            ends(pass),
                             rate,
                             overdub,
-                            &mut std::collections::BTreeSet::new(),
+                            false,
+                            &mut placed,
+                        )?;
+                    }
+                    if let Some(pass) = midi_passes.get(step) {
+                        let cut = crate::recording::midi_in_pass(midi, take, pass);
+                        crate::recording::place_midi(
+                            editor,
+                            &cut,
+                            ends(pass),
+                            rate,
+                            overdub,
+                            true,
+                            &mut placed,
                         )?;
                     }
                     Ok::<(), bl_model::EditError>(())
                 })?;
         }
         Ok(())
+    }
+
+    /// Split Clip (note-editing R41): `arrangement.split` on the clip the
+    /// Clip View shows at the editor's time selection, then the part
+    /// inside the selection is selected.
+    fn split_shown_clip(&mut self) -> Result<Value, ShellError> {
+        let id = note_ids::SPLIT_CLIP;
+        let (args, clip, (from, to)) =
+            clip_view::split_clip_plan(self.editor.document(), &self.clip_view, &self.arrangement)
+                .map_err(|failure| edit_error(id, failure))?;
+        let track = self.editor.document().clip_track(clip);
+        let mut result = self.run_command(edit_ids::SPLIT, args)?;
+        let doc = self.editor.document();
+        let inside: Vec<_> = track
+            .and_then(|track| doc.track(track))
+            .map(|track| {
+                track
+                    .clips()
+                    .filter(|part| part.start >= from && part.end() <= to)
+                    .map(|part| part.id)
+                    .collect()
+            })
+            .unwrap_or_default();
+        if !inside.is_empty() {
+            if let Some(fields) = result.as_object_mut() {
+                fields.insert(
+                    "selected_clips".to_owned(),
+                    serde_json::to_value(&inside).unwrap_or(Value::Null),
+                );
+            }
+            self.arrangement.select_clips(doc, inside);
+        }
+        self.touch();
+        Ok(result)
     }
 
     /// Opens a gesture, such as a drag on a value field: the document
@@ -6290,6 +6391,15 @@ impl Shell {
                     // Spec: piano-roll. With the Clip View open, its MIDI
                     // Note Editor holds the detail area's keys.
                     Area::Detail if self.detail.focus_in_clip() => {
+                        // Spec: multi-clip-editing R11. With loop bars
+                        // selected, Cmd-D duplicates their loops.
+                        if !self
+                            .clip_view
+                            .loop_bars(self.editor.document(), &self.arrangement)
+                            .is_empty()
+                        {
+                            contexts.push(Context::LoopBrace);
+                        }
                         contexts.push(Context::ClipView);
                         if self.clip_view.tab() == ClipTab::Envelopes {
                             contexts.push(Context::Envelope);
@@ -6303,10 +6413,11 @@ impl Shell {
                             contexts.push(Context::SampleEditor);
                         } else {
                             contexts.push(Context::NoteEditor);
-                            if !self
+                            if self
                                 .clip_view
-                                .selected_notes(self.editor.document(), &self.arrangement)
-                                .is_empty()
+                                .active_clips(self.editor.document(), &self.arrangement)
+                                .iter()
+                                .any(|clip| !self.clip_view.selection_of(*clip).is_empty())
                             {
                                 contexts.push(Context::NoteSelection);
                             }
@@ -6370,6 +6481,7 @@ impl Shell {
             ids::VIEW_EXPAND_CLIP_VIEW => Some(self.detail.expanded()),
             ids::VIEW_TOGGLE_PLUGIN_LIST => Some(self.plugin_list.visible()),
             ids::VIEW_DRAW_MODE => Some(self.clip_view.draw_mode()),
+            note_ids::SET_PREVIEW => Some(self.clip_view.preview()),
             ids::VIEW_FOLD_NOTES => Some(
                 self.clip_view
                     .shown_clip(self.editor.document(), &self.arrangement)
@@ -6381,6 +6493,7 @@ impl Shell {
             ids::VIEW_TOGGLE_PLUG_IN_WINDOWS => Some(self.plug_in_windows),
             ids::FOCUS_TOGGLE_TAB_NAVIGATION => Some(self.prefs.tab_navigation),
             ids::FOCUS_TOGGLE_WRAP_NAVIGATION => Some(self.prefs.wrap_navigation.0),
+            ids::SETTINGS_SET_RETUNE_ON_TUNING_LOAD => Some(self.prefs.retune_on_tuning_load),
             session_launch_ids::SET_QUANTIZATION_ENABLED => Some(self.store.launch().enabled),
             SOLO_IN_PLACE => Some(self.editor.document().settings().solo_in_place),
             DELAY_COMPENSATION => Some(self.editor.document().settings().delay_compensation),
@@ -6531,6 +6644,10 @@ impl Shell {
                 }
                 .to_owned(),
             ),
+            // Spec: note-editing R22. M-EDIT-014 and M-EDIT-015 read Group
+            // Notes and Ungroup Notes with notes selected.
+            note_ids::GROUP => Some("Group Notes".to_owned()),
+            note_ids::UNGROUP => Some("Ungroup Notes".to_owned()),
             // The Playback menu's first item toggles with Stop (M-PLAY-001).
             transport_ids::PLAY_STOP => {
                 Some(if self.playing() { "Stop" } else { "Play" }.to_owned())
@@ -6576,9 +6693,90 @@ impl Shell {
         contexts
     }
 
+    /// Whether a comping command can run with `args` now: the menus' enabled
+    /// state (the comping spec, R29). Its arguments must read, name things the
+    /// set has, and, for Insert Take Lane, there must be a track to add to.
+    fn can_comp(&self, id: &str, args: &Value) -> bool {
+        let args = if args.is_null() {
+            json!({})
+        } else {
+            args.clone()
+        };
+        let doc = self.editor.document();
+        let lane = |lane: &bl_model::TakeLaneId| doc.take_lane_track(*lane).is_some();
+        let track = |track: &TrackId| {
+            doc.track(*track)
+                .is_some_and(|t| matches!(t.kind(), TrackKind::Audio | TrackKind::Midi))
+        };
+        match id {
+            comping_ids::INSERT => serde_json::from_value::<comping_ids::InsertArgs>(args)
+                .ok()
+                .is_some_and(|args| {
+                    let tracks = args
+                        .tracks
+                        .unwrap_or_else(|| self.arrangement.selected_tracks().to_vec());
+                    !tracks.is_empty() && tracks.iter().all(track)
+                }),
+            comping_ids::DUPLICATE => serde_json::from_value::<comping_ids::DuplicateArgs>(args)
+                .ok()
+                .is_some_and(|args| !args.lanes.is_empty() && args.lanes.iter().all(lane)),
+            comping_ids::COPY_TO_MAIN_LANE => {
+                serde_json::from_value::<comping_ids::CopyToMainLaneArgs>(args)
+                    .ok()
+                    .is_some_and(|args| !args.lanes.is_empty() && args.lanes.iter().all(lane))
+            }
+            comping_ids::REPLACE_WITH_TAKE => {
+                serde_json::from_value::<comping_ids::ReplaceWithTakeArgs>(args)
+                    .ok()
+                    .is_some_and(|args| track(&args.track))
+            }
+            comping_ids::MOVE_COMP_EDGE => {
+                serde_json::from_value::<comping_ids::MoveCompEdgeArgs>(args)
+                    .ok()
+                    .is_some_and(|args| track(&args.track))
+            }
+            comping_ids::COMP_SOURCES => {
+                serde_json::from_value::<comping_ids::CompSourcesArgs>(args)
+                    .ok()
+                    .is_some_and(|args| track(&args.track))
+            }
+            _ => false,
+        }
+    }
+
     /// The frozen track that refuses `id`, if any (the freeze and bounce
     /// spec, R8).
     fn frozen_blocks(&self, id: &str, args: &Value) -> Option<TrackId> {
+        // Spec: freeze-and-bounce R30. A frozen track's take lanes play no part
+        // in the freeze, but a lane can't be auditioned on it and nothing is
+        // copied from one to the main lane.
+        let doc = self.editor.document();
+        let lane_track = |lane: &Value| {
+            let lane = serde_json::from_value::<bl_model::TakeLaneId>(lane.clone()).ok()?;
+            doc.take_lane_track(lane)
+        };
+        let frozen = |track: Option<TrackId>| {
+            track.filter(|track| doc.track(*track).is_some_and(|t| t.is_frozen()))
+        };
+        match id {
+            "take_lane.set_audition" if args.get("on").and_then(Value::as_bool) == Some(true) => {
+                return frozen(args.get("lane").and_then(lane_track));
+            }
+            // It copies from one lane on each track it names.
+            comping_ids::COPY_TO_MAIN_LANE => {
+                return args
+                    .get("lanes")
+                    .and_then(Value::as_array)
+                    .and_then(|lanes| lanes.iter().find_map(|lane| frozen(lane_track(lane))));
+            }
+            comping_ids::REPLACE_WITH_TAKE => {
+                return frozen(
+                    args.get("track")
+                        .and_then(|track| serde_json::from_value::<TrackId>(track.clone()).ok()),
+                );
+            }
+            _ => {}
+        }
         // R7 keeps a frozen track's mixer live: volume, pan, sends, the
         // activator, solo and the crossfader all work; only its devices, its
         // clips' own settings, arming and new clips are locked (R8).
@@ -6617,8 +6815,10 @@ impl Shell {
             .get("clip")
             .and_then(|value| serde_json::from_value::<bl_model::ClipId>(value.clone()).ok())
         {
+            // A take-lane clip plays no part in the freeze (R30).
             return doc
                 .clip_track(clip)
+                .filter(|_| doc.clip_lane(clip).is_none())
                 .filter(|track| doc.track(*track).is_some_and(|t| t.is_frozen()));
         }
         if let Some(device) = args
@@ -6670,6 +6870,9 @@ impl Shell {
         if bounce_ids::handles(id) {
             return self.can_bounce(id, args);
         }
+        if comping_ids::handles(id) {
+            return self.can_comp(id, args);
+        }
         if audio_ids::handles(id) {
             // Spec: audio-clip-editing R28. The menus' enabled states.
             let args = if args.is_null() {
@@ -6710,6 +6913,27 @@ impl Shell {
             REDUCED_LATENCY_MONITORING => {
                 return self.editor.document().settings().delay_compensation;
             }
+            // Spec: note-editing R22, R23. Group Notes needs two notes, and
+            // Ungroup Notes a grouped one.
+            note_ids::GROUP | note_ids::UNGROUP => {
+                let named = args.get("notes").and_then(Value::as_array).map(Vec::len);
+                return if id == note_ids::GROUP {
+                    named.unwrap_or_else(|| {
+                        self.clip_view
+                            .selected_notes(self.editor.document(), &self.arrangement)
+                            .len()
+                    }) >= 2
+                } else {
+                    named.is_some()
+                        || self
+                            .clip_view
+                            .selection_group_kinds(self.editor.document(), &self.arrangement)
+                            != (false, false)
+                };
+            }
+            // Spec: step-recording R9. Step Input Mode is available while the
+            // editor shows a MIDI clip.
+            note_ids::STEP_INPUT_MODE => return self.editor_track().is_some(),
             ids::FOCUS_NEXT_NEIGHBOR => return self.has_neighbor(false),
             ids::FOCUS_PREVIOUS_NEIGHBOR => return self.has_neighbor(true),
             // Spec: time-editing R8. Cmd-R renames the selected locators
@@ -7378,6 +7602,26 @@ impl Shell {
                 self.effects.push(Effect::PickFolder);
                 Ok(Value::Null)
             }
+            // Spec: tunings R15. With Retune Set On Loading Tuning Systems
+            // on, a person who loads a tuning, or removes it, is asked
+            // first; Cancel changes nothing.
+            tuning_ids::LOAD | tuning_ids::REMOVE
+                if !has("retune")
+                    && self.tuning_change_asks()
+                    && (id == tuning_ids::LOAD
+                        || self.editor.document().settings().tuning.is_some()) =>
+            {
+                self.effects.push(Effect::ConfirmRetune {
+                    then: Invocation::new(id, args),
+                });
+                Ok(Value::Null)
+            }
+            ids::SETTINGS_SET_RETUNE_ON_TUNING_LOAD if !has("on") => {
+                // Options ▸ Retune Set On Loading Tuning Systems switches
+                // the setting to the other state.
+                let on = !self.prefs.retune_on_tuning_load;
+                self.run(id, json!({ "on": on }))
+            }
             ids::SETTINGS_SET_TEMPORARY_FOLDER if !has("path") => {
                 self.effects.push(Effect::PickTemporaryFolder);
                 Ok(Value::Null)
@@ -7623,6 +7867,7 @@ impl Shell {
         self.poll_capture();
         let arranged = self.arrangement.selected_clips().to_vec();
         let slot = self.selected_slot_clip();
+        let slots = self.selected_slot_clips();
         let shown = self.shown_clip();
         let revision = self.document_revision;
         let generation = self.editor_generation;
@@ -7633,7 +7878,7 @@ impl Shell {
             self.refresh_search();
         }
         if result.is_ok() {
-            self.follow_clip_selection(id, &arranged, slot);
+            self.follow_clip_selection(id, &arranged, slot, &slots);
             // Spec: scales R10. Selecting a clip makes its scale the
             // current scale, and a change to that clip's scale changes it
             // with it.
@@ -7693,10 +7938,40 @@ impl Shell {
             .map(|clip| clip.id)
     }
 
+    /// The clips in the selected Session slots, in track then scene order.
+    fn selected_slot_clips(&self) -> Vec<bl_model::ClipId> {
+        let doc = self.editor.document();
+        let order = doc.track_order();
+        let mut slots = self.session.selected_slots().to_vec();
+        // Spec: multi-clip-editing R2. By track, then scene.
+        slots.sort_by_key(|slot| {
+            (
+                order.iter().position(|track| *track == slot.track),
+                doc.scene_position(slot.scene),
+            )
+        });
+        slots
+            .iter()
+            .filter_map(|slot| doc.slot(slot.track, slot.scene).map(|clip| clip.id))
+            .collect()
+    }
+
     /// The clips the Control Bar's scale controls change (the scales spec,
     /// R12): the Arrangement's selected clips, or the Session slot's clip.
     #[must_use]
     pub fn scale_targets(&self) -> Vec<bl_model::ClipId> {
+        // Spec: multi-clip-editing R9, R15. Every clip the note editor
+        // shows, or with Focus Mode on the active clip alone.
+        let active = self
+            .clip_view
+            .active_clips(self.editor.document(), &self.arrangement);
+        if active.len() > 1
+            || self
+                .clip_view
+                .focus_active(self.editor.document(), &self.arrangement)
+        {
+            return active;
+        }
         let arranged = self.arrangement.selected_clips();
         if !arranged.is_empty() {
             return arranged.to_vec();
@@ -7722,14 +7997,25 @@ impl Shell {
         id: &str,
         arranged: &[bl_model::ClipId],
         slot: Option<bl_model::ClipId>,
+        slots: &[bl_model::ClipId],
     ) {
         let now = self.selected_slot_clip();
+        let all = self.selected_slot_clips();
         let picked = matches!(
             id,
             session_ids::SELECT | session_ids::SELECT_ALL | session_ids::SELECT_EDGE
-        ) || now != slot;
-        if let Some(clip) = now.filter(|_| picked) {
-            self.clip_view.show_session_clip(clip);
+        ) || now != slot
+            || all != slots;
+        if now.is_some() && picked {
+            // Spec: multi-clip-editing R1, R3. Every selected slot's clip
+            // shows, the one clicked last being the foreground clip.
+            let doc = self.editor.document();
+            let last = self
+                .session
+                .anchor()
+                .and_then(|anchor| doc.slot(anchor.track, anchor.scene))
+                .map(|clip| clip.id);
+            self.clip_view.show_session_clips(all, last);
         } else if (matches!(id, edit_ids::SELECT_CLIPS | edit_ids::SELECT_ALL)
             || self.arrangement.selected_clips() != arranged)
             && !self.arrangement.selected_clips().is_empty()
@@ -7987,6 +8273,9 @@ impl Shell {
         let args = self.prepare_device_role(id, args)?;
         let args = self.prepare_scale_clips(id, args)?;
         let args = self.prepare_groove_clips(id, args)?;
+        // Spec: tunings R15. A tuning set or removed without `retune`
+        // follows Retune Set On Loading Tuning Systems.
+        let args = self.with_retune(id, args);
         self.prepare_warping(id, args)
     }
 
@@ -8196,6 +8485,7 @@ impl Shell {
                 || audio_ids::handles(id)
                 || freeze_ids::handles(id)
                 || bounce_ids::handles(id)
+                || comping_ids::handles(id)
                 || edit_ids::handles(id)
                 || note_ids::handles(id)
                 || device_ids::handles(id)
@@ -8222,6 +8512,19 @@ impl Shell {
         }
         if bounce_ids::handles(id) {
             return self.run_bounce(id, args);
+        }
+        if comping_ids::handles(id) {
+            // Spec: comping R4, R5, R17 to R21.
+            let before = self.editor.document().clone();
+            let result =
+                crate::arrangement::comping::run(id, args, &mut self.editor, &self.arrangement)
+                    .map_err(|failure| edit_error(id, failure));
+            if *self.editor.document() != before {
+                self.dirty = true;
+                self.document_changed();
+            }
+            self.touch();
+            return result;
         }
         if edit_ids::handles(id) {
             // Spec: automation-editing R5. With the time selection in
@@ -8271,22 +8574,26 @@ impl Shell {
             self.touch();
             return result;
         }
+        if note_ids::is_preview_or_mode(id) || id == note_ids::STEP_RECORD {
+            // Spec: step-recording. The Preview switch, previews, step
+            // recording and Step Input Mode reach the MIDI input, the
+            // preferences and the focus.
+            return self.run_step_input(id, args);
+        }
+        if id == note_ids::SPLIT_CLIP {
+            return self.split_shown_clip();
+        }
         if note_ids::handles(id) {
-            // Spec: piano-roll. The Clip View's note edits.
-            let before = self.editor.document().clone();
-            let result = clip_view::run(
-                id,
-                args,
-                &mut self.editor,
-                &mut self.clip_view,
-                &self.arrangement,
-            )
-            .map_err(|failure| edit_error(id, failure));
-            if *self.editor.document() != before {
-                self.dirty = true;
-                self.document_changed();
+            let keys = id == note_ids::SELECT_NOTES
+                && args["select"]
+                    .as_str()
+                    .is_some_and(|select| select != "all");
+            let result = self.run_note_edit(id, args);
+            if keys && result.is_ok() {
+                // Spec: step-recording R2. A note selected from the keys
+                // sounds, when Preview is on.
+                self.preview_selected();
             }
-            self.touch();
             return result;
         }
         if sample_ids::handles(id) {
@@ -8845,6 +9152,9 @@ impl Shell {
         if midi_ids::handles(id) {
             return self.run_midi_files(id, args);
         }
+        if tuning_ids::handles(id) {
+            return self.run_tunings(id, args);
+        }
         if dawproject_ids::handles(id) {
             return self.run_dawproject(id, args);
         }
@@ -9191,6 +9501,26 @@ impl Shell {
     /// Arguments as a JSON object: `null` is no arguments.
     fn object(args: Value) -> Value {
         if args.is_null() { json!({}) } else { args }
+    }
+
+    /// Runs one of the Clip View's note edits, as one undo step.
+    fn run_note_edit(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        // Spec: piano-roll. The Clip View's note edits.
+        let before = self.editor.document().clone();
+        let result = clip_view::run(
+            id,
+            args,
+            &mut self.editor,
+            &mut self.clip_view,
+            &self.arrangement,
+        )
+        .map_err(|failure| edit_error(id, failure));
+        if *self.editor.document() != before {
+            self.dirty = true;
+            self.document_changed();
+        }
+        self.touch();
+        result
     }
 
     fn args<T: DeserializeOwned>(id: &str, args: Value) -> Result<T, ShellError> {
@@ -9913,6 +10243,7 @@ impl Shell {
                 // Spec: piano-roll; M-VIEW-039, S-NOTE-038. View state only,
                 // saved with the set.
                 let FoldNotesArgs { clip, folded } = Self::args(id, args)?;
+                let args_clip_named = clip.is_some();
                 let clip = match clip {
                     Some(clip) => clip,
                     None => self
@@ -9931,6 +10262,14 @@ impl Shell {
                 }
                 let folded = folded.unwrap_or(!self.clip_view.is_folded(clip));
                 self.clip_view.set_folded(clip, folded);
+                if !args_clip_named {
+                    for other in self
+                        .clip_view
+                        .shown(self.editor.document(), &self.arrangement)
+                    {
+                        self.clip_view.set_folded(other, folded);
+                    }
+                }
                 Ok(to_value(
                     &self
                         .clip_view
@@ -10241,6 +10580,12 @@ impl Shell {
             ids::SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES => {
                 let SwitchArgs { on } = Self::args(id, args)?;
                 self.prefs.create_fades_on_clip_edges = OnByDefault(on);
+                self.save_preferences();
+                Ok(to_value(&SwitchResult { on }))
+            }
+            ids::SETTINGS_SET_RETUNE_ON_TUNING_LOAD => {
+                let SwitchArgs { on } = Self::args(id, args)?;
+                self.prefs.retune_on_tuning_load = on;
                 self.save_preferences();
                 Ok(to_value(&SwitchResult { on }))
             }

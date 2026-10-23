@@ -330,6 +330,32 @@ fn a_clip_round_trips_through_a_written_file() {
     );
 }
 
+// Spec: note-editing R31. A MIDI file holds the notes without their groups.
+#[test]
+fn grouped_notes_are_written_without_their_groups() {
+    let plain = vec![
+        Note::new(60, Ticks::ZERO, Ticks::from_quarters(1), 100),
+        Note::new(64, Ticks::from_quarters(1), Ticks::from_quarters(1), 100),
+    ];
+    let grouped: Vec<Note> = plain
+        .iter()
+        .cloned()
+        .map(|note| Note {
+            group: Some(1),
+            ..note
+        })
+        .collect();
+    let signature = TimeSignature::new(4, 4).unwrap();
+    let tempo = Bpm::new(120.0).unwrap();
+    let bytes = midi::write_bytes("Clip", &grouped, tempo, signature).unwrap();
+    assert_eq!(
+        bytes,
+        midi::write_bytes("Clip", &plain, tempo, signature).unwrap()
+    );
+    let read = midi::read_bytes(&bytes).unwrap();
+    assert!(read.tracks[0].notes.iter().all(|note| note.group.is_none()));
+}
+
 #[test]
 fn a_file_past_the_size_cap_is_refused_before_it_is_read() {
     // A sparse file one byte past the cap: refused from its length alone.

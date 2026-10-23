@@ -888,7 +888,7 @@ pub(crate) fn lists(
     // The clips' envelopes (WP-3.15): every clip on the track's Arrangement
     // lane that plays and carries one modulates the parameter it names
     // while the clip plays.
-    for clip in track.clips() {
+    for clip in track.played_clips() {
         if clip.mute {
             continue;
         }

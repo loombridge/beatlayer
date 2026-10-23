@@ -1,6 +1,6 @@
 # The multisampler, sample editing in the sampler devices, and the autosampler
 
-- **Status:** partial (WP-5.13, WP-5.14 and WP-5.15, R1 to R63, are built; WP-5.16 builds R64 to R67 and R69 to R73, and R68's real-time route for the external instrument is not built; R74 is WP-6.9's)
+- **Status:** partial (WP-5.13, WP-5.14 and WP-5.15, R1 to R63, are built; WP-5.16 builds R64 to R67 and R69 to R73, and R68's real-time route for the external instrument is not built)
 - **Work packages:** WP-5.13 (zones, the zone editor, the Sample tab, the volume envelope and voices), WP-5.14 (the Pitch/Osc, Filter/Global, Modulation and MIDI tabs, and SFZ import), WP-5.15 (sample editing in the sampler devices' displays, IMP-28), WP-5.16 (the autosampler, IMP-27), WP-6.9 (tuning systems: R74)
 - **Parity-matrix row:** Instruments: Sampler (multisample, zones, modulation), plus SFZ import; Instruments: Simpler (the display's edits); [the improvements](../05-improvements.md), IMP-27 and IMP-28
 - **Checked against:** the Live 12 reference manual (online edition), read 17 October 2026: chapter 31, sections 31.10 "Sampler" (31.10.1 to 31.10.11) and 31.11 "Simpler" (its sample display and 31.11.7 "Context Menu Options for Simpler"); chapter 23, sections 23.2 and 23.2.4.1; and the SFZ format reference at sfzformat.com, read 17 October 2026
@@ -225,7 +225,7 @@ This spec covers the multisampler, the IMP-28 edits in both sampler devices' dis
 | R71 | `crates/analysis/src/loops.rs`, `a_sustained_tone_gets_a_loop_without_a_click`; `crates/shell/tests/autosample.rs`, `a_looped_note_sustains_past_its_length` | unit; shell test |
 | R72 | `crates/shell/tests/autosample.rs`, `three_octaves_and_two_layers_match_the_synth` | shell test (golden comparison) |
 | R73 | `crates/shell/tests/autosample.rs`, `cancel_deletes_the_files_and_changes_nothing` | shell test |
-| R74 | to be written in WP-6.9 | |
+| R74 | `crates/devices/tests/tuning.rs`, `keys_play_at_the_tunings_frequencies_at_any_block_size`, `a_sounding_note_does_not_move_when_the_tuning_changes` | unit |
 
 ## Not built yet
 

@@ -487,6 +487,9 @@ pub(super) fn render_doc(
 ) -> Result<(Vec<f32>, u32), ShellError> {
     let rate = shell.engine_rate();
     let media: Arc<dyn bl_engine::MediaLibrary> = shell.media.clone();
+    // Spec: freeze-and-bounce R30. A render takes main lanes only, whether or
+    // not a take lane is auditioned.
+    let doc = &doc.without_auditions();
     let spec = crate::export::Render {
         start,
         length: Length::To(start + length),

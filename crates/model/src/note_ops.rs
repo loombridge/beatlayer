@@ -73,7 +73,7 @@ pub fn chop_equal(note: &Note, parts: u32) -> Vec<Note> {
 /// The notes of one pitch, earliest first, as one note: from the earliest
 /// start to the latest end, with the earliest note's values, and every
 /// note's pressure points at their places in time, the later note's where
-/// two share a tick (note-editing R39).
+/// two overlap (note-editing R39).
 ///
 /// # Panics
 ///
@@ -86,14 +86,14 @@ pub fn join(notes: &[Note]) -> Note {
     joined.length = to - first.start;
     let mut points: Vec<PressurePoint> = Vec::new();
     for note in notes {
-        for point in &note.pressure {
-            let at = note.start - first.start + point.at;
-            points.retain(|kept| kept.at != at);
-            points.push(PressurePoint {
-                at,
-                value: point.value,
-            });
+        let offset = note.start - first.start;
+        if !note.pressure.is_empty() {
+            points.retain(|kept| kept.at < offset || kept.at >= offset + note.length);
         }
+        points.extend(note.pressure.iter().map(|point| PressurePoint {
+            at: offset + point.at,
+            value: point.value,
+        }));
     }
     points.sort_by_key(|point| point.at);
     joined.pressure = points;
@@ -252,7 +252,7 @@ mod tests {
     fn a_join_keeps_the_earliest_values_and_every_pressure_point() {
         let a = Note {
             velocity: 90,
-            pressure: vec![point(0, 1), point(100, 2)],
+            pressure: vec![point(0, 1), point(100, 2), point(200, 4)],
             ..note(0, 300)
         };
         let b = Note {
@@ -266,7 +266,7 @@ mod tests {
         assert_eq!(
             joined.pressure,
             [point(0, 1), point(100, 3)],
-            "the later wins"
+            "where they overlap the later note's points win"
         );
     }
 

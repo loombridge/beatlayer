@@ -25,7 +25,12 @@ use bl_model::{
 };
 use bl_shell_spec::editing::{Position, SplitArgs};
 use bl_shell_spec::notes::{
-    self as ids, AddNoteArgs, AdjustValueArgs, ChopNotesArgs, ChopStep, ClipTab, ClipViewState, CopyNotesArgs, DeactivateArgs, DeleteNotesArgs, DuplicateNotesArgs, FitToTimeArgs, JoinNotesArgs, MoveNotesArgs, NoteClipboardState, NoteEditResult, NoteField, NoteSelectMode, NoteSelection, PasteNotesArgs, QuantizeNotesArgs, QuantizeSettings, QuantizeSettingsArgs, QuantizeTarget, RampValueArgs, RandomizeAmounts, RandomizeArgs, ResizeNotesArgs, SelectNotesArgs, SetValueArgs, SplitNotesArgs, StretchNotesArgs,
+    self as ids, AddNoteArgs, AdjustValueArgs, ChopNotesArgs, ChopStep, ClipTab, ClipViewState,
+    CopyNotesArgs, DeactivateArgs, DeleteNotesArgs, DuplicateNotesArgs, FitToTimeArgs,
+    JoinNotesArgs, MoveNotesArgs, NoteClipboardState, NoteEditResult, NoteField, NoteSelectMode,
+    NoteSelection, PasteNotesArgs, QuantizeNotesArgs, QuantizeSettings, QuantizeSettingsArgs,
+    QuantizeTarget, RampValueArgs, RandomizeAmounts, RandomizeArgs, ResizeNotesArgs,
+    SelectNotesArgs, SetValueArgs, SplitNotesArgs, StretchNotesArgs,
 };
 use bl_shell_spec::sample_editor as sample_ids;
 use bl_shell_spec::sample_editor::{SelectTimeArgs, SetInsertMarkerArgs};

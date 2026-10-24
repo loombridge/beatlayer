@@ -56,6 +56,7 @@ use bl_shell_spec::browser::{
     ShowFileArgs, ShowQuickTagsArgs, ShowTagEditorArgs, StateArgs, TagEditorRow, TagEditorRowKind,
     TagGroupInfo, TagInfo, TagItemsArgs, TagSource, TagState, TaggedItem, TagsArgs, TagsState,
 };
+use bl_shell_spec::commands::{BROWSER_WIDTH, clamp_browser_width};
 use bl_shell_spec::settings::CollectFiles;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -140,6 +141,9 @@ pub struct BrowserPrefs {
     /// Whether the browser runs down to the Status Bar (Full-Height
     /// Browser; spec: browser R26).
     pub full_height: bool,
+    /// The browser's width in points at 100%, as its right edge was last
+    /// dragged (spec: browser R29).
+    pub width: f32,
 }
 
 impl Default for BrowserPrefs {
@@ -156,6 +160,7 @@ impl Default for BrowserPrefs {
             labels: LabelPrefs::default(),
             columns: ColumnsState::default(),
             full_height: false,
+            width: BROWSER_WIDTH,
         }
     }
 }
@@ -344,6 +349,8 @@ pub struct BrowserView {
     details: Mutex<DetailsCache>,
     /// Whether the browser runs down to the Status Bar.
     full_height: bool,
+    /// The browser's width in points at 100%.
+    width: f32,
 }
 
 /// The tags some item under a label carries, with the generation and label
@@ -561,6 +568,7 @@ impl BrowserView {
             available: Mutex::new(None),
             details: Mutex::new(DetailsCache::default()),
             full_height: prefs.full_height,
+            width: clamp_browser_width(prefs.width),
         };
         view.user_library.clone_from(&prefs.user_library);
         view.places_changed();
@@ -1242,6 +1250,7 @@ impl BrowserView {
             labels: self.label_prefs.clone(),
             columns: self.columns.clone(),
             full_height: self.full_height,
+            width: self.width,
         }
     }
 
@@ -1978,6 +1987,18 @@ impl BrowserView {
     /// Runs the browser down to the Status Bar, or back.
     pub fn set_full_height(&mut self, on: bool) {
         self.full_height = on;
+    }
+
+    /// The browser's width in points at 100%, as it was set: a window too
+    /// narrow for it shows the browser narrower (spec: browser R29).
+    #[must_use]
+    pub fn width(&self) -> f32 {
+        self.width
+    }
+
+    /// Sets the browser's width, brought within its narrowest and widest.
+    pub fn set_width(&mut self, points: f32) {
+        self.width = clamp_browser_width(points);
     }
 
     /// Takes background work's news: a newer index, a decoded preview, a

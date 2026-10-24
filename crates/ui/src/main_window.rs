@@ -173,6 +173,7 @@ pub struct MainWindowUi {
     save_history: crate::save_history_panel::SaveHistoryPanelUi,
     /// The detail area's top edge (detail-views R10).
     detail_edge: crate::detail_area::DetailEdge,
+    browser_edge: crate::browser_edge::BrowserEdge,
     /// The File Manager's switches (WP-6.63).
     file_manager: crate::file_manager::FileManagerUi,
     /// The search field (WP-6.42).
@@ -271,6 +272,7 @@ impl MainWindowUi {
             undo_history: crate::undo_history_panel::UndoHistoryPanelUi::default(),
             save_history: crate::save_history_panel::SaveHistoryPanelUi::default(),
             detail_edge: crate::detail_area::DetailEdge::default(),
+            browser_edge: crate::browser_edge::BrowserEdge::default(),
         }
     }
 
@@ -511,7 +513,8 @@ impl MainWindowUi {
                 .map(|width| self.assistant.drag_width().unwrap_or(width));
             let undo_history = (shell.undo_history_open() || shell.save_history_open())
                 .then_some(crate::layout::UNDO_HISTORY_WIDTH);
-            let detail = crate::layout::DetailViews::of(shell.detail_of(self.window));
+            let detail = crate::layout::DetailViews::of(shell.detail_of(self.window))
+                .with_browser_width(shell.browser_view().width());
             let layout = if second {
                 // Spec: second-window R2, R12, R17. No Info View, assistant
                 // or Undo History; the Control Bar is cut off.
@@ -546,6 +549,10 @@ impl MainWindowUi {
                 }
             }
             self.main_view(ui, shell, theme, layout.main_view, &mut events);
+            // Spec: browser R29. The browser's right edge, in the gap
+            // between it and the main view.
+            self.browser_edge
+                .show(ui, theme, shell, &layout, &mut events);
             // Spec: browser-tags R10. The Tag Editor opens beside the
             // content pane (L-BRW-013), over the main view, so it is drawn
             // after it.

@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-810 commands in 47 areas.
+811 commands in 47 areas.
 
 ## Permission classes
 
@@ -816,6 +816,7 @@ Each command has:
 | [`view.full_screen`](#viewfull_screen) | Full Screen | `read` | `Ctrl+Cmd+F` | `F11` |
 | [`view.lane`](#viewlane) | Note Editor Lane | `read` |  |  |
 | [`view.lanes`](#viewlanes) | Expression Lanes | `read` |  |  |
+| [`view.set_browser_width`](#viewset_browser_width) | Set Browser Width | `read` |  |  |
 | [`view.set_detail_height`](#viewset_detail_height) | Set Clip View Height | `read` |  |  |
 | [`view.set_plugin_list_only_missing`](#viewset_plugin_list_only_missing) | Show Only Missing Plug-Ins | `read` |  |  |
 | [`view.set_zoom`](#viewset_zoom) | Zoom | `edit` |  |  |
@@ -14735,6 +14736,22 @@ Arguments:
 | `swap` | boolean or null | no | With `lane`: hide it and show in its place the first hidden lane after it, going round to the first (the lane header's Swap Lane). |
 
 Result: [`ClipViewState`](#clipviewstate).
+
+#### `view.set_browser_width`
+
+**Set Browser Width**. Permission: `read`. Contexts: `global`.
+
+Sets the browser's width to `points`, in points at 100% zoom, as dragging the browser's right edge does one frame at a time; a width outside 70 to 4000 points is brought within them, and a window too narrow for it shows the browser narrower, leaving the main view 160 points. Both windows' browsers take it, and it is kept for the next start. Read in `view.state`'s `window.browser_width`. Changes nothing in the set and isn't an undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `points` | number | yes | The browser's width in points at 100%, from 70 to 4000. |
+
+Result: [`ViewResult`](#viewresult).
 
 #### `view.set_detail_height`
 
@@ -44050,6 +44067,7 @@ What the view commands return: the window's view state afterwards.
 | `main_view` | string | yes | The main view: `arrangement` or `session`. |
 | `browser` | boolean | yes | Whether the browser shows. |
 | `full_height_browser` | boolean | yes | Whether the browser runs down to the Status Bar (Full-Height Browser, spec: browser R26). |
+| `browser_width` | number | yes | The browser's width in points at 100%, as it was set; a window too narrow for it shows the browser narrower (browser R29). |
 | `info_view` | boolean | yes | Whether the Info View shows. |
 | `full_screen` | boolean | yes | Whether the main window is in full-screen mode. |
 | `zoom` | number | yes | The interface zoom, where 1 is 100%. |
@@ -44063,6 +44081,12 @@ What the view commands return: the window's view state afterwards.
     "browser": {
       "description": "Whether the browser shows.",
       "type": "boolean"
+    },
+    "browser_width": {
+      "default": 302.0,
+      "description": "The browser's width in points at 100%, as it was set; a window too narrow for it shows the browser narrower (browser R29).",
+      "format": "float",
+      "type": "number"
     },
     "full_height_browser": {
       "default": false,
@@ -44091,6 +44115,7 @@ What the view commands return: the window's view state afterwards.
     "main_view",
     "browser",
     "full_height_browser",
+    "browser_width",
     "info_view",
     "full_screen",
     "zoom"

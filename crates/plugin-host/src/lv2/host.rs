@@ -27,6 +27,7 @@ use super::describe::{self, Parameter};
 use super::node::{Active, HostEnds, MAX_CHANNELS};
 use super::{Lv2Error, Lv2Node, PluginInfo, PortKind, StateHandle, World};
 use crate::drive::Driver;
+use crate::window::GuiSize;
 
 /// A plug-in Beatlayer can make devices of, and the bundle it's in.
 #[derive(Clone, Debug, PartialEq)]
@@ -63,6 +64,8 @@ pub struct PluginStatus {
     pub editor_open: bool,
     /// Whether its open editor is hidden.
     pub editor_hidden: bool,
+    /// The size of its editor's host window, while it is open in one.
+    pub editor_size: Option<GuiSize>,
     /// Each parameter's value, in plain units.
     pub values: Vec<(ParamId, f64)>,
 }
@@ -130,31 +133,32 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 
 /// The main thread's plug-ins.
 pub(super) struct Main {
-    entries: BTreeMap<DeviceId, Entry>,
+    /// The open editors, declared first so they are cleaned up while their
+    /// plug-ins are still there.
+    pub(super) editors: super::ui::Editors,
+    pub(super) entries: BTreeMap<DeviceId, Entry>,
     /// Devices whose plug-in couldn't be found or made, and why.
     missing: BTreeMap<DeviceId, (String, PathBuf, String)>,
     /// Instances nodes gave back, freed on the next look.
     garbage: Vec<Active>,
     /// The changes the plug-ins' editors made, for the set's undo steps.
-    changes: Vec<ParamChange>,
+    pub(super) changes: Vec<ParamChange>,
     /// The devices whose plug-in reported a new latency.
     latency_changes: Vec<(DeviceId, u32)>,
     /// An offline render has the plug-ins ([`Lv2Host::lend`]).
     lending: bool,
     /// Devices the render couldn't make a plug-in for, and why.
     loan_problems: Vec<(DeviceId, String)>,
-    #[cfg(all(unix, not(target_os = "macos")))]
-    pub(super) editors: super::ui::Editors,
 }
 
 /// One device's plug-in.
-struct Entry {
-    plugin_id: String,
+pub(super) struct Entry {
+    pub(super) plugin_id: String,
     path: PathBuf,
-    info: PluginInfo,
-    params: Vec<Parameter>,
+    pub(super) info: PluginInfo,
+    pub(super) params: Vec<Parameter>,
     /// The state of the instance last handed to a node.
-    handle: Option<StateHandle>,
+    pub(super) handle: Option<StateHandle>,
     /// The state the next instance starts from: the set's saved state, or
     /// one that was loaded.
     restore: Option<String>,
@@ -163,9 +167,9 @@ struct Entry {
     values: Vec<(u32, f64)>,
     /// The node it runs for, and nodes it ran for that haven't given their
     /// instance back yet.
-    ends: Option<HostEnds>,
+    pub(super) ends: Option<HostEnds>,
     retired: Vec<HostEnds>,
-    config: Option<NodeConfig>,
+    pub(super) config: Option<NodeConfig>,
     /// An instance is with the current node.
     handed: bool,
     /// Making an instance failed; it isn't tried again until the next node.
@@ -223,6 +227,7 @@ impl Lv2Host {
                 main: Mutex::new(MainOnly {
                     owner,
                     value: Main {
+                        editors: super::ui::Editors::default(),
                         entries: BTreeMap::new(),
                         missing: BTreeMap::new(),
                         garbage: Vec::new(),
@@ -230,8 +235,6 @@ impl Lv2Host {
                         latency_changes: Vec::new(),
                         lending: false,
                         loan_problems: Vec::new(),
-                        #[cfg(all(unix, not(target_os = "macos")))]
-                        editors: super::ui::Editors::default(),
                     },
                 }),
                 latencies: Mutex::new(BTreeMap::new()),
@@ -328,10 +331,7 @@ impl Lv2Host {
         }
         garbage.clear();
         drop(latencies);
-        #[cfg(all(unix, not(target_os = "macos")))]
-        {
-            changed |= super::ui::pump(main);
-        }
+        changed |= super::ui::pump(main);
         changed
     }
 
@@ -423,6 +423,7 @@ impl Lv2Host {
                 has_editor: false,
                 editor_open: false,
                 editor_hidden: false,
+                editor_size: None,
                 values: Vec::new(),
             });
         }
@@ -455,6 +456,7 @@ impl Lv2Host {
             has_editor: has_editor(&entry.info),
             editor_open,
             editor_hidden,
+            editor_size: super::ui::size(main, device),
             values,
         })
     }
@@ -493,11 +495,30 @@ impl Lv2Host {
         Ok(())
     }
 
+    /// Makes the device's editor window `size` physical pixels, as dragging
+    /// its edge does, and tells the editor.
+    ///
+    /// # Errors
+    ///
+    /// [`Lv2Error::Failed`] if its editor isn't open in a host window.
+    pub fn resize_editor(&self, device: DeviceId, size: GuiSize) -> Result<(), Lv2Error> {
+        let mut guard = lock(&self.inner.main);
+        super::ui::resize_window(guard.get()?, device, size)
+    }
+
     /// The devices whose plug-in's editor window is open, hidden or shown.
     #[must_use]
     pub fn open_editors(&self) -> Vec<DeviceId> {
         let mut guard = lock(&self.inner.main);
         guard.get().map(open_editors).unwrap_or_default()
+    }
+
+    /// Opens the device's editor with no window, for a test where there is no
+    /// display.
+    #[cfg(test)]
+    pub(super) fn open_editor_headless(&self, device: DeviceId) -> Result<(), Lv2Error> {
+        let mut guard = lock(&self.inner.main);
+        super::ui::open_with(guard.get()?, device, None)
     }
 
     /// Lets go of every plug-in whose device isn't in `keep`, as when a set
@@ -729,35 +750,24 @@ fn has_editor(info: &PluginInfo) -> bool {
     cfg!(all(unix, not(target_os = "macos"))) && info.ui.is_some()
 }
 
-#[cfg(all(unix, not(target_os = "macos")))]
 fn editor_state(main: &Main, device: DeviceId) -> (bool, bool) {
     super::ui::state(main, device)
 }
 
-#[cfg(not(all(unix, not(target_os = "macos"))))]
-fn editor_state(_: &Main, _: DeviceId) -> (bool, bool) {
-    (false, false)
+fn open_editor(main: &mut Main, device: DeviceId, title: &str) -> Result<(), Lv2Error> {
+    super::ui::open(main, device, title)
 }
 
-#[cfg(all(unix, not(target_os = "macos")))]
-use super::ui::{close as close_editor, open as open_editor, open_devices as open_editors, set_visible as set_editor_visible};
-
-#[cfg(not(all(unix, not(target_os = "macos"))))]
-fn open_editor(_: &mut Main, _: DeviceId, _: &str) -> Result<(), Lv2Error> {
-    Err(Lv2Error::Failed(
-        "LV2 editors are shown in X11 windows, which this platform doesn't host".to_owned(),
-    ))
+fn close_editor(main: &mut Main, device: DeviceId) {
+    super::ui::close(main, device);
 }
 
-#[cfg(not(all(unix, not(target_os = "macos"))))]
-fn close_editor(_: &mut Main, _: DeviceId) {}
+fn set_editor_visible(main: &mut Main, device: DeviceId, shown: bool) {
+    super::ui::set_visible(main, device, shown);
+}
 
-#[cfg(not(all(unix, not(target_os = "macos"))))]
-fn set_editor_visible(_: &mut Main, _: DeviceId, _: bool) {}
-
-#[cfg(not(all(unix, not(target_os = "macos"))))]
-fn open_editors(_: &mut Main) -> Vec<DeviceId> {
-    Vec::new()
+fn open_editors(main: &mut Main) -> Vec<DeviceId> {
+    super::ui::open_devices(main)
 }
 
 /// The device's running plug-in, or why it has none.

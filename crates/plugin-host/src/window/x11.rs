@@ -137,6 +137,21 @@ impl Window {
         })
     }
 
+    /// The window's X ID, which an LV2 UI embeds its view into.
+    pub fn id(&self) -> u32 {
+        self.window
+    }
+
+    /// The size of the window `child`, which another connection made inside
+    /// this one, in physical pixels.
+    pub fn child_size(&self, child: u32) -> Option<GuiSize> {
+        let geometry = self.conn.get_geometry(child).ok()?.reply().ok()?;
+        Some(GuiSize {
+            width: u32::from(geometry.width),
+            height: u32::from(geometry.height),
+        })
+    }
+
     pub fn handle(&self) -> ClapWindow<'static, '_> {
         ClapWindow::from_x11_handle(c_ulong::from(self.window))
     }

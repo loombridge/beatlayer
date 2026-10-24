@@ -27,6 +27,13 @@
 //!   [`BAR_BEAT_PORT`] and [`SPEED_PORT`] show the last position it got, and
 //!   while the song plays it sends a note on at the block's first frame
 //!   whose key is [`BEAT_NOTE`] plus the whole beat.
+//! - **Editor.** An X11 UI ([`UI_URI`]) in the same library. It makes a view
+//!   of [`UI_WIDTH`] by [`UI_HEIGHT`] in the window it is given (none where
+//!   there is none), and is scripted so a test sees every call between it
+//!   and the host: it answers a new gain with `steps` of four times the gain;
+//!   when `toggle` goes to 1 it takes hold of the gain, writes 1.5 and 1.75
+//!   and lets go; it asks to be closed when `mode` is 2; and when its view is
+//!   resized it writes the new width to `cutoff`.
 //! - **Scan modes.** `BL_TEST_LV2_SCAN` set to `crash` or `hang` makes
 //!   instantiating the plug-in crash or hang, so the scanner's child process
 //!   is tested against a plug-in that misbehaves.
@@ -77,6 +84,15 @@ pub const LATENCY: u32 = 32;
 pub const ECHO_TRANSPOSE: u8 = 12;
 
 const PORTS: usize = 16;
+/// The editor's URI.
+pub const UI_URI: &str = "urn:beatlayer:test:gain-echo:ui";
+/// The size of the editor's view.
+pub const UI_WIDTH: u32 = 200;
+pub const UI_HEIGHT: u32 = 100;
+const UI_PARENT: &CStr = c"http://lv2plug.in/ns/extensions/ui#parent";
+const UI_RESIZE: &CStr = c"http://lv2plug.in/ns/extensions/ui#resize";
+const UI_TOUCH: &CStr = c"http://lv2plug.in/ns/extensions/ui#touch";
+const UI_IDLE: &CStr = c"http://lv2plug.in/ns/extensions/ui#idleInterface";
 const MIDI_EVENT: &CStr = c"http://lv2plug.in/ns/ext/midi#MidiEvent";
 const SEQUENCE: &CStr = c"http://lv2plug.in/ns/ext/atom#Sequence";
 const INT: &CStr = c"http://lv2plug.in/ns/ext/atom#Int";
@@ -353,6 +369,250 @@ unsafe extern "C" fn restore(
     0
 }
 
+type UiWrite = unsafe extern "C" fn(*mut c_void, u32, u32, u32, *const c_void);
+
+#[repr(C)]
+struct UiDescriptor {
+    uri: *const c_char,
+    instantiate: unsafe extern "C" fn(
+        *const UiDescriptor,
+        *const c_char,
+        *const c_char,
+        UiWrite,
+        *mut c_void,
+        *mut *mut c_void,
+        *const *const Feature,
+    ) -> *mut c_void,
+    cleanup: unsafe extern "C" fn(*mut c_void),
+    port_event: unsafe extern "C" fn(*mut c_void, u32, u32, u32, *const c_void),
+    extension_data: unsafe extern "C" fn(*const c_char) -> *const c_void,
+}
+
+#[repr(C)]
+struct UiResize {
+    handle: *mut c_void,
+    ui_resize: unsafe extern "C" fn(*mut c_void, i32, i32) -> i32,
+}
+
+#[repr(C)]
+struct UiTouch {
+    handle: *mut c_void,
+    touch: unsafe extern "C" fn(*mut c_void, u32, bool),
+}
+
+#[repr(C)]
+struct UiIdle {
+    idle: unsafe extern "C" fn(*mut c_void) -> i32,
+}
+
+// SAFETY: the statics hold function pointers and a C string literal.
+unsafe impl Sync for UiDescriptor {}
+// SAFETY: as above.
+unsafe impl Sync for UiResize {}
+// SAFETY: as above.
+unsafe impl Sync for UiIdle {}
+
+static UI_DESCRIPTOR: UiDescriptor = UiDescriptor {
+    uri: c"urn:beatlayer:test:gain-echo:ui".as_ptr(),
+    instantiate: ui_instantiate,
+    cleanup: ui_cleanup,
+    port_event: ui_port_event,
+    extension_data: ui_extension_data,
+};
+
+static UI_RESIZE_INTERFACE: UiResize = UiResize {
+    handle: ptr::null_mut(),
+    ui_resize: ui_resized,
+};
+
+static UI_IDLE_INTERFACE: UiIdle = UiIdle { idle: ui_idle };
+
+struct TestUi {
+    write: UiWrite,
+    controller: *mut c_void,
+    touch: *const UiTouch,
+    values: [f32; PORTS],
+    first_gain: Option<f32>,
+    last_gain: f32,
+    gestured: bool,
+    /// The view in the host's window, where there is one.
+    #[cfg(all(unix, not(target_os = "macos")))]
+    view: Option<(x11rb::rust_connection::RustConnection, u32)>,
+}
+
+impl TestUi {
+    /// Writes a control port's value to the host.
+    unsafe fn send(&self, port: u32, value: f32) {
+        // SAFETY: the host's own write function, given its controller.
+        unsafe { (self.write)(self.controller, port, 4, 0, ptr::from_ref(&value).cast()) };
+    }
+}
+
+/// # Safety
+///
+/// Only the host's call to find the plug-in's editors.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lv2ui_descriptor(index: u32) -> *const c_void {
+    if index == 0 {
+        (&raw const UI_DESCRIPTOR).cast()
+    } else {
+        ptr::null()
+    }
+}
+
+unsafe extern "C" fn ui_instantiate(
+    _: *const UiDescriptor,
+    _plugin: *const c_char,
+    _bundle: *const c_char,
+    write: UiWrite,
+    controller: *mut c_void,
+    widget: *mut *mut c_void,
+    features: *const *const Feature,
+) -> *mut c_void {
+    let (mut parent, mut resize, mut touch) = (0usize, ptr::null::<UiResize>(), ptr::null());
+    // SAFETY: `features` is a null-terminated list of features.
+    unsafe {
+        let mut at = features;
+        while !at.is_null() && !(*at).is_null() {
+            let uri = CStr::from_ptr((**at).uri);
+            if uri == UI_PARENT {
+                parent = (**at).data as usize;
+            } else if uri == UI_RESIZE {
+                resize = (**at).data.cast();
+            } else if uri == UI_TOUCH {
+                touch = (**at).data.cast();
+            }
+            at = at.add(1);
+        }
+        *widget = ptr::null_mut();
+        #[cfg(not(all(unix, not(target_os = "macos"))))]
+        let _ = parent;
+        #[cfg(all(unix, not(target_os = "macos")))]
+        let view = (parent != 0).then(|| ui_view(parent as u32)).flatten();
+        #[cfg(all(unix, not(target_os = "macos")))]
+        if let Some((_, id)) = &view {
+            *widget = *id as usize as *mut c_void;
+        }
+        if let Some(resize) = resize.as_ref() {
+            (resize.ui_resize)(resize.handle, UI_WIDTH as i32, UI_HEIGHT as i32);
+        }
+        Box::into_raw(Box::new(TestUi {
+            write,
+            controller,
+            touch,
+            values: [0.0; PORTS],
+            first_gain: None,
+            last_gain: 0.0,
+            gestured: false,
+            #[cfg(all(unix, not(target_os = "macos")))]
+            view,
+        }))
+        .cast()
+    }
+}
+
+/// Makes the editor's view: a window of [`UI_WIDTH`] by [`UI_HEIGHT`] inside
+/// `parent`, on the display.
+#[cfg(all(unix, not(target_os = "macos")))]
+fn ui_view(parent: u32) -> Option<(x11rb::rust_connection::RustConnection, u32)> {
+    use x11rb::connection::Connection as _;
+    use x11rb::protocol::xproto::{ConnectionExt as _, CreateWindowAux, WindowClass};
+    use x11rb::{COPY_DEPTH_FROM_PARENT, COPY_FROM_PARENT};
+
+    let (conn, _) = x11rb::rust_connection::RustConnection::connect(None).ok()?;
+    let id = conn.generate_id().ok()?;
+    conn.create_window(
+        COPY_DEPTH_FROM_PARENT,
+        id,
+        parent,
+        0,
+        0,
+        UI_WIDTH as u16,
+        UI_HEIGHT as u16,
+        0,
+        WindowClass::INPUT_OUTPUT,
+        COPY_FROM_PARENT,
+        &CreateWindowAux::new().background_pixel(0x0033_66aa),
+    )
+    .ok()?;
+    conn.map_window(id).ok()?;
+    conn.flush().ok()?;
+    Some((conn, id))
+}
+
+unsafe extern "C" fn ui_cleanup(ui: *mut c_void) {
+    // SAFETY: the `TestUi` `ui_instantiate` made; the last call.
+    drop(unsafe { Box::from_raw(ui.cast::<TestUi>()) });
+}
+
+unsafe extern "C" fn ui_port_event(ui: *mut c_void, port: u32, size: u32, format: u32, data: *const c_void) {
+    if format != 0 || size != 4 {
+        return;
+    }
+    // SAFETY: the `TestUi` `ui_instantiate` made, and a float from the host.
+    unsafe {
+        let ui = &mut *ui.cast::<TestUi>();
+        if let Some(slot) = ui.values.get_mut(port as usize) {
+            *slot = data.cast::<f32>().read_unaligned();
+        }
+        if port == GAIN {
+            ui.first_gain.get_or_insert(ui.values[GAIN as usize]);
+        }
+    }
+}
+
+unsafe extern "C" fn ui_extension_data(uri: *const c_char) -> *const c_void {
+    // SAFETY: `uri` is a C string.
+    let uri = unsafe { CStr::from_ptr(uri) };
+    if uri == UI_IDLE {
+        ptr::from_ref(&UI_IDLE_INTERFACE).cast()
+    } else if uri == UI_RESIZE {
+        ptr::from_ref(&UI_RESIZE_INTERFACE).cast()
+    } else {
+        ptr::null()
+    }
+}
+
+/// The host resized the view: the new width is written to `cutoff`.
+unsafe extern "C" fn ui_resized(ui: *mut c_void, width: i32, _height: i32) -> i32 {
+    // SAFETY: the `TestUi` `ui_instantiate` made.
+    unsafe { (*ui.cast::<TestUi>()).send(CUTOFF, width as f32) };
+    0
+}
+
+/// The editor's turn: what it is scripted to do. Nonzero asks to be closed.
+unsafe extern "C" fn ui_idle(ui: *mut c_void) -> i32 {
+    // SAFETY: the `TestUi` `ui_instantiate` made.
+    unsafe {
+        let ui = &mut *ui.cast::<TestUi>();
+        if ui.values[MODE as usize] == 2.0 {
+            return 1;
+        }
+        if ui.values[TOGGLE as usize] == 1.0
+            && !ui.gestured
+            && let Some(touch) = ui.touch.as_ref()
+        {
+            ui.gestured = true;
+            (touch.touch)(touch.handle, GAIN, true);
+            ui.send(GAIN, 1.5);
+            ui.send(GAIN, 1.75);
+            (touch.touch)(touch.handle, GAIN, false);
+        }
+        // A new gain from the host is answered; the first is the one the
+        // editor opened with.
+        let gain = ui.values[GAIN as usize];
+        if let Some(first) = ui.first_gain
+            && gain != ui.last_gain
+        {
+            ui.last_gain = gain;
+            if gain != first {
+                ui.send(STEPS, gain * 4.0);
+            }
+        }
+    }
+    0
+}
+
 /// A `u32` at byte `at` of an Atom buffer.
 unsafe fn word(base: *const u8, at: usize) -> u32 {
     // SAFETY: the caller keeps `at` inside the buffer.
@@ -487,7 +747,9 @@ pub fn bundle() -> &'static Path {
             format!(
                 "@prefix lv2: <http://lv2plug.in/ns/lv2core#> .\n\
                  @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .\n\
-                 <{PLUGIN_URI}> a lv2:Plugin ; lv2:binary <{file}> ; rdfs:seeAlso <plugin.ttl> .\n"
+                 @prefix ui: <http://lv2plug.in/ns/extensions/ui#> .\n\
+                 <{PLUGIN_URI}> a lv2:Plugin ; lv2:binary <{file}> ; rdfs:seeAlso <plugin.ttl> .\n\
+                 <{UI_URI}> a ui:X11UI ; ui:binary <{file}> ; rdfs:seeAlso <plugin.ttl> .\n"
             ),
         )
         .expect("the manifest");
@@ -521,9 +783,11 @@ fn description() -> String {
          @prefix pprops: <http://lv2plug.in/ns/ext/port-props#> .\n\
          @prefix units: <http://lv2plug.in/ns/extensions/units#> .\n\
          @prefix time: <http://lv2plug.in/ns/ext/time#> .\n\
+         @prefix ui: <http://lv2plug.in/ns/extensions/ui#> .\n\
          @prefix worker: <http://lv2plug.in/ns/ext/worker#> .\n\
          <{PLUGIN_URI}> a lv2:Plugin ;\n\
            doap:name \"{PLUGIN_NAME}\" ;\n\
+           ui:ui <{UI_URI}> ;\n\
            lv2:requiredFeature urid:map ;\n\
            lv2:optionalFeature worker:schedule ;\n\
            lv2:extensionData state:interface, worker:interface ;\n\

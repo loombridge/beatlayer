@@ -102,6 +102,54 @@ pub struct LogLog {
     pub vprintf: unsafe extern "C" fn(*mut c_void, Urid, *const c_char, *mut c_void) -> i32,
 }
 
+/// `LV2UI_Write_Function`.
+pub type UiWrite = unsafe extern "C" fn(*mut c_void, u32, u32, u32, *const c_void);
+
+/// `LV2UI_Descriptor`.
+#[repr(C)]
+pub struct UiDescriptor {
+    pub uri: *const c_char,
+    pub instantiate: unsafe extern "C" fn(
+        *const UiDescriptor,
+        *const c_char,
+        *const c_char,
+        UiWrite,
+        *mut c_void,
+        *mut *mut c_void,
+        *const *const Feature,
+    ) -> *mut c_void,
+    pub cleanup: unsafe extern "C" fn(*mut c_void),
+    pub port_event: Option<unsafe extern "C" fn(*mut c_void, u32, u32, u32, *const c_void)>,
+    pub extension_data: Option<unsafe extern "C" fn(*const c_char) -> *const c_void>,
+}
+
+/// `LV2UI_Resize`, a feature of the host's and an interface of the UI's.
+#[repr(C)]
+pub struct UiResize {
+    pub handle: *mut c_void,
+    pub ui_resize: unsafe extern "C" fn(*mut c_void, i32, i32) -> i32,
+}
+
+/// `LV2UI_Port_Map`.
+#[repr(C)]
+pub struct UiPortMap {
+    pub handle: *mut c_void,
+    pub port_index: unsafe extern "C" fn(*mut c_void, *const c_char) -> u32,
+}
+
+/// `LV2UI_Touch`.
+#[repr(C)]
+pub struct UiTouch {
+    pub handle: *mut c_void,
+    pub touch: unsafe extern "C" fn(*mut c_void, u32, bool),
+}
+
+/// `LV2UI_Idle_Interface`.
+#[repr(C)]
+pub struct UiIdle {
+    pub idle: unsafe extern "C" fn(*mut c_void) -> i32,
+}
+
 pub type GetPortValue =
     unsafe extern "C" fn(*const c_char, *mut c_void, *mut u32, *mut u32) -> *const c_void;
 pub type SetPortValue = unsafe extern "C" fn(*const c_char, *mut c_void, *const c_void, u32, u32);

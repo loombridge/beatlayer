@@ -25,7 +25,6 @@ mod features;
 mod host;
 mod node;
 mod sys;
-#[cfg(all(unix, not(target_os = "macos")))]
 mod ui;
 
 use std::ffi::{CStr, CString, c_char, c_void};
@@ -1193,6 +1192,10 @@ impl StateHandle {
         &self.ports
     }
 
+    fn ports_shared(&self) -> Arc<[PortInfo]> {
+        Arc::clone(&self.ports)
+    }
+
     /// A control port's value as of the end of the plug-in's last block.
     pub fn control(&self, index: u32) -> f32 {
         self.mirror
@@ -1203,6 +1206,17 @@ impl StateHandle {
     /// The latency the plug-in reported in its last block, in frames.
     pub fn latency(&self) -> u32 {
         self.latency.map_or(0, |port| self.control(port as u32).max(0.0) as u32)
+    }
+
+    /// What an editor of the plug-in is given: the URID map and unmap, and the
+    /// plug-in's own handle, for the UIs that ask for instance access.
+    fn ui_support(&self) -> ui::Support {
+        ui::Support {
+            map: self.core.shared.map_ptr(),
+            unmap: self.core.shared.unmap_ptr(),
+            // SAFETY: `raw` is live as long as the core is.
+            instance: unsafe { (*self.core.raw).handle },
+        }
     }
 
     /// The plug-in's state as text, as [`Instance::save_state`].

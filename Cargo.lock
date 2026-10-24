@@ -854,6 +854,7 @@ dependencies = [
  "bl-devices",
  "bl-dsp",
  "bl-media",
+ "bl-midi-tools",
  "bl-model",
  "bl-rt",
  "bl-stretch",

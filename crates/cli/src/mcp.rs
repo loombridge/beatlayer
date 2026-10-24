@@ -87,7 +87,7 @@ pub fn run(args: &McpArgs) -> Outcome {
     bl_agent::stdio::serve(
         &mut agent,
         &mut shell,
-        io::stdin().lock(),
+        io::BufReader::new(io::stdin()),
         io::stdout().lock(),
     )
     .map_err(|error| format!("the agent API's input or output failed: {error}"))?;

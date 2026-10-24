@@ -6649,6 +6649,7 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
 | `mappings` | array of [`Mapping`](#mapping) | no | The parameters a modulator maps, one per slot (the modulation spec, R19). Left out of the saved set for a device that maps none. |
 | `media` | array of [`ContentHash`](#contenthash) or null | no | The media the device plays, by content hash, one entry per sample slot (WP-2.16, WP-5.17): the sampler's sample is slot 0, the eight-slot drum sampler's slots are 0 to 7. The media store holds each like a clip's audio (the sampler spec, R11). A slot with no sample is `None`, and the list never ends in one. Left out of the saved set for a device that plays none; a set saved before slots existed holds one hash, which loads as slot 0. |
 | `midi_sidechain` | [`MidiSidechain`](#midisidechain) or null | no | The device's MIDI sidechain input, if its type declares one (the routing spec, R32): a MIDI track whose notes and channel messages the device hears beside its audio. Left out of the saved set for a device without one. |
+| `mpe` | [`PluginMpe`](#pluginmpe) | no | A plug-in's MPE Mode and the MPE/Multi-channel Settings its MPE MIDI goes out on (the MPE spec, R14, R18). Off in a new device, and left out of the saved set until changed. Native devices never set it. |
 | `other_params` | array or null | no | The values of the state that isn't active, in the same form as [`params`](Self::params) (device compare R1, R10). `None` while the two states are equal, as a new device's are, and left out of the saved set then. Use [`other_params`](Self::other_params) to read it. |
 | `own_name` | string | no | The device's own name, such as `Auto Filter`, which the title bar shows while Show Preset Name is off. Empty while it's the same as [`name`](Self::name), and left out of the saved set then. |
 | `plugin` | [`PluginState`](#pluginstate) or null | no | A plug-in's own state and where it was loaded from (WP-2.6), as last saved with the set. Left out of the saved set for a native device, and for a plug-in until the set is first saved with it. |
@@ -6761,6 +6762,10 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
         }
       ],
       "description": "The device's MIDI sidechain input, if its type declares one (the routing spec, R32): a MIDI track whose notes and channel messages the device hears beside its audio. Left out of the saved set for a device without one."
+    },
+    "mpe": {
+      "$ref": "#/$defs/PluginMpe",
+      "description": "A plug-in's MPE Mode and the MPE/Multi-channel Settings its MPE MIDI goes out on (the MPE spec, R14, R18). Off in a new device, and left out of the saved set until changed. Native devices never set it."
     },
     "name": {
       "description": "The name the title bar shows while Show Preset Name is on: the device's own name until a preset or Rename gives it another.",
@@ -9884,7 +9889,7 @@ One of:
 
 ### `External`
 
-An external device's routing: `port` (MIDI To, the MIDI output port's name as the MIDI settings list it; absent for No Output), `channel` (the MIDI channel, 1 to 16), `audio_from` (the audio interface's inputs it comes back on, a channel or a pair), and `hardware_latency`.
+An external device's routing: `port` (MIDI To, the MIDI output port's name as the MIDI settings list it; absent for No Output), `channel` (the MIDI channel, 1 to 16), `mpe` (the MPE/Multi-channel Settings when MPE is chosen in place of a channel), `audio_from` (the audio interface's inputs it comes back on, a channel or a pair), and `hardware_latency`.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -9892,13 +9897,14 @@ An external device's routing: `port` (MIDI To, the MIDI output port's name as th
 | `audio_to` | [`Channel`](#channel) or null | no | Audio To: the interface's outputs an external effect sends its signal to, the first pair on a new effect. `None` for an external instrument: it sends notes, not audio. |
 | `channel` | integer from 0 to 255 | no | The MIDI channel, 1 to 16: 1 on a new device. |
 | `hardware_latency` | [`HardwareLatency`](#hardwarelatency) | no | Hardware Latency: 0 ms on a new device. |
+| `mpe` | [`MpeSettings`](#mpesettings) or null | no | MPE, chosen after the 16 channels in the channel chooser, with the MPE/Multi-channel Settings the notes go out on (the MPE spec, R19). `None` sends on `channel`. |
 | `port` | string or null | no | MIDI To: the output port, by name, or `None` for No Output (a new device's). The device keeps the name while the port is away. |
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "An external device's routing: `port` (MIDI To, the MIDI output port's name as the MIDI settings list it; absent for No Output), `channel` (the MIDI channel, 1 to 16), `audio_from` (the audio interface's inputs it comes back on, a channel or a pair), and `hardware_latency`.",
+  "description": "An external device's routing: `port` (MIDI To, the MIDI output port's name as the MIDI settings list it; absent for No Output), `channel` (the MIDI channel, 1 to 16), `mpe` (the MPE/Multi-channel Settings when MPE is chosen in place of a channel), `audio_from` (the audio interface's inputs it comes back on, a channel or a pair), and `hardware_latency`.",
   "properties": {
     "audio_from": {
       "$ref": "#/$defs/Channel",
@@ -9925,6 +9931,17 @@ An external device's routing: `port` (MIDI To, the MIDI output port's name as th
     "hardware_latency": {
       "$ref": "#/$defs/HardwareLatency",
       "description": "Hardware Latency: 0 ms on a new device."
+    },
+    "mpe": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/MpeSettings"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "MPE, chosen after the 16 channels in the channel chooser, with the MPE/Multi-channel Settings the notes go out on (the MPE spec, R19). `None` sends on `channel`."
     },
     "port": {
       "description": "MIDI To: the output port, by name, or `None` for No Output (a new device's). The device keeps the name while the port is away.",
@@ -16250,12 +16267,12 @@ A device's MIDI sidechain section, in the same left strip as a sidechain's (WP-5
 
 ### `MidiTo`
 
-Where a MIDI track's MIDI goes: another MIDI track (its ID), or an output port, `{ "name": "Synth", "channel": 1 }`: the MIDI output port's name as the MIDI settings list it, and the channel to send on, 1 to 16.
+Where a MIDI track's MIDI goes: another MIDI track (its ID), or an output port, `{ "name": "Synth", "channel": 1 }`: the MIDI output port's name as the MIDI settings list it, and the channel to send on, 1 to 16; with `mpe` (the MPE/Multi-channel Settings, `{}` for the new ones) the track sends MPE MIDI in place of one channel.
 
 One of:
 
 - [`TrackId`](#trackid): Another MIDI track's Track In.
-- an object with `name` (string), `channel` (integer from 0 to 255): A MIDI output port, by the name the MIDI system gives it, and the channel everything is sent on. The track keeps the name while the port is away and sends again when a port of that name returns.
+- an object with `name` (string), `channel` (integer from 0 to 255), `mpe` ([`MpeSettings`](#mpesettings) or null): A MIDI output port, by the name the MIDI system gives it, and the channel everything is sent on. The track keeps the name while the port is away and sends again when a port of that name returns.
 
 <details><summary>JSON Schema</summary>
 
@@ -16276,6 +16293,17 @@ One of:
           "minimum": 0,
           "type": "integer"
         },
+        "mpe": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MpeSettings"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "MPE, chosen after the 16 channels in the channel chooser, with the MPE/Multi-channel Settings the notes go out on (the MPE spec, R19); `None` sends on `channel`."
+        },
         "name": {
           "description": "The port's name, as the MIDI settings list it.",
           "type": "string"
@@ -16288,7 +16316,7 @@ One of:
       "type": "object"
     }
   ],
-  "description": "Where a MIDI track's MIDI goes: another MIDI track (its ID), or an output port, `{ \"name\": \"Synth\", \"channel\": 1 }`: the MIDI output port's name as the MIDI settings list it, and the channel to send on, 1 to 16."
+  "description": "Where a MIDI track's MIDI goes: another MIDI track (its ID), or an output port, `{ \"name\": \"Synth\", \"channel\": 1 }`: the MIDI output port's name as the MIDI settings list it, and the channel to send on, 1 to 16; with `mpe` (the MPE/Multi-channel Settings, `{}` for the new ones) the track sends MPE MIDI in place of one channel."
 }
 ```
 
@@ -17076,6 +17104,187 @@ One of:
     {
       "const": "off",
       "description": "The input is never heard.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `MpeMode`
+
+Whether the notes go out in a zone, or on a range of channels.
+
+One of:
+
+- `"zone"`: One zone of master and note channels.
+- `"multi_channel"`: Multi-channel mode: notes on the channels of a range, with no master.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Whether the notes go out in a zone, or on a range of channels.",
+  "oneOf": [
+    {
+      "const": "zone",
+      "description": "One zone of master and note channels.",
+      "type": "string"
+    },
+    {
+      "const": "multi_channel",
+      "description": "Multi-channel mode: notes on the channels of a range, with no master.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `MpeSettings`
+
+MPE/Multi-channel Settings: `mode` (`zone` or `multi_channel`), `zone` (`lower` with master channel 1, or `upper` with 16) and `channels` (its note channels, 1 to 15) for a zone; `first` and `last` (1 to 16) for multi-channel mode. Anything left out takes the new settings' value: the lower zone with 15 note channels.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `channels` | integer from 0 to 255 | no | The zone's number of note channels, 1 to 15. |
+| `first` | integer from 0 to 255 | no | Multi-channel mode's first channel, 1 to 16. |
+| `last` | integer from 0 to 255 | no | Its last channel, 1 to 16, not below the first. |
+| `mode` | [`MpeMode`](#mpemode) | no | Zone or multi-channel mode. |
+| `zone` | [`MpeZone`](#mpezone) | no | The zone, in zone mode. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "additionalProperties": false,
+  "description": "MPE/Multi-channel Settings: `mode` (`zone` or `multi_channel`), `zone` (`lower` with master channel 1, or `upper` with 16) and `channels` (its note channels, 1 to 15) for a zone; `first` and `last` (1 to 16) for multi-channel mode. Anything left out takes the new settings' value: the lower zone with 15 note channels.",
+  "properties": {
+    "channels": {
+      "description": "The zone's number of note channels, 1 to 15.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "first": {
+      "description": "Multi-channel mode's first channel, 1 to 16.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "last": {
+      "description": "Its last channel, 1 to 16, not below the first.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "mode": {
+      "$ref": "#/$defs/MpeMode",
+      "description": "Zone or multi-channel mode."
+    },
+    "zone": {
+      "$ref": "#/$defs/MpeZone",
+      "description": "The zone, in zone mode."
+    }
+  },
+  "type": "object"
+}
+```
+
+</details>
+
+### `MpeSettingsDialog`
+
+What `plugin.show_mpe_settings` returns: whether the dialog is open and what it edits.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `open` | boolean | yes | Whether the dialog is open. |
+| `device` | [`DeviceId`](#deviceid) or null | no | The plug-in or External Instrument device it edits, if it edits one. |
+| `settings` | [`MpeSettings`](#mpesettings) or null | no | The settings it shows, while it is open. |
+| `track` | [`TrackId`](#trackid) or null | no | The track whose MIDI To it edits, if it edits one. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `plugin.show_mpe_settings` returns: whether the dialog is open and what it edits.",
+  "properties": {
+    "device": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DeviceId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The plug-in or External Instrument device it edits, if it edits one."
+    },
+    "open": {
+      "description": "Whether the dialog is open.",
+      "type": "boolean"
+    },
+    "settings": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/MpeSettings"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The settings it shows, while it is open."
+    },
+    "track": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TrackId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The track whose MIDI To it edits, if it edits one."
+    }
+  },
+  "required": [
+    "open"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `MpeZone`
+
+Which end of the channels a zone's master channel is on.
+
+One of:
+
+- `"lower"`: Master channel 1, note channels 2 and up.
+- `"upper"`: Master channel 16, note channels 15 and down.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Which end of the channels a zone's master channel is on.",
+  "oneOf": [
+    {
+      "const": "lower",
+      "description": "Master channel 1, note channels 2 and up.",
+      "type": "string"
+    },
+    {
+      "const": "upper",
+      "description": "Master channel 16, note channels 15 and down.",
       "type": "string"
     }
   ]
@@ -19316,6 +19525,7 @@ What `plugin.info` and `plugin.show_window` return.
 | `window_open` | boolean | yes | Whether its window is open. |
 | `window_shown` | boolean | yes | Whether its window is shown: open, and not hidden by View ▸ Plug-In Windows or Auto-Hide Plug-In Windows. Hiding is not closing: a hidden window is still open. |
 | `values` | array of pair of [`ParamId`](#paramid) and number | yes | Each parameter's value, as the plug-in itself reports it, as `[parameter, value]` pairs. |
+| `mpe` | [`PluginMpe`](#pluginmpe) | yes | Its MPE Mode and the MPE/Multi-channel Settings its MPE MIDI goes out on (the MPE spec, R14, R18). |
 | `failure` | string or null | no | What went wrong, if anything: it couldn't be found or loaded, refused to activate (the device passes its input through), or failed while processing (the device is silent). |
 | `window` | [`WindowFrame`](#windowframe) or null | no | Where its window sits and how big it is, once it has been placed (`plugin.set_window`); `null` until then. Saved with the set beside the document, so moving or resizing is never an undo step (WP-2.10; as [`FloatingWindow`](crate::devices::FloatingWindow)). |
 
@@ -19349,6 +19559,13 @@ What `plugin.info` and `plugin.show_window` return.
       "format": "uint32",
       "minimum": 0,
       "type": "integer"
+    },
+    "mpe": {
+      "$ref": "#/$defs/PluginMpe",
+      "default": {
+        "on": false
+      },
+      "description": "Its MPE Mode and the MPE/Multi-channel Settings its MPE MIDI goes out on (the MPE spec, R14, R18)."
     },
     "path": {
       "description": "The file it was loaded from.",
@@ -19405,7 +19622,8 @@ What `plugin.info` and `plugin.show_window` return.
     "has_window",
     "window_open",
     "window_shown",
-    "values"
+    "values",
+    "mpe"
   ],
   "type": "object"
 }
@@ -19492,6 +19710,74 @@ What `plugin.load` returns.
     "new_track",
     "plugin",
     "name"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PluginMpe`
+
+A plug-in device's MPE: `on` (MPE Mode, off in a new device) and `settings` (the MPE/Multi-channel Settings; left out while they are the new settings').
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean | yes | MPE Mode. |
+| `settings` | [`MpeSettings`](#mpesettings) | no | The settings MPE MIDI goes out on, left out while they are the new settings'. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "additionalProperties": false,
+  "description": "A plug-in device's MPE: `on` (MPE Mode, off in a new device) and `settings` (the MPE/Multi-channel Settings; left out while they are the new settings').",
+  "properties": {
+    "on": {
+      "description": "MPE Mode.",
+      "type": "boolean"
+    },
+    "settings": {
+      "$ref": "#/$defs/MpeSettings",
+      "description": "The settings MPE MIDI goes out on, left out while they are the new settings'."
+    }
+  },
+  "required": [
+    "on"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PluginMpeState`
+
+What `plugin.set_mpe` and `plugin.set_mpe_settings` return: the device and its MPE Mode and settings now.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `mpe` | [`PluginMpe`](#pluginmpe) | yes | Its MPE Mode and settings. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `plugin.set_mpe` and `plugin.set_mpe_settings` return: the device and its MPE Mode and settings now.",
+  "properties": {
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device."
+    },
+    "mpe": {
+      "$ref": "#/$defs/PluginMpe",
+      "description": "Its MPE Mode and settings."
+    }
+  },
+  "required": [
+    "device",
+    "mpe"
   ],
   "type": "object"
 }

@@ -361,6 +361,7 @@ pub fn info(
             window_shown: status.editor_open && !status.editor_hidden,
             window: None,
             values: status.values,
+            mpe: bl_model::PluginMpe::default(),
         });
     }
     let status = vst3.status(device)?;
@@ -376,6 +377,7 @@ pub fn info(
         window_shown: status.editor_open && !status.editor_hidden,
         window: None,
         values: status.values,
+        mpe: bl_model::PluginMpe::default(),
     })
 }
 

@@ -13,6 +13,7 @@ mod common;
 mod editor;
 mod engine;
 mod midi_effect;
+mod mpe;
 mod offline;
 mod offline_au;
 mod offline_vst3;

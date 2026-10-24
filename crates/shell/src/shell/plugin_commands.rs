@@ -1,6 +1,6 @@
 //! The plug-in commands and loading a plug-in from the Browser.
 
-use super::{Effect, Shell, ShellError, to_value};
+use super::{Effect, MpeDialogTarget, Shell, ShellError, to_value};
 use crate::devices;
 use crate::devices::DeviceView;
 use bl_model::AutomationTarget;
@@ -38,6 +38,14 @@ impl Shell {
                     // WP-2.10: where the window sits, from the frame store
                     // the set keeps.
                     info.window = shell.devices.window_frame(device);
+                    // Spec: mpe R14. Its MPE Mode and settings are the
+                    // device's.
+                    info.mpe = shell
+                        .editor
+                        .document()
+                        .device(device)
+                        .map(|d| d.mpe)
+                        .unwrap_or_default();
                     to_value(&info)
                 })
                 .ok_or_else(|| unavailable(format!("{device}'s plug-in hasn't started yet")))
@@ -256,6 +264,88 @@ impl Shell {
                 }
                 self.touch();
                 info(self, device)
+            }
+            plugin_ids::SET_MPE | plugin_ids::SET_MPE_SETTINGS => {
+                // Spec: mpe R14, R18.
+                let (device, change): (_, Box<dyn Fn(bl_model::PluginMpe) -> bl_model::PluginMpe>) =
+                    if id == plugin_ids::SET_MPE {
+                        let plugin_ids::SetMpeArgs { device, on } = Self::args(id, args)?;
+                        (
+                            device,
+                            Box::new(move |mpe| bl_model::PluginMpe {
+                                on: on.unwrap_or(!mpe.on),
+                                ..mpe
+                            }),
+                        )
+                    } else {
+                        let plugin_ids::SetMpeSettingsArgs { device, settings } =
+                            Self::args(id, args)?;
+                        (
+                            device,
+                            Box::new(move |mpe| bl_model::PluginMpe { settings, ..mpe }),
+                        )
+                    };
+                let device = target(self, device)?;
+                let current = self
+                    .editor
+                    .document()
+                    .device(device)
+                    .map(|d| d.mpe)
+                    .ok_or_else(|| unavailable(format!("no {device}")))?;
+                let mpe = change(current);
+                let label = if id == plugin_ids::SET_MPE {
+                    "Change MPE Mode"
+                } else {
+                    "Change MPE Settings"
+                };
+                self.editor
+                    .transact(label, |e| {
+                        e.apply(bl_model::Command::SetPluginMpe { device, mpe })
+                    })
+                    .map_err(|error| ShellError::InvalidArgs {
+                        command: id.to_owned(),
+                        message: error.to_string(),
+                    })?;
+                self.dirty = true;
+                self.document_changed();
+                self.touch();
+                Ok(to_value(&plugin_ids::PluginMpeState { device, mpe }))
+            }
+            plugin_ids::SHOW_MPE_SETTINGS => {
+                let plugin_ids::ShowMpeSettingsArgs {
+                    device,
+                    track,
+                    shown,
+                } = Self::args(id, args)?;
+                let wanted = match (device, track) {
+                    (Some(_), Some(_)) => {
+                        return Err(ShellError::InvalidArgs {
+                            command: id.to_owned(),
+                            message: "give a device or a track, not both".to_owned(),
+                        });
+                    }
+                    (None, Some(track)) => Some(MpeDialogTarget::Track(track)),
+                    (device, None) => device
+                        .or(self.devices.selected())
+                        .map(MpeDialogTarget::Device),
+                };
+                if shown == Some(false) {
+                    self.mpe_dialog = None;
+                } else {
+                    let target = wanted
+                        .ok_or_else(|| unavailable("select a plug-in device first".to_owned()))?;
+                    let previous = self.mpe_dialog.replace(target);
+                    if self.mpe_settings_dialog().settings.is_none() {
+                        self.mpe_dialog = previous;
+                        return Err(unavailable(
+                            "it has no MPE/Multi-channel Settings: a plug-in device, an \
+                             External Instrument or a MIDI track set to MPE has them"
+                                .to_owned(),
+                        ));
+                    }
+                }
+                self.touch();
+                Ok(to_value(&self.mpe_settings_dialog()))
             }
             plugin_ids::INFO => {
                 let plugin_ids::PluginInfoArgs { device } = Self::args(id, args)?;
@@ -797,6 +887,45 @@ impl Shell {
                 self.document_changed();
                 Err(error)
             }
+        }
+    }
+}
+
+impl Shell {
+    /// The MPE/Multi-channel Settings dialog (the MPE spec, R18): whether
+    /// it's open, what it edits, and the settings it shows. It closes by
+    /// itself when what it edits has gone or no longer sends MPE.
+    #[must_use]
+    pub fn mpe_settings_dialog(&self) -> plugin_ids::MpeSettingsDialog {
+        let document = self.editor.document();
+        let (device, track, settings) = match self.mpe_dialog {
+            None => return plugin_ids::MpeSettingsDialog::default(),
+            Some(MpeDialogTarget::Device(id)) => {
+                let settings = document.device(id).and_then(|device| {
+                    if matches!(device.kind, bl_model::DeviceKind::Plugin { .. }) {
+                        Some(device.mpe.settings)
+                    } else {
+                        device.external.as_ref().and_then(|external| external.mpe)
+                    }
+                });
+                (Some(id), None, settings)
+            }
+            Some(MpeDialogTarget::Track(id)) => {
+                let settings =
+                    document
+                        .track(id)
+                        .and_then(|track| match &track.routing().midi_output {
+                            Some(bl_model::MidiTo::Port { mpe, .. }) => *mpe,
+                            _ => None,
+                        });
+                (None, Some(id), settings)
+            }
+        };
+        plugin_ids::MpeSettingsDialog {
+            open: settings.is_some(),
+            device,
+            track,
+            settings,
         }
     }
 }

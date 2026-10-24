@@ -1687,6 +1687,7 @@ fn activate(instance: &mut Instance, config: &NodeConfig) -> Result<node::Active
         out_channels,
         params: instance.params.iter().map(|p| p.map).collect(),
         midi: midi_map(&instance.controller),
+        expressions: note_expressions(&instance.controller),
         pending: std::mem::take(&mut instance.pending),
         drive: Driver::new(instance.params.iter().map(|p| {
             // Each control starts where the controller is: the set's values
@@ -1706,6 +1707,44 @@ fn activate(instance: &mut Instance, config: &NodeConfig) -> Result<node::Active
             (p.descriptor.clone(), false, control)
         })),
     })
+}
+
+/// The note expression types the controller takes (the VST3 hosting spec,
+/// R20): whether it implements `INoteExpressionController`, and the types its
+/// `INoteExpressionPhysicalUIMapping` gives a key's Y movement and its
+/// pressure. Asked once, here on the main thread.
+fn note_expressions(controller: &ComPtr<IEditController>) -> node::NoteExpressions {
+    if controller.cast::<INoteExpressionController>().is_none() {
+        return node::NoteExpressions::default();
+    }
+    let mut expressions = node::NoteExpressions {
+        controller: true,
+        ..node::NoteExpressions::default()
+    };
+    if let Some(mapping) = controller.cast::<INoteExpressionPhysicalUIMapping>() {
+        let invalid = NoteExpressionTypeIDs_::kInvalidTypeID;
+        let mut maps = [
+            PhysicalUIMap {
+                physicalUITypeID: PhysicalUITypeIDs_::kPUIYMovement,
+                noteExpressionTypeID: invalid,
+            },
+            PhysicalUIMap {
+                physicalUITypeID: PhysicalUITypeIDs_::kPUIPressure,
+                noteExpressionTypeID: invalid,
+            },
+        ];
+        let mut list = PhysicalUIMapList {
+            count: 2,
+            map: maps.as_mut_ptr(),
+        };
+        // SAFETY: the controller fills the list's maps it was given, from
+        // the main thread.
+        if unsafe { mapping.getPhysicalUIMapping(0, 0, &raw mut list) } == kResultOk {
+            expressions.slide = Some(maps[0].noteExpressionTypeID).filter(|t| *t != invalid);
+            expressions.pressure = Some(maps[1].noteExpressionTypeID).filter(|t| *t != invalid);
+        }
+    }
+    expressions
 }
 
 /// What the controller's `IMidiMapping` maps each channel's MIDI controllers

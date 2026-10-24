@@ -63,7 +63,12 @@ impl Document {
                 MidiTo::Track(to) => {
                     self.check_target(track, *to, |kind| kind == TrackKind::Midi)?;
                 }
-                MidiTo::Port { name, channel } => check_port(name, *channel)?,
+                MidiTo::Port { name, channel, mpe } => {
+                    check_port(name, *channel)?;
+                    if let Some(mpe) = mpe {
+                        mpe.check()?;
+                    }
+                }
             }
         }
         for device in track.devices_deep() {

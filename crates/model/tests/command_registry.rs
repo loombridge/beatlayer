@@ -366,7 +366,8 @@ fn every_command_runs_by_id() {
             .midi_output,
         Some(MidiTo::Port {
             name: "Synth".to_owned(),
-            channel: 3
+            channel: 3,
+            mpe: None
         })
     );
     agent.run(
@@ -3367,6 +3368,7 @@ fn schemas_match_what_commands_serialise() {
                 params: [(ParamId(4), 0.5)].into_iter().collect(),
                 name: "Warm Pad".to_owned(),
                 shape: None,
+                mpe: None,
             },
         ),
         (
@@ -3711,6 +3713,7 @@ fn schemas_match_what_commands_serialise() {
                     name: "Synth".to_owned(),
                 }),
                 channel: Some(2),
+                mpe: None,
                 audio_from: Some(Channel::Pair(3)),
                 hardware_latency: Some(HardwareLatency::Samples { value: 96 }),
             },

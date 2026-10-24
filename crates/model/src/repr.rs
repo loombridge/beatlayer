@@ -2000,6 +2000,7 @@ mod tests {
         let by_port = set(Some(MidiTo::Port {
             name: "Synth".to_owned(),
             channel: 3,
+            mpe: None,
         }));
         assert_eq!(routing(&by_port), json!({ "name": "Synth", "channel": 3 }));
         for (value, expected) in [
@@ -2010,6 +2011,7 @@ mod tests {
                 Some(MidiTo::Port {
                     name: "Synth".to_owned(),
                     channel: 3,
+                    mpe: None,
                 }),
             ),
         ] {
@@ -2022,6 +2024,7 @@ mod tests {
             let to = Some(MidiTo::Port {
                 name: name.to_owned(),
                 channel,
+                mpe: None,
             });
             assert!(
                 editor
@@ -2056,6 +2059,7 @@ mod tests {
                 device: outboard,
                 midi_to: None,
                 channel: Some(2),
+                mpe: None,
                 audio_from: None,
                 audio_to: None,
                 hardware_latency: Some(HardwareLatency::Samples { value: 64 }),

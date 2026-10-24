@@ -1318,6 +1318,32 @@ impl DeviceViewUi {
             }
             crate::menus::take_focus_first(ui, &response);
         }
+        // Spec: mpe R14, R18 (C-DEVICE-015). A plug-in's MPE Mode, ticked
+        // while it's on, and the MPE/Multi-channel Settings.
+        if let Some(mpe) = frame.mpe {
+            ui.separator();
+            let response = ui.button(if mpe.on { "✔ MPE Mode" } else { "MPE Mode" });
+            crate::menus::register_item(ui.ctx(), &response);
+            if response.clicked() {
+                invoke(
+                    events,
+                    bl_shell::plugin_commands::SET_MPE,
+                    json!({ "device": frame.id }),
+                );
+                ui.close();
+            }
+            crate::menus::take_focus_first(ui, &response);
+            let response = ui.button("MPE Settings…");
+            crate::menus::register_item(ui.ctx(), &response);
+            if response.clicked() {
+                invoke(
+                    events,
+                    bl_shell::plugin_commands::SHOW_MPE_SETTINGS,
+                    json!({ "device": frame.id }),
+                );
+                ui.close();
+            }
+        }
         // Drum Sampler's own items after its switches (31.4.5): the swap to
         // Simpler, and Save as Default Pad, which the Drum Rack's pads
         // (T145) bring.

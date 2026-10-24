@@ -63,6 +63,9 @@ pub struct Preset {
     /// An Articulation Map's articulations (the articulation map spec, R16),
     /// in order; `None` for any other device.
     pub articulations: Option<Vec<bl_model::Articulation>>,
+    /// A plug-in's MPE Mode and settings (the MPE spec, R14); `None` for
+    /// the default, off, and for any other device.
+    pub mpe: Option<bl_model::PluginMpe>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -77,6 +80,8 @@ struct File {
     shape: Option<Vec<bl_model::modulator::ShapePoint>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     articulations: Vec<bl_model::Articulation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    mpe: Option<bl_model::PluginMpe>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -143,6 +148,7 @@ impl Preset {
             params: device.params.clone(),
             shape: device.shape.clone(),
             articulations: (!device.articulations.is_empty()).then(|| device.articulations.clone()),
+            mpe: (!device.mpe.is_default()).then_some(device.mpe),
         }
     }
 
@@ -183,6 +189,7 @@ impl Preset {
             params: self.params.iter().map(|(&p, &v)| (p, v)).collect(),
             shape: self.shape.clone(),
             articulations: self.articulations.clone().unwrap_or_default(),
+            mpe: self.mpe,
         };
         let mut bytes = serde_json::to_vec_pretty(&file).unwrap_or_default();
         bytes.push(b'\n');
@@ -255,6 +262,10 @@ impl Preset {
             params,
             shape: file.shape,
             articulations: (!file.articulations.is_empty()).then_some(file.articulations),
+            mpe: match file.mpe {
+                Some(mpe) if mpe.settings.check().is_ok() => Some(mpe),
+                _ => None,
+            },
         })
     }
 

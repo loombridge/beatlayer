@@ -29,6 +29,18 @@
 //!   the pitch bend on channel 3 to the gain, as `IMidiMapping`, so the host
 //!   can send a channel message as a parameter change.
 //!
+//! - **Note expression.** Every note-on, note-off, note expression value,
+//!   polyphonic pressure and parameter change it receives is logged, with
+//!   its frame (counted from the plug-in's activation), to the file
+//!   [`LOG_VAR`] names; each note expression value and polyphonic pressure
+//!   goes back out as it came. With [`EXPRESSIONS_VAR`] set its controller
+//!   implements `INoteExpressionController` (tuning, brightness and, by
+//!   default, a custom pressure) and `INoteExpressionPhysicalUIMapping`
+//!   (the key's Y movement drives brightness, its pressure the custom
+//!   type); with [`MAPPING_VAR`] set its `IMidiMapping` maps each channel's
+//!   pitch bend, control change 74 and channel pressure to parameters of
+//!   their own.
+//!
 //! The editor itself is the next part's (WP-2.10).
 
 use std::cell::{Cell, UnsafeCell};
@@ -79,6 +91,36 @@ const ACTIVATE_FAILS: u8 = 2;
 
 /// How many channels the plug-in delays, at most.
 const MAX_CHANNELS: usize = 2;
+
+/// The environment variable a test sets to the file the plug-in logs what it
+/// receives to, one line each: `frame=<n> <on|off|expression:<type>|
+/// pressure|param:<id>> channel=<c> key=<k> id=<note ID, -1 for none>
+/// value=<v>`. Unset for no log.
+pub const LOG_VAR: &str = "BL_TEST_VST3_LOG";
+
+/// The environment variable a test sets to `on` so the controller
+/// implements note expression, or to `no-pressure` so its physical mapping
+/// leaves the key's pressure unmapped. Unset for a controller without it.
+pub const EXPRESSIONS_VAR: &str = "BL_TEST_VST3_EXPRESSIONS";
+
+/// The environment variable a test sets (to anything) so the controller's
+/// MIDI mapping maps channels 2 to 16's pitch bend, control change 74 and
+/// channel pressure to [`mapped_param`]s.
+pub const MAPPING_VAR: &str = "BL_TEST_VST3_MAPPING";
+
+/// The note expression type the controller gives pressure.
+pub const PRESSURE_TYPE: u32 = 100_000;
+/// The note expression types it gives tuning and brightness: VST3's own.
+pub const TUNING_TYPE: u32 = 2;
+pub const BRIGHTNESS_TYPE: u32 = 5;
+
+/// The parameter the MIDI mapping gives `channel`'s (0 to 15) pitch bend
+/// (`what` 0), control change 74 (1) or channel pressure (2), when
+/// [`MAPPING_VAR`] is set.
+#[must_use]
+pub const fn mapped_param(channel: u32, what: u32) -> u32 {
+    100 + channel * 3 + what
+}
 
 /// The environment variable a test sets so a scan crashes (`crash`) or hangs
 /// (`hang`) on purpose, as `bl-test-clap` does for CLAP. Only the scanner's
@@ -262,6 +304,8 @@ struct Processor {
     failure: AtomicU8,
     /// The delay ring's write cursor, shared by its channels.
     at: Cell<usize>,
+    /// Frames processed, for the log.
+    frames: AtomicU64,
     /// One ring of [`MAX_LATENCY`] frames per channel.
     delay: UnsafeCell<Vec<f32>>,
 }
@@ -284,6 +328,7 @@ impl Processor {
             active_latency: AtomicU32::new(0),
             failure: AtomicU8::new(NO_FAILURE),
             at: Cell::new(0),
+            frames: AtomicU64::new(0),
             delay: UnsafeCell::new(vec![0.0; MAX_CHANNELS * MAX_LATENCY]),
         }
     }
@@ -300,6 +345,27 @@ impl Processor {
     fn set_latency_normalized(&self, value: f64) {
         let frames = to_plain(LATENCY, value).clamp(0.0, MAX_LATENCY as f64);
         self.latency.store(frames as u32, Ordering::Relaxed);
+    }
+
+    /// Appends a line to the log, if there is one: `at` frames into the
+    /// block that is being processed.
+    fn log(&self, at: i32, what: &str, channel: i32, key: i32, id: i32, value: f64) {
+        use std::io::Write;
+        let Some(path) = std::env::var_os(LOG_VAR) else {
+            return;
+        };
+        let Ok(mut file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+        else {
+            return;
+        };
+        let _ = writeln!(
+            file,
+            "frame={} {what} channel={channel} key={key} id={id} value={value}",
+            self.frames.load(Ordering::Relaxed) + u64::try_from(at.max(0)).unwrap_or(0),
+        );
     }
 
     /// One frame through the delay ring, at the latency in force.
@@ -339,7 +405,7 @@ impl IPluginBaseTrait for Processor {
 impl IComponentTrait for Processor {
     unsafe fn getControllerClassId(&self, class_id: *mut TUID) -> tresult {
         // SAFETY: the host passes a valid pointer for the call.
-        unsafe { *class_id = Controller::CID };
+        unsafe { *class_id = Controller::<false>::CID };
         kResultOk
     }
 
@@ -684,6 +750,7 @@ impl IAudioProcessorTrait for Processor {
                     if !value.is_finite() {
                         continue;
                     }
+                    self.log(offset, &format!("param:{}", ids[index]), -1, -1, -1, value);
                     match ids[index] {
                         GAIN => self.set_gain_normalized(value),
                         LATENCY => self.set_latency_normalized(value),
@@ -720,6 +787,14 @@ impl IAudioProcessorTrait for Processor {
                     match event.r#type as i32 {
                         x if x == Event_::EventTypes_::kNoteOnEvent as int32 => {
                             let note = event.__field0.noteOn;
+                            self.log(
+                                event.sampleOffset,
+                                "on",
+                                i32::from(note.channel),
+                                i32::from(note.pitch),
+                                note.noteId,
+                                f64::from(note.velocity),
+                            );
                             if offset < frames {
                                 for channel in out_channels.iter().take(pairs) {
                                     // SAFETY: the channel is `frames` long.
@@ -739,13 +814,45 @@ impl IAudioProcessorTrait for Processor {
                                         tuning: 0.0,
                                         velocity: note.velocity,
                                         length: 0,
-                                        noteId: -1,
+                                        noteId: note.noteId,
                                     },
                                 },
                             })
                         }
+                        x if x == Event_::EventTypes_::kNoteExpressionValueEvent as int32 => {
+                            let value = event.__field0.noteExpressionValue;
+                            self.log(
+                                event.sampleOffset,
+                                &format!("expression:{}", value.typeId),
+                                -1,
+                                -1,
+                                value.noteId,
+                                value.value,
+                            );
+                            Some(event)
+                        }
+                        x if x == Event_::EventTypes_::kPolyPressureEvent as int32 => {
+                            let pressure = event.__field0.polyPressure;
+                            self.log(
+                                event.sampleOffset,
+                                "pressure",
+                                i32::from(pressure.channel),
+                                i32::from(pressure.pitch),
+                                pressure.noteId,
+                                f64::from(pressure.pressure),
+                            );
+                            Some(event)
+                        }
                         x if x == Event_::EventTypes_::kNoteOffEvent as int32 => {
                             let note = event.__field0.noteOff;
+                            self.log(
+                                event.sampleOffset,
+                                "off",
+                                i32::from(note.channel),
+                                i32::from(note.pitch),
+                                note.noteId,
+                                f64::from(note.velocity),
+                            );
                             Some(Event {
                                 busIndex: 0,
                                 sampleOffset: event.sampleOffset,
@@ -757,7 +864,7 @@ impl IAudioProcessorTrait for Processor {
                                         channel: note.channel,
                                         pitch: (note.pitch + ECHO_TRANSPOSE).min(127),
                                         velocity: note.velocity,
-                                        noteId: -1,
+                                        noteId: note.noteId,
                                         tuning: 0.0,
                                     },
                                 },
@@ -773,6 +880,7 @@ impl IAudioProcessorTrait for Processor {
                 }
             }
         }
+        self.frames.fetch_add(frames as u64, Ordering::Relaxed);
         kResultOk
     }
 
@@ -784,7 +892,7 @@ impl IAudioProcessorTrait for Processor {
 /// The controller: the plug-in's parameters as a person or an agent sees
 /// them, and the gestures a change makes, as its editor's would. Its values
 /// are plain; VST3's are normalized.
-struct Controller {
+struct Controller<const EXPRESSIONS: bool> {
     gain: Cell<f64>,
     latency: Cell<f64>,
     last_note: Cell<f64>,
@@ -793,7 +901,7 @@ struct Controller {
     handler: Cell<*mut IComponentHandler>,
 }
 
-impl Controller {
+impl<const EXPRESSIONS: bool> Controller<EXPRESSIONS> {
     const CID: TUID = uid(0x1BA8A477, 0xEE0A4B2D, 0x80F50D14, 0x13D2EAA1);
 
     fn new() -> Self {
@@ -867,11 +975,119 @@ impl Controller {
     }
 }
 
-impl Class for Controller {
+impl Class for Controller<false> {
     type Interfaces = (IEditController, IMidiMapping);
 }
 
-impl IMidiMappingTrait for Controller {
+impl Class for Controller<true> {
+    type Interfaces = (
+        IEditController,
+        IMidiMapping,
+        INoteExpressionController,
+        INoteExpressionPhysicalUIMapping,
+    );
+}
+
+/// Whether the pressure type is on offer: [`EXPRESSIONS_VAR`] isn't
+/// `no-pressure`.
+fn has_pressure() -> bool {
+    std::env::var(EXPRESSIONS_VAR).as_deref() != Ok("no-pressure")
+}
+
+impl INoteExpressionControllerTrait for Controller<true> {
+    unsafe fn getNoteExpressionCount(&self, bus: int32, _channel: int16) -> int32 {
+        match (bus, has_pressure()) {
+            (0, true) => 3,
+            (0, false) => 2,
+            _ => 0,
+        }
+    }
+
+    unsafe fn getNoteExpressionInfo(
+        &self,
+        bus: int32,
+        _channel: int16,
+        index: int32,
+        info: *mut NoteExpressionTypeInfo,
+    ) -> tresult {
+        let (id, title, bipolar) = match (bus, index) {
+            (0, 0) => (TUNING_TYPE, "Tuning", true),
+            (0, 1) => (BRIGHTNESS_TYPE, "Brightness", false),
+            (0, 2) if has_pressure() => (PRESSURE_TYPE, "Pressure", false),
+            _ => return kInvalidArgument,
+        };
+        // SAFETY: the host passes a valid pointer for the call.
+        let info = unsafe { &mut *info };
+        info.typeId = id;
+        copy_wstring(title, &mut info.title);
+        copy_wstring(title, &mut info.shortTitle);
+        copy_wstring("", &mut info.units);
+        info.unitId = -1;
+        info.valueDesc = NoteExpressionValueDescription {
+            defaultValue: if bipolar { 0.5 } else { 0.0 },
+            minimum: 0.0,
+            maximum: 1.0,
+            stepCount: 0,
+        };
+        info.associatedParameterId = u32::MAX;
+        info.flags = if bipolar {
+            NoteExpressionTypeInfo_::NoteExpressionTypeFlags_::kIsBipolar as int32
+        } else {
+            0
+        };
+        kResultOk
+    }
+
+    unsafe fn getNoteExpressionStringByValue(
+        &self,
+        _bus: int32,
+        _channel: int16,
+        _id: NoteExpressionTypeID,
+        _value: NoteExpressionValue,
+        _string: *mut String128,
+    ) -> tresult {
+        kNotImplemented
+    }
+
+    unsafe fn getNoteExpressionValueByString(
+        &self,
+        _bus: int32,
+        _channel: int16,
+        _id: NoteExpressionTypeID,
+        _string: *const TChar,
+        _value: *mut NoteExpressionValue,
+    ) -> tresult {
+        kNotImplemented
+    }
+}
+
+impl INoteExpressionPhysicalUIMappingTrait for Controller<true> {
+    unsafe fn getPhysicalUIMapping(
+        &self,
+        bus: int32,
+        _channel: int16,
+        list: *mut PhysicalUIMapList,
+    ) -> tresult {
+        if bus != 0 || list.is_null() {
+            return kInvalidArgument;
+        }
+        // SAFETY: the host passes a list of `count` maps it owns for the
+        // call.
+        let list = unsafe { &*list };
+        for index in 0..list.count as usize {
+            // SAFETY: an index within the list's count.
+            let map = unsafe { &mut *list.map.add(index) };
+            map.noteExpressionTypeID = match map.physicalUITypeID {
+                PhysicalUITypeIDs_::kPUIYMovement => BRIGHTNESS_TYPE,
+                PhysicalUITypeIDs_::kPUIPressure if has_pressure() => PRESSURE_TYPE,
+                _ => NoteExpressionTypeIDs_::kInvalidTypeID,
+            };
+        }
+        kResultOk
+    }
+}
+
+impl<const EXPRESSIONS: bool> IMidiMappingTrait for Controller<EXPRESSIONS> {
     unsafe fn getMidiControllerAssignment(
         &self,
         bus: int32,
@@ -881,16 +1097,35 @@ impl IMidiMappingTrait for Controller {
     ) -> tresult {
         // Control change 1 on channel 1, and the pitch bend (129) on
         // channel 3.
-        let mapped = bus == 0 && matches!((channel, controller), (0, 1) | (2, 129));
+        let mut mapped = bus == 0
+            && matches!((channel, controller), (0, 1) | (2, 129))
+            && std::env::var_os(MAPPING_VAR).is_none();
+        let mut param = GAIN;
+        // Channels 2 to 16 give their pitch bend, control change 74 and
+        // channel pressure parameters of their own, when a test asks.
+        if !mapped
+            && bus == 0
+            && (1..16).contains(&channel)
+            && std::env::var_os(MAPPING_VAR).is_some()
+            && let Some(what) = match controller {
+                129 => Some(0),
+                74 => Some(1),
+                128 => Some(2),
+                _ => None,
+            }
+        {
+            mapped = true;
+            param = mapped_param(channel as u32, what);
+        }
         if mapped && !id.is_null() {
             // SAFETY: the host passes a valid out pointer.
-            unsafe { *id = GAIN };
+            unsafe { *id = param };
         }
         if mapped { kResultOk } else { kResultFalse }
     }
 }
 
-impl IPluginBaseTrait for Controller {
+impl<const EXPRESSIONS: bool> IPluginBaseTrait for Controller<EXPRESSIONS> {
     unsafe fn initialize(&self, _context: *mut FUnknown) -> tresult {
         kResultOk
     }
@@ -900,7 +1135,7 @@ impl IPluginBaseTrait for Controller {
     }
 }
 
-impl IEditControllerTrait for Controller {
+impl<const EXPRESSIONS: bool> IEditControllerTrait for Controller<EXPRESSIONS> {
     unsafe fn setComponentState(&self, state: *mut IBStream) -> tresult {
         let bytes = read_state(state);
         // The host told it "the component's state is none": nothing to follow.
@@ -1104,7 +1339,7 @@ impl IPluginFactoryTrait for Factory {
         let info = unsafe { &mut *info };
         let (cid, category) = match index {
             0 => (Processor::CID, "Audio Module Class"),
-            1 => (Controller::CID, "Component Controller Class"),
+            1 => (Controller::<false>::CID, "Component Controller Class"),
             _ => return kInvalidArgument,
         };
         info.cid = cid;
@@ -1124,8 +1359,12 @@ impl IPluginFactoryTrait for Factory {
         let class = unsafe { *(cid as *const TUID) };
         let instance: Option<ComPtr<FUnknown>> = if class == Processor::CID {
             ComWrapper::new(Processor::new()).to_com_ptr::<FUnknown>()
-        } else if class == Controller::CID {
-            ComWrapper::new(Controller::new()).to_com_ptr::<FUnknown>()
+        } else if class == Controller::<false>::CID {
+            if std::env::var_os(EXPRESSIONS_VAR).is_some() {
+                ComWrapper::new(Controller::<true>::new()).to_com_ptr::<FUnknown>()
+            } else {
+                ComWrapper::new(Controller::<false>::new()).to_com_ptr::<FUnknown>()
+            }
         } else {
             None
         };

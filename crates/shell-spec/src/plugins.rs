@@ -10,7 +10,9 @@
 
 use bl_commands::Context::{DeviceView, Global};
 use bl_commands::{CommandSpec, Permission, RegisterError, Registry};
-use bl_model::{DeviceId, DeviceRole, ParamId, PluginFormat, TrackId, WindowFrame};
+use bl_model::{
+    DeviceId, DeviceRole, MpeSettings, ParamId, PluginFormat, PluginMpe, TrackId, WindowFrame,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -40,6 +42,15 @@ pub const CONFIGURE_PARAM: &str = "plugin.configure_param";
 pub const UNCONFIGURE_PARAM: &str = "plugin.unconfigure_param";
 /// `plugin.move_configured_param`: reorders the configured list (WP-5.40).
 pub const MOVE_CONFIGURED_PARAM: &str = "plugin.move_configured_param";
+/// `plugin.set_mpe`: a plug-in device's MPE Mode (WP-6.17b, the MPE spec,
+/// R14).
+pub const SET_MPE: &str = "plugin.set_mpe";
+/// `plugin.set_mpe_settings`: the MPE/Multi-channel Settings of a plug-in
+/// device (the MPE spec, R18).
+pub const SET_MPE_SETTINGS: &str = "plugin.set_mpe_settings";
+/// `plugin.show_mpe_settings`: opens or closes the MPE/Multi-channel
+/// Settings dialog (the MPE spec, R18).
+pub const SHOW_MPE_SETTINGS: &str = "plugin.show_mpe_settings";
 /// `plugin.scan`: find the plug-ins installed on this machine (WP-2.9).
 pub const SCAN: &str = "plugin.scan";
 /// `plugin.rescan`: scan again, ignoring the cache (WP-2.9).
@@ -66,6 +77,9 @@ pub const IDS: &[&str] = &[
     CONFIGURE_PARAM,
     UNCONFIGURE_PARAM,
     MOVE_CONFIGURED_PARAM,
+    SET_MPE,
+    SET_MPE_SETTINGS,
+    SHOW_MPE_SETTINGS,
     SCAN,
     RESCAN,
     LIST,
@@ -197,6 +211,78 @@ pub struct PluginInfo {
     /// Each parameter's value, as the plug-in itself reports it, as
     /// `[parameter, value]` pairs.
     pub values: Vec<(ParamId, f64)>,
+    /// Its MPE Mode and the MPE/Multi-channel Settings its MPE MIDI goes
+    /// out on (the MPE spec, R14, R18).
+    #[serde(default)]
+    pub mpe: PluginMpe,
+}
+
+/// Arguments of `plugin.set_mpe`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetMpeArgs {
+    /// The device; the selected one if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// MPE Mode on (true) or off (false); switches if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on: Option<bool>,
+}
+
+/// Arguments of `plugin.set_mpe_settings`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetMpeSettingsArgs {
+    /// The device; the selected one if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// The new settings.
+    pub settings: MpeSettings,
+}
+
+/// What `plugin.set_mpe` and `plugin.set_mpe_settings` return: the device and
+/// its MPE Mode and settings now.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PluginMpeState {
+    /// The device.
+    pub device: DeviceId,
+    /// Its MPE Mode and settings.
+    pub mpe: PluginMpe,
+}
+
+/// Arguments of `plugin.show_mpe_settings`: where the dialog is for. Give a
+/// `device` (a plug-in's, or an External Instrument's, whose MIDI To is set
+/// to MPE) or a `track` (a MIDI track whose MIDI To is a port set to MPE).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ShowMpeSettingsArgs {
+    /// The plug-in or External Instrument device; the selected device if
+    /// neither this nor `track` is given.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// A MIDI track, for its MIDI To.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub track: Option<TrackId>,
+    /// Open (true) or close (false) the dialog; opens if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shown: Option<bool>,
+}
+
+/// What `plugin.show_mpe_settings` returns: whether the dialog is open and
+/// what it edits.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct MpeSettingsDialog {
+    /// Whether the dialog is open.
+    pub open: bool,
+    /// The plug-in or External Instrument device it edits, if it edits one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// The track whose MIDI To it edits, if it edits one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub track: Option<TrackId>,
+    /// The settings it shows, while it is open.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settings: Option<MpeSettings>,
 }
 
 /// Arguments of `plugin.set_window`: where a plug-in device's editor
@@ -564,6 +650,54 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
             .context(DeviceView)
             .args::<PluginInfoArgs>()
             .result::<PluginInfo>(),
+    )?;
+    registry.register(
+        CommandSpec::new(SET_MPE, "Set MPE Mode")
+            .description(
+                "Switches a plug-in device's MPE Mode, the item of its title bar menu: on, the \
+                 plug-in gets each note's pitch, slide and pressure as its format takes them \
+                 (CLAP note expressions, VST3 note expression, or MPE MIDI, which an Audio Unit \
+                 gets), and off, only each note's pressure as polyphonic key pressure. Off in a \
+                 new device. Switches unless `on` says which. One undo step (Change MPE); saved \
+                 with the set, the device's presets and its default preset. `plugin.info` \
+                 reports it.",
+            )
+            .permission(Permission::Edit)
+            .context(DeviceView)
+            .args::<SetMpeArgs>()
+            .result::<PluginMpeState>(),
+    )?;
+    registry.register(
+        CommandSpec::new(SET_MPE_SETTINGS, "Set MPE/Multi-channel Settings")
+            .description(
+                "Sets the MPE/Multi-channel Settings of a plug-in device: `settings` gives the \
+                 `mode` (`zone` or `multi_channel`); for a zone its `zone` (`lower`, master \
+                 channel 1, or `upper`, master channel 16) and `channels` (its note channels, 1 \
+                 to 15); for multi-channel mode the `first` and `last` channel, 1 to 16. What is \
+                 left out takes the new settings' value: the lower zone with 15 note channels. \
+                 They shape only the MPE MIDI the device is sent. One undo step (Change MPE); \
+                 saved with the device; `plugin.info` reports them.",
+            )
+            .permission(Permission::Edit)
+            .context(DeviceView)
+            .args::<SetMpeSettingsArgs>()
+            .result::<PluginMpeState>(),
+    )?;
+    registry.register(
+        CommandSpec::new(SHOW_MPE_SETTINGS, "MPE Settings…")
+            .description(
+                "Opens or closes the MPE/Multi-channel Settings dialog, from a plug-in's title \
+                 bar menu, or from MIDI To once MPE is its channel: give a plug-in or External \
+                 Instrument `device`, or a MIDI `track` whose MIDI To is a port set to MPE. \
+                 Opens unless `shown` says which. The dialog's controls run \
+                 `plugin.set_mpe_settings`, `routing.set_midi_output` and \
+                 `device.set_external`. It changes only the view: it isn't an undo step. \
+                 Returns the dialog's state.",
+            )
+            .permission(Permission::Read)
+            .contexts([Global, DeviceView])
+            .args::<ShowMpeSettingsArgs>()
+            .result::<MpeSettingsDialog>(),
     )?;
     registry.register(
         CommandSpec::new(SET_WINDOW, "Set Plug-In Window Place")

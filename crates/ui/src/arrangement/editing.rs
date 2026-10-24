@@ -312,6 +312,15 @@ impl ClipGestures {
         }
     }
 
+    /// The clips a move drag is carrying, if one is under way.
+    #[must_use]
+    pub fn moving_clips(&self) -> Option<&[ClipId]> {
+        match &self.drag {
+            Some(ClipDrag::Move { clips, .. }) => Some(clips),
+            _ => None,
+        }
+    }
+
     /// Whether a drag or a keyboard resize is under way.
     #[must_use]
     pub fn active(&self) -> bool {

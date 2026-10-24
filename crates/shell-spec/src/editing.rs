@@ -481,6 +481,15 @@ pub struct EditResult {
     /// Whether the edit was recorded as an undo step: false when it changed
     /// nothing.
     pub undo_step: bool,
+    /// How many copied Session clips a paste didn't place, because they
+    /// would land on a track of the other kind or past the last track
+    /// (the second window spec, R20).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub skipped: usize,
+}
+
+fn is_zero(count: &usize) -> bool {
+    *count == 0
 }
 
 /// What `arrangement.copy` put on the clipboard.

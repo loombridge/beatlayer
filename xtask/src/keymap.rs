@@ -72,6 +72,12 @@ const DECLINES: &[&str] = &["S-A11Y-022", "S-A11Y-024", "S-A11Y-025", "S-NOTE-05
 /// its key means.
 const WIDGET: &[(&str, &str)] = &[
     (
+        "S-EDIT-014",
+        "the Session View: Shift with Cut, Copy, Paste or Duplicate is S-SES-029 to S-SES-032, \
+         which run `session.cut`, `session.copy`, `session.paste` and `session.duplicate` with \
+         `all_tracks` (the session view spec, R42)",
+    ),
+    (
         "S-EDIT-015",
         "the Arrangement: Shift with Cut, Copy, Paste, Duplicate or Delete is S-ARR-015 to \
          S-ARR-019, which run `arrangement.cut_time`, `arrangement.copy_time`, \

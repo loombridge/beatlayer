@@ -5,12 +5,14 @@ use super::{
     automation_label, clip_marker_command, edit_error, is_automation_edit, marker_label,
     sample_edit_command, to_value,
 };
+use crate::WindowKind;
 use crate::arrangement::ArrangementView;
 use crate::arrangement::automation;
 use crate::arrangement::automation::EnvelopeClipboard;
 use crate::arrangement::editing;
 use crate::arrangement::editing::Clipboard;
 use crate::arrangement::editing::EditFailure;
+use crate::clip_drag::{ClipDrag, ClipDragEvent};
 use crate::clip_view;
 use crate::clip_view::ClipView;
 use crate::devices::DeviceView;
@@ -48,7 +50,10 @@ impl Shell {
     pub fn gesture_under_way(&self) -> bool {
         // The edit a selected breakpoint opens isn't one: it can last
         // minutes, and another command ends it (automation-editing R23).
-        self.edit_gesture.is_some() || (self.gesture && self.key_edit.is_none())
+        self.edit_gesture.is_some()
+            || (self.gesture && self.key_edit.is_none())
+            // Spec: second-window R23. Clips dragged between the views.
+            || self.clip_drag.is_some()
     }
 
     /// Runs a command as [`Shell::run`] does, recording what it changes in
@@ -132,6 +137,7 @@ impl Shell {
                 editor: &mut self.editor,
                 view: &self.arrangement,
                 clipboard: &self.clipboard,
+                session: &self.session,
             },
         )
     }
@@ -465,5 +471,59 @@ impl Shell {
         self.automation_take
             .release(self.arrangement.transport().position);
         self.release_session_moves();
+    }
+}
+
+impl Shell {
+    /// The drag of clips between the views, if one is under way.
+    #[must_use]
+    pub fn clip_drag(&self) -> Option<&ClipDrag> {
+        self.clip_drag.as_ref()
+    }
+
+    /// Takes a step of the drag of clips between the views, from `window`: a
+    /// drop runs its command (errors show in the Status Bar) and ends the
+    /// drag.
+    ///
+    /// # Errors
+    ///
+    /// [`ShellError`] if the drop's command failed; the drag has ended.
+    pub fn clip_drag_event(
+        &mut self,
+        window: WindowKind,
+        event: ClipDragEvent,
+    ) -> Result<(), ShellError> {
+        match event {
+            ClipDragEvent::Begin(source) => {
+                self.clip_drag = Some(ClipDrag {
+                    source,
+                    window,
+                    over: None,
+                });
+                self.touch();
+            }
+            ClipDragEvent::Over(spot) => {
+                if let Some(drag) = &mut self.clip_drag {
+                    match spot {
+                        Some(spot) => drag.over = Some((window, spot)),
+                        // Only the window the pointer was over forgets the place.
+                        None if drag.over.is_some_and(|(over, _)| over == window) => {
+                            drag.over = None;
+                        }
+                        None => {}
+                    }
+                }
+            }
+            ClipDragEvent::End { drop } => {
+                let Some(drag) = self.clip_drag.take() else {
+                    return Ok(());
+                };
+                self.touch();
+                if drop && let Some((id, args)) = drag.drop_command() {
+                    self.invoke(id, args)?;
+                }
+            }
+        }
+        Ok(())
     }
 }

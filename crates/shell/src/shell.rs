@@ -653,6 +653,9 @@ pub struct Shell {
     /// The clipboard of copied envelope shapes (WP-6.25), kept across sets
     /// as Live keeps it, and never part of a set.
     envelope_clipboard: Option<EnvelopeClipboard>,
+    /// A drag of clips between the Session and the Arrangement under way
+    /// (WP-6.29b).
+    clip_drag: Option<crate::clip_drag::ClipDrag>,
     /// A gesture that edits the set, under way (WP-1.8b).
     edit_gesture: Option<Gesture>,
     /// The edit a breakpoint selected from the keyboard has open (WP-6.26):
@@ -1189,6 +1192,7 @@ impl Shell {
             document_revision: 0,
             clipboard: None,
             envelope_clipboard: None,
+            clip_drag: None,
             edit_gesture: None,
             key_edit: None,
             envelope_control_focused: false,

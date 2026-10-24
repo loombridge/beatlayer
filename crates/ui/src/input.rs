@@ -118,6 +118,12 @@ impl KeyDispatcher {
             else {
                 return true;
             };
+            // Spec: second-window R18. Esc during a drag of clips ends the
+            // drag, in whichever view it has switched to: the window reads
+            // it, and no binding takes it.
+            if *key == Key::Escape && shell.clip_drag().is_some() {
+                return true;
+            }
             // Spec: midi-io R21, R22. A note key goes down and up as one
             // note, whatever else happens meanwhile.
             let note = |pressed| {

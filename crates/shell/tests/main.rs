@@ -99,6 +99,7 @@ mod scene_tempo;
 mod search;
 mod second_window;
 mod session_automation;
+mod session_clips;
 mod session_launch;
 mod session_recording;
 mod session_to_arrangement;

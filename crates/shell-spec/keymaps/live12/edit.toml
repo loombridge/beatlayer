@@ -15,6 +15,7 @@ commands = [
   { id = "chain.cut", contexts = ["rack-chains"] },
   { id = "device.cut", contexts = ["device-view"] },
   { id = "note.cut", contexts = ["note-editor", "note-selection"] },
+  { id = "session.cut", contexts = ["session"] },
   { id = "track.cut", contexts = ["track-headers"] },
 ]
 
@@ -33,6 +34,7 @@ commands = [
   { id = "chain.copy", contexts = ["rack-chains"] },
   { id = "device.copy", contexts = ["device-view"] },
   { id = "note.copy", contexts = ["note-editor", "note-selection"] },
+  { id = "session.copy", contexts = ["session"] },
   { id = "track.copy", contexts = ["track-headers"] },
 ]
 
@@ -51,6 +53,7 @@ commands = [
   { id = "chain.paste", contexts = ["rack-chains"] },
   { id = "device.paste", contexts = ["device-view"] },
   { id = "note.paste", contexts = ["note-editor", "note-selection"] },
+  { id = "session.paste", contexts = ["session"] },
   { id = "track.paste", contexts = ["track-headers"] },
 ]
 
@@ -69,6 +72,7 @@ commands = [
   { id = "chain.duplicate", contexts = ["rack-chains"] },
   { id = "device.duplicate", contexts = ["device-view"] },
   { id = "note.duplicate", contexts = ["note-editor", "note-selection"] },
+  { id = "session.duplicate", contexts = ["session"] },
   { id = "track.duplicate", contexts = ["track-headers"] },
 ]
 
@@ -210,7 +214,8 @@ trigger = "held"
 milestone = "M3"
 mac = ["Shift (with the command)"]
 win = ["Shift (with the command)"]
-status = "pending"
+status = "widget"
+handler = "the Session View: Shift with Cut, Copy, Paste or Duplicate is S-SES-029 to S-SES-032, which run `session.cut`, `session.copy`, `session.paste` and `session.duplicate` with `all_tracks` (the session view spec, R42)"
 
 [[shortcut]]
 id = "S-EDIT-015"

@@ -389,6 +389,8 @@ pub enum ItemKind {
     /// A Beatlayer device preset, which loads into the device being
     /// hot-swapped (WP-2.4).
     Preset,
+    /// A Stacks chord bank (`.blstacks`), which loads into Stacks (WP-6.14b).
+    ChordBank,
     /// A plug-in the scanner found (WP-2.9).
     Plugin,
     /// One of Beatlayer's own devices, listed under a device label (the

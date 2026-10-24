@@ -1779,6 +1779,17 @@ impl Shell {
             );
         }
         if id == browser_ids::LOAD_SELECTED
+            && let Some(path) = self.browser_view.selected_chord_bank()
+        {
+            // Spec: midi-generators R26. A chord bank chosen in the browser
+            // loads into Stacks as `midi_tool.load_bank` loads it.
+            Self::args::<NoArgs>(id, args)?;
+            return self.run(
+                bl_shell_spec::midi_tools::LOAD_BANK,
+                json!({ "path": path.to_string_lossy() }),
+            );
+        }
+        if id == browser_ids::LOAD_SELECTED
             && let Some(path) = self.browser_view.selected_sfz()
         {
             // Spec: multisampler R47. A selected SFZ instrument loads as a

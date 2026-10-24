@@ -840,3 +840,162 @@ fn euclideans_tabs_have_the_voices_rotations_pitches_arrows_and_randomise_button
     h.click(centre(Harness::node(&all, "<")));
     assert_eq!(values(&mut h, "euclidean")["pitch_1"], 36);
 }
+
+/// The Chord Selector Pad's diagram for bank entry `entry` of the first page
+/// (three across, as the panel draws them), at its centre.
+fn diagram(h: &mut Harness, entry: usize) -> Pos2 {
+    let all = nodes(h);
+    let b = Harness::node(&all, "Chord Selector Pad")
+        .bounds
+        .expect("the pad has bounds");
+    let (column, row) = ((entry % 3) as f32, (entry / 3) as f32);
+    Pos2::new(
+        b.x0 as f32 + column * 32.0 + 15.0,
+        b.y0 as f32 + row * 26.0 + 12.0,
+    )
+}
+
+fn chord(h: &mut Harness) -> u64 {
+    values(h, "stacks")["chord"].as_u64().unwrap()
+}
+
+#[test]
+fn stacks_pad_chooses_by_click_and_drag_and_cmd_up_and_down_and_names_the_chord_on_hover() {
+    // Spec: midi-generators R21; S-NOTE-052. Clicking a diagram or dragging
+    // across the pad chooses its entry (a drag is one undo step that Esc puts
+    // back); with the pad focused Cmd+Up and Cmd+Down choose the entry before
+    // or after; hovering a diagram puts the chord's name and notes in the
+    // Status Bar.
+    let (mut h, _) = set();
+    h.shell.run("view.expand_clip_view", json!({})).unwrap();
+    generator(&mut h, "stacks", true);
+    h.settle();
+    assert_eq!(chord(&mut h), 0);
+    // A click on the third diagram of the first row chooses entry 2, and with
+    // Auto on the notes are written: the Ninth is five notes.
+    let before = steps(&h);
+    let at = diagram(&mut h, 2);
+    h.click(at);
+    h.settle();
+    assert_eq!(chord(&mut h), 2);
+    assert_eq!(steps(&h), before + 1);
+    // Cmd+Up and Cmd+Down choose the entry before and after, stopping at the
+    // ends of the bank.
+    h.key(Key::ArrowDown, Modifiers::COMMAND);
+    h.settle();
+    assert_eq!(chord(&mut h), 3);
+    h.key(Key::ArrowUp, Modifiers::COMMAND);
+    h.key(Key::ArrowUp, Modifiers::COMMAND);
+    h.settle();
+    assert_eq!(chord(&mut h), 1);
+    h.key(Key::ArrowUp, Modifiers::COMMAND);
+    h.key(Key::ArrowUp, Modifiers::COMMAND);
+    h.settle();
+    assert_eq!(chord(&mut h), 0, "no wrap at the first entry");
+    // Without Cmd, Up and Down leave the chord as it is.
+    h.key(Key::ArrowDown, Modifiers::NONE);
+    h.settle();
+    assert_eq!(chord(&mut h), 0);
+    // A drag across the pad is one undo step and ends on the entry under the
+    // pointer.
+    let (from, to) = (diagram(&mut h, 0), diagram(&mut h, 5));
+    let before = steps(&h);
+    let (one, four) = (diagram(&mut h, 1), diagram(&mut h, 4));
+    press(&mut h, from);
+    h.frame(vec![Event::PointerMoved(one)]);
+    h.frame(vec![Event::PointerMoved(four)]);
+    h.frame(vec![Event::PointerMoved(to)]);
+    release(&mut h, to);
+    assert_eq!(chord(&mut h), 5);
+    assert_eq!(steps(&h), before + 1, "one undo step");
+    // Esc puts a drag back.
+    let kept = (steps(&h), values(&mut h, "stacks"));
+    let seven = diagram(&mut h, 7);
+    press(&mut h, to);
+    h.frame(vec![Event::PointerMoved(seven)]);
+    h.frame(vec![Event::Key {
+        key: Key::Escape,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: Modifiers::NONE,
+    }]);
+    release(&mut h, seven);
+    assert_eq!((steps(&h), values(&mut h, "stacks")), kept);
+    // Hovering names the chord and its notes on the selected chord's root;
+    // leaving the pad clears the hint.
+    let major = diagram(&mut h, 9 - 9);
+    h.shell
+        .run(
+            "midi_tool.set",
+            json!({ "tool": "stacks", "values": { "chord_root": 60 } }),
+        )
+        .unwrap();
+    h.frame(vec![Event::PointerMoved(major)]);
+    h.settle();
+    h.frame(vec![Event::PointerMoved(major)]);
+    assert_eq!(h.shell.hint(), Some("Triad: C3 E3 G3"));
+    h.frame(vec![Event::PointerMoved(Pos2::new(5.0, 5.0))]);
+    h.settle();
+    assert_eq!(h.shell.hint(), None);
+}
+
+#[test]
+fn stacks_add_chord_and_delete_chord_and_the_progression_cells() {
+    // Spec: midi-generators R17. Add Chord adds a chord after the selected
+    // one and selects it, Delete Chord removes it (disabled for the only
+    // chord), and clicking a cell of the progression selects that chord.
+    let (mut h, _) = set();
+    h.shell.run("view.expand_clip_view", json!({})).unwrap();
+    generator(&mut h, "stacks", false);
+    let all = nodes(&mut h);
+    assert!(Harness::node(&all, "Delete Chord").disabled);
+    assert_eq!(
+        Harness::node(&all, "Chord 1: Triad on C3").toggled,
+        Some(true)
+    );
+    h.click(centre(Harness::node(&all, "Add Chord")));
+    let all = nodes(&mut h);
+    h.click(centre(Harness::node(&all, "Add Chord")));
+    let all = nodes(&mut h);
+    assert_eq!(values(&mut h, "stacks")["selected"], 2);
+    assert_eq!(
+        values(&mut h, "stacks")["progression"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
+    assert_eq!(
+        Harness::node(&all, "Chord 3: Triad on C3").toggled,
+        Some(true)
+    );
+    assert!(!Harness::node(&all, "Delete Chord").disabled);
+    // A cell selects its chord and is no undo step.
+    let before = steps(&h);
+    h.click(centre(Harness::node(&all, "Chord 1: Triad on C3")));
+    assert_eq!(values(&mut h, "stacks")["selected"], 0);
+    assert_eq!(steps(&h), before);
+    // Delete Chord removes the selected one.
+    let all = nodes(&mut h);
+    h.click(centre(Harness::node(&all, "Delete Chord")));
+    assert_eq!(
+        values(&mut h, "stacks")["progression"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    // The controls show the selected chord's settings and set them.
+    let all = nodes(&mut h);
+    assert_eq!(Harness::node(&all, "Chord Root").value, "C3");
+    h.click(centre(Harness::node(&all, "Chord Root")));
+    type_text(&mut h, "d3");
+    assert_eq!(values(&mut h, "stacks")["chord_root"], 62);
+    assert_eq!(
+        values(&mut h, "stacks")["progression"][0]["root"],
+        62,
+        "the selected chord's root"
+    );
+    assert_eq!(values(&mut h, "stacks")["progression"][1]["root"], 60);
+}

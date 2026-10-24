@@ -1836,3 +1836,281 @@ fn r8_r43_chops_gaps_write_its_pattern_and_a_toggle_click_is_a_set() {
     );
     assert_eq!(song.notes().iter().filter(|n| n.key == 60).count(), 2);
 }
+
+// Stacks and its chord banks (the MIDI generators spec, R17 to R28).
+
+fn scratch_dir(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!(
+        "bl-shell-{name}-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+const TWO_CHORDS: &str = r#"{"format":"beatlayer-stacks","schema":1,"name":"Two","chords":[
+    {"name":"Pair","semitones":[0,7]},{"name":"Wide","degrees":[0,4,9]}]}"#;
+
+fn stacks(state: &MidiToolState) -> &bl_shell::midi_tool_commands::StacksState {
+    &state.stacks
+}
+
+fn stacks_values(state: &MidiToolState) -> serde_json::Map<String, Value> {
+    state
+        .tools
+        .iter()
+        .find(|t| t.tool == "stacks")
+        .unwrap()
+        .values
+        .clone()
+}
+
+#[test]
+fn r17_r28_state_reads_the_progression_and_the_bank_and_the_chord_commands_change_them() {
+    let mut song = song(Vec::new());
+    let state = song.state();
+    let read = stacks(&state);
+    assert_eq!(read.progression.len(), 1);
+    assert_eq!(
+        (read.progression[0].chord, read.progression[0].root),
+        (0, 60)
+    );
+    assert_eq!(read.selected, 0);
+    assert!(read.bank.built_in);
+    assert_eq!(read.bank.name, "Beatlayer Chords");
+    assert_eq!(read.bank.chords.len(), 27);
+    assert_eq!(read.bank.chords[0].name, "Triad");
+    assert!(read.bank.chords[0].degrees);
+    assert_eq!(read.bank.chords[9].intervals, [0, 4, 7]);
+    // The progression is a list in the settings, and Add Chord is a command
+    // that writes the chords at once with Auto on: two slots of two bars.
+    song.select_time(0, 4 * BAR);
+    song.tool(
+        ids::SET,
+        json!({ "tool": "stacks", "values": { "chord": 9, "chord_root": 62 } }),
+    );
+    let state = song.tool(ids::ADD_CHORD, json!({}));
+    assert_eq!(stacks(&state).progression.len(), 2);
+    assert_eq!(stacks(&state).selected, 1);
+    assert_eq!(stacks(&state).progression[1].root, 62);
+    assert_eq!(stacks(&state).progression[1].chord, 0);
+    let list = stacks_values(&state)["progression"].clone();
+    assert_eq!(list.as_array().unwrap().len(), 2, "{list}");
+    assert_eq!(list[1]["root"], json!(62));
+    let starts: Vec<i64> = song.notes().iter().map(|n| n.start.0).collect();
+    assert!(
+        starts.contains(&0) && starts.contains(&(2 * BAR)),
+        "{starts:?}"
+    );
+    assert_eq!(song.notes().len(), 6);
+    // Delete Chord removes the selected one, and the only chord stays.
+    let state = song.tool(ids::DELETE_CHORD, json!({}));
+    assert_eq!(stacks(&state).progression.len(), 1);
+    assert_eq!(song.notes().len(), 3);
+    let message = song.refused(ids::DELETE_CHORD, json!({}));
+    assert!(message.contains("only chord"), "{message}");
+    // The whole progression can be set by an agent, and is checked.
+    let state = song.tool(
+        ids::SET,
+        json!({ "tool": "stacks", "values": { "progression": [
+            { "chord": 9, "root": 60 }, { "chord": 10, "root": 57 }, { "chord": 9, "root": 65 }] } }),
+    );
+    assert_eq!(stacks(&state).progression.len(), 3);
+    let message = song.refused(
+        ids::SET,
+        json!({ "tool": "stacks", "values": { "progression": [{ "chord": 400 }] } }),
+    );
+    assert!(message.contains("chord"), "{message}");
+    assert_eq!(song.state().stacks.progression.len(), 3, "nothing changed");
+}
+
+#[test]
+fn r21_choosing_a_chord_to_edit_writes_no_notes_but_changing_it_does() {
+    let mut song = song(Vec::new());
+    song.select_time(0, BAR);
+    song.tool(ids::ADD_CHORD, json!({}));
+    let notes = song.notes();
+    let steps = song.steps();
+    let state = song.tool(
+        ids::SET,
+        json!({ "tool": "stacks", "values": { "selected": 0 } }),
+    );
+    assert_eq!(stacks(&state).selected, 0);
+    assert_eq!(song.steps(), steps, "selecting a chord is no undo step");
+    assert_eq!(song.notes(), notes);
+    song.tool(
+        ids::SET,
+        json!({ "tool": "stacks", "values": { "chord_root": 55 } }),
+    );
+    assert_eq!(song.steps(), steps + 1);
+    assert_ne!(song.notes(), notes);
+}
+
+#[test]
+fn r20_in_scale_mode_a_new_stacks_starts_on_the_scales_root() {
+    // D minor: the first chord's root is D in the octave from C3 up, so a
+    // triad of the scale's degrees is D, F, A.
+    let mut song = song_with(MidiData::new(Vec::new()), Scale::new(2, ScaleName::Minor));
+    song.select_time(0, BAR);
+    let state = song.tool(ids::APPLY, json!({ "tool": "stacks" }));
+    assert_eq!(stacks(&state).progression[0].root, 62);
+    assert_eq!(song.keys(), [62, 65, 69]);
+}
+
+#[test]
+fn r26_a_bank_loads_from_a_file_replaces_the_bank_and_changes_no_notes() {
+    let dir = scratch_dir("bank");
+    let path = dir.join("Two.blstacks");
+    std::fs::write(&path, TWO_CHORDS).unwrap();
+    let mut song = song(vec![note(40, 0, QUARTER)]);
+    song.select_time(0, BAR);
+    song.tool(
+        ids::SET,
+        json!({ "tool": "stacks", "values": { "progression": [
+            { "chord": 0 }, { "chord": 1 }, { "chord": 20 }] } }),
+    );
+    let notes = song.notes();
+    let steps = song.steps();
+    let state = song.tool(ids::LOAD_BANK, json!({ "path": path.to_string_lossy() }));
+    let bank = &stacks(&state).bank;
+    assert_eq!((bank.name.as_str(), bank.built_in), ("Two", false));
+    assert_eq!(bank.chords.len(), 2);
+    assert_eq!(bank.chords[1].name, "Wide");
+    assert!(bank.chords[1].degrees);
+    // The chords stay by place; one past the new end takes the first entry.
+    let places: Vec<usize> = stacks(&state).progression.iter().map(|c| c.chord).collect();
+    assert_eq!(places, [0, 1, 0]);
+    assert_eq!(song.notes(), notes, "loading changes no notes");
+    assert_eq!(song.steps(), steps, "and is no undo step");
+    // The built-in bank loads back.
+    let state = song.tool(ids::LOAD_BANK, json!({ "built_in": true }));
+    assert!(stacks(&state).bank.built_in);
+    assert_eq!(stacks(&state).bank.chords.len(), 27);
+    // One of `path` and `built_in` is needed.
+    for args in [json!({}), json!({ "path": "x", "built_in": true })] {
+        let message = song.refused(ids::LOAD_BANK, args);
+        assert!(message.contains("path"), "{message}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn r25_each_broken_bank_file_is_refused_with_the_reason_and_changes_nothing() {
+    let dir = scratch_dir("broken");
+    let mut song = song(Vec::new());
+    let before = song.state().stacks;
+    let nine = r#"{"format":"beatlayer-stacks","schema":1,"name":"B","chords":[
+        {"name":"Nine","semitones":[0,1,2,3,4,5,6,7,8]}]}"#;
+    let falling = r#"{"format":"beatlayer-stacks","schema":1,"name":"B","chords":[
+        {"name":"Fine","semitones":[0,7]},{"name":"Falling","semitones":[0,7,4]}]}"#;
+    let first = r#"{"format":"beatlayer-stacks","schema":1,"name":"B","chords":[
+        {"name":"Late","semitones":[2,4,7]}]}"#;
+    let wrong = r#"{"format":"beatlayer-preset","schema":1,"name":"B","chords":[]}"#;
+    let big = format!("{TWO_CHORDS}{}", " ".repeat(1 << 20));
+    for (name, text, says) in [
+        ("nine.blstacks", nine.to_owned(), "chords[0] \"Nine\""),
+        (
+            "falling.blstacks",
+            falling.to_owned(),
+            "chords[1] \"Falling\"",
+        ),
+        ("first.blstacks", first.to_owned(), "semitones[0] must be 0"),
+        ("wrong.blstacks", wrong.to_owned(), "format"),
+        ("big.blstacks", big, "bytes"),
+        ("junk.blstacks", "not json".to_owned(), "line 1"),
+    ] {
+        let path = dir.join(name);
+        std::fs::write(&path, text).unwrap();
+        let message = song.refused(ids::LOAD_BANK, json!({ "path": path.to_string_lossy() }));
+        assert!(message.contains(says), "{name}: {message}");
+        assert!(message.contains(name), "{name} names the file: {message}");
+        assert_eq!(song.state().stacks, before, "{name} changed nothing");
+    }
+    let missing = dir.join("missing.blstacks");
+    let message = song.refused(ids::LOAD_BANK, json!({ "path": missing.to_string_lossy() }));
+    assert!(message.contains("missing.blstacks"), "{message}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn r23_a_loaded_bank_is_saved_with_the_set_and_reopens_after_the_file_is_deleted() {
+    let mut editor = factory_default_set();
+    let track = editor.document().top_level().next().unwrap();
+    let clip = editor.new_id();
+    editor
+        .apply(Command::CreateClip {
+            track,
+            clip: Clip::new(
+                clip,
+                Ticks::ZERO,
+                Ticks(4 * BAR),
+                ClipData::Midi(MidiData::new(Vec::new())),
+            ),
+        })
+        .unwrap();
+    let dir = scratch_dir("saved-bank");
+    let set = dir.join("Chords.blset");
+    bl_shell::files::ProjectFiles::new()
+        .save(&set, &editor)
+        .unwrap();
+    let file = dir.join("Two.blstacks");
+    std::fs::write(&file, TWO_CHORDS).unwrap();
+    let mut shell = Shell::new(
+        Preferences::default(),
+        None,
+        AudioHost::null(Default::default()),
+        Box::new(bl_shell::files::ProjectFiles::new()),
+    );
+    shell
+        .run("set.open", json!({ "path": set.to_string_lossy() }))
+        .unwrap();
+    shell
+        .run("arrangement.select_clips", json!({ "clips": [clip] }))
+        .unwrap();
+    shell
+        .run(ids::LOAD_BANK, json!({ "path": file.to_string_lossy() }))
+        .unwrap();
+    shell
+        .run(
+            ids::SET,
+            json!({ "tool": "stacks", "values": { "chord": 1, "chord_root": 64 } }),
+        )
+        .unwrap();
+    shell.run("set.save", json!({})).unwrap();
+    shell.run("set.new", json!({})).unwrap();
+    std::fs::remove_file(&file).unwrap();
+    shell
+        .run("set.open", json!({ "path": set.to_string_lossy() }))
+        .unwrap();
+    shell
+        .run("arrangement.select_clips", json!({ "clips": [clip] }))
+        .unwrap();
+    let state: MidiToolState =
+        serde_json::from_value(shell.run(ids::STATE, json!({})).unwrap()).unwrap();
+    assert_eq!(state.stacks.bank.name, "Two");
+    assert!(!state.stacks.bank.built_in);
+    assert_eq!(
+        state
+            .stacks
+            .bank
+            .chords
+            .iter()
+            .map(|c| (c.name.as_str(), c.degrees, c.intervals.clone()))
+            .collect::<Vec<_>>(),
+        [("Pair", false, vec![0, 7]), ("Wide", true, vec![0, 4, 9])]
+    );
+    assert_eq!(state.stacks.progression[0].chord, 1);
+    assert_eq!(state.stacks.progression[0].root, 64);
+    // Beatlayer's built-in bank is not saved: it is compiled in.
+    shell
+        .run(ids::LOAD_BANK, json!({ "built_in": true }))
+        .unwrap();
+    let saved = shell.clip_view().midi_tools().saved();
+    let bank = &saved.tools["stacks"].values["bank"];
+    assert_eq!(bank, &json!(""));
+    let _ = std::fs::remove_dir_all(&dir);
+}

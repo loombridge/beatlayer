@@ -17,6 +17,7 @@ use crate::rhythm::Rhythm;
 use crate::seed::Seed;
 use crate::shape::Shape;
 use crate::span::Span;
+use crate::stacks::Stacks;
 use crate::strum::Strum;
 use crate::time_warp::TimeWarp;
 use crate::velocity_shaper::VelocityShaper;
@@ -105,6 +106,19 @@ pub trait MidiTool: Send + Sync {
         Ok(())
     }
 
+    /// Whether a change of the parameters at `changed` changes the notes the
+    /// tool writes, so Auto applies it. A parameter that only says what the
+    /// panel shows, such as Stacks' selected chord, does not. The default is
+    /// that every change does.
+    fn changes_notes(&self, _changed: &[usize]) -> bool {
+        true
+    }
+
+    /// Moves values that are still the defaults onto what `input` allows,
+    /// before the tool's first change or application: Stacks' root becomes the
+    /// clip's scale root. The default leaves them as they are.
+    fn start(&self, _values: &mut [ParamValue], _input: &ToolInput) {}
+
     /// The notes the tool writes for `input` and `values`, one value per
     /// parameter. Call it through [`run`], which checks the values and
     /// finishes the notes.
@@ -169,6 +183,7 @@ fn native_tools() -> Vec<Box<dyn MidiTool>> {
         Box::new(Rhythm::new()),
         Box::new(Seed::new()),
         Box::new(Shape::new()),
+        Box::new(Stacks::new()),
         Box::new(Euclidean::new()),
     ]
 }

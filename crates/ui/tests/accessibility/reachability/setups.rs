@@ -711,6 +711,25 @@ pub(crate) fn euclidean_shown(h: &mut Harness) {
         .unwrap();
 }
 
+/// The same, with the Generate panel showing Stacks and two chords in its
+/// progression, so Delete Chord is enabled.
+pub(crate) fn stacks_shown(h: &mut Harness) {
+    midi_tools_shown(h);
+    h.shell
+        .run("midi_tool.choose", json!({ "tool": "stacks" }))
+        .unwrap();
+    h.shell
+        .run(
+            "midi_tool.set_auto",
+            json!({ "tool": "stacks", "auto": false }),
+        )
+        .unwrap();
+    h.shell.run("midi_tool.add_chord", json!({})).unwrap();
+    h.shell
+        .run("clip_view.show_panel", json!({ "panel": "generate" }))
+        .unwrap();
+}
+
 pub(crate) fn plugin_list(h: &mut Harness) {
     h.shell
         .run("view.toggle_plugin_list", json!({}))

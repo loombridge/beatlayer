@@ -93,7 +93,8 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+Up", "Cmd+Down"]
 win = ["Ctrl+Up", "Ctrl+Down"]
-status = "pending"
+status = "widget"
+handler = "Stacks' Chord Selector Pad while it has the keyboard focus: Cmd+Up and Cmd+Down choose the entry before or after the selected chord's"
 
 [[shortcut]]
 id = "S-NOTE-053"

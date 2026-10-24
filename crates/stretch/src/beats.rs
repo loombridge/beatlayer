@@ -296,8 +296,9 @@ impl Plan {
             before.position_at(at),
             (1.0 - came) * self.decay(at - before.begin, envelope),
         );
-        if (out.0 - pass.position_at(at)).abs() < 1e-4 {
-            // One read: the same frames, at the two levels' sum.
+        if (out.0 - pass.position_at(at)).abs() < 1.0 {
+            // One read: the same frames to within one, as where a transient
+            // lies between frames (R4), at the two levels' sum.
             let sum = level * came + out.1;
             return Mix {
                 level: if level == 1.0 && out.1 == 1.0 - came {
@@ -622,6 +623,22 @@ mod tests {
             vec![
                 segment(0, 24_000, 0.0, 24_000.0, 12_000.0),
                 segment(24_000, 48_000, 24_000.0, 48_000.0, 36_000.0),
+            ],
+            Loop::BackAndForth,
+            100,
+            RATE,
+        )
+        .with_passes(|_| 1.0);
+        for frame in 23_000..24_500 {
+            let mix = plan.mix(frame, 100.0);
+            assert_eq!((mix.level, mix.outgoing), (1.0, None), "frame {frame}");
+        }
+        // A transient between frames starts its segment on the nearest one:
+        // the two reads are a fraction of a frame apart, still one read.
+        let plan = Plan::new(
+            vec![
+                segment(0, 24_000, 0.0, 23_999.993, 12_000.0),
+                segment(24_000, 48_000, 23_999.993, 48_000.0, 36_000.0),
             ],
             Loop::BackAndForth,
             100,

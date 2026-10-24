@@ -103,7 +103,11 @@ fn beats() -> BeatsSettings {
 /// Plays a song for `frames` frames in blocks of `block`, under the
 /// allocation trap, and returns the left channel.
 fn play(editor: &Editor, frames: u64, block: usize) -> Vec<f32> {
-    let registry = Registry::new().with_media(Arc::new(media()));
+    play_media(editor, media(), frames, block)
+}
+
+fn play_media(editor: &Editor, media: MediaMap, frames: u64, block: usize) -> Vec<f32> {
+    let registry = Registry::new().with_media(Arc::new(media));
     let mut offline = Offline::new(EngineConfig::new(RATE, block), registry);
     offline.sync(editor.document());
     assert!(offline.missing_media().is_empty());
@@ -790,4 +794,164 @@ fn transposition_stops_at_48_semitones() {
         editor.document().clip(clip).unwrap().data,
         before.clip(clip).unwrap().data
     );
+}
+
+/// 500 ms segments of `signal`, at 48 kHz for just over two seconds, with a
+/// transient at each beat of a 120 BPM clip: the material the joins are
+/// pinned on.
+fn joins_media(signal: impl Fn(usize) -> f32) -> MediaMap {
+    let mut map = MediaMap::new();
+    let sample = SampleData::new(48_000, vec![(0..100_000).map(signal).collect()]).unwrap();
+    map.insert(MEDIA, Arc::new(sample));
+    map.set_transients(MEDIA, vec![0.5, 1.0, 1.5]);
+    map
+}
+
+/// The joins' clip: Beats at Transients, a whole note long, in a song at
+/// `tempo`.
+fn joins_song(tempo: f64, loop_mode: TransientLoopMode, envelope: u32) -> Editor {
+    let settings = BeatsSettings {
+        preserve: Preserve::Transients,
+        transient_loop_mode: loop_mode,
+        transient_envelope: envelope,
+    };
+    song(tempo, Ticks::WHOLE, settings, WarpMode::Beats)
+}
+
+/// Plays the joins' song at every block size the acceptance names, requires
+/// the same samples from each (R6) and returns them.
+fn joins(editor: &Editor, signal: impl Fn(usize) -> f32 + Copy, frames: u64) -> Vec<f32> {
+    let want = play_media(editor, joins_media(signal), frames, 512);
+    for block in [1, 64, 4_096] {
+        assert_eq!(
+            play_media(editor, joins_media(signal), frames, block),
+            want,
+            "blocks of {block}"
+        );
+    }
+    want
+}
+
+/// The file frame a ramp file's output frame plays.
+fn ramp(i: usize) -> f32 {
+    i as f32 / 65_536.0
+}
+
+fn played(out: &[f32], frame: usize) -> f64 {
+    f64::from(out[frame]) * 65_536.0
+}
+
+fn near(got: f32, want: f64, frame: usize) {
+    assert!(
+        (f64::from(got) - want).abs() < 1e-3,
+        "frame {frame}: {got} against {want}"
+    );
+}
+
+// Spec: warp-modes R15. Played at half speed with Loop Off, a segment fades
+// out linearly over 10 ms, ending 2 ms before the file frame the next would
+// begin at, then is silent; the next fades in over 10 ms, ending 2 ms before
+// its transient. No step anywhere.
+#[test]
+fn loop_off_fades_out_and_the_next_segment_fades_in() {
+    let out = joins(
+        &joins_song(60.0, TransientLoopMode::LoopOff, 100),
+        |_| 1.0,
+        49_000,
+    );
+    // Segment 0 sounds 23,904 frames: its 24,000 less 2 ms.
+    assert_eq!(out[23_423], 1.0);
+    near(out[23_424 + 240], 0.5, 23_664);
+    assert_eq!(out[23_904], 0.0);
+    assert_eq!(out[45_000], 0.0);
+    // Segment 1 begins 12 ms before its transient, at song frame 48,000.
+    assert_eq!(out[47_423], 0.0);
+    near(out[47_424 + 240], 0.5, 47_664);
+    assert_eq!(out[47_904], 1.0);
+    for pair in out.windows(2) {
+        assert!((pair[1] - pair[0]).abs() < 0.01, "no step: {pair:?}");
+    }
+}
+
+// Spec: warp-modes R15. Loop Forward and Back-and-Forth turn about 22 ms
+// before the next segment's file frame, in a 10 ms crossfade centred on the
+// turn: Back-and-Forth reads backwards to the middle of what lies before it,
+// Loop Forward jumps back to it. The file here is a ramp, so each output
+// frame says which file frame it plays.
+#[test]
+fn loop_turns_crossfade_around_the_end_and_the_middle() {
+    // Segment 0 plays file frames 0 to 24,000; it turns at 22,944, and the
+    // middle of what lies before that is 11,472.
+    let forth = joins(
+        &joins_song(60.0, TransientLoopMode::LoopBackAndForth, 100),
+        ramp,
+        46_000,
+    );
+    assert_eq!(played(&forth, 22_000), 22_000.0);
+    assert!(
+        (played(&forth, 22_944) - 22_944.0).abs() < 2.0,
+        "both at the turn"
+    );
+    assert!(
+        (played(&forth, 23_500) - 22_388.0).abs() < 2.0,
+        "backwards from it"
+    );
+    // The next turn is a pass later (11,472 frames), at the middle.
+    assert!(
+        (played(&forth, 34_416) - 11_472.0).abs() < 2.0,
+        "both at the middle"
+    );
+    assert!(
+        (played(&forth, 34_916) - 11_972.0).abs() < 2.0,
+        "and forwards from it"
+    );
+    let forward = joins(
+        &joins_song(60.0, TransientLoopMode::LoopForward, 100),
+        ramp,
+        46_000,
+    );
+    assert_eq!(played(&forward, 22_000), 22_000.0);
+    assert!(
+        (played(&forward, 22_944) - (22_944.0 + 11_472.0) / 2.0).abs() < 2.0,
+        "a crossfade"
+    );
+    assert!(
+        (played(&forward, 23_444) - 11_972.0).abs() < 2.0,
+        "forwards from the middle"
+    );
+}
+
+// Spec: warp-modes R15. A song faster than the clip cuts a segment short with
+// a 10 ms crossfade into the next, which began 12 ms before its transient.
+#[test]
+fn a_segment_cut_short_crossfades_into_the_next() {
+    let out = joins(
+        &joins_song(180.0, TransientLoopMode::LoopBackAndForth, 100),
+        ramp,
+        16_500,
+    );
+    // The next segment's transient is at song frame 16,000, file frame
+    // 24,000; it begins 576 frames earlier.
+    assert_eq!(played(&out, 15_423), 15_423.0);
+    let middle = 15_424 + 240;
+    let want = (middle as f64 + (24_000.0 - 576.0 + 240.0)) / 2.0;
+    assert!((played(&out, middle) - want).abs() < 2.0);
+    assert!((played(&out, 15_424 + 480) - (24_000.0 - 96.0)).abs() < 2.0);
+}
+
+// Spec: warp-modes R16. At Transient Envelope 50 each segment decays from its
+// transient, half at about 65 ms, and the next fades in over 2 ms only.
+#[test]
+fn a_lowered_transient_envelope_decays_and_fades_in_briefly() {
+    let out = joins(
+        &joins_song(60.0, TransientLoopMode::LoopOff, 50),
+        |_| 1.0,
+        49_000,
+    );
+    near(out[3_128], 0.5, 3_128);
+    near(out[6_256], 0.25, 6_256);
+    // The next fade in is 96 frames, ending 34 frames before the transient.
+    assert_eq!(out[47_869], 0.0);
+    near(out[47_870 + 48], 0.5, 47_918);
+    assert_eq!(out[47_966], 1.0);
 }

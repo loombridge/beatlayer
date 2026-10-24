@@ -9,6 +9,14 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
     use Reason::{Equivalent, Gap, LaterView, Live, Query, Unobserved};
     vec![
         (
+            "clip.set_colour",
+            Exception(Equivalent(
+                "the clip's context menu, opened with the Context Menu key or Shift-F10 \
+                 (S-CTX-002) on the selected clip: its last row is the colour palette, whose \
+                 swatches the arrow keys move between and Enter chooses (themes R22)",
+            )),
+        ),
+        (
             "clip.set_scale",
             main(a_clip_selected, control_bar, "Scale Mode", Key::Enter),
         ),

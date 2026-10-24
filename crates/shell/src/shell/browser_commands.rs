@@ -70,6 +70,7 @@ impl Shell {
             },
             collect_files: self.prefs.collect_files_on_export,
             search: &search,
+            look: &self.prefs.look,
         };
         let outcome = self
             .browser_view

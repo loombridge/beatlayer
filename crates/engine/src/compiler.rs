@@ -3340,6 +3340,49 @@ mod tests {
         assert!(other.data.is_empty());
     }
 
+    // Spec: themes R27. A colour is never heard: colouring a track, a clip or a
+    // scene sends the engine no program, no parameter and no clip data.
+    #[test]
+    fn a_colour_edit_sends_the_engine_nothing() {
+        let mut f = Fixture::new();
+        let audio_track = track(&mut f.editor, TrackKind::Audio, None);
+        let clip = bl_model::Clip::new(
+            f.editor.new_id(),
+            bl_core::time::Ticks::ZERO,
+            bl_core::time::Ticks::WHOLE,
+            bl_model::ClipData::Audio(bl_model::AudioData::new(bl_model::ContentHash([7; 32]))),
+        );
+        let clip_id = clip.id;
+        f.apply(Command::CreateClip {
+            track: audio_track,
+            clip,
+        });
+        let scene = f.editor.document().scenes().next().unwrap().id;
+        for command in [
+            Command::SetTrackColour {
+                tracks: vec![audio_track, f.group],
+                colour: 40,
+            },
+            Command::SetClipColour {
+                clips: vec![clip_id],
+                colour: 41,
+            },
+            Command::SetSceneColour {
+                scenes: vec![scene],
+                colour: Some(42),
+            },
+            Command::AssignColourToClips {
+                tracks: vec![audio_track],
+            },
+            Command::AssignColourToGrouped {
+                tracks: vec![f.group],
+            },
+        ] {
+            let update = f.apply(command.clone());
+            assert!(update.is_empty(), "{command:?}");
+        }
+    }
+
     #[test]
     fn mixer_and_parameter_edits_need_no_program() {
         let mut f = Fixture::new();

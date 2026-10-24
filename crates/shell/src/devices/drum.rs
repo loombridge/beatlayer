@@ -1263,6 +1263,7 @@ impl DeviceView {
     pub(super) fn extract_chain(
         &mut self,
         editor: &mut Editor,
+        look: &bl_shell_spec::settings::ThemeLook,
         args: ExtractChainArgs,
     ) -> Result<Extracted, DeviceError> {
         let doc = editor.document();
@@ -1325,6 +1326,7 @@ impl DeviceView {
                     parent: None,
                     index: top,
                 })?;
+                crate::colours::colour_new(editor, look, &[new_track], &[])?;
                 for (n, device) in devices.iter().enumerate() {
                     editor.apply(Command::MoveDevice {
                         device: *device,
@@ -1398,6 +1400,7 @@ impl DeviceView {
     pub(super) fn extract_return(
         &mut self,
         editor: &mut Editor,
+        look: &bl_shell_spec::settings::ThemeLook,
         args: ExtractChainArgs,
     ) -> Result<Extracted, DeviceError> {
         let doc = editor.document();
@@ -1427,6 +1430,7 @@ impl DeviceView {
                     parent: None,
                     index: count,
                 })?;
+                crate::colours::colour_new(editor, look, &[new_track], &[])?;
                 for (n, device) in devices.iter().enumerate() {
                     editor.apply(Command::MoveDevice {
                         device: *device,

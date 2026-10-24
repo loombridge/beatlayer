@@ -271,9 +271,17 @@ impl Shell {
             track_ids::GROUP => {
                 let track_ids::GroupTracksArgs { tracks } = Self::args(id, args)?;
                 let tracks = tracks.unwrap_or_else(|| self.arrangement.selected_tracks().to_vec());
-                let group_id =
-                    crate::tracks::group_tracks(&mut self.editor, &tracks, track_ids::GROUP_STEP)
-                        .map_err(|reason| ShellError::Unavailable {
+                let look = &self.prefs.look;
+                let group_id = self
+                    .editor
+                    .transact(track_ids::GROUP_STEP, |editor| {
+                        let group =
+                            crate::tracks::group_tracks(editor, &tracks, track_ids::GROUP_STEP)?;
+                        crate::colours::colour_new(editor, look, &[group], &[])
+                            .map_err(|error| error.to_string())?;
+                        Ok::<_, String>(group)
+                    })
+                    .map_err(|reason| ShellError::Unavailable {
                         command: id.to_owned(),
                         reason,
                     })?;

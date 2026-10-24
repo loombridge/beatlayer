@@ -2079,7 +2079,7 @@ fn the_notes_are_paler_the_softer_their_velocity() {
     let start = n.marker();
     let length = n.length();
     let track = n.doc().clip_track(n.clip).expect("the clip's track");
-    let full = bl_ui::arrangement::scene::track_colour(&n.h.theme, track);
+    let full = bl_ui::arrangement::scene::track_colour(&n.h.theme, n.doc(), track);
     let palest = bl_ui::theme::note_colour(full, 1);
     let middle = bl_ui::theme::note_colour(full, 64);
     let output = n.h.settle();

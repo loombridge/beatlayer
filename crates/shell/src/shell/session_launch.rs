@@ -253,6 +253,7 @@ impl Shell {
                     capture,
                     launch_quantization: self.prefs.launch.default_quantization,
                     search: &search,
+                    look: &self.prefs.look,
                 },
             )
             .map_err(|error| match error {

@@ -4443,12 +4443,13 @@ One of:
 
 ### `ChangeSet`
 
-What a command changed: whether the song settings (the tempo map, the time-signature map, the crossfader, the Arrangement loop, or Solo in Place) changed, whether the track list changed, and which tracks, scenes, clips, and devices were added, removed, or modified, keyed by ID. Every field is empty or false if nothing changed.
+What a command changed: whether the song settings (the tempo map, the time-signature map, the crossfader, the Arrangement loop, or Solo in Place) changed, whether the track list changed, whether a colour changed, and which tracks, scenes, clips, and devices were added, removed, or modified, keyed by ID. Every field is empty or false if nothing changed.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `settings` | boolean | yes | The song settings changed: the tempo map, the time-signature map, the crossfader, the Arrangement loop, or Solo in Place. |
 | `layout` | boolean | yes | The track tree changed: a track was added, removed, or moved, so routing may have changed. |
+| `colours` | boolean | yes | The colour of a track, a clip, or a scene changed. The engine never hears a colour, so nothing else is listed for it (the themes spec, R27), but the set did change. |
 | `tracks` | object of [`Change`](#change) by integer key | yes | Tracks whose own settings changed: name, mixer, sends, the tracks inside a group, or the order of the device chain. Changes to a track's clips or to its devices' settings are listed under `clips` and `devices` instead. |
 | `scenes` | object of [`Change`](#change) by integer key | yes | Scenes that were added, removed, renamed, or moved. A scene whose clips changed only is listed under `clips`, not here. |
 | `clips` | object of [`Change`](#change) by integer key | yes | Clips that changed, including clips moved to another track or between the Arrangement and a Session slot. |
@@ -4458,7 +4459,7 @@ What a command changed: whether the song settings (the tempo map, the time-signa
 
 ```json
 {
-  "description": "What a command changed: whether the song settings (the tempo map, the time-signature map, the crossfader, the Arrangement loop, or Solo in Place) changed, whether the track list changed, and which tracks, scenes, clips, and devices were added, removed, or modified, keyed by ID. Every field is empty or false if nothing changed.",
+  "description": "What a command changed: whether the song settings (the tempo map, the time-signature map, the crossfader, the Arrangement loop, or Solo in Place) changed, whether the track list changed, whether a colour changed, and which tracks, scenes, clips, and devices were added, removed, or modified, keyed by ID. Every field is empty or false if nothing changed.",
   "properties": {
     "clips": {
       "additionalProperties": false,
@@ -4469,6 +4470,10 @@ What a command changed: whether the song settings (the tempo map, the time-signa
         }
       },
       "type": "object"
+    },
+    "colours": {
+      "description": "The colour of a track, a clip, or a scene changed. The engine never hears a colour, so nothing else is listed for it (the themes spec, R27), but the set did change.",
+      "type": "boolean"
     },
     "devices": {
       "additionalProperties": false,
@@ -4512,6 +4517,7 @@ What a command changed: whether the song settings (the tempo map, the time-signa
   "required": [
     "settings",
     "layout",
+    "colours",
     "tracks",
     "scenes",
     "clips",
@@ -4718,6 +4724,7 @@ A clip on a track's arrangement lane.
 | `length` | [`Ticks`](#ticks) | yes | How long the clip is. Always positive. |
 | `mute` | boolean | yes | Whether the clip is switched off, so it stays in place but doesn't play. |
 | `data` | [`ClipData`](#clipdata) | yes | What the clip plays. |
+| `colour` | integer or null | no | The clip's colour, a swatch from 0 to 69 (the themes spec, R14). A clip handed to a command without one takes its track's colour as it goes in, and a set saved before colours gives each clip its track's on loading, so a clip in a document always has one. |
 | `envelopes` | array of [`ClipEnvelope`](#clipenvelope) | no | The clip's envelopes (WP-3.15): one per parameter of its track it modulates, in target order. Empty for a clip with none, which is what a set saved before this package holds. |
 | `groove` | [`GrooveId`](#grooveid) or null | no | The clip's groove (WP-6.19): one of the set's Groove Pool, or none. It changes when the clip's notes play, or where its audio plays, and nothing in the clip itself until it is committed. |
 | `launch` | [`ClipLaunch`](#cliplaunch) | no | The clip's launch settings (WP-3.4), which only a Session clip's launching reads. The defaults for a clip saved without them. |
@@ -4730,6 +4737,16 @@ A clip on a track's arrangement lane.
 {
   "description": "A clip on a track's arrangement lane.",
   "properties": {
+    "colour": {
+      "description": "The clip's colour, a swatch from 0 to 69 (the themes spec, R14). A clip handed to a command without one takes its track's colour as it goes in, and a set saved before colours gives each clip its track's on loading, so a clip in a document always has one.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
     "data": {
       "$ref": "#/$defs/ClipData",
       "description": "What the clip plays."
@@ -4794,6 +4811,37 @@ A clip on a track's arrangement lane.
     "data"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `ClipColour`
+
+What Clip Color gives a new clip (themes R23).
+
+One of:
+
+- `"track-color"`: The clip takes its track's colour, as it does in Live.
+- `"random"`: The clip takes swatch `h mod 70`, `h` being a hash of its ID.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What Clip Color gives a new clip (themes R23).",
+  "oneOf": [
+    {
+      "const": "track-color",
+      "description": "The clip takes its track's colour, as it does in Live.",
+      "type": "string"
+    },
+    {
+      "const": "random",
+      "description": "The clip takes swatch `h mod 70`, `h` being a hash of its ID.",
+      "type": "string"
+    }
+  ]
 }
 ```
 
@@ -26752,6 +26800,10 @@ Theme & Colors in `settings.state` (themes R12).
 | `brightness` | integer from -32768 to 32767 | yes | Brightness. |
 | `color_intensity` | integer from -32768 to 32767 | yes | Color Intensity, in percent. |
 | `color_hue` | integer from -32768 to 32767 | yes | Color Hue, in degrees. |
+| `auto_assign_track_colours` | boolean | yes | Auto-Assign Track Colors (themes R23). |
+| `default_track_colour` | integer from 0 to 255 | yes | Default Track Color, a swatch from 0 to 69, which new tracks take while Auto-Assign Track Colors is off. |
+| `reduced_automatic_colours` | boolean | yes | Reduced Automatic Colors. |
+| `clip_colour` | [`ClipColour`](#clipcolour) | yes | Clip Color. |
 | `appearance` | [`Appearance`](#appearance) | yes | The Appearance chosen. |
 | `drawn_appearance` | [`Appearance`](#appearance) | yes | The appearance drawn now, `light` or `dark`: Follow System resolved. |
 | `themes` | array of string | yes | The themes the Theme chooser offers, in its order. |
@@ -26766,6 +26818,11 @@ Theme & Colors in `settings.state` (themes R12).
       "$ref": "#/$defs/Appearance",
       "description": "The Appearance chosen."
     },
+    "auto_assign_track_colours": {
+      "default": true,
+      "description": "Auto-Assign Track Colors (themes R23).",
+      "type": "boolean"
+    },
     "brightness": {
       "default": 0,
       "description": "Brightness.",
@@ -26773,6 +26830,11 @@ Theme & Colors in `settings.state` (themes R12).
       "maximum": 32767,
       "minimum": -32768,
       "type": "integer"
+    },
+    "clip_colour": {
+      "$ref": "#/$defs/ClipColour",
+      "default": "track-color",
+      "description": "Clip Color."
     },
     "color_hue": {
       "default": 0,
@@ -26790,6 +26852,14 @@ Theme & Colors in `settings.state` (themes R12).
       "minimum": -32768,
       "type": "integer"
     },
+    "default_track_colour": {
+      "default": 12,
+      "description": "Default Track Color, a swatch from 0 to 69, which new tracks take while Auto-Assign Track Colors is off.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
     "drawn_appearance": {
       "$ref": "#/$defs/Appearance",
       "description": "The appearance drawn now, `light` or `dark`: Follow System resolved."
@@ -26805,6 +26875,11 @@ Theme & Colors in `settings.state` (themes R12).
     "high_contrast": {
       "default": false,
       "description": "High Contrast.",
+      "type": "boolean"
+    },
+    "reduced_automatic_colours": {
+      "default": false,
+      "description": "Reduced Automatic Colors.",
       "type": "boolean"
     },
     "theme": {
@@ -26833,6 +26908,10 @@ Theme & Colors in `settings.state` (themes R12).
     "brightness",
     "color_intensity",
     "color_hue",
+    "auto_assign_track_colours",
+    "default_track_colour",
+    "reduced_automatic_colours",
+    "clip_colour",
     "appearance",
     "drawn_appearance",
     "themes"

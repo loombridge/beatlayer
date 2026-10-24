@@ -95,6 +95,10 @@ struct TrackRepr {
     /// before it have none, which loads unlinked.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     link: Option<crate::ids::LinkGroupId>,
+    /// The track's colour (the themes spec, R14). Sets saved before
+    /// WP-6.30b have none, which loads as `id mod 14` (R21).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    colour: Option<u8>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     children: Vec<TrackRepr>,
     /// The track's frozen audio (WP-4.14). Sets saved before it have none,
@@ -231,6 +235,7 @@ impl TrackRepr {
             keep_monitoring_latency: track.keep_monitoring_latency(),
             tuning_bypass: track.tuning_bypass(),
             link: track.link(),
+            colour: Some(track.colour()),
             frozen: track.frozen.clone(),
             children: if with_children {
                 track
@@ -297,6 +302,9 @@ impl TryFrom<DocumentRepr> for Document {
         if let Some(scenes) = &scenes {
             for scene in scenes {
                 loader.claim(scene.id.0)?;
+                if let Some(colour) = scene.colour {
+                    crate::colour::check_swatch("scene colour", colour)?;
+                }
             }
         }
         let mut document = Self {
@@ -427,6 +435,10 @@ impl Loader {
         track.keep_monitoring_latency = repr.keep_monitoring_latency;
         track.tuning_bypass = repr.tuning_bypass;
         track.link = repr.link;
+        if let Some(colour) = repr.colour {
+            crate::colour::check_swatch("track colour", colour)?;
+            track.colour = colour;
+        }
         track.frozen = repr.frozen;
         if let Some(routing) = repr.routing {
             track.routing = routing;
@@ -480,6 +492,7 @@ impl Loader {
                 midi.repair_groups();
             }
             check_clip(&clip)?;
+            clip.colour.get_or_insert(track.colour);
             self.index.clip_track.insert(clip.id, id);
             track.clips.insert(clip.id, Shared::new(clip));
         }
@@ -497,6 +510,7 @@ impl Loader {
                 midi.repair_groups();
             }
             check_clip(&slot.clip)?;
+            slot.clip.colour.get_or_insert(track.colour);
             self.index.clip_track.insert(slot.clip.id, id);
             if track
                 .slots
@@ -516,6 +530,7 @@ impl Loader {
                     midi.repair_groups();
                 }
                 check_clip(clip)?;
+                clip.colour.get_or_insert(track.colour);
                 self.index.clip_track.insert(clip.id, id);
             }
             self.index.lane_track.insert(lane.id, id);

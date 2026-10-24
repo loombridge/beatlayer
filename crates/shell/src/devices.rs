@@ -225,6 +225,9 @@ pub struct Context<'a> {
     pub auto_hide: bool,
     /// Whether View ▸ Plug-In Windows shows the windows.
     pub windows_shown: bool,
+    /// The colour settings, for a track a command makes (the themes spec,
+    /// R19).
+    pub look: &'a bl_shell_spec::settings::ThemeLook,
 }
 
 /// The display of a device whose type draws none.
@@ -1689,6 +1692,7 @@ impl DeviceView {
             zoom,
             auto_hide,
             windows_shown,
+            look,
         } = ctx;
         let track = shown_track(arrangement, editor.document());
         let windows = |view: &Self, editor: &Editor| {
@@ -1808,7 +1812,8 @@ impl DeviceView {
             ids::ADD => {
                 let args: AddDeviceArgs = parse(args)?;
                 let ready = self.default_rack(editor, &args, user_library, media, &mut outcome);
-                let added = self.add(&args, editor, arrangement, user_library, track, ready)?;
+                let added =
+                    self.add(&args, editor, arrangement, user_library, look, track, ready)?;
                 if let Some(name) = &added.default_preset {
                     // Spec: device-chains R13, as Live's "Using Default
                     // Preset Auto Filter.adv."
@@ -2127,13 +2132,13 @@ impl DeviceView {
             }
             pad_ids::CHAIN_EXTRACT => {
                 let args: pad_ids::ExtractChainArgs = parse(args)?;
-                outcome.value = to_value(&self.extract_chain(editor, args)?);
+                outcome.value = to_value(&self.extract_chain(editor, look, args)?);
                 outcome.document_changed = true;
                 return Ok(outcome);
             }
             pad_ids::CHAIN_EXTRACT_RETURN => {
                 let args: pad_ids::ExtractChainArgs = parse(args)?;
-                outcome.value = to_value(&self.extract_return(editor, args)?);
+                outcome.value = to_value(&self.extract_return(editor, look, args)?);
                 outcome.document_changed = true;
                 return Ok(outcome);
             }
@@ -2450,8 +2455,15 @@ impl DeviceView {
                 let args: AddPresetArgs = parse(args)?;
                 let (add, ready) =
                     self.ready_to_add(&args, editor, user_library, media, &mut outcome)?;
-                let added =
-                    self.add(&add, editor, arrangement, user_library, track, Some(ready))?;
+                let added = self.add(
+                    &add,
+                    editor,
+                    arrangement,
+                    user_library,
+                    look,
+                    track,
+                    Some(ready),
+                )?;
                 outcome.document_changed = true;
                 outcome.value = to_value(&added);
                 return Ok(outcome);
@@ -2580,6 +2592,7 @@ impl DeviceView {
         editor: &mut Editor,
         arrangement: &mut ArrangementView,
         user_library: Option<&Path>,
+        look: &bl_shell_spec::settings::ThemeLook,
         shown: Option<TrackId>,
         ready: Option<Ready>,
     ) -> Result<DeviceAdded, DeviceError> {
@@ -2630,6 +2643,7 @@ impl DeviceView {
                     parent: None,
                     index: top,
                 })?;
+                crate::colours::colour_new(editor, look, &[track_id], &[])?;
             }
             editor.apply(Command::InsertDevice {
                 track: track_id,

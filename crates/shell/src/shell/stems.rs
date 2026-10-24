@@ -497,6 +497,7 @@ impl Shell {
             .filter_map(|(output, hash)| hash.map(|hash| (parts_name(&output.parts), hash)))
             .collect();
         let mut created = Vec::new();
+        let look = &self.prefs.look;
         self.editor
             .transact(stems_ids::STEP, |editor| {
                 // Spec: stem-separation R9. More than one part goes in a
@@ -541,6 +542,7 @@ impl Shell {
                         clip: copy,
                     })?;
                 }
+                crate::colours::colour_new(editor, look, &created, &[])?;
                 // Spec: stem-separation R11. The original is deactivated.
                 editor.apply(Command::SetClipMute {
                     clip: source_clip,

@@ -463,7 +463,8 @@ impl Shell {
                         // Spec: grooves R20. A clip made by recording takes
                         // the set's auto-load groove.
                         clip: Clip::new(clip, Ticks::ZERO, length, data)
-                            .with_groove(self.editor.document().settings().grooves.auto_loaded()),
+                            .with_groove(self.editor.document().settings().grooves.auto_loaded())
+                            .with_colour(self.prefs.look.new_clip_colour(clip)),
                     })
                 }
             };
@@ -574,9 +575,11 @@ impl Shell {
                                     // Spec: grooves R20. A clip made by
                                     // recording takes the set's auto-load
                                     // groove.
-                                    clip: Clip::new(clip, Ticks::ZERO, length, data).with_groove(
-                                        self.editor.document().settings().grooves.auto_loaded(),
-                                    ),
+                                    clip: Clip::new(clip, Ticks::ZERO, length, data)
+                                        .with_groove(
+                                            self.editor.document().settings().grooves.auto_loaded(),
+                                        )
+                                        .with_colour(self.prefs.look.new_clip_colour(clip)),
                                 })?;
                                 clip
                             }

@@ -248,9 +248,9 @@ impl ClipViewUi {
                 Some(Shown {
                     clip: *id,
                     name: clip.name.clone(),
-                    colour: track.map_or(theme.colors.accent.0, |track| {
-                        crate::arrangement::scene::track_colour(theme, track)
-                    }),
+                    colour: clip
+                        .colour
+                        .map_or(theme.colors.accent.0, |swatch| theme.swatch(swatch)),
                     midi: midi.clone(),
                     clip_start: clip.start,
                     length: clip.length,

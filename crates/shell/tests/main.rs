@@ -32,6 +32,7 @@ mod clip_files;
 mod clip_streaming;
 mod clip_view;
 mod clip_view_tabs;
+mod colours;
 mod comping;
 mod dawproject;
 mod detail_views;

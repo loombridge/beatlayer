@@ -132,6 +132,39 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             "settings.set_color_hue",
             settings("theme-colors", nothing, "Color Hue", Key::ArrowUp),
         ),
+        // The Track and Clip Colors rows (the themes spec, R23): Default Track
+        // Color waits for Auto-Assign Track Colors to be off.
+        (
+            "settings.set_auto_assign_track_colours",
+            settings(
+                "theme-colors",
+                nothing,
+                "Auto-Assign Track Colors",
+                Key::Enter,
+            ),
+        ),
+        (
+            "settings.set_default_track_colour",
+            settings(
+                "theme-colors",
+                auto_assign_off,
+                "Default Track Color",
+                Key::ArrowDown,
+            ),
+        ),
+        (
+            "settings.set_reduced_automatic_colours",
+            settings(
+                "theme-colors",
+                nothing,
+                "Reduced Automatic Colors",
+                Key::Enter,
+            ),
+        ),
+        (
+            "settings.set_clip_colour",
+            settings("theme-colors", nothing, "Clip Color", Key::ArrowDown),
+        ),
         (
             "settings.set_create_fades_on_clip_edges",
             settings(
@@ -325,4 +358,14 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             settings("file-folder", nothing, "Save Continuously", Key::Enter),
         ),
     ]
+}
+
+/// Auto-Assign Track Colors off, which enables Default Track Color.
+fn auto_assign_off(h: &mut crate::common::Harness) {
+    h.shell
+        .run(
+            "settings.set_auto_assign_track_colours",
+            serde_json::json!({ "on": false }),
+        )
+        .unwrap();
 }

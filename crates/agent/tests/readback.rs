@@ -810,6 +810,14 @@ fn fixture() -> Project {
             name: "Verse".to_owned(),
         },
     );
+    // WP-6.30b: a colour on the scene, which a new one doesn't have.
+    apply(
+        &mut editor,
+        Command::SetSceneColour {
+            scenes: vec![scenes[0]],
+            colour: Some(47),
+        },
+    );
     apply(
         &mut editor,
         Command::SetSceneTempo {
@@ -1521,6 +1529,82 @@ fn the_note_value_commands_run_by_id_and_read_back() {
     assert_eq!(after[1]["mute"], true, "deactivated");
     assert_ne!(after[2]["release_velocity"], before[2]["release_velocity"]);
     assert_eq!(after[0]["mute"], before[0]["mute"], "the others untouched");
+}
+
+// Spec: themes R25. The colour commands run by ID through the agent API, and
+// the query tool's track, clip and scene objects read the swatch back.
+#[test]
+fn the_colour_commands_run_by_id_and_read_back() {
+    let mut client = open(&fixture(), "colours");
+    let keys = query(
+        &mut client,
+        json!({ "path": "track \"Keys\"", "detail": "full" }),
+    );
+    let track = keys["id"].clone();
+    let clip = keys["saved"]["clips"]["items"][0]["id"].clone();
+    let run = |client: &mut Client<InProcess>, command: &str, args: Value| {
+        client
+            .call(
+                "run",
+                json!({ "commands": [{ "command": command, "args": args }] }),
+            )
+            .unwrap()
+            .ok()
+            .unwrap_or_else(|error| panic!("{command}: {error}"))
+    };
+    let colour = |client: &mut Client<InProcess>, what: &Value| -> Value {
+        query(client, json!({ "id": what }))["colour"].clone()
+    };
+
+    run(
+        &mut client,
+        "track.set_colour",
+        json!({ "tracks": [track], "colour": 44 }),
+    );
+    assert_eq!(colour(&mut client, &track), 44);
+    run(
+        &mut client,
+        "clip.set_colour",
+        json!({ "clips": [clip], "colour": 7 }),
+    );
+    assert_eq!(colour(&mut client, &clip), 7);
+    // Assign Track Color to Clips gives the clip its track's colour back.
+    run(
+        &mut client,
+        "track.assign_colour_to_clips",
+        json!({ "tracks": [track] }),
+    );
+    assert_eq!(colour(&mut client, &clip), 44);
+
+    let scenes = query(&mut client, json!({ "path": "scene 1" }));
+    let scene = scenes["id"].clone();
+    assert!(
+        scenes["colour"].is_number(),
+        "the fixture's scene has one: {scenes}"
+    );
+    run(
+        &mut client,
+        "scene.set_colour",
+        json!({ "scenes": [scene], "colour": null }),
+    );
+    assert_eq!(colour(&mut client, &scene), Value::Null);
+    run(
+        &mut client,
+        "scene.set_colour",
+        json!({ "scenes": [scene], "colour": 69 }),
+    );
+    assert_eq!(colour(&mut client, &scene), 69);
+    // A swatch outside the palette is refused.
+    let refused = client
+        .call(
+            "run",
+            json!({ "commands": [{
+                "command": "track.set_colour",
+                "args": { "tracks": [track], "colour": 70 }
+            }] }),
+        )
+        .unwrap();
+    assert!(refused.ok().is_err());
 }
 
 // Spec: note-editing R32. Group Notes and Ungroup Notes run by ID through the

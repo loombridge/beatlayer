@@ -222,6 +222,9 @@ pub struct Context<'a> {
     /// the file says: the set's project folder, the User Library and the
     /// places (clip files R12).
     pub search: &'a [PathBuf],
+    /// The colour settings, for the tracks and clips added (the themes spec,
+    /// R19, R20).
+    pub look: &'a bl_shell_spec::settings::ThemeLook,
 }
 
 /// What [`BrowserView::poll`] found.
@@ -3663,29 +3666,42 @@ impl BrowserView {
         ctx: Context<'_>,
         outcome: &mut Outcome,
     ) -> Result<(), BrowserError> {
-        let (result, media) = if args.paths.iter().any(|p| arrange::is_clip_file(p)) {
-            let (result, media, missing) =
-                arrange::add_clip_files(ctx.editor, ctx.media, ctx.insert_marker, ctx.search, args)
-                    .map_err(|error| match error {
-                        AddError::InvalidArgs(message) => BrowserError::InvalidArgs(message),
-                        AddError::Failed(message) => BrowserError::Failed(message),
-                    })?;
-            outcome.message = arrange::missing_message(missing);
-            (result, media)
-        } else {
-            arrange::add_files(
-                ctx.editor,
-                ctx.media,
-                ctx.insert_marker,
-                ctx.edge_fades,
-                ctx.warping,
-                args,
-            )
+        let clip_files = args.paths.iter().any(|p| arrange::is_clip_file(p));
+        let look = ctx.look;
+        // Spec: themes R19, R20. The new tracks and clips take their colours
+        // in the step that makes them.
+        let (result, media) = ctx
+            .editor
+            .transact(arrange::UNDO_LABEL, |editor| {
+                let (result, media) = if clip_files {
+                    let (result, media, missing) = arrange::add_clip_files(
+                        editor,
+                        ctx.media,
+                        ctx.insert_marker,
+                        ctx.search,
+                        args,
+                    )?;
+                    outcome.message = arrange::missing_message(missing);
+                    (result, media)
+                } else {
+                    arrange::add_files(
+                        editor,
+                        ctx.media,
+                        ctx.insert_marker,
+                        ctx.edge_fades,
+                        ctx.warping,
+                        args,
+                    )?
+                };
+                let clips: Vec<_> = result.clips.iter().map(|clip| clip.clip).collect();
+                crate::colours::colour_new(editor, look, &result.created_tracks, &clips)
+                    .map_err(|error| AddError::Failed(error.to_string()))?;
+                Ok((result, media))
+            })
             .map_err(|error| match error {
                 AddError::InvalidArgs(message) => BrowserError::InvalidArgs(message),
                 AddError::Failed(message) => BrowserError::Failed(message),
-            })?
-        };
+            })?;
         outcome.value = to_value(&result);
         outcome.media = media;
         outcome.document_changed = true;

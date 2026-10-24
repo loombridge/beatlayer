@@ -21,6 +21,7 @@ mod clip_edge_fades;
 mod clip_envelope;
 mod clip_files;
 mod clip_view;
+mod clips_between_views;
 mod common;
 mod detail_views;
 mod device_panel;

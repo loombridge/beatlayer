@@ -1,6 +1,6 @@
 # The second window: two main views at once, the detail views between windows, and clips between the Session and the Arrangement
 
-- **Status:** partial (R1 to R17 each have a passing test; R18 to R23 come with WP-6.29b)
+- **Status:** implemented (R1 to R23 each have a passing test)
 - **Work packages:** WP-6.29 (the second window: R1 to R17), WP-6.29b (clips between the Session and the Arrangement, by dragging in one window or between two, and by Copy and Paste: R18 to R23). Each window's own interface zoom is [interface-zoom.md](interface-zoom.md) R11 to R15; the detail area inside a window is [detail-views.md](detail-views.md)'s
 - **Parity-matrix row:** Views and workflow: Second window; Interface zoom, per window
 - **Checked against:** the Live 12 reference manual (online edition), read 20 October 2026; the Live 12 release notes, 12.0 and 12.1; the UI parity reference's rows L-WIN2-001 to L-WIN2-003, L-WIN-002, L-CTRL-001, L-CTRL-027, L-ARR-018, M-VIEW-002, M-FILE-004, S-VIEW-002, S-VIEW-003, S-VIEW-004, I-DROP-014, I-DROP-015 and I-FOCUS-010, recorded from Live 12.4.3 on macOS
@@ -91,9 +91,9 @@ This spec covers the second window, what it shows, the keyboard focus between th
 | R15 | `crates/shell/tests/second_window.rs`, `view_state_reads_back_every_command`; `crates/agent/tests/readback_runtime.rs`, `view_state_reads_back_the_second_window`; `crates/app/src/capture.rs`, `a_view_is_captured_from_whichever_window_shows_it`; `cargo xtask commands` | unit, through the agent API |
 | R16 | `crates/ui/tests/second_window.rs`, `each_window_is_a_root_of_the_accessibility_tree_and_names_itself`, `only_the_window_in_front_outlines_its_focused_area` | UI script |
 | R17 | `crates/ui/tests/second_window.rs`, `it_lays_out_at_its_first_size_and_its_smallest_at_50_100_and_200_percent`, `the_control_bar_is_measured_from_the_windows_left_edge_like_the_main_windows`, `the_second_window_zooms_on_its_own` | unit, UI script |
-| R18 | to be written in WP-6.29b | |
-| R19 | to be written in WP-6.29b | |
-| R20 | to be written in WP-6.29b | |
-| R21 | to be written in WP-6.29b | |
-| R22 | to be written in WP-6.29b | |
-| R23 | to be written in WP-6.29b | |
+| R18 | `crates/ui/tests/clips_between_views.rs`, `dragging_a_session_clip_onto_the_arrangement_view_button_drops_it_there`, `esc_and_a_drop_on_nothing_change_nothing`, `a_clip_drag_over_the_second_windows_selector_switches_its_view` | UI script |
+| R19 | `crates/ui/tests/clips_between_views.rs`, `a_session_clip_dragged_into_the_other_window_drops_there`, `an_arrangement_clip_dragged_into_the_other_window_drops_in_a_slot` | UI script, two harness windows |
+| R20 | `crates/shell/tests/session_clips.rs`, `a_session_clip_is_copied_to_the_arrangement_at_the_position`, `without_arguments_it_copies_the_selection_to_the_selected_track_at_the_insert_marker`, `clips_of_three_tracks_keep_their_distance_across_the_tracks`, `one_tracks_clips_from_three_scenes_land_end_to_end`, `clips_for_a_track_of_the_wrong_kind_are_skipped_and_counted`, `the_copies_replace_what_they_cover`; `crates/ui/tests/clips_between_views.rs`, `the_selected_session_clips_are_dragged_together` | unit, UI script |
+| R21 | `crates/shell/tests/session_clips.rs`, `arrangement_clips_of_one_track_go_down_the_scenes_in_the_order_they_play`, `arrangement_clips_of_two_tracks_go_across_the_tracks`, `scenes_are_added_at_the_end_and_full_slots_are_replaced`, `arrangement_clips_for_the_wrong_kind_of_track_take_no_slot` | unit |
+| R22 | `crates/shell/tests/session_clips.rs`, `session_clips_pasted_in_the_arrangement_land_at_the_insert_marker_on_the_selected_track`, `arrangement_clips_pasted_in_the_session_view_start_at_the_selected_slot`; `crates/ui/tests/clips_between_views.rs`, `copy_and_paste_by_key_carry_clips_across_the_views` | unit, UI script |
+| R23 | `crates/shell/tests/session_clips.rs`, `a_session_clip_is_copied_to_the_arrangement_at_the_position` (one undo step, named), `a_clip_drag_waits_for_agents_and_drops_where_the_pointer_was`, `the_commands_are_registered_with_their_classes_and_keys`; `crates/agent/tests/permissions.rs`, `copies_between_the_views_over_clips_ask_and_into_empty_space_do_not`; `crates/agent/tests/readback.rs`, `the_copies_between_the_views_run_by_id_and_read_back`; `cargo xtask commands` | unit, through the agent API |

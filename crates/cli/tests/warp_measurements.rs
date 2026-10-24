@@ -9,7 +9,7 @@ use bl_engine::{EngineConfig, MediaMap, Offline, Registry, TransportCommand};
 use bl_media::SampleData;
 use bl_model::{
     AudioData, Clip, ClipData, Command, ComplexProSettings, ContentHash, Editor, TextureSettings,
-    TonesSettings, TrackKind, WarpMarker, WarpMode,
+    TonesSettings, TrackKind, TransientLoopMode, WarpMarker, WarpMode,
 };
 
 const RATE: SampleRate = SampleRate::HZ_48000;
@@ -1186,7 +1186,13 @@ fn hit_timing(mode: WarpMode, table: &mut Table) {
     let hits = drum_hits();
     let name = format!("{mode:?}");
     for tempo in TEMPOS {
-        let song = target_song(tempo, Fixture::Drums, mode, |_| {});
+        // Loop Forward, Beats' default when this was written: Loop
+        // Back-and-Forth's reversed fill under a hit leaves steps that
+        // `hit_start` reads as the hit at half speed. The engine's hit
+        // positions are pinned to the sample in `warp_modes.rs`.
+        let song = target_song(tempo, Fixture::Drums, mode, |audio| {
+            audio.warp_settings.beats.transient_loop_mode = TransientLoopMode::LoopForward;
+        });
         let scale = 120.0 / tempo;
         let out = render(&song, &media, ((4.0 * scale + 0.5) * 48_000.0) as u64, 512);
         let mut worst = (0.0f64, 0);

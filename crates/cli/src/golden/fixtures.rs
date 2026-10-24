@@ -2058,6 +2058,7 @@ fn transposition_envelope_beats() -> Scene {
         clip,
         beats: Some(BeatsUpdate {
             preserve: Some(Preserve::Eighth),
+            transient_loop_mode: Some(TransientLoopMode::LoopForward),
             ..BeatsUpdate::default()
         }),
         tones: None,
@@ -2136,7 +2137,7 @@ macro_rules! warp_mode_fixtures {
     };
 }
 
-/// Beats at its defaults, over [`beats`] (R14 to R17). The fixture hands the
+/// Beats at Loop Forward, over [`beats`] (R14 to R17). The fixture hands the
 /// clip its transients, which a saved set doesn't have until the analysis
 /// reaches the engine, so the scene stops the transport on its last frame
 /// to be one `bl-cli render` doesn't play as saved.

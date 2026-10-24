@@ -583,6 +583,26 @@ fn saved_defaults_are_for_the_content_they_were_saved_for() {
     assert_eq!(audio(&shell, broken).gain, 1.0);
 }
 
+// Spec: warp-modes R2
+#[test]
+fn defaults_saved_before_the_loop_mode_default_changed_keep_loop_forward() {
+    let scratch = Scratch::new("save-default-v1");
+    let (mut shell, _, path, clip) = tuned_clip(&scratch);
+    set(&mut shell, "clip.save_default", json!({ "clip": clip }));
+    // A version 1 file names no Transient Loop Mode for a clip that had Loop
+    // Forward, the default then.
+    let file = bl_shell::clip_defaults::path_for(&path);
+    let mut saved: Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+    saved["version"] = 1.into();
+    saved["defaults"]["warp_settings"] = json!({});
+    std::fs::write(&file, serde_json::to_vec(&saved).unwrap()).unwrap();
+    let read = shell.run("clip.defaults", json!({ "clip": clip })).unwrap();
+    assert_eq!(
+        read["defaults"]["warp_settings"]["beats"]["transient_loop_mode"],
+        "loop_forward"
+    );
+}
+
 // Spec: warping R42
 #[test]
 fn save_default_clip_fails_loudly_when_it_cannot_write() {

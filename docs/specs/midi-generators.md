@@ -1,6 +1,6 @@
 # MIDI Tools: the generators
 
-- **Status:** draft
+- **Status:** partial (R1 to R16, WP-6.14, each have a passing test; R17 to R28, Stacks and its chord banks, are WP-6.14b's)
 - **Work packages:** WP-6.14 (what every generator shares, Rhythm, Seed, Shape and Euclidean: R1 to R16); WP-6.14b (Stacks, its chord banks in Beatlayer's own format and Beatlayer's built-in bank: R17 to R28). The Generate panel, choosing a tool, where a generator writes, applying, undo, seeds and chains are [midi-tools.md](midi-tools.md)'s (WP-6.11, WP-6.15)
 - **Parity-matrix row:** MIDI editing: "MIDI Tools, generators (Rhythm, Seed, Shape, Stacks, Euclidean)", whose note says chord banks are in Beatlayer's own format
 - **Checked against:** the Live 12 reference manual (online edition), read 20 October 2026: chapter 11, its introduction and sections 11.3.1 to 11.3.5; the Live 12 release notes, 12.0, 12.0.5, 12.1 and 12.2; the UI parity reference's I-CLICK-049 and S-NOTE-052
@@ -167,22 +167,22 @@ Stacks' chord banks are files in Beatlayer's own format, which a person writes o
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1 | to be written in WP-6.14 | |
-| R2 | to be written in WP-6.14 | |
-| R3 | to be written in WP-6.14 | |
-| R4 | to be written in WP-6.14 | |
-| R5 | to be written in WP-6.14 | |
-| R6 | to be written in WP-6.14 | |
-| R7 | to be written in WP-6.14 | |
-| R8 | to be written in WP-6.14 | |
-| R9 | to be written in WP-6.14 | |
-| R10 | to be written in WP-6.14 | |
-| R11 | to be written in WP-6.14 | |
-| R12 | to be written in WP-6.14 | |
-| R13 | to be written in WP-6.14 | |
-| R14 | to be written in WP-6.14 | |
-| R15 | to be written in WP-6.14 | |
-| R16 | to be written in WP-6.14 | |
+| R1 | `crates/midi-tools/tests/generators.rs`, `r1_a_pitch_is_written_on_the_allowed_key_nearest_it`, `every_generated_note_lies_in_its_range_and_its_allowed_keys` | unit, property |
+| R2 | `crates/ui/tests/clip_view.rs`, `option_clicking_and_dragging_the_piano_ruler_sets_the_shown_generators_pitch_or_range` | UI script |
+| R3 | `crates/midi-tools/tests/generators.rs`, `r3_a_pitch_has_a_name_and_takes_a_typed_name_or_number`; `crates/ui/tests/midi_tools.rs`, `rhythm_draws_its_step_pattern_names_its_pitch_and_steps_accent_offset_with_arrows` | unit, UI script |
+| R4 | `crates/midi-tools/tests/generators.rs`, `r4_rhythms_parameters_have_the_ranges_and_defaults_of_the_table`; `crates/ui/tests/midi_tools.rs`, `rhythm_draws_its_step_pattern_names_its_pitch_and_steps_accent_offset_with_arrows` | unit, UI script |
+| R5 | `crates/midi-tools/tests/generators.rs`, `r5_pattern_0_is_the_even_spread_and_the_others_follow_in_step_order`, `every_rhythm_pattern_holds_density_steps` | unit, property |
+| R6 | `crates/midi-tools/tests/generators.rs`, `r6_the_pattern_repeats_across_the_range_and_a_split_halves_a_step`, `euclidean_writes_exactly_density_hits_per_pattern_and_rhythm_density_notes`; `crates/agent/tests/midi_tools.rs`, `each_generator_applies_by_id_with_a_seed_replacing_only_the_notes_it_overlaps` | unit, property, agent |
+| R7 | `crates/midi-tools/tests/generators.rs`, `r7_accents_count_the_steps_that_write_from_the_ranges_start` | unit |
+| R8 | `crates/midi-tools/tests/generators.rs`, `r8_seeds_ranges_keep_their_lowest_below_their_highest`; `crates/ui/tests/midi_tools.rs`, `seeds_pitch_range_slider_moves_a_handle_or_both_and_merges_handles` | unit, UI script |
+| R9 | `crates/midi-tools/tests/generators.rs`, `r9_seed_makes_density_times_the_keys_for_each_whole_note` | unit |
+| R10 | `crates/midi-tools/tests/generators.rs`, `r10_seed_keeps_to_its_voices_and_never_overlaps_a_key_with_itself`, `every_generated_note_lies_in_its_range_and_its_allowed_keys` | unit, property |
+| R11 | `crates/midi-tools/tests/generators.rs`, `r11_shape_has_six_presets_of_sixteen_levels_and_drawing_reads_user`; `crates/ui/tests/midi_tools.rs`, `shapes_levels_display_draws_levels_and_the_preset_reads_user` | unit, UI script |
+| R12 | `crates/midi-tools/tests/generators.rs`, `r12_shape_gives_each_slot_the_level_of_its_place_in_the_range` | unit |
+| R13 | `crates/midi-tools/tests/generators.rs`, `r13_a_tie_lasts_into_the_next_slot_which_stays_empty` | unit |
+| R14 | `crates/midi-tools/tests/generators.rs`, `r14_euclideans_voices_and_parameters_have_the_defaults_of_the_table`; `crates/ui/tests/midi_tools.rs`, `euclideans_tabs_have_the_voices_rotations_pitches_arrows_and_randomise_button` | unit, UI script |
+| R15 | `crates/midi-tools/tests/generators.rs`, `r15_density_hits_are_spread_as_evenly_as_they_go` | unit |
+| R16 | `crates/midi-tools/tests/generators.rs`, `r16_each_switched_on_voice_repeats_its_pattern_from_the_ranges_start`, `r16_the_randomise_button_draws_every_rotation_from_the_seed`; `crates/agent/tests/midi_tools.rs`, `the_randomise_button_sets_every_rotation_from_a_seed_and_reads_back` | unit, agent |
 | R17 | to be written in WP-6.14b | |
 | R18 | to be written in WP-6.14b | |
 | R19 | to be written in WP-6.14b | |

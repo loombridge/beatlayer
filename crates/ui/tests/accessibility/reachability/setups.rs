@@ -699,6 +699,20 @@ pub(crate) fn midi_tools_changed(h: &mut Harness) {
         .unwrap();
 }
 
+/// The same, with LFO chosen and its Random wave, which has a Reseed button.
+pub(crate) fn midi_tools_lfo_random(h: &mut Harness) {
+    midi_tools_shown(h);
+    h.shell
+        .run("midi_tool.choose", json!({ "tool": "lfo" }))
+        .unwrap();
+    h.shell
+        .run(
+            "midi_tool.set",
+            json!({ "tool": "lfo", "values": { "shape_type": "random" } }),
+        )
+        .unwrap();
+}
+
 /// The same, with the Generate panel showing Euclidean, whose Pattern tab
 /// has the randomise button.
 pub(crate) fn euclidean_shown(h: &mut Harness) {

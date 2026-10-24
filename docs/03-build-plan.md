@@ -710,7 +710,7 @@ Total to 1.0: 293 packages planned in Phases 0 to 7, and about 95 estimated in P
 | 6.22b | todo |  |  |
 | 6.23 | todo |  |  |
 | 6.24 | done | 22 October 2026 | [#314](https://github.com/loombridge/beatlayer/pull/314); locators in the Arrangement's scrub area, the song start time, and playing from the scrub area on the global launch quantisation ([time editing](specs/time-editing.md) R1 to R13) |
-| 6.24b | todo |  |  |
+| 6.24b | done | 24 October 2026 | [#373](https://github.com/loombridge/beatlayer/pull/373); Insert Silence and Cut, Copy, Paste, Duplicate and Delete Time across every track, the tempo, the time-signature markers and the locators, with Shift and an edit command acting on time ([time editing](specs/time-editing.md) R14 to R23) |
 | 6.25 | done | 22 October 2026 | [#305](https://github.com/loombridge/beatlayer/pull/305); a time selection in the Arrangement's automation lanes names the lanes it covers, the breakpoints it covers and a segment drag move as one undo step each, Cut, Copy, Paste, Duplicate and Delete act on the selected lanes' envelopes and a copied shape pastes onto another parameter, and Lock Envelopes keeps the tracks' envelopes where they are while clip edits carry them over the clips' spans when it's off ([automation editing](specs/automation-editing.md) R1 to R10) |
 | 6.25b | done | 24 October 2026 | [#371](https://github.com/loombridge/beatlayer/pull/371); the ten automation shapes, stretching values and time, skewing with the selection's handles, and Simplify Envelope act on the selected lanes' envelopes in the Arrangement, one undo step each ([automation editing](specs/automation-editing.md) R11 to R19) |
 | 6.25c | todo |  |  |

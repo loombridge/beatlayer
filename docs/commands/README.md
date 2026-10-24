@@ -2965,6 +2965,43 @@ One breakpoint of an envelope: a position, the value there, and the bend of the 
 
 </details>
 
+### `BreakpointRef`
+
+A breakpoint of a note's expression envelope, named by the note and its position (Spec: mpe R32).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `note` | integer, at least 0 | yes | The note, by its place in the clip's notes in order (by start, then pitch). |
+| `at` | [`Ticks`](#ticks) | yes | The breakpoint's position in ticks counted from the note's start. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "additionalProperties": false,
+  "description": "A breakpoint of a note's expression envelope, named by the note and its position (Spec: mpe R32).",
+  "properties": {
+    "at": {
+      "$ref": "#/$defs/Ticks",
+      "description": "The breakpoint's position in ticks counted from the note's start."
+    },
+    "note": {
+      "description": "The note, by its place in the clip's notes in order (by start, then pitch).",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "note",
+    "at"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `BrowserState`
 
 What the browser shows: most browser commands return it.
@@ -4915,18 +4952,19 @@ One of:
 
 ### `ClipTab`
 
-A tab of the Clip View: `notes` (the MIDI Note Editor) or `envelopes` (the clip's envelopes).
+A tab of the Clip View: `notes` (the MIDI Note Editor), `envelopes` (the clip's envelopes) or `mpe` (the Expression Editor, a MIDI clip's per-note Pitch, Slide and Pressure).
 
 One of:
 
 - `"notes"`: The MIDI Note Editor.
 - `"envelopes"`: The clip's envelopes (WP-3.16).
+- `"mpe"`: The Expression Editor, the MPE tab (WP-6.18): a MIDI clip's per-note Pitch, Slide and Pressure envelopes.
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "A tab of the Clip View: `notes` (the MIDI Note Editor) or `envelopes` (the clip's envelopes).",
+  "description": "A tab of the Clip View: `notes` (the MIDI Note Editor), `envelopes` (the clip's envelopes) or `mpe` (the Expression Editor, a MIDI clip's per-note Pitch, Slide and Pressure).",
   "oneOf": [
     {
       "const": "notes",
@@ -4936,6 +4974,11 @@ One of:
     {
       "const": "envelopes",
       "description": "The clip's envelopes (WP-3.16).",
+      "type": "string"
+    },
+    {
+      "const": "mpe",
+      "description": "The Expression Editor, the MPE tab (WP-6.18): a MIDI clip's per-note Pitch, Slide and Pressure envelopes.",
       "type": "string"
     }
   ]
@@ -5068,6 +5111,7 @@ What the Clip View shows: which clip it is editing, the notes selected in it, it
 | `preview` | boolean | yes | Whether the Preview switch is on (Spec: step-recording R1): one switch for every MIDI clip's editor, kept between launches. |
 | `envelope` | [`AutomationTarget`](#automationtarget) or null | yes | The parameter whose envelope the Envelopes tab shows; `null` when it shows none. |
 | `filters` | [`NoteFilters`](#notefilters) | yes | Find and Select Notes: whether the filter bar shows, and every filter's settings, with which are on. |
+| `mpe` | [`MpeTabState`](#mpetabstate) | yes | The MPE tab's lanes, grid and selected breakpoints (WP-6.18). |
 | `envelope_breakpoint` | [`Ticks`](#ticks) or null | no | The breakpoint selected in the Envelope Editor (WP-6.26), if any: `clip.select_envelope_breakpoint` sets it. |
 | `envelope_marker` | [`Ticks`](#ticks) or null | no | The Envelope Editor's insert marker, in ticks from the beginning of the clip's contents (WP-6.26), which Left and Right move along the envelope; `null` until it has been moved. |
 
@@ -5184,6 +5228,17 @@ What the Clip View shows: which clip it is editing, the notes selected in it, it
       },
       "type": "array"
     },
+    "mpe": {
+      "$ref": "#/$defs/MpeTabState",
+      "default": {
+        "breakpoints": [],
+        "grid": false,
+        "hidden": false,
+        "lanes": [],
+        "toggled": []
+      },
+      "description": "The MPE tab's lanes, grid and selected breakpoints (WP-6.18)."
+    },
     "preview": {
       "description": "Whether the Preview switch is on (Spec: step-recording R1): one switch for every MIDI clip's editor, kept between launches.",
       "type": "boolean"
@@ -5246,7 +5301,8 @@ What the Clip View shows: which clip it is editing, the notes selected in it, it
     "tab",
     "preview",
     "envelope",
-    "filters"
+    "filters",
+    "mpe"
   ],
   "type": "object"
 }
@@ -8698,6 +8754,48 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `DrawStep`
+
+One step of a freehand drawing: a value held for a stretch.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `at` | [`Ticks`](#ticks) | yes | Where the step starts, in ticks from the beginning of the clip's contents. |
+| `length` | [`Ticks`](#ticks) | yes | How long it lasts, in ticks, 1 or more. |
+| `value` | number | yes | The value it holds. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "additionalProperties": false,
+  "description": "One step of a freehand drawing: a value held for a stretch.",
+  "properties": {
+    "at": {
+      "$ref": "#/$defs/Ticks",
+      "description": "Where the step starts, in ticks from the beginning of the clip's contents."
+    },
+    "length": {
+      "$ref": "#/$defs/Ticks",
+      "description": "How long it lasts, in ticks, 1 or more."
+    },
+    "value": {
+      "description": "The value it holds.",
+      "format": "double",
+      "type": "number"
+    }
+  },
+  "required": [
+    "at",
+    "length",
+    "value"
+  ],
+  "type": "object"
 }
 ```
 
@@ -17124,6 +17222,90 @@ One of:
 
 </details>
 
+### `MpeLane`
+
+A lane of the Clip View's MPE tab: `pitch_bend` (first, and only on a track whose instrument is a Drum Rack), `slide`, `pressure`, `velocity` or `release_velocity`.
+
+One of:
+
+- `"pitch_bend"`: The Pitch envelopes of a Drum Rack's notes, from −48 to +48 semitones.
+- `"slide"`: Each note's Slide envelope, 0 to 127.
+- `"pressure"`: Each note's Pressure envelope, 0 to 127.
+- `"velocity"`: Each note's velocity, 1 to 127.
+- `"release_velocity"`: Each note's release velocity, 1 to 127.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A lane of the Clip View's MPE tab: `pitch_bend` (first, and only on a track whose instrument is a Drum Rack), `slide`, `pressure`, `velocity` or `release_velocity`.",
+  "oneOf": [
+    {
+      "const": "pitch_bend",
+      "description": "The Pitch envelopes of a Drum Rack's notes, from −48 to +48 semitones.",
+      "type": "string"
+    },
+    {
+      "const": "slide",
+      "description": "Each note's Slide envelope, 0 to 127.",
+      "type": "string"
+    },
+    {
+      "const": "pressure",
+      "description": "Each note's Pressure envelope, 0 to 127.",
+      "type": "string"
+    },
+    {
+      "const": "velocity",
+      "description": "Each note's velocity, 1 to 127.",
+      "type": "string"
+    },
+    {
+      "const": "release_velocity",
+      "description": "Each note's release velocity, 1 to 127.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `MpeLaneState`
+
+A lane drawn in the MPE tab.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `lane` | [`MpeLane`](#mpelane) | yes | Which lane. |
+| `height` | number | yes | How tall it is, in points. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A lane drawn in the MPE tab.",
+  "properties": {
+    "height": {
+      "description": "How tall it is, in points.",
+      "format": "float",
+      "type": "number"
+    },
+    "lane": {
+      "$ref": "#/$defs/MpeLane",
+      "description": "Which lane."
+    }
+  },
+  "required": [
+    "lane",
+    "height"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `MpeMode`
 
 Whether the notes go out in a zone, or on a range of channels.
@@ -17267,6 +17449,79 @@ What `plugin.show_mpe_settings` returns: whether the dialog is open and what it 
   },
   "required": [
     "open"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `MpeTabState`
+
+The MPE tab's selection and lanes, as `view.state` reports them (Spec: mpe R23, R25).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `toggled` | array of [`MpeLane`](#mpelane) | yes | The lanes whose selector toggle is on, in lane order. |
+| `hidden` | boolean | yes | Whether the triangle has hidden the lanes and their toggles. |
+| `lanes` | array of [`MpeLaneState`](#mpelanestate) | yes | The lanes drawn now, from the top, with their heights in points: the Pitch Bend lane first on a Drum Rack's track. |
+| `grid` | boolean | yes | Whether the tab's own grid is on for the clip shown. |
+| `breakpoints` | array of [`BreakpointRef`](#breakpointref) | yes | The selected breakpoints of that envelope. |
+| `envelope` | [`Expression`](#expression) or null | no | The envelope that has the keyboard, if a breakpoint was selected. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The MPE tab's selection and lanes, as `view.state` reports them (Spec: mpe R23, R25).",
+  "properties": {
+    "breakpoints": {
+      "description": "The selected breakpoints of that envelope.",
+      "items": {
+        "$ref": "#/$defs/BreakpointRef"
+      },
+      "type": "array"
+    },
+    "envelope": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Expression"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The envelope that has the keyboard, if a breakpoint was selected."
+    },
+    "grid": {
+      "description": "Whether the tab's own grid is on for the clip shown.",
+      "type": "boolean"
+    },
+    "hidden": {
+      "description": "Whether the triangle has hidden the lanes and their toggles.",
+      "type": "boolean"
+    },
+    "lanes": {
+      "description": "The lanes drawn now, from the top, with their heights in points: the Pitch Bend lane first on a Drum Rack's track.",
+      "items": {
+        "$ref": "#/$defs/MpeLaneState"
+      },
+      "type": "array"
+    },
+    "toggled": {
+      "description": "The lanes whose selector toggle is on, in lane order.",
+      "items": {
+        "$ref": "#/$defs/MpeLane"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "toggled",
+    "hidden",
+    "lanes",
+    "grid",
+    "breakpoints"
   ],
   "type": "object"
 }

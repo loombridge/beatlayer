@@ -1369,3 +1369,25 @@ fn the_middle_button_pans_the_waveform() {
     );
     assert_eq!(s.steps(), steps, "not an undo step");
 }
+
+#[test]
+fn an_audio_clip_has_no_mpe_tab() {
+    // Spec: mpe R22. The toolbar lists the Sample and Envelopes tabs only,
+    // the tab command refuses `mpe`, and the next tab skips it.
+    let mut s = sample("no-mpe-tab", true);
+    let output = s.h.settle();
+    let nodes = Harness::nodes(&output);
+    assert!(nodes.iter().all(|n| n.label != "MPE"), "no MPE tab");
+    assert!(nodes.iter().any(|n| n.label == "Envelopes"));
+    assert!(
+        s.h.shell
+            .run("view.clip_tab", json!({ "tab": "mpe" }))
+            .is_err()
+    );
+    s.run("view.clip_tab", json!({ "tab": "envelopes" }));
+    s.run("view.clip_tab", json!({}));
+    assert_eq!(
+        s.h.shell.clip_view().tab(),
+        bl_shell::note_commands::ClipTab::Notes
+    );
+}

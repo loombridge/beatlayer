@@ -88,6 +88,7 @@ mod metronome;
 pub mod modulation;
 pub mod modulator;
 mod mpe_settings;
+mod mpe_view;
 pub mod note_expression;
 pub mod note_ops;
 pub mod param;
@@ -138,6 +139,7 @@ pub use editor::{EditError, Editor, HistoryStep, Maker};
 pub use error::ModelError;
 pub use fades::{EdgeRoom, FadeLimits};
 pub use mpe_settings::{MAX_NOTE_CHANNELS, MpeMode, MpeSettings, MpeZone, PluginMpe};
+pub use mpe_view::{DEFAULT_LANE_HEIGHT, MpeLane, MpeView};
 pub use note_expression::Expression;
 pub mod freeze;
 pub use external::{

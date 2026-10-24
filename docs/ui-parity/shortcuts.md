@@ -35,10 +35,10 @@ A shortcut applies in its context. The same keys may mean different things in di
 | [`track-headers`](#track-headers) | A track title bar is selected, in either view. | 13 |
 | [`take-lanes`](#take-lanes) | A take lane is selected in the Arrangement. | 6 |
 | [`loop-brace`](#loop-brace) | A loop brace or a clip start or end marker is selected, or a multi-clip loop bar. | 11 |
-| [`envelope`](#envelope) | An automation lane or the Clip View's Envelope Editor has focus. | 17 |
-| [`clip-view`](#clip-view) | The Clip View has focus, whichever editor it shows. | 9 |
+| [`envelope`](#envelope) | An automation lane or the Clip View's Envelope Editor has focus. | 16 |
+| [`clip-view`](#clip-view) | The Clip View has focus, whichever editor it shows. | 11 |
 | [`sample-editor`](#sample-editor) | The Clip View shows an audio clip's Sample Editor. | 16 |
-| [`note-editor`](#note-editor) | The Clip View shows a MIDI clip's MIDI Note Editor. | 42 |
+| [`note-editor`](#note-editor) | The Clip View shows a MIDI clip's MIDI Note Editor. | 41 |
 | [`note-selection`](#note-selection) | Notes are selected in the MIDI Note Editor. | 16 |
 | [`device-view`](#device-view) | The Device View has focus. | 12 |
 | [`rack-chains`](#rack-chains) | A rack's chain list has focus. | 1 |
@@ -375,7 +375,6 @@ An automation lane or the Clip View's Envelope Editor has focus.
 | S-A11Y-023 | Change the selected breakpoint's value | `Up` or `Down` | `Up` or `Down` | key | press | M6 | manual 41.5 |
 | S-A11Y-024 | Cancel the breakpoint edit and deselect | `Esc` | `Esc` | key | press | M6 | manual 41.5 |
 | S-A11Y-025 | Delete the selected breakpoint | `Delete` | `Delete` | key | press | M6 | manual 41.5 |
-| S-NOTE-053 | Select every breakpoint of the focused expression envelope | `Cmd+A` | `Ctrl+A` | key | press | M6 | manual 12.2 |
 | S-A11Y-028 | Cycle the automated parameters in the Clip View's Envelope Editor | `Option+Up` or `Option+Down` | `Alt+Up` or `Alt+Down` | key | press | M6 | Live 12 release notes, 12.2, bug fixes (the Clip View's Envelope Editor) |
 | S-A11Y-029 | Cycle all of the clip's device parameters in the Clip View's Envelope Editor | `Shift+Option+Up` or `Shift+Option+Down` | `Shift+Alt+Up` or `Shift+Alt+Down` | key | press | M6 | Live 12 release notes, 12.2, bug fixes (the Clip View's Envelope Editor) |
 | S-A11Y-030 | Move the selected breakpoint in time by the grid | `Left` or `Right` | `Left` or `Right` | key | press | M6 | manual 41.5.1; Live 12 release notes, 12.2 |
@@ -390,11 +389,13 @@ The Clip View has focus, whichever editor it shows.
 | S-LOOP-002 | Set the loop start at the play position | `Cmd+F10` | `Ctrl+F10` | key | press | M2 | manual 42.8; Live 12 release notes, 12.0 |
 | S-LOOP-003 | Set the loop end at the play position | `Cmd+F11` | `Ctrl+F11` | key | press | M2 | manual 42.8; Live 12 release notes, 12.0 |
 | S-LOOP-004 | Set the clip end marker at the play position | `Cmd+F12` | `Ctrl+F12` | key | press | M2 | manual 42.8; Live 12 release notes, 12.0 |
+| S-CLIPMODE-002 | Cycle the Notes, Envelopes and MPE tabs (unconfirmed) | `Option+Tab` | `Ctrl+Tab` | key | press | M3 | manual 42.10 |
 | S-CLIPMODE-003 | Show the Content Editor (the Sample or Notes tab) | `Option+Shift+1` | `Alt+Shift+1` | key | press | M2 | manual 42.10; observed in 12.4.3 (macOS), 10 October 2026: View menu |
 | S-CLIPMODE-004 | Show the Envelope Editor (the Envelopes tab) | `Option+Shift+2` | `Alt+Shift+2` | key | press | M3 | manual 42.10; observed in 12.4.3 (macOS), 10 October 2026: View menu |
 | S-CLIPMODE-005 | Show the Expression Editor (the MPE tab) | `Option+Shift+3` | `Alt+Shift+3` | key | press | M6 | manual 42.10; observed in 12.4.3 (macOS), 10 October 2026: View menu |
 | S-NOTE-030 | Expand the Clip View to full size | `Cmd+Option+E` | `Ctrl+Alt+E` | key | press | M6 | manual 42.12; observed in 12.4.3 (macOS), 10 October 2026: View menu |
 | S-NOTE-052 | Choose the previous or next chord in Stacks' Chord Selector Pad | `Cmd+Up` or `Cmd+Down` | `Ctrl+Up` or `Ctrl+Down` | key | press | M6 | manual 11.3.4 |
+| S-NOTE-053 | Select every breakpoint of the focused expression envelope | `Cmd+A` | `Ctrl+A` | key | press | M6 | manual 12.2 |
 
 ## sample-editor
 
@@ -425,7 +426,6 @@ The Clip View shows a MIDI clip's MIDI Note Editor.
 
 | ID | Action | macOS | Windows | Kind | Trigger | Milestone | Source |
 |---|---|---|---|---|---|---|---|
-| S-CLIPMODE-002 | Cycle the Notes, Envelopes and MPE tabs (unconfirmed) | `Option+Tab` | `Ctrl+Tab` | key | press | M3 | manual 42.10 |
 | S-NOTE-001 | Select all notes | `Cmd+A` | `Ctrl+A` | key | press | M2 | manual 42.12 |
 | S-NOTE-002 | Copy notes by dragging | Option+drag | Ctrl+drag | mouse | press | M2 | manual 42.12 |
 | S-NOTE-003 | Chop the selected notes on the grid, or split them at the time selection's edges | `Cmd+E` | `Ctrl+E` | key | press | M6 | manual 42.12 |

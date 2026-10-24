@@ -1464,6 +1464,157 @@ fn an_agent_sets_a_notes_expression_envelopes_and_reads_them_back() {
 }
 
 #[test]
+fn an_agent_edits_the_mpe_tabs_envelopes_and_reads_the_lanes_back() {
+    // Spec: mpe R32. Each edit of the MPE tab runs by ID with the clip, the
+    // notes and the envelope spelled out; the clip query reads the envelopes
+    // back, and `view.state` reads the lanes and the selected breakpoints.
+    let mut client = headless(false);
+    let created = call(
+        &mut client,
+        "run",
+        json!({ "label": "A clip of notes", "commands": [
+            { "command": "track.create",
+              "args": { "id": {"$new": "notes"}, "kind": "midi", "name": "Notes",
+                        "index": 0 } },
+            { "command": "clip.create",
+              "args": { "track": {"$ref": "notes"},
+                        "clip": { "id": {"$new": "clip"}, "name": "Notes", "start": 0,
+                                  "length": 705_600, "mute": false,
+                                  "data": { "midi": { "notes": [
+                                      { "key": 60, "velocity": 100, "start": 0,
+                                        "length": 480 }
+                                  ] } } } } },
+        ] }),
+    );
+    let clip = created["ids"]["clip"].as_u64().unwrap();
+    // Note and view commands run one to a call.
+    let one = |client: &mut _, command: &str, args: Value| {
+        let ran = call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": command, "args": args }] }),
+        );
+        assert_eq!(ran["ran"], 1, "{command}");
+    };
+    let steps = client.transport().shell.editor().undo_history().len();
+    let edits = [
+        (
+            "note.add_expression_breakpoint",
+            json!({ "clip": clip, "notes": [0],
+            "envelope": "slide", "at": 0, "value": 20.0 }),
+        ),
+        (
+            "note.add_expression_breakpoint",
+            json!({ "clip": clip, "notes": [0],
+            "envelope": "slide", "at": 480, "value": 100.0 }),
+        ),
+        (
+            "note.set_expression_curve",
+            json!({ "clip": clip, "note": 0,
+            "envelope": "slide", "at": 0, "bend": 0.5 }),
+        ),
+        (
+            "note.move_expression_breakpoints",
+            json!({ "clip": clip, "envelope": "slide",
+            "breakpoints": [{ "note": 0, "at": 480 }], "time": -80, "value": -10.0 }),
+        ),
+        (
+            "note.scale_expression",
+            json!({ "clip": clip, "notes": [0],
+            "lane": "slide", "factor": 0.5 }),
+        ),
+        (
+            "note.draw_expression",
+            json!({ "clip": clip, "notes": [0], "envelope": "pressure",
+            "steps": [{ "at": 100, "length": 100, "value": 64.0 }] }),
+        ),
+    ];
+    let count = edits.len();
+    for (command, args) in edits {
+        one(&mut client, command, args);
+    }
+    assert_eq!(
+        client.transport().shell.editor().undo_history().len(),
+        steps + count,
+        "one undo step each"
+    );
+    let queried = call(
+        &mut client,
+        "query",
+        json!({ "id": clip, "detail": "full" }),
+    );
+    let note = &queried["content"]["notes"]["items"][0];
+    assert_eq!(
+        note["slide"],
+        json!([
+            { "at": 0, "value": 10.0, "bend": 0.5 },
+            { "at": 400, "value": 45.0 }
+        ])
+    );
+    assert_eq!(
+        note["pressure"],
+        json!([{ "at": 100, "value": 64.0 }, { "at": 200, "value": 64.0 }])
+    );
+    // The selection, the lanes and the grid are read-class view commands.
+    one(
+        &mut client,
+        "arrangement.select_clips",
+        json!({ "clips": [clip] }),
+    );
+    one(
+        &mut client,
+        "clip_view.select_notes",
+        json!({ "clip": clip, "notes": [0] }),
+    );
+    one(
+        &mut client,
+        "clip_view.select_expression_breakpoints",
+        json!({ "clip": clip, "envelope": "slide", "all": true }),
+    );
+    one(
+        &mut client,
+        "view.mpe_lanes",
+        json!({ "lane": "velocity", "show": true }),
+    );
+    one(
+        &mut client,
+        "view.mpe_grid",
+        json!({ "clip": clip, "on": true }),
+    );
+    let state = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "view.state" }] }),
+    );
+    let mpe = &state["results"][0]["result"]["clip_view"]["mpe"];
+    assert_eq!(mpe["grid"], true, "{state}");
+    assert_eq!(mpe["envelope"], "slide");
+    assert_eq!(mpe["breakpoints"].as_array().unwrap().len(), 2);
+    assert_eq!(mpe["toggled"], json!(["slide", "pressure", "velocity"]));
+    // Clear All Envelopes empties all three, as one undo step.
+    let steps = client.transport().shell.editor().undo_history().len();
+    one(
+        &mut client,
+        "note.clear_expressions",
+        json!({ "clip": clip, "notes": [0] }),
+    );
+    assert_eq!(
+        client.transport().shell.editor().undo_history().len(),
+        steps + 1
+    );
+    let queried = call(
+        &mut client,
+        "query",
+        json!({ "id": clip, "detail": "full" }),
+    );
+    let note = &queried["content"]["notes"]["items"][0];
+    assert!(
+        note.get("slide").is_none() && note.get("pressure").is_none(),
+        "{note}"
+    );
+}
+
+#[test]
 fn an_agent_sets_the_note_filters_and_inverts_the_selection_by_command() {
     // Spec: find-and-select-notes R14. Both commands run by ID, and
     // `view.state` reads the bar and the filters back.

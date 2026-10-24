@@ -104,8 +104,13 @@ pub const VIEW_LANE: &str = "view.lane";
 /// `view.lanes`: show, hide and swap the Clip View's expression lanes, and
 /// set Randomize's amounts (WP-6.1).
 pub const VIEW_LANES: &str = "view.lanes";
+/// `view.mpe_lanes`: show, hide, swap and resize the MPE tab's lanes
+/// (WP-6.18).
+pub const VIEW_MPE_LANES: &str = "view.mpe_lanes";
+/// `view.mpe_grid`: switch the MPE tab's own grid for a clip (WP-6.18).
+pub const VIEW_MPE_GRID: &str = "view.mpe_grid";
 /// `view.clip_tab`: show a tab of the Clip View, or go on to the next
-/// (S-CLIPMODE-001 to 004, WP-3.16).
+/// (S-CLIPMODE-001 to 005, WP-3.16, WP-6.18).
 pub const VIEW_CLIP_TAB: &str = "view.clip_tab";
 /// `view.clip_envelope`: choose the parameter whose envelope the Clip View's
 /// Envelopes tab shows (WP-3.16).
@@ -287,6 +292,8 @@ pub const IDS: &[&str] = &[
     VIEW_FOLD_NOTES,
     VIEW_LANE,
     VIEW_LANES,
+    VIEW_MPE_LANES,
+    VIEW_MPE_GRID,
     VIEW_CLIP_TAB,
     VIEW_CLIP_ENVELOPE,
     VIEW_TOGGLE_INFO_VIEW,
@@ -801,6 +808,48 @@ pub struct LanesArgs {
     /// and `true` shows them again as they were; left out, nothing changes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub all: Option<bool>,
+}
+
+/// Arguments of `view.mpe_lanes`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MpeLanesArgs {
+    /// The lane the `show`, `swap` and `height` fields act on: `slide`,
+    /// `pressure`, `velocity` or `release_velocity`; `pitch_bend` too for
+    /// `height`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lane: Option<bl_model::MpeLane>,
+    /// With `lane`: switch its toggle on (`true`) or off (`false`); left
+    /// out, it switches.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub show: Option<bool>,
+    /// With `lane`: switch it off and the first lane after it that is off
+    /// on, going round (the lane header's swap).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub swap: Option<bool>,
+    /// With `lane`: its height in points, 8 to 400.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height: Option<f32>,
+    /// The triangle: `false` hides the lanes and their toggles, `true` shows
+    /// them again. Left out, nothing changes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub visible: Option<bool>,
+    /// `true` switches every toggle on and shows the lanes, as the triangle
+    /// clicked with Option does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub all: Option<bool>,
+}
+
+/// Arguments of `view.mpe_grid`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MpeGridArgs {
+    /// The MIDI clip. Left out, the one the Clip View shows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<bl_model::ClipId>,
+    /// Switch the grid on or off; left out, it switches.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on: Option<bool>,
 }
 
 /// Arguments of `view.set_plugin_list_only_missing`.
@@ -1579,11 +1628,44 @@ fn specs() -> Vec<CommandSpec> {
             .contexts([ClipView, NoteEditor])
             .args::<LanesArgs>()
             .result::<ClipViewState>(),
+        CommandSpec::new(VIEW_MPE_LANES, "MPE Lanes")
+            .description(
+                "Shows, hides, swaps and resizes the lanes of the Clip View's MPE tab \
+                 (`slide`, `pressure`, `velocity`, `release_velocity`, always in that order \
+                 from the top, with `pitch_bend` first on a track whose instrument is a Drum \
+                 Rack). With `lane`: `show` switches its selector toggle (left out, it \
+                 switches), `swap` switches it off and the first lane after it that is off \
+                 on, and `height` sets its height in points. `visible` is the triangle: \
+                 `false` hides the lanes and their toggles, `true` shows them again; `all` \
+                 switches every toggle on and shows the lanes, as the triangle does with \
+                 Option held or with every toggle off. A new set shows Slide and Pressure. \
+                 Changes only the view: no undo step, and it is saved with the set. The \
+                 result is the Clip View's state, whose `mpe` lists the lanes.",
+            )
+            .permission(Permission::Read)
+            .contexts([ClipView, NoteEditor])
+            .args::<MpeLanesArgs>()
+            .result::<ClipViewState>(),
+        CommandSpec::new(VIEW_MPE_GRID, "MPE Grid")
+            .description(
+                "Switches the MPE tab's own grid for a clip (Cmd+4, Ctrl+4 on Windows, while \
+                 the tab has the focus). With it on, a breakpoint or segment being moved \
+                 snaps to its neighbours' positions, and a new breakpoint near a grid line \
+                 lands on the line. It is off in a new clip, saved with the set, and neither \
+                 the Arrangement's grid nor an undo step. The result is the Clip View's \
+                 state, whose `mpe.grid` says whether it is on.",
+            )
+            .permission(Permission::Read)
+            .contexts([NoteEditor])
+            .binding("S-GRID-005")
+            .args::<MpeGridArgs>()
+            .result::<ClipViewState>(),
         CommandSpec::new(VIEW_CLIP_TAB, "Clip View Tab")
             .description(
                 "Chooses the tab the Clip View shows for its clip: `notes` (the MIDI Note \
-                 Editor, Option+Shift+1) or `envelopes` (the clip's envelopes, \
-                 Option+Shift+2). Left out, `tab` goes on to the next tab and round to the \
+                 Editor, Option+Shift+1), `envelopes` (the clip's envelopes, \
+                 Option+Shift+2) or `mpe` (the Expression Editor, for a MIDI clip only, \
+                 Option+Shift+3). Left out, `tab` goes on to the next tab and round to the \
                  first after the last (Option+Tab). The Clip View shows the clip most \
                  recently selected, in the Arrangement or in a Session slot. Changes only \
                  the view, so it's no undo step and isn't saved with the set. The result \
@@ -1595,6 +1677,7 @@ fn specs() -> Vec<CommandSpec> {
             .binding(Binding::new("S-CLIPMODE-002"))
             .binding(Binding::new("S-CLIPMODE-003").arg("tab", "notes"))
             .binding(Binding::new("S-CLIPMODE-004").arg("tab", "envelopes"))
+            .binding(Binding::new("S-CLIPMODE-005").arg("tab", "mpe"))
             .args::<ClipTabArgs>()
             .result::<ClipViewState>(),
         CommandSpec::new(VIEW_CLIP_ENVELOPE, "Clip View Envelope")

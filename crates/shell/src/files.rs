@@ -18,6 +18,7 @@ use bl_model::{
     ClipFolds, ContentHash, DEFAULT_SCENE_COUNT, DeviceWindows, Document, Editor, LaunchSettings,
     MultisamplerViews, RackViewMap, SceneId, TrackId, TrackKind, WindowViews, registry,
 };
+use bl_project::midi_tools::MidiToolSettings;
 use bl_project::{
     Media, MediaPath, MediaRef, Project, ProjectFolder, SET_EXTENSION, SaveOptions, SetFile,
     SetInfo, is_set,
@@ -195,6 +196,18 @@ pub trait SetStore {
         ClipFolds::new()
     }
 
+    /// Gives the store the MIDI Tools' chosen tools and settings (WP-6.11),
+    /// for the next save to write beside the document. A store that keeps
+    /// no MIDI Tool settings ignores it.
+    fn set_midi_tools(&mut self, settings: MidiToolSettings) {
+        let _ = settings;
+    }
+
+    /// The open set's MIDI Tool choices and settings, as it was saved.
+    fn midi_tools(&self) -> MidiToolSettings {
+        MidiToolSettings::default()
+    }
+
     /// Gives the store the global launch quantisation and its switch
     /// (WP-3.2), for the next save to write beside the document. A store
     /// that keeps no launch settings ignores it.
@@ -307,6 +320,9 @@ pub struct ProjectFiles {
     /// Folded MIDI Note Editors (WP-2.3): the open set's, then the shell's
     /// for the next save.
     folds: ClipFolds,
+    /// The MIDI Tools' chosen tools and settings (WP-6.11): the open set's,
+    /// then the shell's for the next save.
+    midi_tools: MidiToolSettings,
     /// The global launch quantisation and its switch (WP-3.2): the open
     /// set's, then the shell's for the next save.
     launch: LaunchSettings,
@@ -337,6 +353,7 @@ impl SetStore for ProjectFiles {
         self.rack_views = project.rack_views;
         self.multisamplers = project.multisamplers;
         self.folds = project.folds;
+        self.midi_tools = project.midi_tools;
         self.launch = project.launch;
         self.window_views = project.window_views;
         self.added.clear();
@@ -407,6 +424,7 @@ impl SetStore for ProjectFiles {
         self.rack_views = RackViewMap::new();
         self.multisamplers = MultisamplerViews::new();
         self.folds = ClipFolds::new();
+        self.midi_tools = MidiToolSettings::default();
         self.launch = LaunchSettings::default();
         self.window_views = WindowViews::default();
         self.added.clear();
@@ -426,6 +444,7 @@ impl SetStore for ProjectFiles {
             .with_rack_views(&self.rack_views)
             .with_multisamplers(&self.multisamplers)
             .with_folds(&self.folds)
+            .with_midi_tools(&self.midi_tools)
             .with_launch(self.launch)
             .with_window_views(self.window_views)
     }
@@ -437,6 +456,7 @@ impl SetStore for ProjectFiles {
         self.rack_views = project.rack_views;
         self.multisamplers = project.multisamplers;
         self.folds = project.folds;
+        self.midi_tools = project.midi_tools;
         self.launch = project.launch;
         self.window_views = project.window_views;
         self.added.clear();
@@ -480,6 +500,14 @@ impl SetStore for ProjectFiles {
 
     fn folds(&self) -> ClipFolds {
         self.folds.clone()
+    }
+
+    fn set_midi_tools(&mut self, settings: MidiToolSettings) {
+        self.midi_tools = settings;
+    }
+
+    fn midi_tools(&self) -> MidiToolSettings {
+        self.midi_tools.clone()
     }
 
     fn set_launch(&mut self, launch: LaunchSettings) {
@@ -561,6 +589,7 @@ impl SetStore for ProjectFiles {
             .with_rack_views(&self.rack_views)
             .with_multisamplers(&self.multisamplers)
             .with_folds(&self.folds)
+            .with_midi_tools(&self.midi_tools)
             .with_launch(self.launch)
             .with_window_views(self.window_views);
         let mut set = SetFile::open(path)
@@ -759,6 +788,7 @@ impl ProjectFiles {
             .with_rack_views(&self.rack_views)
             .with_multisamplers(&self.multisamplers)
             .with_folds(&self.folds)
+            .with_midi_tools(&self.midi_tools)
             .with_launch(self.launch)
             .with_window_views(self.window_views);
         let mut set = self

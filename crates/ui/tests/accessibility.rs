@@ -1748,6 +1748,50 @@ fn detail_area(h: &mut Harness) {
     });
 }
 
+/// A MIDI clip in the first Session slot, shown in the Clip View with the
+/// Transform panel showing.
+fn midi_tools_shown(h: &mut Harness) {
+    let track = h.shell.editor().document().top_level().next().unwrap();
+    let scene = h.shell.editor().document().scenes().next().unwrap().id;
+    h.shell
+        .run(
+            "session.insert_empty_midi_clip",
+            json!({ "track": track, "scene": scene }),
+        )
+        .unwrap();
+    h.shell
+        .run("session.select", json!({ "track": track, "scene": scene }))
+        .unwrap();
+    h.shell.run("view.toggle_clip_view", json!({})).unwrap();
+    h.shell
+        .run("clip_view.show_panel", json!({ "panel": "transform" }))
+        .unwrap();
+}
+
+/// The same, with the shown tool's degrees off their default, so Reset can
+/// be pressed.
+fn midi_tools_changed(h: &mut Harness) {
+    midi_tools_shown(h);
+    h.shell
+        .run(
+            "midi_tool.set_auto",
+            json!({ "tool": "test_transpose", "auto": false }),
+        )
+        .unwrap();
+    h.shell
+        .run(
+            "midi_tool.set",
+            json!({ "tool": "test_transpose", "values": { "degrees": 3 } }),
+        )
+        .unwrap();
+    h.shell
+        .run(
+            "midi_tool.set_auto",
+            json!({ "tool": "test_transpose", "auto": true }),
+        )
+        .unwrap();
+}
+
 fn plugin_list(h: &mut Harness) {
     h.shell
         .run("view.toggle_plugin_list", json!({}))
@@ -3156,6 +3200,54 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("clip.set_launch_quantization", Exception(clip_launch)),
         ("clip.set_velocity_amount", Exception(clip_launch)),
         ("note.add", Exception(note_editor)),
+        // The MIDI Tools (WP-6.11): the panels' controls are in the Tab
+        // order; `midi_tool.apply` has Cmd+Enter (S-NOTE-033).
+        ("midi_tool.list", Exception(Query)),
+        ("midi_tool.state", Exception(Query)),
+        (
+            "clip_view.show_panel",
+            main(
+                midi_tools_shown,
+                detail_area,
+                "MIDI Generative Tools",
+                Key::Enter,
+            ),
+        ),
+        (
+            "midi_tool.set",
+            main(midi_tools_shown, detail_area, "Degrees", Key::ArrowUp),
+        ),
+        (
+            "midi_tool.set_auto",
+            main(
+                midi_tools_shown,
+                detail_area,
+                "Test Transpose Auto",
+                Key::Enter,
+            ),
+        ),
+        (
+            "midi_tool.reset",
+            main(midi_tools_changed, detail_area, "Reset", Key::Enter),
+        ),
+        (
+            "midi_tool.choose",
+            Exception(LaterView(
+                "the native tools (WP-6.12 to WP-6.14): until they land the registry holds one                  tool of each kind, and the Selectors have nothing to choose between",
+            )),
+        ),
+        (
+            "midi_tool.reseed",
+            Exception(LaterView(
+                "the tools' Reseed buttons, which come with the native tools that have them                  (WP-6.13, WP-6.14)",
+            )),
+        ),
+        (
+            "midi_tool.close",
+            Exception(Equivalent(
+                "changing the selected notes or the time selection, which closes the open                  application (the MIDI Tools spec, R21)",
+            )),
+        ),
         // `note.move`, `note.resize`, `note.delete` and
         // `clip_view.select_notes` have keys of their own now: the
         // note-selection keys (S-A11Y-010, S-A11Y-011), Delete

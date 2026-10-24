@@ -687,6 +687,7 @@ dependencies = [
  "bl-devices",
  "bl-engine",
  "bl-media",
+ "bl-midi-tools",
  "bl-model",
  "bl-plugin-host",
  "bl-project",
@@ -925,6 +926,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "bl-midi-tools"
+version = "0.2.0"
+dependencies = [
+ "bl-core",
+]
+
+[[package]]
 name = "bl-model"
 version = "0.2.0"
 dependencies = [
@@ -1006,6 +1014,7 @@ dependencies = [
  "bl-interop",
  "bl-media",
  "bl-midi-io",
+ "bl-midi-tools",
  "bl-model",
  "bl-plugin-host",
  "bl-project",
@@ -1076,6 +1085,7 @@ dependencies = [
  "bl-engine",
  "bl-media",
  "bl-midi-io",
+ "bl-midi-tools",
  "bl-model",
  "bl-project",
  "bl-shell",

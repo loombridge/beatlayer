@@ -455,7 +455,7 @@ fn place_clip(
 /// and whether it recorded an undo step. A failure puts the document back.
 pub(crate) fn transaction<T>(
     editor: &mut Editor,
-    label: &'static str,
+    label: impl Into<std::borrow::Cow<'static, str>>,
     edit: impl FnOnce(&mut Editor) -> Result<T, EditFailure>,
 ) -> Result<(T, bool), EditFailure> {
     editor.begin(label);

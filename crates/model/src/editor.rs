@@ -60,6 +60,8 @@ struct Open {
     label: Cow<'static, str>,
     maker: Maker,
     start: Document,
+    /// Whether the step is recorded even if the document ends as it began.
+    keep: bool,
 }
 
 /// A step in the history: its label, who made it, and one version of the
@@ -360,6 +362,7 @@ impl Editor {
             label: label.into(),
             maker,
             start: self.document.clone(),
+            keep: false,
         });
     }
 
@@ -373,11 +376,25 @@ impl Editor {
     /// [`EditError::NoTransaction`] if none is open.
     pub fn commit(&mut self) -> Result<bool, EditError> {
         let open = self.open.pop().ok_or(EditError::NoTransaction)?;
-        if !self.open.is_empty() || open.start == self.document {
+        if let Some(outer) = self.open.last_mut() {
+            outer.keep |= open.keep;
+            return Ok(false);
+        }
+        if open.start == self.document && !open.keep {
             return Ok(false);
         }
         self.record(open.label, open.maker, open.start);
         Ok(true)
+    }
+
+    /// Makes the innermost open transaction record its undo step when it
+    /// closes even if the document ends as it began, as a MIDI Tool's
+    /// application does when it leaves the notes as they were (the MIDI
+    /// Tools spec, R22). Does nothing outside a transaction.
+    pub fn keep_step(&mut self) {
+        if let Some(open) = self.open.last_mut() {
+            open.keep = true;
+        }
     }
 
     /// Closes the innermost transaction, putting the document back as it was
@@ -708,6 +725,27 @@ mod tests {
 
     fn start_of(editor: &Editor, clip: ClipId) -> Ticks {
         editor.document().clip(clip).unwrap().start
+    }
+
+    #[test]
+    fn a_kept_step_is_recorded_though_the_document_ends_as_it_began() {
+        let mut editor = Editor::new();
+        editor.begin("Plain");
+        assert!(
+            !editor.commit().unwrap(),
+            "an unchanged transaction records nothing"
+        );
+        editor.begin("Kept");
+        editor.begin("Inside");
+        editor.keep_step();
+        assert!(
+            !editor.commit().unwrap(),
+            "the inner one leaves it to the outer"
+        );
+        assert!(editor.commit().unwrap(), "the outer one records it");
+        assert_eq!(editor.undo_history().collect::<Vec<_>>(), ["Kept"]);
+        editor.undo().unwrap();
+        assert!(!editor.can_undo());
     }
 
     #[test]

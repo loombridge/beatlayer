@@ -112,9 +112,9 @@ impl Env {
         let output = self.h.settle();
         let nodes = Harness::nodes(&output);
         let bounds = Harness::node(&nodes, "Clip View").bounds.unwrap();
-        // The clip is a Session clip: the editor sits beside the Launch
-        // Properties panel.
-        bl_ui::launch_panel::editor_rect(Rect::from_min_max(
+        // The clip is a Session clip: the editor sits beside the panel
+        // groups.
+        bl_ui::clip_view::editor_rect(Rect::from_min_max(
             pos2(bounds.x0 as f32, bounds.y0 as f32),
             pos2(bounds.x1 as f32, bounds.y1 as f32),
         ))

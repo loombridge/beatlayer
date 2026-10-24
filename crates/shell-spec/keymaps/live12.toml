@@ -2042,7 +2042,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+Enter"]
 win = ["Ctrl+Enter"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "midi_tool.apply", contexts = ["note-editor"] },
+]
 
 [[shortcut]]
 id = "S-NOTE-034"

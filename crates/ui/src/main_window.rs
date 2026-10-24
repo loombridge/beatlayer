@@ -1414,7 +1414,10 @@ impl MainWindowUi {
         // while the pointer is over empty space.
         let keymap =
             crate::keymap::keymap_in_use(&mut self.keymap, &mut self.keymap_revision, shell);
+        // A MIDI Tool's control under the pointer says its own name and
+        // description (the MIDI Tools spec, R7).
         self.info = crate::search_field::info(shell)
+            .or_else(|| crate::tool_panel::take_info(ui.ctx()))
             .unwrap_or_else(|| info_content(self.hovered.or(self.other_hovered), shell, keymap));
         if self.info.title.is_empty() {
             return;

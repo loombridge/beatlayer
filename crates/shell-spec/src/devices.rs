@@ -699,6 +699,11 @@ pub struct DeviceFrame {
     /// saved with the set. False for a device that isn't a plug-in.
     #[serde(default)]
     pub configure: bool,
+    /// A plug-in's MPE Mode and settings (the MPE spec, R14, R18), which
+    /// its title bar menu's MPE Mode and MPE Settings… edit; left out for a
+    /// device that isn't a plug-in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mpe: Option<bl_model::PluginMpe>,
     /// Whether it's the selected device.
     pub selected: bool,
     /// Whether it's the device being hot-swapped.

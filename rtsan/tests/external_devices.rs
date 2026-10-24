@@ -95,6 +95,7 @@ fn midi_out_and_the_external_instrument_pass_under_rtsan() {
             to: Some(MidiTo::Port {
                 name: "Synth".to_owned(),
                 channel: 3,
+                mpe: None,
             }),
         })
         .unwrap();
@@ -112,6 +113,7 @@ fn midi_out_and_the_external_instrument_pass_under_rtsan() {
     device.external = Some(External {
         port: Some("Rack".to_owned()),
         channel: 2,
+        mpe: None,
         audio_from: Channel::Pair(3),
         audio_to: None,
         hardware_latency: HardwareLatency::Milliseconds { value: 3.0 },
@@ -192,6 +194,7 @@ fn midi_out_and_the_external_instrument_pass_under_rtsan() {
                     to: Some(MidiTo::Port {
                         name: port.to_owned(),
                         channel: 3,
+                        mpe: None,
                     }),
                 })
                 .unwrap();

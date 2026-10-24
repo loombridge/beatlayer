@@ -104,6 +104,7 @@ pub mod midi_controllers;
 pub mod mixer;
 pub mod modbus;
 pub mod mpe;
+pub mod mpe_layout;
 mod node;
 pub mod nodes;
 mod offline;
@@ -157,7 +158,8 @@ pub use midi_clips::{MidiClipList, MidiClipPlayer};
 pub use mixer::METER_RELEASE_DB_PER_SECOND;
 pub use node::{
     Articulations, Block, Node, NodeConfig, NodeData, NodeEvent, NodeKey, NoteBuffer, NoteEvent,
-    NoteExpression, NoteKind, ParamValue, Segment, Segments, TransportInfo, segments,
+    NoteExpression, NoteKind, ParamValue, PluginMpeData, Segment, Segments, TransportInfo,
+    segments,
 };
 pub use offline::Offline;
 pub use processor::{Carry, Output, Processor};

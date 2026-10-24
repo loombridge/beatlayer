@@ -483,7 +483,10 @@ impl Shell {
                     .as_ref()
                     .is_some_and(|clipboard| match clipboard {
                         Clipboard::Tracks(copied) => !copied.tracks.is_empty(),
-                        Clipboard::Material(_) | Clipboard::Time(_) => false,
+                        Clipboard::Material(_)
+                        | Clipboard::Time(_)
+                        | Clipboard::Slots(_)
+                        | Clipboard::Scenes(_) => false,
                     });
             }
             ids::APP_HIDE => return cfg!(target_os = "macos"),
@@ -799,6 +802,25 @@ impl Shell {
                 .as_ref()
                 .is_some_and(|schema| bl_commands::validate(schema, &args).is_ok())
                 && self.browser_view.can_run(id, &args);
+        }
+        if crate::session_clips::handles(id) {
+            let args = if args.is_null() {
+                json!({})
+            } else {
+                args.clone()
+            };
+            return spec
+                .args
+                .as_ref()
+                .is_some_and(|schema| bl_commands::validate(schema, &args).is_ok())
+                && crate::session_clips::can_run(
+                    id,
+                    &args,
+                    self.editor.document(),
+                    &self.session,
+                    &self.arrangement,
+                    self.clipboard.as_ref(),
+                );
         }
         if edit_ids::handles(id) {
             let args = if args.is_null() {

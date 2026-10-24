@@ -550,7 +550,9 @@ pub enum Output {
 #[schemars(
     description = "Where a MIDI track's MIDI goes: another MIDI track (its ID), or an output \
                    port, `{ \"name\": \"Synth\", \"channel\": 1 }`: the MIDI output port's \
-                   name as the MIDI settings list it, and the channel to send on, 1 to 16."
+                   name as the MIDI settings list it, and the channel to send on, 1 to 16; \
+                   with `mpe` (the MPE/Multi-channel Settings, `{}` for the new ones) the \
+                   track sends MPE MIDI in place of one channel."
 )]
 pub enum MidiTo {
     /// Another MIDI track's Track In.
@@ -563,6 +565,11 @@ pub enum MidiTo {
         name: String,
         /// The channel, 1 to 16.
         channel: u8,
+        /// MPE, chosen after the 16 channels in the channel chooser, with
+        /// the MPE/Multi-channel Settings the notes go out on (the MPE
+        /// spec, R19); `None` sends on `channel`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        mpe: Option<crate::MpeSettings>,
     },
 }
 
@@ -574,6 +581,7 @@ impl MidiTo {
         Self::Port {
             name: name.into(),
             channel: 1,
+            mpe: None,
         }
     }
 

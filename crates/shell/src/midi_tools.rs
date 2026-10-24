@@ -15,9 +15,10 @@ use std::collections::BTreeMap;
 
 use bl_core::time::Ticks;
 use bl_midi_tools::{
-    Breakpoint, DIVISION_NAMES, MidiTool, ParamKind, ParamSpec, ParamValue, QUANTIZE_GRIDS,
-    Registry, Rng, ToolDescriptor, ToolError, ToolInput, ToolKind, ToolNote, ToolPoint, ToolScale,
-    random_rotations, rotation_id,
+    Breakpoint, ChordBank, DIVISION_NAMES, MAX_BANK_BYTES, MidiTool, ParamKind, ParamSpec,
+    ParamValue, QUANTIZE_GRIDS, Registry, Rng, ToolDescriptor, ToolError, ToolInput, ToolKind,
+    ToolNote, ToolPoint, ToolScale, add_chord, delete_chord, entry_keys, load_bank,
+    random_rotations, rotation_id, stack_view,
 };
 use bl_model::{
     Breakpoint as NotePoint, Clip, ClipData, ClipId, Document, Editor, MidiData, Note, RackKind,
@@ -25,9 +26,10 @@ use bl_model::{
 };
 use bl_project::midi_tools::{ChosenTools, MidiToolSettings, SavedTool};
 use bl_shell_spec::midi_tools::{
-    self as ids, ApplicationState, ApplyArgs, ChooseArgs, ClipArgs, MidiToolState, Panel,
-    ParamInfo, RandomizeArgs, RangeArgs, ReseedArgs, ResetArgs, SetArgs, SetAutoArgs,
-    ShowPanelArgs, StepState, TargetState, ToolInfo, ToolList, ToolRun, ToolSettingsState,
+    self as ids, ApplicationState, ApplyArgs, BankEntryState, BankState, ChooseArgs, ChordState,
+    ClipArgs, LoadBankArgs, MidiToolState, Panel, ParamInfo, RandomizeArgs, RangeArgs, ReseedArgs,
+    ResetArgs, SetArgs, SetAutoArgs, ShowPanelArgs, StacksState, StepState, TargetState, ToolInfo,
+    ToolList, ToolRun, ToolSettingsState,
 };
 use bl_shell_spec::notes::{QuantizeSettings, QuantizeTarget};
 use serde::de::DeserializeOwned;
@@ -44,6 +46,9 @@ const DEFAULT_GENERATOR: &str = "rhythm";
 /// The generator whose randomise button `midi_tool.randomize` presses (the
 /// MIDI generators spec, R16).
 const EUCLIDEAN: &str = "euclidean";
+/// The generator whose progression and bank the Stacks commands change (the
+/// MIDI generators spec, R17, R26).
+const STACKS: &str = "stacks";
 /// The Quantize tool, whose settings are the Clip View's Quantize settings
 /// (the MIDI transformations spec, R20), and its parameters' places.
 const QUANTIZE: &str = "quantize";
@@ -590,7 +595,11 @@ fn value_to_json(spec: &ParamSpec, value: &ParamValue) -> Value {
         }
         (_, ParamValue::Levels(levels)) => json!(levels),
         (_, ParamValue::Toggles(toggles)) => json!(toggles),
-        (_, ParamValue::Structured(text)) => json!(text),
+        // The JSON the text holds, so an agent reads and sets Stacks'
+        // progression as a list; text that isn't JSON stays text.
+        (_, ParamValue::Structured(text)) => {
+            serde_json::from_str(text).unwrap_or_else(|_| json!(text))
+        }
     }
 }
 
@@ -663,9 +672,10 @@ fn value_from_json(spec: &ParamSpec, json: &Value) -> Result<ParamValue, String>
                 .collect::<Option<Vec<_>>>()
                 .ok_or_else(wrong)?,
         ),
-        ParamKind::Structured => {
-            ParamValue::Structured(json.as_str().ok_or_else(wrong)?.to_owned())
-        }
+        ParamKind::Structured => ParamValue::Structured(match json {
+            Value::String(text) => text.clone(),
+            other => other.to_string(),
+        }),
     };
     spec.check(&value)?;
     Ok(value)
@@ -957,23 +967,61 @@ fn tool_input(
 /// R14); a key that can't move stays where it is.
 #[must_use]
 pub fn stepped_keys(doc: &Document, clip: ClipId, keys: &[u8], degrees: i32) -> Vec<u8> {
-    let Some(value) = doc.clip(clip) else {
+    if doc.clip(clip).is_none() {
         return keys.to_vec();
-    };
-    let input = ToolInput {
+    }
+    let input = plain_input(doc, clip);
+    keys.iter()
+        .map(|key| input.step_key(*key, degrees).unwrap_or(*key))
+        .collect()
+}
+
+/// A tool's input with no notes: the clip's scale and Drum Rack keys, which
+/// is all a generator's pitch controls need.
+fn plain_input(doc: &Document, clip: ClipId) -> ToolInput {
+    let value = doc.clip(clip);
+    ToolInput {
         notes: Vec::new(),
         range: (Ticks::ZERO, Ticks::ZERO),
         grid_step: Ticks::ZERO,
-        signature: doc.settings().time_signatures.signature_at(value.start),
-        scale: value.scale.enabled.then(|| ToolScale {
-            root: value.scale.root,
-            steps: value.scale.steps().to_vec(),
+        signature: value.map_or(bl_core::time::TimeSignature::FOUR_FOUR, |value| {
+            doc.settings().time_signatures.signature_at(value.start)
         }),
+        scale: value
+            .filter(|value| value.scale.enabled)
+            .map(|value| ToolScale {
+                root: value.scale.root,
+                steps: value.scale.steps().to_vec(),
+            }),
         drum_keys: doc.clip_track(clip).and_then(|track| drum_keys(doc, track)),
         seed: 0,
+    }
+}
+
+/// Every entry of Stacks' bank with its keys on `root`, as Stacks writes them
+/// for `clip` (the MIDI generators spec, R19): what the Chord Selector Pad
+/// draws and names on hover (R21).
+#[must_use]
+pub fn bank_chords(
+    doc: &Document,
+    tools: &MidiTools,
+    clip: ClipId,
+    root: u8,
+) -> Vec<(String, Vec<u8>)> {
+    let Some(tool) = Registry::native().find(STACKS) else {
+        return Vec::new();
     };
-    keys.iter()
-        .map(|key| input.step_key(*key, degrees).unwrap_or(*key))
+    let Ok(view) = stack_view(&tools.settings_of(tool.descriptor()).values) else {
+        return Vec::new();
+    };
+    let input = plain_input(doc, clip);
+    view.bank
+        .chords
+        .into_iter()
+        .map(|entry| {
+            let keys = entry_keys(&input, &entry, root, 0);
+            (entry.name, keys)
+        })
         .collect()
 }
 
@@ -1219,7 +1267,7 @@ fn set_values(
     tools: &mut MidiTools,
     tool: &dyn MidiTool,
     values: &Map<String, Value>,
-) -> Result<(), EditFailure> {
+) -> Result<Vec<usize>, EditFailure> {
     let descriptor = tool.descriptor();
     let mut settings = tools.settings_of(descriptor);
     let before = settings.values.clone();
@@ -1248,7 +1296,22 @@ fn set_values(
         .map_err(|error| invalid(error.to_string()))?;
     tool.validate(&settings.values).map_err(failure)?;
     tools.settings.insert(descriptor.id.clone(), settings);
-    Ok(())
+    Ok(changed)
+}
+
+/// Moves a tool's settings that are still the defaults onto what the clip
+/// allows, before its first change or application: Stacks' root onto the
+/// clip's scale (the MIDI generators spec, R20).
+fn start_on_clip(tools: &mut MidiTools, tool: &dyn MidiTool, doc: &Document, clip: ClipId) {
+    let descriptor = tool.descriptor();
+    let mut settings = tools.settings_of(descriptor);
+    if !settings.at_defaults(descriptor) {
+        return;
+    }
+    tool.start(&mut settings.values, &plain_input(doc, clip));
+    if !settings.at_defaults(descriptor) {
+        tools.settings.insert(descriptor.id.clone(), settings);
+    }
 }
 
 /// What a new application acts on besides the editor's selection, and its
@@ -1361,6 +1424,7 @@ fn state(
                 }
             })
             .collect(),
+        stacks: stacks_state(tools),
         target: value.zip(midi).and_then(|(value, midi)| {
             let target = target(doc, view, arrangement, value, midi, None, None).ok()?;
             Some(TargetState {
@@ -1405,6 +1469,96 @@ fn state(
             }),
         run,
     }
+}
+
+/// Stacks' progression and bank as `midi_tool.state` reads them (the MIDI
+/// generators spec, R28).
+fn stacks_state(tools: &MidiTools) -> StacksState {
+    let tool = Registry::native()
+        .find(STACKS)
+        .expect("Stacks is a native tool");
+    let descriptor = tool.descriptor();
+    let view = stack_view(&tools.settings_of(descriptor).values)
+        .or_else(|_| stack_view(&descriptor.defaults()))
+        .expect("Stacks' defaults are a progression and a bank");
+    StacksState {
+        progression: view
+            .chords
+            .iter()
+            .map(|chord| ChordState {
+                chord: chord.chord,
+                root: chord.root,
+                inversion: chord.inversion,
+                duration: chord.duration,
+                offset: chord.offset,
+            })
+            .collect(),
+        selected: view.selected,
+        bank: BankState {
+            name: view.bank.name,
+            built_in: view.built_in,
+            chords: view
+                .bank
+                .chords
+                .into_iter()
+                .map(|entry| BankEntryState {
+                    name: entry.name,
+                    degrees: entry.degrees,
+                    intervals: entry.intervals,
+                })
+                .collect(),
+        },
+    }
+}
+
+/// Changes Stacks' settings by `edit` and applies it when its Auto switch is
+/// on, as `midi_tool.set` does (the MIDI generators spec, R17).
+fn edit_stacks(
+    editor: &mut Editor,
+    view: &mut ClipView,
+    arrangement: &ArrangementView,
+    clip: Option<ClipId>,
+    edit: impl FnOnce(&mut [ParamValue]) -> Result<(), String>,
+) -> Result<Value, EditFailure> {
+    let doc = editor.document().clone();
+    let subject = subject(&doc, view, arrangement, clip)?;
+    let found = Registry::native()
+        .find(STACKS)
+        .ok_or_else(|| unavailable("Stacks is missing"))?;
+    start_on_clip(&mut view.tools, found, &doc, subject.clip);
+    let descriptor = found.descriptor();
+    let mut settings = view.tools.settings_of(descriptor);
+    edit(&mut settings.values).map_err(refused)?;
+    view.tools.settings.insert(descriptor.id.clone(), settings);
+    let run = if view.tools.settings_of(descriptor).auto {
+        auto_apply(editor, view, arrangement, subject.clip, found, None)?
+    } else {
+        None
+    };
+    let doc = editor.document().clone();
+    Ok(to_value(&state(
+        &doc,
+        view,
+        arrangement,
+        Some(subject.clip),
+        run,
+    )))
+}
+
+/// Loads the bank in the file at `path`: refused, saying what is wrong and
+/// where, when the file breaks the format (the MIDI generators spec, R25).
+fn read_bank(path: &str) -> Result<ChordBank, EditFailure> {
+    use std::io::Read;
+    let read = |error: std::io::Error| invalid(format!("{path}: {error}"));
+    // One byte past the limit is enough to see a file is too long, and keeps
+    // a path that never ends (a device file) from filling memory.
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)
+        .map_err(read)?
+        .take(MAX_BANK_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(read)?;
+    ChordBank::parse(&bytes).map_err(|error| invalid(format!("{path}: {error}")))
 }
 
 /// With Auto on, applies the tool after a change of its parameters (R17): a
@@ -1649,8 +1803,11 @@ pub fn run(
                     view.tools.settings.insert(descriptor.id.clone(), settings);
                 }
             }
-            set_values(&mut view.tools, found, &values)?;
-            let run = if view.tools.settings_of(found.descriptor()).auto {
+            start_on_clip(&mut view.tools, found, &doc, subject.clip);
+            let changed = set_values(&mut view.tools, found, &values)?;
+            let run = if view.tools.settings_of(found.descriptor()).auto
+                && found.changes_notes(&changed)
+            {
                 auto_apply(editor, view, arrangement, subject.clip, found, step)?
             } else {
                 None
@@ -1732,6 +1889,7 @@ pub fn run(
             let subject = subject(&doc, view, arrangement, clip)?;
             let found = resolve_tool(&view.tools, subject.track, tool.as_deref())?;
             let descriptor = found.descriptor();
+            start_on_clip(&mut view.tools, found, &doc, subject.clip);
             if let Some(values) = &values {
                 set_values(&mut view.tools, found, values)?;
             }
@@ -1855,6 +2013,43 @@ pub fn run(
                 Some(subject.clip),
                 run,
             )))
+        }
+        ids::ADD_CHORD => {
+            let ClipArgs { clip } = parse(args)?;
+            edit_stacks(editor, view, arrangement, clip, add_chord)
+        }
+        ids::DELETE_CHORD => {
+            let ClipArgs { clip } = parse(args)?;
+            edit_stacks(editor, view, arrangement, clip, delete_chord)
+        }
+        ids::LOAD_BANK => {
+            let LoadBankArgs {
+                clip,
+                path,
+                built_in,
+            } = parse(args)?;
+            // Spec: midi-generators R26. The bank replaces Stacks' bank and
+            // changes no notes.
+            let bank = match (path, built_in) {
+                (Some(path), None | Some(false)) => Some(read_bank(&path)?),
+                (None, Some(true)) => None,
+                _ => {
+                    return Err(invalid(
+                        "give `path`, a chord bank file, or `built_in` true, not both",
+                    ));
+                }
+            };
+            let found = Registry::native()
+                .find(STACKS)
+                .ok_or_else(|| unavailable("Stacks is missing"))?;
+            if let Ok(subject) = subject(&doc, view, arrangement, clip) {
+                start_on_clip(&mut view.tools, found, &doc, subject.clip);
+            }
+            let descriptor = found.descriptor();
+            let mut settings = view.tools.settings_of(descriptor);
+            load_bank(&mut settings.values, bank).map_err(refused)?;
+            view.tools.settings.insert(descriptor.id.clone(), settings);
+            Ok(to_value(&state(&doc, view, arrangement, clip, None)))
         }
         other => Err(invalid(format!("`{other}` isn't a MIDI Tools command"))),
     }

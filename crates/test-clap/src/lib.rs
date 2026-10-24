@@ -14,6 +14,12 @@
 //!   to the output on its frame, as a note-on's velocity does.
 //! - **Parameters out.** On a note-on it sets its own [`LAST_NOTE`]
 //!   parameter to the note's key, as an editor would, inside a gesture.
+//! - **Note expressions and MIDI.** Every note-on, note-off, note
+//!   expression and MIDI message it receives is logged, with its frame
+//!   (counted from the plug-in's activation), to the file [`LOG_VAR`] names;
+//!   each note expression and MIDI message goes back out as it came, a note
+//!   expression on the note [`ECHO_TRANSPOSE`] up. [`DIALECT_VAR`] sets the
+//!   dialects its note input port takes.
 //! - **Latency.** It reports [`LATENCY`]'s value, as of its last
 //!   activation; a change asks the host to restart it. (It doesn't delay
 //!   its audio: delay compensation is WP-2.11's.)
@@ -63,8 +69,8 @@ use clack_extensions::params::{
 use clack_extensions::state::{PluginState, PluginStateImpl};
 use clack_plugin::events::Match;
 use clack_plugin::events::event_types::{
-    NoteOffEvent, NoteOnEvent, ParamGestureBeginEvent, ParamGestureEndEvent, ParamModEvent,
-    ParamValueEvent,
+    MidiEvent, NoteExpressionEvent, NoteExpressionType, NoteOffEvent, NoteOnEvent,
+    ParamGestureBeginEvent, ParamGestureEndEvent, ParamModEvent, ParamValueEvent,
 };
 use clack_plugin::events::spaces::CoreEventSpace;
 use clack_plugin::prelude::*;
@@ -162,6 +168,17 @@ pub const NOTE_PORTS_VAR: &str = "BL_TEST_CLAP_NOTE_PORTS";
 fn no_note_output() -> bool {
     std::env::var(NOTE_PORTS_VAR).as_deref() == Ok("none")
 }
+
+/// The environment variable a test sets to the file the plug-in logs the
+/// notes, note expressions and MIDI messages it receives to, one line each:
+/// `frame=<n> <on|off|expression:<type>|midi> port=<p> channel=<c> key=<k>
+/// id=<note ID, -1 for none> value=<v>`. Unset for no log.
+pub const LOG_VAR: &str = "BL_TEST_CLAP_LOG";
+
+/// The environment variable a test sets to the dialects of the plug-in's note
+/// input port: `midi` (MIDI alone) or `midi-mpe` (all three, preferring
+/// MIDI-MPE). Unset for CLAP's own and MIDI, preferring CLAP.
+pub const DIALECT_VAR: &str = "BL_TEST_CLAP_DIALECT";
 
 /// What an extra output port carries, as a share of the main output's
 /// signal: a quarter, so a test can tell the two apart.
@@ -387,6 +404,35 @@ impl DefaultPluginFactory for GainEcho {
 /// The audio thread's side.
 pub struct Processor<'a> {
     shared: &'a Shared<'a>,
+    /// Frames processed since activation, for the log's frames.
+    frame: u64,
+    log: Option<std::fs::File>,
+}
+
+impl Processor<'_> {
+    /// Appends a line to the log, if there is one; `what` is only made then,
+    /// so a plug-in with no log allocates nothing.
+    fn log(&mut self, at: u32, what: impl FnOnce() -> String, pckn: Option<Pckn>, value: f64) {
+        use std::io::Write;
+        let Some(file) = self.log.as_mut() else {
+            return;
+        };
+        let what = what();
+        let (port, channel, key, id) = pckn.map_or((-1, -1, -1, -1), |p| {
+            let get = |m: Match<u16>| m.into_specific().map_or(-1, i32::from);
+            (
+                get(p.port_index),
+                get(p.channel),
+                get(p.key),
+                p.note_id.into_specific().map_or(-1, |id| id as i64 as i32),
+            )
+        });
+        let _ = writeln!(
+            file,
+            "frame={} {what} port={port} channel={channel} key={key} id={id} value={value}",
+            self.frame + u64::from(at),
+        );
+    }
 }
 
 impl<'a> PluginAudioProcessor<'a, Shared<'a>, MainThread<'a>> for Processor<'a> {
@@ -406,7 +452,18 @@ impl<'a> PluginAudioProcessor<'a, Shared<'a>, MainThread<'a>> for Processor<'a> 
         shared
             .active_latency
             .store(shared.latency.load(Relaxed), Relaxed);
-        Ok(Self { shared })
+        let log = std::env::var(LOG_VAR).ok().and_then(|path| {
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)
+                .ok()
+        });
+        Ok(Self {
+            shared,
+            frame: 0,
+            log,
+        })
     }
 
     fn process(
@@ -484,6 +541,7 @@ impl<'a> PluginAudioProcessor<'a, Shared<'a>, MainThread<'a>> for Processor<'a> 
             match event.as_core_event() {
                 Some(CoreEventSpace::NoteOn(note)) => {
                     let at = event.header().time();
+                    self.log(at, || "on".to_owned(), Some(note.pckn()), note.velocity());
                     // The impulse lands on the note's own frame.
                     #[expect(
                         clippy::cast_possible_truncation,
@@ -513,9 +571,42 @@ impl<'a> PluginAudioProcessor<'a, Shared<'a>, MainThread<'a>> for Processor<'a> 
                         let _ = events.output.try_push(ParamGestureEndEvent::new(at, id));
                     }
                 }
+                Some(CoreEventSpace::NoteExpression(expression)) => {
+                    let at = event.header().time();
+                    let kind = match expression.expression_type() {
+                        Some(NoteExpressionType::Tuning) => "tuning",
+                        Some(NoteExpressionType::Brightness) => "brightness",
+                        Some(NoteExpressionType::Pressure) => "pressure",
+                        _ => "other",
+                    };
+                    self.log(
+                        at,
+                        || format!("expression:{kind}"),
+                        Some(expression.pckn()),
+                        expression.value(),
+                    );
+                    if let Some(kind) = expression.expression_type() {
+                        let echo = NoteExpressionEvent::new(
+                            at,
+                            transposed(expression.pckn()),
+                            kind,
+                            expression.value(),
+                        );
+                        let _ = events.output.try_push(echo);
+                    }
+                }
                 Some(CoreEventSpace::Midi(midi)) => {
                     let at = event.header().time() as usize;
                     let [status, one, two] = midi.data();
+                    self.log(
+                        at as u32,
+                        || format!("midi:{status},{one},{two}"),
+                        None,
+                        0.0,
+                    );
+                    let _ = events
+                        .output
+                        .try_push(MidiEvent::new(at as u32, 0, midi.data()));
                     let level = match status & 0xF0 {
                         0xB0 => f32::from(two) / 127.0,
                         0xD0 => f32::from(one) / 127.0,
@@ -532,6 +623,7 @@ impl<'a> PluginAudioProcessor<'a, Shared<'a>, MainThread<'a>> for Processor<'a> 
                 }
                 Some(CoreEventSpace::NoteOff(note)) => {
                     let at = event.header().time();
+                    self.log(at, || "off".to_owned(), Some(note.pckn()), note.velocity());
                     let echo = NoteOffEvent::new(at, transposed(note.pckn()), note.velocity());
                     let _ = events.output.try_push(echo);
                 }
@@ -565,6 +657,7 @@ impl<'a> PluginAudioProcessor<'a, Shared<'a>, MainThread<'a>> for Processor<'a> 
                 }
             }
         }
+        self.frame += frames as u64;
         Ok(ProcessStatus::ContinueIfNotQuiet)
     }
 }
@@ -638,11 +731,20 @@ impl PluginNotePortsImpl for MainThread<'_> {
 
     fn get(&self, index: u32, is_input: bool, writer: &mut NotePortInfoWriter<'_>) {
         if index == 0 && (is_input || !no_note_output()) {
+            let (supported_dialects, preferred_dialect) =
+                match std::env::var(DIALECT_VAR).as_deref() {
+                    Ok("midi") if is_input => (NoteDialects::MIDI, NoteDialect::Midi),
+                    Ok("midi-mpe") if is_input => (
+                        NoteDialects::CLAP | NoteDialects::MIDI | NoteDialects::MIDI_MPE,
+                        NoteDialect::MidiMpe,
+                    ),
+                    _ => (NoteDialects::CLAP | NoteDialects::MIDI, NoteDialect::Clap),
+                };
             writer.set(&NotePortInfo {
                 id: ClapId::new(0),
                 name: b"Notes",
-                supported_dialects: NoteDialects::CLAP | NoteDialects::MIDI,
-                preferred_dialect: Some(NoteDialect::Clap),
+                supported_dialects,
+                preferred_dialect: Some(preferred_dialect),
             });
         }
     }

@@ -245,6 +245,13 @@ impl MixerUi {
         self.built
     }
 
+    /// The Session View's slot the pointer was over in the last frame, for
+    /// clips dragged from the Arrangement to drop on (second-window R21).
+    #[must_use]
+    pub fn drop_spot(&self) -> Option<bl_shell::clip_drag::DropSpot> {
+        self.grid.drop_spot()
+    }
+
     /// Draws the Session View in the main view `rect`: the title bars, the
     /// clip slots and status row (M3, drawn as a placeholder), and the
     /// mixer under them while it shows (R1).

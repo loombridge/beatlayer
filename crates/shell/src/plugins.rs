@@ -19,6 +19,7 @@ use bl_devices::KitHost;
 use bl_model::{Command, Device, DeviceId, DeviceKind, Document, Editor, ParamId, PluginFormat};
 use bl_plugin_host::au::AuHost;
 use bl_plugin_host::clap::ClapHost;
+use bl_plugin_host::lv2::Lv2Host;
 use bl_plugin_host::scan::{SCANNED_FORMATS, ScanReport, Scanner, system_paths};
 use bl_plugin_host::vst3::Vst3Host;
 use bl_shell_spec::plugins::{
@@ -149,14 +150,15 @@ pub fn has_format(doc: &Document, format: PluginFormat) -> bool {
     !devices(doc, format).is_empty()
 }
 
-/// Whether the set has a CLAP, VST3 or Audio Unit device: an offline render
-/// of it borrows the engine's plug-ins (offline-plugin-renders R1).
+/// Whether the set has a CLAP, VST3, Audio Unit or LV2 device: an offline
+/// render of it borrows the engine's plug-ins (offline-plugin-renders R1).
 #[must_use]
 pub fn has_plugin(doc: &Document) -> bool {
     [
         PluginFormat::Clap,
         PluginFormat::Vst3,
         PluginFormat::AudioUnit,
+        PluginFormat::Lv2,
     ]
     .into_iter()
     .any(|format| has_format(doc, format))
@@ -176,10 +178,31 @@ pub fn is_vst3(doc: &Document, device: DeviceId) -> bool {
     })
 }
 
+/// Whether `device` is an LV2 plug-in device in `doc` (WP-5.39).
+#[must_use]
+pub fn is_lv2(doc: &Document, device: DeviceId) -> bool {
+    doc.device(device).is_some_and(|d| {
+        matches!(
+            d.kind,
+            DeviceKind::Plugin {
+                format: PluginFormat::Lv2,
+                ..
+            }
+        )
+    })
+}
+
 /// Whether `device` is a plug-in device of a hosted format in `doc`.
 #[must_use]
 pub fn is_plugin(doc: &Document, device: DeviceId) -> bool {
-    is_clap(doc, device) || is_vst3(doc, device)
+    is_clap(doc, device) || is_vst3(doc, device) || is_lv2(doc, device)
+}
+
+/// Whether `path` names an LV2 bundle: a folder whose name ends in `.lv2`.
+#[must_use]
+pub fn is_lv2_path(path: &Path) -> bool {
+    path.extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("lv2"))
 }
 
 /// Whether `path` names a VST3 bundle or module: its own name or a folder
@@ -221,15 +244,17 @@ fn devices(doc: &Document, format: PluginFormat) -> Vec<DeviceId> {
         .collect()
 }
 
-/// Spec: clap-hosting R8, au-hosting R8, which vst3-hosting's state rules
-/// mirror. Takes each running plug-in's state into the set, without an undo
-/// step, so saving or copying the device keeps it: CLAP plug-ins', Audio
-/// Units', VST3 plug-ins', and kit plug-ins' compiled in. A device whose
-/// plug-in isn't running keeps the state it had.
+/// Spec: clap-hosting R8, au-hosting R8, which vst3-hosting's and
+/// lv2-hosting's state rules mirror. Takes each running plug-in's state into
+/// the set, without an undo step, so saving or copying the device keeps it:
+/// CLAP plug-ins', Audio Units', VST3 plug-ins', LV2 plug-ins', and kit
+/// plug-ins' compiled in. A device whose plug-in isn't running keeps the
+/// state it had.
 pub fn capture_states(
     plugins: &ClapHost,
     au: &AuHost,
     vst3: &Vst3Host,
+    lv2: &Lv2Host,
     kit: &KitHost,
     editor: &mut Editor,
 ) {
@@ -249,6 +274,11 @@ pub fn capture_states(
     }
     for device in devices(editor.document(), PluginFormat::Vst3) {
         if let Ok(state) = vst3.save_state(device) {
+            let _ = editor.amend_plugin_state(device, Some(state));
+        }
+    }
+    for device in devices(editor.document(), PluginFormat::Lv2) {
+        if let Ok(state) = lv2.save_state(device) {
             let _ = editor.amend_plugin_state(device, Some(state));
         }
     }
@@ -344,12 +374,13 @@ pub fn apply_param_changes(
 
 /// What `plugin.info` reports for `device`, from whichever host has it:
 /// the CLAP host's report for a CLAP device, the Audio Unit host's for an
-/// Audio Unit, or the VST3 host's.
+/// Audio Unit, the VST3 host's, or the LV2 host's.
 #[must_use]
 pub fn info(
     plugins: &ClapHost,
     au: &AuHost,
     vst3: &Vst3Host,
+    lv2: &Lv2Host,
     device: DeviceId,
 ) -> Option<PluginInfo> {
     if let Some(status) = plugins.status(device).or_else(|| au.status(device)) {
@@ -365,21 +396,39 @@ pub fn info(
             window_shown: status.editor_open && !status.editor_hidden,
             window: None,
             values: status.values,
+            mpe: bl_model::PluginMpe::default(),
             ara: None,
         });
     }
-    let status = vst3.status(device)?;
-    let ara = vst3.ara_status().into_iter().find_map(|plugin| {
-        plugin
-            .devices
-            .iter()
-            .find(|(bound, _)| *bound == device)
-            .map(|(_, track)| bl_shell_spec::plugins::AraDevice {
-                factory: plugin.plugin.clone(),
-                track: *track,
-                regions: plugin.regions.len(),
-            })
-    });
+    if let Some(status) = vst3.status(device) {
+        let ara = vst3.ara_status().into_iter().find_map(|plugin| {
+            plugin
+                .devices
+                .iter()
+                .find(|(bound, _)| *bound == device)
+                .map(|(_, track)| bl_shell_spec::plugins::AraDevice {
+                    factory: plugin.plugin.clone(),
+                    track: *track,
+                    regions: plugin.regions.len(),
+                })
+        });
+        return Some(PluginInfo {
+            device,
+            plugin: status.plugin_id,
+            path: status.path.to_string_lossy().into_owned(),
+            active: status.active,
+            latency: status.latency,
+            failure: status.failure,
+            has_window: status.has_editor,
+            window_open: status.editor_open,
+            window_shown: status.editor_open && !status.editor_hidden,
+            window: None,
+            values: status.values,
+            mpe: bl_model::PluginMpe::default(),
+            ara,
+        });
+    }
+    let status = lv2.status(device)?;
     Some(PluginInfo {
         device,
         plugin: status.plugin_id,
@@ -392,7 +441,8 @@ pub fn info(
         window_shown: status.editor_open && !status.editor_hidden,
         window: None,
         values: status.values,
-        ara,
+        mpe: bl_model::PluginMpe::default(),
+        ara: None,
     })
 }
 
@@ -506,8 +556,9 @@ pub fn scan_report(
 
 /// The formats the browser lists and a scan of the system folders covers
 /// (WP-2.9b; the plug-in scanning spec, R12): CLAP always (Live has no
-/// CLAP, so no switch), VST3 with Use VST3 Plug-In System Folders, and
-/// Audio Units with Use Audio Units v2 on macOS.
+/// CLAP, so no switch), VST3 with Use VST3 Plug-In System Folders, Audio
+/// Units with Use Audio Units v2 on macOS, and LV2 on Linux (Live has no LV2
+/// either, so no switch).
 #[must_use]
 pub fn listed_formats(prefs: &crate::settings::Preferences) -> Vec<PluginFormat> {
     SCANNED_FORMATS
@@ -517,7 +568,7 @@ pub fn listed_formats(prefs: &crate::settings::Preferences) -> Vec<PluginFormat>
             PluginFormat::Clap => true,
             PluginFormat::Vst3 => prefs.vst3_system_folders,
             PluginFormat::AudioUnit => prefs.use_audio_units_v2,
-            PluginFormat::Lv2 => false,
+            PluginFormat::Lv2 => true,
         })
         .collect()
 }

@@ -59,7 +59,7 @@ use egui_wgpu::{
 };
 use serde_json::json;
 use winit::application::ApplicationHandler;
-use winit::dpi::{LogicalPosition, LogicalSize};
+use winit::dpi::{LogicalPosition, LogicalSize, PhysicalPosition};
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::window::{Fullscreen, Window, WindowAttributes, WindowId};
@@ -373,6 +373,9 @@ struct Host {
     main: Option<Surface>,
     /// The second window, while it is open (WP-6.29).
     second: Option<Surface>,
+    /// Whether the other main window hears the pointer of a drag of clips
+    /// that began in one (WP-6.29b).
+    drag_forwarded: bool,
     settings: Option<Surface>,
     /// The assistant's panel in a window of its own, while it floats open
     /// (WP-2.23, part 3; D24), with what it draws.
@@ -598,6 +601,7 @@ pub fn run(args: Args) -> Result<(), String> {
         proxy,
         main: None,
         second: None,
+        drag_forwarded: false,
         settings: None,
         assistant: None,
         assistant_ui: AssistantPanelUi::default(),
@@ -1019,6 +1023,58 @@ impl Host {
         }
     }
 
+    /// While clips are dragged between the views, a window keeps the pointer
+    /// until the button is up, so the other main window is told where it is
+    /// from the screen's point of view (second-window R19), as if the pointer
+    /// moved there: it reports the place under it, and the drop uses it.
+    fn forward_clip_drag(
+        &mut self,
+        kind: WindowKind,
+        device_id: winit::event::DeviceId,
+        position: PhysicalPosition<f64>,
+    ) {
+        let (this, other) = match kind {
+            WindowKind::Main => (&self.main, &self.second),
+            WindowKind::Second => (&self.second, &self.main),
+            _ => return,
+        };
+        let dragging = self
+            .shell
+            .clip_drag()
+            .is_some_and(|drag| drag.window == kind);
+        let local = (|| {
+            let (this, other) = (this.as_ref()?, other.as_ref()?);
+            let from = this.window.inner_position().ok()?;
+            let to = other.window.inner_position().ok()?;
+            let size = other.window.inner_size();
+            let x = f64::from(from.x - to.x) + position.x;
+            let y = f64::from(from.y - to.y) + position.y;
+            (dragging
+                && x >= 0.0
+                && y >= 0.0
+                && x < f64::from(size.width)
+                && y < f64::from(size.height))
+            .then(|| PhysicalPosition::new(x, y))
+        })();
+        let was = std::mem::replace(&mut self.drag_forwarded, local.is_some());
+        let event = match local {
+            Some(position) => WindowEvent::CursorMoved {
+                device_id,
+                position,
+            },
+            None if was => WindowEvent::CursorLeft { device_id },
+            None => return,
+        };
+        let other = match kind {
+            WindowKind::Main => &mut self.second,
+            _ => &mut self.main,
+        };
+        if let Some(surface) = other {
+            let _ = surface.state.on_window_event(&surface.window, &event);
+            surface.window.request_redraw();
+        }
+    }
+
     fn surface(&mut self, kind: WindowKind) -> &mut Option<Surface> {
         match kind {
             WindowKind::Main => &mut self.main,
@@ -1421,6 +1477,10 @@ impl Host {
                 UiEvent::BeginGesture(label) => self.shell.begin_gesture(label),
                 UiEvent::BeginNamedGesture(label) => self.shell.begin_gesture(&label),
                 UiEvent::EndGesture => self.shell.end_gesture(),
+                UiEvent::ClipDrag(step) => {
+                    // A drop that fails shows in the Status Bar.
+                    let _ = self.shell.clip_drag_event(kind, step);
+                }
             }
         }
         self.after_commands(event_loop);
@@ -2305,6 +2365,13 @@ impl ApplicationHandler<UserEvent> for Host {
             }
             response.repaint
         };
+        if let WindowEvent::CursorMoved {
+            device_id,
+            position,
+        } = &event
+        {
+            self.forward_clip_drag(kind, *device_id, *position);
+        }
         match event {
             WindowEvent::CloseRequested => {
                 match kind {

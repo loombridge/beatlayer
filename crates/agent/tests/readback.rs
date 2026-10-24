@@ -443,6 +443,11 @@ fn fixture() -> Project {
     device.external = Some(External {
         port: Some("Synth".to_owned()),
         channel: 5,
+        mpe: Some(bl_model::MpeSettings {
+            zone: bl_model::MpeZone::Upper,
+            channels: 7,
+            ..bl_model::MpeSettings::default()
+        }),
         audio_from: Channel::Mono(3),
         audio_to: None,
         hardware_latency: HardwareLatency::Samples { value: 96 },
@@ -1716,4 +1721,63 @@ fn the_multi_clip_commands_run_by_id_and_read_back() {
     );
     let state = run(&mut client, "clip_view.focus_mode", json!({ "on": true }));
     assert!(state.to_string().contains("\"focus_mode\":true"), "{state}");
+}
+
+// Spec: second-window R23. The copies between the Session and the
+// Arrangement run by ID through the agent API and read back through the
+// query tool's track: its Arrangement clips and its slots.
+#[test]
+fn the_copies_between_the_views_run_by_id_and_read_back() {
+    let mut client = open(&fixture(), "copies");
+    let full = |client: &mut Client<InProcess>| {
+        query(
+            client,
+            json!({ "path": "track \"Keys\"", "detail": "full", "limit": 100 }),
+        )
+    };
+    let track = full(&mut client)["id"].clone();
+    let before = full(&mut client)["saved"]["clips"]["total"]
+        .as_u64()
+        .unwrap();
+    let slot = query(&mut client, json!({ "path": "track \"Keys\" / slot 2" }));
+    let clip = slot["clip"]["id"].clone();
+    let run = |client: &mut Client<InProcess>, command: &str, args: Value| {
+        client
+            .call(
+                "run",
+                json!({ "label": "Copies", "commands": [{ "command": command, "args": args }] }),
+            )
+            .unwrap()
+            .ok()
+            .unwrap_or_else(|error| panic!("{command}: {error}"))
+    };
+    run(
+        &mut client,
+        "session.copy_to_arrangement",
+        json!({ "clips": [clip], "track": track, "at": 40 * BAR }),
+    );
+    let after = full(&mut client);
+    assert_eq!(
+        after["saved"]["clips"]["total"].as_u64().unwrap(),
+        before + 1
+    );
+    let copy = after["saved"]["clips"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["start"] == 40 * BAR)
+        .unwrap_or_else(|| panic!("{after}"))
+        .clone();
+    assert_eq!(copy["name"], "Loop");
+    let scene = query(&mut client, json!({ "path": "scene 3" }))["id"].clone();
+    run(
+        &mut client,
+        "session.copy_to_session",
+        json!({ "clips": [copy["id"]], "track": track, "scene": scene }),
+    );
+    let third = query(&mut client, json!({ "path": "track \"Keys\" / slot 3" }));
+    assert_eq!(third["clip"]["name"], "Loop");
+    // The Session clip it came from is where it was.
+    let again = query(&mut client, json!({ "path": "track \"Keys\" / slot 2" }));
+    assert_eq!(again["clip"]["id"], slot["clip"]["id"]);
 }

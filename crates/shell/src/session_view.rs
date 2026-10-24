@@ -177,6 +177,32 @@ impl SessionView {
         self.slots.first().copied()
     }
 
+    /// Selects these slots, as a click on them does.
+    pub(crate) fn select_slots(&mut self, slots: Vec<SlotRef>) {
+        self.anchor = slots.first().copied();
+        self.slots = slots;
+        self.scenes.clear();
+        self.tracks.clear();
+        self.title_tracks = false;
+    }
+
+    /// Selects these scenes, as a click on them does.
+    pub(crate) fn select_scenes(&mut self, scenes: Vec<SceneId>) {
+        self.scene_anchor = scenes.first().copied();
+        self.scenes = scenes;
+        self.slots.clear();
+        self.tracks.clear();
+        self.title_tracks = false;
+    }
+
+    /// Drops the slots and scenes `doc` no longer has an empty slot or a
+    /// scene for, as Delete does.
+    pub(crate) fn forget_missing(&mut self, doc: &bl_model::Document) {
+        self.slots
+            .retain(|slot| doc.slot(slot.track, slot.scene).is_some());
+        self.scenes.retain(|scene| doc.scene(*scene).is_some());
+    }
+
     /// Runs a Session View command.
     ///
     /// # Errors

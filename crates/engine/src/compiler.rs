@@ -546,6 +546,17 @@ impl Compiler {
                     self.gc.data(crate::modbus::Shape(shape)),
                 ));
             }
+            // Spec: mpe R14, R18. A plug-in's MPE Mode and settings reach
+            // its node as node data, with no new program.
+            if let (Change::Modified, Some(before), Some(after)) =
+                (change, old.device(id), document.device(id))
+                && before.mpe != after.mpe
+            {
+                update.data.push((
+                    NodeKey::Device(id),
+                    self.gc.data(crate::node::PluginMpeData(after.mpe)),
+                ));
+            }
             // Spec: articulation-map R14. An Articulation Map's list reaches
             // its node as node data, so a change to it reaches the playing
             // device without a new program.
@@ -1325,6 +1336,19 @@ impl Compiler {
             // Spec: tunings R18. Every node is new too, so each instrument
             // on a track that plays the tuning is sent its pitches.
             self.send_key_pitches(document, id, true, &mut update);
+            // Spec: mpe R14. A plug-in's node starts with MPE Mode off, so
+            // each one whose mode or settings differ is sent them.
+            for device in document
+                .track(id)
+                .into_iter()
+                .flat_map(bl_model::Track::devices_deep)
+                .filter(|device| !device.mpe.is_default())
+            {
+                update.data.push((
+                    NodeKey::Device(device.id),
+                    self.gc.data(crate::node::PluginMpeData(device.mpe)),
+                ));
+            }
         }
         update
     }

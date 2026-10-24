@@ -29,6 +29,7 @@ type PresetState = (
     String,
     Option<Vec<bl_model::modulator::ShapePoint>>,
     Option<Vec<bl_model::Articulation>>,
+    Option<bl_model::PluginMpe>,
 );
 
 /// The notes the pad view can start at: the last group of sixteen.
@@ -600,6 +601,7 @@ impl DeviceView {
                             bl_project::preset::preset_name(&path),
                             loaded.shape,
                             loaded.articulations,
+                            loaded.mpe,
                         )),
                     ))
                 }
@@ -923,13 +925,14 @@ impl DeviceView {
                             index,
                             device,
                         })?;
-                        if let Some((params, name, shape, articulations)) = state {
+                        if let Some((params, name, shape, articulations, mpe)) = state {
                             editor.apply(Command::SetDeviceState {
                                 device: id,
                                 params,
                                 name,
                                 shape,
                                 articulations,
+                                mpe,
                             })?;
                         }
                     }

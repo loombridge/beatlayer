@@ -75,7 +75,7 @@ pub struct Keymap {
 }
 
 impl Keymap {
-    /// The default keymap, `keymaps/live12.toml`.
+    /// The default keymap, `keymaps/live12/`.
     #[must_use]
     pub fn live12() -> Self {
         Self::from_data(data::Keymap::live12())

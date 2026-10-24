@@ -89,10 +89,7 @@ pub(crate) fn is_audio(path: &str) -> bool {
 
 /// Whether `path` names a clip file, by its extension.
 pub(crate) fn is_clip_file(path: &str) -> bool {
-    Path::new(path)
-        .file_name()
-        .and_then(|name| listing::file_kind(&name.to_string_lossy()))
-        == Some(ItemKind::Clip)
+    listing::path_kind(Path::new(path)) == Some(ItemKind::Clip)
 }
 
 /// What the Status Bar says when placing a clip file left audio files

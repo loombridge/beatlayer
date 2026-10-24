@@ -36,10 +36,25 @@ pub fn file_kind(name: &str) -> Option<ItemKind> {
     }
 }
 
+/// What a path in the browser is: what [`file_kind`] says of the file's name,
+/// and a clip file for the key of a Session clip of an opened set, which
+/// behaves as one (set exchange R2).
+#[must_use]
+pub fn path_kind(path: &Path) -> Option<ItemKind> {
+    if let Some((_, row)) = crate::set_exchange::parse_key(&path.to_string_lossy()) {
+        return matches!(row, crate::set_exchange::Row::Clip(_)).then_some(ItemKind::Clip);
+    }
+    file_kind(&path.file_name()?.to_string_lossy())
+}
+
 /// What a clip file holds, read from the first bytes of the file; `None`
-/// for a file that isn't a clip file or is damaged (clip files R6).
+/// for a file that isn't a clip file or is damaged (clip files R6). A Session
+/// clip of an opened set holds what the clip is.
 #[must_use]
 pub fn clip_kind(path: &Path) -> Option<bl_shell_spec::browser::ClipFileKind> {
+    if let Some(kind) = crate::set_exchange::clip_kind(path) {
+        return Some(kind);
+    }
     use bl_project::clip_file::{ClipKind, peek_kind};
     use bl_shell_spec::browser::ClipFileKind;
     peek_kind(path).map(|kind| match kind {

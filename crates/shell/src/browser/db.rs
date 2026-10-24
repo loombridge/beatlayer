@@ -25,7 +25,7 @@ use super::tags::{Tag, TagGroup};
 
 /// The schema version this build writes. A file with a higher version is
 /// left alone.
-pub const SCHEMA_VERSION: i64 = 2;
+pub const SCHEMA_VERSION: i64 = 3;
 
 /// The file's schema, as SQLite statements.
 const SCHEMA: &str = "
@@ -57,6 +57,11 @@ CREATE TABLE IF NOT EXISTS item_tags (
     item_key TEXT NOT NULL,
     tag_id INTEGER NOT NULL,
     PRIMARY KEY (item_key, tag_id)
+);
+CREATE TABLE IF NOT EXISTS item_collections (
+    item_key TEXT NOT NULL,
+    collection INTEGER NOT NULL,
+    PRIMARY KEY (item_key, collection)
 );
 CREATE TABLE IF NOT EXISTS saved_labels (
     id INTEGER PRIMARY KEY,
@@ -139,6 +144,15 @@ pub enum TagOp {
     SetItemTags { key: String, tags: Vec<i64> },
 }
 
+/// A change to the collections (spec: browser-tags R35).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CollectionOp {
+    /// The item's key.
+    pub key: String,
+    /// The collections it is in now, by their numbers.
+    pub collections: Vec<u8>,
+}
+
 /// A change to the saved labels.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LabelOp {
@@ -161,6 +175,8 @@ pub struct Loaded {
     pub item_tags: Vec<(String, Vec<i64>)>,
     /// The saved labels, in the order they were made.
     pub saved_labels: Vec<SavedLabel>,
+    /// The collections each item is in, by its key.
+    pub item_collections: Vec<(String, Vec<u8>)>,
 }
 
 /// The tags the database holds: the groups, the tags, and the items that
@@ -179,6 +195,8 @@ enum Request {
     Tags(Vec<TagOp>),
     /// Write the changes to the saved labels.
     Labels(Vec<LabelOp>),
+    /// Write the changes to the collections.
+    Collections(Vec<CollectionOp>),
     /// Write everything that's waiting, and answer when it's done.
     Flush(Sender<()>),
 }
@@ -355,6 +373,13 @@ impl Db {
         }
     }
 
+    /// Writes the changes to the collections.
+    pub fn save_collections(&self, ops: Vec<CollectionOp>) {
+        if let Some(sender) = &self.requests {
+            let _ = sender.send(Request::Collections(ops));
+        }
+    }
+
     /// Writes everything that's waiting, and waits for it, for tests.
     pub fn flush(&self) {
         let Some(sender) = &self.requests else {
@@ -438,6 +463,7 @@ fn write_loop(connection: rusqlite::Connection, requests: Receiver<Request>) {
             Request::Files(ops) => write_files(&connection, &ops),
             Request::Tags(ops) => write_tags(&connection, &ops),
             Request::Labels(ops) => write_labels(&connection, &ops),
+            Request::Collections(ops) => write_collections(&connection, &ops),
             Request::Flush(reply) => {
                 let _ = reply.send(());
             }
@@ -470,7 +496,27 @@ fn read_all(connection: &rusqlite::Connection) -> Loaded {
         tags,
         item_tags,
         saved_labels: read_labels(connection),
+        item_collections: read_collections(connection),
     }
+}
+
+/// Reads the collections each item is in.
+fn read_collections(connection: &rusqlite::Connection) -> Vec<(String, Vec<u8>)> {
+    let mut items: Vec<(String, Vec<u8>)> = Vec::new();
+    for (key, collection) in rows(
+        connection,
+        "SELECT item_key, collection FROM item_collections ORDER BY item_key, collection",
+        |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+    ) {
+        let Ok(collection) = u8::try_from(collection) else {
+            continue;
+        };
+        match items.last_mut() {
+            Some((last, collections)) if *last == key => collections.push(collection),
+            _ => items.push((key, vec![collection])),
+        }
+    }
+    items
 }
 
 /// Reads the saved labels the file holds.
@@ -650,6 +696,29 @@ fn write_files(connection: &rusqlite::Connection, ops: &[FileOp]) {
     let _ = transaction.commit();
 }
 
+/// Writes the changes to the collections, in one transaction.
+fn write_collections(connection: &rusqlite::Connection, ops: &[CollectionOp]) {
+    if ops.is_empty() {
+        return;
+    }
+    let Ok(transaction) = connection.unchecked_transaction() else {
+        return;
+    };
+    for op in ops {
+        let _ = transaction.execute(
+            "DELETE FROM item_collections WHERE item_key = ?1",
+            rusqlite::params![op.key],
+        );
+        for collection in &op.collections {
+            let _ = transaction.execute(
+                "INSERT OR IGNORE INTO item_collections (item_key, collection) VALUES (?1, ?2)",
+                rusqlite::params![op.key, collection],
+            );
+        }
+    }
+    let _ = transaction.commit();
+}
+
 /// Writes the changes to the tags, in one transaction.
 fn write_tags(connection: &rusqlite::Connection, ops: &[TagOp]) {
     if ops.is_empty() {
@@ -813,6 +882,36 @@ mod tests {
         assert_eq!(loaded.files.len(), 1);
         assert_eq!(loaded.files[0].name, "Kick.wav");
         assert_eq!(loaded.files[0].size, 10);
+    }
+
+    #[test]
+    fn a_database_of_the_previous_version_gains_the_collections_table() {
+        // Spec: browser-tags R1, R4, R35.
+        let dir = scratch("migrate");
+        let path = dir.join("browser.db");
+        {
+            let db = Db::open(path.clone());
+            db.flush();
+        }
+        let connection = rusqlite::Connection::open(&path).expect("the file");
+        connection
+            .execute_batch("DROP TABLE item_collections")
+            .expect("the table goes");
+        connection
+            .pragma_update(None, "user_version", 2)
+            .expect("the version");
+        drop(connection);
+        let db = Db::open(path);
+        assert!(db.damaged().is_none() && !db.is_newer());
+        db.save_collections(vec![CollectionOp {
+            key: "/lib/Kick.wav".to_owned(),
+            collections: vec![2, 5],
+        }]);
+        db.flush();
+        assert_eq!(
+            db.load().item_collections,
+            [("/lib/Kick.wav".to_owned(), vec![2, 5])]
+        );
     }
 
     #[test]

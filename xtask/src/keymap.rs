@@ -143,6 +143,16 @@ const WIDGET: &[(&str, &str)] = &[
          (`focus.browser`, `browser.select`)",
     ),
     (
+        "S-BRW-008",
+        "the browser's list: 1 to 7 put the selected items in the collection of that number, \
+         or take them out (`browser.set_collection`)",
+    ),
+    (
+        "S-BRW-009",
+        "the browser's list: 0 takes the selected items out of every collection \
+         (`browser.clear_collections`)",
+    ),
+    (
         "S-BRW-015",
         "the browser's Quick Tags: Cmd-E (Ctrl-E) moves the keyboard focus to the Add field",
     ),

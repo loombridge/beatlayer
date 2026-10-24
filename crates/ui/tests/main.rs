@@ -14,6 +14,7 @@ mod auto_filter;
 mod automation;
 mod autosampler;
 mod browser;
+mod browser_collections;
 mod browser_edge;
 mod browser_filters;
 mod capture_midi;

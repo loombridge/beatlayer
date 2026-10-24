@@ -96,6 +96,44 @@ const DRAWN_TITLE_BAR: bool = cfg!(target_os = "macos");
 /// The content height the system's title bar leaves, for a window `height`
 /// points tall with Live's title bar: the whole height where Beatlayer
 /// draws the title bar, and less [`TITLE_BAR`] where the system does.
+/// Shows files and folders in the system's file manager: Finder selects
+/// them, File Explorer selects each, and on other systems the default file
+/// manager opens the folder each lies in (the browser spec, R25). A file
+/// manager that can't be started is left alone: there is nothing to tell the
+/// person that they can act on.
+fn show_in_file_manager(paths: &[PathBuf]) {
+    #[cfg(target_os = "macos")]
+    let _ = std::process::Command::new("open")
+        .arg("-R")
+        .args(paths)
+        .spawn();
+    #[cfg(target_os = "windows")]
+    for path in paths {
+        use std::os::windows::process::CommandExt as _;
+        // Explorer reads the path after `/select,` with its quotes.
+        let _ = std::process::Command::new("explorer")
+            .raw_arg(format!("/select,\"{}\"", path.display()))
+            .spawn();
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        let mut folders: Vec<&std::path::Path> = paths
+            .iter()
+            .filter_map(|path| {
+                if path.is_dir() {
+                    Some(path.as_path())
+                } else {
+                    path.parent()
+                }
+            })
+            .collect();
+        folders.dedup();
+        for folder in folders {
+            let _ = std::process::Command::new("xdg-open").arg(folder).spawn();
+        }
+    }
+}
+
 fn content_height(height: f32) -> f32 {
     if DRAWN_TITLE_BAR {
         height
@@ -1658,6 +1696,7 @@ impl Host {
                     event_loop.hide_application();
                 }
             }
+            Effect::ShowInFileManager(paths) => show_in_file_manager(&paths),
             Effect::ShowAbout => {
                 let _ = rfd::MessageDialog::new()
                     .set_level(rfd::MessageLevel::Info)

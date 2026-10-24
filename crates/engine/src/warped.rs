@@ -45,6 +45,10 @@ use crate::clip_source::WINDOW_FRAMES as NARROW_WINDOW;
 /// so a point a jump lands on is cued that far early.
 pub(crate) const CUE_BACK: u64 = 1_032;
 
+/// The speed, in file frames per song frame, that cueing a Complex clip allows
+/// for: a song up to half again as fast as the clip's own tempo.
+const CUE_SPEED: f64 = 1.5;
+
 /// The frames between the grid frames a launched clip's speed is read at.
 const SPEED_GRID: i64 = 4_096;
 
@@ -428,15 +432,32 @@ impl Warped {
         window_of(self.mode, self.contents.rate)
     }
 
+    /// How many frames before a point a jump lands on the clip reads, so the
+    /// point is cued that far early: the interpolator's reach, or, in the
+    /// frequency-domain modes, the audio a prime seeks with at one and a half
+    /// times the clip's own speed (R7, R24).
+    pub(crate) fn reach_back(&self) -> u64 {
+        match self.mode {
+            ClipWarpMode::Complex | ClipWarpMode::ComplexPro => {
+                bl_stretch::complex::seek_reach(self.contents.rate, CUE_SPEED) as u64
+            }
+            _ => CUE_BACK,
+        }
+    }
+
     /// How many file frames the clip's reads reach back into, at most: the
-    /// longest stretch from a Beats segment's turn to its end (R15), a grain
-    /// mode's window (its reads overlap the last one by nearly that much, and
-    /// the room serves them), or nothing where a mode's reads only go
-    /// forwards.
+    /// longest stretch from a Beats segment's turn to its end (R15), the
+    /// window of a mode whose reads overlap the last one by nearly that much
+    /// (a grain mode's, or Complex's and Complex Pro's, R21), which the room
+    /// serves, so a streamed source is only ever read forwards, or nothing
+    /// where a mode's reads only go forwards.
     pub(crate) fn history_frames(&self) -> usize {
         if self.plan.is_empty() {
             return match self.mode {
-                ClipWarpMode::Tones | ClipWarpMode::Texture => self.window_frames(),
+                ClipWarpMode::Tones
+                | ClipWarpMode::Texture
+                | ClipWarpMode::Complex
+                | ClipWarpMode::ComplexPro => self.window_frames(),
                 _ => 0,
             };
         }
@@ -1317,7 +1338,7 @@ impl WarpScratch {
         playing: Playing,
         plan: Option<&Plan>,
         past: Option<&Past>,
-        history: Option<&mut History>,
+        mut history: Option<&mut History>,
         stretchers: &mut Stretchers,
         lane: usize,
     ) -> (usize, bool) {
@@ -1344,7 +1365,7 @@ impl WarpScratch {
             want,
             playing,
             plan,
-            history,
+            history.as_deref_mut(),
             Out::New,
             stretchers,
             lane,
@@ -1369,7 +1390,10 @@ impl WarpScratch {
             n,
             past.playing,
             launched.is_none().then(|| past.warped.plan()),
-            None,
+            // The old mode reads the same file near the same frames, which
+            // the new mode's room usually holds: a streamed source then
+            // isn't asked to jump back and forth within the fade.
+            history,
             Out::Previous,
             stretchers,
             lane,

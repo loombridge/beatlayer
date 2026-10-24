@@ -534,6 +534,11 @@ impl Shell {
                 self.publish_plugins();
                 Ok(to_value(&report))
             }
+            plugin_ids::ARA_STATE => {
+                let _: plugin_ids::AraStateArgs = Self::args(id, args)?;
+                self.vst3.idle();
+                Ok(to_value(&crate::plugins::ara_state(&self.vst3)))
+            }
             plugin_ids::LIST => {
                 let _: plugin_ids::ListArgs = Self::args(id, args)?;
                 let list = self.set_plugin_list();

@@ -73,6 +73,7 @@ rustix = { version = "1.1", default-features = false, features = ["std", "fs"] }
 # The browser's database, so the tests can read it and check what it holds.
 rusqlite = { version = "0.40.2", default-features = false, features = ["bundled"] }
 # The test plug-ins, built from source, which the plug-in tests load.
+bl-test-ara = { path = "../test-ara" }
 bl-test-clap = { path = "../test-clap" }
 bl-test-lv2 = { path = "../test-lv2" }
 bl-test-vst3 = { path = "../test-vst3" }

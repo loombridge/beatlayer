@@ -717,6 +717,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "bl-ara-sys"
+version = "0.2.0"
+
+[[package]]
 name = "bl-assistant"
 version = "0.2.0"
 dependencies = [
@@ -955,11 +959,14 @@ dependencies = [
 name = "bl-plugin-host"
 version = "0.2.0"
 dependencies = [
+ "bl-ara-sys",
  "bl-commands",
  "bl-core",
  "bl-engine",
+ "bl-media",
  "bl-model",
  "bl-rt",
+ "bl-test-ara",
  "bl-test-clap",
  "bl-test-lv2",
  "bl-test-vst3",
@@ -1025,6 +1032,7 @@ dependencies = [
  "bl-project",
  "bl-rt",
  "bl-shell-spec",
+ "bl-test-ara",
  "bl-test-clap",
  "bl-test-lv2",
  "bl-test-vst3",
@@ -1062,6 +1070,14 @@ dependencies = [
  "bl-dsp",
  "cc",
  "proptest",
+]
+
+[[package]]
+name = "bl-test-ara"
+version = "0.2.0"
+dependencies = [
+ "bl-ara-sys",
+ "vst3",
 ]
 
 [[package]]

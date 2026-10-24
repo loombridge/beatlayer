@@ -128,6 +128,9 @@ pub struct LaneHeader<'a> {
     pub order: &'a [TakeLaneId],
     /// The names Tab moves between while one is typed.
     pub names: &'a [Named],
+    /// The track's take lanes in order, each with its top and bottom in the
+    /// header column, for dragging a header between them.
+    pub track_lanes: &'a [(TakeLaneId, f32, f32)],
 }
 
 fn invoke(events: &mut Vec<UiEvent>, id: &str, args: serde_json::Value) {
@@ -183,6 +186,7 @@ pub fn header(
         keys,
         order,
         names,
+        track_lanes: _,
     } = *h;
     let colors = &theme.colors;
     let doc = shell.editor().document();
@@ -211,8 +215,10 @@ pub fn header(
         [rect.left_bottom(), rect.right_bottom()],
         Stroke::new(1.0, colors.lane_line.0),
     );
-    let response = ui.interact(title, title_id(lane), Sense::click());
+    let response = ui.interact(title, title_id(lane), Sense::click_and_drag());
     crate::focus::register(ui.ctx(), response.id, bl_shell::Area::MainView, None);
+    reorder(ui, theme, &response, h, title, events);
+    resize(ui, h, rect, events);
 
     // The Audition Take Lane button, after the name (L-ARR-020).
     let button = Rect::from_min_size(
@@ -329,6 +335,174 @@ pub fn header(
                 egui::accesskit::Toggled::False
             });
         });
+    }
+}
+
+/// The ID of the strip along a take lane header's lower edge.
+fn split_id(lane: TakeLaneId) -> Id {
+    Id::new(("arrangement-take-lane-split", lane))
+}
+
+fn dragging_id() -> Id {
+    Id::new("take-lane-header-dragging")
+}
+
+/// Whether a take lane header was dragged in this pass, so Esc reaches the
+/// drag rather than the keymap. A drag whose header isn't drawn ends.
+pub fn is_dragging(ctx: &egui::Context) -> bool {
+    ctx.data(|d| d.get_temp::<u64>(dragging_id())) == Some(ctx.cumulative_pass_nr())
+}
+
+/// What a header drag has worked out: where the lanes it moves would go, or
+/// that Esc cancelled it.
+#[derive(Clone, Copy, Debug, Default)]
+struct Reordering {
+    /// The place among the lanes that aren't moved, as `take_lane.move` counts.
+    index: Option<usize>,
+    cancelled: bool,
+}
+
+/// Dragging a take lane header up or down moves the selected take lanes
+/// within their track, a line showing where they'll go (the comping spec,
+/// R35; I-DRAG-045). Grabbing a header that isn't selected selects it. One
+/// undo step, and Esc cancels.
+fn reorder(
+    ui: &mut Ui,
+    theme: &Theme,
+    response: &egui::Response,
+    h: &LaneHeader<'_>,
+    title: Rect,
+    events: &mut Vec<UiEvent>,
+) {
+    let id = response.id.with("reordering");
+    if response.drag_started() {
+        ui.data_mut(|d| d.insert_temp(id, Reordering::default()));
+        if !h.selected {
+            invoke(events, ids::SELECT_TAKE_LANES, json!({ "lanes": [h.lane] }));
+        }
+    }
+    if !response.dragged() && !response.drag_stopped() {
+        return;
+    }
+    let mut state: Reordering = ui.data(|d| d.get_temp(id)).unwrap_or_default();
+    // The lanes that move, all on this header's track.
+    let selection = h.shell.arrangement().selected_take_lanes();
+    let moving: Vec<TakeLaneId> = h
+        .track_lanes
+        .iter()
+        .map(|(lane, ..)| *lane)
+        .filter(|lane| {
+            if h.selected {
+                selection.contains(lane)
+            } else {
+                *lane == h.lane
+            }
+        })
+        .collect();
+    let whole = if h.selected {
+        moving.len() == selection.len()
+    } else {
+        true
+    };
+    state.cancelled |= ui.input(|i| i.key_pressed(Key::Escape));
+    let rest: Vec<&(TakeLaneId, f32, f32)> = h
+        .track_lanes
+        .iter()
+        .filter(|(lane, ..)| !moving.contains(lane))
+        .collect();
+    if let Some(pointer) = ui.input(|i| i.pointer.interact_pos())
+        && whole
+        && !moving.is_empty()
+        && !rest.is_empty()
+    {
+        let index = rest
+            .iter()
+            .filter(|(_, top, bottom)| pointer.y > (top + bottom) / 2.0)
+            .count();
+        state.index = Some(index);
+        if response.dragged() && !state.cancelled {
+            let y = rest
+                .get(index)
+                .map_or_else(|| rest[rest.len() - 1].2, |(_, top, _)| *top);
+            ui.painter().line_segment(
+                [pos2(title.left(), y), pos2(title.right(), y)],
+                Stroke::new(2.0, theme.colors.focus.0),
+            );
+        }
+    }
+    // While the header is dragged the keymap leaves the keys alone, so Esc
+    // reaches the drag ([`is_dragging`]).
+    let pass = ui.ctx().cumulative_pass_nr();
+    ui.data_mut(|d| {
+        if response.drag_stopped() {
+            d.remove::<u64>(dragging_id());
+        } else {
+            d.insert_temp(dragging_id(), pass);
+        }
+    });
+    if response.drag_stopped() {
+        // Where the first lane that moves is now, among the others.
+        let now = h
+            .track_lanes
+            .iter()
+            .take_while(|(lane, ..)| !moving.contains(lane))
+            .count();
+        if let Some(index) = state.index
+            && !state.cancelled
+            && index != now
+        {
+            invoke(
+                events,
+                "take_lane.move",
+                json!({ "lanes": moving, "index": index }),
+            );
+        }
+        ui.data_mut(|d| d.remove::<Reordering>(id));
+    } else {
+        ui.data_mut(|d| d.insert_temp(id, state));
+    }
+}
+
+/// Dragging a take lane header's lower edge sets the height of the selected
+/// take lanes (the comping spec, R35; I-DRAG-046), as a track header's lower
+/// edge sets its height.
+fn resize(ui: &mut Ui, h: &LaneHeader<'_>, rect: Rect, events: &mut Vec<UiEvent>) {
+    let id = split_id(h.lane);
+    let strip = Rect::from_min_max(
+        pos2(rect.left() + header_columns::TITLE.0, rect.bottom() - 3.0),
+        pos2(
+            rect.left() + header_columns::title_width(h.show_in_out),
+            rect.bottom(),
+        ),
+    );
+    let response = ui
+        .interact(strip, id, Sense::drag())
+        .on_hover_cursor(egui::CursorIcon::ResizeVertical);
+    let view = h.shell.arrangement();
+    if response.drag_started() {
+        // The height when the drag began; the drag adds to it.
+        ui.data_mut(|d| d.insert_temp(id, view.take_lane_height(h.lane)));
+        if !h.selected {
+            invoke(events, ids::SELECT_TAKE_LANES, json!({ "lanes": [h.lane] }));
+        }
+    }
+    if response.dragged()
+        && let Some(pointer) = response.interact_pointer_pos()
+        && let Some(press) = ui.input(|i| i.pointer.press_origin())
+    {
+        let start = ui
+            .data(|d| d.get_temp::<f32>(id))
+            .unwrap_or_else(|| view.take_lane_height(h.lane));
+        let lanes: Vec<TakeLaneId> = if h.selected {
+            view.selected_take_lanes().to_vec()
+        } else {
+            vec![h.lane]
+        };
+        invoke(
+            events,
+            ids::SET_TRACK_HEIGHT,
+            json!({ "take_lanes": lanes, "height": f64::from(start + pointer.y - press.y) }),
+        );
     }
 }
 

@@ -32,7 +32,7 @@ use std::sync::mpsc::Receiver;
 
 use bl_core::time::Ticks;
 use bl_media::PeakEvent;
-use bl_model::{Document, TrackId, TrackKind};
+use bl_model::{ClipId, Document, TrackId, TrackKind};
 use bl_shell::arrangement::rows::{DROP_AREA, FOLDED_HEIGHT, Row, rows_between};
 use bl_shell::arrangement::{ArrangementView, Horizontal};
 use bl_shell::arrangement_commands::{self as ids, Lane};
@@ -179,6 +179,9 @@ pub struct ArrangementUi {
     shared: SharedFrame,
     library: PeakLibrary,
     index: ClipIndex,
+    /// Whether a take lane header is being dragged, which keeps the keys from
+    /// the keymap so Esc reaches the drag (the comping spec, R35).
+    header_drag: bool,
     rows: Vec<Row>,
     labels: Vec<Label>,
     shown: Vec<ShownClip>,
@@ -341,6 +344,7 @@ impl ArrangementUi {
             shared: Arc::new(std::sync::Mutex::new(Shared::default())),
             library: PeakLibrary::new(),
             index: ClipIndex::default(),
+            header_drag: false,
             rows: Vec::new(),
             labels: Vec::new(),
             shown: Vec::new(),
@@ -363,6 +367,21 @@ impl ArrangementUi {
             lanes: None,
             fades_drawn: fades::Drawn::default(),
         }
+    }
+
+    /// Whether a take lane header is being dragged, so keys go to the drag
+    /// rather than the keymap.
+    #[must_use]
+    pub fn is_dragging_header(&self) -> bool {
+        self.header_drag
+    }
+
+    /// The stretches of a take-lane clip that its track's main lane uses, as
+    /// start and end ticks: what the lanes draw in the track's colour (the
+    /// comping spec, R33).
+    #[must_use]
+    pub fn used_stretches(&self, track: TrackId, clip: ClipId) -> &[(i64, i64)] {
+        self.index.used(track, clip)
     }
 
     /// The fade handles the last frame drew (WP-6.51), and the dotted line
@@ -591,6 +610,7 @@ impl ArrangementUi {
                 shown: &self.shown,
                 rows: &self.rows,
                 scroll_y,
+                draw_mode: shell.clip_view().draw_mode(),
             };
             // Spec: automation-editing R27 (C-TIME-026). A breakpoint offers
             // Edit Value, and the line of an envelope, Add Value.
@@ -661,6 +681,7 @@ impl ArrangementUi {
                 shown: &self.shown,
                 rows: &self.rows,
                 scroll_y: view.scroll_y() as f32,
+                draw_mode: shell.clip_view().draw_mode(),
             };
             self.fades_drawn = fades::paint(
                 &ui.painter_at(lanes),
@@ -735,6 +756,7 @@ impl ArrangementUi {
         self.headers(
             ui, shell, theme, &layout, scroll_y, &pinned, &returns, events,
         );
+        self.header_drag = take_lanes::is_dragging(ui.ctx());
         // Over the pinned rows' lanes, in the lanes' lower right corner.
         self.grid_indicator(ui, view, doc, theme, layout.grid_indicator);
         self.accessibility(ui, view, doc, &layout);
@@ -808,6 +830,7 @@ impl ArrangementUi {
             shown: &self.shown,
             rows: &self.rows,
             scroll_y,
+            draw_mode: shell.clip_view().draw_mode(),
         };
         let automation_lanes = automation::Lanes {
             view,
@@ -1777,6 +1800,13 @@ impl ArrangementUi {
             );
             // WP-6.22: a header beside each take lane under the track
             // (L-ARR-020).
+            let track_lanes: Vec<(bl_model::TakeLaneId, f32, f32)> = view
+                .take_lane_rows(doc, row)
+                .map(|lane| {
+                    let top = column.top() + lane.top - scroll_y;
+                    (lane.lane, top, top + lane.height)
+                })
+                .collect();
             for lane in view.take_lane_rows(doc, row) {
                 let Some(held) = doc.take_lane(lane.lane) else {
                     continue;
@@ -1808,6 +1838,7 @@ impl ArrangementUi {
                             && view.selected_take_lanes().first() == Some(&lane.lane),
                         order: &lane_order,
                         names: &names,
+                        track_lanes: &track_lanes,
                     },
                     events,
                 );
@@ -2627,6 +2658,7 @@ impl ArrangementUi {
             shown: &self.shown,
             rows: &self.rows,
             scroll_y: view.scroll_y() as f32,
+            draw_mode: shell.clip_view().draw_mode(),
         };
         ui.input(|input| {
             self.clips

@@ -52,6 +52,9 @@ pub const EXPORT_LIST: &str = "plugin.export_list";
 /// `plugin.settings`: hidden plug-ins and the format preference (WP-2.9,
 /// IMP-07).
 pub const SETTINGS: &str = "plugin.settings";
+/// `ara.state`: what each ARA plug-in's document holds and has done (IMP-20,
+/// the ARA hosting spec).
+pub const ARA_STATE: &str = "ara.state";
 
 /// Every command [`register`] adds, so a host knows which IDs to send to
 /// `bl-shell`'s `Shell::run`.
@@ -71,6 +74,7 @@ pub const IDS: &[&str] = &[
     LIST,
     EXPORT_LIST,
     SETTINGS,
+    ARA_STATE,
 ];
 
 /// How many knobs a plug-in device's panel shows (WP-2.10, D19, IMP-03):
@@ -199,6 +203,99 @@ pub struct PluginInfo {
     /// Each parameter's value, as the plug-in itself reports it, as
     /// `[parameter, value]` pairs.
     pub values: Vec<(ParamId, f64)>,
+    /// What the device is as an ARA plug-in, if it is one: the track it
+    /// renders (`null` while it renders none) and how many playback regions
+    /// its document holds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ara: Option<AraDevice>,
+}
+
+/// An ARA plug-in device, as `plugin.info` reports it (IMP-20).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct AraDevice {
+    /// The plug-in's ARA factory ID.
+    pub factory: String,
+    /// The track whose clips it renders: the one it is the ARA device of.
+    pub track: Option<TrackId>,
+    /// The playback regions its document holds, on every track.
+    pub regions: usize,
+}
+
+/// Arguments of `ara.state`: none.
+pub type AraStateArgs = bl_commands::NoArgs;
+
+/// What `ara.state` returns: every ARA plug-in's document, in the order of
+/// its factory ID.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct AraState {
+    /// The ARA plug-ins in the set that are running.
+    pub plugins: Vec<AraPlugin>,
+}
+
+/// One ARA plug-in's document (IMP-20).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct AraPlugin {
+    /// The plug-in's ARA factory ID.
+    pub factory: String,
+    /// Its name.
+    pub name: String,
+    /// Whether it plays a region at another speed than its audio's, so
+    /// warped clips go to it too.
+    pub timestretch: bool,
+    /// The devices bound to the document, each with the track it renders.
+    pub devices: Vec<AraBoundDevice>,
+    /// How many region sequences (tracks), audio sources (files) and audio
+    /// modifications (clips) it holds.
+    pub sequences: usize,
+    pub sources: usize,
+    pub modifications: usize,
+    /// Its playback regions.
+    pub regions: Vec<AraRegionInfo>,
+    /// How many edit cycles the set has been given to it in.
+    pub edit_cycles: u64,
+    /// How many audio readers it opened, how many reads it made, and how
+    /// many frames it read.
+    pub readers_opened: u64,
+    pub reader_calls: u64,
+    pub frames_read: u64,
+    /// Reads that came from inside its render call: always 0, because an
+    /// audio reader never runs on the audio thread.
+    pub audio_thread_reads: u64,
+    /// Files it couldn't be given because they couldn't be read.
+    pub missing: Vec<bl_model::ContentHash>,
+    /// Whether it restored its archive when it was made: `restored`, or why
+    /// it couldn't; `null` if the set held none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub restored: Option<String>,
+}
+
+/// A device bound to an ARA document.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct AraBoundDevice {
+    /// The device.
+    pub device: DeviceId,
+    /// The track it renders, if any.
+    pub track: Option<TrackId>,
+}
+
+/// One playback region of an ARA plug-in: a straight stretch of a clip's
+/// audio put on the timeline. Times are seconds.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct AraRegionInfo {
+    /// The clip, and which stretch of it: a warped clip has a piece for each
+    /// warp marker and tempo change.
+    pub clip: bl_model::ClipId,
+    pub piece: u32,
+    /// The track.
+    pub track: TrackId,
+    /// Where in the clip's file the region starts, and how much of it plays.
+    pub start_in_audio: f64,
+    pub duration_in_audio: f64,
+    /// Where on the song's timeline it starts, and how long it lasts.
+    pub start: f64,
+    pub duration: f64,
+    /// Whether the audio plays faster or slower than it was recorded.
+    pub stretched: bool,
 }
 
 /// Arguments of `plugin.set_window`: where a plug-in device's editor
@@ -568,6 +665,24 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
             .context(DeviceView)
             .args::<PluginInfoArgs>()
             .result::<PluginInfo>(),
+    )?;
+    registry.register(
+        CommandSpec::new(ARA_STATE, "ARA Plug-In State")
+            .description(
+                "Reports what each running ARA plug-in's document holds and has done: the \
+                 devices bound to it and the tracks they render, how many region sequences, \
+                 audio sources and audio modifications it has, each playback region with its \
+                 place in the file and on the timeline in seconds, how many edit cycles the \
+                 set has been given in, how many audio readers it opened and how much it read \
+                 (never from the audio thread), the files it couldn't be given, and whether \
+                 it restored its archive. A track with an ARA plug-in leaves its clips to \
+                 it; the plug-in follows every clip edit, undo and redo as document edits. \
+                 Changes nothing.",
+            )
+            .permission(Permission::Read)
+            .context(Global)
+            .args::<AraStateArgs>()
+            .result::<AraState>(),
     )?;
     registry.register(
         CommandSpec::new(SET_WINDOW, "Set Plug-In Window Place")

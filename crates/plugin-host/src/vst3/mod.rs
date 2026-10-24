@@ -21,6 +21,7 @@
 //!
 //! [`ClapHost::lend`]: crate::clap::ClapHost::lend
 
+mod ara;
 mod describe;
 mod handlers;
 mod node;
@@ -96,6 +97,8 @@ pub struct Vst3Type {
     pub vendor: Option<String>,
     /// Its version, if it gives one (the scanner's list, WP-2.9).
     pub version: Option<String>,
+    /// What it is as an ARA 2 plug-in, if it is one (IMP-20).
+    pub ara: Option<crate::ara::Factory>,
 }
 
 /// What a device's plug-in is doing, for `plugin.info`.
@@ -260,6 +263,9 @@ struct Main {
     /// Instances let go of while a node still had their component, waiting
     /// for it to come back so they can be deactivated and terminated.
     closing: Vec<(DeviceId, Instance)>,
+    /// ARA hosting's document controllers (IMP-20), declared before
+    /// `modules` so every controller goes before the module it came from.
+    ara: ara::State,
     /// Devices whose plug-in couldn't be made, and why.
     missing: BTreeMap<DeviceId, (String, PathBuf, String)>,
     /// The modules loaded so far, by path. Declared after the instances so
@@ -284,6 +290,7 @@ impl Main {
         Self {
             instances: BTreeMap::new(),
             closing: Vec::new(),
+            ara: ara::State::default(),
             missing: BTreeMap::new(),
             modules: HashMap::new(),
             host: ComWrapper::new(HostApplication),
@@ -377,6 +384,9 @@ struct Instance {
     latency: u32,
     /// The offline render that has it.
     lent: Option<Lent>,
+    /// Its binding to an ARA document controller, if it is an ARA plug-in
+    /// (IMP-20).
+    ara: Option<ara::Binding>,
     /// The host's component handler, which the controller reports its own
     /// changes and restart asks to. Declared last, so it outlives both the
     /// controller that holds it and the component it is set through.
@@ -515,6 +525,7 @@ impl Vst3Host {
             let mut probe = new_instance(main, &module, &cid)?;
             let params: Vec<_> = probe.params.iter().map(|p| p.descriptor.clone()).collect();
             let note_output = has_event_output(&probe.component);
+            let ara = ara::factory_of(&probe.component).map(|(_, factory)| factory);
             teardown(&mut probe);
             drop(probe);
             found.push(Vst3Type {
@@ -536,6 +547,7 @@ impl Vst3Host {
                 },
                 vendor,
                 version,
+                ara,
             });
         }
         drop(guard);
@@ -596,6 +608,8 @@ impl Vst3Host {
         }
         main.closing
             .retain(|(_, instance)| instance.handed.is_some());
+        let bound = ara::bound_generations(main);
+        main.ara.reap(&bound);
         changed |= !changes.is_empty() || !latency_changes.is_empty();
         main.changes.extend(changes);
         main.latency_changes.extend(latency_changes);
@@ -736,6 +750,9 @@ impl Vst3Host {
             }
         }
         lock(&self.inner.latencies).retain(|device, _| keep.contains(device));
+        if keep.is_empty() {
+            main.ara.clear();
+        }
     }
 
     /// Lets go of every plug-in, as when another set opens.
@@ -858,6 +875,19 @@ impl NodeFactory for LoanFactory {
             .map(|t| t.device_type.clone())
             .collect()
     }
+
+    fn ara_support(&self, device: &Device) -> Option<bl_model::AraSupport> {
+        ara_support_of(&self.inner, device)
+    }
+}
+
+/// What the device is as an ARA plug-in, from the types the host has loaded.
+fn ara_support_of(inner: &Inner, device: &Device) -> Option<bl_model::AraSupport> {
+    lock(&inner.types)
+        .iter()
+        .find(|known| known.device_type.kind == device.kind)
+        .and_then(|known| known.ara.as_ref())
+        .map(|factory| factory.support)
 }
 
 /// The VST3 plug-ins' factory for the engine's registry. It makes each VST3
@@ -903,6 +933,10 @@ impl NodeFactory for Vst3Factory {
             .iter()
             .map(|t| t.device_type.clone())
             .collect()
+    }
+
+    fn ara_support(&self, device: &Device) -> Option<bl_model::AraSupport> {
+        ara_support_of(&self.inner, device)
     }
 }
 
@@ -1220,6 +1254,7 @@ fn new_instance(main: &Main, module: &Module, cid: &TUID) -> Result<Instance, Vs
         failure: None,
         latency: 0,
         lent: None,
+        ara: None,
         handler,
     })
 }
@@ -1548,6 +1583,11 @@ fn ensure_instance(main: &mut Main, device: &Device, inner: &Inner) -> bool {
     };
     instance.path = path;
     main.missing.remove(&device.id);
+    // Spec: ara-hosting R2. An ARA plug-in is bound to its document before
+    // it is activated or given its state.
+    if let Err(why) = ara::bind(main, &mut instance) {
+        instance.failure = Some(format!("ARA: {why}"));
+    }
     // Spec: vst3-hosting R9, R11 (as clap-hosting's R9, R11): the saved
     // state first, then the set's parameter values over it.
     if let Some(saved) = device.plugin.as_ref().filter(|p| !p.data.is_empty())
@@ -1556,7 +1596,13 @@ fn ensure_instance(main: &mut Main, device: &Device, inner: &Inner) -> bool {
         instance.failure = Some(format!("{error}; it starts from its defaults"));
     }
     set_values(&mut instance, device);
+    let bound = instance.ara.is_some();
     main.instances.insert(device.id, instance);
+    // Spec: ara-hosting R2. A plug-in made after the last poll, such as one
+    // an offline render makes, is given its regions before it is activated.
+    if bound {
+        ara::resync(main, inner);
+    }
     true
 }
 
@@ -1667,8 +1713,11 @@ fn activate(instance: &mut Instance, config: &NodeConfig) -> Result<node::Active
     if unsafe { component.setActive(1) } != kResultOk {
         return Err("it refused to activate".to_owned());
     }
+    // A plug-in built on the SDK's `AudioEffect` doesn't implement
+    // `setProcessing`, which the interface allows.
     // SAFETY: as above.
-    if unsafe { processor.setProcessing(1) } != kResultOk {
+    let started = unsafe { processor.setProcessing(1) };
+    if started != kResultOk && started != kNotImplemented {
         // SAFETY: as above.
         unsafe { component.setActive(0) };
         return Err("it refused to start processing".to_owned());
@@ -1817,6 +1866,7 @@ fn pump(
 
     let ready = instance.handed.is_none()
         && instance.lent.is_none()
+        && !instance.ara.as_ref().is_some_and(|binding| binding.hold)
         && instance.refused.is_none()
         && !instance.silenced
         && instance.config.is_some();

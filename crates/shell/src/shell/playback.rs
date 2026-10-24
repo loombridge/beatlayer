@@ -65,6 +65,11 @@ impl Shell {
         changed |= self.poll_plugin_scan();
         let plugins_changed =
             self.plugins.idle() | self.au.idle() | self.vst3.idle() | self.lv2.idle();
+        // Spec: ara-hosting R2, R8, R12. The ARA plug-ins' documents follow
+        // the set, and their editors the Arrangement's selection.
+        self.vst3
+            .sync_ara(self.editor.document(), self.document_revision);
+        self.follow_ara();
         if plugins_changed {
             self.refresh_device_types();
             changed = true;

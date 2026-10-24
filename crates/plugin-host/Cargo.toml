@@ -16,9 +16,12 @@ name = "beatlayer-scan"
 path = "src/bin/beatlayer-scan.rs"
 
 [dependencies]
+bl-ara-sys = { path = "../ara-sys" }
 bl-commands.workspace = true
 bl-core.workspace = true
 bl-engine.workspace = true
+# ARA's audio readers read the media store (IMP-20).
+bl-media.workspace = true
 bl-model.workspace = true
 # CLAP hosting (WP-2.6), pinned because its API can still change (the
 # architecture, "Plug-in hosting").
@@ -65,6 +68,7 @@ x11rb = { version = "0.13", default-features = false }
 [dev-dependencies]
 # The test plug-ins, built from source; their cdylibs are what the tests
 # load.
+bl-test-ara = { path = "../test-ara" }
 bl-test-clap = { path = "../test-clap" }
 bl-test-lv2 = { path = "../test-lv2" }
 bl-test-vst3 = { path = "../test-vst3" }

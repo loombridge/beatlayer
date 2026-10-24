@@ -6,12 +6,15 @@
 //! Arrangement (`bl_shell::context_menus`), or shows disabled until a
 //! package binds it; the grid rows offer each setting as a choice.
 
+use bl_model::Shape;
 use bl_shell::Shell;
 use bl_shell::arrangement_commands::{self as view_ids, AdaptiveGrid, FixedGrid};
-use bl_shell::context_menus::{self, ADAPTIVE_GRID_ROWS, FIXED_GRID_ROWS, SelectionMenu};
+use bl_shell::context_menus::{
+    self, ADAPTIVE_GRID_ROWS, FIXED_GRID_ROWS, SHAPE_ROWS, SelectionMenu,
+};
 use bl_shell::editing_commands as ids;
 use bl_shell::menus::{Action, shown};
-use egui::{Pos2, Ui};
+use egui::{Pos2, Sense, Stroke, Ui, pos2, vec2};
 use serde_json::json;
 
 use super::editing::Lanes;
@@ -141,14 +144,27 @@ impl ContextMenus {
         self.kind = MenuKind::Time;
         let view = lanes.view;
         let at = view.snap(lanes.doc, lanes.at(pos));
-        let track = lanes.track_at(pos);
+        let place = lanes
+            .place_at(pos)
+            .map(|(row, lane)| (lanes.rows[row].track, lane));
+        let track = place.map(|(track, _)| track);
         let inside = view.time_selection().is_some_and(|(start, end)| {
-            at >= start && at <= end && track.is_none_or(|t| view.selected_tracks().contains(&t))
+            at >= start
+                && at <= end
+                && track.is_none_or(|t| view.selected_tracks().contains(&t))
+                // Spec: comping R29. On a take lane, inside the lanes the
+                // selection covers.
+                && place.is_none_or(|(_, lane)| {
+                    lane.is_none_or(|lane| view.selection_take_lanes().contains(&lane))
+                })
         });
         if !inside {
             let mut args = json!({ "at": at });
             if let Some(track) = track {
                 args["track"] = json!(track);
+            }
+            if let Some((_, Some(lane))) = place {
+                args["lane"] = json!(lane);
             }
             invoke(events, view_ids::SET_INSERT_MARKER, args);
         }
@@ -231,6 +247,18 @@ impl ContextMenus {
                         ui.close();
                     }
                 });
+            } else if SHAPE_ROWS.contains(&item.row) {
+                // Spec: automation-editing R11. Five buttons a row.
+                let shapes = if item.row == SHAPE_ROWS[0] {
+                    &Shape::ALL[..5]
+                } else {
+                    &Shape::ALL[5..]
+                };
+                ui.horizontal(|ui| {
+                    for shape in shapes {
+                        shape_button(ui, shell, *shape, events);
+                    }
+                });
             } else {
                 // The scrub area's Add Locator adds one where the area was
                 // right-clicked (the time editing spec, R3).
@@ -279,7 +307,76 @@ fn selection_menu(shell: &Shell) -> SelectionMenu {
     } else {
         !view.selected_clips().is_empty()
     };
-    SelectionMenu { clips }
+    // Spec: automation-editing R11, R18. A time selection in an automation
+    // lane brings the shapes and Simplify Envelope.
+    let automation = view.time_selection().is_some()
+        && view
+            .time_selection_lanes()
+            .iter()
+            .any(|lane| lane.target().is_some());
+    SelectionMenu {
+        clips,
+        automation,
+        take_lane: view.take_lane_selected(),
+        time_commands: true,
+    }
+}
+
+/// One of the shape buttons (the automation editing spec, R11): a drawing
+/// of the shape that assistive technology reads by its name.
+fn shape_button(ui: &mut Ui, shell: &Shell, shape: Shape, events: &mut Vec<UiEvent>) {
+    let args = json!({ "shape": shape });
+    let enabled = shell.can_invoke_in(
+        bl_shell::automation_commands::INSERT_SHAPE,
+        &args,
+        &shell.active_contexts(),
+    );
+    let (rect, response) = ui.allocate_exact_size(vec2(34.0, 24.0), Sense::click());
+    let response = if enabled {
+        response
+    } else {
+        response.on_disabled_hover_text(shape.label())
+    };
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, shape.label())
+    });
+    crate::menus::register_item(ui.ctx(), &response);
+    let visuals = ui.style().interact(&response);
+    ui.painter().rect(
+        rect,
+        3.0,
+        visuals.bg_fill,
+        visuals.bg_stroke,
+        egui::StrokeKind::Inside,
+    );
+    // The shape drawn between a quarter and three quarters of the way up the
+    // button, for the ramps starting from the value before and ending on the
+    // value after.
+    let inner = rect.shrink2(vec2(6.0, 5.0));
+    let line: Vec<Pos2> = (0..=24)
+        .map(|i| {
+            let along = f64::from(i) / 24.0;
+            let level = shape.level(along, 0.25, 0.75) as f32;
+            pos2(
+                inner.left() + inner.width() * along as f32,
+                inner.bottom() - inner.height() * level,
+            )
+        })
+        .collect();
+    let colour = if enabled {
+        visuals.fg_stroke.color
+    } else {
+        ui.visuals().weak_text_color()
+    };
+    ui.painter()
+        .add(egui::Shape::line(line, Stroke::new(1.5, colour)));
+    if enabled && response.clicked() {
+        events.push(UiEvent::Invoke(bl_shell::Invocation::new(
+            bl_shell::automation_commands::INSERT_SHAPE,
+            args,
+        )));
+        ui.close();
+    }
 }
 
 /// Whether the selected clips are audio clips, whose menu adds the

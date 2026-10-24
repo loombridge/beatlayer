@@ -63,6 +63,13 @@ const DECLINES: &[&str] = &["S-A11Y-022", "S-A11Y-024", "S-A11Y-025"];
 /// its key means.
 const WIDGET: &[(&str, &str)] = &[
     (
+        "S-EDIT-015",
+        "the Arrangement: Shift with Cut, Copy, Paste, Duplicate or Delete is S-ARR-015 to \
+         S-ARR-019, which run `arrangement.cut_time`, `arrangement.copy_time`, \
+         `arrangement.paste_time`, `arrangement.duplicate_time` and `arrangement.delete_time` \
+         (the time editing spec, R21)",
+    ),
+    (
         "S-EDIT-016",
         "the Arrangement's automation lane: the edit keys with Option (Alt on Windows) held \
          apply to the envelopes (the automation editing spec, R6)",
@@ -89,6 +96,16 @@ const WIDGET: &[(&str, &str)] = &[
         "S-ARR-022",
         "the Arrangement View: Option-Plus (Alt-Plus) makes the selected tracks taller and \
          Option-Minus (Alt-Minus) shorter (`arrangement.set_track_height`)",
+    ),
+    (
+        "S-COMP-006",
+        "the Arrangement View: Cmd-Down and Cmd-Up replace the main lane's material in the \
+         selection with the next or previous take (`take_lane.replace_with_take`)",
+    ),
+    (
+        "S-COMP-008",
+        "the Arrangement View: with take lane headers selected, Cmd-Up and Cmd-Down move the \
+         lanes up or down a place (`take_lane.move`)",
     ),
     (
         "S-A11Y-003",

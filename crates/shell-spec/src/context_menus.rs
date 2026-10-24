@@ -11,8 +11,10 @@
 //! than single items: they carry `arrangement.set_grid`, and the UI lays
 //! out a choice for each setting.
 
-use crate::arrangement::SET_GRID;
+use crate::arrangement::{SET_GRID, SHOW_TAKE_LANES};
 use crate::audio_editing::CONSOLIDATE_TO_SCENE;
+use crate::automation::{INSERT_SHAPE, SIMPLIFY};
+use crate::comping::COPY_TO_MAIN_LANE;
 use crate::devices::{
     COMPARE_COPY, COMPARE_SWITCH, SAVE_DEFAULT_PRESET, SET_FLOATING, SET_ROLE, UNGROUP,
 };
@@ -29,6 +31,11 @@ const SET_CHAIN_COLOUR: &str = "chain.set_colour";
 
 /// The rows that hold the zoom-adaptive grid's settings.
 pub const ADAPTIVE_GRID_ROWS: [&str; 2] = ["C-CLIP-ARR-020", "C-TIME-013"];
+
+/// The rows that hold the automation shapes, as rows of buttons: the
+/// waveforms, then the ramps and the ADSR (C-TIME-021; the automation
+/// editing spec, R11).
+pub const SHAPE_ROWS: [&str; 2] = ["C-TIME-021a", "C-TIME-021b"];
 
 /// The rows that hold the fixed grid's spacings.
 pub const FIXED_GRID_ROWS: [&str; 2] = ["C-CLIP-ARR-021", "C-TIME-014"];
@@ -355,13 +362,19 @@ fn track_extras(after: &str, state: TrackMenu) -> Vec<Row> {
             }
             if state.arrangement {
                 rows.push(SEPARATOR);
-                rows.push(("C-TRACK-019a", "Show Take Lanes", Pending(None)));
+                // Spec: track-context-menu R10.
+                rows.push(("C-TRACK-019a", "Show Take Lanes", Cmd(SHOW_TAKE_LANES)));
+                rows.push(("C-TRACK-019b", "Insert Take Lane", Key(&["S-COMP-004"])));
                 rows.push((
-                    "C-TRACK-019b",
-                    "Insert Take Lane",
-                    Pending(Some("S-COMP-004")),
+                    "C-TRACK-019c",
+                    "Delete All Take Lanes",
+                    Cmd("take_lane.delete_all"),
                 ));
-                rows.push(("C-TRACK-019c", "Delete All Take Lanes", Pending(None)));
+                rows.push((
+                    "C-TRACK-019d",
+                    "Delete All Unused Take Lanes",
+                    Cmd("take_lane.delete_unused"),
+                ));
             }
         }
         "C-TRACK-016" if state.group => rows.push((
@@ -474,9 +487,6 @@ pub fn pending_package(row: &str) -> Option<&'static str> {
             Some("WP-2.24 (the Info View)")
         }
         "C-TRACK-018a" | "C-TRACK-018b" => Some("Phase 6 (linked-track editing)"),
-        "C-TRACK-019a" | "C-TRACK-019b" | "C-TRACK-019c" => {
-            Some("Phase 6 (take lanes and comping)")
-        }
         "C-TRACK-015" | "C-TRACK-016" | "C-TRACK-017b" => {
             Some("a package not planned yet (track colours)")
         }
@@ -496,18 +506,89 @@ pub fn pending_package(row: &str) -> Option<&'static str> {
 /// What a clip's or a time selection's menu adds to its base rows
 /// (C-CLIP-ARR-025, C-CLIP-ARR-026, C-TIME-019, C-TIME-020): a selection
 /// that holds clips brings Split, Consolidate, and Crop Clip, and a time
-/// selection that holds clips also brings Consolidate Time to New Scene.
+/// selection that holds clips also brings Consolidate Time to New Scene; a
+/// selection on a take lane brings Copy Selection to Main Lane (the comping
+/// spec, R29).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SelectionMenu {
     /// The selection holds clips.
     pub clips: bool,
+    /// A time selection's menu brings the …Time commands (C-TIME-018).
+    pub time_commands: bool,
+    /// The time selection covers an automation lane, which brings the
+    /// shapes and Simplify Envelope (C-TIME-021).
+    pub automation: bool,
+    /// The selection is on a take lane.
+    pub take_lane: bool,
 }
+
+/// The row of Beatlayer's own Copy Selection to Main Lane in a take-lane
+/// clip's menu, after Paste Bounced Audio (the comping spec, R29).
+pub const R29_COPY_CLIP: &str = "R29-copy-to-main-lane-clip";
+
+/// The row of Beatlayer's own Copy Selection to Main Lane in the time
+/// selection's menu on a take lane, after Paste Bounced Audio (R29).
+pub const R29_COPY_TIME: &str = "R29-copy-to-main-lane-time";
+
+/// The menu a take lane's header opens, C-TAKE-001 to C-TAKE-008 of menus.md
+/// in its order (the comping spec, R29). Live's separators weren't recorded.
+const TAKE_LANE: &[Row] = &[
+    (
+        "C-TAKE-001",
+        "Copy Selection to Main Lane",
+        Cmd(COPY_TO_MAIN_LANE),
+    ),
+    ("C-TAKE-002", "Insert Take Lane", Key(&["S-COMP-004"])),
+    ("C-TAKE-003", "Duplicate", Key(&["S-COMP-005"])),
+    ("C-TAKE-004", "Rename", Key(&["S-EDIT-008"])),
+    ("C-TAKE-005", "Delete", Key(&["S-EDIT-005"])),
+    (
+        "C-TAKE-006",
+        "Delete All Take Lanes",
+        Cmd("take_lane.delete_all"),
+    ),
+    (
+        "C-TAKE-007",
+        "Delete All Unused Take Lanes",
+        Cmd("take_lane.delete_unused"),
+    ),
+    ("C-TAKE-008", "Paste Bounced Audio", Key(&["S-BOUNCE-002"])),
+];
+
+/// The menu a take lane's header opens (C-TAKE).
+#[must_use]
+pub fn take_lane() -> Vec<MenuItem> {
+    items(TAKE_LANE)
+}
+
+/// The rows a time selection in an automation lane adds to the top of its
+/// menu: the shapes as two rows of buttons, and Simplify Envelope. Where in
+/// the menu they sit isn't recorded in the UI parity reference.
+const TIME_AUTOMATION: &[Row] = &[
+    ("C-TIME-021a", "Waveforms", Cmd(INSERT_SHAPE)),
+    ("C-TIME-021b", "Ramps and ADSR", Cmd(INSERT_SHAPE)),
+    ("C-TIME-021c", "Simplify Envelope", Cmd(SIMPLIFY)),
+    SEPARATOR,
+];
 
 /// The rows a selection that holds clips adds to a clip's menu.
 const CLIP_SELECTION: &[Row] = &[
     SEPARATOR,
     ("C-CLIP-ARR-025", "Split", Key(&["S-ARR-001"])),
     ("C-CLIP-ARR-026", "Consolidate", Key(&["S-ARR-002"])),
+];
+
+/// The …Time commands a time selection's menu adds after Duplicate
+/// (C-TIME-018; time editing R22). menus.md doesn't place them in the
+/// observed menu, so [`SelectionMenu::time_commands`] brings them and the
+/// base menu stays as observed.
+const TIME_COMMANDS: &[Row] = &[
+    SEPARATOR,
+    ("C-TIME-018a", "Cut Time", Key(&["S-ARR-015"])),
+    ("C-TIME-018b", "Copy Time", Key(&["S-ARR-016"])),
+    ("C-TIME-018c", "Paste Time", Key(&["S-ARR-017"])),
+    ("C-TIME-018d", "Duplicate Time", Key(&["S-ARR-018"])),
+    ("C-TIME-018e", "Delete Time", Key(&["S-ARR-019"])),
 ];
 
 /// The rows a time selection that holds clips adds to its menu.
@@ -533,10 +614,14 @@ pub fn arrangement_clip() -> Vec<MenuItem> {
 /// The menu a clip in the Arrangement opens, with the rows `state` adds.
 #[must_use]
 pub fn arrangement_clip_in(state: SelectionMenu) -> Vec<MenuItem> {
-    items(&with_selection(
-        CLIP,
-        CLIP_SELECTION,
-        "C-CLIP-ARR-004",
+    items(&with_take_lane(
+        with_selection(CLIP, CLIP_SELECTION, "C-CLIP-ARR-004", state),
+        "C-CLIP-ARR-016",
+        (
+            R29_COPY_CLIP,
+            "Copy Selection to Main Lane",
+            Cmd(COPY_TO_MAIN_LANE),
+        ),
         state,
     ))
 }
@@ -586,7 +671,16 @@ pub fn arrangement_audio_clip() -> Vec<MenuItem> {
 #[must_use]
 pub fn arrangement_audio_clip_in(state: SelectionMenu) -> Vec<MenuItem> {
     let mut rows = Vec::with_capacity(CLIP.len() + AUDIO_CLIP.len() + CLIP_SELECTION.len());
-    let selection = with_selection(CLIP, CLIP_SELECTION, "C-CLIP-ARR-004", state);
+    let selection = with_take_lane(
+        with_selection(CLIP, CLIP_SELECTION, "C-CLIP-ARR-004", state),
+        "C-CLIP-ARR-016",
+        (
+            R29_COPY_CLIP,
+            "Copy Selection to Main Lane",
+            Cmd(COPY_TO_MAIN_LANE),
+        ),
+        state,
+    );
     for &row in &selection {
         rows.push(row);
         if row.0 == "C-CLIP-ARR-018" {
@@ -607,7 +701,25 @@ pub fn arrangement_time() -> Vec<MenuItem> {
 /// adds.
 #[must_use]
 pub fn arrangement_time_in(state: SelectionMenu) -> Vec<MenuItem> {
-    items(&with_selection(TIME, TIME_SELECTION, "C-TIME-007", state))
+    let mut rows = Vec::new();
+    if state.automation {
+        rows.extend_from_slice(TIME_AUTOMATION);
+    }
+    let mut time = with_selection(TIME, TIME_SELECTION, "C-TIME-007", state);
+    if state.time_commands {
+        time = insert_after(&time, TIME_COMMANDS, "C-TIME-003");
+    }
+    rows.extend(with_take_lane(
+        time,
+        "C-TIME-011",
+        (
+            R29_COPY_TIME,
+            "Copy Selection to Main Lane",
+            Cmd(COPY_TO_MAIN_LANE),
+        ),
+        state,
+    ));
+    items(&rows)
 }
 
 /// The scrub area's menu (C-TIME-022).
@@ -634,6 +746,11 @@ fn with_selection(base: &[Row], extra: &[Row], after: &str, state: SelectionMenu
     if !state.clips {
         return base.to_vec();
     }
+    insert_after(base, extra, after)
+}
+
+/// `base` with `extra` inserted after the row `after`.
+fn insert_after(base: &[Row], extra: &[Row], after: &str) -> Vec<Row> {
     let mut rows = Vec::with_capacity(base.len() + extra.len());
     for &row in base {
         rows.push(row);
@@ -642,6 +759,22 @@ fn with_selection(base: &[Row], extra: &[Row], after: &str, state: SelectionMenu
         }
     }
     rows
+}
+
+/// `rows` with Copy Selection to Main Lane, `copy`, inserted after the row
+/// `after` while the selection is on a take lane.
+fn with_take_lane(rows: Vec<Row>, after: &str, copy: Row, state: SelectionMenu) -> Vec<Row> {
+    if !state.take_lane {
+        return rows;
+    }
+    let mut out = Vec::with_capacity(rows.len() + 1);
+    for row in rows {
+        out.push(row);
+        if row.0 == after {
+            out.push(copy);
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -754,7 +887,7 @@ mod tests {
             .iter()
             .filter(|i| !i.is_separator() && !base.iter().any(|b| b.row == i.row))
             .collect();
-        assert_eq!(added.len(), 9);
+        assert_eq!(added.len(), 10);
         let Some(text) = std::fs::read_to_string(
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/ui-parity/menus.md"),
         )
@@ -805,6 +938,30 @@ mod tests {
         }
     }
 
+    // Spec: time-editing R22
+    #[test]
+    fn a_time_selections_menu_brings_the_time_commands_after_duplicate() {
+        let base = arrangement_time();
+        assert!(!base.iter().any(|i| i.row.starts_with("C-TIME-018")));
+        let with = arrangement_time_in(SelectionMenu {
+            time_commands: true,
+            ..SelectionMenu::default()
+        });
+        let labels: Vec<_> = with.iter().map(|i| i.label).collect();
+        let duplicate = labels.iter().position(|l| *l == "Duplicate").unwrap();
+        assert_eq!(
+            labels[duplicate + 2..duplicate + 7],
+            [
+                "Cut Time",
+                "Copy Time",
+                "Paste Time",
+                "Duplicate Time",
+                "Delete Time"
+            ]
+        );
+        assert!(with[duplicate + 1].is_separator() && with[duplicate + 7].is_separator());
+    }
+
     #[test]
     fn the_menus_follow_lives_rows_and_separators_in_order() {
         for (menu, heading) in [
@@ -812,6 +969,7 @@ mod tests {
             (arrangement_time(), "(C-TIME)"),
             (device(), "(C-DEVICE)"),
             (track(TrackMenu::default()), "(C-TRACK)"),
+            (take_lane(), "(C-TAKE)"),
             (note(), "(C-NOTE)"),
             (keys(), "(C-KEYS)"),
             (loop_bar(), "(C-LOOPBAR)"),
@@ -848,6 +1006,58 @@ mod tests {
                 }
             }
         }
+    }
+
+    // Spec: track-context-menu R10, comping R29
+    #[test]
+    fn the_track_menu_in_the_arrangement_holds_the_take_lane_items_after_group_tracks() {
+        let menu = track(TrackMenu {
+            arrangement: true,
+            ..TrackMenu::default()
+        });
+        let rows: Vec<&str> = menu.iter().map(|i| i.row).collect();
+        let group = rows.iter().position(|r| *r == "C-TRACK-012").unwrap();
+        assert_eq!(
+            &rows[group + 1..group + 6],
+            [
+                "",
+                "C-TRACK-019a",
+                "C-TRACK-019b",
+                "C-TRACK-019c",
+                "C-TRACK-019d"
+            ]
+        );
+        let command = |row: &str| menu.iter().find(|i| i.row == row).unwrap().action;
+        assert_eq!(command("C-TRACK-019a"), Cmd(SHOW_TAKE_LANES));
+        assert_eq!(command("C-TRACK-019b"), Key(&["S-COMP-004"]));
+        assert_eq!(command("C-TRACK-019c"), Cmd("take_lane.delete_all"));
+        assert_eq!(command("C-TRACK-019d"), Cmd("take_lane.delete_unused"));
+    }
+
+    // Spec: comping R29
+    #[test]
+    fn a_selection_on_a_take_lane_adds_copy_selection_to_main_lane_after_paste_bounced_audio() {
+        let on = SelectionMenu {
+            clips: true,
+            time_commands: false,
+            automation: false,
+            take_lane: true,
+        };
+        for (menu, bounced, own) in [
+            (arrangement_clip_in(on), "C-CLIP-ARR-016", R29_COPY_CLIP),
+            (arrangement_time_in(on), "C-TIME-011", R29_COPY_TIME),
+        ] {
+            let at = menu.iter().position(|i| i.row == bounced).unwrap();
+            assert_eq!(menu[at].label, "Paste Bounced Audio");
+            assert_eq!(menu[at + 1].row, own);
+            assert_eq!(menu[at + 1].label, "Copy Selection to Main Lane");
+            assert_eq!(menu[at + 1].command(), Some(COPY_TO_MAIN_LANE));
+        }
+        assert!(
+            !arrangement_clip_in(SelectionMenu::default())
+                .iter()
+                .any(|i| i.row == R29_COPY_CLIP)
+        );
     }
 
     // Spec: piano-roll R30

@@ -27,6 +27,7 @@ use bl_shell_spec::browser::{self as browser_ids, AddToArrangementArgs};
 use bl_shell_spec::comping::{self as comping_ids, MoveCompEdgeArgs};
 use bl_shell_spec::editing as edit_ids;
 use bl_shell_spec::midi_files::{self as midi_ids, MidiImportArgs};
+use bl_shell_spec::midi_tools as tool_ids;
 use serde_json::Value;
 
 use crate::arrangement::ArrangementView;
@@ -41,6 +42,10 @@ pub const SET_CLIP_DATA: &str = "clip.set_data";
 /// shorten clips it doesn't act on, or, for `clip.set_data`, leave a MIDI
 /// clip fewer notes than it has.
 pub const RAISED_BY_ARGUMENTS: &[&str] = &[
+    tool_ids::APPLY,
+    tool_ids::SET,
+    tool_ids::SET_AUTO,
+    tool_ids::RESEED,
     audio_ids::CROP,
     edit_ids::MOVE_CLIPS,
     edit_ids::RESIZE_CLIPS,
@@ -152,6 +157,8 @@ pub(crate) struct Scene<'a> {
     /// The clip the shell's Clip View shows, which a call naming no clip
     /// acts on (`clip.crop`).
     pub(crate) shown_clip: Option<ClipId>,
+    /// The Clip View, whose MIDI Tools a tool's call is tried against.
+    pub(crate) clip_view: &'a crate::clip_view::ClipView,
 }
 
 /// Decides what calling `id` with `args` needs, against the document as it
@@ -197,6 +204,9 @@ pub(crate) fn assess(
         }
         audio_ids::CROP => cropping(args, registered, scene),
         SET_CLIP_DATA => notes_set(args, registered, scene.editor),
+        tool_ids::APPLY | tool_ids::SET | tool_ids::SET_AUTO | tool_ids::RESEED => {
+            tool_notes(id, args, registered, scene)
+        }
         bounce_ids::PASTE_BOUNCED_AUDIO => paste_bounced(args, registered, scene),
         _ => tried(id, args, registered, scene),
     }
@@ -317,6 +327,47 @@ fn notes_set(args: &Value, registered: Permission, editor: &mut Editor) -> CallP
     }
 }
 
+/// A MIDI Tool's call, tried and cancelled against a copy of the Clip View:
+/// destructive when it would leave the clip fewer notes than it has, as
+/// `clip.set_data` is (the MIDI Tools spec, R24).
+fn tool_notes(id: &str, args: &Value, registered: Permission, scene: Scene<'_>) -> CallPermission {
+    let unchanged = CallPermission::registered(registered);
+    let Scene {
+        editor,
+        view,
+        clip_view,
+        shown_clip,
+        ..
+    } = scene;
+    let clip = args
+        .get("clip")
+        .and_then(|clip| serde_json::from_value::<ClipId>(clip.clone()).ok())
+        .or_else(|| clip_view.shown_clip(editor.document(), view))
+        .or(shown_clip);
+    let Some(clip) = clip else {
+        return unchanged;
+    };
+    let notes = |doc: &Document| match doc.clip(clip).map(|clip| &clip.data) {
+        Some(ClipData::Midi(midi)) => Some(midi.notes.len()),
+        _ => None,
+    };
+    let Some(has) = notes(editor.document()) else {
+        return unchanged;
+    };
+    let mut tried = clip_view.clone();
+    editor.begin("Check a call's permission");
+    let ran = crate::midi_tools::run(id, args.clone(), editor, &mut tried, view).is_ok();
+    let leaves = notes(editor.document());
+    editor.cancel().ok();
+    match leaves {
+        Some(leaves) if ran && leaves < has => CallPermission {
+            fewer_notes: Some(FewerNotes { clip, has, leaves }),
+            ..unchanged
+        },
+        _ => unchanged,
+    }
+}
+
 /// `track.paste_bounced_audio`: destructive when the pasted audio would
 /// replace or shorten a clip it doesn't act on (the freeze and bounce spec,
 /// R26; the agent permissions spec, R1).
@@ -328,7 +379,7 @@ fn paste_bounced(args: &Value, registered: Permission, scene: Scene<'_>) -> Call
     let Some(clipboard) = scene.clipboard.as_ref().and_then(Clipboard::material) else {
         return unchanged;
     };
-    if clipboard.tracks.is_empty() {
+    if clipboard.lanes.is_empty() {
         return unchanged;
     }
     let doc = scene.editor.document();
@@ -384,7 +435,9 @@ fn paste_bounced(args: &Value, registered: Permission, scene: Scene<'_>) -> Call
     let Some(base) = lanes.iter().position(|id| *id == track) else {
         return unchanged;
     };
-    for (distance, _) in &clipboard.tracks {
+    let mut distances: Vec<usize> = clipboard.lanes.iter().map(|lane| lane.distance).collect();
+    distances.dedup();
+    for distance in distances {
         let Some(destination) = lanes.get(base + distance) else {
             return unchanged;
         };
@@ -460,7 +513,7 @@ fn tried(id: &str, args: &Value, registered: Permission, scene: Scene<'_>) -> Ca
     editor.begin("Check a call's permission");
     // The fades an edit settles change no clip's place, so the dry run skips them.
     let ran = if comping_ids::handles(id) {
-        crate::arrangement::comping::run(id, args.clone(), editor, &view).is_ok()
+        crate::arrangement::comping::run(id, args.clone(), editor, &mut view).is_ok()
     } else {
         editing::run(id, args.clone(), editor, &mut view, &mut clipboard, false).is_ok()
     };

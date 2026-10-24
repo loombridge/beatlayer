@@ -16,8 +16,8 @@ use common::{Harness, Window};
 use egui::{Event, Modifiers, PointerButton, Pos2, Rect, pos2};
 use serde_json::{Value, json};
 
-/// The list's first row's top, in window coordinates (the browser's tests').
-const LIST_TOP: f32 = 103.0;
+/// The list's first row's top, in window coordinates (the browser's tests'): under the Filter View, which shows in a new install.
+const LIST_TOP: f32 = 227.0;
 
 /// A folder of its own under the system's temporary folder, removed when
 /// dropped.

@@ -55,7 +55,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        249,
+        252,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
              the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
              routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -92,9 +92,10 @@ fn every_document_command_is_registered() {
              set_locator_info_text, loop_to_next_locator and set_song_start, WP-6.51 the \
              two for crossfades: set_crossfade and delete_crossfade, and WP-6.19 \
              seven for grooves: add_groove, delete_groove, rename_groove, set_groove, \
-             set_global_groove_amount, set_auto_load_groove and set_clip_groove, and WP-6.9 \
+             set_global_groove_amount, set_auto_load_groove and set_clip_groove, WP-6.9 \
              five for tunings: set_tuning, remove_tuning, set_tuning_reference, \
-             set_tuning_range and set_tuning_bypass"
+             set_tuning_range and set_tuning_bypass, WP-6.22 move_clip_to_lane, and WP-6.24b \
+             the two for time: insert_time and delete_time"
     );
 
     for op in &ops {
@@ -623,6 +624,10 @@ fn every_command_runs_by_id() {
         json!({ "clip": riff, "track": bass, "start": bar * 2 }),
     );
     agent.run("clip.move_by", json!({ "clips": [riff], "by": -quarter }));
+    agent.run(
+        "clip.move_to_lane",
+        json!({ "clip": riff, "track": bass, "start": bar * 2 - quarter }),
+    );
     agent.run(
         "clip.set_length",
         json!({ "clip": riff, "length": bar * 2 }),
@@ -2235,6 +2240,16 @@ fn every_command_runs_by_id() {
     );
     agent.run("song.delete_locator", json!({ "locator": chorus }));
 
+    // Time (WP-6.24b): opening a bar of silence on every track at 1.1.1, then
+    // closing a quarter note after it.
+    let before = agent.editor.document().clone();
+    agent.run("song.insert_time", json!({ "at": 0, "length": bar }));
+    assert_ne!(agent.editor.document(), &before);
+    agent.run(
+        "song.delete_time",
+        json!({ "start": bar, "end": bar + quarter }),
+    );
+
     // Grooves (WP-6.19): adding one, naming it, setting its parameters and
     // the Global Amount, giving a clip it, auto-loading it, and deleting it.
     let swing: GrooveId = agent.new_id();
@@ -2436,6 +2451,22 @@ fn schemas_match_what_commands_serialise() {
             },
         ),
         ("song.delete_locator", Command::DeleteLocator { locator }),
+        (
+            "song.insert_time",
+            Command::InsertTime {
+                at: Ticks::WHOLE,
+                length: Ticks::QUARTER,
+                clips: Vec::new(),
+            },
+        ),
+        (
+            "song.delete_time",
+            Command::DeleteTime {
+                start: Ticks::WHOLE,
+                end: Ticks::WHOLE + Ticks::QUARTER,
+                clips: Vec::new(),
+            },
+        ),
         (
             "groove.add",
             Command::AddGroove {
@@ -2917,6 +2948,15 @@ fn schemas_match_what_commands_serialise() {
             Command::MoveClip {
                 clip,
                 track,
+                start: Ticks::QUARTER,
+            },
+        ),
+        (
+            "clip.move_to_lane",
+            Command::MoveClipToLane {
+                clip,
+                track,
+                lane: None,
                 start: Ticks::QUARTER,
             },
         ),

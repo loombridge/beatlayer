@@ -5654,6 +5654,114 @@ fn an_agent_tags_browser_items_by_command_id_and_reads_them_back() {
     assert_eq!(read["items"][0]["tags"][0]["source"], json!("own"));
 }
 
+// Spec: browser-tags R32, browser R26.
+#[test]
+fn an_agent_filters_the_browser_keeps_labels_and_reads_them_back() {
+    let mut client = Client::new(InProcess::new(Agent::headless(true), Shell::headless()));
+    client.initialize("filters").unwrap();
+    let run = |client: &mut Client<InProcess>, command: &str, args: Value| {
+        let out = call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": command, "args": args }] }),
+        );
+        out["results"][0].clone()
+    };
+    let state =
+        |client: &mut Client<InProcess>| run(client, "browser.state", json!({}))["result"].clone();
+    // The Filter View shows in a new install, and the switch reads back.
+    assert_eq!(state(&mut client)["filter_view"]["shown"], json!(true));
+    run(
+        &mut client,
+        "browser.set_filter_view",
+        json!({ "show": false }),
+    );
+    assert_eq!(state(&mut client)["filter_view"]["shown"], json!(false));
+    // A tag is selected, and the selection reads back.
+    run(
+        &mut client,
+        "browser.add_tag_group",
+        json!({ "name": "Mine" }),
+    );
+    run(
+        &mut client,
+        "browser.add_tag",
+        json!({ "name": "Favourite", "group": "Mine" }),
+    );
+    run(
+        &mut client,
+        "browser.filter",
+        json!({ "tags": ["Mine|Favourite"] }),
+    );
+    assert_eq!(
+        state(&mut client)["filter_view"]["selected"],
+        json!(["Mine|Favourite"])
+    );
+    // Add Label keeps it, and the label reads back and is removed again.
+    run(&mut client, "browser.add_label", json!({}));
+    let kept = state(&mut client);
+    assert_eq!(kept["saved_labels"][0]["tags"], json!(["Mine|Favourite"]));
+    run(
+        &mut client,
+        "browser.rename_label",
+        json!({ "label": { "saved": 1 }, "name": "Mine" }),
+    );
+    run(
+        &mut client,
+        "browser.set_label_icon",
+        json!({ "label": { "saved": 1 }, "icon": "star" }),
+    );
+    let named = state(&mut client);
+    assert_eq!(named["saved_labels"][0]["name"], json!("Mine"));
+    assert_eq!(named["saved_labels"][0]["icon"], json!("star"));
+    run(
+        &mut client,
+        "browser.remove_label",
+        json!({ "label": { "saved": 1 } }),
+    );
+    assert_eq!(state(&mut client)["saved_labels"], json!([]));
+    // The columns, the groups shown, the label order and the history.
+    run(
+        &mut client,
+        "browser.set_columns",
+        json!({ "shown": ["size"], "sort": "size", "descending": true }),
+    );
+    let columns = state(&mut client)["columns"].clone();
+    assert_eq!(columns["shown"], json!(["size"]));
+    assert_eq!(columns["sort"], json!("size"));
+    run(
+        &mut client,
+        "browser.set_filter_groups",
+        json!({ "group": "Creator" }),
+    );
+    run(
+        &mut client,
+        "browser.set_label_shown",
+        json!({ "label": "tunings", "shown": false }),
+    );
+    run(
+        &mut client,
+        "browser.move_label",
+        json!({ "label": "samples", "position": 1 }),
+    );
+    run(&mut client, "browser.reset_label_order", json!({}));
+    run(
+        &mut client,
+        "browser.open_place",
+        json!({ "label": "samples" }),
+    );
+    assert_eq!(state(&mut client)["can_back"], json!(true));
+    run(&mut client, "browser.back", json!({}));
+    assert_eq!(state(&mut client)["can_forward"], json!(true));
+    run(&mut client, "browser.forward", json!({}));
+    run(&mut client, "browser.clear_filters", json!({}));
+    assert_eq!(state(&mut client)["filter_view"]["selected"], json!([]));
+    // Full-Height Browser reads back in view.state.
+    run(&mut client, "view.toggle_full_height_browser", json!({}));
+    let view = run(&mut client, "view.state", json!({}))["result"].clone();
+    assert_eq!(view["window"]["full_height_browser"], json!(true));
+}
+
 // Spec: articulation-map R18. An agent builds an Articulation Map's list by
 // command ID, headless, and reads it back through `articulation.list` and
 // the query tool.

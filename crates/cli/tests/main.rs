@@ -32,6 +32,7 @@ mod golden;
 mod m2_assistant;
 mod m2_song;
 mod mixer_goldens;
+mod mpe_render;
 mod older_sets;
 mod scene_goldens;
 mod transport_goldens;

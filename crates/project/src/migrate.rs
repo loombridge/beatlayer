@@ -18,7 +18,7 @@ use serde_json::{Map, Value};
 use crate::error::LoadError;
 
 /// The schema version this build writes, and the newest it can read.
-pub const SCHEMA_VERSION: u32 = 8;
+pub const SCHEMA_VERSION: u32 = 9;
 
 /// The oldest schema version this build can read, through [`MIGRATIONS`].
 pub const OLDEST_SCHEMA_VERSION: u32 = SCHEMA_VERSION - MIGRATIONS.len() as u32;
@@ -84,7 +84,83 @@ pub const MIGRATIONS: &[Migration] = &[
                   R3)",
         apply: passes_become_clips,
     },
+    Migration {
+        from: 8,
+        summary: "a note's pressure is an envelope of breakpoints, beside its new Pitch and Slide \
+                  envelopes (the MPE spec, R1 and R2); each pressure point a set saved before \
+                  it holds becomes a breakpoint, with one a tick before each later point \
+                  holding the value before it, so the pressure plays the steps it played",
+        apply: |mut value| {
+            pressure_to_breakpoints(&mut value);
+            Ok(value)
+        },
+    },
 ];
+
+/// Turns every note's pressure points in the saved JSON `value` into
+/// breakpoints (the MPE spec, R2): each point stays, and a point after another
+/// is preceded one tick before it by a breakpoint at the value before it, so
+/// the envelope plays the steps the points were. A set file and a clip file
+/// of the schemas before it hold the old form.
+pub(crate) fn pressure_to_breakpoints(value: &mut Value) {
+    match value {
+        Value::Object(fields) => {
+            if let Some(notes) = fields
+                .get_mut("midi")
+                .and_then(|midi| midi.get_mut("notes"))
+                .and_then(Value::as_array_mut)
+            {
+                notes.iter_mut().for_each(steps_of_pressure);
+            }
+            fields.values_mut().for_each(pressure_to_breakpoints);
+        }
+        Value::Array(items) => items.iter_mut().for_each(pressure_to_breakpoints),
+        _ => {}
+    }
+}
+
+fn steps_of_pressure(note: &mut Value) {
+    let Some(points) = note.get_mut("pressure").and_then(Value::as_array_mut) else {
+        return;
+    };
+    let breakpoint = |at: i64, value: f64| {
+        let mut point = Map::new();
+        point.insert("at".to_owned(), Value::from(at));
+        point.insert("value".to_owned(), Value::from(value));
+        Value::Object(point)
+    };
+    let mut steps: Vec<Value> = Vec::with_capacity(points.len() * 2 + 1);
+    let mut before: Option<(i64, f64)> = None;
+    // A note played no pressure before its first point; an envelope holds
+    // its first value back to the note's start, so it starts from none.
+    if points
+        .first()
+        .and_then(|point| point.get("at"))
+        .and_then(Value::as_i64)
+        .is_some_and(|at| at > 0)
+    {
+        steps.push(breakpoint(0, 0.0));
+        before = Some((0, 0.0));
+    }
+    for point in points.iter() {
+        let (Some(at), Some(value)) = (
+            point.get("at").and_then(Value::as_i64),
+            point.get("value").and_then(Value::as_f64),
+        ) else {
+            // Not a pressure point as the old form had it: leave it for the
+            // loader to refuse.
+            return;
+        };
+        if let Some((was, held)) = before
+            && at - 1 > was
+        {
+            steps.push(breakpoint(at - 1, held));
+        }
+        steps.push(breakpoint(at, value));
+        before = Some((at, value));
+    }
+    *points = steps;
+}
 
 /// One step from a schema version to the next.
 #[derive(Clone, Copy, Debug)]
@@ -539,5 +615,43 @@ mod tests {
             run(json!({}), 0, NOT_AN_OBJECT).unwrap_err(),
             LoadError::Migration { from: 0, .. }
         ));
+    }
+
+    // Spec: mpe R2
+    #[test]
+    fn pressure_points_become_steps() {
+        let mut value = json!({
+            "tracks": [{ "clips": [{ "data": { "midi": { "notes": [
+                { "key": 60, "pressure": [
+                    { "at": 0, "value": 90 },
+                    { "at": 500, "value": 20 },
+                    { "at": 501, "value": 30 },
+                ] },
+                { "key": 62 },
+                { "key": 64, "pressure": [{ "at": 100, "value": 64 }] },
+            ] } } }] }]
+        });
+        pressure_to_breakpoints(&mut value);
+        let notes = &value["tracks"][0]["clips"][0]["data"]["midi"]["notes"];
+        assert_eq!(
+            notes[0]["pressure"],
+            json!([
+                { "at": 0, "value": 90.0 },
+                { "at": 499, "value": 90.0 },
+                { "at": 500, "value": 20.0 },
+                { "at": 501, "value": 30.0 },
+            ]),
+            "a point a tick after another needs no step before it"
+        );
+        assert!(notes[1].get("pressure").is_none());
+        assert_eq!(
+            notes[2]["pressure"],
+            json!([
+                { "at": 0, "value": 0.0 },
+                { "at": 99, "value": 0.0 },
+                { "at": 100, "value": 64.0 },
+            ]),
+            "no pressure before the first point, as it played"
+        );
     }
 }

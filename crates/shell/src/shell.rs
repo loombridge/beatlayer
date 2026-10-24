@@ -17,6 +17,7 @@ use bl_model::{
 };
 use bl_project::ProjectFolder;
 use bl_project::autosave::{Autosave, Recoverable, Recovered};
+use bl_project::history;
 use bl_project::registry as recovery_ids;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -53,6 +54,7 @@ use crate::detail::DetailArea;
 use crate::devices::{self, DeviceError, DeviceView};
 use crate::files::{ProjectFiles, SetStore, new_set_from};
 use crate::midi::MidiHost;
+use crate::midi_tools;
 use crate::mixer_controls::{self, Switch};
 use crate::mixer_view::{MixerOf, MixerView, MixerViewError};
 use crate::permission::CallPermission;
@@ -86,6 +88,7 @@ use bl_shell_spec::freeze as freeze_ids;
 use bl_shell_spec::locator as locator_ids;
 use bl_shell_spec::midi_files as midi_ids;
 use bl_shell_spec::midi_io as midi_io_ids;
+use bl_shell_spec::midi_tools as tool_ids;
 use bl_shell_spec::mixer_view as mixer_ids;
 use bl_shell_spec::multisampler as multisampler_ids;
 use bl_shell_spec::notes::{self as note_ids, ClipTab, RandomizeAmounts};
@@ -127,6 +130,7 @@ mod plugin_list;
 mod processed_files;
 mod sample_edits;
 mod sample_keys;
+mod save_history;
 pub use sample_keys::TransientList;
 mod search;
 mod session_recording;
@@ -343,6 +347,10 @@ pub enum Effect {
     /// person types the new name; Return runs `locator.rename` with it
     /// (WP-6.24; the time editing spec, R8).
     RenameLocator(bl_model::LocatorId),
+    /// Start renaming a take lane in its header, where the person types the
+    /// new name; Return runs `take_lane.rename` with it, and Tab goes on to
+    /// the next lane or track's name (WP-6.22; the comping spec, R28).
+    RenameTakeLane(bl_model::TakeLaneId),
     /// Bring a floating device's window to the front (the mixer view spec,
     /// R28).
     RaiseDeviceWindow(bl_model::DeviceId),
@@ -573,6 +581,9 @@ pub struct Shell {
     /// Whether the Undo History panel shows (WP-6.28): view state, never
     /// part of the set, like the browser's.
     undo_history_open: bool,
+    /// The Save History panel (IMP-05, WP-6.39): whether it shows and the
+    /// rows it lists. View state, like the Undo History's.
+    save_history: save_history::SaveHistory,
     /// What the Arrangement View shows (WP-1.8a).
     arrangement: ArrangementView,
     /// What the Clip View shows (WP-2.3): whether it's open, Draw Mode, and
@@ -621,6 +632,11 @@ pub struct Shell {
     analysis_options: bl_analysis::cache::AnalysisOptions,
     /// The analysis cache, made when first used.
     analysis: Option<bl_analysis::cache::AnalysisCache>,
+    /// The cache as the engine reads it for the files' transients: the
+    /// live engine's, previews' and exports' (the warp modes spec, R14).
+    analysis_slot: crate::analysed_media::AnalysisSlot,
+    /// The files whose analysis the live engine hasn't heard is ready.
+    analysis_unheard: std::collections::HashSet<bl_media::ContentHash>,
     /// How the peaks of the files an export writes are kept (WP-6.71, R34):
     /// in memory only until the app says otherwise.
     peak_options: bl_media::PeakCacheOptions,
@@ -1051,6 +1067,8 @@ impl Shell {
         // The engine's clips stream from the set's media (WP-1.4b).
         let media = Arc::new(MediaStore::new());
         audio.set_media(Arc::clone(&media));
+        let analysis_slot = crate::analysed_media::AnalysisSlot::default();
+        audio.set_analysis(analysis_slot.clone());
         // CLAP plug-ins (WP-2.6): this thread is their main thread.
         let plugins = ClapHost::new();
         audio.set_plugins(plugins.clone());
@@ -1091,6 +1109,8 @@ impl Shell {
             auditioning: None,
             analysis_options: bl_analysis::cache::AnalysisOptions::memory_only(),
             analysis: None,
+            analysis_slot,
+            analysis_unheard: std::collections::HashSet::new(),
             peak_options: bl_media::PeakCacheOptions::memory_only(),
             peaks: None,
             analysed: std::collections::HashSet::new(),
@@ -1151,6 +1171,7 @@ impl Shell {
             assistant_conversation: Arc::default(),
             assistant_stop_flag: Arc::default(),
             undo_history_open: false,
+            save_history: save_history::SaveHistory::default(),
             arrangement: ArrangementView::new(),
             clip_view: {
                 let mut view = ClipView::default();
@@ -1502,6 +1523,7 @@ impl Shell {
         self.devices
             .set_multisampler_views(self.store.multisampler_views());
         self.clip_view.set_folds(self.store.folds());
+        self.clip_view.restore_midi_tools(&self.store.midi_tools());
         for (hash, path, size) in self.store.media_files() {
             self.media
                 .add_reference(bl_media::ContentHash::from_bytes(hash.0), path, size);
@@ -2043,6 +2065,7 @@ impl Shell {
             inputs,
             outputs,
             midi_inputs: self.midi.input_names(),
+            mpe_inputs: self.midi.mpe_input_names(),
             midi_outputs: self.midi.output_names(),
             device_outputs,
         }
@@ -3888,6 +3911,7 @@ impl Shell {
         let user_library = self.browser_view.user_library().map(Path::to_path_buf);
         let zoom = self.zoom();
         let auto_hide = self.prefs.auto_hide_plug_in_windows.0;
+        let swapping = self.devices.hot_swap_targets();
         let result = self.devices.run(
             id,
             args,
@@ -3902,6 +3926,12 @@ impl Shell {
             },
         );
         let outcome = result.map_err(|error| device_error(id, error))?;
+        // Spec: browser-tags R31. Starting hot-swap clears the search words
+        // and the selected tags as a new step.
+        let now_swapping = self.devices.hot_swap_targets();
+        if now_swapping != swapping && now_swapping != Default::default() {
+            self.browser_view.hot_swap_started();
+        }
         // Spec: drum-racks R5. A held Preview button plays its chain.
         for &(chain, on) in &outcome.previews {
             self.audio.send_param(
@@ -4939,6 +4969,7 @@ impl Shell {
     /// anything a window shows changed.
     pub fn poll(&mut self) -> bool {
         self.analysis_cache();
+        self.hear_analyses();
         let warping = auto_warp::Warping {
             prefs: self.prefs.warp,
             analysis: self.analysis.as_ref(),
@@ -4962,6 +4993,9 @@ impl Shell {
             self.set_message(message, true);
         }
         let mut changed = polled.changed | self.poll_processed() | self.poll_stems();
+        // Spec: crash-recovery R15. The Save History follows new save points
+        // and saves while it shows.
+        changed |= self.refresh_save_history();
         // Spec: export R41. The export on its thread: its share moves the
         // progress window, and its end lands in the Status Bar.
         changed |= self.poll_export();
@@ -5290,6 +5324,7 @@ impl Shell {
                 || self.is_device_command(id)
                 || track_ids::handles(id)
                 || note_ids::handles(id)
+                || tool_ids::handles(id)
                 || midi_ids::handles(id)
                 || matches!(
                     id,
@@ -5338,6 +5373,7 @@ impl Shell {
                 insert_marker: self.arrangement.insert_marker(),
                 selected_track: self.arrangement.selected_tracks().first().copied(),
                 shown_clip: shown,
+                clip_view: &self.clip_view,
                 editor: &mut self.editor,
                 view: &self.arrangement,
                 clipboard: &self.clipboard,
@@ -5383,6 +5419,7 @@ impl Shell {
             if !edit_ids::handles(&invocation.id)
                 && !locator_ids::handles(&invocation.id)
                 && !note_ids::handles(&invocation.id)
+                && !tool_ids::handles(&invocation.id)
                 && !is_automation_edit(&invocation.id)
                 && !automation_ids::handles(&invocation.id)
                 && !clip_marker_command(&invocation.id)
@@ -5425,6 +5462,16 @@ impl Shell {
         } else {
             editing::label(&invocation.id, &invocation.args)
         };
+        // Spec: midi-tools R22. A tool's control drag is one undo step
+        // named after the tool.
+        let label: std::borrow::Cow<'static, str> = midi_tools::gesture_label(
+            &invocation.id,
+            &invocation.args,
+            self.editor.document(),
+            &self.clip_view,
+            &self.arrangement,
+        )
+        .map_or(std::borrow::Cow::Borrowed(label), std::borrow::Cow::Owned);
         // Sample editor R8: a frame that inserts a warp marker begins the
         // gesture's base, on which the frames that follow move it.
         let makes_base = invocation.id == "clip.insert_warp_marker";
@@ -5451,7 +5498,7 @@ impl Shell {
                 self.clip_view = gesture.clip_view.clone();
             }
         }
-        self.editor.begin(label);
+        self.editor.begin(label.clone());
         let launch = self.launch_settings();
         let edge_fades = self.create_fades_on_clip_edges();
         let run = |editor: &mut Editor,
@@ -5469,6 +5516,14 @@ impl Shell {
                     .map_err(|error| EditFailure::Refused(error.to_string()))
             } else if note_ids::handles(&invocation.id) {
                 clip_view::run(
+                    &invocation.id,
+                    invocation.args.clone(),
+                    editor,
+                    clip_view,
+                    arrangement,
+                )
+            } else if tool_ids::handles(&invocation.id) {
+                midi_tools::run(
                     &invocation.id,
                     invocation.args.clone(),
                     editor,
@@ -5566,7 +5621,7 @@ impl Shell {
         &mut self,
         base: &Option<Invocation>,
         id: &str,
-        label: &'static str,
+        label: std::borrow::Cow<'static, str>,
         failure: EditFailure,
     ) -> Result<Value, ShellError> {
         let Some(last) = self.edit_gesture.as_ref().and_then(|g| g.last.clone()) else {
@@ -5585,6 +5640,15 @@ impl Shell {
                     .map_err(|error| EditFailure::Refused(error.to_string()))
             } else if note_ids::handles(&step.id) {
                 clip_view::run(
+                    &step.id,
+                    step.args.clone(),
+                    &mut self.editor,
+                    &mut self.clip_view,
+                    &self.arrangement,
+                )
+                .map(|_| ())
+            } else if tool_ids::handles(&step.id) {
+                midi_tools::run(
                     &step.id,
                     step.args.clone(),
                     &mut self.editor,
@@ -6135,6 +6199,12 @@ impl Shell {
                 }
             }
         }
+        let take_lanes_before: Vec<(TrackId, usize)> = self
+            .editor
+            .document()
+            .tracks()
+            .map(|track| (track.id(), track.take_lanes().len()))
+            .collect();
         let applied = match take.wrap {
             None => {
                 let mut placed = std::collections::BTreeSet::new();
@@ -6204,6 +6274,22 @@ impl Shell {
         if let Err(error) = applied {
             self.fail_recording(format!("Recording failed: {error}"));
             return;
+        }
+        // Spec: comping R13. A recording that adds a take lane to a track
+        // shows the track's take lanes.
+        let grown: Vec<TrackId> = self
+            .editor
+            .document()
+            .tracks()
+            .filter(|track| {
+                take_lanes_before
+                    .iter()
+                    .any(|(id, was)| *id == track.id() && track.take_lanes().len() > *was)
+            })
+            .map(bl_model::Track::id)
+            .collect();
+        for track in grown {
+            self.arrangement.keep_take_lanes_shown(track);
         }
         if let Some(report) = &mut self.last_recording {
             report.clips_made = true;
@@ -6507,6 +6593,13 @@ impl Shell {
                             if self.arrangement.title_bars_selected() {
                                 contexts.push(Context::TrackHeaders);
                             }
+                            // Spec: comping R28. A take lane is selected: its
+                            // header, the time on it or a clip on it.
+                            if !self.arrangement.title_bars_selected()
+                                && self.arrangement.take_lane_selected()
+                            {
+                                contexts.push(Context::TakeLanes);
+                            }
                             // Spec: automation-editing R20. A selected
                             // automation lane's keys come ahead of the
                             // Arrangement's.
@@ -6612,6 +6705,7 @@ impl Shell {
             ids::VIEW_FULL_SCREEN => Some(self.full_screen_of(self.acting_window())),
             ids::VIEW_TOGGLE_SECOND_WINDOW => Some(self.second.open),
             ids::VIEW_TOGGLE_BROWSER => Some(self.browser_of(self.acting_window())),
+            ids::VIEW_TOGGLE_FULL_HEIGHT_BROWSER => Some(self.browser_view.full_height()),
             ids::VIEW_TOGGLE_CLIP_VIEW => Some(self.detail_of(self.acting_window()).clip_shown()),
             ids::VIEW_TOGGLE_DEVICE_VIEW => {
                 Some(self.detail_of(self.acting_window()).device_shown())
@@ -6628,6 +6722,7 @@ impl Shell {
             ids::VIEW_TOGGLE_INFO_VIEW => Some(self.info_view),
             assistant_ids::VIEW_TOGGLE_ASSISTANT => Some(self.assistant_open),
             ids::VIEW_TOGGLE_UNDO_HISTORY => Some(self.undo_history_open),
+            ids::VIEW_TOGGLE_SAVE_HISTORY => Some(self.save_history.open),
             ids::VIEW_TOGGLE_PLUG_IN_WINDOWS => Some(self.plug_in_windows),
             ids::FOCUS_TOGGLE_TAB_NAVIGATION => Some(self.prefs.tab_navigation),
             ids::FOCUS_TOGGLE_WRAP_NAVIGATION => Some(self.prefs.wrap_navigation.0),
@@ -6652,6 +6747,7 @@ impl Shell {
             ),
             ids::AUDIO_TOGGLE_ENGINE => Some(self.audio.engine_on()),
             browser_ids::SET_PREVIEW => Some(self.browser_view.preview_on()),
+            browser_ids::SET_FILTER_VIEW => Some(self.browser_view.filter_view_shown()),
             "device.set_show_preset_name" => self
                 .devices
                 .selected()
@@ -6691,6 +6787,10 @@ impl Shell {
     /// Delete Locator and deletes while a locator is selected (the time
     /// editing spec, R4).
     pub fn menu_command<'a>(&self, id: &'a str) -> &'a str {
+        // Spec: comping R28. Edit ▸ Rename renames the selected take lanes.
+        if id == "clip.rename" && !self.arrangement.selected_take_lanes().is_empty() {
+            return "take_lane.rename";
+        }
         if self.arrangement.selected_locators().is_empty() {
             return id;
         }
@@ -6710,6 +6810,9 @@ impl Shell {
             // Spec: time-editing R4. The Create menu's Add Locator reads
             // Delete Locator while a locator is selected.
             locator_ids::DELETE => Some("Delete Locator".to_owned()),
+            // Spec: time-editing R17. Create ▸ Insert Scene reads Insert
+            // Silence with the Arrangement focused.
+            edit_ids::INSERT_SILENCE => Some("Insert Silence".to_owned()),
             // Spec: audio-clips R28. Create ▸ Create Fade reads Create Fade
             // In/Out or Create Crossfade as the selection gives one.
             edit_ids::CREATE_FADE => Some(
@@ -6857,17 +6960,46 @@ impl Shell {
                 }),
             comping_ids::DUPLICATE => serde_json::from_value::<comping_ids::DuplicateArgs>(args)
                 .ok()
-                .is_some_and(|args| !args.lanes.is_empty() && args.lanes.iter().all(lane)),
+                .is_some_and(|args| match args.lanes {
+                    Some(lanes) => !lanes.is_empty() && lanes.iter().all(lane),
+                    None => !self.arrangement.selected_take_lanes().is_empty(),
+                }),
             comping_ids::COPY_TO_MAIN_LANE => {
+                // Spec: comping R17, R29. Named lanes and a range, or the
+                // selection's: a take lane and the time on it.
                 serde_json::from_value::<comping_ids::CopyToMainLaneArgs>(args)
                     .ok()
-                    .is_some_and(|args| !args.lanes.is_empty() && args.lanes.iter().all(lane))
+                    .is_some_and(|args| {
+                        let lanes_ok = match &args.lanes {
+                            Some(lanes) => !lanes.is_empty() && lanes.iter().all(lane),
+                            None => self.arrangement.take_lane_selected(),
+                        };
+                        let range_ok = (args.start.is_some() && args.end.is_some())
+                            || self.arrangement.time_selection().is_some();
+                        lanes_ok && range_ok
+                    })
             }
             comping_ids::REPLACE_WITH_TAKE => {
+                // Spec: comping R19. A named track, or the selection's audio
+                // and MIDI tracks and its time.
                 serde_json::from_value::<comping_ids::ReplaceWithTakeArgs>(args)
                     .ok()
-                    .is_some_and(|args| track(&args.track))
+                    .is_some_and(|args| {
+                        let tracks_ok = match args.track {
+                            Some(named) => track(&named),
+                            None => self.arrangement.selected_tracks().iter().any(track),
+                        };
+                        let range_ok = (args.start.is_some() && args.end.is_some())
+                            || self.arrangement.time_selection().is_some();
+                        tracks_ok && range_ok
+                    })
             }
+            comping_ids::AUDITION => serde_json::from_value::<comping_ids::AuditionArgs>(args)
+                .ok()
+                .is_some_and(|args| match args.lanes {
+                    Some(lanes) => !lanes.is_empty() && lanes.iter().all(lane),
+                    None => self.arrangement.take_lane_selected(),
+                }),
             comping_ids::MOVE_COMP_EDGE => {
                 serde_json::from_value::<comping_ids::MoveCompEdgeArgs>(args)
                     .ok()
@@ -7030,6 +7162,15 @@ impl Shell {
         match id {
             model::UNDO => return self.editor.can_undo(),
             model::REDO => return self.editor.can_redo(),
+            // Spec: midi-tools R19. Apply Transformation/Generator is
+            // disabled while no MIDI clip shows.
+            tool_ids::APPLY => {
+                return midi_tools::can_apply(
+                    self.editor.document(),
+                    &self.clip_view,
+                    &self.arrangement,
+                );
+            }
             // The whole-track copies (the track context menu spec, R3):
             // Cut, Copy and Duplicate work on the selected tracks, and
             // Paste on the tracks on the clipboard.
@@ -7042,7 +7183,7 @@ impl Shell {
                     .as_ref()
                     .is_some_and(|clipboard| match clipboard {
                         Clipboard::Tracks(copied) => !copied.tracks.is_empty(),
-                        Clipboard::Material(_) => false,
+                        Clipboard::Material(_) | Clipboard::Time(_) => false,
                     });
             }
             ids::APP_HIDE => return cfg!(target_os = "macos"),
@@ -7090,7 +7231,27 @@ impl Shell {
             ids::FOCUS_PREVIOUS_NEIGHBOR => return self.has_neighbor(true),
             // Spec: time-editing R8. Cmd-R renames the selected locators
             // while there are any.
-            "clip.rename" => return self.arrangement.selected_locators().is_empty(),
+            "clip.rename" => {
+                return self.arrangement.selected_locators().is_empty()
+                    && self.arrangement.selected_take_lanes().is_empty();
+            }
+            // Spec: comping R28, R29. Rename on a take lane's header types the
+            // name in place; without a name it needs a header selected or a
+            // lane named.
+            "take_lane.rename" if args.get("name").is_none() => {
+                return args.get("lane").is_some()
+                    || !self.arrangement.selected_take_lanes().is_empty();
+            }
+            // Spec: track-context-menu R10. The two deletes of a track's
+            // take lanes act on the selected tracks, and are enabled when one
+            // has a take lane.
+            "take_lane.delete_all" | "take_lane.delete_unused" if args.get("tracks").is_none() => {
+                let doc = self.editor.document();
+                return self.arrangement.selected_tracks().iter().any(|track| {
+                    doc.track(*track)
+                        .is_some_and(|held| held.take_lanes().len() > 0)
+                });
+            }
             // Zoom In and Zoom Out stop at the zoom's ends (interface-zoom
             // R3).
             ids::VIEW_ZOOM_IN | ids::VIEW_ZOOM_OUT => {
@@ -7167,6 +7328,11 @@ impl Shell {
         if capture_ids::handles(id) {
             // Spec: capture-midi R1. Nothing played, nothing to capture.
             return self.capture_midi_ready() && self.audio.engine_running();
+        }
+        if id == automation_ids::SIMPLIFY && args.get("lanes").is_none() {
+            // Spec: automation-editing R18. Disabled without a time selection
+            // in an automation lane.
+            return automation::can_run(id, &self.arrangement, None);
         }
         if ids::handles(id) || transport_ids::handles(id) {
             return true;
@@ -7856,6 +8022,44 @@ impl Shell {
                 self.effects.push(Effect::RenameTrack(track));
                 self.touch();
                 Ok(Value::Null)
+            }
+            "take_lane.rename" if !has("name") => {
+                // Spec: comping R6, R28. Cmd-R and a take lane header's
+                // Rename type the new name in the header.
+                let lane = args
+                    .get("lane")
+                    .and_then(|v| serde_json::from_value(v.clone()).ok())
+                    .or_else(|| self.arrangement.selected_take_lanes().first().copied())
+                    .ok_or_else(|| ShellError::Unavailable {
+                        command: id.to_owned(),
+                        reason: "select a take lane first".to_owned(),
+                    })?;
+                self.effects.push(Effect::RenameTakeLane(lane));
+                self.touch();
+                Ok(Value::Null)
+            }
+            "take_lane.delete_all" | "take_lane.delete_unused" if !has("tracks") => {
+                // Spec: track-context-menu R10. They act on the selected
+                // audio and MIDI tracks.
+                let doc = self.editor.document();
+                let tracks: Vec<TrackId> = self
+                    .arrangement
+                    .selected_tracks()
+                    .iter()
+                    .copied()
+                    .filter(|track| {
+                        doc.track(*track).is_some_and(|held| {
+                            matches!(held.kind(), TrackKind::Audio | TrackKind::Midi)
+                        })
+                    })
+                    .collect();
+                if tracks.is_empty() {
+                    return Err(ShellError::Unavailable {
+                        command: id.to_owned(),
+                        reason: "select an audio or MIDI track first".to_owned(),
+                    });
+                }
+                self.run(id, json!({ "tracks": tracks }))
             }
             locator_ids::RENAME if !has("name") => {
                 // Spec: time-editing R8. Cmd-R and Edit ▸ Rename type the
@@ -8651,6 +8855,10 @@ impl Shell {
     }
 
     fn run_command(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        if history::handles(id) {
+            // Spec: crash-recovery R20.
+            return self.run_save_history(id, args);
+        }
         if recovery_ids::handles(id) {
             // Spec: crash-recovery R26. The recovery commands run against
             // the app's own recovery.
@@ -8673,6 +8881,7 @@ impl Shell {
                 || comping_ids::handles(id)
                 || edit_ids::handles(id)
                 || note_ids::handles(id)
+                || tool_ids::handles(id)
                 || device_ids::handles(id)
                 || multisampler_ids::handles(id)
                 || self.is_device_command(id)
@@ -8702,7 +8911,7 @@ impl Shell {
             // Spec: comping R4, R5, R17 to R21.
             let before = self.editor.document().clone();
             let result =
-                crate::arrangement::comping::run(id, args, &mut self.editor, &self.arrangement)
+                crate::arrangement::comping::run(id, args, &mut self.editor, &mut self.arrangement)
                     .map_err(|failure| edit_error(id, failure));
             if *self.editor.document() != before {
                 self.dirty = true;
@@ -8784,6 +8993,25 @@ impl Shell {
             }
             return result;
         }
+        if tool_ids::handles(id) {
+            // Spec: midi-tools R23. The MIDI Tools' panels, choices,
+            // settings and applications.
+            let before = self.editor.document().clone();
+            let result = midi_tools::run(
+                id,
+                args,
+                &mut self.editor,
+                &mut self.clip_view,
+                &self.arrangement,
+            )
+            .map_err(|failure| edit_error(id, failure));
+            if *self.editor.document() != before {
+                self.dirty = true;
+                self.document_changed();
+            }
+            self.touch();
+            return result;
+        }
         if sample_ids::handles(id) {
             // Spec: sample-editor R21. The Sample Editor's selections and
             // view are the shell's, and change nothing in the set.
@@ -8807,6 +9035,11 @@ impl Shell {
             return self.run_device_command(id, device, command, args);
         }
         if model::handles(id) {
+            // Spec: midi-tools R21. Undo and redo close the open MIDI Tool
+            // application.
+            if matches!(id, model::UNDO | model::REDO | model::GO_TO_STEP) {
+                self.clip_view.tools.close();
+            }
             let args = self.prepare_edit(id, args)?;
             let args_floating = args.get("floating") == Some(&Value::Bool(true));
             // Spec: automation R17. With Automation Arm on and the transport
@@ -8997,6 +9230,14 @@ impl Shell {
             if id != view_ids::STATE {
                 // A query changes nothing a window shows.
                 self.touch();
+            }
+            if result.is_ok()
+                && id == view_ids::SELECT_TAKE_LANES
+                && (self.detail.clip_shown() || self.detail.device_shown())
+            {
+                // Spec: comping R26. With the Clip View or the Device View
+                // open, selecting a take lane's header selects its clips.
+                self.arrangement.select_header_clips(self.editor.document());
             }
             if result.is_ok() && id == view_ids::FOCUS_TITLE_BAR {
                 // Spec: accessibility R4. Esc from a track's control gives
@@ -9480,6 +9721,7 @@ impl Shell {
                         args.track,
                         args.sync,
                         args.remote,
+                        args.mpe,
                     )
                     .map_err(failed)?;
                 self.prefs.midi = self.midi.prefs();
@@ -9657,7 +9899,7 @@ impl Shell {
         let playing = self.audio.transport_state().playing;
         let source = crate::perception::Source {
             document: self.editor.document(),
-            media: Arc::clone(&self.media) as Arc<dyn bl_engine::MediaLibrary>,
+            media: self.engine_media(),
             selection: self.arrangement.time_selection(),
             engine_rate,
             plugins: self.plugin_hosts(),
@@ -9942,6 +10184,8 @@ impl Shell {
                 self.devices
                     .set_multisampler_views(bl_model::MultisamplerViews::new());
                 self.clip_view.set_folds(bl_model::ClipFolds::new());
+                self.clip_view
+                    .restore_midi_tools(&bl_project::midi_tools::MidiToolSettings::default());
                 self.set_path = None;
                 self.dirty = false;
                 self.message = None;
@@ -9976,6 +10220,7 @@ impl Shell {
                     .set_multisampler_views(self.store.multisampler_views());
                 // Spec: piano-roll. Folded note editors too.
                 self.clip_view.set_folds(self.store.folds());
+                self.clip_view.restore_midi_tools(&self.store.midi_tools());
                 self.saved = snapshot(&editor);
                 self.set_replaced();
                 self.editor = editor;
@@ -10037,6 +10282,8 @@ impl Shell {
                 self.store
                     .set_multisampler_views(self.devices.multisampler_views().clone());
                 self.store.set_folds(self.clip_view.folds().clone());
+                self.store
+                    .set_midi_tools(self.clip_view.midi_tools().saved());
                 let warnings = self.store.save(&path, &self.editor).map_err(failed)?;
                 self.saved_as(path, &warnings);
                 Ok(self.set_result())
@@ -10057,6 +10304,8 @@ impl Shell {
                 self.store
                     .set_multisampler_views(self.devices.multisampler_views().clone());
                 self.store.set_folds(self.clip_view.folds().clone());
+                self.store
+                    .set_midi_tools(self.clip_view.midi_tools().saved());
                 self.store.set_temporary_folder(self.temporary_folder());
                 let (path, warnings) = self
                     .store
@@ -10211,6 +10460,8 @@ impl Shell {
                 self.store
                     .set_multisampler_views(self.devices.multisampler_views().clone());
                 self.store.set_folds(self.clip_view.folds().clone());
+                self.store
+                    .set_midi_tools(self.clip_view.midi_tools().saved());
                 let files = self
                     .store
                     .collect_groups(&groups, library)
@@ -10328,6 +10579,36 @@ impl Shell {
                 let closed = self.close_plug_in_windows();
                 self.touch();
                 Ok(to_value(&ids::ClosedPlugInWindows { closed }))
+            }
+            ids::VIEW_TOGGLE_FULL_HEIGHT_BROWSER => {
+                // Spec: browser R26. The column runs down to the Status Bar;
+                // kept between launches.
+                Self::args::<NoArgs>(id, args)?;
+                let on = !self.browser_view.full_height();
+                self.browser_view.set_full_height(on);
+                self.prefs.browser = self
+                    .browser_view
+                    .prefs(self.prefs.browser.user_library.clone());
+                self.save_preferences();
+                Ok(self.view_result())
+            }
+            ids::VIEW_SET_BROWSER_WIDTH => {
+                // Spec: browser R29. Both windows' browsers take the width,
+                // kept between launches; no undo step.
+                let ids::BrowserWidthArgs { points } = Self::args(id, args)?;
+                if !points.is_finite() {
+                    return Err(ShellError::InvalidArgs {
+                        command: id.to_owned(),
+                        message: "`points` must be a number".to_owned(),
+                    });
+                }
+                self.browser_view.set_width(points as f32);
+                self.prefs.browser = self
+                    .browser_view
+                    .prefs(self.prefs.browser.user_library.clone());
+                self.save_preferences();
+                self.touch();
+                Ok(self.view_result())
             }
             ids::VIEW_TOGGLE_PLUGIN_LIST => {
                 // Spec: plugin-list R1, R3. View state only.
@@ -10509,6 +10790,7 @@ impl Shell {
                     plugin_list: self.plugin_list.state(),
                     assistant: self.assistant_panel_state(),
                     undo_history: self.undo_history_open,
+                    save_history: self.save_history.open,
                     plug_in_windows: self.plug_in_windows,
                 }))
             }
@@ -10517,8 +10799,18 @@ impl Shell {
                 // isn't saved with the set and isn't an undo step.
                 Self::args::<NoArgs>(id, args)?;
                 self.undo_history_open = !self.undo_history_open;
+                if self.undo_history_open {
+                    // They share the right-hand area (crash-recovery R12).
+                    self.save_history.open = false;
+                }
                 self.touch();
                 Ok(to_value(&self.undo_history_state()))
+            }
+            ids::VIEW_TOGGLE_SAVE_HISTORY => {
+                // Spec: crash-recovery R12. View state: not saved with the
+                // set and no undo step.
+                Self::args::<NoArgs>(id, args)?;
+                Ok(self.toggle_save_history())
             }
             ids::VIEW_TOGGLE_INFO_VIEW => {
                 Self::args::<NoArgs>(id, args)?;

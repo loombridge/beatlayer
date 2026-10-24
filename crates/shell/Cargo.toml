@@ -35,6 +35,7 @@ bl-media.workspace = true
 # MIDI ports and the computer MIDI keyboard (WP-2.2), and the queue they send
 # the engine's processor.
 bl-midi-io.workspace = true
+bl-midi-tools.workspace = true
 bl-model.workspace = true
 # CLAP plug-ins as devices (WP-2.6): the host, whose factory goes into each
 # engine's registry and whose main-thread work runs in the shell's poll.
@@ -82,6 +83,8 @@ bl-rt.workspace = true
 # The kit's example plug-ins for offline render tests.
 bl-devices = { workspace = true, features = ["kit-examples"] }
 lspk-example-gain.workspace = true
+# The test tools the MIDI Tools framework's tests use (WP-6.11).
+bl-midi-tools = { workspace = true, features = ["testing"] }
 
 # `au_editor` runs on the process's main thread, where Apple makes a unit's
 # view controller; the test harness runs a `#[test]` on a worker thread, so

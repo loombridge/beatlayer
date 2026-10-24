@@ -11,7 +11,7 @@ Live lists every MIDI port the computer offers in its Settings, inputs and outpu
 
 Beatlayer keeps the port switches in its preferences and the track's input and monitoring in the set. Messages arrive on the MIDI system's own thread, are stamped with the time they arrived, and cross to the audio thread on a lock-free queue; the engine places each one in the next block at the sample its time gives, and hands it to every MIDI track whose input it matches.
 
-This spec covers ports and their switches, a MIDI track's input and channel, the monitoring switch, how incoming messages reach the engine, and the computer MIDI keyboard. It leaves to other packages: what a track's devices do with the notes (WP-2.1), recording them (WP-2.14), an audio track's input and audio monitoring (WP-2.13), routing MIDI from one track to another (WP-2.19), MIDI output from tracks, MIDI clock and MIDI mapping (Phase 7, M7), control surfaces and Takeover Mode (Phase 7), and how an MPE port's messages become each note's own expressions ([MPE](mpe.md), WP-6.17). The MPE switch itself, and a track's input from an MPE port, are R27 and R28.
+This spec covers ports and their switches, a MIDI track's input and channel, the monitoring switch, how incoming messages reach the engine, and the computer MIDI keyboard. It leaves to other packages: what a track's devices do with the notes (WP-2.1), recording them (WP-2.14), an audio track's input and audio monitoring (WP-2.13), routing MIDI from one track to another (WP-2.19), MIDI output from tracks, MIDI clock ([MIDI clock](midi-clock.md)), MIDI Timecode ([MIDI Timecode](midi-timecode.md)), MIDI mapping and Takeover Mode ([remote mapping](remote-mapping.md)), and control surfaces ([control surfaces](control-surfaces.md)), and how an MPE port's messages become each note's own expressions ([MPE](mpe.md), WP-6.17). The MPE switch itself, and a track's input from an MPE port, are R27 and R28.
 
 ## Sources
 
@@ -35,7 +35,7 @@ This spec covers ports and their switches, a MIDI track's input and channel, the
 - **R2.** Each port has a Track, a Sync, and a Remote switch, in that order, on the Tempo & MIDI page of the Settings window, after the page's other MIDI settings (L-SET-014). Its row reads "In: <name>" or "Out: <name>". (S1, S2)
 - **R3.** The switches are kept in the preferences by direction and port name, so they apply again whenever the port is seen, after a restart or a replug. A port seen for the first time starts with Track on for an input and every switch off for an output. (S1; the starting state is Beatlayer's choice)
 - **R4.** A port is open while any of its switches is on, and closed when all three are off. A port that can't be opened keeps its switches and reports why. (Beatlayer's choice)
-- **R5.** An input's messages reach tracks only while its Track switch is on. Messages from an input with Remote on go to remote control, and its clock and transport messages, with Sync on, go to sync; both wait for Phase 7, which maps and follows them, so for now they're only counted. A message from an input whose Track switch is off never reaches a track. (S1)
+- **R5.** An input's messages reach tracks only while its Track switch is on. Messages from an input with Remote on go to remote control ([remote mapping](remote-mapping.md) R7 and R8, and the control surfaces a Control Surfaces row gives the port, [control surfaces](control-surfaces.md)), and its clock, transport and timecode messages, with Sync on, go to sync ([MIDI clock](midi-clock.md) R14, [MIDI Timecode](midi-timecode.md) R2). A message from an input whose Track switch is off never reaches a track. (S1)
 - **R6.** Listing the ports is a read-class command (`midi.ports`). Changing a switch is an external-class command (`midi.set_port`), because it opens or closes a device outside Beatlayer. (D17)
 
 ### A MIDI track's input and monitoring
@@ -88,5 +88,5 @@ This spec covers ports and their switches, a MIDI track's input and channel, the
 | R22 | `bl-ui` `midi_input::m_switches_the_keyboard_on_and_its_letters_play_notes` | UI |
 | R23 | `bl-shell` `midi_io::the_computer_keyboard_reaches_tracks_set_to_it_or_all_ins_only` | integration |
 | R6, R24 | `bl-cli` `agent_midi_io` (each `midi.*` command by ID through `bl-cli mcp`; `midi.set_port` refused without `--autonomous`) | agent API |
-| R27 | to be written in WP-6.17 | integration, UI |
-| R28 | to be written in WP-6.17 | integration |
+| R27 | `bl-shell` `midi_io::the_mpe_switch_persists_across_restarts_and_opens_nothing_by_itself`; `bl-shell` `mpe_recording::the_ports_mpe_switch_is_set_by_id_read_back_and_kept`; `bl-ui` `midi_input::an_inputs_row_has_an_mpe_switch_after_remote_and_an_outputs_has_none`; `bl-cli` `agent_midi_io::the_mpe_switch_is_external_like_the_others`; `bl-engine` `mpe_input::a_port_that_is_not_mpe_is_read_as_before` | integration, UI |
+| R28 | `bl-shell` `midi_io::a_track_on_an_mpe_port_shows_all_channels_and_keeps_the_channel_it_chose`; `bl-engine` `mpe_input::a_track_takes_every_channel_of_an_mpe_port` | integration |

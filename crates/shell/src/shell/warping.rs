@@ -34,7 +34,9 @@ impl Shell {
     pub fn use_analysis_options(&mut self, options: AnalysisOptions) {
         self.analysis_options = options;
         self.analysis = None;
+        self.analysis_slot.set(None);
         self.analysed.clear();
+        self.analysis_unheard.clear();
         self.start_analyses();
     }
 
@@ -65,8 +67,45 @@ impl Shell {
         if self.analysis.is_none() {
             self.analysis =
                 AnalysisCache::new(Arc::clone(&self.media), self.analysis_options.clone()).ok();
+            self.analysis_slot
+                .set(self.analysis.as_ref().map(AnalysisCache::reader));
         }
         self.analysis.as_ref()
+    }
+
+    /// The set's media as the engine plays it, with the files' transients
+    /// the analyses have found, which Beats clips cut at (the warp modes
+    /// spec, R14): for previews, exports and renders, as the live engine has
+    /// it. A file whose analysis isn't ready cuts at its warp markers alone,
+    /// as it does live until the analysis lands.
+    pub(super) fn engine_media(&self) -> Arc<dyn bl_engine::MediaLibrary> {
+        crate::analysed_media::AnalysedMedia::library(
+            Arc::clone(&self.media) as Arc<dyn bl_engine::MediaLibrary>,
+            self.analysis_slot.clone(),
+        )
+    }
+
+    /// Tells the live engine about each file whose analysis has become
+    /// ready since it was started, so the clips that play it are compiled
+    /// again with its transients (the warp modes spec, R14).
+    pub(super) fn hear_analyses(&mut self) {
+        if self.analysis_unheard.is_empty() {
+            return;
+        }
+        let Some(cache) = self.analysis.as_ref() else {
+            return;
+        };
+        let ready: Vec<ContentHash> = self
+            .analysis_unheard
+            .iter()
+            .copied()
+            .filter(|hash| cache.get(*hash).is_some())
+            .collect();
+        for hash in ready {
+            self.analysis_unheard.remove(&hash);
+            self.audio
+                .media_analysed(bl_model::ContentHash(*hash.as_bytes()));
+        }
     }
 
     /// Starts the analysis of each audio file the set uses that hasn't been
@@ -85,7 +124,11 @@ impl Shell {
             .collect();
         for hash in fresh {
             if let Some(cache) = self.analysis_cache() {
-                cache.request(hash);
+                // A file analysed already plays with its transients from the
+                // clip's first compile.
+                if !matches!(cache.request(hash), AnalysisStatus::Ready(_)) {
+                    self.analysis_unheard.insert(hash);
+                }
             }
             self.analysed.insert(hash);
         }

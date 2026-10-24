@@ -6,7 +6,8 @@
 //! allocation, free, lock, or blocking call on the audio thread, and the
 //! allocation trap fails the test at any heap use it sees. One track plays a
 //! test instrument, so the input merges with a clip's notes in the chain, and
-//! the monitoring edits end the notes it holds.
+//! the monitoring edits end the notes it holds. A port with MPE on is read as
+//! MPE (WP-6.17), its notes and per-note expressions placed the same way.
 
 bl_rt::install_trap!();
 
@@ -125,6 +126,35 @@ fn midi_input_passes_under_rtsan() {
                     time: Instant::now(),
                     message: MidiMessage::note_on(0, key, 100),
                 });
+                // Spec: mpe R13. An MPE controller on a port of its own: a
+                // note on a member channel with its bend, slide and
+                // pressure around it, a message on the master channel, and
+                // now and then a configuration message.
+                if sent.is_multiple_of(7) {
+                    let mpe = MidiSource::MpePort(PortId::from_name("Roli"));
+                    let member = 1 + (sent / 7 % 14) as u8;
+                    let key = 36 + (sent / 7 % 48) as u8;
+                    let mut bundle = vec![
+                        vec![0xE0 | member, (sent % 128) as u8, 70],
+                        vec![0xB0 | member, 74, (sent % 128) as u8],
+                        vec![0xD0 | member, 40],
+                        vec![0x90 | member, key, 100],
+                        vec![0xE0 | member, 0, 90],
+                        vec![0xA0 | member, key, 20],
+                        vec![0xB0, 1, 64],
+                        vec![0x80 | member, key, 64],
+                    ];
+                    if sent.is_multiple_of(7 * 50) {
+                        bundle.extend([vec![0xB0, 101, 0], vec![0xB0, 100, 6], vec![0xB0, 6, 14]]);
+                    }
+                    for bytes in bundle {
+                        input.send(MidiInputEvent {
+                            source: mpe,
+                            time: Instant::now(),
+                            message: MidiMessage::from_bytes(&bytes).unwrap(),
+                        });
+                    }
+                }
                 sent += 1;
                 thread::sleep(Duration::from_micros(400));
             }

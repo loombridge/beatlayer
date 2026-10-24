@@ -5,7 +5,7 @@
 //! command and the field in its result, or the query tool's path for an
 //! object and the field in its full result. An action with nothing to read
 //! back says so, with a reason. [`problems`] checks the table against the
-//! registry, and [`markdown`] renders it for the command reference.
+//! registry, and [`markdown`] renders a namespace's rows for the command reference.
 
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
@@ -150,14 +150,19 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("arrangement.reverse", query(Track, "clips")),
     ("arrangement.create_fade", query(Clip, "data.audio.fade_in")),
     ("arrangement.cut", query(Track, "clips")),
+    ("arrangement.cut_time", query(Track, "clips")),
+    ("arrangement.delete_time", query(Track, "clips")),
     ("arrangement.delete_crossfade", query(Clip, "data.audio.fade_in_before")),
     ("arrangement.delete_fades", query(Clip, "data.audio.fade_in")),
     ("arrangement.delete", query(Track, "clips")),
     ("arrangement.duplicate", query(Track, "clips")),
+    ("arrangement.duplicate_time", query(Track, "clips")),
+    ("arrangement.insert_silence", query(Track, "clips")),
     ("arrangement.loop_selection", read("transport.state", "loop_start")),
     ("arrangement.move_clips", query(Track, "clips")),
     ("arrangement.nudge", query(Track, "clips")),
     ("arrangement.paste", query(Track, "clips")),
+    ("arrangement.paste_time", query(Track, "clips")),
     ("arrangement.resize_clips", query(Track, "clips")),
     ("arrangement.set_crossfade", query(Clip, "data.audio.fade_in_before")),
     ("arrangement.split", query(Track, "clips")),
@@ -189,6 +194,8 @@ pub const READBACK: &[(&str, Readback)] = &[
     // The document's own locator commands (WP-6.24), which the shell's
     // `locator.*` commands, the UI, and the keys run.
     ("song.add_locator", query(Song, "settings.locators")),
+    ("song.delete_time", query(Track, "clips")),
+    ("song.insert_time", query(Track, "clips")),
     ("song.delete_locator", query(Song, "settings.locators")),
     ("song.loop_to_next_locator", query(Song, "settings.arrangement_loop")),
     ("song.move_locator", query(Song, "settings.locators")),
@@ -207,7 +214,12 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("automation.delete_range", query(Track, "automation")),
     ("automation.duplicate", query(Track, "automation")),
     ("automation.move_breakpoints", query(Track, "automation")),
+    ("automation.insert_shape", query(Track, "automation")),
     ("automation.paste", query(Track, "automation")),
+    ("automation.simplify", query(Track, "automation")),
+    ("automation.skew", query(Track, "automation")),
+    ("automation.stretch_time", query(Track, "automation")),
+    ("automation.stretch_values", query(Track, "automation")),
     ("automation.delete_breakpoint", query(Track, "automation")),
     ("automation.move_breakpoint", query(Track, "automation")),
     ("automation.re_enable", query(Track, "automation")),
@@ -219,22 +231,36 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("keymap.reset", read("keymap.state", "shortcuts")),
     ("keymap.unbind", read("keymap.state", "shortcuts")),
     ("browser.add_folder", nothing(BROWSER)),
+    ("browser.add_label", nothing(BROWSER)),
     ("browser.add_tag", nothing(TAGS)),
     ("browser.add_tag_group", nothing(TAGS)),
     ("browser.add_to_arrangement", query(Track, "clips")),
+    ("browser.back", nothing(BROWSER)),
+    ("browser.clear_filters", nothing(BROWSER)),
     ("browser.delete_tag", nothing(TAGS)),
+    ("browser.filter", nothing(BROWSER)),
+    ("browser.forward", nothing(BROWSER)),
     ("browser.load_selected", query(Track, "clips")),
+    ("browser.move_label", nothing(BROWSER)),
     ("browser.move_tag", nothing(TAGS)),
     ("browser.open_folder", nothing(BROWSER)),
     ("browser.open_place", nothing(BROWSER)),
     ("browser.preview", nothing(BROWSER)),
     ("browser.remove_folder", nothing(BROWSER)),
+    ("browser.remove_label", nothing(BROWSER)),
     ("browser.rename_file", nothing(BROWSER)),
+    ("browser.rename_label", nothing(BROWSER)),
     ("browser.rename_tag", nothing(TAGS)),
+    ("browser.reset_label_order", nothing(BROWSER)),
     ("browser.reset_tag_order", nothing(TAGS)),
     ("browser.scrub_preview", nothing(BROWSER)),
     ("browser.search", nothing(BROWSER)),
     ("browser.select", nothing(BROWSER)),
+    ("browser.set_columns", nothing(BROWSER)),
+    ("browser.set_filter_groups", nothing(BROWSER)),
+    ("browser.set_filter_view", nothing(BROWSER)),
+    ("browser.set_label_icon", nothing(BROWSER)),
+    ("browser.set_label_shown", nothing(BROWSER)),
     ("browser.set_preview", nothing(BROWSER)),
     ("browser.set_raw", nothing(BROWSER)),
     ("browser.show_file", nothing(BROWSER)),
@@ -264,6 +290,7 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("clip.insert_warp_marker", query(Clip, "data.audio.warp_markers")),
     ("clip.insert_warp_markers", query(Clip, "data.audio.warp_markers")),
     ("clip.move", query(Clip, "start")),
+    ("clip.move_to_lane", query(Clip, "start")),
     ("clip.move_by", query(Clip, "start")),
     ("clip.move_envelope_breakpoint", query(Clip, "envelopes")),
     ("clip.move_to_slot", query(Track, "slots")),
@@ -455,6 +482,12 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("midi.import_file", query(Track, "clips")),
     ("midi.set_port", read("midi.ports", "ports")),
     ("midi.toggle_computer_keyboard", read("midi.ports", "keyboard.on")),
+    ("midi_tool.apply", query(Clip, "data.midi.notes")),
+    ("midi_tool.choose", read("midi_tool.state", "transformation")),
+    ("midi_tool.reseed", query(Clip, "data.midi.notes")),
+    ("midi_tool.reset", read("midi_tool.state", "tools[].values")),
+    ("midi_tool.set", read("midi_tool.state", "tools[].values")),
+    ("midi_tool.set_auto", read("midi_tool.state", "tools[].auto")),
     ("mixer.arm_exclusive", query(Track, "mixer.arm")),
     ("mixer.set_arm", query(Track, "mixer.arm")),
     ("mixer.set_crossfade_assign", query(Track, "mixer.crossfade")),
@@ -501,6 +534,7 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("note.randomize", query(Clip, "data.midi.notes")),
     ("note.resize", query(Clip, "data.midi.notes")),
     ("note.set_value", query(Clip, "data.midi.notes")),
+    ("note.set_expression", query(Clip, "data.midi.notes")),
     ("note.split", query(Clip, "data.midi.notes")),
     ("note.split_clip", query(Track, "clips")),
     ("note.step_record", query(Clip, "data.midi.notes")),
@@ -595,6 +629,7 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("set.open_backup", query(Song, "set.unsaved_changes")),
     ("set.recover", query(Song, "set.path")),
     ("set.relink_missing", nothing("finds files outside the set; the clips that use them read their media")),
+    ("set.restore", query(Song, "undo.next_undo")),
     ("set.save", query(Song, "set.unsaved_changes")),
     ("set.save_as", query(Song, "set.path")),
     ("set.save_as_default", nothing(FILE)),
@@ -651,6 +686,7 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("stems.cancel", read("stems.status", "separation")),
     ("stems.install", read("stems.status", "install")),
     ("stems.separate", query(Song, "tracks")),
+    ("take_lane.audition", query(Track, "take_lanes")),
     ("take_lane.copy_to_main_lane", query(Track, "clips")),
     ("take_lane.create_clip", query(Track, "take_lanes")),
     ("take_lane.delete", query(Track, "take_lanes")),
@@ -697,6 +733,10 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("transport.set_punch_out", read("transport.state", "punch_out")),
     ("transport.set_recording", read("transport.state", "recording")),
     ("view.set_zoom", read("view.state", "window.zoom")),
+    (
+        "view.toggle_full_height_browser",
+        read("view.state", "window.full_height_browser"),
+    ),
     ("view.zoom_in", read("view.state", "window.zoom")),
     ("view.zoom_out", read("view.state", "window.zoom")),
     ("view.zoom_reset", read("view.state", "window.zoom")),
@@ -841,14 +881,24 @@ pub fn problems(
     problems
 }
 
-/// The reference's "Readback" section: where each command that isn't `read`
-/// reads back, then the commands with nothing to read back and why.
+/// The reference's "Readback" section as the index explains it.
+pub const INTRO: &str = "## Readback\n\n\
+     Anything an agent can set, it can read back. Each command that isn't `read` names where \
+     its effect shows: a read command and the field in its result, or the query tool's path \
+     for an object and the field in its full result. A query field is one the set saves for \
+     the object, or one of the song's overview. `cargo xtask commands` fails when a command \
+     that changes something names none, or names a field that isn't there. Each namespace's \
+     page has the rows for its commands.\n";
+
+/// The rows of one namespace (the ID's part before its first dot): where
+/// each of its commands that isn't `read` reads back, then those with
+/// nothing to read back and why. Empty when it has no such command.
 #[must_use]
-pub fn markdown(registry: &Registry, table: &[(&str, Readback)]) -> String {
+pub fn markdown(registry: &Registry, table: &[(&str, Readback)], namespace: &str) -> String {
     let anchor = |id: &str| format!("[`{id}`](#{})", id.replace('.', ""));
     let mut reads = String::new();
     let mut nothing = String::new();
-    for spec in registry.iter() {
+    for spec in registry.iter().filter(|spec| spec.area() == namespace) {
         let Some((_, readback)) = table.iter().find(|(id, _)| *id == spec.id) else {
             continue;
         };
@@ -869,17 +919,20 @@ pub fn markdown(registry: &Registry, table: &[(&str, Readback)]) -> String {
             }
         }
     }
-    format!(
-        "## Readback\n\n\
-         Anything an agent can set, it can read back. Each command that isn't `read` names where \
-         its effect shows: a read command and the field in its result, or the query tool's path \
-         for an object and the field in its full result. A query field is one the set saves for \
-         the object, or one of the song's overview. `cargo xtask commands` fails when a command \
-         that changes something names none, or names a field that isn't there.\n\n\
-         | Command | Read it with | Field |\n|---|---|---|\n{reads}\n\
-         ### Nothing to read back\n\n\
-         | Command | Why |\n|---|---|\n{nothing}\n"
-    )
+    let mut out = String::new();
+    if !reads.is_empty() {
+        let _ = write!(
+            out,
+            "| Command | Read it with | Field |\n|---|---|---|\n{reads}\n"
+        );
+    }
+    if !nothing.is_empty() {
+        let _ = write!(
+            out,
+            "### Nothing to read back\n\n| Command | Why |\n|---|---|\n{nothing}\n"
+        );
+    }
+    out
 }
 
 #[cfg(test)]
@@ -1010,7 +1063,7 @@ mod tests {
             ("test.set_loop", read("test.state", "loop_on")),
             ("test.quit", nothing("ends the app")),
         ];
-        let text = markdown(&registry(), &table);
+        let text = markdown(&registry(), &table, "test");
         assert!(text.contains("| [`test.set_loop`](#testset_loop) | `test.state` | `loop_on` |"));
         assert!(text.contains("| [`test.quit`](#testquit) | ends the app |"));
     }

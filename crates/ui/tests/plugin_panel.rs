@@ -104,7 +104,12 @@ fn clicking_the_wrench_opens_and_closes_the_plugins_window() {
     );
     assert!(!button.disabled);
     assert_eq!(button.value, "off");
-    let title = Harness::node(&nodes, bl_test_clap::PLUGIN_NAME);
+    // The name is on the device's group and on its title bar's button; the
+    // button is what sits after the wrench.
+    let title = nodes
+        .iter()
+        .find(|n| n.role == egui::accesskit::Role::Button && n.label == bl_test_clap::PLUGIN_NAME)
+        .expect("the title bar's button");
     assert!(
         title.bounds.unwrap().x0 as f32 >= wrench.right(),
         "the name follows it"

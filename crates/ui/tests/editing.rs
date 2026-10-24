@@ -863,3 +863,93 @@ fn context_menus_reach_the_edits_and_the_grid() {
     assert!(s.choose(&output, "Narrow"));
     assert!(!s.state().grid.fixed);
 }
+
+/// The state of the menu item `row`.
+fn menu_item(s: &Set, row: &str) -> bl_ui::menus::ItemState {
+    let menus = bl_shell::menus::menu_bar(bl_shell::menus::MenuPlatform::current());
+    let item = menus
+        .iter()
+        .flat_map(bl_shell::menus::Menu::walk)
+        .find(|item| item.row == row)
+        .unwrap();
+    bl_ui::menus::item_state(item, &s.h.shell, &s.h.keymap, Platform::current())
+}
+
+#[test]
+fn shift_with_the_edit_keys_runs_the_time_commands_one_step_each() {
+    // Spec: time-editing R21 (S-EDIT-015, S-ARR-014 to S-ARR-019).
+    let mut s = set();
+    let (a, b) = (s.a, s.b);
+    let start = s.doc().clone();
+    let shift = command() | Modifiers::SHIFT;
+    s.click(pos2(x(3.0), AUDIO_3.0), Modifiers::NONE);
+    // Cmd-Shift-C copies the time: no step. Cmd-Shift-X cuts it: A goes and B
+    // closes up from 8 to 4.
+    s.key(Key::C, shift);
+    assert_eq!(s.steps(), 0);
+    s.key(Key::X, shift);
+    assert!(s.doc().clip(a).is_none());
+    assert_eq!(s.bars(b), (4.0, 6.0));
+    assert_eq!(s.undo_label().as_deref(), Some("Cut Time"));
+    // Cmd-Shift-V opens it again at the insert marker and puts A back.
+    s.key(Key::V, shift);
+    assert_eq!(s.bars(b), (8.0, 10.0));
+    assert_eq!(s.undo_label().as_deref(), Some("Paste Time"));
+    // Cmd-Shift-D lays a copy of the pasted time straight after it.
+    s.key(Key::D, shift);
+    assert_eq!(s.bars(b), (12.0, 14.0));
+    assert_eq!(s.undo_label().as_deref(), Some("Duplicate Time"));
+    // Cmd-Shift-Delete closes the copy up again.
+    s.key(Key::Delete, shift);
+    assert_eq!(s.bars(b), (8.0, 10.0));
+    assert_eq!(s.undo_label().as_deref(), Some("Delete Time"));
+    assert_eq!(s.steps(), 4);
+    // Cmd-I opens silence as long as the time selected, with the
+    // Arrangement focused.
+    s.click(pos2(x(3.0), AUDIO_3.0), Modifiers::NONE);
+    s.shortcut("S-ARR-014");
+    assert_eq!(s.undo_label().as_deref(), Some("Insert Silence"));
+    assert_eq!(s.bars(b), (12.0, 14.0));
+    assert_eq!(s.steps(), 5);
+    for _ in 0..5 {
+        s.key(Key::Z, command());
+    }
+    assert_eq!(*s.doc(), start);
+}
+
+#[test]
+fn the_edit_and_create_menus_enable_the_time_items_as_the_selection_gives_a_span() {
+    // Spec: time-editing R22 (M-EDIT-018 to M-EDIT-022, M-CREATE-005).
+    let mut s = set();
+    let edit_items = [
+        "M-EDIT-018",
+        "M-EDIT-019",
+        "M-EDIT-020",
+        "M-EDIT-021",
+        "M-EDIT-022",
+    ];
+    // Nothing selected: no span, and the Create menu's item is Insert
+    // Silence while the Arrangement has the focus.
+    s.click(pos2(x(20.0), AUDIO_3.0), Modifiers::NONE);
+    s.h.settle();
+    for row in edit_items {
+        assert!(!menu_item(&s, row).enabled, "{row} with no span");
+    }
+    assert_eq!(menu_item(&s, "M-CREATE-005").label, "Insert Silence");
+    assert!(!menu_item(&s, "M-CREATE-005").enabled);
+    // A clip selected gives a span: everything but Paste Time is on.
+    s.click(pos2(x(3.0), AUDIO_3.0), Modifiers::NONE);
+    for row in edit_items {
+        assert_eq!(
+            menu_item(&s, row).enabled,
+            row != "M-EDIT-020",
+            "{row} with a span and an empty clipboard"
+        );
+    }
+    assert!(menu_item(&s, "M-CREATE-005").enabled);
+    // Copying time gives Paste Time something to paste.
+    s.key(Key::C, command() | Modifiers::SHIFT);
+    assert!(menu_item(&s, "M-EDIT-020").enabled);
+    // The items show their keys.
+    assert!(menu_item(&s, "M-EDIT-022").chord.is_some());
+}

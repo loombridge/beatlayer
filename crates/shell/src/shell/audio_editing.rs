@@ -6,7 +6,6 @@
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeSet;
 use std::rc::Rc;
-use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use bl_core::time::Ticks;
@@ -23,7 +22,7 @@ use serde_json::Value;
 
 use super::*;
 use crate::arrangement::editing;
-use crate::arrangement::placing::clear;
+use crate::arrangement::placing::clear_on;
 use crate::processed::{Kind, Request, Written};
 
 /// The longest a consolidate render may run: a day, as an export's is.
@@ -66,12 +65,16 @@ impl Shell {
                 Ok(args) => self.reverse_range(id, &args).is_ok(),
                 Err(_) => false,
             },
-            ids::CONSOLIDATE | ids::CONSOLIDATE_TO_SCENE => {
-                match Self::args::<TargetArgs>(id, args.clone()) {
-                    Ok(args) => self.material_of(id, &args).is_ok(),
-                    Err(_) => false,
-                }
-            }
+            // Consolidate works on take lanes too (R29); to a scene, on
+            // main lanes only.
+            ids::CONSOLIDATE => match Self::args::<TargetArgs>(id, args.clone()) {
+                Ok(args) => self.lane_material_of(id, &args).is_ok(),
+                Err(_) => false,
+            },
+            ids::CONSOLIDATE_TO_SCENE => match Self::args::<TargetArgs>(id, args.clone()) {
+                Ok(args) => self.material_of(id, &args).is_ok(),
+                Err(_) => false,
+            },
             _ => false,
         }
     }
@@ -416,6 +419,7 @@ impl Shell {
             TargetArgs {
                 clips: None,
                 tracks: args.tracks.clone(),
+                lanes: None,
                 start: args.start.clone(),
                 end: args.end.clone(),
             },
@@ -638,7 +642,7 @@ impl Shell {
     /// the range, replacing the material it covers.
     fn consolidate(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
         let args: TargetArgs = Self::args(id, args)?;
-        let (material, start, end) = self.material_of(id, &args)?;
+        let (material, start, end) = self.lane_material_of(id, &args)?;
         self.editor.begin("Consolidate");
         let outcome = self.consolidate_range(id, material, start, end, None);
         let (created, tracks, files) = self.finish(outcome)?;
@@ -656,10 +660,16 @@ impl Shell {
         let targets = TargetArgs {
             clips: None,
             tracks: args.tracks,
+            lanes: None,
             start: args.start,
             end: args.end,
         };
+        // A take lane's material is no scene's: only the main lanes.
         let (material, start, end) = self.material_of(id, &targets)?;
+        let material = material
+            .into_iter()
+            .map(|(track, clips)| (editing::Place::main(track), clips))
+            .collect();
         let doc = self.editor.document();
         let index = match args.scene.or_else(|| self.shown_scene()) {
             Some(scene) => doc
@@ -728,7 +738,7 @@ impl Shell {
     fn consolidate_range(
         &mut self,
         id: &str,
-        material: Vec<(TrackId, Vec<Clip>)>,
+        material: Vec<(editing::Place, Vec<Clip>)>,
         start: Ticks,
         end: Ticks,
         scene: Option<SceneId>,
@@ -737,7 +747,8 @@ impl Shell {
         let broke: Rc<Cell<bool>> = Rc::new(Cell::new(false));
         let mut order: Vec<(usize, TrackId, ClipId, Option<String>)> = Vec::new();
         for (index, entry) in material.iter().enumerate() {
-            let track = entry.0;
+            let lane = entry.0;
+            let track = lane.track;
             let clips = &entry.1;
             let kind = self.editor.document().track(track).map(|t| t.kind());
             let name = clips
@@ -758,7 +769,7 @@ impl Shell {
                         clip.start = Ticks::ZERO;
                     }
                     let placed = self.editor.transact(label_of(scene), |editor| {
-                        place(editor, track, scene, start, end, clip)
+                        place(editor, lane, scene, start, end, clip)
                     });
                     match placed {
                         Ok(()) => order.push((index, track, new_id, None)),
@@ -767,7 +778,7 @@ impl Shell {
                 }
                 Some(TrackKind::Audio) => {
                     let (frames, channels, gain, markers, tempo) =
-                        self.consolidate_audio(id, track, start, end)?;
+                        self.consolidate_audio(id, lane, start, end)?;
                     let label = crate::routing::track_label(self.editor.document(), track);
                     let file = format!("{label} Consolidate [{}].wav", crate::recording::stamp());
                     let rate = self.engine_rate();
@@ -814,7 +825,7 @@ impl Shell {
                             groove: None,
                         };
                         let placed = shell.editor.transact(label_of(scene), |editor| {
-                            place(editor, track, scene, start, end, clip)
+                            place(editor, lane, scene, start, end, clip)
                         });
                         match placed {
                             Ok(()) => {
@@ -864,14 +875,18 @@ impl Shell {
     fn consolidate_audio(
         &self,
         id: &str,
-        track: TrackId,
+        place: editing::Place,
         start: Ticks,
         end: Ticks,
     ) -> Result<(Vec<f32>, u16, f64, Vec<WarpMarker>, f64), ShellError> {
         let document = self.editor.document();
-        let prepared = consolidate_document(document, track).map_err(|why| failed(id, why))?;
+        let track = place.track;
+        // A take lane's clips play when it's auditioned (the comping spec,
+        // R14): a lane is consolidated by rendering the track so.
+        let prepared =
+            consolidate_document(document, track, place.lane).map_err(|why| failed(id, why))?;
         let rate = self.engine_rate();
-        let media: Arc<dyn bl_engine::MediaLibrary> = self.media.clone();
+        let media = self.engine_media();
         let spec = crate::export::Render {
             start,
             length: crate::export::Length::To(end),
@@ -923,6 +938,32 @@ impl Shell {
         let markers = beat_markers(document, start, end);
         let tempo = document.settings().tempo.bpm_at(end).get();
         Ok((frames, if mono { 1 } else { 2 }, gain, markers, tempo))
+    }
+
+    /// What a consolidate acts on: each lane (a track's main lane or one of
+    /// its take lanes, the comping spec R27) with the clips the range covers,
+    /// already cut to the range, and the range itself.
+    #[expect(
+        clippy::type_complexity,
+        reason = "each lane's clips cut to the range, and the range"
+    )]
+    fn lane_material_of(
+        &self,
+        id: &str,
+        args: &TargetArgs,
+    ) -> Result<(Vec<(editing::Place, Vec<Clip>)>, Ticks, Ticks), ShellError> {
+        let doc = self.editor.document();
+        let target = editing::target(doc, &self.arrangement, args.clone())
+            .map_err(|failure| edit_error(id, failure))?;
+        let (by_place, start, end) = editing::lane_material(doc, &target);
+        let material: Vec<(editing::Place, Vec<Clip>)> = by_place
+            .into_iter()
+            .filter(|(_, clips)| !clips.is_empty())
+            .collect();
+        if material.is_empty() {
+            return Err(unavailable(id, "no clip is in the range"));
+        }
+        Ok((material, start, end))
     }
 
     /// What a consolidate acts on: each track with the clips the range
@@ -1081,7 +1122,7 @@ fn label_of(scene: Option<SceneId>) -> &'static str {
 /// Arrangement over the range the old clips covered (R19, R26).
 fn place(
     editor: &mut bl_model::Editor,
-    track: TrackId,
+    lane: editing::Place,
     scene: Option<SceneId>,
     start: Ticks,
     end: Ticks,
@@ -1092,11 +1133,15 @@ fn place(
     // when it is made.
     let scale = clip.scale;
     let id = clip.id;
+    let track = lane.track;
     if let Some(scene) = scene {
         editor.apply(Command::CreateSlotClip { track, scene, clip })?;
     } else {
-        clear(editor, track, start, end, &BTreeSet::new())?;
-        editor.apply(Command::CreateClip { track, clip })?;
+        clear_on(editor, track, lane.lane, start, end, &BTreeSet::new())?;
+        editor.apply(match lane.lane {
+            Some(lane) => Command::CreateTakeClip { lane, clip },
+            None => Command::CreateClip { track, clip },
+        })?;
     }
     if scale != editor.document().settings().scale {
         editor.apply(scale.command(vec![id]))?;
@@ -1154,13 +1199,19 @@ pub(crate) fn crop_clip(
         return Some(clip);
     }
     let (start, end) = span?;
-    let selected = view.selected_tracks();
-    doc.track_order().into_iter().find_map(|track| {
-        if !selected.is_empty() && !selected.contains(&track) {
-            return None;
-        }
-        doc.track(track)?
-            .clips()
+    // Spec: comping R27. The lanes the selection is on, take lanes included.
+    let places = if view.selected_tracks().is_empty() {
+        doc.track_order()
+            .into_iter()
+            .map(editing::Place::main)
+            .collect()
+    } else {
+        editing::in_row_order(doc, view.selected_places())
+    };
+    places.into_iter().find_map(|place| {
+        place
+            .clips(doc)
+            .into_iter()
             .find(|clip| clip.start < end && clip.end() > start)
             .map(|clip| clip.id)
     })
@@ -1296,8 +1347,13 @@ fn beat_markers(document: &Document, start: Ticks, end: Ticks) -> Vec<WarpMarker
 pub(super) fn consolidate_document(
     document: &Document,
     track: TrackId,
+    lane: Option<bl_model::TakeLaneId>,
 ) -> Result<Document, String> {
     let mut doc = document.clone();
+    if let Some(lane) = lane {
+        doc.apply(&Command::SetAudition { lane, on: true })
+            .map_err(|error| error.to_string())?;
+    }
     let main = doc.main_id();
     // Spec: R20. The track's clips reach Main alone: a track in a group
     // comes out of it before the group goes, or deleting the group would

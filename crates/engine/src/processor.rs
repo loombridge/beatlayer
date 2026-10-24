@@ -1997,7 +1997,8 @@ impl Processor {
         for (track, events) in program.get().midi.monitored_inputs() {
             for event in events {
                 let at = event.offset as usize;
-                if !crate::recording::is_recorded(&event.message)
+                if !(event.mpe != crate::mpe::MpeRole::Plain
+                    || crate::recording::is_recorded(&event.message))
                     || at < offset
                     || at >= offset + frames
                 {
@@ -2009,6 +2010,7 @@ impl Processor {
                     clock: self.clock + at as u64,
                     song: song.map(|position| position + Frames(into)),
                     message: event.message,
+                    mpe: event.mpe,
                 };
                 if self.captured.push(logged).is_err() {
                     self.midi.counters.capture_dropped += 1;

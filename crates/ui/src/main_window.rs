@@ -168,8 +168,12 @@ pub struct MainWindowUi {
     assistant: crate::assistant_panel::AssistantPanelUi,
     /// The Undo History panel (WP-6.28): the row the keyboard has moved to.
     undo_history: crate::undo_history_panel::UndoHistoryPanelUi,
+    /// The Save History panel (WP-6.39), which shares the Undo History's
+    /// place.
+    save_history: crate::save_history_panel::SaveHistoryPanelUi,
     /// The detail area's top edge (detail-views R10).
     detail_edge: crate::detail_area::DetailEdge,
+    browser_edge: crate::browser_edge::BrowserEdge,
     /// The File Manager's switches (WP-6.63).
     file_manager: crate::file_manager::FileManagerUi,
     /// The search field (WP-6.42).
@@ -266,7 +270,9 @@ impl MainWindowUi {
             chain_names: Vec::new(),
             assistant: crate::assistant_panel::AssistantPanelUi::default(),
             undo_history: crate::undo_history_panel::UndoHistoryPanelUi::default(),
+            save_history: crate::save_history_panel::SaveHistoryPanelUi::default(),
             detail_edge: crate::detail_area::DetailEdge::default(),
+            browser_edge: crate::browser_edge::BrowserEdge::default(),
         }
     }
 
@@ -408,6 +414,11 @@ impl MainWindowUi {
                 self.devices.start_variation_rename(*rack, *index);
             }
             Effect::RenameTrack(track) => crate::track_menu::start_rename(ctx, *track),
+            Effect::RenameTakeLane(lane) => {
+                // Spec: comping R28. Rename types the name in the take
+                // lane's header.
+                crate::arrangement::take_lanes::start_rename(ctx, *lane);
+            }
             Effect::RenameLocator(locator) => {
                 // Spec: time-editing R8. Rename types the name in the
                 // scrub area.
@@ -500,10 +511,10 @@ impl MainWindowUi {
             let assistant = shell
                 .assistant_docked_width()
                 .map(|width| self.assistant.drag_width().unwrap_or(width));
-            let undo_history = shell
-                .undo_history_open()
+            let undo_history = (shell.undo_history_open() || shell.save_history_open())
                 .then_some(crate::layout::UNDO_HISTORY_WIDTH);
-            let detail = crate::layout::DetailViews::of(shell.detail_of(self.window));
+            let detail = crate::layout::DetailViews::of(shell.detail_of(self.window))
+                .with_browser_width(shell.browser_view().width());
             let layout = if second {
                 // Spec: second-window R2, R12, R17. No Info View, assistant
                 // or Undo History; the Control Bar is cut off.
@@ -515,7 +526,7 @@ impl MainWindowUi {
                     shell.info_view_of(self.window),
                     assistant,
                     undo_history,
-                    detail,
+                    detail.with_full_height_browser(shell.browser_view().full_height()),
                 )
             }
             .translate(area.min.to_vec2());
@@ -537,6 +548,11 @@ impl MainWindowUi {
                     tag_editor = shell.browser_view().tag_editor().then_some(browser);
                 }
             }
+            // Spec: browser R29. The browser's right edge, in the gap
+            // between it and the main view, under the main view's own
+            // controls where they reach into the gap.
+            self.browser_edge
+                .show(ui, theme, shell, &layout, &mut events);
             self.main_view(ui, shell, theme, layout.main_view, &mut events);
             // Spec: browser-tags R10. The Tag Editor opens beside the
             // content pane (L-BRW-013), over the main view, so it is drawn
@@ -633,10 +649,20 @@ impl MainWindowUi {
                 self.assistant
                     .show(ui, shell, theme, pane, true, &mut events);
             }
-            if let Some(pane) = layout.undo_history {
-                self.undo_history.show(ui, shell, theme, pane, &mut events);
-            } else if !second {
-                self.undo_history.hide(&mut events);
+            match layout.undo_history {
+                Some(pane) if shell.save_history_open() => {
+                    self.undo_history.hide(&mut events);
+                    self.save_history.show(ui, shell, theme, pane, &mut events);
+                }
+                Some(pane) => {
+                    self.save_history.hide(&mut events);
+                    self.undo_history.show(ui, shell, theme, pane, &mut events);
+                }
+                None if !second => {
+                    self.undo_history.hide(&mut events);
+                    self.save_history.hide(&mut events);
+                }
+                None => {}
             }
             outline_focused_area(ui, shell, theme, &layout, self.window);
             // Spec: command-palette R2. The search field sits above every
@@ -674,6 +700,7 @@ impl MainWindowUi {
         }
         self.mixer_typing = crate::mixer::is_typing(ctx)
             || crate::track_menu::is_renaming(ctx)
+            || crate::arrangement::take_lanes::is_renaming(ctx)
             || crate::envelope_keys::is_typing(ctx);
         // An open menu, or a dialog, keeps the keys.
         self.menu_open = egui::Popup::is_any_open(ctx)
@@ -1035,6 +1062,9 @@ impl MainWindowUi {
             if *el == Element::MixerMenu {
                 self.mixer_menu(&response, shell, events);
             }
+            if *el == Element::BrowserMenu {
+                self.browser_menu(&response, shell, events);
+            }
             if *el == Element::RootNote {
                 // Spec: scales R9. The Root Note chooser lists the twelve
                 // pitch classes.
@@ -1224,6 +1254,35 @@ impl MainWindowUi {
         });
     }
 
+    /// The Browser Config Menu (L-CTRL-001): Full-Height Browser, Groove
+    /// Pool and Tuning, as the View menu's rows give them (spec: browser
+    /// R26).
+    fn browser_menu(
+        &mut self,
+        response: &egui::Response,
+        shell: &Shell,
+        events: &mut Vec<UiEvent>,
+    ) {
+        let keymap =
+            crate::keymap::keymap_in_use(&mut self.keymap, &mut self.keymap_revision, shell);
+        let platform = crate::keymap::Platform::current();
+        let menus = bl_shell::menus::menu_bar(bl_shell::menus::MenuPlatform::current());
+        let rows: Vec<&bl_shell::menus::MenuItem> = ["M-VIEW-024", "M-VIEW-022", "M-VIEW-023"]
+            .iter()
+            .filter_map(|row| {
+                menus
+                    .iter()
+                    .flat_map(bl_shell::menus::Menu::walk)
+                    .find(|item| item.row == *row)
+            })
+            .collect();
+        egui::Popup::menu(response).show(|ui| {
+            for item in rows {
+                let _ = crate::menus::item(ui, item, shell, keymap, platform, events);
+            }
+        });
+    }
+
     fn control_bar(
         &mut self,
         ui: &mut Ui,
@@ -1363,7 +1422,10 @@ impl MainWindowUi {
         // while the pointer is over empty space.
         let keymap =
             crate::keymap::keymap_in_use(&mut self.keymap, &mut self.keymap_revision, shell);
+        // A MIDI Tool's control under the pointer says its own name and
+        // description (the MIDI Tools spec, R7).
         self.info = crate::search_field::info(shell)
+            .or_else(|| crate::tool_panel::take_info(ui.ctx()))
             .unwrap_or_else(|| info_content(self.hovered.or(self.other_hovered), shell, keymap));
         if self.info.title.is_empty() {
             return;

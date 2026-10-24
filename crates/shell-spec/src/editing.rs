@@ -15,14 +15,14 @@
 
 use std::borrow::Cow;
 
-use bl_commands::Context::{Arrangement, LoopBrace};
+use bl_commands::Context::{Arrangement, LoopBrace, TakeLanes};
 use bl_commands::{Binding, CommandSpec, NoArgs, Permission, RegisterError, Registry};
 use bl_core::time::{Ticks, TimeSignatureMap};
 use bl_model::{ClipId, TrackId};
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::{Deserialize, Serialize};
 
-use crate::arrangement::{ArrangementState, TimeRange};
+use crate::arrangement::{ArrangementState, Lane, TimeRange};
 
 /// `arrangement.select_clips`: select clips, as clicking their title bars
 /// does.
@@ -52,6 +52,21 @@ pub const CREATE_FADE: &str = "arrangement.create_fade";
 /// `arrangement.delete_fades`: delete the fades and crossfades of clips
 /// (Cmd-Option-Delete, and Delete with a fade handle selected).
 pub const DELETE_FADES: &str = "arrangement.delete_fades";
+/// `arrangement.insert_silence`: open empty time on every track (Cmd-I).
+pub const INSERT_SILENCE: &str = "arrangement.insert_silence";
+/// `arrangement.cut_time`: copy a span of every track, then delete it
+/// (Cmd-Shift-X).
+pub const CUT_TIME: &str = "arrangement.cut_time";
+/// `arrangement.copy_time`: copy a span of every track (Cmd-Shift-C).
+pub const COPY_TIME: &str = "arrangement.copy_time";
+/// `arrangement.paste_time`: open time on every track and paste into it
+/// (Cmd-Shift-V).
+pub const PASTE_TIME: &str = "arrangement.paste_time";
+/// `arrangement.duplicate_time`: put a copy of a span of every track right
+/// after it (Cmd-Shift-D).
+pub const DUPLICATE_TIME: &str = "arrangement.duplicate_time";
+/// `arrangement.delete_time`: close a span on every track (Cmd-Shift-Delete).
+pub const DELETE_TIME: &str = "arrangement.delete_time";
 /// `arrangement.nudge`: move the selection by one grid step (Left, Right).
 pub const NUDGE: &str = "arrangement.nudge";
 /// `arrangement.loop_selection`: set the loop brace to the selection and
@@ -79,6 +94,12 @@ pub const IDS: &[&str] = &[
     SELECT_LOOP,
     CREATE_FADE,
     DELETE_FADES,
+    INSERT_SILENCE,
+    CUT_TIME,
+    COPY_TIME,
+    PASTE_TIME,
+    DUPLICATE_TIME,
+    DELETE_TIME,
 ];
 
 /// Whether `id` is one of the Arrangement's editing commands.
@@ -200,6 +221,11 @@ pub struct TargetArgs {
     /// The tracks a span of time covers. Left out, the selected tracks.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tracks: Option<Vec<TrackId>>,
+    /// The lanes a span of time covers, each a track's own lane or one of
+    /// its take lanes (the comping spec, R27). Left out, the lanes of the
+    /// time selection, or `tracks`' own lanes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lanes: Option<Vec<Lane>>,
     /// Where the span starts. Left out, the time selection's start.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub start: Option<Position>,
@@ -207,6 +233,50 @@ pub struct TargetArgs {
     /// end.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub end: Option<Position>,
+}
+
+/// A span of time on every track, for the …Time commands (time editing R14).
+/// Left out, the Arrangement's time selection (the span of the selected
+/// clips when clips are selected).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TimeSpanArgs {
+    /// Where the span starts. Left out, the time selection's start.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start: Option<Position>,
+    /// Where the span ends, after `start`. Left out, the time selection's
+    /// end.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end: Option<Position>,
+}
+
+/// Arguments of `arrangement.paste_time`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PasteTimeArgs {
+    /// Where the time opens. Left out, the time selection's start, or the
+    /// insert marker.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<Position>,
+}
+
+/// What `arrangement.copy_time` put on the clipboard.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct TimeClipboardState {
+    /// How many clips it holds, on the main lanes and the take lanes.
+    pub clips: usize,
+    /// How many tracks it holds clips or envelopes of.
+    pub tracks: usize,
+    /// How many envelopes it holds, over every track.
+    pub envelopes: usize,
+    /// How many tempo breakpoints it holds.
+    pub tempo_breakpoints: usize,
+    /// How many time-signature markers it holds.
+    pub time_signatures: usize,
+    /// How many locators it holds.
+    pub locators: usize,
+    /// How long the span is.
+    pub length: Ticks,
 }
 
 /// Arguments of `arrangement.move_clips`.
@@ -232,6 +302,11 @@ pub struct MoveClipsArgs {
     /// it in the track list. Left out, every clip stays on its track.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub track: Option<TrackId>,
+    /// The lane `anchor` moves to, a track's own lane or one of its take
+    /// lanes (the comping spec, R27); the other clips keep their distance
+    /// from it among the track's lanes. Give `track` or `lane`, not both.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lane: Option<Lane>,
     /// Copy the clips instead, leaving the originals where they are.
     #[serde(default)]
     pub copy: bool,
@@ -283,6 +358,11 @@ pub struct SplitArgs {
     /// the clips on the selected tracks.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tracks: Option<Vec<TrackId>>,
+    /// The lanes whose clips are split, each a track's own lane or one of its
+    /// take lanes (the comping spec, R27). Left out, `tracks`' own lanes, or
+    /// the lanes the time selection covers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lanes: Option<Vec<Lane>>,
     /// Where to split. Left out, the time selection's start and end, or the
     /// insert marker.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -302,6 +382,13 @@ pub struct PasteArgs {
     /// selected track, or the track the material was copied from.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub track: Option<TrackId>,
+    /// The lane the clipboard's first lane goes to, a track's own lane or
+    /// one of its take lanes (the comping spec, R27); its other lanes keep
+    /// their distance from it, among the tracks and among a track's lanes.
+    /// Left out, the first lane selected, or the first selected track's main
+    /// lane.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lane: Option<Lane>,
 }
 
 /// Arguments of `arrangement.delete_fades`.
@@ -517,6 +604,9 @@ fn specs() -> Vec<CommandSpec> {
              Arrangement's selection.",
         )
         .binding("S-EDIT-004")
+        // Cmd-D also reaches it with a time selection or clips on a take
+        // lane, where S-COMP-005 is the take-lane context's own Cmd-D.
+        .context(TakeLanes)
         .args::<TargetArgs>(),
         CommandSpec::new(COPY, "Copy")
             .description(
@@ -555,6 +645,94 @@ fn specs() -> Vec<CommandSpec> {
         )
         .binding("S-EDIT-003")
         .args::<PasteArgs>(),
+        edit(
+            INSERT_SILENCE,
+            "Insert Silence",
+            Permission::Edit,
+            "Opens as much empty time as the time selection (or `start` to `end`) is long, at \
+             its start, on every track, whichever tracks are selected: a clip across that point \
+             is split there, and every clip (main lane and take lanes), automation breakpoint, \
+             tempo breakpoint, time-signature marker and locator at or after it moves later. \
+             Each envelope, the tempo and the signature hold across the new time the value they \
+             had at the point. The Session View's slots and the loop brace are left as they \
+             are. The new time becomes the time selection. One undo step, `Insert Silence`. \
+             Cmd-I (Ctrl-I) runs this with the Arrangement focused. To give the position and \
+             length in ticks, use `song.insert_time`.",
+        )
+        .binding("S-ARR-014")
+        .args::<TimeSpanArgs>(),
+        edit(
+            CUT_TIME,
+            "Cut Time",
+            Permission::Destructive,
+            "Copies the time selection (or `start` to `end`) from every track to the clipboard, \
+             as `arrangement.copy_time` does, then deletes it, as `arrangement.delete_time` \
+             does. One undo step, `Cut Time`. Cmd-Shift-X (Ctrl-Shift-X) runs this, and so does \
+             Shift with Cut. Because it removes the person's work, an agent asks first.",
+        )
+        .binding("S-ARR-015")
+        .args::<TimeSpanArgs>(),
+        CommandSpec::new(COPY_TIME, "Copy Time")
+            .description(
+                "Copies the time selection (or `start` to `end`) from every track, whichever \
+                 tracks are selected, to the clipboard in place of what it held: each track's \
+                 clips and parts of clips on its main lane and take lanes, each track's \
+                 envelopes over the span, the tempo over it, the time-signature markers and \
+                 locators inside it, and its length. Cmd-Shift-C (Ctrl-Shift-C) runs this, and \
+                 so does Shift with Copy. The clipboard isn't part of the set, and copying \
+                 changes nothing in it. The result says what the clipboard holds.",
+            )
+            .permission(Permission::Read)
+            .context(Arrangement)
+            .binding("S-ARR-016")
+            .args::<TimeSpanArgs>()
+            .result::<TimeClipboardState>(),
+        edit(
+            PASTE_TIME,
+            "Paste Time",
+            Permission::Edit,
+            "Opens as much time as the clipboard holds at `at` (left out, the time selection's \
+             start or the insert marker) on every track, as `arrangement.insert_silence` does, \
+             and puts the clipboard's material in it. Material copied with \
+             `arrangement.copy_time` or `arrangement.cut_time` goes back on the tracks it came \
+             from (a track deleted since gets nothing), with its envelopes, the tempo, the \
+             time-signature markers and the locators; clips copied with `arrangement.copy` or \
+             `arrangement.cut` go where `arrangement.paste` puts them. The pasted time becomes \
+             the time selection. Refused, changing nothing, with nothing on the clipboard. One \
+             undo step, `Paste Time`. Cmd-Shift-V (Ctrl-Shift-V) runs this, and so does Shift \
+             with Paste.",
+        )
+        .binding("S-ARR-017")
+        .args::<PasteTimeArgs>(),
+        edit(
+            DUPLICATE_TIME,
+            "Duplicate Time",
+            Permission::Edit,
+            "Puts a copy of the time selection (or `start` to `end`) from every track straight \
+             after it, as `arrangement.copy_time` and `arrangement.paste_time` at its end \
+             would, leaving the clipboard as it was. The copy becomes the time selection, so \
+             running it again lays down another. One undo step, `Duplicate Time`. \
+             Cmd-Shift-D (Ctrl-Shift-D) runs this, and so does Shift with Duplicate.",
+        )
+        .binding("S-ARR-018")
+        .args::<TimeSpanArgs>(),
+        edit(
+            DELETE_TIME,
+            "Delete Time",
+            Permission::Destructive,
+            "Removes the time selection (or `start` to `end`) from every track, whichever \
+             tracks are selected, so what follows closes up: clips inside it are deleted, a \
+             clip across an edge is cut or split there, and everything after it moves earlier. \
+             An envelope keeps its shape up to the span's start and from there takes the shape \
+             it had from the span's end, stepping between the two values over one tick where \
+             they differ; the tempo steps at the span's start. Time-signature markers and \
+             locators inside the span are deleted. The insert marker goes to the span's start \
+             with no time selected. One undo step, `Delete Time`. Cmd-Shift-Delete \
+             (Ctrl-Shift-Delete) runs this, and so does Shift with Delete. Undo restores \
+             it, but because it removes the person's work an agent asks first.",
+        )
+        .binding("S-ARR-019")
+        .args::<TimeSpanArgs>(),
         edit(
             NUDGE,
             "Nudge",
@@ -651,6 +829,12 @@ mod tests {
         assert_eq!(class(CUT), Some(Permission::Destructive));
         assert_eq!(class(SELECT_CLIPS), Some(Permission::Read));
         assert_eq!(class(COPY), Some(Permission::Read));
+        // The …Time commands: removing time asks first, copying changes
+        // nothing.
+        assert_eq!(class(DELETE_TIME), Some(Permission::Destructive));
+        assert_eq!(class(CUT_TIME), Some(Permission::Destructive));
+        assert_eq!(class(COPY_TIME), Some(Permission::Read));
+        assert_eq!(class(INSERT_SILENCE), Some(Permission::Edit));
         assert_eq!(class(MOVE_CLIPS), Some(Permission::Edit));
     }
 

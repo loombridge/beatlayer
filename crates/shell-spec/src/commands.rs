@@ -60,6 +60,9 @@ pub const VIEW_FULL_SCREEN: &str = "view.full_screen";
 pub const VIEW_TOGGLE_SECOND_WINDOW: &str = "view.toggle_second_window";
 /// `view.toggle_browser`: show or hide the browser.
 pub const VIEW_TOGGLE_BROWSER: &str = "view.toggle_browser";
+/// Runs the browser down to the Status Bar, or back to the detail area's
+/// top (Full-Height Browser; spec: browser R26).
+pub const VIEW_TOGGLE_FULL_HEIGHT_BROWSER: &str = "view.toggle_full_height_browser";
 /// `view.toggle_clip_view`: show or hide the Clip View (WP-2.3).
 pub const VIEW_TOGGLE_CLIP_VIEW: &str = "view.toggle_clip_view";
 /// `view.toggle_device_view`: show or hide the Device View (WP-6.27).
@@ -78,6 +81,8 @@ pub const VIEW_TOGGLE_DETAIL_AREA: &str = "view.toggle_detail_area";
 pub const VIEW_EXPAND_CLIP_VIEW: &str = "view.expand_clip_view";
 /// `view.set_detail_height`: set the Clip View's height (WP-6.27).
 pub const VIEW_SET_DETAIL_HEIGHT: &str = "view.set_detail_height";
+/// `view.set_browser_width`: set the browser's width (browser R29).
+pub const VIEW_SET_BROWSER_WIDTH: &str = "view.set_browser_width";
 /// `focus.clip_view`: move the keyboard focus to the Clip View (WP-6.27).
 pub const FOCUS_CLIP_VIEW: &str = "focus.clip_view";
 /// `focus.device_view`: move the keyboard focus to the Device View
@@ -126,6 +131,8 @@ pub const VIEW_ZOOM_RESET: &str = "view.zoom_reset";
 pub const VIEW_SET_ZOOM: &str = "view.set_zoom";
 /// `view.toggle_undo_history`: show or hide the Undo History panel.
 pub const VIEW_TOGGLE_UNDO_HISTORY: &str = "view.toggle_undo_history";
+/// `view.toggle_save_history`: show or hide the Save History panel (IMP-05).
+pub const VIEW_TOGGLE_SAVE_HISTORY: &str = "view.toggle_save_history";
 /// `focus.control_bar`: move the keyboard focus to the Control Bar.
 pub const FOCUS_CONTROL_BAR: &str = "focus.control_bar";
 /// `focus.arrangement`: move the keyboard focus to the Arrangement View.
@@ -263,6 +270,7 @@ pub const IDS: &[&str] = &[
     VIEW_FULL_SCREEN,
     VIEW_TOGGLE_SECOND_WINDOW,
     VIEW_TOGGLE_BROWSER,
+    VIEW_TOGGLE_FULL_HEIGHT_BROWSER,
     VIEW_TOGGLE_CLIP_VIEW,
     VIEW_TOGGLE_DEVICE_VIEW,
     VIEW_SHOW_DETAIL_VIEWS,
@@ -270,6 +278,7 @@ pub const IDS: &[&str] = &[
     VIEW_TOGGLE_DETAIL_AREA,
     VIEW_EXPAND_CLIP_VIEW,
     VIEW_SET_DETAIL_HEIGHT,
+    VIEW_SET_BROWSER_WIDTH,
     FOCUS_CLIP_VIEW,
     FOCUS_DEVICE_VIEW,
     VIEW_TOGGLE_PLUGIN_LIST,
@@ -289,6 +298,7 @@ pub const IDS: &[&str] = &[
     VIEW_ZOOM_RESET,
     VIEW_SET_ZOOM,
     VIEW_TOGGLE_UNDO_HISTORY,
+    VIEW_TOGGLE_SAVE_HISTORY,
     FOCUS_CONTROL_BAR,
     FOCUS_ARRANGEMENT,
     FOCUS_NEXT,
@@ -850,6 +860,28 @@ pub const MAIN_VIEW_MIN_HEIGHT: f32 = 80.0;
 /// The gap between the Clip View and the Device View stacked, and between
 /// the main view and the detail area, in points at 100% (detail-views R8).
 pub const DETAIL_GAP: f32 = 8.0;
+/// The browser's width until its right edge is dragged, in points at 100%
+/// (L-WIN-004; browser R29).
+pub const BROWSER_WIDTH: f32 = 302.0;
+/// The browser's narrowest width, in points at 100%: its content pane at
+/// its narrowest beside the narrowest sidebar (browser R29).
+pub const BROWSER_MIN_WIDTH: f32 = 70.0;
+/// The widest width `view.set_browser_width` keeps, which no window shows.
+pub const BROWSER_MAX_WIDTH: f32 = 4000.0;
+/// The least width the main view keeps beside a widened browser, in points
+/// at 100% (browser R29).
+pub const MAIN_VIEW_MIN_WIDTH: f32 = 160.0;
+
+/// `points` brought within the browser's narrowest and widest widths; a
+/// width that isn't a number is the default.
+#[must_use]
+pub fn clamp_browser_width(points: f32) -> f32 {
+    if points.is_finite() {
+        points.clamp(BROWSER_MIN_WIDTH, BROWSER_MAX_WIDTH)
+    } else {
+        BROWSER_WIDTH
+    }
+}
 
 /// One of the detail area's two views.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -897,6 +929,14 @@ pub struct DetailHeightArgs {
     pub window: Option<WindowName>,
 }
 
+/// Arguments of `view.set_browser_width`.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BrowserWidthArgs {
+    /// The browser's width in points at 100%, from 70 to 4000.
+    pub points: f64,
+}
+
 /// What the view commands return: the window's view state afterwards.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ViewResult {
@@ -904,12 +944,24 @@ pub struct ViewResult {
     pub main_view: String,
     /// Whether the browser shows.
     pub browser: bool,
+    /// Whether the browser runs down to the Status Bar (Full-Height
+    /// Browser, spec: browser R26).
+    #[serde(default)]
+    pub full_height_browser: bool,
+    /// The browser's width in points at 100%, as it was set; a window too
+    /// narrow for it shows the browser narrower (browser R29).
+    #[serde(default = "default_browser_width")]
+    pub browser_width: f32,
     /// Whether the Info View shows.
     pub info_view: bool,
     /// Whether the main window is in full-screen mode.
     pub full_screen: bool,
     /// The interface zoom, where 1 is 100%.
     pub zoom: f32,
+}
+
+fn default_browser_width() -> f32 {
+    BROWSER_WIDTH
 }
 
 /// What `view.toggle_second_window` returns and `view.state` reports under
@@ -961,6 +1013,8 @@ pub struct ViewState {
     pub assistant: crate::assistant::AssistantPanelState,
     /// Whether the Undo History panel shows.
     pub undo_history: bool,
+    /// Whether the Save History panel shows.
+    pub save_history: bool,
     /// Whether floating devices' and plug-ins' windows are shown, as
     /// `view.toggle_plug_in_windows` sets it.
     pub plug_in_windows: bool,
@@ -977,6 +1031,18 @@ pub struct UndoHistoryState {
     /// The current row's place in the history, counted up from the set's
     /// start: 0 before any step.
     pub current: usize,
+}
+
+/// What `view.toggle_save_history` returns: the Save History panel's state
+/// afterwards.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SaveHistoryState {
+    /// Whether the panel shows.
+    pub open: bool,
+    /// How many rows the history lists (`set.save_history` lists them).
+    pub rows: usize,
+    /// Whether Save Continuously is on.
+    pub continuous: bool,
 }
 
 /// Adds the shell's commands to a registry, the agent server's
@@ -1255,6 +1321,31 @@ fn specs() -> Vec<CommandSpec> {
             .binding("S-BRW-002")
             .args::<WindowArgs>()
             .result::<ViewResult>(),
+        CommandSpec::new(VIEW_TOGGLE_FULL_HEIGHT_BROWSER, "Full-Height Browser")
+            .description(
+                "Runs the browser column from under the Control Bar down to the Status Bar, \
+                 instead of to the detail area's top; the Info View and the Clip or Device View \
+                 stay open, under the main view to the browser's right. Calling it again puts \
+                 the column back. Kept for the next start. Read in `view.state`'s \
+                 `window.full_height_browser`. Changes nothing in the set.",
+            )
+            .permission(Permission::Edit)
+            .context(Global)
+            .args::<NoArgs>()
+            .result::<ViewResult>(),
+        CommandSpec::new(VIEW_SET_BROWSER_WIDTH, "Set Browser Width")
+            .description(
+                "Sets the browser's width to `points`, in points at 100% zoom, as dragging \
+                 the browser's right edge does one frame at a time; a width outside 70 to \
+                 4000 points is brought within them, and a window too narrow for it shows the \
+                 browser narrower, leaving the main view 160 points. Both windows' browsers \
+                 take it, and it is kept for the next start. Read in `view.state`'s \
+                 `window.browser_width`. Changes nothing in the set and isn't an undo step.",
+            )
+            .permission(Permission::Read)
+            .context(Global)
+            .args::<BrowserWidthArgs>()
+            .result::<ViewResult>(),
         CommandSpec::new(VIEW_STATE, "View State")
             .description(
                 "Reports what the view commands switch: the main view (Arrangement or \
@@ -1269,7 +1360,8 @@ fn specs() -> Vec<CommandSpec> {
                  `view.switch_detail_view`, `view.toggle_detail_area`, \
                  `view.expand_clip_view`, `view.set_detail_height`, `focus.clip_view`, \
                  `focus.device_view`), the assistant's panel, the \
-                 Undo History (`view.toggle_undo_history`), whether plug-in windows are \
+                 Undo History (`view.toggle_undo_history`), the Save History \
+                 (`view.toggle_save_history`), whether plug-in windows are \
                  shown (`view.toggle_plug_in_windows`), the second window under \
                  `second_window`: whether it is open, its main view, browser, full-screen \
                  mode, zoom, frame and detail area (`view.toggle_second_window`, and the \
@@ -1611,6 +1703,19 @@ fn specs() -> Vec<CommandSpec> {
             .binding("S-VIEW-021")
             .args::<NoArgs>()
             .result::<UndoHistoryState>(),
+        CommandSpec::new(VIEW_TOGGLE_SAVE_HISTORY, "Save History")
+            .description(
+                "Shows or hides the Save History panel at the right of the main window, where \
+                 the Undo History opens (showing one hides the other). The panel lists the open \
+                 set's save points, then its saved versions, newest first; `set.save_history` \
+                 lists the same rows and `set.restore` restores one. Whether it shows is view \
+                 state: it isn't saved with the set and isn't an undo step. Changes nothing in \
+                 the set.",
+            )
+            .permission(Permission::Read)
+            .context(Global)
+            .args::<NoArgs>()
+            .result::<SaveHistoryState>(),
         CommandSpec::new(FOCUS_CONTROL_BAR, "Control Bar")
             .description(
                 "Moves the keyboard focus to the Control Bar at the top of the main window, \

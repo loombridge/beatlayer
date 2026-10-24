@@ -859,3 +859,315 @@ fn option_double_clicking_a_segment_straightens_it() {
         .unwrap();
     assert_eq!(first.bend, 0.0, "the segment is straight again");
 }
+
+// Shapes, handles and Simplify Envelope (WP-6.25b).
+
+/// Selects bar 1 to bar 2 in the track's pan lane.
+fn select_span(s: &mut Set) {
+    s.h.shell
+        .run(
+            "arrangement.select_time",
+            json!({
+                "start": BAR,
+                "end": BAR * 2,
+                "lanes": [{ "type": "automation", "track": s.track, "target": pan_json() }],
+            }),
+        )
+        .unwrap();
+    s.h.settle();
+}
+
+/// The Edit menu's Simplify Envelope (M-EDIT-039).
+fn edit_menu_simplify(h: &Harness) -> bl_ui::menus::ItemState {
+    let bar = bl_shell::menus::menu_bar(bl_shell::menus::MenuPlatform::current());
+    let item = bar
+        .iter()
+        .flat_map(bl_shell::menus::Menu::walk)
+        .find(|item| item.row == "M-EDIT-039")
+        .expect("Simplify Envelope is in the Edit menu");
+    bl_ui::menus::item_state(
+        item,
+        &h.shell,
+        &h.keymap,
+        bl_ui::keymap::Platform::current(),
+    )
+}
+
+// Spec: automation-editing R11, R19. Each shape button in the time selection's
+// menu inserts its shape, as one undo step.
+#[test]
+fn the_time_selections_menu_inserts_each_shape_in_one_undo_step() {
+    for shape in bl_model::Shape::ALL {
+        let mut s = set();
+        select_span(&mut s);
+        let before = s.steps();
+        let at = pos2(s.x(Ticks(BAR + BAR / 2)), s.y(0.0));
+        let output = right_click(&mut s.h, at);
+        let nodes = Harness::nodes(&output);
+        s.h.click(centre_of(&nodes, shape.label()));
+        s.h.settle();
+        let commands = s.commands();
+        assert!(
+            commands.contains(&"automation.insert_shape".to_owned()),
+            "{shape:?}: {commands:?}"
+        );
+        assert_eq!(s.steps(), before + 1, "{shape:?} is one undo step");
+    }
+}
+
+// Spec: automation-editing R11. Without a time selection in an automation
+// lane the menu has no shapes.
+#[test]
+fn a_menu_outside_automation_lanes_has_no_shapes() {
+    let mut s = set();
+    s.h.shell
+        .run(
+            "arrangement.select_time",
+            json!({ "start": 0, "end": BAR, "tracks": [s.track] }),
+        )
+        .unwrap();
+    s.h.settle();
+    let at = pos2(s.x(Ticks(BAR / 2)), s.lane().top() - 10.0);
+    let output = right_click(&mut s.h, at);
+    let nodes = Harness::nodes(&output);
+    assert!(!nodes.iter().any(|n| n.label == "Sine"));
+    assert!(!nodes.iter().any(|n| n.label == "Simplify Envelope"));
+}
+
+// Spec: automation-editing R18. Simplify Envelope runs from the time
+// selection's menu and from the Edit menu, and the Edit menu's item is
+// disabled without a time selection in an automation lane.
+#[test]
+fn simplify_envelope_runs_from_both_menus() {
+    let mut s = set();
+    // A straight run of breakpoints, which two replace.
+    for i in 1..8 {
+        s.h.shell
+            .run(
+                "automation.set_breakpoint",
+                json!({
+                    "track": s.track,
+                    "target": pan_json(),
+                    "at": i * BAR / 4,
+                    "value": -0.8 + 1.6 * (i as f64 / 8.0),
+                }),
+            )
+            .unwrap();
+    }
+    assert_eq!(s.points().len(), 9);
+    assert!(!edit_menu_simplify(&s.h).enabled, "no time selection");
+    s.h.shell
+        .run(
+            "arrangement.select_time",
+            json!({
+                "start": 0,
+                "end": BAR * 2 + 1,
+                "lanes": [{ "type": "automation", "track": s.track, "target": pan_json() }],
+            }),
+        )
+        .unwrap();
+    s.h.settle();
+    // The menu in the lane.
+    let before = s.steps();
+    let at = pos2(s.x(Ticks(BAR)), s.y(0.0) - 30.0);
+    let output = right_click(&mut s.h, at);
+    let nodes = Harness::nodes(&output);
+    s.h.click(centre_of(&nodes, "Simplify Envelope"));
+    s.h.settle();
+    assert!(s.commands().contains(&"automation.simplify".to_owned()));
+    assert_eq!(s.points().len(), 2);
+    assert_eq!(s.steps(), before + 1);
+    // And the Edit menu's.
+    s.h.shell.run("edit.undo", json!({})).unwrap();
+    assert_eq!(s.points().len(), 9);
+    let state = edit_menu_simplify(&s.h);
+    assert!(state.enabled);
+    let invocation = state.invocation.unwrap();
+    s.h.shell.invoke(&invocation.id, invocation.args).unwrap();
+    assert_eq!(s.points().len(), 2);
+}
+
+// Spec: automation-editing R14, R15. The top handle stretches the values,
+// as one undo step.
+#[test]
+fn dragging_the_top_handle_stretches_the_values_in_one_undo_step() {
+    let mut s = set();
+    select_span(&mut s);
+    // A breakpoint to stretch, half way up the lane.
+    s.h.shell
+        .run(
+            "automation.set_breakpoint",
+            json!({ "track": s.track, "target": pan_json(), "at": BAR + BAR / 4, "value": 0.0 }),
+        )
+        .unwrap();
+    s.h.settle();
+    let before = s.steps();
+    let lane = s.lane();
+    let middle = (s.x(Ticks(BAR)) + s.x(Ticks(BAR * 2))) / 2.0;
+    let top = pos2(middle, lane.top());
+    // Hover first, so the handles show, then drag the top to the middle.
+    s.h.frame(vec![Event::PointerMoved(top)]);
+    drag(
+        &mut s.h,
+        top,
+        pos2(middle, lane.center().y),
+        Modifiers::NONE,
+    );
+    let commands = s.commands();
+    assert!(
+        commands.contains(&"automation.stretch_values".to_owned()),
+        "{commands:?}"
+    );
+    // 0 was half way up the travel, and the top edge is now half way up.
+    let moved = s
+        .points()
+        .into_iter()
+        .find(|point| point.at == Ticks(BAR + BAR / 4))
+        .unwrap();
+    assert!((moved.value - -0.5).abs() < 0.1, "{moved:?}");
+    assert_eq!(s.steps(), before + 1, "the drag is one undo step");
+}
+
+// Spec: automation-editing R14, R16. The right handle stretches in time and
+// the time selection follows.
+#[test]
+fn dragging_the_right_handle_stretches_in_time_and_the_selection_follows() {
+    let mut s = set();
+    select_span(&mut s);
+    let before = s.steps();
+    let lane = s.lane();
+    let right = pos2(s.x(Ticks(BAR * 2)), lane.center().y);
+    s.h.frame(vec![Event::PointerMoved(right)]);
+    let to = pos2(s.x(Ticks(BAR * 3)), right.y);
+    drag(&mut s.h, right, to, Modifiers::NONE);
+    let commands = s.commands();
+    assert!(
+        commands.contains(&"automation.stretch_time".to_owned()),
+        "{commands:?}"
+    );
+    let selection = s.h.shell.arrangement().time_selection().unwrap();
+    assert_eq!(selection.0, Ticks(BAR));
+    assert!(selection.1 > Ticks(BAR * 5 / 2), "{selection:?}");
+    assert_eq!(s.steps(), before + 1, "the drag is one undo step");
+}
+
+// Spec: automation-editing R14, R17. A corner handle skews the values.
+#[test]
+fn dragging_a_corner_handle_skews_in_one_undo_step() {
+    let mut s = set();
+    select_span(&mut s);
+    s.h.shell
+        .run(
+            "automation.set_breakpoint",
+            json!({ "track": s.track, "target": pan_json(), "at": BAR + BAR / 2, "value": 0.5 }),
+        )
+        .unwrap();
+    s.h.settle();
+    let before = s.steps();
+    let lane = s.lane();
+    let corner = pos2(s.x(Ticks(BAR)), lane.top());
+    s.h.frame(vec![Event::PointerMoved(corner)]);
+    drag(
+        &mut s.h,
+        corner,
+        pos2(corner.x, lane.center().y),
+        Modifiers::NONE,
+    );
+    let commands = s.commands();
+    assert!(
+        commands.contains(&"automation.skew".to_owned()),
+        "{commands:?}"
+    );
+    assert_eq!(s.steps(), before + 1, "the drag is one undo step");
+    let moved = s
+        .points()
+        .into_iter()
+        .find(|point| point.at == Ticks(BAR + BAR / 2))
+        .unwrap();
+    assert!(moved.value < 0.5, "{moved:?}");
+}
+
+// Spec: automation-editing R14. Esc during a handle drag puts the envelope
+// and the selection back.
+#[test]
+fn esc_cancels_a_handle_drag() {
+    let mut s = set();
+    select_span(&mut s);
+    let (doc, selection, steps) = (
+        s.doc().clone(),
+        s.h.shell.arrangement().time_selection(),
+        s.steps(),
+    );
+    let lane = s.lane();
+    let right = pos2(s.x(Ticks(BAR * 2)), lane.center().y);
+    let to = pos2(s.x(Ticks(BAR * 3)), right.y);
+    let held = Event::ModifiersChanged(Modifiers::NONE);
+    s.h.frame(vec![held.clone(), Event::PointerMoved(right)]);
+    s.h.frame(vec![
+        held.clone(),
+        Event::PointerButton {
+            pos: right,
+            button: PointerButton::Primary,
+            pressed: true,
+            modifiers: Modifiers::NONE,
+        },
+    ]);
+    s.h.frame(vec![held.clone(), Event::PointerMoved(to)]);
+    assert!(s.h.shell.gesture_open(), "the drag is under way");
+    assert_ne!(s.h.shell.arrangement().time_selection(), selection);
+    s.h.key(Key::Escape, Modifiers::NONE);
+    s.h.frame(vec![
+        held,
+        Event::PointerButton {
+            pos: to,
+            button: PointerButton::Primary,
+            pressed: false,
+            modifiers: Modifiers::NONE,
+        },
+    ]);
+    s.h.settle();
+    assert_eq!(*s.doc(), doc, "the envelope is back");
+    assert_eq!(s.h.shell.arrangement().time_selection(), selection);
+    assert!(!s.h.shell.gesture_open());
+    assert_eq!(s.steps(), steps, "nothing is recorded");
+}
+
+// Spec: automation-editing R17. Option mirrors a handle's movement on the
+// opposite one.
+#[test]
+fn option_mirrors_a_handle_drag_on_the_opposite_handle() {
+    let mut s = set();
+    select_span(&mut s);
+    s.h.shell
+        .run(
+            "automation.set_breakpoint",
+            json!({ "track": s.track, "target": pan_json(), "at": BAR + BAR / 2, "value": 0.0 }),
+        )
+        .unwrap();
+    s.h.settle();
+    let lane = s.lane();
+    let middle = (s.x(Ticks(BAR)) + s.x(Ticks(BAR * 2))) / 2.0;
+    let top = pos2(middle, lane.top());
+    s.h.frame(vec![Event::PointerMoved(top)]);
+    // Dragging the top handle a quarter of the way down pulls the bottom
+    // one a quarter of the way up: a breakpoint at the middle stays there.
+    drag(
+        &mut s.h,
+        top,
+        pos2(middle, lane.top() + lane.height() / 4.0),
+        Modifiers::ALT,
+    );
+    let moved = s
+        .points()
+        .into_iter()
+        .find(|point| point.at == Ticks(BAR + BAR / 2))
+        .unwrap();
+    assert!(moved.value.abs() < 0.1, "{moved:?}");
+    let ends: Vec<f64> = s
+        .points()
+        .iter()
+        .filter(|point| point.at == Ticks::ZERO)
+        .map(|point| point.value)
+        .collect();
+    assert_eq!(ends, [-0.8], "outside the span nothing moved");
+}

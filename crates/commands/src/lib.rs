@@ -30,7 +30,7 @@ pub mod reference {
      Every action a person or an agent can take in Beatlayer is a command in the registry \
      (`crates/commands`). Menus, shortcuts, key and MIDI mapping, the agent API, and tests \
      all run commands by the IDs below, so an action has one implementation however it's \
-     reached (decisions D16 and D17 in [the architecture](02-architecture.md#decisions-log)).\n\
+     reached (decisions D16 and D17 in [the architecture](../02-architecture.md#decisions-log)).\n\
      \n\
      Each command has:\n\
      \n\
@@ -40,8 +40,8 @@ pub mod reference {
      changes;\n\
      - a **permission class**, which decides whether an agent asks first;\n\
      - **contexts**: the parts of the interface where a person reaches it, as \
-     [the UI parity reference](ui-parity/README.md) names them;\n\
-     - **default keys**: shortcuts from [the UI parity reference](ui-parity/shortcuts.md), \
+     [the UI parity reference](../ui-parity/README.md) names them;\n\
+     - **default keys**: shortcuts from [the UI parity reference](../ui-parity/shortcuts.md), \
      by ID, with any arguments they fix. The UI supplies the other arguments from the \
      selection in the shortcut's context, a text field, or a gesture. A command Live has \
      no shortcut for has no default keys;\n\

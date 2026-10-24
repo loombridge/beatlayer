@@ -216,6 +216,7 @@ impl Opened {
             folder: None,
             format: None,
             clip_kind: None,
+            details: None,
         });
         if !shown {
             return;
@@ -245,6 +246,7 @@ impl Opened {
                         folder: None,
                         format: None,
                         clip_kind: Some(clip_file_kind(&clip.data)),
+                        details: None,
                     });
                 }
             }
@@ -259,6 +261,7 @@ impl Opened {
             folder: None,
             format: None,
             clip_kind: None,
+            details: None,
         });
     }
 }

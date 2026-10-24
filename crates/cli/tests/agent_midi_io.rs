@@ -114,3 +114,43 @@ fn without_autonomous_changing_a_port_is_refused() {
     let ports = run(&mut client, "midi.ports", json!({}));
     assert_eq!(ports["ports"], json!([]));
 }
+
+/// Spec: midi-io R27. The MPE switch is `midi.set_port`'s `mpe`, which is
+/// external like the other switches, and is accepted as an argument when
+/// autonomous; a port the computer doesn't offer is still refused.
+#[test]
+fn the_mpe_switch_is_external_like_the_others() {
+    let mut client = bl_cli_mcp(&[]);
+    let refused = client
+        .call(
+            "run",
+            json!({ "commands": [{ "command": "midi.set_port",
+                                   "args": { "direction": "input", "name": "Roli",
+                                             "mpe": true } }] }),
+        )
+        .unwrap();
+    assert!(refused.is_error);
+    assert!(
+        refused.text.contains("`midi.set_port` is external"),
+        "{}",
+        refused.text
+    );
+    assert!(client.into_transport().finish().unwrap().success());
+
+    let mut client = bl_cli_mcp(&["--autonomous"]);
+    let refused = client
+        .call(
+            "run",
+            json!({ "commands": [{ "command": "midi.set_port",
+                                   "args": { "direction": "input", "name": "Roli",
+                                             "mpe": true } }] }),
+        )
+        .unwrap();
+    assert!(refused.is_error);
+    assert!(
+        refused.text.contains("Roli") && !refused.text.contains("unknown field"),
+        "the argument is known; the port isn't offered: {}",
+        refused.text
+    );
+    assert!(client.into_transport().finish().unwrap().success());
+}

@@ -59,7 +59,7 @@ Each row's **Notes** name the work packages that build it ("Built in WP-1.8a, WP
 | Live feature | Milestone | Notes |
 |---|---|---|
 | Launch modes: Trigger, Gate, Toggle, Repeat | M3 | Behaviour spec first. Built in WP-3.3 |
-| Legato, launch quantisation, velocity amount, nudge, Select on Launch | M3 | Built in WP-3.2, WP-3.4, WP-3.9 |
+| Legato, launch quantisation, velocity amount, nudge, Select on Launch | M3 (the settings, Select on Launch), M7 (Legato, a clip's own quantisation and nudging in the engine; velocity on MIDI and key launches) | [Spec](specs/launch-quantisation.md). Built in WP-3.2, WP-3.4, WP-3.9, WP-7.29, WP-7.2 |
 | The Clip View's Main Properties panel: Start and End with Show and Set, Duplicate, Loop, Position and Length, Signature | M6 | Its Groove and Scale rows come with grooves and scales ([spec](specs/clip-properties.md)). Built in WP-6.55 |
 | Clip stop buttons, removable | M3 | Built in WP-3.2 |
 | Follow actions on clips and scenes (No Action, Stop, Play Again, Previous, Next, First, Last, Any, Other, Jump; A and B with chance; linked and unlinked; global switch) | M3 | Seeded randomness so renders repeat. Built in WP-3.10 |
@@ -107,7 +107,7 @@ Each row's **Notes** name the work packages that build it ("Built in WP-1.8a, WP
 | MPE lanes (pitch bend, slide, pressure), Drum Rack pitch-bend lane | M6 | Native devices take per-note expression since M2 and M5; per-note expression in clips, MPE controllers and recording in WP-6.17, the MPE tab and the Drum Rack's pitch-bend lane in WP-6.18 ([spec](specs/mpe.md)). Built in WP-6.17, WP-6.18 |
 | MIDI Tools, transformations (Arpeggiate, Chop, Connect, Glissando, LFO, Ornament, Quantize, Recombine, Span, Strum, Time Warp, Velocity Shaper) | M6 | Built on the same API that extensions use in M9 ([spec](specs/midi-transformations.md)). Built in WP-6.11, WP-6.12, WP-6.13, WP-6.13b |
 | MIDI Tools, generators (Rhythm, Seed, Shape, Stacks, Euclidean) | M6 | Chord banks in Beatlayer's own format ([spec](specs/midi-generators.md)). Built in WP-6.11, WP-6.14, WP-6.14b |
-| Chained MIDI Tools, mapped to keys or MIDI | M6 (chains), M7 (mapping to keys or MIDI) | Mapping comes with M7's map modes ([spec](specs/midi-tools.md)). Built in WP-6.15 |
+| Chained MIDI Tools, mapped to keys or MIDI | M6 (chains), M7 (mapping to keys or MIDI) | [Spec](specs/midi-tools.md); mapping a chain: [map modes](specs/map-modes.md). Built in WP-6.15, WP-7.3b |
 | Pitch and Time Utilities (Fit to Scale, Invert, Transpose, Add Interval, ×2, ÷2, Stretch, Set Length, Humanize, Reverse, Legato) | M6 | [Spec](specs/pitch-and-time-utilities.md). Built in WP-6.16 |
 | Scale Mode per clip, MIDI and audio | M6 | Scale-aware devices follow as each device ships ([spec](specs/scales.md)). Built in WP-6.7, WP-6.7b |
 | Tuning systems: `.scl` and `.ascl` import, `.ascl` save, reference pitch and note range, per-track bypass, MIDI controller layouts, tunings on MPE plug-ins | M6 | Beatlayer generates its own bundled tunings (EDO, just intonation, historical temperaments) ([spec](specs/tunings.md)). Built in WP-6.9, WP-6.9b, WP-6.10 |
@@ -122,7 +122,7 @@ Each row's **Notes** name the work packages that build it ("Built in WP-1.8a, WP
 | Loop recording into take lanes | M2 | Built in WP-2.13 |
 | Take lanes and comping, take-lane commands | M6 | [Spec](specs/comping.md). Built in WP-6.21, WP-6.22, WP-6.22b |
 | Linked-track editing | M6 | [Spec](specs/linked-track-editing.md). Built in WP-6.23 |
-| MIDI Arrangement Overdub, record quantisation | M2 | Built in WP-2.14 |
+| MIDI Arrangement Overdub, record quantisation | M2 (overdub), M7 (record quantisation) | Built in WP-2.14, WP-7.32 |
 | Session slot recording, Session overdub | M3 | Built in WP-3.11 |
 | Session performance into the Arrangement, Back to Arrangement | M3 | Built in WP-3.13, WP-3.6 |
 | Count-in, metronome sounds and subdivision, metronome only while recording | M2 | Built in WP-2.15 |
@@ -163,7 +163,7 @@ Each row's **Notes** name the work packages that build it ("Built in WP-1.8a, WP
 | Relative modulation on top of automation | M5 | Built in WP-5.9 |
 | Modulators: LFO, Shaper, Envelope Follower, Envelope MIDI, Shaper MIDI, Expression Control | M5 | Built in WP-5.10, WP-5.11 |
 | Macros (16 per rack), variations, randomise, map mode with per-mapping ranges | M5 | Built in WP-5.4, WP-5.5 |
-| MIDI map mode, key map mode, takeover modes, relative controllers, instant mappings | M7 | |
+| MIDI map mode, key map mode, takeover modes, relative controllers, instant mappings | M7 | [Remote mapping](specs/remote-mapping.md), [map modes](specs/map-modes.md), [control surfaces](specs/control-surfaces.md). Built in WP-7.1, WP-7.2, WP-7.2b, WP-7.3, WP-7.3b, WP-7.4, WP-7.6 |
 | Computer MIDI keyboard | M2 | Built in WP-2.2 |
 | MPE controllers and MPE out: a MIDI port's MPE switch, MIDI To and the External Instrument sending MPE, MPE/Multi-channel Settings | M6 | [Spec](specs/mpe.md). Built in WP-6.17, WP-6.17b |
 
@@ -184,7 +184,7 @@ Each row's **Notes** name the work packages that build it ("Built in WP-1.8a, WP
 
 | Live device | Milestone | Notes |
 |---|---|---|
-| Simpler | M2 | Sampler v1. Built in WP-2.16 |
+| Simpler | M2 (Sampler v1), M7 (the region with S Start, S Length and S Loop Length; Slice mode's Playback; Slice to Drum Rack) | [Spec](specs/sampler.md). Built in WP-2.16, WP-7.33, WP-7.33b |
 | Drift | M2 | Polysynth v1. Built in WP-2.17 |
 | Impulse, Drum Sampler | M5 | Built in WP-5.17, WP-5.18 |
 | Sampler (multisample, zones, modulation) | M5 | Plus SFZ import. Built in WP-5.13, WP-5.14 |
@@ -197,7 +197,7 @@ Each row's **Notes** name the work packages that build it ("Built in WP-1.8a, WP
 | Drum Synths (Kick, Snare, Clap, Hi-hat, Cymbal, Tom, FM, Clang) | M8 | |
 | Granulator III | M8 | |
 | Bass, Poli | M8 | |
-| CV Instrument, CV Triggers | M7 | Needs a DC-coupled interface |
+| CV Instrument, CV Triggers | M7 | Needs a DC-coupled interface; Live's are Max devices, Beatlayer's are native ([spec](specs/cv-tools.md)). Built in WP-7.17 |
 | Inspired by Nature (Tree Tone, Emit, Vector FM, Vector Grain) | M9 | Built with the extension SDK as showcase devices |
 
 ## Audio effects
@@ -213,7 +213,7 @@ Each row's **Notes** name the work packages that build it ("Built in WP-1.8a, WP
 | Amp, Cabinet, Pedal | M8 | Cabinet impulse responses recorded or open-licensed |
 | Echo, Hybrid Reverb, Roar, Spectral Resonator, Spectral Time | M8 | |
 | Convolution Reverb, Color Limiter, Gated Delay, Pitch Hack, PitchLoop89, Re-Enveloper, Spectral Blur, Vector Delay | M8 | Live's versions are Max devices; Beatlayer's are native |
-| CV tools (Clock In and Out, Envelope Follower, In, LFO, Shaper, Utility) | M7 | |
+| CV tools (Clock In and Out, Envelope Follower, In, LFO, Shaper, Utility) | M7 | Live's are Max devices, Beatlayer's are native ([spec](specs/cv-tools.md)). Built in WP-7.18, WP-7.18b |
 | Legacy devices (Auto Filter Legacy, Chorus, Flanger, Phaser, Frequency Shifter, and others) | M9 | Mapped to current equivalents on Live set import |
 | Surround Panner | Out | No surround mixing in 1.0 |
 
@@ -231,12 +231,13 @@ Each row's **Notes** name the work packages that build it ("Built in WP-1.8a, WP
 
 | Live feature | Milestone | Notes |
 |---|---|---|
-| Ableton Link: tempo, phase, Start Stop Sync | M7 | Through the open-source Link library |
-| Link Audio | M7 | In the open-source Link library since Link 4.0 (4 May 2026) |
-| MIDI Clock in and out with song position; sync delay per port | M7 | |
-| MIDI Timecode in | M7 | |
-| Control-surface scripts (Live ships 139, in Python) | M7 | Beatlayer's own scripting host and scripts; a handful of popular controllers at first, the rest from the community |
-| Push 2 as a controller | M7 | Through Ableton's public Push 2 interface documentation |
+| Tap tempo, Start Transport With Tap Tempo; Phase Nudge Down and Up | M7 | Built in WP-7.31, WP-7.30 |
+| Ableton Link: tempo, phase, Start Stop Sync | M7 | Through the open-source Link library, 4.1.1 ([spec](specs/link.md)). Built in WP-7.14, WP-7.15 |
+| Link Audio | M7 | In the open-source Link library since Link 4.0 (4 May 2026) ([spec](specs/link-audio.md)). Built in WP-7.16 |
+| MIDI Clock in and out with song position; sync delay per port | M7 | [Spec](specs/midi-clock.md). Built in WP-7.11, WP-7.12 |
+| MIDI Timecode in | M7 | [Spec](specs/midi-timecode.md). Built in WP-7.13 |
+| Control-surface scripts (Live ships 139, in Python) | M7 | Beatlayer's own control-surface host, with native surfaces and declarative controller templates; the first controllers are Novation's Launchpad X, Mini MK3 and Pro MK3 and Launchkey MK3 and MK4, and Akai's APC mini mk2 and APC40 mkII, the rest from the community; scripts as WebAssembly components come with the extension SDK in M9 ([control surfaces](specs/control-surfaces.md), [supported controllers](specs/supported-controllers.md)). Built in WP-7.5, WP-7.6, WP-7.7, WP-7.8, WP-7.9, WP-7.10 |
+| Push 2 as a controller | M7 | Through Ableton's public Push 2 interface documentation ([Push 2](specs/push-2.md), [notes on Push 2](specs/push-2-notes.md), [tracks on Push 2](specs/push-2-tracks.md)). Built in WP-7.19, WP-7.20, WP-7.21, WP-7.22, WP-7.23, WP-7.24, WP-7.25, WP-7.26, WP-7.27, WP-7.28 |
 | Push 3 as a controller | M10 | If its protocol is documented by then; otherwise out |
 | Push 3 standalone, Move, Note, Ableton Cloud sync | Out | Closed platforms and services |
 

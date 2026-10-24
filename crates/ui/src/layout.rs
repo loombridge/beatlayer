@@ -28,7 +28,8 @@
 //! don't scale ([`title_bar_height`]).
 
 use bl_shell::commands::{
-    CLIP_VIEW_HEIGHT, CLIP_VIEW_MIN_HEIGHT, DETAIL_GAP, DEVICE_VIEW_HEIGHT, MAIN_VIEW_MIN_HEIGHT,
+    BROWSER_MIN_WIDTH, BROWSER_WIDTH, CLIP_VIEW_HEIGHT, CLIP_VIEW_MIN_HEIGHT, DETAIL_GAP,
+    DEVICE_VIEW_HEIGHT, MAIN_VIEW_MIN_HEIGHT, MAIN_VIEW_MIN_WIDTH,
 };
 use egui::{Pos2, Rect, Vec2, pos2, vec2};
 
@@ -419,7 +420,7 @@ pub const D24: &str = "D24";
 #[rustfmt::skip]
 pub const ELEMENTS: &[Placement] = &[
     p(E::BrowserToggle, "L-CTRL-001", "Show/Hide Browser", CB, 9.0, 18.0, Left, Switch, None),
-    p(E::BrowserMenu, "L-CTRL-001", "Browser Config Menu", CB, 27.0, 8.0, Left, MenuArrow, Some("M6")),
+    p(E::BrowserMenu, "L-CTRL-001", "Browser Config Menu", CB, 27.0, 8.0, Left, MenuArrow, None),
     p(E::TapTempo, "L-CTRL-004", "Tap Tempo", CB, 54.0, 28.0, Left, Button, Some("M2")),
     p(E::Tempo, "L-CTRL-005", "Tempo", CB, 82.0, 44.0, Left, Value, None),
     p(E::NudgeDown, "L-CTRL-006", "Phase Nudge Down", CB, 126.0, 18.0, Left, Button, Some("M7")),
@@ -504,6 +505,11 @@ pub struct DetailViews {
     pub clip_height: f32,
     /// Whether the Clip View takes its largest height.
     pub expanded: bool,
+    /// Whether the browser runs down to the Status Bar, the detail area
+    /// beside it (Full-Height Browser, browser R26).
+    pub full_height_browser: bool,
+    /// The browser's width as it was set, in layout points (browser R29).
+    pub browser_width: f32,
 }
 
 impl DetailViews {
@@ -515,7 +521,23 @@ impl DetailViews {
             device: detail.device_shown(),
             clip_height: detail.clip_height() as f32,
             expanded: detail.expanded(),
+            full_height_browser: false,
+            browser_width: BROWSER_WIDTH,
         }
+    }
+
+    /// The same, with the browser running down to the Status Bar or not.
+    #[must_use]
+    pub const fn with_full_height_browser(mut self, on: bool) -> Self {
+        self.full_height_browser = on;
+        self
+    }
+
+    /// The same, with the browser `width` points wide as it was set.
+    #[must_use]
+    pub const fn with_browser_width(mut self, width: f32) -> Self {
+        self.browser_width = width;
+        self
     }
 }
 
@@ -528,6 +550,8 @@ impl Default for DetailViews {
             device: true,
             clip_height: CLIP_VIEW_HEIGHT,
             expanded: false,
+            full_height_browser: false,
+            browser_width: BROWSER_WIDTH,
         }
     }
 }
@@ -563,6 +587,9 @@ pub struct ShellLayout {
     /// The tallest the Clip View can be in this window, in layout points:
     /// the height that leaves the main view its smallest (R10).
     pub largest_clip_view: f32,
+    /// The widest the browser can be in this window, in layout points: the
+    /// width that leaves the main view its least (browser R29).
+    pub largest_browser: f32,
     /// The Status Bar strip (L-WIN-007).
     pub status_bar: Rect,
     /// The assistant's pane, at the right edge, while it's docked and open
@@ -727,8 +754,24 @@ impl ShellLayout {
                 .clamp(CLIP_VIEW_MIN_HEIGHT, largest_clip_view),
         };
         let height = clip_height + gap + device_height;
+        // Spec: browser R26. With the Full-Height Browser the detail area
+        // starts to the right of the browser's column.
+        let full_height = browser && detail_views.full_height_browser;
+        // Spec: browser R29. The browser keeps its width as it was set, less
+        // in a window too narrow for it, where the main view keeps its
+        // least width; never narrower than its narrowest.
+        let largest_browser = (right - MAIN_VIEW_MIN_WIDTH - 2.0 * MARGIN).max(BROWSER_MIN_WIDTH);
+        let browser_right = MARGIN
+            + detail_views
+                .browser_width
+                .clamp(BROWSER_MIN_WIDTH, largest_browser);
+        let detail_left = if full_height {
+            browser_right + MARGIN
+        } else {
+            MARGIN
+        };
         let detail = Rect::from_min_max(
-            pos2(MARGIN, detail_bottom - height),
+            pos2(detail_left, detail_bottom - height),
             pos2(right, detail_bottom),
         );
         // The Info View is as tall as the detail area, or as tall as the
@@ -741,7 +784,7 @@ impl ShellLayout {
             };
             Rect::from_min_max(
                 pos2(detail.left(), detail_bottom - height),
-                pos2(240.0, detail_bottom),
+                pos2(detail.left() + (240.0 - MARGIN), detail_bottom),
             )
         });
         // The main view runs down to the detail area, 8 points above it, or
@@ -752,9 +795,14 @@ impl ShellLayout {
         } else {
             detail_bottom
         };
-        let browser_bottom = info_view.map_or(views_bottom, |info| info.top() - DETAIL_GAP);
-        let browser_rect =
-            browser.then(|| Rect::from_min_max(pos2(MARGIN, y(61.0)), pos2(311.0, browser_bottom)));
+        let browser_bottom = if full_height {
+            detail_bottom
+        } else {
+            info_view.map_or(views_bottom, |info| info.top() - DETAIL_GAP)
+        };
+        let browser_rect = browser.then(|| {
+            Rect::from_min_max(pos2(MARGIN, y(61.0)), pos2(browser_right, browser_bottom))
+        });
         let main_left = browser_rect.map_or(MARGIN, |b| b.right() + MARGIN);
         let main_view = Rect::from_min_max(pos2(main_left, y(61.0)), pos2(right, views_bottom));
         // With the Info View hidden the views take the detail area's whole
@@ -811,6 +859,7 @@ impl ShellLayout {
             clip_view,
             device_view,
             largest_clip_view,
+            largest_browser,
             status_bar,
             assistant,
             undo_history,
@@ -894,6 +943,7 @@ impl ShellLayout {
             scale(rect);
         }
         self.largest_clip_view *= factor;
+        self.largest_browser *= factor;
         if let Some(browser) = &mut self.browser {
             scale(browser);
         }
@@ -967,6 +1017,14 @@ impl ShellLayout {
 /// in Live (browser, "To observe in Live").
 pub const BROWSER_ROW: f32 = 17.0;
 
+/// The content pane's least width, which a narrowed browser keeps before
+/// its sidebar narrows, as observed in Live 12.4.6 (browser R29).
+pub const CONTENT_MIN_WIDTH: f32 = 57.0;
+
+/// The sidebar's narrowest width, which the browser's narrowest leaves it
+/// (browser R29).
+pub const SIDEBAR_MIN_WIDTH: f32 = BROWSER_MIN_WIDTH - CONTENT_MIN_WIDTH - 1.0;
+
 /// How high the Quick Tags section is, when it shows (L-BRW-012). Live's
 /// isn't measured; this is Beatlayer's own.
 pub const QUICK_TAGS_HEIGHT: f32 = 62.0;
@@ -975,12 +1033,37 @@ pub const QUICK_TAGS_HEIGHT: f32 = 62.0;
 /// (L-BRW-013). Live's isn't measured; this is Beatlayer's own.
 pub const TAG_EDITOR_WIDTH: f32 = 190.0;
 
+/// How high the Filter View is, when it shows: from y 84 to y 204 in the
+/// default state (L-BRW-007).
+pub const FILTER_VIEW_HEIGHT: f32 = 120.0;
+
+/// The gap under the Filter View: the column header row sits at y 208
+/// (L-BRW-009).
+pub const FILTER_VIEW_GAP: f32 = 4.0;
+
+/// How high the Results bar is (L-BRW-008). Live's isn't measured; this is
+/// Beatlayer's own.
+pub const RESULTS_BAR_HEIGHT: f32 = 18.0;
+
+/// Which of the content pane's optional parts show, which decide where the
+/// column header row and the list go.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct BrowserParts {
+    /// Quick Tags, at the pane's bottom (L-BRW-012).
+    pub quick_tags: bool,
+    /// The Filter View, at the pane's top (L-BRW-007).
+    pub filter_view: bool,
+    /// The Results bar, under the Filter View, while a search or a filter is
+    /// active (L-BRW-008).
+    pub results_bar: bool,
+}
+
 /// The browser's parts inside its column (L-BRW rows), from layout.md's
 /// measurements in Live 12.4.3 at 1600 × 1000 points. The top row and the
 /// sidebar keep their size; the search field and the content pane stretch
 /// with the column, which keeps Live's 302 points until it can be widened
-/// (I-DRAG-027). The Filter View (L-BRW-007) is an M6 feature and hidden, so
-/// the column header row sits at the content pane's top.
+/// (I-DRAG-027). With the Filter View shown (R18) the column header row sits
+/// under it, at y 208; hidden, at the content pane's top.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BrowserLayout {
     /// The browser column (L-WIN-004).
@@ -999,8 +1082,16 @@ pub struct BrowserLayout {
     pub sidebar: Rect,
     /// The content pane (L-BRW-006).
     pub content: Rect,
+    /// The Filter View (L-BRW-007), as high as the pane's top part it fills;
+    /// no height while it is hidden.
+    pub filter_view: Rect,
+    /// The Results bar (L-BRW-008); no height while there is no search or
+    /// filter.
+    pub results_bar: Rect,
     /// The column header row, with Name (L-BRW-009).
     pub header: Rect,
+    /// The Content Options menu's button, at the header row's right.
+    pub column_menu: Rect,
     /// The item list (L-BRW-010).
     pub list: Rect,
     /// The Quick Tags section, at the content pane's bottom, above the
@@ -1023,9 +1114,23 @@ impl BrowserLayout {
         Self::compute_with(column, false)
     }
 
-    /// Lays the browser out in its column, with Quick Tags showing or not.
+    /// Lays the browser out in its column, with Quick Tags showing or not
+    /// and the Filter View hidden.
     #[must_use]
     pub fn compute_with(column: Rect, quick_tags_shown: bool) -> Self {
+        Self::compute_parts(
+            column,
+            BrowserParts {
+                quick_tags: quick_tags_shown,
+                ..BrowserParts::default()
+            },
+        )
+    }
+
+    /// Lays the browser out in its column, with these parts showing.
+    #[must_use]
+    pub fn compute_parts(column: Rect, parts: BrowserParts) -> Self {
+        let quick_tags_shown = parts.quick_tags;
         // Offsets from layout.md's window coordinates: the column spans x 9
         // to 311 and y 61 to 766 at the reference size.
         let x = |window_x: f32| column.left() + window_x - 9.0;
@@ -1033,12 +1138,49 @@ impl BrowserLayout {
         let row = |x0: f32, x1: f32| Rect::from_min_max(pos2(x0, top(62.0)), pos2(x1, top(80.0)));
         let right = column.right();
         let body_top = top(84.0);
+        // Spec: browser R29. A narrowed browser narrows its content pane to
+        // its least width, then the sidebar, down to its narrowest.
+        let sidebar_right = (right - CONTENT_MIN_WIDTH - 1.0)
+            .min(x(109.0))
+            .max(column.left() + SIDEBAR_MIN_WIDTH);
         let sidebar = Rect::from_min_max(
             pos2(column.left(), body_top),
-            pos2(x(109.0), column.bottom()),
+            pos2(sidebar_right, column.bottom()),
         );
-        let content = Rect::from_min_max(pos2(x(110.0), body_top), pos2(right, column.bottom()));
-        let header = Rect::from_min_max(content.min, pos2(right, content.top() + 19.0));
+        let content = Rect::from_min_max(
+            pos2(sidebar_right + 1.0, body_top),
+            pos2(right, column.bottom()),
+        );
+        // The Filter View fills the pane's top, the Results bar follows, and
+        // the column header row and the list move down under them.
+        let band = |top: f32, height: f32| {
+            Rect::from_min_max(pos2(content.left(), top), pos2(right, top + height))
+        };
+        let mut below = content.top();
+        let filter_view = band(
+            below,
+            if parts.filter_view {
+                FILTER_VIEW_HEIGHT
+            } else {
+                0.0
+            },
+        );
+        if parts.filter_view {
+            below += FILTER_VIEW_HEIGHT + FILTER_VIEW_GAP;
+        }
+        let results_bar = band(
+            below,
+            if parts.results_bar {
+                RESULTS_BAR_HEIGHT
+            } else {
+                0.0
+            },
+        );
+        if parts.results_bar {
+            below += RESULTS_BAR_HEIGHT;
+        }
+        let header = Rect::from_min_max(pos2(content.left(), below), pos2(right, below + 19.0));
+        let column_menu = Rect::from_min_max(pos2(right - 16.0, header.top()), header.max);
         // The strip from y 744 to the column's bottom (766).
         let strip = Rect::from_min_max(pos2(content.left(), column.bottom() - 22.0), content.max);
         // Quick Tags sits at the content pane's bottom, above the preview
@@ -1072,12 +1214,15 @@ impl BrowserLayout {
             forward: row(x(29.0), x(47.0)),
             // The search field ends 41 points short of the column's right,
             // and the filter controls keep their place from the right.
-            search: row(x(50.0), right - 41.0),
+            search: row(x(50.0), (right - 41.0).max(x(50.0))),
             filter_toggle: row(right - 36.0, right - 18.0),
             filter_menu: row(right - 14.0, right - 2.0),
             sidebar,
             content,
+            filter_view,
+            results_bar,
             header,
+            column_menu,
             list,
             quick_tags,
             strip,

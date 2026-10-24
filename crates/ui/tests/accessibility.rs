@@ -438,16 +438,32 @@ fn tab_moves_within_the_focused_area_and_wraps_with_wrap_tab_navigation() {
     assert_eq!(seen[seen.len() - 2], last);
     assert_eq!(h.shell.focused_area(), Area::ControlBar);
 
-    // The browser: from the search field to the sidebar to the list, each
-    // part's keys applying as the shell moves its focus there.
+    // The browser: from the search field to the Filter View toggle and
+    // menu, the sidebar, the Filter View, then the content pane's header
+    // and list, each part's keys applying as the shell moves its focus
+    // there (browser-tags R23, I-FOCUS-007).
     press(&mut h, Key::F, command());
     assert_eq!(focused_id(&h), Some(bl_ui::browser::search_id()));
+    press(&mut h, Key::Tab, Modifiers::NONE);
+    assert_eq!(
+        focused_id(&h),
+        Some(bl_ui::browser::control_id("Show Filter View"))
+    );
+    press(&mut h, Key::Tab, Modifiers::NONE);
+    assert_eq!(
+        focused_id(&h),
+        Some(bl_ui::browser::control_id("Filter View Menu"))
+    );
     press(&mut h, Key::Tab, Modifiers::NONE);
     assert_eq!(focused_id(&h), Some(bl_ui::browser::sidebar_id()));
     assert_eq!(
         h.shell.browser_view().focus(),
         bl_shell::browser::Part::Sidebar
     );
+    press(&mut h, Key::Tab, Modifiers::NONE);
+    assert_eq!(focused_id(&h), Some(bl_ui::browser::filter_view_id()));
+    press(&mut h, Key::Tab, Modifiers::NONE);
+    assert_eq!(focused_id(&h), Some(bl_ui::browser::content_options_id()));
     press(&mut h, Key::Tab, Modifiers::NONE);
     assert_eq!(focused_id(&h), Some(bl_ui::browser::list_id()));
     assert_eq!(
@@ -1723,6 +1739,15 @@ fn clip_view_shown(h: &mut Harness) {
 }
 
 /// The keyboard focus in the detail area, off any control.
+fn browser_area(h: &mut Harness) {
+    h.shell.set_focused_area(bl_shell::Area::Browser);
+    h.ctx.memory_mut(|m| {
+        if let Some(id) = m.focused() {
+            m.surrender_focus(id);
+        }
+    });
+}
+
 fn detail_area(h: &mut Harness) {
     h.shell.set_focused_area(bl_shell::Area::Detail);
     h.ctx.memory_mut(|m| {
@@ -1730,6 +1755,50 @@ fn detail_area(h: &mut Harness) {
             m.surrender_focus(id);
         }
     });
+}
+
+/// A MIDI clip in the first Session slot, shown in the Clip View with the
+/// Transform panel showing.
+fn midi_tools_shown(h: &mut Harness) {
+    let track = h.shell.editor().document().top_level().next().unwrap();
+    let scene = h.shell.editor().document().scenes().next().unwrap().id;
+    h.shell
+        .run(
+            "session.insert_empty_midi_clip",
+            json!({ "track": track, "scene": scene }),
+        )
+        .unwrap();
+    h.shell
+        .run("session.select", json!({ "track": track, "scene": scene }))
+        .unwrap();
+    h.shell.run("view.toggle_clip_view", json!({})).unwrap();
+    h.shell
+        .run("clip_view.show_panel", json!({ "panel": "transform" }))
+        .unwrap();
+}
+
+/// The same, with the shown tool's degrees off their default, so Reset can
+/// be pressed.
+fn midi_tools_changed(h: &mut Harness) {
+    midi_tools_shown(h);
+    h.shell
+        .run(
+            "midi_tool.set_auto",
+            json!({ "tool": "test_transpose", "auto": false }),
+        )
+        .unwrap();
+    h.shell
+        .run(
+            "midi_tool.set",
+            json!({ "tool": "test_transpose", "values": { "degrees": 3 } }),
+        )
+        .unwrap();
+    h.shell
+        .run(
+            "midi_tool.set_auto",
+            json!({ "tool": "test_transpose", "auto": true }),
+        )
+        .unwrap();
 }
 
 fn plugin_list(h: &mut Harness) {
@@ -1934,6 +2003,17 @@ fn paths() -> BTreeMap<&'static str, Path> {
          the envelopes (S-EDIT-016), and the lane's gestures move and select their breakpoints \
          (automation-editing R2 to R4)",
     );
+    // The shapes are buttons in the time selection's context menu, which
+    // the keyboard opens (S-CTX-002); the handles that stretch and skew a
+    // selection are dragged, and the manual gives them no keys.
+    let envelope_shapes = Equivalent(
+        "the buttons of the time selection's context menu in an automation lane, which the \
+         context-menu keys open (S-CTX-002; automation-editing R11)",
+    );
+    let handles = Live(
+        "the handles of a time selection in an automation lane are dragged; the manual gives \
+         them no keys (manual 25.5.3; automation-editing R14 to R17)",
+    );
     // The automation lane that has the keyboard (WP-6.26): Enter makes and
     // selects a breakpoint at the insert marker, and the arrows, a typed
     // number, Delete and Cmd-Delete edit it.
@@ -1960,7 +2040,37 @@ fn paths() -> BTreeMap<&'static str, Path> {
         "the browser's Quick Tags: its Add\u{2026} field, its X, and its Create New Tag\u{2026} \
          item (the browser tags spec, R13 and R14)",
     );
+    // The browser's Filter View, saved labels, sidebar and columns
+    // (browser-tags R18 to R28): the Tab order reaches the Filter View's tag
+    // buttons, the Filter View Menu, the Results bar's buttons, the
+    // sidebar and the header row's Content Options button.
+    let filters = Equivalent(
+        "the browser's Filter View: its tag buttons (the arrow keys, Enter and Cmd-Enter), the \
+         Filter View Menu's group items, the Results bar's Clear and Add Label buttons, Esc and \
+         Cmd-F in the search field (the browser tags spec, R20 to R23)",
+    );
+    let labels = Equivalent(
+        "the browser's sidebar: the Library section's Edit mode and its check boxes, a label's \
+         context menu (Rename, also Cmd-R, Choose Icon, Remove), the Library heading's Reset \
+         Label Order item, and dragging a label (the browser tags spec, R24 to R26)",
+    );
+    let columns = Equivalent(
+        "the content pane's header row: the Content Options menu, a column's name sorting by it, \
+         and dragging a column's name (the browser tags spec, R27 and R28)",
+    );
     BTreeMap::from([
+        // The browser's Filter View, labels and columns (browser-tags R18
+        // to R28).
+        ("browser.add_label", Exception(filters)),
+        ("browser.clear_filters", Exception(filters)),
+        ("browser.filter", Exception(filters)),
+        ("browser.set_filter_groups", Exception(filters)),
+        ("browser.move_label", Exception(labels)),
+        ("browser.remove_label", Exception(labels)),
+        ("browser.reset_label_order", Exception(labels)),
+        ("browser.set_label_icon", Exception(labels)),
+        ("browser.set_label_shown", Exception(labels)),
+        ("browser.set_columns", Exception(columns)),
         // The browser's tags (browser-tags R10 to R16).
         ("browser.add_tag", Exception(tag_editor)),
         ("browser.add_tag_group", Exception(tag_editor)),
@@ -1976,7 +2086,11 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("automation.delete_range", Exception(envelope_edit)),
         ("automation.duplicate", Exception(envelope_edit)),
         ("automation.move_breakpoints", Exception(envelope_edit)),
+        ("automation.insert_shape", Exception(envelope_shapes)),
         ("automation.paste", Exception(envelope_edit)),
+        ("automation.skew", Exception(handles)),
+        ("automation.stretch_time", Exception(handles)),
+        ("automation.stretch_values", Exception(handles)),
         ("automation.select_segment", Exception(envelope_edit)),
         ("automation.select_breakpoint", Exception(selecting)),
         ("clip.select_envelope_breakpoint", Exception(selecting)),
@@ -2216,6 +2330,20 @@ fn paths() -> BTreeMap<&'static str, Path> {
             Exception(Equivalent(
                 "the shell's locator.delete, which the Delete Locator button and the Delete key \
                  run (the time editing spec, R4 and R13)",
+            )),
+        ),
+        (
+            "song.insert_time",
+            Exception(Equivalent(
+                "arrangement.insert_silence, which Cmd-I and Create ▸ Insert Silence run on the \
+                 time selection (the time editing spec, R17 and R24)",
+            )),
+        ),
+        (
+            "song.delete_time",
+            Exception(Equivalent(
+                "arrangement.delete_time, which Cmd-Shift-Delete and Edit ▸ Delete Time run on \
+                 the time selection (the time editing spec, R15 and R24)",
             )),
         ),
         (
@@ -2809,6 +2937,20 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ),
         ("clip.create", Exception(editing)),
         (
+            "set.restore",
+            Exception(Equivalent(
+                "the Save History panel's rows: select one with the arrow keys and press Return, \
+                 or press Restore (crash recovery R16, R19)",
+            )),
+        ),
+        (
+            "set.save_history",
+            Exception(Equivalent(
+                "the Save History panel lists the same rows, which reach assistive technology \
+                 (crash recovery R13, R19)",
+            )),
+        ),
+        (
             "edit.go_to_step",
             Exception(Equivalent(
                 "the Undo History panel's rows: click one, or move to it with the arrow keys \
@@ -2817,88 +2959,65 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ),
         (
             "track.add_take_lane",
-            Exception(LaterView(
-                "the take lanes' view and comping (milestone M6); loop recording makes the lanes",
+            Exception(Equivalent(
+                "Insert Take Lane (Shift+Option+T), which adds an empty take lane; recording makes the others",
             )),
         ),
         (
             "take_lane.comp_sources",
             Exception(LaterView(
-                "the take lanes' rows, headers, keys and menus (WP-6.22, comping R23 to R30)",
-            )),
-        ),
-        (
-            "take_lane.copy_to_main_lane",
-            Exception(LaterView(
-                "the take lanes' rows, headers, keys and menus (WP-6.22, comping R23 to R30)",
+                "the take lanes' source highlights (WP-6.22b, comping R33)",
             )),
         ),
         (
             "take_lane.create_clip",
-            Exception(LaterView(
-                "the take lanes' rows, headers, keys and menus (WP-6.22, comping R23 to R30)",
+            Exception(Equivalent(
+                "moving, copying and pasting clips onto a take lane in the Arrangement (comping R27)",
             )),
         ),
         (
             "take_lane.delete",
-            Exception(LaterView(
-                "the take lanes' rows, headers, keys and menus (WP-6.22, comping R23 to R30)",
+            Exception(Equivalent(
+                "Delete with take lane headers selected, which runs arrangement.delete (comping R7)",
             )),
         ),
         (
             "take_lane.delete_all",
-            Exception(LaterView(
-                "the take lanes' rows, headers, keys and menus (WP-6.22, comping R23 to R30)",
+            Exception(Equivalent(
+                "Delete All Take Lanes in a track header's or a take lane header's menu (comping R29)",
             )),
         ),
         (
             "take_lane.delete_unused",
-            Exception(LaterView(
-                "the take lanes' rows, headers, keys and menus (WP-6.22, comping R23 to R30)",
-            )),
-        ),
-        (
-            "take_lane.duplicate",
-            Exception(LaterView(
-                "the take lanes' rows, headers, keys and menus (WP-6.22, comping R23 to R30)",
-            )),
-        ),
-        (
-            "take_lane.insert",
-            Exception(LaterView(
-                "the take lanes' rows, headers, keys and menus (WP-6.22, comping R23 to R30)",
-            )),
-        ),
-        (
-            "take_lane.move",
-            Exception(LaterView(
-                "the take lanes' rows, headers, keys and menus (WP-6.22, comping R23 to R30)",
+            Exception(Equivalent(
+                "Delete All Unused Take Lanes in a track header's or a take lane header's menu (comping R29)",
             )),
         ),
         (
             "take_lane.move_comp_edge",
             Exception(LaterView(
-                "the take lanes' rows, headers, keys and menus (WP-6.22, comping R23 to R30)",
+                "dragging a source highlight's edge (WP-6.22b, comping R34)",
             )),
         ),
         (
             "take_lane.rename",
-            Exception(LaterView(
-                "the take lanes' rows, headers, keys and menus (WP-6.22, comping R23 to R30)",
-            )),
-        ),
-        (
-            "take_lane.replace_with_take",
-            Exception(LaterView(
-                "the take lanes' rows, headers, keys and menus (WP-6.22, comping R23 to R30)",
+            Exception(Equivalent(
+                "Cmd+R with a take lane header selected, and Rename in its menu, type the name in the header (comping R28)",
             )),
         ),
         (
             "take_lane.set_audition",
-            Exception(LaterView(
-                "the take lanes' rows, headers, keys and menus (WP-6.22, comping R23 to R30)",
+            Exception(Equivalent(
+                "the Audition Take Lane switch in a take lane's header, and T (comping R14, R30)",
             )),
         ),
+        (
+            "arrangement.select_take_lanes",
+            Exception(Equivalent(
+                "clicking a take lane's header, or Up and Down through the headers (comping R26)",
+            )),
+        ),
+        ("clip.move_to_lane", Exception(editing)),
         ("clip.delete", Exception(editing)),
         ("clip.move", Exception(editing)),
         ("clip.move_by", Exception(editing)),
@@ -3090,11 +3209,67 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("clip.set_launch_quantization", Exception(clip_launch)),
         ("clip.set_velocity_amount", Exception(clip_launch)),
         ("note.add", Exception(note_editor)),
+        // The MIDI Tools (WP-6.11): the panels' controls are in the Tab
+        // order; `midi_tool.apply` has Cmd+Enter (S-NOTE-033).
+        ("midi_tool.list", Exception(Query)),
+        ("midi_tool.state", Exception(Query)),
+        (
+            "clip_view.show_panel",
+            main(
+                midi_tools_shown,
+                detail_area,
+                "MIDI Generative Tools",
+                Key::Enter,
+            ),
+        ),
+        (
+            "midi_tool.set",
+            main(midi_tools_shown, detail_area, "Degrees", Key::ArrowUp),
+        ),
+        (
+            "midi_tool.set_auto",
+            main(
+                midi_tools_shown,
+                detail_area,
+                "Test Transpose Auto",
+                Key::Enter,
+            ),
+        ),
+        (
+            "midi_tool.reset",
+            main(midi_tools_changed, detail_area, "Reset", Key::Enter),
+        ),
+        (
+            "midi_tool.choose",
+            Exception(LaterView(
+                "the native tools (WP-6.12 to WP-6.14): until they land the registry holds one                  tool of each kind, and the Selectors have nothing to choose between",
+            )),
+        ),
+        (
+            "midi_tool.reseed",
+            Exception(LaterView(
+                "the tools' Reseed buttons, which come with the native tools that have them                  (WP-6.13, WP-6.14)",
+            )),
+        ),
+        (
+            "midi_tool.close",
+            Exception(Equivalent(
+                "changing the selected notes or the time selection, which closes the open                  application (the MIDI Tools spec, R21)",
+            )),
+        ),
         // `note.move`, `note.resize`, `note.delete` and
         // `clip_view.select_notes` have keys of their own now: the
         // note-selection keys (S-A11Y-010, S-A11Y-011), Delete
         // (S-EDIT-005) and Cmd-A (S-NOTE-001).
         ("note.ramp_value", Exception(note_editor)),
+        // The Clip View's MPE tab, where a note's expression envelopes are
+        // edited by the pointer and the keyboard, is WP-6.18's.
+        (
+            "note.set_expression",
+            Exception(LaterView(
+                "the Clip View's MPE tab, where a note's expression envelopes are edited (WP-6.18)",
+            )),
+        ),
         // Spec: step-recording R2. The pointer's press plays a preview; from
         // the keyboard, selecting a note with the note-jump keys sounds it.
         (
@@ -3135,6 +3310,12 @@ fn paths() -> BTreeMap<&'static str, Path> {
             Exception(Equivalent(
                 "Option-click on a view's toggle; Cmd+Option+3 and Cmd+Option+4 show both views in turn",
             )),
+        ),
+        // The browser's right edge is a splitter the keyboard reaches and
+        // the arrow keys move (browser R29).
+        (
+            "view.set_browser_width",
+            main(nothing, browser_area, "Browser Width", Key::ArrowRight),
         ),
         (
             "view.set_detail_height",

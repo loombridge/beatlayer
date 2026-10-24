@@ -1196,9 +1196,17 @@ fn a_midi_take_goes_on_a_take_lane_and_overdub_merges_only_the_main_lane() {
         .run("transport.set_recording", json!({ "recording": true }))
         .unwrap();
     shell.run("transport.play", json!({})).unwrap();
+    assert!(
+        shell.audio().flush(std::time::Duration::from_secs(10)),
+        "the engine never took Play"
+    );
     tap_a(&control, &mut shell, 100, 100);
     play_for(&control, &mut shell, 100);
     shell.run("transport.stop", json!({})).unwrap();
+    assert!(
+        shell.audio().flush(std::time::Duration::from_secs(10)),
+        "the engine never took Stop"
+    );
     let lanes = lanes_with_clips(&control, &mut shell, track, 1);
     assert_eq!(lanes.len(), 1);
     assert_eq!(lanes[0].name, "Take 1");
@@ -1245,9 +1253,19 @@ fn record_from_midi(control: &NullControl, shell: &mut Shell, later: bool) {
         .run("transport.set_recording", json!({ "recording": true }))
         .unwrap();
     shell.run("transport.play", json!({})).unwrap();
+    // As in record_from: every take records the same frames only once Play
+    // and Stop are on the audio thread's queue, past the last take's clips.
+    assert!(
+        shell.audio().flush(std::time::Duration::from_secs(10)),
+        "the engine never took Play"
+    );
     tap_a(control, shell, if later { 250 } else { 100 }, 100);
     play_for(control, shell, 100);
     shell.run("transport.stop", json!({})).unwrap();
+    assert!(
+        shell.audio().flush(std::time::Duration::from_secs(10)),
+        "the engine never took Stop"
+    );
 }
 
 // Spec: comping R12; recording R12, R16. MIDI passes round the loop each go

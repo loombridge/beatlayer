@@ -331,6 +331,30 @@ impl std::fmt::Debug for AnalysisCache {
     }
 }
 
+/// Reads the analyses an [`AnalysisCache`] has ready, without starting any
+/// or waiting ([`AnalysisCache::reader`]).
+#[derive(Clone)]
+pub struct AnalysisReader {
+    shared: Arc<Shared>,
+}
+
+impl std::fmt::Debug for AnalysisReader {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AnalysisReader").finish_non_exhaustive()
+    }
+}
+
+impl AnalysisReader {
+    /// The hash's analysis if it's ready.
+    #[must_use]
+    pub fn get(&self, hash: ContentHash) -> Option<Arc<Analysis>> {
+        match self.shared.slots().get(&hash) {
+            Some(Slot::Ready(analysis)) => Some(Arc::clone(analysis)),
+            _ => None,
+        }
+    }
+}
+
 impl AnalysisCache {
     /// A cache that analyses media in `store`.
     ///
@@ -384,6 +408,16 @@ impl AnalysisCache {
         match self.shared.slots().get(&hash) {
             Some(Slot::Ready(analysis)) => Some(Arc::clone(analysis)),
             _ => None,
+        }
+    }
+
+    /// A handle that reads the analyses ready in this cache, cheap to clone
+    /// and to send to another thread, which starts none: what the engine's
+    /// compiler asks for a Beats clip's transients through.
+    #[must_use]
+    pub fn reader(&self) -> AnalysisReader {
+        AnalysisReader {
+            shared: Arc::clone(&self.shared),
         }
     }
 

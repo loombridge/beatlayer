@@ -18,6 +18,7 @@ use bl_model::{
     ClipFolds, ContentHash, DEFAULT_SCENE_COUNT, DeviceWindows, Document, Editor, LaunchSettings,
     MultisamplerViews, RackViewMap, SceneId, TrackId, TrackKind, WindowViews, registry,
 };
+use bl_project::midi_tools::MidiToolSettings;
 use bl_project::{
     Media, MediaPath, MediaRef, Project, ProjectFolder, SET_EXTENSION, SaveOptions, SetFile,
     SetInfo, is_set,
@@ -102,6 +103,15 @@ pub trait SetStore {
         Err("this set store can't read a set".to_owned())
     }
 
+    /// Adds the entries of a restored version's media table that the set's
+    /// own table lacks (the crash-recovery spec, R16), so every clip of the
+    /// restored song still finds its file. Where both name a file, the
+    /// set's own entry stays: it is the one pointing at the files from where
+    /// the set is now. A store that keeps no media table ignores it.
+    fn merge_media(&mut self, media: &Media) {
+        let _ = media;
+    }
+
     /// Records a file the set's clips play (WP-1.10), by its content hash,
     /// its path on disk, and its size, so the next save lists it in the
     /// set's media table. A store that keeps no media table ignores it.
@@ -184,6 +194,18 @@ pub trait SetStore {
     /// was saved.
     fn folds(&self) -> ClipFolds {
         ClipFolds::new()
+    }
+
+    /// Gives the store the MIDI Tools' chosen tools and settings (WP-6.11),
+    /// for the next save to write beside the document. A store that keeps
+    /// no MIDI Tool settings ignores it.
+    fn set_midi_tools(&mut self, settings: MidiToolSettings) {
+        let _ = settings;
+    }
+
+    /// The open set's MIDI Tool choices and settings, as it was saved.
+    fn midi_tools(&self) -> MidiToolSettings {
+        MidiToolSettings::default()
     }
 
     /// Gives the store the global launch quantisation and its switch
@@ -298,6 +320,9 @@ pub struct ProjectFiles {
     /// Folded MIDI Note Editors (WP-2.3): the open set's, then the shell's
     /// for the next save.
     folds: ClipFolds,
+    /// The MIDI Tools' chosen tools and settings (WP-6.11): the open set's,
+    /// then the shell's for the next save.
+    midi_tools: MidiToolSettings,
     /// The global launch quantisation and its switch (WP-3.2): the open
     /// set's, then the shell's for the next save.
     launch: LaunchSettings,
@@ -328,6 +353,7 @@ impl SetStore for ProjectFiles {
         self.rack_views = project.rack_views;
         self.multisamplers = project.multisamplers;
         self.folds = project.folds;
+        self.midi_tools = project.midi_tools;
         self.launch = project.launch;
         self.window_views = project.window_views;
         self.added.clear();
@@ -398,6 +424,7 @@ impl SetStore for ProjectFiles {
         self.rack_views = RackViewMap::new();
         self.multisamplers = MultisamplerViews::new();
         self.folds = ClipFolds::new();
+        self.midi_tools = MidiToolSettings::default();
         self.launch = LaunchSettings::default();
         self.window_views = WindowViews::default();
         self.added.clear();
@@ -417,6 +444,7 @@ impl SetStore for ProjectFiles {
             .with_rack_views(&self.rack_views)
             .with_multisamplers(&self.multisamplers)
             .with_folds(&self.folds)
+            .with_midi_tools(&self.midi_tools)
             .with_launch(self.launch)
             .with_window_views(self.window_views)
     }
@@ -428,9 +456,18 @@ impl SetStore for ProjectFiles {
         self.rack_views = project.rack_views;
         self.multisamplers = project.multisamplers;
         self.folds = project.folds;
+        self.midi_tools = project.midi_tools;
         self.launch = project.launch;
         self.window_views = project.window_views;
         self.added.clear();
+    }
+
+    fn merge_media(&mut self, media: &Media) {
+        for file in media.iter() {
+            if self.media.get(&file.hash).is_none() {
+                self.media.insert(file.clone());
+            }
+        }
     }
 
     fn set_multisampler_views(&mut self, views: MultisamplerViews) {
@@ -463,6 +500,14 @@ impl SetStore for ProjectFiles {
 
     fn folds(&self) -> ClipFolds {
         self.folds.clone()
+    }
+
+    fn set_midi_tools(&mut self, settings: MidiToolSettings) {
+        self.midi_tools = settings;
+    }
+
+    fn midi_tools(&self) -> MidiToolSettings {
+        self.midi_tools.clone()
     }
 
     fn set_launch(&mut self, launch: LaunchSettings) {
@@ -544,6 +589,7 @@ impl SetStore for ProjectFiles {
             .with_rack_views(&self.rack_views)
             .with_multisamplers(&self.multisamplers)
             .with_folds(&self.folds)
+            .with_midi_tools(&self.midi_tools)
             .with_launch(self.launch)
             .with_window_views(self.window_views);
         let mut set = SetFile::open(path)
@@ -742,6 +788,7 @@ impl ProjectFiles {
             .with_rack_views(&self.rack_views)
             .with_multisamplers(&self.multisamplers)
             .with_folds(&self.folds)
+            .with_midi_tools(&self.midi_tools)
             .with_launch(self.launch)
             .with_window_views(self.window_views);
         let mut set = self

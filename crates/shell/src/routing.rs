@@ -31,6 +31,9 @@ pub struct Interface {
     /// The names of the MIDI input ports, in the order the Settings window
     /// lists them (the MIDI I/O spec, R7).
     pub midi_inputs: Vec<String>,
+    /// The names of the MIDI input ports whose MPE switch is on: a track
+    /// whose input is one takes every channel of it (the MIDI I/O spec, R28).
+    pub mpe_inputs: Vec<String>,
     /// The names of the MIDI output ports whose Track switch is on, in the
     /// order the Settings window lists them (the external devices spec, R1).
     pub midi_outputs: Vec<String>,
@@ -515,8 +518,8 @@ fn midi_from(doc: &Document, track: TrackId, ports: &[String]) -> Chooser {
 /// The input channel: Pre FX · Post FX · Post Mixer with a track chosen
 /// (observed, Post Mixer the default); the interface's inputs with Ext. In
 /// (the single channels, then the pairs); All Channels, then 1 to 16, with a
-/// MIDI port (the MIDI I/O spec, R7); All Channels, fixed, with All Ins or the
-/// computer keyboard; nothing otherwise.
+/// MIDI port (the MIDI I/O spec, R7); All Channels, fixed, with All Ins, the
+/// computer keyboard or a port with MPE on (R28); nothing otherwise.
 fn input_channel(
     doc: &Document,
     track: TrackId,
@@ -605,6 +608,15 @@ fn input_channel(
                     json!({ "type": "external", "channel": channel_value(channel) }),
                 )
             }),
+            pending: None,
+        },
+        // Spec: midi-io R28. A port with MPE on is taken on every channel: the
+        // chooser reads All Channels and can't be changed; the channel the
+        // track had chosen stays in the set for when MPE is off again.
+        Input::Port { name } if midi && interface.mpe_inputs.contains(&name) => Chooser {
+            name: "Input Channel",
+            text: "All Channels".to_owned(),
+            entries: Vec::new(),
             pending: None,
         },
         Input::Port { name } if midi => {

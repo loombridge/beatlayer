@@ -1487,6 +1487,19 @@ const ENTRIES: &[Entry] = &[
             several clips together, use `clip.move_by`.",
     },
     Entry {
+        id: "clip.move_to_lane",
+        action: Action::Apply("move_clip_to_lane"),
+        label: "Move Clip to Lane",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Moves a clip so it starts at `start` on the main lane of `track`, or, with \
+            `lane`, on that take lane of the track, out of the lane or Session slot it sat in. \
+            The track must be an audio or MIDI track of the clip's kind. It does not clear what \
+            the destination holds there; to move clips as the Arrangement does, replacing what \
+            they land on, use `arrangement.move_clips`.",
+    },
+    Entry {
         id: "clip.move_by",
         action: Action::Apply("move_clips"),
         label: "Move Clips",
@@ -3499,6 +3512,40 @@ const ENTRIES: &[Entry] = &[
             Choosing it where it is set clears it, so the song starts at the insert marker \
             again. While it is set, Play starts the song there instead of at the insert \
             marker. One undo step, `Set Song Start Time`.",
+    },
+    Entry {
+        id: "song.insert_time",
+        action: Action::Apply("insert_time"),
+        label: "Insert Silence",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Opens `length` ticks of empty time at `at` on every track, whichever \
+            tracks are selected: a clip across `at` is split there (leave out `clips` and the \
+            part after the split gets a new ID), and every Arrangement clip, take-lane clip, \
+            automation breakpoint, tempo breakpoint, time-signature marker and locator at or \
+            after `at` moves later by `length`. Each envelope, the tempo and the signature hold \
+            across the new time the value they had at `at`. The Session View's slots and the \
+            loop brace are left as they are. One undo step, `Insert Silence`. To insert \
+            silence at the time selection as a person does, use `arrangement.insert_silence`.",
+    },
+    Entry {
+        id: "song.delete_time",
+        action: Action::Apply("delete_time"),
+        label: "Delete Time",
+        permission: Permission::Destructive,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Removes the span from `start` to `end` on every track, whichever tracks \
+            are selected, so what follows closes up: clips inside it are deleted, a clip across \
+            an edge is cut or split there (leave out `clips` and the part after a split gets a \
+            new ID), and every Arrangement clip, take-lane clip, automation breakpoint, tempo \
+            breakpoint, time-signature marker and locator at or after `end` moves earlier by \
+            the span's length. Markers and locators inside the span are deleted. The Session \
+            View's slots and the loop brace are left as they are. One undo step, `Delete \
+            Time`. Undo restores it, but because it removes the person's work an agent asks \
+            first. To delete the time selected as a person does, use \
+            `arrangement.delete_time`.",
     },
     Entry {
         id: "groove.add",

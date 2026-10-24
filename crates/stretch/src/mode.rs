@@ -11,7 +11,7 @@
 //! (grains, segments, a stretcher) makes it with the player's clip list, off
 //! the audio thread, and `render` allocates and locks nothing (R5).
 
-use crate::beats::Plan;
+use crate::beats::{Mix, Plan};
 use crate::interp::Interpolation;
 
 /// A planar block of frames: channel `c` is `data[c * stride..]`.
@@ -142,9 +142,10 @@ impl WarpMode for RePitch {
 }
 
 /// Beats (R14 to R17): the clip played as segments. The positions come from
-/// the player's table, which [`Plan::stretches`](crate::beats::Plan::stretches)
-/// gives, and the mode shapes each segment's level by the transient envelope
-/// (R16). It keeps no state: a frame's output depends only on the song.
+/// the player's table, which [`Plan::passes`](crate::beats::Plan::passes)
+/// gives, and the mode shapes each frame's level by the plan's joins and the
+/// transient envelope (R15, R16). It keeps no state: a frame's output depends
+/// only on the song.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Beats;
 
@@ -166,17 +167,48 @@ impl WarpMode for Beats {
         stride: usize,
     ) {
         read(request, window, out, stride);
+        self.shape(request, window.channels, out, stride, |mix| mix.level);
+    }
+}
+
+impl Beats {
+    /// Renders the pass fading out under each frame of the run: the request's
+    /// positions are where each frame's outgoing pass reads (any position
+    /// where none does), and the frames with none are silent (R15).
+    pub fn render_outgoing(
+        self,
+        request: &Request<'_>,
+        window: &Window<'_>,
+        out: &mut [f32],
+        stride: usize,
+    ) {
+        read(request, window, out, stride);
+        self.shape(request, window.channels, out, stride, |mix| {
+            mix.outgoing.map_or(0.0, |(_, level)| level)
+        });
+    }
+
+    /// Scales each frame of the run by the level `level` picks from what the
+    /// plan says sounds there. At 100 every level is 1, so the run is left
+    /// untouched, to the bit.
+    fn shape(
+        self,
+        request: &Request<'_>,
+        channels: usize,
+        out: &mut [f32],
+        stride: usize,
+        level: impl Fn(Mix) -> f64,
+    ) {
         if request.beats.is_empty() {
             return;
         }
-        // The envelope (R16). At 100 every level is 1, so the run is left
-        // untouched, to the bit.
-        for c in 0..window.channels {
+        for c in 0..channels {
             let channel = &mut out[c * stride..c * stride + request.positions.len()];
             for (i, frame) in channel.iter_mut().enumerate() {
-                let level = request
+                let mix = request
                     .beats
-                    .level_with(request.first + i as i64, request.transient_envelope);
+                    .mix(request.first + i as i64, request.transient_envelope);
+                let level = level(mix);
                 if level != 1.0 {
                     *frame = (*frame as f64 * level) as f32;
                 }

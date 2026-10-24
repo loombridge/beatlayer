@@ -4,18 +4,19 @@
 //! each of the file's transients (Preserve Transients), or at each line of a
 //! grid of the clip's own beats. It begins on the song frame its beginning
 //! falls on, reads the file from there at the clip's pitch ratio (1 until
-//! WP-4.7 wires Transpose and Detune), and stops where the next segment
+//! WP-4.7 wires Transpose and Detune), and is replaced where the next segment
 //! begins, so a song faster than the clip cuts it short (R15). A segment
 //! whose own audio runs out first is filled by its transient loop mode,
 //! turning at the zero crossing nearest its middle, and the transient
-//! envelope shapes its level (R16).
+//! envelope shapes its level (R16). Every join is a short linear fade or
+//! crossfade, never a step (R15).
 //!
-//! The plan holds the segments and the laws a mode plays them by: the
-//! stretches of the song each one reads over ([`Plan::stretches`]), which a
-//! player turns into the pieces of its table, and the level of each song
-//! frame ([`Plan::level`]). It is made off the audio thread, with the clip
-//! list (R5), and a frame's output depends only on the song, its media and
-//! where the clip's playback began (R6).
+//! The plan holds the segments and the laws a mode plays them by: the passes
+//! of the song each one reads over ([`Plan::passes`]), which a player turns
+//! into the pieces of its table, and what sounds at each song frame
+//! ([`Plan::mix`]). It is made off the audio thread, with the clip list
+//! (R5), and a frame's output depends only on the song, its media and where
+//! the clip's playback began (R6).
 
 /// Ticks to the quarter note, as the warp map counts them.
 const TICKS_PER_QUARTER: f64 = 705_600.0;
@@ -80,11 +81,13 @@ pub struct Segment {
     pub turn: f64,
 }
 
-/// A straight stretch of the song over which a segment's read runs in a
-/// straight line: one piece of a player's table.
+/// A straight stretch of the song over which a pass's read runs in a straight
+/// line: one piece of a player's table. A pass begins as a crossfade from the
+/// pass before it, over [`Plan::fade`] frames, or as a fade in from silence.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Stretch {
-    /// The song frame the stretch begins at, perhaps between frames.
+    /// The song frame the stretch begins at, perhaps between frames: where
+    /// its fade in begins.
     pub frame: f64,
     /// The file position at [`frame`](Self::frame); NaN where the segment
     /// plays nothing.
@@ -92,6 +95,28 @@ pub struct Stretch {
     /// File frames per song frame, signed: a Back-and-Forth pass reads
     /// backwards.
     pub slope: f64,
+    /// The song frame of the transient of the segment the pass belongs to,
+    /// which the transient envelope decays from (R16).
+    pub begin: f64,
+}
+
+impl Stretch {
+    /// The file position at song frame `frame`.
+    #[must_use]
+    pub fn position_at(&self, frame: f64) -> f64 {
+        self.position + (frame - self.frame) * self.slope
+    }
+}
+
+/// What sounds at one song frame (R15, R16): the stretch it falls in at
+/// `level`, and where the stretch before it, still fading out, is read.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Mix {
+    /// The level of the frame's own read.
+    pub level: f64,
+    /// The file position and level of the pass fading out under it, if one
+    /// does.
+    pub outgoing: Option<(f64, f64)>,
 }
 
 /// A Beats clip's plan (R14 to R17): its segments in song order, the loop
@@ -102,9 +127,17 @@ pub struct Plan {
     loop_mode: Loop,
     /// The transient envelope, 0 to 100 (R16): 100 at full level.
     envelope: u32,
-    /// How far a falling segment's level takes to reach silence: 10 ms in
-    /// song frames (R16).
-    fall: f64,
+    /// Frames a second.
+    rate: f64,
+    /// The length of the fade at a join (R15), in song frames.
+    fade: f64,
+    /// How far before a segment's transient its fade in ends (R15).
+    lead: f64,
+    /// Half the length of a loop turn's crossfade (R15).
+    half_turn: f64,
+    /// The passes the segments play, as a player reads them: set by
+    /// [`with_passes`](Self::with_passes).
+    passes: Vec<Stretch>,
 }
 
 impl Default for Plan {
@@ -113,9 +146,25 @@ impl Default for Plan {
     }
 }
 
-/// How far a transient envelope's fall takes: 10 ms (R16, Beatlayer's own
-/// law within the manual's two ends).
-pub const FALL_SECONDS: f64 = 0.010;
+/// The length of a join's fade at Transient Envelope 100, and at 50 and below
+/// (R15): a linear fade between.
+const FADE_SECONDS: (f64, f64) = (0.002, 0.010);
+/// How long before the transient the fade ends, at Transient Envelope 50 and
+/// below, and at 100 (R15).
+const LEAD_SECONDS: (f64, f64) = (0.0007, 0.002);
+/// The length of a loop turn's crossfade (R15).
+const TURN_SECONDS: f64 = 0.010;
+/// How long before the segment's end a loop turns (R15).
+const LOOP_LEAD_SECONDS: f64 = 0.022;
+/// The time constant of the transient envelope's decay at 50 (R16).
+const DECAY_SECONDS: f64 = 0.094;
+
+/// The file frame a segment ending at `end` turns its loop at, at the latest
+/// (R15), at `rate` frames a second.
+#[must_use]
+pub fn loop_end(end: f64, rate: f64) -> f64 {
+    end - LOOP_LEAD_SECONDS * rate
+}
 
 impl Plan {
     /// The plan every mode that isn't Beats is given: no segment at all.
@@ -123,19 +172,45 @@ impl Plan {
         segments: Vec::new(),
         loop_mode: Loop::Forward,
         envelope: 100,
-        fall: 0.0,
+        rate: 0.0,
+        fade: 0.0,
+        lead: 0.0,
+        half_turn: 0.0,
+        passes: Vec::new(),
     };
 
     /// A plan of `segments`, which must be in song order and cover the clip's
     /// playback without a gap, at `rate` frames a second.
     #[must_use]
     pub fn new(segments: Vec<Segment>, loop_mode: Loop, envelope: u32, rate: f64) -> Self {
+        // Spec: warp-modes R15. The join's fade shrinks as the envelope
+        // falls from 100 to 50 and stays short below it.
+        let t = ((f64::from(envelope) - 50.0) / 50.0).clamp(0.0, 1.0);
+        let between = |(low, high): (f64, f64)| ((low + (high - low) * t) * rate).round();
         Self {
             segments,
             loop_mode,
             envelope,
-            fall: FALL_SECONDS * rate,
+            rate,
+            fade: between(FADE_SECONDS),
+            lead: between(LEAD_SECONDS),
+            half_turn: (TURN_SECONDS / 2.0 * rate).round(),
+            passes: Vec::new(),
         }
+    }
+
+    /// The plan with its passes made, each segment read at the pitch ratio
+    /// `ratio` gives (R17).
+    #[must_use]
+    pub fn with_passes(mut self, ratio: impl Fn(&Segment) -> f64) -> Self {
+        self.passes = self.stretches_by(ratio);
+        self
+    }
+
+    /// The passes, in song order: the player's table.
+    #[must_use]
+    pub fn passes(&self) -> &[Stretch] {
+        &self.passes
     }
 
     /// The segments, in song order.
@@ -162,44 +237,81 @@ impl Plan {
         self.segments.is_empty()
     }
 
-    /// The segment covering song frame `frame`.
-    #[must_use]
-    pub fn at(&self, frame: i64) -> Option<&Segment> {
-        let after = self
-            .segments
-            .partition_point(|segment| segment.frame <= frame);
-        let segment = self.segments.get(after.checked_sub(1)?)?;
-        (frame < segment.until).then_some(segment)
-    }
-
-    /// The level of song frame `frame`, shaped by the transient envelope
-    /// (R16): 1 at 100, and below it the segment's full level for its share
-    /// of the segment, then a straight fall to silence over 10 ms, or by the
-    /// next segment's beginning if that comes first.
-    #[must_use]
-    pub fn level(&self, frame: i64) -> f64 {
-        self.level_with(frame, f64::from(self.envelope))
-    }
-
-    /// The same for a transient envelope of `envelope` (0 to 100) instead of
-    /// the plan's own: what a clip whose Transient Envelope is automated
-    /// plays.
-    #[must_use]
-    pub fn level_with(&self, frame: i64, envelope: f64) -> f64 {
-        let Some(segment) = self.at(frame) else {
-            return 1.0;
-        };
-        let span = (segment.until - segment.frame) as f64;
-        let hold = span * envelope / 100.0;
-        let offset = (frame - segment.frame) as f64;
-        if offset <= hold {
+    /// The level of a segment `since` frames after its transient under a
+    /// transient envelope of `envelope` (R16): 1 at 100 and before the
+    /// transient, and otherwise a decay whose time constant grows with the
+    /// envelope.
+    fn decay(&self, since: f64, envelope: f64) -> f64 {
+        if envelope >= 100.0 || since <= 0.0 {
             return 1.0;
         }
-        let fall = self.fall.min((span - hold).max(0.0));
-        if fall <= 0.0 {
+        if envelope <= 0.0 {
             return 0.0;
         }
-        (1.0 - (offset - hold) / fall).max(0.0)
+        (-since / (DECAY_SECONDS * self.rate * envelope / (100.0 - envelope))).exp()
+    }
+
+    /// What sounds at song frame `frame` under a transient envelope of
+    /// `envelope` (0 to 100): the pass it falls in, faded in by the join or
+    /// out by the silence after it, and the pass before it while that fades
+    /// out (R15, R16). Where the two read the same frames, as a clip at its
+    /// own tempo does, they are one read.
+    #[must_use]
+    pub fn mix(&self, frame: i64, envelope: f64) -> Mix {
+        let at = frame as f64;
+        let after = self.passes.partition_point(|pass| pass.frame <= at);
+        let i = after.saturating_sub(1);
+        let silent = Mix {
+            level: 0.0,
+            outgoing: None,
+        };
+        let Some(pass) = self.passes.get(i).filter(|pass| !pass.position.is_nan()) else {
+            return silent;
+        };
+        let mut level = self.decay(at - pass.begin, envelope);
+        // Fading out into the silence that follows.
+        if let Some(next) = self.passes.get(i + 1)
+            && next.position.is_nan()
+        {
+            level *= ((next.frame - at) / self.fade).clamp(0.0, 1.0);
+        }
+        let came = ((at - pass.frame) / self.fade).clamp(0.0, 1.0);
+        if came >= 1.0 || self.fade <= 0.0 {
+            return Mix {
+                level,
+                outgoing: None,
+            };
+        }
+        let Some(before) = i
+            .checked_sub(1)
+            .map(|before| &self.passes[before])
+            .filter(|before| !before.position.is_nan())
+        else {
+            return Mix {
+                level: level * came,
+                outgoing: None,
+            };
+        };
+        let out = (
+            before.position_at(at),
+            (1.0 - came) * self.decay(at - before.begin, envelope),
+        );
+        if (out.0 - pass.position_at(at)).abs() < 1e-4 {
+            // One read: the same frames, at the two levels' sum.
+            let sum = level * came + out.1;
+            return Mix {
+                level: if level == 1.0 && out.1 == 1.0 - came {
+                    1.0
+                } else {
+                    sum
+                },
+                outgoing: None,
+            };
+        }
+        Mix {
+            level: level * came,
+            outgoing: Some(out),
+        }
     }
 
     /// The stretches the plan reads over at the clip's pitch ratio `ratio`
@@ -217,61 +329,88 @@ impl Plan {
     #[must_use]
     pub fn stretches_by(&self, ratio: impl Fn(&Segment) -> f64) -> Vec<Stretch> {
         let mut out = Vec::new();
-        for segment in &self.segments {
-            self.segment_stretches(&mut out, segment, ratio(segment));
+        for (i, segment) in self.segments.iter().enumerate() {
+            let has_next = i + 1 < self.segments.len();
+            self.segment_stretches(&mut out, segment, has_next, ratio(segment));
         }
         out
     }
 
-    fn segment_stretches(&self, out: &mut Vec<Stretch>, segment: &Segment, ratio: f64) {
-        let (frame, until) = (segment.frame as f64, segment.until as f64);
-        if until <= frame {
+    fn segment_stretches(
+        &self,
+        out: &mut Vec<Stretch>,
+        segment: &Segment,
+        has_next: bool,
+        ratio: f64,
+    ) {
+        let (begin, until) = (segment.frame as f64, segment.until as f64);
+        if until <= begin {
             return;
         }
-        // The segment's own audio: the file up to where the next begins (R15).
-        let mut at = frame;
-        if segment.end > segment.position && ratio > 0.0 {
-            let own = (segment.end - segment.position) / ratio;
-            let stop = (frame + own).min(until);
-            if stop > frame {
-                out.push(Stretch {
-                    frame,
-                    position: segment.position,
-                    slope: ratio,
-                });
-                at = stop;
+        // The segment's audio starts before its transient and fades in, so
+        // it crossfades with what is still sounding (R15). The next
+        // segment's does the same, which is where this one's ends.
+        let lead = self.fade + self.lead;
+        let start = begin - lead;
+        let join = if has_next { until - lead } else { until };
+        let silent = |frame| Stretch {
+            frame,
+            position: f64::NAN,
+            slope: 1.0,
+            begin,
+        };
+        if segment.end <= segment.position || ratio <= 0.0 {
+            out.push(silent(start));
+            return;
+        }
+        let first = segment.position - lead * ratio;
+        out.push(Stretch {
+            frame: start,
+            position: first,
+            slope: ratio,
+            begin,
+        });
+        // Audio that lasts until the next segment begins, to within a frame,
+        // plays on through the join: no fade out, no loop.
+        if (segment.end - segment.position) / ratio + 1.0 >= until - begin {
+            return;
+        }
+        // The segment's own audio ends a moment before the file frame the
+        // next begins at, with a fade out that the silence after it ends.
+        let own = start + (segment.end - self.lead * ratio - first) / ratio;
+        // A loop turns shortly before that and at the turn, which is the
+        // middle of what lies between; its crossfade is centred on it.
+        let (at, turn) = (loop_end(segment.end, self.rate), segment.turn);
+        let pass = (at - turn) / ratio;
+        let half = self.half_turn;
+        let mut centre = start + (at - first) / ratio;
+        if self.loop_mode == Loop::Off || pass < 2.0 * half || centre - half <= start {
+            if own < join {
+                out.push(silent(own));
             }
-        }
-        if at >= until {
             return;
         }
-        let length = segment.end - segment.turn;
-        if self.loop_mode == Loop::Off || length <= 0.0 || ratio <= 0.0 {
-            out.push(Stretch {
-                frame: at,
-                position: f64::NAN,
-                slope: 1.0,
-            });
-            return;
-        }
-        let pass = length / ratio;
         let back_and_forth = self.loop_mode == Loop::BackAndForth;
         let mut backwards = back_and_forth;
-        while at < until {
+        while centre + half <= join {
+            // At the centre the new pass reads the file frame the old one
+            // has reached, so the two crossfade over the same audio.
             out.push(if backwards {
                 Stretch {
-                    frame: at,
-                    position: segment.end,
+                    frame: centre - half,
+                    position: at + half * ratio,
                     slope: -ratio,
+                    begin,
                 }
             } else {
                 Stretch {
-                    frame: at,
-                    position: segment.turn,
+                    frame: centre - half,
+                    position: turn - half * ratio,
                     slope: ratio,
+                    begin,
                 }
             });
-            at += pass;
+            centre += pass;
             if back_and_forth {
                 backwards = !backwards;
             }
@@ -362,135 +501,161 @@ mod tests {
         }
     }
 
-    // Spec: warp-modes R15. A segment that runs out of its own audio is
-    // filled by its loop mode, turning at the zero crossing.
-    #[test]
-    fn each_loop_mode_fills_a_short_segment() {
-        // 1,000 file frames from 100, the next segment beginning at 600: its
-        // own audio lasts 500 song frames at ratio 1; the segment spans 2,000.
-        let segment = segment(0, 2_000, 100.0, 600.0, 350.0);
-        let plan = |loop_mode| Plan::new(vec![segment], loop_mode, 100, 48_000.0);
-        let off = plan(Loop::Off).stretches(1.0);
-        assert_eq!(off.len(), 2);
-        assert_eq!(
-            (off[0].frame, off[0].position, off[0].slope),
-            (0.0, 100.0, 1.0)
-        );
-        assert_eq!((off[1].frame, off[1].slope), (500.0, 1.0));
-        assert!(off[1].position.is_nan(), "silence until the next segment");
-        let forward = plan(Loop::Forward).stretches(1.0);
-        // The pass is 600 - 350 = 250 frames long: from 500, 750, 1,000, ...
-        assert_eq!(forward.len(), 1 + 6);
-        assert_eq!(forward[1].position, 350.0);
-        assert_eq!(forward[1].frame, 500.0);
-        assert_eq!(forward[2].position, 350.0);
-        assert_eq!(forward[2].frame, 750.0);
-        let forth = plan(Loop::BackAndForth).stretches(1.0);
-        // Backwards from the end, then forwards to it, and so on.
-        assert_eq!(forth[1].position, 600.0);
-        assert_eq!(forth[1].slope, -1.0);
-        assert_eq!(forth[2].position, 350.0);
-        assert_eq!(forth[2].slope, 1.0);
-        assert_eq!(forth[3].slope, -1.0);
+    const RATE: f64 = 48_000.0;
+
+    /// A segment of 480 ms of audio from the file's start, on a song second,
+    /// whose loop turns at the middle of its first 458 ms.
+    fn long(until: i64) -> Segment {
+        segment(0, until, 0.0, 24_000.0, 11_472.0)
     }
 
-    // Spec: warp-modes R15. A song faster than the clip cuts each segment at
-    // the next one's beginning.
+    // Spec: warp-modes R15. A segment starts 12 ms before its transient, and
+    // when its own audio runs out, a Loop Off segment fades out over 10 ms
+    // ending 2 ms before the file frame the next would begin at, then is
+    // silent.
     #[test]
-    fn a_far_along_next_segment_cuts_the_own_audio_short() {
-        // 1,000 file frames of own audio, but the next segment begins 200
-        // song frames later: the own audio is cut there.
-        let plan = Plan::new(
-            vec![segment(0, 200, 0.0, 1_000.0, 500.0)],
-            Loop::Forward,
-            100,
-            48_000.0,
+    fn loop_off_fades_out_then_falls_silent() {
+        let plan = Plan::new(vec![long(48_000)], Loop::Off, 100, RATE);
+        let passes = plan.stretches(1.0);
+        assert_eq!(passes.len(), 2);
+        assert_eq!(
+            (passes[0].frame, passes[0].position, passes[0].slope),
+            (-576.0, -576.0, 1.0),
+            "12 ms before the transient, reading the file 12 ms before it"
         );
         assert_eq!(
-            plan.stretches(1.0),
-            vec![Stretch {
-                frame: 0.0,
-                position: 0.0,
-                slope: 1.0
-            }]
+            passes[1].frame, 23_904.0,
+            "2 ms before the file's frame 24,000"
         );
-        // Twice as fast reads the file twice as fast, so the same 1,000
-        // frames run out 500 song frames in: the fill starts there, and the
-        // segment's span cuts it before that.
-        let plan = Plan::new(
-            vec![segment(0, 600, 0.0, 1_000.0, 500.0)],
-            Loop::Forward,
-            100,
-            48_000.0,
-        );
-        let stretches = plan.stretches(2.0);
+        assert!(passes[1].position.is_nan());
+        let plan = plan.with_passes(|_| 1.0);
         assert_eq!(
-            stretches[0],
-            Stretch {
-                frame: 0.0,
-                position: 0.0,
-                slope: 2.0
-            }
+            plan.mix(-576, 100.0).level,
+            0.0,
+            "the fade in begins silent"
         );
-        assert_eq!(
-            stretches[1].frame, 500.0,
-            "the own audio runs out at 1000/2"
-        );
-        assert_eq!(stretches[1].position, 500.0);
-        assert_eq!(stretches[1].slope, 2.0);
+        assert!((plan.mix(-336, 100.0).level - 0.5).abs() < 1e-12);
+        assert_eq!(plan.mix(-96, 100.0).level, 1.0, "full level 2 ms early");
+        assert_eq!(plan.mix(23_424, 100.0).level, 1.0);
+        assert!((plan.mix(23_664, 100.0).level - 0.5).abs() < 1e-12);
+        assert_eq!(plan.mix(23_904, 100.0).level, 0.0);
+        assert_eq!(plan.mix(40_000, 100.0).level, 0.0);
     }
 
-    // Spec: warp-modes R16. The envelope holds the segment's level, then
-    // falls to silence over 10 ms.
+    // Spec: warp-modes R15. Loop Forward turns about 22 ms before the file
+    // frame the next segment would begin at, back to the middle, in
+    // crossfades of 10 ms centred on the turn, identical on every pass.
     #[test]
-    fn transient_envelope_holds_then_falls_over_10_ms() {
-        let plan = Plan::new(
-            vec![segment(0, 48_000, 0.0, 48_000.0, 24_000.0)],
-            Loop::Off,
-            100,
-            48_000.0,
-        );
-        assert_eq!(plan.level(0), 1.0);
-        assert_eq!(plan.level(47_999), 1.0);
-        let plan = Plan::new(
-            vec![segment(0, 48_000, 0.0, 48_000.0, 24_000.0)],
-            Loop::Off,
-            50,
-            48_000.0,
-        );
-        // Held for the first half, then falling over 480 frames (10 ms).
-        assert_eq!(plan.level(24_000), 1.0, "the hold ends there");
-        assert_eq!(plan.level(23_999), 1.0);
-        assert!((plan.level(24_240) - 0.5).abs() < 1e-9);
-        assert_eq!(plan.level(24_480), 0.0);
-        assert_eq!(plan.level(47_000), 0.0);
-        // At 0 the fall starts at once.
-        let plan = Plan::new(
-            vec![segment(0, 48_000, 0.0, 48_000.0, 24_000.0)],
-            Loop::Off,
-            0,
-            48_000.0,
-        );
-        assert_eq!(plan.level(0), 1.0, "it starts falling at once");
-        assert!((plan.level(240) - 0.5).abs() < 1e-9);
-        assert_eq!(plan.level(480), 0.0);
+    fn loop_forward_jumps_back_to_the_middle_in_a_crossfade() {
+        let plan = Plan::new(vec![long(48_000)], Loop::Forward, 100, RATE);
+        let passes = plan.stretches(1.0);
+        // Turns at song frame 22,944 (file frame 22,944), then every 11,472.
+        let frames: Vec<f64> = passes.iter().map(|pass| pass.frame).collect();
+        assert_eq!(frames, [-576.0, 22_704.0, 34_176.0, 45_648.0]);
+        for pass in &passes[1..] {
+            assert_eq!((pass.position, pass.slope), (11_472.0 - 240.0, 1.0));
+        }
+        let plan = plan.with_passes(|_| 1.0);
+        // Midway through the first turn both ends sound at half level, the
+        // old one at the frame it has reached and the new one 5 ms before the
+        // middle.
+        let mix = plan.mix(22_944, 100.0);
+        assert!((mix.level - 0.5).abs() < 1e-12);
+        let (position, level) = mix.outgoing.unwrap();
+        assert_eq!(position, 22_944.0);
+        assert!((level - 0.5).abs() < 1e-12);
+        assert_eq!(plan.stretches(1.0)[1].position_at(22_944.0), 11_472.0);
     }
 
-    // Spec: warp-modes R16. The fall ends at the next segment's beginning
-    // when that comes first.
+    // Spec: warp-modes R15. Back-and-Forth turns at the same places, reading
+    // backwards from the end to the middle and forwards again.
     #[test]
-    fn a_short_segment_falls_by_its_next_beginning() {
+    fn back_and_forth_turns_in_crossfades_with_the_same_passes() {
+        let passes = Plan::new(vec![long(48_000)], Loop::BackAndForth, 100, RATE).stretches(1.0);
+        let frames: Vec<f64> = passes.iter().map(|pass| pass.frame).collect();
+        assert_eq!(frames, [-576.0, 22_704.0, 34_176.0, 45_648.0]);
+        let slopes: Vec<f64> = passes.iter().map(|pass| pass.slope).collect();
+        assert_eq!(slopes, [1.0, -1.0, 1.0, -1.0]);
+        // The backward pass is at the end's turn at its centre, 5 ms on from
+        // where it begins.
+        assert_eq!(passes[1].position, 22_944.0 + 240.0);
+        assert_eq!(passes[1].position_at(22_944.0), 22_944.0);
+        assert_eq!(passes[2].position_at(34_416.0), 11_472.0);
+    }
+
+    // Spec: warp-modes R15. A song faster than the clip cuts a segment short
+    // with a crossfade of 10 ms into the next, which began 12 ms before its
+    // transient.
+    #[test]
+    fn a_segment_cut_short_crossfades_into_the_next() {
         let plan = Plan::new(
-            vec![segment(0, 100, 0.0, 100.0, 50.0)],
-            Loop::Off,
-            0,
-            48_000.0,
+            vec![
+                long(12_000),
+                segment(12_000, 24_000, 24_000.0, 48_000.0, 36_000.0),
+            ],
+            Loop::BackAndForth,
+            100,
+            RATE,
+        )
+        .with_passes(|_| 1.0);
+        assert_eq!(plan.passes().len(), 2, "no turn fits before the join");
+        assert_eq!(plan.passes()[1].frame, 12_000.0 - 576.0);
+        assert_eq!(
+            plan.mix(11_423, 100.0).outgoing,
+            None,
+            "the old read is alone until then"
         );
-        assert_eq!(plan.level(0), 1.0);
-        assert!((plan.level(50) - 0.5).abs() < 1e-9);
-        assert!(
-            (plan.level(99) - 0.01).abs() < 1e-9,
-            "the fall is cut at the segment's end"
+        let mix = plan.mix(11_424 + 240, 100.0);
+        assert!((mix.level - 0.5).abs() < 1e-12);
+        let (position, level) = mix.outgoing.unwrap();
+        assert!((level - 0.5).abs() < 1e-12);
+        assert_eq!(position, 11_664.0 + 576.0 - 576.0);
+        assert_eq!(plan.mix(11_424 + 480, 100.0).outgoing, None);
+        assert_eq!(plan.mix(11_424 + 480, 100.0).level, 1.0);
+    }
+
+    // Spec: warp-modes R4, R15. Segments that follow one another in the file
+    // read the same frames through a join, which is no crossfade at all.
+    #[test]
+    fn a_continuous_join_is_untouched() {
+        let plan = Plan::new(
+            vec![
+                segment(0, 24_000, 0.0, 24_000.0, 12_000.0),
+                segment(24_000, 48_000, 24_000.0, 48_000.0, 36_000.0),
+            ],
+            Loop::BackAndForth,
+            100,
+            RATE,
+        )
+        .with_passes(|_| 1.0);
+        for frame in 23_000..24_500 {
+            let mix = plan.mix(frame, 100.0);
+            assert_eq!((mix.level, mix.outgoing), (1.0, None), "frame {frame}");
+        }
+    }
+
+    // Spec: warp-modes R16. The envelope decays each segment from its
+    // transient by a time constant that grows with it, and the join's fade in
+    // shortens to 2 ms.
+    #[test]
+    fn transient_envelope_decays_from_the_transient() {
+        let at = |envelope, frame| {
+            Plan::new(vec![long(48_000)], Loop::Off, envelope, RATE)
+                .with_passes(|_| 1.0)
+                .mix(frame, f64::from(envelope))
+                .level
+        };
+        assert_eq!(at(100, 20_000), 1.0, "nothing decays at 100");
+        // Half level 65 ms after the transient, a quarter at 133 ms.
+        assert!((at(50, 3_120) - 0.5).abs() < 0.01);
+        assert!((at(50, 6_384) - 0.25).abs() < 0.01);
+        assert_eq!(at(50, 0), 1.0);
+        assert_eq!(at(0, 1), 0.0, "at 0 a segment dies at once");
+        let plan = Plan::new(vec![long(48_000)], Loop::Off, 50, RATE).with_passes(|_| 1.0);
+        assert_eq!(
+            plan.passes()[0].frame,
+            -130.0,
+            "a 2 ms fade in, ending 0.7 ms early"
         );
     }
 

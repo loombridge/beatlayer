@@ -346,25 +346,38 @@ impl Controller {
         let added = model
             .regions
             .iter()
-            .filter(|(key, region)| {
-                self.regions
+            .filter(|(key, _)| {
+                !self
+                    .regions
                     .get(*key)
-                    .is_none_or(|placed| placed.region.track != region.track)
+                    .is_some_and(|placed| self.keeps(key, placed, model))
             })
             .map(|(_, region)| region.track)
             .collect();
         let removed = self
             .regions
             .iter()
-            .filter(|(key, placed)| {
-                model
-                    .regions
-                    .get(*key)
-                    .is_none_or(|region| region.track != placed.region.track)
-            })
+            .filter(|(key, placed)| !self.keeps(key, placed, model))
             .map(|(_, placed)| placed.region.track)
             .collect();
         (added, removed)
+    }
+
+    /// Whether a region the plug-in holds stays in `model`: on the same
+    /// track, and on its clip's same file. A clip cropped to a new file
+    /// keeps its ID but gets a new audio modification, and a region can't
+    /// move to another modification, so its region is made again.
+    fn keeps(&self, key: &RegionKey, placed: &PlacedRegion, model: &Model) -> bool {
+        let media = |clip: &ClipId| self.modifications.get(clip).map(|m| m.media);
+        model
+            .regions
+            .get(key)
+            .is_some_and(|region| region.track == placed.region.track)
+            && model
+                .modifications
+                .get(&placed.region.clip)
+                .map(|m| m.media)
+                == media(&placed.region.clip)
     }
 
     /// Gives the plug-in `model` in one edit cycle (R2): objects that left
@@ -435,17 +448,12 @@ impl Controller {
             );
         }
 
-        // Regions that left, or moved to another track, go first: their
-        // renderers let go of them, then they are destroyed.
+        // Regions that left, moved to another track or to another file go
+        // first: their renderers let go of them, then they are destroyed.
         let gone: Vec<RegionKey> = self
             .regions
             .iter()
-            .filter(|(key, placed)| {
-                model
-                    .regions
-                    .get(*key)
-                    .is_none_or(|region| region.track != placed.region.track)
-            })
+            .filter(|(key, placed)| !self.keeps(key, placed, model))
             .map(|(key, _)| *key)
             .collect();
         for key in gone {

@@ -24,25 +24,29 @@
 //! Its one class is both component and controller, with no parameters and no
 //! editor.
 
+mod bundle;
 mod document;
 mod entry;
+mod report;
 
 use std::cell::UnsafeCell;
 use std::ffi::{CString, c_char, c_void};
 use std::mem::size_of;
-use std::path::{Path, PathBuf};
 use std::ptr;
 use std::slice;
+use std::sync::Arc;
 use std::sync::atomic::Ordering::{Relaxed, Release};
 use std::sync::atomic::{AtomicBool, AtomicU64};
-use std::sync::{Arc, OnceLock};
 
 use bl_ara_sys as ara;
 use vst3::Steinberg::Vst::*;
 use vst3::Steinberg::*;
 use vst3::{Class, ComRef, ComWrapper, uid};
 
+pub use bundle::bundle;
 use document::Extension;
+pub use report::{ModificationReport, REQUEST, Report, report_of};
+
 use entry::{
     IPlugInEntryPoint, IPlugInEntryPoint2, IPlugInEntryPoint2Trait, IPlugInEntryPointTrait,
 };
@@ -126,10 +130,6 @@ fn format_fuid(tuid: &TUID) -> String {
 pub fn plugin_id() -> String {
     format_fuid(&Processor::CID)
 }
-
-/// A component state that makes the plug-in ask the host for the transport:
-/// play, locate, a cycle range, the cycle on, and stop.
-pub const REQUEST: &[u8] = b"REQUEST";
 
 /// Every byte the host's stream holds, as a state.
 fn read_state(state: *mut IBStream) -> Vec<u8> {
@@ -636,157 +636,4 @@ pub extern "system" fn GetPluginFactory() -> *mut IPluginFactory {
         Some(factory) => factory.into_raw(),
         None => ptr::null_mut(),
     }
-}
-
-/// What the plug-in reported, read back from the component state the host
-/// saved (see the crate documentation).
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Report {
-    /// How many times the host broke one of ARA's rules.
-    pub violations: u32,
-    /// What its editor view was told is selected, as (regions, sequences).
-    pub selections: Vec<(usize, usize)>,
-    /// Its audio modifications.
-    pub modifications: Vec<ModificationReport>,
-    /// How many audio sources it holds.
-    pub sources: usize,
-    /// The archive ID it was restored from, if it was.
-    pub archive_id: String,
-}
-
-/// One audio modification, as the plug-in reports it.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ModificationReport {
-    /// Its persistent ID: `clip-` and the clip's number.
-    pub id: String,
-    /// How many times the host updated its properties.
-    pub updates: u32,
-    /// What its archive said `updates` was, if an archive was restored.
-    pub restored: Option<u32>,
-    /// Whether it is active: not deactivated for the undo history.
-    pub active: bool,
-}
-
-/// Reads the plug-in's report from a state the host saved
-/// (`Vst3Host::save_state`'s bytes): the component's part of it.
-#[must_use]
-pub fn report_of(state: &[u8]) -> Report {
-    // The host's state: a magic, then the component's and the controller's
-    // parts, each with its length.
-    let length = state
-        .get(4..8)
-        .and_then(|bytes| bytes.try_into().ok())
-        .map_or(0, u32::from_le_bytes) as usize;
-    let text = String::from_utf8_lossy(state.get(8..8 + length).unwrap_or_default()).into_owned();
-    let field = |name: &str| -> &str {
-        text.split(';')
-            .find_map(|part| part.strip_prefix(name))
-            .unwrap_or_default()
-    };
-    let list = |value: &str| -> Vec<String> {
-        value
-            .split(',')
-            .filter(|part| !part.is_empty())
-            .map(str::to_owned)
-            .collect()
-    };
-    Report {
-        violations: field("v=").parse().unwrap_or(0),
-        selections: list(field("s="))
-            .iter()
-            .filter_map(|entry| {
-                let (regions, sequences) = entry.split_once(':')?;
-                Some((regions.parse().ok()?, sequences.parse().ok()?))
-            })
-            .collect(),
-        modifications: list(field("m="))
-            .iter()
-            .filter_map(|entry| {
-                let mut parts = entry.split(':');
-                let id = parts.next()?.to_owned();
-                let updates = parts.next()?.parse().ok()?;
-                let restored: i64 = parts.next()?.parse().ok()?;
-                let active = parts.next()? == "1";
-                Some(ModificationReport {
-                    id,
-                    updates,
-                    restored: u32::try_from(restored).ok(),
-                    active,
-                })
-            })
-            .collect(),
-        sources: field("sources=").parse().unwrap_or(0),
-        archive_id: field("a=").to_owned(),
-    }
-}
-
-/// For the host's tests: the test plug-in as a VST3 bundle, made once per
-/// test run from the cdylib Cargo built beside the running test binary: on
-/// macOS a `.vst3` bundle with its `Info.plist` and its binary under
-/// `Contents/MacOS`, on Linux under `Contents/x86_64-linux`, and on Windows
-/// under `Contents/x86_64-win`, as the VST3 specification lays them out.
-#[must_use]
-pub fn bundle() -> &'static Path {
-    static BUNDLE: OnceLock<PathBuf> = OnceLock::new();
-    BUNDLE.get_or_init(|| {
-        let library = library();
-        let dir = std::env::temp_dir().join(format!("beatlayer-test-ara-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("a temporary folder");
-        let bundle = dir.join("Test ARA Player.vst3");
-        let contents = bundle.join("Contents");
-        let (folder, name) = if cfg!(target_os = "macos") {
-            ("MacOS".to_owned(), "Test ARA Player".to_owned())
-        } else if cfg!(target_os = "windows") {
-            ("x86_64-win".to_owned(), "Test ARA Player.vst3".to_owned())
-        } else {
-            (
-                "x86_64-linux".to_owned(),
-                format!("{}bl_test_ara.so", std::env::consts::DLL_PREFIX),
-            )
-        };
-        let binary = contents.join(&folder);
-        std::fs::create_dir_all(&binary).expect("the bundle's folders");
-        std::fs::copy(&library, binary.join(name)).expect("the library");
-        if cfg!(target_os = "macos") {
-            std::fs::write(
-                contents.join("Info.plist"),
-                r#"<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-<key>CFBundleExecutable</key><string>Test ARA Player</string>
-<key>CFBundleIdentifier</key><string>bl.test.vst3.ara-player</string>
-<key>CFBundlePackageType</key><string>BNDL</string>
-</dict></plist>
-"#,
-            )
-            .expect("the bundle's Info.plist");
-        }
-        bundle
-    })
-}
-
-/// The newest test plug-in library Cargo built beside the running test
-/// binary.
-fn library() -> PathBuf {
-    let exe = std::env::current_exe().expect("the test binary's path");
-    let deps = exe.parent().expect("the test binary's folder");
-    let prefix = format!("{}bl_test_ara", std::env::consts::DLL_PREFIX);
-    let suffix = std::env::consts::DLL_SUFFIX;
-    let mut found: Vec<(std::time::SystemTime, PathBuf)> = [deps, deps.parent().unwrap_or(deps)]
-        .iter()
-        .flat_map(|dir| std::fs::read_dir(dir).into_iter().flatten().flatten())
-        .map(|entry| entry.path())
-        .filter(|path| {
-            path.file_name()
-                .and_then(|n| n.to_str())
-                .is_some_and(|n| n.starts_with(&prefix) && n.ends_with(suffix))
-        })
-        .filter_map(|path| Some((path.metadata().ok()?.modified().ok()?, path)))
-        .collect();
-    found.sort();
-    found
-        .pop()
-        .map(|(_, path)| path)
-        .expect("Cargo builds the test plug-in's cdylib beside the tests")
 }

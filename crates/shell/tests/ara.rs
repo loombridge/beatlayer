@@ -17,6 +17,11 @@ use bl_shell::testing::{rig, wait_for};
 use serde_json::json;
 use std::path::{Path, PathBuf};
 
+// `bl-test-ara`'s bundle helper as source, not as a crate: linking it beside
+// `bl-test-vst3` gives the binary two sets of VST3 entry points.
+#[path = "../../test-ara/src/bundle.rs"]
+mod test_ara;
+
 /// A quarter note, in ticks.
 const QUARTER: i64 = 705_600;
 
@@ -96,7 +101,7 @@ fn info(shell: &mut Shell, device: DeviceId) -> PluginInfo {
 // Spec: ara-hosting R2, R4, R9, R10, R13
 #[test]
 fn an_ara_plugin_follows_the_set_through_commands_and_keeps_its_archive() {
-    follows_the_set(bl_test_ara::bundle().as_os_str());
+    follows_the_set(test_ara::bundle().as_os_str());
 }
 
 // Spec: ara-hosting R2, R4, R9, R10, R13
@@ -236,7 +241,7 @@ fn an_export_has_the_plugins_clips_once_as_the_clip_player_would_play_them() {
         shell
             .run(
                 ids::LOAD,
-                json!({ "path": bl_test_ara::bundle().to_string_lossy(), "track": track }),
+                json!({ "path": test_ara::bundle().to_string_lossy(), "track": track }),
             )
             .unwrap(),
     )

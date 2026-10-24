@@ -30,12 +30,21 @@ use bl_plugin_host::vst3::{Vst3Host, plugin_state};
 
 use crate::common;
 
+// `bl-test-ara`'s helpers as source, not as a crate: linking it beside
+// `bl-test-vst3` gives the binary two sets of VST3 entry points.
+#[path = "../../test-ara/src/bundle.rs"]
+mod test_ara;
+#[path = "../../test-ara/src/report.rs"]
+mod test_ara_report;
+
 const RATE: SampleRate = SampleRate::HZ_48000;
 /// A quarter note, in ticks.
 const QUARTER: i64 = 705_600;
 /// Where the clip starts: one beat, half a second at 120 BPM, in frames.
 const START: i64 = 24_000;
 const FILE: ContentHash = ContentHash([7; 32]);
+/// The file a crop of the clip writes.
+const CROPPED: ContentHash = ContentHash([8; 32]);
 
 /// ARA starts and stops in a plug-in's binary for each host, so the tests of
 /// one binary take turns.
@@ -108,6 +117,7 @@ impl World {
         let audio = audio(frames);
         let mut files = Files::default();
         files.0.insert(FILE, Arc::clone(&audio));
+        files.0.insert(CROPPED, self::audio(frames / 2));
         host.set_ara_media(Arc::new(files));
 
         let mut editor = Editor::new();
@@ -162,7 +172,7 @@ impl World {
             clip,
             audio,
             revision: 1,
-            reports: bundle == bl_test_ara::bundle(),
+            reports: bundle == test_ara::bundle(),
         };
         world.settle();
         world
@@ -268,10 +278,10 @@ impl World {
     }
 
     /// What `bl-test-ara` kept, from its saved state.
-    fn report(&self) -> bl_test_ara::Report {
+    fn report(&self) -> test_ara_report::Report {
         assert!(self.reports, "only bl-test-ara reports");
         let state = self.host.save_state(self.device).unwrap();
-        bl_test_ara::report_of(&state.data)
+        test_ara_report::report_of(&state.data)
     }
 }
 
@@ -521,7 +531,7 @@ macro_rules! suite {
     };
 }
 
-suite!(test_plugin, Some(bl_test_ara::bundle().to_path_buf()));
+suite!(test_plugin, Some(test_ara::bundle().to_path_buf()));
 suite!(
     sdk_plugin,
     std::env::var_os("BL_ARA_TEST_PLUGIN").map(PathBuf::from)
@@ -533,7 +543,7 @@ suite!(
 #[test]
 fn the_host_never_changes_a_running_plugins_regions_or_destroys_what_is_in_use() {
     let _turn = one_at_a_time();
-    let mut world = World::new(bl_test_ara::bundle());
+    let mut world = World::new(test_ara::bundle());
     // Every kind of membership change, with the plug-in running.
     let second: ClipId = world.editor.new_id();
     world.edit(Command::CreateClip {
@@ -561,11 +571,39 @@ fn the_host_never_changes_a_running_plugins_regions_or_destroys_what_is_in_use()
     assert_eq!(world.host.ara_status()[0].regions.len(), 2);
 }
 
+// Spec: ara-hosting R2, R8
+#[test]
+fn regions_are_let_go_of_before_they_are_destroyed_when_the_device_goes_or_the_clip_is_cropped() {
+    let _turn = one_at_a_time();
+    let mut world = World::new(test_ara::bundle());
+    // Switched off, the device renders nothing: its track's regions go.
+    world.edit(Command::SetDeviceEnabled {
+        device: world.device,
+        enabled: false,
+    });
+    assert!(world.host.ara_status()[0].regions.is_empty());
+    world.edit(Command::SetDeviceEnabled {
+        device: world.device,
+        enabled: true,
+    });
+    assert_eq!(world.host.ara_status()[0].regions.len(), 1);
+    // Cropped, the clip keeps its ID but plays a new file: a new
+    // modification, and a new region on it.
+    world.edit(Command::CropClip {
+        clip: world.clip,
+        media: Some(CROPPED),
+        from: 0.25,
+        to: 0.75,
+    });
+    assert_eq!(world.host.ara_status()[0].regions.len(), 1);
+    assert_eq!(world.report().violations, 0);
+}
+
 // Spec: ara-hosting R6
 #[test]
 fn a_modification_that_left_the_set_comes_back_with_what_the_plugin_kept() {
     let _turn = one_at_a_time();
-    let mut world = World::new(bl_test_ara::bundle());
+    let mut world = World::new(test_ara::bundle());
     // A move updates the clip's properties in the plug-in: its own edit
     // count goes up.
     world.edit(Command::RenameClip {
@@ -610,7 +648,7 @@ fn a_modification_that_left_the_set_comes_back_with_what_the_plugin_kept() {
 fn what_the_plugin_kept_is_in_its_archive() {
     let _turn = one_at_a_time();
     let archives = {
-        let mut world = World::new(bl_test_ara::bundle());
+        let mut world = World::new(test_ara::bundle());
         world.edit(Command::RenameClip {
             clip: world.clip,
             name: "Take 2".to_owned(),
@@ -627,7 +665,7 @@ fn what_the_plugin_kept_is_in_its_archive() {
     // Opened again: the set's clip is the one the archive names (the set
     // is built the same way, so it has the same ID), and the plug-in has its
     // edits back.
-    let world = World::build(bl_test_ara::bundle(), 48_000, 2 * QUARTER, |_| {}, archives);
+    let world = World::build(test_ara::bundle(), 48_000, 2 * QUARTER, |_| {}, archives);
     let report = world.report();
     assert_eq!(
         report.archive_id,
@@ -667,7 +705,7 @@ fn a_warped_clip_is_played_stretched_to_its_warp_map() {
         audio.end = None;
     };
     let mut world = World::build(
-        bl_test_ara::bundle(),
+        test_ara::bundle(),
         96_000,
         8 * QUARTER,
         world_shape,
@@ -708,7 +746,7 @@ fn a_warped_clip_is_played_stretched_to_its_warp_map() {
 #[test]
 fn the_editor_view_is_told_what_the_arrangement_has_selected() {
     let _turn = one_at_a_time();
-    let world = World::new(bl_test_ara::bundle());
+    let world = World::new(test_ara::bundle());
     world.host.ara_select(&[world.clip], &[world.track]);
     world.host.ara_select(&[], &[world.track]);
     // A clip on another track is nobody's here.
@@ -720,10 +758,10 @@ fn the_editor_view_is_told_what_the_arrangement_has_selected() {
 #[test]
 fn the_transport_requests_a_plugin_makes_reach_the_host() {
     let _turn = one_at_a_time();
-    let world = World::new(bl_test_ara::bundle());
+    let world = World::new(test_ara::bundle());
     world
         .host
-        .load_state(world.device, &plugin_state(bl_test_ara::REQUEST, &[]))
+        .load_state(world.device, &plugin_state(test_ara_report::REQUEST, &[]))
         .unwrap();
     assert_eq!(
         world.host.take_ara_requests(),
@@ -747,7 +785,7 @@ fn clips_the_plugin_cant_render_stay_with_the_clip_player() {
     let _turn = one_at_a_time();
     // A clip at half gain is the player's, not the plug-in's.
     let world = World::build(
-        bl_test_ara::bundle(),
+        test_ara::bundle(),
         48_000,
         2 * QUARTER,
         |audio| audio.gain = 0.5,

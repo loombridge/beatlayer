@@ -572,12 +572,6 @@ fn sync(
             renders.insert(device.id, track.id());
         }
     }
-    for (&device, instance) in &mut main.instances {
-        if let Some(binding) = &mut instance.ara {
-            binding.track = renders.get(&device).copied();
-        }
-    }
-
     let mut edited = false;
     let ids: Vec<String> = main.ara.controllers.keys().cloned().collect();
     let Main { ara, instances, .. } = main;
@@ -600,16 +594,19 @@ fn sync(
         // are asked for first (R8).
         let (added, removed) = controller.membership(&model);
         let mut waiting = false;
-        for instance in instances.values_mut() {
+        for (device, instance) in instances.iter_mut() {
             let Some(binding) = &instance.ara else {
                 continue;
             };
             if binding.plugin != plugin {
                 continue;
             }
-            let affected = binding
-                .track
-                .is_some_and(|track| added.contains(&track) || removed.contains(&track));
+            let track = renders.get(device).copied();
+            let affected = binding.track != track
+                || [binding.track, track]
+                    .into_iter()
+                    .flatten()
+                    .any(|track| added.contains(&track) || removed.contains(&track));
             if affected && busy(instance) {
                 waiting = true;
                 hold(instance);
@@ -618,11 +615,33 @@ fn sync(
         if waiting {
             continue;
         }
+        // An instance whose device moved, was switched off or deleted lets
+        // go of its old track's regions and sequence before the edit cycle
+        // can destroy them; none of them is running now.
+        for (device, instance) in instances.iter_mut() {
+            let Some(binding) = &mut instance.ara else {
+                continue;
+            };
+            let track = renders.get(device).copied();
+            if binding.plugin != plugin || binding.track == track {
+                continue;
+            }
+            for region in std::mem::take(&mut binding.regions) {
+                binding
+                    .extension
+                    .remove_region(region as sys::ARAPlaybackRegionRef);
+            }
+            if let Some(old) = binding.sequence.take() {
+                binding
+                    .extension
+                    .remove_sequence(old as sys::ARARegionSequenceRef);
+            }
+            binding.track = track;
+        }
         if controller.differs(&model) {
-            let mut before = |track: TrackId, region: sys::ARAPlaybackRegionRef| {
+            let mut before = |_: TrackId, region: sys::ARAPlaybackRegionRef| {
                 for instance in instances.values_mut() {
                     if let Some(binding) = &mut instance.ara
-                        && binding.track == Some(track)
                         && binding.regions.remove(&(region as usize))
                     {
                         binding.extension.remove_region(region);
@@ -686,6 +705,9 @@ fn sync(
                 .collect();
             for key in stale {
                 binding.regions.remove(&key);
+                binding
+                    .extension
+                    .remove_region(key as sys::ARAPlaybackRegionRef);
             }
             if binding.sequence != sequence_key {
                 if let Some(old) = binding.sequence {

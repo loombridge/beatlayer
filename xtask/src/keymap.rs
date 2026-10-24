@@ -435,6 +435,11 @@ const WIDGET: &[(&str, &str)] = &[
          (`note.adjust_value`)",
     ),
     (
+        "S-NOTE-052",
+        "Stacks' Chord Selector Pad while it has the keyboard focus: Cmd-Up and Cmd-Down choose \
+         the entry before or after the selected chord's",
+    ),
+    (
         "S-A11Y-005",
         "the Clip View's note editor: Enter selects the notes that start inside the time \
          selection (`clip_view.select_notes`)",

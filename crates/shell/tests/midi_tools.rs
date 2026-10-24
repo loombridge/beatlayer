@@ -217,6 +217,7 @@ fn r2_r3_r5_the_list_describes_every_tool_in_order() {
             "rhythm",
             "seed",
             "shape",
+            "stacks",
             "euclidean",
             "test_fill"
         ],
@@ -227,7 +228,7 @@ fn r2_r3_r5_the_list_describes_every_tool_in_order() {
     assert_eq!(transpose.parameters[0].kind, "whole");
     assert!(transpose.parameters[0].scale_aware);
     assert_eq!(transpose.parameters[0].default, json!(0));
-    let fill = &list.tools[16];
+    let fill = &list.tools[17];
     assert_eq!(fill.parameters[1].kind, "division");
     assert_eq!(fill.parameters[1].default, json!("1/16"));
     assert_eq!(fill.parameters[2].unit.as_deref(), Some("%"));

@@ -550,7 +550,7 @@ impl MidiTool for Stacks {
         let Ok(mut state) = State::read(values) else {
             return;
         };
-        state.chords[0].root = 60 + (scale.root + 12 - 60 % 12) % 12;
+        state.chords[0].root = 60 + scale.root % 12;
         state.write(values);
     }
 

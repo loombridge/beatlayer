@@ -155,6 +155,7 @@ fn midi_tool_apply_by_id_with_values_and_a_seed_reads_back() {
             "rhythm",
             "seed",
             "shape",
+            "stacks",
             "euclidean",
             "test_fill"
         ]

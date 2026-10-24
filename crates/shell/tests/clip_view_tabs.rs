@@ -128,8 +128,8 @@ impl Song {
     }
 }
 
-// Spec: piano-roll R22. The tab commands change only the view: Notes
-// and Envelopes by name, and the next tab, round to the first, when `tab` is
+// Spec: piano-roll R22. The tab commands change only the view: Notes,
+// Envelopes and MPE by name, and the next tab, round to the first, when `tab` is
 // left out. The state reads the tab back.
 #[test]
 fn the_tab_commands_show_and_cycle_the_clip_views_tabs() {
@@ -144,21 +144,17 @@ fn the_tab_commands_show_and_cycle_the_clip_views_tabs() {
             .tab,
         ClipTab::Envelopes
     );
+    // Spec: mpe R22. The MPE tab is the third.
+    assert_eq!(song.view("view.clip_tab", json!({})).tab, ClipTab::Mpe);
     assert_eq!(song.view("view.clip_tab", json!({})).tab, ClipTab::Notes);
     assert_eq!(
-        song.view("view.clip_tab", json!({})).tab,
-        ClipTab::Envelopes
+        song.view("view.clip_tab", json!({ "tab": "mpe" })).tab,
+        ClipTab::Mpe
     );
     assert_eq!(
         song.shell.editor().undo_history().len(),
         steps,
         "a tab is view state, not an undo step"
-    );
-    assert!(
-        song.shell
-            .run("view.clip_tab", json!({ "tab": "mpe" }))
-            .is_err(),
-        "the MPE tab comes with its own package"
     );
 }
 

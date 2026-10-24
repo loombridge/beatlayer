@@ -142,6 +142,7 @@ What `browser.add_to_arrangement` and `browser.load_selected` return.
 |---|---|---|---|
 | `created_tracks` | array of [`TrackId`](#trackid) | yes | Audio tracks made for the files, top to bottom. |
 | `clips` | array of [`PlacedClip`](#placedclip) | yes | The clips placed, in the order of the files. |
+| `created_lanes` | array of [`TakeLaneId`](#takelaneid) | no | Take lanes added to tracks that had none at the place a file was dropped on (the comping spec, R36). |
 
 <details><summary>JSON Schema</summary>
 
@@ -153,6 +154,13 @@ What `browser.add_to_arrangement` and `browser.load_selected` return.
       "description": "The clips placed, in the order of the files.",
       "items": {
         "$ref": "#/$defs/PlacedClip"
+      },
+      "type": "array"
+    },
+    "created_lanes": {
+      "description": "Take lanes added to tracks that had none at the place a file was dropped on (the comping spec, R36).",
+      "items": {
+        "$ref": "#/$defs/TakeLaneId"
       },
       "type": "array"
     },
@@ -19800,6 +19808,7 @@ A clip a browser command placed.
 | `length` | [`Ticks`](#ticks) | yes | How long it is. |
 | `name` | string | yes | Its name: the file's, without the extension. |
 | `path` | string | yes | The file it plays. |
+| `lane` | [`TakeLaneId`](#takelaneid) or null | no | The take lane it is on, if it is on one rather than a main lane. |
 
 <details><summary>JSON Schema</summary>
 
@@ -19810,6 +19819,17 @@ A clip a browser command placed.
     "clip": {
       "$ref": "#/$defs/ClipId",
       "description": "The new clip."
+    },
+    "lane": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TakeLaneId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The take lane it is on, if it is on one rather than a main lane."
     },
     "length": {
       "$ref": "#/$defs/Ticks",

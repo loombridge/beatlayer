@@ -201,6 +201,14 @@
       "bits": 24,
       "render_hash": "fnv1a64:6dfe12718a75e409"
     },
+    "comp-edge-moved": {
+      "made_on": "macos-aarch64",
+      "sample_rate": 48000,
+      "channels": 2,
+      "frames": 156000,
+      "bits": 24,
+      "render_hash": "fnv1a64:c5c13f215df6d96f"
+    },
     "comp-from-two-takes": {
       "made_on": "macos-aarch64",
       "sample_rate": 48000,
@@ -208,6 +216,14 @@
       "frames": 108000,
       "bits": 24,
       "render_hash": "fnv1a64:08cc25b94fc121bc"
+    },
+    "comp-three-parts": {
+      "made_on": "macos-aarch64",
+      "sample_rate": 48000,
+      "channels": 2,
+      "frames": 156000,
+      "bits": 24,
+      "render_hash": "fnv1a64:25c601bbc8d4e782"
     },
     "complex-180": {
       "made_on": "macos-aarch64",

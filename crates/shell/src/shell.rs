@@ -1326,6 +1326,26 @@ impl Shell {
         self.touch();
     }
 
+    /// The Status Bar's list of the open MIDI Tools chain (Spec: midi-tools
+    /// R30).
+    fn chain_status(&self) -> Option<String> {
+        self.clip_view.midi_tools().chain_status(
+            self.editor.document(),
+            &self.clip_view,
+            &self.arrangement,
+        )
+    }
+
+    /// Shows the open chain's list in the Status Bar when a command changed
+    /// it from `listed` (Spec: midi-tools R30).
+    fn announce_chain(&mut self, listed: Option<String>) {
+        if let Some(text) = self.chain_status()
+            && Some(&text) != listed.as_ref()
+        {
+            self.set_message(text, false);
+        }
+    }
+
     /// The line the Status Bar shows while it has no message: what the
     /// pointer is over says about itself, such as a drum rack's pad
     /// (WP-5.6).
@@ -1565,10 +1585,20 @@ impl Shell {
             }
             return result;
         }
+        if let Some(clip) = self.audio_apply(id, &args) {
+            // Spec: midi-transformations R22. On an audio clip the Transform
+            // panel's apply button and Cmd+Enter quantise it with the
+            // panel's settings.
+            return self.run(
+                bl_shell_spec::warping::QUANTIZE_AUDIO,
+                json!({ "clip": clip }),
+            );
+        }
         if tool_ids::handles(id) {
             // Spec: midi-tools R23. The MIDI Tools' panels, choices,
             // settings and applications.
             let before = self.editor.document().clone();
+            let listed = self.chain_status();
             let result = midi_tools::run(
                 id,
                 args,
@@ -1580,6 +1610,9 @@ impl Shell {
             if *self.editor.document() != before {
                 self.dirty = true;
                 self.document_changed();
+            }
+            if result.is_ok() {
+                self.announce_chain(listed);
             }
             self.touch();
             return result;
@@ -1908,6 +1941,22 @@ impl Shell {
     /// The agent API's last audio previews (WP-1.16, WP-2.28).
     pub fn previews_mut(&mut self) -> &mut crate::perception::Previews {
         &mut self.previews
+    }
+
+    /// The audio clip `midi_tool.apply` is for, if it is for one.
+    fn audio_apply(&self, id: &str, args: &Value) -> Option<bl_model::ClipId> {
+        if id != tool_ids::APPLY {
+            return None;
+        }
+        let named = args
+            .get("clip")
+            .and_then(|clip| serde_json::from_value(clip.clone()).ok());
+        midi_tools::audio_clip(
+            self.editor.document(),
+            &self.clip_view,
+            &self.arrangement,
+            named,
+        )
     }
 
     /// Arguments as a JSON object: `null` is no arguments.

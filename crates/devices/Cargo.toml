@@ -22,6 +22,8 @@ bl-engine.workspace = true
 # A device that plays media (WP-2.16) reads the decoded audio the media
 # store hands the engine, as `SampleData`.
 bl-media.workspace = true
+# Arpeggiator and the Arpeggiate tool share one style order.
+bl-midi-tools.workspace = true
 # Devices' parameter descriptors and layouts are the document's types
 # (WP-2.5), so the shell, the UI, and presets read them too.
 bl-model.workspace = true

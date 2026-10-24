@@ -201,15 +201,24 @@ fn r2_r3_r5_the_list_describes_every_tool_in_order() {
     let names: Vec<&str> = list.tools.iter().map(|tool| tool.id.as_str()).collect();
     assert_eq!(
         names,
-        ["test_transpose", "test_fill"],
+        [
+            "arpeggiate",
+            "chop",
+            "connect",
+            "ornament",
+            "quantize",
+            "test_transpose",
+            "test_shift",
+            "test_fill"
+        ],
         "transformations, then generators"
     );
-    let transpose = &list.tools[0];
+    let transpose = &list.tools[5];
     assert_eq!(transpose.parameters[0].id, "degrees");
     assert_eq!(transpose.parameters[0].kind, "whole");
     assert!(transpose.parameters[0].scale_aware);
     assert_eq!(transpose.parameters[0].default, json!(0));
-    let fill = &list.tools[1];
+    let fill = &list.tools[7];
     assert_eq!(fill.parameters[1].kind, "division");
     assert_eq!(fill.parameters[1].default, json!("1/16"));
     assert_eq!(fill.parameters[2].unit.as_deref(), Some("%"));
@@ -711,6 +720,8 @@ fn r19_the_default_tool_is_the_chosen_tool_of_the_panel_shown_last() {
         ids::SET,
         json!({ "tool": "test_transpose", "values": { "degrees": 7 } }),
     );
+    song.tool(ids::CHOOSE, json!({ "tool": "test_fill" }));
+    song.tool(ids::CHOOSE, json!({ "tool": "test_transpose" }));
     song.tool(ids::SHOW_PANEL, json!({ "panel": "generate" }));
     assert_eq!(song.state().current_tool.as_deref(), Some("test_fill"));
     song.tool(ids::SHOW_PANEL, json!({ "panel": "transform" }));
@@ -1146,4 +1157,673 @@ fn r5_a_saved_value_outside_its_range_loads_as_the_default() {
     assert_eq!(fill.values["key"], json!(60), "out of range: the default");
     assert_eq!(fill.values["length"], json!(70), "in range: kept");
     assert!(!fill.values.contains_key("colour"), "no such parameter");
+}
+
+// Chained MIDI Tools (WP-6.15; the MIDI Tools spec, R27 to R33).
+
+impl Song {
+    /// Applies `test_transpose` or `test_shift` with a spread, so the seed
+    /// matters, and a seed.
+    fn apply_seeded(&mut self, tool: &str, key: &str, amount: i64, seed: u32) -> MidiToolState {
+        self.tool(
+            ids::APPLY,
+            json!({ "tool": tool, "values": { key: amount, "spread": 20 }, "seed": seed }),
+        )
+    }
+
+    /// Selects the three notes and chains Test Transpose, then Test Shift.
+    fn chain_of_two(&mut self) {
+        self.select_notes(&[0, 1, 2]);
+        self.apply_seeded("test_transpose", "degrees", 1, 11);
+        self.apply_seeded("test_shift", "sixteenths", 2, 22);
+    }
+
+    fn chain(&mut self) -> Vec<(String, u32)> {
+        self.state()
+            .application
+            .map(|app| app.chain.into_iter().map(|s| (s.tool, s.seed)).collect())
+            .unwrap_or_default()
+    }
+
+    fn status(&self) -> Option<String> {
+        self.shell.message().map(|message| message.text.clone())
+    }
+}
+
+/// `three()` after Test Transpose and then Test Shift, each run on its own
+/// as the second takes the first's notes.
+fn run_in_turn(degrees: i64) -> Vec<Note> {
+    let mut song = song(three());
+    song.select_notes(&[0, 1, 2]);
+    song.apply_seeded("test_transpose", "degrees", degrees, 11);
+    song.tool(ids::CLOSE, json!({}));
+    song.apply_seeded("test_shift", "sixteenths", 2, 22);
+    song.notes()
+}
+
+#[test]
+fn r27_r33_two_transformations_in_turn_form_a_chain_the_state_reports() {
+    // Spec: midi-tools R27, R33. The second takes the first's notes; the
+    // state lists each step with its settings and seed.
+    let mut song = song(three());
+    song.select_notes(&[0, 1, 2]);
+    let steps = song.steps();
+    song.apply_seeded("test_transpose", "degrees", 1, 11);
+    let state = song.apply_seeded("test_shift", "sixteenths", 2, 22);
+    assert_eq!(
+        song.notes(),
+        run_in_turn(1),
+        "the second run on the first's output"
+    );
+    assert_eq!(song.steps(), steps + 2, "each application is a step");
+    assert_eq!(song.last_step().as_deref(), Some("Test Shift"));
+    let application = state.application.unwrap();
+    assert_eq!(application.input_notes, 3);
+    assert_eq!(application.tool, "test_shift");
+    let chain = application.chain;
+    assert_eq!(chain.len(), 2);
+    assert_eq!(
+        (chain[0].tool.as_str(), chain[0].seed),
+        ("test_transpose", 11)
+    );
+    assert_eq!(chain[0].values["degrees"], json!(1));
+    assert_eq!(chain[0].values["spread"], json!(20));
+    assert_eq!((chain[1].tool.as_str(), chain[1].seed), ("test_shift", 22));
+    assert_eq!(chain[1].values["sixteenths"], json!(2));
+}
+
+#[test]
+fn r27_the_same_tool_applied_twice_is_two_steps() {
+    // Spec: midi-tools R27.
+    let mut song = song(three());
+    song.select_notes(&[0, 1, 2]);
+    song.apply_seeded("test_transpose", "degrees", 1, 11);
+    song.apply_seeded("test_transpose", "degrees", 2, 22);
+    assert_eq!(
+        song.chain(),
+        [
+            ("test_transpose".to_owned(), 11),
+            ("test_transpose".to_owned(), 22)
+        ]
+    );
+    assert_eq!(song.keys(), [63, 65, 67]);
+}
+
+#[test]
+fn r27_a_generator_starts_a_new_chain_and_transformations_join_it() {
+    // Spec: midi-tools R27.
+    let mut song = song(three());
+    song.chain_of_two();
+    assert_eq!(song.chain().len(), 2);
+    song.tool(ids::APPLY, json!({ "tool": "test_fill", "seed": 5 }));
+    assert_eq!(
+        song.chain(),
+        [("test_fill".to_owned(), 5)],
+        "the generator closed the chain and began its own"
+    );
+    song.apply_seeded("test_shift", "sixteenths", 1, 6);
+    assert_eq!(
+        song.chain(),
+        [("test_fill".to_owned(), 5), ("test_shift".to_owned(), 6)]
+    );
+}
+
+#[test]
+fn r27_notes_or_a_range_of_their_own_start_a_new_chain() {
+    // Spec: midi-tools R27: a transformation joins the chain only when the
+    // notes the chain wrote are its target.
+    let mut song = song(three());
+    song.chain_of_two();
+    song.tool(
+        ids::APPLY,
+        json!({ "tool": "test_transpose", "notes": [0], "seed": 1 }),
+    );
+    assert_eq!(song.chain(), [("test_transpose".to_owned(), 1)]);
+}
+
+#[test]
+fn r28_changing_the_first_tool_runs_the_second_again_with_its_own_seed() {
+    // Spec: midi-tools R28. One undo step, named for the tool changed.
+    let mut song = song(three());
+    song.chain_of_two();
+    let steps = song.steps();
+    song.tool(
+        ids::SET,
+        json!({ "tool": "test_transpose", "values": { "degrees": 3 } }),
+    );
+    assert_eq!(song.notes(), run_in_turn(3), "the second's own seed, 22");
+    assert_eq!(song.steps(), steps + 1);
+    assert_eq!(song.last_step().as_deref(), Some("Test Transpose"));
+    assert_eq!(
+        song.chain(),
+        [
+            ("test_transpose".to_owned(), 11),
+            ("test_shift".to_owned(), 22)
+        ],
+        "the seeds stay"
+    );
+    // A change of the last tool runs only it.
+    song.tool(
+        ids::SET,
+        json!({ "tool": "test_shift", "values": { "sixteenths": 4 } }),
+    );
+    assert_eq!(song.last_step().as_deref(), Some("Test Shift"));
+    assert_eq!(song.chain().len(), 2);
+    // Undo puts back the step's change as one.
+    song.shell.run("edit.undo", json!({})).unwrap();
+    assert_eq!(song.notes(), run_in_turn(3));
+}
+
+#[test]
+fn r28_a_gesture_on_an_earlier_tool_is_one_step_named_for_it() {
+    // Spec: midi-tools R28, R22. The frames of a drag on the first tool's
+    // control run the chain again from its step.
+    let mut song = song(three());
+    song.chain_of_two();
+    let steps = song.steps();
+    let frame = |degrees: i64| {
+        Invocation::new(
+            ids::SET,
+            json!({ "tool": "test_transpose", "values": { "degrees": degrees } }),
+        )
+    };
+    for degrees in 2..=3 {
+        song.shell
+            .gesture(GesturePhase::Update, Some(&frame(degrees)))
+            .unwrap();
+    }
+    song.shell
+        .gesture(GesturePhase::Commit, Some(&frame(4)))
+        .unwrap();
+    assert_eq!(song.notes(), run_in_turn(4));
+    assert_eq!(song.steps(), steps + 1, "however many frames, one step");
+    assert_eq!(song.last_step().as_deref(), Some("Test Transpose"));
+    assert_eq!(song.chain().len(), 2, "the chain stays open");
+}
+
+#[test]
+fn r28_choosing_a_tool_in_the_chain_shows_its_step_and_set_names_a_step() {
+    // Spec: midi-tools R28. A tool in the chain more than once shows its
+    // last step; `step` names another.
+    let mut song = song(three());
+    song.select_notes(&[0, 1, 2]);
+    song.apply_seeded("test_transpose", "degrees", 1, 11);
+    song.apply_seeded("test_shift", "sixteenths", 1, 22);
+    song.apply_seeded("test_transpose", "degrees", 2, 33);
+    let degrees = |song: &mut Song| {
+        song.state()
+            .tools
+            .iter()
+            .find(|t| t.tool == "test_transpose")
+            .unwrap()
+            .values["degrees"]
+            .clone()
+    };
+    let steps = song.steps();
+    song.tool(
+        ids::SET,
+        json!({ "tool": "test_transpose", "step": 0, "values": { "degrees": 5 } }),
+    );
+    assert_eq!(song.steps(), steps + 1);
+    let chain = song.state().application.unwrap().chain;
+    assert_eq!(chain[0].values["degrees"], json!(5), "step 0 changed");
+    assert_eq!(chain[2].values["degrees"], json!(2), "step 2 did not");
+    assert_eq!(degrees(&mut song), json!(5), "the settings follow the step");
+    song.tool(ids::CHOOSE, json!({ "tool": "test_transpose" }));
+    assert_eq!(
+        degrees(&mut song),
+        json!(2),
+        "choosing shows the last step's settings"
+    );
+    // Without `step` the last step changes.
+    song.tool(
+        ids::SET,
+        json!({ "tool": "test_transpose", "values": { "degrees": 7 } }),
+    );
+    let chain = song.state().application.unwrap().chain;
+    assert_eq!(
+        (
+            chain[0].values["degrees"].clone(),
+            chain[2].values["degrees"].clone()
+        ),
+        (json!(5), json!(7))
+    );
+    // Another tool's step, or one that isn't there, is refused.
+    let message = song.refused(
+        ids::SET,
+        json!({ "tool": "test_transpose", "step": 1, "values": { "degrees": 1 } }),
+    );
+    assert!(message.contains("test_shift"), "{message}");
+    song.refused(
+        ids::SET,
+        json!({ "tool": "test_transpose", "step": 9, "values": { "degrees": 1 } }),
+    );
+}
+
+#[test]
+fn r31_auto_off_on_the_middle_step_runs_the_third_on_the_firsts_output() {
+    // Spec: midi-tools R31. One undo step.
+    let mut song = song(three());
+    song.select_notes(&[0, 1, 2]);
+    song.apply_seeded("test_transpose", "degrees", 1, 11);
+    song.apply_seeded("test_shift", "sixteenths", 3, 22);
+    song.apply_seeded("test_transpose", "degrees", 2, 33);
+    let steps = song.steps();
+    song.tool(
+        ids::SET_AUTO,
+        json!({ "tool": "test_shift", "auto": false }),
+    );
+    assert_eq!(song.steps(), steps + 1, "as one undo step");
+    assert_eq!(
+        song.chain(),
+        [
+            ("test_transpose".to_owned(), 11),
+            ("test_transpose".to_owned(), 33)
+        ]
+    );
+    let mut expected = self::song(three());
+    expected.select_notes(&[0, 1, 2]);
+    expected.apply_seeded("test_transpose", "degrees", 1, 11);
+    expected.apply_seeded("test_transpose", "degrees", 2, 33);
+    assert_eq!(song.notes(), expected.notes());
+    song.shell.run("edit.undo", json!({})).unwrap();
+    assert_eq!(song.chain().len(), 0, "undo closes the chain");
+}
+
+#[test]
+fn r31_auto_off_on_the_last_step_leaves_the_rest_and_on_the_only_step_closes_the_chain() {
+    // Spec: midi-tools R31.
+    let mut song = song(three());
+    song.select_notes(&[0, 1, 2]);
+    let original = song.notes();
+    song.apply_seeded("test_transpose", "degrees", 1, 11);
+    let after_first = song.notes();
+    song.apply_seeded("test_shift", "sixteenths", 3, 22);
+    song.tool(
+        ids::SET_AUTO,
+        json!({ "tool": "test_shift", "auto": false }),
+    );
+    assert_eq!(song.notes(), after_first, "the notes the first step made");
+    assert_eq!(song.chain(), [("test_transpose".to_owned(), 11)]);
+    // The chain is still open on those notes: the first can be changed.
+    song.tool(
+        ids::SET,
+        json!({ "tool": "test_transpose", "values": { "degrees": 4 } }),
+    );
+    assert_eq!(song.keys(), [64, 66, 68]);
+    song.tool(
+        ids::SET_AUTO,
+        json!({ "tool": "test_transpose", "auto": false }),
+    );
+    assert_eq!(song.notes(), original, "the input is back");
+    assert!(song.state().application.is_none(), "and the chain closed");
+}
+
+#[test]
+fn r32_every_outside_edit_closes_the_chain() {
+    // Spec: midi-tools R32, R21. A note move, an expression edit, undo, a
+    // change of the selection.
+    let mut song = song(three());
+    let closes = |song: &mut Song, edit: &dyn Fn(&mut Song)| {
+        song.tool(ids::CLOSE, json!({}));
+        song.chain_of_two();
+        assert_eq!(song.chain().len(), 2);
+        edit(song);
+        assert!(song.state().application.is_none());
+    };
+    closes(&mut song, &|song| {
+        song.shell
+            .run("note.move", json!({ "by": SIXTEENTH }))
+            .unwrap();
+    });
+    closes(&mut song, &|song| {
+        song.shell
+            .run(
+                "note.set_expression",
+                json!({ "envelope": "pressure", "breakpoints": [{ "at": 0, "value": 64.0 }] }),
+            )
+            .unwrap();
+    });
+    closes(&mut song, &|song| {
+        song.shell.run("edit.undo", json!({})).unwrap();
+    });
+    closes(&mut song, &|song| song.select_notes(&[0]));
+    // After it closes, the next change starts a new chain.
+    song.tool(ids::CLOSE, json!({}));
+    song.select_notes(&[0, 1, 2]);
+    song.apply_seeded("test_shift", "sixteenths", 1, 3);
+    assert_eq!(song.chain(), [("test_shift".to_owned(), 3)]);
+}
+
+#[test]
+fn r30_the_status_bar_lists_the_chain_until_another_message_replaces_it() {
+    // Spec: midi-tools R30.
+    let mut song = song(three());
+    song.select_notes(&[0, 1, 2]);
+    song.apply_seeded("test_transpose", "degrees", 1, 11);
+    assert_eq!(song.status().as_deref(), Some("Test Transpose"));
+    song.apply_seeded("test_shift", "sixteenths", 2, 22);
+    assert_eq!(
+        song.status().as_deref(),
+        Some("Test Transpose › Test Shift")
+    );
+    // Another message replaces it, and a change that leaves the list as it
+    // was doesn't bring it back.
+    song.shell.set_message("Something else", false);
+    song.tool(
+        ids::SET,
+        json!({ "tool": "test_transpose", "values": { "degrees": 2 } }),
+    );
+    assert_eq!(song.status().as_deref(), Some("Something else"));
+    song.apply_seeded("test_transpose", "degrees", 1, 33);
+    assert_eq!(
+        song.status().as_deref(),
+        Some("Test Transpose › Test Shift › Test Transpose"),
+        "a tool applied twice is listed twice"
+    );
+}
+
+#[test]
+fn r30_a_drags_first_frame_lists_the_chain_it_starts() {
+    // Spec: midi-tools R30. A control's gesture announces the chain too.
+    let mut song = song(three());
+    song.select_notes(&[0, 1, 2]);
+    let frame = Invocation::new(
+        ids::SET,
+        json!({ "tool": "test_transpose", "values": { "degrees": 2 } }),
+    );
+    song.shell
+        .gesture(GesturePhase::Update, Some(&frame))
+        .unwrap();
+    assert_eq!(song.status().as_deref(), Some("Test Transpose"));
+}
+
+// The transformations of WP-6.12 (the MIDI transformations spec, R3 to R22),
+// through the commands.
+
+/// Three notes with room between them, none on the grid.
+fn spaced() -> Vec<Note> {
+    vec![
+        note(60, 37, SIXTEENTH),
+        note(64, 2 * QUARTER + 1000, SIXTEENTH),
+        note(67, 3 * QUARTER + 11, SIXTEENTH),
+    ]
+}
+
+#[test]
+fn r3_to_r19_each_transformation_applies_by_id_with_a_seed_as_one_undo_step() {
+    for (tool, name, values) in [
+        (
+            "arpeggiate",
+            "Arpeggiate",
+            json!({ "steps": 1, "gate": 50 }),
+        ),
+        ("chop", "Chop", json!({ "parts": 4 })),
+        ("connect", "Connect", json!({ "spread": 2 })),
+        ("ornament", "Ornament", json!({})),
+        ("quantize", "Quantize", json!({ "end": true })),
+    ] {
+        let mut one = song(spaced());
+        one.select_notes(&[0, 1, 2]);
+        let before = one.notes();
+        let steps = one.steps();
+        let args = json!({ "tool": tool, "values": values, "seed": 5 });
+        let run = one.tool(ids::APPLY, args.clone()).run.unwrap();
+        assert_eq!(run.seed, 5, "{tool}");
+        assert!(run.undo_step, "{tool}");
+        assert_eq!(one.steps(), steps + 1, "{tool}: one undo step");
+        assert_eq!(one.last_step().as_deref(), Some(name), "{tool}");
+        assert_ne!(one.notes(), before, "{tool} changed the notes");
+        // The same input, settings and seed give the same notes.
+        let mut two = song(spaced());
+        two.select_notes(&[0, 1, 2]);
+        two.tool(ids::APPLY, args);
+        assert_eq!(one.notes(), two.notes(), "{tool}");
+        one.shell.run("edit.undo", json!({})).unwrap();
+        assert_eq!(one.notes(), before, "{tool}: undo");
+    }
+}
+
+#[test]
+fn r4_to_r6_arpeggiate_in_and_out_of_scale_mode_and_on_a_drum_rack() {
+    let chord = || {
+        vec![
+            note(60, 0, BAR / 2),
+            note(64, 0, BAR / 2),
+            note(67, 0, BAR / 2),
+        ]
+    };
+    let values = json!({ "steps": 1, "distance": 1, "rate": "1/16" });
+    // Without a scale a degree is a semitone.
+    let mut plain = song(chord());
+    plain.select_notes(&[0, 1, 2]);
+    plain.tool(
+        ids::APPLY,
+        json!({ "tool": "arpeggiate", "values": values }),
+    );
+    assert_eq!(plain.keys()[..6], [60, 64, 67, 61, 65, 68]);
+    // In C major one degree up from C is D, from E is F and from G is A.
+    let mut major = song_with(MidiData::new(chord()), Scale::new(0, ScaleName::Major));
+    major.select_notes(&[0, 1, 2]);
+    major.tool(
+        ids::APPLY,
+        json!({ "tool": "arpeggiate", "values": values }),
+    );
+    assert_eq!(major.keys()[..6], [60, 64, 67, 62, 65, 69]);
+    // On a Drum Rack a step counts through the pads' keys.
+    let pads = |editor: &mut Editor, track: TrackId| {
+        let rack = editor.new_id();
+        editor
+            .apply(Command::InsertDevice {
+                track,
+                index: 0,
+                device: bl_model::Device::rack(rack, RackKind::Drum),
+            })
+            .unwrap();
+        for key in [36u8, 38, 42] {
+            let chain = editor.new_id();
+            editor
+                .apply(Command::AddChain {
+                    rack,
+                    index: 0,
+                    chain: Chain::for_pad(chain, "Pad", key),
+                })
+                .unwrap();
+        }
+    };
+    let mut drums = song_on(
+        MidiData::new(vec![note(36, 0, BAR / 2), note(38, 0, BAR / 2)]),
+        Scale::default(),
+        pads,
+    );
+    drums.select_notes(&[0, 1]);
+    drums.tool(
+        ids::APPLY,
+        json!({ "tool": "arpeggiate", "values": values }),
+    );
+    assert!(
+        drums.keys().iter().all(|key| [36, 38, 42].contains(key)),
+        "{:?}",
+        drums.keys()
+    );
+}
+
+#[test]
+fn r12_to_r13_connect_in_a_scale_and_on_a_drum_rack_stays_on_their_keys() {
+    let ends = || vec![note(60, 0, SIXTEENTH), note(71, 4 * QUARTER, SIXTEENTH)];
+    let mut major = song_with(MidiData::new(ends()), Scale::new(0, ScaleName::Major));
+    major.select_notes(&[0, 1]);
+    major.tool(
+        ids::APPLY,
+        json!({ "tool": "connect", "values": { "spread": 3 }, "seed": 2 }),
+    );
+    assert!(major.notes().len() > 2);
+    assert!(
+        major
+            .keys()
+            .iter()
+            .all(|key| [0, 2, 4, 5, 7, 9, 11].contains(&(key % 12))),
+        "{:?}",
+        major.keys()
+    );
+}
+
+#[test]
+fn r20_r19_cmd_u_quantizes_with_the_tools_settings_which_are_saved_and_reloaded() {
+    // Spec: midi-transformations R19, R20; piano-roll R19.
+    let mut editor = factory_default_set();
+    let track = editor.document().top_level().next().unwrap();
+    let clip = editor.new_id();
+    editor
+        .apply(Command::CreateClip {
+            track,
+            clip: Clip::new(
+                clip,
+                Ticks::ZERO,
+                Ticks(4 * BAR),
+                ClipData::Midi(MidiData::new(vec![note(60, QUARTER + 200, QUARTER - 100)])),
+            ),
+        })
+        .unwrap();
+    let dir = std::env::temp_dir().join(format!(
+        "bl-shell-quantize-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("Quantize.blset");
+    bl_shell::files::ProjectFiles::new()
+        .save(&path, &editor)
+        .unwrap();
+    let mut shell = Shell::new(
+        Preferences::default(),
+        None,
+        AudioHost::null(Default::default()),
+        Box::new(bl_shell::files::ProjectFiles::new()),
+    );
+    let open = |shell: &mut Shell| {
+        shell
+            .run("set.open", json!({ "path": path.to_string_lossy() }))
+            .unwrap();
+        shell
+            .run("arrangement.select_clips", json!({ "clips": [clip] }))
+            .unwrap();
+    };
+    open(&mut shell);
+    let steps = shell.editor().undo_history().len();
+    let settings = shell
+        .run(
+            "clip_view.quantize_settings",
+            json!({ "grid": QUARTER, "target": "both", "triplets": true, "amount": 100 }),
+        )
+        .unwrap();
+    assert_eq!(settings["target"], json!("both"));
+    assert_eq!(settings["triplets"], json!(true));
+    assert_eq!(shell.editor().undo_history().len(), steps, "no undo step");
+    shell.run("set.save", json!({})).unwrap();
+    shell.run("set.new", json!({})).unwrap();
+    open(&mut shell);
+    let settings = shell
+        .run("clip_view.quantize_settings", json!({ "amount": 100 }))
+        .unwrap();
+    assert_eq!(settings["grid"], json!(QUARTER));
+    assert_eq!(settings["target"], json!("both"));
+    assert_eq!(settings["triplets"], json!(true));
+    let state: MidiToolState =
+        serde_json::from_value(shell.run(ids::STATE, json!({})).unwrap()).unwrap();
+    let quantize = state.tools.iter().find(|t| t.tool == "quantize").unwrap();
+    assert_eq!(quantize.values["start"], json!(true));
+    assert_eq!(quantize.values["end"], json!(true));
+    assert_eq!(quantize.values["grid"], json!("1_4"));
+    assert_eq!(quantize.values["triplets"], json!(true));
+    // Cmd+U quantises through `note.quantize` with them: lines a quarter
+    // triplet apart, the start first and then the end.
+    shell
+        .run("clip_view.select_notes", json!({ "notes": [0] }))
+        .unwrap();
+    shell.run("note.quantize", json!({})).unwrap();
+    let ClipData::Midi(midi) = &shell.editor().document().clip(clip).unwrap().data else {
+        panic!("a MIDI clip");
+    };
+    let third = QUARTER * 2 / 3;
+    let moved = notes_in_order(midi);
+    assert_eq!(
+        (moved[0].start, moved[0].length),
+        (Ticks(2 * third), Ticks(third))
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn r21_quantize_settings_shows_the_transform_panel_with_quantize_chosen_without_an_undo_step() {
+    let mut song = song(three());
+    let (steps, notes) = (song.steps(), song.notes());
+    assert_eq!(song.state().panel, Panel::Utilities);
+    song.shell
+        .run("clip_view.quantize_settings", json!({}))
+        .unwrap();
+    let state = song.state();
+    assert_eq!(state.panel, Panel::Transform);
+    assert_eq!(state.transformation, "quantize");
+    assert_eq!((song.steps(), song.notes()), (steps, notes));
+    // Reading a field back does not move the panel.
+    song.tool(ids::SHOW_PANEL, json!({ "panel": "utilities" }));
+    song.shell
+        .run("clip_view.quantize_settings", json!({ "amount": 40 }))
+        .unwrap();
+    assert_eq!(song.state().panel, Panel::Utilities);
+}
+
+#[test]
+fn r8_r43_chops_gaps_write_its_pattern_and_a_toggle_click_is_a_set() {
+    let mut song = song(three());
+    let chop = |state: &MidiToolState| {
+        state
+            .tools
+            .iter()
+            .find(|t| t.tool == "chop")
+            .unwrap()
+            .values
+            .clone()
+    };
+    song.tool(ids::SET_AUTO, json!({ "tool": "chop", "auto": false }));
+    let state = song.tool(
+        ids::SET,
+        json!({ "tool": "chop", "values": { "parts": 4, "gaps": 1 } }),
+    );
+    let values = chop(&state);
+    assert_eq!(
+        values["pattern"].as_array().unwrap()[..4],
+        [json!(true), json!(false), json!(true), json!(false)]
+    );
+    // A toggle click sets the pattern; the change is refused if it leaves no part.
+    let mut toggles = vec![true; 16];
+    toggles[1] = false;
+    let state = song.tool(
+        ids::SET,
+        json!({ "tool": "chop", "values": { "pattern": toggles } }),
+    );
+    assert_eq!(
+        chop(&state)["pattern"].as_array().unwrap()[..4],
+        [json!(true), json!(false), json!(true), json!(true)]
+    );
+    let message = song.refused(
+        ids::SET,
+        json!({ "tool": "chop", "values": { "pattern": vec![false; 16] } }),
+    );
+    assert!(message.contains("at least one part"), "{message}");
+    assert!(
+        song.refused(ids::SET, json!({ "tool": "chop", "values": { "gaps": 9 } }))
+            .contains("gaps"),
+    );
+    // Applying cuts the selected notes; the gaps write nothing.
+    song.select_notes(&[0]);
+    song.tool(
+        ids::APPLY,
+        json!({ "tool": "chop", "values": { "gaps": 1, "parts": 4 } }),
+    );
+    assert_eq!(song.notes().iter().filter(|n| n.key == 60).count(), 2);
 }

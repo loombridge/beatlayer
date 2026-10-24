@@ -79,7 +79,7 @@ impl Shell {
                 || self.is_device_command(id)
                 || track_ids::handles(id)
                 || note_ids::handles(id)
-                || tool_ids::handles(id)
+                || (tool_ids::handles(id) && self.audio_apply(id, &args).is_none())
                 || midi_ids::handles(id)
                 || matches!(
                     id,
@@ -204,6 +204,7 @@ impl Shell {
     }
 
     fn gesture_step(&mut self, invocation: &Invocation) -> Result<Value, ShellError> {
+        let listed = self.chain_status();
         let label = if note_ids::handles(&invocation.id) {
             clip_view::label(&invocation.id)
         } else if automation_ids::handles(&invocation.id) {
@@ -363,6 +364,9 @@ impl Shell {
                 }
                 if sample_edit_command(&invocation.id) {
                     self.clip_view.sample_follow(true);
+                }
+                if tool_ids::handles(&invocation.id) {
+                    self.announce_chain(listed);
                 }
                 Ok(value)
             }

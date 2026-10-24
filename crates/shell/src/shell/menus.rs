@@ -464,7 +464,12 @@ impl Shell {
                     self.editor.document(),
                     &self.clip_view,
                     &self.arrangement,
-                );
+                ) || self.audio_apply(id, args).is_some_and(|clip| {
+                    matches!(
+                        self.editor.document().clip(clip).map(|clip| &clip.data),
+                        Some(ClipData::Audio(audio)) if audio.warp
+                    )
+                });
             }
             // The whole-track copies (the track context menu spec, R3):
             // Cut, Copy and Duplicate work on the selected tracks, and

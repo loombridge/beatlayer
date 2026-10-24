@@ -694,7 +694,7 @@ Total to 1.0: 293 packages planned in Phases 0 to 7, and about 95 estimated in P
 | 6.10 | todo |  |  |
 | 6.11 | done | 24 October 2026 | [#355](https://github.com/loombridge/beatlayer/pull/355); the MIDI Tools framework: the Transform and Generate panels in the Clip View, choosing a tool per track, what a tool acts on, Auto, the Apply button and Cmd+Enter as one undo step named for the tool, re-running from the kept input as parameters move, seeds, settings saved with the set, and the tool interface the extension API reuses ([MIDI Tools](specs/midi-tools.md)) |
 | 6.12 | done | 24 October 2026 | [#398](https://github.com/loombridge/beatlayer/pull/398); the first five MIDI transformations, Arpeggiate (sharing the Arpeggiator's styles), Chop, Connect, Ornament and Quantize, with Cmd+U applying Quantize's saved settings, Cmd+Shift+U showing it, and the audio clip's Quantize panel ([MIDI transformations](specs/midi-transformations.md) R1 to R22) |
-| 6.13 | todo |  |  |
+| 6.13 | done | 24 October 2026 | [#399](https://github.com/loombridge/beatlayer/pull/399); the other five MIDI transformations, Recombine, Span, Strum (sharing the Chord device's strum law), Time Warp and Velocity Shaper, each with its display in the Transform panel ([MIDI transformations](specs/midi-transformations.md) R23 to R35) |
 | 6.13b | todo |  |  |
 | 6.14 | todo |  |  |
 | 6.14b | todo |  |  |

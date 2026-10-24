@@ -1,4 +1,5 @@
 [package]
+autotests = false
 name = "bl-midi-tools"
 description = "The MIDI Tools' interface: a tool's description, its input and output as plain data, the seeded generator, and the registry."
 version.workspace = true
@@ -17,6 +18,10 @@ bl-core.workspace = true
 
 [dev-dependencies]
 proptest = { version = "1.11", default-features = false, features = ["std"] }
+
+[[test]]
+name = "midi_tools_tests"
+path = "tests/main.rs"
 
 [lints]
 workspace = true

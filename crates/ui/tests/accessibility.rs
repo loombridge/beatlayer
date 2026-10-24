@@ -1772,6 +1772,10 @@ fn midi_tools_shown(h: &mut Harness) {
         .run("session.select", json!({ "track": track, "scene": scene }))
         .unwrap();
     h.shell.run("view.toggle_clip_view", json!({})).unwrap();
+    // The test tool, whose controls these checks reach.
+    h.shell
+        .run("midi_tool.choose", json!({ "tool": "test_transpose" }))
+        .unwrap();
     h.shell
         .run("clip_view.show_panel", json!({ "panel": "transform" }))
         .unwrap();
@@ -3241,9 +3245,12 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ),
         (
             "midi_tool.choose",
-            Exception(LaterView(
-                "the native tools (WP-6.12 to WP-6.14): until they land the registry holds one                  tool of each kind, and the Selectors have nothing to choose between",
-            )),
+            main(
+                midi_tools_shown,
+                detail_area,
+                "Transformation Selector",
+                Key::ArrowUp,
+            ),
         ),
         (
             "midi_tool.reseed",

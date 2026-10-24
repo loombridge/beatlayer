@@ -59,6 +59,7 @@ mod grooves;
 mod interface_zoom;
 mod keymap;
 mod kitbag;
+mod linked_tracks;
 mod locator;
 mod macros;
 mod menus;

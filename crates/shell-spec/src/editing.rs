@@ -206,6 +206,10 @@ pub struct SelectClipsArgs {
     /// How to change the selection; `replace` if left out.
     #[serde(default)]
     pub mode: SelectMode,
+    /// Whether it reaches the tracks linked with the ones it names (the
+    /// linked-track editing spec, R15). `true` if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub linked: Option<bool>,
 }
 
 /// What an edit acts on: clips, or a span of time on tracks. Left out, the
@@ -233,6 +237,10 @@ pub struct TargetArgs {
     /// end.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub end: Option<Position>,
+    /// Whether it reaches the tracks linked with the ones it names (the
+    /// linked-track editing spec, R15). `true` if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub linked: Option<bool>,
 }
 
 /// A span of time on every track, for the …Time commands (time editing R14).
@@ -310,6 +318,10 @@ pub struct MoveClipsArgs {
     /// Copy the clips instead, leaving the originals where they are.
     #[serde(default)]
     pub copy: bool,
+    /// Whether it reaches the tracks linked with the ones it names (the
+    /// linked-track editing spec, R15). `true` if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub linked: Option<bool>,
 }
 
 /// Which edge of a clip.
@@ -345,6 +357,10 @@ pub struct ResizeClipsArgs {
     /// The clip whose edge `to` places. Left out, the earliest clip.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub anchor: Option<ClipId>,
+    /// Whether it reaches the tracks linked with the ones it names (the
+    /// linked-track editing spec, R15). `true` if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub linked: Option<bool>,
 }
 
 /// Arguments of `arrangement.split`.
@@ -367,6 +383,10 @@ pub struct SplitArgs {
     /// insert marker.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub at: Option<Vec<Position>>,
+    /// Whether it reaches the tracks linked with the ones it names (the
+    /// linked-track editing spec, R15). `true` if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub linked: Option<bool>,
 }
 
 /// Arguments of `arrangement.paste`.

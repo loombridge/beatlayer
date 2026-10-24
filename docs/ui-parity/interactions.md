@@ -50,7 +50,7 @@ Source: `obs` means observed in Live 12.4.3 on macOS on 10 October 2026, unless 
 | I-CLICK-038 | Piano ruler key | Click; Shift-click | Selects that key track's notes; adds them to the selection or removes them | man 10.5.2, 10.5.12.1 |
 | I-CLICK-039 | MIDI note | Shift-click | Adds it to the selection or removes it | man 10.5.2 |
 | I-CLICK-040 | Audition Take Lane button (take lane header) | Click | Auditions the lane, or stops auditioning it (S-COMP-003) | man 21.5 |
-| I-CLICK-041 | Linked-track indicator | Click; hover | Selects the tracks of its link group; highlights them | man 6.14.1 |
+| I-CLICK-041 | Linked-track indicator | Click; hover | Selects every track of its link group, as shift-clicking each header would; hovering fills the group's title areas with the selected-track header colour | man 6.14.1; obs (Live 12) |
 | I-CLICK-042 | Take lane inside a time selection on its track's main lane, Draw Mode on | Click | Copies that take lane's material in the time selection to the main lane | man 21.6 |
 | I-CLICK-043 | Show/Hide Take Lanes toggle | Click | Shows or hides the track's take lanes | man 21.1 |
 | I-CLICK-044 | Automation segment | Click within a few points of it but not on it; Shift-click on it | Selects the segment: its two breakpoints | man 25.5.2 |

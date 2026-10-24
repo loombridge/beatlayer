@@ -93,6 +93,7 @@ pub mod stems_dialog;
 pub mod theme;
 pub mod theme_library;
 pub mod theme_look;
+pub mod tool_displays;
 pub mod tool_panel;
 pub mod track_menu;
 pub mod undo_history_panel;

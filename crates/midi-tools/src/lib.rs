@@ -22,14 +22,19 @@ mod input;
 mod ornament;
 mod quantize;
 mod random;
+mod recombine;
 mod registry;
 mod rhythm;
 mod seed;
 mod shape;
+mod span;
+mod strum;
 mod style;
 #[cfg(feature = "testing")]
 mod testing;
+mod time_warp;
 mod value;
+mod velocity_shaper;
 
 pub use chop::{TOGGLES as CHOP_TOGGLES, gaps_pattern, pattern_follows_gaps};
 pub use descriptor::{
@@ -48,7 +53,9 @@ pub use registry::{
 };
 pub use rhythm::{MAX_STEPS as RHYTHM_MAX_STEPS, pattern_count, rhythm_steps};
 pub use shape::{LEVELS as SHAPE_LEVELS, preset_levels};
+pub use strum::strum_position;
 pub use style::{
     CHORD_TRIGGER, PLAY_ORDER, RANDOM, RANDOM_ONCE, RANDOM_OTHER, STYLE_NAMES, style_order,
 };
 pub use value::{key_name, parse_key};
+pub use velocity_shaper::ENVELOPE_POINTS;

@@ -145,6 +145,11 @@ fn midi_tool_apply_by_id_with_values_and_a_seed_reads_back() {
             "connect",
             "ornament",
             "quantize",
+            "recombine",
+            "span",
+            "strum",
+            "time_warp",
+            "velocity_shaper",
             "test_transpose",
             "test_shift",
             "rhythm",
@@ -338,6 +343,171 @@ fn each_transformation_applies_by_id_with_a_seed_and_reads_back() {
         // One undo step puts the notes back.
         run(&mut client, "edit.undo", json!({}));
         assert_eq!(notes(&mut client, clip), before, "{tool}: undo");
+    }
+}
+
+/// A clip of these notes, `[key, start, length, velocity]` each, on the first
+/// MIDI track.
+fn clip_with(client: &mut Client<InProcess>, name: &str, notes: &[[u64; 4]]) -> u64 {
+    let track = call(client, "query", json!({ "path": "track \"1 MIDI\"" }))["id"]
+        .as_u64()
+        .unwrap();
+    let notes: Vec<Value> = notes
+        .iter()
+        .map(|[key, start, length, velocity]| {
+            json!({ "key": key, "velocity": velocity, "start": start, "length": length })
+        })
+        .collect();
+    let made = call(
+        client,
+        "run",
+        json!({ "commands": [{ "command": "clip.create", "args": {
+            "track": track,
+            "clip": { "id": { "$new": name }, "name": name, "start": 0,
+                      "length": 4 * 4 * BEAT, "mute": false,
+                      "data": { "midi": { "notes": notes } } } } }] }),
+    );
+    made["ids"][name].as_u64().unwrap()
+}
+
+/// The clip's notes as `[key, start, length, velocity]`, in order of start.
+fn notes_of(client: &mut Client<InProcess>, clip: u64) -> Vec<[u64; 4]> {
+    let full = call(client, "query", json!({ "id": clip, "detail": "full" }));
+    let mut notes: Vec<[u64; 4]> = full["saved"]["data"]["midi"]["notes"]["items"]
+        .as_array()
+        .unwrap_or_else(|| panic!("the clip's notes: {full}"))
+        .iter()
+        .map(|n| ["key", "start", "length", "velocity"].map(|field| n[field].as_u64().unwrap()))
+        .collect();
+    notes.sort_unstable_by_key(|n| (n[1], n[0]));
+    notes
+}
+
+fn steps(client: &mut Client<InProcess>) -> u64 {
+    call(client, "query", json!({ "path": "song" }))["undo"]["current"]
+        .as_u64()
+        .unwrap()
+}
+
+#[test]
+fn each_transformation_applies_by_id_with_a_seed_as_one_undo_step() {
+    // Spec: midi-transformations R23 to R35; midi-tools R20, R22, R23. Each
+    // tool by ID with values and a seed: the notes read back, the same seed
+    // gives the same notes, and one undo step puts them all back.
+    type Notes = Vec<[u64; 4]>;
+    let cases: [(&str, Value, Notes, Notes); 5] = [
+        (
+            "recombine",
+            json!({ "dimension": "pitch", "shuffle": true, "mirror": true, "rotation_steps": 1 }),
+            vec![
+                [60, 0, BEAT, 100],
+                [62, BEAT, BEAT, 100],
+                [64, 2 * BEAT, BEAT, 100],
+            ],
+            // Pinned to the seed: the application's draw is Beatlayer's own
+            // generator, the same on every platform.
+            Vec::new(),
+        ),
+        (
+            "span",
+            json!({ "mode": "staccato" }),
+            vec![
+                [60, 0, 3 * BEAT, 100],
+                [62, BEAT, BEAT, 100],
+                [64, 3 * BEAT, BEAT, 100],
+            ],
+            vec![
+                [60, 0, BEAT / 2, 100],
+                [62, BEAT, BEAT / 2, 100],
+                [64, 3 * BEAT, BEAT / 2, 100],
+            ],
+        ),
+        (
+            "strum",
+            json!({ "strum_low": 100 }),
+            vec![[60, 0, BEAT, 100], [64, 0, BEAT, 100], [67, 0, BEAT, 100]],
+            // The grid step is the editor's, so the strum's size isn't pinned.
+            Vec::new(),
+        ),
+        (
+            "time_warp",
+            json!({ "breakpoint_1_speed": 200, "breakpoint_2_speed": 200,
+                    "preserve_time_range": false }),
+            vec![
+                [60, 0, BEAT, 100],
+                [62, 2 * BEAT, BEAT, 100],
+                [64, 4 * BEAT, BEAT, 100],
+            ],
+            vec![
+                [60, 0, BEAT, 100],
+                [62, BEAT, BEAT, 100],
+                [64, 2 * BEAT, BEAT, 100],
+            ],
+        ),
+        (
+            "velocity_shaper",
+            json!({ "envelope": [{ "x": 0.0, "y": 0.0 }, { "x": 1.0, "y": 1.0 }],
+                    "minimum_velocity": 1, "maximum_velocity": 101 }),
+            vec![
+                [60, 0, BEAT, 90],
+                [62, 2 * BEAT, BEAT, 90],
+                [64, 4 * BEAT, BEAT, 90],
+                [65, 6 * BEAT, BEAT, 90],
+            ],
+            vec![
+                [60, 0, BEAT, 1],
+                [62, 2 * BEAT, BEAT, 26],
+                [64, 4 * BEAT, BEAT, 51],
+                [65, 6 * BEAT, BEAT, 76],
+            ],
+        ),
+    ];
+    let mut client = app();
+    for (tool, values, given, expected) in cases {
+        let clip = clip_with(&mut client, tool, &given);
+        let before = steps(&mut client);
+        let range = json!({ "start": 0, "end": 8 * BEAT });
+        let apply = |client: &mut Client<InProcess>| {
+            run(
+                client,
+                "midi_tool.apply",
+                json!({ "clip": clip, "tool": tool, "notes": (0..given.len()).collect::<Vec<_>>(),
+                        "range": range, "values": values, "seed": 11 }),
+            )
+        };
+        let result = apply(&mut client);
+        assert_eq!(result["run"]["seed"], 11, "{tool}");
+        assert_eq!(result["run"]["wrote"], given.len(), "{tool}");
+        let written = notes_of(&mut client, clip);
+        assert_ne!(written, given, "{tool} changed the notes");
+        if !expected.is_empty() {
+            assert_eq!(written, expected, "{tool}");
+        }
+        assert_eq!(steps(&mut client), before + 1, "{tool}: one undo step");
+        // One step puts them all back, and the same seed writes the same.
+        call(
+            &mut client,
+            "run",
+            json!({ "commands": [{ "command": "edit.go_to_step", "args": { "index": before } }] }),
+        );
+        assert_eq!(notes_of(&mut client, clip), given, "{tool}: undone");
+        apply(&mut client);
+        assert_eq!(
+            notes_of(&mut client, clip),
+            written,
+            "{tool}: the same seed"
+        );
+        // The settings read back as set.
+        let state = run(&mut client, "midi_tool.state", json!({ "clip": clip }));
+        let kept = state["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["tool"] == tool)
+            .unwrap();
+        for (name, value) in values.as_object().unwrap() {
+            assert_eq!(&kept["values"][name], value, "{tool} {name}");
+        }
     }
 }
 

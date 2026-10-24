@@ -207,6 +207,11 @@ fn r2_r3_r5_the_list_describes_every_tool_in_order() {
             "connect",
             "ornament",
             "quantize",
+            "recombine",
+            "span",
+            "strum",
+            "time_warp",
+            "velocity_shaper",
             "test_transpose",
             "test_shift",
             "rhythm",
@@ -217,12 +222,12 @@ fn r2_r3_r5_the_list_describes_every_tool_in_order() {
         ],
         "transformations, then generators"
     );
-    let transpose = &list.tools[5];
+    let transpose = &list.tools[10];
     assert_eq!(transpose.parameters[0].id, "degrees");
     assert_eq!(transpose.parameters[0].kind, "whole");
     assert!(transpose.parameters[0].scale_aware);
     assert_eq!(transpose.parameters[0].default, json!(0));
-    let fill = &list.tools[11];
+    let fill = &list.tools[16];
     assert_eq!(fill.parameters[1].kind, "division");
     assert_eq!(fill.parameters[1].default, json!("1/16"));
     assert_eq!(fill.parameters[2].unit.as_deref(), Some("%"));

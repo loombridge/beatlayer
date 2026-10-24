@@ -623,3 +623,238 @@ fn note_expression_values_a_vst3_plugin_sends_out_reach_the_next_device() {
             .all(|(_, kind, _)| !matches!(kind, NoteKind::Expression { .. }))
     );
 }
+
+/// Apple's DLS synth, an Audio Unit, with MPE Mode on: two notes of one
+/// chord bent apart by different Pitch envelopes sound that far apart (the
+/// MPE spec, R16; Audio Unit hosting R20).
+#[cfg(target_os = "macos")]
+mod au {
+    use super::*;
+    use bl_model::{Device, DeviceKind, PluginFormat};
+    use bl_plugin_host::au::AuHost;
+
+    /// A chord of two notes, a second each: C (key 60) bent up three
+    /// semitones, and E (key 64) bent down five.
+    fn chord() -> MidiData {
+        let mut a = Note::new(60, Ticks::ZERO, BEAT * 2, 100);
+        a.pitch = vec![point(Ticks::ZERO, 3.0)];
+        let mut b = Note::new(64, Ticks::ZERO, BEAT * 2, 100);
+        b.pitch = vec![point(Ticks::ZERO, -5.0)];
+        MidiData::new([a, b])
+    }
+
+    /// The DLS synth rendering `notes` for `frames` frames, in blocks of
+    /// `block`, with MPE Mode as `mpe` says: the left channel.
+    fn render(block: usize, mpe: PluginMpe, notes: MidiData, frames: u64) -> Vec<f32> {
+        let host = AuHost::new();
+        host.load("aumu", "dls ", "appl").expect("the DLS synth");
+        let mut registry = testing::registry(&Arc::new(Probe::default()));
+        registry.add(host.factory());
+        let mut offline = Offline::new(EngineConfig::new(RATE, block), registry);
+        let mut editor = Editor::new();
+        let track = editor.new_id();
+        editor
+            .apply(Command::CreateTrack {
+                id: track,
+                kind: TrackKind::Midi,
+                name: String::new(),
+                parent: None,
+                index: 0,
+            })
+            .unwrap();
+        let id = editor.new_id();
+        let mut synth = Device::new(
+            id,
+            "DLSMusicDevice",
+            DeviceKind::Plugin {
+                format: PluginFormat::AudioUnit,
+                plugin_id: "aumu/dls /appl".to_owned(),
+            },
+        )
+        .with_role(DeviceRole::Instrument);
+        synth.mpe = mpe;
+        editor
+            .apply(Command::InsertDevice {
+                track,
+                index: 0,
+                device: synth,
+            })
+            .unwrap();
+        let clip = editor.new_id();
+        editor
+            .apply(Command::CreateClip {
+                track,
+                clip: Clip::new(clip, Ticks::ZERO, BEAT * 4, ClipData::Midi(notes)),
+            })
+            .unwrap();
+        offline.sync(editor.document());
+        offline.sender().transport(TransportCommand::Play);
+        let mut left = Vec::new();
+        offline.render(frames, |out| left.extend_from_slice(out.channel(0)));
+        assert_eq!(offline.heap_operations(), 0, "block size {block}");
+        left
+    }
+
+    /// The frequency near `expected` (within 60 cents either way) where
+    /// `signal`, from its second quarter on, is strongest, found by a scan
+    /// of one cent steps, in cents from `expected`.
+    fn peak_cents(signal: &[f32], expected: f64) -> f64 {
+        let part = &signal[signal.len() / 4..];
+        let rate = f64::from(RATE.hz());
+        let mut best = (f64::MIN, 0.0);
+        for cents in -60..=60 {
+            let hz = expected * 2f64.powf(f64::from(cents) / 1200.0);
+            let w = 2.0 * std::f64::consts::PI * hz / rate;
+            let (mut re, mut im) = (0.0, 0.0);
+            for (n, s) in part.iter().enumerate() {
+                // A Hann window keeps the neighbouring note out.
+                let hann =
+                    0.5 - 0.5 * (2.0 * std::f64::consts::PI * n as f64 / part.len() as f64).cos();
+                let x = f64::from(*s) * hann;
+                re += x * (w * n as f64).cos();
+                im += x * (w * n as f64).sin();
+            }
+            let power = re * re + im * im;
+            if power > best.0 {
+                best = (power, f64::from(cents));
+            }
+        }
+        best.1
+    }
+
+    // Spec: mpe R16; au-hosting R20
+    #[test]
+    fn two_notes_bent_apart_by_their_pitch_envelopes_sound_within_five_cents_of_their_bends() {
+        let on = PluginMpe {
+            on: true,
+            settings: MpeSettings::default(),
+        };
+        let signal = render(512, on, chord(), 40_000);
+        assert!(signal.iter().any(|s| s.abs() > 0.01), "the chord sounds");
+        let hz = |key: f64, semitones: f64| 440.0 * 2f64.powf((key - 69.0 + semitones) / 12.0);
+        for (key, bend) in [(60.0, 3.0), (64.0, -5.0)] {
+            let off = peak_cents(&signal, hz(key, bend));
+            assert!(
+                off.abs() <= 5.0,
+                "key {key} bent {bend} semitones sounds {off} cents away"
+            );
+        }
+        // The same chord with MPE Mode off isn't bent at all.
+        let flat = render(512, PluginMpe::default(), chord(), 40_000);
+        let off = peak_cents(&flat, hz(60.0, 3.0));
+        assert!(
+            off.abs() > 20.0,
+            "unbent, the note is far from its bend: {off}"
+        );
+    }
+
+    // Spec: mpe R17, R21; au-hosting R20. The unit is scheduled MPE MIDI's
+    // messages on their frames, whatever the blocks: it renders the same.
+    #[test]
+    fn the_unit_renders_the_same_in_any_block_size() {
+        let on = PluginMpe {
+            on: true,
+            settings: MpeSettings::default(),
+        };
+        let first = render(512, on, chord(), 12_000);
+        for block in [64, 4096] {
+            assert!(
+                render(block, on, chord(), 12_000) == first,
+                "block size {block} renders other than block size 512"
+            );
+        }
+    }
+}
+
+// Spec: mpe R14, R16. The device's MPE Mode reaches its running node when it
+// changes, with no new plug-in instance: the plug-in gets polyphonic key
+// pressure until it is switched on and note expressions after.
+#[test]
+fn switching_mpe_mode_while_playing_changes_what_a_plugin_gets() {
+    let _ = std::fs::remove_file(log_path(Format::Clap));
+    // SAFETY: the plug-in reads this when it is activated, and this test
+    // runs in a process of its own.
+    unsafe { std::env::set_var(bl_test_clap::LOG_VAR, log_path(Format::Clap)) };
+    let host = ClapHost::new();
+    host.load(bundle()).expect("the test plug-in loads");
+    let mut registry = testing::registry(&Arc::new(Probe::default()));
+    registry.add(host.factory());
+    let mut offline = Offline::new(EngineConfig::new(RATE, 128), registry);
+    let mut editor = Editor::new();
+    let track = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: track,
+            kind: TrackKind::Midi,
+            name: String::new(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    let id = editor.new_id();
+    let mut plugin = device_with_role(1, &[], DeviceRole::Instrument);
+    plugin.id = id;
+    editor
+        .apply(Command::InsertDevice {
+            track,
+            index: 0,
+            device: plugin,
+        })
+        .unwrap();
+    // One long note whose pitch bends up 48 semitones over four beats, with
+    // a pressure that rises with it.
+    let mut note = Note::new(62, Ticks::ZERO, BEAT * 4, 100);
+    note.pitch = vec![point(Ticks::ZERO, 0.0), point(BEAT * 4, 48.0)];
+    note.pressure = vec![point(Ticks::ZERO, 0.0), point(BEAT * 4, 127.0)];
+    let clip = editor.new_id();
+    editor
+        .apply(Command::CreateClip {
+            track,
+            clip: Clip::new(
+                clip,
+                Ticks::ZERO,
+                BEAT * 4,
+                ClipData::Midi(MidiData::new([note])),
+            ),
+        })
+        .unwrap();
+    offline.sync(editor.document());
+    offline.sender().transport(TransportCommand::Play);
+    offline.render(BEAT_FRAMES as u64, |_| {});
+    editor
+        .apply(Command::SetPluginMpeMode {
+            device: id,
+            on: true,
+        })
+        .unwrap();
+    offline.sync(editor.document());
+    offline.render(BEAT_FRAMES as u64, |_| {});
+    assert_eq!(offline.heap_operations(), 0);
+
+    let log = read_log(Format::Clap);
+    let tuning: Vec<(i64, f64)> = log
+        .iter()
+        .filter(|line| line.what == "expression:tuning")
+        .map(|line| (line.frame, line.value))
+        .collect();
+    assert!(!tuning.is_empty(), "note expressions came after the switch");
+    assert!(
+        tuning.iter().all(|(frame, _)| *frame >= BEAT_FRAMES - 128),
+        "none came before it: {:?}",
+        tuning.first()
+    );
+    // Two beats of four is 24 of 48 semitones.
+    assert!((tuning.last().unwrap().1 - 24.0).abs() < 0.1, "{tuning:?}");
+    // Before it, only polyphonic key pressure.
+    let pressure_before = log
+        .iter()
+        .filter(|line| line.what.starts_with("midi:160") && line.frame < BEAT_FRAMES)
+        .count();
+    assert!(pressure_before > 10, "{pressure_before}");
+    assert!(
+        log.iter()
+            .filter(|line| line.what.starts_with("midi:160"))
+            .all(|line| line.frame < BEAT_FRAMES),
+        "and none after"
+    );
+}

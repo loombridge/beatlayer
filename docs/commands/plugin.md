@@ -201,7 +201,7 @@ Result: [`PluginScan`](#pluginscan).
 
 **Set MPE Mode**. Permission: `edit`. Contexts: `device-view`.
 
-Switches a plug-in device's MPE Mode, the item of its title bar menu: on, the plug-in gets each note's pitch, slide and pressure as its format takes them (CLAP note expressions, VST3 note expression, or MPE MIDI, which an Audio Unit gets), and off, only each note's pressure as polyphonic key pressure. Off in a new device. Switches unless `on` says which. One undo step (Change MPE); saved with the set, the device's presets and its default preset. `plugin.info` reports it.
+Switches a plug-in device's MPE Mode, the item of its title bar menu (`on`). On, the plug-in gets each note's pitch, slide and pressure as its format takes them: CLAP note expressions, VST3 note expression, or MPE MIDI (an Audio Unit gets MPE MIDI, each note on a channel of its own in the zone the MPE/Multi-channel Settings name). Off, it gets only each note's pressure, as polyphonic key pressure. Off in a new device; saved with the set, the device's presets and its default preset. One undo step (Change MPE Mode). `plugin.info` reports it. A device that isn't a plug-in has no MPE Mode.
 
 Default keys: none.
 
@@ -209,16 +209,16 @@ Arguments:
 
 | Name | Type | Required | Description |
 |---|---|---|---|
-| `device` | [`DeviceId`](README.md#deviceid) or null | no | The device; the selected one if left out. |
-| `on` | boolean or null | no | MPE Mode on (true) or off (false); switches if left out. |
+| `device` | [`DeviceId`](README.md#deviceid) | yes | The device, which must be a plug-in. |
+| `on` | boolean | yes | Whether MPE Mode is on. |
 
-Result: [`PluginMpeState`](README.md#pluginmpestate).
+Result: [`ChangeSet`](README.md#changeset).
 
 ### `plugin.set_mpe_settings`
 
 **Set MPE/Multi-channel Settings**. Permission: `edit`. Contexts: `device-view`.
 
-Sets the MPE/Multi-channel Settings of a plug-in device: `settings` gives the `mode` (`zone` or `multi_channel`); for a zone its `zone` (`lower`, master channel 1, or `upper`, master channel 16) and `channels` (its note channels, 1 to 15); for multi-channel mode the `first` and `last` channel, 1 to 16. What is left out takes the new settings' value: the lower zone with 15 note channels. They shape only the MPE MIDI the device is sent. One undo step (Change MPE); saved with the device; `plugin.info` reports them.
+Sets the MPE/Multi-channel Settings of a plug-in device, the dialog its title bar menu opens: `settings` gives the `mode` (`zone` or `multi_channel`); for a zone its `zone` (`lower`, master channel 1, or `upper`, master channel 16) and `channels` (its note channels, 1 to 15); for multi-channel mode the `first` and `last` channel, 1 to 16. What it leaves out takes the new settings' value: the lower zone with 15 note channels. They shape only the MPE MIDI the device is sent. One undo step (Change MPE Settings); saved with the device; `plugin.info` reports them.
 
 Default keys: none.
 
@@ -226,10 +226,10 @@ Arguments:
 
 | Name | Type | Required | Description |
 |---|---|---|---|
-| `settings` | [`MpeSettings`](README.md#mpesettings) | yes | The new settings. |
-| `device` | [`DeviceId`](README.md#deviceid) or null | no | The device; the selected one if left out. |
+| `device` | [`DeviceId`](README.md#deviceid) | yes | The device, which must be a plug-in. |
+| `settings` | [`MpeSettings`](README.md#mpesettings) | yes | The settings. |
 
-Result: [`PluginMpeState`](README.md#pluginmpestate).
+Result: [`ChangeSet`](README.md#changeset).
 
 ### `plugin.set_panel_param`
 

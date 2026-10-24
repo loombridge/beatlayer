@@ -410,12 +410,14 @@ pub struct Processor<'a> {
 }
 
 impl Processor<'_> {
-    /// Appends a line to the log, if there is one.
-    fn log(&mut self, at: u32, what: &str, pckn: Option<Pckn>, value: f64) {
+    /// Appends a line to the log, if there is one; `what` is only made then,
+    /// so a plug-in with no log allocates nothing.
+    fn log(&mut self, at: u32, what: impl FnOnce() -> String, pckn: Option<Pckn>, value: f64) {
         use std::io::Write;
         let Some(file) = self.log.as_mut() else {
             return;
         };
+        let what = what();
         let (port, channel, key, id) = pckn.map_or((-1, -1, -1, -1), |p| {
             let get = |m: Match<u16>| m.into_specific().map_or(-1, i32::from);
             (
@@ -539,7 +541,7 @@ impl<'a> PluginAudioProcessor<'a, Shared<'a>, MainThread<'a>> for Processor<'a> 
             match event.as_core_event() {
                 Some(CoreEventSpace::NoteOn(note)) => {
                     let at = event.header().time();
-                    self.log(at, "on", Some(note.pckn()), note.velocity());
+                    self.log(at, || "on".to_owned(), Some(note.pckn()), note.velocity());
                     // The impulse lands on the note's own frame.
                     #[expect(
                         clippy::cast_possible_truncation,
@@ -579,7 +581,7 @@ impl<'a> PluginAudioProcessor<'a, Shared<'a>, MainThread<'a>> for Processor<'a> 
                     };
                     self.log(
                         at,
-                        &format!("expression:{kind}"),
+                        || format!("expression:{kind}"),
                         Some(expression.pckn()),
                         expression.value(),
                     );
@@ -596,7 +598,12 @@ impl<'a> PluginAudioProcessor<'a, Shared<'a>, MainThread<'a>> for Processor<'a> 
                 Some(CoreEventSpace::Midi(midi)) => {
                     let at = event.header().time() as usize;
                     let [status, one, two] = midi.data();
-                    self.log(at as u32, &format!("midi:{status},{one},{two}"), None, 0.0);
+                    self.log(
+                        at as u32,
+                        || format!("midi:{status},{one},{two}"),
+                        None,
+                        0.0,
+                    );
                     let _ = events
                         .output
                         .try_push(MidiEvent::new(at as u32, 0, midi.data()));
@@ -616,7 +623,7 @@ impl<'a> PluginAudioProcessor<'a, Shared<'a>, MainThread<'a>> for Processor<'a> 
                 }
                 Some(CoreEventSpace::NoteOff(note)) => {
                     let at = event.header().time();
-                    self.log(at, "off", Some(note.pckn()), note.velocity());
+                    self.log(at, || "off".to_owned(), Some(note.pckn()), note.velocity());
                     let echo = NoteOffEvent::new(at, transposed(note.pckn()), note.velocity());
                     let _ = events.output.try_push(echo);
                 }

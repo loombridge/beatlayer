@@ -98,6 +98,14 @@ const MAX_CHANNELS: usize = 2;
 /// value=<v>`. Unset for no log.
 pub const LOG_VAR: &str = "BL_TEST_VST3_LOG";
 
+/// The file the log goes to, read from [`LOG_VAR`] once (when processing is
+/// set up), so a plug-in with no log allocates nothing in a block.
+fn log_path() -> Option<&'static PathBuf> {
+    static PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
+    PATH.get_or_init(|| std::env::var_os(LOG_VAR).map(PathBuf::from))
+        .as_ref()
+}
+
 /// The environment variable a test sets to `on` so the controller
 /// implements note expression, or to `no-pressure` so its physical mapping
 /// leaves the key's pressure unmapped. Unset for a controller without it.
@@ -349,11 +357,20 @@ impl Processor {
 
     /// Appends a line to the log, if there is one: `at` frames into the
     /// block that is being processed.
-    fn log(&self, at: i32, what: &str, channel: i32, key: i32, id: i32, value: f64) {
+    fn log(
+        &self,
+        at: i32,
+        what: impl FnOnce() -> String,
+        channel: i32,
+        key: i32,
+        id: i32,
+        value: f64,
+    ) {
         use std::io::Write;
-        let Some(path) = std::env::var_os(LOG_VAR) else {
+        let Some(path) = log_path() else {
             return;
         };
+        let what = what();
         let Ok(mut file) = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
@@ -598,6 +615,8 @@ impl IAudioProcessorTrait for Processor {
     }
 
     unsafe fn setupProcessing(&self, _setup: *mut ProcessSetup) -> tresult {
+        // The log's file is looked up here, not in a block.
+        let _ = log_path();
         kResultOk
     }
 
@@ -750,7 +769,14 @@ impl IAudioProcessorTrait for Processor {
                     if !value.is_finite() {
                         continue;
                     }
-                    self.log(offset, &format!("param:{}", ids[index]), -1, -1, -1, value);
+                    self.log(
+                        offset,
+                        || format!("param:{}", ids[index]),
+                        -1,
+                        -1,
+                        -1,
+                        value,
+                    );
                     match ids[index] {
                         GAIN => self.set_gain_normalized(value),
                         LATENCY => self.set_latency_normalized(value),
@@ -789,7 +815,7 @@ impl IAudioProcessorTrait for Processor {
                             let note = event.__field0.noteOn;
                             self.log(
                                 event.sampleOffset,
-                                "on",
+                                || "on".to_owned(),
                                 i32::from(note.channel),
                                 i32::from(note.pitch),
                                 note.noteId,
@@ -823,7 +849,7 @@ impl IAudioProcessorTrait for Processor {
                             let value = event.__field0.noteExpressionValue;
                             self.log(
                                 event.sampleOffset,
-                                &format!("expression:{}", value.typeId),
+                                || format!("expression:{}", value.typeId),
                                 -1,
                                 -1,
                                 value.noteId,
@@ -835,7 +861,7 @@ impl IAudioProcessorTrait for Processor {
                             let pressure = event.__field0.polyPressure;
                             self.log(
                                 event.sampleOffset,
-                                "pressure",
+                                || "pressure".to_owned(),
                                 i32::from(pressure.channel),
                                 i32::from(pressure.pitch),
                                 pressure.noteId,
@@ -847,7 +873,7 @@ impl IAudioProcessorTrait for Processor {
                             let note = event.__field0.noteOff;
                             self.log(
                                 event.sampleOffset,
-                                "off",
+                                || "off".to_owned(),
                                 i32::from(note.channel),
                                 i32::from(note.pitch),
                                 note.noteId,

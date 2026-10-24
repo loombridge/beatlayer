@@ -124,23 +124,28 @@ fn controls(ui: &mut Ui, settings: &mut MpeSettings) {
     }
 }
 
-/// A number from `low` to `high` with a button each way, named `name`.
+/// A number from `low` to `high` with a button each way, named `name`; the
+/// buttons read "Decrease" and "Increase" `name` to assistive technology.
 fn stepper(ui: &mut Ui, name: &str, value: &mut u8, low: u8, high: u8) {
     ui.horizontal(|ui| {
         ui.label(name);
-        let down = ui
-            .add_enabled(*value > low, egui::Button::new("−"))
-            .on_hover_text(format!("Decrease {name}"));
+        let down = ui.add_enabled(*value > low, egui::Button::new("−"));
+        name_button(ui, &down, &format!("Decrease {name}"));
         ui.label(value.to_string());
-        let up = ui
-            .add_enabled(*value < high, egui::Button::new("+"))
-            .on_hover_text(format!("Increase {name}"));
+        let up = ui.add_enabled(*value < high, egui::Button::new("+"));
+        name_button(ui, &up, &format!("Increase {name}"));
         if down.clicked() {
             *value = value.saturating_sub(1).max(low);
         }
         if up.clicked() {
             *value = (*value + 1).min(high);
         }
+    });
+}
+
+fn name_button(ui: &Ui, response: &egui::Response, label: &str) {
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_label(label.to_owned());
     });
 }
 
@@ -160,7 +165,7 @@ fn apply(
         {
             invoke(
                 events,
-                ids::SET_MPE_SETTINGS,
+                "plugin.set_mpe_settings",
                 json!({ "device": device, "settings": settings }),
             );
         } else {

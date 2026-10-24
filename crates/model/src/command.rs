@@ -1683,13 +1683,22 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         mpe: Option<crate::PluginMpe>,
     },
-    /// Sets a plug-in device's MPE Mode and the MPE/Multi-channel Settings
-    /// its MPE MIDI goes out on (the MPE spec, R14, R18).
-    SetPluginMpe {
+    /// Switches a plug-in device's MPE Mode (the MPE spec, R14): on, the
+    /// plug-in gets each note's pitch, slide and pressure as its format takes
+    /// them; off, only its pressure as polyphonic key pressure.
+    SetPluginMpeMode {
         /// The device, which must be a plug-in.
         device: DeviceId,
-        /// The new MPE Mode and settings.
-        mpe: crate::PluginMpe,
+        /// Whether MPE Mode is on.
+        on: bool,
+    },
+    /// Sets the MPE/Multi-channel Settings a plug-in device's MPE MIDI goes
+    /// out on (the MPE spec, R18).
+    SetPluginMpeSettings {
+        /// The device, which must be a plug-in.
+        device: DeviceId,
+        /// The settings.
+        settings: crate::MpeSettings,
     },
     /// Floats a device in a window of its own, or docks it back in the
     /// Device View (IMP-14, WP-2.5b). Only native devices float.
@@ -2856,7 +2865,8 @@ impl Command {
             Self::RenameDevice { .. } => "Change \"Device Name\"",
             Self::SetShowPresetName { .. } => "Toggle Show Preset Name",
             // Spec: mpe R14, R18. Beatlayer's own names.
-            Self::SetPluginMpe { .. } => "Change MPE",
+            Self::SetPluginMpeMode { .. } => "Change MPE Mode",
+            Self::SetPluginMpeSettings { .. } => "Change MPE Settings",
             Self::SetDeviceState { .. } => "Load Preset",
             Self::SetDeviceEnabled { .. } => "Change \"Device On\"",
             // IMP-14: Beatlayer's own, so Live has no name for them.
@@ -4359,18 +4369,12 @@ impl Document {
                 }
                 Ok(())
             }
-            Command::SetPluginMpe { device, mpe } => {
-                mpe.settings.check()?;
-                let current = self.device_ref(*device)?;
-                if !matches!(current.kind, DeviceKind::Plugin { .. }) {
-                    return Err(ModelError::InvalidInput(
-                        "only a plug-in device has an MPE Mode",
-                    ));
-                }
-                if current.mpe != *mpe {
-                    self.device_mut(*device)?.mpe = *mpe;
-                }
-                Ok(())
+            Command::SetPluginMpeMode { device, on } => {
+                self.edit_plugin_mpe(*device, |mpe| mpe.on = *on)
+            }
+            Command::SetPluginMpeSettings { device, settings } => {
+                settings.check()?;
+                self.edit_plugin_mpe(*device, |mpe| mpe.settings = *settings)
             }
             Command::SetDeviceFloating { device, floating } => {
                 let current = self.device_ref(*device)?;
@@ -5365,6 +5369,26 @@ impl Document {
 
     /// Changes a device's sidechain settings with `edit`, if it has a
     /// sidechain input.
+    /// Changes a plug-in device's MPE Mode and settings with `change`.
+    fn edit_plugin_mpe(
+        &mut self,
+        device: DeviceId,
+        change: impl FnOnce(&mut crate::PluginMpe),
+    ) -> Result<(), ModelError> {
+        let current = self.device_ref(device)?;
+        if !matches!(current.kind, DeviceKind::Plugin { .. }) {
+            return Err(ModelError::InvalidInput(
+                "only a plug-in device has an MPE Mode",
+            ));
+        }
+        let mut mpe = current.mpe;
+        change(&mut mpe);
+        if mpe != current.mpe {
+            self.device_mut(device)?.mpe = mpe;
+        }
+        Ok(())
+    }
+
     fn edit_sidechain(
         &mut self,
         id: DeviceId,

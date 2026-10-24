@@ -265,52 +265,6 @@ impl Shell {
                 self.touch();
                 info(self, device)
             }
-            plugin_ids::SET_MPE | plugin_ids::SET_MPE_SETTINGS => {
-                // Spec: mpe R14, R18.
-                let (device, change): (_, Box<dyn Fn(bl_model::PluginMpe) -> bl_model::PluginMpe>) =
-                    if id == plugin_ids::SET_MPE {
-                        let plugin_ids::SetMpeArgs { device, on } = Self::args(id, args)?;
-                        (
-                            device,
-                            Box::new(move |mpe| bl_model::PluginMpe {
-                                on: on.unwrap_or(!mpe.on),
-                                ..mpe
-                            }),
-                        )
-                    } else {
-                        let plugin_ids::SetMpeSettingsArgs { device, settings } =
-                            Self::args(id, args)?;
-                        (
-                            device,
-                            Box::new(move |mpe| bl_model::PluginMpe { settings, ..mpe }),
-                        )
-                    };
-                let device = target(self, device)?;
-                let current = self
-                    .editor
-                    .document()
-                    .device(device)
-                    .map(|d| d.mpe)
-                    .ok_or_else(|| unavailable(format!("no {device}")))?;
-                let mpe = change(current);
-                let label = if id == plugin_ids::SET_MPE {
-                    "Change MPE Mode"
-                } else {
-                    "Change MPE Settings"
-                };
-                self.editor
-                    .transact(label, |e| {
-                        e.apply(bl_model::Command::SetPluginMpe { device, mpe })
-                    })
-                    .map_err(|error| ShellError::InvalidArgs {
-                        command: id.to_owned(),
-                        message: error.to_string(),
-                    })?;
-                self.dirty = true;
-                self.document_changed();
-                self.touch();
-                Ok(to_value(&plugin_ids::PluginMpeState { device, mpe }))
-            }
             plugin_ids::SHOW_MPE_SETTINGS => {
                 let plugin_ids::ShowMpeSettingsArgs {
                     device,

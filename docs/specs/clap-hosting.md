@@ -1,6 +1,6 @@
 # CLAP hosting
 
-- **Status:** partial (R1 to R20 and R24 have passing tests; R21 to R23 are WP-6.17b's)
+- **Status:** partial (R1 to R24 have passing tests)
 - **Work packages:** WP-2.6 (this spec). The plug-in scanner, the browser's plug-ins, and plug-in sources are WP-2.9's; plug-in editor windows per platform (embedding, resizing, scale), the plug-in device panel, and plug-in window handling are WP-2.10's (Settings > Plug-Ins is WP-2.5b's); delay compensation is WP-2.11's; offline renders (export, agents' previews) running plug-ins are WP-2.6b's; VST3 and Audio Units are WP-2.7 and 2.8; notes reach devices from MIDI clips and inputs with WP-2.1 and 2.2. The host side of the plug-in kit's agent-commands extension (R18, R19) belongs to Reagent's own plan; the gain-adjustment report (R24) is WP-5.29's (IMP-25). WP-6.17b adds per-note expression and MPE (R21 to R23, with [MPE](mpe.md) R14 to R21)
 - **Parity-matrix row:** Plug-in formats: (Beatlayer only) CLAP
 - **Checked against:** Live 12.4.6 on macOS, observed on 12 October 2026 with Apple's AUDelay (a plug-in's own window, its title, its undo step, and the wrench button); the CLAP specification (1.2); [the architecture](../02-architecture.md), "Plug-in hosting" and "Real-time rules"
@@ -86,7 +86,7 @@ The test plug-in, Test Gain Echo, is built from source in `crates/test-clap` and
 | R18 | `crates/agent/tests/kit_devices.rs`, `a_kit_plugin_as_clap_serves_its_commands_through_the_extension`; the plug-in kit's `examples/gain/tests/clap.rs`, `a_host_lists_and_runs_its_commands_through_the_extension` | MCP script |
 | R19 | `crates/agent/tests/kit_devices.rs`, `a_kit_plugin_as_clap_serves_its_commands_through_the_extension` | MCP script, real-time trap count |
 | R20 | `crates/plugin-host/tests/clap.rs`, `channel_messages_reach_the_plugin_as_midi_events_on_their_frames` | unit, real-time trap |
-| R21 | to be written in WP-6.17b | unit, real-time trap |
-| R22 | to be written in WP-6.17b | unit, real-time trap |
-| R23 | to be written in WP-6.17b | unit, real-time trap |
+| R21 | `crates/plugin-host/tests/mpe.rs`, `with_mpe_mode_off_a_clap_plugin_gets_polyphonic_key_pressure_only` | unit, real-time trap |
+| R22 | `crates/plugin-host/tests/mpe.rs`, `with_mpe_mode_on_a_clap_plugin_gets_note_expressions_for_each_note`, `a_note_port_preferring_midi_mpe_gets_mpe_midi` | unit, real-time trap |
+| R23 | `crates/plugin-host/tests/mpe.rs`, `note_expressions_a_plugin_sends_out_reach_the_next_device_as_expressions`, `note_expressions_a_plugin_sends_out_are_dropped_while_mpe_mode_is_off` | unit, real-time trap |
 | R24 | `crates/plugin-host/tests/engine.rs`, `a_plugins_gain_adjustment_shows_on_its_tracks_meter` | real-time trap |

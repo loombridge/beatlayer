@@ -55,7 +55,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        253,
+        255,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
              the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
              routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -1656,6 +1656,25 @@ fn every_command_runs_by_id() {
             .port,
         None
     );
+    // A plug-in's MPE Mode and settings (WP-6.17b): both are one undo step,
+    // and the device keeps them.
+    let synth: DeviceId = agent.new_id();
+    agent.run(
+        "device.insert",
+        json!({ "track": bass, "index": 0, "device": {
+            "id": synth, "name": "Synth", "enabled": true, "params": [],
+            "kind": { "plugin": { "format": "clap", "plugin_id": "com.example.synth" } },
+        } }),
+    );
+    agent.run("plugin.set_mpe", json!({ "device": synth, "on": true }));
+    agent.run(
+        "plugin.set_mpe_settings",
+        json!({ "device": synth, "settings": { "zone": "upper", "channels": 7 } }),
+    );
+    let mpe = agent.editor.document().device(synth).unwrap().mpe;
+    assert!(mpe.on);
+    assert_eq!(mpe.settings.zone, bl_model::MpeZone::Upper);
+    assert_eq!(mpe.settings.channels, 7);
     // Racks (WP-5.1): a rack with a chain, a second chain added with a
     // device in it, a device moved in and switched on and off with
     // everything inside, and the chain's controls.
@@ -3702,6 +3721,21 @@ fn schemas_match_what_commands_serialise() {
             Command::SetMidiSidechainSource {
                 device,
                 track: None,
+            },
+        ),
+        (
+            "plugin.set_mpe",
+            Command::SetPluginMpeMode { device, on: true },
+        ),
+        (
+            "plugin.set_mpe_settings",
+            Command::SetPluginMpeSettings {
+                device,
+                settings: bl_model::MpeSettings {
+                    zone: bl_model::MpeZone::Upper,
+                    channels: 7,
+                    ..bl_model::MpeSettings::default()
+                },
             },
         ),
         (

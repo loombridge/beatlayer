@@ -436,6 +436,42 @@ mod tests {
         dir
     }
 
+    // Spec: mpe R14. A plug-in's MPE Mode and settings are in its preset,
+    // and a preset made while they are new's says nothing of them.
+    #[test]
+    fn a_preset_keeps_a_plugins_mpe_mode_and_settings() {
+        let mut plugin = Device::new(
+            DeviceId(Id::new(9).unwrap()),
+            "Synth",
+            DeviceKind::Plugin {
+                format: bl_model::PluginFormat::Clap,
+                plugin_id: "com.example.synth".to_owned(),
+            },
+        );
+        assert_eq!(Preset::of(&plugin).mpe, None);
+        plugin.mpe = bl_model::PluginMpe {
+            on: true,
+            settings: bl_model::MpeSettings {
+                zone: bl_model::MpeZone::Upper,
+                channels: 5,
+                ..bl_model::MpeSettings::default()
+            },
+        };
+        let preset = Preset::of(&plugin);
+        assert_eq!(preset.mpe, Some(plugin.mpe));
+        let back = Preset::decode(&preset.encode()).unwrap();
+        assert_eq!(back, preset);
+        // A preset file saved before MPE has none.
+        let mut file: serde_json::Value = serde_json::from_slice(&preset.encode()).unwrap();
+        file.as_object_mut().unwrap().remove("mpe");
+        let older = Preset::decode(&serde_json::to_vec(&file).unwrap()).unwrap();
+        assert_eq!(older.mpe, None);
+        // Settings out of range are dropped on load, the rest kept.
+        file["mpe"] = serde_json::json!({ "on": true, "settings": { "channels": 16 } });
+        let broken = Preset::decode(&serde_json::to_vec(&file).unwrap()).unwrap();
+        assert_eq!(broken.mpe, None);
+    }
+
     // Spec: device-chains R16
     #[test]
     fn a_preset_round_trips_exactly() {

@@ -7106,6 +7106,7 @@ One device as the Device View shows it.
 | `external` | [`ExternalSection`](#externalsection) or null | no | Its routing to hardware, if it is an external device (WP-5.34). |
 | `midi_sidechain` | [`MidiSidechainSection`](#midisidechainsection) or null | no | Its MIDI sidechain section, if it has a MIDI sidechain input (WP-5.27). |
 | `modulator` | [`ModulatorFrame`](#modulatorframe) or null | no | For a modulator, what it maps and which Map button is armed (WP-5.10). |
+| `mpe` | [`PluginMpe`](#pluginmpe) or null | no | A plug-in's MPE Mode and settings (the MPE spec, R14, R18), which its title bar menu's MPE Mode and MPE Settings… edit; left out for a device that isn't a plug-in. |
 | `multisampler` | [`MultisamplerState`](#multisamplerstate) or null | no | A multisampler's views and selected layers (WP-5.13, R30); left out for any other device. |
 | `panel` | [`DevicePanel`](#devicepanel) or null | no | Its parameters and layout, for the generic UI; left out for a device whose type doesn't describe them. |
 | `rack` | [`RackFrame`](#rackframe) or null | no | A rack's frame: its views, its chain list and the selected chain's devices (WP-5.2). None for a device that isn't a rack. |
@@ -7200,6 +7201,17 @@ One device as the Device View shows it.
         }
       ],
       "description": "For a modulator, what it maps and which Map button is armed (WP-5.10)."
+    },
+    "mpe": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PluginMpe"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "A plug-in's MPE Mode and settings (the MPE spec, R14, R18), which its title bar menu's MPE Mode and MPE Settings… edit; left out for a device that isn't a plug-in."
     },
     "multisampler": {
       "anyOf": [
@@ -19744,40 +19756,6 @@ A plug-in device's MPE: `on` (MPE Mode, off in a new device) and `settings` (the
   },
   "required": [
     "on"
-  ],
-  "type": "object"
-}
-```
-
-</details>
-
-### `PluginMpeState`
-
-What `plugin.set_mpe` and `plugin.set_mpe_settings` return: the device and its MPE Mode and settings now.
-
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `device` | [`DeviceId`](#deviceid) | yes | The device. |
-| `mpe` | [`PluginMpe`](#pluginmpe) | yes | Its MPE Mode and settings. |
-
-<details><summary>JSON Schema</summary>
-
-```json
-{
-  "description": "What `plugin.set_mpe` and `plugin.set_mpe_settings` return: the device and its MPE Mode and settings now.",
-  "properties": {
-    "device": {
-      "$ref": "#/$defs/DeviceId",
-      "description": "The device."
-    },
-    "mpe": {
-      "$ref": "#/$defs/PluginMpe",
-      "description": "Its MPE Mode and settings."
-    }
-  },
-  "required": [
-    "device",
-    "mpe"
   ],
   "type": "object"
 }

@@ -46,6 +46,7 @@ mod midi_tools;
 mod mixer;
 mod modulation;
 mod modulators;
+mod mpe_settings;
 mod multi_clip;
 mod multisampler_sample_tab;
 mod multisampler_tabs;

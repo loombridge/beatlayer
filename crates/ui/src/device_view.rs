@@ -1327,8 +1327,8 @@ impl DeviceViewUi {
             if response.clicked() {
                 invoke(
                     events,
-                    bl_shell::plugin_commands::SET_MPE,
-                    json!({ "device": frame.id }),
+                    "plugin.set_mpe",
+                    json!({ "device": frame.id, "on": !mpe.on }),
                 );
                 ui.close();
             }

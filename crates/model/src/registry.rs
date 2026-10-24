@@ -3095,6 +3095,38 @@ const ENTRIES: &[Entry] = &[
             the bass compressor's source to the kick's track and switch External on.",
     },
     Entry {
+        id: "plugin.set_mpe",
+        action: Action::Apply("set_plugin_mpe_mode"),
+        label: "Set MPE Mode",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Switches a plug-in device's MPE Mode, the item of its title bar menu \
+            (`on`). On, the plug-in gets each note's pitch, slide and pressure as its format \
+            takes them: CLAP note expressions, VST3 note expression, or MPE MIDI (an Audio Unit \
+            gets MPE MIDI, each note on a channel of its own in the zone the MPE/Multi-channel \
+            Settings name). Off, it gets only each note's pressure, as polyphonic key \
+            pressure. Off in a new device; saved with the set, the device's presets and its \
+            default preset. One undo step (Change MPE Mode). `plugin.info` reports it. A device \
+            that isn't a plug-in has no MPE Mode.",
+    },
+    Entry {
+        id: "plugin.set_mpe_settings",
+        action: Action::Apply("set_plugin_mpe_settings"),
+        label: "Set MPE/Multi-channel Settings",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Sets the MPE/Multi-channel Settings of a plug-in device, the dialog its \
+            title bar menu opens: `settings` gives the `mode` (`zone` or `multi_channel`); for a \
+            zone its `zone` (`lower`, master channel 1, or `upper`, master channel 16) and \
+            `channels` (its note channels, 1 to 15); for multi-channel mode the `first` and \
+            `last` channel, 1 to 16. What it leaves out takes the new settings' value: the lower \
+            zone with 15 note channels. They shape only the MPE MIDI the device is sent. One \
+            undo step (Change MPE Settings); saved with the device; `plugin.info` reports \
+            them.",
+    },
+    Entry {
         id: "device.set_external",
         action: Action::Apply("set_external"),
         label: "Set External Device",

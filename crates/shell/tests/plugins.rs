@@ -1513,3 +1513,203 @@ fn a_plugin_without_a_note_output_cannot_be_a_midi_effect() {
         "it stays where it was"
     );
 }
+
+fn last_step(shell: &Shell) -> String {
+    shell
+        .editor()
+        .undo_history()
+        .next()
+        .unwrap_or_default()
+        .to_owned()
+}
+
+// Spec: mpe R14, R18
+#[test]
+fn mpe_mode_and_settings_are_one_undo_step_each_and_read_back() {
+    let mut shell = Shell::headless();
+    shell.start_audio();
+    let track = audio_track(&shell);
+    let device = load(&mut shell, track);
+    wait(&mut shell, device, |i| i.active);
+
+    // Off in a new device, with the new settings.
+    let new = info(&mut shell, device).mpe;
+    assert!(!new.on);
+    assert_eq!(new.settings, bl_model::MpeSettings::default());
+
+    // Switching it on is one undo step, read back by `plugin.info` and the
+    // Device View's frame.
+    let before = shell.editor().undo_history().len();
+    shell
+        .run("plugin.set_mpe", json!({ "device": device, "on": true }))
+        .unwrap();
+    assert_eq!(shell.editor().undo_history().len(), before + 1);
+    assert_eq!(last_step(&shell), "Change MPE Mode");
+    assert!(info(&mut shell, device).mpe.on);
+    shell
+        .run("device.select", json!({ "device": device }))
+        .unwrap();
+    let view: DeviceViewState =
+        serde_json::from_value(shell.run("device_view.state", json!({})).unwrap()).unwrap();
+    let frame = view.devices.iter().find(|d| d.id == device).unwrap();
+    assert_eq!(frame.mpe.map(|mpe| mpe.on), Some(true));
+
+    // So are the settings.
+    shell
+        .run(
+            "plugin.set_mpe_settings",
+            json!({ "device": device, "settings": { "zone": "upper", "channels": 7 } }),
+        )
+        .unwrap();
+    assert_eq!(shell.editor().undo_history().len(), before + 2);
+    assert_eq!(last_step(&shell), "Change MPE Settings");
+    let mpe = info(&mut shell, device).mpe;
+    assert!(mpe.on);
+    assert_eq!(
+        (mpe.settings.zone, mpe.settings.channels),
+        (bl_model::MpeZone::Upper, 7)
+    );
+
+    // Settings out of range change nothing; a device that isn't a plug-in
+    // has no MPE Mode.
+    assert!(
+        shell
+            .run(
+                "plugin.set_mpe_settings",
+                json!({ "device": device, "settings": { "channels": 16 } }),
+            )
+            .is_err()
+    );
+    assert!(
+        shell
+            .run(
+                "plugin.set_mpe_settings",
+                json!({ "device": device, "settings": { "mode": "multi_channel", "first": 9, "last": 4 } }),
+            )
+            .is_err()
+    );
+    assert_eq!(shell.editor().undo_history().len(), before + 2);
+
+    // Undo takes them back in order, redo brings them again.
+    shell.run("edit.undo", json!({})).unwrap();
+    assert_eq!(
+        info(&mut shell, device).mpe.settings,
+        bl_model::MpeSettings::default()
+    );
+    shell.run("edit.undo", json!({})).unwrap();
+    assert!(!info(&mut shell, device).mpe.on);
+    shell.run("edit.redo", json!({})).unwrap();
+    shell.run("edit.redo", json!({})).unwrap();
+    assert_eq!(info(&mut shell, device).mpe, mpe);
+}
+
+// Spec: mpe R14
+#[test]
+fn mpe_mode_survives_save_and_load_and_goes_into_presets_and_the_default_preset() {
+    let scratch = std::env::temp_dir().join(format!("bl-shell-mpe-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&scratch);
+    std::fs::create_dir_all(&scratch).unwrap();
+    let mut shell = Shell::headless();
+    shell.set_user_library(Some(scratch.join("Library")));
+    shell.start_audio();
+    let track = audio_track(&shell);
+    let device = load(&mut shell, track);
+    shell
+        .run("plugin.set_mpe", json!({ "device": device, "on": true }))
+        .unwrap();
+    shell
+        .run(
+            "plugin.set_mpe_settings",
+            json!({ "device": device, "settings": { "mode": "multi_channel", "first": 2, "last": 9 } }),
+        )
+        .unwrap();
+    let mpe = shell.editor().document().device(device).unwrap().mpe;
+
+    // Saved with the set, and opened again.
+    let saved = shell
+        .run(
+            commands::SET_SAVE_AS,
+            json!({ "path": scratch.join("Mpe.blset") }),
+        )
+        .unwrap();
+    let path = saved["path"].as_str().unwrap().to_owned();
+    shell.run(commands::SET_NEW, json!({})).unwrap();
+    shell
+        .run(commands::SET_OPEN, json!({ "path": path }))
+        .unwrap();
+    assert_eq!(shell.editor().document().device(device).unwrap().mpe, mpe);
+
+    // In a preset: another device of the plug-in loads it, MPE Mode and
+    // settings with the rest.
+    let preset: Value = shell
+        .run("device.save_preset", json!({ "device": device }))
+        .unwrap();
+    let track = audio_track(&shell);
+    let other = load(&mut shell, track);
+    assert!(!shell.editor().document().device(other).unwrap().mpe.on);
+    shell
+        .run(
+            "device.load_preset",
+            json!({ "device": other, "path": preset["path"] }),
+        )
+        .unwrap();
+    assert_eq!(shell.editor().document().device(other).unwrap().mpe, mpe);
+
+    // Save as Default Preset: a plug-in loaded afterwards starts with it.
+    shell
+        .run("device.save_default_preset", json!({ "device": device }))
+        .unwrap();
+    let fresh = load(&mut shell, track);
+    assert_eq!(shell.editor().document().device(fresh).unwrap().mpe, mpe);
+    let _ = std::fs::remove_dir_all(&scratch);
+}
+
+// Spec: mpe R18
+#[test]
+fn the_settings_dialog_opens_for_a_plugin_and_closes() {
+    let mut shell = Shell::headless();
+    shell.start_audio();
+    let track = audio_track(&shell);
+    let device = load(&mut shell, track);
+    assert!(!shell.mpe_settings_dialog().open);
+    let history = shell.editor().undo_history().len();
+    let shown: ids::MpeSettingsDialog = serde_json::from_value(
+        shell
+            .run(ids::SHOW_MPE_SETTINGS, json!({ "device": device }))
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(shown.open);
+    assert_eq!(shown.device, Some(device));
+    assert_eq!(shown.settings, Some(bl_model::MpeSettings::default()));
+    assert_eq!(shell.mpe_settings_dialog(), shown);
+    // What it edits changes under it, and it shows the change.
+    shell
+        .run(
+            "plugin.set_mpe_settings",
+            json!({ "device": device, "settings": { "channels": 3 } }),
+        )
+        .unwrap();
+    assert_eq!(
+        shell.mpe_settings_dialog().settings.map(|s| s.channels),
+        Some(3)
+    );
+    let closed: ids::MpeSettingsDialog = serde_json::from_value(
+        shell
+            .run(
+                ids::SHOW_MPE_SETTINGS,
+                json!({ "device": device, "shown": false }),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(!closed.open);
+    // Only the settings change was an undo step.
+    assert_eq!(shell.editor().undo_history().len(), history + 1);
+    // A device with no settings to edit doesn't open it.
+    assert!(
+        shell
+            .run(ids::SHOW_MPE_SETTINGS, json!({ "track": track }))
+            .is_err()
+    );
+}

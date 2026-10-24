@@ -13,7 +13,7 @@ use zip::write::SimpleFileOptions;
 
 use crate::common::TestDir;
 
-const NEVER: AtomicBool = AtomicBool::new(false);
+static NEVER: AtomicBool = AtomicBool::new(false);
 
 /// A project folder of two sets, samples in two folders, an empty folder,
 /// and what a pack leaves out: `Backup`, a journal and a save under way.

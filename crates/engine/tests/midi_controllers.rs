@@ -441,3 +441,91 @@ fn an_unlinked_envelope_runs_once_from_the_clip_start_while_the_loop_repeats() {
         "the unlinked one plays once"
     );
 }
+
+/// Two notes as Glissando writes them: C4 for two beats from the second
+/// beat, bending to the G4 of the note that follows it from the fourth.
+fn glissando() -> Vec<Note> {
+    use bl_midi_tools::{ParamValue, Registry, ToolInput, ToolNote, run};
+    let tool = Registry::native().find("glissando").unwrap();
+    let tool_note = |note: &Note| ToolNote::new(i16::from(note.key), note.start, note.length, 100);
+    let first = Note::new(60, BEAT, BEAT * 2, 100);
+    let second = Note::new(67, BEAT * 3, BEAT, 100);
+    let input = ToolInput {
+        notes: vec![tool_note(&first), tool_note(&second)],
+        range: (Ticks::ZERO, BAR),
+        grid_step: BEAT / 4,
+        signature: bl_core::time::TimeSignature::FOUR_FOUR,
+        scale: None,
+        drum_keys: None,
+        seed: 1,
+    };
+    // Start 50 %, Curve 0 %: the pitch holds to the third beat, then rises.
+    let notes = run(tool, &input, &[ParamValue::Whole(50), ParamValue::Whole(0)])
+        .unwrap()
+        .notes;
+    notes
+        .iter()
+        .zip([first, second])
+        .map(|(written, note)| Note {
+            pitch: written
+                .pitch
+                .iter()
+                .map(|p| Breakpoint {
+                    at: p.at,
+                    value: p.value,
+                    bend: p.bend,
+                })
+                .collect(),
+            ..note
+        })
+        .collect()
+}
+
+// Spec: midi-transformations R37, R38; mpe R5. A note Glissando bent reaches
+// the instrument as per-note pitch expression on its frames: nothing while
+// the pitch holds, then values at least every 5 ms that follow the written
+// line to the next note's pitch; the note it bends toward sends none. The
+// same in every block size, under the allocation trap.
+#[test]
+fn a_glissando_notes_pitch_reaches_the_instrument_as_per_note_expression() {
+    let heard = in_every_block_size(
+        &MidiData::new(glissando()),
+        |_, _, _| {},
+        BEAT_FRAMES as usize * 6,
+        None,
+    );
+    let bend = expression(&heard, NoteExpression::Bend);
+    // The note-on, then a bend of 0 semitones on its frame.
+    assert_eq!(heard[0], (BEAT_FRAMES, NoteKind::On, 60));
+    assert_eq!(bend[0], (BEAT_FRAMES, 0.0));
+    // Nothing is sent while the pitch holds, up to the third beat.
+    let from = BEAT_FRAMES * 2;
+    assert!(bend[1..].iter().all(|b| b.0 > from), "{bend:?}");
+    // Along the rise, every value is a share of 48 semitones that follows the
+    // line toward +7, at most 5 ms (240 frames) apart.
+    let rise = &bend[1..];
+    assert!(rise.len() >= 100, "{} messages", rise.len());
+    for pair in rise.windows(2) {
+        assert!(pair[1].0 - pair[0].0 <= 240, "{pair:?}");
+    }
+    for &(frame, value) in rise {
+        let along = (frame - from) as f32 / BEAT_FRAMES as f32;
+        // Straight segments between the 16 written points of a line.
+        assert!(
+            (value * 48.0 - 7.0 * along).abs() < 0.01,
+            "{frame}: {value}"
+        );
+    }
+    // The instrument is told the whole bend, and every one of its messages
+    // belongs to the first note, before its note-off.
+    assert!(rise.last().unwrap().1 * 48.0 > 6.9);
+    let off = BEAT_FRAMES * 3;
+    assert!(
+        heard
+            .iter()
+            .filter(|h| matches!(h.1, NoteKind::Expression { .. }))
+            .all(|h| h.2 == 60 && h.0 <= off)
+    );
+    // The note it bends toward has no envelope and sends none.
+    assert!(heard.contains(&(BEAT_FRAMES * 3, NoteKind::On, 67)));
+}

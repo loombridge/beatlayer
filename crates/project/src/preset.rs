@@ -148,7 +148,7 @@ impl Preset {
             params: device.params.clone(),
             shape: device.shape.clone(),
             articulations: (!device.articulations.is_empty()).then(|| device.articulations.clone()),
-            mpe: (!device.mpe.is_default()).then_some(device.mpe),
+            mpe: matches!(device.kind, DeviceKind::Plugin { .. }).then_some(device.mpe),
         }
     }
 
@@ -437,7 +437,7 @@ mod tests {
     }
 
     // Spec: mpe R14. A plug-in's MPE Mode and settings are in its preset,
-    // and a preset made while they are new's says nothing of them.
+    // off too, so loading it switches a device's MPE Mode off.
     #[test]
     fn a_preset_keeps_a_plugins_mpe_mode_and_settings() {
         let mut plugin = Device::new(
@@ -448,7 +448,10 @@ mod tests {
                 plugin_id: "com.example.synth".to_owned(),
             },
         );
-        assert_eq!(Preset::of(&plugin).mpe, None);
+        assert_eq!(
+            Preset::of(&plugin).mpe,
+            Some(bl_model::PluginMpe::default())
+        );
         plugin.mpe = bl_model::PluginMpe {
             on: true,
             settings: bl_model::MpeSettings {

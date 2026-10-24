@@ -2100,9 +2100,19 @@ mod tests {
             .unwrap()
             .remove("mpe");
         assert_eq!(
-            load(older).unwrap().device(synth).unwrap().mpe,
+            load(older.clone()).unwrap().device(synth).unwrap().mpe,
             PluginMpe::default()
         );
+        // Settings out of range don't load: on a plug-in, or an External
+        // Instrument's MIDI To.
+        let mut broken = older.clone();
+        broken["tracks"][at]["devices"][1]["mpe"] =
+            json!({ "on": true, "settings": { "mode": "multi_channel", "first": 0 } });
+        assert!(load(broken).is_err());
+        let mut broken = older;
+        broken["tracks"][at]["devices"][0]["external"]["mpe"] =
+            json!({ "mode": "multi_channel", "first": 9, "last": 17 });
+        assert!(load(broken).is_err());
     }
 
     // Spec: external-devices R2, R15

@@ -8606,6 +8606,8 @@ fn check_one_device(device: &Device) -> Result<(), ModelError> {
         check_value("parameter value", *value, value.is_finite())?;
     }
     device.layers.check()?;
+    // Spec: mpe R18. Settings out of range don't load.
+    device.mpe.settings.check()?;
     crate::modulator::check_mappings(device)?;
     if let Some(shape) = &device.shape {
         crate::modulator::check_shape(shape)?;

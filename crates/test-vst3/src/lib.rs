@@ -1104,8 +1104,15 @@ impl INoteExpressionPhysicalUIMappingTrait for Controller<true> {
             // SAFETY: an index within the list's count.
             let map = unsafe { &mut *list.map.add(index) };
             map.noteExpressionTypeID = match map.physicalUITypeID {
-                PhysicalUITypeIDs_::kPUIYMovement => BRIGHTNESS_TYPE,
-                PhysicalUITypeIDs_::kPUIPressure if has_pressure() => PRESSURE_TYPE,
+                // The constants are `i32` on Windows and `u32` elsewhere.
+                id if id == PhysicalUITypeIDs_::kPUIYMovement as PhysicalUITypeID => {
+                    BRIGHTNESS_TYPE
+                }
+                id if id == PhysicalUITypeIDs_::kPUIPressure as PhysicalUITypeID
+                    && has_pressure() =>
+                {
+                    PRESSURE_TYPE
+                }
                 _ => NoteExpressionTypeIDs_::kInvalidTypeID,
             };
         }

@@ -1725,11 +1725,11 @@ fn note_expressions(controller: &ComPtr<IEditController>) -> node::NoteExpressio
         let invalid = NoteExpressionTypeIDs_::kInvalidTypeID;
         let mut maps = [
             PhysicalUIMap {
-                physicalUITypeID: PhysicalUITypeIDs_::kPUIYMovement,
+                physicalUITypeID: PhysicalUITypeIDs_::kPUIYMovement as PhysicalUITypeID,
                 noteExpressionTypeID: invalid,
             },
             PhysicalUIMap {
-                physicalUITypeID: PhysicalUITypeIDs_::kPUIPressure,
+                physicalUITypeID: PhysicalUITypeIDs_::kPUIPressure as PhysicalUITypeID,
                 noteExpressionTypeID: invalid,
             },
         ];

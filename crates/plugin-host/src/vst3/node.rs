@@ -1112,8 +1112,14 @@ impl Node for Vst3Node {
             if note.kind == NoteKind::On
                 && let Some(id) = note.note_id
             {
-                self.sent[self.sent_next] = (id as i32, note.channel, note.key);
-                self.sent_next = (self.sent_next + 1) % SENT_NOTES;
+                // A plug-in may reuse an ended note's ID: its slot is the
+                // new note's.
+                let id = id as i32;
+                let slot = self.sent.iter().position(|(sent, ..)| *sent == id);
+                self.sent[slot.unwrap_or(self.sent_next)] = (id, note.channel, note.key);
+                if slot.is_none() {
+                    self.sent_next = (self.sent_next + 1) % SENT_NOTES;
+                }
             }
             block.send_note(note);
         }

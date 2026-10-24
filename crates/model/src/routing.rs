@@ -78,6 +78,9 @@ impl Document {
             // Spec: external-devices R9, R12
             if let Some(external) = &device.external {
                 check_port(external.port.as_deref().unwrap_or("-"), external.channel)?;
+                if let Some(mpe) = &external.mpe {
+                    mpe.check()?;
+                }
                 if !external.hardware_latency.is_valid() {
                     return Err(ModelError::InvalidInput(
                         "the hardware latency is out of range",

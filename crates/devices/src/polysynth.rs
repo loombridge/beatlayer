@@ -2000,7 +2000,8 @@ impl VoiceHandler for Synth {
                 if level == 0.0 {
                     continue;
                 }
-                let vel_vol = self.vel_vol[from + frame];
+                // Spec: polysynth R15. The knob is in per cent.
+                let vel_vol = self.vel_vol[from + frame] / 100.0;
                 let scale = 1.0 - vel_vol + vel_vol * velocity;
                 let volume = if volume_moved {
                     self.destination(

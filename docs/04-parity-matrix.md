@@ -263,7 +263,7 @@ Each row's **Notes** name the work packages that build it ("Built in WP-1.8a, WP
 | Live set import (`.als`) | M9 | |
 | Live device and rack preset import (`.adv`, `.adg`) | M9 | Native devices mapped to Beatlayer equivalents |
 | Packs (`.alp`), Max devices (`.amxd`), Move and Note bundles (`.ablbundle`) | Out | Ableton content and closed platforms |
-| Pack a project into one archive, export Session clips as a new set, merge sets | M6 | Beatlayer's own pack format ([spec](specs/set-exchange.md)). Opening a set in the browser, merging its tracks, device chains and clips, and saving tracks or Session clips as a new set: WP-6.35; packs: WP-6.35b. Built in WP-6.35 |
+| Pack a project into one archive, export Session clips as a new set, merge sets | M6 | Beatlayer's own pack format ([spec](specs/set-exchange.md)). Opening a set in the browser, merging its tracks, device chains and clips, and saving tracks or Session clips as a new set: WP-6.35; packs: WP-6.35b. Built in WP-6.35 and WP-6.35b |
 | Standard MIDI Files, import and export | M2 | Built in WP-2.21 |
 | Audio import: WAV, AIFF, AIFF-C, FLAC, Ogg Vorbis, MP3, M4A (AAC, ALAC), RF64 and BWF over 4 GB | M1 | M4A on every platform, not only macOS. Built in WP-1.1, WP-1.10 |
 | Export: Main, all tracks as stems, selected tracks, one track; include returns and Main effects; mono; normalise | M1 (Main), M2 (one track), M4 (stems, render as loop), M6 (the dialog, mono) | The Export Audio/Video dialog, Convert to Mono and Create Analysis File: WP-6.71 ([spec](specs/export.md) R28 to R45). Built in WP-1.12, WP-2.26, WP-4.17, WP-6.71 |

@@ -25,6 +25,10 @@ serde = { version = "1.0.228", default-features = false, features = ["std", "der
 # without it, mixer and parameter values drift by one unit in the last place
 # over a save and load.
 serde_json = { version = "1.0.151", features = ["float_roundtrip"] }
+# Packs (set-exchange R16 to R23): a project folder in one ZIP file. The
+# versions the shell and the DAWproject reader already build.
+flate2 = "1.1"
+zip = { version = "9.0.5", default-features = false, features = ["deflate-flate2"] }
 # The local time a backup's time is shown in (file-management R18). The
 # versions the app and the engine already use, so nothing new enters the
 # build.

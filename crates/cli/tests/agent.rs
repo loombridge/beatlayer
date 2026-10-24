@@ -6228,3 +6228,81 @@ fn an_agent_shows_the_devices_section_and_reads_it_back() {
     );
     assert_eq!(enabled(&mut client), false);
 }
+
+/// An agent packs the project of a saved set into one file, installs the pack
+/// in another folder, and reads the new folder back (set exchange R24).
+#[test]
+fn an_agent_packs_a_project_and_installs_the_pack() {
+    // Spec: set-exchange R16, R20, R24.
+    let dir = TempDir::new("packs");
+    let mut client = Client::new(InProcess::new(Agent::headless(true), Shell::headless()));
+    client.initialize("pack-agent").unwrap();
+    let run = |client: &mut Client<InProcess>, command: &str, args: Value| {
+        let out = call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": command, "args": args }] }),
+        );
+        assert_eq!(out["ran"], 1, "{out}");
+        out["results"][0]["result"].clone()
+    };
+    let saved = run(
+        &mut client,
+        "set.save_as",
+        json!({ "path": dir.0.join("Tango.blset") }),
+    );
+    let set = saved["path"].as_str().unwrap().to_owned();
+    let pack = dir.0.join("Tango Project.blpack");
+
+    let packed = run(&mut client, "set.create_pack", json!({ "path": pack }));
+    assert_eq!(packed["path"], pack.to_string_lossy().as_ref(), "{packed}");
+    assert_eq!(packed["files"], 1, "{packed}");
+    assert_eq!(packed["left_out"], json!([]), "{packed}");
+    assert!(pack.is_file());
+
+    // Installed in the User Library, a place, so the browser lists it.
+    let library = dir.0.join("Library");
+    bl_shell::browser::places::create_user_library(&library).unwrap();
+    run(
+        &mut client,
+        "settings.set_user_library",
+        json!({ "path": library }),
+    );
+    let installed = run(
+        &mut client,
+        "set.install_pack",
+        json!({ "pack": pack, "folder": library }),
+    );
+    let folder = library.join("Tango Project");
+    assert_eq!(
+        installed["folder"],
+        folder.to_string_lossy().as_ref(),
+        "{installed}"
+    );
+    assert_eq!(
+        installed["sets"],
+        json!([folder.join("Tango.blset").to_string_lossy()]),
+        "{installed}"
+    );
+    assert!(Path::new(&set).is_file(), "the packed project is unchanged");
+
+    // Nothing is going on any more, and the new folder reads back in the
+    // browser.
+    let status = run(&mut client, "set.pack_status", json!({}));
+    assert_eq!(status["share"], 0.0, "{status}");
+    assert!(status.get("job").is_none(), "{status}");
+    run(
+        &mut client,
+        "browser.open_folder",
+        json!({ "path": library }),
+    );
+    let state = run(&mut client, "browser.state", json!({}));
+    assert!(
+        state["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["path"] == folder.to_string_lossy().as_ref()),
+        "{state}"
+    );
+}

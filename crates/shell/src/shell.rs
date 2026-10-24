@@ -120,6 +120,7 @@ mod invoke;
 mod menus;
 mod midi_input;
 mod mixer;
+mod packs;
 mod perception_commands;
 mod playback;
 mod plugin_commands;
@@ -276,6 +277,26 @@ pub enum Effect {
         file_name: String,
         /// The folder the dialog opens in, if there is one.
         folder: Option<PathBuf>,
+    },
+    /// Ask where to write a pack of the project folder `project` (the open
+    /// set's when `None`), in a save dialog that suggests `file_name` in
+    /// `folder`, then run `set.create_pack` with the path (set exchange R16).
+    PickPackPath {
+        /// The project folder to pack, when it isn't the open set's.
+        project: Option<String>,
+        /// The suggested name: the project folder's, with `.blpack`.
+        file_name: String,
+        /// The folder the dialog opens in: the project's parent.
+        folder: PathBuf,
+    },
+    /// Ask for a pack to install, then ask where to unpack it (set exchange
+    /// R20).
+    PickPack,
+    /// Ask for the folder to unpack `pack` into, the pack's own folder
+    /// first, then run `set.install_pack` with it (set exchange R20).
+    PickInstallFolder {
+        /// The pack to unpack.
+        pack: String,
     },
     /// Quit.
     Quit,
@@ -614,6 +635,7 @@ pub struct Shell {
     stems: stems::StemsState,
     /// The Export Audio/Video dialog and the export under way (WP-6.71).
     export: export_dialog::ExportState,
+    packs: packs::PackState,
     /// The autosampler at work (WP-5.16, IMP-27).
     autosample: Option<autosample::Job>,
     /// The autosampler's dialog, open for an instrument.
@@ -1106,6 +1128,7 @@ impl Shell {
             processed: Vec::new(),
             stems: stems::StemsState::default(),
             export: export_dialog::ExportState::default(),
+            packs: packs::PackState::default(),
             autosample: None,
             autosample_dialog: None,
             autosample_result_value: None,

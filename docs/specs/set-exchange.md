@@ -1,6 +1,6 @@
 # Merging sets, saving clips and tracks as sets, and packing a project
 
-- **Status:** partial (R1 to R9 and R11 to R15 each have a passing test, but for the parts listed under "Not built yet"; R10 is WP-6.20's and R16 to R24 WP-6.35b's)
+- **Status:** partial (R1 to R9, R11 to R24 each have a passing test, but for the parts listed under "Not built yet"; R10 is WP-6.20's)
 - **Work packages:** WP-6.35, a set opened in the browser, merging its tracks, device chains and clips into the open set, and saving tracks or Session clips as a new set (R1 to R9 and R11 to R15); WP-6.20, a set's grooves in the browser (R10); WP-6.35b, packing a project into one file and unpacking it (R16 to R24). Clip files are [clip files](clip-files.md)'; Collect Files on Export is [file management](file-management.md)'s (R7 to R9); the File Manager's views are [file management](file-management.md)'s
 - **Parity-matrix row:** Files and export: Pack a project into one archive, export Session clips as a new set, merge sets
 - **Checked against:** the Live 12 reference manual (online edition), read 20 October 2026; the Live 12 release notes, 12.0, 12.2 and 12.3; the UI parity reference's rows I-DROP-002, 006 and 011, M-FILE-005, L-OTH-002 and C-BROWSER-014
@@ -63,7 +63,7 @@ This spec covers the set in the browser, merging, saving tracks and clips as a s
 - **R20.** Install Pack... in the File menu (M-FILE-005), dropping a pack on the main window (I-DROP-023), or opening one from Finder or Explorer asks for the folder to unpack into, the pack's own folder offered first, and makes the project folder there with every file in it. When a folder of that name is already there, the new one is named with " 2", " 3" and so on, as Save As names a project folder ([the app shell](app-shell.md) R20). Unpacking opens no set and changes nothing in the open set; the result and the Status Bar name the new folder and its sets, and the browser lists it when it lies in a place. (S5, S10)
 - **R21.** Unpacking checks the whole pack before it writes anything: a pack without the manifest, from a later version of Beatlayer, or with an entry whose name is absolute, climbs out of the project folder with `..`, is a link, or can't be a file name on this platform, is refused, and so is a pack that needs more space than the destination has. It then unpacks into a hidden folder beside the destination and renames it into place, so an unpack stopped at any point, or refused because a file's checksum doesn't match or a file unpacks larger than the pack says, leaves nothing behind. (S10; Beatlayer's own)
 - **R22.** The files a pack unpacks are byte for byte those packed, so a set from it opens with every file it used from inside its project found at the same paths, with the same content hashes ([audio import](audio-import.md) R9). (S5, S10)
-- **R23.** Packing and unpacking run on a background thread, reporting how far they've got, and either can be cancelled, leaving no pack and no unpacked folder. A pack the reader refuses never crashes Beatlayer; the reader is fuzzed. (S10)
+- **R23.** Packing and unpacking run on a background thread, reporting how far they've got, and either can be cancelled, leaving no pack and no unpacked folder (`set.pack_status` reads how far, `set.cancel_pack` cancels). A pack the reader refuses never crashes Beatlayer; the reader is fuzzed. (S10)
 - **R24.** `set.create_pack` packs a project folder (the open set's when none is given) into a pack at a path, and returns the pack's path, how many files and bytes it holds and the external files it left out; `set.install_pack` unpacks a pack into a folder and returns the new project folder and its sets. Both read or write files outside the project, so they're external; each reads back in its result and in `browser.state` (the new file or folder). (S10)
 
 ## Tests
@@ -85,15 +85,15 @@ This spec covers the set in the browser, merging, saving tracks and clips as a s
 | R13 | `crates/shell/tests/set_exchange.rs`, `a_set_of_one_track_is_named_after_it_and_refers_to_the_files_with_never`, `tracks_saved_as_a_set_open_on_their_own_and_stand_alone` | unit, through `Shell::run` on real folders |
 | R14 | `crates/shell/tests/set_exchange.rs`, `tracks_saved_as_a_set_open_on_their_own_and_stand_alone`, `a_set_of_one_track_is_named_after_it_and_refers_to_the_files_with_never`, `ask_waits_for_the_answer_before_saving_a_set` | unit, through `Shell::run` on real folders |
 | R15 | `crates/cli/tests/agent.rs`, `an_agent_saves_tracks_as_a_set_merges_it_and_reads_it_back`; `crates/shell-spec/src/set_exchange.rs`, `every_listed_id_is_registered_and_complete`; `cargo xtask commands` | unit, agent API |
-| R16 | to be written in WP-6.35b | |
-| R17 | to be written in WP-6.35b | |
-| R18 | to be written in WP-6.35b | |
-| R19 | to be written in WP-6.35b | |
-| R20 | to be written in WP-6.35b | |
-| R21 | to be written in WP-6.35b | |
-| R22 | to be written in WP-6.35b | |
-| R23 | to be written in WP-6.35b | |
-| R24 | to be written in WP-6.35b | |
+| R16 | `crates/shell/tests/packs.rs`, `a_project_of_two_sets_packs_and_unpacks_elsewhere_and_its_sets_open_with_every_sample`, `a_person_is_asked_where_and_the_work_runs_on_a_thread_that_can_be_cancelled`; `crates/ui/tests/file_manager.rs`, `the_packing_section_holds_create_pack` | unit, through `Shell::run` on real folders, UI script |
+| R17 | `crates/project/tests/pack.rs`, `a_project_packs_and_unpacks_with_every_file_byte_identical`; `crates/shell/tests/packs.rs`, `a_sample_from_outside_the_project_is_named_in_the_result` | unit, through `Shell::run` on real folders |
+| R18 | `crates/shell/tests/packs.rs`, `packing_the_open_projects_unsaved_changes_or_a_set_never_saved_is_refused` | unit, through `Shell::run` on real folders |
+| R19 | `crates/project/tests/pack.rs`, `a_pack_starts_with_its_manifest_and_holds_zip64_records`, `a_project_packs_and_unpacks_with_every_file_byte_identical`, `a_cancelled_pack_and_a_cancelled_unpack_leave_nothing` | unit |
+| R20 | `crates/shell/tests/packs.rs`, `a_pack_installed_where_its_folder_is_taken_makes_the_next_numbered_name`, `a_person_is_asked_where_and_the_work_runs_on_a_thread_that_can_be_cancelled`; `crates/ui/tests/file_manager.rs`, `a_pack_dropped_on_the_window_is_installed`; `xtask`, `package::tests::packaging_files_declare_what_the_app_needs` | unit, UI script |
+| R21 | `crates/project/tests/pack.rs`, `a_pack_with_a_bad_name_a_link_or_no_manifest_is_refused_with_nothing_written`, `a_pack_from_a_later_version_or_not_a_pack_is_refused`, `a_file_with_a_bad_checksum_or_more_bytes_than_declared_is_refused_with_nothing_written`; `crates/shell/tests/packs.rs`, `packs_the_reader_refuses_write_nothing` | unit, through `Shell::run` on real folders |
+| R22 | `crates/shell/tests/packs.rs`, `a_project_of_two_sets_packs_and_unpacks_elsewhere_and_its_sets_open_with_every_sample` | unit, through `Shell::run` on real folders |
+| R23 | `crates/project/tests/pack.rs`, `a_cancelled_pack_and_a_cancelled_unpack_leave_nothing`, `the_reader_checks_a_whole_pack_without_writing_and_refuses_one_that_is_too_big`; `fuzz/fuzz_targets/pack.rs`; `crates/shell/tests/packs.rs`, `a_person_is_asked_where_and_the_work_runs_on_a_thread_that_can_be_cancelled` | unit, fuzz |
+| R24 | `crates/shell/tests/packs.rs`, `a_project_of_two_sets_packs_and_unpacks_elsewhere_and_its_sets_open_with_every_sample`; `crates/cli/tests/agent.rs`, `an_agent_packs_a_project_and_installs_the_pack`; `crates/shell-spec/src/set_exchange.rs`, `every_listed_id_is_registered_and_complete`; `cargo xtask commands` | unit, agent API |
 
 ## Not built yet
 
@@ -101,3 +101,7 @@ This spec covers the set in the browser, merging, saving tracks and clips as a s
 - A return track or Main of an opened set can't be added as a track (R4); only its chain of devices comes, by its Devices row (R8). The spec doesn't say what dragging a return track does.
 - A frozen track's Session clips saved as a set (R12) are saved without the track's frozen state.
 - Dropping a set file from Finder or Explorer on a title bar (R3) isn't built; the drop takes a set from the browser (I-DROP-021).
+- A file is stored or compressed by Deflate on the evidence of its first 256 KiB (R19), so a file that starts with data that compresses well and goes on with data that doesn't is compressed anyway. A pack's checksum for each file is the CRC-32 that ZIP keeps (R19, R21).
+- Links in a project folder are left out of a pack, not followed (R17).
+- A pack opened from Finder or Explorer is unpacked when it is the file Beatlayer starts with, as a set is (R20); one double-clicked while Beatlayer runs isn't handled.
+- `set.cancel_pack` and `set.pack_status` (R23) are Beatlayer's own commands for the progress window's Cancel and its bar; R24 names the two that pack and unpack.

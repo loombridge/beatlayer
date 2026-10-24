@@ -167,8 +167,8 @@ impl Extension {
         }
     }
 
-    /// Gives the playback renderer a region to render, and the editor
-    /// renderer the same one to preview. The plug-in must not be active.
+    /// Gives the playback renderer a region to render. The plug-in must not
+    /// be active.
     pub(crate) fn add_region(&self, region: sys::ARAPlaybackRegionRef) {
         if let Some((reference, interface)) = &self.playback
             && let Some(add) = interface.addPlaybackRegion

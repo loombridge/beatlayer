@@ -964,6 +964,7 @@ dependencies = [
  "bl-media",
  "bl-model",
  "bl-rt",
+ "bl-test-ara",
  "bl-test-clap",
  "bl-test-vst3",
  "block2 0.6.2",
@@ -1064,6 +1065,14 @@ dependencies = [
  "bl-dsp",
  "cc",
  "proptest",
+]
+
+[[package]]
+name = "bl-test-ara"
+version = "0.2.0"
+dependencies = [
+ "bl-ara-sys",
+ "vst3",
 ]
 
 [[package]]

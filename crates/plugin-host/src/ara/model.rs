@@ -267,3 +267,205 @@ fn warped(clip: &Clip, audio: &AudioData, tempo: &TempoMap, file: f64) -> Vec<Pi
         .filter(|piece| piece.playback.1 > 0.0 && piece.modification.1 > 0.0)
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::host;
+    use super::*;
+    use bl_core::time::{Bpm, TempoMap, TempoSegment};
+    use bl_model::{
+        AudioData, Clip, ClipData, Command, DeviceKind, Editor, PluginFormat, TrackKind, WarpMarker,
+    };
+
+    const QUARTER: i64 = TICKS_PER_QUARTER;
+    const FILE: ContentHash = ContentHash([7; 32]);
+
+    fn kind(id: &str) -> DeviceKind {
+        DeviceKind::Plugin {
+            format: PluginFormat::Vst3,
+            plugin_id: id.to_owned(),
+        }
+    }
+
+    /// A set with an audio track holding the ARA plug-in `plugin`.
+    struct Set {
+        editor: Editor,
+        track: TrackId,
+    }
+
+    impl Set {
+        fn new(plugin: &str) -> Self {
+            let mut editor = Editor::new();
+            let track = editor.new_id();
+            editor
+                .apply(Command::CreateTrack {
+                    id: track,
+                    kind: TrackKind::Audio,
+                    name: "Vocal".to_owned(),
+                    parent: None,
+                    index: 0,
+                })
+                .unwrap();
+            let device = editor.new_id();
+            editor
+                .apply(Command::InsertDevice {
+                    track,
+                    index: 0,
+                    device: Device::new(device, "Plug-in", kind(plugin)),
+                })
+                .unwrap();
+            Self { editor, track }
+        }
+
+        fn clip(&mut self, start: i64, length: i64, audio: AudioData) -> ClipId {
+            let clip = self.editor.new_id();
+            self.editor
+                .apply(Command::CreateClip {
+                    track: self.track,
+                    clip: Clip::new(clip, Ticks(start), Ticks(length), ClipData::Audio(audio)),
+                })
+                .unwrap();
+            clip
+        }
+
+        fn model(&self, plugin: &str, stretch: bool) -> Model {
+            let hosts = |device: &Device| match &device.kind {
+                DeviceKind::Plugin { plugin_id, .. } => {
+                    Some((plugin_id.clone(), AraSupport { timestretch: stretch }))
+                }
+                _ => None,
+            };
+            Model::of(self.editor.document(), plugin, &hosts, &mut |_| Some(2.0))
+        }
+    }
+
+    // Spec: ara-hosting R3
+    #[test]
+    fn the_musical_context_gives_the_tempo_and_signatures_as_sync_points() {
+        let tempo = TempoMap::new([
+            TempoSegment::Constant {
+                start: Ticks(0),
+                bpm: Bpm::new(120.0).unwrap(),
+            },
+            TempoSegment::Constant {
+                start: Ticks(4 * QUARTER),
+                bpm: Bpm::new(60.0).unwrap(),
+            },
+        ])
+        .unwrap();
+        let content = host::Content::of(&tempo, &bl_core::time::TimeSignatureMap::default());
+        // Quarter 0, the change at quarter 4 (two seconds in), and a quarter
+        // past it, which the final tempo is read from.
+        assert_eq!(
+            content.tempo_entries(),
+            vec![(0.0, 0.0), (2.0, 4.0), (3.0, 5.0)]
+        );
+    }
+
+    // Spec: ara-hosting R4, R5
+    #[test]
+    fn an_unwarped_clip_is_one_region_at_its_place_playing_the_file_at_its_own_speed() {
+        let mut set = Set::new("A");
+        let mut audio = AudioData::new(FILE);
+        audio.start = 0.25;
+        audio.end = Some(1.25);
+        // Two beats at 120 BPM are a second, and the clip starts one beat in.
+        let clip = set.clip(QUARTER, 8 * QUARTER, audio);
+        let model = set.model("A", false);
+        assert_eq!(model.sequences.len(), 1);
+        assert_eq!(model.sources.len(), 1);
+        assert_eq!(model.modifications.len(), 1);
+        let region = &model.regions[&(clip, 0)];
+        assert_eq!(region.start_in_modification, 0.25);
+        // The clip is longer than the audio between the markers: the audio
+        // ends the region.
+        assert_eq!(region.duration_in_modification, 1.0);
+        assert_eq!((region.start_in_playback, region.duration_in_playback), (0.5, 1.0));
+        assert_eq!(region.flags, NO_CHANGES);
+    }
+
+    // Spec: ara-hosting R4
+    #[test]
+    fn a_clip_shorter_than_its_audio_plays_part_of_it() {
+        let mut set = Set::new("A");
+        let clip = set.clip(0, QUARTER, AudioData::new(FILE));
+        let model = set.model("A", false);
+        let region = &model.regions[&(clip, 0)];
+        assert_eq!((region.duration_in_modification, region.duration_in_playback), (0.5, 0.5));
+    }
+
+    // Spec: ara-hosting R4
+    #[test]
+    fn clips_the_plugin_cant_render_stay_out_of_its_document() {
+        let mut set = Set::new("A");
+        let mut quiet = AudioData::new(FILE);
+        quiet.gain = 0.5;
+        let mut looped = AudioData::new(FILE);
+        looped.looping = true;
+        let mut warped = AudioData::new(FILE);
+        warped.warp = true;
+        warped.warp_markers = vec![WarpMarker { time: 0.0, beat: Ticks(0) }];
+        warped.tempo = Some(120.0);
+        let plain = set.clip(0, QUARTER, AudioData::new(FILE));
+        for audio in [quiet, looped, warped] {
+            set.clip(2 * QUARTER, QUARTER, audio);
+        }
+        let model = set.model("A", false);
+        assert_eq!(model.regions.keys().copied().collect::<Vec<_>>(), vec![(plain, 0)]);
+        assert_eq!(model.modifications.len(), 1);
+    }
+
+    // Spec: ara-hosting R3
+    #[test]
+    fn a_track_belongs_to_the_plugin_that_is_first_in_its_chain() {
+        let mut set = Set::new("A");
+        let other = set.editor.new_id();
+        set.editor
+            .apply(Command::InsertDevice {
+                track: set.track,
+                index: 1,
+                device: Device::new(other, "Other", kind("B")),
+            })
+            .unwrap();
+        set.clip(0, QUARTER, AudioData::new(FILE));
+        assert_eq!(set.model("A", false).sequences.len(), 1);
+        assert!(set.model("B", false).sequences.is_empty());
+        assert!(set.model("C", false).regions.is_empty());
+    }
+
+    // Spec: ara-hosting R5
+    #[test]
+    fn a_warped_clip_is_a_region_for_each_straight_stretch_of_its_warp_map() {
+        let mut set = Set::new("A");
+        // The file's first second is squeezed into a beat (half a second at
+        // 120 BPM); after that marker it plays at the clip's tempo of 120.
+        let mut audio = AudioData::new(FILE);
+        audio.warp = true;
+        audio.warp_markers = vec![
+            WarpMarker { time: 0.0, beat: Ticks(0) },
+            WarpMarker { time: 1.0, beat: Ticks(QUARTER) },
+        ];
+        audio.tempo = Some(120.0);
+        audio.start = 0.0;
+        audio.end = None;
+        let clip = set.clip(0, 8 * QUARTER, audio);
+        let model = set.model("A", true);
+        let pieces: Vec<_> = model
+            .regions
+            .values()
+            .map(|r| {
+                (
+                    r.piece,
+                    r.start_in_modification,
+                    r.duration_in_modification,
+                    r.start_in_playback,
+                    r.duration_in_playback,
+                )
+            })
+            .collect();
+        // The file is two seconds long, so it ends on beat 3.
+        assert_eq!(pieces, vec![(0, 0.0, 1.0, 0.0, 0.5), (1, 1.0, 1.0, 0.5, 1.0)]);
+        assert!(model.regions.values().all(|r| r.flags == TIMESTRETCH));
+        assert!(model.regions.keys().all(|(c, _)| *c == clip));
+    }
+}

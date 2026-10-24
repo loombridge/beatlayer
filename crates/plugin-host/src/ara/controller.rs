@@ -128,6 +128,7 @@ struct Modification {
     reference: sys::ARAAudioModificationRef,
     _host: Box<Tag>,
     media: ContentHash,
+    name: String,
 }
 
 struct PlacedRegion {
@@ -535,29 +536,38 @@ impl Controller {
             }
         }
         for (clip, wanted) in &model.modifications {
-            if self.modifications.contains_key(clip) {
+            let name = CString::new(wanted.name.clone()).unwrap_or_default();
+            let id = CString::new(format!("clip-{}", u64::from(clip.0))).unwrap_or_default();
+            let properties = sys::ARAAudioModificationProperties {
+                structSize: size_of::<sys::ARAAudioModificationProperties>(),
+                name: name.as_ptr(),
+                persistentID: id.as_ptr(),
+            };
+            if let Some(existing) = self.modifications.get_mut(clip) {
+                if existing.name != wanted.name {
+                    call!(self, updateAudioModificationProperties(existing.reference, &raw const properties));
+                    existing.name.clone_from(&wanted.name);
+                }
                 continue;
             }
             let Some(source) = self.sources.get(&wanted.media) else {
                 continue;
             };
             let source_ref = source.reference;
-            let name = CString::new(wanted.name.clone()).unwrap_or_default();
-            let id = CString::new(format!("clip-{}", u64::from(clip.0))).unwrap_or_default();
             if let Some(dead) = self.dead_clips.remove(clip) {
                 self.dead_modifications.retain(|dead| dead != clip);
                 if dead.media == wanted.media {
                     call!(self, deactivateAudioModificationForUndoHistory(dead.reference, 0));
+                    let mut dead = dead;
+                    if dead.name != wanted.name {
+                        call!(self, updateAudioModificationProperties(dead.reference, &raw const properties));
+                        dead.name.clone_from(&wanted.name);
+                    }
                     self.modifications.insert(*clip, dead);
                     continue;
                 }
                 call!(self, destroyAudioModification(dead.reference));
             }
-            let properties = sys::ARAAudioModificationProperties {
-                structSize: size_of::<sys::ARAAudioModificationProperties>(),
-                name: name.as_ptr(),
-                persistentID: id.as_ptr(),
-            };
             let host = tag();
             let reference = call!(
                 self,
@@ -573,6 +583,7 @@ impl Controller {
                     reference,
                     _host: host,
                     media: wanted.media,
+                    name: wanted.name.clone(),
                 },
             );
         }

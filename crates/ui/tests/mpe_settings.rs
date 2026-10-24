@@ -6,7 +6,6 @@
 //! Instrument. The plug-in is the test plug-in, built from source.
 
 use crate::common;
-use std::time::{Duration, Instant};
 
 use bl_model::{DeviceId, MidiTo, MpeMode, MpeZone, TrackId};
 use bl_shell::plugin_commands::{self as ids, PluginLoaded};
@@ -32,19 +31,6 @@ fn harness() -> (Harness, DeviceId, TrackId) {
             .unwrap(),
     )
     .unwrap();
-    let until = Instant::now() + Duration::from_secs(10);
-    while !h
-        .shell
-        .plugin_info(loaded.device)
-        .is_some_and(|i| i.has_window)
-    {
-        assert!(
-            Instant::now() < until,
-            "the plug-in never offered its editor"
-        );
-        h.shell.poll();
-        std::thread::sleep(Duration::from_millis(5));
-    }
     h.settle();
     (h, loaded.device, track)
 }

@@ -85,11 +85,10 @@ fn read_log(format: Format) -> Vec<Line> {
     let mut lines: Vec<Line> = text
         .lines()
         .map(|line| {
-            let mut fields = line.split(' ');
             let mut frame = 0;
             let (mut what, mut channel, mut key, mut id, mut value) =
                 (String::new(), -1, -1, -1, 0.0);
-            while let Some(field) = fields.next() {
+            for field in line.split(' ') {
                 match field.split_once('=') {
                     Some(("frame", v)) => frame = v.parse().unwrap(),
                     Some(("channel", v)) => channel = v.parse().unwrap(),

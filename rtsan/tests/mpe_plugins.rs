@@ -164,7 +164,8 @@ fn mpe_midi_out_of_a_tracks_midi_to_passes_under_rtsan() {
 #[test]
 fn mpe_clap_note_expressions_pass_under_rtsan() {
     let host = ClapHost::new();
-    host.load(bl_test_clap::bundle()).expect("the test plug-in loads");
+    host.load(bl_test_clap::bundle())
+        .expect("the test plug-in loads");
     let mut registry = testing::registry(&Arc::new(Probe::default()));
     registry.add(host.factory());
     run(

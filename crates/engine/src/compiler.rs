@@ -315,6 +315,32 @@ impl Compiler {
         update
     }
 
+    /// What the audio thread needs now that `media`'s analysis is ready:
+    /// the clips of every track that plays the file, sent again, so a Beats
+    /// clip's plan cuts at the transients the library now gives (the warp
+    /// modes spec, R14). Nothing before a document has been synced.
+    pub(crate) fn media_analysed(&mut self, media: ContentHash) -> Update {
+        let mut update = Update::default();
+        let Some(document) = self.synced.take() else {
+            return update;
+        };
+        let plays = |clip: &bl_model::Clip| matches!(&clip.data, bl_model::ClipData::Audio(audio) if audio.media == media);
+        let tracks: Vec<TrackId> = document
+            .tracks()
+            .filter(|track| {
+                track.clips().any(plays)
+                    || track.played_clips().any(plays)
+                    || track.slots().any(|(_, clip)| plays(clip))
+            })
+            .map(bl_model::Track::id)
+            .collect();
+        for track in tracks {
+            self.send_clips(&document, Some(&document), track, &mut update);
+        }
+        self.synced = Some(document);
+        update
+    }
+
     /// The last program's generation, or 0 before the first.
     #[must_use]
     pub fn generation(&self) -> u64 {
@@ -3264,6 +3290,32 @@ mod tests {
         // No return takes its sends before the mixer, so no task keeps a
         // copy for them.
         assert!(program.tap_pool.is_empty());
+    }
+
+    // Spec: warp-modes R14. A file's analysis landing after its clips were
+    // compiled sends the clips of the tracks that play it again, so a Beats
+    // clip's plan cuts at the transients the library now gives; a file no
+    // clip plays sends nothing.
+    #[test]
+    fn a_file_analysed_sends_again_only_the_clips_that_play_it() {
+        let mut f = Fixture::new();
+        let audio_track = track(&mut f.editor, TrackKind::Audio, None);
+        let media = bl_model::ContentHash([7; 32]);
+        let clip = bl_model::Clip::new(
+            f.editor.new_id(),
+            bl_core::time::Ticks::ZERO,
+            bl_core::time::Ticks::WHOLE,
+            bl_model::ClipData::Audio(bl_model::AudioData::new(media)),
+        );
+        f.apply(Command::CreateClip {
+            track: audio_track,
+            clip,
+        });
+        let update = f.compiler.media_analysed(media);
+        assert!(update.program.is_none());
+        assert!(!update.data.is_empty(), "the audio track's clips go again");
+        let other = f.compiler.media_analysed(bl_model::ContentHash([8; 32]));
+        assert!(other.data.is_empty());
     }
 
     #[test]

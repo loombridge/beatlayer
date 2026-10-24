@@ -630,6 +630,11 @@ pub struct Shell {
     analysis_options: bl_analysis::cache::AnalysisOptions,
     /// The analysis cache, made when first used.
     analysis: Option<bl_analysis::cache::AnalysisCache>,
+    /// The cache as the engine reads it for the files' transients: the
+    /// live engine's, previews' and exports' (the warp modes spec, R14).
+    analysis_slot: crate::analysed_media::AnalysisSlot,
+    /// The files whose analysis the live engine hasn't heard is ready.
+    analysis_unheard: std::collections::HashSet<bl_media::ContentHash>,
     /// How the peaks of the files an export writes are kept (WP-6.71, R34):
     /// in memory only until the app says otherwise.
     peak_options: bl_media::PeakCacheOptions,
@@ -1060,6 +1065,8 @@ impl Shell {
         // The engine's clips stream from the set's media (WP-1.4b).
         let media = Arc::new(MediaStore::new());
         audio.set_media(Arc::clone(&media));
+        let analysis_slot = crate::analysed_media::AnalysisSlot::default();
+        audio.set_analysis(analysis_slot.clone());
         // CLAP plug-ins (WP-2.6): this thread is their main thread.
         let plugins = ClapHost::new();
         audio.set_plugins(plugins.clone());
@@ -1100,6 +1107,8 @@ impl Shell {
             auditioning: None,
             analysis_options: bl_analysis::cache::AnalysisOptions::memory_only(),
             analysis: None,
+            analysis_slot,
+            analysis_unheard: std::collections::HashSet::new(),
             peak_options: bl_media::PeakCacheOptions::memory_only(),
             peaks: None,
             analysed: std::collections::HashSet::new(),
@@ -4943,6 +4952,7 @@ impl Shell {
     /// anything a window shows changed.
     pub fn poll(&mut self) -> bool {
         self.analysis_cache();
+        self.hear_analyses();
         let warping = auto_warp::Warping {
             prefs: self.prefs.warp,
             analysis: self.analysis.as_ref(),
@@ -9840,7 +9850,7 @@ impl Shell {
         let playing = self.audio.transport_state().playing;
         let source = crate::perception::Source {
             document: self.editor.document(),
-            media: Arc::clone(&self.media) as Arc<dyn bl_engine::MediaLibrary>,
+            media: self.engine_media(),
             selection: self.arrangement.time_selection(),
             engine_rate,
             plugins: self.plugin_hosts(),

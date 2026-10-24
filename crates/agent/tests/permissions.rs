@@ -263,6 +263,61 @@ fn pasting_over_clips_asks_and_into_empty_space_doesn_t() {
 }
 
 #[test]
+fn copies_between_the_views_over_clips_ask_and_into_empty_space_do_not() {
+    // Spec: second-window R23; agent-permissions R1, R2. A copy into the
+    // Arrangement over another clip, or into a full slot, is destructive as
+    // well as an edit, decided from where it lands; the same copy into empty
+    // space isn't. Cut always asks.
+    let (mut client, midi, _, b) = two_clips(4);
+    let scene = |client: &mut Client<InProcess>, number: u64| {
+        call(
+            client,
+            "query",
+            json!({ "path": format!("scene {number}") }),
+        )["id"]
+            .as_u64()
+            .unwrap()
+    };
+    let (first, third) = (scene(&mut client, 1), scene(&mut client, 3));
+    let made = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "clip.create_in_slot", "args": {
+            "track": midi,
+            "scene": first,
+            "clip": { "id": { "$new": "S" }, "name": "S", "start": 0, "length": BAR,
+                      "mute": false, "data": { "midi": { "notes": [] } } } } }] }),
+    );
+    let slot_clip = made["ids"]["S"].as_u64().unwrap();
+    // Into the Arrangement: over B at bar 5 (from 1), and into empty space.
+    let over = json!({ "clips": [slot_clip], "track": midi, "at": 4 * BAR });
+    let went = attempt(&mut client, "session.copy_to_arrangement", &over);
+    assert!(went.asked, "{went:?}");
+    assert!(went.permission.contains("destructive"), "{went:?}");
+    let empty = json!({ "clips": [slot_clip], "track": midi, "at": 9 * BAR });
+    let went = attempt(&mut client, "session.copy_to_arrangement", &empty);
+    assert!(!went.asked, "{went:?}");
+    assert_eq!(went.permission, "edit");
+    // Into the Session View: onto the full slot, and onto an empty one.
+    let over = json!({ "clips": [b], "track": midi, "scene": first });
+    let went = attempt(&mut client, "session.copy_to_session", &over);
+    assert!(went.asked, "{went:?}");
+    assert!(went.permission.contains("destructive"), "{went:?}");
+    let empty = json!({ "clips": [b], "track": midi, "scene": third });
+    let went = attempt(&mut client, "session.copy_to_session", &empty);
+    assert!(!went.asked, "{went:?}");
+    assert_eq!(went.permission, "edit");
+    // Cut removes the person's work.
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "session.select",
+                               "args": { "track": midi, "scene": first } }] }),
+    );
+    assert!(attempt(&mut client, "session.cut", &json!({})).asked);
+}
+
+#[test]
 fn an_agent_s_delete_time_asks_first_and_copy_time_and_insert_silence_don_t() {
     // Spec: agent-permissions R1; time-editing R15, R17, R18. Removing time
     // from every track removes the person's work whatever it holds; copying

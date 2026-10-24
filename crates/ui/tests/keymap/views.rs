@@ -301,3 +301,54 @@ fn tab_esc_and_delete_in_the_envelope_context_fall_through_when_they_cannot_run(
         .expect("Enter is the envelope's");
     assert_eq!(hit.command.id, "envelope.enter");
 }
+
+// Spec: session-view R39 to R43, second-window R22 (S-EDIT-001 to S-EDIT-004,
+// S-EDIT-014). Cut, Copy, Paste and Duplicate reach the Session View's
+// commands in the `session` context, and Shift with them runs the same with
+// `all_tracks` (S-SES-029 to S-SES-032).
+#[test]
+fn the_edit_keys_reach_the_session_views_commands() {
+    let keymap = Keymap::live12();
+    let session = [Context::Session, Context::Global];
+    for (shortcut, command, key, all_tracks) in [
+        ("S-EDIT-001", "session.cut", Key::X, false),
+        ("S-EDIT-002", "session.copy", Key::C, false),
+        ("S-EDIT-003", "session.paste", Key::V, false),
+        ("S-EDIT-004", "session.duplicate", Key::D, false),
+        ("S-SES-029", "session.cut", Key::X, true),
+        ("S-SES-030", "session.copy", Key::C, true),
+        ("S-SES-031", "session.paste", Key::V, true),
+        ("S-SES-032", "session.duplicate", Key::D, true),
+    ] {
+        let entry = keymap.entry_for(shortcut).unwrap();
+        assert_eq!(entry.status, Status::Bound, "{shortcut}");
+        for (platform, held) in [
+            (Platform::Mac, mods(true, false, false, all_tracks)),
+            (Platform::Other, mods(false, true, false, all_tracks)),
+        ] {
+            let hit = keymap
+                .resolve(platform, key, held, &session)
+                .unwrap_or_else(|| panic!("{shortcut} on {platform:?}"));
+            assert_eq!(hit.command.id, command, "{shortcut} on {platform:?}");
+            assert_eq!(hit.context, Context::Session, "{shortcut}");
+            assert_eq!(
+                hit.command.args.get("all_tracks").and_then(|v| v.as_bool()),
+                all_tracks.then_some(true),
+                "{shortcut}"
+            );
+        }
+    }
+    match &keymap.entry_for("S-EDIT-014").unwrap().status {
+        Status::Widget(handler) => {
+            for command in [
+                "session.cut",
+                "session.copy",
+                "session.paste",
+                "session.duplicate",
+            ] {
+                assert!(handler.contains(command), "{handler}");
+            }
+        }
+        other => panic!("S-EDIT-014 is {other:?}"),
+    }
+}

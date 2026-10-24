@@ -1678,6 +1678,27 @@ pub enum Command {
         /// device has.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         articulations: Option<Vec<crate::articulation::Articulation>>,
+        /// A plug-in's MPE Mode and settings (the MPE spec, R14), which a
+        /// preset of one holds; `null` to keep the ones the device has.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        mpe: Option<crate::PluginMpe>,
+    },
+    /// Switches a plug-in device's MPE Mode (the MPE spec, R14): on, the
+    /// plug-in gets each note's pitch, slide and pressure as its format takes
+    /// them; off, only its pressure as polyphonic key pressure.
+    SetPluginMpeMode {
+        /// The device, which must be a plug-in.
+        device: DeviceId,
+        /// Whether MPE Mode is on.
+        on: bool,
+    },
+    /// Sets the MPE/Multi-channel Settings a plug-in device's MPE MIDI goes
+    /// out on (the MPE spec, R18).
+    SetPluginMpeSettings {
+        /// The device, which must be a plug-in.
+        device: DeviceId,
+        /// The settings.
+        settings: crate::MpeSettings,
     },
     /// Floats a device in a window of its own, or docks it back in the
     /// Device View (IMP-14, WP-2.5b). Only native devices float.
@@ -2132,6 +2153,11 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[schemars(range(min = 1, max = 16))]
         channel: Option<u8>,
+        /// MPE, chosen in place of a channel, with the MPE/Multi-channel
+        /// Settings the notes go out on (the MPE spec, R19). Giving a
+        /// `channel` instead sends on that channel again.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        mpe: Option<crate::MpeSettings>,
         /// Audio From: the audio interface's inputs it comes back on.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         audio_from: Option<Channel>,
@@ -2838,6 +2864,9 @@ impl Command {
             Self::MoveDevice { .. } => "Move Device",
             Self::RenameDevice { .. } => "Change \"Device Name\"",
             Self::SetShowPresetName { .. } => "Toggle Show Preset Name",
+            // Spec: mpe R14, R18. Beatlayer's own names.
+            Self::SetPluginMpeMode { .. } => "Change MPE Mode",
+            Self::SetPluginMpeSettings { .. } => "Change MPE Settings",
             Self::SetDeviceState { .. } => "Load Preset",
             Self::SetDeviceEnabled { .. } => "Change \"Device On\"",
             // IMP-14: Beatlayer's own, so Live has no name for them.
@@ -2915,6 +2944,7 @@ impl Command {
             Self::SetExternal {
                 midi_to: None,
                 channel: None,
+                mpe: None,
                 audio_from: None,
                 ..
             } => "Change \"Hardware Latency\"",
@@ -4315,12 +4345,19 @@ impl Document {
                 name,
                 shape,
                 articulations,
+                mpe,
             } => {
                 let mut loaded = self.device_ref(*device)?.clone();
                 loaded.set_both(params.clone());
                 loaded.shape.clone_from(shape);
                 if let Some(articulations) = articulations {
                     loaded.set_articulations(articulations.clone());
+                }
+                if let Some(mpe) = mpe {
+                    mpe.settings.check()?;
+                    if matches!(loaded.kind, DeviceKind::Plugin { .. }) {
+                        loaded.mpe = *mpe;
+                    }
                 }
                 loaded.set_name(name);
                 // The preset the device holds is the one its name names (the
@@ -4331,6 +4368,13 @@ impl Document {
                     *self.device_mut(*device)? = loaded;
                 }
                 Ok(())
+            }
+            Command::SetPluginMpeMode { device, on } => {
+                self.edit_plugin_mpe(*device, |mpe| mpe.on = *on)
+            }
+            Command::SetPluginMpeSettings { device, settings } => {
+                settings.check()?;
+                self.edit_plugin_mpe(*device, |mpe| mpe.settings = *settings)
             }
             Command::SetDeviceFloating { device, floating } => {
                 let current = self.device_ref(*device)?;
@@ -4652,6 +4696,7 @@ impl Document {
                 device,
                 midi_to,
                 channel,
+                mpe,
                 audio_from,
                 audio_to,
                 hardware_latency,
@@ -4666,7 +4711,23 @@ impl Document {
                     Some(ExternalPort::Port { name }) => external.port = Some(name.clone()),
                     None => {}
                 }
-                external.channel = channel.unwrap_or(external.channel);
+                // Spec: mpe R19. A channel chosen takes MPE's place.
+                match (channel, mpe) {
+                    (Some(_), Some(_)) => {
+                        return Err(ModelError::InvalidInput(
+                            "MIDI To is a channel or MPE, not both",
+                        ));
+                    }
+                    (Some(channel), None) => {
+                        external.channel = *channel;
+                        external.mpe = None;
+                    }
+                    (None, Some(mpe)) => {
+                        mpe.check()?;
+                        external.mpe = Some(*mpe);
+                    }
+                    (None, None) => {}
+                }
                 external.audio_from = audio_from.unwrap_or(external.audio_from);
                 if let Some(channel) = audio_to {
                     external.audio_to = Some(*channel);
@@ -5308,6 +5369,26 @@ impl Document {
 
     /// Changes a device's sidechain settings with `edit`, if it has a
     /// sidechain input.
+    /// Changes a plug-in device's MPE Mode and settings with `change`.
+    fn edit_plugin_mpe(
+        &mut self,
+        device: DeviceId,
+        change: impl FnOnce(&mut crate::PluginMpe),
+    ) -> Result<(), ModelError> {
+        let current = self.device_ref(device)?;
+        if !matches!(current.kind, DeviceKind::Plugin { .. }) {
+            return Err(ModelError::InvalidInput(
+                "only a plug-in device has an MPE Mode",
+            ));
+        }
+        let mut mpe = current.mpe;
+        change(&mut mpe);
+        if mpe != current.mpe {
+            self.device_mut(device)?.mpe = mpe;
+        }
+        Ok(())
+    }
+
     fn edit_sidechain(
         &mut self,
         id: DeviceId,
@@ -8525,6 +8606,8 @@ fn check_one_device(device: &Device) -> Result<(), ModelError> {
         check_value("parameter value", *value, value.is_finite())?;
     }
     device.layers.check()?;
+    // Spec: mpe R18. Settings out of range don't load.
+    device.mpe.settings.check()?;
     crate::modulator::check_mappings(device)?;
     if let Some(shape) = &device.shape {
         crate::modulator::check_shape(shape)?;
@@ -10840,6 +10923,7 @@ mod tests {
             name: "Warm".to_owned(),
             shape: None,
             articulations: None,
+            mpe: None,
         })
         .unwrap();
         let loaded = song.doc.device(device).unwrap();
@@ -10853,6 +10937,7 @@ mod tests {
                 name: String::new(),
                 shape: None,
                 articulations: None,
+                mpe: None,
             }),
             ModelError::InvalidValue { .. }
         ));
@@ -12952,6 +13037,7 @@ mod tests {
             name: String::new(),
             shape: None,
             articulations: None,
+            mpe: None,
         })
         .unwrap();
         let d = song.doc.device(device).unwrap();

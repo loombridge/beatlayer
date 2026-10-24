@@ -1,12 +1,13 @@
 //! One loan for every plug-in format (offline-plugin-renders R1, WP-4.21):
-//! an offline render of a set that holds CLAP, VST3 and Audio Unit devices
-//! lends all three hosts' plug-ins at once.
+//! an offline render of a set that holds CLAP, VST3, Audio Unit and LV2
+//! devices lends all four hosts' plug-ins at once.
 
 use bl_engine::Registry;
 use bl_model::{DeviceId, PluginFormat};
 
 use crate::au::{self, AuHost};
 use crate::clap::{self, ClapHost};
+use crate::lv2::{self, Lv2Host};
 use crate::vst3::{self, Vst3Host};
 
 /// The plug-in hosts a render can borrow from; a format without a host
@@ -16,6 +17,7 @@ pub struct Hosts<'a> {
     pub clap: Option<&'a ClapHost>,
     pub vst3: Option<&'a Vst3Host>,
     pub au: Option<&'a AuHost>,
+    pub lv2: Option<&'a Lv2Host>,
 }
 
 impl Hosts<'_> {
@@ -27,7 +29,7 @@ impl Hosts<'_> {
             PluginFormat::Clap => self.clap.is_some(),
             PluginFormat::Vst3 => self.vst3.is_some(),
             PluginFormat::AudioUnit => self.au.is_some() && cfg!(target_os = "macos"),
-            PluginFormat::Lv2 => false,
+            PluginFormat::Lv2 => self.lv2.is_some(),
         }
     }
 
@@ -39,6 +41,7 @@ impl Hosts<'_> {
             PluginFormat::Clap,
             PluginFormat::Vst3,
             PluginFormat::AudioUnit,
+            PluginFormat::Lv2,
         ]
         .into_iter()
         .any(|format| self.borrows(format) && has(format))
@@ -74,6 +77,12 @@ impl Hosts<'_> {
                 .map(AuHost::lend)
                 .transpose()
                 .map_err(|e| text(&e))?,
+            lv2: self
+                .lv2
+                .filter(|_| wants(PluginFormat::Lv2))
+                .map(Lv2Host::lend)
+                .transpose()
+                .map_err(|e| text(&e))?,
         })
     }
 }
@@ -86,6 +95,7 @@ pub struct Loans {
     clap: Option<clap::Loan>,
     vst3: Option<vst3::Loan>,
     au: Option<au::Loan>,
+    lv2: Option<lv2::Loan>,
 }
 
 impl Loans {
@@ -98,6 +108,9 @@ impl Loans {
             registry.add(loan.factory());
         }
         if let Some(loan) = &self.au {
+            registry.add(loan.factory());
+        }
+        if let Some(loan) = &self.lv2 {
             registry.add(loan.factory());
         }
     }
@@ -114,6 +127,9 @@ impl Loans {
             problems.extend(loan.problems());
         }
         if let Some(loan) = &self.au {
+            problems.extend(loan.problems());
+        }
+        if let Some(loan) = &self.lv2 {
             problems.extend(loan.problems());
         }
         problems

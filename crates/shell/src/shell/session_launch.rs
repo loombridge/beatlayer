@@ -206,8 +206,37 @@ impl Shell {
         Ok(Value::Null)
     }
 
+    /// Runs the Session View's clipboard and the copies between the views.
+    fn run_session_clips(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        let before = self.editor.document().clone();
+        let result = crate::session_clips::run(
+            id,
+            args,
+            &mut self.editor,
+            &mut self.session,
+            &mut self.arrangement,
+            &mut self.clipboard,
+            self.prefs.create_fades_on_clip_edges.0,
+        )
+        .map_err(|failure| super::edit_error(id, failure));
+        if *self.editor.document() != before {
+            self.dirty = true;
+            self.document_changed();
+        }
+        if let Ok(outcome) = &result
+            && let Some(message) = &outcome.message
+        {
+            self.set_message(message.clone(), false);
+        }
+        self.touch();
+        result.map(|outcome| outcome.value)
+    }
+
     /// Runs the Session View's commands.
     pub(super) fn run_session_view(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        if crate::session_clips::handles(id) {
+            return self.run_session_clips(id, args);
+        }
         // Spec: session-view. The grid's selection and scroll are view
         // state; its edits run the set's scene and slot commands as one
         // undo step.

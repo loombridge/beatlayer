@@ -40,6 +40,7 @@ fn to(name: &str, channel: u8) -> Option<MidiTo> {
     Some(MidiTo::Port {
         name: name.to_owned(),
         channel,
+        mpe: None,
     })
 }
 

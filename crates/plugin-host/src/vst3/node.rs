@@ -15,11 +15,14 @@ use std::ptr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering::Relaxed};
 
+use bl_core::midi::MidiMessage;
 use bl_core::time::TICKS_PER_QUARTER;
+use bl_engine::mpe_layout::{MpeLayout, PlainNotes};
 use bl_engine::{
-    AutomationList, Block, Node, NodeData, NodeEvent, NoteEvent, NoteKind, ParamValue,
+    AutomationList, Block, Node, NodeData, NodeEvent, NoteEvent, NoteExpression, NoteKind,
+    ParamValue, PluginMpeData,
 };
-use bl_model::ParamId;
+use bl_model::{ParamId, PluginMpe};
 use rtrb::{Consumer, Producer, RingBuffer};
 use vst3::Steinberg::Vst::*;
 use vst3::Steinberg::*;
@@ -45,12 +48,30 @@ const PENDING_CAPACITY: usize = 512;
 /// applied to its component, so the controller's are the device's.
 const APPLIED_CAPACITY: usize = 256;
 
+/// The semitones a note's bend of 1 is (the MPE spec, R6).
+const BEND_SEMITONES: f64 = 48.0;
+
 /// The MIDI controller numbers VST3 gives a channel's pressure and pitch
 /// bend beside the 128 control changes, and how many there are
 /// (`ControllerNumbers`).
 const AFTER_TOUCH: usize = 128;
 const PITCH_BEND: usize = 129;
 pub(crate) const CONTROLLERS: usize = 130;
+
+/// The note expression types a plug-in's controller takes (the VST3 hosting
+/// spec, R20): whether it implements `INoteExpressionController` at all, and
+/// the types its `INoteExpressionPhysicalUIMapping` gives a key's Y movement
+/// and its pressure.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct NoteExpressions {
+    pub(crate) controller: bool,
+    pub(crate) slide: Option<u32>,
+    pub(crate) pressure: Option<u32>,
+}
+
+/// How many notes the plug-in sent that the node remembers the key of, so
+/// a note expression it sends names it (R21).
+const SENT_NOTES: usize = 128;
 
 /// What a node and the main thread both see.
 #[derive(Debug, Default)]
@@ -101,6 +122,8 @@ pub(crate) struct Active {
     /// The parameter its controller maps each channel's MIDI controller to
     /// (`IMidiMapping`), at `channel * CONTROLLERS + controller`.
     pub(crate) midi: Vec<Option<u32>>,
+    /// The note expression types its controller takes.
+    pub(crate) expressions: NoteExpressions,
     /// The device's plain values, sent to it at the first frame of its
     /// next block.
     pub(crate) pending: Vec<(u32, f64)>,
@@ -407,8 +430,9 @@ impl HostEvents {
         true
     }
 
-    /// Adds a note the block carries, on its frame.
-    fn push_note(&self, note: &NoteEvent) -> bool {
+    /// Adds a note the block carries, on its frame, with its expressions
+    /// sent as `expressions` and `mpe` say (the MPE spec, R15, R16).
+    fn push_note(&self, note: &NoteEvent, mpe: bool, expressions: &NoteExpressions) -> bool {
         let mut event: Event = Event {
             busIndex: 0,
             sampleOffset: i32::try_from(note.offset).unwrap_or(i32::MAX),
@@ -432,11 +456,53 @@ impl HostEvents {
             .note_id
             .map_or(-1, |id| i32::try_from(id).unwrap_or(-1));
         match note.kind {
-            // Per-note expressions wait for MPE hosting (the parity
-            // matrix's note): a plug-in's note port takes them then.
+            // Spec: vst3-hosting R19, R20. Pressure is polyphonic pressure
+            // unless MPE Mode is on and the controller maps it to a note
+            // expression; pitch and slide are note expressions, with MPE
+            // Mode on.
+            NoteKind::Expression { expression, value } => {
+                let value = f64::from(value);
+                let expression_type = match (mpe, expression) {
+                    (true, NoteExpression::Bend) => Some((
+                        NoteExpressionTypeIDs_::kTuningTypeID,
+                        (0.5 + value * BEND_SEMITONES / 240.0).clamp(0.0, 1.0),
+                    )),
+                    (true, NoteExpression::Slide) => {
+                        expressions.slide.map(|t| (t, value.clamp(0.0, 1.0)))
+                    }
+                    (true, NoteExpression::Pressure) => {
+                        expressions.pressure.map(|t| (t, value.clamp(0.0, 1.0)))
+                    }
+                    _ => None,
+                };
+                if let Some((type_id, value)) = expression_type {
+                    if note_id < 0 {
+                        return false;
+                    }
+                    event.r#type = Event_::EventTypes_::kNoteExpressionValueEvent as u16;
+                    event.__field0 = Event__type0 {
+                        noteExpressionValue: NoteExpressionValueEvent {
+                            typeId: type_id,
+                            noteId: note_id,
+                            value,
+                        },
+                    };
+                } else if expression == NoteExpression::Pressure {
+                    event.r#type = Event_::EventTypes_::kPolyPressureEvent as u16;
+                    event.__field0 = Event__type0 {
+                        polyPressure: PolyPressureEvent {
+                            channel,
+                            pitch,
+                            pressure: value.clamp(0.0, 1.0) as f32,
+                            noteId: note_id,
+                        },
+                    };
+                } else {
+                    return false;
+                }
+            }
             // Channel messages go in as parameter changes.
-            NoteKind::Expression { .. }
-            | NoteKind::Control { .. }
+            NoteKind::Control { .. }
             | NoteKind::PitchBend { .. }
             | NoteKind::ChannelPressure { .. } => return false,
             NoteKind::On => {
@@ -543,6 +609,20 @@ pub struct Vst3Node {
     /// Frames processed since the plug-in was activated.
     steady: u64,
     max_frames: usize,
+    /// The device's MPE Mode and settings (the MPE spec, R14), as the
+    /// compiler last sent them; `pending_mpe` waits for the next block.
+    mpe: PluginMpe,
+    pending_mpe: Option<PluginMpe>,
+    /// MPE MIDI laid out for a controller without note expression (R17),
+    /// made with the node.
+    layout: MpeLayout,
+    /// The notes it was given as plain notes, which MPE MIDI laid out through
+    /// the MIDI mapping takes over from.
+    plain: PlainNotes,
+    /// The notes the plug-in sent: ID, channel, key, in a ring, so its note
+    /// expressions name them (R21).
+    sent: [(i32, u8, u8); SENT_NOTES],
+    sent_next: usize,
 }
 
 impl Vst3Node {
@@ -591,6 +671,12 @@ impl Vst3Node {
             midi_effect,
             steady: 0,
             max_frames,
+            mpe: PluginMpe::default(),
+            pending_mpe: None,
+            layout: MpeLayout::new(PluginMpe::default().settings),
+            plain: PlainNotes::default(),
+            sent: [(-1, 0, 0); SENT_NOTES],
+            sent_next: 0,
         };
         let ends = HostEnds {
             to_node,
@@ -612,6 +698,8 @@ impl Vst3Node {
                 self.give_back(old);
             }
             self.dead = false;
+            // Spec: mpe R17. A plug-in activated again is opened again.
+            self.layout.reopen();
             if let Some(active) = self.active.as_ref() {
                 self.status.latency.store(active.latency, Relaxed);
             }
@@ -901,18 +989,40 @@ impl Node for Vst3Node {
             );
         }
         self.events_in.reset();
-        for note in block.notes() {
-            if note.kind.is_message() {
-                // Spec: vst3-hosting R18. A plug-in reads a channel message
-                // as the parameter its controller maps it to.
-                let map = &self.active.as_ref().expect("the check above").midi;
-                if let Some((id, value)) = mapped(map, note) {
-                    let offset = i32::try_from(note.offset).unwrap_or(i32::MAX);
-                    // shortcut: appended after the block's own changes, so a message earlier than an automation point of the same parameter is out of order; sort the queue if a plug-in maps an automated parameter.
-                    self.incoming.push(id, offset, value);
+        let active = self.active.as_ref().expect("the check above");
+        let (map, expressions) = (&active.midi, active.expressions);
+        take_mpe(
+            &mut self.pending_mpe,
+            &mut self.mpe,
+            (&mut self.layout, &mut self.plain),
+            (&self.events_in, &self.incoming),
+            (map, !expressions.controller),
+        );
+        if self.mpe.on && !expressions.controller {
+            // Spec: vst3-hosting R20. A controller without note expression
+            // gets MPE MIDI: each note on its member channel, and that
+            // channel's pitch bend, controller 74 and pressure through its
+            // MIDI mapping.
+            let (events, incoming) = (&self.events_in, &self.incoming);
+            let mut sink = |offset: u32, message: MidiMessage| {
+                lay_in(events, incoming, map, offset, message);
+            };
+            self.layout.open(&mut sink);
+            self.layout.lay_out(block.notes(), &mut sink);
+        } else {
+            for note in block.notes() {
+                if note.kind.is_message() {
+                    // Spec: vst3-hosting R18. A plug-in reads a channel
+                    // message as the parameter its controller maps it to.
+                    if let Some((id, value)) = mapped(map, note) {
+                        let offset = i32::try_from(note.offset).unwrap_or(i32::MAX);
+                        // shortcut: appended after the block's own changes, so a message earlier than an automation point of the same parameter is out of order; sort the queue if a plug-in maps an automated parameter.
+                        self.incoming.push(id, offset, value);
+                    }
+                } else {
+                    self.plain.track(note);
+                    self.events_in.push_note(note, self.mpe.on, &expressions);
                 }
-            } else {
-                self.events_in.push_note(note);
             }
         }
         self.events_out.reset();
@@ -988,14 +1098,35 @@ impl Node for Vst3Node {
             }
         }
 
-        // Its notes back into the block on their frames.
+        // Its notes back into the block on their frames, and, with MPE Mode
+        // on, its note expressions as the expressions of those notes
+        // (R21).
+        let expressions = self.active.as_ref().map(|active| active.expressions);
         for index in 0..self.events_out.len() {
             let Some(event) = self.events_out.event(index) else {
                 break;
             };
             let Some(note) = note_out(&event) else {
+                if self.mpe.on
+                    && let Some(expressions) = expressions
+                    && let Some(note) = expression_out(&event, &expressions, &self.sent)
+                {
+                    block.send_note(note);
+                }
                 continue;
             };
+            if note.kind == NoteKind::On
+                && let Some(id) = note.note_id
+            {
+                // A plug-in may reuse an ended note's ID: its slot is the
+                // new note's.
+                let id = id as i32;
+                let slot = self.sent.iter().position(|(sent, ..)| *sent == id);
+                self.sent[slot.unwrap_or(self.sent_next)] = (id, note.channel, note.key);
+                if slot.is_none() {
+                    self.sent_next = (self.sent_next + 1) % SENT_NOTES;
+                }
+            }
             block.send_note(note);
         }
         self.drain_params();
@@ -1013,6 +1144,8 @@ impl Node for Vst3Node {
     fn receive_data(&mut self, data: NodeData) {
         if data.downcast_ref::<AutomationList>().is_some() {
             self.automation = Some(data);
+        } else if let Some(PluginMpeData(mpe)) = data.downcast_ref() {
+            self.pending_mpe = Some(*mpe);
         }
     }
 
@@ -1025,6 +1158,95 @@ impl Node for Vst3Node {
     fn latency(&self) -> u32 {
         self.status.latency.load(Relaxed)
     }
+}
+
+/// Takes the MPE Mode and settings the compiler sent, at the start of a
+/// block: the notes MPE MIDI laid out for the old ones ends, and the zone
+/// opens again.
+fn take_mpe(
+    pending: &mut Option<PluginMpe>,
+    mpe: &mut PluginMpe,
+    (layout, plain): (&mut MpeLayout, &mut PlainNotes),
+    (events, incoming): (&ComWrapper<HostEvents>, &ComWrapper<HostParams>),
+    (map, through_mapping): (&[Option<u32>], bool),
+) {
+    let Some(new) = pending.take() else {
+        return;
+    };
+    let mut sink = |offset: u32, message: MidiMessage| {
+        lay_in(events, incoming, map, offset, message);
+    };
+    if mpe.on != new.on {
+        layout.release_all(0, &mut sink);
+        // The layout knows none of the notes given as plain ones.
+        if new.on && through_mapping {
+            plain.release_all(0, &mut sink);
+        }
+    }
+    layout.configure(new.settings, &mut sink);
+    *mpe = new;
+}
+
+/// Hands a message of MPE MIDI to the plug-in: a note as a note event on its
+/// channel, anything else as the parameter the controller maps it to
+/// (R20).
+fn lay_in(
+    events: &ComWrapper<HostEvents>,
+    incoming: &ComWrapper<HostParams>,
+    map: &[Option<u32>],
+    offset: u32,
+    message: MidiMessage,
+) {
+    let Some(note) = NoteEvent::from_midi(offset, &message) else {
+        return;
+    };
+    if matches!(note.kind, NoteKind::On | NoteKind::Off) {
+        events.push_note(&note, false, &NoteExpressions::default());
+    } else if let Some((id, value)) = mapped(map, &note) {
+        incoming.push(id, i32::try_from(offset).unwrap_or(i32::MAX), value);
+    }
+}
+
+/// The per-note expression a note expression value event out is, if the
+/// plug-in sent the note it names and its type is one Beatlayer takes:
+/// tuning as a bend of its semitones over 48, and the types its physical
+/// mapping gives Y movement and pressure as slide and pressure (R21).
+fn expression_out(
+    event: &Event,
+    expressions: &NoteExpressions,
+    sent: &[(i32, u8, u8); SENT_NOTES],
+) -> Option<NoteEvent> {
+    if event.r#type != Event_::EventTypes_::kNoteExpressionValueEvent as u16 {
+        return None;
+    }
+    // SAFETY: the event's type says which union member it holds.
+    let value = unsafe { event.__field0.noteExpressionValue };
+    let (expression, scaled) = if value.typeId == NoteExpressionTypeIDs_::kTuningTypeID {
+        (
+            NoteExpression::Bend,
+            ((value.value - 0.5) * 240.0 / BEND_SEMITONES).clamp(-1.0, 1.0),
+        )
+    } else if Some(value.typeId) == expressions.slide {
+        (NoteExpression::Slide, value.value.clamp(0.0, 1.0))
+    } else if Some(value.typeId) == expressions.pressure {
+        (NoteExpression::Pressure, value.value.clamp(0.0, 1.0))
+    } else {
+        return None;
+    };
+    let &(id, channel, key) = sent
+        .iter()
+        .find(|(id, ..)| *id == value.noteId && *id >= 0)?;
+    Some(NoteEvent {
+        offset: u32::try_from(event.sampleOffset.max(0)).unwrap_or(0),
+        kind: NoteKind::Expression {
+            expression,
+            value: scaled as f32,
+        },
+        channel,
+        key,
+        velocity: 0.0,
+        note_id: Some(id as u32),
+    })
 }
 
 /// The note an event list holds, if it's one Beatlayer takes.

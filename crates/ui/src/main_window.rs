@@ -8,6 +8,7 @@
 use std::time::Duration;
 
 use bl_model::{CountIn, MetronomeRhythm, MetronomeSound};
+use bl_shell::clip_drag::{ClipDragEvent, DragSource, DropSpot};
 use bl_shell::midi_io_commands as midi_ids;
 use bl_shell::settings::AutomationRecordMode;
 use bl_shell::{
@@ -83,6 +84,10 @@ pub enum UiEvent {
     /// The person chose row `n` of the search field's list (WP-6.42): the
     /// host passes it to [`Shell::search_run_row`].
     SearchRun(usize),
+    /// A step of a drag of clips between the Session and the Arrangement
+    /// (WP-6.29b), for the host to pass to [`Shell::clip_drag_event`] with
+    /// the window it came from.
+    ClipDrag(ClipDragEvent),
 }
 
 /// What the Info View is showing: the control under the pointer, the
@@ -178,6 +183,15 @@ pub struct MainWindowUi {
     file_manager: crate::file_manager::FileManagerUi,
     /// The search field (WP-6.42).
     search_field: crate::search_field::SearchFieldUi,
+    /// The view this window showed when a clip drag over its view selector
+    /// switched it, so one visit to the selector switches once.
+    drag_switched: Option<MainView>,
+    /// The place under this window's pointer that the last frame told the
+    /// shell of, while clips are dragged between the views.
+    drag_over: Option<DropSpot>,
+    /// Whether a drag of clips between the views was under way last frame,
+    /// so the browser's drop outline ends with it, wherever it ended.
+    drag_seen: bool,
 }
 
 /// A move of the keyboard focus asked for by `focus.next`,
@@ -273,6 +287,9 @@ impl MainWindowUi {
             save_history: crate::save_history_panel::SaveHistoryPanelUi::default(),
             detail_edge: crate::detail_area::DetailEdge::default(),
             browser_edge: crate::browser_edge::BrowserEdge::default(),
+            drag_switched: None,
+            drag_over: None,
+            drag_seen: false,
         }
     }
 
@@ -555,6 +572,7 @@ impl MainWindowUi {
             self.browser_edge
                 .show(ui, theme, shell, &layout, &mut events);
             self.main_view(ui, shell, theme, layout.main_view, &mut events);
+            self.clip_drag_frame(ui, shell, &layout, area, &mut events);
             // Spec: browser-tags R10. The Tag Editor opens beside the
             // content pane (L-BRW-013), over the main view, so it is drawn
             // after it.
@@ -695,6 +713,9 @@ impl MainWindowUi {
             // window while it's open.
             crate::autosampler::show(ctx, shell, theme, &mut events);
             crate::slice_dialog::show(ctx, shell, theme, &mut events);
+            // Spec: mpe R18. The MPE/Multi-channel Settings dialog sits over
+            // the window while it's open.
+            crate::mpe_settings_dialog::show(ctx, shell, theme, &mut events);
             // Spec: crash-recovery R22. The recovery prompt sits over the
             // window while there are sets a crash left to offer.
             crate::recovery_dialog::show(ctx, shell, theme, &mut events);
@@ -710,7 +731,8 @@ impl MainWindowUi {
                     || shell.export_dialog().is_some()
                     || shell.export_running()
                     || shell.autosampler_dialog().is_some()
-                    || shell.slice_dialog().is_some()));
+                    || shell.slice_dialog().is_some()
+                    || shell.mpe_settings_dialog().open));
         // The track whose control has the focus, for the neighbour items'
         // state (the accessibility spec, R4).
         let order = crate::focus::drawn(ctx);
@@ -766,6 +788,96 @@ impl MainWindowUi {
             }
         }
         events
+    }
+
+    /// Clips dragged between the Session and the Arrangement, from this
+    /// window's side (second-window R18, R19, R23): over the view selector
+    /// they switch this window to the other view, in the view they aren't from
+    /// they tell the shell which place is under the pointer, and the window
+    /// they began in ends the drag where the pointer is let go. Esc ends it
+    /// with nothing dropped.
+    fn clip_drag_frame(
+        &mut self,
+        ui: &Ui,
+        shell: &Shell,
+        layout: &ShellLayout,
+        area: Rect,
+        events: &mut Vec<UiEvent>,
+    ) {
+        let Some(drag) = shell.clip_drag() else {
+            self.drag_switched = None;
+            self.drag_over = None;
+            // Spec: clip files R3. A drag ended by Esc, or let go where the
+            // view it began in isn't drawn, leaves no outline in the browser.
+            if std::mem::take(&mut self.drag_seen) {
+                crate::browser::end_clip_drag(ui.ctx());
+            }
+            return;
+        };
+        self.drag_seen = true;
+        let ctx = ui.ctx();
+        let (pos, released, escaped, modifiers) = ctx.input(|i| {
+            (
+                i.pointer.latest_pos(),
+                i.pointer.any_released(),
+                i.key_pressed(egui::Key::Escape),
+                i.modifiers,
+            )
+        });
+        let tell = |events: &mut Vec<UiEvent>, event| events.push(UiEvent::ClipDrag(event));
+        if escaped {
+            self.drag_switched = None;
+            self.drag_over = None;
+            tell(events, ClipDragEvent::End { drop: false });
+            return;
+        }
+        let pos = pos.filter(|pos| area.contains(*pos));
+        let shown = shell.main_view_of(self.window);
+        // The selector of the view this window doesn't show switches it.
+        let selector = layout.rect(match shown {
+            MainView::Session => Element::ArrangementView,
+            MainView::Arrangement => Element::SessionView,
+        });
+        if pos.is_some_and(|pos| selector.contains(pos)) {
+            if self.drag_switched != Some(shown) {
+                self.drag_switched = Some(shown);
+                if matches!(drag.source, DragSource::Arrangement(_)) {
+                    self.arrangement.abandon_drag(ctx, events);
+                }
+                events.push(UiEvent::Invoke(Invocation::new(
+                    ids::VIEW_TOGGLE_SESSION_ARRANGEMENT,
+                    json!({}),
+                )));
+            }
+        } else {
+            self.drag_switched = None;
+        }
+        // A live move of Arrangement clips can't go on into another window:
+        // it goes back, and the clips are carried instead.
+        if pos.is_none() && shell.second_window_open() && drag.window == self.window {
+            self.arrangement.abandon_drag(ctx, events);
+        }
+        let spot = pos.and_then(|pos| match (&drag.source, shown) {
+            (DragSource::Slots(_), MainView::Arrangement) => {
+                self.arrangement.drop_spot(shell, pos, modifiers)
+            }
+            (DragSource::Arrangement(_), MainView::Session) => self.mixer.drop_spot(),
+            _ => None,
+        });
+        if spot != self.drag_over {
+            self.drag_over = spot;
+            tell(events, ClipDragEvent::Over(spot));
+        }
+        if drag.window == self.window {
+            // A drag whose button is up without a release having come ends too:
+            // the window lost it.
+            let down = ctx.input(|i| i.pointer.any_down());
+            if released || !down {
+                self.drag_switched = None;
+                self.drag_over = None;
+                tell(events, ClipDragEvent::End { drop: released });
+            }
+        }
     }
 
     /// Carries out a focus move from the last frame's order (the

@@ -10,6 +10,8 @@
 use bl_core::midi::{MidiMessage, PortId};
 use bl_model::Expression;
 
+use crate::node::{NoteEvent, NoteExpression, NoteKind};
+
 /// The most MPE ports read at once.
 const PORTS: usize = 8;
 
@@ -349,6 +351,90 @@ impl MpeReader {
         };
         self.ports[at].read(message, &mut self.next_id, &mut self.roles);
         &self.roles
+    }
+}
+
+/// MPE MIDI a plug-in sends out of its MIDI port, read as an MPE port's is
+/// (the MPE spec, R20): its zones, its member channels' values and its held
+/// notes are made with the node.
+#[derive(Debug)]
+pub struct MpeInput {
+    port: Port,
+    next_id: u32,
+    roles: Vec<MpeRole>,
+}
+
+impl Default for MpeInput {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl MpeInput {
+    /// A reader for one source, a lower zone until its messages say
+    /// otherwise.
+    #[must_use]
+    pub fn new() -> Self {
+        let mut port = Port::new();
+        port.take(PortId(0));
+        Self {
+            port,
+            next_id: FIRST_ID,
+            roles: Vec::with_capacity(ROLES),
+        }
+    }
+
+    /// Reads `message`, sent at `offset`, and hands what it is to `out`: a
+    /// note with an ID of its own, a note's expression, or a channel
+    /// message. A message it takes in without passing on gives nothing.
+    pub fn read(&mut self, offset: u32, message: &MidiMessage, mut out: impl FnMut(NoteEvent)) {
+        self.roles.clear();
+        self.port.read(message, &mut self.next_id, &mut self.roles);
+        let channel = message.channel().unwrap_or(0);
+        let value = f32::from(message.data2()) / 127.0;
+        for role in &self.roles {
+            let event = |kind, key, velocity, id| NoteEvent {
+                offset,
+                kind,
+                channel,
+                key,
+                velocity,
+                note_id: id,
+            };
+            match *role {
+                MpeRole::Note { id } => {
+                    let kind = if message.is_note_on() {
+                        NoteKind::On
+                    } else {
+                        NoteKind::Off
+                    };
+                    out(event(kind, message.data1(), value, Some(id)));
+                }
+                MpeRole::Expression {
+                    id,
+                    key,
+                    expression,
+                    value,
+                } => {
+                    // Spec: mpe R6. A bend is a share of 48 semitones.
+                    let (expression, scale) = match expression {
+                        Expression::Pitch => (NoteExpression::Bend, 1.0 / BEND_RANGE),
+                        Expression::Slide => (NoteExpression::Slide, 1.0 / 127.0),
+                        Expression::Pressure => (NoteExpression::Pressure, 1.0 / 127.0),
+                    };
+                    let kind = NoteKind::Expression {
+                        expression,
+                        value: (value * scale).clamp(-1.0, 1.0),
+                    };
+                    out(event(kind, key, 0.0, Some(id)));
+                }
+                MpeRole::Plain => {
+                    if let Some(note) = NoteEvent::from_midi(offset, message) {
+                        out(note);
+                    }
+                }
+            }
+        }
     }
 }
 

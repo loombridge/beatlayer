@@ -316,6 +316,19 @@ impl Shell {
         self.detail.take_from(&mut self.second.detail);
         self.second.open = false;
         self.second.full_screen = false;
+        // A drag of clips that began in it, or is over it, ends with it.
+        if self
+            .clip_drag
+            .as_ref()
+            .is_some_and(|drag| drag.window == WindowKind::Second)
+        {
+            self.clip_drag = None;
+        }
+        if let Some(drag) = &mut self.clip_drag {
+            drag.over = drag
+                .over
+                .filter(|(window, _)| *window != WindowKind::Second);
+        }
         if self.focused_window == WindowKind::Second {
             self.focused_window = WindowKind::Main;
         }

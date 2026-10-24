@@ -445,6 +445,12 @@ impl fmt::Debug for NodeData {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Articulations(pub bl_model::ArticulationList);
 
+/// A plug-in device's MPE Mode and MPE/Multi-channel Settings as node data
+/// (the MPE spec, R14 and R18): a plug-in's node starts with MPE Mode off,
+/// and the compiler sends this when the device's is on or changes.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PluginMpeData(pub bl_model::PluginMpe);
+
 /// A node: a device, a track's mixer, or anything else that processes audio
 /// in a program.
 ///

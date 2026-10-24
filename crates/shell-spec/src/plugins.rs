@@ -10,7 +10,9 @@
 
 use bl_commands::Context::{DeviceView, Global};
 use bl_commands::{CommandSpec, Permission, RegisterError, Registry};
-use bl_model::{DeviceId, DeviceRole, ParamId, PluginFormat, TrackId, WindowFrame};
+use bl_model::{
+    DeviceId, DeviceRole, MpeSettings, ParamId, PluginFormat, PluginMpe, TrackId, WindowFrame,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -40,6 +42,9 @@ pub const CONFIGURE_PARAM: &str = "plugin.configure_param";
 pub const UNCONFIGURE_PARAM: &str = "plugin.unconfigure_param";
 /// `plugin.move_configured_param`: reorders the configured list (WP-5.40).
 pub const MOVE_CONFIGURED_PARAM: &str = "plugin.move_configured_param";
+/// `plugin.show_mpe_settings`: opens or closes the MPE/Multi-channel
+/// Settings dialog (the MPE spec, R18).
+pub const SHOW_MPE_SETTINGS: &str = "plugin.show_mpe_settings";
 /// `plugin.scan`: find the plug-ins installed on this machine (WP-2.9).
 pub const SCAN: &str = "plugin.scan";
 /// `plugin.rescan`: scan again, ignoring the cache (WP-2.9).
@@ -69,6 +74,7 @@ pub const IDS: &[&str] = &[
     CONFIGURE_PARAM,
     UNCONFIGURE_PARAM,
     MOVE_CONFIGURED_PARAM,
+    SHOW_MPE_SETTINGS,
     SCAN,
     RESCAN,
     LIST,
@@ -91,9 +97,11 @@ pub fn handles(id: &str) -> bool {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct LoadPluginArgs {
-    /// The plug-in's file or bundle (`.clap`, or `.vst3` for VST3).
+    /// The plug-in's file or bundle (`.clap`, `.vst3` for VST3, or an LV2
+    /// bundle folder, `.lv2`, on Linux).
     pub path: String,
-    /// Which of the file's plug-ins, by its ID; the first if left out.
+    /// Which of the file's plug-ins, by its ID (an LV2 plug-in's URI); the
+    /// first if left out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plugin: Option<String>,
     /// The track; the selected track if left out.
@@ -136,7 +144,7 @@ pub struct PluginLoaded {
     /// Whether a new MIDI track was made for it, as `device.add` does for
     /// an instrument or MIDI effect.
     pub new_track: bool,
-    /// The plug-in's ID: a CLAP ID, or a VST3 class ID.
+    /// The plug-in's ID: a CLAP ID, a VST3 class ID, or an LV2 URI.
     pub plugin: String,
     /// Its name.
     pub name: String,
@@ -168,7 +176,7 @@ pub struct PluginInfoArgs {
 pub struct PluginInfo {
     /// The device.
     pub device: DeviceId,
-    /// The plug-in's ID: a CLAP ID, or a VST3 class ID.
+    /// The plug-in's ID: a CLAP ID, a VST3 class ID, or an LV2 URI.
     pub plugin: String,
     /// The file it was loaded from.
     pub path: String,
@@ -206,6 +214,45 @@ pub struct PluginInfo {
     /// its document holds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ara: Option<AraDevice>,
+    /// Its MPE Mode and the MPE/Multi-channel Settings its MPE MIDI goes
+    /// out on (the MPE spec, R14, R18).
+    #[serde(default)]
+    pub mpe: PluginMpe,
+}
+
+/// Arguments of `plugin.show_mpe_settings`: where the dialog is for. Give a
+/// `device` (a plug-in's, or an External Instrument's, whose MIDI To is set
+/// to MPE) or a `track` (a MIDI track whose MIDI To is a port set to MPE).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ShowMpeSettingsArgs {
+    /// The plug-in or External Instrument device; the selected device if
+    /// neither this nor `track` is given.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// A MIDI track, for its MIDI To.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub track: Option<TrackId>,
+    /// Open (true) or close (false) the dialog; opens if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shown: Option<bool>,
+}
+
+/// What `plugin.show_mpe_settings` returns: whether the dialog is open and
+/// what it edits.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct MpeSettingsDialog {
+    /// Whether the dialog is open.
+    pub open: bool,
+    /// The plug-in or External Instrument device it edits, if it edits one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// The track whose MIDI To it edits, if it edits one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub track: Option<TrackId>,
+    /// The settings it shows, while it is open.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settings: Option<MpeSettings>,
 }
 
 /// An ARA plug-in device, as `plugin.info` reports it (IMP-20).
@@ -596,11 +643,13 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     registry.register(
         CommandSpec::new(LOAD, "Load Plug-In")
             .description(
-                "Loads a plug-in from its file or bundle (`path`: a `.clap` file, or a \
-                 `.vst3` bundle or module) and adds it as a device, as `device.add` adds one: \
+                "Loads a plug-in from its file or bundle (`path`: a `.clap` file, a \
+                 `.vst3` bundle or module, or on Linux an `.lv2` bundle folder) and adds it \
+                 as a device, as `device.add` adds one: \
                  to the selected track (or `track`), at `index` or where its role goes, \
                  selected, one undo step (Insert Device). `plugin` picks one of the file's \
-                 plug-ins by its ID (CLAP's, or a VST3 class ID); the first if left out. Its \
+                 plug-ins by its ID (CLAP's, a VST3 class ID, or an LV2 URI); the first if \
+                 left out. Its \
                  parameters become the device's, which `device.parameters` lists and \
                  `device.set_param` and automation change. The plug-in's code runs inside \
                  Beatlayer, so load only plug-ins you trust. The scanner (`plugin.scan`) \
@@ -661,6 +710,22 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
             .context(DeviceView)
             .args::<PluginInfoArgs>()
             .result::<PluginInfo>(),
+    )?;
+    registry.register(
+        CommandSpec::new(SHOW_MPE_SETTINGS, "MPE Settings…")
+            .description(
+                "Opens or closes the MPE/Multi-channel Settings dialog, from a plug-in's title \
+                 bar menu, or from MIDI To once MPE is its channel: give a plug-in or External \
+                 Instrument `device`, or a MIDI `track` whose MIDI To is a port set to MPE. \
+                 Opens unless `shown` says which. The dialog's controls run \
+                 `plugin.set_mpe_settings`, `routing.set_midi_output` and \
+                 `device.set_external`. It changes only the view: it isn't an undo step. \
+                 Returns the dialog's state.",
+            )
+            .permission(Permission::Read)
+            .contexts([Global, DeviceView])
+            .args::<ShowMpeSettingsArgs>()
+            .result::<MpeSettingsDialog>(),
     )?;
     registry.register(
         CommandSpec::new(ARA_STATE, "ARA Plug-In State")
@@ -770,7 +835,8 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                 "Finds the plug-ins installed on this machine and describes each one: its \
                  format, its file, its identifier, name, vendor, version, and role in a chain. \
                  Scans the files or folders in `paths` for every hosted format, or, when \
-                 `paths` is left out, the system plug-in folders of CLAP and of the formats \
+                 `paths` is left out, the system plug-in folders of CLAP, of LV2 on Linux \
+                 (`LV2_PATH` names them when it is set), and of the formats \
                  the Plug-Ins settings switch on (`plugin.settings`: `vst3_system_folders`, \
                  and on macOS `use_audio_units_v2`). The app also runs this at start, in the \
                  background, and when one of those switches turns on. Each \

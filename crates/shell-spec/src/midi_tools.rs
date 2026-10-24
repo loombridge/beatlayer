@@ -44,9 +44,29 @@ pub const RESEED: &str = "midi_tool.reseed";
 /// `midi_tool.randomize`: set every voice's Rotation of Euclidean at random.
 pub const RANDOMIZE: &str = "midi_tool.randomize";
 
+/// `midi_tool.add_chord`: add a chord to Stacks' progression.
+pub const ADD_CHORD: &str = "midi_tool.add_chord";
+/// `midi_tool.delete_chord`: delete the selected chord of Stacks' progression.
+pub const DELETE_CHORD: &str = "midi_tool.delete_chord";
+/// `midi_tool.load_bank`: load a chord bank into Stacks.
+pub const LOAD_BANK: &str = "midi_tool.load_bank";
+
 /// Every command [`register`] adds.
 pub const IDS: &[&str] = &[
-    LIST, STATE, SHOW_PANEL, CLOSE, CHOOSE, SET, SET_AUTO, RESET, APPLY, RESEED, RANDOMIZE,
+    LIST,
+    STATE,
+    SHOW_PANEL,
+    CLOSE,
+    CHOOSE,
+    SET,
+    SET_AUTO,
+    RESET,
+    APPLY,
+    RESEED,
+    RANDOMIZE,
+    ADD_CHORD,
+    DELETE_CHORD,
+    LOAD_BANK,
 ];
 
 /// Whether `id` is one of the MIDI Tools' commands.
@@ -214,6 +234,54 @@ pub struct ToolRun {
     pub undo_step: bool,
 }
 
+/// One chord of Stacks' progression.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ChordState {
+    /// Which entry of the bank, by its place.
+    pub chord: usize,
+    /// The root key, 0 to 127.
+    pub root: u8,
+    /// The inversion.
+    pub inversion: i64,
+    /// How many eighths of its slot the chord lasts.
+    pub duration: i64,
+    /// How many eighths of its slot after the slot's start the chord starts.
+    pub offset: i64,
+}
+
+/// One entry of Stacks' chord bank.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct BankEntryState {
+    /// The entry's name.
+    pub name: String,
+    /// Whether `intervals` are degrees of a scale rather than semitones.
+    pub degrees: bool,
+    /// The intervals above the root.
+    pub intervals: Vec<u8>,
+}
+
+/// Stacks' chord bank.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct BankState {
+    /// The bank's name.
+    pub name: String,
+    /// Whether it is Beatlayer's built-in bank.
+    pub built_in: bool,
+    /// Its entries, in order.
+    pub chords: Vec<BankEntryState>,
+}
+
+/// Stacks' progression and bank.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct StacksState {
+    /// The chords, one after another.
+    pub progression: Vec<ChordState>,
+    /// The selected chord's place.
+    pub selected: usize,
+    /// The chord bank.
+    pub bank: BankState,
+}
+
 /// What `midi_tool.state` returns, and what the commands that change a
 /// tool's choice, settings or application return.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -232,6 +300,8 @@ pub struct MidiToolState {
     pub generator: String,
     /// Every tool's settings.
     pub tools: Vec<ToolSettingsState>,
+    /// Stacks' progression and its chord bank.
+    pub stacks: StacksState,
     /// What a tool would act on now; none without a MIDI clip.
     pub target: Option<TargetState>,
     /// The open application, if there is one.
@@ -375,6 +445,21 @@ pub struct RandomizeArgs {
     /// The seed, from 0 to 4294967295. Left out, a new one is drawn.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seed: Option<u32>,
+}
+
+/// Arguments of `midi_tool.load_bank`: give `path` or `built_in`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LoadBankArgs {
+    /// The MIDI clip. Left out, the one the Clip View shows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<ClipId>,
+    /// The chord bank file (`.blstacks`) to load.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// `true` loads Beatlayer's built-in bank back.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub built_in: Option<bool>,
 }
 
 /// Adds the MIDI Tools' commands to a registry.
@@ -544,6 +629,42 @@ fn specs() -> Vec<CommandSpec> {
              step; read the Rotations back in `midi_tool.state`.",
         )
         .args::<RandomizeArgs>(),
+        tool(
+            ADD_CHORD,
+            "Add Chord",
+            Permission::Edit,
+            "Adds a chord to Stacks' progression after the selected one, as the Add Chord \
+             button does: the bank's first entry on the selected chord's root, selected. A \
+             progression holds 16 chords at most. With Stacks' Auto switch on it applies at \
+             once, like `midi_tool.set`. Changes no notes by itself and is no undo step; read \
+             the progression back in `midi_tool.state` (`stacks`).",
+        )
+        .args::<ClipArgs>(),
+        tool(
+            DELETE_CHORD,
+            "Delete Chord",
+            Permission::Edit,
+            "Deletes the selected chord of Stacks' progression, as the Delete Chord button \
+             does, unless it is the only one. With Stacks' Auto switch on it applies at once, \
+             like `midi_tool.set`. Changes no notes by itself and is no undo step; read the \
+             progression back in `midi_tool.state` (`stacks`).",
+        )
+        .args::<ClipArgs>(),
+        tool(
+            LOAD_BANK,
+            "Load Chord Bank",
+            Permission::Edit,
+            "Loads a chord bank into Stacks, replacing its bank: the file at `path`, a \
+             `.blstacks` file of Beatlayer's own format (UTF-8 JSON, at most 1 MiB, 1 to 256 \
+             chords each of 2 to 8 rising intervals from 0 to 48, in `semitones` or \
+             `degrees`), or with `built_in` true Beatlayer's built-in bank \"Beatlayer \
+             Chords\". The progression's chords stay by their place in the bank, a place \
+             past the new bank's end taking its first entry. A file that breaks the format is \
+             refused, saying what is wrong and where, and nothing changes. The bank is kept \
+             in Stacks' settings, saved with the set. Changes no notes and is no undo step; \
+             read the bank back in `midi_tool.state` (`stacks.bank`).",
+        )
+        .args::<LoadBankArgs>(),
     ]
 }
 

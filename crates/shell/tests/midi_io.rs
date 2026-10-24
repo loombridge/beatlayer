@@ -1105,7 +1105,8 @@ fn a_track_keeps_a_missing_ports_name_and_sends_again_when_it_returns() {
         routing.midi_output,
         Some(bl_model::MidiTo::Port {
             name: "Synth".to_owned(),
-            channel: 2
+            channel: 2,
+            mpe: None
         })
     );
 

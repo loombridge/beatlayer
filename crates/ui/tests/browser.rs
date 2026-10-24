@@ -1182,3 +1182,56 @@ fn the_middle_button_pans_the_browsers_lists() {
         "the list moved up 50 points"
     );
 }
+
+// Spec: midi-generators R26. Chord banks are listed with the other files,
+// and double-clicking one loads it into Stacks, replacing its bank.
+#[test]
+fn double_clicking_a_chord_bank_loads_it_into_stacks() {
+    let scratch = Scratch::new("chord-bank");
+    let root = scratch.0.join("User Library");
+    create_user_library(&root).unwrap();
+    std::fs::write(
+        root.join("Jazz.blstacks"),
+        r#"{"format":"beatlayer-stacks","schema":1,"name":"Jazz Voicings","chords":[
+            {"name":"Shell","semitones":[0,4,10]}]}"#,
+    )
+    .unwrap();
+    let mut h = Harness::manual_with_title_bar(Window::Main);
+    h.shell.set_user_library(Some(root));
+    h.shell
+        .run(ids::OPEN_PLACE, json!({ "label": "user_library" }))
+        .unwrap();
+    h.settle();
+    h.shell
+        .run(ids::SET_PREVIEW, json!({ "on": false }))
+        .unwrap();
+    let at = names(&h)
+        .iter()
+        .position(|name| name == "Jazz.blstacks")
+        .expect("the chord bank is listed");
+    let kind = h.shell.browser_view().row(at).unwrap().kind;
+    assert_eq!(kind, bl_shell::browser_commands::ItemKind::ChordBank);
+    let state = |h: &mut Harness| h.shell.run("midi_tool.state", json!({})).unwrap();
+    assert_eq!(state(&mut h)["stacks"]["bank"]["built_in"], json!(true));
+    // A double-click, long enough after the last click to be no triple click.
+    h.time += 1.0;
+    let over = row(at);
+    h.frame(vec![Event::PointerMoved(over)]);
+    for _ in 0..2 {
+        for pressed in [true, false] {
+            h.frame(vec![Event::PointerButton {
+                pos: over,
+                button: PointerButton::Primary,
+                pressed,
+                modifiers: Modifiers::NONE,
+            }]);
+        }
+    }
+    h.settle();
+    let loaded = state(&mut h);
+    assert_eq!(loaded["stacks"]["bank"]["name"], json!("Jazz Voicings"));
+    assert_eq!(
+        loaded["stacks"]["bank"]["chords"][0]["name"],
+        json!("Shell")
+    );
+}

@@ -130,9 +130,10 @@ impl Material {
     }
 }
 
-/// What the clipboard holds: the Arrangement's material, or whole tracks
-/// copied from the track headers (the track context menu spec, R14).
-/// Whichever was copied last is what it holds.
+/// What the clipboard holds: the Arrangement's material, whole tracks
+/// copied from the track headers (the track context menu spec, R14), a span
+/// of time, or the Session View's clips or scenes (WP-6.29b). Whichever was
+/// copied last is what it holds.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Clipboard {
     /// The Arrangement's material: each track's clips, placed from the
@@ -142,6 +143,11 @@ pub enum Clipboard {
     Tracks(crate::tracks::CopiedTracks),
     /// A span of time from every track (the time editing spec, R18).
     Time(super::time_commands::TimeMaterial),
+    /// Clips copied from Session slots (the session view spec, R39).
+    Slots(crate::session_clips::SlotMaterial),
+    /// Scenes copied from the Session View, with their clips (the session
+    /// view spec, R39).
+    Scenes(crate::session_clips::SceneMaterial),
 }
 
 impl Clipboard {
@@ -150,7 +156,7 @@ impl Clipboard {
     pub fn material(&self) -> Option<&Material> {
         match self {
             Self::Material(material) => Some(material),
-            Self::Tracks(_) | Self::Time(_) => None,
+            Self::Tracks(_) | Self::Time(_) | Self::Slots(_) | Self::Scenes(_) => None,
         }
     }
 }
@@ -298,7 +304,7 @@ fn lane_index(lanes: &[TrackId], track: TrackId) -> Option<usize> {
 }
 
 /// Whether a clip with this data can go on this track.
-fn fits(doc: &Document, track: TrackId, data: &ClipData) -> bool {
+pub(crate) fn fits(doc: &Document, track: TrackId, data: &ClipData) -> bool {
     doc.track(track).is_some_and(|t| match t.kind() {
         TrackKind::Audio => data.is_audio(),
         TrackKind::Midi => !data.is_audio(),
@@ -475,7 +481,7 @@ pub(crate) fn transaction<T>(
 
 /// Runs `edit` as [`transaction`] does, then settles the fades the edit left
 /// (R26) in the same undo step: `before` is the document the edit began from.
-pub(super) fn settled<T>(
+pub(crate) fn settled<T>(
     editor: &mut Editor,
     label: &'static str,
     (before, edge_fades): (&Document, bool),
@@ -1262,6 +1268,7 @@ pub(super) fn result(
             .map(|(start, end)| TimeRange { start, end }),
         selected_tracks: view.selected.clone(),
         undo_step,
+        skipped: 0,
     }
 }
 
@@ -1327,11 +1334,13 @@ pub fn can_run(
         ids::CREATE_FADE => create_fade_plan(doc, view, args).is_some_and(|plan| !plan.is_empty()),
         ids::DELETE_FADES => given("clips") || !view.selected_clips.is_empty(),
         ids::PASTE => {
-            clipboard.is_some_and(|c| c.material().is_some_and(|m| !m.lanes.is_empty()))
-                && (given("track")
-                    || given("lane")
-                    || !view.selected.is_empty()
-                    || !lanes(doc).is_empty())
+            clipboard.is_some_and(|c| match c {
+                Clipboard::Slots(slots) => !slots.clips.is_empty(),
+                other => other.material().is_some_and(|m| !m.lanes.is_empty()),
+            }) && (given("track")
+                || given("lane")
+                || !view.selected.is_empty()
+                || !lanes(doc).is_empty())
         }
         _ => false,
     }
@@ -1949,20 +1958,46 @@ pub fn run(
             if track.is_some() && lane.is_some() {
                 return Err(invalid("give `track` or `lane`, not both"));
             }
+            let at = match at {
+                Some(at) => at
+                    .resolve(&doc.settings().time_signatures)
+                    .map_err(invalid)?,
+                None => paste_position(view),
+            };
+            // Spec: second-window R22. Session clips pasted in the Arrangement
+            // land as dropping them there does, at the insert marker on the
+            // selected track.
+            if let Some(Clipboard::Slots(slots)) = clipboard.as_ref() {
+                let slots = slots.clone();
+                let base = match (track, lane) {
+                    (Some(track), None) => {
+                        tracks_exist(doc, &[track])?;
+                        track
+                    }
+                    (None, Some(lane)) => places_of(doc, view, None, Some(vec![lane]))?
+                        .first()
+                        .map(|place| place.track)
+                        .ok_or_else(|| invalid("`lane` names no lane"))?,
+                    _ => first_selected_track(doc, view)
+                        .ok_or_else(|| unavailable("no track is selected to paste onto"))?,
+                };
+                let (placed, recorded) = crate::session_clips::copy_to_arrangement(
+                    editor, &slots, base, at, edge_fades,
+                )?;
+                if !placed.created.is_empty() {
+                    view.select_clips(editor.document(), placed.created);
+                }
+                return Ok(to_value(&EditResult {
+                    skipped: placed.skipped,
+                    ..result(doc, editor, view, recorded)
+                }));
+            }
             let Some(copied) = clipboard
                 .as_ref()
                 .and_then(Clipboard::material)
                 .filter(|c| !c.lanes.is_empty())
             else {
                 return Err(unavailable("there's nothing on the clipboard to paste"));
-            };
-            let at = match at {
-                Some(at) => at
-                    .resolve(&doc.settings().time_signatures)
-                    .map_err(invalid)?,
-                None => view
-                    .time_selection
-                    .map_or(view.insert_marker, |(start, _)| start),
             };
             let PastePlan {
                 placements,
@@ -2251,6 +2286,25 @@ fn clips_in(doc: &Document, places: &[Place]) -> Vec<ClipId> {
         .iter()
         .flat_map(|place| place.clips(doc).into_iter().map(|clip| clip.id))
         .collect()
+}
+
+/// Where a paste starts with no position given: the time selection's start,
+/// or the insert marker.
+pub(crate) fn paste_position(view: &ArrangementView) -> Ticks {
+    view.time_selection
+        .map_or(view.insert_marker, |(start, _)| start)
+}
+
+/// The topmost selected track that clips can go on, which a paste with no
+/// track given goes to.
+pub(crate) fn first_selected_track(doc: &Document, view: &ArrangementView) -> Option<TrackId> {
+    let lanes = lanes(doc);
+    let positions = lane_positions(doc);
+    view.selected_places()
+        .into_iter()
+        .filter(|place| lane_index(&lanes, place.track).is_some())
+        .min_by_key(|place| place.row(doc, &positions))
+        .map(|place| place.track)
 }
 
 /// Positions for the UI and tests: `ticks` as an editing command's

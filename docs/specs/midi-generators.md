@@ -1,6 +1,6 @@
 # MIDI Tools: the generators
 
-- **Status:** partial (R1 to R16, WP-6.14, each have a passing test; R17 to R28, Stacks and its chord banks, are WP-6.14b's)
+- **Status:** implemented (R1 to R28 each have a passing test)
 - **Work packages:** WP-6.14 (what every generator shares, Rhythm, Seed, Shape and Euclidean: R1 to R16); WP-6.14b (Stacks, its chord banks in Beatlayer's own format and Beatlayer's built-in bank: R17 to R28). The Generate panel, choosing a tool, where a generator writes, applying, undo, seeds and chains are [midi-tools.md](midi-tools.md)'s (WP-6.11, WP-6.15)
 - **Parity-matrix row:** MIDI editing: "MIDI Tools, generators (Rhythm, Seed, Shape, Stacks, Euclidean)", whose note says chord banks are in Beatlayer's own format
 - **Checked against:** the Live 12 reference manual (online edition), read 20 October 2026: chapter 11, its introduction and sections 11.3.1 to 11.3.5; the Live 12 release notes, 12.0, 12.0.5, 12.1 and 12.2; the UI parity reference's I-CLICK-049 and S-NOTE-052
@@ -107,7 +107,7 @@ Stacks' chord banks are files in Beatlayer's own format, which a person writes o
 
 **Stacks (WP-6.14b)**
 
-- **R17.** Stacks writes a progression of 1 to 16 chords, one after another; a new Stacks has one. The progression shows as a row of cells, the selected chord's lit, and clicking a cell selects that chord (the look is Beatlayer's own). Add Chord, right of the Chord Selector Pad, adds a chord after the selected one, the bank's first entry with the selected chord's root, and selects it; Delete Chord deletes the selected chord unless it is the only one. The pad and the controls below show the selected chord's settings: (S5; the new chord's place and settings, and the ranges besides Chord Inversion's sign, are Beatlayer's own)
+- **R17.** Stacks writes a progression of 1 to 16 chords, one after another; a new Stacks has one. The progression shows as a row of cells, the selected chord's lit, and clicking a cell selects that chord (the look is Beatlayer's own). Add Chord (`midi_tool.add_chord`), right of the Chord Selector Pad, adds a chord after the selected one, the bank's first entry with the selected chord's root, and selects it; Delete Chord (`midi_tool.delete_chord`) deletes the selected chord unless it is the only one. With Auto on, each applies Stacks. The pad and the controls below show the selected chord's settings: (S5; the new chord's place and settings, and the ranges besides Chord Inversion's sign, are Beatlayer's own)
 
   | Parameter, each chord | Kind and range | Default |
   |---|---|---|
@@ -119,8 +119,8 @@ Stacks' chord banks are files in Beatlayer's own format, which a person writes o
 
 - **R18.** The range is split into as many equal slots as the progression has chords, in order. A chord's notes start Chord Offset eighths of its slot after the slot's start and last Chord Duration eighths of the slot, cut at the slot's end. (S5)
 - **R19.** A chord's notes are its Chord Root and the bank entry's intervals above it (R24): in semitones for a semitone entry; for a degree entry, in degrees of the clip's scale counted from the scale note nearest the root, or of the major scale on the root while Scale Mode is off ([scales.md](scales.md) R1, R2; the major scale is Beatlayer's own). Inversion i above 0 moves the lowest note up an octave i times, one note at a time; below 0, the highest note down an octave, |i| times. A note past 0 or 127 moves by octaves until it is inside, and in Scale Mode a note off the scale moves to the nearest scale key (R1). (S5; the inversion law is Beatlayer's own reading)
-- **R20.** In Scale Mode, a new chord's root is the scale's root in the octave from 60 up, and setting a root moves it to the nearest key of the scale (R1). (S5)
-- **R21.** The Chord Selector Pad draws the bank's entries as diagrams, each the chord's pitch classes marked on a lattice of fifths and thirds (a Tonnetz; the drawing is Beatlayer's own), the selected chord's entry lit. Clicking an entry, or dragging across the pad to it, makes it the selected chord's; with the pad focused, Cmd+Up and Cmd+Down (Ctrl on Windows; S-NOTE-052) choose the entry before or after. While the pointer is over an entry, the Status Bar shows its name and its notes on the selected chord's root. Each runs `midi_tool.set`, so with Auto on Stacks applies. (S5, S10)
+- **R20.** In Scale Mode, a new Stacks starts with the scale's root in the octave from 60 up as its first chord's root, and a root that is set is written on the nearest key of the scale (R1, R19); the setting keeps the number it was given. (S5)
+- **R21.** The Chord Selector Pad draws the bank's entries as diagrams, each the chord's pitch classes marked on a lattice of fifths and thirds (a Tonnetz; the drawing is Beatlayer's own), the selected chord's entry lit. Clicking an entry, or dragging across the pad to it, makes it the selected chord's; with the pad focused, Cmd+Up and Cmd+Down (Ctrl on Windows; S-NOTE-052) choose the entry before or after. While the pointer is over an entry, the Status Bar shows its name and its notes on the selected chord's root. Each runs `midi_tool.set`, so with Auto on Stacks applies; choosing which chord the controls show (`selected`) changes no notes. The pad shows nine diagrams at a time, three across, on pages that follow the selected entry and turn with two arrows beside it (Beatlayer's own). (S5, S10)
 - **R22.** Option-clicking a key in the piano ruler sets the selected chord's root (R2), and with Chord Root focused, Up and Down move it a step (R1). (S5)
 - **R23.** Stacks has one chord bank at a time, Beatlayer's built-in bank (R27) until another is loaded. The bank is part of Stacks' settings, saved with the set with every entry in it, so a set opens with its bank whether or not the file is still there. Loading a bank keeps the progression's chords by their place in the bank, a place past the new bank's end taking its first entry. (S5; keeping the bank in the set is Beatlayer's own)
 
@@ -183,15 +183,15 @@ Stacks' chord banks are files in Beatlayer's own format, which a person writes o
 | R14 | `crates/midi-tools/tests/generators.rs`, `r14_euclideans_voices_and_parameters_have_the_defaults_of_the_table`; `crates/ui/tests/midi_tools.rs`, `euclideans_tabs_have_the_voices_rotations_pitches_arrows_and_randomise_button` | unit, UI script |
 | R15 | `crates/midi-tools/tests/generators.rs`, `r15_density_hits_are_spread_as_evenly_as_they_go` | unit |
 | R16 | `crates/midi-tools/tests/generators.rs`, `r16_each_switched_on_voice_repeats_its_pattern_from_the_ranges_start`, `r16_the_randomise_button_draws_every_rotation_from_the_seed`; `crates/agent/tests/midi_tools.rs`, `the_randomise_button_sets_every_rotation_from_a_seed_and_reads_back` | unit, agent |
-| R17 | to be written in WP-6.14b | |
-| R18 | to be written in WP-6.14b | |
-| R19 | to be written in WP-6.14b | |
-| R20 | to be written in WP-6.14b | |
-| R21 | to be written in WP-6.14b | |
-| R22 | to be written in WP-6.14b | |
-| R23 | to be written in WP-6.14b | |
-| R24 | to be written in WP-6.14b | |
-| R25 | to be written in WP-6.14b | |
-| R26 | to be written in WP-6.14b | |
-| R27 | to be written in WP-6.14b | |
-| R28 | to be written in WP-6.14b | |
+| R17 | `crates/midi-tools/tests/stacks.rs`, `r17_a_new_stacks_has_one_chord_with_the_tables_defaults`, `r17_add_chord_follows_the_selected_one_and_delete_chord_keeps_one`, `r17_a_change_to_the_selected_chord_is_the_progressions_and_back`; `crates/shell/tests/midi_tools.rs`, `r17_r28_state_reads_the_progression_and_the_bank_and_the_chord_commands_change_them`; `crates/ui/tests/midi_tools.rs`, `stacks_add_chord_and_delete_chord_and_the_progression_cells`; `crates/agent/tests/midi_tools.rs`, `stacks_loads_a_bank_and_applies_by_id_and_the_chord_commands_read_back` | unit, shell, UI script, agent |
+| R18 | `crates/midi-tools/tests/stacks.rs`, `r18_the_range_is_equal_slots_and_a_chord_takes_eighths_of_its_own`, `every_written_note_lies_in_its_chords_slot` | unit, property |
+| R19 | `crates/midi-tools/tests/stacks.rs`, `r19_semitone_entries_sit_on_the_root_and_degree_entries_follow_the_scale`, `r19_inversions_move_one_note_an_octave_each_and_negative_ones_go_down`, `r19_a_note_past_the_keyboard_moves_by_octaves_until_it_is_inside`, `r19_on_drum_rack_keys_every_note_is_a_pad_and_chords_do_not_repeat_one`, `every_written_note_lies_in_its_chords_slot` | unit, property |
+| R20 | `crates/midi-tools/tests/stacks.rs`, `r20_in_scale_mode_a_new_stacks_starts_on_the_scales_root_and_a_set_root_is_written_on_a_scale_key`; `crates/shell/tests/midi_tools.rs`, `r20_in_scale_mode_a_new_stacks_starts_on_the_scales_root` | unit, shell |
+| R21 | `crates/midi-tools/tests/stacks.rs`, `r21_selecting_a_chord_changes_no_notes_but_choosing_its_entry_does`; `crates/shell/tests/midi_tools.rs`, `r21_choosing_a_chord_to_edit_writes_no_notes_but_changing_it_does`; `crates/ui/tests/midi_tools.rs`, `stacks_pad_chooses_by_click_and_drag_and_cmd_up_and_down_and_names_the_chord_on_hover`; `crates/ui/tests/keymap/editors.rs`, `zero_deactivates_the_selected_notes_and_the_value_keys_are_the_editors` (S-NOTE-052 is the pad's) | unit, shell, UI script, keymap |
+| R22 | `crates/ui/tests/clip_view.rs`, `option_clicking_the_piano_ruler_sets_the_selected_chords_root_in_stacks`; `crates/ui/tests/midi_tools.rs`, `stacks_add_chord_and_delete_chord_and_the_progression_cells` | UI script |
+| R23 | `crates/midi-tools/tests/stacks.rs`, `r23_a_loaded_bank_keeps_the_chords_by_place_and_a_place_past_its_end_takes_the_first`; `crates/shell/tests/midi_tools.rs`, `r23_a_loaded_bank_is_saved_with_the_set_and_reopens_after_the_file_is_deleted` | unit, shell |
+| R24 | `crates/midi-tools/tests/stacks.rs`, `r24_a_valid_bank_round_trips_through_write_and_read_unchanged` | unit |
+| R25 | `crates/midi-tools/tests/stacks.rs`, `r25_each_broken_file_is_refused_with_what_is_wrong_and_where`; `crates/shell/tests/midi_tools.rs`, `r25_each_broken_bank_file_is_refused_with_the_reason_and_changes_nothing` | unit, shell |
+| R26 | `crates/shell/tests/midi_tools.rs`, `r26_a_bank_loads_from_a_file_replaces_the_bank_and_changes_no_notes`; `crates/shell/tests/browser.rs`, `the_browser_lists_chord_banks_and_loading_one_replaces_stacks_bank`; `crates/ui/tests/browser.rs`, `double_clicking_a_chord_bank_loads_it_into_stacks`; `crates/agent/tests/midi_tools.rs`, `stacks_loads_a_bank_and_applies_by_id_and_the_chord_commands_read_back` | shell, UI script, agent |
+| R27 | `crates/midi-tools/tests/stacks.rs`, `r27_the_built_in_bank_holds_the_twenty_seven_entries_in_order` | unit |
+| R28 | `crates/shell/tests/midi_tools.rs`, `r17_r28_state_reads_the_progression_and_the_bank_and_the_chord_commands_change_them`; `crates/agent/tests/midi_tools.rs`, `stacks_loads_a_bank_and_applies_by_id_and_the_chord_commands_read_back` | shell, agent |

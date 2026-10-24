@@ -251,6 +251,20 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             ),
         ),
         (
+            "midi_tool.add_chord",
+            main(stacks_shown, detail_area, "Add Chord", Key::Enter),
+        ),
+        (
+            "midi_tool.delete_chord",
+            main(stacks_shown, detail_area, "Delete Chord", Key::Enter),
+        ),
+        (
+            "midi_tool.load_bank",
+            Exception(Equivalent(
+                "Enter on a chord bank selected in the browser, which runs browser.load_selected",
+            )),
+        ),
+        (
             "midi_tool.close",
             Exception(Equivalent(
                 "changing the selected notes or the time selection, which closes the open                  application (the MIDI Tools spec, R21)",

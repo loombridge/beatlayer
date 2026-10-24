@@ -14,6 +14,7 @@
 //! tool.
 
 mod arpeggiate;
+mod bank;
 mod chop;
 mod connect;
 mod descriptor;
@@ -30,6 +31,7 @@ mod rhythm;
 mod seed;
 mod shape;
 mod span;
+mod stacks;
 mod strum;
 mod style;
 #[cfg(feature = "testing")]
@@ -38,6 +40,10 @@ mod time_warp;
 mod value;
 mod velocity_shaper;
 
+pub use bank::{
+    BANK_EXTENSION, BANK_FORMAT, BANK_SCHEMA, BankError, ChordBank, ChordEntry, MAX_BANK_BYTES,
+    MAX_CHORD_NOTES, MAX_ENTRIES as MAX_BANK_ENTRIES, built_in as built_in_bank,
+};
 pub use chop::{TOGGLES as CHOP_TOGGLES, gaps_pattern, pattern_follows_gaps};
 pub use descriptor::{
     Breakpoint, ChoiceOption, DIVISION_NAMES, ParamKind, ParamSpec, ParamValue, ToolDescriptor,
@@ -56,6 +62,9 @@ pub use registry::{
 };
 pub use rhythm::{MAX_STEPS as RHYTHM_MAX_STEPS, pattern_count, rhythm_steps};
 pub use shape::{LEVELS as SHAPE_LEVELS, preset_levels};
+pub use stacks::{
+    Chord, MAX_CHORDS, StackView, add_chord, delete_chord, entry_keys, load_bank, stack_view,
+};
 pub use strum::strum_position;
 pub use style::{
     CHORD_TRIGGER, PLAY_ORDER, RANDOM, RANDOM_ONCE, RANDOM_OTHER, STYLE_NAMES, style_order,

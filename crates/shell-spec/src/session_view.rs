@@ -2,7 +2,8 @@
 //! and D17): selecting slots, scenes, and track title bars, scrolling the
 //! scenes, inserting and duplicating scenes, making an empty MIDI clip in a
 //! slot, moving and copying a clip between slots, deactivating the selected
-//! clips, and dropping files into a slot.
+//! clips, dropping files into a slot, and copying clips between the Session
+//! and the Arrangement (WP-6.29b), with Cut, Copy, Paste and Duplicate.
 //!
 //! The selection and scroll commands change only what the view shows, so
 //! they are in the read class. The rest edit the set: each is one undo step,
@@ -15,6 +16,8 @@
 use bl_commands::Context::{Global, Session};
 use bl_commands::{Binding, CommandSpec, NoArgs, Permission, RegisterError, Registry};
 use bl_model::{ChangeSet, ClipId, SceneId, TrackId};
+
+use crate::editing::Position;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -52,6 +55,18 @@ pub const CREATE_FOLLOW_ACTION_CHAIN: &str = "session.create_follow_action_chain
 pub const DROP_FILES: &str = "session.drop_files";
 /// `session.focus`: move the keyboard focus to the Session View.
 pub const FOCUS: &str = "session.focus";
+/// `session.copy_to_arrangement`: copy Session clips into the Arrangement.
+pub const COPY_TO_ARRANGEMENT: &str = "session.copy_to_arrangement";
+/// `session.copy_to_session`: copy Arrangement clips into Session slots.
+pub const COPY_TO_SESSION: &str = "session.copy_to_session";
+/// `session.cut`: cut the selected slot clips or scenes.
+pub const CUT: &str = "session.cut";
+/// `session.copy`: copy the selected slot clips or scenes.
+pub const COPY: &str = "session.copy";
+/// `session.paste`: paste what the clipboard holds into the Session View.
+pub const PASTE: &str = "session.paste";
+/// `session.duplicate`: duplicate the selected slot clips.
+pub const DUPLICATE: &str = "session.duplicate";
 
 /// Every command [`register`] adds, so a host knows which IDs to send to
 /// `bl-shell`'s `Shell::run`.
@@ -72,6 +87,12 @@ pub const IDS: &[&str] = &[
     CREATE_FOLLOW_ACTION_CHAIN,
     DROP_FILES,
     FOCUS,
+    COPY_TO_ARRANGEMENT,
+    COPY_TO_SESSION,
+    CUT,
+    COPY,
+    PASTE,
+    DUPLICATE,
 ];
 
 /// Whether `id` is one of the Session View's commands.
@@ -227,6 +248,73 @@ pub struct DropFilesArgs {
     /// spread them across the tracks instead of down the scenes.
     #[serde(default)]
     pub spread: bool,
+}
+
+/// Arguments of `session.copy_to_arrangement`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CopyToArrangementArgs {
+    /// The Session clips to copy, by the IDs they have in their slots. Left
+    /// out, the clips in the selected slots.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clips: Option<Vec<ClipId>>,
+    /// The track the first clip goes to; the clips of other tracks go to the
+    /// tracks after it, as far down as they were across the grid. Left out,
+    /// the first selected track of the Arrangement.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub track: Option<TrackId>,
+    /// Where the first clip of each track starts. Left out, the time
+    /// selection's start, or the insert marker.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<Position>,
+}
+
+/// Arguments of `session.copy_to_session`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CopyToSessionArgs {
+    /// The Arrangement clips to copy. Left out, the selected clips.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clips: Option<Vec<ClipId>>,
+    /// The track whose slot takes the first clip; the clips of other tracks
+    /// go to the tracks after it. Left out, the selected slot's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub track: Option<TrackId>,
+    /// The scene whose slot takes the first clip of each track; its next
+    /// clips go down the scenes after it. Left out, the selected slot's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scene: Option<SceneId>,
+}
+
+/// Arguments of `session.cut`, `session.copy`, `session.paste` and
+/// `session.duplicate`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ClipboardArgs {
+    /// With Shift held (S-EDIT-014): act on the clips and slots of every
+    /// track in the selected scenes, or paste the copied clips from the first
+    /// track, instead of the selected slots' own.
+    #[serde(default)]
+    pub all_tracks: bool,
+}
+
+/// What `session.copy` and `session.cut` put on the clipboard.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SessionClipboardState {
+    /// How many slot clips it holds.
+    pub clips: usize,
+    /// How many scenes it holds.
+    pub scenes: usize,
+}
+
+/// What copying clips between the views did.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct CopiedClips {
+    /// What the edit changed in the set.
+    pub changes: ChangeSet,
+    /// How many clips weren't placed, because they would land on a track of
+    /// another kind or past the last track.
+    pub skipped: usize,
 }
 
 /// Adds the Session View's commands to a registry.
@@ -427,6 +515,105 @@ fn specs() -> Vec<CommandSpec> {
             .context(Session)
             .args::<DropFilesArgs>()
             .result::<ChangeSet>(),
+        CommandSpec::new(COPY_TO_ARRANGEMENT, "Copy Clips to Arrangement")
+            .description(
+                "Copies Session clips (`clips`, or the clips in the selected slots) into the \
+                 Arrangement, as dragging them onto the Arrangement View, between the windows, \
+                 or pasting them there does, and leaves the slots as they were. The first \
+                 track's first clip starts at `at` (left out, the time selection's start or the \
+                 insert marker) on `track` (left out, the first selected track); the clips of \
+                 other tracks go to the tracks as far down as they were across the grid, and the \
+                 clips of one track from several scenes follow one another in scene order, each \
+                 as long as it is. Each keeps its contents, loop and warp settings, and its \
+                 modulation envelopes where the new track has what they modulate. The copies \
+                 replace what they cover (destructive, so an agent asks first, when that's part \
+                 of another clip). A clip that would land on a track of the other kind, or past \
+                 the last track, isn't placed, and the result counts them. The copies are \
+                 selected afterwards. One undo step, `Copy Clips to Arrangement`.",
+            )
+            .permission(Permission::Edit)
+            .contexts([Global, Session])
+            .args::<CopyToArrangementArgs>()
+            .result::<CopiedClips>(),
+        CommandSpec::new(COPY_TO_SESSION, "Copy Clips to Session")
+            .description(
+                "Copies Arrangement clips (`clips`, or the selected clips) into Session slots, \
+                 as dragging them onto the Session View, between the windows, or pasting them \
+                 there does, and leaves the Arrangement as it was. The clips of one track go \
+                 down the scenes from `scene` in the order they play, one clip a slot, and the \
+                 clips of other tracks go across the tracks from `track`, so playing the scenes \
+                 in turn plays them back in order; `track` and `scene` left out, the selected \
+                 slot's. Scenes are added at the end when the clips run past the last. A clip \
+                 landing on a full slot replaces its clip (destructive, so an agent asks \
+                 first); a clip that would land on a track of the other kind, a group, a return \
+                 or Main isn't placed, and the result counts them. The copies' slots are \
+                 selected afterwards. One undo step, `Copy Clips to Session`.",
+            )
+            .permission(Permission::Edit)
+            .contexts([Global, Session])
+            .args::<CopyToSessionArgs>()
+            .result::<CopiedClips>(),
+        CommandSpec::new(CUT, "Cut in the Session View")
+            .description(
+                "Copies the Session View's selection to the clipboard, as `session.copy` does, \
+                 then deletes it, as `session.delete` does: the clips in the selected slots, or \
+                 the selected scenes with their clips. Cmd-X (Ctrl-X) runs this. Because it \
+                 removes the person's work an agent asks first. One undo step.",
+            )
+            .permission(Permission::Destructive)
+            .context(Session)
+            .binding("S-EDIT-001")
+            .binding(Binding::new("S-SES-029").arg("all_tracks", true))
+            .args::<ClipboardArgs>()
+            .result::<ChangeSet>(),
+        CommandSpec::new(COPY, "Copy in the Session View")
+            .description(
+                "Copies the clips in the selected slots, or the selected scenes with their \
+                 clips, to the clipboard, for `session.paste` here or `arrangement.paste` in the \
+                 Arrangement. With `all_tracks`, the clips of every track in the selected slots' \
+                 scenes. The clipboard isn't part of the set, and copying changes nothing in it. \
+                 Cmd-C (Ctrl-C) runs this.",
+            )
+            .permission(Permission::Read)
+            .context(Session)
+            .binding("S-EDIT-002")
+            .binding(Binding::new("S-SES-030").arg("all_tracks", true))
+            .args::<ClipboardArgs>()
+            .result::<SessionClipboardState>(),
+        CommandSpec::new(PASTE, "Paste in the Session View")
+            .description(
+                "Pastes the clipboard into the Session View. Slot clips go from the selected \
+                 slot, keeping their places across the tracks and down the scenes; Arrangement \
+                 clips copied with `arrangement.copy` go down the scenes in the order they play, \
+                 one clip a slot, the clips of several tracks across the tracks, as \
+                 `session.copy_to_session` places them. Scenes on the clipboard are inserted as \
+                 new scenes after the selected scene. A clip landing on a full slot replaces its \
+                 clip (destructive, so an agent asks first), and scenes are added at the end \
+                 when the clips run past the last. With `all_tracks`, the first copied track \
+                 goes to the first track. Cmd-V (Ctrl-V) runs this. One undo step.",
+            )
+            .permission(Permission::Edit)
+            .context(Session)
+            .binding("S-EDIT-003")
+            .binding(Binding::new("S-SES-031").arg("all_tracks", true))
+            .args::<ClipboardArgs>()
+            .result::<CopiedClips>(),
+        CommandSpec::new(DUPLICATE, "Duplicate in the Session View")
+            .description(
+                "Puts a copy of the clips in the selected slots in the slots just below the \
+                 selection, keeping their places, and selects the copies, so running it again \
+                 repeats them. With `all_tracks`, the clips of every track in the selected \
+                 slots' scenes. A copy landing on a full slot replaces its clip (destructive, so \
+                 an agent asks first), and scenes are added at the end when the copies run past \
+                 the last. Cmd-D (Ctrl-D) runs this; a selected scene is duplicated by \
+                 `session.duplicate_scene`. One undo step.",
+            )
+            .permission(Permission::Edit)
+            .context(Session)
+            .binding("S-EDIT-004")
+            .binding(Binding::new("S-SES-032").arg("all_tracks", true))
+            .args::<ClipboardArgs>()
+            .result::<CopiedClips>(),
         view(
             FOCUS,
             "Move Focus to the Session View",

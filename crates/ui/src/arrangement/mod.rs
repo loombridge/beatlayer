@@ -36,6 +36,7 @@ use bl_model::{ClipId, Document, TrackId, TrackKind};
 use bl_shell::arrangement::rows::{DROP_AREA, FOLDED_HEIGHT, Row, rows_between};
 use bl_shell::arrangement::{ArrangementView, Horizontal};
 use bl_shell::arrangement_commands::{self as ids, Lane};
+use bl_shell::clip_drag::{ClipDragEvent, DragSource, DropSpot};
 use bl_shell::locator_commands as locator_ids;
 use bl_shell::{GesturePhase, Invocation, Shell};
 use egui::accesskit::Role;
@@ -787,6 +788,41 @@ impl ArrangementUi {
         }
     }
 
+    /// Puts a move of clips back where it began, as Esc does, so the clips
+    /// can be carried to the Session View instead (second-window R18, R19).
+    pub fn abandon_drag(&mut self, ctx: &egui::Context, events: &mut Vec<UiEvent>) {
+        if self.drag == Some(Drag::Clips) && self.clips.moving().is_some() {
+            crate::browser::end_clip_drag(ctx);
+            self.clips.cancel(events);
+            self.drag = None;
+        }
+    }
+
+    /// The place in the lanes under `pos` that Session clips dropped there
+    /// start at (second-window R20): the track under the pointer, and the
+    /// position snapped as dragging Arrangement clips snaps it, which the
+    /// bypass key (`modifiers`) turns round (I-DRAG-021).
+    #[must_use]
+    pub fn drop_spot(
+        &self,
+        shell: &Shell,
+        pos: Pos2,
+        modifiers: egui::Modifiers,
+    ) -> Option<DropSpot> {
+        let lanes = self.lanes.filter(|lanes| lanes.contains(pos))?;
+        let (view, doc) = (shell.arrangement(), shell.editor().document());
+        let row = self.row_at(lanes, view.scroll_y() as f32, pos)?;
+        let track = self.rows[row].track;
+        if !bl_shell::arrangement::editing::lanes(doc).contains(&track) {
+            return None;
+        }
+        let at = view.horizontal(doc).at(f64::from(pos.x - lanes.left()));
+        Some(DropSpot::Arrangement {
+            track,
+            at: view.snap_drag(doc, at, EditKeys::from(modifiers).bypass),
+        })
+    }
+
     /// The row under a point in the lanes, if any.
     fn row_at(&self, lanes: Rect, scroll_y: f32, pos: Pos2) -> Option<usize> {
         let y = pos.y - lanes.top() + scroll_y;
@@ -855,8 +891,13 @@ impl ArrangementUi {
             } else if self.clips.begin(&clip_lanes, press, keys, events) {
                 // WP-1.8b: a clip's title bar or edge. Spec: clip files R3. A
                 // clip moved by its title bar can be dropped on the browser.
-                if self.clips.moving().is_some() {
+                if let Some(clips) = self.clips.moving_clips() {
                     crate::browser::begin_clip_drag(ui.ctx());
+                    // Spec: second-window R18, R19. The clips can be carried
+                    // to the Session View.
+                    events.push(UiEvent::ClipDrag(ClipDragEvent::Begin(
+                        DragSource::Arrangement(clips.to_vec()),
+                    )));
                 }
                 Drag::Clips
             } else if keys.extend {

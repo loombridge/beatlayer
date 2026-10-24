@@ -580,6 +580,13 @@ impl Shell {
             self.dirty = true;
             self.document_changed();
         }
+        // Spec: second-window R20. Pasted Session clips that weren't placed.
+        if let Ok(value) = &result
+            && let Some(skipped) = value.get("skipped").and_then(Value::as_u64)
+            && let Some(message) = crate::session_clips::skipped_message(skipped as usize)
+        {
+            self.set_message(message, false);
+        }
         self.touch();
         result
     }

@@ -5,6 +5,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::mpe_settings::MpeSettings;
 use crate::track::Channel;
 
 /// MIDI To in a change to an external device's routing.
@@ -111,7 +112,8 @@ impl HardwareLatency {
 #[schemars(
     description = "An external device's routing: `port` (MIDI To, the MIDI output port's name \
                    as the MIDI settings list it; absent for No Output), `channel` (the MIDI \
-                   channel, 1 to 16), `audio_from` (the audio interface's inputs it comes back \
+                   channel, 1 to 16), `mpe` (the MPE/Multi-channel Settings when MPE is chosen \
+                   in place of a channel), `audio_from` (the audio interface's inputs it comes back \
                    on, a channel or a pair), and `hardware_latency`."
 )]
 pub struct External {
@@ -122,6 +124,11 @@ pub struct External {
     /// The MIDI channel, 1 to 16: 1 on a new device.
     #[serde(default = "first_channel", skip_serializing_if = "is_first_channel")]
     pub channel: u8,
+    /// MPE, chosen after the 16 channels in the channel chooser, with the
+    /// MPE/Multi-channel Settings the notes go out on (the MPE spec, R19).
+    /// `None` sends on `channel`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mpe: Option<MpeSettings>,
     /// Audio From: the interface's inputs the sound comes back on, the first
     /// pair on a new device.
     #[serde(default, skip_serializing_if = "Channel::is_first_pair")]
@@ -150,6 +157,7 @@ impl Default for External {
         Self {
             port: None,
             channel: 1,
+            mpe: None,
             audio_from: Channel::default(),
             audio_to: None,
             hardware_latency: HardwareLatency::default(),
@@ -201,6 +209,7 @@ mod tests {
         let kept = External {
             port: Some("Synth".to_owned()),
             channel: 4,
+            mpe: Some(crate::MpeSettings::default()),
             audio_from: Channel::Mono(3),
             audio_to: Some(Channel::Pair(2)),
             hardware_latency: HardwareLatency::Samples { value: 9 },

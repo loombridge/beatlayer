@@ -1962,6 +1962,15 @@ fn r20_in_scale_mode_a_new_stacks_starts_on_the_scales_root() {
     let state = song.tool(ids::APPLY, json!({ "tool": "stacks" }));
     assert_eq!(stacks(&state).progression[0].root, 62);
     assert_eq!(song.keys(), [62, 65, 69]);
+    // Add Chord or a bank loaded before the first change starts there too.
+    let mut song = song_with(MidiData::new(Vec::new()), Scale::new(2, ScaleName::Minor));
+    song.select_time(0, BAR);
+    let state = song.tool(ids::ADD_CHORD, json!({}));
+    assert_eq!(stacks(&state).progression[0].root, 62);
+    assert_eq!(stacks(&state).progression[1].root, 62);
+    let mut song = song_with(MidiData::new(Vec::new()), Scale::new(2, ScaleName::Minor));
+    let state = song.tool(ids::LOAD_BANK, json!({ "built_in": true }));
+    assert_eq!(stacks(&state).progression[0].root, 62);
 }
 
 #[test]

@@ -1525,6 +1525,7 @@ fn edit_stacks(
     let found = Registry::native()
         .find(STACKS)
         .ok_or_else(|| unavailable("Stacks is missing"))?;
+    start_on_clip(&mut view.tools, found, &doc, subject.clip);
     let descriptor = found.descriptor();
     let mut settings = view.tools.settings_of(descriptor);
     edit(&mut settings.values).map_err(refused)?;
@@ -2041,6 +2042,9 @@ pub fn run(
             let found = Registry::native()
                 .find(STACKS)
                 .ok_or_else(|| unavailable("Stacks is missing"))?;
+            if let Ok(subject) = subject(&doc, view, arrangement, clip) {
+                start_on_clip(&mut view.tools, found, &doc, subject.clip);
+            }
             let descriptor = found.descriptor();
             let mut settings = view.tools.settings_of(descriptor);
             load_bank(&mut settings.values, bank).map_err(refused)?;

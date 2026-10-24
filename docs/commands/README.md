@@ -5034,6 +5034,53 @@ An envelope a clip carries for a parameter of its track: the parameter it modula
 
 </details>
 
+### `ClipEnvelopeResult`
+
+What an Envelope Editor editing command reports: what it changed in the set, and the selection afterwards.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `changes` | [`ChangeSet`](#changeset) | yes | What the edit changed in the set. |
+| `time_selection` | [`TimeRange`](#timerange) or null | yes | The time selected in the editor afterwards, in ticks from the beginning of the clip's contents, if any. |
+| `undo_step` | boolean | yes | Whether the edit was recorded as an undo step: false when it changed nothing. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What an Envelope Editor editing command reports: what it changed in the set, and the selection afterwards.",
+  "properties": {
+    "changes": {
+      "$ref": "#/$defs/ChangeSet",
+      "description": "What the edit changed in the set."
+    },
+    "time_selection": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TimeRange"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The time selected in the editor afterwards, in ticks from the beginning of the clip's contents, if any."
+    },
+    "undo_step": {
+      "description": "Whether the edit was recorded as an undo step: false when it changed nothing.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "changes",
+    "time_selection",
+    "undo_step"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `ClipFileKind`
 
 What a clip file holds.
@@ -5444,6 +5491,8 @@ What the Clip View shows: which clip it is editing, the notes selected in it, it
 | `mpe` | [`MpeTabState`](#mpetabstate) | yes | The MPE tab's lanes, grid and selected breakpoints (WP-6.18). |
 | `envelope_breakpoint` | [`Ticks`](#ticks) or null | no | The breakpoint selected in the Envelope Editor (WP-6.26), if any: `clip.select_envelope_breakpoint` sets it. |
 | `envelope_marker` | [`Ticks`](#ticks) or null | no | The Envelope Editor's insert marker, in ticks from the beginning of the clip's contents (WP-6.26), which Left and Right move along the envelope; `null` until it has been moved. |
+| `envelope_segment` | [`Ticks`](#ticks) or null | no | The segment selected in the Envelope Editor, as the breakpoint it starts at: `clip.select_envelope_segment` sets it. |
+| `envelope_selection` | [`TimeRange`](#timerange) or null | no | The time selected in the Envelope Editor (WP-6.25c), in ticks from the beginning of the clip's contents: `clip.select_envelope_time` sets it. |
 
 <details><summary>JSON Schema</summary>
 
@@ -5512,6 +5561,28 @@ What the Clip View shows: which clip it is editing, the notes selected in it, it
         }
       ],
       "description": "The Envelope Editor's insert marker, in ticks from the beginning of the clip's contents (WP-6.26), which Left and Right move along the envelope; `null` until it has been moved."
+    },
+    "envelope_segment": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Ticks"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The segment selected in the Envelope Editor, as the breakpoint it starts at: `clip.select_envelope_segment` sets it."
+    },
+    "envelope_selection": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TimeRange"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The time selected in the Envelope Editor (WP-6.25c), in ticks from the beginning of the clip's contents: `clip.select_envelope_time` sets it."
     },
     "filters": {
       "$ref": "#/$defs/NoteFilters",

@@ -54,6 +54,7 @@ use bl_shell_spec::autosampler as autosampler_ids;
 use bl_shell_spec::bounce as bounce_ids;
 use bl_shell_spec::browser as browser_ids;
 use bl_shell_spec::capture_midi as capture_ids;
+use bl_shell_spec::clip_envelope_editing as clip_envelope_ids;
 use bl_shell_spec::comping as comping_ids;
 use bl_shell_spec::dawproject as dawproject_ids;
 use bl_shell_spec::devices as device_ids;
@@ -1567,10 +1568,23 @@ impl Shell {
             return self.run_edit(id, args);
         }
         if automation_ids::handles(id) {
+            // Spec: clip-envelopes R13. Edit ▸ Simplify Envelope acts on the
+            // Envelope Editor's time selection while the editor has the
+            // keyboard and the Arrangement has no automation lane selected.
+            if id == automation_ids::SIMPLIFY
+                && args.as_object().is_none_or(serde_json::Map::is_empty)
+                && !crate::arrangement::automation::can_run(id, &self.arrangement, None)
+                && self.can_clip_envelope_edit(clip_envelope_ids::SIMPLIFY, &self.active_contexts())
+            {
+                return self.run_clip_envelope_edit(clip_envelope_ids::SIMPLIFY, args);
+            }
             return self.run_automation(id, args);
         }
         if envelope_key_ids::handles(id) {
             return self.run_envelope_keys(id, args);
+        }
+        if clip_envelope_ids::handles(id) {
+            return self.run_clip_envelope_edit(id, args);
         }
         if locator_ids::handles(id) {
             return self.run_locator(id, args);

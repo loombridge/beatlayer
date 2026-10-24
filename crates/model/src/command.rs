@@ -1530,6 +1530,25 @@ pub enum Command {
         /// Whether the envelope follows the clip's timeline.
         linked: bool,
     },
+    /// Replaces one of a clip's envelopes with the breakpoints given, as the
+    /// clip envelope editing commands do when they write a shape, a stretch or
+    /// a paste over a span (the clip envelopes spec, R12, R13). The envelope
+    /// keeps its Linked switch.
+    SetClipEnvelope {
+        /// The clip.
+        clip: ClipId,
+        /// The parameter of the clip's track.
+        target: AutomationTarget,
+        /// Which of the clip's envelopes for the parameter: `modulation`
+        /// (the default) or a Session clip's `automation`.
+        #[serde(default)]
+        kind: EnvelopeKind,
+        /// The envelope's breakpoints, in position order, each with its
+        /// position in ticks from the beginning of the clip's contents, its
+        /// value in the parameter's own units and the bend of the segment
+        /// starting at it. Empty takes the envelope with it.
+        points: Vec<Breakpoint>,
+    },
 
     /// Inserts a new empty scene at `index` among the scenes: it holds an
     /// empty slot in every audio and MIDI track. A new set opens with eight
@@ -2812,6 +2831,7 @@ impl Command {
             Self::DeleteClipEnvelopeBreakpoint { .. } => "Delete Envelope Breakpoint",
             Self::DeleteClipEnvelope { .. } => "Clear Envelope",
             Self::SetClipEnvelopeLinked { .. } => "Link Envelope",
+            Self::SetClipEnvelope { .. } => "Set Envelope",
             Self::CreateScene { .. } => "Create scene",
             Self::DeleteScene { .. } => "Delete scene",
             Self::MoveScene { .. } => "Move scene",
@@ -4241,6 +4261,12 @@ impl Document {
                 kind,
                 linked,
             } => self.set_clip_envelope_linked(*clip, *target, *kind, *linked),
+            Command::SetClipEnvelope {
+                clip,
+                target,
+                kind,
+                points,
+            } => self.set_clip_envelope(*clip, *target, *kind, points),
             Command::CreateScene { id, index } => self.create_scene(*id, *index),
             Command::DeleteScene { scene } => self.delete_scene(*scene),
             Command::MoveScene { scene, index } => self.move_scene(*scene, *index),
@@ -6920,6 +6946,30 @@ impl Document {
         check_clip_setting_kind(target, kind)?;
         self.check_envelope_kind(clip, kind)?;
         clip_entry(&mut self.clip_mut(clip)?.envelopes, target, kind).linked = linked;
+        Ok(())
+    }
+
+    /// Replaces the breakpoints of the clip's envelope for `target`, giving
+    /// the clip that envelope, linked, if it has none. An empty list takes
+    /// the envelope with it.
+    fn set_clip_envelope(
+        &mut self,
+        clip: ClipId,
+        target: AutomationTarget,
+        kind: EnvelopeKind,
+        points: &[Breakpoint],
+    ) -> Result<(), ModelError> {
+        self.check_clip_envelope_target(clip, target)?;
+        check_clip_setting_kind(target, kind)?;
+        self.check_envelope_kind(clip, kind)?;
+        for point in points {
+            check_clip_envelope_value(target, point.value)?;
+        }
+        let envelope = Envelope::from_points(points.to_vec())?;
+        if envelope.is_empty() {
+            return self.delete_clip_envelope(clip, target, kind);
+        }
+        clip_entry(&mut self.clip_mut(clip)?.envelopes, target, kind).envelope = envelope;
         Ok(())
     }
 
@@ -11415,6 +11465,57 @@ mod tests {
         assert!(!enabled(&song, pan) && !enabled(&song, volume));
         song.apply(Command::ReEnableAutomation {}).unwrap();
         assert!(enabled(&song, pan) && enabled(&song, volume));
+    }
+
+    // Spec: clip-envelopes R12, R13
+    #[test]
+    fn a_whole_clip_envelope_replaces_the_breakpoints_and_keeps_the_linked_switch() {
+        let mut song = Song::new();
+        let track = song.track(TrackKind::Audio, None);
+        let clip = song.clip(track, 0);
+        let pan = AutomationTarget::Mixer {
+            param: MixerParam::Pan,
+        };
+        let set = |points: Vec<Breakpoint>| Command::SetClipEnvelope {
+            kind: EnvelopeKind::Modulation,
+            clip,
+            target: pan,
+            points,
+        };
+        let point = |at: Ticks, value: f64| Breakpoint {
+            at,
+            value,
+            bend: 0.0,
+        };
+        song.apply(Command::SetClipEnvelopeLinked {
+            kind: EnvelopeKind::Modulation,
+            clip,
+            target: pan,
+            linked: false,
+        })
+        .unwrap();
+        song.apply(set(vec![
+            point(Ticks::ZERO, -1.0),
+            point(Ticks::WHOLE, 1.0),
+        ]))
+        .unwrap();
+        let envelope = song.doc.clip(clip).unwrap().envelope(&pan).unwrap();
+        assert!(!envelope.linked, "the switch stays as it was");
+        assert_eq!(envelope.envelope.value_at(Ticks::WHOLE / 2), Some(0.0));
+        // A value that isn't a number, a position out of order and a
+        // position before zero are refused, and change nothing.
+        for broken in [
+            vec![point(Ticks::ZERO, f64::NAN)],
+            vec![point(Ticks::WHOLE, 0.0), point(Ticks::ZERO, 0.0)],
+            vec![point(Ticks(-1), 0.0)],
+        ] {
+            let before = song.doc.clone();
+            song.reject(set(broken));
+            assert_eq!(song.doc, before);
+        }
+        // An empty list takes the envelope with it.
+        song.apply(set(Vec::new())).unwrap();
+        assert!(song.doc.clip(clip).unwrap().envelope(&pan).is_none());
     }
 
     // Spec: clip-envelopes R1, R5

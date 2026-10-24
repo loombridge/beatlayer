@@ -53,7 +53,7 @@ Result: [`EnvelopeKeyState`](README.md#envelopekeystate).
 
 **Delete Envelope Breakpoint**. Permission: `destructive`. Contexts: `envelope`.
 
-Deletes the selected breakpoint of the envelope that has the keyboard, or with none selected the one at the insert marker, if there is one. One undo step. Because it removes the person's work, an agent asks first.
+Deletes the selected breakpoint of the envelope that has the keyboard, or with none selected the one at the insert marker, if there is one. In the Envelope Editor, with none selected and a time selected, it deletes the selection's range instead, as `clip.delete_envelope_range` does. One undo step. Because it removes the person's work, an agent asks first.
 
 Default keys:
 

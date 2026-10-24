@@ -422,6 +422,7 @@ impl Shell {
                 lanes: None,
                 start: args.start.clone(),
                 end: args.end.clone(),
+                linked: Some(false),
             },
         )
         .map_err(|failure| edit_error(id, failure))?;
@@ -663,6 +664,7 @@ impl Shell {
             lanes: None,
             start: args.start,
             end: args.end,
+            linked: Some(false),
         };
         // A take lane's material is no scene's: only the main lanes.
         let (material, start, end) = self.material_of(id, &targets)?;

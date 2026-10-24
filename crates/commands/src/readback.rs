@@ -69,6 +69,7 @@ impl Object {
                 "tracks",
             ],
             Self::Device => &["compare"],
+            Self::Track => &["linked"],
             _ => &[],
         }
     }

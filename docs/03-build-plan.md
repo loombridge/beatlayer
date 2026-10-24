@@ -698,7 +698,7 @@ Total to 1.0: 293 packages planned in Phases 0 to 7, and about 95 estimated in P
 | 6.13b | todo |  |  |
 | 6.14 | todo |  |  |
 | 6.14b | todo |  |  |
-| 6.15 | todo |  |  |
+| 6.15 | done | 24 October 2026 | [#400](https://github.com/loombridge/beatlayer/pull/400); chained MIDI Tools: a transformation on a chain's output joins it, changing an earlier tool re-runs the later steps as one undo step, and the selectors and the Status Bar show the chain ([MIDI Tools](specs/midi-tools.md) R27 to R33) |
 | 6.16 | todo |  |  |
 | 6.17 | done | 24 October 2026 | [#356](https://github.com/loombridge/beatlayer/pull/356); each MIDI note carries Pitch, Slide and Pressure envelopes (older sets' pressure points load into Pressure), kept through every note edit and set by `note.set_expression`, played to native devices as per-note expression at any block size, read from MIDI ports with the MPE switch on ([the spec](specs/mpe.md) R1 to R13), and recorded into every kind of take; plug-ins and MPE out are WP-6.17b |
 | 6.17b | todo |  |  |

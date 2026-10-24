@@ -47,6 +47,8 @@ pub const RAISED_BY_ARGUMENTS: &[&str] = &[
     tool_ids::SET_AUTO,
     tool_ids::RESEED,
     tool_ids::RANDOMIZE,
+    tool_ids::ADD_CHORD,
+    tool_ids::DELETE_CHORD,
     audio_ids::CROP,
     edit_ids::MOVE_CLIPS,
     edit_ids::RESIZE_CLIPS,
@@ -209,7 +211,9 @@ pub(crate) fn assess(
         | tool_ids::SET
         | tool_ids::SET_AUTO
         | tool_ids::RESEED
-        | tool_ids::RANDOMIZE => tool_notes(id, args, registered, scene),
+        | tool_ids::RANDOMIZE
+        | tool_ids::ADD_CHORD
+        | tool_ids::DELETE_CHORD => tool_notes(id, args, registered, scene),
         bounce_ids::PASTE_BOUNCED_AUDIO => paste_bounced(args, registered, scene),
         _ => tried(id, args, registered, scene),
     }

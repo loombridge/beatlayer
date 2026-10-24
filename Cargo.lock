@@ -938,6 +938,7 @@ version = "0.2.0"
 dependencies = [
  "bl-core",
  "proptest",
+ "serde_json",
 ]
 
 [[package]]

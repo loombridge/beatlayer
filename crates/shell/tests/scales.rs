@@ -375,6 +375,10 @@ fn the_playhead_entering_a_clip_makes_its_scale_the_current_scale() {
             .unwrap();
     }
     assert_eq!(current(&shell), Scale::default());
+    // The engine takes the set on a thread of its own, and reports the
+    // transport as stopped until a block has run with it: without this wait
+    // the eight blocks below can finish before the set arrives.
+    testing::settle(&control, &mut shell);
 
     // The transport plays from the start: the playhead enters the first
     // clip, and then the second.

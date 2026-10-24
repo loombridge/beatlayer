@@ -1065,12 +1065,12 @@ mod tests {
                 }
             }
         }
-        // The Clip Markers submenu's items wait for their package too.
+        // The Clip Markers submenu's items run the shortcuts' commands
+        // (piano-roll R37).
         let markers = note().into_iter().find(|i| i.row == "C-NOTE-014").unwrap();
         assert_eq!(markers.items.len(), 4);
         for item in markers.items {
-            assert!(matches!(item.action, Pending(_)), "{}", item.row);
-            assert!(pending_package(item.row).is_some(), "{}", item.row);
+            assert!(matches!(item.action, Key(_)), "{}", item.row);
         }
     }
 }

@@ -1,6 +1,6 @@
 # Merging sets, saving clips and tracks as sets, and packing a project
 
-- **Status:** draft
+- **Status:** partial (R1 to R9 and R11 to R15 each have a passing test, but for the parts listed under "Not built yet"; R10 is WP-6.20's and R16 to R24 WP-6.35b's)
 - **Work packages:** WP-6.35, a set opened in the browser, merging its tracks, device chains and clips into the open set, and saving tracks or Session clips as a new set (R1 to R9 and R11 to R15); WP-6.20, a set's grooves in the browser (R10); WP-6.35b, packing a project into one file and unpacking it (R16 to R24). Clip files are [clip files](clip-files.md)'; Collect Files on Export is [file management](file-management.md)'s (R7 to R9); the File Manager's views are [file management](file-management.md)'s
 - **Parity-matrix row:** Files and export: Pack a project into one archive, export Session clips as a new set, merge sets
 - **Checked against:** the Live 12 reference manual (online edition), read 20 October 2026; the Live 12 release notes, 12.0, 12.2 and 12.3; the UI parity reference's rows I-DROP-002, 006 and 011, M-FILE-005, L-OTH-002 and C-BROWSER-014
@@ -70,21 +70,21 @@ This spec covers the set in the browser, merging, saving tracks and clips as a s
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1 | to be written in WP-6.35 | |
-| R2 | to be written in WP-6.35 | |
-| R3 | to be written in WP-6.35 | |
-| R4 | to be written in WP-6.35 | |
-| R5 | to be written in WP-6.35 | |
-| R6 | to be written in WP-6.35 | |
-| R7 | to be written in WP-6.35 | |
-| R8 | to be written in WP-6.35 | |
-| R9 | to be written in WP-6.35 | |
+| R1 | `crates/shell/tests/set_exchange.rs`, `a_set_opens_in_the_browser_to_its_tracks_clips_and_devices`, `a_newer_or_damaged_set_shows_why_and_merges_nothing`; `crates/shell/src/set_exchange.rs`, `a_row_key_names_its_set_and_row` | unit, through `Shell::run` on real folders |
+| R2 | `crates/shell/tests/set_exchange.rs`, `a_session_clip_of_an_opened_set_loads_as_a_clip_file` | unit, through `Shell::run` on real folders |
+| R3 | `crates/shell/tests/set_exchange.rs`, `a_set_merges_whole_but_for_its_returns_in_one_undo_step`, `a_newer_or_damaged_set_shows_why_and_merges_nothing`; `crates/ui/tests/set_exchange.rs`, `a_set_dragged_onto_a_title_bar_adds_its_tracks_after_it` | unit, UI script |
+| R4 | `crates/shell/tests/set_exchange.rs`, `one_track_merges_alone_and_a_routing_to_a_track_left_behind_resets`, `enter_on_a_track_or_a_devices_row_adds_it`; `crates/ui/tests/set_exchange.rs`, `a_track_of_an_opened_set_dragged_onto_a_title_bar_is_added` | unit, UI script |
+| R5 | `crates/shell/tests/set_exchange.rs`, `a_set_merges_whole_but_for_its_returns_in_one_undo_step`; `crates/shell/tests/whole_tracks.rs`, `tracks_pasted_into_another_set_bring_their_files` | unit, through `Shell::run` on real folders |
+| R6 | `crates/shell/tests/set_exchange.rs`, `a_set_merges_whole_but_for_its_returns_in_one_undo_step`, `one_track_merges_alone_and_a_routing_to_a_track_left_behind_resets`; `crates/shell/tests/shell_commands.rs`, `tracks_paste_into_another_set_and_settle_their_references` | unit, through `Shell::run` on real folders |
+| R7 | `crates/shell/tests/set_exchange.rs`, `a_sample_missing_at_its_path_is_relinked_by_content` | unit, through `Shell::run` on real folders |
+| R8 | `crates/shell/tests/set_exchange.rs`, `a_devices_row_adds_the_chain_without_its_automation`, `enter_on_a_track_or_a_devices_row_adds_it` | unit, through `Shell::run` on real folders |
+| R9 | `crates/shell/tests/set_exchange.rs`, `a_set_merges_whole_but_for_its_returns_in_one_undo_step`, `a_devices_row_adds_the_chain_without_its_automation` | unit, through `Shell::run` on real folders |
 | R10 | to be written in WP-6.20 | |
-| R11 | to be written in WP-6.35 | |
-| R12 | to be written in WP-6.35 | |
-| R13 | to be written in WP-6.35 | |
-| R14 | to be written in WP-6.35 | |
-| R15 | to be written in WP-6.35 | |
+| R11 | `crates/shell/tests/set_exchange.rs`, `tracks_saved_as_a_set_open_on_their_own_and_stand_alone`; `crates/ui/tests/set_exchange.rs`, `track_title_bars_dragged_onto_a_folder_are_saved_as_a_set` | unit, UI script |
+| R12 | `crates/shell/tests/set_exchange.rs`, `session_clips_saved_as_a_set_keep_their_layout_by_scene`; `crates/ui/tests/set_exchange.rs`, `several_session_clips_dragged_onto_a_folder_are_saved_as_a_set` | unit, UI script |
+| R13 | `crates/shell/tests/set_exchange.rs`, `a_set_of_one_track_is_named_after_it_and_refers_to_the_files_with_never`, `tracks_saved_as_a_set_open_on_their_own_and_stand_alone` | unit, through `Shell::run` on real folders |
+| R14 | `crates/shell/tests/set_exchange.rs`, `tracks_saved_as_a_set_open_on_their_own_and_stand_alone`, `a_set_of_one_track_is_named_after_it_and_refers_to_the_files_with_never`, `ask_waits_for_the_answer_before_saving_a_set` | unit, through `Shell::run` on real folders |
+| R15 | `crates/cli/tests/agent.rs`, `an_agent_saves_tracks_as_a_set_merges_it_and_reads_it_back`; `crates/shell-spec/src/set_exchange.rs`, `every_listed_id_is_registered_and_complete`; `cargo xtask commands` | unit, agent API |
 | R16 | to be written in WP-6.35b | |
 | R17 | to be written in WP-6.35b | |
 | R18 | to be written in WP-6.35b | |
@@ -94,3 +94,10 @@ This spec covers the set in the browser, merging, saving tracks and clips as a s
 | R22 | to be written in WP-6.35b | |
 | R23 | to be written in WP-6.35b | |
 | R24 | to be written in WP-6.35b | |
+
+## Not built yet
+
+- A set is read whole when it is opened in the browser (R1); a set of hundreds of megabytes reads slowly. The last four sets read are kept, so previewing, dragging and loading one of its clips read it once.
+- A return track or Main of an opened set can't be added as a track (R4); only its chain of devices comes, by its Devices row (R8). The spec doesn't say what dragging a return track does.
+- A frozen track's Session clips saved as a set (R12) are saved without the track's frozen state.
+- Dropping a set file from Finder or Explorer on a title bar (R3) isn't built; the drop takes a set from the browser (I-DROP-021).

@@ -37,6 +37,17 @@ pub fn kind_text(kind: ItemKind, clip: Option<ClipFileKind>) -> &'static str {
             Some(ClipFileKind::Midi) => "MIDI Clip File",
             None => "Clip File",
         },
+        ItemKind::Track => "Track",
+        ItemKind::Group => "Group Track",
+        ItemKind::Return => "Return Track",
+        ItemKind::Main => "Main Track",
+        ItemKind::SessionClip => match clip {
+            Some(ClipFileKind::Audio) => "Audio Clip",
+            Some(ClipFileKind::Midi) => "MIDI Clip",
+            None => "Clip",
+        },
+        ItemKind::Devices => "Devices",
+        ItemKind::Notice => "",
     }
 }
 

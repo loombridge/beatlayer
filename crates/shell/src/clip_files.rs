@@ -69,7 +69,7 @@ fn same_content(dir: &Path, size: u64, hash: ContentHash) -> Option<PathBuf> {
 /// that the store has, copied into the `Samples/Imported` folder of `home`
 /// unless it is in `home` already, or left where it is when `copy` is off.
 /// Returns the table and how many files were copied.
-fn collect(
+pub(crate) fn collect(
     store: &MediaStore,
     used: &BTreeSet<ContentHash>,
     folder: &Path,
@@ -165,7 +165,7 @@ pub fn uses_outside(
 }
 
 /// How long an unwarped audio clip lasts, in seconds (clip files R9).
-fn seconds_of(doc: &Document, clip: &Clip) -> Option<f64> {
+pub(crate) fn seconds_of(doc: &Document, clip: &Clip) -> Option<f64> {
     let ClipData::Audio(audio) = &clip.data else {
         return None;
     };
@@ -283,7 +283,7 @@ fn register(store: &MediaStore, hash: ContentHash, at: &Path) -> Option<MediaFil
 ///
 /// A message if the file can't be read or is refused.
 pub fn load(store: &MediaStore, path: &Path, search: &[PathBuf]) -> Result<Loaded, String> {
-    let file = ClipFile::load(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let file = crate::set_exchange::read_clip_file(path)?;
     let folder = path.parent().unwrap_or_else(|| Path::new("."));
     let mut media = Vec::new();
     let mut wanted = Vec::new();
@@ -330,9 +330,7 @@ pub fn load(store: &MediaStore, path: &Path, search: &[PathBuf]) -> Result<Loade
         }
     }
     Ok(Loaded {
-        stem: path
-            .file_stem()
-            .map_or_else(String::new, |s| s.to_string_lossy().into_owned()),
+        stem: crate::set_exchange::stem_of(path),
         file,
         media,
         missing,

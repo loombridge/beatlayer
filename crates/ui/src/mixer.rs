@@ -776,7 +776,11 @@ fn title_bars(
                 theme.colors.clip_text.0,
             );
         }
-        let response = ui.interact(bar, Id::new(("mixer-title", of, track)), Sense::click());
+        let response = ui.interact(
+            bar,
+            Id::new(("mixer-title", of, track)),
+            Sense::click_and_drag(),
+        );
         // The fold button for the track's rack, at the bar's right, over the
         // title bar's own click.
         if let Some((rack, folded, rect)) = fold {

@@ -284,6 +284,16 @@ fn register(store: &MediaStore, hash: ContentHash, at: &Path) -> Option<MediaFil
 /// A message if the file can't be read or is refused.
 pub fn load(store: &MediaStore, path: &Path, search: &[PathBuf]) -> Result<Loaded, String> {
     let file = crate::set_exchange::read_clip_file(path)?;
+    Ok(register_media(store, path, file, search))
+}
+
+/// [`load`] for a clip file already read from `path`.
+pub(crate) fn register_media(
+    store: &MediaStore,
+    path: &Path,
+    file: ClipFile,
+    search: &[PathBuf],
+) -> Loaded {
     let folder = path.parent().unwrap_or_else(|| Path::new("."));
     let mut media = Vec::new();
     let mut wanted = Vec::new();
@@ -329,12 +339,12 @@ pub fn load(store: &MediaStore, path: &Path, search: &[PathBuf]) -> Result<Loade
             None => missing += 1,
         }
     }
-    Ok(Loaded {
+    Loaded {
         stem: crate::set_exchange::stem_of(path),
         file,
         media,
         missing,
-    })
+    }
 }
 
 /// The track a clip goes on.

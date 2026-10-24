@@ -503,6 +503,11 @@ pub struct PreviewState {
     /// The file playing, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub playing: Option<String>,
+    /// Why the file selected last doesn't preview, if it doesn't: a MIDI clip
+    /// file whose chain has no instrument, or a clip file whose audio is
+    /// missing. The preview strip shows it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
     /// How far it has played, in seconds.
     pub position_seconds: f64,
     /// How long it is, in seconds.

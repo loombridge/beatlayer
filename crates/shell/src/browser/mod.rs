@@ -222,6 +222,9 @@ pub struct Context<'a> {
     /// the file says: the set's project folder, the User Library and the
     /// places (clip files R12).
     pub search: &'a [PathBuf],
+    /// The set's tempo, in BPM, at the playhead: what a MIDI clip file's
+    /// preview is rendered at (clip files R16).
+    pub set_bpm: f64,
 }
 
 /// What [`BrowserView::poll`] found.
@@ -288,6 +291,8 @@ pub struct BrowserView {
     loading: Option<(u64, PathBuf)>,
     pending_warp: Option<PendingPreview>,
     playing: Option<Playing>,
+    /// Why the file selected last doesn't preview (clip files R13, R16).
+    preview_note: Option<String>,
     preview_rate: u32,
     /// The waveform overview of the file previewed last, for the preview
     /// strip.
@@ -554,6 +559,7 @@ impl BrowserView {
             loading: None,
             pending_warp: None,
             playing: None,
+            preview_note: None,
             preview_rate: 48_000,
             overview: None,
             focus: Part::Content,
@@ -2059,6 +2065,7 @@ impl BrowserView {
                         .map(|p| p.path.to_string_lossy().into_owned())
                 }),
             playing: playing.map(|p| p.path.to_string_lossy().into_owned()),
+            note: self.preview_note.clone(),
             position_seconds: position as f64 / rate,
             length_seconds: length as f64 / rate,
         }
@@ -2252,6 +2259,7 @@ impl BrowserView {
                         "Couldn't preview {}: {error}",
                         loaded.path.to_string_lossy()
                     ));
+                    self.preview_note = Some(error);
                 }
             }
         }
@@ -2447,6 +2455,7 @@ impl BrowserView {
         path: &Path,
         audio: &mut AudioHost,
         search: &[PathBuf],
+        bpm: f64,
     ) -> Result<(), BrowserError> {
         let kind = listing::path_kind(path);
         // A Session clip of an opened set previews as a clip file does.
@@ -2457,13 +2466,6 @@ impl BrowserView {
                 path.to_string_lossy()
             )));
         }
-        if kind == Some(ItemKind::Clip)
-            && listing::clip_kind(path) == Some(bl_shell_spec::browser::ClipFileKind::Midi)
-        {
-            return Err(BrowserError::Unavailable(
-                "MIDI clip files don't preview yet".to_owned(),
-            ));
-        }
         let rate = audio.sample_rate().ok_or_else(|| {
             BrowserError::Unavailable(
                 "the audio device isn't running; switch the audio engine on to preview".to_owned(),
@@ -2472,8 +2474,9 @@ impl BrowserView {
         audio.stop_preview();
         self.playing = None;
         self.pending_warp = None;
+        self.preview_note = None;
         let id = if kind == Some(ItemKind::Clip) {
-            self.loader.request_clip(path, rate, search.to_vec())
+            self.loader.request_clip(path, rate, search.to_vec(), bpm)
         } else {
             self.loader.request(path, rate)
         }
@@ -2485,6 +2488,8 @@ impl BrowserView {
 
     fn stop_preview(&mut self, audio: &AudioHost) {
         audio.stop_preview();
+        self.loader.cancel();
+        self.preview_note = None;
         self.loading = None;
         self.pending_warp = None;
         self.playing = None;
@@ -2837,6 +2842,7 @@ impl BrowserView {
                                 .expect("one file"),
                             ctx.audio,
                             ctx.search,
+                            ctx.set_bpm,
                         );
                     }
                 } else if self.preview_active() {
@@ -2940,7 +2946,7 @@ impl BrowserView {
                         }
                     }
                 };
-                self.start_preview(&path, ctx.audio, ctx.search)?;
+                self.start_preview(&path, ctx.audio, ctx.search, ctx.set_bpm)?;
                 outcome.value = to_value(&self.preview_state(ctx.audio));
             }
             ids::STOP_PREVIEW => {

@@ -1029,6 +1029,7 @@ dependencies = [
  "bl-project",
  "bl-rt",
  "bl-shell-spec",
+ "bl-test-ara",
  "bl-test-clap",
  "bl-test-vst3",
  "flate2",

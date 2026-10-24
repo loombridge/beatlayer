@@ -7,7 +7,9 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use bl_model::PluginFormat;
-use bl_plugin_host::scan::{BlockedPlugin, ScanReport, Scanner, plugin_files, system_paths};
+use bl_plugin_host::scan::{
+    BlockedPlugin, ScanReport, Scanner, lv2_path_folders, plugin_files, system_paths,
+};
 use bl_test_clap::{PLUGIN_ID, PLUGIN_NAME, TEST_SCAN_VAR, bundle};
 use bl_test_vst3 as test_vst3;
 
@@ -24,6 +26,16 @@ fn clap() -> PluginFormat {
 
 fn vst3() -> PluginFormat {
     PluginFormat::Vst3
+}
+
+fn lv2() -> PluginFormat {
+    PluginFormat::Lv2
+}
+
+/// Whether the scanner's child can load lilv: on Linux always, elsewhere
+/// when `BL_TEST_LILV` names a lilv library.
+fn lilv() -> bool {
+    cfg!(target_os = "linux") || std::env::var_os("BL_TEST_LILV").is_some()
 }
 
 // Spec: plugin-scanning R1, R3.
@@ -403,4 +415,139 @@ fn a_scan_answers_reads_while_it_runs() {
     );
     let report = scan.join().unwrap();
     assert_eq!(report.blocked.len(), 1);
+}
+
+// Spec: plugin-scanning R1, R2, R6, R10. LV2 is scanned (WP-5.39): a bundle
+// folder is one file holding its plug-ins.
+#[test]
+fn a_scan_describes_the_test_lv2_plugin_and_caches_it() {
+    if !lilv() {
+        return;
+    }
+    let scanner = scanner();
+    let paths = [bl_test_lv2::bundle().to_path_buf()];
+    let first = scanner.scan(lv2(), &paths);
+    assert_eq!(first.scanned, 1);
+    assert_eq!(first.cached, 0);
+    assert!(first.blocked.is_empty(), "{:?}", first.blocked);
+    assert_eq!(first.plugins.len(), 1);
+    let plugin = &first.plugins[0];
+    assert_eq!(plugin.plugin_id, bl_test_lv2::PLUGIN_URI);
+    assert_eq!(plugin.name, bl_test_lv2::PLUGIN_NAME);
+    assert_eq!(plugin.format, lv2());
+    assert_eq!(plugin.role, bl_model::DeviceRole::AudioEffect);
+    assert!(plugin.note_output);
+    assert_eq!(plugin.path, bl_test_lv2::bundle());
+
+    // An unchanged bundle is answered from the cache.
+    let second = scanner.scan(lv2(), &paths);
+    assert_eq!(second.scanned, 0);
+    assert_eq!(second.cached, 1);
+    assert_eq!(second.plugins, first.plugins);
+
+    // Rescan ignores the cache.
+    let again = scanner.rescan(lv2(), &paths);
+    assert_eq!(again.scanned, 1);
+    assert_eq!(again.cached, 0);
+    assert_eq!(again.plugins, first.plugins);
+}
+
+// Spec: plugin-scanning R1, R10. A folder of LV2 bundles is searched, and a
+// bundle edited in place is scanned again.
+#[test]
+fn a_folder_is_searched_for_lv2_bundles_and_an_edited_one_is_scanned_again() {
+    if !lilv() {
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("bl-scan-lv2-folder-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let copied = dir.join("test-gain-echo.lv2");
+    copy_all(bl_test_lv2::bundle(), &copied);
+    std::fs::write(dir.join("not-a-bundle.txt"), b"").unwrap();
+    let scanner = scanner();
+    let report = scanner.scan(lv2(), std::slice::from_ref(&dir));
+    assert_eq!(report.scanned, 1, "{:?}", report.blocked);
+    assert_eq!(report.plugins.len(), 1);
+    assert_eq!(report.plugins[0].path, copied);
+    assert_eq!(scanner.scan(lv2(), std::slice::from_ref(&dir)).cached, 1);
+
+    // The manifest changes but the folder doesn't gain or lose a file: the
+    // folder's own time wouldn't show it.
+    let manifest = copied.join("manifest.ttl");
+    let text = std::fs::read_to_string(&manifest).unwrap();
+    std::fs::write(&manifest, format!("{text}\n# edited\n")).unwrap();
+    let again = scanner.scan(lv2(), std::slice::from_ref(&dir));
+    assert_eq!(again.scanned, 1);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// Spec: plugin-scanning R4, R5, R10. Instantiating a plug-in runs its code,
+// here in the child process: one that crashes is blocklisted.
+#[test]
+fn an_lv2_plugin_that_crashes_on_scan_is_blocklisted() {
+    if !lilv() {
+        return;
+    }
+    let scanner = scanner().with_env("BL_TEST_LV2_SCAN", "crash");
+    let report = scanner.scan(lv2(), &[bl_test_lv2::bundle().to_path_buf()]);
+    assert!(report.plugins.is_empty());
+    assert_eq!(report.blocked.len(), 1);
+    let reason = &report.blocked[0].reason;
+    assert!(
+        reason.contains("crashed") || reason.contains("readable"),
+        "{reason}"
+    );
+    assert!(scanner.is_blocked(bl_test_lv2::bundle()));
+}
+
+// Spec: plugin-scanning R3, R4, R5, R10.
+#[test]
+fn an_lv2_plugin_that_hangs_on_scan_times_out_and_is_blocklisted() {
+    if !lilv() {
+        return;
+    }
+    let scanner = scanner()
+        .with_env("BL_TEST_LV2_SCAN", "hang")
+        .with_timeout(Duration::from_millis(500));
+    let report = scanner.scan(lv2(), &[bl_test_lv2::bundle().to_path_buf()]);
+    assert!(report.plugins.is_empty());
+    assert_eq!(report.blocked.len(), 1);
+    let reason = &report.blocked[0].reason;
+    assert!(reason.contains("didn't answer"), "{reason}");
+}
+
+// Spec: plugin-scanning R4. A folder that isn't a bundle of plug-ins is
+// blocklisted with why.
+#[test]
+fn a_folder_that_isnt_an_lv2_bundle_is_blocklisted_with_why() {
+    if !lilv() {
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("bl-scan-lv2-bad-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let bundle = dir.join("empty.lv2");
+    std::fs::create_dir_all(&bundle).unwrap();
+    let report = scanner().scan(lv2(), std::slice::from_ref(&bundle));
+    assert_eq!(report.blocked.len(), 1);
+    assert!(!report.blocked[0].reason.is_empty());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// Spec: plugin-scanning R10. `LV2_PATH` names the folders when it is set,
+// `~` standing for the home folder, as lilv reads it.
+#[test]
+fn lv2_path_names_the_folders_searched() {
+    let entries = std::env::join_paths(["/opt/lv2", "~/my-lv2"]).unwrap();
+    assert_eq!(
+        lv2_path_folders(&entries, Some(std::path::Path::new("/home/me"))),
+        [PathBuf::from("/opt/lv2"), PathBuf::from("/home/me/my-lv2")]
+    );
+    // Without it, the standard folders.
+    if std::env::var_os("LV2_PATH").is_none() {
+        let paths = system_paths(lv2());
+        assert!(paths.contains(&PathBuf::from("/usr/lib/lv2")));
+        assert!(paths.contains(&PathBuf::from("/usr/local/lib/lv2")));
+        assert!(paths.iter().any(|p| p.ends_with(".lv2")));
+    }
 }

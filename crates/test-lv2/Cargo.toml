@@ -12,5 +12,9 @@ publish.workspace = true
 # test crate depend on this one, so Cargo builds the cdylib beside its tests.
 crate-type = ["cdylib", "rlib"]
 
+# The editor's view, in the host's X11 window.
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+x11rb = { version = "0.13", default-features = false }
+
 [lints]
 workspace = true

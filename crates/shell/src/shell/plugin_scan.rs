@@ -2,6 +2,7 @@
 
 use super::Shell;
 use bl_plugin_host::clap::ClapHost;
+use bl_plugin_host::lv2::Lv2Host;
 use bl_plugin_host::vst3::Vst3Host;
 use bl_shell_spec::plugins as plugin_ids;
 use std::sync::Arc;
@@ -117,6 +118,12 @@ impl Shell {
         &self.vst3
     }
 
+    /// The LV2 host, whose plug-ins are the set's LV2 devices (WP-5.39).
+    #[must_use]
+    pub fn lv2(&self) -> &Lv2Host {
+        &self.lv2
+    }
+
     /// The hosts an offline render borrows the engine's plug-ins from
     /// (WP-2.6b, WP-4.21).
     #[must_use]
@@ -125,6 +132,7 @@ impl Shell {
             clap: Some(&self.plugins),
             vst3: Some(&self.vst3),
             au: Some(&self.au),
+            lv2: Some(&self.lv2),
         }
     }
 
@@ -133,7 +141,7 @@ impl Shell {
     /// its window is open. None for a device that isn't a loaded plug-in.
     #[must_use]
     pub fn plugin_info(&self, device: bl_model::DeviceId) -> Option<plugin_ids::PluginInfo> {
-        crate::plugins::info(&self.plugins, &self.au, &self.vst3, device)
+        crate::plugins::info(&self.plugins, &self.au, &self.vst3, &self.lv2, device)
     }
 
     /// How the Browser shows plug-ins, and the Plug-In Sources switches:

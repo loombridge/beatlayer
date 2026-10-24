@@ -271,3 +271,34 @@ pub fn modulation_for(device: Device, param: u32, points: &[(Ticks, f64)]) -> No
 /// One bar at 120 BPM and 48 kHz, in frames: a clip's envelope from 0 to 1
 /// over it climbs by 1 / `BAR` a frame.
 pub const BAR: i64 = 96_000;
+
+/// A host with the test LV2 plug-in's bundle loaded, or `None` where lilv
+/// isn't (anywhere but Linux, unless `BL_TEST_LILV` names a lilv library).
+pub fn lv2_host() -> Option<bl_plugin_host::lv2::Lv2Host> {
+    use bl_plugin_host::lv2::{Lv2Error, Lv2Host};
+    let host = Lv2Host::new();
+    if let Some(library) = std::env::var_os("BL_TEST_LILV") {
+        host.use_library(library);
+    }
+    match host.load(bl_test_lv2::bundle()) {
+        Ok(_) => Some(host),
+        Err(Lv2Error::Unavailable) if !cfg!(target_os = "linux") => None,
+        Err(e) => panic!("the test LV2 plug-in should load: {e}"),
+    }
+}
+
+/// A Test Gain Echo LV2 device with `params` (plain values) set.
+pub fn lv2_device(id: u64, params: &[(u32, f64)]) -> Device {
+    let mut device = Device::new(
+        DeviceId(Id::new(id).expect("an ID")),
+        bl_test_lv2::PLUGIN_NAME,
+        DeviceKind::Plugin {
+            format: PluginFormat::Lv2,
+            plugin_id: bl_test_lv2::PLUGIN_URI.to_owned(),
+        },
+    );
+    for (param, value) in params {
+        device.params.insert(ParamId(*param), *value);
+    }
+    device
+}

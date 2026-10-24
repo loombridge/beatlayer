@@ -63,7 +63,8 @@ impl Shell {
         // Plug-ins' main-thread work (WP-2.6 to WP-2.8), and the changes
         // they made themselves.
         changed |= self.poll_plugin_scan();
-        let plugins_changed = self.plugins.idle() | self.au.idle() | self.vst3.idle();
+        let plugins_changed =
+            self.plugins.idle() | self.au.idle() | self.vst3.idle() | self.lv2.idle();
         // Spec: ara-hosting R2, R8, R12. The ARA plug-ins' documents follow
         // the set, and their editors the Arrangement's selection.
         self.vst3
@@ -75,7 +76,12 @@ impl Shell {
         }
         // A plug-in that changed its latency: the engine recompiles with
         // it, so delay compensation follows it (WP-2.7, WP-2.11).
-        for (device, frames) in self.vst3.take_latency_changes() {
+        for (device, frames) in self
+            .vst3
+            .take_latency_changes()
+            .into_iter()
+            .chain(self.lv2.take_latency_changes())
+        {
             self.audio.set_device_latency(device, frames);
             changed = true;
         }
@@ -105,6 +111,12 @@ impl Shell {
             )
             .chain(
                 self.vst3
+                    .take_param_changes()
+                    .into_iter()
+                    .map(|c| (c.device, c.param, c.value)),
+            )
+            .chain(
+                self.lv2
                     .take_param_changes()
                     .into_iter()
                     .map(|c| (c.device, c.param, c.value)),

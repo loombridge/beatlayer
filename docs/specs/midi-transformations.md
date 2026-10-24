@@ -267,11 +267,11 @@ Every tool here is applied as [midi-tools.md](midi-tools.md) says: to the select
 | R33 | to be written in WP-6.13 | |
 | R34 | to be written in WP-6.13 | |
 | R35 | to be written in WP-6.13 | |
-| R36 | to be written in WP-6.13b | |
-| R37 | to be written in WP-6.13b | |
-| R38 | to be written in WP-6.13b | |
-| R39 | to be written in WP-6.13b | |
-| R40 | to be written in WP-6.13b | |
-| R41 | to be written in WP-6.13b | |
-| R42 | to be written in WP-6.13b | |
-| R43 | Chop's toggles, WP-6.12's: `crates/ui/tests/midi_tools.rs`, `chops_pattern_and_emphasis_toggles_each_click_a_set_and_gaps_shows_a_dash`; `crates/shell/tests/midi_tools.rs`, `r8_r43_chops_gaps_write_its_pattern_and_a_toggle_click_is_a_set`. The other displays: to be written in WP-6.13 and WP-6.13b | UI script, unit |
+| R36 | `crates/midi-tools/tests/mpe_transformations.rs`, `r36_glissandos_parameters_have_the_rules_ranges_and_defaults`. The drag in the MPE tab: to be written with WP-6.18 | unit |
+| R37 | `crates/midi-tools/tests/mpe_transformations.rs`, `r37_glissando_needs_two_notes`, `r37_chords_pair_by_rank_and_extra_notes_pair_with_the_highest`, `r37_the_last_chords_notes_keep_the_envelope_they_had`; `crates/shell/tests/midi_tools.rs`, `r37_glissando_is_refused_with_one_note_and_changes_nothing`; `crates/agent/tests/midi_tools.rs`, `glissando_and_lfo_apply_by_id_one_undo_step_and_their_envelopes_read_back`; `crates/engine/tests/midi_controllers.rs`, `a_glissando_notes_pitch_reaches_the_instrument_as_per_note_expression` | unit, engine |
+| R38 | `crates/midi-tools/tests/mpe_transformations.rs`, `r38_the_bend_follows_the_curve_law_point_by_point`, `r38_start_places_the_bend_and_a_start_at_the_end_leaves_the_bend_one_point`, `r38_a_bend_beyond_48_semitones_is_held`, `r38_the_bend_replaces_the_envelope_the_note_had`; `crates/engine/tests/midi_controllers.rs`, `a_glissando_notes_pitch_reaches_the_instrument_as_per_note_expression` | unit, engine |
+| R39 | `crates/midi-tools/tests/mpe_transformations.rs`, `r39_lfos_parameters_have_the_rules_ranges_and_defaults`, `r39_attack_and_decay_together_are_at_most_100_percent`, `r39_switching_target_keeps_the_numbers_within_the_new_ranges`; `crates/shell/tests/midi_tools.rs`, `r39_lfos_settings_keep_attack_and_decay_within_100_and_amount_within_its_target`; `crates/ui/tests/midi_tools.rs`, `lfo_draws_its_curve_and_random_shows_a_reseed_button` | unit, UI script |
+| R40 | `crates/midi-tools/tests/mpe_transformations.rs`, `r40_to_r42_a_sine_is_written_32_points_a_period_with_the_base_and_amount`, `r40_the_target_names_the_envelope_written_and_replaces_the_one_it_had`, `r40_values_are_held_within_the_targets_range`, `r40_attack_and_decay_fade_the_wave_in_and_out`, `r40_time_shift_holds_the_wave_back_or_starts_it_part_way_through`; `crates/agent/tests/midi_tools.rs`, `glissando_and_lfo_apply_by_id_one_undo_step_and_their_envelopes_read_back` | unit |
+| R41 | `crates/midi-tools/tests/mpe_transformations.rs`, `r41_square_triangle_and_shape_follow_the_laws`, `r41_random_holds_a_value_a_cycle_then_slides_to_the_next`; `crates/shell/tests/midi_tools.rs`, `r41_lfo_random_draws_from_the_seed_and_reseed_runs_it_again` | unit |
+| R42 | `crates/midi-tools/tests/mpe_transformations.rs`, `r42_a_long_note_gets_at_most_512_breakpoints_from_its_start_to_its_end`, `r42_a_note_of_a_few_ticks_gets_only_its_two_ends_and_every_rate_is_a_period`, `r40_the_target_names_the_envelope_written_and_replaces_the_one_it_had` | unit |
+| R43 | Chop's toggles, WP-6.12's: `crates/ui/tests/midi_tools.rs`, `chops_pattern_and_emphasis_toggles_each_click_a_set_and_gaps_shows_a_dash`; `crates/shell/tests/midi_tools.rs`, `r8_r43_chops_gaps_write_its_pattern_and_a_toggle_click_is_a_set`. LFO's curve, WP-6.13b's: `crates/ui/tests/midi_tools.rs`, `lfo_draws_its_curve_and_random_shows_a_reseed_button`. The other displays: to be written in WP-6.13 | UI script, unit |

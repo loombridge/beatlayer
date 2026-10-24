@@ -500,3 +500,31 @@ fn cmd_shift_u_and_the_edit_menu_show_the_transform_panel_with_quantize_chosen()
     );
     assert_eq!((self::steps(&h), keys(&h, clip)), (steps, notes));
 }
+
+#[test]
+fn lfo_draws_its_curve_and_random_shows_a_reseed_button() {
+    // Spec: midi-transformations R39, R43. The curve is drawn from the
+    // tool's settings; Reseed comes with the Random wave and runs
+    // `midi_tool.reseed`, which gives the open application a new seed.
+    let (mut h, _) = set();
+    choose(&mut h, "lfo");
+    let all = nodes(&mut h);
+    Harness::node(&all, "LFO curve");
+    assert!(all.iter().all(|n| n.label != "Reseed"));
+    h.shell
+        .run(
+            "midi_tool.set",
+            json!({ "tool": "lfo", "values": { "shape_type": "random", "amount": 12 } }),
+        )
+        .unwrap();
+    h.shell
+        .run("midi_tool.apply", json!({ "tool": "lfo", "seed": 3 }))
+        .unwrap();
+    let all = nodes(&mut h);
+    let steps = steps(&h);
+    h.click(centre(Harness::node(&all, "Reseed")));
+    let state: bl_shell::midi_tool_commands::MidiToolState =
+        serde_json::from_value(h.shell.run("midi_tool.state", json!({})).unwrap()).unwrap();
+    assert_ne!(state.application.unwrap().seed, 3);
+    assert_eq!(self::steps(&h), steps + 1, "the new run is an undo step");
+}

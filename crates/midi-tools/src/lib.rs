@@ -17,7 +17,9 @@ mod arpeggiate;
 mod chop;
 mod connect;
 mod descriptor;
+mod glissando;
 mod input;
+mod lfo;
 mod ornament;
 mod quantize;
 mod random;
@@ -33,6 +35,7 @@ pub use descriptor::{
     ToolKind, division_ticks,
 };
 pub use input::{ToolInput, ToolNote, ToolOutput, ToolPoint, ToolScale, fold_octaves};
+pub use lfo::lfo_curve;
 pub use quantize::{GRIDS as QUANTIZE_GRIDS, grid_ticks};
 pub use random::Rng;
 pub use registry::{

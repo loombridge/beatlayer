@@ -143,6 +143,8 @@ fn midi_tool_apply_by_id_with_values_and_a_seed_reads_back() {
             "arpeggiate",
             "chop",
             "connect",
+            "glissando",
+            "lfo",
             "ornament",
             "quantize",
             "test_transpose",
@@ -283,5 +285,78 @@ fn each_transformation_applies_by_id_with_a_seed_and_reads_back() {
         // One undo step puts the notes back.
         run(&mut client, "edit.undo", json!({}));
         assert_eq!(notes(&mut client, clip), before, "{tool}: undo");
+    }
+}
+
+/// Each note's `which` envelope as the query tool reads it back, in order
+/// of the notes' starts: its breakpoints' positions and values.
+fn envelopes(client: &mut Client<InProcess>, clip: u64, which: &str) -> Vec<Vec<(u64, f64)>> {
+    let full = call(client, "query", json!({ "id": clip, "detail": "full" }));
+    let mut notes: Vec<&Value> = full["content"]["notes"]["items"]
+        .as_array()
+        .unwrap_or_else(|| panic!("the clip's notes: {full}"))
+        .iter()
+        .collect();
+    notes.sort_by_key(|n| n["start"].as_u64().unwrap());
+    notes
+        .iter()
+        .map(|n| {
+            n[which]
+                .as_array()
+                .map(|points| {
+                    points
+                        .iter()
+                        .map(|p| (p["at"].as_u64().unwrap(), p["value"].as_f64().unwrap()))
+                        .collect()
+                })
+                .unwrap_or_default()
+        })
+        .collect()
+}
+
+#[test]
+fn glissando_and_lfo_apply_by_id_one_undo_step_and_their_envelopes_read_back() {
+    // Spec: midi-transformations R36 to R42. Each tool by ID with values and a
+    // seed; the notes' Pitch or Slide envelopes read back in the query
+    // tool's clip; one undo step clears them.
+    let lfo = json!({ "target": "slide", "shape_type": "triangle", "rate": "1_16",
+                      "amount": 30, "amplitude_base": 60 });
+    for (tool, values, which) in [
+        ("glissando", json!({ "start": 25, "curve": 40 }), "pitch"),
+        ("lfo", lfo, "slide"),
+    ] {
+        let mut client = app();
+        let clip = bass(&mut client, 3);
+        assert!(
+            envelopes(&mut client, clip, which)
+                .iter()
+                .all(Vec::is_empty)
+        );
+        let result = run(
+            &mut client,
+            "midi_tool.apply",
+            json!({ "clip": clip, "tool": tool, "notes": [0, 1, 2], "values": values, "seed": 9 }),
+        );
+        assert_eq!(result["run"]["tool"], tool);
+        let written = envelopes(&mut client, clip, which);
+        if tool == "glissando" {
+            // Each note bends one semitone to the next; the last has none.
+            assert_eq!(written[0].len(), 18);
+            assert_eq!(written[0][1], (BEAT / 4, 0.0));
+            assert_eq!(written[0].last(), Some(&(BEAT, 1.0)));
+            assert!(written[2].is_empty());
+        } else {
+            // 129 points over a note of four periods; the triangle peaks half way through a cycle.
+            assert!(written.iter().all(|points| points.len() == 129));
+            assert_eq!(written[0][0], (0, 30.0));
+            assert_eq!(written[0][16], (BEAT / 8, 90.0));
+        }
+        run(&mut client, "edit.undo", json!({}));
+        assert!(
+            envelopes(&mut client, clip, which)
+                .iter()
+                .all(Vec::is_empty),
+            "{tool}: undo"
+        );
     }
 }

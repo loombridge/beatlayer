@@ -223,9 +223,7 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
         ),
         (
             "midi_tool.reseed",
-            Exception(LaterView(
-                "the tools' Reseed buttons, which come with the native tools that have them                  (WP-6.13, WP-6.14)",
-            )),
+            main(midi_tools_lfo_random, detail_area, "Reseed", Key::Enter),
         ),
         (
             "midi_tool.close",

@@ -3,4 +3,5 @@
 //! in tests/ that isn't listed.
 
 mod interface;
+mod mpe_transformations;
 mod transformations;

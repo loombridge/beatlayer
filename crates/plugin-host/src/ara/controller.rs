@@ -19,9 +19,9 @@ use std::sync::Arc;
 use bl_ara_sys as sys;
 use bl_model::{AraSupport, ClipId, ContentHash, TrackId};
 
+use super::AraMedia;
 use super::host::{Content, ControllerHost, PlaybackRequest, SourceHost};
 use super::model::{Model, Region, RegionKey};
-use super::AraMedia;
 
 /// How many removed modifications a controller keeps deactivated, for undo.
 const GRAVEYARD: usize = 128;
@@ -83,7 +83,9 @@ pub(crate) unsafe fn describe(factory: *const sys::ARAFactory) -> Result<Factory
         if string.is_null() {
             String::new()
         } else {
-            std::ffi::CStr::from_ptr(string).to_string_lossy().into_owned()
+            std::ffi::CStr::from_ptr(string)
+                .to_string_lossy()
+                .into_owned()
         }
     };
     let compatible = (0..found.compatibleDocumentArchiveIDsCount)
@@ -204,7 +206,7 @@ impl Controller {
         };
         // The assert function address must stay valid until ARA is shut
         // down, and may point at nothing.
-        static NO_ASSERT: ASSERT = ASSERT(std::cell::UnsafeCell::new(None));
+        static NO_ASSERT: Assert = Assert(std::cell::UnsafeCell::new(None));
         let configuration = sys::ARAInterfaceConfiguration {
             structSize: size_of::<sys::ARAInterfaceConfiguration>(),
             desiredApiGeneration: sys::kARAAPIGeneration_2_0_Final,
@@ -294,7 +296,9 @@ impl Controller {
 
     /// The plug-in's region sequence for `track`, if it has one.
     pub(crate) fn sequence_of(&self, track: TrackId) -> Option<sys::ARARegionSequenceRef> {
-        self.sequences.get(&track).map(|sequence| sequence.reference)
+        self.sequences
+            .get(&track)
+            .map(|sequence| sequence.reference)
     }
 
     /// The region of a clip's pieces, and the sequence of its track, for a
@@ -303,20 +307,30 @@ impl Controller {
         &self,
         clips: &[ClipId],
         tracks: &[TrackId],
-    ) -> (Vec<sys::ARAPlaybackRegionRef>, Vec<sys::ARARegionSequenceRef>) {
+    ) -> (
+        Vec<sys::ARAPlaybackRegionRef>,
+        Vec<sys::ARARegionSequenceRef>,
+    ) {
         let regions = self
             .regions
             .iter()
             .filter(|((clip, _), _)| clips.contains(clip))
             .map(|(_, placed)| placed.reference)
             .collect();
-        let sequences = tracks.iter().filter_map(|&track| self.sequence_of(track)).collect();
+        let sequences = tracks
+            .iter()
+            .filter_map(|&track| self.sequence_of(track))
+            .collect();
         (regions, sequences)
     }
 
     /// What the controller holds, for status reports.
     pub(crate) fn counts(&self) -> (usize, usize, usize) {
-        (self.sequences.len(), self.sources.len(), self.modifications.len())
+        (
+            self.sequences.len(),
+            self.sources.len(),
+            self.modifications.len(),
+        )
     }
 
     /// The regions the plug-in has, as the model describes them.
@@ -414,7 +428,10 @@ impl Controller {
                 };
                 let context = call!(
                     self,
-                    createMusicalContext(ptr::from_ref(&*host).cast_mut().cast(), &raw const properties)
+                    createMusicalContext(
+                        ptr::from_ref(&*host).cast_mut().cast(),
+                        &raw const properties
+                    )
                 );
                 self.context = Some((context, host));
                 context
@@ -422,7 +439,10 @@ impl Controller {
         };
         if moved {
             let flags = sys::kARAContentUpdateEverythingChanged;
-            call!(self, updateMusicalContextContent(context, ptr::null(), flags));
+            call!(
+                self,
+                updateMusicalContextContent(context, ptr::null(), flags)
+            );
         }
 
         // Regions that left, or moved to another track, go first: their
@@ -459,7 +479,10 @@ impl Controller {
             .collect();
         for clip in left {
             if let Some(modification) = self.modifications.remove(&clip) {
-                call!(self, deactivateAudioModificationForUndoHistory(modification.reference, 1));
+                call!(
+                    self,
+                    deactivateAudioModificationForUndoHistory(modification.reference, 1)
+                );
                 self.dead_clips.insert(clip, modification);
                 self.dead_modifications.retain(|dead| *dead != clip);
                 self.dead_modifications.push_back(clip);
@@ -491,7 +514,10 @@ impl Controller {
             };
             if let Some(source) = self.dead_sources.remove(media) {
                 *lock_audio(&source.host) = Some(audio);
-                call!(self, deactivateAudioSourceForUndoHistory(source.reference, 0));
+                call!(
+                    self,
+                    deactivateAudioSourceForUndoHistory(source.reference, 0)
+                );
                 call!(self, enableAudioSourceSamplesAccess(source.reference, 1));
                 self.sources.insert(*media, source);
                 continue;
@@ -512,7 +538,13 @@ impl Controller {
             match self.sequences.get_mut(&wanted.track) {
                 Some(sequence) => {
                     if sequence.name != wanted.name || sequence.order != wanted.order {
-                        call!(self, updateRegionSequenceProperties(sequence.reference, &raw const properties));
+                        call!(
+                            self,
+                            updateRegionSequenceProperties(
+                                sequence.reference,
+                                &raw const properties
+                            )
+                        );
                         sequence.name.clone_from(&wanted.name);
                         sequence.order = wanted.order;
                     }
@@ -521,7 +553,10 @@ impl Controller {
                     let host = tag();
                     let reference = call!(
                         self,
-                        createRegionSequence(ptr::from_ref(&*host).cast_mut().cast(), &raw const properties)
+                        createRegionSequence(
+                            ptr::from_ref(&*host).cast_mut().cast(),
+                            &raw const properties
+                        )
                     );
                     self.sequences.insert(
                         wanted.track,
@@ -545,7 +580,13 @@ impl Controller {
             };
             if let Some(existing) = self.modifications.get_mut(clip) {
                 if existing.name != wanted.name {
-                    call!(self, updateAudioModificationProperties(existing.reference, &raw const properties));
+                    call!(
+                        self,
+                        updateAudioModificationProperties(
+                            existing.reference,
+                            &raw const properties
+                        )
+                    );
                     existing.name.clone_from(&wanted.name);
                 }
                 continue;
@@ -557,10 +598,19 @@ impl Controller {
             if let Some(dead) = self.dead_clips.remove(clip) {
                 self.dead_modifications.retain(|dead| dead != clip);
                 if dead.media == wanted.media {
-                    call!(self, deactivateAudioModificationForUndoHistory(dead.reference, 0));
+                    call!(
+                        self,
+                        deactivateAudioModificationForUndoHistory(dead.reference, 0)
+                    );
                     let mut dead = dead;
                     if dead.name != wanted.name {
-                        call!(self, updateAudioModificationProperties(dead.reference, &raw const properties));
+                        call!(
+                            self,
+                            updateAudioModificationProperties(
+                                dead.reference,
+                                &raw const properties
+                            )
+                        );
                         dead.name.clone_from(&wanted.name);
                     }
                     self.modifications.insert(*clip, dead);
@@ -613,7 +663,10 @@ impl Controller {
             match self.regions.get_mut(key) {
                 Some(placed) => {
                     if placed.region != *wanted {
-                        call!(self, updatePlaybackRegionProperties(placed.reference, &raw const properties));
+                        call!(
+                            self,
+                            updatePlaybackRegionProperties(placed.reference, &raw const properties)
+                        );
                         placed.region = wanted.clone();
                     }
                 }
@@ -659,7 +712,10 @@ impl Controller {
             self.host.offer_archive(bytes, &id);
             let done = call!(
                 self,
-                restoreObjectsFromArchive(ptr::from_ref(&*self.host).cast_mut().cast(), ptr::null())
+                restoreObjectsFromArchive(
+                    ptr::from_ref(&*self.host).cast_mut().cast(),
+                    ptr::null()
+                )
             );
             self.host.withdraw_archive();
             self.restored = Some(if done == 0 {
@@ -678,8 +734,14 @@ impl Controller {
         audio: Arc<bl_media::SampleData>,
     ) -> Result<Source, String> {
         let cname = CString::new(name).unwrap_or_default();
-        let id = CString::new(media.0.iter().map(|b| format!("{b:02x}")).collect::<String>())
-            .unwrap_or_default();
+        let id = CString::new(
+            media
+                .0
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect::<String>(),
+        )
+        .unwrap_or_default();
         let properties = sys::ARAAudioSourceProperties {
             structSize: size_of::<sys::ARAAudioSourceProperties>(),
             name: cname.as_ptr(),
@@ -692,7 +754,10 @@ impl Controller {
         let host = Box::new(SourceHost::new(audio));
         let reference = call!(
             self,
-            createAudioSource(ptr::from_ref(&*host).cast_mut().cast(), &raw const properties)
+            createAudioSource(
+                ptr::from_ref(&*host).cast_mut().cast(),
+                &raw const properties
+            )
         );
         call!(self, enableAudioSourceSamplesAccess(reference, 1));
         Ok(Source { reference, host })
@@ -701,7 +766,10 @@ impl Controller {
     /// Deactivates a source nothing in the set needs; it stays for undo.
     fn retire_source(&mut self, media: ContentHash, source: Source) -> Result<(), String> {
         call!(self, enableAudioSourceSamplesAccess(source.reference, 0));
-        call!(self, deactivateAudioSourceForUndoHistory(source.reference, 1));
+        call!(
+            self,
+            deactivateAudioSourceForUndoHistory(source.reference, 1)
+        );
         // Its audio isn't needed until it comes back.
         *lock_audio(&source.host) = None;
         self.dead_sources.insert(media, source);
@@ -836,8 +904,8 @@ impl Drop for Controller {
 
 /// The assert function address ARA is configured with: a slot that holds
 /// nothing, so the plug-in's debug asserts stay quiet.
-struct ASSERT(std::cell::UnsafeCell<sys::ARAAssertFunction>);
+struct Assert(std::cell::UnsafeCell<sys::ARAAssertFunction>);
 
 // SAFETY: the slot is never written by the host, and the plug-in only reads
 // it, on the thread that initialized ARA.
-unsafe impl Sync for ASSERT {}
+unsafe impl Sync for Assert {}

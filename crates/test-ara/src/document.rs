@@ -14,9 +14,9 @@ use std::cell::UnsafeCell;
 use std::ffi::{CStr, c_char, c_void};
 use std::mem::size_of;
 use std::ptr;
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::Ordering::{AcqRel, Acquire, Relaxed, Release};
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, AtomicU32, AtomicU64, AtomicUsize};
+use std::sync::{Arc, Mutex};
 
 use bl_ara_sys as ara;
 
@@ -163,7 +163,9 @@ impl Renderer {
                 } else {
                     origin.round() as i64 + (frame - start)
                 };
-                let Ok(at) = usize::try_from(at) else { continue };
+                let Ok(at) = usize::try_from(at) else {
+                    continue;
+                };
                 for (channel, data) in cache.channels.iter().enumerate() {
                     if let (Some(sample), Some(out)) = (
                         data.get(at),
@@ -219,7 +221,9 @@ fn text(string: *const c_char) -> String {
         return String::new();
     }
     // SAFETY: the host's string, valid for the call.
-    unsafe { CStr::from_ptr(string) }.to_string_lossy().into_owned()
+    unsafe { CStr::from_ptr(string) }
+        .to_string_lossy()
+        .into_owned()
 }
 
 fn document<'a>(reference: ara::ARADocumentControllerRef) -> &'a mut Document {
@@ -745,7 +749,11 @@ unsafe extern "C" fn store_objects(
 ) -> ara::ARABool {
     let document = document(reference);
     let mut bytes = ARCHIVE_MAGIC.to_vec();
-    bytes.extend_from_slice(&u32::try_from(document.modifications.len()).unwrap_or(0).to_le_bytes());
+    bytes.extend_from_slice(
+        &u32::try_from(document.modifications.len())
+            .unwrap_or(0)
+            .to_le_bytes(),
+    );
     for &modification in &document.modifications {
         // SAFETY: a modification this module made.
         let modification = unsafe { &*modification };
@@ -863,6 +871,8 @@ pub static INTERFACE: Interface = Interface(ara::ARADocumentControllerInterface 
     getProcessingAlgorithmForAudioSource: Some(algorithm_for_source),
     requestProcessingAlgorithmForAudioSource: Some(request_algorithm),
     isLicensedForCapabilities: Some(licensed),
+    // SAFETY: every field is a number or an optional function pointer, for
+    // which all zeros is valid: no function.
     ..unsafe { std::mem::zeroed() }
 });
 
@@ -945,7 +955,10 @@ unsafe extern "C" fn add_editor_sequence(
     _: ara::ARARegionSequenceRef,
 ) {
     // SAFETY: a renderer this module made.
-    if unsafe { &*renderer.cast::<EditorRenderer>() }.active.load(Acquire) {
+    if unsafe { &*renderer.cast::<EditorRenderer>() }
+        .active
+        .load(Acquire)
+    {
         violation();
     }
 }
@@ -955,7 +968,10 @@ unsafe extern "C" fn remove_editor_sequence(
     _: ara::ARARegionSequenceRef,
 ) {
     // SAFETY: as above.
-    if unsafe { &*renderer.cast::<EditorRenderer>() }.active.load(Acquire) {
+    if unsafe { &*renderer.cast::<EditorRenderer>() }
+        .active
+        .load(Acquire)
+    {
         violation();
     }
 }
@@ -967,7 +983,10 @@ unsafe extern "C" fn notify_selection(
     // SAFETY: the host's selection, valid for the call.
     let selection = unsafe { selection.read_unaligned() };
     if let Ok(mut log) = SELECTIONS.lock() {
-        log.push((selection.playbackRegionRefsCount, selection.regionSequenceRefsCount));
+        log.push((
+            selection.playbackRegionRefsCount,
+            selection.regionSequenceRefsCount,
+        ));
     }
 }
 

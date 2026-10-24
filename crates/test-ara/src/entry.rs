@@ -10,9 +10,7 @@ use std::ptr;
 
 use bl_ara_sys as ara;
 use vst3::Steinberg::{FUnknown, FUnknownVtbl, TUID, kResultOk};
-use vst3::com_scrape_types::{
-    Class, Construct, Guid, Inherits, Interface, Unknown, Wrapper,
-};
+use vst3::com_scrape_types::{Class, Construct, Guid, Inherits, Interface, Unknown, Wrapper};
 
 /// Byte `at` (from the top) of a 32-bit word.
 const fn b(value: u32, at: u32) -> u8 {
@@ -66,7 +64,9 @@ unsafe fn query(this: *mut c_void, iid: &Guid) -> Option<*mut c_void> {
     let unknown = this.cast::<FUnknown>();
     let mut object = ptr::null_mut();
     // SAFETY: a live COM object asked for an interface by ID.
-    let result = unsafe { ((*(*unknown).vtbl).queryInterface)(unknown, iid.as_ptr().cast::<TUID>(), &mut object) };
+    let result = unsafe {
+        ((*(*unknown).vtbl).queryInterface)(unknown, iid.as_ptr().cast::<TUID>(), &mut object)
+    };
     (result == kResultOk).then_some(object)
 }
 
@@ -144,23 +144,26 @@ interface!(
 #[derive(Copy, Clone)]
 pub struct IPlugInEntryPointVtbl {
     pub base: FUnknownVtbl,
-    pub get_factory: unsafe extern "system" fn(this: *mut IPlugInEntryPoint) -> *const ara::ARAFactory,
-    pub bind_to_document_controller: unsafe extern "system" fn(
-        this: *mut IPlugInEntryPoint,
-        document: ara::ARADocumentControllerRef,
-    ) -> *const ara::ARAPlugInExtensionInstance,
+    pub get_factory:
+        unsafe extern "system" fn(this: *mut IPlugInEntryPoint) -> *const ara::ARAFactory,
+    pub bind_to_document_controller:
+        unsafe extern "system" fn(
+            this: *mut IPlugInEntryPoint,
+            document: ara::ARADocumentControllerRef,
+        ) -> *const ara::ARAPlugInExtensionInstance,
 }
 
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct IPlugInEntryPoint2Vtbl {
     pub base: FUnknownVtbl,
-    pub bind_to_document_controller_with_roles: unsafe extern "system" fn(
-        this: *mut IPlugInEntryPoint2,
-        document: ara::ARADocumentControllerRef,
-        known: ara::ARAPlugInInstanceRoleFlags,
-        assigned: ara::ARAPlugInInstanceRoleFlags,
-    ) -> *const ara::ARAPlugInExtensionInstance,
+    pub bind_to_document_controller_with_roles:
+        unsafe extern "system" fn(
+            this: *mut IPlugInEntryPoint2,
+            document: ara::ARADocumentControllerRef,
+            known: ara::ARAPlugInInstanceRoleFlags,
+            assigned: ara::ARAPlugInInstanceRoleFlags,
+        ) -> *const ara::ARAPlugInExtensionInstance,
 }
 
 pub trait IPlugInEntryPointTrait {
@@ -254,9 +257,8 @@ impl IPlugInEntryPoint2 {
             // SAFETY: as above.
             unsafe {
                 let header = this.cast::<u8>().offset(-OFFSET).cast();
-                (*W::data_from_header(header)).bind_to_document_controller_with_roles(
-                    document, known, assigned,
-                )
+                (*W::data_from_header(header))
+                    .bind_to_document_controller_with_roles(document, known, assigned)
             }
         }
 

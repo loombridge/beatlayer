@@ -953,12 +953,13 @@ impl Node for Vst3Node {
                 .map_or(ptr::null_mut(), |events| events.as_ptr()),
             processContext: &raw mut self.context,
         };
-        // SAFETY: the plug-in is active and gets a valid ProcessData with
-        // its buses, changes and events, which live through the call.
         let result = {
             // Spec: ara-hosting R7. An ARA plug-in's audio readers must not
             // be reached from inside this call.
             let _rendering = crate::ara::Rendering::enter();
+            // SAFETY: the plug-in is active and gets a valid ProcessData
+            // with its buses, changes and events, which live through the
+            // call.
             unsafe { active.processor.process(&raw mut data) }
         };
         self.steady = self.steady.wrapping_add(frames as u64);

@@ -249,7 +249,8 @@ impl State {
 
     /// Destroys the retired controllers no plug-in is bound to any more.
     pub(super) fn reap(&mut self, bound: &BTreeSet<u64>) {
-        self.retired.retain(|(generation, _)| bound.contains(generation));
+        self.retired
+            .retain(|(generation, _)| bound.contains(generation));
     }
 }
 
@@ -266,9 +267,8 @@ pub(super) fn bind(main: &mut Main, instance: &mut Instance) -> Result<(), Strin
     let controller = main.ara.controller(raw, &factory)?;
     // SAFETY: the entry point's own function, with the controller's
     // document, before the first activation as it asks.
-    let raw_extension = unsafe {
-        (entry.vtbl::<Entry2Vtbl>().bind)(entry.0, controller.document(), ROLES, ROLES)
-    };
+    let raw_extension =
+        unsafe { (entry.vtbl::<Entry2Vtbl>().bind)(entry.0, controller.document(), ROLES, ROLES) };
     // SAFETY: what the plug-in just returned, valid until the instance goes.
     let extension = unsafe { Extension::of(raw_extension) }
         .ok_or_else(|| "the plug-in didn't bind to the document".to_owned())?;
@@ -322,10 +322,17 @@ impl Vst3Host {
             let mut paths = Vec::new();
             for track in document.tracks() {
                 for device in track.devices_deep() {
-                    if let (DeviceKind::Plugin { format: bl_model::PluginFormat::Vst3, .. }, Some(plugin)) =
-                        (&device.kind, &device.plugin)
+                    if let (
+                        DeviceKind::Plugin {
+                            format: bl_model::PluginFormat::Vst3,
+                            ..
+                        },
+                        Some(plugin),
+                    ) = (&device.kind, &device.plugin)
                         && !plugin.path.is_empty()
-                        && !types.iter().any(|known| known.device_type.kind == device.kind)
+                        && !types
+                            .iter()
+                            .any(|known| known.device_type.kind == device.kind)
                     {
                         let path = std::path::PathBuf::from(&plugin.path);
                         if !paths.contains(&path) {
@@ -391,7 +398,8 @@ impl Vst3Host {
                 .find(|(kind, _)| *kind == device.kind)
                 .map(|(_, factory)| (factory.id.clone(), factory.support))
         };
-        let support = |device: &Device| hosts(device).map(|(_, support): (String, AraSupport)| support);
+        let support =
+            |device: &Device| hosts(device).map(|(_, support): (String, AraSupport)| support);
 
         // Which track each bound device renders.
         let mut renders: BTreeMap<DeviceId, TrackId> = BTreeMap::new();
@@ -429,7 +437,9 @@ impl Vst3Host {
             let (added, removed) = controller.membership(&model);
             let mut waiting = false;
             for instance in instances.values_mut() {
-                let Some(binding) = &instance.ara else { continue };
+                let Some(binding) = &instance.ara else {
+                    continue;
+                };
                 if binding.plugin != plugin {
                     continue;
                 }
@@ -469,7 +479,9 @@ impl Vst3Host {
             // Each idle instance holds the regions of its track.
             for instance in instances.values_mut() {
                 let idle = !busy(instance);
-                let Some(binding) = &mut instance.ara else { continue };
+                let Some(binding) = &mut instance.ara else {
+                    continue;
+                };
                 if binding.plugin != plugin {
                     continue;
                 }
@@ -486,7 +498,8 @@ impl Vst3Host {
                     .track
                     .and_then(|track| controller.sequence_of(track));
                 let sequence_key = sequence.map(|s| s as usize);
-                let settled = binding.regions.iter().eq(want.keys()) && binding.sequence == sequence_key;
+                let settled =
+                    binding.regions.iter().eq(want.keys()) && binding.sequence == sequence_key;
                 if settled {
                     binding.hold = false;
                     continue;
@@ -512,7 +525,9 @@ impl Vst3Host {
                 }
                 if binding.sequence != sequence_key {
                     if let Some(old) = binding.sequence {
-                        binding.extension.remove_sequence(old as sys::ARARegionSequenceRef);
+                        binding
+                            .extension
+                            .remove_sequence(old as sys::ARARegionSequenceRef);
                     }
                     if let Some(new) = sequence {
                         binding.extension.add_sequence(new);
@@ -578,7 +593,9 @@ impl Vst3Host {
         let mut guard = lock(&self.inner.main);
         let Ok(main) = guard.get() else { return };
         for instance in main.instances.values() {
-            let Some(binding) = &instance.ara else { continue };
+            let Some(binding) = &instance.ara else {
+                continue;
+            };
             let (Some(track), Some(view), Some(controller)) = (
                 binding.track,
                 binding.extension.view.as_ref(),
@@ -586,7 +603,8 @@ impl Vst3Host {
             ) else {
                 continue;
             };
-            let on_track = |clip: &ClipId| controller.regions_of(track).any(|((c, _), _)| c == *clip);
+            let on_track =
+                |clip: &ClipId| controller.regions_of(track).any(|((c, _), _)| c == *clip);
             let clips: Vec<ClipId> = clips.iter().copied().filter(on_track).collect();
             let tracks: Vec<TrackId> = tracks.iter().copied().filter(|t| *t == track).collect();
             // SAFETY: the view of the instance bound to this controller.

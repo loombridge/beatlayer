@@ -86,8 +86,8 @@ use bl_shell_spec::transport as transport_ids;
 use bl_shell_spec::transport::RecordingReport;
 use bl_shell_spec::tunings as tuning_ids;
 
-pub(crate) mod audio_editing;
 mod ara;
+pub(crate) mod audio_editing;
 mod audio_panel;
 pub mod autosample;
 mod bounce;

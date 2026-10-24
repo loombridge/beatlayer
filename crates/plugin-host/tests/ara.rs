@@ -22,8 +22,8 @@ use bl_core::time::{Frames, SampleRate, Ticks};
 use bl_engine::{Node, NodeConfig, NodeFactory, TransportInfo};
 use bl_media::SampleData;
 use bl_model::{
-    AudioData, Clip, ClipData, ClipId, Command, ContentHash, Device, DeviceId, Editor,
-    PluginState, TrackId, TrackKind, WarpMarker,
+    AudioData, Clip, ClipData, ClipId, Command, ContentHash, Device, DeviceId, Editor, PluginState,
+    TrackId, TrackKind, WarpMarker,
 };
 use bl_plugin_host::ara::{AraMedia, PlaybackRequest};
 use bl_plugin_host::vst3::{Vst3Host, plugin_state};
@@ -327,7 +327,10 @@ fn moving_and_trimming_a_clip_and_undoing_reach_the_plugin_as_edits(bundle: &Pat
         start: Ticks(2 * QUARTER),
     });
     let region = world.region();
-    assert_eq!((region.start_in_playback, region.duration_in_playback), (1.0, 1.0));
+    assert_eq!(
+        (region.start_in_playback, region.duration_in_playback),
+        (1.0, 1.0)
+    );
     let start = world.frame(2 * QUARTER);
     let heard = world.render(start - 10, start + 48_010, 512);
     assert!(heard == world.expected(start - 10, start + 48_010, start, 0, 48_000));
@@ -384,7 +387,11 @@ fn a_deleted_clip_comes_back_with_the_plugins_edits_by_undo(bundle: &Path) {
     assert!(status.regions.is_empty());
     // The track is the plug-in's with nothing on it: it renders silence.
     let heard = world.render(0, 100, 100);
-    assert!(heard.iter().all(|channel| channel.iter().all(|s| *s == 0.0)));
+    assert!(
+        heard
+            .iter()
+            .all(|channel| channel.iter().all(|s| *s == 0.0))
+    );
     world.editor.undo().unwrap();
     world.changed();
     let status = &world.host.ara_status()[0];
@@ -452,7 +459,10 @@ fn an_offline_render_borrows_the_plugin_and_renders_its_clips(bundle: &Path) {
             for (channel, block) in heard.channels.iter().enumerate() {
                 let file = audio.channel(channel).unwrap();
                 let from = usize::try_from(at - START).unwrap();
-                assert!(block == &file[from..from + 32], "frame {at}, channel {channel}");
+                assert!(
+                    block == &file[from..from + 32],
+                    "frame {at}, channel {channel}"
+                );
             }
         }
         drop(render);
@@ -487,11 +497,26 @@ macro_rules! suite {
             use super::*;
 
             run!($bundle, the_plugin_gets_a_document_of_the_set);
-            run!($bundle, the_plugin_reads_the_whole_clip_and_plays_it_at_its_place_at_any_block_size);
-            run!($bundle, moving_and_trimming_a_clip_and_undoing_reach_the_plugin_as_edits);
-            run!($bundle, a_deleted_clip_comes_back_with_the_plugins_edits_by_undo);
-            run!($bundle, the_plugins_archive_is_saved_with_the_set_and_restored_when_it_opens);
-            run!($bundle, an_offline_render_borrows_the_plugin_and_renders_its_clips);
+            run!(
+                $bundle,
+                the_plugin_reads_the_whole_clip_and_plays_it_at_its_place_at_any_block_size
+            );
+            run!(
+                $bundle,
+                moving_and_trimming_a_clip_and_undoing_reach_the_plugin_as_edits
+            );
+            run!(
+                $bundle,
+                a_deleted_clip_comes_back_with_the_plugins_edits_by_undo
+            );
+            run!(
+                $bundle,
+                the_plugins_archive_is_saved_with_the_set_and_restored_when_it_opens
+            );
+            run!(
+                $bundle,
+                an_offline_render_borrows_the_plugin_and_renders_its_clips
+            );
         }
     };
 }
@@ -559,7 +584,10 @@ fn a_modification_that_left_the_set_comes_back_with_what_the_plugin_kept() {
     let report = world.report();
     assert_eq!(report.modifications.len(), 1);
     assert_eq!(
-        (report.modifications[0].updates, report.modifications[0].active),
+        (
+            report.modifications[0].updates,
+            report.modifications[0].active
+        ),
         (updates, false)
     );
 
@@ -569,7 +597,10 @@ fn a_modification_that_left_the_set_comes_back_with_what_the_plugin_kept() {
     let report = world.report();
     assert_eq!(report.modifications.len(), 1);
     assert_eq!(
-        (report.modifications[0].updates, report.modifications[0].active),
+        (
+            report.modifications[0].updates,
+            report.modifications[0].active
+        ),
         (updates, true)
     );
 }
@@ -589,16 +620,25 @@ fn what_the_plugin_kept_is_in_its_archive() {
         (world.host.ara_archives(&[]), updates)
     };
     let (archives, updates) = archives;
-    assert_eq!(archives[0].archive_id, "io.loombridge.beatlayer.test-ara.archive.1");
+    assert_eq!(
+        archives[0].archive_id,
+        "io.loombridge.beatlayer.test-ara.archive.1"
+    );
     // Opened again: the set's clip is the one the archive names (the set
     // is built the same way, so it has the same ID), and the plug-in has its
     // edits back.
     let world = World::build(bl_test_ara::bundle(), 48_000, 2 * QUARTER, |_| {}, archives);
     let report = world.report();
-    assert_eq!(report.archive_id, "io.loombridge.beatlayer.test-ara.archive.1");
+    assert_eq!(
+        report.archive_id,
+        "io.loombridge.beatlayer.test-ara.archive.1"
+    );
     assert_eq!(report.modifications.len(), 1);
     assert_eq!(
-        (report.modifications[0].updates, report.modifications[0].restored),
+        (
+            report.modifications[0].updates,
+            report.modifications[0].restored
+        ),
         (updates, Some(updates))
     );
 }
@@ -645,7 +685,7 @@ fn a_warped_clip_is_played_stretched_to_its_warp_map() {
     // file's samples two to a frame, the second one to a frame.
     let (from, to) = (START - 10, START + 72_010);
     let heard = world.render(from, to, 512);
-    for channel in 0..2 {
+    for (channel, heard) in heard.iter().enumerate() {
         let file = world.audio.channel(channel).unwrap();
         for frame in from..to {
             let want = if (START..48_000).contains(&frame) {
@@ -656,7 +696,7 @@ fn a_warped_clip_is_played_stretched_to_its_warp_map() {
                 0.0
             };
             assert_eq!(
-                heard[channel][usize::try_from(frame - from).unwrap()],
+                heard[usize::try_from(frame - from).unwrap()],
                 want,
                 "frame {frame}, channel {channel}"
             );

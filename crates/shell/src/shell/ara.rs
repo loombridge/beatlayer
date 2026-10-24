@@ -26,11 +26,15 @@ impl Shell {
                 PlaybackRequest::CycleRange { start, duration } => {
                     let (from, to) = (ticks(start), ticks(start + duration));
                     let length = Ticks((to.get() - from.get()).max(1));
-                    (transport_ids::SET_LOOP, json!({ "start": from, "length": length }))
+                    (
+                        transport_ids::SET_LOOP,
+                        json!({ "start": from, "length": length }),
+                    )
                 }
-                PlaybackRequest::Cycle(enabled) => {
-                    (transport_ids::SET_LOOP_ENABLED, json!({ "enabled": enabled }))
-                }
+                PlaybackRequest::Cycle(enabled) => (
+                    transport_ids::SET_LOOP_ENABLED,
+                    json!({ "enabled": enabled }),
+                ),
             };
             // A request that can't run, such as a locate past the song, is
             // the plug-in's to live without.

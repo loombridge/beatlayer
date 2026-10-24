@@ -142,7 +142,10 @@ fn follows_the_set(bundle: &std::ffi::OsStr) {
 
     let loaded: PluginLoaded = serde_json::from_value(
         shell
-            .run(ids::LOAD, json!({ "path": bundle.to_string_lossy(), "track": track }))
+            .run(
+                ids::LOAD,
+                json!({ "path": bundle.to_string_lossy(), "track": track }),
+            )
             .unwrap(),
     )
     .unwrap();
@@ -156,31 +159,48 @@ fn follows_the_set(bundle: &std::ffi::OsStr) {
     assert_eq!(plugin.regions[0].clip, clip);
     assert_eq!(plugin.regions[0].start, 0.5);
     assert_eq!(plugin.audio_thread_reads, 0);
-    assert!(plugin.frames_read >= 48_000, "the plug-in read the whole file");
+    assert!(
+        plugin.frames_read >= 48_000,
+        "the plug-in read the whole file"
+    );
     // `plugin.info` says what the device is.
     let ara = info(&mut shell, device).ara.expect("an ARA plug-in");
     assert_eq!((ara.track, ara.regions), (Some(track), 1));
 
     // Moved, trimmed and undone: edits to the plug-in's document.
     shell
-        .run("clip.move", json!({ "clip": clip, "track": track, "start": 2 * QUARTER }))
+        .run(
+            "clip.move",
+            json!({ "clip": clip, "track": track, "start": 2 * QUARTER }),
+        )
         .unwrap();
     let state = wait(&mut shell, |s| s.plugins[0].regions[0].start == 1.0);
     assert_eq!(state.plugins[0].modifications, 1);
     shell
-        .run("clip.trim_start", json!({ "clip": clip, "start": 2 * QUARTER + QUARTER / 2 }))
+        .run(
+            "clip.trim_start",
+            json!({ "clip": clip, "start": 2 * QUARTER + QUARTER / 2 }),
+        )
         .unwrap();
-    let state = wait(&mut shell, |s| s.plugins[0].regions[0].start_in_audio == 0.25);
+    let state = wait(&mut shell, |s| {
+        s.plugins[0].regions[0].start_in_audio == 0.25
+    });
     assert_eq!(state.plugins[0].regions[0].duration, 0.75);
     shell.run("edit.undo", json!({})).unwrap();
     shell.run("edit.undo", json!({})).unwrap();
     let state = wait(&mut shell, |s| s.plugins[0].regions[0].start == 0.5);
     assert_eq!(state.plugins[0].sources, 1);
-    assert_eq!(state.plugins[0].readers_opened, 1, "no object was made again");
+    assert_eq!(
+        state.plugins[0].readers_opened, 1,
+        "no object was made again"
+    );
 
     // Saved, and opened by another shell: the archive comes back.
     let saved = shell
-        .run("set.save_as", json!({ "path": scratch.path("Song.blset").display().to_string() }))
+        .run(
+            "set.save_as",
+            json!({ "path": scratch.path("Song.blset").display().to_string() }),
+        )
         .unwrap();
     let path = saved["path"].as_str().unwrap().to_owned();
     drop(shell);
@@ -191,4 +211,87 @@ fn follows_the_set(bundle: &std::ffi::OsStr) {
     });
     assert_eq!(state.plugins[0].restored.as_deref(), Some("restored"));
     assert!(state.plugins[0].frames_read >= 48_000);
+}
+
+// Spec: ara-hosting R9
+#[test]
+fn an_export_has_the_plugins_clips_once_as_the_clip_player_would_play_them() {
+    use std::sync::atomic::AtomicBool;
+
+    use bl_shell::export::{self, Length, Render};
+
+    let scratch = Scratch::new();
+    let file = scratch.path("Take.wav");
+    wav(&file);
+    let mut shell = new_shell(&scratch);
+    let track: TrackId = shell
+        .editor()
+        .document()
+        .tracks()
+        .find(|t| t.kind() == TrackKind::Audio)
+        .map(bl_model::Track::id)
+        .unwrap();
+    shell
+        .run(
+            "browser.add_to_arrangement",
+            json!({ "paths": [file.display().to_string()], "track": track, "at": QUARTER }),
+        )
+        .unwrap();
+    let loaded: PluginLoaded = serde_json::from_value(
+        shell
+            .run(
+                ids::LOAD,
+                json!({ "path": bl_test_ara::bundle().to_string_lossy(), "track": track }),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    wait(&mut shell, |state| {
+        state.plugins.first().is_some_and(|p| p.regions.len() == 1)
+    });
+
+    let render = |shell: &Shell| -> Vec<f32> {
+        let mut samples = Vec::new();
+        export::render(
+            shell.editor().document(),
+            shell.media_store(),
+            shell.plugin_hosts(),
+            &Render {
+                start: bl_core::time::Ticks::ZERO,
+                length: Length::Frames(80_000),
+                sample_rate: 48_000,
+                engine_rate: 48_000,
+                block: 512,
+            },
+            60.0,
+            &AtomicBool::new(false),
+            &mut |_| {},
+            &mut |block| {
+                samples.extend_from_slice(block);
+                Ok(())
+            },
+            None,
+        )
+        .unwrap();
+        samples
+    };
+    let from_the_plugin = render(&shell);
+    // With the plug-in switched off, the clip player plays the clip.
+    shell
+        .run(
+            "device.set_enabled",
+            json!({ "device": loaded.device, "enabled": false }),
+        )
+        .unwrap();
+    let from_the_player = render(&shell);
+    // Past the clip's 4 ms edge fades, which the plug-in doesn't have, they
+    // are the same samples, and the clip is heard once.
+    let (from, to) = ((24_000 + 500) * 2, (24_000 + 48_000 - 500) * 2);
+    assert!(from_the_player[from..to].iter().any(|s| s.abs() > 0.01));
+    assert!(
+        from_the_plugin[from..to] == from_the_player[from..to],
+        "the plug-in's clip and the player's differ"
+    );
+    // And nothing before the clip.
+    assert!(from_the_plugin[..24_000 * 2 - 2].iter().all(|s| *s == 0.0));
 }

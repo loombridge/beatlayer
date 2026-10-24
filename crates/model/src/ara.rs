@@ -53,10 +53,10 @@ fn plain(audio: &AudioData) -> bool {
 /// switched-on device of the track's own chain that `support` names. Only an
 /// audio track that isn't frozen has one.
 #[must_use]
-pub fn ara_device<'a>(
-    track: &'a Track,
+pub fn ara_device(
+    track: &Track,
     support: impl Fn(&Device) -> Option<AraSupport>,
-) -> Option<(&'a Device, AraSupport)> {
+) -> Option<(&Device, AraSupport)> {
     if track.kind() != TrackKind::Audio || track.is_frozen() {
         return None;
     }

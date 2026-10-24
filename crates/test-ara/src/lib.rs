@@ -43,7 +43,9 @@ use vst3::Steinberg::*;
 use vst3::{Class, ComRef, ComWrapper, uid};
 
 use document::Extension;
-use entry::{IPlugInEntryPoint, IPlugInEntryPoint2, IPlugInEntryPoint2Trait, IPlugInEntryPointTrait};
+use entry::{
+    IPlugInEntryPoint, IPlugInEntryPoint2, IPlugInEntryPoint2Trait, IPlugInEntryPointTrait,
+};
 
 /// The plug-in's name, as its class carries it.
 pub const PLUGIN_NAME: &str = "Test ARA Player";
@@ -428,7 +430,10 @@ impl IAudioProcessorTrait for Processor {
         let Some(context) = (unsafe { data.processContext.as_ref() }) else {
             return kResultOk;
         };
-        if context.state & ProcessContext_::StatesAndFlags_::kPlaying as u32 == 0 {
+        // The bindings' default enum type is signed on Windows and unsigned
+        // elsewhere; the field is always `uint32`.
+        let playing = i64::from(ProcessContext_::StatesAndFlags_::kPlaying);
+        if i64::from(context.state) & playing == 0 {
             return kResultOk;
         }
         let rate = f64::from_bits(self.rate.load(Relaxed));

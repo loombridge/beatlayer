@@ -17,7 +17,7 @@ use std::sync::atomic::Ordering::Relaxed;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use bl_ara_sys as sys;
-use bl_core::time::{Ticks, TempoMap, TempoSegment, TICKS_PER_QUARTER, TimeSignatureMap};
+use bl_core::time::{TICKS_PER_QUARTER, TempoMap, TempoSegment, Ticks, TimeSignatureMap};
 use bl_media::SampleData;
 
 thread_local! {
@@ -302,16 +302,16 @@ unsafe extern "C" fn read_audio_samples(
     let Ok(count) = usize::try_from(count) else {
         return 0;
     };
-    host.stats
-        .frames_read
-        .fetch_add(count as u64, Relaxed);
+    host.stats.frames_read.fetch_add(count as u64, Relaxed);
     for (channel, data) in reader.audio.channels().enumerate() {
         // SAFETY: the plug-in gives a buffer of `count` samples for each of
         // the source's channels.
         let out = unsafe { *buffers.add(channel) };
         // The part of the request inside the file; the rest is silence.
         let from = usize::try_from(position.max(0)).unwrap_or(usize::MAX);
-        let skipped = usize::try_from(-position.min(0)).unwrap_or(usize::MAX).min(count);
+        let skipped = usize::try_from(-position.min(0))
+            .unwrap_or(usize::MAX)
+            .min(count);
         let have = data.get(from.min(data.len())..).unwrap_or_default();
         let copied = have.len().min(count - skipped);
         if reader.wide {
@@ -357,7 +357,9 @@ unsafe extern "C" fn archive_size(
 ) -> sys::ARASize {
     // SAFETY: the controller's reference.
     let host = unsafe { host(controller) };
-    lock(&host.archive).as_ref().map_or(0, |(bytes, _)| bytes.len())
+    lock(&host.archive)
+        .as_ref()
+        .map_or(0, |(bytes, _)| bytes.len())
 }
 
 unsafe extern "C" fn read_archive(
@@ -405,7 +407,11 @@ unsafe extern "C" fn write_archive(
     1
 }
 
-unsafe extern "C" fn archiving_progress(_controller: sys::ARAArchivingControllerHostRef, _value: f32) {}
+unsafe extern "C" fn archiving_progress(
+    _controller: sys::ARAArchivingControllerHostRef,
+    _value: f32,
+) {
+}
 
 unsafe extern "C" fn archive_id(
     controller: sys::ARAArchivingControllerHostRef,
@@ -521,7 +527,9 @@ unsafe extern "C" fn reader_event(
     };
     // SAFETY: made by `create_context_reader`, not yet destroyed.
     match unsafe { &*reader.cast::<ContentReader>() } {
-        ContentReader::Tempo(entries) => entries.get(index).map(|entry| std::ptr::from_ref(entry).cast()),
+        ContentReader::Tempo(entries) => entries
+            .get(index)
+            .map(|entry| std::ptr::from_ref(entry).cast()),
         ContentReader::Bars(bars) => bars.get(index).map(|bar| std::ptr::from_ref(bar).cast()),
     }
     .unwrap_or(std::ptr::null())
@@ -553,7 +561,10 @@ unsafe extern "C" fn analysis_progress(
     _value: f32,
 ) {
     // SAFETY: the controller's reference.
-    unsafe { host(controller) }.stats.model_notifications.fetch_add(1, Relaxed);
+    unsafe { host(controller) }
+        .stats
+        .model_notifications
+        .fetch_add(1, Relaxed);
 }
 
 unsafe extern "C" fn source_content_changed(
@@ -563,7 +574,10 @@ unsafe extern "C" fn source_content_changed(
     _flags: sys::ARAContentUpdateFlags,
 ) {
     // SAFETY: the controller's reference.
-    unsafe { host(controller) }.stats.model_notifications.fetch_add(1, Relaxed);
+    unsafe { host(controller) }
+        .stats
+        .model_notifications
+        .fetch_add(1, Relaxed);
 }
 
 unsafe extern "C" fn modification_content_changed(
@@ -573,7 +587,10 @@ unsafe extern "C" fn modification_content_changed(
     _flags: sys::ARAContentUpdateFlags,
 ) {
     // SAFETY: the controller's reference.
-    unsafe { host(controller) }.stats.model_notifications.fetch_add(1, Relaxed);
+    unsafe { host(controller) }
+        .stats
+        .model_notifications
+        .fetch_add(1, Relaxed);
 }
 
 unsafe extern "C" fn region_content_changed(
@@ -583,7 +600,10 @@ unsafe extern "C" fn region_content_changed(
     _flags: sys::ARAContentUpdateFlags,
 ) {
     // SAFETY: the controller's reference.
-    unsafe { host(controller) }.stats.model_notifications.fetch_add(1, Relaxed);
+    unsafe { host(controller) }
+        .stats
+        .model_notifications
+        .fetch_add(1, Relaxed);
 }
 
 // --- Playback -------------------------------------------------------------

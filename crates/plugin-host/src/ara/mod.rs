@@ -25,10 +25,10 @@ use bl_media::SampleData;
 use bl_model::{ContentHash, DeviceId, TrackId};
 
 pub(crate) use controller::Controller;
-pub(crate) use controller::describe;
 pub use controller::Factory;
-pub(crate) use host::Rendering;
+pub(crate) use controller::describe;
 pub use host::PlaybackRequest;
+pub(crate) use host::Rendering;
 pub use model::Region as AraRegion;
 
 /// Where the audio of the set's files comes from: the media store, or in
@@ -117,7 +117,10 @@ impl EditorView {
 /// An instance's ARA extension: the renderers and the editor view the
 /// plug-in made when it was bound to a document controller.
 pub(crate) struct Extension {
-    playback: Option<(sys::ARAPlaybackRendererRef, sys::ARAPlaybackRendererInterface)>,
+    playback: Option<(
+        sys::ARAPlaybackRendererRef,
+        sys::ARAPlaybackRendererInterface,
+    )>,
     editor: Option<(sys::ARAEditorRendererRef, sys::ARAEditorRendererInterface)>,
     pub(crate) view: Option<EditorView>,
 }

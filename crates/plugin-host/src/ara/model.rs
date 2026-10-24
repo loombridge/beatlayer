@@ -8,7 +8,7 @@
 
 use std::collections::BTreeMap;
 
-use bl_core::time::{TICKS_PER_QUARTER, TempoMap, TempoSegment, TimeSignatureMap, Ticks};
+use bl_core::time::{TICKS_PER_QUARTER, TempoMap, TempoSegment, Ticks, TimeSignatureMap};
 use bl_model::{
     AraSupport, AudioData, Clip, ClipData, ClipId, ContentHash, Device, Document, TrackId,
     ara_device, ara_renders,
@@ -141,13 +141,10 @@ impl Model {
                 if regions.is_empty() {
                     continue;
                 }
-                model
-                    .sources
-                    .entry(audio.media)
-                    .or_insert_with(|| Source {
-                        media: audio.media,
-                        name: media_name(audio.media),
-                    });
+                model.sources.entry(audio.media).or_insert_with(|| Source {
+                    media: audio.media,
+                    name: media_name(audio.media),
+                });
                 model.modifications.insert(
                     clip.id,
                     Modification {
@@ -221,7 +218,10 @@ fn warped(clip: &Clip, audio: &AudioData, tempo: &TempoMap, file: f64) -> Vec<Pi
         return Vec::new();
     };
     let first = audio.start;
-    let last = audio.end.unwrap_or_else(|| map.time_to_beat(file)).min(map.time_to_beat(file));
+    let last = audio
+        .end
+        .unwrap_or_else(|| map.time_to_beat(file))
+        .min(map.time_to_beat(file));
     let beats = (last - first).floor();
     if beats < 1.0 {
         return Vec::new();
@@ -241,7 +241,10 @@ fn warped(clip: &Clip, audio: &AudioData, tempo: &TempoMap, file: f64) -> Vec<Pi
             breaks.push(start);
         }
         if let TempoSegment::Ramp { .. } = segment {
-            let end = segments.get(at + 1).map_or(to, |next| next.start().get()).min(to);
+            let end = segments
+                .get(at + 1)
+                .map_or(to, |next| next.start().get())
+                .min(to);
             let mut tick = start.max(from) + TICKS_PER_QUARTER;
             while tick < end && breaks.len() < MAX_PIECES {
                 breaks.push(tick);
@@ -330,9 +333,12 @@ mod tests {
 
         fn model(&self, plugin: &str, stretch: bool) -> Model {
             let hosts = |device: &Device| match &device.kind {
-                DeviceKind::Plugin { plugin_id, .. } => {
-                    Some((plugin_id.clone(), AraSupport { timestretch: stretch }))
-                }
+                DeviceKind::Plugin { plugin_id, .. } => Some((
+                    plugin_id.clone(),
+                    AraSupport {
+                        timestretch: stretch,
+                    },
+                )),
                 _ => None,
             };
             Model::of(self.editor.document(), plugin, &hosts, &mut |_| Some(2.0))
@@ -380,7 +386,10 @@ mod tests {
         // The clip is longer than the audio between the markers: the audio
         // ends the region.
         assert_eq!(region.duration_in_modification, 1.0);
-        assert_eq!((region.start_in_playback, region.duration_in_playback), (0.5, 1.0));
+        assert_eq!(
+            (region.start_in_playback, region.duration_in_playback),
+            (0.5, 1.0)
+        );
         assert_eq!(region.flags, NO_CHANGES);
     }
 
@@ -391,7 +400,10 @@ mod tests {
         let clip = set.clip(0, QUARTER, AudioData::new(FILE));
         let model = set.model("A", false);
         let region = &model.regions[&(clip, 0)];
-        assert_eq!((region.duration_in_modification, region.duration_in_playback), (0.5, 0.5));
+        assert_eq!(
+            (region.duration_in_modification, region.duration_in_playback),
+            (0.5, 0.5)
+        );
     }
 
     // Spec: ara-hosting R4
@@ -404,14 +416,20 @@ mod tests {
         looped.looping = true;
         let mut warped = AudioData::new(FILE);
         warped.warp = true;
-        warped.warp_markers = vec![WarpMarker { time: 0.0, beat: Ticks(0) }];
+        warped.warp_markers = vec![WarpMarker {
+            time: 0.0,
+            beat: Ticks(0),
+        }];
         warped.tempo = Some(120.0);
         let plain = set.clip(0, QUARTER, AudioData::new(FILE));
         for audio in [quiet, looped, warped] {
             set.clip(2 * QUARTER, QUARTER, audio);
         }
         let model = set.model("A", false);
-        assert_eq!(model.regions.keys().copied().collect::<Vec<_>>(), vec![(plain, 0)]);
+        assert_eq!(
+            model.regions.keys().copied().collect::<Vec<_>>(),
+            vec![(plain, 0)]
+        );
         assert_eq!(model.modifications.len(), 1);
     }
 
@@ -442,8 +460,14 @@ mod tests {
         let mut audio = AudioData::new(FILE);
         audio.warp = true;
         audio.warp_markers = vec![
-            WarpMarker { time: 0.0, beat: Ticks(0) },
-            WarpMarker { time: 1.0, beat: Ticks(QUARTER) },
+            WarpMarker {
+                time: 0.0,
+                beat: Ticks(0),
+            },
+            WarpMarker {
+                time: 1.0,
+                beat: Ticks(QUARTER),
+            },
         ];
         audio.tempo = Some(120.0);
         audio.start = 0.0;
@@ -464,7 +488,10 @@ mod tests {
             })
             .collect();
         // The file is two seconds long, so it ends on beat 3.
-        assert_eq!(pieces, vec![(0, 0.0, 1.0, 0.0, 0.5), (1, 1.0, 1.0, 0.5, 1.0)]);
+        assert_eq!(
+            pieces,
+            vec![(0, 0.0, 1.0, 0.0, 0.5), (1, 1.0, 1.0, 0.5, 1.0)]
+        );
         assert!(model.regions.values().all(|r| r.flags == TIMESTRETCH));
         assert!(model.regions.keys().all(|(c, _)| *c == clip));
     }

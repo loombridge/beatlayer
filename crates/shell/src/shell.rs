@@ -101,6 +101,7 @@ use bl_shell_spec::search as search_ids;
 use bl_shell_spec::session_launch as session_launch_ids;
 use bl_shell_spec::session_record as session_record_ids;
 use bl_shell_spec::session_view as session_ids;
+use bl_shell_spec::set_exchange as set_exchange_ids;
 use bl_shell_spec::settings::{
     AgentsPageSettings, AudioPageSettings, DisplayInputSettings, FileFolderSettings, LaunchPrefs,
     LibrarySettings, STATE as SETTINGS_STATE, SettingsState, ThemeColorsSettings,
@@ -133,6 +134,7 @@ mod save_history;
 pub use sample_keys::TransientList;
 mod search;
 mod session_recording;
+mod set_exchange;
 mod slice;
 mod stems;
 mod step_input;
@@ -4193,18 +4195,13 @@ impl Shell {
             .max_by_key(|track| order.iter().position(|t| t == track).unwrap_or(0))
     }
 
-    /// Pastes the tracks on the clipboard, straight after the track to
-    /// paste after, at its level and inside its group when it's in one, or
-    /// after the last track when none is selected (R14).
-    fn paste_tracks(
-        &mut self,
-        id: &str,
-        copied: &crate::tracks::CopiedTracks,
-        after: Option<TrackId>,
-    ) -> Result<Vec<TrackId>, ShellError> {
+    /// Where tracks added after `after` go: straight after it, at its level
+    /// and inside its group when it's in one, or after the last track when
+    /// there is none (the track context menu spec, R14).
+    pub(crate) fn place_after(&self, after: Option<TrackId>) -> crate::tracks::Place {
         let doc = self.editor.document();
         let returns: Vec<TrackId> = doc.returns().collect();
-        let place = match after {
+        match after {
             Some(track) => {
                 let parent = doc.parent(track);
                 if doc
@@ -4245,7 +4242,19 @@ impl Shell {
                 index: doc.top_level().len(),
                 returns: returns.len(),
             },
-        };
+        }
+    }
+
+    /// Pastes the tracks on the clipboard, straight after the track to
+    /// paste after, at its level and inside its group when it's in one, or
+    /// after the last track when none is selected (R14).
+    fn paste_tracks(
+        &mut self,
+        id: &str,
+        copied: &crate::tracks::CopiedTracks,
+        after: Option<TrackId>,
+    ) -> Result<Vec<TrackId>, ShellError> {
+        let place = self.place_after(after);
         // Tracks from another set: their files join this set's media table
         // (R15), and the IDs they name mean nothing here (R15; the set
         // exchange spec, R6).
@@ -4914,6 +4923,14 @@ impl Shell {
     #[doc(hidden)]
     pub fn wait_for_browser_index(&mut self, timeout: std::time::Duration) -> bool {
         self.browser_view.wait_for_index(timeout)
+    }
+
+    /// Waits for the sets opened in the browser to be read, for tests and
+    /// tools (set exchange R1).
+    #[doc(hidden)]
+    pub fn wait_for_browser_sets(&mut self) {
+        self.browser_view.wait_for_sets();
+        self.touch();
     }
 
     /// What Collect Files on Export is set to (Settings ▸ Library).
@@ -9400,6 +9417,31 @@ impl Shell {
             return Ok(loaded);
         }
         if id == browser_ids::LOAD_SELECTED
+            && let Some((set, rows)) = self.browser_view.selected_set_rows()
+        {
+            // Spec: set-exchange R4, R8. Enter on tracks of an opened set
+            // adds them after the selected track, and on a Devices row adds
+            // its chain onto the selected track.
+            Self::args::<NoArgs>(id, args)?;
+            let set = set.to_string_lossy().into_owned();
+            let args = match rows.as_slice() {
+                [crate::set_exchange::Row::Devices(track)] => {
+                    json!({ "path": set, "devices": track })
+                }
+                rows => {
+                    let tracks: Vec<TrackId> = rows
+                        .iter()
+                        .filter_map(|row| match row {
+                            crate::set_exchange::Row::Track(track) => Some(*track),
+                            _ => None,
+                        })
+                        .collect();
+                    json!({ "path": set, "tracks": tracks })
+                }
+            };
+            return self.run(set_exchange_ids::IMPORT, args);
+        }
+        if id == browser_ids::LOAD_SELECTED
             && self.main_view == MainView::Session
             && !self.browser_view.selected_clip_files().is_empty()
         {
@@ -9570,6 +9612,13 @@ impl Shell {
             // Spec: file-management R10 to R17. The File Manager's own
             // commands.
             let result = self.run_file_manager(id, args);
+            self.touch();
+            return result;
+        }
+        if set_exchange_ids::handles(id) {
+            // Spec: set-exchange R3 to R9, R11 to R15. Merging sets and
+            // saving tracks and Session clips as a set.
+            let result = self.run_set_exchange(id, args);
             self.touch();
             return result;
         }

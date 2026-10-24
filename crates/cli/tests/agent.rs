@@ -6016,6 +6016,127 @@ fn an_agent_saves_a_clip_file_places_it_and_reads_both_back() {
     assert!(client.into_transport().finish().unwrap().success());
 }
 
+/// An agent saves tracks and Session clips as a set, opens it in the browser,
+/// merges its tracks and its chain into the open set, and reads it all back,
+/// by command ID (set exchange R15).
+#[test]
+fn an_agent_saves_tracks_as_a_set_merges_it_and_reads_it_back() {
+    // Spec: set-exchange R1, R11, R12, R15.
+    let dir = TempDir::new("set-exchange");
+    let library = dir.0.join("Library");
+    bl_shell::browser::places::create_user_library(&library).unwrap();
+    let mut client = Client::new(InProcess::new(Agent::headless(true), Shell::headless()));
+    client.initialize("set-agent").unwrap();
+    let run = |client: &mut Client<InProcess>, command: &str, args: Value| {
+        let out = call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": command, "args": args }] }),
+        );
+        assert_eq!(out["ran"], 1, "{out}");
+        out["results"][0]["result"].clone()
+    };
+    run(
+        &mut client,
+        "settings.set_user_library",
+        json!({ "path": library }),
+    );
+    let tracks = default_tracks(&mut client);
+    let folder = library.join("Songs");
+    std::fs::create_dir_all(&folder).unwrap();
+
+    // Two tracks saved as a set.
+    let saved = run(
+        &mut client,
+        "set.export_tracks",
+        json!({ "tracks": [tracks[2], tracks[3]], "folder": folder, "name": "Duo" }),
+    );
+    let file = saved["path"].as_str().unwrap().to_owned();
+    assert!(
+        Path::new(&file).ends_with("Duo Project/Duo.blset"),
+        "{saved}"
+    );
+    assert_eq!(saved["name"], "Duo");
+
+    // The new row reads back in the browser, selected with its name open.
+    let state = run(&mut client, "browser.state", json!({}));
+    assert_eq!(state["renaming"], file, "{state}");
+    let row = state["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["path"] == file)
+        .unwrap_or_else(|| panic!("the new row in {state}"));
+    assert_eq!(row["kind"], "set");
+
+    // The set opens like a folder, to its tracks, returns and Main.
+    run(&mut client, "browser.open_folder", json!({ "path": file }));
+    client.transport().shell.wait_for_browser_sets();
+    let state = run(&mut client, "browser.state", json!({}));
+    let rows = state["rows"].as_array().unwrap();
+    let at = rows.iter().position(|row| row["path"] == file).unwrap();
+    let depth = rows[at]["depth"].as_u64().unwrap();
+    let kinds: Vec<(&str, &str)> = rows[at + 1..]
+        .iter()
+        .take_while(|row| row["depth"].as_u64().unwrap() > depth)
+        .map(|row| (row["kind"].as_str().unwrap(), row["name"].as_str().unwrap()))
+        .collect();
+    assert_eq!(
+        kinds,
+        [
+            ("track", "3 Audio"),
+            ("track", "4 Audio"),
+            ("return", "A Return"),
+            ("return", "B Return"),
+            ("main", "Main"),
+        ]
+    );
+
+    // Merging it adds the two tracks, which the song reads back.
+    let before = tracks.len();
+    let merged = run(&mut client, "set.import", json!({ "path": file }));
+    let added: Vec<u64> = merged["tracks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t.as_u64().unwrap())
+        .collect();
+    assert_eq!(added.len(), 2, "{merged}");
+    let after = default_tracks(&mut client);
+    assert_eq!(after.len(), before + 2);
+    assert!(added.iter().all(|t| after.contains(t)));
+
+    // Session clips saved as a set, named after the open set.
+    let (track, scenes) = {
+        let doc = client.transport().shell.editor().document();
+        let scenes: Vec<u64> = doc.scenes().map(|scene| scene.id.0.get()).take(2).collect();
+        (tracks[0], scenes)
+    };
+    for scene in &scenes {
+        run(
+            &mut client,
+            "session.insert_empty_midi_clip",
+            json!({ "track": track, "scene": scene }),
+        );
+    }
+    let clips: Vec<u64> = {
+        let doc = client.transport().shell.editor().document();
+        let held = doc
+            .track(bl_model::TrackId(bl_core::id::Id::new(track).unwrap()))
+            .unwrap();
+        held.slots().map(|(_, clip)| clip.id.0.get()).collect()
+    };
+    assert_eq!(clips.len(), 2);
+    let saved = run(
+        &mut client,
+        "set.export_clips",
+        json!({ "clips": clips, "folder": folder }),
+    );
+    assert_eq!(saved["name"], "Untitled Clips", "{saved}");
+    let state = run(&mut client, "browser.state", json!({}));
+    assert_eq!(state["renaming"], saved["path"], "{state}");
+}
+
 // Spec: mixer-view R21. An agent switches the return tracks scrolling with
 // the tracks, and reads the switch back in the mixers' state.
 #[test]

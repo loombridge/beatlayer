@@ -242,8 +242,7 @@ pub fn decode_clip(
     rate: u32,
     search: &[PathBuf],
 ) -> Result<(SampleData, Box<bl_model::AudioData>), String> {
-    let file = bl_project::clip_file::ClipFile::load(path)
-        .map_err(|e| format!("{}: {e}", path.display()))?;
+    let file = crate::set_exchange::read_clip_file(path)?;
     let bl_model::ClipData::Audio(audio) = file.clip.data else {
         return Err(
             "this clip file holds a MIDI clip, and MIDI clips don't preview yet".to_owned(),

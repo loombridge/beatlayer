@@ -6,7 +6,7 @@ use egui::Key;
 
 pub(crate) fn entries() -> Vec<(&'static str, Path)> {
     use Path::Exception;
-    use Reason::{Equivalent, Live, Query};
+    use Reason::{Equivalent, Gap, Live, Query};
     vec![
         // The browser's Filter View, labels and columns (browser-tags R18
         // to R28).
@@ -127,6 +127,27 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
         ("search.state", Exception(Query)),
         ("search.commands", Exception(Query)),
         ("search.tracks", Exception(Query)),
+        (
+            "set.import",
+            Exception(Equivalent(
+                "Enter on a track or a Devices row of a set opened in the browser \
+                 (`browser.load_selected`)",
+            )),
+        ),
+        (
+            "set.export_tracks",
+            Exception(Gap(
+                "a drag of track title bars into the browser has no keyboard form yet (set \
+                 exchange R11)",
+            )),
+        ),
+        (
+            "set.export_clips",
+            Exception(Gap(
+                "a drag of Session clips into the browser has no keyboard form yet (set \
+                 exchange R12)",
+            )),
+        ),
         (
             "browser.rename_file",
             Exception(Equivalent(

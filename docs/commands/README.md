@@ -9793,6 +9793,48 @@ What `plugin.export_list` returns: the file it wrote.
 
 </details>
 
+### `ExportedSet`
+
+What `set.export_tracks` and `set.export_clips` return.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | The new set file's path. |
+| `name` | string | yes | Its name, without the extension. |
+| `copied` | integer, at least 0 | yes | How many audio files were copied into its project folder. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `set.export_tracks` and `set.export_clips` return.",
+  "properties": {
+    "copied": {
+      "description": "How many audio files were copied into its project folder.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "name": {
+      "description": "Its name, without the extension.",
+      "type": "string"
+    },
+    "path": {
+      "description": "The new set file's path.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "path",
+    "name",
+    "copied"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `Expression`
 
 Which of a note's three expression envelopes.
@@ -12362,6 +12404,62 @@ One thing the import left out or changed.
 
 </details>
 
+### `Imported`
+
+What `set.import` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `tracks` | array of [`TrackId`](#trackid) | yes | The tracks added, in display order: the new track a chain went on, or the track it was added to. |
+| `devices` | array of [`DeviceId`](#deviceid) | yes | The devices added, in the order of the chain, for a chain. |
+| `scenes_added` | integer, at least 0 | yes | How many empty scenes were added at the end of the set so the Session clips keep their places. |
+| `missing_files` | integer, at least 0 | yes | How many audio files the added tracks play that couldn't be found. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `set.import` returns.",
+  "properties": {
+    "devices": {
+      "description": "The devices added, in the order of the chain, for a chain.",
+      "items": {
+        "$ref": "#/$defs/DeviceId"
+      },
+      "type": "array"
+    },
+    "missing_files": {
+      "description": "How many audio files the added tracks play that couldn't be found.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "scenes_added": {
+      "description": "How many empty scenes were added at the end of the set so the Session clips keep their places.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "tracks": {
+      "description": "The tracks added, in display order: the new track a chain went on, or the track it was added to.",
+      "items": {
+        "$ref": "#/$defs/TrackId"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "tracks",
+    "devices",
+    "scenes_added",
+    "missing_files"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `ImportedClip`
 
 A clip `midi.import_file` placed.
@@ -12806,6 +12904,13 @@ One of:
 - `"plugin"`: A plug-in the scanner found (WP-2.9).
 - `"device"`: One of Beatlayer's own devices, listed under a device label (the Modulators label, WP-5.10); its path is the device type's ID.
 - `"clip"`: A clip file (WP-6.34); the row's `clip_kind` says whether it holds an audio clip or a MIDI clip.
+- `"track"`: A track of a set opened in the browser (WP-6.35); its path is the set's, `#t` and the track's ID.
+- `"group"`: A group track of an opened set, holding its tracks.
+- `"return"`: A return track of an opened set.
+- `"main"`: The Main track of an opened set.
+- `"session_clip"`: A Session clip of an opened set (`#c` and the clip's ID): it behaves as a clip file does, and the row's `clip_kind` says whether it holds an audio clip or a MIDI clip.
+- `"devices"`: A track's chain of devices in an opened set (`#d` and the track's ID).
+- `"notice"`: A line in place of an opened set's rows, saying why it can't be read or that it is being read. Offers nothing to drag.
 
 <details><summary>JSON Schema</summary>
 
@@ -12851,6 +12956,41 @@ One of:
     {
       "const": "clip",
       "description": "A clip file (WP-6.34); the row's `clip_kind` says whether it holds an audio clip or a MIDI clip.",
+      "type": "string"
+    },
+    {
+      "const": "track",
+      "description": "A track of a set opened in the browser (WP-6.35); its path is the set's, `#t` and the track's ID.",
+      "type": "string"
+    },
+    {
+      "const": "group",
+      "description": "A group track of an opened set, holding its tracks.",
+      "type": "string"
+    },
+    {
+      "const": "return",
+      "description": "A return track of an opened set.",
+      "type": "string"
+    },
+    {
+      "const": "main",
+      "description": "The Main track of an opened set.",
+      "type": "string"
+    },
+    {
+      "const": "session_clip",
+      "description": "A Session clip of an opened set (`#c` and the clip's ID): it behaves as a clip file does, and the row's `clip_kind` says whether it holds an audio clip or a MIDI clip.",
+      "type": "string"
+    },
+    {
+      "const": "devices",
+      "description": "A track's chain of devices in an opened set (`#d` and the track's ID).",
+      "type": "string"
+    },
+    {
+      "const": "notice",
+      "description": "A line in place of an opened set's rows, saying why it can't be read or that it is being read. Offers nothing to drag.",
       "type": "string"
     }
   ]

@@ -286,7 +286,7 @@ Result: [`TagsState`](README.md#tagsstate).
 
 **Open Folder**. Permission: `external`. Contexts: `browser`.
 
-Opens or closes a folder in the browser's content pane, listing its folders and audio files indented under it (in the Plug-Ins label, a vendor's folder and its plug-ins). Opening a folder closes the other open folders it isn't inside, unless `keep_others` (Cmd or Ctrl held). Right and Left do this on the selected folder. Changes nothing, but reads folders outside the project.
+Opens or closes a folder in the browser's content pane, listing its folders and audio files indented under it (in the Plug-Ins label, a vendor's folder and its plug-ins). A set file opens like a folder, read in the background: its tracks in its order, a group holding its tracks, then its return tracks and Main, each openable in turn (a track lists its Session clips by scene, and every track a Devices row); a set that can't be read opens to a line saying why. A row of an opened set is named by its `path`, the set's path, `#` and `t`, `d` or `c` with the ID of the track, the track whose chain it is, or the Session clip; `set.import` takes those IDs. Opening a folder closes the other open folders it isn't inside, unless `keep_others` (Cmd or Ctrl held). Right and Left do this on the selected folder. Changes nothing, but reads folders outside the project.
 
 Default keys: none.
 
@@ -294,7 +294,7 @@ Arguments:
 
 | Name | Type | Required | Description |
 |---|---|---|---|
-| `path` | string | yes | The folder, as a row of the content pane gives it. |
+| `path` | string | yes | The folder, set file or row of an opened set, as a row of the content pane gives it. |
 | `keep_others` | boolean | no | Keep the other open folders open, as holding Cmd (Ctrl) does. Otherwise opening a folder closes every open folder it isn't inside. |
 | `open` | boolean or null | no | Open (true) or close (false). Left out, it toggles. |
 

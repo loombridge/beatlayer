@@ -14,7 +14,7 @@ use serde_json::json;
 
 use super::{
     BROWSER_ROW, BrowserUi, COLLECTIONS, ClipDropTarget, SideRow, add_folder_id, bounds,
-    drop_chains, invoke, label_id, note_clip_target, scrolled, sidebar_id,
+    drop_chains, drop_tracks, invoke, label_id, note_clip_target, scrolled, sidebar_id,
 };
 use crate::layout::BrowserLayout;
 use crate::main_window::UiEvent;
@@ -506,6 +506,13 @@ impl BrowserUi {
                 drop_chains(ui, theme, rect, path, events);
             }
             _ => {}
+        }
+        // Spec: set-exchange R11. Track title bars dropped on a place's label
+        // are saved there as a new set.
+        if info.label.is_place()
+            && let Some(path) = &info.path
+        {
+            drop_tracks(ui, shell, theme, rect, path, events);
         }
         // Spec: clip files R3. A clip dropped on a place's label is saved in
         // its folder, and on the Clips label in the User Library's `Clips`.

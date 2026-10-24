@@ -12,6 +12,7 @@ mod clap;
 mod common;
 mod editor;
 mod engine;
+mod engine_lv2;
 mod lv2;
 mod lv2_host;
 mod midi_effect;

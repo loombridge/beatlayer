@@ -283,12 +283,9 @@ impl Lv2Host {
         }
         let world = world(&self.inner)?;
         world.load_bundle(path)?;
-        let wanted = canonical(path);
-        let found: Vec<Lv2Type> = world
-            .plugins()
-            .into_iter()
-            .filter(|info| canonical(&info.bundle) == wanted)
-            .map(|info| made_type(&info, path))
+        let found: Vec<Lv2Type> = bundle_plugins(&world, path)
+            .iter()
+            .map(|info| Lv2Type::new(info, path))
             .collect();
         if found.is_empty() {
             return Err(Lv2Error::Load("it offers no plug-ins".to_owned()));
@@ -661,14 +658,29 @@ fn canonical(path: &Path) -> PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| path.to_owned())
 }
 
-fn made_type(info: &PluginInfo, path: &Path) -> Lv2Type {
-    let (device_type, _) = describe::device_type(info);
-    Lv2Type {
-        path: path.to_owned(),
-        device_type,
-        vendor: info.vendor.clone(),
-        version: None,
+impl Lv2Type {
+    /// The device type of `info`, a plug-in in the bundle folder `path`.
+    #[must_use]
+    pub fn new(info: &PluginInfo, path: &Path) -> Self {
+        let (device_type, _) = describe::device_type(info);
+        Self {
+            path: path.to_owned(),
+            device_type,
+            vendor: info.vendor.clone(),
+            version: None,
+        }
     }
+}
+
+/// The plug-ins `world` knows in the bundle folder `path`.
+#[must_use]
+pub fn bundle_plugins(world: &World, path: &Path) -> Vec<PluginInfo> {
+    let wanted = canonical(path);
+    world
+        .plugins()
+        .into_iter()
+        .filter(|info| canonical(&info.bundle) == wanted)
+        .collect()
 }
 
 /// Whether the plug-in has an editor Beatlayer can open: an X11 UI, on the

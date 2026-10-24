@@ -42,7 +42,7 @@ use rtrb::Consumer;
 use features::{Features, Msg, WORKER_INTERFACE, WorkerThread};
 use sys::{Api, Urid};
 
-pub use host::{Loan, Lv2Factory, Lv2Host, Lv2Type, ParamChange, PluginStatus};
+pub use host::{Loan, Lv2Factory, Lv2Host, Lv2Type, ParamChange, PluginStatus, bundle_plugins};
 pub use node::Lv2Node;
 
 const CORE: &str = "http://lv2plug.in/ns/lv2core#";

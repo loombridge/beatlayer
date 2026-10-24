@@ -11,8 +11,12 @@
 //! [`beatlayer-scan`](../bin/beatlayer-scan.rs): it loads the file and prints
 //! what it found as JSON, and only it ever loads the plug-in's code.
 //!
-//! CLAP and VST3 are scanned everywhere, and Audio Units on macOS; LV2 is
-//! the hook [`PluginFormat`] and [`format_extension`] leave for its hosting.
+//! CLAP and VST3 are scanned everywhere, Audio Units on macOS, and LV2 on
+//! Linux. An LV2 bundle folder counts as one file holding several plug-ins;
+//! its child process reads the bundle's metadata with lilv, which runs no
+//! plug-in code, and then instantiates each plug-in once, which does, so a
+//! plug-in that crashes or hangs is blocklisted (the plug-in scanning spec,
+//! R10).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read;
@@ -26,10 +30,11 @@ use bl_model::{DeviceKind, DeviceRole, PluginFormat};
 use serde::{Deserialize, Serialize};
 
 use crate::clap::ClapType;
+use crate::lv2::{self, Lv2Type};
 use crate::vst3::Vst3Type;
 
 /// The formats the scanner can describe: CLAP and VST3 everywhere, and
-/// Audio Units on macOS (WP-2.8). LV2 waits for its hosting.
+/// Audio Units on macOS (WP-2.8).
 #[cfg(target_os = "macos")]
 pub const SCANNED_FORMATS: &[PluginFormat] = &[
     PluginFormat::Clap,
@@ -37,9 +42,14 @@ pub const SCANNED_FORMATS: &[PluginFormat] = &[
     PluginFormat::AudioUnit,
 ];
 
+/// The formats the scanner can describe: CLAP, VST3 and LV2 (WP-5.39).
+#[cfg(target_os = "linux")]
+pub const SCANNED_FORMATS: &[PluginFormat] =
+    &[PluginFormat::Clap, PluginFormat::Vst3, PluginFormat::Lv2];
+
 /// The formats the scanner can describe: CLAP and VST3 (Audio Units are
-/// macOS only). LV2 waits for its hosting.
-#[cfg(not(target_os = "macos"))]
+/// macOS only, and LV2 Linux only).
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub const SCANNED_FORMATS: &[PluginFormat] = &[PluginFormat::Clap, PluginFormat::Vst3];
 
 /// How long a plug-in may take to answer a scan before it's killed and
@@ -165,10 +175,7 @@ impl ChildReply {
             PluginFormat::Clap => clap_plugins(path),
             PluginFormat::Vst3 => vst3_plugins(path),
             PluginFormat::AudioUnit => au_plugins(path),
-            other => Err(format!(
-                "{} plug-ins aren't scanned yet",
-                format_name(other)
-            )),
+            PluginFormat::Lv2 => lv2_plugins(path),
         }
     }
 }
@@ -196,7 +203,53 @@ fn au_plugins(path: &Path) -> Result<Vec<ScannedPlugin>, String> {
     crate::au::scan_file(path).map_err(|e| e.to_string())
 }
 
+/// The environment variable that names a lilv library for the scanner's
+/// child to load instead of the system's, for a test off Linux.
+const LILV_LIBRARY_VAR: &str = "BL_TEST_LILV";
+
+/// Describes the LV2 plug-ins in the bundle folder `path`: lilv reads its
+/// metadata (no plug-in code runs), then each plug-in is instantiated once,
+/// here in the child process, so one that crashes, hangs or won't load is
+/// the scan's failure. A plug-in that won't instantiate is left out when its
+/// bundle holds others that do.
+fn lv2_plugins(path: &Path) -> Result<Vec<ScannedPlugin>, String> {
+    let world = match std::env::var_os(LILV_LIBRARY_VAR) {
+        Some(library) => lv2::World::with_library(Path::new(&library)),
+        None => lv2::World::new(),
+    }
+    .map_err(|e| e.to_string())?;
+    world.load_bundle(path).map_err(|e| e.to_string())?;
+    let mut found = Vec::new();
+    let mut refused = Vec::new();
+    for info in lv2::bundle_plugins(&world, path) {
+        match world.instantiate(&info.uri, 48_000.0, 512) {
+            Ok(_) => found.push(ScannedPlugin::from_lv2(Lv2Type::new(&info, path))),
+            Err(e) => refused.push(format!("{}: {e}", info.name)),
+        }
+    }
+    if found.is_empty() {
+        return Err(if refused.is_empty() {
+            "it offers no plug-ins".to_owned()
+        } else {
+            refused.join("; ")
+        });
+    }
+    Ok(found)
+}
+
 impl ScannedPlugin {
+    /// A scanned plug-in from a loaded LV2 type.
+    #[must_use]
+    pub fn from_lv2(found: Lv2Type) -> Self {
+        Self::from_type(
+            PluginFormat::Lv2,
+            found.path,
+            found.device_type,
+            found.vendor,
+            found.version,
+        )
+    }
+
     /// A scanned plug-in from a loaded CLAP type.
     #[must_use]
     pub fn from_clap(found: ClapType) -> Self {
@@ -364,7 +417,7 @@ impl Scanner {
         // it while a scan runs in the background (WP-2.9b).
         for path in plugin_files(format, paths) {
             let key = path.to_string_lossy().into_owned();
-            let metadata = match std::fs::metadata(&path) {
+            let metadata = match std::fs::metadata(fingerprint(format, &path)) {
                 Ok(metadata) => metadata,
                 Err(e) => {
                     let blocked = BlockedPlugin {
@@ -585,12 +638,45 @@ pub fn scan_program() -> Option<PathBuf> {
     None
 }
 
+/// The file whose size and modification time say whether a plug-in changed:
+/// the file itself, or for an LV2 bundle folder its manifest, which a folder's
+/// own modification time (changed only by adding or removing a file) would
+/// miss an edit of.
+fn fingerprint(format: PluginFormat, path: &Path) -> PathBuf {
+    let manifest = path.join("manifest.ttl");
+    if format == PluginFormat::Lv2 && manifest.is_file() {
+        manifest
+    } else {
+        path.to_owned()
+    }
+}
+
+/// The folders an `LV2_PATH` value names, `~` standing for `home`.
+#[must_use]
+pub fn lv2_path_folders(entries: &std::ffi::OsStr, home: Option<&Path>) -> Vec<PathBuf> {
+    std::env::split_paths(entries)
+        .map(|path| match (path.strip_prefix("~"), home) {
+            (Ok(rest), Some(home)) => home.join(rest),
+            _ => path,
+        })
+        .collect()
+}
+
 /// The system's plug-in folders for `format`, as the format's conventions
 /// put them (the VST3 file format's own locations for VST3), plus the
 /// `CLAP_PATH` entries (the CLAP specification requires them).
 #[must_use]
 pub fn system_paths(format: PluginFormat) -> Vec<PathBuf> {
     let mut paths = Vec::new();
+    // lilv's rule, which the LV2 host follows (the LV2 hosting spec, R10):
+    // `LV2_PATH` names the folders when it is set, and the standard ones
+    // are searched when it isn't.
+    if format == PluginFormat::Lv2
+        && let Some(entries) = std::env::var_os("LV2_PATH").filter(|e| !e.is_empty())
+    {
+        let home = std::env::var_os("HOME").map(PathBuf::from);
+        return lv2_path_folders(&entries, home.as_deref());
+    }
     if format == PluginFormat::Clap
         && let Some(entries) = std::env::var_os("CLAP_PATH")
     {
@@ -623,6 +709,17 @@ pub fn system_paths(format: PluginFormat) -> Vec<PathBuf> {
         // Apple's own units live here, not in the user's or the system's
         // plug-in folders; the scan is expected to find them (WP-2.8).
         paths.push(PathBuf::from("/System/Library/Components"));
+    }
+    if format == PluginFormat::Lv2 {
+        // The standard folders lilv searches on Linux.
+        for folder in [
+            "/usr/lib/lv2",
+            "/usr/lib64/lv2",
+            "/usr/local/lib/lv2",
+            "/usr/local/lib64/lv2",
+        ] {
+            paths.push(PathBuf::from(folder));
+        }
     }
     if format == PluginFormat::Vst3 {
         // The rest of the VST3 format's plug-in locations (macOS' user and

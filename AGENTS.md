@@ -32,6 +32,8 @@ A change that alters a spec, the plan, or the UI parity reference changes it in 
 
 One work package per branch (`wp/<id>-<slug>`) and per pull request, with acceptance evidence pasted in the PR.
 
+A command's handler goes in its area's module in `crates/shell/src/shell/` (named for its namespace or the nearest area), and its readback row in that area's table in `crates/commands/src/readback/`, so two features rarely edit the same file.
+
 Iterate with `cargo xtask check --affected`, which tests only the crates your branch changes and their dependents. Before a PR, it must pass on macOS locally, with its summary pasted in the PR. That is the only local check: CI builds and tests Windows and Linux on every pull request, and a full macOS check runs every night, which catches anything that breaks outside the crates a change touched. A nightly failure is fixed in a follow-up pull request. `cargo xtask check` and `cargo xtask clippy-windows` remain available when you want the whole picture before CI.
 
 Commits: the project's own commits are authored as `Loombridge <code@loombridge.io>`. Set it once per checkout: `git config user.name Loombridge && git config user.email code@loombridge.io`. Outside contributors commit under their own names with the Developer Certificate of Origin ([CONTRIBUTING.md](CONTRIBUTING.md)).

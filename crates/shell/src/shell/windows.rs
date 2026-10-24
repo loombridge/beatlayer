@@ -7,8 +7,10 @@
 //! and a full-screen mode of its own; the Clip View and the Device View each
 //! show in at most one window.
 
+use crate::commands::{ViewResult, ZoomArgs};
+use crate::settings::{zoom_factor, zoom_percent, zoom_step};
 use bl_model::WindowViews;
-use bl_shell_spec::commands::{SecondWindowState, WindowArgs, WindowName};
+use bl_shell_spec::commands::{DetailView, SecondWindowState, WindowArgs, WindowName};
 
 use super::*;
 

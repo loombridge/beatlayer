@@ -880,14 +880,14 @@ mod tests {
         assert_eq!(numbers, (0..=10).collect::<Vec<_>>());
         let milestones: Vec<u32> = progress.milestones.iter().map(|m| m.number).collect();
         assert_eq!(milestones, (0..=10).collect::<Vec<_>>());
-        for phase in &progress.phases[..7] {
+        for phase in &progress.phases[..8] {
             assert!(
                 !phase.packages.is_empty(),
                 "phase {} has packages",
                 phase.number
             );
         }
-        for phase in &progress.phases[7..] {
+        for phase in &progress.phases[8..] {
             assert!(
                 phase.estimate.is_some_and(|n| n > 0),
                 "phase {} has an estimate",

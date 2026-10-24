@@ -33,11 +33,14 @@ impl Shell {
         self.any_floating()
             || !self.plugins.open_editors().is_empty()
             || !self.au.open_editors().is_empty()
+            || !self.lv2.open_editors().is_empty()
     }
 
     /// Whether any plug-in editor window is open (IMP-25).
     pub(super) fn any_plug_in_editor(&self) -> bool {
-        !self.plugins.open_editors().is_empty() || !self.au.open_editors().is_empty()
+        !self.plugins.open_editors().is_empty()
+            || !self.au.open_editors().is_empty()
+            || !self.lv2.open_editors().is_empty()
     }
 
     /// Closes every open plug-in editor window and says how many it closed
@@ -52,6 +55,11 @@ impl Shell {
         }
         for device in self.au.open_editors() {
             if self.au.close_editor(device).is_ok() {
+                closed += 1;
+            }
+        }
+        for device in self.lv2.open_editors() {
+            if self.lv2.close_editor(device).is_ok() {
                 closed += 1;
             }
         }
@@ -73,6 +81,9 @@ impl Shell {
         }
         for device in self.au.open_editors() {
             let _ = self.au.set_editor_visible(device, shown(device));
+        }
+        for device in self.lv2.open_editors() {
+            let _ = self.lv2.set_editor_visible(device, shown(device));
         }
     }
 

@@ -83,6 +83,19 @@ impl EditorWindow {
         self.0.handle()
     }
 
+    /// The window's X ID, which an LV2 UI embeds its view into.
+    #[cfg(all(unix, not(target_os = "macos")))]
+    pub fn x11_id(&self) -> u32 {
+        self.0.id()
+    }
+
+    /// The size of the X window `child`, made inside this one by another
+    /// connection (an LV2 UI's view), if it exists.
+    #[cfg(all(unix, not(target_os = "macos")))]
+    pub fn child_size(&self, child: u32) -> Option<GuiSize> {
+        self.0.child_size(child)
+    }
+
     /// The display's scale factor: 1.0 at 96 DPI.
     pub fn scale(&self) -> f64 {
         self.0.scale()

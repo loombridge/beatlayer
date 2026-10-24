@@ -14,6 +14,7 @@ use bl_model::{
     Output, RackKind, Tap, TrackId, TrackKind,
 };
 use bl_shell_spec::commands::APP_SETTINGS;
+use bl_shell_spec::plugins::SHOW_MPE_SETTINGS;
 use serde_json::{Value, json};
 
 use crate::Invocation;
@@ -260,6 +261,19 @@ fn set_output(track: TrackId, output: Value) -> Invocation {
         "routing.set_output",
         json!({ "track": track, "output": output }),
     )
+}
+
+/// What MIDI To's channel chooser calls MPE (the MPE spec, R19).
+pub const MPE: &str = "MPE";
+
+/// What the chooser lists after the 16 channels (the MPE spec, R19): MPE,
+/// and, with it chosen, MPE Settings…, which opens the dialog (R18).
+fn mpe_entries(choose: Invocation, settings: Invocation, chosen: bool) -> Vec<Entry> {
+    let mut entries = vec![Entry::choice(MPE, choose, chosen)];
+    if chosen {
+        entries.push(Entry::choice("MPE Settings…", settings, false));
+    }
+    entries
 }
 
 fn configure(page: &str) -> Entry {
@@ -752,10 +766,16 @@ fn midi_to(doc: &Document, track: TrackId, ports: &[String]) -> Chooser {
     let mut entries = Vec::new();
     for name in ports {
         let run = match &to {
+            // Spec: mpe R19. The same port keeps its channel, or MPE and its
+            // settings.
             Some(MidiTo::Port {
                 name: kept,
                 channel,
-            }) if kept == name => set(json!({ "name": name, "channel": channel })),
+                mpe,
+            }) if kept == name => set(match mpe {
+                Some(mpe) => json!({ "name": name, "channel": channel, "mpe": mpe }),
+                None => json!({ "name": name, "channel": channel }),
+            }),
             _ => set(json!({ "name": name, "channel": 1 })),
         };
         entries.push(Entry::choice(name, run, chosen_port == Some(name.as_str())));
@@ -799,9 +819,15 @@ fn midi_to_channel(track: TrackId, to: Option<&MidiTo>) -> Chooser {
             }],
             pending: None,
         },
-        Some(MidiTo::Port { name, channel }) => Chooser {
+        Some(MidiTo::Port { name, channel, mpe }) => Chooser {
             name: "Output Channel",
-            text: channel.to_string(),
+            text: if mpe.is_some() {
+                MPE.to_owned()
+            } else {
+                channel.to_string()
+            },
+            // Spec: mpe R19. The 16 channels, then MPE; with MPE chosen, the
+            // list offers MPE Settings… too.
             entries: (1..=16u8)
                 .map(|n| {
                     Entry::choice(
@@ -810,9 +836,20 @@ fn midi_to_channel(track: TrackId, to: Option<&MidiTo>) -> Chooser {
                             "routing.set_midi_output",
                             json!({ "track": track, "to": { "name": name, "channel": n } }),
                         ),
-                        n == *channel,
+                        mpe.is_none() && n == *channel,
                     )
                 })
+                .chain(mpe_entries(
+                    Invocation::new(
+                        "routing.set_midi_output",
+                        json!({
+                            "track": track,
+                            "to": { "name": name, "channel": channel, "mpe": mpe.unwrap_or_default() }
+                        }),
+                    ),
+                    Invocation::new(SHOW_MPE_SETTINGS, json!({ "track": track })),
+                    mpe.is_some(),
+                ))
                 .collect(),
             pending: None,
         },
@@ -1114,15 +1151,26 @@ pub fn external_choosers(
         midi_to: chooser("External MIDI To", midi_to),
         channel: Chooser {
             name: "External MIDI Channel",
-            text: external.channel.to_string(),
+            text: if external.mpe.is_some() {
+                MPE.to_owned()
+            } else {
+                external.channel.to_string()
+            },
+            // Spec: mpe R19. The 16 channels, then MPE, as a track's MIDI
+            // To lists them.
             entries: (1..=16u8)
                 .map(|n| {
                     Entry::choice(
                         n.to_string(),
                         set_external(device, json!({ "channel": n })),
-                        n == external.channel,
+                        external.mpe.is_none() && n == external.channel,
                     )
                 })
+                .chain(mpe_entries(
+                    set_external(device, json!({ "mpe": external.mpe.unwrap_or_default() })),
+                    Invocation::new(SHOW_MPE_SETTINGS, json!({ "device": device })),
+                    external.mpe.is_some(),
+                ))
                 .collect(),
             pending: None,
         },

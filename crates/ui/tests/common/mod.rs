@@ -373,6 +373,9 @@ impl Harness {
                 UiEvent::BeginGesture(label) => self.shell.begin_gesture(label),
                 UiEvent::BeginNamedGesture(label) => self.shell.begin_gesture(label),
                 UiEvent::EndGesture => self.shell.end_gesture(),
+                UiEvent::ClipDrag(step) => {
+                    let _ = self.shell.clip_drag_event(self.kind(), step.clone());
+                }
             }
             self.events.push(event);
         }
@@ -521,6 +524,9 @@ impl Harness {
                 UiEvent::BeginGesture(label) => self.shell.begin_gesture(label),
                 UiEvent::BeginNamedGesture(label) => self.shell.begin_gesture(label),
                 UiEvent::EndGesture => self.shell.end_gesture(),
+                UiEvent::ClipDrag(step) => {
+                    let _ = self.shell.clip_drag_event(window, step.clone());
+                }
             }
             self.events.push(event);
         }

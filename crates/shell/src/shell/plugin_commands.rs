@@ -1,6 +1,6 @@
 //! The plug-in commands and loading a plug-in from the Browser.
 
-use super::{Effect, Shell, ShellError, to_value};
+use super::{Effect, MpeDialogTarget, Shell, ShellError, to_value};
 use crate::devices;
 use crate::devices::DeviceView;
 use bl_model::AutomationTarget;
@@ -33,11 +33,19 @@ impl Shell {
             }
         };
         let info = |shell: &Self, device| {
-            crate::plugins::info(&shell.plugins, &shell.au, &shell.vst3, device)
+            crate::plugins::info(&shell.plugins, &shell.au, &shell.vst3, &shell.lv2, device)
                 .map(|mut info| {
                     // WP-2.10: where the window sits, from the frame store
                     // the set keeps.
                     info.window = shell.devices.window_frame(device);
+                    // Spec: mpe R14. Its MPE Mode and settings are the
+                    // device's.
+                    info.mpe = shell
+                        .editor
+                        .document()
+                        .device(device)
+                        .map(|d| d.mpe)
+                        .unwrap_or_default();
                     to_value(&info)
                 })
                 .ok_or_else(|| unavailable(format!("{device}'s plug-in hasn't started yet")))
@@ -58,6 +66,15 @@ impl Shell {
                 let found: Vec<(bl_engine::DeviceType, std::path::PathBuf)> =
                     if crate::plugins::is_vst3_path(&path) {
                         self.vst3
+                            .load(&path)
+                            .map_err(|e| failed(e.to_string()))?
+                            .into_iter()
+                            .map(|t| (t.device_type, t.path))
+                            .collect()
+                    } else if crate::plugins::is_lv2_path(&path) {
+                        // Spec: lv2-hosting R1. A bundle folder, whose
+                        // plug-ins are chosen by URI.
+                        self.lv2
                             .load(&path)
                             .map_err(|e| failed(e.to_string()))?
                             .into_iter()
@@ -203,10 +220,13 @@ impl Shell {
                     ));
                 }
                 let is_au = crate::plugins::is_au(self.editor.document(), device);
+                let is_lv2 = crate::plugins::is_lv2(self.editor.document(), device);
                 self.plugins.idle();
                 self.au.idle();
-                let open = crate::plugins::info(&self.plugins, &self.au, &self.vst3, device)
-                    .is_some_and(|info| info.window_open);
+                self.lv2.idle();
+                let open =
+                    crate::plugins::info(&self.plugins, &self.au, &self.vst3, &self.lv2, device)
+                        .is_some_and(|info| info.window_open);
                 if shown.unwrap_or(!open) {
                     // Spec: clap-hosting R13 and au-hosting's second part.
                     // Titled "<device>/<track>", as Live titles a plug-in's
@@ -223,6 +243,14 @@ impl Shell {
                     let title = format!("{name}/{title}");
                     if is_au {
                         self.au
+                            .open_editor(device, &title)
+                            .map_err(|e| ShellError::Failed {
+                                command: id.to_owned(),
+                                message: e.to_string(),
+                            })?;
+                    } else if is_lv2 {
+                        // Spec: lv2-hosting R13.
+                        self.lv2
                             .open_editor(device, &title)
                             .map_err(|e| ShellError::Failed {
                                 command: id.to_owned(),
@@ -246,6 +274,13 @@ impl Shell {
                             command: id.to_owned(),
                             message: e.to_string(),
                         })?;
+                } else if is_lv2 {
+                    self.lv2
+                        .close_editor(device)
+                        .map_err(|e| ShellError::Failed {
+                            command: id.to_owned(),
+                            message: e.to_string(),
+                        })?;
                 } else {
                     self.plugins
                         .close_editor(device)
@@ -257,12 +292,49 @@ impl Shell {
                 self.touch();
                 info(self, device)
             }
+            plugin_ids::SHOW_MPE_SETTINGS => {
+                let plugin_ids::ShowMpeSettingsArgs {
+                    device,
+                    track,
+                    shown,
+                } = Self::args(id, args)?;
+                let wanted = match (device, track) {
+                    (Some(_), Some(_)) => {
+                        return Err(ShellError::InvalidArgs {
+                            command: id.to_owned(),
+                            message: "give a device or a track, not both".to_owned(),
+                        });
+                    }
+                    (None, Some(track)) => Some(MpeDialogTarget::Track(track)),
+                    (device, None) => device
+                        .or(self.devices.selected())
+                        .map(MpeDialogTarget::Device),
+                };
+                if shown == Some(false) {
+                    self.mpe_dialog = None;
+                } else {
+                    let target = wanted
+                        .ok_or_else(|| unavailable("select a plug-in device first".to_owned()))?;
+                    let previous = self.mpe_dialog.replace(target);
+                    if self.mpe_settings_dialog().settings.is_none() {
+                        self.mpe_dialog = previous;
+                        return Err(unavailable(
+                            "it has no MPE/Multi-channel Settings: a plug-in device, an \
+                             External Instrument or a MIDI track set to MPE has them"
+                                .to_owned(),
+                        ));
+                    }
+                }
+                self.touch();
+                Ok(to_value(&self.mpe_settings_dialog()))
+            }
             plugin_ids::INFO => {
                 let plugin_ids::PluginInfoArgs { device } = Self::args(id, args)?;
                 let device = target(self, device)?;
                 self.plugins.idle();
                 self.au.idle();
                 self.vst3.idle();
+                self.lv2.idle();
                 info(self, device)
             }
             plugin_ids::SET_WINDOW => {
@@ -802,6 +874,45 @@ impl Shell {
                 self.document_changed();
                 Err(error)
             }
+        }
+    }
+}
+
+impl Shell {
+    /// The MPE/Multi-channel Settings dialog (the MPE spec, R18): whether
+    /// it's open, what it edits, and the settings it shows. It closes by
+    /// itself when what it edits has gone or no longer sends MPE.
+    #[must_use]
+    pub fn mpe_settings_dialog(&self) -> plugin_ids::MpeSettingsDialog {
+        let document = self.editor.document();
+        let (device, track, settings) = match self.mpe_dialog {
+            None => return plugin_ids::MpeSettingsDialog::default(),
+            Some(MpeDialogTarget::Device(id)) => {
+                let settings = document.device(id).and_then(|device| {
+                    if matches!(device.kind, bl_model::DeviceKind::Plugin { .. }) {
+                        Some(device.mpe.settings)
+                    } else {
+                        device.external.as_ref().and_then(|external| external.mpe)
+                    }
+                });
+                (Some(id), None, settings)
+            }
+            Some(MpeDialogTarget::Track(id)) => {
+                let settings =
+                    document
+                        .track(id)
+                        .and_then(|track| match &track.routing().midi_output {
+                            Some(bl_model::MidiTo::Port { mpe, .. }) => *mpe,
+                            _ => None,
+                        });
+                (None, Some(id), settings)
+            }
+        };
+        plugin_ids::MpeSettingsDialog {
+            open: settings.is_some(),
+            device,
+            track,
+            settings,
         }
     }
 }

@@ -35,6 +35,7 @@ type State = (
     String,
     Option<Vec<bl_model::modulator::ShapePoint>>,
     Option<Vec<bl_model::Articulation>>,
+    Option<bl_model::PluginMpe>,
 );
 
 /// A device made ready to go in a chain, with new IDs: what a preset or a
@@ -208,6 +209,7 @@ impl DeviceView {
                     name.to_owned(),
                     p.shape,
                     p.articulations,
+                    p.mpe,
                 );
                 Ok(Ready {
                     device,
@@ -433,13 +435,14 @@ impl DeviceView {
                         device,
                     }),
                 }?;
-                if let Some((params, name, shape, articulations)) = state {
+                if let Some((params, name, shape, articulations, mpe)) = state {
                     editor.apply(Command::SetDeviceState {
                         device: id,
                         params,
                         name,
                         shape,
                         articulations,
+                        mpe,
                     })?;
                 }
                 map_inner_copies(editor, &pairs)
@@ -494,13 +497,14 @@ impl DeviceView {
                     index: 0,
                     device,
                 })?;
-                if let Some((params, name, shape, articulations)) = state {
+                if let Some((params, name, shape, articulations, mpe)) = state {
                     editor.apply(Command::SetDeviceState {
                         device: id,
                         params,
                         name,
                         shape,
                         articulations,
+                        mpe,
                     })?;
                 }
                 map_inner_copies(editor, &pairs)

@@ -693,6 +693,7 @@ dependencies = [
  "bl-project",
  "bl-shell",
  "bl-test-clap",
+ "bl-test-lv2",
  "bl-test-vst3",
  "hound",
  "lspk-agent",
@@ -1036,6 +1037,7 @@ dependencies = [
  "bl-shell-spec",
  "bl-test-ara",
  "bl-test-clap",
+ "bl-test-lv2",
  "bl-test-vst3",
  "flate2",
  "getrandom 0.3.4",
@@ -1092,6 +1094,9 @@ dependencies = [
 [[package]]
 name = "bl-test-lv2"
 version = "0.2.0"
+dependencies = [
+ "x11rb",
+]
 
 [[package]]
 name = "bl-test-vst3"

@@ -2,7 +2,7 @@
 
 <!-- Generated from shortcuts.toml by `cargo xtask ui-parity`. Don't edit this file by hand: edit shortcuts.toml and regenerate. `cargo xtask check` fails if the two differ. -->
 
-Live 12.4.3's keyboard shortcuts, the default keymap Beatlayer binds (D16). Source: Ableton Live 12 reference manual, chapters 41 and 42, read 10 October 2026, and observation of Live 12.4.3 where the Source column says so. 377 shortcuts in 24 contexts; 19 need confirming (see the notes at the end). How to read and change this table: [README](README.md).
+Live 12.4.3's keyboard shortcuts, the default keymap Beatlayer binds (D16). Source: Ableton Live 12 reference manual, chapters 41 and 42, read 10 October 2026, and observation of Live 12.4.3 where the Source column says so. 381 shortcuts in 24 contexts; 19 need confirming (see the notes at the end). How to read and change this table: [README](README.md).
 
 ## By milestone
 
@@ -10,7 +10,7 @@ Live 12.4.3's keyboard shortcuts, the default keymap Beatlayer binds (D16). Sour
 |---|---|
 | M1 | 137 |
 | M2 | 87 |
-| M3 | 39 |
+| M3 | 43 |
 | M4 | 21 |
 | M5 | 10 |
 | M6 | 71 |
@@ -30,7 +30,7 @@ A shortcut applies in its context. The same keys may mean different things in di
 | [`text-field`](#text-field) | A name or text is being edited. | 2 |
 | [`value-field`](#value-field) | A value control (knob, slider, number box) has focus. | 9 |
 | [`menu`](#menu) | A menu is open. | 3 |
-| [`session`](#session) | The Session View has focus. | 28 |
+| [`session`](#session) | The Session View has focus. | 32 |
 | [`arrangement`](#arrangement) | The Arrangement View has focus. | 48 |
 | [`track-headers`](#track-headers) | A track title bar is selected, in either view. | 13 |
 | [`take-lanes`](#take-lanes) | A take lane is selected in the Arrangement. | 6 |
@@ -249,6 +249,10 @@ The Session View has focus.
 | S-SES-026 | Toggle triplet launch quantisation | `Cmd+3` | `Ctrl+3` | key | press | M3 | observed in 12.4.3 (macOS), 10 October 2026: Options menu (Triplet Launch Quantization) |
 | S-SES-027 | Turn launch quantisation on or off | `Cmd+4` | `Ctrl+4` | key | press | M3 | observed in 12.4.3 (macOS), 10 October 2026: Options menu (Launch Quantization Enabled) |
 | S-SES-028 | Crop the selected clip | `Cmd+Shift+J` | `Ctrl+Shift+J` | key | press | M4 | observed in 12.4.3 (macOS), 10 October 2026: empty slot's and Session clip's context menus (Crop Clip) |
+| S-SES-029 | Cut slot clips across all tracks | `Cmd+Shift+X` | `Ctrl+Shift+X` | key | press | M3 | manual 42.5 (Shift with an editing command applies it across all tracks, S-EDIT-014); Beatlayer's reading for the Session View |
+| S-SES-030 | Copy slot clips across all tracks | `Cmd+Shift+C` | `Ctrl+Shift+C` | key | press | M3 | manual 42.5 (Shift with an editing command applies it across all tracks, S-EDIT-014); Beatlayer's reading for the Session View |
+| S-SES-031 | Paste slot clips from the first track | `Cmd+Shift+V` | `Ctrl+Shift+V` | key | press | M3 | manual 42.5 (Shift with an editing command applies it across all tracks, S-EDIT-014); Beatlayer's reading for the Session View |
+| S-SES-032 | Duplicate slot clips across all tracks | `Cmd+Shift+D` | `Ctrl+Shift+D` | key | press | M3 | manual 42.5 (Shift with an editing command applies it across all tracks, S-EDIT-014); Beatlayer's reading for the Session View |
 
 ## arrangement
 
@@ -694,6 +698,10 @@ The Settings window has focus.
 | S-SES-026 | note | Context-dependent keys: listed in the Options menu with the Session View focused; in the Arrangement the same keys are the grid commands (S-GRID-002 to S-GRID-005). The Windows binding is inferred from macOS (Cmd to Ctrl, Option to Alt). |
 | S-SES-027 | note | Context-dependent keys: listed in the Options menu with the Session View focused; in the Arrangement the same keys are the grid commands (S-GRID-002 to S-GRID-005). The Windows binding is inferred from macOS (Cmd to Ctrl, Option to Alt). |
 | S-SES-028 | same command as S-ARR-003 |  |
+| S-SES-029 | note | Beatlayer's own keys for S-EDIT-014 in the Session View, by the same pattern as the Arrangement's time commands across all tracks (S-ARR-015 to S-ARR-018). The manual says Shift extends the command to clips and slots across all tracks but not which keys; not yet observed in Live. |
+| S-SES-030 | note | Beatlayer's own keys for S-EDIT-014 in the Session View, by the same pattern as the Arrangement's time commands across all tracks (S-ARR-015 to S-ARR-018). The manual says Shift extends the command to clips and slots across all tracks but not which keys; not yet observed in Live. |
+| S-SES-031 | note | Beatlayer's own keys for S-EDIT-014 in the Session View, by the same pattern as the Arrangement's time commands across all tracks (S-ARR-015 to S-ARR-018). The manual says Shift extends the command to clips and slots across all tracks but not which keys; not yet observed in Live. |
+| S-SES-032 | note | Beatlayer's own keys for S-EDIT-014 in the Session View, by the same pattern as the Arrangement's time commands across all tracks (S-ARR-015 to S-ARR-018). The manual says Shift extends the command to clips and slots across all tracks but not which keys; not yet observed in Live. |
 | S-ARR-037 | same command as S-SES-007 |  |
 | S-NOTE-044 | note | Disabled in the Options menu in a new set. The Windows binding is inferred from macOS (Cmd to Ctrl, Option to Alt). |
 | S-MENU-006 | note | macOS only: the system adds this item to every Edit menu (M-EDIT-040). |

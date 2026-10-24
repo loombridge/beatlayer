@@ -487,6 +487,7 @@ impl Shell {
             let hosts = bl_plugin_host::Hosts {
                 clap: Some(&self.plugins),
                 vst3: Some(&self.vst3),
+                lv2: Some(&self.lv2),
                 au: Some(&self.au),
             };
             let result = crate::export::run_command(

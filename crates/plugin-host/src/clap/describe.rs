@@ -3,7 +3,7 @@
 
 use bl_model::{DeviceRole, ParamDescriptor, ParamId, ParamKind, ParamUnit, param::Taper};
 use clack_extensions::audio_ports::{AudioPortInfoBuffer, PluginAudioPorts};
-use clack_extensions::note_ports::PluginNotePorts;
+use clack_extensions::note_ports::{NoteDialect, NotePortInfoBuffer, PluginNotePorts};
 use clack_extensions::params::{ParamInfoBuffer, ParamInfoFlags, PluginParams};
 use clack_host::prelude::*;
 
@@ -29,6 +29,24 @@ pub(crate) fn note_output(plugin: &mut PluginMainThreadHandle<'_>) -> bool {
     plugin
         .get_extension::<PluginNotePorts>()
         .is_some_and(|ports| ports.count(plugin, false) > 0)
+}
+
+/// Whether the plug-in's first note input port takes MIDI where CLAP's own
+/// note events would do: it takes only MIDI, or prefers MIDI-MPE (the CLAP
+/// hosting spec, R22). A plug-in without a note input port gets CLAP's
+/// events.
+pub(crate) fn midi_notes(plugin: &mut PluginMainThreadHandle<'_>) -> bool {
+    let Some(ports) = plugin.get_extension::<PluginNotePorts>() else {
+        return false;
+    };
+    let mut buffer = NotePortInfoBuffer::new();
+    if ports.count(plugin, true) == 0 {
+        return false;
+    }
+    ports.get(plugin, 0, true, &mut buffer).is_some_and(|info| {
+        info.preferred_dialect == Some(NoteDialect::MidiMpe)
+            || !info.supported_dialects.supports(NoteDialect::Clap)
+    })
 }
 
 /// The plug-in's audio output ports past its main one (WP-5.45): the names

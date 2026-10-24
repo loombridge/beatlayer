@@ -189,6 +189,9 @@ pub struct MainWindowUi {
     /// The place under this window's pointer that the last frame told the
     /// shell of, while clips are dragged between the views.
     drag_over: Option<DropSpot>,
+    /// Whether a drag of clips between the views was under way last frame,
+    /// so the browser's drop outline ends with it, wherever it ended.
+    drag_seen: bool,
 }
 
 /// A move of the keyboard focus asked for by `focus.next`,
@@ -286,6 +289,7 @@ impl MainWindowUi {
             browser_edge: crate::browser_edge::BrowserEdge::default(),
             drag_switched: None,
             drag_over: None,
+            drag_seen: false,
         }
     }
 
@@ -799,8 +803,14 @@ impl MainWindowUi {
         let Some(drag) = shell.clip_drag() else {
             self.drag_switched = None;
             self.drag_over = None;
+            // Spec: clip files R3. A drag ended by Esc, or let go where the
+            // view it began in isn't drawn, leaves no outline in the browser.
+            if std::mem::take(&mut self.drag_seen) {
+                crate::browser::end_clip_drag(ui.ctx());
+            }
             return;
         };
+        self.drag_seen = true;
         let ctx = ui.ctx();
         let (pos, released, escaped, modifiers) = ctx.input(|i| {
             (

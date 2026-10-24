@@ -470,22 +470,31 @@ One of:
 
 ### `ApplicationState`
 
-The open application.
+The open application, which is a chain of one or more tools.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `tool` | string | yes | The tool. |
+| `tool` | string | yes | The chain's last tool. |
 | `clip` | [`ClipId`](#clipid) | yes | The clip. |
 | `input_notes` | integer, at least 0 | yes | How many input notes it keeps. |
 | `range` | pair of [`Ticks`](#ticks) and [`Ticks`](#ticks) | yes | The range it keeps. |
-| `seed` | integer, at least 0 | yes | The seed its random choices come from. |
+| `seed` | integer, at least 0 | yes | The seed of the chain's last tool. |
+| `chain` | array of [`StepState`](#stepstate) | yes | The chain: each step's tool, settings and seed, in order. |
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "The open application.",
+  "description": "The open application, which is a chain of one or more tools.",
   "properties": {
+    "chain": {
+      "default": [],
+      "description": "The chain: each step's tool, settings and seed, in order.",
+      "items": {
+        "$ref": "#/$defs/StepState"
+      },
+      "type": "array"
+    },
     "clip": {
       "$ref": "#/$defs/ClipId",
       "description": "The clip."
@@ -511,13 +520,13 @@ The open application.
       "type": "array"
     },
     "seed": {
-      "description": "The seed its random choices come from.",
+      "description": "The seed of the chain's last tool.",
       "format": "uint32",
       "minimum": 0,
       "type": "integer"
     },
     "tool": {
-      "description": "The tool.",
+      "description": "The chain's last tool.",
       "type": "string"
     }
   },
@@ -526,7 +535,8 @@ The open application.
     "clip",
     "input_notes",
     "range",
-    "seed"
+    "seed",
+    "chain"
   ],
   "type": "object"
 }
@@ -25149,6 +25159,49 @@ What `note.step_record` did.
     "removed",
     "insert_marker",
     "undo_step"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `StepState`
+
+One step of the open chain.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `tool` | string | yes | The tool's ID. |
+| `values` | object | yes | Every parameter's value by ID, as the step ran with them. |
+| `seed` | integer, at least 0 | yes | The seed the step's random choices come from. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One step of the open chain.",
+  "properties": {
+    "seed": {
+      "description": "The seed the step's random choices come from.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "tool": {
+      "description": "The tool's ID.",
+      "type": "string"
+    },
+    "values": {
+      "additionalProperties": true,
+      "description": "Every parameter's value by ID, as the step ran with them.",
+      "type": "object"
+    }
+  },
+  "required": [
+    "tool",
+    "values",
+    "seed"
   ],
   "type": "object"
 }

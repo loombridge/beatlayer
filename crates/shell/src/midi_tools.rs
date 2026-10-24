@@ -6,7 +6,8 @@
 //! (`bl-midi-tools`); this module is what surrounds it: what it acts on
 //! (R10 to R12), merging its notes into the clip and selecting them
 //! (R12 to R15), the open application with its kept input and seed (R17 to
-//! R21), and one undo step named after the tool (R22). The choices and
+//! R21), which is a chain of tools (R27 to R33), and one undo step named
+//! after the tool (R22). The choices and
 //! settings sit beside the document like the folds, so they are never an
 //! undo step (R4, R5). The rules are in the MIDI Tools spec.
 
@@ -24,8 +25,8 @@ use bl_model::{
 use bl_project::midi_tools::{ChosenTools, MidiToolSettings, SavedTool};
 use bl_shell_spec::midi_tools::{
     self as ids, ApplicationState, ApplyArgs, ChooseArgs, ClipArgs, MidiToolState, Panel,
-    ParamInfo, RangeArgs, ReseedArgs, ResetArgs, SetArgs, SetAutoArgs, ShowPanelArgs, TargetState,
-    ToolInfo, ToolList, ToolRun, ToolSettingsState,
+    ParamInfo, RangeArgs, ReseedArgs, ResetArgs, SetArgs, SetAutoArgs, ShowPanelArgs, StepState,
+    TargetState, ToolInfo, ToolList, ToolRun, ToolSettingsState,
 };
 use bl_shell_spec::notes::{QuantizeSettings, QuantizeTarget};
 use serde::de::DeserializeOwned;
@@ -97,28 +98,61 @@ impl Settings {
     }
 }
 
-/// The open application (the MIDI Tools spec, R17): the notes and range the
-/// tool started from, its seed, and what it left, which says whether it is
-/// still the one that last changed the clip (R21).
+/// One tool of the open chain (the MIDI Tools spec, R27): its settings and
+/// seed, the clip's notes as they were before it ran, and which of them it
+/// took as input. A step after the first takes the notes the step before
+/// wrote.
+#[derive(Clone, Debug, PartialEq)]
+struct Step {
+    tool: String,
+    values: Vec<ParamValue>,
+    seed: u32,
+    /// The clip's notes in the editor's order before the tool ran.
+    base: Vec<Note>,
+    /// Which of `base` a transformation took as input.
+    input: Vec<usize>,
+}
+
+/// The open application, which is a chain (the MIDI Tools spec, R17, R27):
+/// the steps with the range they all keep, and what the last one left,
+/// which says whether the chain is still the one that last changed the clip
+/// (R21).
 #[derive(Clone, Debug, PartialEq)]
 struct Application {
     clip: ClipId,
     /// The clip the Clip View showed when it began.
     shown: Option<ClipId>,
-    tool: String,
-    /// The clip's notes in the editor's order before the tool ran.
-    base: Vec<Note>,
-    /// Which of `base` a transformation took as input.
-    input: Vec<usize>,
+    steps: Vec<Step>,
     range: (Ticks, Ticks),
-    seed: u32,
-    /// The selection and time selection before the tool ran, which switching
-    /// Auto off puts back (R18).
+    /// The selection and time selection before the first tool ran, which
+    /// taking out the only step puts back (R18, R31).
     before: (Vec<u32>, Option<(Ticks, Ticks)>),
-    /// The clip's notes, the selection and the time selection the tool left.
+    /// The clip's notes, the selection and the time selection the chain
+    /// left.
     after: Vec<Note>,
     selected: Vec<u32>,
     time: Option<(Ticks, Ticks)>,
+}
+
+impl Application {
+    /// The place of the last step of `tool`, or the step `step` names when
+    /// it is a step of `tool` (R28).
+    fn step_of(&self, tool: &str, step: Option<usize>) -> Result<Option<usize>, EditFailure> {
+        match step {
+            Some(at) => match self.steps.get(at) {
+                Some(found) if found.tool == tool => Ok(Some(at)),
+                Some(found) => Err(invalid(format!(
+                    "step {at} of the open chain is `{}`, not `{tool}`",
+                    found.tool
+                ))),
+                None => Err(invalid(format!(
+                    "the open chain has no step {at}; it has {}",
+                    self.steps.len()
+                ))),
+            },
+            None => Ok(self.steps.iter().rposition(|found| found.tool == tool)),
+        }
+    }
 }
 
 /// The tool each track shows, every tool's settings, the Clip View's shown
@@ -477,6 +511,53 @@ impl MidiTools {
             && view.selected_notes(doc, arrangement) == app.selected
             && view.time_selection(doc, arrangement) == app.time)
             .then_some(app)
+    }
+
+    /// The IDs of the open chain's tools in order, once each: empty while no
+    /// chain is open (R29).
+    #[must_use]
+    pub fn chain_tools(
+        &self,
+        doc: &Document,
+        view: &ClipView,
+        arrangement: &ArrangementView,
+    ) -> Vec<String> {
+        let Some(app) = self
+            .open
+            .as_ref()
+            .and_then(|app| self.open_for(doc, view, arrangement, app.clip))
+        else {
+            return Vec::new();
+        };
+        let mut tools: Vec<String> = Vec::new();
+        for step in &app.steps {
+            if !tools.contains(&step.tool) {
+                tools.push(step.tool.clone());
+            }
+        }
+        tools
+    }
+
+    /// The open chain's tools by name, in order, separated by " › " (R30).
+    #[must_use]
+    pub fn chain_status(
+        &self,
+        doc: &Document,
+        view: &ClipView,
+        arrangement: &ArrangementView,
+    ) -> Option<String> {
+        let registry = Registry::native();
+        let app = self
+            .open
+            .as_ref()
+            .and_then(|app| self.open_for(doc, view, arrangement, app.clip))?;
+        let names: Vec<&str> = app
+            .steps
+            .iter()
+            .filter_map(|step| registry.find(&step.tool))
+            .map(|tool| tool.descriptor().name.as_str())
+            .collect();
+        (!names.is_empty()).then(|| names.join(" › "))
     }
 }
 
@@ -843,12 +924,13 @@ fn tool_input(
     clip: &Clip,
     midi: &MidiData,
     app: &Application,
+    step: &Step,
 ) -> ToolInput {
     ToolInput {
-        notes: app
+        notes: step
             .input
             .iter()
-            .map(|at| tool_note(&app.base[*at]))
+            .map(|at| tool_note(&step.base[*at]))
             .collect(),
         range: app.range,
         grid_step: arrangement.grid_ticks(doc),
@@ -862,17 +944,17 @@ fn tool_input(
         drum_keys: doc
             .clip_track(clip.id)
             .and_then(|track| drum_keys(doc, track)),
-        seed: app.seed,
+        seed: step.seed,
     }
 }
 
 /// The clip's notes once `written` replace what the tool took (R11, R12),
 /// in the editor's order, and the places of the written notes.
-fn merged(app: &Application, kind: ToolKind, written: &[Note]) -> (Vec<Note>, Vec<u32>) {
-    let mut taken = vec![false; app.base.len()];
+fn merged(step: &Step, kind: ToolKind, written: &[Note]) -> (Vec<Note>, Vec<u32>) {
+    let mut taken = vec![false; step.base.len()];
     match kind {
         ToolKind::Transformation => {
-            for at in &app.input {
+            for at in &step.input {
                 taken[*at] = true;
             }
         }
@@ -895,7 +977,7 @@ fn merged(app: &Application, kind: ToolKind, written: &[Note]) -> (Vec<Note>, Ve
                     span.1 = furthest;
                 }
             }
-            for (at, note) in app.base.iter().enumerate() {
+            for (at, note) in step.base.iter().enumerate() {
                 let end = note.start + note.length;
                 taken[at] = spans.get(&note.key).is_some_and(|list| {
                     let before = list.partition_point(|span| span.0 < end);
@@ -904,7 +986,7 @@ fn merged(app: &Application, kind: ToolKind, written: &[Note]) -> (Vec<Note>, Ve
             }
         }
     }
-    let mut notes: Vec<(Note, bool)> = app
+    let mut notes: Vec<(Note, bool)> = step
         .base
         .iter()
         .zip(&taken)
@@ -940,31 +1022,27 @@ fn set_notes(
     Ok(())
 }
 
-/// Runs the tool on the application's kept input and writes what it makes
-/// into the clip: one step named after the tool, recorded even when the
-/// notes come out as they were (R22). The written notes are selected and the
-/// time selection follows them (R15).
-fn execute(
+/// Writes `notes` into the chain's clip, selects the notes at `places`, lets
+/// the time selection follow them (R15), and keeps the chain open on what it
+/// left.
+fn settle(
     editor: &mut Editor,
     view: &mut ClipView,
     arrangement: &ArrangementView,
-    tool: &dyn MidiTool,
-    values: &[ParamValue],
     mut app: Application,
-) -> Result<ToolRun, EditFailure> {
-    let doc = editor.document().clone();
-    let clip = doc
+    notes: Vec<Note>,
+    places: Vec<u32>,
+) -> Result<(), EditFailure> {
+    let ClipData::Midi(midi) = &editor
+        .document()
         .clip(app.clip)
-        .ok_or_else(|| invalid(format!("no clip has the ID {}", app.clip.0)))?;
-    let ClipData::Midi(midi) = &clip.data else {
+        .ok_or_else(|| invalid(format!("no clip has the ID {}", app.clip.0)))?
+        .data
+    else {
         return Err(refused("the clip isn't a MIDI clip"));
     };
-    let input = tool_input(&doc, arrangement, clip, midi, &app);
-    let output = bl_midi_tools::run(tool, &input, values).map_err(failure)?;
-    let written: Vec<Note> = output.notes.iter().map(note_of).collect();
-    let (notes, places) = merged(&app, tool.descriptor().kind, &written);
-    editor.keep_step();
-    set_notes(editor, app.clip, midi, notes)?;
+    let midi = midi.clone();
+    set_notes(editor, app.clip, &midi, notes)?;
     view.select(app.clip, places.clone());
     if let Some(span) = span_of(editor.document(), app.clip, &places) {
         view.set_time_selection(app.clip, Some(span));
@@ -975,14 +1053,63 @@ fn execute(
     }
     app.selected = view.selected_notes(doc, arrangement).to_vec();
     app.time = view.time_selection(doc, arrangement);
+    view.tools.open = Some(app);
+    Ok(())
+}
+
+/// Runs the chain from step `from`: each step on the notes the step before
+/// it wrote (the kept input, for the first), with its own settings and seed
+/// (R27, R28). The clip's notes become what the last step made: one step
+/// named after the tool, recorded even when the notes come out as they were
+/// (R22). The written notes are selected and the time selection follows
+/// them (R15).
+fn replay(
+    editor: &mut Editor,
+    view: &mut ClipView,
+    arrangement: &ArrangementView,
+    mut app: Application,
+    from: usize,
+) -> Result<ToolRun, EditFailure> {
+    let doc = editor.document().clone();
+    let clip = doc
+        .clip(app.clip)
+        .ok_or_else(|| invalid(format!("no clip has the ID {}", app.clip.0)))?;
+    let ClipData::Midi(midi) = &clip.data else {
+        return Err(refused("the clip isn't a MIDI clip"));
+    };
+    let registry = Registry::native();
+    let mut made: Option<(Vec<Note>, Vec<u32>)> = None;
+    let mut wrote = 0;
+    for at in from..app.steps.len() {
+        if let Some((notes, places)) = made.take() {
+            let step = &mut app.steps[at];
+            step.base = notes;
+            step.input = places.iter().map(|place| *place as usize).collect();
+        }
+        let step = &app.steps[at];
+        let tool = registry
+            .find(&step.tool)
+            .ok_or_else(|| unavailable(format!("the chain's tool `{}` is gone", step.tool)))?;
+        let input = tool_input(&doc, arrangement, clip, midi, &app, step);
+        let output = bl_midi_tools::run(tool, &input, &step.values).map_err(failure)?;
+        let written: Vec<Note> = output.notes.iter().map(note_of).collect();
+        wrote = written.len();
+        made = Some(merged(step, tool.descriptor().kind, &written));
+    }
+    let (notes, places) = made.ok_or_else(|| unavailable("the chain has no step to run"))?;
+    let last = app
+        .steps
+        .last()
+        .ok_or_else(|| unavailable("the chain has no step"))?;
     let run = ToolRun {
-        tool: tool.descriptor().id.clone(),
-        seed: app.seed,
-        wrote: written.len(),
-        notes: places,
+        tool: last.tool.clone(),
+        seed: last.seed,
+        wrote,
+        notes: places.clone(),
         undo_step: false,
     };
-    view.tools.open = Some(app);
+    editor.keep_step();
+    settle(editor, view, arrangement, app, notes, places)?;
     Ok(run)
 }
 
@@ -1104,13 +1231,15 @@ struct Request<'a> {
     seed: u32,
 }
 
-/// A new application on the target as it is now (R17, R19).
+/// A new application on the target as it is now (R17, R19), a chain of the
+/// one tool with `values`.
 fn begin(
     doc: &Document,
     view: &ClipView,
     arrangement: &ArrangementView,
     clip: ClipId,
     tool: &dyn MidiTool,
+    values: Vec<ParamValue>,
     request: &Request<'_>,
 ) -> Result<Application, EditFailure> {
     let Request { notes, range, seed } = *request;
@@ -1122,20 +1251,41 @@ fn begin(
     Ok(Application {
         clip,
         shown: view.shown_clip(doc, arrangement),
-        tool: tool.descriptor().id.clone(),
-        base: notes_in_order(midi),
-        input: if tool.descriptor().kind == ToolKind::Transformation {
-            target.input.iter().map(|place| *place as usize).collect()
-        } else {
-            Vec::new()
-        },
+        steps: vec![Step {
+            tool: tool.descriptor().id.clone(),
+            values,
+            seed,
+            base: notes_in_order(midi),
+            input: if tool.descriptor().kind == ToolKind::Transformation {
+                target.input.iter().map(|place| *place as usize).collect()
+            } else {
+                Vec::new()
+            },
+        }],
         range: target.range,
-        seed,
         before: (target.selected, target.time),
         after: Vec::new(),
         selected: Vec::new(),
         time: None,
     })
+}
+
+/// The chain with a transformation added: it takes the notes the chain
+/// wrote (R27).
+fn join(
+    mut app: Application,
+    tool: &dyn MidiTool,
+    values: Vec<ParamValue>,
+    seed: u32,
+) -> Application {
+    app.steps.push(Step {
+        tool: tool.descriptor().id.clone(),
+        values,
+        seed,
+        base: app.after.clone(),
+        input: app.selected.iter().map(|place| *place as usize).collect(),
+    });
+    app
 }
 
 /// The state a command returns, with the run it made.
@@ -1193,32 +1343,77 @@ fn state(
         }),
         application: clip
             .and_then(|clip| tools.open_for(doc, view, arrangement, clip))
-            .map(|app| ApplicationState {
-                tool: app.tool.clone(),
-                clip: app.clip,
-                input_notes: app.input.len(),
-                range: app.range,
-                seed: app.seed,
+            .and_then(|app| {
+                let last = app.steps.last()?;
+                Some(ApplicationState {
+                    tool: last.tool.clone(),
+                    clip: app.clip,
+                    input_notes: app.steps.first().map_or(0, |first| first.input.len()),
+                    range: app.range,
+                    seed: last.seed,
+                    chain: app
+                        .steps
+                        .iter()
+                        .map(|step| StepState {
+                            tool: step.tool.clone(),
+                            values: registry
+                                .find(&step.tool)
+                                .map(|tool| {
+                                    tool.descriptor()
+                                        .parameters
+                                        .iter()
+                                        .zip(&step.values)
+                                        .map(|(spec, value)| {
+                                            (spec.id.clone(), value_to_json(spec, value))
+                                        })
+                                        .collect()
+                                })
+                                .unwrap_or_default(),
+                            seed: step.seed,
+                        })
+                        .collect(),
+                })
             }),
         run,
     }
 }
 
-/// With Auto on, applies the tool after a change of its parameters (R17): on
-/// the open application's kept input, or on a new one. A transformation does
-/// nothing while it has no input; a generator always runs.
+/// With Auto on, applies the tool after a change of its parameters (R17): a
+/// tool in the open chain runs the chain again from its step, the last one
+/// of that tool unless `step` names another (R28); another transformation
+/// joins the chain (R27); anything else starts a new chain on the target. A
+/// transformation does nothing while it has no input; a generator always
+/// runs.
 fn auto_apply(
     editor: &mut Editor,
     view: &mut ClipView,
     arrangement: &ArrangementView,
     clip: ClipId,
     tool: &dyn MidiTool,
+    step: Option<usize>,
 ) -> Result<Option<ToolRun>, EditFailure> {
     let doc = editor.document().clone();
     let descriptor = tool.descriptor();
     let values = view.tools.settings_of(descriptor).values;
-    let app = match view.tools.open_for(&doc, view, arrangement, clip) {
-        Some(app) if app.tool == descriptor.id => app.clone(),
+    let open = view.tools.open_for(&doc, view, arrangement, clip).cloned();
+    let found = match &open {
+        Some(app) => app.step_of(&descriptor.id, step)?,
+        None if step.is_some() => return Err(unavailable("no MIDI tool chain is open")),
+        None => None,
+    };
+    let (app, from) = match (open, found) {
+        (Some(mut app), Some(at)) => {
+            app.steps[at].values = values;
+            (app, at)
+        }
+        (Some(app), None) if descriptor.kind == ToolKind::Transformation => {
+            if app.selected.is_empty() {
+                return Ok(None);
+            }
+            let seed = view.tools.draw_seed();
+            let at = app.steps.len();
+            (join(app, tool, values, seed), at)
+        }
         _ => {
             let seed = view.tools.draw_seed();
             let request = Request {
@@ -1226,18 +1421,20 @@ fn auto_apply(
                 range: None,
                 seed,
             };
-            let app = begin(&doc, view, arrangement, clip, tool, &request)?;
+            let app = begin(&doc, view, arrangement, clip, tool, values, &request)?;
             // A transformation starts only while notes or a time are
             // selected (R17), and has something to take.
             let selected = !app.before.0.is_empty() || app.before.1.is_some();
-            if descriptor.kind == ToolKind::Transformation && (app.input.is_empty() || !selected) {
+            if descriptor.kind == ToolKind::Transformation
+                && (app.steps[0].input.is_empty() || !selected)
+            {
                 return Ok(None);
             }
-            app
+            (app, 0)
         }
     };
-    let (run, recorded) = step(editor, descriptor.name.clone(), |editor| {
-        execute(editor, view, arrangement, tool, &values, app)
+    let (run, recorded) = step_named(editor, descriptor.name.clone(), |editor| {
+        replay(editor, view, arrangement, app, from)
     })?;
     Ok(Some(ToolRun {
         undo_step: recorded,
@@ -1246,12 +1443,50 @@ fn auto_apply(
 }
 
 /// Runs `edit` as one undo step with this name.
-fn step<T>(
+fn step_named<T>(
     editor: &mut Editor,
     name: String,
     edit: impl FnOnce(&mut Editor) -> Result<T, EditFailure>,
 ) -> Result<(T, bool), EditFailure> {
     transaction(editor, name, edit)
+}
+
+/// Takes step `at` out of the chain: the steps after it run again on the
+/// notes the step before it made, or on the input for the first (R31). Taking
+/// out the only step left puts the input and the selection back and closes
+/// the chain.
+fn take_out(
+    editor: &mut Editor,
+    view: &mut ClipView,
+    arrangement: &ArrangementView,
+    mut app: Application,
+    at: usize,
+) -> Result<(), EditFailure> {
+    let removed = app.steps.remove(at);
+    if app.steps.is_empty() {
+        let ClipData::Midi(midi) = &editor
+            .document()
+            .clip(app.clip)
+            .ok_or_else(|| invalid("no such clip"))?
+            .data
+        else {
+            return Err(refused("the clip isn't a MIDI clip"));
+        };
+        let midi = midi.clone();
+        set_notes(editor, app.clip, &midi, removed.base)?;
+        view.select(app.clip, app.before.0.clone());
+        view.set_time_selection(app.clip, app.before.1);
+        view.tools.close();
+    } else if let Some(next) = app.steps.get_mut(at) {
+        next.base = removed.base;
+        next.input = removed.input;
+        replay(editor, view, arrangement, app, at)?;
+    } else {
+        // The last step went: the notes are what the step before it wrote.
+        let places = removed.input.iter().map(|place| *place as u32).collect();
+        settle(editor, view, arrangement, app, removed.base, places)?;
+    }
+    Ok(())
 }
 
 /// The name of the undo step a tool's control makes while it is dragged: the
@@ -1326,6 +1561,22 @@ pub fn run(
                 ToolKind::Generator => chosen.generator = Some(tool),
             }
             view.tools.generator_last = kind == ToolKind::Generator;
+            // A tool in the open chain shows its step's settings (R28).
+            let descriptor = found.descriptor();
+            let values = view
+                .tools
+                .open_for(&doc, view, arrangement, subject.clip)
+                .and_then(|app| {
+                    app.step_of(&descriptor.id, None)
+                        .ok()
+                        .flatten()
+                        .map(|at| app.steps[at].values.clone())
+                });
+            if let Some(values) = values {
+                let mut settings = view.tools.settings_of(descriptor);
+                settings.values = values;
+                view.tools.settings.insert(descriptor.id.clone(), settings);
+            }
             Ok(to_value(&state(
                 &doc,
                 view,
@@ -1335,7 +1586,12 @@ pub fn run(
             )))
         }
         ids::SET => {
-            let SetArgs { clip, tool, values } = parse(args)?;
+            let SetArgs {
+                clip,
+                tool,
+                step,
+                values,
+            } = parse(args)?;
             if audio_clip(&doc, view, arrangement, clip).is_some() {
                 // R22: Quantize's Grid, Triplets and Amount; nothing to apply to.
                 if values.is_empty() {
@@ -1349,9 +1605,24 @@ pub fn run(
             if values.is_empty() {
                 return Err(invalid("`values` names no parameter"));
             }
+            // A named step shows its own settings before the change (R28).
+            if let Some(named) = step {
+                let descriptor = found.descriptor();
+                let app = view
+                    .tools
+                    .open_for(&doc, view, arrangement, subject.clip)
+                    .ok_or_else(|| unavailable("no MIDI tool chain is open"))?;
+                let at = app.step_of(&descriptor.id, Some(named))?;
+                let values = at.map(|at| app.steps[at].values.clone());
+                if let Some(values) = values {
+                    let mut settings = view.tools.settings_of(descriptor);
+                    settings.values = values;
+                    view.tools.settings.insert(descriptor.id.clone(), settings);
+                }
+            }
             set_values(&mut view.tools, found, &values)?;
             let run = if view.tools.settings_of(found.descriptor()).auto {
-                auto_apply(editor, view, arrangement, subject.clip, found)?
+                auto_apply(editor, view, arrangement, subject.clip, found, step)?
             } else {
                 None
             };
@@ -1373,29 +1644,18 @@ pub fn run(
             settings.auto = auto;
             view.tools.settings.insert(descriptor.id.clone(), settings);
             if !auto {
-                // Auto off puts the notes back as they were before the
-                // application and closes it (R18).
-                let app = view
+                // Auto off takes the tool's step out of the open chain
+                // (R18, R31).
+                let chain = view
                     .tools
                     .open_for(&doc, view, arrangement, subject.clip)
-                    .filter(|app| app.tool == descriptor.id)
                     .cloned();
-                if let Some(app) = app {
-                    step(editor, format!("Revert {}", descriptor.name), |editor| {
-                        let ClipData::Midi(midi) = &editor
-                            .document()
-                            .clip(app.clip)
-                            .ok_or_else(|| invalid("no such clip"))?
-                            .data
-                        else {
-                            return Err(refused("the clip isn't a MIDI clip"));
-                        };
-                        let midi = midi.clone();
-                        set_notes(editor, app.clip, &midi, app.base.clone())
+                if let Some(app) = chain
+                    && let Some(at) = app.step_of(&descriptor.id, None)?
+                {
+                    step_named(editor, format!("Revert {}", descriptor.name), |editor| {
+                        take_out(editor, view, arrangement, app, at)
                     })?;
-                    view.select(app.clip, app.before.0.clone());
-                    view.set_time_selection(app.clip, app.before.1);
-                    view.tools.close();
                 }
             }
             let doc = editor.document().clone();
@@ -1447,21 +1707,49 @@ pub fn run(
                 set_values(&mut view.tools, found, values)?;
             }
             let seed = seed.unwrap_or_else(|| view.tools.draw_seed());
-            let request = Request {
-                notes: notes.as_deref(),
-                range,
-                seed,
+            let values = view.tools.settings_of(descriptor).values;
+            // A transformation applied to the notes the open chain wrote
+            // joins it (R27); notes or a range of its own start a new one.
+            let open =
+                (descriptor.kind == ToolKind::Transformation && notes.is_none() && range.is_none())
+                    .then(|| {
+                        view.tools
+                            .open_for(&doc, view, arrangement, subject.clip)
+                            .cloned()
+                    })
+                    .flatten();
+            let (app, from) = if let Some(app) = open {
+                let at = app.steps.len();
+                (join(app, found, values, seed), at)
+            } else {
+                let request = Request {
+                    notes: notes.as_deref(),
+                    range,
+                    seed,
+                };
+                (
+                    begin(
+                        &doc,
+                        view,
+                        arrangement,
+                        subject.clip,
+                        found,
+                        values,
+                        &request,
+                    )?,
+                    0,
+                )
             };
-            let app = begin(&doc, view, arrangement, subject.clip, found, &request)?;
-            if descriptor.kind == ToolKind::Transformation && app.input.is_empty() {
+            if descriptor.kind == ToolKind::Transformation
+                && app.steps.last().is_none_or(|step| step.input.is_empty())
+            {
                 return Err(unavailable(
                     "there are no notes to transform: select notes, or a time selection \
                      holding notes, or give `notes` or a `range` that holds some",
                 ));
             }
-            let settings = view.tools.settings_of(descriptor);
-            let (run, recorded) = step(editor, descriptor.name.clone(), |editor| {
-                execute(editor, view, arrangement, found, &settings.values, app)
+            let (run, recorded) = step_named(editor, descriptor.name.clone(), |editor| {
+                replay(editor, view, arrangement, app, from)
             })?;
             let run = ToolRun {
                 undo_step: recorded,
@@ -1484,13 +1772,14 @@ pub fn run(
                 .open_for(&doc, view, arrangement, subject.clip)
                 .cloned()
                 .ok_or_else(|| unavailable("no MIDI tool application is open"))?;
-            app.seed = seed.unwrap_or_else(|| view.tools.draw_seed());
+            // The chain's last step takes the new seed, and runs again.
+            let at = app.steps.len() - 1;
+            app.steps[at].seed = seed.unwrap_or_else(|| view.tools.draw_seed());
             let found = Registry::native()
-                .find(&app.tool)
+                .find(&app.steps[at].tool)
                 .ok_or_else(|| unavailable("the application's tool is gone"))?;
-            let settings = view.tools.settings_of(found.descriptor());
-            let (run, recorded) = step(editor, found.descriptor().name.clone(), |editor| {
-                execute(editor, view, arrangement, found, &settings.values, app)
+            let (run, recorded) = step_named(editor, found.descriptor().name.clone(), |editor| {
+                replay(editor, view, arrangement, app, at)
             })?;
             let run = ToolRun {
                 undo_step: recorded,

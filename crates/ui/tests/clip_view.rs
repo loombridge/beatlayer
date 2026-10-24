@@ -3172,3 +3172,37 @@ fn invert_selection_runs_from_the_key_and_the_context_menu() {
     let item = menu_item(&nodes, "Invert Selection");
     assert!(!item.disabled);
 }
+
+#[test]
+fn option_clicking_the_piano_ruler_sets_the_selected_chords_root_in_stacks() {
+    // Spec: midi-generators R2, R22; I-CLICK-049. While the Generate panel
+    // shows Stacks, Option-clicking a key sets the selected chord's Chord
+    // Root, as a gesture of `midi_tool.set`: one undo step named after the
+    // tool; dragging sets it to the key the drag ends on.
+    let step = n_step();
+    let mut n = set(vec![Note::new(60, Ticks::ZERO, step, 100)]);
+    n.h.shell
+        .run("midi_tool.choose", json!({ "tool": "stacks" }))
+        .unwrap();
+    n.h.shell
+        .run("clip_view.show_panel", json!({ "panel": "generate" }))
+        .unwrap();
+    n.h.settle();
+    n.h.shell.run("midi_tool.add_chord", json!({})).unwrap();
+    let steps = n.steps();
+    let key = n.key_at(62);
+    n.click(key, Modifiers::ALT);
+    let values = tool_values(&mut n, "stacks");
+    assert_eq!(values["chord_root"], 62);
+    assert_eq!(values["progression"][1]["root"], 62, "the selected chord");
+    assert_eq!(values["progression"][0]["root"], 60);
+    assert_eq!(n.steps(), steps + 1, "one undo step");
+    assert_eq!(
+        n.h.shell.editor().undo_history().next(),
+        Some("Stacks"),
+        "named after the tool"
+    );
+    let (from, to) = (n.key_at(55), n.key_at(57));
+    n.drag(from, to, Modifiers::ALT);
+    assert_eq!(tool_values(&mut n, "stacks")["chord_root"], 57);
+}

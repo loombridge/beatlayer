@@ -802,7 +802,7 @@ pub(crate) fn json_of(spec: &ParamSpec, value: f64) -> Value {
 
 /// The `midi_tool.set` that Option-clicking or Option-dragging the piano
 /// ruler from key `from` to key `to` makes (the MIDI generators spec, R2): the
-/// shown Rhythm's Pitch, or the range of Seed or Shape. `None` unless the
+/// shown Rhythm's Pitch, the selected chord of Stacks' root, or the range of Seed or Shape. `None` unless the
 /// Generate panel shows one of them.
 pub(crate) fn ruler_set(shell: &Shell, clip: ClipId, from: u8, to: u8) -> Option<Invocation> {
     let tools = shell.clip_view().midi_tools();
@@ -813,6 +813,8 @@ pub(crate) fn ruler_set(shell: &Shell, clip: ClipId, from: u8, to: u8) -> Option
     let tool = tools.chosen(track, ToolKind::Generator)?.descriptor();
     let (spec, value) = match tool.id.as_str() {
         "rhythm" => (tool.parameter("pitch")?.1, json!(to)),
+        // The selected chord's root.
+        "stacks" => (tool.parameter("chord_root")?.1, json!(to)),
         "seed" | "shape" => (
             tool.parameter("pitch_range")?.1,
             json!({ "low": from.min(to), "high": from.max(to) }),

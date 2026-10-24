@@ -1467,6 +1467,49 @@ fn the_browser_lists_sfz_files_and_loads_one_as_a_multisampler() {
     assert_eq!(shell.editor().document().top_level().count(), tracks + 1);
 }
 
+// Spec: midi-generators R26. The browser lists `.blstacks` files as chord
+// banks in every folder it lists, and Load Selected, which double-clicking
+// runs, loads the bank into Stacks; a file that breaks the format is refused
+// and the bank stays.
+#[test]
+fn the_browser_lists_chord_banks_and_loading_one_replaces_stacks_bank() {
+    let scratch = Scratch::new("chord-banks");
+    let (first, second) = (scratch.path("Jazz"), scratch.path("Pop/Deep"));
+    std::fs::create_dir_all(&first).unwrap();
+    std::fs::create_dir_all(&second).unwrap();
+    let bank = r#"{"format":"beatlayer-stacks","schema":1,"name":"Jazz Voicings","chords":[
+        {"name":"Shell","semitones":[0,4,10]}]}"#;
+    std::fs::write(first.join("Jazz.blstacks"), bank).unwrap();
+    std::fs::write(second.join("Broken.blstacks"), "{}").unwrap();
+    let mut shell = Shell::headless();
+    for folder in [&first, &second] {
+        let listed: BrowserState =
+            run(&mut shell, ids::ADD_FOLDER, json!({ "path": text(folder) }));
+        let row = listed
+            .rows
+            .iter()
+            .find(|row| row.name.ends_with(".blstacks"))
+            .expect("the chord bank is listed");
+        assert_eq!(row.kind, ItemKind::ChordBank);
+    }
+    shell.set_focused_area(Area::Browser);
+    let jazz = first.join("Jazz.blstacks");
+    run::<BrowserState>(&mut shell, ids::SELECT, json!({ "paths": [text(&jazz)] }));
+    assert!(shell.can_invoke(ids::LOAD_SELECTED, &json!({})));
+    let loaded = shell.run(ids::LOAD_SELECTED, json!({})).unwrap();
+    assert_eq!(loaded["stacks"]["bank"]["name"], json!("Jazz Voicings"));
+    assert_eq!(loaded["stacks"]["bank"]["built_in"], json!(false));
+    let read = shell.run("midi_tool.state", json!({})).unwrap();
+    assert_eq!(read["stacks"]["bank"]["chords"][0]["name"], json!("Shell"));
+    // A broken file is refused, naming it, and the bank stays.
+    let broken = second.join("Broken.blstacks");
+    run::<BrowserState>(&mut shell, ids::SELECT, json!({ "paths": [text(&broken)] }));
+    let error = shell.run(ids::LOAD_SELECTED, json!({})).unwrap_err();
+    assert!(error.to_string().contains("Broken.blstacks"), "{error}");
+    let read = shell.run("midi_tool.state", json!({})).unwrap();
+    assert_eq!(read["stacks"]["bank"]["name"], json!("Jazz Voicings"));
+}
+
 /// A click track file, and where each click starts.
 fn clicks(
     scratch: &Scratch,

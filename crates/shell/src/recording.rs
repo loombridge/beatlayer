@@ -39,7 +39,6 @@ use bl_model::{
     AutomationTarget, Channel, Clip, ClipData, ClipId, Command, EditError, Editor, EnvelopeKind,
     MidiData, NewTakeLane, Note, TakeLaneId, TrackId,
 };
-use bl_shell_spec::settings::ThemeLook;
 use rtrb::{Consumer, RingBuffer};
 use std::collections::BTreeMap;
 
@@ -955,7 +954,6 @@ pub fn overdub_moves(
 /// [`EditError`] if the document refuses a step.
 pub fn place_midi(
     editor: &mut Editor,
-    look: &ThemeLook,
     takes: &[MidiTake],
     take: TakeBounds,
     rate: SampleRate,
@@ -986,9 +984,10 @@ pub fn place_midi(
                     ..note.clone()
                 })
                 .collect::<Vec<_>>();
-            let clip = Clip::new(id, start, end - start, ClipData::Midi(MidiData::new(notes)))
-                .with_colour(look.new_clip_colour(id));
+            let clip = Clip::new(id, start, end - start, ClipData::Midi(MidiData::new(notes)));
             put_on_lane(editor, recorded.track, clip)?;
+            // Spec: themes R20. The caller colours what `placed` holds.
+            placed.insert(id);
             let steps: Vec<_> = moved.iter().map(|&(at, m)| (at - start, m)).collect();
             write_moves(editor, id, &steps, None)?;
         }
@@ -1074,8 +1073,7 @@ pub fn place_midi(
             // Spec: grooves R20. A clip made by recording takes the set's
             // auto-load groove.
             let clip = Clip::new(id, from, to - from, ClipData::Midi(MidiData::new(inside)))
-                .with_groove(editor.document().settings().grooves.auto_loaded())
-                .with_colour(look.new_clip_colour(id));
+                .with_groove(editor.document().settings().grooves.auto_loaded());
             crate::arrangement::placing::clear(editor, recorded.track, from, to, placed)?;
             placed.insert(id);
             editor.apply(Command::CreateClip {
@@ -1323,7 +1321,6 @@ mod tests {
         let mut placed = Default::default();
         place_midi(
             &mut editor,
-            &ThemeLook::default(),
             &takes,
             take(1, 2),
             RATE,
@@ -1376,7 +1373,6 @@ mod tests {
         let mut placed = Default::default();
         place_midi(
             &mut editor,
-            &ThemeLook::default(),
             &takes,
             take(0, 2),
             RATE,
@@ -1422,7 +1418,6 @@ mod tests {
         let mut placed = Default::default();
         place_midi(
             &mut editor,
-            &ThemeLook::default(),
             &takes,
             take(0, 3),
             RATE,
@@ -1452,7 +1447,6 @@ mod tests {
         let mut placed = Default::default();
         place_midi(
             &mut editor,
-            &ThemeLook::default(),
             &takes,
             take(0, 4),
             RATE,
@@ -1475,7 +1469,6 @@ mod tests {
         let mut placed = Default::default();
         place_midi(
             &mut editor,
-            &ThemeLook::default(),
             &[],
             take(0, 1),
             RATE,
@@ -1628,7 +1621,6 @@ mod tests {
         let mut placed = Default::default();
         place_midi(
             &mut editor,
-            &ThemeLook::default(),
             &takes,
             take(0, 3),
             RATE,
@@ -1686,7 +1678,6 @@ mod tests {
         let mut placed = Default::default();
         place_midi(
             &mut editor,
-            &ThemeLook::default(),
             &takes,
             take(0, 1),
             RATE,
@@ -1713,7 +1704,6 @@ mod tests {
         let mut placed = Default::default();
         place_midi(
             &mut editor,
-            &ThemeLook::default(),
             &takes,
             take(1, 2),
             RATE,
@@ -1761,7 +1751,6 @@ mod tests {
         let mut placed = Default::default();
         place_midi(
             &mut editor,
-            &ThemeLook::default(),
             &takes,
             take(0, 1),
             RATE,
@@ -1794,7 +1783,6 @@ mod tests {
         let takes = played(track, &[(5_000, pressure(60, 9))]);
         place_midi(
             &mut editor,
-            &ThemeLook::default(),
             &takes,
             take(0, 1),
             RATE,
@@ -1855,7 +1843,6 @@ mod tests {
         let mut placed = Default::default();
         place_midi(
             &mut editor,
-            &ThemeLook::default(),
             &takes,
             take(0, 1),
             RATE,

@@ -50,6 +50,7 @@ pub struct ChangeSet {
     /// The colour of a track, a clip, or a scene changed. The engine never
     /// hears a colour, so nothing else is listed for it (the themes spec,
     /// R27), but the set did change.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub colours: bool,
     /// Tracks whose own settings changed: name, mixer, sends, the tracks
     /// inside a group, or the order of the device chain. Changes to a track's

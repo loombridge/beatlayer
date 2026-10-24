@@ -1812,8 +1812,7 @@ impl DeviceView {
             ids::ADD => {
                 let args: AddDeviceArgs = parse(args)?;
                 let ready = self.default_rack(editor, &args, user_library, media, &mut outcome);
-                let added =
-                    self.add(&args, editor, arrangement, user_library, look, track, ready)?;
+                let added = self.add(&args, editor, arrangement, user_library, look, ready)?;
                 if let Some(name) = &added.default_preset {
                     // Spec: device-chains R13, as Live's "Using Default
                     // Preset Auto Filter.adv."
@@ -2455,15 +2454,7 @@ impl DeviceView {
                 let args: AddPresetArgs = parse(args)?;
                 let (add, ready) =
                     self.ready_to_add(&args, editor, user_library, media, &mut outcome)?;
-                let added = self.add(
-                    &add,
-                    editor,
-                    arrangement,
-                    user_library,
-                    look,
-                    track,
-                    Some(ready),
-                )?;
+                let added = self.add(&add, editor, arrangement, user_library, look, Some(ready))?;
                 outcome.document_changed = true;
                 outcome.value = to_value(&added);
                 return Ok(outcome);
@@ -2593,7 +2584,6 @@ impl DeviceView {
         arrangement: &mut ArrangementView,
         user_library: Option<&Path>,
         look: &bl_shell_spec::settings::ThemeLook,
-        shown: Option<TrackId>,
         ready: Option<Ready>,
     ) -> Result<DeviceAdded, DeviceError> {
         if let Some(chain) = args.chain {
@@ -2602,7 +2592,7 @@ impl DeviceView {
         let role = args.device.role;
         let target = args
             .track
-            .or(shown)
+            .or_else(|| shown_track(arrangement, editor.document()))
             .ok_or_else(|| DeviceError::Unavailable("select a track first".to_owned()))?;
         let kind = editor
             .document()

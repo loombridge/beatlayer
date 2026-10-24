@@ -312,7 +312,6 @@ impl Shell {
                     }
                     crate::recording::place_midi(
                         editor,
-                        look,
                         &midi,
                         take,
                         rate,
@@ -320,6 +319,8 @@ impl Shell {
                         true,
                         &mut placed,
                     )?;
+                    let made: Vec<_> = placed.iter().copied().collect();
+                    crate::colours::colour_new(editor, look, &[], &made)?;
                     crate::session_capture::place(editor, &watch, &runs, &armed, end)?;
                     // Spec: audio-clips R26. A take that meets a clip
                     // already there is crossfaded with it.
@@ -518,7 +519,6 @@ impl Shell {
                         let cut = crate::recording::midi_in_pass(midi, take, pass);
                         crate::recording::place_midi(
                             editor,
-                            look,
                             &cut,
                             ends(pass),
                             rate,
@@ -531,7 +531,6 @@ impl Shell {
                         let cut = crate::recording::midi_in_pass(midi, take, pass);
                         crate::recording::place_midi(
                             editor,
-                            look,
                             &cut,
                             ends(pass),
                             rate,
@@ -540,6 +539,8 @@ impl Shell {
                             &mut placed,
                         )?;
                     }
+                    let made: Vec<_> = placed.iter().copied().collect();
+                    crate::colours::colour_new(editor, look, &[], &made)?;
                     Ok::<(), bl_model::EditError>(())
                 })?;
         }

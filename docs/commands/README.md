@@ -4449,11 +4449,11 @@ What a command changed: whether the song settings (the tempo map, the time-signa
 |---|---|---|---|
 | `settings` | boolean | yes | The song settings changed: the tempo map, the time-signature map, the crossfader, the Arrangement loop, or Solo in Place. |
 | `layout` | boolean | yes | The track tree changed: a track was added, removed, or moved, so routing may have changed. |
-| `colours` | boolean | yes | The colour of a track, a clip, or a scene changed. The engine never hears a colour, so nothing else is listed for it (the themes spec, R27), but the set did change. |
 | `tracks` | object of [`Change`](#change) by integer key | yes | Tracks whose own settings changed: name, mixer, sends, the tracks inside a group, or the order of the device chain. Changes to a track's clips or to its devices' settings are listed under `clips` and `devices` instead. |
 | `scenes` | object of [`Change`](#change) by integer key | yes | Scenes that were added, removed, renamed, or moved. A scene whose clips changed only is listed under `clips`, not here. |
 | `clips` | object of [`Change`](#change) by integer key | yes | Clips that changed, including clips moved to another track or between the Arrangement and a Session slot. |
 | `devices` | object of [`Change`](#change) by integer key | yes | Devices whose settings changed, including devices moved to another track. |
+| `colours` | boolean | no | The colour of a track, a clip, or a scene changed. The engine never hears a colour, so nothing else is listed for it (the themes spec, R27), but the set did change. |
 
 <details><summary>JSON Schema</summary>
 
@@ -4517,7 +4517,6 @@ What a command changed: whether the song settings (the tempo map, the time-signa
   "required": [
     "settings",
     "layout",
-    "colours",
     "tracks",
     "scenes",
     "clips",

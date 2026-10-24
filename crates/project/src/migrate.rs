@@ -18,7 +18,7 @@ use serde_json::{Map, Value};
 use crate::error::LoadError;
 
 /// The schema version this build writes, and the newest it can read.
-pub const SCHEMA_VERSION: u32 = 10;
+pub const SCHEMA_VERSION: u32 = 11;
 
 /// The oldest schema version this build can read, through [`MIGRATIONS`].
 pub const OLDEST_SCHEMA_VERSION: u32 = SCHEMA_VERSION - MIGRATIONS.len() as u32;
@@ -105,6 +105,14 @@ pub const MIGRATIONS: &[Migration] = &[
             pin_loop_forward(&mut value);
             Ok(value)
         },
+    },
+    Migration {
+        from: 10,
+        summary: "tracks, clips and scenes gain colours; a set saved before them opens with each \
+                  track at swatch `id mod 14` of the palette's top row, each clip in its \
+                  track's colour and every scene with none, as such sets were drawn (the themes \
+                  spec, R21), so the saved JSON itself needs nothing",
+        apply: Ok,
     },
 ];
 

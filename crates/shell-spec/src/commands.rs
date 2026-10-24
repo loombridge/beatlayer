@@ -56,8 +56,13 @@ pub const WINDOW_CLOSE: &str = "window.close";
 pub const VIEW_STATE: &str = "view.state";
 /// `view.full_screen`: toggle full-screen mode.
 pub const VIEW_FULL_SCREEN: &str = "view.full_screen";
+/// `view.toggle_second_window`: open or close the second window (WP-6.29).
+pub const VIEW_TOGGLE_SECOND_WINDOW: &str = "view.toggle_second_window";
 /// `view.toggle_browser`: show or hide the browser.
 pub const VIEW_TOGGLE_BROWSER: &str = "view.toggle_browser";
+/// Runs the browser down to the Status Bar, or back to the detail area's
+/// top (Full-Height Browser; spec: browser R26).
+pub const VIEW_TOGGLE_FULL_HEIGHT_BROWSER: &str = "view.toggle_full_height_browser";
 /// `view.toggle_clip_view`: show or hide the Clip View (WP-2.3).
 pub const VIEW_TOGGLE_CLIP_VIEW: &str = "view.toggle_clip_view";
 /// `view.toggle_device_view`: show or hide the Device View (WP-6.27).
@@ -124,6 +129,8 @@ pub const VIEW_ZOOM_RESET: &str = "view.zoom_reset";
 pub const VIEW_SET_ZOOM: &str = "view.set_zoom";
 /// `view.toggle_undo_history`: show or hide the Undo History panel.
 pub const VIEW_TOGGLE_UNDO_HISTORY: &str = "view.toggle_undo_history";
+/// `view.toggle_save_history`: show or hide the Save History panel (IMP-05).
+pub const VIEW_TOGGLE_SAVE_HISTORY: &str = "view.toggle_save_history";
 /// `focus.control_bar`: move the keyboard focus to the Control Bar.
 pub const FOCUS_CONTROL_BAR: &str = "focus.control_bar";
 /// `focus.arrangement`: move the keyboard focus to the Arrangement View.
@@ -259,7 +266,9 @@ pub const IDS: &[&str] = &[
     WINDOW_CLOSE,
     VIEW_STATE,
     VIEW_FULL_SCREEN,
+    VIEW_TOGGLE_SECOND_WINDOW,
     VIEW_TOGGLE_BROWSER,
+    VIEW_TOGGLE_FULL_HEIGHT_BROWSER,
     VIEW_TOGGLE_CLIP_VIEW,
     VIEW_TOGGLE_DEVICE_VIEW,
     VIEW_SHOW_DETAIL_VIEWS,
@@ -286,6 +295,7 @@ pub const IDS: &[&str] = &[
     VIEW_ZOOM_RESET,
     VIEW_SET_ZOOM,
     VIEW_TOGGLE_UNDO_HISTORY,
+    VIEW_TOGGLE_SAVE_HISTORY,
     FOCUS_CONTROL_BAR,
     FOCUS_ARRANGEMENT,
     FOCUS_NEXT,
@@ -617,6 +627,61 @@ pub struct SwitchArgs {
     pub on: bool,
 }
 
+/// One of the two main windows (second-window R15).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum WindowName {
+    /// The main window.
+    Main,
+    /// The second window.
+    Second,
+}
+
+impl WindowName {
+    /// The window's ID in command results.
+    #[must_use]
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::Main => "main",
+            Self::Second => "second",
+        }
+    }
+}
+
+/// Whether `id` is a command that takes `window`: the view, browser,
+/// detail-view and zoom commands (second-window R15).
+#[must_use]
+pub fn acts_on_a_window(id: &str) -> bool {
+    matches!(
+        id,
+        VIEW_FULL_SCREEN
+            | VIEW_TOGGLE_BROWSER
+            | VIEW_TOGGLE_CLIP_VIEW
+            | VIEW_TOGGLE_DEVICE_VIEW
+            | VIEW_SHOW_DETAIL_VIEWS
+            | VIEW_SWITCH_DETAIL_VIEW
+            | VIEW_TOGGLE_DETAIL_AREA
+            | VIEW_EXPAND_CLIP_VIEW
+            | VIEW_SET_DETAIL_HEIGHT
+            | FOCUS_CLIP_VIEW
+            | FOCUS_DEVICE_VIEW
+            | VIEW_ZOOM_IN
+            | VIEW_ZOOM_OUT
+            | VIEW_ZOOM_RESET
+            | VIEW_SET_ZOOM
+    )
+}
+
+/// Arguments of the commands that act on one window (second-window R15).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WindowArgs {
+    /// The window to act on, `main` or `second`. Left out, the window with
+    /// the focus.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window: Option<WindowName>,
+}
+
 /// Arguments of `view.set_zoom`: the Display & Input page's Zoom.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -625,6 +690,11 @@ pub struct ZoomArgs {
     /// the size layout.md measures Live at.
     #[schemars(range(min = 50, max = 200))]
     pub percent: u16,
+    /// The window to zoom, `main` or `second`; `second` while the second
+    /// window is closed sets the zoom it opens at. Left out, the window
+    /// with the focus.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window: Option<WindowName>,
 }
 
 /// Arguments of `audio.set_test_tone`: what to change. Fields left out
@@ -828,6 +898,10 @@ pub struct DetailState {
 pub struct DetailHeightArgs {
     /// The Clip View's height in points at 100%, at least 100.
     pub points: f64,
+    /// The window whose detail area it sets, `main` or `second`. Left out,
+    /// the window with the focus.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window: Option<WindowName>,
 }
 
 /// What the view commands return: the window's view state afterwards.
@@ -837,12 +911,39 @@ pub struct ViewResult {
     pub main_view: String,
     /// Whether the browser shows.
     pub browser: bool,
+    /// Whether the browser runs down to the Status Bar (Full-Height
+    /// Browser, spec: browser R26).
+    #[serde(default)]
+    pub full_height_browser: bool,
     /// Whether the Info View shows.
     pub info_view: bool,
     /// Whether the main window is in full-screen mode.
     pub full_screen: bool,
     /// The interface zoom, where 1 is 100%.
     pub zoom: f32,
+}
+
+/// What `view.toggle_second_window` returns and `view.state` reports under
+/// `second_window` (second-window R15).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SecondWindowState {
+    /// Whether the second window is open.
+    pub open: bool,
+    /// The main view it shows, or would show: the one the main window
+    /// doesn't.
+    pub main_view: String,
+    /// Whether its browser shows; it opens without.
+    pub browser: bool,
+    /// Whether it is in full-screen mode.
+    pub full_screen: bool,
+    /// Its interface zoom, where 1 is 100%, kept while it is closed.
+    pub zoom: f32,
+    /// Where it sat and how big it was when it was last open, in points;
+    /// none before it has been opened.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frame: Option<bl_model::WindowFrame>,
+    /// Its detail area.
+    pub detail: DetailState,
 }
 
 /// What `view.state` returns: what the view commands switch, without
@@ -852,6 +953,12 @@ pub struct ViewState {
     /// The main window: the main view, the browser, the Info View,
     /// full-screen mode and the interface zoom.
     pub window: ViewResult,
+    /// The second window: whether it is open, the main view it shows, its
+    /// browser, zoom, frame and detail area.
+    pub second_window: SecondWindowState,
+    /// The window the commands that act on one window act on when they
+    /// aren't told which: the one with the focus.
+    pub focused_window: WindowName,
     /// The Clip View and its note editor: whether it shows, Draw Mode, the
     /// clip it holds, the selected notes, the lane and Fold.
     pub clip_view: ClipViewState,
@@ -865,6 +972,8 @@ pub struct ViewState {
     pub assistant: crate::assistant::AssistantPanelState,
     /// Whether the Undo History panel shows.
     pub undo_history: bool,
+    /// Whether the Save History panel shows.
+    pub save_history: bool,
     /// Whether floating devices' and plug-ins' windows are shown, as
     /// `view.toggle_plug_in_windows` sets it.
     pub plug_in_windows: bool,
@@ -881,6 +990,18 @@ pub struct UndoHistoryState {
     /// The current row's place in the history, counted up from the set's
     /// start: 0 before any step.
     pub current: usize,
+}
+
+/// What `view.toggle_save_history` returns: the Save History panel's state
+/// afterwards.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SaveHistoryState {
+    /// Whether the panel shows.
+    pub open: bool,
+    /// How many rows the history lists (`set.save_history` lists them).
+    pub rows: usize,
+    /// Whether Save Continuously is on.
+    pub continuous: bool,
 }
 
 /// Adds the shell's commands to a registry, the agent server's
@@ -1098,12 +1219,12 @@ fn specs() -> Vec<CommandSpec> {
         CommandSpec::new(VIEW_FULL_SCREEN, "Full Screen")
             .description(
                 "Switches the main window into or out of full-screen mode. Changes nothing in \
-                 the set.",
+                 the set. With the second window open it acts on the window `window` names, `main` or `second`, and on the window with the focus without it.",
             )
             .permission(Permission::Read)
             .context(Global)
             .binding("S-VIEW-001")
-            .args::<NoArgs>()
+            .args::<WindowArgs>()
             .result::<ViewResult>(),
         CommandSpec::new(VIEW_TOGGLE_PLUG_IN_WINDOWS, "Plug-In Windows")
             .description(
@@ -1131,15 +1252,44 @@ fn specs() -> Vec<CommandSpec> {
             .context(Global)
             .args::<NoArgs>()
             .result::<ClosedPlugInWindows>(),
+        CommandSpec::new(VIEW_TOGGLE_SECOND_WINDOW, "Second Window")
+            .description(
+                "Opens the second window, or closes it if it is open: a window with its own \
+                 Control Bar, main view, detail area and Status Bar, showing the main view the \
+                 main window doesn't (the Arrangement View while the main window shows the \
+                 Session View), without the browser. It opens at 990 by 703 points the first \
+                 time and afterwards where and as big as it was. Both windows show one set. \
+                 Closing it moves its Clip and Device Views into the main window. Whether it \
+                 is open is saved with the set, but isn't an undo step and doesn't change the \
+                 set. The result is the second window's state, as `view.state` reports it \
+                 under `second_window`.",
+            )
+            .permission(Permission::Read)
+            .context(Global)
+            .binding("S-VIEW-002")
+            .args::<NoArgs>()
+            .result::<SecondWindowState>(),
         CommandSpec::new(VIEW_TOGGLE_BROWSER, "Browser")
             .description(
                 "Shows or hides the browser at the left of the main window; the main view \
-                 widens to fill its place. Changes nothing in the set.",
+                 widens to fill its place. Changes nothing in the set. With the second window open it acts on the window `window` names, `main` or `second`, and on the window with the focus without it.",
             )
             .permission(Permission::Read)
             .context(Global)
             .binding("S-VIEW-010")
             .binding("S-BRW-002")
+            .args::<WindowArgs>()
+            .result::<ViewResult>(),
+        CommandSpec::new(VIEW_TOGGLE_FULL_HEIGHT_BROWSER, "Full-Height Browser")
+            .description(
+                "Runs the browser column from under the Control Bar down to the Status Bar, \
+                 instead of to the detail area's top; the Info View and the Clip or Device View \
+                 stay open, under the main view to the browser's right. Calling it again puts \
+                 the column back. Kept for the next start. Read in `view.state`'s \
+                 `window.full_height_browser`. Changes nothing in the set.",
+            )
+            .permission(Permission::Edit)
+            .context(Global)
             .args::<NoArgs>()
             .result::<ViewResult>(),
         CommandSpec::new(VIEW_STATE, "View State")
@@ -1156,9 +1306,14 @@ fn specs() -> Vec<CommandSpec> {
                  `view.switch_detail_view`, `view.toggle_detail_area`, \
                  `view.expand_clip_view`, `view.set_detail_height`, `focus.clip_view`, \
                  `focus.device_view`), the assistant's panel, the \
-                 Undo History (`view.toggle_undo_history`), and whether plug-in windows are \
-                 shown (`view.toggle_plug_in_windows`). Changes \
-                 nothing. The Arrangement's own view is in `arrangement.state`, the Mixer's in \
+                 Undo History (`view.toggle_undo_history`), the Save History \
+                 (`view.toggle_save_history`), whether plug-in windows are \
+                 shown (`view.toggle_plug_in_windows`), the second window under \
+                 `second_window`: whether it is open, its main view, browser, full-screen \
+                 mode, zoom, frame and detail area (`view.toggle_second_window`, and the \
+                 commands above with `window` set to `second`), and `focused_window`, `main` \
+                 or `second`, the window the commands that act on one window act on without \
+                 `window`. Changes nothing. The Arrangement's own view is in `arrangement.state`, the Mixer's in \
                  `mixer_view.state`, the Session View's in `session.state` and the Device \
                  View's in `device_view.state`.",
             )
@@ -1175,12 +1330,12 @@ fn specs() -> Vec<CommandSpec> {
                  notes, and selecting another MIDI clip switches the editor to it, clearing \
                  the note selection. Changes nothing in the set and isn't an undo step. The \
                  result is the detail area's state, as `view.state` reports it under \
-                 `detail`.",
+                 `detail`. With the second window open it acts on the window `window` names, `main` or `second`, and on the window with the focus without it.",
             )
             .permission(Permission::Read)
             .context(Global)
             .binding("S-VIEW-015")
-            .args::<NoArgs>()
+            .args::<WindowArgs>()
             .result::<DetailState>(),
         CommandSpec::new(VIEW_TOGGLE_DEVICE_VIEW, "Device View")
             .description(
@@ -1188,24 +1343,24 @@ fn specs() -> Vec<CommandSpec> {
                  track's devices, and leaves the Clip View as it is: with the Clip View \
                  showing, showing the Device View stacks it below the Clip View. Changes \
                  nothing in the set and isn't an undo step. The result is the detail area's \
-                 state, as `view.state` reports it under `detail`.",
+                 state, as `view.state` reports it under `detail`. With the second window open it acts on the window `window` names, `main` or `second`, and on the window with the focus without it.",
             )
             .permission(Permission::Read)
             .context(Global)
             .binding("S-VIEW-016")
-            .args::<NoArgs>()
+            .args::<WindowArgs>()
             .result::<DetailState>(),
         CommandSpec::new(VIEW_SHOW_DETAIL_VIEWS, "Show Clip and Device View")
             .description(
                 "Shows the Clip View and the Device View together, the Clip View above the \
                  Device View, as Option-click (Alt-click) on either view's toggle does. With \
                  both showing already it changes nothing. Changes nothing in the set and isn't \
-                 an undo step. The result is the detail area's state.",
+                 an undo step. The result is the detail area's state. With the second window open it acts on the window `window` names, `main` or `second`, and on the window with the focus without it.",
             )
             .permission(Permission::Read)
             .context(Global)
             .binding("S-VIEW-005")
-            .args::<NoArgs>()
+            .args::<WindowArgs>()
             .result::<DetailState>(),
         CommandSpec::new(VIEW_SWITCH_DETAIL_VIEW, "Toggle Clip/Device View")
             .description(
@@ -1215,12 +1370,12 @@ fn specs() -> Vec<CommandSpec> {
                  showing, shows the view that showed alone last, the Device View in a new \
                  session. Shift+Tab does this while Use Tab Key to Move Focus is off; F12 does \
                  it always. Changes nothing in the set and isn't an undo step. The result is \
-                 the detail area's state.",
+                 the detail area's state. With the second window open it acts on the window `window` names, `main` or `second`, and on the window with the focus without it.",
             )
             .permission(Permission::Read)
             .context(Global)
             .binding("S-VIEW-004")
-            .args::<NoArgs>()
+            .args::<WindowArgs>()
             .result::<DetailState>(),
         CommandSpec::new(VIEW_TOGGLE_DETAIL_AREA, "Hide Device View")
             .description(
@@ -1228,12 +1383,12 @@ fn specs() -> Vec<CommandSpec> {
                  the same ones again; with neither showing and nothing hidden this way, shows \
                  the Device View. The View menu's item reads Hide or Show followed by the views \
                  it would hide or bring back. Changes nothing in the set and isn't an undo \
-                 step. The result is the detail area's state.",
+                 step. The result is the detail area's state. With the second window open it acts on the window `window` names, `main` or `second`, and on the window with the focus without it.",
             )
             .permission(Permission::Read)
             .context(Global)
             .binding("S-VIEW-022")
-            .args::<NoArgs>()
+            .args::<WindowArgs>()
             .result::<DetailState>(),
         CommandSpec::new(VIEW_EXPAND_CLIP_VIEW, "Expand Clip View")
             .description(
@@ -1242,12 +1397,12 @@ fn specs() -> Vec<CommandSpec> {
                  the Clip View is hidden. Dragging the detail area's top edge, or hiding the \
                  Clip View, ends the expansion. Changes nothing in the set and isn't an undo \
                  step. The result is the detail area's state, whose `expanded` says which way \
-                 it went.",
+                 it went. With the second window open it acts on the window `window` names, `main` or `second`, and on the window with the focus without it.",
             )
             .permission(Permission::Read)
             .context(ClipView)
             .binding("S-NOTE-030")
-            .args::<NoArgs>()
+            .args::<WindowArgs>()
             .result::<DetailState>(),
         CommandSpec::new(VIEW_SET_DETAIL_HEIGHT, "Set Clip View Height")
             .description(
@@ -1255,7 +1410,7 @@ fn specs() -> Vec<CommandSpec> {
                  100, as dragging the detail area's top edge does one frame at a time; a \
                  window too short for it shows the Clip View less tall, down to 100 points. \
                  Ends an expansion. The Device View's height doesn't change. Changes nothing \
-                 in the set and isn't an undo step. The result is the detail area's state.",
+                 in the set and isn't an undo step. The result is the detail area's state. With the second window open it acts on the window `window` names, `main` or `second`, and on the window with the focus without it.",
             )
             .permission(Permission::Read)
             .context(Global)
@@ -1265,23 +1420,23 @@ fn specs() -> Vec<CommandSpec> {
             .description(
                 "Moves the keyboard focus to the Clip View's editor, so the Clip View's \
                  shortcuts apply, showing the Clip View first if it is hidden. Changes nothing \
-                 in the set and isn't an undo step. The result is the detail area's state.",
+                 in the set and isn't an undo step. The result is the detail area's state. With the second window open it acts on the window `window` names, `main` or `second`, and on the window with the focus without it.",
             )
             .permission(Permission::Read)
             .context(Global)
             .binding("S-FOCUS-004")
-            .args::<NoArgs>()
+            .args::<WindowArgs>()
             .result::<DetailState>(),
         CommandSpec::new(FOCUS_DEVICE_VIEW, "Device View")
             .description(
                 "Moves the keyboard focus to the Device View, so its shortcuts apply, showing \
                  the Device View first if it is hidden. Changes nothing in the set and isn't \
-                 an undo step. The result is the detail area's state.",
+                 an undo step. The result is the detail area's state. With the second window open it acts on the window `window` names, `main` or `second`, and on the window with the focus without it.",
             )
             .permission(Permission::Read)
             .context(Global)
             .binding("S-FOCUS-005")
-            .args::<NoArgs>()
+            .args::<WindowArgs>()
             .result::<DetailState>(),
         CommandSpec::new(VIEW_TOGGLE_PLUGIN_LIST, "Plug-In List")
             .description(
@@ -1421,7 +1576,9 @@ fn specs() -> Vec<CommandSpec> {
         )
         .description(
             "Switches the main view between the Arrangement View and the Session View. A new \
-             set opens in the Arrangement View. Changes nothing in the set.",
+             set opens in the Arrangement View. With the second window open, the two windows \
+             swap their main views. Which main view the main window shows is saved with the \
+             set, but switching it isn't an undo step and doesn't change the set.",
         )
         .permission(Permission::Read)
         .context(Global)
@@ -1436,34 +1593,34 @@ fn specs() -> Vec<CommandSpec> {
                 "Makes the whole interface larger by one step of 10%, up to 200%: every \
                  window's panes, controls, and text scale together and keep their places. \
                  From a zoom between steps it goes to the next step up. The zoom is kept for \
-                 the next start. Changes nothing in the set and isn't an undo step.",
+                 the next start. Changes nothing in the set and isn't an undo step. With the second window open it acts on the window `window` names, `main` or `second`, and on the window with the focus without it.",
             )
             .permission(Permission::Edit)
             .context(Global)
             .binding("S-ZOOM-001")
-            .args::<NoArgs>()
+            .args::<WindowArgs>()
             .result::<ViewResult>(),
         CommandSpec::new(VIEW_ZOOM_OUT, "Zoom Out")
             .description(
                 "Makes the whole interface smaller by one step of 10%, down to 50%: every \
                  window's panes, controls, and text scale together and keep their places. \
                  From a zoom between steps it goes to the next step down. The zoom is kept for \
-                 the next start. Changes nothing in the set and isn't an undo step.",
+                 the next start. Changes nothing in the set and isn't an undo step. With the second window open it acts on the window `window` names, `main` or `second`, and on the window with the focus without it.",
             )
             .permission(Permission::Edit)
             .context(Global)
             .binding("S-ZOOM-002")
-            .args::<NoArgs>()
+            .args::<WindowArgs>()
             .result::<ViewResult>(),
         CommandSpec::new(VIEW_ZOOM_RESET, "Reset Zoom to 100%")
             .description(
                 "Returns the interface zoom to 100%, the size Live's layout is measured at. \
                  The zoom is kept for the next start. Changes nothing in the set and isn't an \
-                 undo step.",
+                 undo step. With the second window open it acts on the window `window` names, `main` or `second`, and on the window with the focus without it.",
             )
             .permission(Permission::Edit)
             .context(Global)
-            .args::<NoArgs>()
+            .args::<WindowArgs>()
             .result::<ViewResult>(),
         CommandSpec::new(VIEW_SET_ZOOM, "Zoom")
             .description(
@@ -1473,7 +1630,7 @@ fn specs() -> Vec<CommandSpec> {
                  the main window grows if it's smaller than its minimum size at that zoom (as \
                  far as the screen allows). The result's `zoom` is the new zoom as a factor, \
                  1.5 for 150%. The zoom is kept for the next start. Changes nothing in the set \
-                 and isn't an undo step.",
+                 and isn't an undo step. With the second window open it acts on the window `window` names, `main` or `second`, and on the window with the focus without it.",
             )
             .permission(Permission::Edit)
             .contexts([Global, Settings])
@@ -1492,6 +1649,19 @@ fn specs() -> Vec<CommandSpec> {
             .binding("S-VIEW-021")
             .args::<NoArgs>()
             .result::<UndoHistoryState>(),
+        CommandSpec::new(VIEW_TOGGLE_SAVE_HISTORY, "Save History")
+            .description(
+                "Shows or hides the Save History panel at the right of the main window, where \
+                 the Undo History opens (showing one hides the other). The panel lists the open \
+                 set's save points, then its saved versions, newest first; `set.save_history` \
+                 lists the same rows and `set.restore` restores one. Whether it shows is view \
+                 state: it isn't saved with the set and isn't an undo step. Changes nothing in \
+                 the set.",
+            )
+            .permission(Permission::Read)
+            .context(Global)
+            .args::<NoArgs>()
+            .result::<SaveHistoryState>(),
         CommandSpec::new(FOCUS_CONTROL_BAR, "Control Bar")
             .description(
                 "Moves the keyboard focus to the Control Bar at the top of the main window, \
@@ -1505,7 +1675,10 @@ fn specs() -> Vec<CommandSpec> {
         CommandSpec::new(FOCUS_ARRANGEMENT, "Arrangement View")
             .description(
                 "Shows the Arrangement View if the Session View is in front, and moves the \
-                 keyboard focus to it, so its shortcuts apply. Changes nothing in the set.",
+                 keyboard focus to it, so its shortcuts apply. With the second window open, \
+                 moves the focus to the window that shows the Arrangement View and brings it \
+                 to the front, without changing either window's view. Changes nothing in the \
+                 set.",
             )
             .permission(Permission::Read)
             .context(Global)

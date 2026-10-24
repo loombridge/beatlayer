@@ -3,18 +3,21 @@
 
 use bl_core::time::{Ticks, TimeSignature};
 
-/// One point of a note's pressure: from `at` after the note's start the key
-/// is pressed to `value`, until the next point.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ToolPressure {
-    /// Where it takes effect, counted from the note's start.
+/// One breakpoint of a note's envelope, counted from the note's start: the
+/// value there and the bend of the segment starting at it, from -1 to 1
+/// (the MPE spec, R1).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ToolPoint {
+    /// Where it sits, counted from the note's start.
     pub at: Ticks,
-    /// The pressure, from 0 to 127.
-    pub value: u8,
+    /// The value there: semitones for Pitch, 0 to 127 for Slide and Pressure.
+    pub value: f64,
+    /// The bend of the segment starting here; 0 is the straight line.
+    pub bend: f64,
 }
 
-/// A note as a tool sees it: every field a note in the document has. The
-/// expressions are the pressure points today.
+/// A note as a tool sees it: every field a note in the document has,
+/// with its Pitch, Slide and Pressure envelopes.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ToolNote {
     /// The key. A tool may write a key outside 0 to 127; Beatlayer moves it
@@ -34,8 +37,12 @@ pub struct ToolNote {
     pub velocity_deviation: i8,
     /// Whether the note is deactivated.
     pub deactivated: bool,
+    /// The note's pitch bend, in order of `at`.
+    pub pitch: Vec<ToolPoint>,
+    /// The note's slide, in order of `at`.
+    pub slide: Vec<ToolPoint>,
     /// The note's pressure, in order of `at`.
-    pub pressure: Vec<ToolPressure>,
+    pub pressure: Vec<ToolPoint>,
 }
 
 impl ToolNote {
@@ -52,6 +59,8 @@ impl ToolNote {
             chance: 1.0,
             velocity_deviation: 0,
             deactivated: false,
+            pitch: Vec::new(),
+            slide: Vec::new(),
             pressure: Vec::new(),
         }
     }
@@ -62,50 +71,91 @@ impl ToolNote {
         self.start + self.length
     }
 
-    /// The note with this length: a shorter note drops the pressure past its
-    /// new end, a longer one lets the last value hold (the MPE spec, R4).
+    /// The note with this length: a shorter note ends each envelope at its
+    /// new end with the value there, a longer one lets the last value hold
+    /// (the MPE spec, R4).
     #[must_use]
     pub fn with_length(&self, length: Ticks) -> Self {
-        let mut note = self.clone();
-        note.length = length;
-        note.pressure.retain(|point| point.at < length);
-        note
+        if length >= self.length {
+            return Self {
+                length,
+                ..self.clone()
+            };
+        }
+        self.part(Ticks::ZERO, length)
     }
 
     /// The note over its part from `from` to `to`, both counted from its
-    /// start: it takes the stretch of the pressure over that part, with a
-    /// point at the part's start holding the value there, as a split note's
-    /// part does (the MPE spec, R4).
+    /// start: each envelope's stretch over that part, with a breakpoint at
+    /// each end holding the value there, as a split note's part has (the
+    /// MPE spec, R4).
     #[must_use]
     pub fn part(&self, from: Ticks, to: Ticks) -> Self {
-        let mut note = self.clone();
-        note.start = self.start + from;
-        note.length = to - from;
-        note.pressure = match self
-            .pressure
-            .iter()
-            .rev()
-            .find(|point| point.at <= from)
-            .or(self.pressure.first())
-        {
-            None => Vec::new(),
-            Some(held) => std::iter::once(ToolPressure {
-                at: Ticks::ZERO,
-                value: held.value,
-            })
-            .chain(
-                self.pressure
-                    .iter()
-                    .filter(|point| point.at > from && point.at < to)
-                    .map(|point| ToolPressure {
-                        at: point.at - from,
-                        value: point.value,
-                    }),
-            )
-            .collect(),
-        };
-        note
+        Self {
+            start: self.start + from,
+            length: to - from,
+            pitch: window(&self.pitch, from, to),
+            slide: window(&self.slide, from, to),
+            pressure: window(&self.pressure, from, to),
+            ..self.clone()
+        }
     }
+}
+
+/// The value `points` hold at `at`, as the document reads an envelope:
+/// the first value before it, the last after, and the bent segment between.
+fn value_at(points: &[ToolPoint], at: Ticks) -> Option<f64> {
+    let first = points.first()?;
+    let last = points.last()?;
+    if at <= first.at {
+        return Some(first.value);
+    }
+    if at >= last.at {
+        return Some(last.value);
+    }
+    let index = points.partition_point(|point| point.at <= at) - 1;
+    let (start, end) = (points[index], points[index + 1]);
+    let along = (at.0 - start.at.0) as f64 / (end.at.0 - start.at.0) as f64;
+    let along = if start.bend == 0.0 {
+        along
+    } else {
+        along.powf(2f64.powf(start.bend))
+    };
+    Some(start.value + (end.value - start.value) * along)
+}
+
+/// The stretch of `points` from `from` to `to`, counted from `from`; none
+/// for an envelope with no breakpoints.
+fn window(points: &[ToolPoint], from: Ticks, to: Ticks) -> Vec<ToolPoint> {
+    let (Some(start), Some(end)) = (value_at(points, from), value_at(points, to)) else {
+        return Vec::new();
+    };
+    // The bend of the segment the part starts in carries on into the part.
+    let bend = points
+        .iter()
+        .rev()
+        .find(|point| point.at <= from)
+        .map_or(0.0, |point| point.bend);
+    let mut part = vec![ToolPoint {
+        at: Ticks::ZERO,
+        value: start,
+        bend,
+    }];
+    part.extend(
+        points
+            .iter()
+            .filter(|point| point.at > from && point.at < to)
+            .map(|point| ToolPoint {
+                at: point.at - from,
+                ..*point
+            }),
+    );
+    part.push(ToolPoint {
+        at: to - from,
+        value: end,
+        bend: 0.0,
+    });
+    part
 }
 
 /// A clip's scale: a root and the steps above it, in semitones.

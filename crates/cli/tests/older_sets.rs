@@ -102,6 +102,7 @@ fn a_version_1_set_with_split_audio_clips_loads_and_plays_as_it_did() {
         midi_tools: bl_project::midi_tools::MidiToolSettings::default(),
         launch: bl_model::LaunchSettings::default(),
         multisamplers: bl_model::MultisamplerViews::new(),
+        window_views: bl_model::WindowViews::default(),
     };
     let mut saved: Value = serde_json::from_slice(&encode_json(&project, 1).unwrap()).unwrap();
     saved["schema"] = json!(1);
@@ -184,6 +185,7 @@ fn a_set_saved_before_crossfades_opens_with_the_same_fades_and_none_between_clip
         midi_tools: bl_project::midi_tools::MidiToolSettings::default(),
         launch: bl_model::LaunchSettings::default(),
         multisamplers: bl_model::MultisamplerViews::new(),
+        window_views: bl_model::WindowViews::default(),
     };
     let saved: Value = serde_json::from_slice(&encode_json(&project, 1).unwrap()).unwrap();
     // The set holds nothing of curves or crossfades, as before.
@@ -262,6 +264,7 @@ fn sets_from_before_racks_load_unchanged() {
         midi_tools: bl_project::midi_tools::MidiToolSettings::default(),
         launch: bl_model::LaunchSettings::default(),
         multisamplers: bl_model::MultisamplerViews::new(),
+        window_views: bl_model::WindowViews::default(),
     };
     // A device that isn't a rack saves no chains, so a set saved before
     // racks existed is what is saved now.
@@ -305,6 +308,7 @@ fn a_set_saved_before_the_scales_loads_unchanged() {
         midi_tools: bl_project::midi_tools::MidiToolSettings::default(),
         launch: bl_model::LaunchSettings::default(),
         multisamplers: bl_model::MultisamplerViews::new(),
+        window_views: bl_model::WindowViews::default(),
     };
     let saved = encode_json(&project, 1).unwrap();
     let value: Value = serde_json::from_slice(&saved).unwrap();
@@ -382,6 +386,7 @@ fn a_set_saved_before_use_current_scale_loads_its_devices_unchanged() {
         midi_tools: bl_project::midi_tools::MidiToolSettings::default(),
         launch: bl_model::LaunchSettings::default(),
         multisamplers: bl_model::MultisamplerViews::new(),
+        window_views: bl_model::WindowViews::default(),
     };
     let saved = encode_json(&project, 1).unwrap();
     let (loaded, _) = decode_json(&saved, &LoadOptions::default()).unwrap();
@@ -460,6 +465,7 @@ fn a_set_saved_before_the_lanes_loads_unchanged_and_every_note_value_round_trips
         midi_tools: bl_project::midi_tools::MidiToolSettings::default(),
         launch: bl_model::LaunchSettings::default(),
         multisamplers: bl_model::MultisamplerViews::new(),
+        window_views: bl_model::WindowViews::default(),
     };
     let saved = encode_json(&project, 1).unwrap();
     let value: Value = serde_json::from_slice(&saved).unwrap();
@@ -548,6 +554,7 @@ fn probability_groups_are_saved_with_the_clip_and_broken_ones_load_ungrouped() {
         midi_tools: bl_project::midi_tools::MidiToolSettings::default(),
         launch: bl_model::LaunchSettings::default(),
         multisamplers: bl_model::MultisamplerViews::new(),
+        window_views: bl_model::WindowViews::default(),
     };
     let saved = encode_json(&project, 1).unwrap();
     let value: Value = serde_json::from_slice(&saved).unwrap();
@@ -779,6 +786,7 @@ fn an_older_clip_envelope_renders_the_same() {
         midi_tools: bl_project::midi_tools::MidiToolSettings::default(),
         launch: bl_model::LaunchSettings::default(),
         multisamplers: bl_model::MultisamplerViews::new(),
+        window_views: bl_model::WindowViews::default(),
     };
     let mut saved: Value = serde_json::from_slice(&encode_json(&project, 1).unwrap()).unwrap();
     saved["schema"] = json!(4);
@@ -841,6 +849,7 @@ fn a_set_without_b_loads_with_b_equal_to_a() {
         midi_tools: bl_project::midi_tools::MidiToolSettings::default(),
         launch: bl_model::LaunchSettings::default(),
         multisamplers: bl_model::MultisamplerViews::new(),
+        window_views: bl_model::WindowViews::default(),
     };
     // A set from before the two states has neither field.
     let saved: Value = serde_json::from_slice(&encode_json(&project, 1).unwrap()).unwrap();
@@ -1040,6 +1049,7 @@ fn a_set_saved_before_locators_loads_with_none() {
         midi_tools: bl_project::midi_tools::MidiToolSettings::default(),
         launch: bl_model::LaunchSettings::default(),
         multisamplers: bl_model::MultisamplerViews::new(),
+        window_views: bl_model::WindowViews::default(),
     };
     let saved = encode_json(&project, 1).unwrap();
     let value: Value = serde_json::from_slice(&saved).unwrap();
@@ -1090,6 +1100,7 @@ fn the_locators_and_the_song_start_time_are_saved_and_load_again() {
         midi_tools: bl_project::midi_tools::MidiToolSettings::default(),
         launch: bl_model::LaunchSettings::default(),
         multisamplers: bl_model::MultisamplerViews::new(),
+        window_views: bl_model::WindowViews::default(),
     };
     let saved = encode_json(&project, 1).unwrap();
     let (loaded, _) = decode_json(&saved, &LoadOptions::default()).unwrap();
@@ -1110,6 +1121,7 @@ fn project_of(editor: &Editor) -> Project {
         midi_tools: bl_project::midi_tools::MidiToolSettings::default(),
         launch: bl_model::LaunchSettings::default(),
         multisamplers: bl_model::MultisamplerViews::new(),
+        window_views: bl_model::WindowViews::default(),
     }
 }
 
@@ -1418,4 +1430,183 @@ fn a_version_7_set_with_take_lanes_loads_and_plays_as_it_did() {
         .apply(Command::SetAudition { lane, on: true })
         .unwrap();
     assert_ne!(render(audition.document()), expected);
+}
+
+/// What a test instrument on a track playing `document` heard in the first
+/// `frames` frames: the song frame, what, and the key.
+fn heard_by_the_instrument(
+    document: &Document,
+    frames: u64,
+) -> Vec<(i64, bl_engine::NoteKind, u8)> {
+    let probe = std::sync::Arc::new(bl_engine::testing::Probe::default());
+    let registry = bl_engine::testing::registry(&probe);
+    let mut offline = Offline::new(EngineConfig::new(SampleRate::HZ_48000, 256), registry);
+    offline.sync(document);
+    offline.sender().transport(TransportCommand::Play);
+    offline.render(frames, |_| {});
+    probe
+        .recorded_notes()
+        .into_iter()
+        .map(|n| (n.frame, n.event.kind, n.event.key))
+        .collect()
+}
+
+// Spec: mpe R2, midi-controller-data R2. A set saved with a note's pressure
+// as points (schema 7) opens with each point a breakpoint and a step before
+// each later one, and sends the same pressure frame for frame.
+#[test]
+fn a_set_saved_with_pressure_points_opens_and_sends_the_same_pressure() {
+    use bl_engine::{NoteExpression, NoteKind};
+    use bl_model::{Device, DeviceKind, MidiData, Note};
+
+    let beat = Ticks::QUARTER;
+    let mut editor = Editor::new();
+    let track = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: track,
+            kind: TrackKind::Midi,
+            name: "Keys".to_owned(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    let device = editor.new_id();
+    editor
+        .apply(Command::InsertDevice {
+            track,
+            index: 0,
+            device: Device::new(
+                device,
+                "",
+                DeviceKind::Native {
+                    device_type: bl_engine::testing::INSTRUMENT.to_owned(),
+                },
+            ),
+        })
+        .unwrap();
+    let clip = editor.new_id();
+    editor
+        .apply(Command::CreateClip {
+            track,
+            clip: Clip::new(
+                clip,
+                Ticks::ZERO,
+                beat * 8,
+                ClipData::Midi(MidiData::new([Note::new(62, beat, beat * 2, 100)])),
+            ),
+        })
+        .unwrap();
+    let project = Project {
+        document: editor.document().clone(),
+        ids: editor.ids(),
+        media: Media::default(),
+        windows: bl_model::DeviceWindows::new(),
+        rack_views: bl_model::RackViewMap::new(),
+        folds: bl_model::ClipFolds::new(),
+        launch: bl_model::LaunchSettings::default(),
+        multisamplers: bl_model::MultisamplerViews::new(),
+        window_views: bl_model::WindowViews::default(),
+        midi_tools: bl_project::midi_tools::MidiToolSettings::default(),
+    };
+    // As version 7 saved it: two pressure points, whole-number values.
+    let mut saved: Value = serde_json::from_slice(&encode_json(&project, 1).unwrap()).unwrap();
+    saved["schema"] = json!(7);
+    let notes = &mut saved["document"]["tracks"][0]["clips"][0]["data"]["midi"]["notes"];
+    assert!(notes[0].get("pressure").is_none());
+    notes[0]["pressure"] = json!([
+        { "at": 0, "value": 127 },
+        { "at": beat.get() / 2, "value": 64 },
+    ]);
+    let (loaded, info) = decode_json(
+        &serde_json::to_vec(&saved).unwrap(),
+        &LoadOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(info.schema, 7);
+    loaded.document.check_invariants().unwrap();
+
+    // Each point is a breakpoint, with a step a tick before the second.
+    let ClipData::Midi(data) = &loaded.document.clip(clip).unwrap().data else {
+        unreachable!("a MIDI clip");
+    };
+    let pressure: Vec<(i64, f64)> = data.notes[0]
+        .pressure
+        .iter()
+        .map(|p| (p.at.get(), p.value))
+        .collect();
+    assert_eq!(
+        pressure,
+        [
+            (0, 127.0),
+            (beat.get() / 2 - 1, 127.0),
+            (beat.get() / 2, 64.0)
+        ]
+    );
+    // And it plays what it played: the pressure on the note's frame and the
+    // step half a beat on, then the note-off, frame for frame (a beat is
+    // 24,000 frames at 120 BPM and 48 kHz).
+    let pressure = |value: f32| NoteKind::Expression {
+        expression: NoteExpression::Pressure,
+        value,
+    };
+    assert_eq!(
+        heard_by_the_instrument(&loaded.document, 96_000),
+        [
+            (24_000, NoteKind::On, 62),
+            (24_000, pressure(1.0), 62),
+            (36_000, pressure(64.0 / 127.0), 62),
+            (72_000, NoteKind::Off, 62),
+        ]
+    );
+}
+
+/// A set saved before the second window existed opens in the Arrangement
+/// View with one window; a set that keeps its views writes them and reads
+/// them again, and one that keeps the defaults leaves them out (the second
+/// window spec, R14).
+#[test]
+fn a_set_saved_before_the_second_window_opens_in_the_arrangement_with_one_window() {
+    let (editor, _) = midi_clip_song();
+    let project = project_of(&editor);
+    let saved = encode_json(&project, 1).unwrap();
+    let value: Value = serde_json::from_slice(&saved).unwrap();
+    assert!(
+        value.get("window_views").is_none(),
+        "the default views are left out, so an older set reads the same"
+    );
+    let (loaded, _) = decode_json(&saved, &LoadOptions::default()).unwrap();
+    assert_eq!(loaded.window_views, bl_model::WindowViews::default());
+
+    // Opened in the shell, it shows the Arrangement View, one window.
+    let dir = std::env::temp_dir().join(format!("bl-cli-older-views-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("Older.blset");
+    std::fs::write(&path, bl_project::encode(&project, 1).unwrap()).unwrap();
+    let mut shell = bl_shell::Shell::headless();
+    shell
+        .run("view.toggle_session_arrangement", json!({}))
+        .unwrap();
+    shell.run("view.toggle_second_window", json!({})).unwrap();
+    shell
+        .run("set.open", json!({ "path": path.display().to_string() }))
+        .unwrap();
+    assert_eq!(shell.main_view(), bl_shell::MainView::Arrangement);
+    assert!(!shell.second_window_open());
+    assert!(!shell.is_dirty());
+
+    // A set that keeps its views writes them and reads them again.
+    let kept = project_of(&editor).with_window_views(bl_model::WindowViews {
+        session: true,
+        second_window: true,
+    });
+    let saved = encode_json(&kept, 2).unwrap();
+    let value: Value = serde_json::from_slice(&saved).unwrap();
+    assert_eq!(
+        value["window_views"],
+        json!({ "session": true, "second_window": true })
+    );
+    let (loaded, _) = decode_json(&saved, &LoadOptions::default()).unwrap();
+    assert_eq!(loaded.window_views, kept.window_views);
+    let _ = std::fs::remove_dir_all(&dir);
 }

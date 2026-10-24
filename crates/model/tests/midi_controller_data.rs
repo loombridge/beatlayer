@@ -7,8 +7,8 @@ use bl_commands::validate;
 use bl_core::time::Ticks;
 use bl_model::registry;
 use bl_model::{
-    AutomationTarget, Clip, ClipData, ClipId, Command, Editor, EnvelopeKind, MidiData, Note,
-    PressurePoint, TrackId, TrackKind,
+    AutomationTarget, Breakpoint, Clip, ClipData, ClipId, Command, Editor, EnvelopeKind, MidiData,
+    Note, TrackId, TrackKind,
 };
 use serde_json::{Value, json};
 
@@ -278,14 +278,16 @@ fn a_controller_or_value_that_breaks_the_rules_is_refused() {
     assert_eq!(song.envelope(cc(1)), Some(vec![(0, 127.0)]));
 }
 
-// Spec: midi-controller-data R2, R7
+// Spec: midi-controller-data R2, R7; mpe R1. A note's pressure breakpoints
+// must lie in order from the note's start to its end, inside the range.
 #[test]
-fn a_notes_pressure_points_must_lie_in_order_inside_the_note() {
-    let point = |at: i64, value: u8| PressurePoint {
+fn a_notes_pressure_breakpoints_must_lie_in_order_inside_the_note() {
+    let point = |at: i64, value: f64| Breakpoint {
         at: Ticks(at),
         value,
+        bend: 0.0,
     };
-    let note = |pressure: Vec<PressurePoint>| Note {
+    let note = |pressure: Vec<Breakpoint>| Note {
         pressure,
         ..Note::new(60, Ticks::ZERO, Ticks(1000), 100)
     };
@@ -303,14 +305,18 @@ fn a_notes_pressure_points_must_lie_in_order_inside_the_note() {
             ),
         })
     };
-    assert!(make(&mut song, vec![point(0, 0), point(999, 127)]).is_ok());
+    assert!(make(&mut song, vec![point(0, 0.0), point(1000, 127.0)]).is_ok());
     assert!(make(&mut song, vec![]).is_ok());
     for bad in [
-        vec![point(0, 128)],
-        vec![point(1000, 10)],
-        vec![point(-1, 10)],
-        vec![point(10, 10), point(10, 20)],
-        vec![point(20, 10), point(10, 20)],
+        vec![point(0, 128.0)],
+        vec![point(1001, 10.0)],
+        vec![point(-1, 10.0)],
+        vec![point(10, 10.0), point(10, 20.0)],
+        vec![point(20, 10.0), point(10, 20.0)],
+        vec![Breakpoint {
+            bend: 1.5,
+            ..point(0, 1.0)
+        }],
     ] {
         let error = make(&mut song, bad.clone()).unwrap_err();
         assert!(error.to_string().contains("note"), "{bad:?} gave {error}");

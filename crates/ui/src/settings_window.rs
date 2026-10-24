@@ -989,8 +989,30 @@ fn display_page(
     ) {
         events.push(UiEvent::Invoke(Invocation::new(
             ids::VIEW_SET_ZOOM,
-            json!({ "percent": next as u16 }),
+            json!({ "percent": next as u16, "window": "main" }),
         )));
+    }
+    // Spec: interface-zoom R12. While the second window is open, its zoom
+    // is a row of its own after Zoom.
+    if shell.second_window_open() {
+        let percent = shell.zoom_percent_of(bl_shell::WindowKind::Second);
+        let rect = rows.row(ui, "Second Window Zoom", SettingsLayout::NUMBER);
+        if let Some(next) = number_box(
+            ui,
+            theme,
+            "second-window-zoom",
+            "Second Window Zoom",
+            rect,
+            f64::from(percent),
+            (f64::from(ZOOM_MIN_PERCENT), f64::from(ZOOM_MAX_PERCENT)),
+            &|value, steps| f64::from(zoom_step(value as u16, steps)),
+            &format!("{percent} %"),
+        ) {
+            events.push(UiEvent::Invoke(Invocation::new(
+                ids::VIEW_SET_ZOOM,
+                json!({ "percent": next as u16, "window": "second" }),
+            )));
+        }
     }
     // Spec: accessibility R6, R7 (L-SET-010): the Display Options and
     // Navigation and Keyboard sections, with the keyboard's settings built
@@ -1040,8 +1062,9 @@ fn display_page(
     }
     rows.note(
         ui,
-        "The zoom scales every window; View > Zoom and its keys change it too. The Mouse and \
-         Pen Input and Application Options settings come with later packages.",
+        "The zoom scales the main window and this one; View > Zoom and its keys change the \
+         zoom of the window in front. The Mouse and Pen Input and Application Options \
+         settings come with later packages.",
     );
 }
 
@@ -1756,8 +1779,8 @@ fn library_page(
 }
 
 /// Tempo & MIDI (L-SET-014): the MIDI ports table (WP-2.2), each input and
-/// output with its Track, Sync, and Remote switches, as the MIDI I/O spec
-/// R2 gives it. The Tempo Follower, control surfaces, and Takeover Mode come
+/// output with its Track, Sync, and Remote switches, and an input its MPE
+/// switch after them, as the MIDI I/O spec R2 and R27 give it. The Tempo Follower, control surfaces, and Takeover Mode come
 /// with later packages. Sync and Remote are kept and act when sync and MIDI
 /// mapping are built (R5).
 fn tempo_midi_page(
@@ -1780,12 +1803,17 @@ fn tempo_midi_page(
     }
     for port in ports {
         let label = format!("{}: {}", port.direction.label(), port.name);
-        let rects = rows.row_of(ui, &label, &[SettingsLayout::SWITCH; 3]);
-        for (rect, (name, on)) in rects.into_iter().zip([
+        // Spec: midi-io R27. Only an input has an MPE switch, after Remote.
+        let mut switches = vec![
             ("Track", port.track),
             ("Sync", port.sync),
             ("Remote", port.remote),
-        ]) {
+        ];
+        if port.direction == midi_ids::PortDirection::Input {
+            switches.push(("MPE", port.mpe));
+        }
+        let rects = rows.row_of(ui, &label, &vec![SettingsLayout::SWITCH; switches.len()]);
+        for (rect, (name, on)) in rects.into_iter().zip(switches) {
             let salt = format!("midi-port-{}-{}-{name}", port.direction as u8, port.name);
             if let Some(on) = switch(ui, theme, &salt, &format!("{label} {name}"), rect, on) {
                 let mut args = json!({ "direction": port.direction, "name": port.name });

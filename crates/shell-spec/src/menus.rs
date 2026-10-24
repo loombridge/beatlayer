@@ -19,6 +19,7 @@
 use crate::arrangement::{SHOW_IN_OUT, SHOW_RETURN_TRACKS, SHOW_VOLUME};
 use crate::assistant::VIEW_TOGGLE_ASSISTANT;
 use crate::audio_editing::CONSOLIDATE_TO_SCENE;
+use crate::automation::SIMPLIFY;
 use crate::browser::{ADD_FOLDER as BROWSER_ADD_FOLDER, SET_PREVIEW as BROWSER_PREVIEW};
 use crate::capture_midi::CAPTURE as CAPTURE_MIDI;
 use crate::commands::{
@@ -28,19 +29,20 @@ use crate::commands::{
     FOCUS_TOGGLE_WRAP_NAVIGATION, SET_COLLECT_ALL, SET_NEW, SET_OPEN, SET_SAVE, SET_SAVE_AS,
     SET_SAVE_AS_DEFAULT, SET_SAVE_AS_TEMPLATE, VIEW_DRAW_MODE, VIEW_EXPAND_CLIP_VIEW,
     VIEW_FULL_SCREEN, VIEW_SWITCH_DETAIL_VIEW, VIEW_TOGGLE_BROWSER, VIEW_TOGGLE_CLIP_VIEW,
-    VIEW_TOGGLE_DETAIL_AREA, VIEW_TOGGLE_DEVICE_VIEW, VIEW_TOGGLE_INFO_VIEW,
-    VIEW_TOGGLE_PLUG_IN_WINDOWS, VIEW_TOGGLE_PLUGIN_LIST, VIEW_TOGGLE_SESSION_ARRANGEMENT,
+    VIEW_TOGGLE_DETAIL_AREA, VIEW_TOGGLE_DEVICE_VIEW, VIEW_TOGGLE_FULL_HEIGHT_BROWSER,
+    VIEW_TOGGLE_INFO_VIEW, VIEW_TOGGLE_PLUG_IN_WINDOWS, VIEW_TOGGLE_PLUGIN_LIST,
+    VIEW_TOGGLE_SAVE_HISTORY, VIEW_TOGGLE_SECOND_WINDOW, VIEW_TOGGLE_SESSION_ARRANGEMENT,
     VIEW_TOGGLE_UNDO_HISTORY, VIEW_ZOOM_IN, VIEW_ZOOM_OUT, VIEW_ZOOM_RESET, WINDOW_CLOSE,
 };
 use crate::devices::COMPARE_COPY;
 use crate::export::OPEN_DIALOG as EXPORT_OPEN_DIALOG;
 use crate::file_manager::{SET_SAVE_COPY, VIEW_TOGGLE_FILE_MANAGER};
 use crate::mixer_view::{
-    CROSSFADER as MIXER_CROSSFADER, FOCUS as MIXER_FOCUS, IN_OUT as MIXER_IN_OUT,
-    PERFORMANCE_IMPACT as MIXER_PERFORMANCE_IMPACT, RETURN_TRACKS as MIXER_RETURN_TRACKS,
-    RETURN_TRACKS_SCROLL as MIXER_RETURN_TRACKS_SCROLL, SCENE_TEMPO as MIXER_SCENE_TEMPO,
-    SENDS as MIXER_SENDS, TOGGLE as MIXER_TOGGLE, TRACK_OPTIONS as MIXER_TRACK_OPTIONS,
-    VOLUME as MIXER_VOLUME,
+    CROSSFADER as MIXER_CROSSFADER, DEVICES as MIXER_DEVICES, FOCUS as MIXER_FOCUS,
+    IN_OUT as MIXER_IN_OUT, PERFORMANCE_IMPACT as MIXER_PERFORMANCE_IMPACT,
+    RETURN_TRACKS as MIXER_RETURN_TRACKS, RETURN_TRACKS_SCROLL as MIXER_RETURN_TRACKS_SCROLL,
+    SCENE_TEMPO as MIXER_SCENE_TEMPO, SENDS as MIXER_SENDS, TOGGLE as MIXER_TOGGLE,
+    TRACK_OPTIONS as MIXER_TRACK_OPTIONS, VOLUME as MIXER_VOLUME,
 };
 use crate::notes::SET_PREVIEW as NOTE_PREVIEW;
 
@@ -122,6 +124,12 @@ pub const IMP_12: &str = "IMP-12";
 /// menus.md's Live rows, though the reference names it IMP-01.
 pub const IMP_01: &str = "IMP-01";
 
+/// The row of Beatlayer's own Devices section switch (IMP-25), straight
+/// after Performance Impact in the Mixer Controls submenu: an improvement,
+/// so not one of menus.md's Live rows, though the reference names it
+/// IMP-25.
+pub const IMP_25: &str = "IMP-25";
+
 /// The row of Beatlayer's own Close All Plug-in Windows (IMP-25), after
 /// Plug-In Windows: an improvement, so not a row of menus.md.
 pub const IMP_25_CLOSE_WINDOWS: &str = "IMP-25-close-windows";
@@ -129,6 +137,10 @@ pub const IMP_25_CLOSE_WINDOWS: &str = "IMP-25-close-windows";
 /// The row of Beatlayer's own Manage Plug-Ins (IMP-29), after Manage
 /// Files: an improvement, so not a row of menus.md.
 pub const IMP_29: &str = "IMP-29";
+
+/// The row of Beatlayer's own Save History (IMP-05), after Open Beatlayer
+/// Set Backups: an improvement, so not one of menus.md's Live rows.
+pub const IMP_05: &str = "IMP-05";
 
 /// The rows of Beatlayer's own Search Commands… (IMP-16) at the top of Help,
 /// with the separator after it, and Find Track (IMP-18) after Next Neighbor:
@@ -291,6 +303,7 @@ const FILE: &[Row] = &[
     ("M-FILE-007", "Manage Files", Cmd(VIEW_TOGGLE_FILE_MANAGER)),
     (IMP_29, "Manage Plug-Ins", Cmd(VIEW_TOGGLE_PLUGIN_LIST)),
     ("M-FILE-008", "Open Beatlayer Set Backups", Submenu),
+    (IMP_05, "Save History", Cmd(VIEW_TOGGLE_SAVE_HISTORY)),
     SEPARATOR,
     ("M-FILE-009", "Save Beatlayer Set", Cmd(SET_SAVE)),
     ("M-FILE-010", "Save Beatlayer Set As...", Cmd(SET_SAVE_AS)),
@@ -437,7 +450,7 @@ const EDIT: &[Row] = &[
         Pending(None),
     ),
     SEPARATOR,
-    ("M-EDIT-039", "Simplify Envelope", Pending(None)),
+    ("M-EDIT-039", "Simplify Envelope", Cmd(SIMPLIFY)),
     SEPARATOR,
     (
         "M-EDIT-040",
@@ -555,7 +568,11 @@ const PLAYBACK: &[Row] = &[
 
 const VIEW: &[Row] = &[
     ("M-VIEW-001", "Full Screen", Cmd(VIEW_FULL_SCREEN)),
-    ("M-VIEW-002", "Second Window", Key(&["S-VIEW-002"])),
+    (
+        "M-VIEW-002",
+        "Second Window",
+        Cmd(VIEW_TOGGLE_SECOND_WINDOW),
+    ),
     ("M-VIEW-003", "Zoom", Submenu),
     ("M-VIEW-003a", "Zoom In", Cmd(VIEW_ZOOM_IN)),
     ("M-VIEW-003b", "Zoom Out", Cmd(VIEW_ZOOM_OUT)),
@@ -615,7 +632,11 @@ const VIEW: &[Row] = &[
     ("M-VIEW-021", "Browser", Cmd(VIEW_TOGGLE_BROWSER)),
     ("M-VIEW-022", "Groove Pool", Key(&["S-VIEW-017"])),
     ("M-VIEW-023", "Tuning", Pending(None)),
-    ("M-VIEW-024", "Full-Height Browser", Pending(None)),
+    (
+        "M-VIEW-024",
+        "Full-Height Browser",
+        Cmd(VIEW_TOGGLE_FULL_HEIGHT_BROWSER),
+    ),
     SEPARATOR,
     ("M-VIEW-025", "Search in Browser", Key(&["S-BRW-006"])),
     ("M-VIEW-026", "Show Similar Files", Key(&["S-BRW-010"])),
@@ -655,6 +676,7 @@ const VIEW: &[Row] = &[
         "Performance Impact",
         Cmd(MIXER_PERFORMANCE_IMPACT),
     ),
+    (IMP_25, "Devices", Cmd(MIXER_DEVICES)),
     ("M-VIEW-032-sep2", "", Action::Separator),
     ("M-VIEW-032g", "Return Tracks", Cmd(MIXER_RETURN_TRACKS)),
     // IMP-01's switch, straight after Return Tracks, with no key.
@@ -904,11 +926,12 @@ pub(crate) fn items(rows: &[Row]) -> Vec<MenuItem> {
             items: Vec::new(),
         };
         // A row joins the submenu above it when its ID starts with the
-        // submenu's, and so does IMP-01's row, which the reference names
-        // with its improvement's ID, when the row above it was one of the
-        // submenu's.
+        // submenu's, and so do IMP-01's and IMP-25's rows, which the
+        // reference names with their improvements' IDs, when the row above
+        // it was one of the submenu's.
         let joins = |submenu: &str| {
-            row.starts_with(submenu) || (row == IMP_01 && previous.starts_with(submenu))
+            row.starts_with(submenu)
+                || ((row == IMP_01 || row == IMP_25) && previous.starts_with(submenu))
         };
         let parent = out
             .last_mut()

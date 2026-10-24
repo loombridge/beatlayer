@@ -33,7 +33,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+Shift+W"]
 win = ["Ctrl+Shift+W"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "view.toggle_second_window", contexts = ["global"] },
+]
 
 [[shortcut]]
 id = "S-VIEW-003"
@@ -776,7 +779,7 @@ mac = ["Cmd+D"]
 win = ["Ctrl+D"]
 status = "bound"
 commands = [
-  { id = "arrangement.duplicate", contexts = ["arrangement"] },
+  { id = "arrangement.duplicate", contexts = ["arrangement", "take-lanes"] },
   { id = "chain.duplicate", contexts = ["rack-chains"] },
   { id = "device.duplicate", contexts = ["device-view"] },
   { id = "note.duplicate", contexts = ["note-editor", "note-selection"] },
@@ -839,6 +842,7 @@ mac = ["Cmd+R"]
 win = ["Ctrl+R"]
 status = "bound"
 commands = [
+  { id = "browser.rename_label", contexts = ["browser-sidebar"] },
   { id = "chain.rename", contexts = ["rack-chains"] },
   { id = "clip.rename", contexts = ["arrangement"] },
   { id = "device.rename", contexts = ["device-view"] },
@@ -3032,7 +3036,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+Option+U"]
 win = ["Ctrl+Alt+U"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "arrangement.show_take_lanes", contexts = ["arrangement"] },
+]
 
 [[shortcut]]
 id = "S-COMP-002"
@@ -3043,7 +3050,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Enter"]
 win = ["Enter"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "take_lane.copy_to_main_lane", contexts = ["take-lanes"] },
+]
 
 [[shortcut]]
 id = "S-COMP-003"
@@ -3054,7 +3064,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["T"]
 win = ["T"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "take_lane.audition", contexts = ["take-lanes"] },
+]
 
 [[shortcut]]
 id = "S-COMP-004"
@@ -3065,7 +3078,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Shift+Option+T"]
 win = ["Shift+Alt+T"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "take_lane.insert", contexts = ["arrangement"] },
+]
 
 [[shortcut]]
 id = "S-COMP-005"
@@ -3076,7 +3092,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+D"]
 win = ["Ctrl+D"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "take_lane.duplicate", contexts = ["take-lanes"] },
+]
 
 [[shortcut]]
 id = "S-COMP-006"
@@ -3087,7 +3106,8 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+Up", "Cmd+Down"]
 win = ["Ctrl+Up", "Ctrl+Down"]
-status = "pending"
+status = "widget"
+handler = "the Arrangement View: Cmd-Down and Cmd-Up replace the main lane's material in the selection with the next or previous take (`take_lane.replace_with_take`)"
 
 [[shortcut]]
 id = "S-BOUNCE-001"
@@ -3652,7 +3672,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+LeftBracket"]
 win = ["Ctrl+LeftBracket"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "browser.back", contexts = ["browser"] },
+]
 
 [[shortcut]]
 id = "S-BRW-012"
@@ -3663,7 +3686,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+RightBracket"]
 win = ["Ctrl+RightBracket"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "browser.forward", contexts = ["browser"] },
+]
 
 [[shortcut]]
 id = "S-BRW-013"
@@ -3674,7 +3700,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+Option+G"]
 win = ["Ctrl+Alt+G"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "browser.set_filter_view", contexts = ["browser"] },
+]
 
 [[shortcut]]
 id = "S-BRW-014"
@@ -4783,7 +4812,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Left"]
 win = ["Left"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "arrangement.show_take_lanes", contexts = ["take-lanes"], args = { on = false, title_bars = true } },
+]
 
 [[shortcut]]
 id = "S-COMP-008"
@@ -4794,7 +4826,8 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+Up", "Cmd+Down"]
 win = ["Ctrl+Up", "Ctrl+Down"]
-status = "pending"
+status = "widget"
+handler = "the Arrangement View: with take lane headers selected, Cmd-Up and Cmd-Down move the lanes up or down a place (`take_lane.move`)"
 
 [[shortcut]]
 id = "S-A11Y-028"

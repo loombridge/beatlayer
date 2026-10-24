@@ -1,6 +1,6 @@
 # The browser's tags, collections, filters, saved labels, columns and history
 
-- **Status:** partial (R1 to R17 each have a passing test)
+- **Status:** partial (R1 to R33 each have a passing test; R34 to R48 are WP-6.32b's and WP-6.33's)
 - **Work packages:** WP-6.31, the browser's database on disk, tags and tag groups, the Tag Editor, Quick Tags and searching by tag (R1 to R17); WP-6.32, the Filter View and its menu, saved labels, the Library labels' order, the content pane's columns, and the browser's history (R18 to R33); WP-6.32b, collections (R34 to R40); WP-6.33, hidden plug-ins and the format preference in the browser (IMP-07, R41 to R44), and nested collections (IMP-07, R45 to R48). The browser's places, search by name and preview are [the browser spec](browser.md)'s; the plug-ins' data and commands are [plug-in scanning](plugin-scanning.md)'s; clip files are [clip files](clip-files.md)'
 - **Parity-matrix row:** Views and workflow: Browser: collections, tags, tag groups, Tag Editor, Quick Tags, filter view, saved searches, columns, history; [the improvements](../05-improvements.md), IMP-07 (hiding plug-ins in the browser, nested collections)
 - **Checked against:** the Live 12 reference manual (online edition), read 20 October 2026; the Live 12 release notes, 12.0 to 12.4.5; the UI parity reference's rows L-BRW-001 to 016, L-SET-017, S-BRW-008 to 014, M-VIEW-027, M-NAV-016, M-NAV-017, C-BROWSER-004 to 011 and 018, I-CLICK-031 and I-FOCUS-007
@@ -136,7 +136,7 @@ This spec covers the database, tags and tag groups, the Tag Editor, Quick Tags, 
 | R5 | `crates/shell/tests/browser_tags.rs`, `a_tagged_file_moved_outside_beatlayer_keeps_its_tags_by_content` | unit |
 | R6 | `crates/shell/tests/browser_tags.rs`, `every_tag_command_runs_by_id_and_reads_back` | unit |
 | R7 | `crates/shell/tests/browser_tags.rs`, `beatlayers_groups_cant_be_renamed_or_deleted` | unit |
-| R8 | `crates/shell/tests/browser_tags.rs`, `every_tag_command_runs_by_id_and_reads_back` | unit |
+| R8 | `crates/shell/tests/browser_tags.rs`, `every_tag_command_runs_by_id_and_reads_back`; `crates/shell/tests/browser_filters.rs`, `deleting_a_tag_a_saved_label_uses_asks_first_and_the_label_leaves_it_out`; `crates/ui/tests/browser_filters.rs`, `deleting_a_tag_a_saved_label_uses_asks_first_and_names_the_label` | unit, UI script |
 | R9 | `crates/shell/tests/browser_tags.rs`, `a_folders_tag_reaches_a_file_two_folders_down` | unit |
 | R10 | `crates/ui/tests/browser.rs`, `the_tag_editor_ticks_and_unticks_with_two_items_selected`; `crates/ui/tests/keymap.rs`, `the_tags_shortcuts_reach_their_commands` | UI script, unit |
 | R11 | `crates/ui/tests/browser.rs`, `the_tag_editor_ticks_and_unticks_with_two_items_selected` | UI script |
@@ -146,22 +146,22 @@ This spec covers the database, tags and tag groups, the Tag Editor, Quick Tags, 
 | R15 | `crates/shell/tests/browser_tags.rs`, `a_hash_search_finds_tagged_items` | unit |
 | R16 | `crates/shell/tests/browser_tags.rs`, `every_tag_command_runs_by_id_and_reads_back`; `crates/cli/tests/agent.rs`, `an_agent_tags_browser_items_by_command_id_and_reads_them_back` | unit |
 | R17 | `crates/ui/tests/browser.rs`, `every_part_of_the_tags_reaches_assistive_technology` | UI script |
-| R18 | to be written in WP-6.32 | |
-| R19 | to be written in WP-6.32 | |
-| R20 | to be written in WP-6.32 | |
-| R21 | to be written in WP-6.32 | |
-| R22 | to be written in WP-6.32 | |
-| R23 | to be written in WP-6.32 | |
-| R24 | to be written in WP-6.32 | |
-| R25 | to be written in WP-6.32 | |
-| R26 | to be written in WP-6.32 | |
-| R27 | to be written in WP-6.32 | |
-| R28 | to be written in WP-6.32 | |
-| R29 | to be written in WP-6.32 | |
-| R30 | to be written in WP-6.32 | |
-| R31 | to be written in WP-6.32 | |
-| R32 | to be written in WP-6.32 | |
-| R33 | to be written in WP-6.32 | |
+| R18 | `crates/ui/tests/browser.rs`, `the_browser_sits_where_live_puts_it`; `crates/ui/tests/browser_filters.rs`, `the_filter_views_layout_rows_follow_layout_md`, `the_toggle_the_keys_and_the_buttons_reach_their_commands`, `the_filter_view_shows_groups_and_tag_buttons_and_clicks_select_them`; `crates/ui/tests/keymap.rs`, `the_filter_and_history_shortcuts_reach_their_commands`; `crates/shell/tests/browser_filters.rs`, `the_filter_view_is_shown_hidden_and_kept_between_launches` | UI script, unit |
+| R19 | `crates/shell/tests/browser_filters.rs`, `the_filter_view_lists_the_groups_a_label_shows_and_their_tags_in_use`; `crates/shell/src/browser/filter.rs`, `labels_show_the_groups_the_spec_gives_them` | unit |
+| R20 | `crates/shell/tests/browser_filters.rs`, `tags_in_one_group_widen_the_list_and_a_tag_in_another_group_narrows_it`, `selected_tags_survive_a_change_of_library_label`; `crates/ui/tests/browser_filters.rs`, `the_filter_view_shows_groups_and_tag_buttons_and_clicks_select_them` | unit, UI script |
+| R21 | `crates/shell/tests/browser_filters.rs`, `the_groups_a_label_shows_are_chosen_and_kept_between_launches`; `crates/ui/tests/browser_filters.rs`, `the_filter_view_menu_lists_the_groups_and_its_items`, `a_groups_name_offers_hide_filter_group` | unit, UI script |
+| R22 | `crates/shell/tests/browser_filters.rs`, `clear_and_cmd_f_clear_what_the_results_bar_says`; `crates/ui/tests/browser_filters.rs`, `the_results_bar_clears_and_keeps_a_search`, `cmd_f_selects_the_search_text_and_clears_the_tags` | unit, UI script |
+| R23 | `crates/ui/tests/browser_filters.rs`, `the_filter_views_keys_move_between_tags_and_select_them`, `tab_walks_the_search_field_the_filter_toggle_and_menu_then_the_sidebar_and_the_filter_view`, `the_filter_view_shows_groups_and_tag_buttons_and_clicks_select_them`; `crates/ui/tests/accessibility.rs`, `tab_moves_within_the_focused_area_and_wraps_with_wrap_tab_navigation` | UI script |
+| R24 | `crates/shell/tests/browser_filters.rs`, `a_saved_label_lists_a_file_tagged_after_it_was_made_and_survives_a_restart`; `crates/ui/tests/browser_filters.rs`, `a_saved_label_takes_its_name_in_the_sidebar_and_has_a_menu` | unit, UI script |
+| R25 | `crates/shell/tests/browser_filters.rs`, `labels_are_renamed_given_icons_and_kept_between_launches`; `crates/ui/tests/browser_filters.rs`, `a_saved_label_takes_its_name_in_the_sidebar_and_has_a_menu`, `cmd_r_renames_the_chosen_label_in_the_sidebar` | unit, UI script |
+| R26 | `crates/shell/tests/browser_filters.rs`, `library_labels_are_hidden_moved_and_reset`; `crates/shell/src/browser/labels.rs`, `all_stays_first_and_saved_labels_follow_the_library`; `crates/ui/tests/browser_filters.rs`, `the_library_sections_edit_mode_hides_labels_and_dragging_moves_them` | unit, UI script |
+| R27 | `crates/shell/tests/browser_filters.rs`, `columns_sort_and_file_extensions_survive_a_restart`; `crates/ui/tests/browser_filters.rs`, `the_content_options_menu_shows_columns_and_the_header_sorts_and_moves_them` | unit, UI script |
+| R28 | `crates/shell/tests/browser_filters.rs`, `columns_sort_and_file_extensions_survive_a_restart`; `crates/ui/tests/browser_filters.rs`, `the_content_options_menu_shows_columns_and_the_header_sorts_and_moves_them` | unit, UI script |
+| R29 | `crates/shell/tests/browser_filters.rs`, `history_steps_back_through_label_search_tags_and_a_new_step_drops_those_ahead`, `history_brings_back_open_folders_and_the_selection`; `crates/shell/src/browser/history.rs`, `typing_is_one_step_and_a_new_step_drops_those_ahead`, `the_history_holds_a_hundred_steps` | unit |
+| R30 | `crates/ui/tests/browser_filters.rs`, `the_toggle_the_keys_and_the_buttons_reach_their_commands`; `crates/ui/tests/keymap.rs`, `the_filter_and_history_shortcuts_reach_their_commands` | UI script, unit |
+| R31 | `crates/shell/tests/browser_filters.rs`, `starting_hot_swap_clears_the_search_and_the_tags_as_a_step` | unit |
+| R32 | `crates/shell/tests/browser_filters.rs`, `the_new_commands_are_registered_with_their_classes`; `crates/cli/tests/agent.rs`, `an_agent_filters_the_browser_keeps_labels_and_reads_them_back` | unit |
+| R33 | `crates/ui/tests/browser_filters.rs`, `the_filter_view_shows_groups_and_tag_buttons_and_clicks_select_them`, `the_library_sections_edit_mode_hides_labels_and_dragging_moves_them`, `the_content_options_menu_shows_columns_and_the_header_sorts_and_moves_them` | UI script |
 | R34 | to be written in WP-6.32b | |
 | R35 | to be written in WP-6.32b | |
 | R36 | to be written in WP-6.32b | |

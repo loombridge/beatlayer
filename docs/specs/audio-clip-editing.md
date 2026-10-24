@@ -1,6 +1,6 @@
 # Audio clip editing: Reverse, Crop, Consolidate, and Consolidate Time to New Scene
 
-- **Status:** partial (R1 to R6, WP-4.20, R7 to R13, WP-4.7, and R14 to R28, WP-4.13, are built; R29 for WP-6.22)
+- **Status:** partial (R1 to R6, WP-4.20, R7 to R13, WP-4.7, and R14 to R28, WP-4.13, and R29, WP-6.22, are built)
 - **Work packages:** WP-4.7 (Reverse, R7 to R13), WP-4.13 (Crop, Consolidate, and Consolidate Time to New Scene, R14 to R28, built), WP-6.22 (Crop and Consolidate on take lanes, R29). The processed files of R1 to R6 are WP-4.20's, which both use, and so do freezing and bounce ([freeze and bounce](freeze-and-bounce.md)).
 - **Parity-matrix row:** Audio clips and warping: Clip pitch, reverse, RAM mode, high-quality interpolation (reverse); Split, Crop, Crop to Time Selection (crop); Consolidate
 - **Checked against:** the Live 12 reference manual (online edition), read 17 October 2026, and the UI parity reference's observations of Live 12.4.3 on macOS (10 October 2026)
@@ -115,4 +115,4 @@ This spec covers what each edit does to the clip and to the disk, where its file
 | R26 | `crates/shell/tests/audio_editing.rs`, `consolidate_time_to_new_scene_fills_a_new_scene_and_leaves_the_arrangement` | shell test |
 | R27 | `crates/shell/tests/audio_editing.rs`, `consolidate_time_to_new_scene_chooses_the_scene_it_follows`; `crates/cli/tests/agent_audio_editing.rs`, `an_agent_crops_and_consolidates_by_command_id_and_reads_them_back` | shell test, agent test |
 | R28 | `crates/shell-spec/src/context_menus.rs`, `the_menus_follow_lives_rows_and_separators_in_order`; `xtask/src/keymap.rs`, `the_repository_keymap_is_in_sync` (S-ARR-002, S-ARR-003, S-SES-028 bound) | unit, keymap test |
-| R29 | to be written in WP-6.22 | shell test |
+| R29 | `crates/shell/tests/take_lanes_view.rs`, `consolidate_works_on_a_take_lane`, `crop_works_on_a_take_lane_clip` | shell test |

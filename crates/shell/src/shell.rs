@@ -17,6 +17,7 @@ use bl_model::{
 };
 use bl_project::ProjectFolder;
 use bl_project::autosave::{Autosave, Recoverable, Recovered};
+use bl_project::history;
 use bl_project::registry as recovery_ids;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -128,6 +129,7 @@ mod plugin_list;
 mod processed_files;
 mod sample_edits;
 mod sample_keys;
+mod save_history;
 pub use sample_keys::TransientList;
 mod search;
 mod session_recording;
@@ -136,6 +138,7 @@ mod stems;
 mod step_input;
 mod tunings;
 mod warping;
+mod windows;
 
 use file_manager::FileManager;
 
@@ -169,6 +172,9 @@ impl MainView {
 pub enum WindowKind {
     /// The main window.
     Main,
+    /// The second window (WP-6.29): another main view, with a Control Bar,
+    /// a detail area and a Status Bar of its own.
+    Second,
     /// The Settings window.
     Settings,
     /// A floating device's window (WP-2.5b, IMP-14).
@@ -282,8 +288,13 @@ pub enum Effect {
     CloseSettings,
     /// Enter or leave full-screen mode.
     SetFullScreen(bool),
+    /// Enter or leave full-screen mode in the second window.
+    SetSecondFullScreen(bool),
     /// Move the keyboard focus to an area of the main window.
     FocusArea(Area),
+    /// Move the keyboard focus to an area of the second window, and bring
+    /// it to the front.
+    FocusSecondArea(Area),
     /// Move the keyboard focus to the next or previous control, or to the
     /// same control on the next or previous track.
     MoveFocus {
@@ -334,6 +345,13 @@ pub enum Effect {
     /// person types the new name; Return runs `locator.rename` with it
     /// (WP-6.24; the time editing spec, R8).
     RenameLocator(bl_model::LocatorId),
+    /// Start renaming a take lane in its header, where the person types the
+    /// new name; Return runs `take_lane.rename` with it, and Tab goes on to
+    /// the next lane or track's name (WP-6.22; the comping spec, R28).
+    RenameTakeLane(bl_model::TakeLaneId),
+    /// Bring a floating device's window to the front (the mixer view spec,
+    /// R28).
+    RaiseDeviceWindow(bl_model::DeviceId),
 }
 
 /// Where a gesture that edits the set is (WP-1.8b): see [`Shell::gesture`].
@@ -508,6 +526,11 @@ pub struct Shell {
     system_dark: bool,
     focused_window: WindowKind,
     focused_area: Area,
+    /// The second window's state (WP-6.29).
+    second: windows::SecondWindow,
+    /// The main window or the second window, whichever was in front last:
+    /// the one the commands that act on one window act on.
+    front_window: WindowKind,
     /// The track whose control has the keyboard focus (WP-1.14).
     focused_track: Option<TrackId>,
     /// Whether a device's value control (a knob or a number box) has the
@@ -556,6 +579,9 @@ pub struct Shell {
     /// Whether the Undo History panel shows (WP-6.28): view state, never
     /// part of the set, like the browser's.
     undo_history_open: bool,
+    /// The Save History panel (IMP-05, WP-6.39): whether it shows and the
+    /// rows it lists. View state, like the Undo History's.
+    save_history: save_history::SaveHistory,
     /// What the Arrangement View shows (WP-1.8a).
     arrangement: ArrangementView,
     /// What the Clip View shows (WP-2.3): whether it's open, Draw Mode, and
@@ -1030,7 +1056,7 @@ impl Shell {
         audio.set_preview_gain(prefs.browser.preview_volume as f32);
         // Spec: file-management R1. A saved default set is what a new set
         // starts from; without one, the factory default set.
-        let editor = new_set_from(prefs.default_set.as_deref());
+        let (editor, window_views) = new_set_from(prefs.default_set.as_deref());
         // The engine's clips stream from the set's media (WP-1.4b).
         let media = Arc::new(MediaStore::new());
         audio.set_media(Arc::clone(&media));
@@ -1113,6 +1139,8 @@ impl Shell {
             full_screen: false,
             focused_window: WindowKind::Main,
             focused_area: Area::MainView,
+            second: windows::SecondWindow::default(),
+            front_window: WindowKind::Main,
             focused_track: None,
             value_focused: false,
             effects: Vec::new(),
@@ -1132,6 +1160,7 @@ impl Shell {
             assistant_conversation: Arc::default(),
             assistant_stop_flag: Arc::default(),
             undo_history_open: false,
+            save_history: save_history::SaveHistory::default(),
             arrangement: ArrangementView::new(),
             clip_view: {
                 let mut view = ClipView::default();
@@ -1195,6 +1224,9 @@ impl Shell {
             device_commands_key: Vec::new(),
             plugins_generation: 0,
         };
+        // Spec: second-window R14. A saved default set keeps its main view
+        // and the second window.
+        shell.apply_window_views(window_views);
         shell.agent_tokens_in_file = !agent::StoredTokens::of(&shell.prefs.agent).is_empty();
         shell.give_agents_tokens();
         shell.publish_plugins();
@@ -1468,9 +1500,11 @@ impl Shell {
             self.set_path
                 .as_deref()
                 .or(self.prefs.default_set.as_deref()),
-        );
+        )
+        .0;
         self.dirty = true;
         self.store.adopt(set, project);
+        self.apply_window_views(self.store.window_views());
         // The views saved beside the song, and its files, as `set.open`
         // takes them.
         self.devices.set_windows(self.store.windows());
@@ -2020,6 +2054,7 @@ impl Shell {
             inputs,
             outputs,
             midi_inputs: self.midi.input_names(),
+            mpe_inputs: self.midi.mpe_input_names(),
             midi_outputs: self.midi.output_names(),
             device_outputs,
         }
@@ -2449,6 +2484,10 @@ impl Shell {
             page: self.prefs.settings_page,
             display_input: DisplayInputSettings {
                 zoom_percent: self.zoom_percent(),
+                second_window_zoom_percent: self
+                    .second
+                    .open
+                    .then(|| self.zoom_percent_of(WindowKind::Second)),
                 outline_view_in_focus: self.outline_view_in_focus(),
                 use_tab_key_to_move_focus: self.tab_navigation(),
                 wrap_tab_navigation: self.wrap_navigation(),
@@ -2634,6 +2673,12 @@ impl Shell {
 
     /// Records which window has the keyboard focus.
     pub fn set_focused_window(&mut self, window: WindowKind) {
+        if window == WindowKind::Second && !self.second.open {
+            return;
+        }
+        if matches!(window, WindowKind::Main | WindowKind::Second) {
+            self.front_window = window;
+        }
         if self.focused_window != window {
             // Spec: automation-editing R23. The edit ends when the focus
             // leaves.
@@ -3846,9 +3891,16 @@ impl Shell {
             // for an agent that never polls the engine.
             self.audio.displays_into(self.devices.displays_mut());
         }
+        // Spec: mixer-view R28. Selecting a device that floats brings its
+        // window to the front.
+        let selected = (id == device_ids::SELECT)
+            .then(|| serde_json::from_value::<device_ids::SelectDeviceArgs>(args.clone()).ok())
+            .flatten()
+            .and_then(|a| a.device);
         let user_library = self.browser_view.user_library().map(Path::to_path_buf);
         let zoom = self.zoom();
         let auto_hide = self.prefs.auto_hide_plug_in_windows.0;
+        let swapping = self.devices.hot_swap_targets();
         let result = self.devices.run(
             id,
             args,
@@ -3863,6 +3915,12 @@ impl Shell {
             },
         );
         let outcome = result.map_err(|error| device_error(id, error))?;
+        // Spec: browser-tags R31. Starting hot-swap clears the search words
+        // and the selected tags as a new step.
+        let now_swapping = self.devices.hot_swap_targets();
+        if now_swapping != swapping && now_swapping != Default::default() {
+            self.browser_view.hot_swap_started();
+        }
         // Spec: drum-racks R5. A held Preview button plays its chain.
         for &(chain, on) in &outcome.previews {
             self.audio.send_param(
@@ -3883,6 +3941,15 @@ impl Shell {
         }
         if let Some(message) = outcome.message {
             self.set_message(message, false);
+        }
+        if let Some(device) = selected
+            && self
+                .floating_windows()
+                .windows
+                .iter()
+                .any(|w| w.device == device && w.shown)
+        {
+            self.effects.push(Effect::RaiseDeviceWindow(device));
         }
         if let Some(route) = outcome.browse {
             // Spec: device-chains R19. Hot-swapping shows the device's
@@ -4697,10 +4764,16 @@ impl Shell {
         &self.session
     }
 
-    /// The mixer of the view in front.
+    /// The mixer of the view in the window in front.
     #[must_use]
     pub fn front_mixer(&self) -> MixerOf {
-        match self.main_view {
+        self.mixer_of(self.acting_window())
+    }
+
+    /// The mixer of the view `window` shows.
+    #[must_use]
+    pub fn mixer_of(&self, window: WindowKind) -> MixerOf {
+        match self.main_view_of(window) {
             MainView::Arrangement => MixerOf::Arrangement,
             MainView::Session => MixerOf::Session,
         }
@@ -4893,6 +4966,9 @@ impl Shell {
             self.set_message(message, true);
         }
         let mut changed = polled.changed | self.poll_processed() | self.poll_stems();
+        // Spec: crash-recovery R15. The Save History follows new save points
+        // and saves while it shows.
+        changed |= self.refresh_save_history();
         // Spec: export R41. The export on its thread: its share moves the
         // progress window, and its end lands in the Status Bar.
         changed |= self.poll_export();
@@ -5149,15 +5225,13 @@ impl Shell {
             self.save_preferences();
         }
         if outcome.show_browser {
-            self.browser = true;
+            self.show_browser_in(self.acting_window());
         }
         if let Some(message) = outcome.message {
             self.set_message(message, false);
         }
         if outcome.focus {
-            self.focused_window = WindowKind::Main;
-            self.focused_area = Area::Browser;
-            self.effects.push(Effect::FocusArea(Area::Browser));
+            self.focus_area(Area::Browser);
         }
         if id != browser_ids::STATE {
             self.touch();
@@ -5757,7 +5831,14 @@ impl Shell {
     /// first scene selected in the Session View, while it's in front.
     #[must_use]
     pub fn scene_view_scene(&self) -> Option<bl_model::SceneId> {
-        (self.main_view == MainView::Session)
+        self.scene_view_scene_in(WindowKind::Main)
+    }
+
+    /// The same for `window`: only the window that shows the Session View
+    /// has it.
+    #[must_use]
+    pub fn scene_view_scene_in(&self, window: WindowKind) -> Option<bl_model::SceneId> {
+        (self.main_view_of(window) == MainView::Session)
             .then(|| self.session.state().scenes.first().copied())
             .flatten()
             .filter(|scene| self.editor.document().scene(*scene).is_some())
@@ -6091,6 +6172,12 @@ impl Shell {
                 }
             }
         }
+        let take_lanes_before: Vec<(TrackId, usize)> = self
+            .editor
+            .document()
+            .tracks()
+            .map(|track| (track.id(), track.take_lanes().len()))
+            .collect();
         let applied = match take.wrap {
             None => {
                 let mut placed = std::collections::BTreeSet::new();
@@ -6160,6 +6247,22 @@ impl Shell {
         if let Err(error) = applied {
             self.fail_recording(format!("Recording failed: {error}"));
             return;
+        }
+        // Spec: comping R13. A recording that adds a take lane to a track
+        // shows the track's take lanes.
+        let grown: Vec<TrackId> = self
+            .editor
+            .document()
+            .tracks()
+            .filter(|track| {
+                take_lanes_before
+                    .iter()
+                    .any(|(id, was)| *id == track.id() && track.take_lanes().len() > *was)
+            })
+            .map(bl_model::Track::id)
+            .collect();
+        for track in grown {
+            self.arrangement.keep_take_lanes_shown(track);
         }
         if let Some(report) = &mut self.last_recording {
             report.clips_made = true;
@@ -6445,7 +6548,7 @@ impl Shell {
             // Device View's keys act on it (Float's among them), and the
             // global ones work.
             WindowKind::Device(_) => vec![Context::DeviceView, Context::Global],
-            WindowKind::Main => {
+            window @ (WindowKind::Main | WindowKind::Second) => {
                 let mut contexts = Vec::with_capacity(3);
                 // Spec: crash-recovery R23. While the recovery prompt is
                 // open, it has the keyboard: the main window's own keys
@@ -6454,13 +6557,21 @@ impl Shell {
                 if self.recovery_prompt_open() {
                     return contexts;
                 }
-                match self.focused_area {
-                    Area::MainView => match self.main_view {
+                let detail = self.detail_of(window);
+                match self.focused_area_of(window) {
+                    Area::MainView => match self.main_view_of(window) {
                         MainView::Arrangement => {
                             // A selected title bar's keys come first
                             // (shortcuts.md, `track-headers`).
                             if self.arrangement.title_bars_selected() {
                                 contexts.push(Context::TrackHeaders);
+                            }
+                            // Spec: comping R28. A take lane is selected: its
+                            // header, the time on it or a clip on it.
+                            if !self.arrangement.title_bars_selected()
+                                && self.arrangement.take_lane_selected()
+                            {
+                                contexts.push(Context::TakeLanes);
                             }
                             // Spec: automation-editing R20. A selected
                             // automation lane's keys come ahead of the
@@ -6478,7 +6589,7 @@ impl Shell {
                     Area::Detail if self.value_focused => contexts.push(Context::ValueField),
                     // Spec: piano-roll. With the Clip View open, its MIDI
                     // Note Editor holds the detail area's keys.
-                    Area::Detail if self.detail.focus_in_clip() => {
+                    Area::Detail if detail.focus_in_clip() => {
                         // Spec: multi-clip-editing R11. With loop bars
                         // selected, Cmd-D duplicates their loops.
                         if !self
@@ -6564,11 +6675,15 @@ impl Shell {
                         == selected.map(bl_model::SongStart::Locator),
                 )
             }
-            ids::VIEW_FULL_SCREEN => Some(self.full_screen),
-            ids::VIEW_TOGGLE_BROWSER => Some(self.browser),
-            ids::VIEW_TOGGLE_CLIP_VIEW => Some(self.detail.clip_shown()),
-            ids::VIEW_TOGGLE_DEVICE_VIEW => Some(self.detail.device_shown()),
-            ids::VIEW_EXPAND_CLIP_VIEW => Some(self.detail.expanded()),
+            ids::VIEW_FULL_SCREEN => Some(self.full_screen_of(self.acting_window())),
+            ids::VIEW_TOGGLE_SECOND_WINDOW => Some(self.second.open),
+            ids::VIEW_TOGGLE_BROWSER => Some(self.browser_of(self.acting_window())),
+            ids::VIEW_TOGGLE_FULL_HEIGHT_BROWSER => Some(self.browser_view.full_height()),
+            ids::VIEW_TOGGLE_CLIP_VIEW => Some(self.detail_of(self.acting_window()).clip_shown()),
+            ids::VIEW_TOGGLE_DEVICE_VIEW => {
+                Some(self.detail_of(self.acting_window()).device_shown())
+            }
+            ids::VIEW_EXPAND_CLIP_VIEW => Some(self.detail_of(self.acting_window()).expanded()),
             ids::VIEW_TOGGLE_PLUGIN_LIST => Some(self.plugin_list.visible()),
             ids::VIEW_DRAW_MODE => Some(self.clip_view.draw_mode()),
             note_ids::SET_PREVIEW => Some(self.clip_view.preview()),
@@ -6580,6 +6695,7 @@ impl Shell {
             ids::VIEW_TOGGLE_INFO_VIEW => Some(self.info_view),
             assistant_ids::VIEW_TOGGLE_ASSISTANT => Some(self.assistant_open),
             ids::VIEW_TOGGLE_UNDO_HISTORY => Some(self.undo_history_open),
+            ids::VIEW_TOGGLE_SAVE_HISTORY => Some(self.save_history.open),
             ids::VIEW_TOGGLE_PLUG_IN_WINDOWS => Some(self.plug_in_windows),
             ids::FOCUS_TOGGLE_TAB_NAVIGATION => Some(self.prefs.tab_navigation),
             ids::FOCUS_TOGGLE_WRAP_NAVIGATION => Some(self.prefs.wrap_navigation.0),
@@ -6604,6 +6720,7 @@ impl Shell {
             ),
             ids::AUDIO_TOGGLE_ENGINE => Some(self.audio.engine_on()),
             browser_ids::SET_PREVIEW => Some(self.browser_view.preview_on()),
+            browser_ids::SET_FILTER_VIEW => Some(self.browser_view.filter_view_shown()),
             "device.set_show_preset_name" => self
                 .devices
                 .selected()
@@ -6643,6 +6760,10 @@ impl Shell {
     /// Delete Locator and deletes while a locator is selected (the time
     /// editing spec, R4).
     pub fn menu_command<'a>(&self, id: &'a str) -> &'a str {
+        // Spec: comping R28. Edit ▸ Rename renames the selected take lanes.
+        if id == "clip.rename" && !self.arrangement.selected_take_lanes().is_empty() {
+            return "take_lane.rename";
+        }
         if self.arrangement.selected_locators().is_empty() {
             return id;
         }
@@ -6713,7 +6834,7 @@ impl Shell {
             // Spec: detail-views R6. Hide Device View reads for the views it
             // would hide, or the ones it would bring back.
             ids::VIEW_TOGGLE_DETAIL_AREA => {
-                let (hiding, views) = self.detail.toggle_area_views();
+                let (hiding, views) = self.detail_of(self.acting_window()).toggle_area_views();
                 let names = match views[..] {
                     [DetailView::Clip] => "Clip View",
                     [DetailView::Device] => "Device View",
@@ -6809,17 +6930,46 @@ impl Shell {
                 }),
             comping_ids::DUPLICATE => serde_json::from_value::<comping_ids::DuplicateArgs>(args)
                 .ok()
-                .is_some_and(|args| !args.lanes.is_empty() && args.lanes.iter().all(lane)),
+                .is_some_and(|args| match args.lanes {
+                    Some(lanes) => !lanes.is_empty() && lanes.iter().all(lane),
+                    None => !self.arrangement.selected_take_lanes().is_empty(),
+                }),
             comping_ids::COPY_TO_MAIN_LANE => {
+                // Spec: comping R17, R29. Named lanes and a range, or the
+                // selection's: a take lane and the time on it.
                 serde_json::from_value::<comping_ids::CopyToMainLaneArgs>(args)
                     .ok()
-                    .is_some_and(|args| !args.lanes.is_empty() && args.lanes.iter().all(lane))
+                    .is_some_and(|args| {
+                        let lanes_ok = match &args.lanes {
+                            Some(lanes) => !lanes.is_empty() && lanes.iter().all(lane),
+                            None => self.arrangement.take_lane_selected(),
+                        };
+                        let range_ok = (args.start.is_some() && args.end.is_some())
+                            || self.arrangement.time_selection().is_some();
+                        lanes_ok && range_ok
+                    })
             }
             comping_ids::REPLACE_WITH_TAKE => {
+                // Spec: comping R19. A named track, or the selection's audio
+                // and MIDI tracks and its time.
                 serde_json::from_value::<comping_ids::ReplaceWithTakeArgs>(args)
                     .ok()
-                    .is_some_and(|args| track(&args.track))
+                    .is_some_and(|args| {
+                        let tracks_ok = match args.track {
+                            Some(named) => track(&named),
+                            None => self.arrangement.selected_tracks().iter().any(track),
+                        };
+                        let range_ok = (args.start.is_some() && args.end.is_some())
+                            || self.arrangement.time_selection().is_some();
+                        tracks_ok && range_ok
+                    })
             }
+            comping_ids::AUDITION => serde_json::from_value::<comping_ids::AuditionArgs>(args)
+                .ok()
+                .is_some_and(|args| match args.lanes {
+                    Some(lanes) => !lanes.is_empty() && lanes.iter().all(lane),
+                    None => self.arrangement.take_lane_selected(),
+                }),
             comping_ids::MOVE_COMP_EDGE => {
                 serde_json::from_value::<comping_ids::MoveCompEdgeArgs>(args)
                     .ok()
@@ -6949,7 +7099,7 @@ impl Shell {
         // View shows, whichever area has the focus; the key is the Clip
         // View's own.
         if id == ids::VIEW_EXPAND_CLIP_VIEW {
-            return self.detail.clip_shown();
+            return self.detail_of(self.window_in(args)).clip_shown();
         }
         if !spec.contexts.iter().any(|context| active.contains(context)) {
             return false;
@@ -7051,11 +7201,44 @@ impl Shell {
             ids::FOCUS_PREVIOUS_NEIGHBOR => return self.has_neighbor(true),
             // Spec: time-editing R8. Cmd-R renames the selected locators
             // while there are any.
-            "clip.rename" => return self.arrangement.selected_locators().is_empty(),
+            "clip.rename" => {
+                return self.arrangement.selected_locators().is_empty()
+                    && self.arrangement.selected_take_lanes().is_empty();
+            }
+            // Spec: comping R28, R29. Rename on a take lane's header types the
+            // name in place; without a name it needs a header selected or a
+            // lane named.
+            "take_lane.rename" if args.get("name").is_none() => {
+                return args.get("lane").is_some()
+                    || !self.arrangement.selected_take_lanes().is_empty();
+            }
+            // Spec: track-context-menu R10. The two deletes of a track's
+            // take lanes act on the selected tracks, and are enabled when one
+            // has a take lane.
+            "take_lane.delete_all" | "take_lane.delete_unused" if args.get("tracks").is_none() => {
+                let doc = self.editor.document();
+                return self.arrangement.selected_tracks().iter().any(|track| {
+                    doc.track(*track)
+                        .is_some_and(|held| held.take_lanes().len() > 0)
+                });
+            }
             // Zoom In and Zoom Out stop at the zoom's ends (interface-zoom
             // R3).
-            ids::VIEW_ZOOM_IN => return self.zoom_percent() < ZOOM_MAX_PERCENT,
-            ids::VIEW_ZOOM_OUT => return self.zoom_percent() > ZOOM_MIN_PERCENT,
+            ids::VIEW_ZOOM_IN | ids::VIEW_ZOOM_OUT => {
+                // Spec: interface-zoom R13. The ends are those of the window
+                // the zoom acts on.
+                let window = self.zoom_window(match args["window"].as_str() {
+                    Some("main") => Some(ids::WindowName::Main),
+                    Some("second") => Some(ids::WindowName::Second),
+                    _ => None,
+                });
+                let percent = self.zoom_percent_of(window);
+                return if id == ids::VIEW_ZOOM_IN {
+                    percent < ZOOM_MAX_PERCENT
+                } else {
+                    percent > ZOOM_MIN_PERCENT
+                };
+            }
             // A person's Zoom setting always names a percentage in range, as
             // the Customization settings do (themes R7).
             ids::VIEW_SET_ZOOM
@@ -7086,6 +7269,7 @@ impl Shell {
                         .document()
                         .device(device)
                         .is_some_and(|d| d.floating),
+                    WindowKind::Second => self.second.open,
                     WindowKind::Main => false,
                 };
             }
@@ -7114,6 +7298,11 @@ impl Shell {
         if capture_ids::handles(id) {
             // Spec: capture-midi R1. Nothing played, nothing to capture.
             return self.capture_midi_ready() && self.audio.engine_running();
+        }
+        if id == automation_ids::SIMPLIFY && args.get("lanes").is_none() {
+            // Spec: automation-editing R18. Disabled without a time selection
+            // in an automation lane.
+            return automation::can_run(id, &self.arrangement, None);
         }
         if ids::handles(id) || transport_ids::handles(id) {
             return true;
@@ -7803,6 +7992,44 @@ impl Shell {
                 self.effects.push(Effect::RenameTrack(track));
                 self.touch();
                 Ok(Value::Null)
+            }
+            "take_lane.rename" if !has("name") => {
+                // Spec: comping R6, R28. Cmd-R and a take lane header's
+                // Rename type the new name in the header.
+                let lane = args
+                    .get("lane")
+                    .and_then(|v| serde_json::from_value(v.clone()).ok())
+                    .or_else(|| self.arrangement.selected_take_lanes().first().copied())
+                    .ok_or_else(|| ShellError::Unavailable {
+                        command: id.to_owned(),
+                        reason: "select a take lane first".to_owned(),
+                    })?;
+                self.effects.push(Effect::RenameTakeLane(lane));
+                self.touch();
+                Ok(Value::Null)
+            }
+            "take_lane.delete_all" | "take_lane.delete_unused" if !has("tracks") => {
+                // Spec: track-context-menu R10. They act on the selected
+                // audio and MIDI tracks.
+                let doc = self.editor.document();
+                let tracks: Vec<TrackId> = self
+                    .arrangement
+                    .selected_tracks()
+                    .iter()
+                    .copied()
+                    .filter(|track| {
+                        doc.track(*track).is_some_and(|held| {
+                            matches!(held.kind(), TrackKind::Audio | TrackKind::Midi)
+                        })
+                    })
+                    .collect();
+                if tracks.is_empty() {
+                    return Err(ShellError::Unavailable {
+                        command: id.to_owned(),
+                        reason: "select an audio or MIDI track first".to_owned(),
+                    });
+                }
+                self.run(id, json!({ "tracks": tracks }))
             }
             locator_ids::RENAME if !has("name") => {
                 // Spec: time-editing R8. Cmd-R and Edit ▸ Rename type the
@@ -8598,6 +8825,10 @@ impl Shell {
     }
 
     fn run_command(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        if history::handles(id) {
+            // Spec: crash-recovery R20.
+            return self.run_save_history(id, args);
+        }
         if recovery_ids::handles(id) {
             // Spec: crash-recovery R26. The recovery commands run against
             // the app's own recovery.
@@ -8650,7 +8881,7 @@ impl Shell {
             // Spec: comping R4, R5, R17 to R21.
             let before = self.editor.document().clone();
             let result =
-                crate::arrangement::comping::run(id, args, &mut self.editor, &self.arrangement)
+                crate::arrangement::comping::run(id, args, &mut self.editor, &mut self.arrangement)
                     .map_err(|failure| edit_error(id, failure));
             if *self.editor.document() != before {
                 self.dirty = true;
@@ -8970,12 +9201,18 @@ impl Shell {
                 // A query changes nothing a window shows.
                 self.touch();
             }
+            if result.is_ok()
+                && id == view_ids::SELECT_TAKE_LANES
+                && (self.detail.clip_shown() || self.detail.device_shown())
+            {
+                // Spec: comping R26. With the Clip View or the Device View
+                // open, selecting a take lane's header selects its clips.
+                self.arrangement.select_header_clips(self.editor.document());
+            }
             if result.is_ok() && id == view_ids::FOCUS_TITLE_BAR {
                 // Spec: accessibility R4. Esc from a track's control gives
                 // the keyboard back to the Arrangement, at the title bar.
-                self.focused_window = WindowKind::Main;
-                self.focused_area = Area::MainView;
-                self.effects.push(Effect::FocusArea(Area::MainView));
+                self.focus_area(Area::MainView);
             }
             if result.is_ok() && matches!(id, view_ids::SET_INSERT_MARKER | view_ids::SELECT_TIME) {
                 // Spec: control-bar-transport R15. A click or a time
@@ -9013,9 +9250,7 @@ impl Shell {
                 });
             if result.is_ok() && id == mixer_ids::FOCUS {
                 // Spec: mixer-view R13.
-                self.focused_window = WindowKind::Main;
-                self.focused_area = Area::MainView;
-                self.effects.push(Effect::FocusArea(Area::MainView));
+                self.focus_area(Area::MainView);
             }
             if result.is_ok() && id == mixer_ids::RETURN_TRACKS_SCROLL {
                 // Spec: mixer-view R21. The switch is an application
@@ -9114,10 +9349,7 @@ impl Shell {
             if id == session_ids::FOCUS {
                 // Spec: session-view. Navigate ▸ Session View shows it and
                 // moves the focus into it.
-                self.main_view = MainView::Session;
-                self.focused_window = WindowKind::Main;
-                self.focused_area = Area::MainView;
-                self.effects.push(Effect::FocusArea(Area::MainView));
+                self.focus_main_view(MainView::Session);
             }
             if id != session_ids::STATE {
                 self.touch();
@@ -9427,6 +9659,7 @@ impl Shell {
                         args.track,
                         args.sync,
                         args.remote,
+                        args.mpe,
                     )
                     .map_err(failed)?;
                 self.prefs.midi = self.midi.prefs();
@@ -9692,32 +9925,11 @@ impl Shell {
     }
 
     fn view_window(&self) -> ViewResult {
-        ViewResult {
-            main_view: self.main_view.id().to_owned(),
-            browser: self.browser,
-            info_view: self.info_view,
-            full_screen: self.full_screen,
-            zoom: self.zoom(),
-        }
+        self.view_result_of(WindowKind::Main)
     }
 
     fn view_result(&self) -> Value {
         to_value(&self.view_window())
-    }
-
-    /// What the detail area's commands return. The Clip View's own copy of
-    /// whether it shows follows the detail area here, the one place every
-    /// change passes.
-    fn detail_result(&mut self) -> Value {
-        self.clip_view.set_visible(self.detail.clip_shown());
-        to_value(&self.detail.state())
-    }
-
-    /// Gives the detail area the keyboard focus.
-    fn focus_detail(&mut self) {
-        self.focused_window = WindowKind::Main;
-        self.focused_area = Area::Detail;
-        self.effects.push(Effect::FocusArea(Area::Detail));
     }
 
     fn set_result(&self) -> Value {
@@ -9900,10 +10112,11 @@ impl Shell {
                 self.set_replaced();
                 // Spec: file-management R1. A new set starts from the saved
                 // default set when there is one.
-                let editor = new_set_from(self.prefs.default_set.as_deref());
+                let (editor, window_views) = new_set_from(self.prefs.default_set.as_deref());
                 self.saved = snapshot(&editor);
                 self.editor = editor;
                 self.store.close();
+                self.apply_window_views(window_views);
                 self.devices.set_windows(bl_model::DeviceWindows::new());
                 self.devices.set_rack_views(bl_model::RackViewMap::new());
                 self.devices
@@ -9913,7 +10126,6 @@ impl Shell {
                     .restore_midi_tools(&bl_project::midi_tools::MidiToolSettings::default());
                 self.set_path = None;
                 self.dirty = false;
-                self.main_view = MainView::Arrangement;
                 self.message = None;
                 self.arrangement.reset();
                 self.clip_view.forget_selection();
@@ -9950,6 +10162,9 @@ impl Shell {
                 self.saved = snapshot(&editor);
                 self.set_replaced();
                 self.editor = editor;
+                // Spec: second-window R14. The set opens with the main view
+                // and the second window it was saved with.
+                self.apply_window_views(self.store.window_views());
                 self.set_path = Some(opened);
                 self.dirty = false;
                 self.message = None;
@@ -10272,17 +10487,16 @@ impl Shell {
                     self.touch();
                     return Ok(Value::Null);
                 }
+                if self.focused_window == WindowKind::Second {
+                    // Spec: second-window R1. Close Window closes the second
+                    // window with it in front.
+                    return self.run_window_view(ids::VIEW_TOGGLE_SECOND_WINDOW, json!({}));
+                }
                 if !self.settings_open {
                     return Err(unavailable("no secondary window is open"));
                 }
                 self.close_settings();
                 Ok(Value::Null)
-            }
-            ids::VIEW_FULL_SCREEN => {
-                Self::args::<NoArgs>(id, args)?;
-                self.full_screen = !self.full_screen;
-                self.effects.push(Effect::SetFullScreen(self.full_screen));
-                Ok(self.view_result())
             }
             ids::VIEW_TOGGLE_PLUG_IN_WINDOWS => {
                 // Spec: device-chains R33. It hides and shows windows only.
@@ -10304,79 +10518,17 @@ impl Shell {
                 self.touch();
                 Ok(to_value(&ids::ClosedPlugInWindows { closed }))
             }
-            ids::VIEW_TOGGLE_BROWSER => {
+            ids::VIEW_TOGGLE_FULL_HEIGHT_BROWSER => {
+                // Spec: browser R26. The column runs down to the Status Bar;
+                // kept between launches.
                 Self::args::<NoArgs>(id, args)?;
-                self.browser = !self.browser;
-                if !self.browser && self.focused_area == Area::Browser {
-                    self.focused_area = Area::MainView;
-                }
+                let on = !self.browser_view.full_height();
+                self.browser_view.set_full_height(on);
+                self.prefs.browser = self
+                    .browser_view
+                    .prefs(self.prefs.browser.user_library.clone());
+                self.save_preferences();
                 Ok(self.view_result())
-            }
-            ids::VIEW_TOGGLE_CLIP_VIEW => {
-                // Spec: detail-views R1; L-STAT-004. View state only.
-                Self::args::<NoArgs>(id, args)?;
-                self.detail.toggle(DetailView::Clip);
-                Ok(self.detail_result())
-            }
-            ids::VIEW_TOGGLE_DEVICE_VIEW => {
-                // Spec: detail-views R1; L-STAT-006.
-                Self::args::<NoArgs>(id, args)?;
-                self.detail.toggle(DetailView::Device);
-                Ok(self.detail_result())
-            }
-            ids::VIEW_SHOW_DETAIL_VIEWS => {
-                // Spec: detail-views R2; I-CLICK-027.
-                Self::args::<NoArgs>(id, args)?;
-                self.detail.both();
-                Ok(self.detail_result())
-            }
-            ids::VIEW_SWITCH_DETAIL_VIEW => {
-                // Spec: detail-views R5; S-VIEW-004.
-                Self::args::<NoArgs>(id, args)?;
-                if self.detail.switch() {
-                    self.focus_detail();
-                }
-                Ok(self.detail_result())
-            }
-            ids::VIEW_TOGGLE_DETAIL_AREA => {
-                // Spec: detail-views R6; S-VIEW-022.
-                Self::args::<NoArgs>(id, args)?;
-                self.detail.toggle_area();
-                Ok(self.detail_result())
-            }
-            ids::VIEW_EXPAND_CLIP_VIEW => {
-                // Spec: detail-views R11; S-NOTE-030.
-                Self::args::<NoArgs>(id, args)?;
-                if !self.detail.toggle_expanded() {
-                    return Err(ShellError::Unavailable {
-                        command: id.to_owned(),
-                        reason: "the Clip View is hidden".to_owned(),
-                    });
-                }
-                Ok(self.detail_result())
-            }
-            ids::VIEW_SET_DETAIL_HEIGHT => {
-                // Spec: detail-views R10, R18.
-                let ids::DetailHeightArgs { points } = Self::args(id, args)?;
-                if !points.is_finite() {
-                    return Err(ShellError::InvalidArgs {
-                        command: id.to_owned(),
-                        message: "`points` must be a number".to_owned(),
-                    });
-                }
-                self.detail.set_clip_height(points);
-                Ok(self.detail_result())
-            }
-            ids::FOCUS_CLIP_VIEW | ids::FOCUS_DEVICE_VIEW => {
-                // Spec: detail-views R14; S-FOCUS-004, S-FOCUS-005.
-                Self::args::<NoArgs>(id, args)?;
-                self.detail.focus_view(if id == ids::FOCUS_CLIP_VIEW {
-                    DetailView::Clip
-                } else {
-                    DetailView::Device
-                });
-                self.focus_detail();
-                Ok(self.detail_result())
             }
             ids::VIEW_TOGGLE_PLUGIN_LIST => {
                 // Spec: plugin-list R1, R3. View state only.
@@ -10545,6 +10697,12 @@ impl Shell {
                 Self::args::<NoArgs>(id, args)?;
                 Ok(to_value(&ViewState {
                     window: self.view_window(),
+                    second_window: self.second_window_state(),
+                    focused_window: if self.acting_window() == WindowKind::Second {
+                        ids::WindowName::Second
+                    } else {
+                        ids::WindowName::Main
+                    },
                     clip_view: self
                         .clip_view
                         .state(self.editor.document(), &self.arrangement),
@@ -10552,6 +10710,7 @@ impl Shell {
                     plugin_list: self.plugin_list.state(),
                     assistant: self.assistant_panel_state(),
                     undo_history: self.undo_history_open,
+                    save_history: self.save_history.open,
                     plug_in_windows: self.plug_in_windows,
                 }))
             }
@@ -10560,53 +10719,43 @@ impl Shell {
                 // isn't saved with the set and isn't an undo step.
                 Self::args::<NoArgs>(id, args)?;
                 self.undo_history_open = !self.undo_history_open;
+                if self.undo_history_open {
+                    // They share the right-hand area (crash-recovery R12).
+                    self.save_history.open = false;
+                }
                 self.touch();
                 Ok(to_value(&self.undo_history_state()))
+            }
+            ids::VIEW_TOGGLE_SAVE_HISTORY => {
+                // Spec: crash-recovery R12. View state: not saved with the
+                // set and no undo step.
+                Self::args::<NoArgs>(id, args)?;
+                Ok(self.toggle_save_history())
             }
             ids::VIEW_TOGGLE_INFO_VIEW => {
                 Self::args::<NoArgs>(id, args)?;
                 self.info_view = !self.info_view;
                 Ok(self.view_result())
             }
-            ids::VIEW_TOGGLE_SESSION_ARRANGEMENT => {
-                Self::args::<NoArgs>(id, args)?;
-                self.main_view = match self.main_view {
-                    MainView::Arrangement => MainView::Session,
-                    MainView::Session => MainView::Arrangement,
-                };
-                Ok(self.view_result())
-            }
-            // Spec: interface-zoom R3, R5, R6.
-            ids::VIEW_ZOOM_IN | ids::VIEW_ZOOM_OUT | ids::VIEW_ZOOM_RESET => {
-                Self::args::<NoArgs>(id, args)?;
-                let next = match id {
-                    ids::VIEW_ZOOM_IN => zoom_step(self.zoom_percent(), 1),
-                    ids::VIEW_ZOOM_OUT => zoom_step(self.zoom_percent(), -1),
-                    _ => 100,
-                };
-                self.set_zoom_percent(next);
-                Ok(self.view_result())
-            }
-            ids::VIEW_SET_ZOOM => {
-                let ZoomArgs { percent } = Self::args(id, args)?;
-                self.set_zoom_percent(percent);
-                Ok(self.view_result())
-            }
-            ids::FOCUS_CONTROL_BAR => {
-                Self::args::<NoArgs>(id, args)?;
-                self.focused_window = WindowKind::Main;
-                self.focused_area = Area::ControlBar;
-                self.effects.push(Effect::FocusArea(Area::ControlBar));
-                Ok(Value::Null)
-            }
-            ids::FOCUS_ARRANGEMENT => {
-                Self::args::<NoArgs>(id, args)?;
-                self.main_view = MainView::Arrangement;
-                self.focused_window = WindowKind::Main;
-                self.focused_area = Area::MainView;
-                self.effects.push(Effect::FocusArea(Area::MainView));
-                Ok(Value::Null)
-            }
+            ids::VIEW_TOGGLE_SECOND_WINDOW
+            | ids::VIEW_FULL_SCREEN
+            | ids::VIEW_TOGGLE_BROWSER
+            | ids::VIEW_TOGGLE_CLIP_VIEW
+            | ids::VIEW_TOGGLE_DEVICE_VIEW
+            | ids::VIEW_SHOW_DETAIL_VIEWS
+            | ids::VIEW_SWITCH_DETAIL_VIEW
+            | ids::VIEW_TOGGLE_DETAIL_AREA
+            | ids::VIEW_EXPAND_CLIP_VIEW
+            | ids::VIEW_SET_DETAIL_HEIGHT
+            | ids::FOCUS_CLIP_VIEW
+            | ids::FOCUS_DEVICE_VIEW
+            | ids::VIEW_TOGGLE_SESSION_ARRANGEMENT
+            | ids::VIEW_ZOOM_IN
+            | ids::VIEW_ZOOM_OUT
+            | ids::VIEW_ZOOM_RESET
+            | ids::VIEW_SET_ZOOM
+            | ids::FOCUS_CONTROL_BAR
+            | ids::FOCUS_ARRANGEMENT => self.run_window_view(id, args),
             ids::FOCUS_NEXT | ids::FOCUS_PREVIOUS => {
                 Self::args::<NoArgs>(id, args)?;
                 self.effects.push(Effect::MoveFocus {

@@ -5,7 +5,7 @@
 use bl_core::time::{Ticks, TimeSignature};
 use bl_midi_tools::{
     DIVISION_NAMES, MAX_NOTES, ParamValue, Registry, ToolError, ToolInput, ToolKind, ToolNote,
-    ToolPressure, ToolScale, division_ticks, fold_octaves, run,
+    ToolPoint, ToolScale, division_ticks, fold_octaves, run,
 };
 
 fn input(notes: Vec<ToolNote>, range: (i64, i64)) -> ToolInput {
@@ -161,36 +161,31 @@ fn r13_keys_fold_by_octaves_and_a_generator_is_cut_at_the_ranges_end() {
 }
 
 #[test]
-fn r14_pieces_take_the_stretch_of_the_pressure_over_their_span() {
+fn r14_pieces_take_the_stretch_of_each_envelope_over_their_span() {
+    let point = |at: i64, value: f64| ToolPoint {
+        at: Ticks(at),
+        value,
+        bend: 0.0,
+    };
     let mut held = note(60, 0, 1000);
-    held.pressure = vec![
-        ToolPressure {
-            at: Ticks(0),
-            value: 10,
-        },
-        ToolPressure {
-            at: Ticks(600),
-            value: 90,
-        },
-    ];
+    held.pressure = vec![point(0, 0.0), point(600, 60.0)];
+    held.pitch = vec![point(0, 2.0)];
     let part = held.part(Ticks(500), Ticks(1000));
     assert_eq!(part.start, Ticks(500));
     assert_eq!(
         part.pressure,
-        [
-            ToolPressure {
-                at: Ticks(0),
-                value: 10
-            },
-            ToolPressure {
-                at: Ticks(100),
-                value: 90
-            },
-        ],
-        "a point at the part's start holds the value there"
+        [point(0, 50.0), point(100, 60.0), point(500, 60.0)],
+        "a point at each end of the part holds the value there"
     );
+    assert_eq!(part.pitch, [point(0, 2.0), point(500, 2.0)]);
+    assert!(part.slide.is_empty(), "an empty envelope stays empty");
     let shorter = held.with_length(Ticks(500));
-    assert_eq!(shorter.pressure.len(), 1, "the point past the new end goes");
+    assert_eq!(
+        shorter.pressure,
+        [point(0, 0.0), point(500, 50.0)],
+        "the point past the new end goes and one holds the value there"
+    );
+    assert_eq!(held.with_length(Ticks(2000)).pressure, held.pressure);
 }
 
 #[test]

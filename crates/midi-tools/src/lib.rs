@@ -24,7 +24,7 @@ pub use descriptor::{
     Breakpoint, ChoiceOption, DIVISION_NAMES, ParamKind, ParamSpec, ParamValue, ToolDescriptor,
     ToolKind, division_ticks,
 };
-pub use input::{ToolInput, ToolNote, ToolOutput, ToolPressure, ToolScale, fold_octaves};
+pub use input::{ToolInput, ToolNote, ToolOutput, ToolPoint, ToolScale, fold_octaves};
 pub use random::Rng;
 pub use registry::{
     GENERATOR_ORDER, MAX_NOTES, MidiTool, Registry, TRANSFORMATION_ORDER, ToolError, run,

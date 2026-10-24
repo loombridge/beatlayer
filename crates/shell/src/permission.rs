@@ -379,7 +379,7 @@ fn paste_bounced(args: &Value, registered: Permission, scene: Scene<'_>) -> Call
     let Some(clipboard) = scene.clipboard.as_ref().and_then(Clipboard::material) else {
         return unchanged;
     };
-    if clipboard.tracks.is_empty() {
+    if clipboard.lanes.is_empty() {
         return unchanged;
     }
     let doc = scene.editor.document();
@@ -435,7 +435,9 @@ fn paste_bounced(args: &Value, registered: Permission, scene: Scene<'_>) -> Call
     let Some(base) = lanes.iter().position(|id| *id == track) else {
         return unchanged;
     };
-    for (distance, _) in &clipboard.tracks {
+    let mut distances: Vec<usize> = clipboard.lanes.iter().map(|lane| lane.distance).collect();
+    distances.dedup();
+    for distance in distances {
         let Some(destination) = lanes.get(base + distance) else {
             return unchanged;
         };
@@ -511,7 +513,7 @@ fn tried(id: &str, args: &Value, registered: Permission, scene: Scene<'_>) -> Ca
     editor.begin("Check a call's permission");
     // The fades an edit settles change no clip's place, so the dry run skips them.
     let ran = if comping_ids::handles(id) {
-        crate::arrangement::comping::run(id, args.clone(), editor, &view).is_ok()
+        crate::arrangement::comping::run(id, args.clone(), editor, &mut view).is_ok()
     } else {
         editing::run(id, args.clone(), editor, &mut view, &mut clipboard, false).is_ok()
     };

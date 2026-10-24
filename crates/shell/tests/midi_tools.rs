@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 
 use bl_core::time::Ticks;
 use bl_model::{
-    Chain, Clip, ClipData, ClipId, Command, Document, Editor, MidiData, Note, PressurePoint,
-    RackKind, Scale, ScaleName, TrackId,
+    Breakpoint, Chain, Clip, ClipData, ClipId, Command, Document, Editor, MidiData, Note, RackKind,
+    Scale, ScaleName, TrackId,
 };
 use bl_shell::audio::AudioHost;
 use bl_shell::clip_view::notes_in_order;
@@ -484,7 +484,7 @@ fn r13_a_key_past_the_keyboard_moves_by_octaves() {
 #[test]
 fn r14_a_note_a_tool_makes_carries_what_the_input_note_had() {
     // Spec: midi-tools R14, mpe R4. Release velocity, chance, deviation and
-    // deactivation carry; each piece takes the stretch of the pressure over
+    // deactivation carry; each piece takes the stretch of each envelope over
     // its part.
     let mut input = note(60, 0, 2 * SIXTEENTH);
     input.release_velocity = 30;
@@ -492,15 +492,22 @@ fn r14_a_note_a_tool_makes_carries_what_the_input_note_had() {
     input.velocity_deviation = 5;
     input.mute = true;
     input.pressure = vec![
-        PressurePoint {
+        Breakpoint {
             at: Ticks(0),
-            value: 10,
+            value: 10.0,
+            bend: 0.0,
         },
-        PressurePoint {
+        Breakpoint {
             at: Ticks(SIXTEENTH),
-            value: 90,
+            value: 90.0,
+            bend: 0.0,
         },
     ];
+    input.pitch = vec![Breakpoint {
+        at: Ticks(0),
+        value: 2.0,
+        bend: 0.0,
+    }];
     let mut song = song(vec![input]);
     song.select_notes(&[0]);
     song.tool(
@@ -522,20 +529,14 @@ fn r14_a_note_a_tool_makes_carries_what_the_input_note_had() {
         );
         assert_eq!(piece.length, Ticks(SIXTEENTH));
     }
-    assert_eq!(
-        notes[0].pressure,
-        [PressurePoint {
-            at: Ticks(0),
-            value: 10
-        }]
-    );
-    assert_eq!(
-        notes[1].pressure,
-        [PressurePoint {
-            at: Ticks(0),
-            value: 90
-        }]
-    );
+    let point = |at: i64, value: f64| Breakpoint {
+        at: Ticks(at),
+        value,
+        bend: 0.0,
+    };
+    assert_eq!(notes[0].pressure, [point(0, 10.0), point(SIXTEENTH, 90.0)]);
+    assert_eq!(notes[1].pressure, [point(0, 90.0), point(SIXTEENTH, 90.0)]);
+    assert_eq!(notes[1].pitch, [point(0, 2.0), point(SIXTEENTH, 2.0)]);
 }
 
 #[test]

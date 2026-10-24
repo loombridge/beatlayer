@@ -23,14 +23,15 @@ use bl_core::midi::MidiMessage;
 use bl_core::time::{Bpm, Frames, SampleRate, TICKS_PER_QUARTER, Ticks};
 use bl_model::{Breakpoint, MidiData, Note, TrackId};
 
-use crate::controller_take::is_controller;
+use crate::controller_take::{Heard, is_controller};
+use crate::mpe::MpeRole;
 
 /// How many messages the ring holds between two drains.
 pub const CAPTURE_RING: usize = 4096;
 
 /// A note or controller message a monitoring MIDI track's input received,
 /// and when.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CapturedMidi {
     /// The track whose input received it.
     pub track: TrackId,
@@ -43,6 +44,9 @@ pub struct CapturedMidi {
     pub song: Option<Frames>,
     /// A note-on or a note-off, or a controller message.
     pub message: MidiMessage,
+    /// What it is from an MPE port: a note of its own, or one note's
+    /// expression (the MPE spec, R12). Otherwise [`MpeRole::Plain`].
+    pub mpe: MpeRole,
 }
 
 /// The most messages the buffer keeps for a track. The oldest go first.
@@ -98,7 +102,7 @@ impl Buffer {
         self.tracks
             .values()
             .flatten()
-            .any(|m| m.message.is_note_on())
+            .any(|m| m.message.is_note_on() && !is_expression(m))
     }
 
     /// How many notes have been released: the note-offs kept, on every
@@ -108,7 +112,7 @@ impl Buffer {
         self.tracks
             .values()
             .flatten()
-            .filter(|m| m.message.is_note_off())
+            .filter(|m| m.message.is_note_off() && !is_expression(m))
             .count()
     }
 
@@ -124,6 +128,8 @@ impl Buffer {
 /// A note as it was played, timed in engine-clock frames.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Played {
+    /// The note's ID, if an MPE port played it: what its expressions name.
+    pub id: Option<u32>,
     /// The key.
     pub key: u8,
     /// The velocity of the note-on.
@@ -154,9 +160,12 @@ pub fn pair(messages: &[CapturedMidi]) -> Vec<Played> {
     let end = last.map_or(0, |m| m.clock);
     let end_song = last.and_then(&song);
     let mut held: [Option<&CapturedMidi>; 128] = [None; 128];
+    // The notes an MPE port holds, each by the ID of its own.
+    let mut mpe: Vec<(u32, &CapturedMidi)> = Vec::new();
     let mut notes = Vec::new();
-    let mut finish = |on: &CapturedMidi, off_clock: u64, off_song, release: u8| {
+    let mut finish = |id: Option<u32>, on: &CapturedMidi, off_clock: u64, off_song, release: u8| {
         notes.push(Played {
+            id,
             key: on.message.data1(),
             velocity: on.message.data2().max(1),
             release: if release == 0 { 64 } else { release },
@@ -167,22 +176,31 @@ pub fn pair(messages: &[CapturedMidi]) -> Vec<Played> {
         });
     };
     for m in notes_only {
-        let key = usize::from(m.message.data1());
         let on = m.message.is_note_on();
+        let release = |on: bool| if on { 0 } else { m.message.data2() };
+        if let MpeRole::Note { id } = m.mpe {
+            // Spec: mpe R12. An MPE note ends with its own note-off.
+            if let Some(at) = mpe.iter().position(|(held, _)| *held == id) {
+                let (_, started) = mpe.remove(at);
+                finish(Some(id), started, m.clock, song(m), release(on));
+            } else if on {
+                mpe.push((id, m));
+            }
+            continue;
+        }
+        let key = usize::from(m.message.data1());
         if let Some(started) = held[key].take() {
-            finish(
-                started,
-                m.clock,
-                song(m),
-                if on { 0 } else { m.message.data2() },
-            );
+            finish(None, started, m.clock, song(m), release(on));
         }
         if on {
             held[key] = Some(m);
         }
     }
     for started in held.into_iter().flatten() {
-        finish(started, end, end_song, 0);
+        finish(None, started, end, end_song, 0);
+    }
+    for (id, started) in mpe {
+        finish(Some(id), started, end, end_song, 0);
     }
     notes.sort_by_key(|note| note.on);
     notes
@@ -190,7 +208,14 @@ pub fn pair(messages: &[CapturedMidi]) -> Vec<Played> {
 
 /// Whether a message is a note-on or a note-off.
 fn is_note(m: &CapturedMidi) -> bool {
-    m.message.is_note_on() || m.message.is_note_off()
+    (m.message.is_note_on() || m.message.is_note_off()) && !is_expression(m)
+}
+
+/// Whether a message is one note's expression from an MPE port. Its bytes
+/// are those of the message that gave it, which may be a note-on, whose
+/// starting values it is.
+fn is_expression(m: &CapturedMidi) -> bool {
+    matches!(m.mpe, MpeRole::Expression { .. })
 }
 
 /// The song frame of a message: the one the engine stamped, or, before the
@@ -214,10 +239,46 @@ pub fn controllers(messages: &[CapturedMidi]) -> Vec<CapturedMidi> {
     };
     messages
         .iter()
-        .filter(|m| m.clock <= until && is_controller(&m.message))
+        .filter(|m| m.clock <= until && m.mpe == MpeRole::Plain && is_controller(&m.message))
         .map(|m| CapturedMidi {
             song: song(m),
             ..*m
+        })
+        .collect()
+}
+
+/// What an MPE port said about its notes up to the last note message, as
+/// [`Heard`] expressions at the positions a new clip placed by [`place`]
+/// with the same `timing` gives them (the MPE spec, R12).
+#[must_use]
+pub fn place_expressions(
+    messages: &[CapturedMidi],
+    timing: Timing,
+    ticks: impl Fn(Frames) -> Ticks,
+) -> Vec<Heard> {
+    let song = song_of(messages);
+    let Some(until) = messages.iter().rev().find(|m| is_note(m)).map(|m| m.clock) else {
+        return Vec::new();
+    };
+    messages
+        .iter()
+        .filter(|m| m.clock <= until)
+        .filter_map(|m| {
+            let MpeRole::Expression {
+                id,
+                expression,
+                value,
+                ..
+            } = m.mpe
+            else {
+                return None;
+            };
+            Some(Heard {
+                id,
+                expression,
+                value: f64::from(value),
+                at: position(timing, &ticks, m.clock, song(m)),
+            })
         })
         .collect()
 }
@@ -290,6 +351,8 @@ pub fn fit(onsets: &[f64], current: f64) -> Fit {
 pub struct Placed {
     /// The notes.
     pub notes: Vec<Note>,
+    /// The ID of each note's, in the same order, if an MPE port played it.
+    pub ids: Vec<Option<u32>>,
     /// Where the loop begins.
     pub loop_start: Ticks,
     /// Where it ends, which is also the clip's length.
@@ -393,6 +456,7 @@ pub fn place(
     let end = bars_up(last, bar).max(1);
     let span = bars_up(last - first, bar).max(1);
     Placed {
+        ids: placed.iter().map(|(.., n)| n.id).collect(),
         notes: placed
             .into_iter()
             .map(|(on, off, n)| {
@@ -568,6 +632,7 @@ mod tests {
     fn played(count: u64, gap: u64) -> Vec<Played> {
         (0..count)
             .map(|i| Played {
+                id: None,
                 key: 60,
                 velocity: 100,
                 release: 64,
@@ -649,6 +714,7 @@ mod tests {
         use bl_core::midi::MidiMessage;
         let track = TrackId(bl_core::id::Id::new(1).unwrap());
         let message = |clock, song: Option<i64>, message| CapturedMidi {
+            mpe: MpeRole::Plain,
             track,
             clock,
             song: song.map(Frames),
@@ -744,6 +810,7 @@ mod tests {
     fn notes_pair_and_a_held_note_ends_with_the_last_message() {
         use bl_core::midi::MidiMessage;
         let message = |clock, message| CapturedMidi {
+            mpe: MpeRole::Plain,
             track: TrackId(bl_core::id::Id::new(1).unwrap()),
             clock,
             song: None,
@@ -772,6 +839,7 @@ mod tests {
     fn a_held_note_ends_on_the_last_messages_song_frame() {
         use bl_core::midi::MidiMessage;
         let message = |clock, song, message| CapturedMidi {
+            mpe: MpeRole::Plain,
             track: TrackId(bl_core::id::Id::new(1).unwrap()),
             clock,
             song: Some(Frames(song)),
@@ -788,6 +856,7 @@ mod tests {
 
     fn heard(clock: u64, message: MidiMessage) -> CapturedMidi {
         CapturedMidi {
+            mpe: MpeRole::Plain,
             track: TrackId(bl_core::id::Id::new(1).unwrap()),
             clock,
             song: None,
@@ -883,6 +952,7 @@ mod tests {
         let track = TrackId(bl_core::id::Id::new(1).unwrap());
         let push = |buffer: &mut Buffer, clock, message| {
             buffer.push(CapturedMidi {
+                mpe: MpeRole::Plain,
                 track,
                 clock,
                 song: None,
@@ -912,6 +982,7 @@ mod tests {
         let track = TrackId(bl_core::id::Id::new(1).unwrap());
         let push = |buffer: &mut Buffer, clock, message| {
             buffer.push(CapturedMidi {
+                mpe: MpeRole::Plain,
                 track,
                 clock,
                 song: None,

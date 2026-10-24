@@ -103,6 +103,7 @@ pub mod midi_clips;
 pub mod midi_controllers;
 pub mod mixer;
 pub mod modbus;
+pub mod mpe;
 mod node;
 pub mod nodes;
 mod offline;

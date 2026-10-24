@@ -14,12 +14,13 @@ use std::collections::BTreeSet;
 use bl_core::time::Ticks;
 use bl_model::{
     AutomationTarget, Breakpoint, ChangeSet, Command, Document, Editor, Envelope, MixerParam,
-    TrackId,
+    ParamScale, TrackId,
 };
 use bl_shell_spec::arrangement::Lane;
 use bl_shell_spec::automation::{
-    self as ids, AutomationResult, EnvelopeClipboardState, EnvelopeSpanArgs, MoveBreakpointsArgs,
-    PasteEnvelopeArgs, SelectSegmentArgs,
+    self as ids, AutomationResult, EnvelopeClipboardState, EnvelopeSpanArgs, InsertShapeArgs,
+    MoveBreakpointsArgs, PasteEnvelopeArgs, SelectSegmentArgs, SkewArgs, SkewEdge, StretchTimeArgs,
+    StretchValuesArgs,
 };
 use bl_shell_spec::editing::Position;
 use serde::Serialize;
@@ -90,6 +91,16 @@ impl Travel {
             Self::Steps { steps } => bl_model::macro_step_position(steps, t),
             Self::Linear { min, max } => min + (max - min) * t,
         }
+    }
+}
+
+impl ParamScale for Travel {
+    fn position(&self, value: f64) -> f64 {
+        Self::position(*self, value)
+    }
+
+    fn value(&self, position: f64) -> f64 {
+        Self::value(*self, position)
     }
 }
 
@@ -252,6 +263,56 @@ fn lanes_of(
         ));
     }
     Ok(lanes)
+}
+
+/// Whether the time selection covers an automation lane.
+fn has_automation_lane(view: &ArrangementView) -> bool {
+    view.time_selection_lanes()
+        .iter()
+        .any(|lane| lane.target().is_some())
+}
+
+/// The automation lanes the selected tracks show.
+fn shown_lanes(view: &ArrangementView) -> Vec<(TrackId, AutomationTarget)> {
+    if !view.automation_mode() {
+        return Vec::new();
+    }
+    view.selected_tracks()
+        .iter()
+        .filter_map(|track| Some((*track, view.automation_lane(*track)?)))
+        .collect()
+}
+
+/// Edits the envelope of each lane with `edit`, which gets the parameter's
+/// travel and the value its control holds now, and writes the result as one
+/// command; a lane the edit leaves as it was writes nothing.
+fn edit_lanes(
+    editor: &mut Editor,
+    devices: &DeviceView,
+    lanes: &[(TrackId, AutomationTarget)],
+    edit: impl Fn(&mut Envelope, Travel, f64),
+) -> Result<(), EditFailure> {
+    for (track, target) in lanes {
+        let doc = editor.document();
+        let travel = travel(doc, devices, *target);
+        let rest = crate::modulation::control_value(doc, devices, *track, target)
+            .unwrap_or_else(|| travel.value(0.5));
+        let before = envelope_of(doc, *track, *target).cloned();
+        let mut envelope = before.clone().unwrap_or_default();
+        edit(&mut envelope, travel, rest);
+        if before.as_ref() == Some(&envelope) {
+            continue;
+        }
+        apply(
+            editor,
+            Command::SetAutomationEnvelope {
+                track: *track,
+                target: *target,
+                points: envelope.points().collect(),
+            },
+        )?;
+    }
+    Ok(())
 }
 
 /// The span a command acts on: the one given, or the time selection's.
@@ -450,6 +511,11 @@ pub fn label(id: &str) -> &'static str {
         ids::DELETE_RANGE => "Delete Automation",
         ids::PASTE => "Paste Automation",
         ids::DUPLICATE => "Duplicate Automation",
+        ids::INSERT_SHAPE => "Insert Shape",
+        ids::STRETCH_VALUES => "Stretch Automation Values",
+        ids::STRETCH_TIME => "Stretch Automation in Time",
+        ids::SKEW => "Skew Automation",
+        ids::SIMPLIFY => "Simplify Envelope",
         _ => "Automation",
     }
 }
@@ -463,7 +529,17 @@ pub fn can_run(id: &str, view: &ArrangementView, clipboard: Option<&EnvelopeClip
     match id {
         ids::MOVE_BREAKPOINTS => has_lane,
         ids::SELECT_SEGMENT => true,
-        ids::COPY | ids::CUT | ids::DELETE_RANGE | ids::DUPLICATE => has_lane,
+        ids::COPY
+        | ids::CUT
+        | ids::DELETE_RANGE
+        | ids::DUPLICATE
+        | ids::INSERT_SHAPE
+        | ids::STRETCH_VALUES
+        | ids::STRETCH_TIME
+        | ids::SKEW => has_lane,
+        // Spec: automation-editing R18. Simplify Envelope needs a time
+        // selection in an automation lane.
+        ids::SIMPLIFY => has_lane && view.time_selection().is_some(),
         ids::PASTE => clipboard.is_some_and(|c| !c.lanes.is_empty()) && has_lane,
         _ => false,
     }
@@ -569,6 +645,139 @@ pub fn run(
                 })
                 .collect();
             view.select_span_on(lanes, end, end + copied.length);
+            Ok(to_value(&result(&doc, editor, view, recorded)))
+        }
+        ids::INSERT_SHAPE => {
+            let InsertShapeArgs {
+                shape,
+                lanes,
+                start,
+                end,
+            } = parse(args)?;
+            let lanes = match lanes {
+                None if !has_automation_lane(view) => {
+                    let shown = shown_lanes(view);
+                    if shown.is_empty() {
+                        return Err(EditFailure::Unavailable(
+                            "no automation lane is selected".to_owned(),
+                        ));
+                    }
+                    shown
+                }
+                lanes => lanes_of(view, lanes)?,
+            };
+            let (start, end) = match (start, end, view.time_selection()) {
+                // Spec: automation-editing R11. With no time selection, one
+                // grid step from the insert marker.
+                (None, None, None) => {
+                    let at = view.insert_marker();
+                    (at, at + view.grid_step(&doc).ticks)
+                }
+                (start, end, _) => span(&doc, view, start, end)?,
+            };
+            let (_, recorded) = transaction(editor, label(id), |editor| {
+                edit_lanes(editor, devices, &lanes, |envelope, travel, rest| {
+                    envelope.insert_shape(shape, start, end, rest, &travel);
+                })
+            })?;
+            Ok(to_value(&result(&doc, editor, view, recorded)))
+        }
+        ids::STRETCH_VALUES => {
+            let StretchValuesArgs {
+                lanes,
+                start,
+                end,
+                bottom,
+                top,
+            } = parse(args)?;
+            if !(bottom.is_finite() && top.is_finite() && bottom <= top) {
+                return Err(EditFailure::InvalidArgs(
+                    "`bottom` must not be above `top`".to_owned(),
+                ));
+            }
+            let lanes = lanes_of(view, lanes)?;
+            let (start, end) = span(&doc, view, start, end)?;
+            let (_, recorded) = transaction(editor, label(id), |editor| {
+                edit_lanes(editor, devices, &lanes, |envelope, travel, _| {
+                    envelope.remap_span(start, end, (bottom, bottom), (top, top), &travel);
+                })
+            })?;
+            Ok(to_value(&result(&doc, editor, view, recorded)))
+        }
+        ids::SKEW => {
+            let SkewArgs {
+                edge,
+                at_start,
+                at_end,
+                lanes,
+                start,
+                end,
+            } = parse(args)?;
+            // The edge can't cross the other one, which stays level.
+            let crosses = match edge {
+                SkewEdge::Top => at_start < 0.0 || at_end < 0.0,
+                SkewEdge::Bottom => at_start > 1.0 || at_end > 1.0,
+            };
+            if !(at_start.is_finite() && at_end.is_finite()) || crosses {
+                return Err(EditFailure::InvalidArgs(
+                    "the edge can't pass the opposite one".to_owned(),
+                ));
+            }
+            let lanes = lanes_of(view, lanes)?;
+            let (start, end) = span(&doc, view, start, end)?;
+            let (bottom, top) = match edge {
+                SkewEdge::Top => ((0.0, 0.0), (at_start, at_end)),
+                SkewEdge::Bottom => ((at_start, at_end), (1.0, 1.0)),
+            };
+            let (_, recorded) = transaction(editor, label(id), |editor| {
+                edit_lanes(editor, devices, &lanes, |envelope, travel, _| {
+                    envelope.remap_span(start, end, bottom, top, &travel);
+                })
+            })?;
+            Ok(to_value(&result(&doc, editor, view, recorded)))
+        }
+        ids::STRETCH_TIME => {
+            let StretchTimeArgs {
+                lanes,
+                start,
+                end,
+                to_start,
+                to_end,
+                carry,
+            } = parse(args)?;
+            let lanes = lanes_of(view, lanes)?;
+            let (start, end) = span(&doc, view, start, end)?;
+            let signatures = &doc.settings().time_signatures;
+            let resolve = |at: Option<Position>, default: Ticks| match at {
+                Some(at) => at.resolve(signatures).map_err(EditFailure::InvalidArgs),
+                None => Ok(default),
+            };
+            let (to_start, to_end) = (resolve(to_start, start)?, resolve(to_end, end)?);
+            if to_end <= to_start || to_start < Ticks::ZERO {
+                return Err(EditFailure::InvalidArgs(
+                    "the new span must be after time zero and `to_end` after `to_start`".to_owned(),
+                ));
+            }
+            let (_, recorded) = transaction(editor, label(id), |editor| {
+                edit_lanes(editor, devices, &lanes, |envelope, _, _| {
+                    envelope.stretch_span(start, end, to_start, to_end, carry);
+                })
+            })?;
+            // Spec: automation-editing R16. The time selection follows.
+            if view.time_selection() == Some((start, end)) {
+                view.select_span_on(view.time_selection_lanes().to_vec(), to_start, to_end);
+            }
+            Ok(to_value(&result(&doc, editor, view, recorded)))
+        }
+        ids::SIMPLIFY => {
+            let EnvelopeSpanArgs { lanes, start, end } = parse(args)?;
+            let lanes = lanes_of(view, lanes)?;
+            let (start, end) = span(&doc, view, start, end)?;
+            let (_, recorded) = transaction(editor, label(id), |editor| {
+                edit_lanes(editor, devices, &lanes, |envelope, travel, _| {
+                    envelope.simplify_span(start, end, &travel);
+                })
+            })?;
             Ok(to_value(&result(&doc, editor, view, recorded)))
         }
         other => Err(EditFailure::InvalidArgs(format!(

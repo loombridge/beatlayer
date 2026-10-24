@@ -1,7 +1,7 @@
 # Macros: macro controls, Map mode, Randomize, and variations
 
-- **Status:** implemented (WP-5.4 built R1 to R20, WP-5.5 R25 to R33, and WP-5.4b R21 to R24)
-- **Work packages:** WP-5.4 (macros, Map mode, Randomize, names and colours, R1 to R20), WP-5.4b (the stepped and radio-button styles: R21 to R24), WP-5.5 (macro variations: R25 to R33). The rack itself, its chains, its title bar and its view column are WP-5.1's and WP-5.2's ([racks.md](racks.md)); MIDI and key mapping of a macro is milestone M7's; rack presets are WP-5.8's; modulation of a macro or of a mapped parameter is [modulation.md](modulation.md)'s
+- **Status:** partial (WP-5.4 built R1 to R20, WP-5.5 R25 to R33, and WP-5.4b R21 to R24; R34 to R36 come with WP-7.3b)
+- **Work packages:** WP-5.4 (macros, Map mode, Randomize, names and colours, R1 to R20), WP-5.4b (the stepped and radio-button styles: R21 to R24), WP-5.5 (macro variations: R25 to R33), WP-7.3b (MIDI and key mapping of macros, and the Mapping Browser's modes: R34 to R36). The rack itself, its chains, its title bar and its view column are WP-5.1's and WP-5.2's ([racks.md](racks.md)); the map modes themselves are [map modes](map-modes.md)'s; rack presets are WP-5.8's; modulation of a macro or of a mapped parameter is [modulation.md](modulation.md)'s
 - **Parity-matrix row:** Automation and modulation: Macros (16 per rack), variations, randomise, map mode with per-mapping ranges; [the improvements](../05-improvements.md), IMP-30 (stepped and radio-button macro styles)
 - **Checked against:** the Live 12 reference manual (online edition), read 17 October 2026; the Live 12 release notes, 12.4
 
@@ -26,6 +26,7 @@ This spec covers the macros in the document, in the engine and in the rack's mac
 | S7 | Beatlayer | [The UI parity reference](../ui-parity/README.md): [layout.md](../ui-parity/layout.md) L-DEV-008 (a rack's macro controls, chain list, zones and devices, shown by the view switches in its title bar) and L-OTH-007 (in a map mode mappable controls are tinted and the mappings list replaces the browser); [menus.md](../ui-parity/menus.md) M-EDIT-024 (Rename, Cmd+R, S-EDIT-008) and M-EDIT-025 (Edit Info Text); [layout.md](../ui-parity/layout.md) L-INFO-003 (the user's own info text) | Where the macros sit, how a map mode shows, and the Edit menu items that rename and annotate the selection |
 | S8 | Beatlayer | [The improvements](../05-improvements.md), rule G2 and IMP-30 (stepped and radio-button macro styles); rules 1 and 2 (add, don't move; a changed default is an option) | Every parameter can be automated and modulated; the macro styles are an addition that leaves Live's knob the default |
 | S9 | Beatlayer | [The architecture](../02-architecture.md), "Parameters, automation, and modulation", "Real-time rules" and decisions D16 and D17; [device-framework.md](device-framework.md) R1, R4, R6, R16 to R18; [automation.md](automation.md) R3, R5 and R17 | A parameter's value moves along its control's travel from 0 to 1; changes land on their frame and continuous ones glide over 20 ms; a control's change is one undo step named Change "<name>"; a hand move overrides an envelope; moves while Automation Arm records become touches; no allocation, lock or blocking call on the audio thread; every action is a registered command with a schema, a description and a permission class, and what an agent sets it can read back |
+| S10 | Beatlayer | [Map modes](map-modes.md) R2, R8, R11 and R12; [remote mapping](remote-mapping.md) R3, R5 and R11 | A rack's Map mode and the two map modes are one at a time and share the Mapping Browser's place; device parameters and their kinds are mappable to MIDI, and switches, buttons and radio buttons to keys; a mapped message runs its control's command and a refused one changes nothing |
 
 ## Rules
 
@@ -71,6 +72,12 @@ This spec covers the macros in the document, in the engine and in the rack's mac
 - **R32.** The variation commands are registered commands with schemas, descriptions and permission classes, run by ID with the rack and the variation named: `rack.store_variation`, `rack.launch_variation`, `rack.overwrite_variation`, `rack.rename_variation`, `rack.duplicate_variation` and `rack.set_macro_variation_excluded` are `edit`, `rack.delete_variation` is `destructive`, and `rack.show_variations` is `read` (view state). `rack.macros` reports each variation's name and values and each macro's variation exclusion, which is the readback the others name. (S9)
 - **R33.** Launching a variation reaches every mapped parameter on one frame, with nothing allocated, locked or blocked on the audio thread: it sends parameter changes and no new program. (S9)
 
+**MIDI and key mapping of macros (WP-7.3b)**
+
+- **R34.** In MIDI Map Mode and Key Map Mode a rack's shown macros are mappable controls like any device parameter: a Knob or Stepped macro is a continuous control, mapped to MIDI only; a Radio Buttons macro is a radio button, mapped to MIDI or to keys, a key or note stepping it to its next button. A mapped macro moves its parameters as R7 says, and a run of messages to it is one undo step named as R13 names a macro's move. (S2, S8, S10; the kinds by style are Beatlayer's own)
+- **R35.** A parameter a macro holds (R11) has no overlay in the map modes, and `remote.map` refuses it, naming the macro. A parameter that already has a MIDI or key mapping keeps it when a macro maps it, the mapping refused while the macro holds the parameter, and it acts again once the parameter is unmapped. (S10; Beatlayer's own)
+- **R36.** The Mapping Browser is one list in the browser's place in three modes, one at a time: in a rack's Map mode it is R9's mappings list of that rack's macro mappings; in MIDI Map Mode and Key Map Mode it lists the set's MIDI or key mappings, a macro's showing its rack's path and its macro's name ([map modes](map-modes.md) R8). Turning on one mode turns off the others. (S2, S10)
+
 ## Tests
 
 | Rule | Test | Kind |
@@ -108,3 +115,6 @@ This spec covers the macros in the document, in the engine and in the rack's mac
 | R31 | `crates/model/src/repr.rs`, `variations_save_with_the_set_and_load_back` | unit |
 | R32 | `crates/model/tests/command_registry.rs`, `every_command_runs_by_id`; `crates/cli/tests/agent_macros.rs`, `an_agent_stores_launches_and_reads_back_variations` | unit, agent test |
 | R33 | `rtsan/tests/macros.rs`, `a_variation_launch_runs_clean_under_the_sanitizer` | RealtimeSanitizer |
+| R34 | to be written in WP-7.3b | integration, UI script |
+| R35 | to be written in WP-7.3b | integration |
+| R36 | to be written in WP-7.3b | UI script |

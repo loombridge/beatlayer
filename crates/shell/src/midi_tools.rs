@@ -15,11 +15,11 @@ use std::collections::BTreeMap;
 use bl_core::time::Ticks;
 use bl_midi_tools::{
     Breakpoint, DIVISION_NAMES, MidiTool, ParamKind, ParamSpec, ParamValue, Registry, Rng,
-    ToolDescriptor, ToolError, ToolInput, ToolKind, ToolNote, ToolPressure, ToolScale,
+    ToolDescriptor, ToolError, ToolInput, ToolKind, ToolNote, ToolPoint, ToolScale,
 };
 use bl_model::{
-    Clip, ClipData, ClipId, Document, Editor, MidiData, Note, PressurePoint, RackKind, Receive,
-    TrackId,
+    Breakpoint as NotePoint, Clip, ClipData, ClipId, Document, Editor, MidiData, Note, RackKind,
+    Receive, TrackId,
 };
 use bl_project::midi_tools::{ChosenTools, MidiToolSettings, SavedTool};
 use bl_shell_spec::midi_tools::{
@@ -655,14 +655,18 @@ fn tool_note(note: &Note) -> ToolNote {
         chance: note.probability,
         velocity_deviation: note.velocity_deviation,
         deactivated: note.mute,
-        pressure: note
-            .pressure
-            .iter()
-            .map(|point| ToolPressure {
-                at: point.at,
-                value: point.value,
-            })
-            .collect(),
+        pitch: note.pitch.iter().map(tool_point).collect(),
+        slide: note.slide.iter().map(tool_point).collect(),
+        pressure: note.pressure.iter().map(tool_point).collect(),
+    }
+}
+
+/// A breakpoint as a tool sees it.
+fn tool_point(point: &NotePoint) -> ToolPoint {
+    ToolPoint {
+        at: point.at,
+        value: point.value,
+        bend: point.bend,
     }
 }
 
@@ -679,14 +683,18 @@ fn note_of(tool: &ToolNote) -> Note {
         mute: tool.deactivated,
         // A written note joins no probability group (note-editing R21).
         group: None,
-        pressure: tool
-            .pressure
-            .iter()
-            .map(|point| PressurePoint {
-                at: point.at,
-                value: point.value.min(127),
-            })
-            .collect(),
+        pitch: tool.pitch.iter().map(breakpoint).collect(),
+        slide: tool.slide.iter().map(breakpoint).collect(),
+        pressure: tool.pressure.iter().map(breakpoint).collect(),
+    }
+}
+
+/// A breakpoint a tool wrote, as the document holds it.
+fn breakpoint(point: &ToolPoint) -> NotePoint {
+    NotePoint {
+        at: point.at,
+        value: point.value,
+        bend: point.bend.clamp(-1.0, 1.0),
     }
 }
 

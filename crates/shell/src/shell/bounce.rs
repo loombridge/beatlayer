@@ -89,7 +89,7 @@ impl Shell {
                 self.clipboard
                     .as_ref()
                     .and_then(Clipboard::material)
-                    .is_some_and(|copied| !copied.tracks.is_empty())
+                    .is_some_and(|copied| !copied.lanes.is_empty())
                     && self.paste_destination(&args).is_ok()
             }
             _ => false,
@@ -607,6 +607,7 @@ impl Shell {
                 TargetArgs {
                     clips: None,
                     tracks,
+                    lanes: None,
                     start: args.start.clone(),
                     end: args.end.clone(),
                 },
@@ -717,7 +718,7 @@ impl Shell {
             .clipboard
             .as_ref()
             .and_then(Clipboard::material)
-            .filter(|copied| !copied.tracks.is_empty())
+            .filter(|copied| !copied.lanes.is_empty())
         else {
             return Err(unavailable(id, "there's nothing on the clipboard to paste"));
         };
@@ -731,11 +732,10 @@ impl Shell {
             }
         }
         let destination = self.paste_destination(&args)?;
-        let distances: Vec<usize> = copied
-            .tracks
-            .iter()
-            .map(|(distance, _)| *distance)
-            .collect();
+        // One destination per source track: a track's take lanes share its
+        // distance, and the lanes run top to bottom.
+        let mut distances: Vec<usize> = copied.lanes.iter().map(|lane| lane.distance).collect();
+        distances.dedup();
         let tracks = self.destination_tracks(&destination, &distances)?;
         let mut files = Vec::new();
         let mut rendered = Vec::new();
@@ -882,7 +882,7 @@ impl Shell {
                     );
                 }
             } else if !placements.is_empty() {
-                let ids = editing::place(editor, placements)
+                let ids = editing::place_on_main(editor, placements)
                     .map_err(|failure| edit_error(id, failure))?;
                 created = ids;
             }
@@ -1227,7 +1227,8 @@ fn switch_off(editor: &mut Editor, target: &Target) -> Result<(), String> {
             }
             Ok(())
         }
-        Target::Time { tracks, start, end } => {
+        Target::Time { places, start, end } => {
+            let tracks = &editing::main_tracks(places);
             for track in tracks {
                 // A group's own tracks are switched off with it (R24).
                 let mut lanes = vec![*track];
@@ -1345,9 +1346,9 @@ fn target_groups(doc: &Document, target: &Target) -> Vec<TrackId> {
                 }
             }
         }
-        Target::Time { tracks, .. } => {
-            for track in tracks {
-                push(*track, &mut groups);
+        Target::Time { places, .. } => {
+            for track in editing::main_tracks(places) {
+                push(track, &mut groups);
             }
         }
     }

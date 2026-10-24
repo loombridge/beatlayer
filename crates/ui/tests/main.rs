@@ -3,7 +3,6 @@
 //! 1,700 binaries and 170 GB a worktree. Add a test file here as `mod`;
 //! `cargo xtask check` fails on a file in tests/ that isn't listed.
 
-mod common;
 mod accessibility;
 mod agent_settings;
 mod arrangement;
@@ -15,11 +14,13 @@ mod auto_filter;
 mod automation;
 mod autosampler;
 mod browser;
+mod browser_filters;
 mod capture_midi;
 mod clip_edge_fades;
 mod clip_envelope;
 mod clip_files;
 mod clip_view;
+mod common;
 mod detail_views;
 mod device_panel;
 mod device_view;
@@ -55,13 +56,16 @@ mod realtime_dialog;
 mod recovery;
 mod sample_display;
 mod sample_editor;
+mod save_history;
 mod scales;
 mod scene_view;
 mod search_field;
+mod second_window;
 mod session_view;
 mod settings_window;
 mod slice_to_midi;
 mod stems_dialog;
+mod take_lanes;
 mod theme_page;
 mod track_menu;
 mod transport;

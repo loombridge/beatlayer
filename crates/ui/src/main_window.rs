@@ -11,8 +11,8 @@ use bl_model::{CountIn, MetronomeRhythm, MetronomeSound};
 use bl_shell::midi_io_commands as midi_ids;
 use bl_shell::settings::AutomationRecordMode;
 use bl_shell::{
-    Area, Effect, GesturePhase, Invocation, MainView, Shell, commands as ids, commands::DetailView,
-    transport_commands,
+    Area, Effect, GesturePhase, Invocation, MainView, Shell, WindowKind, commands as ids,
+    commands::DetailView, transport_commands,
 };
 use egui::accesskit::Role;
 use egui::{
@@ -103,6 +103,10 @@ pub struct InfoViewContent {
 /// The main window's UI state between frames.
 #[derive(Debug)]
 pub struct MainWindowUi {
+    /// The window this draws: the main window, or the second window
+    /// (WP-6.29), which has a Control Bar, a main view, a detail area and a
+    /// Status Bar of its own.
+    window: WindowKind,
     /// A focus move asked for by a command, done in the next frame.
     focus_request: Option<FocusRequest>,
     /// The Control Bar control focused last, which focus returns to
@@ -110,6 +114,9 @@ pub struct MainWindowUi {
     last_control: Element,
     /// The element under the pointer, for the Info View.
     hovered: Option<Element>,
+    /// The element under the pointer in the other window, which the main
+    /// window's Info View describes too (info-view R8).
+    other_hovered: Option<Element>,
     /// A move to the next or previous control, or to a neighbour, done at
     /// the start of the next frame from the order the last frame drew
     /// (WP-1.14; the accessibility spec, R3 and R4).
@@ -161,6 +168,9 @@ pub struct MainWindowUi {
     assistant: crate::assistant_panel::AssistantPanelUi,
     /// The Undo History panel (WP-6.28): the row the keyboard has moved to.
     undo_history: crate::undo_history_panel::UndoHistoryPanelUi,
+    /// The Save History panel (WP-6.39), which shares the Undo History's
+    /// place.
+    save_history: crate::save_history_panel::SaveHistoryPanelUi,
     /// The detail area's top edge (detail-views R10).
     detail_edge: crate::detail_area::DetailEdge,
     /// The File Manager's switches (WP-6.63).
@@ -221,10 +231,22 @@ impl MainWindowUi {
     /// A fresh main window.
     #[must_use]
     pub fn new() -> Self {
+        Self::of(WindowKind::Main)
+    }
+
+    /// A fresh second window.
+    #[must_use]
+    pub fn second() -> Self {
+        Self::of(WindowKind::Second)
+    }
+
+    fn of(window: WindowKind) -> Self {
         Self {
+            window,
             focus_request: None,
             last_control: Element::BrowserToggle,
             hovered: None,
+            other_hovered: None,
             focus_move: None,
             order: crate::focus::Order::default(),
             pending: None,
@@ -247,8 +269,28 @@ impl MainWindowUi {
             chain_names: Vec::new(),
             assistant: crate::assistant_panel::AssistantPanelUi::default(),
             undo_history: crate::undo_history_panel::UndoHistoryPanelUi::default(),
+            save_history: crate::save_history_panel::SaveHistoryPanelUi::default(),
             detail_edge: crate::detail_area::DetailEdge::default(),
         }
+    }
+
+    /// The window this draws.
+    #[must_use]
+    pub fn window(&self) -> WindowKind {
+        self.window
+    }
+
+    /// The element under the pointer in this window's last frame.
+    #[must_use]
+    pub fn hovered(&self) -> Option<Element> {
+        self.hovered
+    }
+
+    /// Tells the main window which element is under the pointer in the
+    /// other window, for its Info View (info-view R8). Whether that changed
+    /// what the Info View shows, so the host can draw it again.
+    pub fn set_other_hovered(&mut self, hovered: Option<Element>) -> bool {
+        std::mem::replace(&mut self.other_hovered, hovered) != hovered
     }
 
     /// Where the last frame put the panes, in points from the window's
@@ -341,10 +383,12 @@ impl MainWindowUi {
     /// Carries out an effect that moves the keyboard focus in this window.
     pub fn apply_effect(&mut self, ctx: &Context, effect: &Effect) {
         match effect {
-            Effect::FocusArea(Area::ControlBar) => {
+            Effect::FocusArea(Area::ControlBar) | Effect::FocusSecondArea(Area::ControlBar) => {
                 self.focus_request = Some(FocusRequest::Element(self.last_control));
             }
-            Effect::FocusArea(Area::MainView) => self.focus_request = Some(FocusRequest::MainView),
+            Effect::FocusArea(Area::MainView) | Effect::FocusSecondArea(Area::MainView) => {
+                self.focus_request = Some(FocusRequest::MainView);
+            }
             Effect::FocusArea(Area::Assistant) => self.assistant.focus_prompt(),
             Effect::RenameDevice(device) => {
                 // Spec: device-chains R10. Rename types the name in the
@@ -368,6 +412,11 @@ impl MainWindowUi {
                 self.devices.start_variation_rename(*rack, *index);
             }
             Effect::RenameTrack(track) => crate::track_menu::start_rename(ctx, *track),
+            Effect::RenameTakeLane(lane) => {
+                // Spec: comping R28. Rename types the name in the take
+                // lane's header.
+                crate::arrangement::take_lanes::start_rename(ctx, *lane);
+            }
             Effect::RenameLocator(locator) => {
                 // Spec: time-editing R8. Rename types the name in the
                 // scrub area.
@@ -402,6 +451,8 @@ impl MainWindowUi {
     ) -> Vec<UiEvent> {
         let ctx = root.ctx().clone();
         let ctx = &ctx;
+        crate::window::set(ctx, self.window);
+        let second = self.window == WindowKind::Second;
         let mut events = Vec::new();
         // Spec: automation-editing R23. A value being typed goes with the
         // envelope that has the keyboard, so it can't hold the keys after
@@ -430,7 +481,7 @@ impl MainWindowUi {
         }
         self.resolve_pending(ctx, &mut events);
         if title_bar {
-            draw_title_bar(root, theme, &shell.set_name());
+            draw_title_bar(root, theme, &window_title(shell, self.window));
         }
         if let Some(bar) = menu_bar {
             egui::Panel::top("menu-bar")
@@ -458,17 +509,23 @@ impl MainWindowUi {
             let assistant = shell
                 .assistant_docked_width()
                 .map(|width| self.assistant.drag_width().unwrap_or(width));
-            let undo_history = shell
-                .undo_history_open()
+            let undo_history = (shell.undo_history_open() || shell.save_history_open())
                 .then_some(crate::layout::UNDO_HISTORY_WIDTH);
-            let layout = ShellLayout::compute_with_detail(
-                area.size(),
-                shell.browser_visible(),
-                shell.info_view_visible(),
-                assistant,
-                undo_history,
-                crate::layout::DetailViews::of(shell.detail()),
-            )
+            let detail = crate::layout::DetailViews::of(shell.detail_of(self.window));
+            let layout = if second {
+                // Spec: second-window R2, R12, R17. No Info View, assistant
+                // or Undo History; the Control Bar is cut off.
+                ShellLayout::compute_second(area.size(), shell.browser_of(self.window), detail)
+            } else {
+                ShellLayout::compute_with_detail(
+                    area.size(),
+                    shell.browser_of(self.window),
+                    shell.info_view_of(self.window),
+                    assistant,
+                    undo_history,
+                    detail.with_full_height_browser(shell.browser_view().full_height()),
+                )
+            }
             .translate(area.min.to_vec2());
             self.track_area_clicks(ctx, &layout, &mut events);
             // Where the Tag Editor opens, beside the content pane.
@@ -519,8 +576,10 @@ impl MainWindowUi {
             // under the pointer are known by the time it reads them.
             self.status_bar(ui, shell, theme, &layout, &mut events);
             self.info_view(ui, theme, shell, layout.info_view);
-            let scene = shell.scene_view_scene();
-            if shell.file_manager_open() {
+            let scene = shell.scene_view_scene_in(self.window);
+            // The File Manager and the list of the set's plug-ins show in the
+            // main window only.
+            if !second && shell.file_manager_open() {
                 // Spec: file-management R10. The File Manager takes the
                 // detail area's place, in front of the Clip or Device View,
                 // and the list of the set's plug-ins gives way to it.
@@ -532,7 +591,7 @@ impl MainWindowUi {
                     &mut self.file_manager,
                     &mut events,
                 );
-            } else if shell.plugin_list().visible() {
+            } else if !second && shell.plugin_list().visible() {
                 // Spec: plugin-list R1. The list of the set's plug-ins takes
                 // the detail area's place, where the File Manager opens
                 // (L-OTH-002), in front of the Clip or Device View.
@@ -582,49 +641,67 @@ impl MainWindowUi {
                 self.assistant
                     .show(ui, shell, theme, pane, true, &mut events);
             }
-            if let Some(pane) = layout.undo_history {
-                self.undo_history.show(ui, shell, theme, pane, &mut events);
-            } else {
-                self.undo_history.hide(&mut events);
+            match layout.undo_history {
+                Some(pane) if shell.save_history_open() => {
+                    self.undo_history.hide(&mut events);
+                    self.save_history.show(ui, shell, theme, pane, &mut events);
+                }
+                Some(pane) => {
+                    self.save_history.hide(&mut events);
+                    self.undo_history.show(ui, shell, theme, pane, &mut events);
+                }
+                None if !second => {
+                    self.undo_history.hide(&mut events);
+                    self.save_history.hide(&mut events);
+                }
+                None => {}
             }
-            outline_focused_area(ui, shell, theme, &layout);
+            outline_focused_area(ui, shell, theme, &layout, self.window);
             // Spec: command-palette R2. The search field sits above every
             // pane, at the main view's top.
-            self.search_field
-                .show(ui, shell, theme, layout.main_view, &mut events);
+            // The field is one for the set; the window in front draws it.
+            if !shell.search().open || shell.acting_window() == self.window {
+                self.search_field
+                    .show(ui, shell, theme, layout.main_view, &mut events);
+            }
             if let Some(track) = self.search_field.revealed(shell) {
                 self.mixer.reveal(shell.front_mixer(), track);
             }
             self.drawn = Some(layout);
         });
-        // Spec: stem-separation R1. Separate Stems' dialog sits over the
-        // window while it's open.
-        crate::stems_dialog::show(ctx, shell, theme, &mut events);
-        // Spec: external-devices R23. The real-time render's dialog sits
-        // over the window while a render that runs through external
-        // hardware is under way.
-        crate::realtime_dialog::show(ctx, shell, theme, &mut events);
-        // Spec: export R28, R41. The Export Audio/Video dialog sits over the
-        // window while it's open, and the progress window while an export
-        // runs.
-        crate::export_dialog::show(ctx, shell, theme, &mut events);
-        // Spec: multisampler R64. The autosampler's dialog sits over the
-        // window while it's open.
-        crate::autosampler::show(ctx, shell, theme, &mut events);
-        crate::slice_dialog::show(ctx, shell, theme, &mut events);
-        // Spec: crash-recovery R22. The recovery prompt sits over the
-        // window while there are sets a crash left to offer.
-        crate::recovery_dialog::show(ctx, shell, theme, &mut events);
+        // The dialogs sit over the main window.
+        if !second {
+            // Spec: stem-separation R1. Separate Stems' dialog sits over the
+            // window while it's open.
+            crate::stems_dialog::show(ctx, shell, theme, &mut events);
+            // Spec: external-devices R23. The real-time render's dialog sits
+            // over the window while a render that runs through external
+            // hardware is under way.
+            crate::realtime_dialog::show(ctx, shell, theme, &mut events);
+            // Spec: export R28, R41. The Export Audio/Video dialog sits over
+            // the window while it's open, and the progress window while an
+            // export runs.
+            crate::export_dialog::show(ctx, shell, theme, &mut events);
+            // Spec: multisampler R64. The autosampler's dialog sits over the
+            // window while it's open.
+            crate::autosampler::show(ctx, shell, theme, &mut events);
+            crate::slice_dialog::show(ctx, shell, theme, &mut events);
+            // Spec: crash-recovery R22. The recovery prompt sits over the
+            // window while there are sets a crash left to offer.
+            crate::recovery_dialog::show(ctx, shell, theme, &mut events);
+        }
         self.mixer_typing = crate::mixer::is_typing(ctx)
             || crate::track_menu::is_renaming(ctx)
+            || crate::arrangement::take_lanes::is_renaming(ctx)
             || crate::envelope_keys::is_typing(ctx);
         // An open menu, or a dialog, keeps the keys.
         self.menu_open = egui::Popup::is_any_open(ctx)
-            || shell.stems_dialog().is_some()
-            || shell.export_dialog().is_some()
-            || shell.export_running()
-            || shell.autosampler_dialog().is_some()
-            || shell.slice_dialog().is_some();
+            || (!second
+                && (shell.stems_dialog().is_some()
+                    || shell.export_dialog().is_some()
+                    || shell.export_running()
+                    || shell.autosampler_dialog().is_some()
+                    || shell.slice_dialog().is_some()));
         // The track whose control has the focus, for the neighbour items'
         // state (the accessibility spec, R4).
         let order = crate::focus::drawn(ctx);
@@ -633,7 +710,8 @@ impl MainWindowUi {
             .and_then(|id| order.find(id))
             .and_then(|entry| entry.control)
             .map(|control| control.track);
-        if track != shell.focused_track() {
+        // Only the window in front knows which control has the focus.
+        if track != shell.focused_track() && shell.acting_window() == self.window {
             events.push(UiEvent::FocusTrack(track));
         }
         // Spec: automation-editing R20. The envelope keys are the view's,
@@ -647,7 +725,7 @@ impl MainWindowUi {
         let control = ctx.memory(egui::Memory::focused).is_some_and(|id| {
             id != main_view_id() && id != crate::arrangement::lanes_id() && Some(id) != editor
         });
-        if control != shell.envelope_control_focused() {
+        if control != shell.envelope_control_focused() && shell.acting_window() == self.window {
             events.push(UiEvent::FocusControl(control));
         }
         let metering = shell.meters().iter().any(|m| {
@@ -662,6 +740,21 @@ impl MainWindowUi {
         } else if shell.audio().engine_on() {
             // The CPU meter updates a few times a second.
             ctx.request_repaint_after(Duration::from_millis(500));
+        }
+        if second {
+            // The commands this window's clicks run act on this window,
+            // whichever has the focus when the host runs them.
+            for event in &mut events {
+                if let UiEvent::Invoke(invocation) = event
+                    && ids::acts_on_a_window(&invocation.id)
+                    && invocation.args.get("window").is_none()
+                {
+                    if !invocation.args.is_object() {
+                        invocation.args = json!({});
+                    }
+                    invocation.args["window"] = json!("second");
+                }
+            }
         }
         events
     }
@@ -696,7 +789,7 @@ impl MainWindowUi {
             .iter()
             .find(|t| tracks.contains(t))
             .copied();
-        let place = match shell.main_view() {
+        let place = match shell.main_view_of(self.window) {
             MainView::Arrangement => crate::mixer::Place::Header,
             MainView::Session => crate::mixer::Place::Mixer(bl_shell::mixer_view::MixerOf::Session),
         };
@@ -732,8 +825,8 @@ impl MainWindowUi {
             return;
         }
         let in_view = focused == Some(main_view_id())
-            || (focused.is_none() && shell.focused_area() == Area::MainView);
-        if in_view && shell.main_view() == MainView::Session {
+            || (focused.is_none() && shell.focused_area_of(self.window) == Area::MainView);
+        if in_view && shell.main_view_of(self.window) == MainView::Session {
             // From the Session View, Tab goes into the selected track's strip
             // (the first track's), after its title bar.
             let Some(track) = selected.or(tracks.first().copied()) else {
@@ -760,7 +853,7 @@ impl MainWindowUi {
         // header in it (the first track's with none selected).
         if let Some(id) = self.order.tab(
             focused.filter(|id| *id != main_view_id()),
-            shell.focused_area(),
+            shell.focused_area_of(self.window),
             selected.or(tracks.first().copied()),
             step.backwards,
             shell.wrap_navigation(),
@@ -810,7 +903,7 @@ impl MainWindowUi {
     /// the view itself has the keyboard: the selected clip, or the selected
     /// track's title (the accessibility spec, R2).
     fn active_descendant(&self, ctx: &Context, shell: &Shell) -> Option<Id> {
-        if shell.main_view() != MainView::Arrangement {
+        if shell.main_view_of(self.window) != MainView::Arrangement {
             return None;
         }
         let view = shell.arrangement();
@@ -889,10 +982,14 @@ impl MainWindowUi {
             if placement.strip != strip {
                 continue;
             }
+            // The assistant's toggle stays the main window's alone (D24).
+            if self.window == WindowKind::Second && *el == Element::AssistantToggle {
+                continue;
+            }
             let mut look = self
                 .transport
                 .look(shell, *el)
-                .unwrap_or_else(|| look(*el, shell));
+                .unwrap_or_else(|| look(*el, shell, self.window));
             if *el == Element::Message
                 && let Some(readout) = crate::mixer::take_readout(ui.ctx())
             {
@@ -928,8 +1025,8 @@ impl MainWindowUi {
             }
             if response.clicked() {
                 let option = ui.input(|input| input.modifiers.alt);
-                let invocations = detail_click(*el, shell, option)
-                    .unwrap_or_else(|| click(*el, shell).into_iter().collect());
+                let invocations = detail_click(*el, shell, self.window, option)
+                    .unwrap_or_else(|| click(*el, shell, self.window).into_iter().collect());
                 events.extend(invocations.into_iter().map(UiEvent::Invoke));
             }
             if *el == Element::Metronome {
@@ -956,6 +1053,9 @@ impl MainWindowUi {
             }
             if *el == Element::MixerMenu {
                 self.mixer_menu(&response, shell, events);
+            }
+            if *el == Element::BrowserMenu {
+                self.browser_menu(&response, shell, events);
             }
             if *el == Element::RootNote {
                 // Spec: scales R9. The Root Note chooser lists the twelve
@@ -1146,6 +1246,35 @@ impl MainWindowUi {
         });
     }
 
+    /// The Browser Config Menu (L-CTRL-001): Full-Height Browser, Groove
+    /// Pool and Tuning, as the View menu's rows give them (spec: browser
+    /// R26).
+    fn browser_menu(
+        &mut self,
+        response: &egui::Response,
+        shell: &Shell,
+        events: &mut Vec<UiEvent>,
+    ) {
+        let keymap =
+            crate::keymap::keymap_in_use(&mut self.keymap, &mut self.keymap_revision, shell);
+        let platform = crate::keymap::Platform::current();
+        let menus = bl_shell::menus::menu_bar(bl_shell::menus::MenuPlatform::current());
+        let rows: Vec<&bl_shell::menus::MenuItem> = ["M-VIEW-024", "M-VIEW-022", "M-VIEW-023"]
+            .iter()
+            .filter_map(|row| {
+                menus
+                    .iter()
+                    .flat_map(bl_shell::menus::Menu::walk)
+                    .find(|item| item.row == *row)
+            })
+            .collect();
+        egui::Popup::menu(response).show(|ui| {
+            for item in rows {
+                let _ = crate::menus::item(ui, item, shell, keymap, platform, events);
+            }
+        });
+    }
+
     fn control_bar(
         &mut self,
         ui: &mut Ui,
@@ -1219,7 +1348,7 @@ impl MainWindowUi {
         rect: Rect,
         events: &mut Vec<UiEvent>,
     ) {
-        let (name, note) = match shell.main_view() {
+        let (name, note) = match shell.main_view_of(self.window) {
             MainView::Arrangement => (
                 "Arrangement View",
                 "Tracks and their clips along the song's timeline, with the rulers above and \
@@ -1240,7 +1369,7 @@ impl MainWindowUi {
             response.request_focus();
             self.focus_request = None;
         }
-        match shell.main_view() {
+        match shell.main_view_of(self.window) {
             MainView::Arrangement => {
                 self.arrangement.show(ui, shell, theme, rect, events);
                 if let Some(mixer) = self.arrangement.mixer_rect() {
@@ -1289,7 +1418,7 @@ impl MainWindowUi {
         // description (the MIDI Tools spec, R7).
         self.info = crate::search_field::info(shell)
             .or_else(|| crate::tool_panel::take_info(ui.ctx()))
-            .unwrap_or_else(|| info_content(self.hovered, shell, keymap));
+            .unwrap_or_else(|| info_content(self.hovered.or(self.other_hovered), shell, keymap));
         if self.info.title.is_empty() {
             return;
         }
@@ -1421,21 +1550,43 @@ fn track_order(shell: &Shell) -> Vec<bl_model::TrackId> {
     shell.neighbor_order()
 }
 
+/// The title a window shows, and reaches assistive technology as its name:
+/// the set's, and "<set name>, Second Window" for the second window
+/// (second-window R16).
+#[must_use]
+pub fn window_title(shell: &Shell, window: WindowKind) -> String {
+    if window == WindowKind::Second {
+        format!("{}, Second Window", shell.set_name())
+    } else {
+        shell.set_name()
+    }
+}
+
 /// Draws a border round the area with the keyboard focus while Outline View
 /// in Focus is on (the accessibility spec, R7; I-FOCUS-009). It's off by
 /// default, as Live's is, and then nothing shows where the focus is.
-fn outline_focused_area(ui: &Ui, shell: &Shell, theme: &Theme, layout: &ShellLayout) {
-    if !shell.outline_view_in_focus() || shell.focused_window() != bl_shell::WindowKind::Main {
+fn outline_focused_area(
+    ui: &Ui,
+    shell: &Shell,
+    theme: &Theme,
+    layout: &ShellLayout,
+    window: WindowKind,
+) {
+    // Only the window in front outlines its focused area (second-window
+    // R16).
+    if !shell.outline_view_in_focus() || shell.focused_window() != window {
         return;
     }
-    let rect = match shell.focused_area() {
+    let rect = match shell.focused_area_of(window) {
         Area::ControlBar => Some(layout.control_bar),
         Area::Browser => layout.browser,
         Area::MainView => Some(layout.main_view),
         // Spec: detail-views R15. With both views showing, the outline goes
         // round the one that has the focus.
         Area::Detail => match (layout.clip_view, layout.device_view) {
-            (Some(clip), Some(_)) if shell.detail().focus() == DetailView::Clip => Some(clip),
+            (Some(clip), Some(_)) if shell.detail_of(window).focus() == DetailView::Clip => {
+                Some(clip)
+            }
             (Some(_), Some(device)) => Some(device),
             _ => Some(layout.detail),
         },
@@ -1517,7 +1668,7 @@ fn region(ui: &mut Ui, salt: &str, rect: Rect, role: Role, name: &str) -> Id {
 }
 
 /// What an element shows, from the shell's state.
-fn look(element: Element, shell: &Shell) -> Look {
+fn look(element: Element, shell: &Shell, window: WindowKind) -> Look {
     let text = |t: &str| Look {
         text: Some(t.to_owned()),
         ..Look::default()
@@ -1533,9 +1684,9 @@ fn look(element: Element, shell: &Shell) -> Look {
                 .map_or_else(Look::default, |t| text(t.name()))
         }
         Element::BrowserToggle => Look {
-            on: shell.browser_visible(),
+            on: shell.browser_of(window),
             value: Some(
-                if shell.browser_visible() {
+                if shell.browser_of(window) {
                     "shown"
                 } else {
                     "hidden"
@@ -1569,9 +1720,9 @@ fn look(element: Element, shell: &Shell) -> Look {
         // of the clip it shows.
         Element::ClipViewToggle | Element::DeviceViewToggle => {
             let on = if element == Element::ClipViewToggle {
-                shell.detail().clip_shown()
+                shell.detail_of(window).clip_shown()
             } else {
-                shell.detail().device_shown()
+                shell.detail_of(window).device_shown()
             };
             Look {
                 on,
@@ -1705,7 +1856,7 @@ fn look(element: Element, shell: &Shell) -> Look {
             }
         }
         Element::MixerToggle => {
-            let shown = shell.mixer_view().of(shell.front_mixer()).shown;
+            let shown = shell.mixer_view().of(shell.mixer_of(window)).shown;
             Look {
                 on: shown,
                 value: Some(if shown { "shown" } else { "hidden" }.to_owned()),
@@ -1713,11 +1864,11 @@ fn look(element: Element, shell: &Shell) -> Look {
             }
         }
         Element::SessionView => Look {
-            on: shell.main_view() == MainView::Session,
+            on: shell.main_view_of(window) == MainView::Session,
             ..Look::default()
         },
         Element::ArrangementView => Look {
-            on: shell.main_view() == MainView::Arrangement,
+            on: shell.main_view_of(window) == MainView::Arrangement,
             ..Look::default()
         },
         Element::MidiIndicators => {
@@ -1813,17 +1964,19 @@ fn command_of(element: Element) -> Option<&'static str> {
 /// `view`'s selector runs, except that with both views showing neither is
 /// hidden.
 pub(crate) fn open_view(shell: &Shell, view: DetailView) -> Vec<Invocation> {
-    if shell.detail().clip_shown() && shell.detail().device_shown() {
+    let window = shell.acting_window();
+    let detail = shell.detail_of(window);
+    if detail.clip_shown() && detail.device_shown() {
         Vec::new()
     } else {
-        show_only(shell, view)
+        show_only(shell, window, view)
     }
 }
 
 /// What a click on a view's selector runs (detail-views R3): the commands
 /// that show `view` and hide the other.
-fn show_only(shell: &Shell, view: DetailView) -> Vec<Invocation> {
-    let detail = shell.detail();
+fn show_only(shell: &Shell, window: WindowKind, view: DetailView) -> Vec<Invocation> {
+    let detail = shell.detail_of(window);
     let command = |toggle| Invocation::new(toggle, json!({}));
     let (own, own_shown, other, other_shown) = match view {
         DetailView::Clip => (
@@ -1853,7 +2006,12 @@ fn show_only(shell: &Shell, view: DetailView) -> Vec<Invocation> {
 /// `None` for another element (detail-views R1 to R3): a toggle shows or
 /// hides its view, and Option-click on either shows both; a selector shows
 /// its view and hides the other.
-fn detail_click(element: Element, shell: &Shell, option: bool) -> Option<Vec<Invocation>> {
+fn detail_click(
+    element: Element,
+    shell: &Shell,
+    window: WindowKind,
+    option: bool,
+) -> Option<Vec<Invocation>> {
     let toggle = |id| vec![Invocation::new(id, json!({}))];
     Some(match element {
         Element::ClipViewToggle | Element::DeviceViewToggle if option => {
@@ -1861,14 +2019,14 @@ fn detail_click(element: Element, shell: &Shell, option: bool) -> Option<Vec<Inv
         }
         Element::ClipViewToggle => toggle(ids::VIEW_TOGGLE_CLIP_VIEW),
         Element::DeviceViewToggle => toggle(ids::VIEW_TOGGLE_DEVICE_VIEW),
-        Element::ClipSelector => show_only(shell, DetailView::Clip),
-        Element::DeviceSelector => show_only(shell, DetailView::Device),
+        Element::ClipSelector => show_only(shell, window, DetailView::Clip),
+        Element::DeviceSelector => show_only(shell, window, DetailView::Device),
         _ => return None,
     })
 }
 
 /// What clicking a live element runs.
-fn click(element: Element, shell: &Shell) -> Option<Invocation> {
+fn click(element: Element, shell: &Shell, window: WindowKind) -> Option<Invocation> {
     match element {
         Element::BrowserToggle => Some(Invocation::new(ids::VIEW_TOGGLE_BROWSER, json!({}))),
         Element::InfoToggle => Some(Invocation::new(ids::VIEW_TOGGLE_INFO_VIEW, json!({}))),
@@ -1894,11 +2052,10 @@ fn click(element: Element, shell: &Shell) -> Option<Invocation> {
             ids::APP_SETTINGS,
             json!({ "page": "audio" }),
         )),
-        Element::SessionView if shell.main_view() != MainView::Session => Some(Invocation::new(
-            ids::VIEW_TOGGLE_SESSION_ARRANGEMENT,
-            json!({}),
-        )),
-        Element::ArrangementView if shell.main_view() != MainView::Arrangement => Some(
+        Element::SessionView if shell.main_view_of(window) != MainView::Session => Some(
+            Invocation::new(ids::VIEW_TOGGLE_SESSION_ARRANGEMENT, json!({})),
+        ),
+        Element::ArrangementView if shell.main_view_of(window) != MainView::Arrangement => Some(
             Invocation::new(ids::VIEW_TOGGLE_SESSION_ARRANGEMENT, json!({})),
         ),
         // Spec: file-management R12. A click on the missing-files message

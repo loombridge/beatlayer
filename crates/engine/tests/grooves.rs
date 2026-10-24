@@ -473,10 +473,16 @@ fn a_grooves_clip_envelopes_stay_where_they_are_and_a_notes_expressions_move_wit
     // timeline whatever the groove does; a note's pressure points are
     // measured from where the note plays.
     let mut with = Note::new(60, Ticks(STEP + STEP / 16), Ticks(STEP), 100);
-    with.pressure = vec![bl_model::PressurePoint {
-        at: Ticks(STEP / 8),
-        value: 90,
-    }];
+    let point = |at: i64, value: f64| bl_model::Breakpoint {
+        at: Ticks(at),
+        value,
+        bend: 0.0,
+    };
+    with.pressure = vec![
+        point(0, 10.0),
+        point(STEP / 8 - 1, 10.0),
+        point(STEP / 8, 90.0),
+    ];
     let build = |grooved: bool| {
         let mut song = grooved_song(vec![with.clone()], grooved);
         for (at, value) in [(Ticks(0), 10.0), (Ticks(STEP * 2), 100.0)] {
@@ -513,7 +519,7 @@ fn a_grooves_clip_envelopes_stay_where_they_are_and_a_notes_expressions_move_wit
     let pressure = |events: &[(i64, String)]| {
         events
             .iter()
-            .find(|(_, what)| what.starts_with("pressure"))
+            .rfind(|(_, what)| what.starts_with("pressure"))
             .map(|(frame, _)| *frame)
     };
     let moved = frame_of(STEP + STEP / 4 + STEP / 8) - frame_of(STEP + STEP / 16 + STEP / 8);

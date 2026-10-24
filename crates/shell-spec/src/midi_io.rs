@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 /// `midi.ports`: list the MIDI ports and the computer keyboard's state.
 pub const PORTS: &str = "midi.ports";
-/// `midi.set_port`: change a port's Track, Sync, and Remote switches.
+/// `midi.set_port`: change a port's Track, Sync, Remote and MPE switches.
 pub const SET_PORT: &str = "midi.set_port";
 /// `midi.toggle_computer_keyboard`: switch the computer MIDI keyboard.
 pub const TOGGLE_COMPUTER_KEYBOARD: &str = "midi.toggle_computer_keyboard";
@@ -79,6 +79,10 @@ pub struct PortInfo {
     /// Remote: an input controls Beatlayer through MIDI mapping; an output
     /// sends feedback. Kept now, acted on when MIDI mapping is built.
     pub remote: bool,
+    /// MPE: an input's messages reach tracks as MPE, each note on a channel of
+    /// its own; an output has no MPE switch, and reads false.
+    #[serde(default)]
+    pub mpe: bool,
     /// Whether the MIDI system offers the port now.
     pub present: bool,
     /// Whether it is open: any of its switches is on.
@@ -132,6 +136,9 @@ pub struct SetPortArgs {
     /// Remote on or off. Left out, it stays as it is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remote: Option<bool>,
+    /// MPE on or off, for an input. Left out, it stays as it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mpe: Option<bool>,
 }
 
 /// Arguments of `midi.toggle_computer_keyboard`.
@@ -187,7 +194,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
         CommandSpec::new(PORTS, "MIDI Ports")
             .description(
                 "Lists every MIDI input and output port the computer offers, each with its \
-                 Track, Sync, and Remote switches as the Settings window's Tempo & MIDI page \
+                 Track, Sync, Remote and MPE switches as the Settings window's Tempo & MIDI page \
                  shows them, and the computer MIDI keyboard's state. Changes nothing.",
             )
             .permission(Permission::Read)
@@ -198,11 +205,14 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     registry.register(
         CommandSpec::new(SET_PORT, "Set MIDI Port")
             .description(
-                "Changes a MIDI port's Track, Sync, and Remote switches, as the Settings \
+                "Changes a MIDI port's Track, Sync, Remote and MPE switches, as the Settings \
                  window's MIDI ports table does; switches left out stay as they are. A port is \
-                 open while any of its switches is on and closed when all are off. An input's \
-                 notes and controllers reach tracks only while its Track switch is on; Sync \
-                 and Remote are kept and act when sync and MIDI mapping are built. The port's \
+                 open while its Track, Sync or Remote switch is on and closed when all three \
+                 are off; MPE opens nothing by itself. An input's notes and controllers reach \
+                 tracks only while its Track switch is on, and as MPE, each note on a channel \
+                 of its own with its own pitch, slide and pressure, while its MPE switch is on \
+                 too; Sync and Remote are kept and act when sync and MIDI mapping are built. \
+                 Output ports have no MPE switch, and `mpe` on one is refused. The port's \
                  switches are kept for the next start, and aren't part of the set or an undo \
                  step. Opens or closes a device outside Beatlayer. Fails if the computer \
                  doesn't offer the port now.",

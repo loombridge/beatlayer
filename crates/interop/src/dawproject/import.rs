@@ -222,6 +222,7 @@ impl Importer<'_, '_> {
             midi_tools: bl_project::midi_tools::MidiToolSettings::default(),
             launch: bl_model::LaunchSettings::default(),
             multisamplers: bl_model::MultisamplerViews::new(),
+            window_views: bl_model::WindowViews::default(),
         };
         Ok(Imported {
             project,

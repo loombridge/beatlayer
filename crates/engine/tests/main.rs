@@ -7,13 +7,13 @@
 // can't install its own global allocator.
 bl_rt::install_trap!();
 
-mod common;
 mod analysis;
 mod automation;
 mod capture_midi;
 mod clip_envelopes;
 mod clip_settings;
 mod clips;
+mod common;
 mod crossfades;
 mod cue;
 mod deactivated;
@@ -38,6 +38,7 @@ mod midi_recording;
 mod midi_sidechain;
 mod mixer;
 mod modulation;
+mod mpe_input;
 mod multi_output;
 mod pdc;
 mod performance;
@@ -57,7 +58,6 @@ mod session_launch_log;
 mod session_recording;
 mod sidechain;
 mod state;
-mod streaming;
 mod stress;
 mod swap;
 mod transport;

@@ -20117,7 +20117,7 @@ What `plugin.info` and `plugin.show_window` return.
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `device` | [`DeviceId`](#deviceid) | yes | The device. |
-| `plugin` | string | yes | The plug-in's ID: a CLAP ID, or a VST3 class ID. |
+| `plugin` | string | yes | The plug-in's ID: a CLAP ID, a VST3 class ID, or an LV2 URI. |
 | `path` | string | yes | The file it was loaded from. |
 | `active` | boolean | yes | Whether it's running: activated and processing for the engine. |
 | `latency` | integer, at least 0 | yes | The latency it reports, in frames, as of its last activation. Delay compensation (WP-2.11) lines other tracks up with it. |
@@ -20176,7 +20176,7 @@ What `plugin.info` and `plugin.show_window` return.
       "type": "string"
     },
     "plugin": {
-      "description": "The plug-in's ID: a CLAP ID, or a VST3 class ID.",
+      "description": "The plug-in's ID: a CLAP ID, a VST3 class ID, or an LV2 URI.",
       "type": "string"
     },
     "values": {
@@ -20277,7 +20277,7 @@ What `plugin.load` returns.
 | `device` | [`DeviceId`](#deviceid) | yes | The new device, now selected. |
 | `track` | [`TrackId`](#trackid) | yes | Its track. |
 | `new_track` | boolean | yes | Whether a new MIDI track was made for it, as `device.add` does for an instrument or MIDI effect. |
-| `plugin` | string | yes | The plug-in's ID: a CLAP ID, or a VST3 class ID. |
+| `plugin` | string | yes | The plug-in's ID: a CLAP ID, a VST3 class ID, or an LV2 URI. |
 | `name` | string | yes | Its name. |
 
 <details><summary>JSON Schema</summary>
@@ -20299,7 +20299,7 @@ What `plugin.load` returns.
       "type": "boolean"
     },
     "plugin": {
-      "description": "The plug-in's ID: a CLAP ID, or a VST3 class ID.",
+      "description": "The plug-in's ID: a CLAP ID, a VST3 class ID, or an LV2 URI.",
       "type": "string"
     },
     "track": {

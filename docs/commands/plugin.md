@@ -107,7 +107,7 @@ Result: [`SetPluginList`](README.md#setpluginlist).
 
 **Load Plug-In**. Permission: `external`. Contexts: `global`, `device-view`.
 
-Loads a plug-in from its file or bundle (`path`: a `.clap` file, or a `.vst3` bundle or module) and adds it as a device, as `device.add` adds one: to the selected track (or `track`), at `index` or where its role goes, selected, one undo step (Insert Device). `plugin` picks one of the file's plug-ins by its ID (CLAP's, or a VST3 class ID); the first if left out. Its parameters become the device's, which `device.parameters` lists and `device.set_param` and automation change. The plug-in's code runs inside Beatlayer, so load only plug-ins you trust. The scanner (`plugin.scan`) lists the plug-ins on this machine; this command still loads one by its path.
+Loads a plug-in from its file or bundle (`path`: a `.clap` file, a `.vst3` bundle or module, or on Linux an `.lv2` bundle folder) and adds it as a device, as `device.add` adds one: to the selected track (or `track`), at `index` or where its role goes, selected, one undo step (Insert Device). `plugin` picks one of the file's plug-ins by its ID (CLAP's, a VST3 class ID, or an LV2 URI); the first if left out. Its parameters become the device's, which `device.parameters` lists and `device.set_param` and automation change. The plug-in's code runs inside Beatlayer, so load only plug-ins you trust. The scanner (`plugin.scan`) lists the plug-ins on this machine; this command still loads one by its path.
 
 Default keys: none.
 
@@ -115,9 +115,9 @@ Arguments:
 
 | Name | Type | Required | Description |
 |---|---|---|---|
-| `path` | string | yes | The plug-in's file or bundle (`.clap`, or `.vst3` for VST3). |
+| `path` | string | yes | The plug-in's file or bundle (`.clap`, `.vst3` for VST3, or an LV2 bundle folder, `.lv2`, on Linux). |
 | `index` | integer or null | no | Where it goes in the chain; as `device.add` places it if left out. |
-| `plugin` | string or null | no | Which of the file's plug-ins, by its ID; the first if left out. |
+| `plugin` | string or null | no | Which of the file's plug-ins, by its ID (an LV2 plug-in's URI); the first if left out. |
 | `track` | [`TrackId`](README.md#trackid) or null | no | The track; the selected track if left out. |
 
 Result: [`PluginLoaded`](README.md#pluginloaded).
@@ -181,7 +181,7 @@ Result: [`PluginScan`](#pluginscan).
 
 **Scan Plug-Ins**. Permission: `external`. Contexts: `global`, `device-view`.
 
-Finds the plug-ins installed on this machine and describes each one: its format, its file, its identifier, name, vendor, version, and role in a chain. Scans the files or folders in `paths` for every hosted format, or, when `paths` is left out, the system plug-in folders of CLAP and of the formats the Plug-Ins settings switch on (`plugin.settings`: `vst3_system_folders`, and on macOS `use_audio_units_v2`). The app also runs this at start, in the background, and when one of those switches turns on. Each one is loaded in a separate process with a timeout, so a plug-in that crashes or hangs is put on a blocklist with the reason instead of taking Beatlayer down; a file whose size and modification time are unchanged is answered from the cache. Reads plug-in files outside the project, so an agent asks first.
+Finds the plug-ins installed on this machine and describes each one: its format, its file, its identifier, name, vendor, version, and role in a chain. Scans the files or folders in `paths` for every hosted format, or, when `paths` is left out, the system plug-in folders of CLAP, of LV2 on Linux (`LV2_PATH` names them when it is set), and of the formats the Plug-Ins settings switch on (`plugin.settings`: `vst3_system_folders`, and on macOS `use_audio_units_v2`). The app also runs this at start, in the background, and when one of those switches turns on. Each one is loaded in a separate process with a timeout, so a plug-in that crashes or hangs is put on a blocklist with the reason instead of taking Beatlayer down; a file whose size and modification time are unchanged is answered from the cache. Reads plug-in files outside the project, so an agent asks first.
 
 Default keys: none.
 

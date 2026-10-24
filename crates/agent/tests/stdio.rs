@@ -4,9 +4,9 @@
 //! and while no one asks anything.
 
 use std::io::{self, Read};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering::Relaxed};
 use std::sync::mpsc::Receiver;
-use std::sync::Arc;
 
 use bl_agent::Agent;
 use bl_media::{BitDepth, Dither, EncodeSpec, FileType};

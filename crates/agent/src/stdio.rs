@@ -106,7 +106,9 @@ impl BufRead for Ticking {
             self.at = 0;
             let next = if self.mid_line {
                 // The rest of a line: no tick inside it.
-                self.lines.recv().map_err(|_| RecvTimeoutError::Disconnected)
+                self.lines
+                    .recv()
+                    .map_err(|_| RecvTimeoutError::Disconnected)
             } else {
                 self.chunk.extend_from_slice(TICK);
                 self.lines.recv_timeout(IDLE)

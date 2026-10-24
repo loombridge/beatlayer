@@ -344,7 +344,7 @@ fn hidden_beside(target: &Path) -> PathBuf {
 ///
 /// [`Error::Refused`] for a pack that fails a check, and why.
 pub fn plan<R: Read + Seek>(archive: &mut ZipArchive<R>) -> Result<Plan, Error> {
-    if archive.len() == 0 || archive.len() > MAX_ENTRIES {
+    if archive.is_empty() || archive.len() > MAX_ENTRIES {
         return Err(Error::Refused(
             "this isn't a Beatlayer pack: it has no manifest or too many entries".to_owned(),
         ));

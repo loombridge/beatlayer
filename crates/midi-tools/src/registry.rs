@@ -11,6 +11,11 @@ use crate::descriptor::{ParamValue, ToolDescriptor, ToolKind};
 use crate::input::{ToolInput, ToolOutput, fold_octaves};
 use crate::ornament::Ornament;
 use crate::quantize::Quantize;
+use crate::recombine::Recombine;
+use crate::span::Span;
+use crate::strum::Strum;
+use crate::time_warp::TimeWarp;
+use crate::velocity_shaper::VelocityShaper;
 use bl_core::time::Ticks;
 
 /// The most notes one run may write; a run that would write more is
@@ -67,6 +72,17 @@ pub trait MidiTool: Send + Sync {
     /// The tool's name, kind and parameters.
     fn descriptor(&self) -> &ToolDescriptor;
 
+    /// Whether `values` suit the tool together, beyond each one's kind and
+    /// range, such as Velocity Shaper's envelope. [`run`] and the shell check
+    /// it before the settings change.
+    ///
+    /// # Errors
+    ///
+    /// [`ToolError::Values`] saying what is wrong.
+    fn validate(&self, _values: &[ParamValue]) -> Result<(), ToolError> {
+        Ok(())
+    }
+
     /// Settles the values after a change that named the parameters at
     /// `changed`: `after` holds them all, `before` the values the change
     /// started from. A tool whose parameters depend on one another, as
@@ -111,6 +127,7 @@ pub fn run(
 ) -> Result<ToolOutput, ToolError> {
     let descriptor = tool.descriptor();
     descriptor.check(values)?;
+    tool.validate(values)?;
     let mut output = tool.run(input, values)?;
     if output.notes.len() > MAX_NOTES {
         return Err(ToolError::TooManyNotes(output.notes.len()));
@@ -140,6 +157,11 @@ fn native_tools() -> Vec<Box<dyn MidiTool>> {
         Box::new(Connect::new()),
         Box::new(Ornament::new()),
         Box::new(Quantize::new()),
+        Box::new(Recombine::new()),
+        Box::new(Span::new()),
+        Box::new(Strum::new()),
+        Box::new(TimeWarp::new()),
+        Box::new(VelocityShaper::new()),
     ]
 }
 

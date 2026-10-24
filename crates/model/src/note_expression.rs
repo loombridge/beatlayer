@@ -180,6 +180,90 @@ pub fn window(points: &[Breakpoint], from: Ticks, to: Ticks) -> Vec<Breakpoint> 
     part
 }
 
+/// Puts a breakpoint at `at` holding `value` (the MPE spec, R26): one
+/// already there takes the value, and `bend` when given; otherwise a new
+/// one is made, straight unless `bend` says otherwise.
+pub fn put(points: &mut Vec<Breakpoint>, at: Ticks, value: f64, bend: Option<f64>) {
+    match points.binary_search_by_key(&at, |point| point.at) {
+        Ok(place) => {
+            points[place].value = value;
+            if let Some(bend) = bend {
+                points[place].bend = bend;
+            }
+        }
+        Err(place) => points.insert(
+            place,
+            Breakpoint {
+                at,
+                value,
+                bend: bend.unwrap_or(0.0),
+            },
+        ),
+    }
+}
+
+/// Moves the breakpoints at `moved` by `time` ticks and `value` (R26): the
+/// caller holds the move inside the note and the range. A breakpoint that
+/// isn't moved and lies in the way of a moved one, between where it was and
+/// where it lands, is removed.
+pub fn shift(points: &mut Vec<Breakpoint>, moved: &[Ticks], time: Ticks, value: f64) {
+    let spans: Vec<(Ticks, Ticks)> = moved
+        .iter()
+        .map(|at| (*at.min(&(*at + time)), *at.max(&(*at + time))))
+        .collect();
+    points.retain(|point| {
+        moved.contains(&point.at)
+            || !spans
+                .iter()
+                .any(|(low, high)| (*low..=*high).contains(&point.at))
+    });
+    for point in points.iter_mut().filter(|point| moved.contains(&point.at)) {
+        point.at += time;
+        point.value += value;
+    }
+    points.sort_by_key(|point| point.at);
+}
+
+/// `points` with every value multiplied by `factor` and held in
+/// `expression`'s range (R29).
+pub fn scale(points: &mut [Breakpoint], factor: f64, expression: Expression) {
+    let (low, high) = expression.range();
+    for point in points {
+        point.value = (point.value * factor).clamp(low, high);
+    }
+}
+
+/// Draws steps over a note's envelope (R30). Each step is a start, an end
+/// and a value, counted from the note's start, inside the note and in
+/// order; the stretch from the first start to the last end loses its
+/// breakpoints and gets a breakpoint at each step's start and one just
+/// before the next step, so the value holds. Neighbouring steps of one
+/// value join.
+pub fn draw(points: &mut Vec<Breakpoint>, steps: &[(Ticks, Ticks, f64)], expression: Expression) {
+    let (low, high) = expression.range();
+    let mut joined: Vec<(Ticks, Ticks, f64)> = Vec::new();
+    for (start, end, value) in steps.iter().copied().filter(|(start, end, _)| start < end) {
+        let value = value.clamp(low, high);
+        match joined.last_mut() {
+            Some(last) if last.1 == start && last.2 == value => last.1 = end,
+            _ => joined.push((start, end, value)),
+        }
+    }
+    let (Some(first), Some(last)) = (joined.first(), joined.last()) else {
+        return;
+    };
+    let (from, to) = (first.0, last.1);
+    points.retain(|point| point.at < from || point.at > to);
+    for (index, (start, end, value)) in joined.iter().enumerate() {
+        let touches = joined.get(index + 1).is_some_and(|next| next.0 == *end);
+        put(points, *start, *value, Some(0.0));
+        let hold = if touches { *end - Ticks(1) } else { *end };
+        if hold > *start {
+            put(points, hold, *value, Some(0.0));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -262,5 +346,103 @@ mod tests {
             window(&[point(50, 7.0)], Ticks(100), Ticks(200)),
             [point(0, 7.0), point(100, 7.0)]
         );
+    }
+
+    // Spec: mpe R26
+    #[test]
+    fn a_breakpoint_put_on_another_takes_its_value_and_a_new_one_goes_in_order() {
+        let mut points = vec![point(0, 1.0), point(100, 2.0)];
+        put(&mut points, Ticks(50), 9.0, None);
+        put(&mut points, Ticks(100), 5.0, Some(0.5));
+        assert_eq!(points[1], point(50, 9.0));
+        assert_eq!((points[2].value, points[2].bend), (5.0, 0.5));
+        put(&mut points, Ticks(100), 6.0, None);
+        assert_eq!(
+            (points[2].value, points[2].bend),
+            (6.0, 0.5),
+            "the bend stays"
+        );
+    }
+
+    // Spec: mpe R26, I-DRAG-050
+    #[test]
+    fn a_moved_breakpoint_removes_the_one_it_passes_or_lands_on() {
+        let mut points = vec![
+            point(0, 0.0),
+            point(100, 10.0),
+            point(200, 20.0),
+            point(300, 30.0),
+        ];
+        shift(&mut points, &[Ticks(100)], Ticks(150), 5.0);
+        assert_eq!(points, [point(0, 0.0), point(250, 15.0), point(300, 30.0)]);
+        // Moving the other way past the first removes it as well.
+        shift(&mut points, &[Ticks(250)], Ticks(-250), 0.0);
+        assert_eq!(points, [point(0, 15.0), point(300, 30.0)]);
+        // A group moves together and takes nothing with it.
+        let mut points = vec![
+            point(0, 0.0),
+            point(100, 10.0),
+            point(200, 20.0),
+            point(300, 30.0),
+        ];
+        shift(&mut points, &[Ticks(100), Ticks(200)], Ticks(50), 1.0);
+        assert_eq!(
+            points,
+            [
+                point(0, 0.0),
+                point(150, 11.0),
+                point(250, 21.0),
+                point(300, 30.0)
+            ]
+        );
+    }
+
+    // Spec: mpe R29
+    #[test]
+    fn scaling_multiplies_from_zero_and_holds_the_range() {
+        let mut points = vec![point(0, 40.0), point(100, 100.0)];
+        scale(&mut points, 1.5, Expression::Slide);
+        assert_eq!((points[0].value, points[1].value), (60.0, 127.0));
+        scale(&mut points, 0.0, Expression::Pressure);
+        assert_eq!((points[0].value, points[1].value), (0.0, 0.0));
+    }
+
+    // Spec: mpe R30
+    #[test]
+    fn drawn_steps_replace_the_stretch_and_hold_their_value() {
+        let mut points = vec![
+            point(0, 1.0),
+            point(120, 2.0),
+            point(250, 3.0),
+            point(400, 4.0),
+        ];
+        draw(
+            &mut points,
+            &[
+                (Ticks(100), Ticks(200), 10.0),
+                (Ticks(200), Ticks(300), 20.0),
+            ],
+            Expression::Pressure,
+        );
+        assert_eq!(
+            points,
+            [
+                point(0, 1.0),
+                point(100, 10.0),
+                point(199, 10.0),
+                point(200, 20.0),
+                point(300, 20.0),
+                point(400, 4.0)
+            ]
+        );
+        // Steps of one value join, and a value past the range is held in it.
+        let mut points = Vec::new();
+        draw(
+            &mut points,
+            &[(Ticks(0), Ticks(10), 500.0), (Ticks(10), Ticks(20), 127.0)],
+            Expression::Slide,
+        );
+        assert_eq!(points, [point(0, 127.0), point(20, 127.0)]);
+        assert!(points_fit(&points, Ticks(20), Expression::Slide));
     }
 }

@@ -232,16 +232,20 @@ fn the_tab_keys_show_and_cycle_the_tabs() {
     assert_eq!(e.h.shell.clip_view().tab(), ClipTab::Notes);
     e.h.key(egui::Key::Tab, next_tab());
     assert_eq!(e.h.shell.clip_view().tab(), ClipTab::Envelopes);
-    // The reference records Option+Tab for the note editor and the sample
-    // editor only, so from the Envelopes tab the other tab keys go back.
+    // Spec: mpe R22. Option+Tab goes on from the Envelopes tab to the MPE
+    // tab and round to the Notes tab.
     e.h.key(egui::Key::Tab, next_tab());
+    assert_eq!(e.h.shell.clip_view().tab(), ClipTab::Mpe);
+    e.h.key(egui::Key::Tab, next_tab());
+    assert_eq!(e.h.shell.clip_view().tab(), ClipTab::Notes);
+    e.h.key(egui::Key::Num2, option_shift());
     assert_eq!(e.h.shell.clip_view().tab(), ClipTab::Envelopes);
     e.h.key(egui::Key::Num1, option_shift());
     assert_eq!(e.h.shell.clip_view().tab(), ClipTab::Notes);
 }
 
 // Spec: piano-roll R22; AccessKit. The toolbar's tabs are in the tree, the
-// shown one selected and MPE disabled, and clicking a tab runs
+// shown one selected, and clicking a tab runs
 // `view.clip_tab`.
 #[test]
 fn the_tabs_are_accessible_and_clicking_one_shows_it() {
@@ -250,7 +254,7 @@ fn the_tabs_are_accessible_and_clicking_one_shows_it() {
     let nodes = Harness::nodes(&output);
     assert_eq!(Harness::node(&nodes, "Envelopes").toggled, Some(true));
     assert_eq!(Harness::node(&nodes, "Notes").toggled, Some(false));
-    assert!(Harness::node(&nodes, "MPE").disabled);
+    assert_eq!(Harness::node(&nodes, "MPE").toggled, Some(false));
     let notes = e.node_centre("Notes");
     e.click(notes);
     assert_eq!(e.h.shell.clip_view().tab(), ClipTab::Notes);

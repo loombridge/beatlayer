@@ -27,13 +27,15 @@ use crate::commands::ClipTabArgs;
 use crate::commands::FoldNotesArgs;
 use crate::commands::LaneArgs;
 use crate::commands::LanesArgs;
+use crate::commands::MpeGridArgs;
+use crate::commands::MpeLanesArgs;
 use crate::commands::SwitchResult;
 use crate::commands::ViewState;
 use bl_commands::NoArgs;
 use bl_model::AutomationTarget;
 use bl_model::ClipData;
 use bl_shell_spec::arrangement as view_ids;
-use bl_shell_spec::notes::RandomizeAmounts;
+use bl_shell_spec::notes::{ClipTab, RandomizeAmounts};
 
 impl Shell {
     /// Whether the Undo History panel shows (WP-6.28).
@@ -326,8 +328,20 @@ impl Shell {
             ids::VIEW_CLIP_TAB => {
                 // Spec: piano-roll R1; S-CLIPMODE-001 to 004. View state only.
                 let ClipTabArgs { tab } = Self::args(id, args)?;
-                self.clip_view
-                    .set_tab(tab.unwrap_or_else(|| self.clip_view.tab().next()));
+                // Spec: mpe R22. An audio clip has no MPE tab: it cycles
+                // through the other two.
+                let audio = self
+                    .clip_view
+                    .shown_audio_clip(self.editor.document(), &self.arrangement)
+                    .is_some();
+                if audio && tab == Some(ClipTab::Mpe) {
+                    return Err(unavailable("an audio clip has no MPE tab"));
+                }
+                let next = match self.clip_view.tab().next() {
+                    ClipTab::Mpe if audio => ClipTab::Notes,
+                    next => next,
+                };
+                self.clip_view.set_tab(tab.unwrap_or(next));
                 Ok(to_value(
                     &self
                         .clip_view
@@ -412,6 +426,85 @@ impl Shell {
                 if let Some(on) = all {
                     self.clip_view.show_all_lanes(on);
                 }
+                Ok(to_value(
+                    &self
+                        .clip_view
+                        .state(self.editor.document(), &self.arrangement),
+                ))
+            }
+            ids::VIEW_MPE_LANES => {
+                // Spec: mpe R23. View state saved with the set; no undo step.
+                let MpeLanesArgs {
+                    lane,
+                    show,
+                    swap,
+                    height,
+                    visible,
+                    all,
+                } = Self::args(id, args)?;
+                if lane.is_none() && (show.is_some() || swap.is_some() || height.is_some()) {
+                    return Err(ShellError::InvalidArgs {
+                        command: id.to_owned(),
+                        message: "`show`, `swap` and `height` need a `lane`".to_owned(),
+                    });
+                }
+                if height.is_some_and(|h| !(8.0..=400.0).contains(&h)) {
+                    return Err(ShellError::InvalidArgs {
+                        command: id.to_owned(),
+                        message: "`height` must be from 8 to 400 points".to_owned(),
+                    });
+                }
+                if lane == Some(bl_model::MpeLane::PitchBend) && (show.is_some() || swap.is_some())
+                {
+                    return Err(ShellError::InvalidArgs {
+                        command: id.to_owned(),
+                        message: "the Pitch Bend lane has no toggle: it shows first on a Drum \
+                                  Rack's track"
+                            .to_owned(),
+                    });
+                }
+                let mpe = self.clip_view.mpe_mut();
+                if let Some(lane) = lane {
+                    if let Some(height) = height {
+                        mpe.heights.insert(lane, height);
+                    }
+                    if swap == Some(true) {
+                        mpe.swap(lane);
+                    } else if let Some(on) = show {
+                        mpe.show(lane, on);
+                    } else if height.is_none() {
+                        let on = !mpe.shown.contains(&lane);
+                        mpe.show(lane, on);
+                    }
+                }
+                if let Some(visible) = visible {
+                    mpe.hidden = !visible;
+                }
+                if all == Some(true) {
+                    mpe.show_all();
+                }
+                Ok(to_value(
+                    &self
+                        .clip_view
+                        .state(self.editor.document(), &self.arrangement),
+                ))
+            }
+            ids::VIEW_MPE_GRID => {
+                // Spec: mpe R27. The tab's own grid, saved with the set.
+                let MpeGridArgs { clip, on } = Self::args(id, args)?;
+                let doc = self.editor.document();
+                let clip = clip
+                    .or_else(|| self.clip_view.shown_clip(doc, &self.arrangement))
+                    .ok_or_else(|| unavailable("no MIDI clip is shown in the Clip View"))?;
+                if !doc
+                    .clip(clip)
+                    .is_some_and(|c| matches!(c.data, ClipData::Midi(_)))
+                {
+                    return Err(unavailable("the clip isn't a MIDI clip"));
+                }
+                let mpe = self.clip_view.mpe_mut();
+                let on = on.unwrap_or(!mpe.grid_on(clip));
+                mpe.set_grid(clip, on);
                 Ok(to_value(
                     &self
                         .clip_view

@@ -148,6 +148,7 @@ fn midi_tool_apply_by_id_with_values_and_a_seed_reads_back() {
             "ornament",
             "quantize",
             "test_transpose",
+            "test_shift",
             "test_fill"
         ]
     );
@@ -243,6 +244,55 @@ fn an_apply_that_leaves_fewer_notes_reports_fewer_notes_and_asks_first() {
         json!({ "command": "midi_tool.choose" }),
     );
     assert!(described.get("raised_by_arguments").is_none());
+}
+
+#[test]
+fn two_tools_chained_by_id_read_back_as_a_chain() {
+    // Spec: midi-tools R27, R28, R33. A second transformation applied to the
+    // notes the first wrote joins its chain; `midi_tool.state` lists each
+    // step, and a change of the first with `step` runs the second again.
+    let mut client = app();
+    let clip = bass(&mut client, 3);
+    run(
+        &mut client,
+        "arrangement.select_clips",
+        json!({ "clips": [clip] }),
+    );
+    run(
+        &mut client,
+        "clip_view.select_notes",
+        json!({ "notes": [0, 1, 2] }),
+    );
+    run(
+        &mut client,
+        "midi_tool.apply",
+        json!({ "tool": "test_transpose", "values": { "degrees": 2 }, "seed": 5 }),
+    );
+    let result = run(
+        &mut client,
+        "midi_tool.apply",
+        json!({ "tool": "test_shift", "values": { "sixteenths": 4 }, "seed": 6 }),
+    );
+    assert_eq!(result["run"]["tool"], "test_shift");
+    let state = run(&mut client, "midi_tool.state", json!({ "clip": clip }));
+    let chain = state["application"]["chain"].as_array().unwrap();
+    let steps: Vec<(&str, u64)> = chain
+        .iter()
+        .map(|s| (s["tool"].as_str().unwrap(), s["seed"].as_u64().unwrap()))
+        .collect();
+    assert_eq!(steps, [("test_transpose", 5), ("test_shift", 6)]);
+    assert_eq!(chain[0]["values"]["degrees"], 2);
+    assert_eq!(chain[1]["values"]["sixteenths"], 4);
+    assert_eq!(keys(&mut client, clip), [62, 63, 64]);
+    run(
+        &mut client,
+        "midi_tool.set",
+        json!({ "tool": "test_transpose", "step": 0, "values": { "degrees": 5 } }),
+    );
+    assert_eq!(keys(&mut client, clip), [65, 66, 67], "the chain ran again");
+    let state = run(&mut client, "midi_tool.state", json!({ "clip": clip }));
+    assert_eq!(state["application"]["chain"][0]["values"]["degrees"], 5);
+    assert_eq!(state["application"]["chain"][1]["seed"], 6);
 }
 
 #[test]

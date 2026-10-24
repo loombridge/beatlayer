@@ -71,9 +71,10 @@ fn r3_the_registry_lists_each_kind_apart() {
             "lfo",
             "ornament",
             "quantize",
-            "test_transpose"
+            "test_transpose",
+            "test_shift"
         ],
-        "the native tools in the selector's order, then the test tool"
+        "the native tools in the selector's order, then the test tools"
     );
     assert_eq!(generators, ["test_fill"]);
     assert!(

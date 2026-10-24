@@ -269,12 +269,19 @@ fn tools(
     let mut y = rect.top();
 
     // The Transformation or Generator Selector (R2).
+    // Spec: midi-tools R29. A tool in the open chain carries the accent LED.
+    let chained = tools.chain_tools(doc, shell.clip_view(), shell.arrangement());
     let choices: Vec<Choice<String>> = registry
         .tools(kind)
         .map(|tool| Choice {
             label: tool.descriptor().name.clone(),
             value: tool.descriptor().id.clone(),
-            leds: NO_LEDS,
+            leds: [
+                None,
+                chained
+                    .contains(&tool.descriptor().id)
+                    .then_some(theme.colors.accent.0),
+            ],
         })
         .collect();
     let (salt, name) = match kind {

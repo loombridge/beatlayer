@@ -13,7 +13,11 @@ use crate::registry::{MidiTool, ToolError};
 
 /// The test tools.
 pub(crate) fn tools() -> Vec<Box<dyn MidiTool>> {
-    vec![Box::new(Transpose::new()), Box::new(Fill::new())]
+    vec![
+        Box::new(Transpose::new()),
+        Box::new(Shift::new()),
+        Box::new(Fill::new()),
+    ]
 }
 
 fn whole(values: &[ParamValue], at: usize) -> i64 {
@@ -96,6 +100,62 @@ impl MidiTool for Transpose {
                 }
                 notes.push(out);
             }
+        }
+        Ok(ToolOutput { notes })
+    }
+}
+
+/// `test_shift`: moves every input note later by `sixteenths` sixteenth
+/// notes, and spreads its velocity by up to `spread` from the seed. A second
+/// transformation for the chains' tests.
+struct Shift(ToolDescriptor);
+
+impl Shift {
+    fn new() -> Self {
+        Self(ToolDescriptor {
+            id: "test_shift".to_owned(),
+            name: "Test Shift".to_owned(),
+            kind: ToolKind::Transformation,
+            parameters: vec![
+                ParamSpec::new(
+                    "sixteenths",
+                    "Sixteenths",
+                    ParamKind::Whole { min: 0, max: 16 },
+                    ParamValue::Whole(0),
+                    "How many sixteenth notes each note moves later.",
+                ),
+                ParamSpec::new(
+                    "spread",
+                    "Spread",
+                    ParamKind::Whole { min: 0, max: 100 },
+                    ParamValue::Whole(0),
+                    "How far a velocity may move at random.",
+                ),
+            ],
+        })
+    }
+}
+
+impl MidiTool for Shift {
+    fn descriptor(&self) -> &ToolDescriptor {
+        &self.0
+    }
+
+    fn run(&self, input: &ToolInput, values: &[ParamValue]) -> Result<ToolOutput, ToolError> {
+        let by = Ticks(Ticks::QUARTER.get() / 4 * whole(values, 0));
+        let spread = u32::try_from(whole(values, 1)).unwrap_or(0);
+        let mut rng = Rng::new(input.seed);
+        let mut notes = Vec::new();
+        for note in &input.notes {
+            let mut out = note.clone();
+            out.start += by;
+            if spread > 0 {
+                let drawn = i32::try_from(rng.below(2 * spread + 1)).unwrap_or(0);
+                let velocity =
+                    i32::from(note.velocity) + drawn - i32::try_from(spread).unwrap_or(0);
+                out.velocity = u8::try_from(velocity.clamp(1, 127)).unwrap_or(1);
+            }
+            notes.push(out);
         }
         Ok(ToolOutput { notes })
     }

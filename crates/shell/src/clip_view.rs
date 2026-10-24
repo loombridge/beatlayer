@@ -579,9 +579,6 @@ pub struct ClipView {
     /// they're the same (Spec: multi-clip-editing R12).
     pieces: Vec<(ClipId, NoteClipboard)>,
     copied_with: Option<(Vec<ClipId>, Option<ClipId>)>,
-    /// What Quantize uses when its arguments leave them out. View state,
-    /// like Draw Mode: not part of the set.
-    quantize: QuantizeSettings,
     /// The tab the Clip View shows (L-CLIP-010).
     tab: ClipTab,
     /// The parameter whose envelope the Envelopes tab shows.
@@ -788,28 +785,26 @@ impl ClipView {
     }
 
     /// The Quantize settings `note.quantize` uses when its arguments leave
-    /// them out.
+    /// them out: the Quantize MIDI Tool's (the MIDI transformations spec,
+    /// R20).
     #[must_use]
     pub fn quantize(&self) -> QuantizeSettings {
-        self.quantize
+        self.tools.quantize()
     }
 
-    /// Changes the Quantize settings: the fields given, keeping the rest.
-    pub fn set_quantize(
-        &mut self,
-        grid: Option<Ticks>,
-        target: Option<QuantizeTarget>,
-        amount: Option<u8>,
-    ) {
-        if let Some(grid) = grid {
-            self.quantize.grid = Some(grid);
-        }
-        if let Some(target) = target {
-            self.quantize.target = target;
-        }
-        if let Some(amount) = amount {
-            self.quantize.amount = amount;
-        }
+    /// The spacing of the grid lines the Quantize settings make, in ticks:
+    /// `editing` where no division is set, else the division, two-thirds as
+    /// long with triplets on (the MIDI transformations spec, R19).
+    #[must_use]
+    pub fn quantize_grid(&self, editing: Ticks) -> Ticks {
+        let QuantizeSettings { grid, triplets, .. } = self.quantize();
+        grid.map_or(editing, |grid| {
+            if triplets {
+                Ticks(grid.get() * 2 / 3)
+            } else {
+                grid
+            }
+        })
     }
 
     /// The tab the Clip View shows.
@@ -2480,11 +2475,21 @@ pub fn run(
             let QuantizeSettingsArgs {
                 grid,
                 target,
+                triplets,
                 amount,
             } = parse(args)?;
             check_grid(grid)?;
             check_amount(amount)?;
-            view.set_quantize(grid, target, amount);
+            if grid.is_none() && target.is_none() && triplets.is_none() && amount.is_none() {
+                // Cmd-Shift-U and Edit > Quantize Settings... (S-NOTE-012,
+                // S-SAMPLE-002; the MIDI transformations spec, R21): the
+                // Transform panel with Quantize chosen. View state.
+                let track = view
+                    .shown_clip(doc, arrangement)
+                    .and_then(|clip| doc.clip_track(clip));
+                view.tools.show_quantize(track);
+            }
+            view.tools.set_quantize(grid, target, triplets, amount)?;
             Ok(to_value(&view.quantize()))
         }
         ids::QUANTIZE_NOTES => {
@@ -2502,10 +2507,15 @@ pub fn run(
             let ordered = notes_in_order(&midi);
             let places = places_or_selected(view, clip, notes, ordered.len())?;
             let settings = view.quantize();
-            let grid = grid
-                .or(settings.grid)
-                .unwrap_or_else(|| arrangement.grid_ticks(doc));
-            let target = target.unwrap_or(settings.target);
+            let grid = grid.unwrap_or_else(|| view.quantize_grid(arrangement.grid_ticks(doc)));
+            // Start and End both off move nothing (the MIDI transformations spec, R19).
+            let target = match (target, view.tools.quantize_moves()) {
+                (Some(target), _) => Some(target),
+                (None, (true, true)) => Some(QuantizeTarget::Both),
+                (None, (false, true)) => Some(QuantizeTarget::NoteEnd),
+                (None, (true, false)) => Some(QuantizeTarget::NoteStart),
+                (None, (false, false)) => None,
+            };
             let amount = amount.unwrap_or(settings.amount);
             let signatures = &doc.settings().time_signatures;
             let clip_start = doc.clip(clip).map_or(Ticks::ZERO, |value| value.start);
@@ -2514,13 +2524,16 @@ pub fn run(
                 let mut quantized = ordered.clone();
                 let mut moved = Vec::with_capacity(places.len());
                 for place in &places {
-                    let note = quantize_note(
-                        &quantized[*place as usize],
-                        target,
-                        step,
-                        signatures,
-                        amount,
-                    )?;
+                    let note = match target {
+                        Some(target) => quantize_note(
+                            &quantized[*place as usize],
+                            target,
+                            step,
+                            signatures,
+                            amount,
+                        )?,
+                        None => quantized[*place as usize].clone(),
+                    };
                     quantized[*place as usize] = note.clone();
                     moved.push(note);
                 }
@@ -3649,8 +3662,35 @@ fn quantize_note(
             }
             quantized.set_length(length);
         }
+        QuantizeTarget::Both => {
+            // The start moves, keeping the length; then the end moves toward
+            // its line, or the first line after the start where its line is
+            // at or before it (the MIDI transformations spec, R19).
+            quantized.start = toward(note.start, snap(signatures, step, note.start), amount);
+            let end = quantized.start + quantized.length;
+            let mut line = snap(signatures, step, end);
+            if line <= quantized.start {
+                line = first_line_after(signatures, step, quantized.start);
+            }
+            quantized.set_length(toward(end, line, amount) - quantized.start);
+        }
     }
     Ok(quantized)
+}
+
+/// The first grid line after `at`, for the lines `step` lays out.
+fn first_line_after(signatures: &TimeSignatureMap, step: Step, at: Ticks) -> Ticks {
+    let reach = step.ticks.max(signatures.signature_at(at).bar_length());
+    let mut found = None;
+    crate::arrangement::grid::lines(
+        signatures,
+        step,
+        at + Ticks(1),
+        at + reach + reach,
+        1,
+        |line, _| found = Some(line),
+    );
+    found.unwrap_or(at + step.ticks)
 }
 
 /// `at` moved `amount` percent of the way toward `to`, rounded to the

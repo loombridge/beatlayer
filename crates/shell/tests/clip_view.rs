@@ -423,10 +423,35 @@ fn quantising_ends_leaves_starts_alone() {
 }
 
 #[test]
-fn the_quantise_settings_are_view_state() {
-    // Spec: piano-roll (WP-2.3 part 3). Like Draw Mode, the settings change
-    // nothing in the set and are no undo step; fields left out keep their
-    // values.
+fn quantising_both_moves_the_start_and_then_the_end() {
+    // Spec: piano-roll R18, midi-transformations R19. With `both` the start
+    // moves to its line keeping the length, then the end moves to its line.
+    let mut notes = song(vec![song_note(60, SIXTEENTH + 30, QUARTER - 60)]);
+    notes.one_step(
+        ids::QUANTIZE_NOTES,
+        json!({ "notes": [0], "grid": SIXTEENTH, "target": "both", "amount": 100 }),
+    );
+    let note = &notes.notes()[0];
+    assert_eq!(note.start, Ticks(SIXTEENTH));
+    assert_eq!(note.start + note.length, Ticks(5 * SIXTEENTH));
+    // An end whose line is at or before the start goes to the first line
+    // after it, so a short note is not refused.
+    let mut short = song(vec![song_note(60, 10, 20)]);
+    short.one_step(
+        ids::QUANTIZE_NOTES,
+        json!({ "notes": [0], "grid": SIXTEENTH, "target": "both" }),
+    );
+    let note = &short.notes()[0];
+    assert_eq!(
+        (note.start, note.start + note.length),
+        (Ticks(0), Ticks(SIXTEENTH))
+    );
+}
+
+#[test]
+fn the_quantise_settings_are_the_quantize_tools_and_no_undo_step() {
+    // Spec: piano-roll R19. The settings change nothing in the set and are no
+    // undo step; fields left out keep their values.
     let mut song = song(Vec::new());
     let steps = song.steps();
     let state = song.settings(ids::QUANTIZE_SETTINGS, json!({}));

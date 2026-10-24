@@ -20031,8 +20031,9 @@ The Clip View's Quantize settings, as `clip_view.quantize_settings` reports them
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `grid` | [`Ticks`](#ticks) or null | yes | The spacing between the quantise grid's lines, in ticks. `null` (nothing) follows the Clip View's editing grid, the step the note area draws, at the moment the command runs. |
-| `target` | [`QuantizeTarget`](#quantizetarget) | yes | Whether quantise moves note starts or note ends. |
+| `grid` | [`Ticks`](#ticks) or null | yes | The spacing between the quantise grid's lines, in ticks: a note division from a whole note to a 1/32 note. `null` (nothing) follows the Clip View's editing grid, the step the note area draws, at the moment the command runs. |
+| `target` | [`QuantizeTarget`](#quantizetarget) | yes | Whether quantise moves note starts, note ends, or both. With the Quantize tool's Start and End both off this reads `note_start`; `midi_tool.state` has the two switches. |
+| `triplets` | boolean | yes | Whether a `grid` of a note division is a triplet of it, two-thirds as long. It has no effect while `grid` is `null`. |
 | `amount` | integer from 0 to 255 | yes | How far each note moves toward its grid line, as a percentage from 0 (nothing moves) to 100 (every note lands on the line). |
 
 <details><summary>JSON Schema</summary>
@@ -20057,16 +20058,21 @@ The Clip View's Quantize settings, as `clip_view.quantize_settings` reports them
           "type": "null"
         }
       ],
-      "description": "The spacing between the quantise grid's lines, in ticks. `null` (nothing) follows the Clip View's editing grid, the step the note area draws, at the moment the command runs."
+      "description": "The spacing between the quantise grid's lines, in ticks: a note division from a whole note to a 1/32 note. `null` (nothing) follows the Clip View's editing grid, the step the note area draws, at the moment the command runs."
     },
     "target": {
       "$ref": "#/$defs/QuantizeTarget",
-      "description": "Whether quantise moves note starts or note ends."
+      "description": "Whether quantise moves note starts, note ends, or both. With the Quantize tool's Start and End both off this reads `note_start`; `midi_tool.state` has the two switches."
+    },
+    "triplets": {
+      "description": "Whether a `grid` of a note division is a triplet of it, two-thirds as long. It has no effect while `grid` is `null`.",
+      "type": "boolean"
     }
   },
   "required": [
     "grid",
     "target",
+    "triplets",
     "amount"
   ],
   "type": "object"
@@ -20077,18 +20083,19 @@ The Clip View's Quantize settings, as `clip_view.quantize_settings` reports them
 
 ### `QuantizeTarget`
 
-What `note.quantize` moves toward the grid: `note_start` (the default) moves each note's start, `note_end` moves its end instead, leaving the start alone.
+What `note.quantize` moves toward the grid: `note_start` (the default) moves each note's start, `note_end` moves its end instead, leaving the start alone, and `both` moves the start and then the end.
 
 One of:
 
 - `"note_start"`: Move the notes' starts.
 - `"note_end"`: Move the notes' ends; the starts stay put.
+- `"both"`: Move the notes' starts, then their ends.
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "What `note.quantize` moves toward the grid: `note_start` (the default) moves each note's start, `note_end` moves its end instead, leaving the start alone.",
+  "description": "What `note.quantize` moves toward the grid: `note_start` (the default) moves each note's start, `note_end` moves its end instead, leaving the start alone, and `both` moves the start and then the end.",
   "oneOf": [
     {
       "const": "note_start",
@@ -20098,6 +20105,11 @@ One of:
     {
       "const": "note_end",
       "description": "Move the notes' ends; the starts stay put.",
+      "type": "string"
+    },
+    {
+      "const": "both",
+      "description": "Move the notes' starts, then their ends.",
       "type": "string"
     }
   ]

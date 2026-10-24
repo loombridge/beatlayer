@@ -10,7 +10,7 @@
 //! [`register`] adds their specs, which are pure data; `bl-shell` runs them
 //! by ID.
 
-use bl_commands::Context::{ClipView, NoteEditor};
+use bl_commands::Context::{ClipView, NoteEditor, SampleEditor};
 use bl_commands::{CommandSpec, NoArgs, Permission, RegisterError, Registry};
 use bl_core::time::Ticks;
 use bl_model::ClipId;
@@ -499,10 +499,13 @@ fn specs() -> Vec<CommandSpec> {
              unchanged. A transformation applied to the notes the open chain wrote (no \
              `notes` or `range` given) joins the chain as a new step; a generator, or notes \
              or a range of its own, starts a new chain. Cmd+Enter (S-NOTE-033) and Edit ▸ \
-             Apply Transformation/Generator run it. A transformation with no input is \
-             refused, and so is a run that would write more than 65536 notes. A call that \
-             would leave the clip fewer notes asks first. Read the notes in the query tool's `clip` (`data.midi.notes`).",
+             Apply Transformation/Generator run it. On an audio clip, whose Transform panel \
+             holds Quantize alone, it runs `clip.quantize_audio` with Quantize's Grid, \
+             Triplets and Amount. A transformation with no input is refused, and so is a run \
+             that would write more than 65536 notes. A call that would leave the clip fewer \
+             notes asks first. Read the notes in the query tool's `clip` (`data.midi.notes`).",
         )
+        .contexts([NoteEditor, ClipView, SampleEditor])
         .binding("S-NOTE-033")
         .args::<ApplyArgs>(),
         tool(

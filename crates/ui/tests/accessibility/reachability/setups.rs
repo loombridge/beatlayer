@@ -666,6 +666,10 @@ pub(crate) fn midi_tools_shown(h: &mut Harness) {
         .run("session.select", json!({ "track": track, "scene": scene }))
         .unwrap();
     h.shell.run("view.toggle_clip_view", json!({})).unwrap();
+    // The test tool, whose controls these checks reach.
+    h.shell
+        .run("midi_tool.choose", json!({ "tool": "test_transpose" }))
+        .unwrap();
     h.shell
         .run("clip_view.show_panel", json!({ "panel": "transform" }))
         .unwrap();

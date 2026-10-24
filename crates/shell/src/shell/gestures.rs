@@ -79,7 +79,7 @@ impl Shell {
                 || self.is_device_command(id)
                 || track_ids::handles(id)
                 || note_ids::handles(id)
-                || tool_ids::handles(id)
+                || (tool_ids::handles(id) && self.audio_apply(id, &args).is_none())
                 || midi_ids::handles(id)
                 || matches!(
                     id,

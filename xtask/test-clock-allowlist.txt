@@ -66,7 +66,7 @@ crates/shell/tests/plugins.rs # waits for a real CLAP plug-in
 crates/shell/tests/plugins_au.rs # waits for a real Audio Unit
 crates/shell/tests/processed_files.rs # a timeout on a processed file's write
 crates/shell/tests/realtime.rs # measures the callback under real-time pacing
-crates/ui/tests/accessibility.rs # waits for a real plug-in's editor to load
+crates/ui/tests/accessibility/reachability/setups.rs # waits for a real plug-in's editor to load
 crates/ui/tests/agent_settings.rs # measures the Settings window's frame cost itself
 crates/ui/tests/browser.rs # waits for the browser's index thread to read the disk
 crates/ui/tests/midi_input.rs # waits for the MIDI output thread and its indicator's timed fade

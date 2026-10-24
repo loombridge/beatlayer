@@ -71,7 +71,7 @@ The units under test are Apple's built-in ones, which need no third-party binari
 | R12 | `crates/plugin-host/tests/au.rs`, `a_unit_that_cant_be_found_leaves_its_device_passing_through`; `a_set_round_trips_the_units_state` (a state the unit refuses) | unit |
 | R13 | `crates/shell/tests/au_editor.rs` (AUDelay's editor opens and closes by `plugin.show_window`; neither is an undo step); `crates/shell/tests/plugins_au.rs`, `an_audio_unit_loads_runs_and_keeps_its_state_with_the_set` (`plugin.info` reports the unit's editor) | unit |
 | R14 | `crates/shell/tests/plugins_au.rs`, `loading_an_audio_unit_says_they_are_macos_only` | unit |
-| R16 | `crates/shell-spec/src/plugins.rs`, `every_listed_id_is_registered_and_complete`; `crates/ui/tests/accessibility.rs`, `every_m1_command_is_reachable_from_the_keyboard` | unit |
+| R16 | `crates/shell-spec/src/plugins.rs`, `every_listed_id_is_registered_and_complete`; `crates/ui/tests/accessibility/reachability/mod.rs`, `every_m1_command_is_reachable_from_the_keyboard` | unit |
 | R17 | every block in `crates/plugin-host/tests/` runs as a real-time section under the allocation trap | real-time trap |
 | R18 | `crates/plugin-host/tests/au.rs`, `a_control_change_reaches_the_unit_with_its_notes` | unit, real-time trap |
 | R19 | to be written in WP-6.17b | unit, real-time trap |

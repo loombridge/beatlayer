@@ -529,10 +529,17 @@ impl Shell {
                 let points = self.envelope_points(keyed);
                 let at = selected.unwrap_or_else(|| self.envelope_marker(keyed));
                 points.iter().any(|point| point.at == at)
+                    || (selected.is_none() && self.deletes_range(keyed))
             }
             ids::DELETE => !self.envelope_points(keyed).is_empty(),
             _ => false,
         }
+    }
+
+    /// Whether Delete deletes the Envelope Editor's time selection: it has
+    /// one, and no breakpoint is selected (the clip envelopes spec, R12).
+    fn deletes_range(&self, keyed: Keyed) -> bool {
+        matches!(keyed, Keyed::Clip { clip, .. } if self.clip_view.envelope_time(clip).is_some())
     }
 
     /// Runs one of the envelope keys' commands (the automation editing spec,
@@ -742,15 +749,28 @@ impl Shell {
                 let keyed = self.keyed().ok_or_else(|| Self::no_envelope(id))?;
                 let selected = self.envelope_selected(keyed);
                 let at = selected.unwrap_or_else(|| self.envelope_marker(keyed));
-                if !self.envelope_points(keyed).iter().any(|p| p.at == at) {
-                    return Err(ShellError::Unavailable {
-                        command: id.to_owned(),
-                        reason: "no breakpoint is selected or at the insert marker".to_owned(),
-                    });
+                // Spec: clip-envelopes R12. With a time selected in the
+                // Envelope Editor and no breakpoint selected, Delete
+                // deletes the selection's range.
+                if selected.is_none()
+                    && self.deletes_range(keyed)
+                    && let Keyed::Clip { clip, target } = keyed
+                {
+                    self.run_command(
+                        bl_shell_spec::clip_envelope_editing::DELETE_RANGE,
+                        json!({ "clip": clip, "target": target }),
+                    )?;
+                } else {
+                    if !self.envelope_points(keyed).iter().any(|p| p.at == at) {
+                        return Err(ShellError::Unavailable {
+                            command: id.to_owned(),
+                            reason: "no breakpoint is selected or at the insert marker".to_owned(),
+                        });
+                    }
+                    let (command, args) = Self::delete_breakpoint_command(keyed, at);
+                    self.run_command(command, args)?;
+                    self.select_envelope_breakpoint(keyed, None);
                 }
-                let (command, args) = Self::delete_breakpoint_command(keyed, at);
-                self.run_command(command, args)?;
-                self.select_envelope_breakpoint(keyed, None);
                 keyed
             }
             ids::DELETE => {

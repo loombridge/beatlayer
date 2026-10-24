@@ -75,7 +75,15 @@ pub fn item_state_in(
             let chord = keymap.chord_for_shortcut(shortcuts[0], platform);
             shortcuts
                 .iter()
-                .find_map(|shortcut| keymap.command_for(shortcut, contexts))
+                .find_map(|shortcut| {
+                    keymap.command_for_running(shortcut, contexts, |command| {
+                        shell.can_invoke_in(
+                            &command.id,
+                            &Value::Object(command.args.clone()),
+                            contexts,
+                        )
+                    })
+                })
                 .map_or_else(
                     || inert(chord),
                     |command| {

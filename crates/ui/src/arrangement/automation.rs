@@ -147,13 +147,7 @@ impl Lane<'_> {
 
     /// The handle of the time selection's box under a point, if any.
     fn handle_at(&self, pos: Pos2) -> Option<Handle> {
-        let rect = self.span_box()?;
-        Handle::ALL
-            .into_iter()
-            .map(|handle| (handle, handle.pos(rect).distance(pos)))
-            .filter(|(_, away)| *away <= HANDLE_GRAB)
-            .min_by(|(_, a), (_, b)| a.total_cmp(b))
-            .map(|(handle, _)| handle)
+        Handle::at(self.span_box()?, pos)
     }
 
     /// How far a point is from the envelope's line, if it is near it.
@@ -563,7 +557,7 @@ pub(crate) fn mark_controls(
 /// One of the eight handles on a hovered time selection's box (the
 /// automation editing spec, R14).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Handle {
+pub(crate) enum Handle {
     Top,
     Bottom,
     Left,
@@ -575,7 +569,7 @@ pub(super) enum Handle {
 }
 
 impl Handle {
-    const ALL: [Self; 8] = [
+    pub(crate) const ALL: [Self; 8] = [
         Self::Top,
         Self::Bottom,
         Self::Left,
@@ -585,6 +579,16 @@ impl Handle {
         Self::BottomLeft,
         Self::BottomRight,
     ];
+
+    /// The handle of the box `rect` that a press at `pos` grabs, if any.
+    pub(crate) fn at(rect: Rect, pos: Pos2) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .map(|handle| (handle, handle.pos(rect).distance(pos)))
+            .filter(|(_, away)| *away <= HANDLE_GRAB)
+            .min_by(|(_, a), (_, b)| a.total_cmp(b))
+            .map(|(handle, _)| handle)
+    }
 
     /// Where the handle sits on `rect`.
     fn pos(self, rect: Rect) -> Pos2 {
@@ -616,7 +620,7 @@ impl Handle {
 /// where the bottom and top edges run at its start and end, as shares of
 /// the parameter's travel.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(super) struct BoxShape {
+pub(crate) struct BoxShape {
     start: Ticks,
     end: Ticks,
     bottom: (f64, f64),
@@ -626,8 +630,7 @@ pub(super) struct BoxShape {
 impl BoxShape {
     /// The box's four corners on screen: top left, top right, bottom right,
     /// bottom left.
-    fn corners(self, rect: Rect, horizontal: Horizontal) -> [Pos2; 4] {
-        let x = |at: Ticks| rect.left() + horizontal.x(at) as f32;
+    pub(crate) fn corners(self, rect: Rect, x: impl Fn(Ticks) -> f32) -> [Pos2; 4] {
         let y = |share: f64| rect.bottom() - share as f32 * rect.height();
         [
             pos2(x(self.start), y(self.top.0)),
@@ -638,19 +641,37 @@ impl BoxShape {
     }
 }
 
-/// The box a handle's drag makes of the one that began it, for the pointer
-/// at `pointer` (the automation editing spec, R15 to R17): Shift makes a
-/// vertical drag finer, Option (Alt on Windows) moves the opposite handle
-/// the opposite way, and Cmd (Alt on Windows) does the opposite of the
-/// grid's setting.
-#[expect(clippy::too_many_arguments, reason = "the drag's inputs")]
-fn drag_box(
-    handle: Handle,
-    from: (Ticks, Ticks),
-    rect: Rect,
+/// Where a handle drag's pointer is in time: on the editing grid, unless Cmd
+/// (Alt on Windows) does the opposite of the grid's setting (S-ENV-006).
+fn handle_time(
     view: &ArrangementView,
     doc: &Document,
     horizontal: Horizontal,
+    rect: Rect,
+    pointer: Pos2,
+    modifiers: Modifiers,
+) -> Ticks {
+    let invert = if cfg!(target_os = "macos") {
+        modifiers.mac_cmd
+    } else {
+        modifiers.alt
+    };
+    view.snap_drag(
+        doc,
+        horizontal.at(f64::from(pointer.x - rect.left())),
+        invert,
+    )
+}
+
+/// The box a handle's drag makes of the one that began it, for the pointer
+/// at `pointer`, which is at `at` in time once snapped (the automation
+/// editing spec, R15 to R17): Shift makes a vertical drag finer, and Option
+/// (Alt on Windows) moves the opposite handle the opposite way.
+pub(crate) fn drag_box(
+    handle: Handle,
+    from: (Ticks, Ticks),
+    rect: Rect,
+    at: Ticks,
     pointer: Pos2,
     modifiers: Modifiers,
 ) -> BoxShape {
@@ -673,16 +694,6 @@ fn drag_box(
         }
     };
     let mirror = modifiers.alt;
-    let invert = if cfg!(target_os = "macos") {
-        modifiers.mac_cmd
-    } else {
-        modifiers.alt
-    };
-    let at = view.snap_drag(
-        doc,
-        horizontal.at(f64::from(pointer.x - rect.left())),
-        invert,
-    );
     match handle {
         Handle::Top => {
             let top = height(1.0);
@@ -744,23 +755,44 @@ fn drag_box(
     shape
 }
 
+/// The commands a handle's drag runs: the stretch of values, the stretch in
+/// time and the skew.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct BoxCommands {
+    pub stretch_values: &'static str,
+    pub stretch_time: &'static str,
+    pub skew: &'static str,
+}
+
+/// The automation lane's.
+const LANE_BOX: BoxCommands = BoxCommands {
+    stretch_values: "automation.stretch_values",
+    stretch_time: "automation.stretch_time",
+    skew: "automation.skew",
+};
+
 /// The command that makes the box a handle's drag drew.
-fn box_command(handle: Handle, shape: BoxShape, carry: bool) -> (&'static str, Value) {
+pub(crate) fn box_command(
+    handle: Handle,
+    shape: BoxShape,
+    carry: bool,
+    commands: BoxCommands,
+) -> (&'static str, Value) {
     match handle {
         Handle::Top | Handle::Bottom => (
-            "automation.stretch_values",
+            commands.stretch_values,
             json!({ "bottom": shape.bottom.0, "top": shape.top.0 }),
         ),
         Handle::Left | Handle::Right => (
-            "automation.stretch_time",
+            commands.stretch_time,
             json!({ "to_start": shape.start, "to_end": shape.end, "carry": carry }),
         ),
         Handle::TopLeft | Handle::TopRight => (
-            "automation.skew",
+            commands.skew,
             json!({ "edge": "top", "at_start": shape.top.0, "at_end": shape.top.1 }),
         ),
         Handle::BottomLeft | Handle::BottomRight => (
-            "automation.skew",
+            commands.skew,
             json!({ "edge": "bottom", "at_start": shape.bottom.0, "at_end": shape.bottom.1 }),
         ),
     }
@@ -956,17 +988,9 @@ impl AutomationGestures {
                 rect,
                 horizontal,
             } => {
-                let shape = drag_box(
-                    *handle,
-                    *span,
-                    *rect,
-                    view,
-                    doc,
-                    *horizontal,
-                    pointer,
-                    modifiers,
-                );
-                Some(box_command(*handle, shape, modifiers.shift))
+                let at = handle_time(view, doc, *horizontal, *rect, pointer, modifiers);
+                let shape = drag_box(*handle, *span, *rect, at, pointer, modifiers);
+                Some(box_command(*handle, shape, modifiers.shift, LANE_BOX))
             }
             LaneDrag::Breakpoint {
                 target,
@@ -1067,17 +1091,9 @@ impl AutomationGestures {
             return None;
         };
         (self.lane == Some(track)).then(|| {
-            drag_box(
-                *handle,
-                *span,
-                *rect,
-                view,
-                doc,
-                *horizontal,
-                pointer,
-                modifiers,
-            )
-            .corners(*rect, *horizontal)
+            let at = handle_time(view, doc, *horizontal, *rect, pointer, modifiers);
+            drag_box(*handle, *span, *rect, at, pointer, modifiers)
+                .corners(*rect, |at| rect.left() + horizontal.x(at) as f32)
         })
     }
 
@@ -1321,9 +1337,21 @@ pub(super) fn paint_handles(
     theme: &Theme,
     outline: Option<[Pos2; 4]>,
 ) {
-    let Some(rect) = lane.span_box() else {
-        return;
-    };
+    if let Some(rect) = lane.span_box() {
+        paint_handles_at(painter, ui, rect, theme, outline);
+    }
+}
+
+/// Paints the handles of a time selection's box, `rect`, while the pointer
+/// is over it or a handle is being dragged, and the outline of the box a drag
+/// has made.
+pub(crate) fn paint_handles_at(
+    painter: &Painter,
+    ui: &Ui,
+    rect: Rect,
+    theme: &Theme,
+    outline: Option<[Pos2; 4]>,
+) {
     let hover = ui.input(|i| i.pointer.hover_pos());
     if outline.is_none() && !hover.is_some_and(|pos| rect.expand(HANDLE_GRAB).contains(pos)) {
         return;

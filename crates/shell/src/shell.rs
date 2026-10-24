@@ -285,6 +285,9 @@ pub enum Effect {
     Hide,
     /// Show the About window.
     ShowAbout,
+    /// Show these files and folders in the system's file manager (Finder,
+    /// File Explorer): the browser's Show in Finder (browser R25).
+    ShowInFileManager(Vec<PathBuf>),
     /// Open the Settings window, or bring it to the front.
     OpenSettings,
     /// Close the Settings window.

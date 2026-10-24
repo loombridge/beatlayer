@@ -13463,6 +13463,7 @@ One row of the content pane.
 | `depth` | integer from 0 to 65535 | yes | How deep it's indented: 0 at the top of the list. |
 | `open` | boolean | yes | For a folder, whether it's open. |
 | `clip_kind` | [`ClipFileKind`](#clipfilekind) or null | no | For a clip file, what it holds; `null` when its first bytes don't say (a damaged file), which placing refuses (clip files R6). |
+| `collections` | array of integer from 0 to 255 | no | The collections it is in, by their numbers (1 is Favorites), in order; left out while it is in none (spec: browser-tags R35, R40). |
 | `details` | [`ItemDetails`](#itemdetails) or null | no | What the optional columns show for it, left out while none shows (spec: browser-tags R27). |
 | `folder` | string or null | no | In search results, the folder it's in, relative to its place. |
 | `format` | [`PluginFormat`](#pluginformat) or null | no | For a plug-in, its format, which the row's badge shows (the plug-in scanning spec, R11). |
@@ -13483,6 +13484,16 @@ One row of the content pane.
         }
       ],
       "description": "For a clip file, what it holds; `null` when its first bytes don't say (a damaged file), which placing refuses (clip files R6)."
+    },
+    "collections": {
+      "description": "The collections it is in, by their numbers (1 is Favorites), in order; left out while it is in none (spec: browser-tags R35, R40).",
+      "items": {
+        "format": "uint8",
+        "maximum": 255,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": "array"
     },
     "depth": {
       "description": "How deep it's indented: 0 at the top of the list.",
@@ -14151,7 +14162,7 @@ One of:
 
 ### `Label`
 
-A label in the browser's sidebar: `all`, a Library category (`sounds`, `drums`, `instruments`, `audio_effects`, `midi_effects`, `modulators`, `plug_ins`, `clips`, `samples`, `grooves`, `tunings`, `templates`), a place (`user_library`, `current_project`), or a folder added to Places, as `{"folder": "/its/path"}`, or a saved label, as `{"saved": 3}`.
+A label in the browser's sidebar: `all`, a Library category (`sounds`, `drums`, `instruments`, `audio_effects`, `midi_effects`, `modulators`, `plug_ins`, `clips`, `samples`, `grooves`, `tunings`, `templates`), a place (`user_library`, `current_project`), or a folder added to Places, as `{"folder": "/its/path"}`, or a saved label, as `{"saved": 3}`, or a collection, 1 (Favorites) to 7 (Gray), as `{"collection": 3}`.
 
 One of:
 
@@ -14172,12 +14183,13 @@ One of:
 - `"current_project"`: The open set's project folder.
 - an object with `folder` (string): A folder the person added to Places, by its path.
 - an object with `saved` (integer): A saved label, by its ID (spec: browser-tags R24).
+- an object with `collection` (integer from 0 to 255): A collection, by its number: 1 is Favorites, 7 Gray (spec: browser-tags R34).
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "A label in the browser's sidebar: `all`, a Library category (`sounds`, `drums`, `instruments`, `audio_effects`, `midi_effects`, `modulators`, `plug_ins`, `clips`, `samples`, `grooves`, `tunings`, `templates`), a place (`user_library`, `current_project`), or a folder added to Places, as `{\"folder\": \"/its/path\"}`, or a saved label, as `{\"saved\": 3}`.",
+  "description": "A label in the browser's sidebar: `all`, a Library category (`sounds`, `drums`, `instruments`, `audio_effects`, `midi_effects`, `modulators`, `plug_ins`, `clips`, `samples`, `grooves`, `tunings`, `templates`), a place (`user_library`, `current_project`), or a folder added to Places, as `{\"folder\": \"/its/path\"}`, or a saved label, as `{\"saved\": 3}`, or a collection, 1 (Favorites) to 7 (Gray), as `{\"collection\": 3}`.",
   "oneOf": [
     {
       "const": "all",
@@ -14278,6 +14290,22 @@ One of:
       },
       "required": [
         "saved"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "A collection, by its number: 1 is Favorites, 7 Gray (spec: browser-tags R34).",
+      "properties": {
+        "collection": {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "collection"
       ],
       "type": "object"
     }
@@ -24545,7 +24573,7 @@ A sidebar section.
 
 One of:
 
-- `"collections"`: Collections (M6).
+- `"collections"`: The seven collections (spec: browser-tags R34).
 - `"library"`: The Library labels.
 - `"places"`: Places: folders on disk.
 
@@ -24557,7 +24585,7 @@ One of:
   "oneOf": [
     {
       "const": "collections",
-      "description": "Collections (M6).",
+      "description": "The seven collections (spec: browser-tags R34).",
       "type": "string"
     },
     {

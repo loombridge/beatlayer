@@ -204,6 +204,15 @@ impl BrowserView {
         Ok(())
     }
 
+    /// Whether `label` is a label the sidebar lets the person rename and
+    /// hide: a Library label, a saved label or a collection, that exists.
+    fn check_shown_label(&self, label: &Label) -> Result<(), BrowserError> {
+        if label.is_collection() {
+            return self.check_label(label);
+        }
+        self.check_library_label(label)
+    }
+
     /// Keeps what the browser shows as a saved label and chooses it, its
     /// name open for editing (spec: browser-tags R24).
     pub(super) fn add_label(&mut self) -> Result<(), BrowserError> {
@@ -255,13 +264,13 @@ impl BrowserView {
     pub(super) fn rename_label(&mut self, args: RenameLabelArgs) -> Result<bool, BrowserError> {
         let RenameLabelArgs { label, name } = args;
         let label = label.unwrap_or_else(|| self.label.clone());
-        if !label.is_library() {
+        if !label.is_library() && !label.is_collection() {
             return Err(BrowserError::InvalidArgs(format!(
                 "{} takes its folder's name and isn't renamed",
                 self.label_name(&label)
             )));
         }
-        self.check_library_label(&label)?;
+        self.check_shown_label(&label)?;
         let Some(name) = name else {
             self.renaming_label = if self.renaming_label.as_ref() == Some(&label) {
                 None
@@ -307,6 +316,12 @@ impl BrowserView {
                 label.name()
             )));
         }
+        if label.is_collection() {
+            return Err(BrowserError::InvalidArgs(format!(
+                "{} has its colour, not an icon",
+                self.label_name(&label)
+            )));
+        }
         if let Label::Folder(_) = &label {
             self.check_label(&label)?;
         } else {
@@ -341,7 +356,7 @@ impl BrowserView {
     /// Shows or hides a Library or saved label in the sidebar.
     pub(super) fn set_label_shown(&mut self, args: SetLabelShownArgs) -> Result<(), BrowserError> {
         let SetLabelShownArgs { label, shown } = args;
-        self.check_library_label(&label)?;
+        self.check_shown_label(&label)?;
         if label == Label::All && !shown {
             return Err(BrowserError::InvalidArgs("All can't be hidden".to_owned()));
         }
@@ -356,6 +371,12 @@ impl BrowserView {
     /// Moves a label within the Library section.
     pub(super) fn move_label(&mut self, args: MoveLabelArgs) -> Result<(), BrowserError> {
         let MoveLabelArgs { label, position } = args;
+        if label.is_collection() {
+            return Err(BrowserError::InvalidArgs(format!(
+                "{} keeps its place: the collections are always in the same order",
+                self.label_name(&label)
+            )));
+        }
         self.check_library_label(&label)?;
         if label == Label::All {
             return Err(BrowserError::InvalidArgs("All stays first".to_owned()));

@@ -426,6 +426,9 @@ pub struct AudioHost {
     media: Option<Arc<MediaStore>>,
     /// The running engine's streams, for their figures.
     streams: Option<Arc<MediaStreams>>,
+    /// The shell's analyses, which give the engine the files' transients
+    /// (the warp modes spec, R14).
+    analysis: crate::analysed_media::AnalysisSlot,
     /// How many engines have started, so a host can tell a new one, which
     /// holds none of the commands scheduled on the last (WP-1.15b).
     engines: u64,
@@ -524,6 +527,7 @@ impl AudioHost {
             drop_thread: None,
             media: None,
             streams: None,
+            analysis: crate::analysed_media::AnalysisSlot::default(),
             engines: 0,
             held_reports: Vec::new(),
             held_captured: Vec::new(),
@@ -562,6 +566,21 @@ impl AudioHost {
     /// and without it, clips play silence.
     pub fn set_media(&mut self, media: Arc<MediaStore>) {
         self.media = Some(media);
+    }
+
+    /// Gives every engine from now on the files' transients as `analysis`
+    /// reads them, which Beats clips cut at (the warp modes spec, R14).
+    pub fn set_analysis(&mut self, analysis: crate::analysed_media::AnalysisSlot) {
+        self.analysis = analysis;
+    }
+
+    /// Tells the running engine `media`'s analysis is ready, so the clips
+    /// that play it are compiled again with its transients. Nothing while
+    /// no engine runs: the next one asks when it compiles them.
+    pub fn media_analysed(&self, media: bl_model::ContentHash) {
+        if let Some(engine) = &self.engine {
+            engine.media_analysed(media);
+        }
     }
 
     /// Gives every engine from now on the CLAP host's plug-ins (WP-2.6).
@@ -1289,7 +1308,10 @@ impl AudioHost {
             let streams = MediaStreams::new(Arc::clone(media))
                 .map_err(|e| format!("couldn't start the disk thread: {e}"))?;
             let streams = Arc::new(streams);
-            registry.set_media(Arc::clone(&streams) as Arc<dyn MediaLibrary>);
+            registry.set_media(crate::analysed_media::AnalysedMedia::library(
+                Arc::clone(&streams) as Arc<dyn MediaLibrary>,
+                self.analysis.clone(),
+            ));
             self.streams = Some(streams);
         }
         let (engine, mut processor) = Engine::start(config, registry)

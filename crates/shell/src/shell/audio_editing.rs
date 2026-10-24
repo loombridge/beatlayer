@@ -6,7 +6,6 @@
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeSet;
 use std::rc::Rc;
-use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use bl_core::time::Ticks;
@@ -887,7 +886,7 @@ impl Shell {
         let prepared =
             consolidate_document(document, track, place.lane).map_err(|why| failed(id, why))?;
         let rate = self.engine_rate();
-        let media: Arc<dyn bl_engine::MediaLibrary> = self.media.clone();
+        let media = self.engine_media();
         let spec = crate::export::Render {
             start,
             length: crate::export::Length::To(end),

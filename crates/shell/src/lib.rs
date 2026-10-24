@@ -65,6 +65,7 @@
 //! crate, so every command and setting can be driven and tested headless.
 
 pub mod agent;
+pub mod analysed_media;
 pub mod arrangement;
 pub mod assistant;
 pub mod audio;

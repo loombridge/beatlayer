@@ -447,7 +447,7 @@ impl Shell {
         let selection = self.arrangement.time_selection();
         let selected: Vec<TrackId> = self.arrangement.selected_tracks().to_vec();
         let document = self.editor.document().clone();
-        let media: Arc<dyn bl_engine::MediaLibrary> = self.media.clone();
+        let media = self.engine_media();
         let store = Arc::clone(&self.media);
         let session = self.realtime.clone();
         // A render that ran before leaves nothing behind: the session

@@ -230,6 +230,9 @@ enum Request {
     /// The latency a device's node reports now, from a plug-in that
     /// changed its own (WP-2.7).
     Latency(DeviceId, u32),
+    /// A file's analysis is ready: the clips that play it are compiled
+    /// again, so a Beats clip cuts at its transients (warp-modes R14).
+    MediaAnalysed(bl_model::ContentHash),
     /// The audio interface's output latency and round trip in frames now
     /// (WP-5.34).
     RoundTrip {
@@ -341,6 +344,7 @@ impl std::fmt::Debug for Request {
             Self::Param(_) => "Param",
             Self::Data(..) => "Data",
             Self::Latency(..) => "Latency",
+            Self::MediaAnalysed(_) => "MediaAnalysed",
             Self::RoundTrip { .. } => "RoundTrip",
             Self::Transport(..) => "Transport",
             Self::Schedule(_) => "Schedule",
@@ -548,6 +552,15 @@ impl Engine {
     /// (WP-2.7; delay-compensation R6).
     pub fn set_device_latency(&self, device: DeviceId, frames: u32) {
         self.request(Request::Latency(device, frames));
+    }
+
+    /// Tells the engine `media`'s analysis is now ready in the media
+    /// library: every track that plays the file gets its clips again, so a
+    /// Beats clip's plan cuts at the transients the library now gives
+    /// (the warp modes spec, R14). The document hasn't changed, so a sync
+    /// wouldn't.
+    pub fn media_analysed(&self, media: bl_model::ContentHash) {
+        self.request(Request::MediaAnalysed(media));
     }
 
     /// Reports the audio interface's latency now, in frames: `output`, the
@@ -803,6 +816,15 @@ fn compile_loop(
                         } else {
                             counts.without_program.fetch_add(1, Relaxed);
                         }
+                        sender.send_update(update);
+                    }
+                }
+                Request::MediaAnalysed(media) => {
+                    // While no processor runs, the next restart compiles
+                    // every clip anew, asking the library then.
+                    if let Some(sender) = sender.as_mut() {
+                        let update = compiler.media_analysed(media);
+                        counts.without_program.fetch_add(1, Relaxed);
                         sender.send_update(update);
                     }
                 }

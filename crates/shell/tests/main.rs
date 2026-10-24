@@ -21,6 +21,7 @@ mod automation;
 mod automation_record;
 mod autosample;
 mod beat_repeat;
+mod beats_transients;
 mod bounce;
 mod browser;
 mod browser_filters;

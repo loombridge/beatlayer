@@ -28410,6 +28410,7 @@ What the view commands return: the window's view state afterwards.
 | `main_view` | string | yes | The main view: `arrangement` or `session`. |
 | `browser` | boolean | yes | Whether the browser shows. |
 | `full_height_browser` | boolean | yes | Whether the browser runs down to the Status Bar (Full-Height Browser, spec: browser R26). |
+| `browser_width` | number | yes | The browser's width in points at 100%, as it was set; a window too narrow for it shows the browser narrower (browser R29). |
 | `info_view` | boolean | yes | Whether the Info View shows. |
 | `full_screen` | boolean | yes | Whether the main window is in full-screen mode. |
 | `zoom` | number | yes | The interface zoom, where 1 is 100%. |
@@ -28423,6 +28424,12 @@ What the view commands return: the window's view state afterwards.
     "browser": {
       "description": "Whether the browser shows.",
       "type": "boolean"
+    },
+    "browser_width": {
+      "default": 302.0,
+      "description": "The browser's width in points at 100%, as it was set; a window too narrow for it shows the browser narrower (browser R29).",
+      "format": "float",
+      "type": "number"
     },
     "full_height_browser": {
       "default": false,
@@ -28451,6 +28458,7 @@ What the view commands return: the window's view state afterwards.
     "main_view",
     "browser",
     "full_height_browser",
+    "browser_width",
     "info_view",
     "full_screen",
     "zoom"

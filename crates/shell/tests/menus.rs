@@ -168,6 +168,7 @@ fn every_shell_command_is_on_a_menu_or_a_control() {
         // View's height (R10).
         commands::VIEW_SHOW_DETAIL_VIEWS,
         commands::VIEW_SET_DETAIL_HEIGHT,
+        commands::VIEW_SET_BROWSER_WIDTH,
         // A query for agents, like `transport.state`.
         commands::VIEW_STATE,
         // The Shortcuts page's buttons (the custom shortcuts spec, R8 and

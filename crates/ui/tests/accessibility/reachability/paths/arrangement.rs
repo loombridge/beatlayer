@@ -196,6 +196,12 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
         ),
         ("view.lane", Exception(NOTE_EDITOR)),
         ("view.lanes", Exception(NOTE_FOOTER)),
+        // The MPE tab's lane toggles are switches Tab reaches (the MPE spec,
+        // R34).
+        (
+            "view.mpe_lanes",
+            main(mpe_tab_shown, detail_area, "Pressure", Key::Enter),
+        ),
         // The list of the set's plug-ins (IMP-29, WP-6.41): Enter on its
         // Show Only Missing switch.
         (

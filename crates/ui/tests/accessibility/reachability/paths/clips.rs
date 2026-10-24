@@ -238,14 +238,21 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
         // note-selection keys (S-A11Y-010, S-A11Y-011), Delete
         // (S-EDIT-005) and Cmd-A (S-NOTE-001).
         ("note.ramp_value", Exception(NOTE_EDITOR)),
-        // The Clip View's MPE tab, where a note's expression envelopes are
-        // edited by the pointer and the keyboard, is WP-6.18's.
+        // The Clip View's MPE tab (WP-6.18): its breakpoint edits.
+        ("note.set_expression", Exception(MPE_BREAKPOINTS)),
+        ("note.add_expression_breakpoint", Exception(MPE_BREAKPOINTS)),
         (
-            "note.set_expression",
-            Exception(LaterView(
-                "the Clip View's MPE tab, where a note's expression envelopes are edited (WP-6.18)",
-            )),
+            "note.move_expression_breakpoints",
+            Exception(MPE_BREAKPOINTS),
         ),
+        (
+            "note.delete_expression_breakpoints",
+            Exception(MPE_BREAKPOINTS),
+        ),
+        ("note.set_expression_curve", Exception(MPE_BREAKPOINTS)),
+        ("note.scale_expression", Exception(MPE_BREAKPOINTS)),
+        ("note.draw_expression", Exception(MPE_BREAKPOINTS)),
+        ("note.clear_expressions", Exception(MPE_BREAKPOINTS)),
         // Spec: step-recording R2. The pointer's press plays a preview; from
         // the keyboard, selecting a note with the note-jump keys sounds it.
         (

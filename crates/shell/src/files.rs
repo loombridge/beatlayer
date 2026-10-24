@@ -16,7 +16,7 @@ use std::path::{Component, Path, PathBuf};
 use bl_core::id::IdAllocator;
 use bl_model::{
     ClipFolds, ContentHash, DEFAULT_SCENE_COUNT, DeviceWindows, Document, Editor, LaunchSettings,
-    MultisamplerViews, RackViewMap, SceneId, TrackId, TrackKind, WindowViews, registry,
+    MpeView, MultisamplerViews, RackViewMap, SceneId, TrackId, TrackKind, WindowViews, registry,
 };
 use bl_project::midi_tools::MidiToolSettings;
 use bl_project::{
@@ -233,6 +233,18 @@ pub trait SetStore {
         WindowViews::default()
     }
 
+    /// Gives the store the MPE tab's lanes and grids (WP-6.18), for the next
+    /// save to write beside the document. A store that keeps none ignores
+    /// it.
+    fn set_mpe_view(&mut self, view: MpeView) {
+        let _ = view;
+    }
+
+    /// The open set's MPE tab lanes and grids, as it was saved.
+    fn mpe_view(&self) -> MpeView {
+        MpeView::default()
+    }
+
     /// Writes `editor` to `path` as a copy without making it the open set:
     /// the default set and templates (WP-2.25). Returns warnings about
     /// things that went wrong without stopping the write. A store that
@@ -329,6 +341,9 @@ pub struct ProjectFiles {
     /// The main view and the second window (WP-6.29): the open set's, then
     /// the shell's for the next save.
     window_views: WindowViews,
+    /// The MPE tab's lanes and grids (WP-6.18): the open set's, then the
+    /// shell's for the next save.
+    mpe_view: MpeView,
 }
 
 impl ProjectFiles {
@@ -356,6 +371,7 @@ impl SetStore for ProjectFiles {
         self.midi_tools = project.midi_tools;
         self.launch = project.launch;
         self.window_views = project.window_views;
+        self.mpe_view = project.mpe_view;
         self.added.clear();
         Ok((editor, opened))
     }
@@ -427,6 +443,7 @@ impl SetStore for ProjectFiles {
         self.midi_tools = MidiToolSettings::default();
         self.launch = LaunchSettings::default();
         self.window_views = WindowViews::default();
+        self.mpe_view = MpeView::default();
         self.added.clear();
     }
 
@@ -447,6 +464,7 @@ impl SetStore for ProjectFiles {
             .with_midi_tools(&self.midi_tools)
             .with_launch(self.launch)
             .with_window_views(self.window_views)
+            .with_mpe_view(&self.mpe_view)
     }
 
     fn adopt(&mut self, set: Option<SetFile>, project: Project) {
@@ -459,6 +477,7 @@ impl SetStore for ProjectFiles {
         self.midi_tools = project.midi_tools;
         self.launch = project.launch;
         self.window_views = project.window_views;
+        self.mpe_view = project.mpe_view;
         self.added.clear();
     }
 
@@ -520,6 +539,14 @@ impl SetStore for ProjectFiles {
 
     fn window_views(&self) -> WindowViews {
         self.window_views
+    }
+
+    fn set_mpe_view(&mut self, view: MpeView) {
+        self.mpe_view = view;
+    }
+
+    fn mpe_view(&self) -> MpeView {
+        self.mpe_view.clone()
     }
 
     fn launch(&self) -> LaunchSettings {
@@ -591,7 +618,8 @@ impl SetStore for ProjectFiles {
             .with_folds(&self.folds)
             .with_midi_tools(&self.midi_tools)
             .with_launch(self.launch)
-            .with_window_views(self.window_views);
+            .with_window_views(self.window_views)
+            .with_mpe_view(&self.mpe_view);
         let mut set = SetFile::open(path)
             .map(|(set, _)| set)
             .unwrap_or_else(|_| SetFile::new(path.to_owned()));
@@ -790,7 +818,8 @@ impl ProjectFiles {
             .with_folds(&self.folds)
             .with_midi_tools(&self.midi_tools)
             .with_launch(self.launch)
-            .with_window_views(self.window_views);
+            .with_window_views(self.window_views)
+            .with_mpe_view(&self.mpe_view);
         let mut set = self
             .set
             .clone()

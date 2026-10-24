@@ -822,6 +822,7 @@ dependencies = [
  "bl-dsp",
  "bl-engine",
  "bl-media",
+ "bl-midi-tools",
  "bl-model",
  "bl-rt",
  "lspk-dsp",
@@ -930,6 +931,7 @@ name = "bl-midi-tools"
 version = "0.2.0"
 dependencies = [
  "bl-core",
+ "proptest",
 ]
 
 [[package]]

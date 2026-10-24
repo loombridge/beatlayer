@@ -613,6 +613,7 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("set.open_backup", query(Song, "set.unsaved_changes")),
     ("set.recover", query(Song, "set.path")),
     ("set.relink_missing", nothing("finds files outside the set; the clips that use them read their media")),
+    ("set.restore", query(Song, "undo.next_undo")),
     ("set.save", query(Song, "set.unsaved_changes")),
     ("set.save_as", query(Song, "set.path")),
     ("set.save_as_default", nothing(FILE)),

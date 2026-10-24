@@ -88,6 +88,7 @@ mod routing;
 mod sample_editor;
 mod sample_edits;
 mod sampler;
+mod save_history;
 mod scales;
 mod scene_tempo;
 mod search;

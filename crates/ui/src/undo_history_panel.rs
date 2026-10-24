@@ -17,13 +17,13 @@ use crate::main_window::UiEvent;
 use crate::theme::Theme;
 
 /// The header's height (L-LRN-002).
-const HEADER: f32 = 21.0;
+pub(crate) const HEADER: f32 = 21.0;
 /// A row's height (undo history R4).
-const ROW: f32 = 18.0;
+pub(crate) const ROW: f32 = 18.0;
 /// The width the agent's mark takes before a row's label.
 const MARK: f32 = 12.0;
 /// The margin inside the panel.
-const MARGIN: f32 = 6.0;
+pub(crate) const MARGIN: f32 = 6.0;
 
 /// A row of the panel: a step of the history, or the set's start.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -368,7 +368,7 @@ fn draw_row(
 
 /// Paints a row's label, cut short with an ellipsis where it is wider
 /// than the row (R4).
-fn paint_label(ui: &Ui, theme: &Theme, rect: Rect, text: &str, colour: Color32) {
+pub(crate) fn paint_label(ui: &Ui, theme: &Theme, rect: Rect, text: &str, colour: Color32) {
     let galley = ui
         .painter()
         .layout_no_wrap(text.to_owned(), theme.font(), colour);
@@ -397,18 +397,18 @@ fn paint_label(ui: &Ui, theme: &Theme, rect: Rect, text: &str, colour: Color32) 
 }
 
 /// Adds a control to the main window's Tab order.
-fn register(ui: &Ui, id: Id) {
+pub(crate) fn register(ui: &Ui, id: Id) {
     crate::focus::register(ui.ctx(), id, Area::UndoHistory, None);
 }
 
 /// Names a widget for assistive technology.
-fn name(ui: &Ui, id: Id, label: &str) {
+pub(crate) fn name(ui: &Ui, id: Id, label: &str) {
     ui.ctx().accesskit_node_builder(id, |node| {
         node.set_label(label.to_owned());
     });
 }
 
-fn bounds(rect: Rect) -> egui::accesskit::Rect {
+pub(crate) fn bounds(rect: Rect) -> egui::accesskit::Rect {
     egui::accesskit::Rect {
         x0: rect.left().into(),
         y0: rect.top().into(),
@@ -417,6 +417,6 @@ fn bounds(rect: Rect) -> egui::accesskit::Rect {
     }
 }
 
-fn invoke(events: &mut Vec<UiEvent>, id: &str, args: Value) {
+pub(crate) fn invoke(events: &mut Vec<UiEvent>, id: &str, args: Value) {
     events.push(UiEvent::Invoke(Invocation::new(id, args)));
 }

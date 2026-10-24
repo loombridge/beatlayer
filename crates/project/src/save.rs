@@ -282,6 +282,27 @@ fn find_set(path: &Path) -> Result<PathBuf, LoadError> {
 /// Loads a set file and applies its newest save point, returning the file's
 /// fingerprint too.
 fn load_file(path: &Path, options: &LoadOptions) -> Result<(Project, SetInfo, u64), LoadError> {
+    let (project, info, fingerprint) = read_set(path, options)?;
+    let follows = Follows {
+        revision: info.revision,
+        fingerprint,
+    };
+    // The song comes from the save point when there is one, and so does the
+    // schema it was saved in: a set opened by an older build and journalled
+    // by this one holds this build's form there (the modulation spec, R5).
+    let (project, schema) = journal::newest_save_point(path, follows, options)
+        .map_or((project, info.schema), |(project, saved)| {
+            (project, saved.schema)
+        });
+    Ok((project, SetInfo { schema, ..info }, fingerprint))
+}
+
+/// Loads a set file as it was saved, without its save points, returning the
+/// file's fingerprint too.
+pub(crate) fn read_set(
+    path: &Path,
+    options: &LoadOptions,
+) -> Result<(Project, SetInfo, u64), LoadError> {
     let io = |source| LoadError::Io {
         path: path.to_owned(),
         source,
@@ -302,19 +323,7 @@ fn load_file(path: &Path, options: &LoadOptions) -> Result<(Project, SetInfo, u6
         });
     }
     let (project, info) = decode(&bytes, options)?;
-    let fingerprint = fingerprint(&bytes);
-    let follows = Follows {
-        revision: info.revision,
-        fingerprint,
-    };
-    // The song comes from the save point when there is one, and so does the
-    // schema it was saved in: a set opened by an older build and journalled
-    // by this one holds this build's form there (the modulation spec, R5).
-    let (project, schema) = journal::newest_save_point(path, follows, options)
-        .map_or((project, info.schema), |(project, saved)| {
-            (project, saved.schema)
-        });
-    Ok((project, SetInfo { schema, ..info }, fingerprint))
+    Ok((project, info, fingerprint(&bytes)))
 }
 
 /// The file-system operations a save makes, so tests can stop a save after

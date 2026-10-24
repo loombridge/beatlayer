@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-789 commands in 46 areas.
+792 commands in 46 areas.
 
 ## Permission classes
 
@@ -660,11 +660,13 @@ Each command has:
 | [`set.open_backup`](#setopen_backup) | Open Beatlayer Set Backup | `external` |  |  |
 | [`set.recover`](#setrecover) | Recover Set | `destructive` |  |  |
 | [`set.relink_missing`](#setrelink_missing) | Relink Missing Files | `external` |  |  |
+| [`set.restore`](#setrestore) | Restore | `destructive` |  |  |
 | [`set.save`](#setsave) | Save Beatlayer Set | `destructive` | `Cmd+S` | `Ctrl+S` |
 | [`set.save_as`](#setsave_as) | Save Beatlayer Set As... | `external` | `Cmd+Shift+S` | `Ctrl+Shift+S` |
 | [`set.save_as_default`](#setsave_as_default) | Save Beatlayer Set As Default Set... | `destructive` |  |  |
 | [`set.save_as_template`](#setsave_as_template) | Save Beatlayer Set As Template... | `destructive` |  |  |
 | [`set.save_copy`](#setsave_copy) | Save a Copy... | `external` |  |  |
+| [`set.save_history`](#setsave_history) | Save History | `read` |  |  |
 | [`settings.next_page`](#settingsnext_page) | Next Settings Page | `read` | `Option+Tab` | `Ctrl+Tab` |
 | [`settings.previous_page`](#settingsprevious_page) | Previous Settings Page | `read` | `Option+Shift+Tab` | `Ctrl+Shift+Tab` |
 | [`settings.set_appearance`](#settingsset_appearance) | Appearance | `edit` |  |  |
@@ -812,6 +814,7 @@ Each command has:
 | [`view.toggle_info_view`](#viewtoggle_info_view) | Info | `read` | `Shift+Slash` | `Shift+Slash` |
 | [`view.toggle_plug_in_windows`](#viewtoggle_plug_in_windows) | Plug-In Windows | `read` | `Cmd+Option+P` | `Ctrl+Alt+P` |
 | [`view.toggle_plugin_list`](#viewtoggle_plugin_list) | Plug-In List | `read` |  |  |
+| [`view.toggle_save_history`](#viewtoggle_save_history) | Save History | `read` |  |  |
 | [`view.toggle_second_window`](#viewtoggle_second_window) | Second Window | `read` | `Cmd+Shift+W` | `Ctrl+Shift+W` |
 | [`view.toggle_session_arrangement`](#viewtoggle_session_arrangement) | Toggle Arrangement/Session View | `read` | `Tab` | `Tab` |
 | [`view.toggle_undo_history`](#viewtoggle_undo_history) | Undo History | `read` | `Cmd+Option+Z` | `Ctrl+Alt+Z` |
@@ -12048,6 +12051,22 @@ Arguments:
 
 Result: [`FileReport`](#filereport).
 
+#### `set.restore`
+
+**Restore**. Permission: `destructive`. Contexts: `global`.
+
+Replaces the whole song with the one a row of `set.save_history` holds, as one undo step named `Restore Save Point` or `Restore Saved Version` that undo takes back. The set keeps its file and name, and the transport keeps playing. With Save Continuously on the restore is a new save point; every row stays listed. A row that can't be read changes nothing. Read the result back with the query tool's `song` (`undo.next_undo`).
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `id` | string | yes | The row's `id`, as `set.save_history` gives it. |
+
+Result: [`Restored`](#restored).
+
 #### `set.save`
 
 **Save Beatlayer Set**. Permission: `destructive`. Contexts: `global`.
@@ -12131,6 +12150,18 @@ Arguments:
 | `path` | string | yes | Where to save the copy, as a save dialog gives it: a folder and the set's name, such as `/Music/Tango.blset`. |
 
 Result: [`SavedCopy`](#savedcopy).
+
+#### `set.save_history`
+
+**Save History**. Permission: `read`. Contexts: `global`.
+
+Lists the open set's save history, newest first: the save points Save Continuously kept since the last save (none while it is off), then the set as last saved, then its backups. Each row has an `id` for `set.restore`, its kind (`save_point`, `saved` or `backup`), its time in UTC and its label, which is the edit's name for a save point. A set never saved has no rows. Changes nothing.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`SaveHistory`](#savehistory).
 
 ### Area `settings`
 
@@ -14426,7 +14457,7 @@ Result: [`DetailState`](#detailstate).
 
 **View State**. Permission: `read`. Contexts: `global`.
 
-Reports what the view commands switch: the main view (Arrangement or Session), whether the browser and the Info View show, full-screen mode and the zoom (`view.toggle_session_arrangement`, `view.toggle_browser`, `view.toggle_info_view`, `view.full_screen`, `view.set_zoom`), the Clip View with Draw Mode, the lane, Fold and the selected notes (`view.toggle_clip_view`, `view.draw_mode`, `view.lane`, `view.fold_notes`), the detail area under `detail`: which of the Clip View and the Device View show, the Clip View's height and where the focus is (`view.toggle_clip_view`, `view.toggle_device_view`, `view.show_detail_views`, `view.switch_detail_view`, `view.toggle_detail_area`, `view.expand_clip_view`, `view.set_detail_height`, `focus.clip_view`, `focus.device_view`), the assistant's panel, the Undo History (`view.toggle_undo_history`), whether plug-in windows are shown (`view.toggle_plug_in_windows`), the second window under `second_window`: whether it is open, its main view, browser, full-screen mode, zoom, frame and detail area (`view.toggle_second_window`, and the commands above with `window` set to `second`), and `focused_window`, `main` or `second`, the window the commands that act on one window act on without `window`. Changes nothing. The Arrangement's own view is in `arrangement.state`, the Mixer's in `mixer_view.state`, the Session View's in `session.state` and the Device View's in `device_view.state`.
+Reports what the view commands switch: the main view (Arrangement or Session), whether the browser and the Info View show, full-screen mode and the zoom (`view.toggle_session_arrangement`, `view.toggle_browser`, `view.toggle_info_view`, `view.full_screen`, `view.set_zoom`), the Clip View with Draw Mode, the lane, Fold and the selected notes (`view.toggle_clip_view`, `view.draw_mode`, `view.lane`, `view.fold_notes`), the detail area under `detail`: which of the Clip View and the Device View show, the Clip View's height and where the focus is (`view.toggle_clip_view`, `view.toggle_device_view`, `view.show_detail_views`, `view.switch_detail_view`, `view.toggle_detail_area`, `view.expand_clip_view`, `view.set_detail_height`, `focus.clip_view`, `focus.device_view`), the assistant's panel, the Undo History (`view.toggle_undo_history`), the Save History (`view.toggle_save_history`), whether plug-in windows are shown (`view.toggle_plug_in_windows`), the second window under `second_window`: whether it is open, its main view, browser, full-screen mode, zoom, frame and detail area (`view.toggle_second_window`, and the commands above with `window` set to `second`), and `focused_window`, `main` or `second`, the window the commands that act on one window act on without `window`. Changes nothing. The Arrangement's own view is in `arrangement.state`, the Mixer's in `mixer_view.state`, the Session View's in `session.state` and the Device View's in `device_view.state`.
 
 Default keys: none.
 
@@ -14624,6 +14655,18 @@ Default keys: none.
 Arguments: none (send `{}`).
 
 Result: [`PluginListState`](#pluginliststate).
+
+#### `view.toggle_save_history`
+
+**Save History**. Permission: `read`. Contexts: `global`.
+
+Shows or hides the Save History panel at the right of the main window, where the Undo History opens (showing one hides the other). The panel lists the open set's save points, then its saved versions, newest first; `set.save_history` lists the same rows and `set.restore` restores one. Whether it shows is view state: it isn't saved with the set and isn't an undo step. Changes nothing in the set.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`SaveHistoryState`](#savehistorystate).
 
 #### `view.toggle_second_window`
 
@@ -15137,6 +15180,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`set.open`](#setopen) | the query tool's `song` | `set.path` |
 | [`set.open_backup`](#setopen_backup) | the query tool's `song` | `set.unsaved_changes` |
 | [`set.recover`](#setrecover) | the query tool's `song` | `set.path` |
+| [`set.restore`](#setrestore) | the query tool's `song` | `undo.next_undo` |
 | [`set.save`](#setsave) | the query tool's `song` | `set.unsaved_changes` |
 | [`set.save_as`](#setsave_as) | the query tool's `song` | `set.path` |
 | [`settings.set_appearance`](#settingsset_appearance) | `settings.state` | `theme_colors.appearance` |
@@ -27328,6 +27372,52 @@ A key held on the track's MIDI input, with the velocity it was played at.
 
 </details>
 
+### `HistoryRow`
+
+A row, as `set.save_history` reports it.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | string | yes | The ID `set.restore` takes. |
+| `kind` | [`Kind`](#kind) | yes | What the row is. |
+| `time` | string | yes | When it was journalled or saved, in UTC (RFC 3339). |
+| `label` | string | yes | A save point's edit, as the undo history names it; `Saved` for the others. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A row, as `set.save_history` reports it.",
+  "properties": {
+    "id": {
+      "description": "The ID `set.restore` takes.",
+      "type": "string"
+    },
+    "kind": {
+      "$ref": "#/$defs/Kind",
+      "description": "What the row is."
+    },
+    "label": {
+      "description": "A save point's edit, as the undo history names it; `Saved` for the others.",
+      "type": "string"
+    },
+    "time": {
+      "description": "When it was journalled or saved, in UTC (RFC 3339).",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "kind",
+    "time",
+    "label"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `HotSwap`
 
 Hot-swapping, while it lasts.
@@ -28341,6 +28431,43 @@ The keymap in use, as `keymap.state` reports it.
     "skipped"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `Kind`
+
+What a row of the history is.
+
+One of:
+
+- `"save_point"`: A song Save Continuously kept after an edit.
+- `"saved"`: The set as its file last saved it.
+- `"backup"`: A version of the set that a save replaced, from the `Backup` folder.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a row of the history is.",
+  "oneOf": [
+    {
+      "const": "save_point",
+      "description": "A song Save Continuously kept after an edit.",
+      "type": "string"
+    },
+    {
+      "const": "saved",
+      "description": "The set as its file last saved it.",
+      "type": "string"
+    },
+    {
+      "const": "backup",
+      "description": "A version of the set that a save replaced, from the `Backup` folder.",
+      "type": "string"
+    }
+  ]
 }
 ```
 
@@ -36175,6 +36302,43 @@ What `clip.replace_sample` returns.
 
 </details>
 
+### `Restored`
+
+What `set.restore` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | string | yes | The row that was restored. |
+| `undo_step` | string or null | yes | The undo step the restore is, or null when the song already was the row's, so nothing changed. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `set.restore` returns.",
+  "properties": {
+    "id": {
+      "description": "The row that was restored.",
+      "type": "string"
+    },
+    "undo_step": {
+      "description": "The undo step the restore is, or null when the song already was the row's, so nothing changed.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "id",
+    "undo_step"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `ReturnChoice`
 
 An entry of a return chain's Audio To chooser.
@@ -37033,6 +37197,85 @@ What `clip.save_file` returns.
     "name",
     "kind",
     "copied"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `SaveHistory`
+
+What `set.save_history` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `continuous` | boolean | yes | Whether Save Continuously is on. |
+| `rows` | array of [`HistoryRow`](#historyrow) | yes | The rows, newest first. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `set.save_history` returns.",
+  "properties": {
+    "continuous": {
+      "description": "Whether Save Continuously is on.",
+      "type": "boolean"
+    },
+    "rows": {
+      "description": "The rows, newest first.",
+      "items": {
+        "$ref": "#/$defs/HistoryRow"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "continuous",
+    "rows"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `SaveHistoryState`
+
+What `view.toggle_save_history` returns: the Save History panel's state afterwards.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `open` | boolean | yes | Whether the panel shows. |
+| `rows` | integer, at least 0 | yes | How many rows the history lists (`set.save_history` lists them). |
+| `continuous` | boolean | yes | Whether Save Continuously is on. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `view.toggle_save_history` returns: the Save History panel's state afterwards.",
+  "properties": {
+    "continuous": {
+      "description": "Whether Save Continuously is on.",
+      "type": "boolean"
+    },
+    "open": {
+      "description": "Whether the panel shows.",
+      "type": "boolean"
+    },
+    "rows": {
+      "description": "How many rows the history lists (`set.save_history` lists them).",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "open",
+    "rows",
+    "continuous"
   ],
   "type": "object"
 }
@@ -42777,6 +43020,7 @@ What `view.state` returns: what the view commands switch, without switching any 
 | `plugin_list` | [`PluginListState`](#pluginliststate) | yes | The list of the set's plug-ins: whether it shows, and whether Show Only Missing is on. |
 | `assistant` | [`AssistantPanelState`](#assistantpanelstate) | yes | The assistant's panel. |
 | `undo_history` | boolean | yes | Whether the Undo History panel shows. |
+| `save_history` | boolean | yes | Whether the Save History panel shows. |
 | `plug_in_windows` | boolean | yes | Whether floating devices' and plug-ins' windows are shown, as `view.toggle_plug_in_windows` sets it. |
 
 <details><summary>JSON Schema</summary>
@@ -42809,6 +43053,10 @@ What `view.state` returns: what the view commands switch, without switching any 
       "$ref": "#/$defs/PluginListState",
       "description": "The list of the set's plug-ins: whether it shows, and whether Show Only Missing is on."
     },
+    "save_history": {
+      "description": "Whether the Save History panel shows.",
+      "type": "boolean"
+    },
     "second_window": {
       "$ref": "#/$defs/SecondWindowState",
       "description": "The second window: whether it is open, the main view it shows, its browser, zoom, frame and detail area."
@@ -42831,6 +43079,7 @@ What `view.state` returns: what the view commands switch, without switching any 
     "plugin_list",
     "assistant",
     "undo_history",
+    "save_history",
     "plug_in_windows"
   ],
   "type": "object"

@@ -1,6 +1,6 @@
 # Crash recovery and Save Continuously
 
-- **Status:** partial (R1 to R11, R21 to R28 each have a passing test; R12 to R20 are WP-6.39's)
+- **Status:** implemented (every rule has a passing test)
 - **Work packages:** WP-1.11 (the journal, crash recovery, the Save Continuously option, and their commands: R1 to R11). The recovery prompt and the switch in the Settings window are the app shell's to draw (WP-1.7 and the Settings pages after it). WP-6.62 puts the service in the app: the shell journals every edit, the recovery prompt at launch, and the Save Continuously switch (R21 to R28). WP-6.39 builds the save history, which lists the save points and saved versions and restores them (R12 to R20).
 - **Parity-matrix row:** Files and export: Crash recovery; (Beatlayer only) Save Continuously
 - **Checked against:** the Live 12 reference manual (online edition) and the Live 12 release notes, read on 10 October 2026; for R12 to R28, the manual's chapter 5 again and the Live 12 release notes, read 20 October 2026, and the UI parity reference's menus.md (M-FILE-008, M-VIEW-008) and layout.md (L-WIN-008, L-OTH-001) rows.
@@ -44,11 +44,11 @@ This spec covers when edits reach the disk, when a set is offered, what recoveri
 
 **The save history (IMP-05; WP-6.39)**
 
-- **R12.** File ▸ Save History, straight after Open Beatlayer Set Backups (M-FILE-008), runs `view.toggle_save_history`, which shows the open set's save history in the right-hand area where the Undo History opens (L-WIN-008, L-OTH-001), and hides it again; its close button hides it too. Whether it shows is view state: not saved with the set and no undo step. The item's name and place are Beatlayer's own. (S7, S8)
-- **R13.** The history lists, newest first: the set's save points (R9), each named by its edit's label as the undo history names it, with the time it was journalled; then the set as last saved, the revision its file holds, labelled Saved with the time of that save; then each of the set's backups in its project folder's `Backup` folder (S9), labelled Saved with the time in its name. Times show in local time, with seconds for save points, and with the date for any not of today. A set never saved has no history. (S7, S8, S9)
+- **R12.** File ▸ Save History, straight after Open Beatlayer Set Backups (M-FILE-008), runs `view.toggle_save_history`, which shows the open set's save history in the right-hand area where the Undo History opens (L-WIN-008, L-OTH-001), and hides it again; its close button hides it too. It shares that place with the Undo History, so showing one hides the other. Whether it shows is view state: not saved with the set and no undo step. The item's name and place are Beatlayer's own. (S7, S8)
+- **R13.** The history lists, newest first: the set's save points (R9), each named by its edit's label as the undo history names it, with the time it was journalled; then the set as last saved, the revision its file holds, labelled Saved with the time of that save; then each of the set's backups in its project folder's `Backup` folder (S9), labelled Saved with the time in its name. Times show in local time, with seconds for save points, and with the date for any not of today. A set never saved has no history. With Save Continuously off the history lists no save points, even ones an earlier run of the option left (R14). (S7, S8, S9)
 - **R14.** With Save Continuously off the history has no save points, only the saved versions, and a line above them says that Save Continuously keeps a save point after every edit, with a button that opens Settings at the File & Folder page (R11). (S7)
 - **R15.** The history follows the set while it shows: each save point appears at the top as it's journalled (R1, R8), and a normal save, which retires the save points (R10), clears them from the list and puts the new save at the top, the version it replaced among the backups. (S7, S9)
-- **R16.** Selecting a row and clicking Restore at the history's foot, or double-clicking the row, or pressing Return with it selected, runs `set.restore` for it: the song becomes exactly the song that row holds (a save point's saved form, the set file's song, or a backup's song, migrated as opening it would migrate it), as one undo step named `Restore Save Point` or `Restore Saved Version`, which Undo takes back. The set keeps its file, its name and its project folder, and the transport isn't stopped. The undo names are Beatlayer's own. (S7, S9)
+- **R16.** Selecting a row and clicking Restore at the history's foot, or double-clicking the row, or pressing Return with it selected, runs `set.restore` for it: the song becomes exactly the song that row holds (a save point's saved form, the set file's song, or a backup's song, migrated as opening it would migrate it, and its media table merged into the set's: the set's own entry stays where both name a file, so every clip finds its file), as one undo step named `Restore Save Point` or `Restore Saved Version`, which Undo takes back. The set keeps its file, its name and its project folder, and the transport isn't stopped. The undo names are Beatlayer's own. (S7, S9)
 - **R17.** A restore is an edit like any other: it's journalled (R1), and with Save Continuously on it's a new save point at the top of the history, so every row listed before stays listed and can still be restored. (S7)
 - **R18.** A row whose song can't be read any more (its journal damaged, a backup moved away) restores nothing: the song stays as it was and the Status Bar says why. (S7)
 - **R19.** The history is a list for assistive technology, each row reading its label and its time, and Restore a button; every part works from the keyboard. (S9)
@@ -79,15 +79,15 @@ This spec covers when edits reach the disk, when a set is offered, what recoveri
 | R9 | `crates/project/src/journal.rs`, `committed_entries_are_save_points`; `crates/project/src/autosave.rs`, `saving_retires_the_journal_and_continuous_save_commits` | unit |
 | R10 | `crates/project/src/autosave.rs`, `saving_retires_the_journal_and_continuous_save_commits` | unit |
 | R11 | `crates/ui/tests/recovery.rs`, `the_file_and_folder_switch_turns_save_continuously_on`; `crates/project/src/registry.rs`, `every_command_is_registered_and_complete` covers the command. | UI script |
-| R12 | to be written in WP-6.39 | |
-| R13 | to be written in WP-6.39 | |
-| R14 | to be written in WP-6.39 | |
-| R15 | to be written in WP-6.39 | |
-| R16 | to be written in WP-6.39 | |
-| R17 | to be written in WP-6.39 | |
-| R18 | to be written in WP-6.39 | |
-| R19 | to be written in WP-6.39 | |
-| R20 | to be written in WP-6.39 | |
+| R12 | `crates/ui/tests/save_history.rs`, `the_item_follows_open_set_backups_and_the_panel_opens_and_closes`; `crates/shell/tests/save_history.rs`, `the_panel_toggles_as_view_state_and_shares_the_place_with_the_undo_history` | UI script, integration |
+| R13 | `crates/shell/tests/save_history.rs`, `with_save_continuously_each_edit_lists_as_a_save_point_and_the_third_restores`, `a_normal_save_leaves_the_saved_version_and_the_backups`, `a_set_never_saved_has_no_history`; `crates/ui/tests/save_history.rs`, `the_rows_reach_assistive_technology_newest_first_with_their_times` (the times) | integration, UI script |
+| R14 | `crates/shell/tests/save_history.rs`, `with_save_continuously_off_only_saved_versions_list`; `crates/ui/tests/save_history.rs`, `with_save_continuously_off_a_line_and_a_button_lead_to_settings` | integration, UI script |
+| R15 | `crates/shell/tests/save_history.rs`, `the_panel_toggles_as_view_state_and_shares_the_place_with_the_undo_history` (new save points and a save) | integration |
+| R16 | `crates/shell/tests/save_history.rs`, `with_save_continuously_each_edit_lists_as_a_save_point_and_the_third_restores`, `restoring_a_backup_made_before_a_save_as_still_plays_every_clip`; `crates/ui/tests/save_history.rs`, `restore_and_a_double_click_each_restore_the_row` | integration, UI script |
+| R17 | `crates/shell/tests/save_history.rs`, `with_save_continuously_each_edit_lists_as_a_save_point_and_the_third_restores` | integration |
+| R18 | `crates/shell/tests/save_history.rs`, `a_row_that_cant_be_read_restores_nothing` | integration |
+| R19 | `crates/ui/tests/save_history.rs`, `the_rows_reach_assistive_technology_newest_first_with_their_times`, `return_restores_the_selected_row_from_the_keyboard` | UI script |
+| R20 | `crates/agent/tests/save_history.rs`, `set_restore_asks_first_and_reads_back_as_an_undo_step`; `crates/project/src/history.rs`, `every_command_is_registered_and_complete` | integration, unit |
 | R21 | `crates/shell/tests/recovery.rs`, `a_killed_session_is_offered_and_recovered` (the shell journals the set's edits) | integration |
 | R22 | `crates/ui/tests/recovery.rs`, `the_recovery_prompt_lists_the_crashed_sets_newest_first`, `recovering_from_the_prompt_opens_the_set`, `esc_is_later_and_keeps_the_set_for_the_next_launch` | UI script |
 | R23 | `crates/ui/tests/recovery.rs`, `the_recovery_prompt_lists_the_crashed_sets_newest_first` (the tree), `esc_is_later_and_keeps_the_set_for_the_next_launch` (Esc) | UI script |
@@ -109,3 +109,4 @@ These don't come from Live; they follow from the architecture and IMP-05.
 | Sessions register in a recovery folder in the user's application data: a lock file the running session holds (the operating system lets go when the process dies, however it dies) and an index saying where its journal is. | `crates/project/src/autosave.rs`, `a_session_that_closes_leaves_nothing` |
 | A journal applies to a set only if it follows that set file's revision and fingerprint, so a set replaced by another program never picks up stale save points. | `crates/project/src/journal.rs`, `committed_entries_are_save_points` |
 | Sessions and journal entries from a newer version of Beatlayer are left for that version: an older build sharing the recovery folder neither offers nor tidies them. | `crates/project/src/autosave.rs`, `a_newer_versions_sessions_are_left_alone`; `crates/project/src/journal.rs`, `a_newer_versions_entries_are_recognised` |
+| A restore merges the row's media table into the set's: an entry for a file the set's table lacks is added, and where both name a file the set's own stays, since it points at the file from where the set is now. | `crates/shell/tests/save_history.rs`, `restoring_a_backup_made_before_a_save_as_still_plays_every_clip` |

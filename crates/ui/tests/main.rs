@@ -55,6 +55,7 @@ mod realtime_dialog;
 mod recovery;
 mod sample_display;
 mod sample_editor;
+mod save_history;
 mod scales;
 mod scene_view;
 mod search_field;

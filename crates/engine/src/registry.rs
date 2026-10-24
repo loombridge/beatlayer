@@ -16,7 +16,7 @@
 
 use std::sync::Arc;
 
-use bl_model::{Device, DeviceDescription, DeviceId, DeviceKind, DeviceRole};
+use bl_model::{AraSupport, Device, DeviceDescription, DeviceId, DeviceKind, DeviceRole};
 
 use crate::clips::MediaLibrary;
 use crate::node::{Node, NodeConfig};
@@ -44,6 +44,14 @@ pub trait NodeFactory: Send + Sync {
     fn outputs(&self, kind: &DeviceKind) -> Vec<String> {
         let _ = kind;
         Vec::new()
+    }
+
+    /// What `device` does as an ARA plug-in (IMP-20), if it is one: a track
+    /// whose chain holds such a device leaves the clips the plug-in renders
+    /// to it ([`bl_model::ara_renders`]). The default says none is.
+    fn ara_support(&self, device: &Device) -> Option<AraSupport> {
+        let _ = device;
+        None
     }
 }
 
@@ -331,6 +339,15 @@ impl Registry {
     #[must_use]
     pub fn device_type(&self, kind: &DeviceKind) -> Option<DeviceType> {
         self.device_types().into_iter().find(|t| t.kind == *kind)
+    }
+
+    /// What `device` does as an ARA plug-in, if a factory says it is one
+    /// (IMP-20).
+    #[must_use]
+    pub fn ara_support(&self, device: &Device) -> Option<AraSupport> {
+        self.factories
+            .iter()
+            .find_map(|factory| factory.ara_support(device))
     }
 
     /// The extra audio outputs the devices of `kind` offer past their main

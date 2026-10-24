@@ -58,7 +58,8 @@ The engine and the document have no UI dependency, so the whole product runs hea
 | `bl-midi-tools` | MIDI Tools: the tool interface (each tool's description and parameters, its input and output), the native transformations and generators, Beatlayer's seeded generator, the chord-bank format, and the arpeggio and strum laws the Arpeggiator and Chord devices share. Pure functions over notes, with no access to the document | `bl-core` |
 | `bl-media` | Decode, encode, sample-rate conversion, peak files, disk streaming | `bl-dsp`, `bl-rt` (its logger, for the disk thread) |
 | `bl-analysis` | Transients, tempo, key, loudness; ML features (stems, audio to MIDI) behind a feature flag | `bl-dsp`, `bl-media` |
-| `bl-plugin-host` | CLAP, VST3, Audio Unit, and LV2 behind one trait; the scanner; editor windows | `bl-engine` traits |
+| `bl-ara-sys` | The ARA 2 C API's types and function tables as Rust bindings, generated once from the ARA SDK's header (Apache-2.0) and committed, so nothing is fetched at build time | none |
+| `bl-plugin-host` | CLAP, VST3, Audio Unit, and LV2 behind one trait; the scanner; editor windows; ARA 2 hosting for VST3 | `bl-engine` traits, `bl-media` (ARA's audio readers), `bl-ara-sys` |
 | `bl-audio-io` | Audio device backends per platform behind one trait; the supervisor that keeps a stream running through device changes | `bl-rt` |
 | `bl-rt` | A facade over the plug-in kit's `lspk-rt` (since 12 October 2026): the real-time thread harness: priority, audio workgroups, denormal flushing, the allocation trap, a lock-free logger, RealtimeSanitizer | none |
 | `bl-midi-io` | MIDI device I/O, clock, MPE | `bl-core` |
@@ -313,6 +314,7 @@ How WP-2.6 built CLAP hosting ([the CLAP hosting spec](specs/clap-hosting.md)), 
 - **State in the set.** A device's `plugin` (`bl_model::PluginState`) holds the file the plug-in came from and its own state, base64 in the set file, taken from the running plug-in at each save and copy without an undo step (`Editor::amend_plugin_state`).
 - **Offline renders** (export, agents' previews) pass plug-in devices through until WP-2.6b.
 
+- **ARA 2** (IMP-20, [the ARA hosting spec](specs/ara-hosting.md)): a VST3 plug-in that answers ARA's entry points is bound to a document controller the host keeps for its plug-in, and renders its track's clips itself. The main thread turns the set into edit cycles after every change (undo and redo included): the tempo and signatures as the musical context, each track as a region sequence, each file as an audio source, each clip as a modification, each straight stretch of a clip as a playback region. The compiler asks the plug-in's factory which clips it takes (`NodeFactory::ara_support`, `bl_model::ara_renders`) and leaves them out of the track's clip list, which travels as node data. The plug-in's audio readers read the media store on its own threads and never on the audio thread; adding or removing a region on a running plug-in takes it back from its node for a moment. Audio Unit and CLAP ARA hosting aren't built.
 - **Plug-in paths** follow each format's conventions, and Beatlayer honours the `CLAP_PATH` environment variable, as the CLAP specification requires.
 
 ## Media and warping

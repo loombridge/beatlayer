@@ -1589,9 +1589,21 @@ impl ClipViewUi {
         // Spec: mpe R24, R25. Each selected note's Pitch envelope is drawn
         // over it, except while Fold is on or on a Drum Rack's track.
         let held = shell.clip_view().selected_breakpoints(clip);
+        // Only breakpoints that are still there count as chosen: a note edit
+        // can move one.
         let chosen: Vec<BreakpointRef> = held
             .as_ref()
-            .map(|(_, chosen)| chosen.clone())
+            .map(|(envelope, chosen)| {
+                chosen
+                    .iter()
+                    .filter(|point| {
+                        notes.get(point.note as usize).is_some_and(|note| {
+                            note.envelope(*envelope).iter().any(|p| p.at == point.at)
+                        })
+                    })
+                    .copied()
+                    .collect()
+            })
             .unwrap_or_default();
         let pitch_rows: Vec<(u32, f32)> = if mpe_tab && !folded && !drum {
             notes
@@ -1654,15 +1666,8 @@ impl ClipViewUi {
             events,
         );
         if let (Some(mpe_frame), Some(mpe_layout)) = (&mpe_frame, &mpe_layout) {
-            self.mpe.band_input(
-                ui,
-                shell,
-                mpe_frame,
-                mpe_layout,
-                &toggled,
-                mpe_view.hidden,
-                events,
-            );
+            self.mpe
+                .band_input(ui, mpe_frame, mpe_layout, &toggled, mpe_view.hidden, events);
             self.mpe.paint_overlay(
                 ui,
                 theme,
@@ -2256,7 +2261,7 @@ impl ClipViewUi {
         let pitch_taken = match mpe {
             Some(mpe) => {
                 self.mpe.type_keys(ui, mpe, events);
-                self.mpe.pitch_input(ui, shell, mpe, &response, events)
+                self.mpe.pitch_input(ui, mpe, &response, events)
             }
             None => false,
         };

@@ -462,7 +462,7 @@ fn drawing_replaces_the_stretch_dragged_with_steps() {
             GesturePhase::Update,
             ids::DRAW_EXPRESSION,
             json!({ "envelope": "pressure",
-                "steps": [{ "at": 0, "length": to, "value": f64::from(to as i32 / 2) }] }),
+                "steps": [{ "at": 0, "length": to, "value": f64::from(to / 2) }] }),
         );
     }
     song.gesture(GesturePhase::Commit, ids::DRAW_EXPRESSION, Value::Null);

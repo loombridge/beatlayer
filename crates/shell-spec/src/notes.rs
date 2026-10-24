@@ -1682,7 +1682,7 @@ fn specs() -> Vec<CommandSpec> {
         edit(
             DELETE_EXPRESSION_BREAKPOINTS,
             "Delete Expression Breakpoints",
-            Permission::Destructive,
+            Permission::Edit,
             "Deletes breakpoints of one `envelope`, named in `breakpoints` (a note's place and \
              the breakpoint's position in ticks from its start) or selected in the MPE tab, \
              as clicking one does. One undo step, Delete Expression Breakpoints. The clip \
@@ -1727,7 +1727,7 @@ fn specs() -> Vec<CommandSpec> {
         edit(
             CLEAR_EXPRESSIONS,
             "Clear All Envelopes",
-            Permission::Destructive,
+            Permission::Edit,
             "Clears the Pitch, Slide and Pressure envelopes of notes (`notes`, or the \
              selected notes), as Clear All Envelopes in the MPE tab's context menus does. One \
              undo step, Clear All Envelopes. The clip query's notes read the envelopes back.",

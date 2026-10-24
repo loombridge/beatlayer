@@ -15,7 +15,7 @@
 use bl_core::time::Ticks;
 use bl_model::{Breakpoint, ClipId, Expression, MpeLane, Note, envelope_value};
 use bl_shell::note_commands::{self as ids, BreakpointRef, NoteField, TickRange};
-use bl_shell::{GesturePhase, Invocation, Shell};
+use bl_shell::{GesturePhase, Invocation};
 use egui::accesskit::Role;
 use egui::{
     Align2, Color32, CursorIcon, Event, Id, Key, Modifiers, Pos2, Rect, Response, Sense, Shape,
@@ -480,7 +480,7 @@ fn hit(frame: &Frame<'_>, targets: &[Target], pos: Pos2) -> Option<Hit> {
     let mut best: Option<(f32, Hit)> = None;
     for target in targets {
         let points = points_of(frame, target);
-        for index in 0..points.len() {
+        for (index, point) in points.iter().enumerate() {
             let Some(distance) = segment_distance(frame, target, index, pos) else {
                 continue;
             };
@@ -489,7 +489,7 @@ fn hit(frame: &Frame<'_>, targets: &[Target], pos: Pos2) -> Option<Hit> {
                     distance,
                     Hit::Segment {
                         target: *target,
-                        at: points[index].at,
+                        at: point.at,
                         on: distance <= SEGMENT_GRAB,
                     },
                 ));
@@ -605,7 +605,6 @@ enum Menu {
         expression: Expression,
         target: BreakpointRef,
         current: f64,
-        pos: Pos2,
     },
     Add {
         expression: Expression,
@@ -1012,18 +1011,13 @@ impl MpeUi {
             );
         };
         if let Some(Drag::Move {
-            expression,
-            plot,
-            grabbed,
-            ..
+            expression, plot, ..
         }) = &self.drag
-            && let Some(note) = frame.note(grabbed.note)
         {
             // The grabbed breakpoint's value beside the pointer.
             if let Some(pos) = pointer {
                 label(pos, *expression, plot.value(pos.y, *expression));
             }
-            let _ = note;
         } else if self.drag.is_none()
             && let Some(pos) = pointer
         {
@@ -1139,8 +1133,7 @@ pub fn paint_band(
             Some(field) => paint_markers(&lane_painter, theme, frame, field, plot),
             None => {
                 let targets = frame.lane_targets(*lane, plot);
-                for (place, note) in frame.notes.iter().enumerate() {
-                    let place = u32::try_from(place).unwrap_or(u32::MAX);
+                for place in 0..u32::try_from(frame.notes.len()).unwrap_or(u32::MAX) {
                     if frame.is_selected(place) {
                         continue;
                     }
@@ -1152,7 +1145,6 @@ pub fn paint_band(
                         expression,
                         plot: Plot::of_lane(*lane, plot),
                     };
-                    let _ = note;
                     paint_envelope(ui, theme, frame, clip_rect, &target, true);
                 }
                 for target in &targets {
@@ -1259,7 +1251,6 @@ impl MpeUi {
     pub fn band_input(
         &mut self,
         ui: &mut Ui,
-        shell: &Shell,
         frame: &Frame<'_>,
         layout: &MpeLayout,
         shown: &[MpeLane],
@@ -1300,7 +1291,7 @@ impl MpeUi {
                 }
             }
         }
-        for (index, (lane, rect)) in layout.lanes.iter().enumerate() {
+        for (lane, rect) in &layout.lanes {
             let lane = *lane;
             let rect = *rect;
             let id = Id::new(("mpe-lane", clip, lane));
@@ -1339,16 +1330,7 @@ impl MpeUi {
             });
             let response = ui.interact(plot, id, Sense::click_and_drag());
             let targets = frame.lane_targets(lane, plot);
-            self.surface(
-                ui,
-                shell,
-                frame,
-                &response,
-                &targets,
-                Some(lane),
-                plot,
-                events,
-            );
+            self.surface(ui, frame, &response, &targets, Some(lane), plot, events);
             response.context_menu(|ui| {
                 self.menu_items(ui, frame, events);
             });
@@ -1417,7 +1399,6 @@ impl MpeUi {
     pub fn surface(
         &mut self,
         ui: &mut Ui,
-        shell: &Shell,
         frame: &Frame<'_>,
         response: &Response,
         targets: &[Target],
@@ -1439,17 +1420,17 @@ impl MpeUi {
             && self.drag.is_none()
             && let Some(press) = ui.input(|i| i.pointer.press_origin())
         {
-            taken = self.press(frame, targets, lane, field, plot, press, modifiers, shell);
+            taken = self.press(frame, targets, lane, field, plot, press, modifiers);
         }
         // Esc ends a drag in egui's eyes too; the editor's Esc puts the clip
         // back, so the drag isn't committed on that frame.
         let escaped = ui.input(|i| i.key_pressed(Key::Escape));
-        if taken || self.drag_surface(lane) {
+        if taken || self.drag.is_some() {
             if response.dragged()
                 && !escaped
                 && let Some(pos) = pointer
             {
-                self.drag_update(ui, frame, pos, modifiers, events);
+                self.drag_update(frame, pos, modifiers, events);
             }
             if response.drag_stopped() && !escaped {
                 self.drag_stop(frame, pointer, modifiers, events);
@@ -1495,12 +1476,6 @@ impl MpeUi {
         taken
     }
 
-    /// Whether the drag under way belongs to a lane's surface (any drag that
-    /// began on a lane, or in the note area).
-    fn drag_surface(&self, _lane: Option<MpeLane>) -> bool {
-        self.drag.is_some()
-    }
-
     /// A press that starts a drag. Returns whether it was taken.
     #[expect(clippy::too_many_arguments, reason = "one press's whole context")]
     fn press(
@@ -1512,9 +1487,7 @@ impl MpeUi {
         plot: Rect,
         press: Pos2,
         modifiers: Modifiers,
-        _shell: &Shell,
     ) -> bool {
-        let keys = EditKeys::from(modifiers);
         let height = plot.height();
         // Draw Mode draws over an envelope's lane, or over a selected note's
         // Pitch (R30).
@@ -1677,30 +1650,23 @@ impl MpeUi {
                     });
                     true
                 } else {
-                    self.marquee(frame, targets, target.expression, press);
+                    self.marquee(targets, target.expression, press);
                     true
                 }
             }
             Some(Hit::Band(target)) => {
-                self.marquee(frame, targets, target.expression, press);
+                self.marquee(targets, target.expression, press);
                 true
             }
             None => {
                 // Outside every selected note's band, a lane selects nothing
                 // by dragging.
-                let _ = keys;
                 false
             }
         }
     }
 
-    fn marquee(
-        &mut self,
-        _frame: &Frame<'_>,
-        targets: &[Target],
-        expression: Expression,
-        press: Pos2,
-    ) {
+    fn marquee(&mut self, targets: &[Target], expression: Expression, press: Pos2) {
         self.drag = Some(Drag::Marquee {
             expression,
             from: press,
@@ -1712,7 +1678,6 @@ impl MpeUi {
     /// One frame of a drag.
     fn drag_update(
         &mut self,
-        ui: &Ui,
         frame: &Frame<'_>,
         pos: Pos2,
         modifiers: Modifiers,
@@ -1764,7 +1729,6 @@ impl MpeUi {
         } else if let Some((id, args)) = self.drag_command(frame, pos, modifiers) {
             gesture(events, GesturePhase::Update, id, args);
         }
-        let _ = ui;
     }
 
     /// The end of a drag: its last command and the commit.
@@ -1886,20 +1850,20 @@ impl MpeUi {
             // (Cmd-A then selects its breakpoints); the first breakpoint of
             // an empty envelope is made where it was clicked.
             Some(Hit::Band(target)) => {
-                let empty = points_of(frame, &target).is_empty();
-                if empty && lane.is_some() {
-                    if let Some(note) = frame.note(target.place) {
-                        let tick =
-                            frame.snapped(frame.tick(pos.x), target.expression, &[], keys.bypass);
-                        let rel = (tick - note.start).clamp(Ticks::ZERO, note.length);
-                        invoke(
-                            events,
-                            ids::ADD_EXPRESSION_BREAKPOINT,
-                            json!({ "clip": clip, "notes": [target.place],
-                                "envelope": target.expression, "at": rel,
-                                "value": target.plot.value(pos.y, target.expression).round() }),
-                        );
-                    }
+                if points_of(frame, &target).is_empty()
+                    && lane.is_some()
+                    && let Some(note) = frame.note(target.place)
+                {
+                    let tick =
+                        frame.snapped(frame.tick(pos.x), target.expression, &[], keys.bypass);
+                    let rel = (tick - note.start).clamp(Ticks::ZERO, note.length);
+                    invoke(
+                        events,
+                        ids::ADD_EXPRESSION_BREAKPOINT,
+                        json!({ "clip": clip, "notes": [target.place],
+                            "envelope": target.expression, "at": rel,
+                            "value": target.plot.value(pos.y, target.expression).round() }),
+                    );
                 }
                 invoke(
                     events,
@@ -1934,7 +1898,6 @@ impl MpeUi {
                     .iter()
                     .find(|p| p.at == at)
                     .map_or(0.0, |p| p.value),
-                pos,
             },
             Some(Hit::Segment { target, .. } | Hit::Band(target)) => {
                 let Some(note) = frame.note(target.place) else {
@@ -1966,7 +1929,6 @@ impl MpeUi {
                 expression,
                 target,
                 current,
-                pos,
             }) => {
                 let item = ui.button("Edit Value");
                 crate::menus::register_item(ui.ctx(), &item);
@@ -1986,7 +1948,6 @@ impl MpeUi {
                             others,
                         },
                     });
-                    let _ = pos;
                     ui.close();
                 }
             }
@@ -2194,7 +2155,6 @@ impl MpeUi {
     pub fn pitch_input(
         &mut self,
         ui: &mut Ui,
-        shell: &Shell,
         frame: &Frame<'_>,
         response: &Response,
         events: &mut Vec<UiEvent>,
@@ -2206,9 +2166,7 @@ impl MpeUi {
             let keys = EditKeys::from(ui.input(|i| i.modifiers));
             self.pitch_menu(frame, pos, keys);
         }
-        self.surface(
-            ui, shell, frame, response, &targets, None, frame.grid, events,
-        )
+        self.surface(ui, frame, response, &targets, None, frame.grid, events)
     }
 }
 

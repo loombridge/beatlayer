@@ -71,7 +71,7 @@ Default keys:
 | Shortcut | macOS | Windows | Context | Action in the reference | Binding |
 |---|---|---|---|---|---|
 | S-CLIPMODE-001 | `Option+Tab` | `Ctrl+Tab` | `sample-editor` | Switch between the Sample and Envelopes tabs | runs it |
-| S-CLIPMODE-002 | `Option+Tab` | `Ctrl+Tab` | `note-editor` | Cycle the Notes, Envelopes and MPE tabs | runs it |
+| S-CLIPMODE-002 | `Option+Tab` | `Ctrl+Tab` | `clip-view` | Cycle the Notes, Envelopes and MPE tabs | runs it |
 | S-CLIPMODE-003 | `Option+Shift+1` | `Alt+Shift+1` | `clip-view` | Show the Content Editor (the Sample or Notes tab) | fixes `tab` = `"notes"` |
 | S-CLIPMODE-004 | `Option+Shift+2` | `Alt+Shift+2` | `clip-view` | Show the Envelope Editor (the Envelopes tab) | fixes `tab` = `"envelopes"` |
 | S-CLIPMODE-005 | `Option+Shift+3` | `Alt+Shift+3` | `clip-view` | Show the Expression Editor (the MPE tab) | fixes `tab` = `"mpe"` |

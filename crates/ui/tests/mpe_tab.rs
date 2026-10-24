@@ -166,14 +166,6 @@ impl Env {
         layout(body_rect(view, false), &lanes, state.mpe.hidden)
     }
 
-    fn selected(&self) -> Vec<u32> {
-        self.h
-            .shell
-            .clip_view()
-            .selected_notes(self.doc(), self.h.shell.arrangement())
-            .to_vec()
-    }
-
     /// A point in the note area on `key`'s row, `rows` semitones above its
     /// centre, at `tick` of the clip's contents.
     fn pitch_at(&mut self, key: u8, tick: i64, semitones: f64) -> Pos2 {

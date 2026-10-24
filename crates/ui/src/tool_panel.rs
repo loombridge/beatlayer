@@ -357,6 +357,9 @@ fn tools(
     // With no display, a generator draws its own among its controls.
     let only = (!drawn.hidden.is_empty()).then_some(only.as_slice());
     y = parameters(ui, shell, theme, rect, y, clip, &view, only, events);
+    if descriptor.id == "lfo" {
+        y = lfo_curve(ui, theme, rect, y, clip, &view.values, events);
+    }
     y += 4.0;
     let name = |what: &str| format!("{} {what}", descriptor.name);
     // Auto (R2).
@@ -484,6 +487,69 @@ fn parameters(
             events,
         );
         y += ROW;
+    }
+    y
+}
+
+/// LFO's curve display (the MIDI transformations spec, R43): the envelope its
+/// settings write over a note of two periods, which a gesture can't set; and
+/// with the Random wave, the Reseed button (R39) that runs
+/// `midi_tool.reseed`. Returns where the next row goes.
+fn lfo_curve(
+    ui: &mut Ui,
+    theme: &Theme,
+    rect: Rect,
+    mut y: f32,
+    clip: ClipId,
+    values: &[ParamValue],
+    events: &mut Vec<UiEvent>,
+) -> f32 {
+    let left = rect.left() + 6.0;
+    let size = vec2(rect.width() - 12.0, 36.0);
+    let curve = Rect::from_min_size(pos2(left, y + 2.0), size);
+    let response = ui.interact(
+        curve,
+        Id::new(("tool-display", "lfo-curve")),
+        Sense::hover(),
+    );
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Other, false, "LFO curve"));
+    let painter = ui.painter_at(curve);
+    painter.rect_filled(
+        curve,
+        theme.sizes.corner,
+        theme.colors.control.0.gamma_multiply(0.55),
+    );
+    let line = bl_midi_tools::lfo_curve(values)
+        .iter()
+        .map(|p| {
+            pos2(
+                curve.left() + p.x as f32 * curve.width(),
+                curve.bottom() - p.y as f32 * curve.height(),
+            )
+        })
+        .collect();
+    painter.add(egui::Shape::line(
+        line,
+        egui::Stroke::new(1.0, theme.colors.accent.0),
+    ));
+    y += size.y + 6.0;
+    // Random is the fourth Shape Type.
+    if matches!(values.get(1), Some(ParamValue::Choice(3))) {
+        let half = (rect.width() - 18.0) / 2.0;
+        if button(
+            ui,
+            theme,
+            "reseed-lfo",
+            Rect::from_min_size(pos2(left, y), vec2(half, CONTROL.y + 2.0)),
+            "Reseed",
+            true,
+        ) {
+            events.push(UiEvent::Invoke(Invocation::new(
+                bl_shell::midi_tool_commands::RESEED,
+                json!({ "clip": clip }),
+            )));
+        }
+        y += ROW + 2.0;
     }
     y
 }

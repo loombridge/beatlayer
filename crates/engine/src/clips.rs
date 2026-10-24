@@ -302,14 +302,27 @@ pub struct MediaStreams {
 }
 
 impl MediaStreams {
-    /// Streams `store`'s media with the default sizes, for playing in real
-    /// time. Starts the disk thread.
+    /// The sizes a stream plays a clip with: the default's, with a ring and
+    /// cues that hold what a Complex Pro clip reads around its position at
+    /// 1.5 times its speed (the warp modes spec, R21), about 1.4 s of ring and
+    /// 1 s of cue at 48 kHz.
+    #[must_use]
+    pub fn config() -> StreamConfig {
+        StreamConfig {
+            blocks: 16,
+            cue_frames: 49_152,
+            ..StreamConfig::default()
+        }
+    }
+
+    /// Streams `store`'s media with [`config`](Self::config)'s sizes, for
+    /// playing in real time. Starts the disk thread.
     ///
     /// # Errors
     ///
     /// If the disk thread can't start.
     pub fn new(store: Arc<MediaStore>) -> std::io::Result<Self> {
-        Self::with_config(store, StreamConfig::default())
+        Self::with_config(store, Self::config())
     }
 
     /// Streams `store`'s media as `config` says.
@@ -629,10 +642,10 @@ impl Geometry {
     /// How many frames before a point a jump lands on the clip may read, so
     /// the point is cued that far early.
     pub(crate) fn reach_back(&self) -> u64 {
-        if self.warped.is_some() || self.pitch != 1.0 {
-            CUE_BACK
-        } else {
-            0
+        match &self.warped {
+            Some(warped) => warped.reach_back(),
+            None if self.pitch != 1.0 => CUE_BACK,
+            None => 0,
         }
     }
 

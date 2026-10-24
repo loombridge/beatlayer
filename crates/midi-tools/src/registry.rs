@@ -9,7 +9,9 @@ use crate::chop::Chop;
 use crate::connect::Connect;
 use crate::descriptor::{ParamValue, ToolDescriptor, ToolKind};
 use crate::euclidean::Euclidean;
+use crate::glissando::Glissando;
 use crate::input::{ToolInput, ToolOutput, fold_octaves};
+use crate::lfo::Lfo;
 use crate::ornament::Ornament;
 use crate::quantize::Quantize;
 use crate::recombine::Recombine;
@@ -173,6 +175,8 @@ fn native_tools() -> Vec<Box<dyn MidiTool>> {
         Box::new(Arpeggiate::new()),
         Box::new(Chop::new()),
         Box::new(Connect::new()),
+        Box::new(Glissando::new()),
+        Box::new(Lfo::new()),
         Box::new(Ornament::new()),
         Box::new(Quantize::new()),
         Box::new(Recombine::new()),

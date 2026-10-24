@@ -30,10 +30,13 @@ runs:
         #   for the UI candidates (GPUI, egui) and for plug-in editor windows
         #   (baseview or winit). Xvfb gives the headless runner an X display
         #   for the plug-in editor window tests (WP-2.10).
+        # LV2: lilv's runtime library, which the LV2 host loads when it starts
+        #   (WP-5.39); nothing links against it, so no headers.
         sudo apt-get update
         sudo apt-get install --yes --no-install-recommends \
           pkg-config \
           libclang-dev \
+          liblilv-0-0 \
           libasound2-dev \
           libjack-jackd2-dev \
           libpipewire-0.3-dev \

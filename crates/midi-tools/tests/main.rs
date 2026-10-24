@@ -4,6 +4,7 @@
 
 mod generators;
 mod interface;
+mod mpe_transformations;
 mod stacks;
 mod transformations;
 mod transformations_2;

@@ -102,7 +102,11 @@ fn ara_playback_passes_under_rtsan() {
     // Two clips the plug-in renders, and one at half gain, which the clip
     // player keeps.
     let mut clips: Vec<ClipId> = Vec::new();
-    for (start, media, gain) in [(0, one, 1.0), (4 * QUARTER, two, 1.0), (2 * QUARTER, one, 0.5)] {
+    for (start, media, gain) in [
+        (0, one, 1.0),
+        (4 * QUARTER, two, 1.0),
+        (2 * QUARTER, one, 0.5),
+    ] {
         let id = editor.new_id();
         let mut audio = AudioData::new(media);
         audio.gain = gain;
@@ -156,7 +160,9 @@ fn ara_playback_passes_under_rtsan() {
         host.idle();
         host.sync_ara(editor.document(), revision);
         if round % 100 == 50 {
-            sender.transport(TransportCommand::Locate(Ticks(QUARTER * (round % 7) as i64)));
+            sender.transport(TransportCommand::Locate(Ticks(
+                QUARTER * (round % 7) as i64,
+            )));
         }
         assert!(sender.flush());
         let frames = [1, 100, 256, 512][(round % 4) as usize];
@@ -176,7 +182,10 @@ fn ara_playback_passes_under_rtsan() {
     assert_eq!(status.len(), 1);
     assert!(status[0].reader_calls > 0, "the plug-in read the files");
     assert_eq!(status[0].audio_thread_reads, 0);
-    assert!(status[0].edit_cycles > 4, "the clips' edits reached the plug-in");
+    assert!(
+        status[0].edit_cycles > 4,
+        "the clips' edits reached the plug-in"
+    );
     eprintln!(
         "1,500 blocks of ARA playback under RealtimeSanitizer: {} programs, {} edit cycles",
         programs, status[0].edit_cycles

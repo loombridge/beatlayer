@@ -101,7 +101,10 @@ fn an_lv2_plugin_processes_blocks_under_rtsan() {
         // The echoed note, and the beat the plug-in hears in each of the
         // block's three parts while the song plays.
         assert_eq!(
-            out.notes().iter().filter(|n| n.kind == NoteKind::On).count(),
+            out.notes()
+                .iter()
+                .filter(|n| n.kind == NoteKind::On)
+                .count(),
             4
         );
         // The main thread's side runs between blocks, not on the audio

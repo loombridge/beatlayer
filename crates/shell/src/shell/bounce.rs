@@ -610,6 +610,7 @@ impl Shell {
                     lanes: None,
                     start: args.start.clone(),
                     end: args.end.clone(),
+                    linked: Some(false),
                 },
             )
             .map_err(|failure| edit_error(id, failure)),

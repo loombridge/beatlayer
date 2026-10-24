@@ -61,8 +61,31 @@ fn r3_the_registry_lists_each_kind_apart() {
         .tools(ToolKind::Generator)
         .map(|tool| tool.descriptor().id.clone())
         .collect();
-    assert_eq!(transformations, ["test_transpose"]);
-    assert_eq!(generators, ["test_fill"]);
+    assert_eq!(
+        transformations,
+        [
+            "arpeggiate",
+            "chop",
+            "connect",
+            "glissando",
+            "lfo",
+            "ornament",
+            "quantize",
+            "recombine",
+            "span",
+            "strum",
+            "time_warp",
+            "velocity_shaper",
+            "test_transpose",
+            "test_shift"
+        ],
+        "the native tools in the selector's order, then the test tools"
+    );
+    assert_eq!(
+        generators,
+        ["rhythm", "seed", "shape", "euclidean", "test_fill"],
+        "the native generators in the selector's order, then the test tool"
+    );
     assert!(
         registry
             .get(ToolKind::Generator, "test_transpose")

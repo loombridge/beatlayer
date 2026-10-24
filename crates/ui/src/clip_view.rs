@@ -509,11 +509,7 @@ pub(crate) fn stem_x(grid: Rect, start: Ticks, length: Ticks, note: &Note) -> f3
 
 /// A note's name as Live writes it: C3 is middle C (MIDI key 60).
 pub(crate) fn key_name(key: u8) -> String {
-    const NAMES: [&str; 12] = [
-        "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
-    ];
-    let octave = i32::from(key) / 12 - 2;
-    format!("{}{octave}", NAMES[usize::from(key) % 12])
+    bl_midi_tools::key_name(key)
 }
 
 /// Where on a note the pointer is.
@@ -2611,9 +2607,57 @@ impl ClipViewUi {
             pos2(view.left(), grid.top()),
             pos2(grid.left(), grid.bottom()),
         );
-        let keys_response =
-            ui.interact(keys_rect, Id::new(("clip-view-keys", clip)), Sense::click());
-        if keys_response.clicked()
+        let keys_response = ui.interact(
+            keys_rect,
+            Id::new(("clip-view-keys", clip)),
+            Sense::click_and_drag(),
+        );
+        // Spec: generators R2, I-CLICK-049. While the Generate panel shows
+        // Rhythm, Seed or Shape, Option-clicking a key sets the generator's
+        // pitch or a one-key range, and Option-dragging sets Seed's and
+        // Shape's range to the keys dragged over: a gesture of
+        // `midi_tool.set`, one undo step that Esc puts back.
+        // A drag that began with Option held stays a ruler drag to its end,
+        // so letting go of Option first still ends the gesture.
+        let drag = keys_response.id.with("ruler-drag");
+        let option = ui.data(|d| d.get_temp::<(u8, bool)>(drag).is_some())
+            || ui.input(|i| i.modifiers.alt)
+                && crate::tool_panel::ruler_set(shell, clip, 0, 0).is_some();
+        let pick = |pos: Pos2| {
+            rows.key_at(grid, pos.y)
+                .map(|key| key.round().clamp(0.0, 127.0) as u8)
+        };
+        if option {
+            if keys_response.drag_started()
+                && let Some(key) = ui.input(|i| i.pointer.press_origin()).and_then(pick)
+            {
+                ui.data_mut(|d| d.insert_temp(drag, (key, false)));
+            }
+            if keys_response.dragged()
+                && let Some((from, _)) = ui.data(|d| d.get_temp::<(u8, bool)>(drag))
+                && let Some(to) = keys_response.interact_pointer_pos().and_then(pick)
+            {
+                events.push(UiEvent::Gesture {
+                    phase: GesturePhase::Update,
+                    invocation: crate::tool_panel::ruler_set(shell, clip, from, to),
+                });
+                ui.data_mut(|d| d.insert_temp(drag, (from, true)));
+            }
+            if keys_response.drag_stopped() {
+                let ran = ui
+                    .data_mut(|d| d.remove_temp::<(u8, bool)>(drag))
+                    .is_some_and(|(_, ran)| ran);
+                crate::tool_panel::end_gesture(ui, ran, events);
+            }
+            if keys_response.clicked()
+                && let Some(key) = keys_response.interact_pointer_pos().and_then(pick)
+                && let Some(invocation) = crate::tool_panel::ruler_set(shell, clip, key, key)
+            {
+                events.push(UiEvent::Invoke(invocation));
+            }
+        }
+        if !option
+            && keys_response.clicked()
             && let Some(pos) = keys_response.interact_pointer_pos()
             && let Some(key) = rows.key_at(grid, pos.y)
         {

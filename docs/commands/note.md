@@ -439,7 +439,7 @@ Result: [`ClipViewState`](README.md#clipviewstate).
 
 **Quantize**. Permission: `edit`. Contexts: `note-editor`, `note-selection`.
 
-Quantises notes (`notes`, or the selected notes) to `grid`: each note moves `amount` percent of the way from its start (or its end, with `target` `note_end`) to the nearest grid line, so 100 percent lands it on the line and 50 percent halves its distance to it. The lines are laid out from each bar's start, as the note editor's grid is, and a spacing of whole bars counts bars from 1.1.1. `grid`, `target`, and `amount` left out use the Clip View's Quantize settings (`clip_view.quantize_settings`), which follow the note editor's editing grid until a grid is set. Quantising is one undo step, and the quantised notes stay selected.
+Quantises notes (`notes`, or the selected notes) to `grid`: each note moves `amount` percent of the way from its start (with `target` `note_start`), or its end (`note_end`), or its start and then its end (`both`) to the nearest grid line, so 100 percent lands it on the line and 50 percent halves its distance to it. The lines are laid out from each bar's start, as the note editor's grid is, and a spacing of whole bars counts bars from 1.1.1. With `both`, an end whose nearest line is at or before the note's start goes toward the first line after the start instead. `grid`, `target`, and `amount` left out use the Quantize tool's settings (`clip_view.quantize_settings`, `midi_tool.state`), whose grid follows the note editor's editing grid until a note division is chosen and is a triplet of it with Triplets on. Quantising is one undo step, and the quantised notes stay selected.
 
 Default keys:
 

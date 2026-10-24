@@ -296,6 +296,7 @@ impl View<'_> {
 
     fn track(&self, track: &Track) -> Value {
         let mut value = self.track_summary(track);
+        value["linked"] = json!(self.document.linked_with(track.id()));
         if self.detail == Detail::Full {
             value["saved"] = self.saved(&self.document.saved_track(track.id()));
         }

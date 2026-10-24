@@ -1159,13 +1159,13 @@ pub struct ResizeNotesArgs {
     pub by: Ticks,
 }
 
-/// Whether `note.quantize` moves notes' starts or their ends.
+/// Whether `note.quantize` moves notes' starts, their ends, or both.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 #[schemars(
     description = "What `note.quantize` moves toward the grid: `note_start` (the default) \
                    moves each note's start, `note_end` moves its end instead, leaving the \
-                   start alone."
+                   start alone, and `both` moves the start and then the end."
 )]
 pub enum QuantizeTarget {
     /// Move the notes' starts.
@@ -1173,6 +1173,8 @@ pub enum QuantizeTarget {
     NoteStart,
     /// Move the notes' ends; the starts stay put.
     NoteEnd,
+    /// Move the notes' starts, then their ends.
+    Both,
 }
 
 /// The Clip View's Quantize settings, as `clip_view.quantize_settings`
@@ -1180,12 +1182,18 @@ pub enum QuantizeTarget {
 /// out.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct QuantizeSettings {
-    /// The spacing between the quantise grid's lines, in ticks. `null`
-    /// (nothing) follows the Clip View's editing grid, the step the note
-    /// area draws, at the moment the command runs.
+    /// The spacing between the quantise grid's lines, in ticks: a note
+    /// division from a whole note to a 1/32 note. `null` (nothing) follows
+    /// the Clip View's editing grid, the step the note area draws, at the
+    /// moment the command runs.
     pub grid: Option<Ticks>,
-    /// Whether quantise moves note starts or note ends.
+    /// Whether quantise moves note starts, note ends, or both. With the
+    /// Quantize tool's Start and End both off this reads `note_start`;
+    /// `midi_tool.state` has the two switches.
     pub target: QuantizeTarget,
+    /// Whether a `grid` of a note division is a triplet of it, two-thirds as
+    /// long. It has no effect while `grid` is `null`.
+    pub triplets: bool,
     /// How far each note moves toward its grid line, as a percentage from 0
     /// (nothing moves) to 100 (every note lands on the line).
     pub amount: u8,
@@ -1198,6 +1206,7 @@ impl Default for QuantizeSettings {
         Self {
             grid: None,
             target: QuantizeTarget::NoteStart,
+            triplets: false,
             amount: 100,
         }
     }
@@ -1239,13 +1248,18 @@ pub struct QuantizeNotesArgs {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct QuantizeSettingsArgs {
-    /// The quantise grid's line spacing in ticks; must be positive. A new
-    /// view follows the Clip View's editing grid until one is set.
+    /// The quantise grid's line spacing in ticks: a whole note divided by 1,
+    /// 2, 4, 8, 16 or 32. A new set follows the Clip View's editing grid
+    /// until one is set; `midi_tool.reset` of the Quantize tool goes back
+    /// to it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grid: Option<Ticks>,
     /// What quantise moves toward the grid.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<QuantizeTarget>,
+    /// Whether the grid's lines are triplets of the division.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub triplets: Option<bool>,
     /// How far each note moves toward its grid line, from 0 to 100 percent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub amount: Option<u8>,
@@ -1589,14 +1603,17 @@ fn specs() -> Vec<CommandSpec> {
         CommandSpec::new(QUANTIZE_NOTES, "Quantize")
             .description(
                 "Quantises notes (`notes`, or the selected notes) to `grid`: each note moves \
-                 `amount` percent of the way from its start (or its end, with `target` \
-                 `note_end`) to the nearest grid line, so 100 percent lands it on the line \
-                 and 50 percent halves its distance to it. The lines are laid out from each \
-                 bar's start, as the note editor's grid is, and a spacing of whole bars \
-                 counts bars from 1.1.1. `grid`, `target`, and `amount` left out use the \
-                 Clip View's Quantize settings (`clip_view.quantize_settings`), which follow \
-                 the note editor's editing grid until a grid is set. Quantising is one undo \
-                 step, and the quantised notes stay selected.",
+                 `amount` percent of the way from its start (with `target` `note_start`), or \
+                 its end (`note_end`), or its start and then its end (`both`) to the nearest \
+                 grid line, so 100 percent lands it on the line and 50 percent halves its \
+                 distance to it. The lines are laid out from each bar's start, as the note \
+                 editor's grid is, and a spacing of whole bars counts bars from 1.1.1. With \
+                 `both`, an end whose nearest line is at or before the note's start goes \
+                 toward the first line after the start instead. `grid`, `target`, and `amount` \
+                 left out use the Quantize tool's settings (`clip_view.quantize_settings`, \
+                 `midi_tool.state`), whose grid follows the note editor's editing grid until a \
+                 note division is chosen and is a triplet of it with Triplets on. Quantising is \
+                 one undo step, and the quantised notes stay selected.",
             )
             .permission(Permission::Edit)
             .contexts([NoteEditor, NoteSelectionContext])
@@ -1605,17 +1622,23 @@ fn specs() -> Vec<CommandSpec> {
             .result::<NoteEditResult>(),
         CommandSpec::new(QUANTIZE_SETTINGS, "Quantize Settings")
             .description(
-                "Reads or changes the Clip View's Quantize settings, the values `note.quantize`, \
-                 `clip.quantize_audio` and Cmd-U use when their arguments leave them out: `grid`, \
-                 the spacing between the quantise grid's lines in ticks (positive; left unset, \
-                 it follows the note or sample editor's editing grid), `target`, whether quantise \
-                 moves note starts or note ends, and `amount`, how far each note moves toward its \
-                 grid line as a percentage from 0 to 100. Fields left out keep their values, and \
-                 the result reports all of them. The settings belong to the view, like Draw \
-                 Mode: changing them changes nothing in the set and is no undo step.",
+                "Reads or changes the Quantize tool's settings, which are the Clip View's \
+                 Quantize settings, the values `note.quantize`, `clip.quantize_audio` and Cmd-U \
+                 use when their arguments leave them out: `grid`, the spacing between the \
+                 quantise grid's lines in ticks (a whole note divided by 1, 2, 4, 8, 16 or 32; \
+                 left unset, it follows the note or sample editor's editing grid), `target`, \
+                 whether quantise moves note starts, note ends or both, `triplets`, whether \
+                 the grid's lines are two-thirds as far apart, and `amount`, how far each note \
+                 moves toward its grid line as a percentage from 0 to 100. Fields left out keep \
+                 their values, and the result reports all of them. With no fields at all it \
+                 also shows the Transform panel with Quantize chosen (an audio clip's Transform \
+                 panel for an audio clip), as Cmd-Shift-U and Edit > Quantize Settings... do. \
+                 Like every MIDI Tool's settings they are saved with the set and are no undo \
+                 step.",
             )
             .permission(Permission::Read)
             .contexts([NoteEditor, NoteSelectionContext, SampleEditor])
+            .binding("S-NOTE-012")
             .binding("S-SAMPLE-002")
             .args::<QuantizeSettingsArgs>()
             .result::<QuantizeSettings>(),
@@ -2177,7 +2200,7 @@ mod tests {
             .map(|binding| binding.shortcut.as_ref())
             .collect();
         assert_eq!(deactivate, ["S-NOTE-041"]);
-        // The Quantize settings are view state, like Draw Mode.
+        // The Quantize settings are the Quantize tool's, read with a read command.
         assert_eq!(class(QUANTIZE_SETTINGS), Some(Permission::Read));
         // Cmd-U quantises the selected notes (S-NOTE-011).
         let bindings: Vec<&str> = registry
@@ -2195,6 +2218,6 @@ mod tests {
             .iter()
             .map(|binding| binding.shortcut.as_ref())
             .collect();
-        assert_eq!(settings_bindings, ["S-SAMPLE-002"]);
+        assert_eq!(settings_bindings, ["S-NOTE-012", "S-SAMPLE-002"]);
     }
 }

@@ -246,9 +246,12 @@ fn the_panel_shows_its_controls_and_each_runs_its_command() {
 // In Re-Pitch the Transpose and the Detune don't act, and the panel draws
 // them switched off (warp-modes R10).
 // Spec: midi-tools R1. An audio clip's right group holds Audio Utilities and
-// a Transform panel (empty until Quantize arrives), and no Generate panel.
+// a Transform panel holding Quantize, and no Generate panel.
 #[test]
-fn the_right_group_holds_audio_utilities_and_an_empty_transform_panel() {
+fn the_right_group_holds_audio_utilities_and_a_transform_panel_of_quantize() {
+    // Spec: midi-transformations R22. The Transform panel holds Quantize's
+    // Grid, Triplets and Amount, and its button; there is no Start, End,
+    // Auto or Reset.
     let mut p = Panel::new("transform");
     let all = p.nodes();
     let radio = |all: &[Node], name: &str| {
@@ -269,8 +272,36 @@ fn the_right_group_holds_audio_utilities_and_an_empty_transform_panel() {
     assert_eq!(radio(&all, "MIDI Transformation Tools").toggled, Some(true));
     assert!(
         all.iter().all(|n| n.label != "Warp"),
-        "the Transform panel is empty"
+        "the utilities are gone"
     );
+    for control in ["Grid", "Triplets", "Amount", "Transform"] {
+        Harness::node(&all, control);
+    }
+    for gone in [
+        "Start",
+        "End",
+        "Quantize Auto",
+        "Reset",
+        "Transformation Selector",
+    ] {
+        assert!(all.iter().all(|n| n.label != gone), "{gone}");
+    }
+    assert!(
+        Harness::node(&all, "Triplets").disabled,
+        "no triplets with Current Grid"
+    );
+    // The controls are `midi_tool.set` on the audio clip: Quantize's settings.
+    p.h.shell
+        .run(
+            "midi_tool.set",
+            json!({ "clip": p.clip, "tool": "quantize", "values": { "grid": "1_8", "amount": 40 } }),
+        )
+        .unwrap();
+    let all = p.nodes();
+    // (The Clip View has an editing grid named Grid too.)
+    assert!(all.iter().any(|n| n.label == "Grid" && n.value == "1/8"));
+    assert_eq!(Harness::node(&all, "Amount").value, "40 %");
+    assert!(!Harness::node(&all, "Triplets").disabled);
     // Back to the utilities.
     p.h.click(centre(&radio(&all, "Audio Utilities")));
     let all = p.nodes();

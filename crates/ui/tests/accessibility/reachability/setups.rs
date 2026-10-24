@@ -666,6 +666,10 @@ pub(crate) fn midi_tools_shown(h: &mut Harness) {
         .run("session.select", json!({ "track": track, "scene": scene }))
         .unwrap();
     h.shell.run("view.toggle_clip_view", json!({})).unwrap();
+    // The test tool, whose controls these checks reach.
+    h.shell
+        .run("midi_tool.choose", json!({ "tool": "test_transpose" }))
+        .unwrap();
     h.shell
         .run("clip_view.show_panel", json!({ "panel": "transform" }))
         .unwrap();
@@ -701,6 +705,32 @@ pub(crate) fn midi_tools_changed(h: &mut Harness) {
             "midi_tool.set_auto",
             json!({ "tool": "test_transpose", "auto": true }),
         )
+        .unwrap();
+}
+
+/// The same, with LFO chosen and its Random wave, which has a Reseed button.
+pub(crate) fn midi_tools_lfo_random(h: &mut Harness) {
+    midi_tools_shown(h);
+    h.shell
+        .run("midi_tool.choose", json!({ "tool": "lfo" }))
+        .unwrap();
+    h.shell
+        .run(
+            "midi_tool.set",
+            json!({ "tool": "lfo", "values": { "shape_type": "random" } }),
+        )
+        .unwrap();
+}
+
+/// The same, with the Generate panel showing Euclidean, whose Pattern tab
+/// has the randomise button.
+pub(crate) fn euclidean_shown(h: &mut Harness) {
+    midi_tools_shown(h);
+    h.shell
+        .run("midi_tool.choose", json!({ "tool": "euclidean" }))
+        .unwrap();
+    h.shell
+        .run("clip_view.show_panel", json!({ "panel": "generate" }))
         .unwrap();
 }
 

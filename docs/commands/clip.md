@@ -406,7 +406,7 @@ Result: [`ChangeSet`](README.md#changeset).
 
 **Move Clip**. Permission: `edit`. Contexts: `arrangement`.
 
-Moves a clip so it starts at `start`, on the same track or another track of the same kind (audio or MIDI). Its length and contents don't change. To move several clips together, use `clip.move_by`.
+Moves a clip so it starts at `start`, on the same track or another track of the same kind (audio or MIDI). Its length and contents don't change. To move several clips together, use `clip.move_by`. On a linked track it makes the same edit on every track linked with it, in the same undo step, and the result lists everything it changed; give `linked`: false to edit only what the arguments name.
 
 Default keys: none.
 
@@ -417,6 +417,7 @@ Arguments:
 | `clip` | [`ClipId`](README.md#clipid) | yes | The clip. |
 | `track` | [`TrackId`](README.md#trackid) | yes | The track it moves to. |
 | `start` | [`Ticks`](README.md#ticks) | yes | Its new start. |
+| `linked` | boolean | no | Whether the edit reaches the tracks linked with the ones it names (the same on each); true if left out. Give false to limit it to what it names. |
 
 Result: [`ChangeSet`](README.md#changeset).
 
@@ -551,7 +552,7 @@ Result: [`SliceDialogStatus`](README.md#slicedialogstatus).
 
 **Quantize**. Permission: `edit`. Contexts: `clip-view`, `sample-editor`.
 
-Quantises a warped audio clip: for each line of the quantise grid inside the time selection (`from` to `to` in ticks from 1.1.1, or the whole clip with none), the clip's transient nearest that line, if one lies within half a grid step of it, gets a warp marker at its time in the file (made if there is none) and moves `amount` percent of the way to the line, keeping its time in the file. Transients nearest no line get no marker. `grid` is the spacing between grid lines in ticks; left out, it uses the Clip View's Quantize settings (`clip_view.quantize_settings`), which follow the editing grid until a grid is set. `amount` is from 0 to 100 percent (left out, the settings' amount). 100 percent lands each on its line; 0 changes nothing and is no undo step; otherwise it is one undo step. Refuses an unwarped clip.
+Quantises a warped audio clip: for each line of the quantise grid inside the time selection (`from` to `to` in ticks from 1.1.1, or the whole clip with none), the clip's transient nearest that line, if one lies within half a grid step of it, gets a warp marker at its time in the file (made if there is none) and moves `amount` percent of the way to the line, keeping its time in the file. Transients nearest no line get no marker. `grid` is the spacing between grid lines in ticks; left out, it uses the Quantize tool's settings (`clip_view.quantize_settings`), whose grid follows the editing grid until a note division is chosen and is a triplet of it with Triplets on. `amount` is from 0 to 100 percent (left out, the settings' amount). The audio clip's Transform panel and Cmd+Enter run it with those settings. 100 percent lands each on its line; 0 changes nothing and is no undo step; otherwise it is one undo step. Refuses an unwarped clip.
 
 Default keys:
 
@@ -830,7 +831,7 @@ Result: [`ChangeSet`](README.md#changeset).
 
 **Set Clip Fades**. Permission: `edit`. Contexts: `arrangement`.
 
-Sets the lengths, in seconds, of an audio clip's fade-in, from silence at the clip's start in the arrangement, and its fade-out, to silence at its end; 0 is no fade. `fade_in_curve` and `fade_out_curve`, from -1 to 1, shape each: 0, the default, is a straight line in amplitude, a positive curve bows the fade towards full level and a negative one towards silence; left out, a curve stays as it is. Short fades stop a clip that starts or ends mid-waveform from clicking: 0.004 (4 ms) is the length that Create Fades on Clip Edges gives new clips. Lengths must be finite, at least 0 and within the clip's limits: a fade-in ends no later than the fade-out begins, and a fade takes in no point where the clip goes round its loop brace. Where a crossfade begins or ends at the clip, this sets the crossfade's part inside the clip and its curve, and the clip it meets follows; if it can't (its file doesn't reach back that far), the crossfade ends and each clip keeps its own fade. Read the result back with the query tool's `clip` field `data` and the clip's `fade_in_before` and `fade_out_after`.
+Sets the lengths, in seconds, of an audio clip's fade-in, from silence at the clip's start in the arrangement, and its fade-out, to silence at its end; 0 is no fade. `fade_in_curve` and `fade_out_curve`, from -1 to 1, shape each: 0, the default, is a straight line in amplitude, a positive curve bows the fade towards full level and a negative one towards silence; left out, a curve stays as it is. Short fades stop a clip that starts or ends mid-waveform from clicking: 0.004 (4 ms) is the length that Create Fades on Clip Edges gives new clips. Lengths must be finite, at least 0 and within the clip's limits: a fade-in ends no later than the fade-out begins, and a fade takes in no point where the clip goes round its loop brace. Where a crossfade begins or ends at the clip, this sets the crossfade's part inside the clip and its curve, and the clip it meets follows; if it can't (its file doesn't reach back that far), the crossfade ends and each clip keeps its own fade. Read the result back with the query tool's `clip` field `data` and the clip's `fade_in_before` and `fade_out_after`. On a linked track it makes the same edit on every track linked with it, in the same undo step, and the result lists everything it changed; give `linked`: false to edit only what the arguments name.
 
 Default keys: none.
 
@@ -843,6 +844,7 @@ Arguments:
 | `fade_out` | number, at least 0 | yes | The fade-out's length in seconds up to the clip's end: 0 for none. Where a crossfade ends at the clip's end, this is how far before the end it begins. |
 | `fade_in_curve` | number or null | no | The fade-in's curve, from −1 to 1: 0 is a straight line, a positive curve bows towards full level and a negative one towards silence. Left out, the curve stays as it is. |
 | `fade_out_curve` | number or null | no | The fade-out's curve, from −1 to 1. Left out, the curve stays as it is. |
+| `linked` | boolean | no | Whether the edit reaches the tracks linked with the ones it names (the same on each); true if left out. Give false to limit it to what it names. |
 
 Result: [`ChangeSet`](README.md#changeset).
 
@@ -977,7 +979,7 @@ Result: [`ChangeSet`](README.md#changeset).
 
 **Resize Clip**. Permission: `edit`. Contexts: `arrangement`.
 
-Changes how long a clip is, in ticks, keeping its start and its contents. The length must be positive.
+Changes how long a clip is, in ticks, keeping its start and its contents. The length must be positive. On a linked track it makes the same edit on every track linked with it, in the same undo step, and the result lists everything it changed; give `linked`: false to edit only what the arguments name.
 
 Default keys: none.
 
@@ -987,6 +989,7 @@ Arguments:
 |---|---|---|---|
 | `clip` | [`ClipId`](README.md#clipid) | yes | The clip. |
 | `length` | [`Ticks`](README.md#ticks) | yes | The new length. |
+| `linked` | boolean | no | Whether the edit reaches the tracks linked with the ones it names (the same on each); true if left out. Give false to limit it to what it names. |
 
 Result: [`ChangeSet`](README.md#changeset).
 

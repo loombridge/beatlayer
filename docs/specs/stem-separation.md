@@ -38,6 +38,7 @@ This package builds the command for Arrangement clips, the dialog, the download,
 - **R11.** Each new track holds a copy of the clip playing its part: the clip's position, length, markers, loop, warping, gain, fades, and envelopes carry over. The source clip is deactivated. The tracks, the clips, and the deactivation are one undo step, "Separate Stems". (S1)
 - **R12.** The network sees the mix normalised by its mono mean and deviation, in windows of 343,980 frames overlapping by a quarter, blended back with triangular weights; each part is scaled back by the same mean and deviation. Progress is the share of windows done. Beatlayer's own method, Demucs's. (S5)
 - **R13.** High Quality's second pass sees the mix after a quarter of a second of silence, and its result is shifted back by as much before the two passes are averaged. Beatlayer's own method. (S2)
+- **R14.** Under `bl-cli mcp`, with no window, a download or separation under way finishes and lands its tracks while an agent asks for `stems.status` and while no one asks anything: the transport polls the shell before every message and every 50 ms while it waits, as the window does every frame, and a poll never writes to standard output. A headless run keeps no application-data folder, so the packages it downloads go to `Packages` in the system's temporary folder, and a run that needs them again downloads them again; this keeps headless runs apart from the app's own settings and files. Beatlayer's own. (S5)
 
 ## Tests
 
@@ -56,5 +57,6 @@ This package builds the command for Arrangement clips, the dialog, the download,
 | R11 | `crates/shell/tests/stems.rs`, `separating_makes_a_group_of_stem_tracks_and_deactivates_the_clip` | unit |
 | R12 | `crates/analysis/src/stems.rs`, `overlapping_windows_blend_back_into_the_whole_mix`, `progress_rises_to_one_and_can_cancel`; `crates/analysis/tests/stems_model.rs`, `a_bass_line_and_a_hi_hat_separate_into_bass_and_drums` (where the packages are named) | unit |
 | R13 | `crates/analysis/src/stems.rs`, `high_quality_averages_a_shifted_second_pass` | unit |
+| R14 | `crates/agent/tests/stdio.rs`, `a_file_lands_while_an_agent_keeps_asking`, `a_file_lands_while_no_one_asks_anything` (a processed file stands in for the separation's, which lands by the same poll) | unit |
 
 The tests that separate with the real network run where `BL_STEMS_RUNTIME` names ONNX Runtime's shared library and `BL_STEMS_MODEL` the model; without them they pass untested.

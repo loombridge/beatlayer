@@ -470,22 +470,31 @@ One of:
 
 ### `ApplicationState`
 
-The open application.
+The open application, which is a chain of one or more tools.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `tool` | string | yes | The tool. |
+| `tool` | string | yes | The chain's last tool. |
 | `clip` | [`ClipId`](#clipid) | yes | The clip. |
 | `input_notes` | integer, at least 0 | yes | How many input notes it keeps. |
 | `range` | pair of [`Ticks`](#ticks) and [`Ticks`](#ticks) | yes | The range it keeps. |
-| `seed` | integer, at least 0 | yes | The seed its random choices come from. |
+| `seed` | integer, at least 0 | yes | The seed of the chain's last tool. |
+| `chain` | array of [`StepState`](#stepstate) | yes | The chain: each step's tool, settings and seed, in order. |
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "The open application.",
+  "description": "The open application, which is a chain of one or more tools.",
   "properties": {
+    "chain": {
+      "default": [],
+      "description": "The chain: each step's tool, settings and seed, in order.",
+      "items": {
+        "$ref": "#/$defs/StepState"
+      },
+      "type": "array"
+    },
     "clip": {
       "$ref": "#/$defs/ClipId",
       "description": "The clip."
@@ -511,13 +520,13 @@ The open application.
       "type": "array"
     },
     "seed": {
-      "description": "The seed its random choices come from.",
+      "description": "The seed of the chain's last tool.",
       "format": "uint32",
       "minimum": 0,
       "type": "integer"
     },
     "tool": {
-      "description": "The tool.",
+      "description": "The chain's last tool.",
       "type": "string"
     }
   },
@@ -526,7 +535,8 @@ The open application.
     "clip",
     "input_notes",
     "range",
-    "seed"
+    "seed",
+    "chain"
   ],
   "type": "object"
 }
@@ -2579,7 +2589,7 @@ Beats' controls.
 |---|---|---|---|
 | `preserve` | [`Preserve`](#preserve) | no | What it preserves: transients unless given. |
 | `transient_envelope` | integer from 0 to 100 | no | How far each segment fades, 0 to 100: 100 (no fade) unless given. |
-| `transient_loop_mode` | [`TransientLoopMode`](#transientloopmode) | no | What it does when a segment runs out: Loop Forward unless given. |
+| `transient_loop_mode` | [`TransientLoopMode`](#transientloopmode) | no | What it does when a segment runs out: Loop Back-and-Forth unless given. |
 
 <details><summary>JSON Schema</summary>
 
@@ -2600,7 +2610,7 @@ Beats' controls.
     },
     "transient_loop_mode": {
       "$ref": "#/$defs/TransientLoopMode",
-      "description": "What it does when a segment runs out: Loop Forward unless given."
+      "description": "What it does when a segment runs out: Loop Back-and-Forth unless given."
     }
   },
   "type": "object"
@@ -14891,6 +14901,25 @@ The Library page's settings (L-SET-016).
 
 </details>
 
+### `LinkGroupId`
+
+The ID of a link group: a positive integer, unique within the project and never reused.
+
+Type: integer, at least 1.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The ID of a link group: a positive integer, unique within the project and never reused.",
+  "format": "uint64",
+  "minimum": 1,
+  "type": "integer"
+}
+```
+
+</details>
+
 ### `LoadSampleResult`
 
 What `device.load_sample` returns.
@@ -20276,8 +20305,9 @@ The Clip View's Quantize settings, as `clip_view.quantize_settings` reports them
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `grid` | [`Ticks`](#ticks) or null | yes | The spacing between the quantise grid's lines, in ticks. `null` (nothing) follows the Clip View's editing grid, the step the note area draws, at the moment the command runs. |
-| `target` | [`QuantizeTarget`](#quantizetarget) | yes | Whether quantise moves note starts or note ends. |
+| `grid` | [`Ticks`](#ticks) or null | yes | The spacing between the quantise grid's lines, in ticks: a note division from a whole note to a 1/32 note. `null` (nothing) follows the Clip View's editing grid, the step the note area draws, at the moment the command runs. |
+| `target` | [`QuantizeTarget`](#quantizetarget) | yes | Whether quantise moves note starts, note ends, or both. With the Quantize tool's Start and End both off this reads `note_start`; `midi_tool.state` has the two switches. |
+| `triplets` | boolean | yes | Whether a `grid` of a note division is a triplet of it, two-thirds as long. It has no effect while `grid` is `null`. |
 | `amount` | integer from 0 to 255 | yes | How far each note moves toward its grid line, as a percentage from 0 (nothing moves) to 100 (every note lands on the line). |
 
 <details><summary>JSON Schema</summary>
@@ -20302,16 +20332,21 @@ The Clip View's Quantize settings, as `clip_view.quantize_settings` reports them
           "type": "null"
         }
       ],
-      "description": "The spacing between the quantise grid's lines, in ticks. `null` (nothing) follows the Clip View's editing grid, the step the note area draws, at the moment the command runs."
+      "description": "The spacing between the quantise grid's lines, in ticks: a note division from a whole note to a 1/32 note. `null` (nothing) follows the Clip View's editing grid, the step the note area draws, at the moment the command runs."
     },
     "target": {
       "$ref": "#/$defs/QuantizeTarget",
-      "description": "Whether quantise moves note starts or note ends."
+      "description": "Whether quantise moves note starts, note ends, or both. With the Quantize tool's Start and End both off this reads `note_start`; `midi_tool.state` has the two switches."
+    },
+    "triplets": {
+      "description": "Whether a `grid` of a note division is a triplet of it, two-thirds as long. It has no effect while `grid` is `null`.",
+      "type": "boolean"
     }
   },
   "required": [
     "grid",
     "target",
+    "triplets",
     "amount"
   ],
   "type": "object"
@@ -20322,18 +20357,19 @@ The Clip View's Quantize settings, as `clip_view.quantize_settings` reports them
 
 ### `QuantizeTarget`
 
-What `note.quantize` moves toward the grid: `note_start` (the default) moves each note's start, `note_end` moves its end instead, leaving the start alone.
+What `note.quantize` moves toward the grid: `note_start` (the default) moves each note's start, `note_end` moves its end instead, leaving the start alone, and `both` moves the start and then the end.
 
 One of:
 
 - `"note_start"`: Move the notes' starts.
 - `"note_end"`: Move the notes' ends; the starts stay put.
+- `"both"`: Move the notes' starts, then their ends.
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "What `note.quantize` moves toward the grid: `note_start` (the default) moves each note's start, `note_end` moves its end instead, leaving the start alone.",
+  "description": "What `note.quantize` moves toward the grid: `note_start` (the default) moves each note's start, `note_end` moves its end instead, leaving the start alone, and `both` moves the start and then the end.",
   "oneOf": [
     {
       "const": "note_start",
@@ -20343,6 +20379,11 @@ One of:
     {
       "const": "note_end",
       "description": "Move the notes' ends; the starts stay put.",
+      "type": "string"
+    },
+    {
+      "const": "both",
+      "description": "Move the notes' starts, then their ends.",
       "type": "string"
     }
   ]
@@ -25399,6 +25440,49 @@ What `note.step_record` did.
 
 </details>
 
+### `StepState`
+
+One step of the open chain.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `tool` | string | yes | The tool's ID. |
+| `values` | object | yes | Every parameter's value by ID, as the step ran with them. |
+| `seed` | integer, at least 0 | yes | The seed the step's random choices come from. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One step of the open chain.",
+  "properties": {
+    "seed": {
+      "description": "The seed the step's random choices come from.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "tool": {
+      "description": "The tool's ID.",
+      "type": "string"
+    },
+    "values": {
+      "additionalProperties": true,
+      "description": "Every parameter's value by ID, as the step ran with them.",
+      "type": "object"
+    }
+  },
+  "required": [
+    "tool",
+    "values",
+    "seed"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `StretchPoint`
 
 A point inside a stretch's range that moves while both ends stay, as dragging the pseudo marker does.
@@ -27540,6 +27624,37 @@ What `track.group` returns.
 
 </details>
 
+### `TracksLinked`
+
+What `track.link` and `track.unlink` return.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `tracks` | array of [`TrackId`](#trackid) | yes | The tracks whose link changed, in display order. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `track.link` and `track.unlink` return.",
+  "properties": {
+    "tracks": {
+      "description": "The tracks whose link changed, in display order.",
+      "items": {
+        "$ref": "#/$defs/TrackId"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "tracks"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `TracksUngrouped`
 
 What `track.ungroup` returns.
@@ -27616,8 +27731,8 @@ How Beats fills the time a segment's own audio doesn't (R2).
 One of:
 
 - `"loop_off"`: Silence until the next segment.
-- `"loop_forward"`: Back to the segment's middle, forwards again; the default.
-- `"loop_back_and_forth"`: Backwards to the middle, then forwards.
+- `"loop_forward"`: Back to the segment's middle, forwards again.
+- `"loop_back_and_forth"`: Backwards to the middle, then forwards; the default.
 
 <details><summary>JSON Schema</summary>
 
@@ -27632,12 +27747,12 @@ One of:
     },
     {
       "const": "loop_forward",
-      "description": "Back to the segment's middle, forwards again; the default.",
+      "description": "Back to the segment's middle, forwards again.",
       "type": "string"
     },
     {
       "const": "loop_back_and_forth",
-      "description": "Backwards to the middle, then forwards.",
+      "description": "Backwards to the middle, then forwards; the default.",
       "type": "string"
     }
   ]

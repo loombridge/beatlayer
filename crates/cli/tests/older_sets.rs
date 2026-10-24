@@ -12,7 +12,7 @@ use bl_engine::{EngineConfig, MediaMap, Offline, Registry, TransportCommand};
 use bl_media::SampleData;
 use bl_model::{
     AudioData, Clip, ClipData, Command, ContentHash, Device, DeviceKind, Document, Editor, ParamId,
-    TrackKind,
+    Preserve, TrackKind, TransientLoopMode, WarpMarker,
 };
 use bl_project::{LoadOptions, Media, Project, decode_json, encode_json};
 use serde_json::{Value, json};
@@ -1358,7 +1358,10 @@ fn a_version_7_set_with_take_lanes_loads_and_plays_as_it_did() {
             index: 0,
         })
         .unwrap();
-    let audio = AudioData::new(MEDIA);
+    // Version 7 left Loop Forward, Beats' default then, out of the file; it
+    // loads as Loop Forward, so the clips say so.
+    let mut audio = AudioData::new(MEDIA);
+    audio.warp_settings.beats.transient_loop_mode = TransientLoopMode::LoopForward;
     let main = Clip::new(
         editor.new_id(),
         Ticks::ZERO,
@@ -1622,4 +1625,83 @@ fn a_set_saved_before_the_second_window_opens_in_the_arrangement_with_one_window
     let (loaded, _) = decode_json(&saved, &LoadOptions::default()).unwrap();
     assert_eq!(loaded.window_views, kept.window_views);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+// Spec: warp-modes R2. A set saved while Loop Forward was Beats' default
+// transient loop mode names no mode for the clips that had it, and opens
+// playing Loop Forward, not the new default, frame for frame.
+#[test]
+fn a_set_saved_before_loop_back_and_forth_became_the_default_still_plays_loop_forward() {
+    let mut editor = Editor::new();
+    editor
+        .apply(Command::SetTempo {
+            tempo: TempoMap::constant(Bpm::new(60.0).unwrap()),
+        })
+        .unwrap();
+    let track = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: track,
+            kind: TrackKind::Audio,
+            name: "Audio".to_owned(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    // A Beats clip at twice the song's tempo, so each bar's segment runs out
+    // of its own audio and the loop mode fills the rest.
+    let mut audio = AudioData {
+        warp: true,
+        warp_markers: vec![WarpMarker {
+            time: 0.0,
+            beat: Ticks::ZERO,
+        }],
+        tempo: Some(120.0),
+        ..AudioData::new(MEDIA)
+    };
+    audio.warp_settings.beats.preserve = Preserve::Bar;
+    audio.warp_settings.beats.transient_loop_mode = TransientLoopMode::LoopForward;
+    let clip = editor.new_id();
+    editor
+        .apply(Command::CreateClip {
+            track,
+            clip: Clip::new(clip, Ticks::ZERO, Ticks::WHOLE * 2, ClipData::Audio(audio)),
+        })
+        .unwrap();
+    let expected = render(editor.document());
+    let saved = encode_json(&project_of(&editor), 1).unwrap();
+    editor
+        .apply(Command::SetClipWarpSettings {
+            clip,
+            beats: Some(bl_model::BeatsUpdate {
+                transient_loop_mode: Some(TransientLoopMode::LoopBackAndForth),
+                ..Default::default()
+            }),
+            tones: None,
+            texture: None,
+            complex_pro: None,
+        })
+        .unwrap();
+    assert_ne!(render(editor.document()), expected);
+
+    // The set as schema 9 wrote it: Loop Forward, its default, left out.
+    let mut old: Value = serde_json::from_slice(&saved).unwrap();
+    old["schema"] = 9.into();
+    let clips = &mut old["document"]["tracks"][0]["clips"][0]["data"]["audio"];
+    clips["warp_settings"]["beats"]
+        .as_object_mut()
+        .unwrap()
+        .remove("transient_loop_mode")
+        .unwrap();
+    let (loaded, info) =
+        decode_json(&serde_json::to_vec(&old).unwrap(), &LoadOptions::default()).unwrap();
+    assert_eq!(info.schema, 9);
+    let ClipData::Audio(audio) = &loaded.document.clip(clip).unwrap().data else {
+        unreachable!("an audio clip");
+    };
+    assert_eq!(
+        audio.warp_settings.beats.transient_loop_mode,
+        TransientLoopMode::LoopForward
+    );
+    assert_eq!(render(&loaded.document), expected);
 }

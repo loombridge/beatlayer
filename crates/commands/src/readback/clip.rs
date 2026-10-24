@@ -90,6 +90,7 @@ pub(super) const ROWS: &[(&str, Readback)] = &[
     ("midi_tool.set", read("midi_tool.state", "tools[].values")),
     ("midi_tool.reset", read("midi_tool.state", "tools[].values")),
     ("midi_tool.reseed", query(Clip, "data.midi.notes")),
+    ("midi_tool.randomize", read("midi_tool.state", "tools[].values")),
     ("midi_tool.choose", read("midi_tool.state", "transformation")),
     ("midi_tool.apply", query(Clip, "data.midi.notes")),
     ("note.add", query(Clip, "data.midi.notes")),

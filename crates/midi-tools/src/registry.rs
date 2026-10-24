@@ -4,8 +4,24 @@
 use std::fmt;
 use std::sync::OnceLock;
 
+use crate::arpeggiate::Arpeggiate;
+use crate::chop::Chop;
+use crate::connect::Connect;
 use crate::descriptor::{ParamValue, ToolDescriptor, ToolKind};
+use crate::euclidean::Euclidean;
+use crate::glissando::Glissando;
 use crate::input::{ToolInput, ToolOutput, fold_octaves};
+use crate::lfo::Lfo;
+use crate::ornament::Ornament;
+use crate::quantize::Quantize;
+use crate::recombine::Recombine;
+use crate::rhythm::Rhythm;
+use crate::seed::Seed;
+use crate::shape::Shape;
+use crate::span::Span;
+use crate::strum::Strum;
+use crate::time_warp::TimeWarp;
+use crate::velocity_shaper::VelocityShaper;
 use bl_core::time::Ticks;
 
 /// The most notes one run may write; a run that would write more is
@@ -62,6 +78,35 @@ pub trait MidiTool: Send + Sync {
     /// The tool's name, kind and parameters.
     fn descriptor(&self) -> &ToolDescriptor;
 
+    /// Whether `values` suit the tool together, beyond each one's kind and
+    /// range, such as Velocity Shaper's envelope. [`run`] and the shell check
+    /// it before the settings change.
+    ///
+    /// # Errors
+    ///
+    /// [`ToolError::Values`] saying what is wrong.
+    fn validate(&self, _values: &[ParamValue]) -> Result<(), ToolError> {
+        Ok(())
+    }
+
+    /// Settles the values after a change that named the parameters at
+    /// `changed`: `after` holds them all, `before` the values the change
+    /// started from. A tool whose parameters depend on one another, as
+    /// Chop's Gaps writes its Pattern, adjusts them here, or refuses the
+    /// change, saying why. The default leaves them as they are.
+    ///
+    /// # Errors
+    ///
+    /// Why the values can't stand.
+    fn settle(
+        &self,
+        _before: &[ParamValue],
+        _after: &mut [ParamValue],
+        _changed: &[usize],
+    ) -> Result<(), String> {
+        Ok(())
+    }
+
     /// The notes the tool writes for `input` and `values`, one value per
     /// parameter. Call it through [`run`], which checks the values and
     /// finishes the notes.
@@ -88,6 +133,7 @@ pub fn run(
 ) -> Result<ToolOutput, ToolError> {
     let descriptor = tool.descriptor();
     descriptor.check(values)?;
+    tool.validate(values)?;
     let mut output = tool.run(input, values)?;
     if output.notes.len() > MAX_NOTES {
         return Err(ToolError::TooManyNotes(output.notes.len()));
@@ -110,15 +156,25 @@ pub fn run(
 }
 
 /// The tools Beatlayer ships: each native tool's task adds itself here.
-#[cfg(not(feature = "testing"))]
 fn native_tools() -> Vec<Box<dyn MidiTool>> {
-    Vec::new()
-}
-
-/// The tools Beatlayer ships, and the test tools after them.
-#[cfg(feature = "testing")]
-fn native_tools() -> Vec<Box<dyn MidiTool>> {
-    crate::testing::tools()
+    vec![
+        Box::new(Arpeggiate::new()),
+        Box::new(Chop::new()),
+        Box::new(Connect::new()),
+        Box::new(Glissando::new()),
+        Box::new(Lfo::new()),
+        Box::new(Ornament::new()),
+        Box::new(Quantize::new()),
+        Box::new(Recombine::new()),
+        Box::new(Span::new()),
+        Box::new(Strum::new()),
+        Box::new(TimeWarp::new()),
+        Box::new(VelocityShaper::new()),
+        Box::new(Rhythm::new()),
+        Box::new(Seed::new()),
+        Box::new(Shape::new()),
+        Box::new(Euclidean::new()),
+    ]
 }
 
 /// The tools, in the order the selectors list them.
@@ -134,6 +190,8 @@ impl Registry {
         static NATIVE: OnceLock<Registry> = OnceLock::new();
         NATIVE.get_or_init(|| {
             let mut tools = native_tools();
+            #[cfg(feature = "testing")]
+            tools.extend(crate::testing::tools());
             let rank = |tool: &dyn MidiTool| {
                 let descriptor = tool.descriptor();
                 let order: &[&str] = match descriptor.kind {

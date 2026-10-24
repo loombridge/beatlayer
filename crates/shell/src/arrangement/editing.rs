@@ -13,6 +13,8 @@
 //! from where the drag began, inside one transaction (see
 //! `Shell::gesture`). The behaviour is in the arrangement editing spec.
 
+pub(super) mod linked;
+
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use bl_core::time::Ticks;
@@ -573,14 +575,21 @@ pub(crate) fn target(
         lanes,
         start,
         end,
+        linked,
     } = args;
+    let linked = linked::on(linked);
     if let Some(clips) = clips {
         if tracks.is_some() || lanes.is_some() || start.is_some() || end.is_some() {
             return Err(invalid(
                 "give `clips`, or a span of time (`tracks` or `lanes`, `start`, `end`), not both",
             ));
         }
-        return Ok(Target::Clips(clips_or_selected(doc, view, Some(clips))?));
+        let clips = clips_or_selected(doc, view, Some(clips))?;
+        return Ok(Target::Clips(if linked {
+            linked::clips(doc, clips)
+        } else {
+            clips
+        }));
     }
     if tracks.is_none()
         && lanes.is_none()
@@ -588,7 +597,12 @@ pub(crate) fn target(
         && end.is_none()
         && !view.selected_clips.is_empty()
     {
-        return Ok(Target::Clips(clips_or_selected(doc, view, None)?));
+        let clips = clips_or_selected(doc, view, None)?;
+        return Ok(Target::Clips(if linked {
+            linked::clips(doc, clips)
+        } else {
+            clips
+        }));
     }
     let signatures = &doc.settings().time_signatures;
     let selection = view.time_selection;
@@ -611,6 +625,11 @@ pub(crate) fn target(
     if places.is_empty() {
         return Err(unavailable("no track is selected"));
     }
+    let places = if linked {
+        linked::places(doc, places)
+    } else {
+        places
+    };
     Ok(Target::Time { places, start, end })
 }
 
@@ -1341,11 +1360,21 @@ pub fn run(
     let doc = &before;
     match id {
         ids::SELECT_CLIPS => {
-            let SelectClipsArgs { clips, mode } = parse(args)?;
+            let SelectClipsArgs {
+                clips,
+                mode,
+                linked,
+            } = parse(args)?;
+            let linked = linked::on(linked);
             let clips = if clips.is_empty() {
                 Vec::new()
             } else {
-                clips_or_selected(doc, view, Some(clips))?
+                let clips = clips_or_selected(doc, view, Some(clips))?;
+                if linked {
+                    linked::clips(doc, clips)
+                } else {
+                    clips
+                }
             };
             let mut selected = view.selected_clips.clone();
             match mode {
@@ -1400,6 +1429,9 @@ pub fn run(
                     }
                 },
             }
+            if linked && mode == SelectMode::Extend {
+                selected = linked::clips(doc, selected);
+            }
             if selected.is_empty() {
                 view.selected_clips.clear();
             } else {
@@ -1437,11 +1469,17 @@ pub fn run(
                 track,
                 lane,
                 copy,
+                linked,
             } = parse(args)?;
             if track.is_some() && lane.is_some() {
                 return Err(invalid("give `track` or `lane`, not both"));
             }
             let clips = clips_or_selected(doc, view, clips)?;
+            let clips = if linked::on(linked) {
+                linked::clips(doc, clips)
+            } else {
+                clips
+            };
             let lanes = lanes(doc);
             let anchor = match anchor {
                 Some(anchor) if clips.contains(&anchor) => anchor,
@@ -1626,8 +1664,14 @@ pub fn run(
                 by,
                 to,
                 anchor,
+                linked,
             } = parse(args)?;
             let clips = clips_or_selected(doc, view, clips)?;
+            let clips = if linked::on(linked) {
+                linked::clips(doc, clips)
+            } else {
+                clips
+            };
             let lanes = lanes(doc);
             let anchor = match anchor {
                 Some(anchor) if clips.contains(&anchor) => anchor,
@@ -1722,7 +1766,9 @@ pub fn run(
                 tracks,
                 lanes,
                 at,
+                linked,
             } = parse(args)?;
+            let linked = linked::on(linked);
             let signatures = &doc.settings().time_signatures;
             let mut positions: Vec<Ticks> = match at {
                 Some(at) => at
@@ -1737,7 +1783,7 @@ pub fn run(
             };
             positions.sort_unstable();
             positions.dedup();
-            let targets: Vec<ClipId> = match (clips, tracks, lanes) {
+            let mut targets: Vec<ClipId> = match (clips, tracks, lanes) {
                 (Some(clips), None, None) => clips_or_selected(doc, view, Some(clips))?,
                 (None, None, None) if !view.selected_clips.is_empty() => {
                     clips_or_selected(doc, view, None)?
@@ -1755,6 +1801,9 @@ pub fn run(
                     ));
                 }
             };
+            if linked {
+                targets = linked::clips(doc, targets);
+            }
             let (created, recorded) =
                 settled(editor, "Split clips", (doc, edge_fades), |editor| {
                     let mut created = Vec::new();
@@ -1795,10 +1844,25 @@ pub fn run(
             let args: TargetArgs = parse(args)?;
             // Spec: comping R7, R28. With take lane headers selected, Delete
             // deletes the lanes.
-            if args == TargetArgs::default() && !view.selected_take_lanes.is_empty() {
+            let named = TargetArgs {
+                linked: None,
+                ..args.clone()
+            };
+            if named == TargetArgs::default() && !view.selected_take_lanes.is_empty() {
                 let lanes = view.selected_take_lanes.clone();
+                // Spec: linked-track editing R11. The lanes at the same
+                // place on the linked tracks go with them.
+                let mut commands = vec![Command::DeleteTakeLanes { lanes }];
+                if linked::on(args.linked) {
+                    commands = commands
+                        .into_iter()
+                        .flat_map(|c| doc.with_linked(c))
+                        .collect();
+                }
                 let (_, recorded) = transaction(editor, "Delete Take Lane(s)", |editor| {
-                    apply(editor, Command::DeleteTakeLanes { lanes })
+                    commands
+                        .into_iter()
+                        .try_for_each(|c| apply(editor, c).map(drop))
                 })?;
                 view.selected_take_lanes.clear();
                 return Ok(to_value(&result(doc, editor, view, recorded)));

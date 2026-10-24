@@ -82,6 +82,7 @@ mod groove;
 mod ids;
 mod launch;
 mod layers;
+mod linked;
 mod locator;
 mod metronome;
 pub mod modulation;
@@ -152,8 +153,8 @@ pub use groove::{
     GroovePlay, GroovePool, MovedTransients, clip_seed, noise,
 };
 pub use ids::{
-    ChainId, ClipId, ContentHash, DeviceId, GrooveId, LocatorId, ParamId, ParseContentHashError,
-    SceneId, TakeLaneId, TrackId,
+    ChainId, ClipId, ContentHash, DeviceId, GrooveId, LinkGroupId, LocatorId, ParamId,
+    ParseContentHashError, SceneId, TakeLaneId, TrackId,
 };
 /// The persistent collections the document's public types hold.
 pub use imbl::{OrdMap, Vector};

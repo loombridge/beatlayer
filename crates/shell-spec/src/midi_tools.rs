@@ -10,7 +10,7 @@
 //! [`register`] adds their specs, which are pure data; `bl-shell` runs them
 //! by ID.
 
-use bl_commands::Context::{ClipView, NoteEditor};
+use bl_commands::Context::{ClipView, NoteEditor, SampleEditor};
 use bl_commands::{CommandSpec, NoArgs, Permission, RegisterError, Registry};
 use bl_core::time::Ticks;
 use bl_model::ClipId;
@@ -41,9 +41,12 @@ pub const APPLY: &str = "midi_tool.apply";
 /// again.
 pub const RESEED: &str = "midi_tool.reseed";
 
+/// `midi_tool.randomize`: set every voice's Rotation of Euclidean at random.
+pub const RANDOMIZE: &str = "midi_tool.randomize";
+
 /// Every command [`register`] adds.
 pub const IDS: &[&str] = &[
-    LIST, STATE, SHOW_PANEL, CLOSE, CHOOSE, SET, SET_AUTO, RESET, APPLY, RESEED,
+    LIST, STATE, SHOW_PANEL, CLOSE, CHOOSE, SET, SET_AUTO, RESET, APPLY, RESEED, RANDOMIZE,
 ];
 
 /// Whether `id` is one of the MIDI Tools' commands.
@@ -166,10 +169,21 @@ pub struct TargetState {
     pub input: Vec<u32>,
 }
 
-/// The open application.
+/// One step of the open chain.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct StepState {
+    /// The tool's ID.
+    pub tool: String,
+    /// Every parameter's value by ID, as the step ran with them.
+    pub values: Map<String, Value>,
+    /// The seed the step's random choices come from.
+    pub seed: u32,
+}
+
+/// The open application, which is a chain of one or more tools.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ApplicationState {
-    /// The tool.
+    /// The chain's last tool.
     pub tool: String,
     /// The clip.
     pub clip: ClipId,
@@ -177,8 +191,11 @@ pub struct ApplicationState {
     pub input_notes: usize,
     /// The range it keeps.
     pub range: (Ticks, Ticks),
-    /// The seed its random choices come from.
+    /// The seed of the chain's last tool.
     pub seed: u32,
+    /// The chain: each step's tool, settings and seed, in order.
+    #[serde(default)]
+    pub chain: Vec<StepState>,
 }
 
 /// What the last application wrote.
@@ -274,6 +291,10 @@ pub struct SetArgs {
     /// The tool's ID. Left out, the chosen tool of the panel shown last.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool: Option<String>,
+    /// Which step of the open chain to change, counting from 0, when the tool
+    /// is in it more than once. Left out, the tool's last step.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step: Option<usize>,
     /// The parameters to set, by ID, each in the form `midi_tool.list` gives
     /// its default.
     pub values: Map<String, Value>,
@@ -344,6 +365,18 @@ pub struct ReseedArgs {
     pub seed: Option<u32>,
 }
 
+/// Arguments of `midi_tool.randomize`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RandomizeArgs {
+    /// The MIDI clip. Left out, the one the Clip View shows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<ClipId>,
+    /// The seed, from 0 to 4294967295. Left out, a new one is drawn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seed: Option<u32>,
+}
+
 /// Adds the MIDI Tools' commands to a registry.
 ///
 /// # Errors
@@ -392,8 +425,9 @@ fn specs() -> Vec<CommandSpec> {
              transformation and generator the clip's track shows, every tool's settings (its \
              Auto switch, its parameters' values, whether they are all at their defaults), \
              what a tool would act on now (the range, the time selection, the selected notes \
-             and the notes a transformation would take), and the open application with its \
-             tool, how many input notes it keeps, its range and its seed. Changes nothing.",
+             and the notes a transformation would take), and the open application, a chain of \
+             one or more tools, with how many input notes it keeps, its range, and each \
+             step's tool, settings and seed in order. Changes nothing.",
         )
         .args::<ClipArgs>(),
         tool(
@@ -410,7 +444,7 @@ fn specs() -> Vec<CommandSpec> {
             CLOSE,
             "Close MIDI Tool Application",
             Permission::Read,
-            "Closes the open MIDI Tool application, so the next change of a tool's \
+            "Closes the open MIDI Tool application or chain, so the next change of a tool's \
              parameters starts a new one on the notes as they are then. Leaves the notes \
              as they are. View state: no undo step.",
         )
@@ -422,7 +456,8 @@ fn specs() -> Vec<CommandSpec> {
             "Chooses the tool the Transform or Generate panel shows for the track of a MIDI \
              clip, as the Transformation or Generator Selector does: a transformation or a \
              generator, by its ID from `midi_tool.list`. Each track remembers its choice, \
-             saved with the set. Changes no notes and is no undo step; read it back in \
+             saved with the set. A tool that is in the open chain shows the settings of its \
+             last step. Changes no notes and is no undo step; read it back in \
              `midi_tool.state`.",
         )
         .args::<ChooseArgs>(),
@@ -435,20 +470,24 @@ fn specs() -> Vec<CommandSpec> {
              tool's Auto switch on, the change applies the tool at once (a transformation \
              only while notes or a time selection are selected): the first change opens an \
              application on the notes as they are, and each further change runs the tool \
-             again on the notes it started from, with the same seed. The application is \
-             one undo step named after the tool. A change that would leave the clip fewer \
-             notes asks first. Read the settings back in `midi_tool.state` and the notes \
-             in the query tool's `clip`.",
+             again on the notes it started from, with the same seed. A tool that is in the \
+             open chain runs the chain again from its step (its last, or the one `step` \
+             names, counting from 0), each later step with its own settings and seed; \
+             another transformation joins the chain. Each change is one undo step named \
+             after the tool. A change that would leave the clip fewer notes asks first. Read \
+             the settings back in `midi_tool.state` and the notes in the query tool's \
+             `clip`.",
         )
         .args::<SetArgs>(),
         tool(
             SET_AUTO,
             "Set MIDI Tool Auto",
             Permission::Edit,
-            "Switches a MIDI Tool's Auto switch. Switching it off while the tool's \
-             application is open puts the notes back as they were before it and closes the \
-             application, as one undo step; switching it on applies nothing until a \
-             parameter changes. Read it back in `midi_tool.state`.",
+            "Switches a MIDI Tool's Auto switch. Switching it off while the tool is in the \
+             open chain takes its last step out, as one undo step: the steps after it run \
+             again on the notes the step before it made, and taking out the only step puts \
+             the notes back as they were and closes the chain. Switching it on applies \
+             nothing until a parameter changes. Read it back in `midi_tool.state`.",
         )
         .args::<SetAutoArgs>(),
         tool(
@@ -472,23 +511,39 @@ fn specs() -> Vec<CommandSpec> {
              parameters and are kept. `seed` (0 to 4294967295) makes the random choices \
              repeatable; left out, a new one is drawn. The notes written are selected \
              afterwards. One undo step named after the tool, even when the notes come out \
-             unchanged. Cmd+Enter (S-NOTE-033) and Edit ▸ Apply Transformation/Generator \
-             run it. A transformation with no input is refused, and so is a run that would \
-             write more than 65536 notes. A call that would leave the clip fewer notes asks \
-             first. Read the notes in the query tool's `clip` (`data.midi.notes`).",
+             unchanged. A transformation applied to the notes the open chain wrote (no \
+             `notes` or `range` given) joins the chain as a new step; a generator, or notes \
+             or a range of its own, starts a new chain. Cmd+Enter (S-NOTE-033) and Edit ▸ \
+             Apply Transformation/Generator run it. On an audio clip, whose Transform panel \
+             holds Quantize alone, it runs `clip.quantize_audio` with Quantize's Grid, \
+             Triplets and Amount. A transformation with no input is refused, and so is a run \
+             that would write more than 65536 notes. A call that would leave the clip fewer \
+             notes asks first. Read the notes in the query tool's `clip` (`data.midi.notes`).",
         )
+        .contexts([NoteEditor, ClipView, SampleEditor])
         .binding("S-NOTE-033")
         .args::<ApplyArgs>(),
         tool(
             RESEED,
             "Reseed MIDI Tool",
             Permission::Edit,
-            "Gives the open MIDI Tool application a new seed, or the one it is given, and \
-             runs the tool again on the notes it started from, as a tool's Reseed button \
-             does. Refused while no application is open. A call that would leave the clip \
-             fewer notes asks first. Read the seed in `midi_tool.state`.",
+            "Gives the last step of the open MIDI Tool chain a new seed, or the one it is \
+             given, and runs it again on the notes the step before it made, as a tool's \
+             Reseed button does. Refused while no application is open. A call that would \
+             leave the clip fewer notes asks first. Read the seed in `midi_tool.state`.",
         )
         .args::<ReseedArgs>(),
+        tool(
+            RANDOMIZE,
+            "Randomize Euclidean Rotations",
+            Permission::Edit,
+            "Sets the Rotation of every voice of Euclidean to a random value from 0 to Steps - \
+             1, as the Pattern tab's randomise button does. `seed` (0 to 4294967295) makes the \
+             draw repeatable; left out, a new one is drawn. With Euclidean's Auto switch on it \
+             applies at once, like `midi_tool.set`. Changes no notes by itself and is no undo \
+             step; read the Rotations back in `midi_tool.state`.",
+        )
+        .args::<RandomizeArgs>(),
     ]
 }
 

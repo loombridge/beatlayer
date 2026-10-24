@@ -150,16 +150,8 @@ pub fn register(registry: &mut Registry) {
     });
 }
 
-/// How far into a strum of `n` notes note `j` sounds, from 0 to 1, under
-/// `tension` (−1 to 1): positive starts slowly and speeds up.
-#[must_use]
-pub fn strum_position(j: usize, n: usize, tension: f64) -> f64 {
-    if n < 2 {
-        return 0.0;
-    }
-    let u = j as f64 / (n - 1) as f64;
-    1.0 - (1.0 - u).powf(2f64.powf(2.0 * tension))
-}
+/// The strum law, shared with the Strum MIDI Tool.
+pub use bl_midi_tools::strum_position;
 
 /// The shifts a chord sets while Learn is on: `held` is the keys down in the
 /// order they went down; the first is the root and the rest, up to six,

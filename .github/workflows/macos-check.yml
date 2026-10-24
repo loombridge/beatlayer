@@ -72,7 +72,9 @@ jobs:
     needs: decide
     if: needs.decide.outputs.run == 'true'
     runs-on: macos-15
-    timeout-minutes: 30
+    # The full check took 21 minutes on 20 October 2026 and has outgrown 30
+    # since; every nightly from 21 October was cancelled mid-test.
+    timeout-minutes: 60
     defaults:
       run:
         shell: bash

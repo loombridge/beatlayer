@@ -5448,7 +5448,28 @@ impl Shell {
         outcome
     }
 
+    /// The Status Bar's list of the open MIDI Tools chain (Spec: midi-tools
+    /// R30).
+    fn chain_status(&self) -> Option<String> {
+        self.clip_view.midi_tools().chain_status(
+            self.editor.document(),
+            &self.clip_view,
+            &self.arrangement,
+        )
+    }
+
+    /// Shows the open chain's list in the Status Bar when a command changed
+    /// it from `listed` (Spec: midi-tools R30).
+    fn announce_chain(&mut self, listed: Option<String>) {
+        if let Some(text) = self.chain_status()
+            && Some(&text) != listed.as_ref()
+        {
+            self.set_message(text, false);
+        }
+    }
+
     fn gesture_step(&mut self, invocation: &Invocation) -> Result<Value, ShellError> {
+        let listed = self.chain_status();
         let label = if note_ids::handles(&invocation.id) {
             clip_view::label(&invocation.id)
         } else if automation_ids::handles(&invocation.id) {
@@ -5608,6 +5629,9 @@ impl Shell {
                 }
                 if sample_edit_command(&invocation.id) {
                     self.clip_view.sample_follow(true);
+                }
+                if tool_ids::handles(&invocation.id) {
+                    self.announce_chain(listed);
                 }
                 Ok(value)
             }
@@ -8997,6 +9021,7 @@ impl Shell {
             // Spec: midi-tools R23. The MIDI Tools' panels, choices,
             // settings and applications.
             let before = self.editor.document().clone();
+            let listed = self.chain_status();
             let result = midi_tools::run(
                 id,
                 args,
@@ -9008,6 +9033,9 @@ impl Shell {
             if *self.editor.document() != before {
                 self.dirty = true;
                 self.document_changed();
+            }
+            if result.is_ok() {
+                self.announce_chain(listed);
             }
             self.touch();
             return result;

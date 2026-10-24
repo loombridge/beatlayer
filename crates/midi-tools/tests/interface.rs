@@ -61,7 +61,7 @@ fn r3_the_registry_lists_each_kind_apart() {
         .tools(ToolKind::Generator)
         .map(|tool| tool.descriptor().id.clone())
         .collect();
-    assert_eq!(transformations, ["test_transpose"]);
+    assert_eq!(transformations, ["test_transpose", "test_shift"]);
     assert_eq!(generators, ["test_fill"]);
     assert!(
         registry

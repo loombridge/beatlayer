@@ -30,6 +30,7 @@ pub fn kind_text(kind: ItemKind, clip: Option<ClipFileKind>) -> &'static str {
         ItemKind::Sfz => "SFZ Instrument",
         ItemKind::Set => "Beatlayer Set",
         ItemKind::Preset => "Device Preset",
+        ItemKind::ChordBank => "Chord Bank",
         ItemKind::Plugin => "Plug-In",
         ItemKind::Device => "Device",
         ItemKind::Clip => match clip {

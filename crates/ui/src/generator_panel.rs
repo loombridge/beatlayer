@@ -7,14 +7,15 @@
 //! one undo step named after the tool, and Esc puts the notes back.
 
 use bl_midi_tools::{
-    EUCLIDEAN_VOICES, ParamKind, ParamSpec, ParamValue, euclid, rhythm_steps, rotation_id,
+    EUCLIDEAN_VOICES, MAX_CHORDS, ParamKind, ParamSpec, ParamValue, StackView, euclid, key_name,
+    rhythm_steps, rotation_id, stack_view,
 };
 use bl_model::ClipId;
 use bl_shell::midi_tools::ToolView;
 use bl_shell::{Area, GesturePhase, Invocation, Shell};
 use egui::accesskit::{self, Role};
 use egui::{
-    Align2, Id, Key, Rect, Sense, Stroke, StrokeKind, Ui, WidgetInfo, WidgetType, pos2, vec2,
+    Align2, Id, Key, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, WidgetInfo, WidgetType, pos2, vec2,
 };
 use serde_json::{Value, json};
 
@@ -36,8 +37,14 @@ const LEVELS_HEIGHT: f32 = 40.0;
 const LEVEL_STEP: f64 = 0.05;
 /// An arrow button's width.
 const ARROW: f32 = 18.0;
+/// The Chord Selector Pad's diagrams: how many show at once, across and
+/// down, and how big each is.
+const PAD_COLUMNS: usize = 3;
+const PAD_ROWS: usize = 3;
+const DIAGRAM: egui::Vec2 = vec2(30.0, 24.0);
+const DIAGRAM_GAP: f32 = 2.0;
 
-/// Draws the rows of Rhythm, Seed, Shape or Euclidean from `y` down and
+/// Draws the rows of Rhythm, Seed, Shape, Stacks or Euclidean from `y` down and
 /// returns where the next goes; `None` for any other tool, whose rows the
 /// panel draws.
 #[expect(clippy::too_many_arguments, reason = "a panel's whole context")]
@@ -63,6 +70,7 @@ pub(crate) fn rows(
         "seed" => panel.seed(ui, y, events),
         "shape" => panel.shape(ui, y, events),
         "euclidean" => panel.euclidean(ui, y, events),
+        "stacks" => panel.stacks(ui, y, events),
         _ => return None,
     })
 }
@@ -706,6 +714,342 @@ impl Panel<'_> {
         y + CONTROL.y + 6.0
     }
 
+    /// Stacks: the Chord Selector Pad with Add Chord and Delete Chord beside
+    /// it, the progression's cells, then the selected chord's controls (R17,
+    /// R21, R22).
+    fn stacks(&self, ui: &mut Ui, mut y: f32, events: &mut Vec<UiEvent>) -> f32 {
+        let Ok(stack) = stack_view(&self.view.values) else {
+            return y;
+        };
+        let root = stack.chords[stack.selected].root;
+        let entries = bl_shell::midi_tools::bank_chords(
+            self.shell.editor().document(),
+            self.shell.clip_view().midi_tools(),
+            self.clip,
+            root,
+        );
+        y = self.pad(ui, y, &stack, &entries, events);
+        y = self.progression(ui, y, &stack, &entries, events);
+        for id in [
+            "chord_root",
+            "chord_inversion",
+            "chord_duration",
+            "chord_offset",
+        ] {
+            y = self.row(ui, y, id, events);
+        }
+        y
+    }
+
+    /// The Chord Selector Pad: the bank's entries as Tonnetz diagrams, a
+    /// page of them at a time, the selected chord's entry lit. A click or a
+    /// drag chooses an entry; with the pad focused, Cmd+Up and Cmd+Down
+    /// choose the one before or after (S-NOTE-052). While the pointer is over
+    /// one, the Status Bar names it and its notes. Add Chord and Delete Chord
+    /// are beside it, with the arrows that turn its pages (R17, R21).
+    fn pad(
+        &self,
+        ui: &mut Ui,
+        y: f32,
+        stack: &StackView,
+        entries: &[(String, Vec<u8>)],
+        events: &mut Vec<UiEvent>,
+    ) -> f32 {
+        let (_, spec) = self.spec("chord");
+        let current = stack.chords[stack.selected].chord;
+        let per_page = PAD_COLUMNS * PAD_ROWS;
+        // The page the selected entry is on, unless the arrows turned it.
+        let page_id = Id::new(("chord-selector-page", &self.view.descriptor.id));
+        let pages = entries.len().div_ceil(per_page).max(1);
+        let following = current / per_page;
+        let seen = ui.data(|d| d.get_temp::<(usize, usize)>(page_id));
+        let page = match seen {
+            Some((page, chord)) if chord == current => page.min(pages - 1),
+            _ => following,
+        };
+        ui.data_mut(|d| d.insert_temp(page_id, (page, current)));
+        let first = page * per_page;
+        let step = vec2(DIAGRAM.x + DIAGRAM_GAP, DIAGRAM.y + DIAGRAM_GAP);
+        let pad = Rect::from_min_size(
+            pos2(self.left(), y),
+            vec2(
+                step.x * PAD_COLUMNS as f32 - DIAGRAM_GAP,
+                step.y * PAD_ROWS as f32 - DIAGRAM_GAP,
+            ),
+        );
+        let id = Id::new(("chord-selector-pad", &self.view.descriptor.id));
+        let response = ui.interact(pad, id, Sense::click_and_drag());
+        crate::focus::register(ui.ctx(), id, Area::Detail, None);
+        let cell_at = |pos: Pos2| -> Option<usize> {
+            if !pad.contains(pos) {
+                return None;
+            }
+            let column = ((pos.x - pad.left()) / step.x) as usize;
+            let row = ((pos.y - pad.top()) / step.y) as usize;
+            let at = first + row * PAD_COLUMNS + column.min(PAD_COLUMNS - 1);
+            (at < entries.len()).then_some(at)
+        };
+        let choose = |entry: usize| set(self.clip, self.view.descriptor, spec, json!(entry));
+        // The pad's keys, Cmd+Up and Cmd+Down among them, are the pad's while
+        // it has the keyboard, not the note editor's (S-NOTE-052, S-NOTE-027).
+        if response.clicked() || response.drag_started() {
+            response.request_focus();
+        }
+        if response.gained_focus() {
+            events.push(UiEvent::FocusValue(true));
+        }
+        if response.lost_focus() {
+            events.push(UiEvent::FocusValue(false));
+        }
+        let drag_id = id.with("drag");
+        if response.drag_started() {
+            ui.data_mut(|d| d.insert_temp(drag_id, false));
+        }
+        if response.dragged()
+            && let Some(entry) = response.interact_pointer_pos().and_then(cell_at)
+            && entry != current
+        {
+            events.push(UiEvent::Gesture {
+                phase: GesturePhase::Update,
+                invocation: Some(choose(entry)),
+            });
+            ui.data_mut(|d| d.insert_temp(drag_id, true));
+        }
+        if response.drag_stopped() {
+            let ran = ui
+                .data_mut(|d| d.remove_temp::<bool>(drag_id))
+                .unwrap_or(false);
+            end_gesture(ui, ran, events);
+        }
+        if response.clicked()
+            && let Some(entry) = response.interact_pointer_pos().and_then(cell_at)
+            && entry != current
+        {
+            events.push(UiEvent::Invoke(choose(entry)));
+        }
+        if response.has_focus() {
+            ui.memory_mut(|m| {
+                m.set_focus_lock_filter(
+                    id,
+                    egui::EventFilter {
+                        vertical_arrows: true,
+                        ..Default::default()
+                    },
+                );
+            });
+            let pressed = |wanted: Key| {
+                ui.input(|i| {
+                    i.events.iter().any(|event| {
+                        matches!(event, egui::Event::Key { key, pressed: true, modifiers, .. }
+                            if *key == wanted && modifiers.command && !modifiers.alt)
+                    })
+                })
+            };
+            let (before, after) = (pressed(Key::ArrowUp), pressed(Key::ArrowDown));
+            let to = if before {
+                current.checked_sub(1)
+            } else if after {
+                Some(current + 1).filter(|to| *to < entries.len())
+            } else {
+                None
+            };
+            if let Some(to) = to {
+                events.push(UiEvent::Invoke(choose(to)));
+            }
+        }
+        // While the pointer is over a diagram the Status Bar names the chord
+        // and its notes on the selected chord's root.
+        let hint_id = id.with("hint");
+        let hovered = response.hover_pos().and_then(cell_at);
+        let hinted = ui.data(|d| d.get_temp::<bool>(hint_id)).unwrap_or(false);
+        if let Some(entry) = hovered {
+            let (name, keys) = &entries[entry];
+            let notes: Vec<String> = keys.iter().map(|key| key_name(*key)).collect();
+            events.push(UiEvent::StatusHint(Some(format!(
+                "{name}: {}",
+                notes.join(" ")
+            ))));
+        } else if hinted {
+            events.push(UiEvent::StatusHint(None));
+        }
+        ui.data_mut(|d| d.insert_temp(hint_id, hovered.is_some()));
+        let c = &self.theme.colors;
+        for (at, (_, keys)) in entries.iter().enumerate().skip(first).take(per_page) {
+            let slot = at - first;
+            let cell = Rect::from_min_size(
+                pad.min
+                    + vec2(
+                        (slot % PAD_COLUMNS) as f32 * step.x,
+                        (slot / PAD_COLUMNS) as f32 * step.y,
+                    ),
+                DIAGRAM,
+            );
+            let lit = at == current;
+            ui.painter().rect_filled(
+                cell,
+                self.theme.sizes.corner,
+                if lit {
+                    c.control_pressed.0
+                } else if hovered == Some(at) {
+                    c.control_hover.0
+                } else {
+                    c.control.0
+                },
+            );
+            tonnetz(
+                ui,
+                cell,
+                keys,
+                stack.chords[stack.selected].root,
+                lit,
+                self.theme,
+            );
+        }
+        if response.has_focus() && crate::focus::outlined(&response.ctx) {
+            ui.painter().rect_stroke(
+                pad.expand(2.0),
+                self.theme.sizes.corner,
+                Stroke::new(1.5, c.focus.0),
+                StrokeKind::Outside,
+            );
+        }
+        let name = entries
+            .get(current)
+            .map_or_else(String::new, |(name, _)| name.clone());
+        ui.ctx().accesskit_node_builder(response.id, |node| {
+            node.set_role(Role::ListBox);
+            node.set_label("Chord Selector Pad".to_owned());
+            node.set_value(name);
+            node.set_bounds(accesskit::Rect {
+                x0: pad.min.x.into(),
+                y0: pad.min.y.into(),
+                x1: pad.max.x.into(),
+                y1: pad.max.y.into(),
+            });
+        });
+        if ui.rect_contains_pointer(pad) {
+            control_info(ui, spec);
+        }
+        // Add Chord and Delete Chord, and the page arrows, right of the pad.
+        let x = pad.right() + 6.0;
+        let width = (self.rect.right() - 6.0 - x).max(40.0);
+        let invoke = |id: &str| UiEvent::Invoke(Invocation::new(id, json!({ "clip": self.clip })));
+        let at = |row: f32, left: f32, width: f32| {
+            Rect::from_min_size(pos2(left, y + row * ROW), vec2(width, CONTROL.y))
+        };
+        if button(
+            ui,
+            self.theme,
+            "stacks-add-chord",
+            at(0.0, x, width),
+            "Add Chord",
+            stack.chords.len() < MAX_CHORDS,
+        ) {
+            events.push(invoke(bl_shell::midi_tool_commands::ADD_CHORD));
+        }
+        if button(
+            ui,
+            self.theme,
+            "stacks-delete-chord",
+            at(1.0, x, width),
+            "Delete Chord",
+            stack.chords.len() > 1,
+        ) {
+            events.push(invoke(bl_shell::midi_tool_commands::DELETE_CHORD));
+        }
+        for (index, (text, to, enabled)) in [
+            ("<", page.wrapping_sub(1), page > 0),
+            (">", page + 1, page + 1 < pages),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let half = (width - 4.0) / 2.0;
+            if button(
+                ui,
+                self.theme,
+                &format!("stacks-page-{text}"),
+                at(2.0, x + (half + 4.0) * index as f32, half),
+                text,
+                enabled,
+            ) {
+                ui.data_mut(|d| d.insert_temp(page_id, (to, current)));
+            }
+        }
+        y + pad.height() + 4.0
+    }
+
+    /// The progression as a row of cells, the selected chord's lit; clicking
+    /// one selects that chord (R17).
+    fn progression(
+        &self,
+        ui: &mut Ui,
+        y: f32,
+        stack: &StackView,
+        entries: &[(String, Vec<u8>)],
+        events: &mut Vec<UiEvent>,
+    ) -> f32 {
+        let (_, spec) = self.spec("selected");
+        let gap = 1.0;
+        let count = stack.chords.len();
+        let each = ((self.width() + gap) / count as f32 - gap).min(18.0);
+        let c = &self.theme.colors;
+        for (at, chord) in stack.chords.iter().enumerate() {
+            let cell = Rect::from_min_size(
+                pos2(self.left() + (each + gap) * at as f32, y),
+                vec2(each, CONTROL.y),
+            );
+            let id = Id::new(("progression-cell", &self.view.descriptor.id, at));
+            let response = ui.interact(cell, id, Sense::click());
+            crate::focus::register(ui.ctx(), id, Area::Detail, None);
+            let selected = at == stack.selected;
+            ui.painter().rect_filled(
+                cell,
+                self.theme.sizes.corner,
+                if selected {
+                    c.accent.0
+                } else if response.hovered() {
+                    c.control_hover.0
+                } else {
+                    c.control.0
+                },
+            );
+            ui.painter().with_clip_rect(cell).text(
+                cell.center(),
+                Align2::CENTER_CENTER,
+                (at + 1).to_string(),
+                self.theme.small_font(),
+                if selected { c.text.0 } else { c.text_dim.0 },
+            );
+            let label = format!(
+                "Chord {}: {} on {}",
+                at + 1,
+                entries
+                    .get(chord.chord)
+                    .map_or("", |(name, _)| name.as_str()),
+                key_name(chord.root)
+            );
+            response.widget_info(|| {
+                WidgetInfo::selected(WidgetType::RadioButton, true, selected, &label)
+            });
+            if (response.clicked()
+                || (response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter))))
+                && !selected
+            {
+                events.push(UiEvent::Invoke(set(
+                    self.clip,
+                    self.view.descriptor,
+                    spec,
+                    json!(at),
+                )));
+            }
+            if response.hovered() {
+                control_info(ui, spec);
+            }
+        }
+        y + ROW + 2.0
+    }
+
     /// The Voices tab: each voice's switch, pitch and Velocity, and the
     /// arrows that move every voice's pitch together (R14).
     fn voices_tab(&self, ui: &mut Ui, mut y: f32, events: &mut Vec<UiEvent>) -> f32 {
@@ -768,6 +1112,45 @@ impl Panel<'_> {
             }
         }
         y + ROW
+    }
+}
+
+/// A chord as a Tonnetz diagram in `cell`: the twelve pitch classes on a
+/// lattice of fifths across and major thirds up, relative to `root`, the
+/// chord's notes lit and its root ringed. The drawing is Beatlayer's own.
+fn tonnetz(ui: &Ui, cell: Rect, keys: &[u8], root: u8, selected: bool, theme: &Theme) {
+    const COLUMNS: i32 = 4;
+    const ROWS: i32 = 3;
+    let c = &theme.colors;
+    let inner = cell.shrink2(vec2(5.0, 4.0));
+    let at = |a: i32, b: i32| {
+        pos2(
+            inner.left() + inner.width() * a as f32 / (COLUMNS - 1) as f32,
+            inner.bottom() - inner.height() * b as f32 / (ROWS - 1) as f32,
+        )
+    };
+    let lit: Vec<i32> = keys
+        .iter()
+        .map(|key| (i32::from(*key) - i32::from(root)).rem_euclid(12))
+        .collect();
+    let ink = if selected { c.text.0 } else { c.accent.0 };
+    for a in 0..COLUMNS {
+        for b in 0..ROWS {
+            // Along the row a step is a fifth (7 semitones), up it is a
+            // major third (4): the twelve places hold each class once.
+            let class = (7 * a + 4 * b).rem_euclid(12);
+            let place = at(a, b);
+            if lit.contains(&class) {
+                ui.painter().circle_filled(place, 2.2, ink);
+                if class == 0 {
+                    ui.painter()
+                        .circle_stroke(place, 3.6, Stroke::new(1.0, ink));
+                }
+            } else {
+                ui.painter()
+                    .circle_filled(place, 0.8, c.text_dim.0.gamma_multiply(0.45));
+            }
+        }
     }
 }
 

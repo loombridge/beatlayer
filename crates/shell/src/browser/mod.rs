@@ -2518,6 +2518,22 @@ impl BrowserView {
         }
     }
 
+    /// The Stacks chord bank selected, if one file is and it is that.
+    #[must_use]
+    pub fn selected_chord_bank(&self) -> Option<PathBuf> {
+        match self.selected.as_slice() {
+            [one]
+                if one
+                    .file_name()
+                    .and_then(|n| file_kind(&n.to_string_lossy()))
+                    == Some(ItemKind::ChordBank) =>
+            {
+                Some(one.clone())
+            }
+            _ => None,
+        }
+    }
+
     /// The selected audio files, in the content pane's order.
     pub(crate) fn selected_audio(&self) -> Vec<PathBuf> {
         let mut files: Vec<(Option<usize>, PathBuf)> = self
@@ -2595,6 +2611,7 @@ impl BrowserView {
                     || self.selected_plugin().is_some()
                     || self.selected_device().is_some()
                     || self.selected_sfz().is_some()
+                    || self.selected_chord_bank().is_some()
             }
             ids::PREVIEW => {
                 args.get("path").is_some()

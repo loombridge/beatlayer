@@ -157,6 +157,7 @@ fn midi_tool_apply_by_id_with_values_and_a_seed_reads_back() {
             "rhythm",
             "seed",
             "shape",
+            "stacks",
             "euclidean",
             "test_fill"
         ]
@@ -737,4 +738,113 @@ fn the_randomise_button_sets_every_rotation_from_a_seed_and_reads_back() {
         json!({ "clip": clip, "seed": 4 }),
     );
     assert_ne!(rotations(&mut client), first, "another seed");
+}
+
+#[test]
+fn stacks_loads_a_bank_and_applies_by_id_and_the_chord_commands_read_back() {
+    // Spec: midi-generators R17, R23, R26, R28. `midi_tool.load_bank` with a
+    // path, `midi_tool.apply` by ID with a progression, Add Chord and Delete
+    // Chord, all read back in `midi_tool.state`; a broken file is refused.
+    let dir = std::env::temp_dir().join(format!("bl-agent-stacks-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("Two.blstacks");
+    std::fs::write(
+        &file,
+        r#"{"format":"beatlayer-stacks","schema":1,"name":"Two","chords":[
+            {"name":"Pair","semitones":[0,7]},{"name":"Wide","semitones":[0,4,9]}]}"#,
+    )
+    .unwrap();
+    let broken = dir.join("Broken.blstacks");
+    std::fs::write(
+        &broken,
+        r#"{"format":"beatlayer-stacks","schema":1,"name":"B","chords":[
+        {"name":"Falling","semitones":[0,7,4]}]}"#,
+    )
+    .unwrap();
+    let mut client = app();
+    let clip = keys_clip(&mut client, &[]);
+    let state = run(&mut client, "midi_tool.state", json!({ "clip": clip }));
+    assert_eq!(state["stacks"]["bank"]["built_in"], true);
+    assert_eq!(
+        state["stacks"]["bank"]["chords"].as_array().unwrap().len(),
+        27
+    );
+    let state = run(
+        &mut client,
+        "midi_tool.load_bank",
+        json!({ "clip": clip, "path": file.to_string_lossy() }),
+    );
+    assert_eq!(state["stacks"]["bank"]["name"], "Two");
+    assert_eq!(state["stacks"]["bank"]["built_in"], false);
+    assert_eq!(
+        state["stacks"]["bank"]["chords"][1]["intervals"],
+        json!([0, 4, 9])
+    );
+    assert!(
+        notes(&mut client, clip).is_empty(),
+        "loading writes no notes"
+    );
+    // Applied by ID with a progression: two chords in two slots of two beats.
+    let result = run(
+        &mut client,
+        "midi_tool.apply",
+        json!({ "clip": clip, "tool": "stacks",
+                "values": { "progression": [
+                    { "chord": 0, "root": 60 }, { "chord": 1, "root": 65, "duration": 4 }] },
+                "range": { "start": 0, "end": 4 * BEAT } }),
+    );
+    assert_eq!(result["run"]["tool"], "stacks");
+    assert_eq!(result["run"]["wrote"], 5);
+    assert_eq!(
+        notes(&mut client, clip),
+        [
+            (0, 60, 2 * BEAT),
+            (0, 67, 2 * BEAT),
+            (2 * BEAT, 65, BEAT),
+            (2 * BEAT, 69, BEAT),
+            (2 * BEAT, 74, BEAT),
+        ]
+    );
+    // Add Chord and Delete Chord are commands whose effect is the progression;
+    // with Auto on they would apply (and Delete Chord, leaving fewer notes,
+    // asks first), so Auto goes off.
+    run(&mut client, "midi_tool.close", json!({ "clip": clip }));
+    run(
+        &mut client,
+        "midi_tool.set_auto",
+        json!({ "clip": clip, "tool": "stacks", "auto": false }),
+    );
+    let state = run(&mut client, "midi_tool.add_chord", json!({ "clip": clip }));
+    assert_eq!(state["stacks"]["progression"].as_array().unwrap().len(), 3);
+    assert_eq!(
+        state["stacks"]["selected"], 1,
+        "after the selected chord, 0"
+    );
+    let state = run(
+        &mut client,
+        "midi_tool.delete_chord",
+        json!({ "clip": clip }),
+    );
+    assert_eq!(state["stacks"]["progression"].as_array().unwrap().len(), 2);
+    // A broken file is refused, saying what and where, and nothing changes.
+    let refused = client
+        .call(
+            "run",
+            json!({ "commands": [{ "command": "midi_tool.load_bank",
+                                   "args": { "path": broken.to_string_lossy() } }] }),
+        )
+        .unwrap()
+        .ok()
+        .expect_err("the broken file is refused")
+        .to_string();
+    assert!(refused.contains("chords[0] \"Falling\""), "{refused}");
+    let state = run(&mut client, "midi_tool.state", json!({ "clip": clip }));
+    assert_eq!(state["stacks"]["bank"]["name"], "Two");
+    let state = run(
+        &mut client,
+        "midi_tool.load_bank",
+        json!({ "clip": clip, "built_in": true }),
+    );
+    assert_eq!(state["stacks"]["bank"]["built_in"], true);
+    let _ = std::fs::remove_dir_all(&dir);
 }

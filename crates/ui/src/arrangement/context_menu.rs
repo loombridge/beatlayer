@@ -256,7 +256,14 @@ impl ContextMenus {
                 };
                 ui.horizontal(|ui| {
                     for shape in shapes {
-                        shape_button(ui, shell, *shape, events);
+                        shape_button(
+                            ui,
+                            shell,
+                            *shape,
+                            bl_shell::automation_commands::INSERT_SHAPE,
+                            &shell.active_contexts(),
+                            events,
+                        );
                     }
                 });
             } else {
@@ -323,14 +330,19 @@ fn selection_menu(shell: &Shell) -> SelectionMenu {
 }
 
 /// One of the shape buttons (the automation editing spec, R11): a drawing
-/// of the shape that assistive technology reads by its name.
-fn shape_button(ui: &mut Ui, shell: &Shell, shape: Shape, events: &mut Vec<UiEvent>) {
+/// of the shape that assistive technology reads by its name. It runs `id`,
+/// the lane's or the Envelope Editor's insert-shape command, when that can
+/// run in `contexts`.
+pub(crate) fn shape_button(
+    ui: &mut Ui,
+    shell: &Shell,
+    shape: Shape,
+    id: &'static str,
+    contexts: &[bl_commands::Context],
+    events: &mut Vec<UiEvent>,
+) {
     let args = json!({ "shape": shape });
-    let enabled = shell.can_invoke_in(
-        bl_shell::automation_commands::INSERT_SHAPE,
-        &args,
-        &shell.active_contexts(),
-    );
+    let enabled = shell.can_invoke_in(id, &args, contexts);
     let (rect, response) = ui.allocate_exact_size(vec2(34.0, 24.0), Sense::click());
     let response = if enabled {
         response
@@ -371,10 +383,7 @@ fn shape_button(ui: &mut Ui, shell: &Shell, shape: Shape, events: &mut Vec<UiEve
     ui.painter()
         .add(egui::Shape::line(line, Stroke::new(1.5, colour)));
     if enabled && response.clicked() {
-        events.push(UiEvent::Invoke(bl_shell::Invocation::new(
-            bl_shell::automation_commands::INSERT_SHAPE,
-            args,
-        )));
+        events.push(UiEvent::Invoke(bl_shell::Invocation::new(id, args)));
         ui.close();
     }
 }

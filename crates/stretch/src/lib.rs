@@ -11,7 +11,7 @@ mod table;
 pub mod texture;
 pub mod tones;
 
-pub use beats::{Loop, Plan, Preserve, Segment, Stretch};
+pub use beats::{Loop, Mix, Plan, Preserve, Segment, Stretch};
 pub use complex::Complex;
 pub use interp::Interpolation;
 pub use map::{MAX_BPM, MIN_BPM, Marker, WarpMap, ticks_in};

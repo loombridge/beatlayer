@@ -65,12 +65,29 @@ const SYSTEM: &[(&str, &str)] = &[
 /// keyboard, and the notes otherwise (mpe R29).
 const DECLINES: &[&str] = &["S-A11Y-022", "S-A11Y-024", "S-A11Y-025", "S-NOTE-053"];
 
+/// Commands that let the key they share fall through when they can't run,
+/// though the shortcut's other commands don't: the Edit keys in the Clip
+/// View's Envelope Editor act only on its time selection, and otherwise the
+/// note editor's or the Arrangement's act (clip-envelopes R12).
+const DECLINING_COMMANDS: &[&str] = &[
+    "clip.copy_envelope",
+    "clip.cut_envelope",
+    "clip.duplicate_envelope",
+    "clip.paste_envelope",
+];
+
 /// Shortcuts the focused control handles, with which control. The
 /// Arrangement View reads three itself because each has keys that act
 /// differently, and the keymap gives a shortcut one command with one set of
 /// arguments (WP-1.8a); each runs a registered command with the arguments
 /// its key means.
 const WIDGET: &[(&str, &str)] = &[
+    (
+        "S-EDIT-014",
+        "the Session View: Shift with Cut, Copy, Paste or Duplicate is S-SES-029 to S-SES-032, \
+         which run `session.cut`, `session.copy`, `session.paste` and `session.duplicate` with \
+         `all_tracks` (the session view spec, R42)",
+    ),
     (
         "S-EDIT-015",
         "the Arrangement: Shift with Cut, Copy, Paste, Duplicate or Delete is S-ARR-015 to \
@@ -822,7 +839,8 @@ fn render(
                 if let Some(toggles) = &binding.toggles {
                     let _ = write!(line, ", toggles = {}", quote(toggles));
                 }
-                if DECLINES.contains(&source.id.as_str()) {
+                if DECLINES.contains(&source.id.as_str()) || DECLINING_COMMANDS.contains(&&*spec.id)
+                {
                     line.push_str(", declines = true");
                 }
                 line.push_str(" }");

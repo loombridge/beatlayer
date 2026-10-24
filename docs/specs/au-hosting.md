@@ -1,6 +1,6 @@
 # Audio Unit hosting
 
-- **Status:** partial (loading by component description, processing, parameters, state, latency, the scanner's Audio Units, the browser's units, and the unit's own editor are built and tested against Apple's built-in units; per-note expression and MPE, R19 and R20, are WP-6.17b's)
+- **Status:** partial (loading by component description, processing, parameters, state, latency, the scanner's Audio Units, the browser's units, and the unit's own editor are built and tested against Apple's built-in units; per-note expression and MPE, R19 and R20, are built and tested the same way)
 - **Work packages:** WP-2.8 (this spec). The plug-in scanner and the browser's plug-ins are WP-2.9's; a unit's own editor windows, the window layer, and the plug-in device panel are WP-2.10's (the AU scanner is part of that package); delay compensation is WP-2.11's; offline renders (export, agents' previews) borrow CLAP instances (WP-2.6b) and units (WP-4.21, built) as [offline plug-in renders](offline-plugin-renders.md) say; VST3 is WP-2.7; per-note expression and MPE are WP-6.17b's (R19 and R20, with [MPE](mpe.md) R14 to R21)
 - **Parity-matrix row:** Audio Units v2 and v3 (M2, macOS; built in WP-2.8)
 - **Checked against:** Apple's AudioToolbox documentation (`AudioComponent`, `AUAudioUnit`, render blocks, parameter trees, `fullState`, latency), read 15 October 2026; the architecture's "Plug-in hosting" and "Real-time rules"; the CLAP hosting spec, whose rules this mirrors where the formats allow; Live 12.4.6 on macOS, 12 October 2026 (Plug-In Sources lists Use Audio Units v2 and Use Audio Units v3, both Off by default); Apple's built-in units on this machine (macOS 27, Apple silicon)
@@ -76,6 +76,6 @@ The units under test are Apple's built-in ones, which need no third-party binari
 | R16 | `crates/shell-spec/src/plugins.rs`, `every_listed_id_is_registered_and_complete`; `crates/ui/tests/accessibility/reachability/mod.rs`, `every_m1_command_is_reachable_from_the_keyboard` | unit |
 | R17 | every block in `crates/plugin-host/tests/` runs as a real-time section under the allocation trap | real-time trap |
 | R18 | `crates/plugin-host/tests/au.rs`, `a_control_change_reaches_the_unit_with_its_notes` | unit, real-time trap |
-| R19 | to be written in WP-6.17b | unit, real-time trap |
-| R20 | to be written in WP-6.17b | unit, real-time trap |
+| R19 | `crates/plugin-host/tests/mpe.rs`, `au::two_notes_bent_apart_by_their_pitch_envelopes_sound_within_five_cents_of_their_bends` (the unit not bent with MPE Mode off) | unit, real-time trap |
+| R20 | `crates/plugin-host/tests/mpe.rs`, `au::two_notes_bent_apart_by_their_pitch_envelopes_sound_within_five_cents_of_their_bends`, `au::the_unit_renders_the_same_in_any_block_size` | unit, real-time trap |
 | — | The scanner lists the units: `crates/plugin-host/tests/scan.rs`, `a_scan_finds_apples_built_in_audio_units`; `crates/shell/tests/plugin_scanning.rs`, `scanning_finds_audio_units_and_they_join_the_browser` (plugin-scanning R1, R7) | unit |

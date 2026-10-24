@@ -614,3 +614,261 @@ fn an_audio_clips_clip_entry_lists_its_modes_controls() {
         assert_eq!(names(mode), want, "{mode:?}");
     }
 }
+
+/// A right-click at a point.
+fn right_click(e: &mut Env, at: Pos2) -> Vec<common::Node> {
+    e.h.frame(vec![Event::PointerMoved(at)]);
+    for pressed in [true, false] {
+        e.h.frame(vec![Event::PointerButton {
+            pos: at,
+            button: PointerButton::Secondary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        }]);
+    }
+    Harness::nodes(&e.h.settle())
+}
+
+/// The middle of the node labelled `label`.
+fn centre_of(nodes: &[common::Node], label: &str) -> Pos2 {
+    let b = nodes
+        .iter()
+        .rfind(|n| n.label == label && n.bounds.is_some())
+        .unwrap_or_else(|| panic!("no node labelled {label:?}"))
+        .bounds
+        .unwrap();
+    pos2(((b.x0 + b.x1) / 2.0) as f32, ((b.y0 + b.y1) / 2.0) as f32)
+}
+
+impl Env {
+    /// The time selected in the editor.
+    fn selection(&self) -> Option<(Ticks, Ticks)> {
+        self.h.shell.clip_view().envelope_time(self.clip)
+    }
+
+    /// Selects `start` to `end` with the pointer, dragging across the
+    /// background at `value`'s height, away from the envelope.
+    fn select(&mut self, start: Ticks, end: Ticks, value: f64) {
+        let from = self.at(start, value);
+        let to = self.at(end, value);
+        self.drag(from, to, Modifiers::NONE);
+    }
+
+    fn label(&self) -> Option<&str> {
+        self.h.shell.editor().undo_history().next()
+    }
+}
+
+// Spec: clip-envelopes R12. Dragging across the editor's background selects
+// the time dragged over, on the grid, and clicking the background lets it
+// go; selecting is no undo step.
+#[test]
+fn dragging_across_the_background_selects_time_and_a_click_lets_it_go() {
+    let mut e = set();
+    let step = e.h.shell.arrangement().grid_ticks(e.doc());
+    e.point(Ticks::ZERO, -0.5);
+    e.point(8 * step, 0.0);
+    let steps = e.steps();
+    // High above the line, so the drag starts on the background.
+    let from = e.at(2 * step, 0.9);
+    let to = e.at(10 * step, 0.9);
+    e.drag(from, to, Modifiers::NONE);
+    assert_eq!(e.selection(), Some((2 * step, 10 * step)));
+    assert_eq!(e.steps(), steps, "selecting is no undo step");
+    // Dragging back past the start selects the other way round.
+    e.drag(to, from, Modifiers::NONE);
+    assert_eq!(e.selection(), Some((2 * step, 10 * step)));
+    let away = e.at(14 * step, 0.9);
+    e.click(away);
+    assert_eq!(e.selection(), None);
+}
+
+// Spec: clip-envelopes R12; automation-editing R2. Dragging a selected
+// breakpoint moves every selected breakpoint by the same time and share of
+// the travel, as one undo step; the breakpoint outside stays.
+#[test]
+fn dragging_a_selected_breakpoint_moves_all_the_selected_ones_as_one_undo_step() {
+    let mut e = set();
+    let step = e.h.shell.arrangement().grid_ticks(e.doc());
+    e.point(4 * step, -0.5);
+    e.point(8 * step, 0.0);
+    e.point(14 * step, 0.5);
+    e.select(2 * step, 10 * step, 0.9);
+    assert_eq!(e.selection(), Some((2 * step, 10 * step)));
+    let before = e.doc().clone();
+    let steps = e.steps();
+    let from = e.at(8 * step, 0.0);
+    let to = e.at(10 * step, 0.2);
+    e.drag(from, to, Modifiers::NONE);
+    let points = e.points();
+    let at: Vec<Ticks> = points.iter().map(|p| p.0).collect();
+    assert_eq!(at, [6 * step, 10 * step, 14 * step], "{points:?}");
+    assert!((points[0].1 + 0.3).abs() < 0.05, "both rose: {points:?}");
+    assert!((points[1].1 - 0.2).abs() < 0.05, "{points:?}");
+    assert_eq!(points[2], (14 * step, 0.5), "the one outside stays");
+    e.one_step(&before, steps, "Move Envelope Breakpoints");
+}
+
+// Spec: clip-envelopes R12; automation-editing R4. Clicking near a segment
+// but not on it selects it, and dragging it moves its two breakpoints.
+#[test]
+fn clicking_near_a_segment_selects_it_and_dragging_it_moves_its_breakpoints() {
+    let mut e = set();
+    let step = e.h.shell.arrangement().grid_ticks(e.doc());
+    e.point(4 * step, -0.5);
+    e.point(12 * step, 0.5);
+    e.point(15 * step, 0.5);
+    // Three points above the line: near it, not on it.
+    let near = e.at(8 * step, 0.0) + egui::vec2(0.0, -3.0);
+    e.click(near);
+    assert_eq!(
+        e.h.shell.clip_view().envelope_segment(e.clip, PAN),
+        Some(4 * step)
+    );
+    let before = e.doc().clone();
+    let steps = e.steps();
+    let from = e.at(8 * step, 0.0);
+    let to = e.at(10 * step, 0.0);
+    e.drag(from, to, Modifiers::NONE);
+    let at: Vec<Ticks> = e.points().iter().map(|p| p.0).collect();
+    assert_eq!(at, [6 * step, 14 * step, 15 * step]);
+    e.one_step(&before, steps, "Move Envelope Breakpoints");
+}
+
+// Spec: clip-envelopes R12; S-EDIT-001 to S-EDIT-005. With the editor
+// focused, the Edit keys act on its time selection: Copy and Paste, Duplicate,
+// Cut and Delete, each one undo step of the right name.
+#[test]
+fn the_edit_keys_act_on_the_editors_selection() {
+    let mut e = set();
+    let step = e.h.shell.arrangement().grid_ticks(e.doc());
+    e.point(Ticks::ZERO, -0.5);
+    e.point(2 * step, 0.5);
+    e.point(4 * step, -0.5);
+    e.run(
+        "clip.select_envelope_time",
+        json!({ "start": 0, "end": 5 * step }),
+    );
+    e.h.shell.set_focused_area(bl_shell::Area::Detail);
+    // Copy changes nothing; Paste then writes the shape from the selection's
+    // start, after the selection is moved.
+    let steps = e.steps();
+    e.h.key(egui::Key::C, common::command());
+    assert_eq!(e.steps(), steps, "copying is no undo step");
+    e.run(
+        "clip.select_envelope_time",
+        json!({ "start": 8 * step, "end": 9 * step }),
+    );
+    e.h.key(egui::Key::V, common::command());
+    assert_eq!(e.steps(), steps + 1);
+    assert_eq!(e.label(), Some("Paste Envelope"));
+    let at: Vec<Ticks> = e.points().iter().map(|p| p.0).collect();
+    assert_eq!(
+        at,
+        [
+            Ticks::ZERO,
+            2 * step,
+            4 * step,
+            8 * step,
+            10 * step,
+            12 * step,
+            13 * step
+        ]
+    );
+    // Duplicate writes a copy straight after the selection.
+    e.run(
+        "clip.select_envelope_time",
+        json!({ "start": 8 * step, "end": 13 * step }),
+    );
+    e.h.key(egui::Key::D, common::command());
+    assert_eq!(e.label(), Some("Duplicate Envelope"));
+    assert_eq!(e.selection(), Some((13 * step, 18 * step)));
+    // Delete leaves the envelope straight across the span, with its edges.
+    e.run(
+        "clip.select_envelope_time",
+        json!({ "start": 0, "end": 5 * step }),
+    );
+    e.h.key(egui::Key::Delete, Modifiers::NONE);
+    assert_eq!(e.label(), Some("Delete Envelope"));
+    assert!(
+        e.points()
+            .iter()
+            .all(|(at, _)| *at <= Ticks::ZERO || *at >= 5 * step),
+        "{:?}",
+        e.points()
+    );
+    // Cut does the same after putting the shape on the clipboard.
+    e.run(
+        "clip.select_envelope_time",
+        json!({ "start": 8 * step, "end": 13 * step }),
+    );
+    e.h.key(egui::Key::X, common::command());
+    assert_eq!(e.label(), Some("Cut Envelope"));
+}
+
+// Spec: clip-envelopes R13. The time selection's menu offers the shapes and
+// Simplify Envelope; each is one undo step of its name.
+#[test]
+fn the_selections_menu_inserts_a_shape_and_simplifies() {
+    let mut e = set();
+    let step = e.h.shell.arrangement().grid_ticks(e.doc());
+    e.select(2 * step, 10 * step, 0.0);
+    let before = e.doc().clone();
+    let steps = e.steps();
+    let inside = e.at(6 * step, 0.0);
+    let nodes = right_click(&mut e, inside);
+    e.h.click(centre_of(&nodes, "Triangle"));
+    e.h.settle();
+    let points = e.points();
+    assert!(points.len() >= 3, "{points:?}");
+    // Pan runs -100% to 100%: a triangle reaches both.
+    let (low, high) = points.iter().fold((f64::MAX, f64::MIN), |(low, high), p| {
+        (low.min(p.1), high.max(p.1))
+    });
+    assert!(
+        (low + 1.0).abs() < 1e-9 && (high - 1.0).abs() < 0.01,
+        "{points:?}"
+    );
+    e.one_step(&before, steps, "Insert Shape");
+
+    // A busy run of breakpoints simplifies from the same menu.
+    e.run(
+        "clip.delete_envelope",
+        json!({ "clip": e.clip, "target": PAN }),
+    );
+    for i in 0..13 {
+        e.point(i * step, -0.9 + 0.1 * f64::from(i as i32));
+    }
+    e.select(step / 2, 14 * step, 0.95);
+    let busy = e.points().len();
+    let before = e.doc().clone();
+    let steps = e.steps();
+    let inside = e.at(6 * step, 0.95);
+    let nodes = right_click(&mut e, inside);
+    e.h.click(centre_of(&nodes, "Simplify Envelope"));
+    e.h.settle();
+    assert!(e.points().len() < busy, "{busy} points, {:?}", e.points());
+    e.one_step(&before, steps, "Simplify Envelope");
+}
+
+// Spec: clip-envelopes R13; automation-editing R14, R15. Dragging the top
+// handle of the time selection's box stretches the values as one undo step.
+#[test]
+fn dragging_a_handle_stretches_the_selection_as_one_undo_step() {
+    let mut e = set();
+    let step = e.h.shell.arrangement().grid_ticks(e.doc());
+    e.point(4 * step, -0.5);
+    e.point(8 * step, 0.5);
+    e.select(2 * step, 10 * step, 0.9);
+    let (lane, start) = e.lane();
+    let x = x_of_tick(lane, start, e.length(), 6 * step);
+    let top = pos2(x, lane.top());
+    let before = e.doc().clone();
+    let steps = e.steps();
+    // The top edge halfway down: every value is half as far from the bottom.
+    e.drag(top, pos2(x, lane.center().y), Modifiers::NONE);
+    let points = e.points();
+    assert!((points[0].1 + 0.75).abs() < 0.05, "{points:?}");
+    assert!((points[1].1 + 0.25).abs() < 0.05, "{points:?}");
+    e.one_step(&before, steps, "Stretch Envelope Values");
+}

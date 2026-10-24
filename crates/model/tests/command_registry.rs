@@ -55,7 +55,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        253,
+        256,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
              the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
              routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -64,7 +64,7 @@ fn every_document_command_is_registered() {
              WP-2.13 the two for Main Out and Cue Out, WP-3.1 five for scenes and two for slot \
              clips, WP-3.2 set_slot_stop_button, WP-2.12 seven for automation, WP-6.25 \
              set_automation_envelope and set_lock_envelopes, WP-3.15 six for clip \
-             envelopes, WP-3.17 two for the crossfader, WP-2.14 set_midi_overdub, WP-2.13 the \
+             envelopes, WP-6.25c set_clip_envelope, WP-3.17 two for the crossfader, WP-2.14 set_midi_overdub, WP-2.13 the \
              two punch switches, WP-2.13 add_take_lane, WP-3.4 three for a clip's launch \
              settings, WP-3.5 two for a scene's tempo and signature, WP-3.3 \
              set_clip_launch_mode, WP-4.1 seven for the warp map, WP-4.3 five for transients and ranged warp markers, WP-5.1 fifteen for racks and \
@@ -366,7 +366,8 @@ fn every_command_runs_by_id() {
             .midi_output,
         Some(MidiTo::Port {
             name: "Synth".to_owned(),
-            channel: 3
+            channel: 3,
+            mpe: None
         })
     );
     agent.run(
@@ -1655,6 +1656,25 @@ fn every_command_runs_by_id() {
             .port,
         None
     );
+    // A plug-in's MPE Mode and settings (WP-6.17b): both are one undo step,
+    // and the device keeps them.
+    let synth: DeviceId = agent.new_id();
+    agent.run(
+        "device.insert",
+        json!({ "track": bass, "index": 0, "device": {
+            "id": synth, "name": "Synth", "enabled": true, "params": [],
+            "kind": { "plugin": { "format": "clap", "plugin_id": "com.example.synth" } },
+        } }),
+    );
+    agent.run("plugin.set_mpe", json!({ "device": synth, "on": true }));
+    agent.run(
+        "plugin.set_mpe_settings",
+        json!({ "device": synth, "settings": { "zone": "upper", "channels": 7 } }),
+    );
+    let mpe = agent.editor.document().device(synth).unwrap().mpe;
+    assert!(mpe.on);
+    assert_eq!(mpe.settings.zone, bl_model::MpeZone::Upper);
+    assert_eq!(mpe.settings.channels, 7);
     // Racks (WP-5.1): a rack with a chain, a second chain added with a
     // device in it, a device moved in and switched on and off with
     // everything inside, and the chain's controls.
@@ -2012,6 +2032,14 @@ fn every_command_runs_by_id() {
     agent.run(
         "clip.set_envelope_linked",
         json!({ "clip": riff, "target": volume, "linked": false }),
+    );
+    // WP-6.25c: the whole envelope.
+    agent.run(
+        "clip.set_envelope",
+        json!({ "clip": riff, "target": volume, "points": [
+            { "at": 0, "value": 1.0, "bend": 0.0 },
+            { "at": bar, "value": 0.5, "bend": 0.25 },
+        ] }),
     );
     assert!(
         !agent
@@ -2830,6 +2858,21 @@ fn schemas_match_what_commands_serialise() {
             },
         ),
         (
+            "clip.set_envelope",
+            Command::SetClipEnvelope {
+                kind: bl_model::EnvelopeKind::Modulation,
+                clip,
+                target: AutomationTarget::Mixer {
+                    param: MixerParam::Volume,
+                },
+                points: vec![Breakpoint {
+                    at: Ticks::QUARTER,
+                    value: 0.5,
+                    bend: 0.0,
+                }],
+            },
+        ),
+        (
             "routing.set_input",
             Command::SetInput {
                 track,
@@ -3367,6 +3410,7 @@ fn schemas_match_what_commands_serialise() {
                 params: [(ParamId(4), 0.5)].into_iter().collect(),
                 name: "Warm Pad".to_owned(),
                 shape: None,
+                mpe: None,
             },
         ),
         (
@@ -3703,6 +3747,21 @@ fn schemas_match_what_commands_serialise() {
             },
         ),
         (
+            "plugin.set_mpe",
+            Command::SetPluginMpeMode { device, on: true },
+        ),
+        (
+            "plugin.set_mpe_settings",
+            Command::SetPluginMpeSettings {
+                device,
+                settings: bl_model::MpeSettings {
+                    zone: bl_model::MpeZone::Upper,
+                    channels: 7,
+                    ..bl_model::MpeSettings::default()
+                },
+            },
+        ),
+        (
             "device.set_external",
             Command::SetExternal {
                 device,
@@ -3711,6 +3770,7 @@ fn schemas_match_what_commands_serialise() {
                     name: "Synth".to_owned(),
                 }),
                 channel: Some(2),
+                mpe: None,
                 audio_from: Some(Channel::Pair(3)),
                 hardware_latency: Some(HardwareLatency::Samples { value: 96 }),
             },

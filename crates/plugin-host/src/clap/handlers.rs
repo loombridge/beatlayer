@@ -182,6 +182,9 @@ pub(crate) struct ProcessorData {
     /// Its parameters' automation and modulation, played into it (the
     /// modulation spec, R10).
     pub(crate) drive: Driver,
+    /// Whether its note port takes MPE as MIDI where CLAP's note events
+    /// would do ([`describe::midi_notes`](super::describe::midi_notes)).
+    pub(crate) midi_notes: bool,
 }
 
 impl ProcessorData {

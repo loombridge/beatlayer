@@ -397,6 +397,32 @@ impl Shell {
         result
     }
 
+    /// Runs one of the Envelope Editor's editing commands, on the clip's
+    /// envelope (the clip envelopes spec, R12, R13).
+    pub(super) fn run_clip_envelope_edit(
+        &mut self,
+        id: &str,
+        args: Value,
+    ) -> Result<Value, ShellError> {
+        let before = self.editor.document().clone();
+        let result = crate::clip_envelope_edit::run(
+            id,
+            args,
+            &mut self.editor,
+            &mut self.clip_view,
+            &self.arrangement,
+            &mut self.envelope_clipboard,
+            &self.devices,
+        )
+        .map_err(|failure| edit_error(id, failure));
+        if *self.editor.document() != before {
+            self.dirty = true;
+            self.document_changed();
+        }
+        self.touch();
+        result
+    }
+
     /// Runs one of the Clip View's note edits, as one undo step.
     pub(super) fn run_note_edit(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
         // Spec: piano-roll. The Clip View's note edits.
@@ -553,6 +579,13 @@ impl Shell {
         if *self.editor.document() != before {
             self.dirty = true;
             self.document_changed();
+        }
+        // Spec: second-window R20. Pasted Session clips that weren't placed.
+        if let Ok(value) = &result
+            && let Some(skipped) = value.get("skipped").and_then(Value::as_u64)
+            && let Some(message) = crate::session_clips::skipped_message(skipped as usize)
+        {
+            self.set_message(message, false);
         }
         self.touch();
         result

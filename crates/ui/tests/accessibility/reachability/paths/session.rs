@@ -30,6 +30,22 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             )),
         ),
         (
+            "session.copy_to_arrangement",
+            Exception(Equivalent(
+                "dragging clips onto the Arrangement View or into the other window; Copy in \
+                 the Session View and Paste in the Arrangement (`arrangement.paste`) do the \
+                 same from the keyboard",
+            )),
+        ),
+        (
+            "session.copy_to_session",
+            Exception(Equivalent(
+                "dragging clips onto the Session View or into the other window; Copy in the \
+                 Arrangement and Paste in the Session View (`session.paste`) do the same from \
+                 the keyboard",
+            )),
+        ),
+        (
             "session.drop_files",
             Exception(Equivalent(
                 "dropping files from the browser, Finder, or Explorer on a slot",

@@ -25,10 +25,12 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicU64, Ordering::Relaxed};
 
 use bl_core::midi::MidiMessage;
+use bl_engine::mpe_layout::{MpeLayout, PlainNotes};
 use bl_engine::{
-    AutomationList, Block, Node, NodeConfig, NodeData, NodeEvent, NoteEvent, NoteKind, ParamValue,
+    AutomationList, Block, Node, NodeConfig, NodeData, NodeEvent, NoteEvent, NoteExpression,
+    NoteKind, ParamValue, PluginMpeData,
 };
-use bl_model::ParamId;
+use bl_model::{ParamId, PluginMpe};
 use block2::RcBlock;
 use objc2::rc::Retained;
 use objc2_audio_toolbox::{
@@ -233,6 +235,10 @@ enum In {
     Param(u32, f64),
     /// A note.
     Note(NoteEvent),
+    /// A MIDI message for the unit's MIDI block: a note's polyphonic
+    /// pressure with MPE Mode off, or MPE MIDI with it on (the MPE spec,
+    /// R15, R17).
+    Midi(MidiMessage),
 }
 
 /// An Audio Unit's node.
@@ -253,6 +259,15 @@ pub struct AuNode {
     /// through.
     midi_effect: bool,
     steady: u64,
+    /// The device's MPE Mode and settings (the MPE spec, R14), as the
+    /// compiler last sent them; `pending_mpe` waits for the next block.
+    mpe: PluginMpe,
+    pending_mpe: Option<PluginMpe>,
+    /// MPE MIDI laid out for the unit's MIDI block (R17), made with the
+    /// node.
+    layout: MpeLayout,
+    /// The notes it was given as plain notes, which MPE Mode turned on ends.
+    plain: PlainNotes,
 }
 
 impl AuNode {
@@ -274,6 +289,10 @@ impl AuNode {
             events: Vec::with_capacity(EVENT_CAPACITY),
             midi_effect,
             steady: 0,
+            mpe: PluginMpe::default(),
+            pending_mpe: None,
+            layout: MpeLayout::new(PluginMpe::default().settings),
+            plain: PlainNotes::default(),
         };
         let ends = HostEnds {
             to_node,
@@ -290,6 +309,8 @@ impl AuNode {
                 self.give_back(old);
             }
             self.failed = false;
+            // Spec: mpe R17. A unit activated again is opened again.
+            self.layout.reopen();
         }
         if self.status.hand_back.swap(false, Relaxed)
             && let Some(processor) = self.processor.take()
@@ -371,6 +392,12 @@ impl Node for AuNode {
             &status,
             processor,
             list,
+            (
+                &mut self.pending_mpe,
+                &mut self.mpe,
+                &mut self.layout,
+                &mut self.plain,
+            ),
         );
         self.pending.clear();
 
@@ -399,6 +426,11 @@ impl Node for AuNode {
                     }
                     In::Note(note) => {
                         if !processor.midi(&note) {
+                            self.status.dropped.fetch_add(1, Relaxed);
+                        }
+                    }
+                    In::Midi(message) => {
+                        if !processor.midi_message(message) {
                             self.status.dropped.fetch_add(1, Relaxed);
                         }
                     }
@@ -433,6 +465,8 @@ impl Node for AuNode {
     fn receive_data(&mut self, data: NodeData) {
         if data.downcast_ref::<AutomationList>().is_some() {
             self.automation = Some(data);
+        } else if let Some(PluginMpeData(mpe)) = data.downcast_ref() {
+            self.pending_mpe = Some(*mpe);
         }
     }
 
@@ -469,6 +503,12 @@ fn collect(
     status: &Status,
     processor: &mut Processor,
     list: Option<&AutomationList>,
+    (pending_mpe, mpe, layout, plain): (
+        &mut Option<PluginMpe>,
+        &mut PluginMpe,
+        &mut MpeLayout,
+        &mut PlainNotes,
+    ),
 ) {
     events.clear();
     let capacity = events.capacity();
@@ -501,8 +541,52 @@ fn collect(
     processor.drive.play(list, block, |play| {
         push(events, play.offset, In::Param(play.id, play.played));
     });
-    for note in block.notes() {
-        push(events, note.offset, In::Note(*note));
+    // Spec: mpe R15, R16. The new MPE Mode and settings take effect before
+    // the block's notes: the notes MPE MIDI laid out for the old ones ends.
+    if let Some(new) = pending_mpe.take() {
+        let mut sink = |offset: u32, message: MidiMessage| {
+            push(events, offset, In::Midi(message));
+        };
+        if mpe.on != new.on {
+            layout.release_all(0, &mut sink);
+            plain.release_all(0, &mut sink);
+        }
+        layout.configure(new.settings, &mut sink);
+        *mpe = new;
+    }
+    if mpe.on {
+        // Spec: au-hosting R20. The notes and their expressions go in as
+        // MPE MIDI, each message at its frame in the order MPE MIDI lays
+        // them out.
+        let mut sink = |offset: u32, message: MidiMessage| {
+            push(events, offset, In::Midi(message));
+        };
+        layout.open(&mut sink);
+        layout.lay_out(block.notes(), &mut sink);
+    } else {
+        for note in block.notes() {
+            match note.kind {
+                // Spec: au-hosting R19. A note's pressure is polyphonic key
+                // pressure on its key and channel.
+                NoteKind::Expression {
+                    expression: NoteExpression::Pressure,
+                    value,
+                } => {
+                    let pressure = (value.clamp(0.0, 1.0) * 127.0).round() as u8;
+                    let status = 0xA0 | note.channel.min(15);
+                    if let Some(message) =
+                        MidiMessage::from_bytes(&[status, note.key.min(127), pressure])
+                    {
+                        push(events, note.offset, In::Midi(message));
+                    }
+                }
+                NoteKind::Expression { .. } => {}
+                _ => {
+                    plain.track(note);
+                    push(events, note.offset, In::Note(*note));
+                }
+            }
+        }
     }
     // Nearly in order already: an insertion sort, which allocates nothing.
     for i in 1..events.len() {
@@ -700,6 +784,24 @@ impl Processor {
         true
     }
 
+    /// Schedules a MIDI message for the next render call's first frame.
+    pub(crate) fn midi_message(&mut self, message: MidiMessage) -> bool {
+        if self.midi.is_null() {
+            return false;
+        }
+        let mut bytes = message.padded();
+        let length = message.bytes().len() as isize;
+        let data = NonNull::from(&mut bytes[0]);
+        // SAFETY: the MIDI block belongs to this unit and takes the
+        // message's valid bytes, which it copies before it returns; the
+        // call is made between render calls, where Apple's documentation
+        // allows it.
+        unsafe {
+            (&*self.midi).call((AUEventSampleTimeImmediate, 0, length, data));
+        }
+        true
+    }
+
     /// Schedules a note for the next render call's first frame.
     pub(crate) fn midi(&mut self, note: &NoteEvent) -> bool {
         if self.midi.is_null() {
@@ -707,23 +809,11 @@ impl Processor {
         }
         // Spec: au-hosting R18. A channel message goes in as its MIDI bytes.
         if let Some(message) = note.message() {
-            let mut bytes = message.padded();
-            let length = message.bytes().len() as isize;
-            let data = NonNull::from(&mut bytes[0]);
-            // SAFETY: the MIDI block belongs to this unit and takes the
-            // message's valid bytes, which it copies before it returns; the
-            // call is made between render calls, where Apple's
-            // documentation allows it.
-            unsafe {
-                (&*self.midi).call((AUEventSampleTimeImmediate, 0, length, data));
-            }
-            return true;
+            return self.midi_message(message);
         }
         let channel = note.channel.min(15);
         let key = note.key.min(127);
         let mut bytes = match note.kind {
-            // Per-note expressions wait for MPE hosting (the parity
-            // matrix's note): a plug-in's note port takes them then.
             NoteKind::Expression { .. }
             | NoteKind::Control { .. }
             | NoteKind::PitchBend { .. }

@@ -16,6 +16,7 @@ use crate::external::External;
 use crate::ids::{ContentHash, DeviceId, ParamId, TrackId};
 use crate::layers::Layers;
 use crate::modulator::{Mapping, ShapePoint};
+use crate::mpe_settings::PluginMpe;
 use crate::rack::{Chain, RackKind, RackMacros};
 use crate::sample_edits::SampleEdit;
 use crate::track::{Channel, Input};
@@ -105,6 +106,11 @@ pub struct Device {
     /// device, and for a plug-in until the set is first saved with it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plugin: Option<PluginState>,
+    /// A plug-in's MPE Mode and the MPE/Multi-channel Settings its MPE MIDI
+    /// goes out on (the MPE spec, R14, R18). Off in a new device, and left
+    /// out of the saved set until changed. Native devices never set it.
+    #[serde(default, skip_serializing_if = "PluginMpe::is_default")]
+    pub mpe: PluginMpe,
     /// The name of the preset the device holds (the plug-in list spec, R5):
     /// the Beatlayer device preset last loaded into it or saved from it, or
     /// else the program name the plug-in's format reported. Left out of the
@@ -442,6 +448,7 @@ impl Device {
             midi_sidechain: None,
             floating: false,
             plugin: None,
+            mpe: PluginMpe::default(),
             preset_name: None,
             configured: None,
             media: Vec::new(),

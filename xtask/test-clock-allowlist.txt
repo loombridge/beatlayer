@@ -6,6 +6,7 @@
 
 crates/agent/tests/http.rs # a timeout on the agent server and its client
 crates/agent/tests/perception.rs # a timeout on the engine's playback
+crates/agent/tests/plugin_mpe.rs # waits for a real CLAP plug-in
 crates/agent/tests/plugin_vst3.rs # a timeout on a real VST3 host
 crates/analysis/tests/stems_model.rs # a timeout on a model download
 crates/assistant/tests/providers.rs # a timeout on a provider's socket
@@ -25,6 +26,7 @@ crates/engine/tests/drum_racks.rs # a timeout on a drum chain
 crates/engine/tests/external_devices.rs # a timeout on a MIDI port
 crates/engine/tests/midi_input.rs # the delay-locked loop measured against a real-time thread and clock
 crates/engine/tests/midi_output.rs # stamps messages with the system's clock
+crates/engine/tests/mpe_output.rs # stamps messages with the system's clock
 crates/engine/tests/midi_play.rs # stamps messages with the system's clock
 crates/engine/tests/mpe_input.rs # stamps messages with the system's clock, as midi_play does
 crates/engine/tests/midi_recording.rs # stamps messages with the system's clock

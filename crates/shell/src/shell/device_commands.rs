@@ -172,6 +172,7 @@ impl Shell {
         types.extend(self.plugins.types().into_iter().map(|t| t.device_type));
         types.extend(self.au.types().into_iter().map(|t| t.device_type));
         types.extend(self.vst3.types().into_iter().map(|t| t.device_type));
+        types.extend(self.lv2.types().into_iter().map(|t| t.device_type));
         self.devices.set_device_types(types);
     }
 
@@ -245,6 +246,7 @@ impl Shell {
                 &self.plugins,
                 &self.au,
                 &self.vst3,
+                &self.lv2,
                 &self.kit,
                 &mut self.editor,
             );

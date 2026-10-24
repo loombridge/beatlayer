@@ -48,3 +48,9 @@ pub(crate) fn options(pairs: &[(&str, &str)]) -> Vec<ChoiceOption> {
 pub(crate) fn percent(n: i64, percent: i64) -> i64 {
     (n * percent + 50).div_euclid(100)
 }
+
+/// A tick count worked out from a fraction, rounded to the nearest tick,
+/// half up (R2).
+pub(crate) fn round_ticks(ticks: f64) -> bl_core::time::Ticks {
+    bl_core::time::Ticks((ticks + 0.5).floor() as i64)
+}

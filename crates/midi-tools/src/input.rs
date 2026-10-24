@@ -85,6 +85,39 @@ impl ToolNote {
         self.part(Ticks::ZERO, length)
     }
 
+    /// The note with this length and its envelopes' positions scaled by the
+    /// same factor (the MIDI Tools spec, R14; the MPE spec, R4). Two
+    /// breakpoints that land on one tick keep the earlier.
+    #[must_use]
+    pub fn stretched(&self, length: Ticks) -> Self {
+        if length == self.length || self.length <= Ticks::ZERO {
+            return Self {
+                length,
+                ..self.clone()
+            };
+        }
+        let scale = |points: &[ToolPoint]| {
+            let mut scaled: Vec<ToolPoint> = Vec::with_capacity(points.len());
+            for point in points {
+                let at = Ticks(
+                    (i128::from(point.at.0) * i128::from(length.0) / i128::from(self.length.0))
+                        as i64,
+                );
+                if scaled.last().is_none_or(|last| last.at < at) {
+                    scaled.push(ToolPoint { at, ..*point });
+                }
+            }
+            scaled
+        };
+        Self {
+            length,
+            pitch: scale(&self.pitch),
+            slide: scale(&self.slide),
+            pressure: scale(&self.pressure),
+            ..self.clone()
+        }
+    }
+
     /// The note over its part from `from` to `to`, both counted from its
     /// start: each envelope's stretch over that part, with a breakpoint at
     /// each end holding the value there, as a split note's part has (the

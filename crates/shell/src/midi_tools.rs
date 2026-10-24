@@ -454,8 +454,9 @@ impl MidiTools {
             .tools
             .iter()
             .filter_map(|(id, saved)| {
-                let descriptor = registry.find(id)?.descriptor();
-                let values = descriptor
+                let tool = registry.find(id)?;
+                let descriptor = tool.descriptor();
+                let values: Vec<ParamValue> = descriptor
                     .parameters
                     .iter()
                     .map(|spec| {
@@ -466,6 +467,12 @@ impl MidiTools {
                             .unwrap_or_else(|| spec.default.clone())
                     })
                     .collect();
+                // Values that don't suit together load as the defaults too.
+                let values = if tool.validate(&values).is_ok() {
+                    values
+                } else {
+                    descriptor.defaults()
+                };
                 Some((
                     id.clone(),
                     Settings {
@@ -1210,6 +1217,7 @@ fn set_values(
     descriptor
         .check(&settings.values)
         .map_err(|error| invalid(error.to_string()))?;
+    tool.validate(&settings.values).map_err(failure)?;
     tools.settings.insert(descriptor.id.clone(), settings);
     Ok(())
 }
@@ -1788,6 +1796,34 @@ pub fn run(
         }
         other => Err(invalid(format!("`{other}` isn't a MIDI Tools command"))),
     }
+}
+
+/// The notes a transformation would take now and the range it would act on:
+/// what its display, such as Recombine's columns, draws (R43). Empty with no
+/// MIDI clip.
+#[must_use]
+pub fn input_notes(
+    doc: &Document,
+    view: &ClipView,
+    arrangement: &ArrangementView,
+    clip: ClipId,
+) -> (Vec<Note>, (Ticks, Ticks)) {
+    let Some(value) = doc.clip(clip) else {
+        return (Vec::new(), (Ticks::ZERO, Ticks::ZERO));
+    };
+    let ClipData::Midi(midi) = &value.data else {
+        return (Vec::new(), (Ticks::ZERO, Ticks::ZERO));
+    };
+    let Ok(target) = target(doc, view, arrangement, value, midi, None, None) else {
+        return (Vec::new(), (Ticks::ZERO, Ticks::ZERO));
+    };
+    let ordered = notes_in_order(midi);
+    let notes = target
+        .input
+        .iter()
+        .filter_map(|place| ordered.get(*place as usize).cloned())
+        .collect();
+    (notes, target.range)
 }
 
 /// Whether Cmd+Enter and Edit ▸ Apply Transformation/Generator can apply

@@ -23,11 +23,16 @@ mod lfo;
 mod ornament;
 mod quantize;
 mod random;
+mod recombine;
 mod registry;
+mod span;
+mod strum;
 mod style;
 #[cfg(feature = "testing")]
 mod testing;
+mod time_warp;
 mod value;
+mod velocity_shaper;
 
 pub use chop::{TOGGLES as CHOP_TOGGLES, gaps_pattern, pattern_follows_gaps};
 pub use descriptor::{
@@ -41,6 +46,8 @@ pub use random::Rng;
 pub use registry::{
     GENERATOR_ORDER, MAX_NOTES, MidiTool, Registry, TRANSFORMATION_ORDER, ToolError, run,
 };
+pub use strum::strum_position;
 pub use style::{
     CHORD_TRIGGER, PLAY_ORDER, RANDOM, RANDOM_ONCE, RANDOM_OTHER, STYLE_NAMES, style_order,
 };
+pub use velocity_shaper::ENVELOPE_POINTS;

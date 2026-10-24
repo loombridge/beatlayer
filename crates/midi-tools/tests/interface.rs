@@ -71,6 +71,11 @@ fn r3_the_registry_lists_each_kind_apart() {
             "lfo",
             "ornament",
             "quantize",
+            "recombine",
+            "span",
+            "strum",
+            "time_warp",
+            "velocity_shaper",
             "test_transpose",
             "test_shift"
         ],

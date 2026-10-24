@@ -38,6 +38,7 @@ pub mod tags;
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
@@ -75,6 +76,7 @@ use self::preview::{Loader, MediaSamples};
 use self::tags::{Source, TagStore};
 use crate::audio::AudioHost;
 use crate::clip_files;
+use crate::set_exchange::{self, Opened};
 use bl_plugin_host::scan::ScannedPlugin;
 
 /// Wakes the app's event loop when background work (indexing, decoding a
@@ -351,11 +353,29 @@ pub struct BrowserView {
     full_height: bool,
     /// The browser's width in points at 100%.
     width: f32,
+    /// The sets opened in the content pane, by their files (set exchange R1).
+    sets: HashMap<PathBuf, SetState>,
+    /// Sets read on background threads send what they read here.
+    set_reads: (Sender<SetRead>, Receiver<SetRead>),
 }
 
 /// The tags some item under a label carries, with the generation and label
 /// they were worked out for.
 type AvailableTags = ((u64, String), BTreeSet<i64>);
+
+/// A set opened in the content pane (set exchange R1).
+#[derive(Clone, Debug)]
+enum SetState {
+    /// Being read on a background thread.
+    Reading,
+    /// Read: its rows are listed.
+    Ready(Arc<Opened>),
+    /// Refused: why.
+    Refused(String),
+}
+
+/// A set read on a background thread: its file, and what it held or why not.
+type SetRead = (PathBuf, Result<Arc<Opened>, String>);
 
 /// A tagged file's size and content hash, so the tags pass to the same
 /// content found at a new path (spec: browser-tags R5).
@@ -569,6 +589,8 @@ impl BrowserView {
             details: Mutex::new(DetailsCache::default()),
             full_height: prefs.full_height,
             width: clamp_browser_width(prefs.width),
+            sets: HashMap::new(),
+            set_reads: channel(),
         };
         view.user_library.clone_from(&prefs.user_library);
         view.places_changed();
@@ -1506,7 +1528,8 @@ impl BrowserView {
             return;
         };
         for entry in entries {
-            let open = entry.kind == ItemKind::Folder && self.open.contains(&entry.path);
+            let openable = matches!(entry.kind, ItemKind::Folder | ItemKind::Set);
+            let open = openable && self.open.contains(&entry.path);
             out.push(Item {
                 path: entry.path.to_string_lossy().into_owned(),
                 name: entry.name.clone(),
@@ -1518,10 +1541,110 @@ impl BrowserView {
                 clip_kind: entry.clip,
                 details: None,
             });
-            if open {
+            if open && entry.kind == ItemKind::Set {
+                self.set_rows(&entry.path, depth.saturating_add(1), out);
+            } else if open {
                 self.list_into(&entry.path, depth.saturating_add(1), out);
             }
         }
+    }
+
+    /// The rows of an opened set (set exchange R1): its tracks, or a line
+    /// saying why it can't be read or that it is being read.
+    fn set_rows(&self, set: &Path, depth: u16, out: &mut Vec<Item>) {
+        let note = match self.sets.get(set) {
+            Some(SetState::Ready(opened)) => {
+                opened.rows(depth, &self.open, out);
+                return;
+            }
+            Some(SetState::Refused(why)) => why.clone(),
+            _ => "Reading the set\u{2026}".to_owned(),
+        };
+        out.push(Item {
+            path: format!("{}#note", set.to_string_lossy()),
+            name: note,
+            kind: ItemKind::Notice,
+            depth,
+            open: false,
+            folder: None,
+            format: None,
+            clip_kind: None,
+            details: None,
+        });
+    }
+
+    /// Whether `key` is a row of a set that is open in the content pane.
+    fn is_set_row(&self, key: &str) -> bool {
+        key.rsplit_once('#')
+            .is_some_and(|(set, _)| self.sets.contains_key(Path::new(set)))
+    }
+
+    /// Starts reading the set at `path` on a background thread, to list its
+    /// rows when it is read (set exchange R1).
+    fn read_set(&mut self, path: PathBuf) {
+        let (reads, waker) = (self.set_reads.0.clone(), self.waker.clone());
+        let file = path.clone();
+        let started = std::thread::Builder::new()
+            .name("bl-browser-set".to_owned())
+            .spawn(move || {
+                let read = set_exchange::open(&file);
+                let _ = reads.send((file, read));
+                waker.wake();
+            });
+        let state = match started {
+            Ok(_) => SetState::Reading,
+            Err(error) => SetState::Refused(format!("couldn't read the set: {error}")),
+        };
+        self.sets.insert(path, state);
+    }
+
+    /// Takes what a background read of a set found, if the set is still open.
+    fn adopt_set(&mut self, (path, read): SetRead) -> bool {
+        if !self.sets.contains_key(&path) {
+            return false;
+        }
+        let state = match read {
+            Ok(opened) => SetState::Ready(opened),
+            Err(why) => SetState::Refused(why),
+        };
+        self.sets.insert(path, state);
+        true
+    }
+
+    /// Forgets the sets and the set rows that aren't inside an open
+    /// folder any more.
+    fn close_sets(&mut self) {
+        let open = self.open.clone();
+        self.sets.retain(|set, _| open.contains(set));
+        // A folder with a `#` in its name isn't a row of a set.
+        self.open.retain(|p| {
+            set_exchange::parse_key(&p.to_string_lossy()).is_none_or(|(set, _)| open.contains(&set))
+        });
+    }
+
+    /// Waits until every set being read has been, for tests and tools.
+    pub fn wait_for_sets(&mut self) {
+        while self
+            .sets
+            .values()
+            .any(|state| matches!(state, SetState::Reading))
+        {
+            let Ok(read) = self.set_reads.1.recv() else {
+                break;
+            };
+            self.adopt_set(read);
+        }
+        self.rebuild();
+    }
+
+    /// Shows a file the shell wrote in the content pane, selected, with its
+    /// name open for editing (clip files R4; set exchange R13), if it lies in
+    /// one of the places. Returns whether it was shown.
+    pub fn file_saved(&mut self, path: &Path, audio: &AudioHost) -> bool {
+        self.files_changed();
+        let shown = self.reveal(path, audio).is_ok();
+        self.renaming = shown.then(|| path.to_path_buf());
+        shown
     }
 
     /// Works out the content pane's rows again, keeping the selection.
@@ -2011,6 +2134,14 @@ impl BrowserView {
         set_bpm: f64,
     ) -> Polled {
         let mut polled = Polled::default();
+        let mut news = false;
+        while let Ok(read) = self.set_reads.1.try_recv() {
+            news |= self.adopt_set(read);
+        }
+        if news {
+            self.rebuild();
+            polled.changed = true;
+        }
         if self.index.poll() {
             self.generation += 1;
             if matches!(self.rows, Rows::Hits { .. }) {
@@ -2317,9 +2448,10 @@ impl BrowserView {
         audio: &mut AudioHost,
         search: &[PathBuf],
     ) -> Result<(), BrowserError> {
-        let name = path.file_name().map(|n| n.to_string_lossy().into_owned());
-        let kind = name.as_deref().and_then(file_kind);
-        if !matches!(kind, Some(ItemKind::Audio | ItemKind::Clip)) || !path.is_file() {
+        let kind = listing::path_kind(path);
+        // A Session clip of an opened set previews as a clip file does.
+        let row = set_exchange::parse_key(&path.to_string_lossy()).is_some();
+        if !matches!(kind, Some(ItemKind::Audio | ItemKind::Clip)) || !(row || path.is_file()) {
             return Err(BrowserError::InvalidArgs(format!(
                 "{} isn't an audio file or clip file Beatlayer opens",
                 path.to_string_lossy()
@@ -2407,14 +2539,37 @@ impl BrowserView {
         self.renaming.as_deref()
     }
 
+    /// The tracks, or one Devices row, selected in a set opened in the content
+    /// pane, with the set (set exchange R4, R8): what Enter adds to the open
+    /// set. `None` unless every selected item is such a row of one set.
+    #[must_use]
+    pub fn selected_set_rows(&self) -> Option<(PathBuf, Vec<set_exchange::Row>)> {
+        let mut set = None;
+        let mut rows = Vec::new();
+        for path in &self.selected {
+            let (found, row) = set_exchange::parse_key(&path.to_string_lossy())?;
+            if set.get_or_insert_with(|| found.clone()) != &found
+                || matches!(row, set_exchange::Row::Clip(_))
+            {
+                return None;
+            }
+            rows.push((self.position_of(path), row));
+        }
+        rows.sort_by_key(|(position, _)| *position);
+        let rows: Vec<set_exchange::Row> = rows.into_iter().map(|(_, row)| row).collect();
+        let several_devices = rows.len() > 1
+            && rows
+                .iter()
+                .any(|r| matches!(r, set_exchange::Row::Devices(_)));
+        (!rows.is_empty() && !several_devices).then(|| (set.unwrap_or_default(), rows))
+    }
+
     /// The selected clip files, in the content pane's order.
     pub(crate) fn selected_clip_files(&self) -> Vec<PathBuf> {
         let mut files: Vec<(Option<usize>, PathBuf)> = self
             .selected
             .iter()
-            .filter(|p| {
-                p.file_name().and_then(|n| file_kind(&n.to_string_lossy())) == Some(ItemKind::Clip)
-            })
+            .filter(|p| listing::path_kind(p) == Some(ItemKind::Clip))
             .map(|p| (self.position_of(p), p.clone()))
             .collect();
         files.sort_by_key(|(position, _)| *position);
@@ -2434,7 +2589,8 @@ impl BrowserView {
     pub fn can_run(&self, id: &str, args: &Value) -> bool {
         match id {
             ids::LOAD_SELECTED => {
-                !self.selected_audio().is_empty()
+                self.selected_set_rows().is_some()
+                    || !self.selected_audio().is_empty()
                     || !self.selected_clip_files().is_empty()
                     || self.selected_plugin().is_some()
                     || self.selected_device().is_some()
@@ -2561,11 +2717,29 @@ impl BrowserView {
                 } = parse(args)?;
                 let path = if path.starts_with(PLUGIN_FOLDER) && self.is_plugin_row(&path) {
                     PathBuf::from(path)
+                } else if self.is_set_row(&path) {
+                    // Spec: set-exchange R1. A track of an opened set opens
+                    // to list its Session clips or its tracks, and closes
+                    // again; the other rows stay as they are.
+                    let row = PathBuf::from(path);
+                    if open.unwrap_or(!self.open.contains(&row)) {
+                        self.open.insert(row);
+                    } else {
+                        self.open.remove(&row);
+                    }
+                    self.rebuild();
+                    outcome.value = state(self, ctx.audio);
+                    return Ok(outcome);
                 } else {
                     let path = absolute(&path)?;
-                    if !path.is_dir() {
+                    let is_set = path.is_file()
+                        && path
+                            .file_name()
+                            .and_then(|n| file_kind(&n.to_string_lossy()))
+                            == Some(ItemKind::Set);
+                    if !path.is_dir() && !is_set {
                         return Err(BrowserError::InvalidArgs(format!(
-                            "{} isn't a folder",
+                            "{} isn't a folder or a set",
                             path.to_string_lossy()
                         )));
                     }
@@ -2578,10 +2752,16 @@ impl BrowserView {
                         self.open.retain(|p| path.starts_with(p));
                     }
                     self.listings.remove(&path);
+                    // Spec: set-exchange R1. A set is read in the background.
+                    if path.is_file() {
+                        self.read_set(path.clone());
+                    }
                     self.open.insert(path);
                 } else {
                     self.open.retain(|p| !p.starts_with(&path));
+                    self.open.remove(&path);
                 }
+                self.close_sets();
                 self.rebuild();
                 outcome.value = state(self, ctx.audio);
             }
@@ -2594,7 +2774,7 @@ impl BrowserView {
                 let paths = paths
                     .iter()
                     .map(|p| {
-                        if is_device(p) || self.is_plugin_row(p) {
+                        if is_device(p) || self.is_plugin_row(p) || self.is_set_row(p) {
                             Ok(PathBuf::from(p))
                         } else {
                             absolute(p)
@@ -2603,7 +2783,10 @@ impl BrowserView {
                     .collect::<Result<Vec<_>, _>>()?;
                 if let Some(missing) = paths.iter().find(|p| {
                     let name = p.to_string_lossy();
-                    !p.exists() && !is_device(&name) && !self.is_plugin_row(&name)
+                    !p.exists()
+                        && !is_device(&name)
+                        && !self.is_plugin_row(&name)
+                        && !self.is_set_row(&name)
                 }) {
                     return Err(BrowserError::InvalidArgs(format!(
                         "{} doesn't exist",
@@ -2816,7 +2999,7 @@ impl BrowserView {
                 // Spec: browser R14, clip files R10. The selected track if it
                 // is a track of the files' kind, otherwise a new one.
                 let wanted = match listing::clip_kind(&files[0]) {
-                    _ if file_kind(&files[0].to_string_lossy()) != Some(ItemKind::Clip) => {
+                    _ if listing::path_kind(&files[0]) != Some(ItemKind::Clip) => {
                         bl_model::TrackKind::Audio
                     }
                     Some(bl_shell_spec::browser::ClipFileKind::Midi) => bl_model::TrackKind::Midi,
@@ -2901,11 +3084,9 @@ impl BrowserView {
                     library.as_deref(),
                 )
                 .map_err(BrowserError::Failed)?;
-                self.files_changed();
                 // Its row is selected with the name open for editing, if the
                 // folder is in a place the browser shows (clip files R4).
-                let shown = self.reveal(&saved.path, ctx.audio).is_ok();
-                self.renaming = shown.then(|| saved.path.clone());
+                let shown = self.file_saved(&saved.path, ctx.audio);
                 outcome.show_browser = shown;
                 outcome.message = Some(format!("Saved clip file {}.", saved.name));
                 outcome.value = to_value(&SaveClipFileResult {

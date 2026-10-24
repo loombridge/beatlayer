@@ -17,7 +17,7 @@ impl Shell {
     /// Selects tracks, as the Arrangement's selection. The title bars stay
     /// selected when they were, so the keys that act on a title bar keep
     /// working (the track context menu spec, R12, R14).
-    fn select_tracks(&mut self, tracks: &[TrackId]) {
+    pub(super) fn select_tracks(&mut self, tracks: &[TrackId]) {
         let title_bars = self.arrangement.title_bars_selected();
         self.arrangement
             .run(
@@ -67,7 +67,7 @@ impl Shell {
     }
 
     /// The last selected track, in display order: where a paste goes.
-    fn last_selected_track(&self) -> Option<TrackId> {
+    pub(super) fn last_selected_track(&self) -> Option<TrackId> {
         let order = self.editor.document().track_order();
         self.arrangement
             .selected_tracks()
@@ -77,18 +77,13 @@ impl Shell {
             .max_by_key(|track| order.iter().position(|t| t == track).unwrap_or(0))
     }
 
-    /// Pastes the tracks on the clipboard, straight after the track to
-    /// paste after, at its level and inside its group when it's in one, or
-    /// after the last track when none is selected (R14).
-    fn paste_tracks(
-        &mut self,
-        id: &str,
-        copied: &crate::tracks::CopiedTracks,
-        after: Option<TrackId>,
-    ) -> Result<Vec<TrackId>, ShellError> {
+    /// Where tracks added after `after` go: straight after it, at its level
+    /// and inside its group when it's in one, or after the last track when
+    /// there is none (the track context menu spec, R14).
+    pub(crate) fn place_after(&self, after: Option<TrackId>) -> crate::tracks::Place {
         let doc = self.editor.document();
         let returns: Vec<TrackId> = doc.returns().collect();
-        let place = match after {
+        match after {
             Some(track) => {
                 let parent = doc.parent(track);
                 if doc
@@ -129,7 +124,19 @@ impl Shell {
                 index: doc.top_level().len(),
                 returns: returns.len(),
             },
-        };
+        }
+    }
+
+    /// Pastes the tracks on the clipboard, straight after the track to
+    /// paste after, at its level and inside its group when it's in one, or
+    /// after the last track when none is selected (R14).
+    fn paste_tracks(
+        &mut self,
+        id: &str,
+        copied: &crate::tracks::CopiedTracks,
+        after: Option<TrackId>,
+    ) -> Result<Vec<TrackId>, ShellError> {
+        let place = self.place_after(after);
         // Tracks from another set: their files join this set's media table
         // (R15), and the IDs they name mean nothing here (R15; the set
         // exchange spec, R6).

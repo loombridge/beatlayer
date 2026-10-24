@@ -1,7 +1,7 @@
 //! The song: its settings, tempo, grooves, tuning, files and export.
 
 use super::Object::{Clip, Song, Track};
-use super::{FILE, Readback, nothing, query, read};
+use super::{BROWSER, FILE, Readback, nothing, query, read};
 
 /// The readback of this area's commands, one line each, so a command's entry is easy to find.
 #[rustfmt::skip]
@@ -38,6 +38,9 @@ pub(super) const ROWS: &[(&str, Readback)] = &[
     ("set.collect_all_and_save", query(Song, "set.unsaved_changes")),
     ("set.discard_changes", query(Song, "set.unsaved_changes")),
     ("set.discard_recovery", nothing("deletes a recovery file outside the set")),
+    ("set.export_clips", nothing(BROWSER)),
+    ("set.export_tracks", nothing(BROWSER)),
+    ("set.import", query(Song, "tracks")),
     ("set.import_dawproject", query(Song, "set.name")),
     ("set.new", query(Song, "set.name")),
     ("set.open", query(Song, "set.path")),

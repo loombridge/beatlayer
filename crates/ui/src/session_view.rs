@@ -278,7 +278,19 @@ impl GridUi {
             // saved as a clip file there instead (clip files R3).
             let target = crate::browser::end_clip_drag(ui.ctx());
             if let Some(target) = target {
-                crate::browser::save_clip(ui.ctx(), shell, clip, &target, events);
+                // Spec: set-exchange R12 (I-DROP-011). Several selected
+                // clips, the one dragged among them, are saved as a set.
+                let selected: Vec<bl_model::ClipId> = state
+                    .slots
+                    .iter()
+                    .filter_map(|slot| shell.editor().document().slot(slot.track, slot.scene))
+                    .map(|clip| clip.id)
+                    .collect();
+                if selected.len() > 1 && selected.contains(&clip) {
+                    crate::browser::save_clips_as_set(ui.ctx(), shell, selected, &target, events);
+                } else {
+                    crate::browser::save_clip(ui.ctx(), shell, clip, &target, events);
+                }
             } else if let Some(pos) = pos
                 && let Some((to_track, to_scene)) =
                     slot_at(session, &layout, &columns, &scenes, scroll_y, pos)
@@ -874,6 +886,7 @@ impl GridUi {
     ) {
         let ctx = ui.ctx().clone();
         let payload = egui::DragAndDrop::payload::<crate::browser::BrowserDrag>(&ctx);
+        let set_payload = egui::DragAndDrop::payload::<crate::browser::SetDrag>(&ctx);
         let (dropped, released, pointer, modifiers) = ctx.input(|i| {
             (
                 i.raw
@@ -886,13 +899,39 @@ impl GridUi {
                 i.modifiers,
             )
         });
-        if payload.is_none() && dropped.is_empty() {
+        if payload.is_none() && set_payload.is_none() && dropped.is_empty() {
             return;
         }
         let state = shell.session().state();
         let Some(pos) = pointer else {
             return;
         };
+        if let Some(drag) = set_payload {
+            // Spec: set-exchange R3, R8 (I-DROP-021, I-DROP-022). A set, its
+            // tracks or a chain go into the drop area right of the tracks.
+            let area = layout
+                .drop_area
+                .map(|area| area.intersect(session.slots))
+                .filter(|area| area.contains(pos));
+            if let Some(area) = area {
+                ui.painter_at(area).rect_stroke(
+                    area,
+                    0.0,
+                    egui::Stroke::new(2.0, ui.visuals().selection.stroke.color),
+                    egui::StrokeKind::Inside,
+                );
+            }
+            if released {
+                egui::DragAndDrop::clear_payload(&ctx);
+                if area.is_some() {
+                    events.push(UiEvent::Invoke(Invocation::new(
+                        "set.import",
+                        drag.args(None, true),
+                    )));
+                }
+            }
+            return;
+        }
         // Clip files can also be dropped in the drop area, where each makes
         // a track of its kind in the scene it is dropped at (clip files R7).
         let clips = payload

@@ -44,6 +44,14 @@ impl Shell {
         self.browser_view.wait_for_index(timeout)
     }
 
+    /// Waits for the sets opened in the browser to be read, for tests and
+    /// tools (set exchange R1).
+    #[doc(hidden)]
+    pub fn wait_for_browser_sets(&mut self) {
+        self.browser_view.wait_for_sets();
+        self.touch();
+    }
+
     /// Runs a browser command and carries out what it asks of the rest of
     /// the shell.
     pub(super) fn run_browser(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {

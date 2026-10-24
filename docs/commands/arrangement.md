@@ -124,6 +124,7 @@ Arguments:
 | `clips` | array or null | no | Whole clips to act on. Give either `clips` or a span of time, not both. |
 | `end` | [`Position`](README.md#position) or null | no | Where the span ends, after `start`. Left out, the time selection's end. |
 | `lanes` | array or null | no | The lanes a span of time covers, each a track's own lane or one of its take lanes (the comping spec, R27). Left out, the lanes of the time selection, or `tracks`' own lanes. |
+| `linked` | boolean or null | no | Whether it reaches the tracks linked with the ones it names (the linked-track editing spec, R15). `true` if left out. |
 | `start` | [`Position`](README.md#position) or null | no | Where the span starts. Left out, the time selection's start. |
 | `tracks` | array or null | no | The tracks a span of time covers. Left out, the selected tracks. |
 
@@ -167,6 +168,7 @@ Arguments:
 | `clips` | array or null | no | Whole clips to act on. Give either `clips` or a span of time, not both. |
 | `end` | [`Position`](README.md#position) or null | no | Where the span ends, after `start`. Left out, the time selection's end. |
 | `lanes` | array or null | no | The lanes a span of time covers, each a track's own lane or one of its take lanes (the comping spec, R27). Left out, the lanes of the time selection, or `tracks`' own lanes. |
+| `linked` | boolean or null | no | Whether it reaches the tracks linked with the ones it names (the linked-track editing spec, R15). `true` if left out. |
 | `start` | [`Position`](README.md#position) or null | no | Where the span starts. Left out, the time selection's start. |
 | `tracks` | array or null | no | The tracks a span of time covers. Left out, the selected tracks. |
 
@@ -212,6 +214,7 @@ Arguments:
 | `clips` | array or null | no | Whole clips to act on. Give either `clips` or a span of time, not both. |
 | `end` | [`Position`](README.md#position) or null | no | Where the span ends, after `start`. Left out, the time selection's end. |
 | `lanes` | array or null | no | The lanes a span of time covers, each a track's own lane or one of its take lanes (the comping spec, R27). Left out, the lanes of the time selection, or `tracks`' own lanes. |
+| `linked` | boolean or null | no | Whether it reaches the tracks linked with the ones it names (the linked-track editing spec, R15). `true` if left out. |
 | `start` | [`Position`](README.md#position) or null | no | Where the span starts. Left out, the time selection's start. |
 | `tracks` | array or null | no | The tracks a span of time covers. Left out, the selected tracks. |
 
@@ -236,6 +239,7 @@ Arguments:
 | `clips` | array or null | no | Whole clips to act on. Give either `clips` or a span of time, not both. |
 | `end` | [`Position`](README.md#position) or null | no | Where the span ends, after `start`. Left out, the time selection's end. |
 | `lanes` | array or null | no | The lanes a span of time covers, each a track's own lane or one of its take lanes (the comping spec, R27). Left out, the lanes of the time selection, or `tracks`' own lanes. |
+| `linked` | boolean or null | no | Whether it reaches the tracks linked with the ones it names (the linked-track editing spec, R15). `true` if left out. |
 | `start` | [`Position`](README.md#position) or null | no | Where the span starts. Left out, the time selection's start. |
 | `tracks` | array or null | no | The tracks a span of time covers. Left out, the selected tracks. |
 
@@ -281,6 +285,7 @@ Arguments:
 | `clips` | array or null | no | Whole clips to act on. Give either `clips` or a span of time, not both. |
 | `end` | [`Position`](README.md#position) or null | no | Where the span ends, after `start`. Left out, the time selection's end. |
 | `lanes` | array or null | no | The lanes a span of time covers, each a track's own lane or one of its take lanes (the comping spec, R27). Left out, the lanes of the time selection, or `tracks`' own lanes. |
+| `linked` | boolean or null | no | Whether it reaches the tracks linked with the ones it names (the linked-track editing spec, R15). `true` if left out. |
 | `start` | [`Position`](README.md#position) or null | no | Where the span starts. Left out, the time selection's start. |
 | `tracks` | array or null | no | The tracks a span of time covers. Left out, the selected tracks. |
 
@@ -364,6 +369,7 @@ Arguments:
 | `clips` | array or null | no | Whole clips to act on. Give either `clips` or a span of time, not both. |
 | `end` | [`Position`](README.md#position) or null | no | Where the span ends, after `start`. Left out, the time selection's end. |
 | `lanes` | array or null | no | The lanes a span of time covers, each a track's own lane or one of its take lanes (the comping spec, R27). Left out, the lanes of the time selection, or `tracks`' own lanes. |
+| `linked` | boolean or null | no | Whether it reaches the tracks linked with the ones it names (the linked-track editing spec, R15). `true` if left out. |
 | `start` | [`Position`](README.md#position) or null | no | Where the span starts. Left out, the time selection's start. |
 | `tracks` | array or null | no | The tracks a span of time covers. Left out, the selected tracks. |
 
@@ -550,6 +556,7 @@ Arguments:
 | `clips` | array or null | no | The clips. Left out, the selected clips. |
 | `copy` | boolean | no | Copy the clips instead, leaving the originals where they are. |
 | `lane` | [`Lane`](README.md#lane) or null | no | The lane `anchor` moves to, a track's own lane or one of its take lanes (the comping spec, R27); the other clips keep their distance from it among the track's lanes. Give `track` or `lane`, not both. |
+| `linked` | boolean or null | no | Whether it reaches the tracks linked with the ones it names (the linked-track editing spec, R15). `true` if left out. |
 | `to` | [`Position`](README.md#position) or null | no | Where `anchor` starts after the move; the other clips keep their distance from it. |
 | `track` | [`TrackId`](README.md#trackid) or null | no | The track `anchor` moves to; the other clips keep their distance from it in the track list. Left out, every clip stays on its track. |
 
@@ -710,6 +717,7 @@ Arguments:
 | `anchor` | [`ClipId`](README.md#clipid) or null | no | The clip whose edge `to` places. Left out, the earliest clip. |
 | `by` | [`Ticks`](README.md#ticks) or null | no | How far each clip's edge moves, in ticks; negative is earlier. Give `by` or `to`. |
 | `clips` | array or null | no | The clips. Left out, the selected clips. |
+| `linked` | boolean or null | no | Whether it reaches the tracks linked with the ones it names (the linked-track editing spec, R15). `true` if left out. |
 | `to` | [`Position`](README.md#position) or null | no | Where `anchor`'s edge goes; the other clips' edges move as far. |
 
 Result: [`EditResult`](README.md#editresult).
@@ -796,6 +804,7 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `clips` | array of [`ClipId`](README.md#clipid) | yes | The clips. Empty with `replace` clears the clip selection. |
+| `linked` | boolean or null | no | Whether it reaches the tracks linked with the ones it names (the linked-track editing spec, R15). `true` if left out. |
 | `mode` | [`SelectMode`](README.md#selectmode) | no | How to change the selection; `replace` if left out. |
 
 Result: [`ArrangementState`](#arrangementstate).
@@ -868,6 +877,7 @@ Arguments:
 | `start` | [`Ticks`](README.md#ticks) | yes | Where the selection starts. |
 | `end` | [`Ticks`](README.md#ticks) | yes | Where it ends. Before `start` is fine: the two are swapped. |
 | `lanes` | array or null | no | The lanes it covers: each a track's own lane, a take lane under it, or its automation lane (the automation editing spec, R1; the comping spec, R26). Left out, the tracks' own lanes. |
+| `linked` | boolean or null | no | Whether it reaches the tracks linked with the ones it names (the linked-track editing spec, R15). `true` if left out. |
 | `tracks` | array or null | no | The tracks it covers. Left out, the selected tracks. |
 
 Result: [`ArrangementState`](#arrangementstate).
@@ -1128,6 +1138,7 @@ Arguments:
 | `at` | array or null | no | Where to split. Left out, the time selection's start and end, or the insert marker. |
 | `clips` | array or null | no | The clips to split. Left out, the clips on `tracks`. |
 | `lanes` | array or null | no | The lanes whose clips are split, each a track's own lane or one of its take lanes (the comping spec, R27). Left out, `tracks`' own lanes, or the lanes the time selection covers. |
+| `linked` | boolean or null | no | Whether it reaches the tracks linked with the ones it names (the linked-track editing spec, R15). `true` if left out. |
 | `tracks` | array or null | no | The tracks whose clips are split. Left out, the selected clips, or the clips on the selected tracks. |
 
 Result: [`EditResult`](README.md#editresult).

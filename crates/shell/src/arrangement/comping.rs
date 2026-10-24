@@ -20,6 +20,7 @@ use bl_shell_spec::editing::Position;
 use serde::Serialize;
 use serde_json::Value;
 
+use super::editing::linked;
 use super::editing::{
     EditFailure, apply, invalid, place_on_main, refused, transaction, unavailable,
 };
@@ -33,6 +34,37 @@ fn to_value<T: Serialize>(value: &T) -> Value {
 fn take_lane_track(doc: &Document, lane: TakeLaneId) -> Result<TrackId, EditFailure> {
     doc.take_lane_track(lane)
         .ok_or_else(|| invalid(format!("no take lane has the ID {}", lane.0)))
+}
+
+/// `tracks` and the tracks linked with them, each once (the linked-track
+/// editing spec, R11).
+fn with_group(doc: &Document, tracks: Vec<TrackId>) -> Vec<TrackId> {
+    let mut all = tracks.clone();
+    for other in tracks.iter().flat_map(|track| doc.linked_with(*track)) {
+        if !all.contains(&other) {
+            all.push(other);
+        }
+    }
+    all
+}
+
+/// `lanes` and the take lanes at the same place on the tracks linked with
+/// theirs (R11).
+fn with_group_lanes(doc: &Document, lanes: Vec<TakeLaneId>) -> Vec<TakeLaneId> {
+    let mut all = lanes.clone();
+    for lane in lanes {
+        let Some(track) = doc.take_lane_track(lane) else {
+            continue;
+        };
+        for other in doc.linked_with(track) {
+            if let Some(Some(same)) = doc.matching_lane(track, Some(lane), other)
+                && !all.contains(&same)
+            {
+                all.push(same);
+            }
+        }
+    }
+    all
 }
 
 /// An audio or MIDI track, which can hold take lanes.
@@ -147,7 +179,12 @@ pub fn run(
     let doc = &doc;
     match id {
         ids::INSERT => {
-            let InsertArgs { tracks, mut after } = parse(args)?;
+            let InsertArgs {
+                tracks,
+                mut after,
+                linked,
+            } = parse(args)?;
+            let linked = linked::on(linked);
             // Spec: comping R4. Directly after the take lane selected on the
             // track, when no track or lane is named.
             if tracks.is_none() && after.is_empty() {
@@ -163,6 +200,11 @@ pub fn run(
             for lane in &after {
                 take_lane_track(doc, *lane)?;
             }
+            let (tracks, after) = if linked {
+                (with_group(doc, tracks), with_group_lanes(doc, after))
+            } else {
+                (tracks, after)
+            };
             let (lanes, _) = transaction(editor, "Insert Take Lane", |editor| {
                 let mut lanes = Vec::new();
                 for track in &tracks {
@@ -256,8 +298,13 @@ pub fn run(
             Ok(to_value(&LanesResult { lanes: copies }))
         }
         ids::AUDITION => {
-            let AuditionArgs { lanes, on } = parse(args)?;
+            let AuditionArgs { lanes, on, linked } = parse(args)?;
             let lanes = lanes_or_selection(view, lanes)?;
+            let lanes = if linked::on(linked) {
+                with_group_lanes(doc, lanes)
+            } else {
+                lanes
+            };
             // Spec: comping R15. One lane for each track, the last listed.
             let picked = last_per_track(doc, lanes)?;
             for track in picked.keys() {
@@ -285,9 +332,19 @@ pub fn run(
             }))
         }
         ids::COPY_TO_MAIN_LANE => {
-            let CopyToMainLaneArgs { lanes, start, end } = parse(args)?;
+            let CopyToMainLaneArgs {
+                lanes,
+                start,
+                end,
+                linked,
+            } = parse(args)?;
             let (start, end) = range(doc, view, start, end)?;
             let lanes = lanes_or_selection(view, lanes)?;
+            let lanes = if linked::on(linked) {
+                with_group_lanes(doc, lanes)
+            } else {
+                lanes
+            };
             // Of the lanes on one track, the last listed.
             let from = last_per_track(doc, lanes)?;
             let (created, recorded) =
@@ -311,6 +368,7 @@ pub fn run(
                 end,
                 direction,
                 lane,
+                linked,
             } = parse(args)?;
             let selecting = track.is_none() && lane.is_none();
             let (start, end) = range(doc, view, start, end)?;
@@ -338,6 +396,20 @@ pub fn run(
             };
             if targets.is_empty() {
                 return Err(unavailable("no audio or MIDI track is selected"));
+            }
+            // Spec: linked-track editing R12. The same range on the lane at
+            // the same place of each linked track.
+            let mut targets = targets;
+            if linked::on(linked) {
+                for (track, lane) in targets.clone() {
+                    for other in doc.linked_with(track) {
+                        if let Some(same) = doc.matching_lane(track, lane, other)
+                            && !targets.iter().any(|(t, _)| *t == other)
+                        {
+                            targets.push((other, same));
+                        }
+                    }
+                }
             }
             for (track, lane) in &targets {
                 let held = clip_track(doc, *track)?;
@@ -420,72 +492,29 @@ pub fn run(
             }))
         }
         ids::MOVE_COMP_EDGE => {
-            let MoveCompEdgeArgs { track, from, to } = parse(args)?;
+            let MoveCompEdgeArgs {
+                track,
+                from,
+                to,
+                linked,
+            } = parse(args)?;
             let signatures = &doc.settings().time_signatures;
             let (from, to) = (
                 from.resolve(signatures).map_err(invalid)?,
                 to.resolve(signatures).map_err(invalid)?,
             );
-            let held = clip_track(doc, track)?;
-            let tempo = &doc.settings().tempo;
-            let sources = comp::sources(held, tempo);
-            let clips: Vec<&Clip> = held.clips().collect();
-            let (Some(earlier), Some(later)) = (
-                clips.iter().find(|clip| clip.end() == from),
-                clips.iter().find(|clip| clip.start == from),
-            ) else {
-                return Err(refused(format!(
-                    "no two main-lane clips of track {} meet at {from}",
-                    track.0
-                )));
-            };
-            let reach = |clip: &Clip| {
-                // The span of the take-lane clips the clip plays.
-                sources
-                    .iter()
-                    .filter(|source| source.clip == clip.id)
-                    .filter_map(|source| {
-                        held.take_lanes()
-                            .find(|lane| lane.id == source.lane)
-                            .and_then(|lane| lane.clip(source.source))
-                            .map(|take| (take.start, take.end()))
-                    })
-                    .collect::<Vec<_>>()
-            };
-            let (before, after) = (reach(earlier), reach(later));
-            if before.is_empty() || after.is_empty() {
-                return Err(refused(
-                    "both clips must play a take-lane clip for their boundary to move",
-                ));
-            }
-            if to <= earlier.start || to >= later.end() {
-                return Err(refused("each clip must stay at least a tick long"));
-            }
-            // The growing clip goes no further than its take-lane clip does.
-            if to > from && !before.iter().any(|(_, end)| *end >= to) {
-                return Err(refused("the earlier clip's take doesn't reach that far"));
-            }
-            if to < from && !after.iter().any(|(start, _)| *start <= to) {
-                return Err(refused("the later clip's take doesn't reach that far"));
-            }
-            let (earlier, later) = (earlier.id, later.id);
-            let (_, recorded) = transaction(editor, "Move Comp Edge", |editor| {
-                // The shrinking clip first, so the two never overlap.
-                let shorten = Command::SetClipLength {
-                    clip: earlier,
-                    length: to - held.clip(earlier).expect("exists").start,
-                };
-                let trim = Command::TrimClipStart {
-                    clip: later,
-                    start: to,
-                };
-                if to > from {
-                    apply(editor, trim)?;
-                    apply(editor, shorten)
-                } else {
-                    apply(editor, shorten)?;
-                    apply(editor, trim)
+            let mut edges = comp_edge(doc, track, from, to)?;
+            // Spec: linked-track editing R12. The boundary at the same place
+            // of each linked track that has one.
+            if linked::on(linked) {
+                for other in doc.linked_with(track).into_iter().filter(|t| *t != track) {
+                    edges.extend(comp_edge(doc, other, from, to).unwrap_or_default());
                 }
+            }
+            let (_, recorded) = transaction(editor, "Move Comp Edge", |editor| {
+                edges
+                    .into_iter()
+                    .try_for_each(|command| apply(editor, command).map(drop))
             })?;
             Ok(to_value(&CompResult {
                 created: Vec::new(),
@@ -513,6 +542,72 @@ pub fn run(
         }
         other => Err(invalid(format!("`{other}` isn't a comping command"))),
     }
+}
+
+/// The commands that move the boundary between two adjacent main-lane clips
+/// of `track` from `from` to `to`, the shrinking clip's first so the two
+/// never overlap.
+fn comp_edge(
+    doc: &Document,
+    track: TrackId,
+    from: Ticks,
+    to: Ticks,
+) -> Result<Vec<Command>, EditFailure> {
+    let held = clip_track(doc, track)?;
+    let tempo = &doc.settings().tempo;
+    let sources = comp::sources(held, tempo);
+    let clips: Vec<&Clip> = held.clips().collect();
+    let (Some(earlier), Some(later)) = (
+        clips.iter().find(|clip| clip.end() == from),
+        clips.iter().find(|clip| clip.start == from),
+    ) else {
+        return Err(refused(format!(
+            "no two main-lane clips of track {} meet at {from}",
+            track.0
+        )));
+    };
+    let reach = |clip: &Clip| {
+        // The span of the take-lane clips the clip plays.
+        sources
+            .iter()
+            .filter(|source| source.clip == clip.id)
+            .filter_map(|source| {
+                held.take_lanes()
+                    .find(|lane| lane.id == source.lane)
+                    .and_then(|lane| lane.clip(source.source))
+                    .map(|take| (take.start, take.end()))
+            })
+            .collect::<Vec<_>>()
+    };
+    let (before, after) = (reach(earlier), reach(later));
+    if before.is_empty() || after.is_empty() {
+        return Err(refused(
+            "both clips must play a take-lane clip for their boundary to move",
+        ));
+    }
+    if to <= earlier.start || to >= later.end() {
+        return Err(refused("each clip must stay at least a tick long"));
+    }
+    // The growing clip goes no further than its take-lane clip does.
+    if to > from && !before.iter().any(|(_, end)| *end >= to) {
+        return Err(refused("the earlier clip's take doesn't reach that far"));
+    }
+    if to < from && !after.iter().any(|(start, _)| *start <= to) {
+        return Err(refused("the later clip's take doesn't reach that far"));
+    }
+    let shorten = Command::SetClipLength {
+        clip: earlier.id,
+        length: to - earlier.start,
+    };
+    let trim = Command::TrimClipStart {
+        clip: later.id,
+        start: to,
+    };
+    Ok(if to > from {
+        vec![trim, shorten]
+    } else {
+        vec![shorten, trim]
+    })
 }
 
 /// The parts of `start..end` that `take_lane.replace_with_take` replaces,

@@ -12,6 +12,9 @@
 //! - [`vst3`]: VST3 hosting, part 1 (WP-2.7): a plug-in bundle or module
 //!   loaded by path runs as a device, its component and controller
 //!   connected, with sample-accurate parameter changes and notes.
+//! - [`lv2`]: LV2 hosting, part 1 (WP-5.39): Beatlayer's own host on the
+//!   system's lilv library, Linux only; a plug-in instantiated, run block by
+//!   block with audio, control and MIDI ports, and its state saved.
 //! - [`Hosts`] and [`Loans`]: one offline-render loan (WP-2.6b, WP-4.21)
 //!   across the three formats.
 //! - [`scan`]: the plug-in scanner (WP-2.9): finds the plug-ins on this
@@ -25,6 +28,7 @@ pub mod au;
 pub mod clap;
 mod drive;
 mod lend;
+pub mod lv2;
 pub mod scan;
 pub mod vst3;
 pub mod window;

@@ -655,6 +655,10 @@ pub struct SelectTimeArgs {
     /// R26). Left out, the tracks' own lanes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lanes: Option<Vec<Lane>>,
+    /// Whether it reaches the tracks linked with the ones it names (the
+    /// linked-track editing spec, R15). `true` if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub linked: Option<bool>,
 }
 
 /// Which of a fade's handles (the audio clips spec, R27).

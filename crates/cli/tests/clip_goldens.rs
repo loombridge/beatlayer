@@ -306,6 +306,34 @@ fn a_comp_copied_from_two_takes_renders_their_stretches() {
     assert_eq!(takes, 2);
 }
 
+// Spec: linked-track editing R12. A comp made on one of two linked tracks
+// comps both: each track's main lane plays the stretches of its own takes,
+// the right track's a tenth of a second (4,800 frames) further into the file.
+#[test]
+fn a_comp_made_on_one_linked_track_comps_both() {
+    let (scene, render) = matches_the_model("linked-comp");
+    let chirp = chirp(&scene);
+    // Both tracks play at once, so a frame is the two chirps' sum: the left
+    // track at the frame of the first take, and then of the second (0.75
+    // seconds, 36,000 frames, further in); the right track a tenth of a
+    // second further into each.
+    for (frame, take) in [(0usize, 0usize), (47_999, 0), (48_000, 36_000)] {
+        let sum = chirp[frame + take] + chirp[frame + take + 4_800];
+        assert_eq!(
+            left(&render, frame).to_bits(),
+            sum.to_bits(),
+            "frame {frame}"
+        );
+    }
+    let lanes = scene
+        .document()
+        .tracks()
+        .map(|track| (track.take_lanes().count(), track.clips().count()))
+        .filter(|held| held.0 > 0)
+        .collect::<Vec<_>>();
+    assert_eq!(lanes, [(2, 2), (2, 2)]);
+}
+
 // Spec: audio-clips R23, R24, R31
 #[test]
 fn a_crossfade_plays_both_clips_across_its_span_by_the_curve_law() {

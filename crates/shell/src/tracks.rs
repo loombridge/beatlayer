@@ -1137,6 +1137,33 @@ pub fn groupable(doc: &Document, tracks: &[TrackId]) -> Vec<TrackId> {
         .collect()
 }
 
+/// The audio and MIDI tracks `tracks` name for linking, in display order:
+/// each one itself, and each group track the audio and MIDI tracks inside it,
+/// at any depth (the linked-track editing spec, R2 to R4).
+#[must_use]
+pub fn linkable(doc: &Document, tracks: &[TrackId]) -> Vec<TrackId> {
+    let named = |id: TrackId| {
+        tracks.contains(&id) || {
+            let mut parent = doc.parent(id);
+            std::iter::from_fn(|| {
+                let group = parent?;
+                parent = doc.parent(group);
+                Some(group)
+            })
+            .any(|group| tracks.contains(&group))
+        }
+    };
+    doc.track_order()
+        .into_iter()
+        .filter(|&id| {
+            named(id)
+                && doc
+                    .track(id)
+                    .is_some_and(|t| matches!(t.kind(), TrackKind::Audio | TrackKind::Midi))
+        })
+        .collect()
+}
+
 /// Groups `tracks` into a new group track named "Group" as one undo step named `label`.
 /// Inserts the group track where the first track was, moves each track into it in order,
 /// and returns the new group track ID.

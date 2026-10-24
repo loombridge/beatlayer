@@ -22,7 +22,7 @@ use crate::menus::{Action, IMP_12, MenuItem, Row, SEPARATOR, items};
 use crate::notes::{CHOP as CHOP_NOTES, SPLIT as SPLIT_NOTES};
 use crate::slice::OPEN as SLICE_TO_MIDI;
 use crate::stems::OPEN as SEPARATE_STEMS;
-use crate::tracks::{DUPLICATE_WITHOUT_CLIPS, SET_DEVICES_ENABLED};
+use crate::tracks::{DUPLICATE_WITHOUT_CLIPS, LINK, SET_DEVICES_ENABLED, UNLINK};
 
 use Action::{Choice, Command as Cmd, Pending, Shortcut as Key, Submenu};
 
@@ -356,9 +356,9 @@ fn track_extras(after: &str, state: TrackMenu) -> Vec<Row> {
             if state.group {
                 rows.push(("C-TRACK-017a", "Ungroup Tracks", Key(&["S-TRACK-007"])));
             }
-            if state.several {
-                rows.push(("C-TRACK-018a", "Link Tracks", Pending(None)));
-                rows.push(("C-TRACK-018b", "Unlink Track(s)", Pending(None)));
+            if state.several || state.group {
+                rows.push(("C-TRACK-018a", "Link Tracks", Cmd(LINK)));
+                rows.push(("C-TRACK-018b", "Unlink Track(s)", Cmd(UNLINK)));
             }
             if state.arrangement {
                 rows.push(SEPARATOR);
@@ -486,7 +486,6 @@ pub fn pending_package(row: &str) -> Option<&'static str> {
         "C-DEVICE-005" | "C-CLIP-ARR-008" | "C-TRACK-006" | "R26-info" => {
             Some("WP-2.24 (the Info View)")
         }
-        "C-TRACK-018a" | "C-TRACK-018b" => Some("Phase 6 (linked-track editing)"),
         "C-TRACK-015" | "C-TRACK-016" | "C-TRACK-017b" => {
             Some("a package not planned yet (track colours)")
         }

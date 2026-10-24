@@ -161,7 +161,7 @@ impl ClipParam {
                 id,
                 "Transient Loop Mode",
                 &["Loop Off", "Loop Forward", "Loop Back-and-Forth"],
-                1,
+                2,
             ),
             Self::TransientEnvelope => ParamDescriptor::integer(
                 id,

@@ -67,6 +67,8 @@ fn r3_the_registry_lists_each_kind_apart() {
             "arpeggiate",
             "chop",
             "connect",
+            "glissando",
+            "lfo",
             "ornament",
             "quantize",
             "recombine",

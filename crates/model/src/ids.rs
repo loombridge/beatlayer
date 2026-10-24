@@ -106,6 +106,11 @@ object_id!(
     "take lane"
 );
 object_id!(
+    /// The ID of a group of linked tracks (WP-6.23).
+    LinkGroupId,
+    "link group"
+);
+object_id!(
     /// The ID of a locator.
     LocatorId,
     "locator"

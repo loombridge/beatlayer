@@ -62,10 +62,10 @@ pub enum Preserve {
 pub enum TransientLoopMode {
     /// Silence until the next segment.
     LoopOff,
-    /// Back to the segment's middle, forwards again; the default.
-    #[default]
+    /// Back to the segment's middle, forwards again.
     LoopForward,
-    /// Backwards to the middle, then forwards.
+    /// Backwards to the middle, then forwards; the default.
+    #[default]
     LoopBackAndForth,
 }
 
@@ -75,7 +75,7 @@ pub struct BeatsSettings {
     /// What it preserves: transients unless given.
     #[serde(default, skip_serializing_if = "is_default")]
     pub preserve: Preserve,
-    /// What it does when a segment runs out: Loop Forward unless given.
+    /// What it does when a segment runs out: Loop Back-and-Forth unless given.
     #[serde(default, skip_serializing_if = "is_default")]
     pub transient_loop_mode: TransientLoopMode,
     /// How far each segment fades, 0 to 100: 100 (no fade) unless given.
@@ -403,7 +403,11 @@ mod tests {
                 settings.beats.transient_loop_mode,
                 settings.beats.transient_envelope
             ),
-            (Preserve::Transients, TransientLoopMode::LoopForward, 100)
+            (
+                Preserve::Transients,
+                TransientLoopMode::LoopBackAndForth,
+                100
+            )
         );
         assert_eq!(settings.tones.grain_size, 30.0);
         assert_eq!(

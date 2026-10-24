@@ -1298,6 +1298,7 @@ impl ArrangementView {
                     end,
                     tracks,
                     lanes,
+                    linked,
                 } = parse(args)?;
                 let (start, end) = if end < start {
                     (end, start)
@@ -1337,6 +1338,21 @@ impl ArrangementView {
                         .map(|track| Lane::Track { track })
                         .collect(),
                 };
+                // Spec: linked-track editing R7. The same time on the same
+                // lane of every linked track.
+                if editing::linked::on(linked) {
+                    self.time_selection_lanes =
+                        editing::linked::lanes(doc, std::mem::take(&mut self.time_selection_lanes));
+                    self.selected = self.time_selection_lanes.iter().map(Lane::track).fold(
+                        Vec::new(),
+                        |mut tracks, track| {
+                            if !tracks.contains(&track) {
+                                tracks.push(track);
+                            }
+                            tracks
+                        },
+                    );
+                }
                 self.time_selection = (end > start).then_some((start, end));
                 self.insert_marker = start;
                 self.selected_fade = None;

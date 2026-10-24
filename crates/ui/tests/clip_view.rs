@@ -973,6 +973,111 @@ fn shift_clicking_and_the_piano_ruler_select_the_notes() {
     assert_eq!(n.selected(), [0], "and takes them out again");
 }
 
+/// The values of one MIDI tool, as `midi_tool.state` reports them.
+fn tool_values(n: &mut Notes, tool: &str) -> serde_json::Value {
+    let state = n.h.shell.run("midi_tool.state", json!({})).unwrap();
+    let found = state["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["tool"] == tool)
+        .unwrap();
+    found["values"].clone()
+}
+
+#[test]
+fn option_clicking_and_dragging_the_piano_ruler_sets_the_shown_generators_pitch_or_range() {
+    // Spec: midi-generators R2; I-CLICK-049. While the Generate panel shows
+    // Rhythm, Seed or Shape, Option-clicking a key sets the pitch or a
+    // one-key range, and Option-dragging sets the range of Seed and Shape to
+    // the keys dragged over: a gesture of `midi_tool.set`, one undo step, and
+    // Esc puts it back. Without the modifier a click selects the notes
+    // (piano-roll R26).
+    let step = n_step();
+    let mut n = set(vec![Note::new(60, Ticks::ZERO, step, 100)]);
+    n.h.shell
+        .run("clip_view.show_panel", json!({ "panel": "generate" }))
+        .unwrap();
+    n.h.settle();
+    // Rhythm: Option-click sets Pitch and, with Auto on, applies it.
+    let steps = n.steps();
+    let key = n.key_at(58);
+    n.click(key, Modifiers::ALT);
+    assert_eq!(tool_values(&mut n, "rhythm")["pitch"], 58);
+    assert_eq!(n.steps(), steps + 1, "one undo step");
+    assert_eq!(
+        n.h.shell.editor().undo_history().next(),
+        Some("Rhythm"),
+        "named after the tool"
+    );
+    assert!(n.notes().iter().any(|note| note.key == 58), "it applied");
+    // Dragging sets Rhythm's Pitch to the key it ends on.
+    let (from, to) = (n.key_at(55), n.key_at(59));
+    n.drag(from, to, Modifiers::ALT);
+    assert_eq!(tool_values(&mut n, "rhythm")["pitch"], 59);
+    // Seed: Option-dragging sets the range to the keys dragged over, either
+    // way, as one undo step.
+    n.h.shell
+        .run("midi_tool.choose", json!({ "tool": "seed" }))
+        .unwrap();
+    n.h.settle();
+    let steps = n.steps();
+    let (from, to) = (n.key_at(54), n.key_at(59));
+    n.drag(from, to, Modifiers::ALT);
+    assert_eq!(
+        tool_values(&mut n, "seed")["pitch_range"],
+        json!({ "low": 54, "high": 59 })
+    );
+    assert_eq!(n.steps(), steps + 1, "however many frames, one step");
+    let (from, to) = (n.key_at(59), n.key_at(55));
+    n.drag(from, to, Modifiers::ALT);
+    assert_eq!(
+        tool_values(&mut n, "seed")["pitch_range"],
+        json!({ "low": 55, "high": 59 })
+    );
+    // Esc ends a drag and puts it back.
+    let steps = n.steps();
+    let (from, to) = (n.key_at(56), n.key_at(58));
+    n.drag_frames(from, to, Modifiers::ALT);
+    n.h.frame(vec![Event::Key {
+        key: egui::Key::Escape,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: Modifiers::ALT,
+    }]);
+    n.release(to, Modifiers::ALT);
+    assert_eq!(
+        tool_values(&mut n, "seed")["pitch_range"],
+        json!({ "low": 55, "high": 59 })
+    );
+    assert_eq!(n.steps(), steps, "and recorded nothing");
+    // Shape: Option-click is a one-key range.
+    n.h.shell
+        .run("midi_tool.choose", json!({ "tool": "shape" }))
+        .unwrap();
+    n.h.settle();
+    let key = n.key_at(57);
+    n.click(key, Modifiers::ALT);
+    assert_eq!(
+        tool_values(&mut n, "shape")["pitch_range"],
+        json!({ "low": 57, "high": 57 })
+    );
+    // Without the modifier a click selects the notes at the key, and with
+    // another panel shown Option does too.
+    let before = tool_values(&mut n, "shape");
+    let key = n.key_at(60);
+    n.click(key, Modifiers::NONE);
+    assert_eq!(tool_values(&mut n, "shape"), before);
+    n.h.shell
+        .run("clip_view.show_panel", json!({ "panel": "utilities" }))
+        .unwrap();
+    n.h.settle();
+    let key = n.key_at(56);
+    n.click(key, Modifiers::ALT);
+    assert_eq!(tool_values(&mut n, "shape"), before);
+}
+
 #[test]
 fn the_arrows_move_and_lengthen_the_selection() {
     // Spec: piano-roll R27. Left and Right move the selection a grid step,

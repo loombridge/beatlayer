@@ -40,6 +40,7 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `lanes` | array or null | no | The take lanes to audition; of those on one track, the last listed is the one. Left out, the take lanes the selection is on. |
+| `linked` | boolean or null | no | Whether it reaches the tracks linked with the ones it names (the linked-track editing spec, R15). `true` if left out. |
 | `on` | boolean or null | no | Switch them on (true) or off (false). Left out, they switch on, or off when every one of them is auditioned already. |
 
 Result: [`LanesResult`](README.md#lanesresult).
@@ -78,6 +79,7 @@ Arguments:
 |---|---|---|---|
 | `end` | [`Position`](README.md#position) or null | no | Where the range ends, after `start`. Left out, the selection's end. |
 | `lanes` | array or null | no | The take lanes to copy from. Of those on one track, the last listed is copied from. Left out, the take lanes the selection is on: the headers selected, the lanes the time selection covers, or the lanes of the selected clips. |
+| `linked` | boolean or null | no | Whether it reaches the tracks linked with the ones it names (the linked-track editing spec, R15). `true` if left out. |
 | `start` | [`Position`](README.md#position) or null | no | Where the range starts, in ticks or as `bar.beat.sixteenth` text. Left out, the time selection's start, or the selected clips'. |
 
 Result: [`CompResult`](README.md#compresult).
@@ -103,7 +105,7 @@ Result: [`ChangeSet`](README.md#changeset).
 
 **Delete Take Lane(s)**. Permission: `destructive`. Contexts: `arrangement`.
 
-Deletes take lanes with their clips. The main lane is left as it was, and a deleted lane that was auditioned stops being. Undo restores them, but because it removes the person's work an agent asks first.
+Deletes take lanes with their clips. The main lane is left as it was, and a deleted lane that was auditioned stops being. Undo restores them, but because it removes the person's work an agent asks first. On a linked track it makes the same edit on every track linked with it, in the same undo step, and the result lists everything it changed; give `linked`: false to edit only what the arguments name.
 
 Default keys: none.
 
@@ -112,6 +114,7 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `lanes` | array of [`TakeLaneId`](README.md#takelaneid) | yes | The take lanes. |
+| `linked` | boolean | no | Whether the edit reaches the tracks linked with the ones it names (the same on each); true if left out. Give false to limit it to what it names. |
 
 Result: [`ChangeSet`](README.md#changeset).
 
@@ -184,6 +187,7 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `after` | array of [`TakeLaneId`](README.md#takelaneid) | no | Take lanes to add the new ones directly after, for the tracks they belong to. A track with none of them gets its new lane after its last take lane. |
+| `linked` | boolean or null | no | Whether it reaches the tracks linked with the ones it names (the linked-track editing spec, R15). `true` if left out. |
 | `tracks` | array or null | no | The audio or MIDI tracks to add a take lane to. Left out, the selected tracks. |
 
 Result: [`LanesResult`](README.md#lanesresult).
@@ -220,6 +224,7 @@ Arguments:
 | `track` | [`TrackId`](README.md#trackid) | yes | The audio or MIDI track. |
 | `from` | [`Position`](README.md#position) | yes | Where two adjacent main-lane clips meet now. |
 | `to` | [`Position`](README.md#position) | yes | Where they should meet. |
+| `linked` | boolean or null | no | Whether it reaches the tracks linked with the ones it names (the linked-track editing spec, R15). `true` if left out. |
 
 Result: [`CompResult`](README.md#compresult).
 
@@ -227,7 +232,7 @@ Result: [`CompResult`](README.md#compresult).
 
 **Rename Take Lane**. Permission: `edit`. Contexts: `arrangement`.
 
-Gives a take lane a new name. An empty name is refused.
+Gives a take lane a new name. An empty name is refused. On a linked track it makes the same edit on every track linked with it, in the same undo step, and the result lists everything it changed; give `linked`: false to edit only what the arguments name.
 
 Default keys: none.
 
@@ -237,6 +242,7 @@ Arguments:
 |---|---|---|---|
 | `lane` | [`TakeLaneId`](README.md#takelaneid) | yes | The take lane. |
 | `name` | string | yes | Its new name, which can't be empty. |
+| `linked` | boolean | no | Whether the edit reaches the tracks linked with the ones it names (the same on each); true if left out. Give false to limit it to what it names. |
 
 Result: [`ChangeSet`](README.md#changeset).
 
@@ -255,6 +261,7 @@ Arguments:
 | `direction` | [`TakeDirection`](README.md#takedirection) | yes | Whether to take the next or the previous take. |
 | `end` | [`Position`](README.md#position) or null | no | Where the range ends, after `start`. Left out, the selection's end. |
 | `lane` | [`TakeLaneId`](README.md#takelaneid) or null | no | The take lane the selection is on, from which the next or previous take is counted. Left out with `track` given, the selection is on the main lane, and each of its clips counts from the take lane it uses; left out with `track`, the selection says. |
+| `linked` | boolean or null | no | Whether it reaches the tracks linked with the ones it names (the linked-track editing spec, R15). `true` if left out. |
 | `start` | [`Position`](README.md#position) or null | no | Where the range starts, in ticks or as `bar.beat.sixteenth` text. Left out, the time selection's start, or the selected clips'. |
 | `track` | [`TrackId`](README.md#trackid) or null | no | The audio or MIDI track whose main lane is changed. Left out, each audio or MIDI track the selection is on. |
 
@@ -264,7 +271,7 @@ Result: [`CompResult`](README.md#compresult).
 
 **Audition Take Lane**. Permission: `edit`. Contexts: `arrangement`.
 
-Switches the audition of a take lane on or off. While a take lane is auditioned, its track plays that lane's clips in place of its main lane's, from the next block; a track has at most one, so switching one on switches off the one auditioned before. Session clips are unaffected. It is saved with the set.
+Switches the audition of a take lane on or off. While a take lane is auditioned, its track plays that lane's clips in place of its main lane's, from the next block; a track has at most one, so switching one on switches off the one auditioned before. Session clips are unaffected. It is saved with the set. On a linked track it makes the same edit on every track linked with it, in the same undo step, and the result lists everything it changed; give `linked`: false to edit only what the arguments name.
 
 Default keys: none.
 
@@ -274,6 +281,7 @@ Arguments:
 |---|---|---|---|
 | `lane` | [`TakeLaneId`](README.md#takelaneid) | yes | The take lane. |
 | `on` | boolean | yes | Whether it is auditioned. |
+| `linked` | boolean | no | Whether the edit reaches the tracks linked with the ones it names (the same on each); true if left out. Give false to limit it to what it names. |
 
 Result: [`ChangeSet`](README.md#changeset).
 

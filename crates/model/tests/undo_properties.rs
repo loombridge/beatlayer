@@ -20,9 +20,9 @@ use bl_core::id::Id;
 use bl_core::time::{Bpm, TempoMap, Ticks, TimeSignature, TimeSignatureMap};
 use bl_model::{
     AudioData, BeatsUpdate, Change, ChangeSet, Clip, ClipData, ClipId, Command, ContentHash,
-    Device, DeviceId, DeviceKind, Document, EditError, Editor, Input, LaunchMode, MidiData, Mixer,
-    Monitor, NewTakeLane, Note, ParamId, PluginFormat, Routing, SceneId, SendTap, TakeClip,
-    TakeClipData, TakeLane, TakeLaneId, TonesUpdate, TrackId, TrackKind, WarpMode,
+    Device, DeviceId, DeviceKind, Document, EditError, Editor, Input, LaunchMode, LinkGroupId,
+    MidiData, Mixer, Monitor, NewTakeLane, Note, ParamId, PluginFormat, Routing, SceneId, SendTap,
+    TakeClip, TakeClipData, TakeLane, TakeLaneId, TonesUpdate, TrackId, TrackKind, WarpMode,
 };
 use proptest::prelude::*;
 use proptest::sample::Index;
@@ -78,6 +78,9 @@ enum Op {
     SetMonitor(Index, u8),
     SoloExclusive(Index),
     ArmExclusive(Index),
+    /// Linking tracks into a new group of their own, or (false) unlinking
+    /// them (WP-6.23).
+    SetTrackLinks(Vec<Index>, bool),
     /// A send from one track to another, usually a return.
     SetSend(Index, Index, f64),
     SetSendTap(Index, bool),
@@ -223,6 +226,7 @@ fn op() -> impl Strategy<Value = Op> {
         1 => (i(), 0u8..3).prop_map(|(t, m)| Op::SetMonitor(t, m)),
         1 => i().prop_map(Op::SoloExclusive),
         1 => i().prop_map(Op::ArmExclusive),
+        2 => (prop::collection::vec(i(), 1..4), any::<bool>()).prop_map(|(t, link)| Op::SetTrackLinks(t, link)),
         3 => (i(), i(), value(0.0..1.0)).prop_map(|(t, to, v)| Op::SetSend(t, to, v)),
         1 => (i(), any::<bool>()).prop_map(|(t, b)| Op::SetSendTap(t, b)),
         1 => any::<bool>().prop_map(Op::SetSoloInPlace),
@@ -533,6 +537,10 @@ impl Op {
             },
             Self::SoloExclusive(t) => Command::SoloExclusive { track: at.track(t) },
             Self::ArmExclusive(t) => Command::ArmExclusive { track: at.track(t) },
+            Self::SetTrackLinks(tracks, link) => Command::SetTrackLinks {
+                tracks: tracks.iter().map(|t| at.track(t)).collect(),
+                group: link.then(|| editor.new_id()),
+            },
             Self::SetSend(t, to, level) => {
                 // A track that can send, usually to a return.
                 let to = if to.index(8) == 0 {
@@ -1115,6 +1123,8 @@ type OwnSettings = (
     // Its take lanes with their clips, and the one auditioned.
     Vec<TakeLane>,
     Option<TakeLaneId>,
+    // The group of linked tracks it is in.
+    Option<LinkGroupId>,
 );
 
 /// A song flattened into plain maps, for working out change sets the slow
@@ -1158,6 +1168,7 @@ impl Flat {
                 track.routing().clone(),
                 track.take_lanes().cloned().collect(),
                 track.audition(),
+                track.link(),
             );
             flat.tracks.insert(track.id(), own);
             for clip in track.clips() {

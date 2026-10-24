@@ -83,6 +83,19 @@ pub const FAN_OUT: &[&str] = &[
     "clip.rename",
 ];
 
+/// The commands that take `linked`: whether the edit reaches the tracks
+/// linked with the ones it names (the linked-track editing spec, R15).
+pub const LINKED: &[&str] = &[
+    "mixer.set_arm",
+    "mixer.arm_exclusive",
+    "take_lane.rename",
+    "take_lane.delete",
+    "take_lane.set_audition",
+    "clip.move",
+    "clip.set_length",
+    "clip.set_fades",
+];
+
 /// Adds every document command, and undo and redo, to a registry.
 ///
 /// # Errors
@@ -121,7 +134,16 @@ pub fn run(editor: &mut Editor, id: &str, args: Value) -> Result<ChangeSet, RunE
     let entry = entry(id)?;
     match entry.action {
         Action::Apply(_) => {
+            let mut args = args;
+            let linked = take_linked(id, &mut args);
             let mut commands = commands_from_args(entry, args)?;
+            if linked {
+                let doc = editor.document();
+                commands = commands
+                    .into_iter()
+                    .flat_map(|c| doc.with_linked(c))
+                    .collect();
+            }
             if commands.len() == 1 {
                 return Ok(editor.apply(commands.remove(0))?);
             }
@@ -215,6 +237,9 @@ pub fn command_from_args(id: &str, args: Value) -> Result<Command, RunError> {
         });
     };
     fields.insert("op".to_owned(), Value::from(op));
+    if LINKED.contains(&id) {
+        fields.remove("linked");
+    }
     serde_json::from_value(Value::Object(fields)).map_err(|error| RunError::InvalidArgs {
         command: entry.id,
         message: error.to_string(),
@@ -331,8 +356,16 @@ struct Entry {
 
 impl Entry {
     fn spec(&self, commands: &Schema, changes: &Schema) -> CommandSpec {
+        let mut description = self.description.to_owned();
+        if LINKED.contains(&self.id) {
+            description.push_str(
+                " On a linked track it makes the same edit on every track linked with it, in \
+                 the same undo step, and the result lists everything it changed; give \
+                 `linked`: false to edit only what the arguments name.",
+            );
+        }
         let mut spec = CommandSpec::new(self.id, self.label)
-            .description(self.description)
+            .description(description)
             .permission(self.permission)
             .contexts(self.contexts.iter().copied())
             .result_schema(changes.clone());
@@ -343,6 +376,9 @@ impl Entry {
                 Some(mut args) => {
                     if FAN_OUT.contains(&self.id) {
                         accept_clips(&mut args);
+                    }
+                    if LINKED.contains(&self.id) {
+                        accept_linked(&mut args);
                     }
                     spec.args_schema(args)
                 }
@@ -395,6 +431,41 @@ fn accept_clips(schema: &mut Schema) {
     if let Some(required) = schema.get_mut("required").and_then(Value::as_array_mut) {
         required.retain(|name| name != "clip");
     }
+}
+
+/// The schema of a [`LINKED`] command given the schema of its [`Command`]
+/// variant: the same, taking `linked`.
+#[must_use]
+pub fn with_linked(variant: &Schema) -> Schema {
+    let mut schema = variant.clone();
+    accept_linked(&mut schema);
+    schema
+}
+
+/// Adds the `linked` argument to the schema of a [`LINKED`] command.
+fn accept_linked(schema: &mut Schema) {
+    if let Some(properties) = schema.get_mut("properties").and_then(Value::as_object_mut) {
+        properties.insert(
+            "linked".to_owned(),
+            serde_json::json!({
+                "description": "Whether the edit reaches the tracks linked with the ones it \
+                                names (the same on each); true if left out. Give false to \
+                                limit it to what it names.",
+                "type": "boolean",
+            }),
+        );
+    }
+}
+
+/// Takes `linked` out of a [`LINKED`] command's arguments, and says whether
+/// the edit reaches linked tracks.
+fn take_linked(id: &str, args: &mut Value) -> bool {
+    LINKED.contains(&id)
+        && args
+            .as_object_mut()
+            .and_then(|fields| fields.remove("linked"))
+            .and_then(|linked| linked.as_bool())
+            != Some(false)
 }
 
 /// Where a person reaches a track's mixer switches: its title bar, and the
@@ -1115,6 +1186,22 @@ const ENTRIES: &[Entry] = &[
             track that holds a Drum Rack plays twelve equal steps whatever the switch says. \
             Only MIDI tracks have it. The switch is saved with the set only where it's on, and \
             each change is one undo step, named \"Bypass Tuning\".",
+    },
+    Entry {
+        id: "track.set_link_group",
+        action: Action::Apply("set_track_links"),
+        label: "Set Link Group",
+        permission: Permission::Edit,
+        contexts: MIXER,
+        keys: &[],
+        description: "Puts audio and MIDI tracks into the link group `group`, or takes them \
+            out of their groups when `group` is left out. A track leaves the group it was in, \
+            and a group left with one track ends. `group` is a new ID to link the tracks in a \
+            group of their own, or the ID another linked track's group has (`track.link` and \
+            `track.unlink` choose it for you). Group, return and Main tracks can't be linked. \
+            Linked tracks are edited as one: a clip move, resize, split or consolidate, fades, \
+            arming, and take lane edits made on one reach the others. Read the group back with \
+            the query tool's `track`, field `linked`. One undo step.",
     },
     Entry {
         id: "mixer.set_keep_monitoring_latency",

@@ -18,7 +18,7 @@ use serde_json::{Map, Value};
 use crate::error::LoadError;
 
 /// The schema version this build writes, and the newest it can read.
-pub const SCHEMA_VERSION: u32 = 9;
+pub const SCHEMA_VERSION: u32 = 10;
 
 /// The oldest schema version this build can read, through [`MIGRATIONS`].
 pub const OLDEST_SCHEMA_VERSION: u32 = SCHEMA_VERSION - MIGRATIONS.len() as u32;
@@ -95,7 +95,59 @@ pub const MIGRATIONS: &[Migration] = &[
             Ok(value)
         },
     },
+    Migration {
+        from: 9,
+        summary: "Beats' Transient Loop Mode defaults to Loop Back-and-Forth, as Live's does, \
+                  where it defaulted to Loop Forward and left Loop Forward out of the file; each \
+                  audio clip, and each device that warps, that doesn't name its mode now names \
+                  Loop Forward, so it plays as it did (the warp modes spec, R2)",
+        apply: |mut value| {
+            pin_loop_forward(&mut value);
+            Ok(value)
+        },
+    },
 ];
+
+/// Gives every audio clip's and device's warp settings in the saved JSON
+/// `value` that name no Transient Loop Mode the one they had before it
+/// defaulted to Loop Back-and-Forth (the warp modes spec, R2). A set file and
+/// a clip file of the schemas before it hold the old form.
+pub(crate) fn pin_loop_forward(value: &mut Value) {
+    match value {
+        Value::Object(fields) => {
+            for (key, child) in fields.iter_mut() {
+                match (key.as_str(), child) {
+                    // A clip's `warp` is a switch; a device's holds its settings.
+                    ("audio", Value::Object(audio)) if audio.contains_key("media") => {
+                        pin_settings(audio, "warp_settings");
+                    }
+                    ("warp", Value::Object(warp)) => pin_settings(warp, "settings"),
+                    (_, child) => pin_loop_forward(child),
+                }
+            }
+        }
+        Value::Array(items) => items.iter_mut().for_each(pin_loop_forward),
+        _ => {}
+    }
+}
+
+fn pin_settings(owner: &mut Map<String, Value>, key: &str) {
+    let mode = owner
+        .entry(key)
+        .or_insert_with(|| Value::Object(Map::new()))
+        .as_object_mut()
+        .and_then(|settings| {
+            settings
+                .entry("beats")
+                .or_insert_with(|| Value::Object(Map::new()))
+                .as_object_mut()
+        });
+    if let Some(beats) = mode {
+        beats
+            .entry("transient_loop_mode")
+            .or_insert_with(|| Value::from("loop_forward"));
+    }
+}
 
 /// Turns every note's pressure points in the saved JSON `value` into
 /// breakpoints (the MPE spec, R2): each point stays, and a point after another

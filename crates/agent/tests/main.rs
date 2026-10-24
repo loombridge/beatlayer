@@ -24,6 +24,7 @@ mod readback_runtime;
 mod recording;
 mod recovery;
 mod save_history;
+mod stdio;
 mod tools;
 mod tunings;
 mod undo_history;

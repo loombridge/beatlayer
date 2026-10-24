@@ -306,6 +306,76 @@ fn a_comp_copied_from_two_takes_renders_their_stretches() {
     assert_eq!(takes, 2);
 }
 
+/// The crossfades of the main lane of the scene's one track with take lanes,
+/// as `(boundary frame, seconds before, seconds after)`.
+fn comp_crossfades(scene: &Scene) -> Vec<(usize, f64, f64)> {
+    let document = scene.document();
+    let tempo = &document.settings().tempo;
+    let track = document
+        .tracks()
+        .find(|track| track.take_lanes().count() > 0)
+        .expect("a track with takes");
+    let mut found: Vec<_> = bl_model::crossfades(track.clips())
+        .iter()
+        .map(|c| {
+            (
+                tempo.ticks_to_frames(c.boundary, SAMPLE_RATE).get() as usize,
+                c.before,
+                c.after,
+            )
+        })
+        .collect();
+    found.sort_by_key(|found| found.0);
+    found
+}
+
+// Spec: comping R22, audio-clips R24, R26. A comp of three parts with Create
+// Fades on Clip Edges on is crossfaded at both of its boundaries, 2 ms each
+// side: before the span only the earlier part plays, after it only the later
+// one, and across it both do, to the bit as the audio clips spec gives.
+#[test]
+fn a_three_part_comp_is_crossfaded_at_both_edges() {
+    let (scene, render) = matches_the_model("comp-three-parts");
+    let chirp = chirp(&scene);
+    let half = bl_model::EDGE_FADE_SECONDS / 2.0;
+    assert_eq!(
+        comp_crossfades(&scene),
+        [(48_000, half, half), (96_000, half, half)]
+    );
+    // The takes' start markers are a second apart, so the part from take n
+    // plays the chirp n seconds (48,000 n frames) further on.
+    for (boundary, earlier, later) in [(48_000usize, 0usize, 48_000usize), (96_000, 48_000, 96_000)]
+    {
+        // 2 ms is 96 frames.
+        assert_eq!(left(&render, boundary - 97), chirp[boundary - 97 + earlier]);
+        assert_eq!(left(&render, boundary + 96), chirp[boundary + 96 + later]);
+        assert_ne!(left(&render, boundary), chirp[boundary + earlier]);
+        assert_ne!(left(&render, boundary), chirp[boundary + later]);
+    }
+}
+
+// Spec: comping R21, R22. After a comp boundary is moved, the crossfade is
+// where the boundary is: the earlier part plays on from its take to the new
+// place, the later part starts there, and the span is as long as it was.
+#[test]
+fn a_moved_comp_edge_takes_its_crossfade_with_it() {
+    let (scene, render) = matches_the_model("comp-edge-moved");
+    let chirp = chirp(&scene);
+    let half = bl_model::EDGE_FADE_SECONDS / 2.0;
+    // A beat later: 72,000 frames; the second boundary stays at 96,000.
+    assert_eq!(
+        comp_crossfades(&scene),
+        [(72_000, half, half), (96_000, half, half)]
+    );
+    // Where the first boundary was, the first part still plays its take.
+    assert_eq!(left(&render, 48_001), chirp[48_001]);
+    assert_eq!(left(&render, 72_000 - 97), chirp[72_000 - 97]);
+    // After the new span the second part plays, its take a second further on.
+    assert_eq!(left(&render, 72_000 + 96), chirp[72_000 + 96 + 48_000]);
+    assert_ne!(left(&render, 72_000), chirp[72_000]);
+    assert_ne!(left(&render, 72_000), chirp[72_000 + 48_000]);
+}
+
 // Spec: linked-track editing R12. A comp made on one of two linked tracks
 // comps both: each track's main lane plays the stretches of its own takes,
 // the right track's a tenth of a second (4,800 frames) further into the file.

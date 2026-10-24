@@ -520,7 +520,7 @@ fn tried(id: &str, args: &Value, registered: Permission, scene: Scene<'_>) -> Ca
     editor.begin("Check a call's permission");
     // The fades an edit settles change no clip's place, so the dry run skips them.
     let ran = if comping_ids::handles(id) {
-        crate::arrangement::comping::run(id, args.clone(), editor, &mut view).is_ok()
+        crate::arrangement::comping::run(id, args.clone(), editor, &mut view, false).is_ok()
     } else {
         editing::run(id, args.clone(), editor, &mut view, &mut clipboard, false).is_ok()
     };

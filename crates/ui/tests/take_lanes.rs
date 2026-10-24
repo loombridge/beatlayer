@@ -883,3 +883,323 @@ fn shift_click_extends_the_time_selection_over_lanes() {
     assert_eq!(s.h.shell.arrangement().selection_take_lanes(), s.lanes);
     assert_eq!(state.time_selection_lanes.len(), 3, "not the main lane");
 }
+
+impl Set {
+    /// Switches Draw Mode on (B).
+    fn draw_mode(&mut self) {
+        self.h.shell.run("view.draw_mode", json!({})).unwrap();
+        self.h.settle();
+    }
+
+    /// Takes `lane`'s material over bars `from` to `to` to the main lane, as
+    /// set-up.
+    fn comp(&mut self, lane: usize, from: i64, to: i64) {
+        self.h
+            .shell
+            .run(
+                "take_lane.copy_to_main_lane",
+                json!({ "lanes": [self.lanes[lane]], "start": from * BAR, "end": to * BAR }),
+            )
+            .unwrap();
+        self.h.settle();
+    }
+
+    /// The cursor with the pointer at `at`.
+    fn cursor(&mut self, at: Pos2) -> egui::CursorIcon {
+        self.h
+            .frame(vec![Event::PointerMoved(at)])
+            .platform_output
+            .cursor_icon
+    }
+
+    /// The stretches of take `n`'s clip the main lane uses.
+    fn used(&self, n: usize) -> Vec<(i64, i64)> {
+        self.h
+            .main
+            .arrangement()
+            .used_stretches(self.audio(), self.takes[n])
+            .to_vec()
+    }
+}
+
+// Spec: comping R31 (I-DRAG-043, S-GRID-001). In Draw Mode, dragging across a
+// take lane selects the stretch and releasing copies it to the main lane: one
+// gesture, one undo step, and Esc cancels both.
+#[test]
+fn in_draw_mode_a_drag_across_a_take_lane_copies_it_to_the_main_lane() {
+    let mut s = set();
+    s.show_lanes();
+    s.draw_mode();
+    let before = s.doc().clone();
+    let (from, to) = (pos2(x(1.0), LANE_2.0 + 30.0), pos2(x(3.0), LANE_2.0 + 30.0));
+
+    // Esc during the drag cancels the copy and the selection.
+    s.drag(from, to, false);
+    assert!(s.h.shell.gesture_open());
+    assert_eq!(s.main_clips(), [(0, 1), (1, 3), (3, 8)], "the copy follows");
+    s.h.key(Key::Escape, Modifiers::NONE);
+    s.release(to);
+    assert_eq!(*s.doc(), before);
+    assert_eq!(s.steps(), 0);
+    assert!(s.state().time_selection.is_none());
+
+    s.drag(from, to, true);
+    assert_eq!(s.main_clips(), [(0, 1), (1, 3), (3, 8)]);
+    assert_eq!(s.steps(), 1, "the drag is one undo step");
+    assert_eq!(
+        s.undo_label().as_deref(),
+        Some("Copy Selection to Main Lane")
+    );
+    let state = s.state();
+    let time = state.time_selection.unwrap();
+    assert_eq!((time.start, time.end), (Ticks(BAR), Ticks(3 * BAR)));
+    assert_eq!(
+        state.time_selection_lanes,
+        [Lane::Take {
+            track: s.audio(),
+            lane: s.lanes[1]
+        }]
+    );
+    assert_eq!(s.used(1), [(BAR, 3 * BAR)], "the copy plays the take");
+    s.h.shell.run("edit.undo", json!({})).unwrap();
+    assert_eq!(*s.doc(), before);
+
+    // Dragging backwards covers the same stretch.
+    s.drag(to, from, true);
+    assert_eq!(s.main_clips(), [(0, 1), (1, 3), (3, 8)]);
+    s.h.shell.run("edit.undo", json!({})).unwrap();
+
+    // A drag begun on a clip's title bar still moves the clip.
+    s.drag(
+        pos2(x(1.0), LANE_1.0 + 4.0),
+        pos2(x(1.0), LANE_2.0 + 4.0),
+        true,
+    );
+    assert_eq!(s.doc().clip_lane(s.takes[0]), Some(s.lanes[1]));
+    assert_eq!(s.main_clips(), [(0, 8)], "nothing was comped");
+}
+
+// Spec: comping R31. With Draw Mode off a drag across a take lane only
+// selects time; with it on, the stretch snaps to the grid.
+#[test]
+fn a_draw_mode_stretch_snaps_and_off_draw_mode_a_drag_only_selects() {
+    let mut s = set();
+    s.show_lanes();
+    s.select(pos2(x(1.0), LANE_2.0 + 30.0), pos2(x(3.0), LANE_2.0 + 30.0));
+    assert_eq!(s.main_clips(), [(0, 8)]);
+    assert_eq!(s.steps(), 0);
+    s.draw_mode();
+    // 1.1 bars is 3 points off the line at 1 bar; the grid at this zoom is
+    // a beat, 1/4 bar, so the stretch starts on a line.
+    s.drag(
+        pos2(x(1.1), LANE_2.0 + 30.0),
+        pos2(x(3.0), LANE_2.0 + 30.0),
+        true,
+    );
+    let mut starts: Vec<i64> = s
+        .doc()
+        .track(s.audio())
+        .unwrap()
+        .clips()
+        .map(|c| c.start.get())
+        .collect();
+    starts.sort_unstable();
+    assert_eq!(starts.len(), 3, "{starts:?}");
+    assert_eq!(starts[1] % (BAR / 4), 0, "snapped: {starts:?}");
+}
+
+// Spec: comping R32 (I-CLICK-042). In Draw Mode, a click on a take lane inside
+// a time selection on the track's main lane copies that lane's material in it.
+#[test]
+fn in_draw_mode_clicking_a_take_lane_inside_a_main_lane_selection_copies_it() {
+    let mut s = set();
+    s.show_lanes();
+    s.draw_mode();
+    // With no selection a click only places the insert marker.
+    s.click(pos2(x(3.0), LANE_3.0 + 30.0), Modifiers::NONE);
+    assert_eq!(s.main_clips(), [(0, 8)]);
+    assert_eq!(s.steps(), 0);
+    // A time selection on the main lane, bars 2 to 4.
+    s.select(pos2(x(2.0), MAIN.0 + 50.0), pos2(x(4.0), MAIN.0 + 50.0));
+    let time = s.state().time_selection.unwrap();
+    assert_eq!((time.start, time.end), (Ticks(2 * BAR), Ticks(4 * BAR)));
+    // Outside the selection nothing is copied.
+    s.click(pos2(x(5.0), LANE_3.0 + 30.0), Modifiers::NONE);
+    assert_eq!(s.steps(), 0);
+    // Inside it, on Take 3.
+    s.select(pos2(x(2.0), MAIN.0 + 50.0), pos2(x(4.0), MAIN.0 + 50.0));
+    s.click(pos2(x(3.0), LANE_3.0 + 30.0), Modifiers::NONE);
+    assert_eq!(s.main_clips(), [(0, 2), (2, 4), (4, 8)]);
+    assert_eq!(s.steps(), 1);
+    assert_eq!(
+        s.undo_label().as_deref(),
+        Some("Copy Selection to Main Lane")
+    );
+    assert_eq!(s.used(2), [(2 * BAR, 4 * BAR)]);
+    // With Draw Mode off the same click copies nothing.
+    s.h.shell.run("edit.undo", json!({})).unwrap();
+    s.draw_mode();
+    s.select(pos2(x(2.0), MAIN.0 + 50.0), pos2(x(4.0), MAIN.0 + 50.0));
+    s.click(pos2(x(3.0), LANE_3.0 + 30.0), Modifiers::NONE);
+    assert_eq!(s.main_clips(), [(0, 8)]);
+}
+
+// Spec: comping R33. The stretches of each take-lane clip the main lane uses
+// are known to the lanes, and follow an edit to the main lane or to the takes
+// in the next frame.
+#[test]
+fn highlights_follow_the_main_lane_and_the_takes() {
+    let mut s = set();
+    s.show_lanes();
+    assert_eq!(s.used(0), []);
+    s.comp(0, 0, 2);
+    s.comp(2, 2, 4);
+    assert_eq!(s.used(0), [(0, 2 * BAR)]);
+    assert_eq!(s.used(1), []);
+    assert_eq!(s.used(2), [(2 * BAR, 4 * BAR)]);
+
+    // An edit to the main lane: deleting the first part takes its highlight.
+    let first = s
+        .doc()
+        .track(s.audio())
+        .unwrap()
+        .clips()
+        .find(|c| c.start == Ticks(0))
+        .unwrap()
+        .id;
+    s.h.shell
+        .run("clip.delete", json!({ "clip": first }))
+        .unwrap();
+    s.h.settle();
+    assert_eq!(s.used(0), []);
+    assert_eq!(s.used(2), [(2 * BAR, 4 * BAR)]);
+    s.h.shell.run("edit.undo", json!({})).unwrap();
+    s.h.settle();
+    assert_eq!(s.used(0), [(0, 2 * BAR)]);
+
+    // An edit to the takes: Take 3 moved a bar on no longer matches.
+    s.h.shell
+        .run(
+            "arrangement.move_clips",
+            json!({ "clips": [s.takes[2]], "by": BAR }),
+        )
+        .unwrap();
+    s.h.settle();
+    assert_eq!(s.used(2), []);
+    assert_eq!(s.used(0), [(0, 2 * BAR)]);
+}
+
+// Spec: comping R34 (I-DRAG-044). Dragging a highlight's edge where two comp
+// parts meet moves the comp boundary: with the resize cursor, one undo step,
+// and Esc cancels.
+#[test]
+fn dragging_a_highlights_edge_moves_the_comp_boundary() {
+    let mut s = set();
+    s.show_lanes();
+    s.comp(0, 0, 2);
+    s.comp(2, 2, 4);
+    assert_eq!(s.main_clips(), [(0, 2), (2, 4), (4, 8)]);
+    // Take 1's highlight ends at bar 2, where Take 3's begins.
+    let edge = pos2(x(2.0), LANE_1.0 + 30.0);
+    assert_eq!(s.cursor(edge), egui::CursorIcon::ResizeHorizontal);
+    assert_ne!(
+        s.cursor(pos2(x(1.0), LANE_1.0 + 30.0)),
+        egui::CursorIcon::ResizeHorizontal,
+        "only where parts meet"
+    );
+    let before = s.doc().clone();
+    let steps = s.steps();
+
+    let to = pos2(x(3.0), LANE_1.0 + 30.0);
+    s.drag(edge, to, false);
+    assert_eq!(s.main_clips(), [(0, 3), (3, 4), (4, 8)], "follows the drag");
+    s.h.key(Key::Escape, Modifiers::NONE);
+    s.release(to);
+    assert_eq!(*s.doc(), before, "Esc puts the boundary back");
+    assert_eq!(s.steps(), steps);
+
+    // Take 1 reaches bar 4: the boundary goes there.
+    s.drag(edge, to, true);
+    assert_eq!(s.main_clips(), [(0, 3), (3, 4), (4, 8)]);
+    assert_eq!(s.steps(), steps + 1, "the drag is one undo step");
+    assert_eq!(s.undo_label().as_deref(), Some("Move Comp Edge"));
+    assert_eq!(s.used(0), [(0, 3 * BAR)], "the highlight moved with it");
+    s.h.shell.run("edit.undo", json!({})).unwrap();
+    assert_eq!(*s.doc(), before);
+
+    // Take 3 begins at bar 2, so the boundary goes no further left.
+    s.drag(edge, pos2(x(0.5), LANE_1.0 + 30.0), true);
+    assert_eq!(s.main_clips(), [(0, 2), (2, 4), (4, 8)]);
+}
+
+// Spec: comping R35 (I-DRAG-045). Dragging a take lane header up or down moves
+// the selected take lanes within their track, in one undo step; grabbing one
+// that isn't selected selects it, and Esc cancels.
+#[test]
+fn dragging_a_take_lane_header_moves_the_selected_lanes() {
+    let mut s = set();
+    s.show_lanes();
+    let [one, two, three] = s.lanes[..] else {
+        panic!()
+    };
+    assert_eq!(s.lane_ids(), [one, two, three]);
+    let before = s.doc().clone();
+    let header = s.header(0);
+    let below_two = pos2(header.x, LANE_3.0 - 4.0);
+
+    // Esc during the drag leaves the lanes where they were.
+    s.drag(header, below_two, false);
+    s.h.key(Key::Escape, Modifiers::NONE);
+    s.release(below_two);
+    assert_eq!(*s.doc(), before);
+    assert_eq!(s.steps(), 0);
+
+    // Take 1, not selected, is selected by the grab and goes below Take 2.
+    s.drag(header, below_two, true);
+    assert_eq!(s.lane_ids(), [two, one, three]);
+    assert_eq!(s.steps(), 1);
+    assert_eq!(s.undo_label().as_deref(), Some("Move Take Lane(s)"));
+    assert_eq!(s.h.shell.arrangement().selected_take_lanes(), [one]);
+
+    // Dropped where it already is, it doesn't move.
+    let again = s.header(0);
+    s.drag(again, pos2(again.x, LANE_2.0 + 40.0), true);
+    assert_eq!(s.lane_ids(), [two, one, three]);
+    assert_eq!(s.steps(), 1);
+
+    // Two selected lanes move together, keeping their order: Take 1 and Take 3
+    // go above Take 2.
+    s.h.shell
+        .run(
+            view_ids::SELECT_TAKE_LANES,
+            json!({ "lanes": [one, three] }),
+        )
+        .unwrap();
+    let grab = s.header(2);
+    s.drag(grab, pos2(grab.x, LANE_1.0 + 2.0), true);
+    assert_eq!(s.lane_ids(), [one, three, two]);
+    s.h.shell.run("edit.undo", json!({})).unwrap();
+    s.h.shell.run("edit.undo", json!({})).unwrap();
+    assert_eq!(*s.doc(), before);
+}
+
+// Spec: comping R35 (I-DRAG-046). Dragging a take lane header's lower edge
+// sets the height of the selected take lanes, which is view state.
+#[test]
+fn dragging_a_take_lane_headers_lower_edge_sets_the_lanes_height() {
+    let mut s = set();
+    s.show_lanes();
+    let first = s.header(0);
+    s.click(first, Modifiers::NONE);
+    let second = s.header(1);
+    s.click(second, command());
+    assert_eq!(s.h.shell.arrangement().selected_take_lanes().len(), 2);
+    let edge = pos2(first.x, LANE_1.1 - 1.5);
+    assert_eq!(s.cursor(edge), egui::CursorIcon::ResizeVertical);
+    s.drag(edge, edge + vec2(0.0, 20.0), true);
+    let view = s.h.shell.arrangement();
+    assert_eq!(view.take_lane_height(s.lanes[0]), 64.0);
+    assert_eq!(view.take_lane_height(s.lanes[1]), 64.0);
+    assert_eq!(view.take_lane_height(s.lanes[2]), 44.0);
+    assert_eq!(s.steps(), 0, "heights are view state");
+}

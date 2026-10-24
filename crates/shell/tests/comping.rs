@@ -10,12 +10,12 @@ use std::path::{Path, PathBuf};
 use bl_core::time::Ticks;
 use bl_model::{
     AudioData, Clip, ClipData, ClipId, ContentHash, Document, Editor, MidiData, Note, TakeLaneId,
-    TrackId,
+    TrackId, crossfades,
 };
 use bl_shell::audio::AudioHost;
 use bl_shell::files::{SetStore, factory_default_set};
 use bl_shell::settings::Preferences;
-use bl_shell::{Shell, ShellError};
+use bl_shell::{GesturePhase, Invocation, Shell, ShellError};
 use serde_json::{Value, json};
 
 const BAR: i64 = Ticks::WHOLE.get();
@@ -637,4 +637,165 @@ fn duplicate_track_without_clips_copies_no_take_lanes() {
     let copy = s.doc().track(copies[0]).unwrap();
     assert_eq!((copy.take_lanes().len(), copy.clips().len()), (0, 0));
     assert_eq!(s.doc().track(s.tracks[2]).unwrap().take_lanes().len(), 1);
+}
+
+impl Song {
+    /// The main-lane crossfades of `track`, as the bars of their boundaries.
+    fn boundaries(&self, track: usize) -> Vec<i64> {
+        crossfades(self.doc().track(self.tracks[track]).unwrap().clips())
+            .iter()
+            .map(|c| c.boundary.get() / BAR)
+            .collect()
+    }
+
+    /// A three-part comp on track `track`: bars 0 to 2 from take 1, 2 to 4
+    /// from take 2, and 4 to 6 from take 3, each take reaching 1 bar further
+    /// on both sides.
+    fn three_part_comp(&mut self, track: usize) -> [TakeLaneId; 3] {
+        let lanes = [
+            self.lane(track, 1, 0, 8, 5.0),
+            self.lane(track, 2, 0, 8, 5.0),
+            self.lane(track, 3, 0, 8, 5.0),
+        ];
+        for (lane, (start, end)) in lanes.iter().zip([(0, 2), (2, 4), (4, 6)]) {
+            self.shell
+                .run(
+                    "take_lane.copy_to_main_lane",
+                    json!({ "lanes": [lane], "start": start * BAR, "end": end * BAR }),
+                )
+                .unwrap();
+        }
+        lanes
+    }
+}
+
+// Spec: comping R22. With Create Fades on Clip Edges on, the parts of a comp
+// are crossfaded where they meet, in the copy's own undo step.
+#[test]
+fn comp_parts_are_crossfaded_where_they_meet() {
+    let mut s = song();
+    let lanes = s.three_part_comp(2);
+    assert_eq!(s.main(2), [(0, 2), (2, 4), (4, 6)]);
+    assert_eq!(s.boundaries(2), [2, 4]);
+    assert_eq!(
+        s.doc().check_invariants(),
+        Ok(()),
+        "the crossfades keep the set valid"
+    );
+
+    // Copying a middle stretch from another take crossfades its new edges
+    // too, still as one undo step.
+    let steps = s.steps();
+    s.shell
+        .run(
+            "take_lane.copy_to_main_lane",
+            json!({ "lanes": [lanes[0]], "start": 3 * BAR, "end": 7 * BAR / 2 }),
+        )
+        .unwrap();
+    assert_eq!(s.steps(), steps + 1);
+    assert_eq!(s.boundaries(2).len(), 4);
+
+    // With the setting off, a copy leaves its edges as they are.
+    let mut s = song();
+    s.shell
+        .run(
+            "settings.set_create_fades_on_clip_edges",
+            json!({ "on": false }),
+        )
+        .unwrap();
+    s.three_part_comp(2);
+    assert_eq!(s.boundaries(2), Vec::<i64>::new());
+}
+
+// Spec: comping R21, R22. Moving a comp edge moves its crossfade with it, in
+// one undo step.
+#[test]
+fn a_moved_comp_edge_takes_its_crossfade_along() {
+    let mut s = song();
+    s.three_part_comp(2);
+    let before = crossfades(s.doc().track(s.tracks[2]).unwrap().clips());
+    s.one_step(
+        "take_lane.move_comp_edge",
+        json!({ "track": s.tracks[2], "from": 2 * BAR, "to": 3 * BAR / 2 }),
+    );
+    let after = crossfades(s.doc().track(s.tracks[2]).unwrap().clips());
+    assert_eq!(after.len(), 2);
+    let moved = after.iter().find(|c| c.boundary == Ticks(3 * BAR / 2));
+    let first = before
+        .iter()
+        .find(|c| c.boundary == Ticks(2 * BAR))
+        .unwrap();
+    let moved = moved.expect("the crossfade is at the new boundary");
+    assert_eq!(
+        (moved.before, moved.after, moved.curve),
+        (first.before, first.after, first.curve),
+        "it keeps its span and curve"
+    );
+}
+
+// Spec: comping R31, R34. Draw Mode comping and a highlight's edge run as
+// gestures: every frame is one undo step, and Esc puts the set back.
+#[test]
+fn comping_drags_are_one_undo_step_that_cancel_undoes() {
+    let mut s = song();
+    let [_, b, _] = s.three_part_comp(2);
+    let track = s.tracks[2];
+    let steps = s.steps();
+    let before = s.doc().clone();
+
+    // Dragging across take 2 and releasing copies it to the main lane.
+    let copy = |end: i64| {
+        Invocation::new(
+            "take_lane.copy_to_main_lane",
+            json!({ "lanes": [b], "start": BAR / 2, "end": end }),
+        )
+    };
+    for end in [BAR, 3 * BAR / 2] {
+        s.shell
+            .gesture(GesturePhase::Update, Some(&copy(end)))
+            .unwrap();
+    }
+    s.shell.gesture(GesturePhase::Cancel, None).unwrap();
+    assert_eq!(*s.doc(), before, "Esc cancels the copy");
+    assert_eq!(s.steps(), steps);
+
+    for end in [BAR, 3 * BAR / 2] {
+        s.shell
+            .gesture(GesturePhase::Update, Some(&copy(end)))
+            .unwrap();
+    }
+    s.shell
+        .gesture(GesturePhase::Commit, Some(&copy(2 * BAR)))
+        .unwrap();
+    assert_eq!(s.steps(), steps + 1, "the drag is one undo step");
+    assert_eq!(
+        s.shell.editor().undo_history().next(),
+        Some("Copy Selection to Main Lane")
+    );
+    s.shell.run("edit.undo", json!({})).unwrap();
+    assert_eq!(*s.doc(), before);
+
+    // Dragging a comp edge is one step, and Esc leaves the boundary.
+    let edge = |to: i64| {
+        Invocation::new(
+            "take_lane.move_comp_edge",
+            json!({ "track": track, "from": 2 * BAR, "to": to }),
+        )
+    };
+    for to in [BAR + BAR / 2, BAR + BAR / 4] {
+        s.shell
+            .gesture(GesturePhase::Update, Some(&edge(to)))
+            .unwrap();
+    }
+    s.shell.gesture(GesturePhase::Cancel, None).unwrap();
+    assert_eq!(*s.doc(), before);
+    s.shell
+        .gesture(GesturePhase::Commit, Some(&edge(3 * BAR / 2)))
+        .unwrap();
+    assert_eq!(s.steps(), steps + 1);
+    let boundary = crossfades(s.doc().track(track).unwrap().clips())
+        .iter()
+        .map(|c| c.boundary)
+        .min();
+    assert_eq!(boundary, Some(Ticks(3 * BAR / 2)), "the crossfade went too");
 }

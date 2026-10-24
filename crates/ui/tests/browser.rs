@@ -678,6 +678,101 @@ fn dragging_onto_a_track_places_a_clip_at_the_drop() {
     });
 }
 
+// Spec: comping R36 (I-DROP-016, I-DROP-020). Files dragged onto a take lane
+// become takes on it; with Cmd (Ctrl) held each goes on a track of its own,
+// from the one dropped on down, on the take lane at the same place.
+#[test]
+fn dragging_onto_a_take_lane_places_takes_and_cmd_spreads_them_down_the_tracks() {
+    let scratch = Scratch::new("drag-take-lane");
+    let (mut h, root) = harness(&scratch);
+    h.shell
+        .run(ids::SET_PREVIEW, json!({ "on": false }))
+        .unwrap();
+    let [audio, next] = top_level(&h)[2..4] else {
+        panic!("two audio tracks")
+    };
+    h.shell
+        .run("take_lane.insert", json!({ "tracks": [audio] }))
+        .unwrap();
+    h.settle();
+    // "3 Audio"'s main lane spans y 295 to 383 and its take lane 383 to 427.
+    drag(&mut h, row(6), lanes_point(4.3, 400.0), Modifiers::NONE);
+    let doc = h.shell.editor().document();
+    assert_eq!(top_level(&h).len(), 4, "no new track");
+    let track = doc.track(audio).unwrap();
+    assert_eq!(track.clips().count(), 0, "not on the main lane");
+    let lane = track.take_lanes().next().unwrap();
+    let [clip] = &lane.clips[..] else {
+        panic!("one take")
+    };
+    assert_eq!((clip.start, clip.name.as_str()), (Ticks(4 * BAR), "Loop"));
+    assert_eq!(
+        h.shell.editor().undo_history().len(),
+        2,
+        "the lane, the drop"
+    );
+    // The lane plays when it is auditioned.
+    let lane_id = lane.id;
+    h.shell
+        .run(
+            "take_lane.set_audition",
+            json!({ "lane": lane_id, "on": true }),
+        )
+        .unwrap();
+    assert_eq!(
+        h.shell.editor().document().track(audio).unwrap().audition(),
+        Some(lane_id)
+    );
+
+    // Two files with Cmd (Ctrl) held: one on this lane, one on a lane the next
+    // track gets at the same place.
+    h.shell
+        .run(
+            ids::OPEN_FOLDER,
+            json!({ "path": root.join("Samples").to_string_lossy() }),
+        )
+        .unwrap();
+    h.shell
+        .run(
+            ids::OPEN_FOLDER,
+            json!({ "path": root.join("Samples").join("Drums").to_string_lossy() }),
+        )
+        .unwrap();
+    h.settle();
+    h.click(row(6));
+    click_with(&mut h, row(7), Modifiers::SHIFT);
+    assert_eq!(selected(&h), ["Kick.wav", "Snare.wav"]);
+    drag(&mut h, row(6), lanes_point(8.0, 400.0), command());
+    let doc = h.shell.editor().document();
+    assert_eq!(top_level(&h).len(), 4, "no new track");
+    let lane = doc.track(audio).unwrap().take_lane(lane_id).unwrap();
+    assert!(
+        lane.clips
+            .iter()
+            .any(|c| c.name == "Kick" && c.start == Ticks(8 * BAR))
+    );
+    let other: Vec<_> = doc.track(next).unwrap().take_lanes().collect();
+    assert_eq!(other.len(), 1, "a lane was added");
+    assert_eq!(other[0].clips.len(), 1);
+    assert_eq!(other[0].clips[0].name, "Snare");
+    assert_eq!(other[0].clips[0].start, Ticks(8 * BAR));
+    assert!(h.shell.arrangement().shows_take_lanes(next));
+    // Onto a MIDI track's lane: refused.
+    let midi = top_level(&h)[0];
+    h.shell
+        .run("take_lane.insert", json!({ "tracks": [midi] }))
+        .unwrap();
+    h.settle();
+    let clips_before = h.shell.editor().document().clip_count();
+    drag(
+        &mut h,
+        row(6),
+        lanes_point(1.0, 160.0 + 90.0),
+        Modifiers::NONE,
+    );
+    assert_eq!(h.shell.editor().document().clip_count(), clips_before);
+}
+
 // Spec: browser R17.
 #[test]
 fn only_visible_rows_are_built() {

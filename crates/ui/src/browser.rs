@@ -3024,6 +3024,13 @@ impl BrowserUi {
                     if let Some(track) = target.track {
                         args["track"] = json!(track);
                     }
+                    // Spec: comping R36 (I-DROP-016, I-DROP-020). Audio files
+                    // dropped on a take lane go on it as takes.
+                    if let Some(lane) = target.lane
+                        && !clips
+                    {
+                        args["lane"] = json!(lane);
+                    }
                 }
                 // From Finder without a pointer position: a new track at the
                 // insert marker.

@@ -19,13 +19,18 @@ use bl_shell::{Shell, browser_commands, commands};
 use bl_test_lv2::{GAIN, LATENCY, PLUGIN_NAME, PLUGIN_URI};
 use serde_json::json;
 
-/// A headless shell whose LV2 host has lilv, or `None` where there is none.
+/// A headless shell whose LV2 host has lilv, or `None` off Linux where
+/// there is none. On Linux a missing lilv fails the test.
 fn shell() -> Option<Shell> {
     let shell = Shell::headless();
     if let Some(library) = std::env::var_os("BL_TEST_LILV") {
         shell.lv2().use_library(library);
     }
-    shell.lv2().world().ok().map(|_| shell)
+    match shell.lv2().world() {
+        Ok(_) => Some(shell),
+        Err(e) if cfg!(target_os = "linux") => panic!("lilv should be here: {e}"),
+        Err(_) => None,
+    }
 }
 
 fn value(info: &PluginInfo, param: u32) -> Option<f64> {

@@ -422,9 +422,9 @@ struct Editor {
     handle: StateHandle,
     window: Option<EditorWindow>,
     hidden: bool,
-    /// The controls a person is holding, with the last value written: one
-    /// change of the set when they let go.
-    held: BTreeMap<u32, f32>,
+    /// The controls a person is holding, with the last value written, if
+    /// any: one change of the set when they let go, or the editor closes.
+    held: BTreeMap<u32, Option<f32>>,
     /// The ports the UI wrote that the plug-in hasn't taken yet, with the
     /// value written and the one the port had.
     awaiting: BTreeMap<u32, (f32, f32)>,
@@ -540,7 +540,11 @@ pub(super) fn set_visible(main: &mut Main, device: DeviceId, shown: bool) {
 
 /// Closes the device's editor, if it's open.
 pub(super) fn close(main: &mut Main, device: DeviceId) {
-    main.editors.0.remove(&device);
+    if let Some(mut editor) = main.editors.0.remove(&device)
+        && let Some(entry) = main.entries.get(&device)
+    {
+        editor.finish(device, entry, &mut main.changes);
+    }
 }
 
 /// Makes the device's editor window `size`, as dragging its edge does, and
@@ -596,14 +600,25 @@ pub(super) fn pump(main: &mut Main) -> bool {
         entries,
         changes,
         ..
-    } = main;
+    } = &mut *main;
     let mut changed = false;
     let mut closed = Vec::new();
+    // Editors whose plug-in was replaced by a new instance (a state loaded,
+    // a new node): they open again on the new one, in the same window.
+    let mut replaced = Vec::new();
     for (&device, editor) in &mut editors.0 {
         let Some(entry) = entries.get_mut(&device) else {
             closed.push(device);
             continue;
         };
+        if entry
+            .handle
+            .as_ref()
+            .is_some_and(|handle| !Arc::ptr_eq(&handle.core, &editor.handle.core))
+        {
+            replaced.push(device);
+            continue;
+        }
         let (keep, active) = editor.pump(device, entry, changes);
         changed |= active;
         if !keep {
@@ -611,7 +626,22 @@ pub(super) fn pump(main: &mut Main) -> bool {
         }
     }
     for device in closed {
-        editors.0.remove(&device);
+        close(main, device);
+        changed = true;
+    }
+    for device in replaced {
+        if let Some(mut editor) = main.editors.0.remove(&device) {
+            if let Some(entry) = main.entries.get(&device) {
+                editor.finish(device, entry, &mut main.changes);
+            }
+            let Editor {
+                ui, window, hidden, ..
+            } = editor;
+            drop(ui);
+            if open_with(main, device, window).is_ok() && hidden {
+                set_visible(main, device, false);
+            }
+        }
         changed = true;
     }
     changed
@@ -670,16 +700,16 @@ impl Editor {
                             .or_insert((value, old));
                     }
                     if let Some(held) = self.held.get_mut(&port) {
-                        *held = value;
+                        *held = Some(value);
                     } else {
                         changes.extend(param_change(entry, device, port, value));
                     }
                 }
                 Event::Touch(port, true) => {
-                    self.held.insert(port, self.handle.control(port));
+                    self.held.entry(port).or_insert(None);
                 }
                 Event::Touch(port, false) => {
-                    if let Some(value) = self.held.remove(&port) {
+                    if let Some(Some(value)) = self.held.remove(&port) {
                         changes.extend(param_change(entry, device, port, value));
                     }
                 }
@@ -690,6 +720,18 @@ impl Editor {
             .retain(|&port, &mut (_, old)| self.handle.control(port) == old);
         self.ui.send_values(&self.handle, &self.awaiting);
         (true, active)
+    }
+}
+
+impl Editor {
+    /// Ends the gestures still held, as the editor closes: each control
+    /// written during one is a change of the set.
+    fn finish(&mut self, device: DeviceId, entry: &Entry, changes: &mut Vec<ParamChange>) {
+        for (port, value) in std::mem::take(&mut self.held) {
+            if let Some(value) = value {
+                changes.extend(param_change(entry, device, port, value));
+            }
+        }
     }
 }
 
@@ -844,6 +886,36 @@ mod tests {
         host.idle();
         assert!(host.open_editors().is_empty());
         assert!(!host.status(device).unwrap().editor_open);
+    }
+
+    // Spec: lv2-hosting R13. A state loaded makes a new instance, and the
+    // open editor follows it: values still reach the editor.
+    #[test]
+    fn an_editor_follows_its_plugin_into_a_new_instance() {
+        let Some((host, device, mut node)) = running() else {
+            return;
+        };
+        run(node.as_mut(), &[]);
+        host.open_editor_headless(device).expect("it opens");
+        let state = host.save_state(device).expect("it saves");
+        host.load_state(device, &state.data).expect("it loads");
+        run(node.as_mut(), &[]);
+        host.idle();
+        host.idle();
+        host.take_param_changes();
+        assert_eq!(host.open_editors(), [device]);
+
+        run(node.as_mut(), &[(GAIN, 0.5)]);
+        host.idle();
+        host.idle();
+        assert_eq!(
+            host.take_param_changes(),
+            [ParamChange {
+                device,
+                param: ParamId(STEPS),
+                value: 2.0
+            }]
+        );
     }
 
     // Spec: lv2-hosting R13. An editor closes with its device's plug-in, and

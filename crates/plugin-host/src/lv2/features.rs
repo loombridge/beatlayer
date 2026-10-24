@@ -113,6 +113,10 @@ struct OptionValues {
 /// list lilv takes, and what its pointers reach.
 pub(super) struct Features {
     pub(super) list: Vec<*const sys::Feature>,
+    /// The list for state save and restore: without the worker, whose
+    /// queue only the thread running the plug-in may push to, and which
+    /// mustn't run beside `restore`.
+    pub(super) state_list: Vec<*const sys::Feature>,
     _uris: Vec<CString>,
     _features: Vec<sys::Feature>,
     _options: Box<[sys::OptionsOption]>,
@@ -243,8 +247,15 @@ impl Features {
             .collect();
         let mut list: Vec<*const sys::Feature> = features.iter().map(ptr::from_ref).collect();
         list.push(ptr::null());
+        let mut state_list: Vec<*const sys::Feature> = features
+            .iter()
+            .filter(|feature| feature.data != ptr::from_mut(&mut *worker).cast())
+            .map(ptr::from_ref)
+            .collect();
+        state_list.push(ptr::null());
         Self {
             list,
+            state_list,
             _uris: uris,
             _features: features,
             _options: options,

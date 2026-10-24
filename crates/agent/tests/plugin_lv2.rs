@@ -16,7 +16,12 @@ fn client(autonomous: bool) -> Option<Client<InProcess>> {
     if let Some(library) = std::env::var_os("BL_TEST_LILV") {
         shell.lv2().use_library(library);
     }
-    shell.lv2().world().ok()?;
+    // On Linux a missing lilv fails the test; elsewhere it's skipped.
+    match shell.lv2().world() {
+        Ok(_) => {}
+        Err(e) if cfg!(target_os = "linux") => panic!("lilv should be here: {e}"),
+        Err(_) => return None,
+    }
     let mut client = Client::new(InProcess::new(Agent::headless(autonomous), shell));
     client.initialize("test-agent").unwrap();
     Some(client)

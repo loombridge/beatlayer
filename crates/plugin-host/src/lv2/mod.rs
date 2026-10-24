@@ -857,6 +857,9 @@ impl Drop for Core {
     fn drop(&mut self) {
         // The worker stops before the plug-in goes.
         self.worker.take();
+        // Freeing touches the world's libraries, and this may run on the
+        // thread that drops nodes.
+        let _lock = self.shared.lock();
         // SAFETY: `raw` is this value's, live until freed here.
         unsafe {
             if let Some(deactivate) = (*(*self.raw).descriptor).deactivate {
@@ -1126,7 +1129,7 @@ impl Instance {
                 Some(set_port_value),
                 ptr::from_mut(&mut ctx).cast(),
                 0,
-                self.core.features.list.as_ptr(),
+                self.core.features.state_list.as_ptr(),
             );
             (api.lilv_state_free)(state);
         }
@@ -1162,7 +1165,7 @@ fn save(core: &Core, ports: &[PortInfo], controls: *mut f32) -> Result<String, L
             Some(get_port_value),
             ptr::from_mut(&mut ctx).cast(),
             STATE_FLAGS,
-            core.features.list.as_ptr(),
+            core.features.state_list.as_ptr(),
         );
         if state.is_null() {
             return Err(failed("the plug-in's state couldn't be read"));

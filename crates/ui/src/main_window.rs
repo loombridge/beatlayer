@@ -368,6 +368,7 @@ impl MainWindowUi {
             || self.menu_open
             || self.devices.is_typing()
             || self.clip_view.is_typing()
+            || self.arrangement.is_dragging_header()
             || self.search_field.is_open()
     }
 

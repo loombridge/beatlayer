@@ -30,6 +30,7 @@ The commands, by the part of their ID before its first dot:
 
 - [`agent`](agent.md)
 - [`app`](app.md)
+- [`ara`](ara.md)
 - [`arrangement`](arrangement.md)
 - [`articulation`](articulation.md)
 - [`assistant`](assistant.md)
@@ -141,6 +142,7 @@ What `browser.add_to_arrangement` and `browser.load_selected` return.
 |---|---|---|---|
 | `created_tracks` | array of [`TrackId`](#trackid) | yes | Audio tracks made for the files, top to bottom. |
 | `clips` | array of [`PlacedClip`](#placedclip) | yes | The clips placed, in the order of the files. |
+| `created_lanes` | array of [`TakeLaneId`](#takelaneid) | no | Take lanes added to tracks that had none at the place a file was dropped on (the comping spec, R36). |
 
 <details><summary>JSON Schema</summary>
 
@@ -152,6 +154,13 @@ What `browser.add_to_arrangement` and `browser.load_selected` return.
       "description": "The clips placed, in the order of the files.",
       "items": {
         "$ref": "#/$defs/PlacedClip"
+      },
+      "type": "array"
+    },
+    "created_lanes": {
+      "description": "Take lanes added to tracks that had none at the place a file was dropped on (the comping spec, R36).",
+      "items": {
+        "$ref": "#/$defs/TakeLaneId"
       },
       "type": "array"
     },
@@ -537,6 +546,335 @@ The open application, which is a chain of one or more tools.
     "range",
     "seed",
     "chain"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `AraBoundDevice`
+
+A device bound to an ARA document.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `track` | [`TrackId`](#trackid) or null | yes | The track it renders, if any. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A device bound to an ARA document.",
+  "properties": {
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device."
+    },
+    "track": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TrackId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The track it renders, if any."
+    }
+  },
+  "required": [
+    "device",
+    "track"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `AraDevice`
+
+An ARA plug-in device, as `plugin.info` reports it (IMP-20).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `factory` | string | yes | The plug-in's ARA factory ID. |
+| `track` | [`TrackId`](#trackid) or null | yes | The track whose clips it renders: the one it is the ARA device of. |
+| `regions` | integer, at least 0 | yes | The playback regions its document holds, on every track. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "An ARA plug-in device, as `plugin.info` reports it (IMP-20).",
+  "properties": {
+    "factory": {
+      "description": "The plug-in's ARA factory ID.",
+      "type": "string"
+    },
+    "regions": {
+      "description": "The playback regions its document holds, on every track.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "track": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TrackId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The track whose clips it renders: the one it is the ARA device of."
+    }
+  },
+  "required": [
+    "factory",
+    "track",
+    "regions"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `AraPlugin`
+
+One ARA plug-in's document (IMP-20).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `factory` | string | yes | The plug-in's ARA factory ID. |
+| `name` | string | yes | Its name. |
+| `timestretch` | boolean | yes | Whether it plays a region at another speed than its audio's, so warped clips go to it too. |
+| `devices` | array of [`AraBoundDevice`](#arabounddevice) | yes | The devices bound to the document, each with the track it renders. |
+| `sequences` | integer, at least 0 | yes | How many region sequences (tracks), audio sources (files) and audio modifications (clips) it holds. |
+| `sources` | integer, at least 0 | yes |  |
+| `modifications` | integer, at least 0 | yes |  |
+| `regions` | array of [`AraRegionInfo`](#araregioninfo) | yes | Its playback regions. |
+| `edit_cycles` | integer, at least 0 | yes | How many edit cycles the set has been given to it in. |
+| `readers_opened` | integer, at least 0 | yes | How many audio readers it opened, how many reads it made, and how many frames it read. |
+| `reader_calls` | integer, at least 0 | yes |  |
+| `frames_read` | integer, at least 0 | yes |  |
+| `audio_thread_reads` | integer, at least 0 | yes | Reads that came from inside its render call: always 0, because an audio reader never runs on the audio thread. |
+| `missing` | array of [`ContentHash`](#contenthash) | yes | Files it couldn't be given because they couldn't be read. |
+| `restored` | string or null | no | Whether it restored its archive when it was made: `restored`, or why it couldn't; `null` if the set held none. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One ARA plug-in's document (IMP-20).",
+  "properties": {
+    "audio_thread_reads": {
+      "description": "Reads that came from inside its render call: always 0, because an audio reader never runs on the audio thread.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "devices": {
+      "description": "The devices bound to the document, each with the track it renders.",
+      "items": {
+        "$ref": "#/$defs/AraBoundDevice"
+      },
+      "type": "array"
+    },
+    "edit_cycles": {
+      "description": "How many edit cycles the set has been given to it in.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "factory": {
+      "description": "The plug-in's ARA factory ID.",
+      "type": "string"
+    },
+    "frames_read": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "missing": {
+      "description": "Files it couldn't be given because they couldn't be read.",
+      "items": {
+        "$ref": "#/$defs/ContentHash"
+      },
+      "type": "array"
+    },
+    "modifications": {
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "name": {
+      "description": "Its name.",
+      "type": "string"
+    },
+    "reader_calls": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "readers_opened": {
+      "description": "How many audio readers it opened, how many reads it made, and how many frames it read.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "regions": {
+      "description": "Its playback regions.",
+      "items": {
+        "$ref": "#/$defs/AraRegionInfo"
+      },
+      "type": "array"
+    },
+    "restored": {
+      "description": "Whether it restored its archive when it was made: `restored`, or why it couldn't; `null` if the set held none.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "sequences": {
+      "description": "How many region sequences (tracks), audio sources (files) and audio modifications (clips) it holds.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "sources": {
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "timestretch": {
+      "description": "Whether it plays a region at another speed than its audio's, so warped clips go to it too.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "factory",
+    "name",
+    "timestretch",
+    "devices",
+    "sequences",
+    "sources",
+    "modifications",
+    "regions",
+    "edit_cycles",
+    "readers_opened",
+    "reader_calls",
+    "frames_read",
+    "audio_thread_reads",
+    "missing"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `AraRegionInfo`
+
+One playback region of an ARA plug-in: a straight stretch of a clip's audio put on the timeline. Times are seconds.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The clip, and which stretch of it: a warped clip has a piece for each warp marker and tempo change. |
+| `piece` | integer, at least 0 | yes |  |
+| `track` | [`TrackId`](#trackid) | yes | The track. |
+| `start_in_audio` | number | yes | Where in the clip's file the region starts, and how much of it plays. |
+| `duration_in_audio` | number | yes |  |
+| `start` | number | yes | Where on the song's timeline it starts, and how long it lasts. |
+| `duration` | number | yes |  |
+| `stretched` | boolean | yes | Whether the audio plays faster or slower than it was recorded. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One playback region of an ARA plug-in: a straight stretch of a clip's audio put on the timeline. Times are seconds.",
+  "properties": {
+    "clip": {
+      "$ref": "#/$defs/ClipId",
+      "description": "The clip, and which stretch of it: a warped clip has a piece for each warp marker and tempo change."
+    },
+    "duration": {
+      "format": "double",
+      "type": "number"
+    },
+    "duration_in_audio": {
+      "format": "double",
+      "type": "number"
+    },
+    "piece": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "start": {
+      "description": "Where on the song's timeline it starts, and how long it lasts.",
+      "format": "double",
+      "type": "number"
+    },
+    "start_in_audio": {
+      "description": "Where in the clip's file the region starts, and how much of it plays.",
+      "format": "double",
+      "type": "number"
+    },
+    "stretched": {
+      "description": "Whether the audio plays faster or slower than it was recorded.",
+      "type": "boolean"
+    },
+    "track": {
+      "$ref": "#/$defs/TrackId",
+      "description": "The track."
+    }
+  },
+  "required": [
+    "clip",
+    "piece",
+    "track",
+    "start_in_audio",
+    "duration_in_audio",
+    "start",
+    "duration",
+    "stretched"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `AraState`
+
+What `ara.state` returns: every ARA plug-in's document, in the order of its factory ID.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `plugins` | array of [`AraPlugin`](#araplugin) | yes | The ARA plug-ins in the set that are running. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `ara.state` returns: every ARA plug-in's document, in the order of its factory ID.",
+  "properties": {
+    "plugins": {
+      "description": "The ARA plug-ins in the set that are running.",
+      "items": {
+        "$ref": "#/$defs/AraPlugin"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "plugins"
   ],
   "type": "object"
 }
@@ -19620,6 +19958,7 @@ A clip a browser command placed.
 | `length` | [`Ticks`](#ticks) | yes | How long it is. |
 | `name` | string | yes | Its name: the file's, without the extension. |
 | `path` | string | yes | The file it plays. |
+| `lane` | [`TakeLaneId`](#takelaneid) or null | no | The take lane it is on, if it is on one rather than a main lane. |
 
 <details><summary>JSON Schema</summary>
 
@@ -19630,6 +19969,17 @@ A clip a browser command placed.
     "clip": {
       "$ref": "#/$defs/ClipId",
       "description": "The new clip."
+    },
+    "lane": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TakeLaneId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The take lane it is on, if it is on one rather than a main lane."
     },
     "length": {
       "$ref": "#/$defs/Ticks",
@@ -19793,6 +20143,7 @@ What `plugin.info` and `plugin.show_window` return.
 | `window_shown` | boolean | yes | Whether its window is shown: open, and not hidden by View ▸ Plug-In Windows or Auto-Hide Plug-In Windows. Hiding is not closing: a hidden window is still open. |
 | `values` | array of pair of [`ParamId`](#paramid) and number | yes | Each parameter's value, as the plug-in itself reports it, as `[parameter, value]` pairs. |
 | `mpe` | [`PluginMpe`](#pluginmpe) | yes | Its MPE Mode and the MPE/Multi-channel Settings its MPE MIDI goes out on (the MPE spec, R14, R18). |
+| `ara` | [`AraDevice`](#aradevice) or null | no | What the device is as an ARA plug-in, if it is one: the track it renders (`null` while it renders none) and how many playback regions its document holds. |
 | `failure` | string or null | no | What went wrong, if anything: it couldn't be found or loaded, refused to activate (the device passes its input through), or failed while processing (the device is silent). |
 | `window` | [`WindowFrame`](#windowframe) or null | no | Where its window sits and how big it is, once it has been placed (`plugin.set_window`); `null` until then. Saved with the set beside the document, so moving or resizing is never an undo step (WP-2.10; as [`FloatingWindow`](crate::devices::FloatingWindow)). |
 
@@ -19805,6 +20156,17 @@ What `plugin.info` and `plugin.show_window` return.
     "active": {
       "description": "Whether it's running: activated and processing for the engine.",
       "type": "boolean"
+    },
+    "ara": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AraDevice"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "What the device is as an ARA plug-in, if it is one: the track it renders (`null` while it renders none) and how many playback regions its document holds."
     },
     "device": {
       "$ref": "#/$defs/DeviceId",

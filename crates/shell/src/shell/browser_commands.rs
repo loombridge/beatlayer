@@ -95,6 +95,16 @@ impl Shell {
             self.dirty = true;
             self.document_changed();
         }
+        // Spec: comping R36. Files dropped on take lanes show the lanes of
+        // the tracks they went on, which may be lanes the drop added.
+        if id == browser_ids::ADD_TO_ARRANGEMENT
+            && let Ok(added) =
+                serde_json::from_value::<browser_ids::AddResult>(outcome.value.clone())
+        {
+            for clip in added.clips.iter().filter(|clip| clip.lane.is_some()) {
+                self.arrangement.show_take_lanes_of(clip.track);
+            }
+        }
         if outcome.prefs_changed {
             self.prefs.browser = self
                 .browser_view

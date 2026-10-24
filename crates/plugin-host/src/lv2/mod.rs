@@ -1,36 +1,56 @@
-//! LV2 hosting, part 1 (WP-5.39): Beatlayer's own host on the system's lilv
+//! LV2 hosting (WP-5.39): Beatlayer's own host on the system's lilv
 //! library, beside the CLAP, VST3 and Audio Unit hosts. A [`World`] finds
 //! the LV2 plug-ins on the machine and instantiates one at the engine's
-//! rate as an [`Instance`]: audio and control ports connected, MIDI in and
-//! out through Atom ports, latency read from the plug-in's latency port,
-//! and state saved and restored as the text lilv writes.
+//! rate as an [`Instance`]: audio and control ports connected, MIDI and
+//! the transport in and MIDI out through Atom ports, latency read from the
+//! plug-in's latency port, its worker run on a thread of its own, and state
+//! saved and restored as the text lilv writes.
 //!
 //! lilv is loaded from the system when a [`World`] is made, not linked, so
 //! a machine without it runs Beatlayer with LV2 unavailable
 //! ([`Lv2Error::Unavailable`]); only Linux looks for it, the other
-//! platforms always answer so. The device, the scanner and the browser are
-//! the next part's (the LV2 hosting spec).
+//! platforms always answer so. The device ([`Lv2Host`], [`Lv2Node`]), the
+//! scanner and the editors build on this (the LV2 hosting spec).
 //!
 //! An [`Instance`] is made, activated and dropped off the audio thread;
 //! [`Instance::run`], [`Instance::set_control`] and [`Instance::midi_out`]
-//! allocate nothing and take no lock. Saving and restoring state are
-//! main-thread calls, and so is every call on a [`World`]: lilv's world isn't
-//! thread-safe, so each one holds the world's lock.
+//! allocate nothing and take no lock. Saving state needs no more than a
+//! [`StateHandle`], which LV2 lets run beside the audio thread; restoring
+//! it is a main-thread call on an instance no one is running, and so is
+//! every call on a [`World`]: lilv's world isn't thread-safe, so each one
+//! holds the world's lock.
 
+mod describe;
+mod features;
+mod host;
+mod node;
 mod sys;
+#[cfg(all(unix, not(target_os = "macos")))]
+mod ui;
 
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::fmt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::ptr;
 use std::slice;
+use std::sync::atomic::{AtomicU32, Ordering::Relaxed};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use sys::{Api, Feature, Urid};
+use bl_model::{DeviceId, ParamUnit};
+use rtrb::Consumer;
+
+use features::{Features, Msg, WORKER_INTERFACE, WorkerThread};
+use sys::{Api, Urid};
+
+pub use host::{Loan, Lv2Factory, Lv2Host, Lv2Type, ParamChange, PluginStatus};
+pub use node::Lv2Node;
 
 const CORE: &str = "http://lv2plug.in/ns/lv2core#";
 const ATOM: &str = "http://lv2plug.in/ns/ext/atom#";
-const URID: &str = "http://lv2plug.in/ns/ext/urid#";
+const PORT_PROPS: &str = "http://lv2plug.in/ns/ext/port-props#";
+const UNITS: &str = "http://lv2plug.in/ns/extensions/units#";
+const TIME: &str = "http://lv2plug.in/ns/ext/time#";
+const UI: &str = "http://lv2plug.in/ns/extensions/ui#";
 /// What lilv's state calls take: the plug-in's data is plain old data and
 /// portable (`LV2_STATE_IS_POD | LV2_STATE_IS_PORTABLE`).
 const STATE_FLAGS: u32 = 3;
@@ -52,6 +72,17 @@ pub enum Lv2Error {
     BadBlock,
     /// The block's MIDI doesn't fit the plug-in's Atom port.
     TooManyEvents,
+    /// The file isn't an LV2 bundle Beatlayer can load, and why.
+    Load(String),
+    /// No plug-in of that URI is known.
+    UnknownPlugin(String),
+    /// The device has no running plug-in: it isn't an LV2 device, or its
+    /// plug-in couldn't be made.
+    NoInstance(DeviceId),
+    /// A host call off the main thread.
+    WrongThread,
+    /// The plug-ins are lent to another offline render already.
+    Lent,
 }
 
 impl fmt::Display for Lv2Error {
@@ -61,6 +92,11 @@ impl fmt::Display for Lv2Error {
             Self::Failed(why) => f.write_str(why),
             Self::BadBlock => f.write_str("the block is longer than the instance's maximum"),
             Self::TooManyEvents => f.write_str("the MIDI events don't fit the Atom port"),
+            Self::Load(why) => write!(f, "couldn't load the plug-in: {why}"),
+            Self::UnknownPlugin(uri) => write!(f, "no LV2 plug-in {uri} is known"),
+            Self::NoInstance(device) => write!(f, "{device} has no running LV2 plug-in"),
+            Self::WrongThread => f.write_str("LV2's main-thread calls run on the main thread"),
+            Self::Lent => f.write_str("the plug-ins are lent to another render"),
         }
     }
 }
@@ -90,12 +126,39 @@ pub enum PortKind {
 pub struct PortInfo {
     pub index: u32,
     pub symbol: String,
+    pub name: String,
     pub kind: PortKind,
     pub input: bool,
     /// A control port's range and default; zero where the plug-in gives none.
     pub min: f32,
     pub max: f32,
     pub default: f32,
+    /// `lv2:toggled`, `lv2:integer`, `lv2:enumeration` and
+    /// `pprops:logarithmic`: how a control port's value reads.
+    pub toggled: bool,
+    pub integer: bool,
+    pub enumeration: bool,
+    pub logarithmic: bool,
+    /// `pprops:notOnGUI`: a port the plug-in keeps off its panel.
+    pub hidden: bool,
+    /// `pprops:notAutomatic`: a port automation shouldn't move.
+    pub not_automatic: bool,
+    /// `lv2:isSideChain`: an audio input that isn't the main one.
+    pub sidechain: bool,
+    /// An Atom input that takes `time:Position`.
+    pub position: bool,
+    /// What a control port's value measures (`units:unit`).
+    pub unit: ParamUnit,
+    /// An enumeration's values and their labels.
+    pub scale_points: Vec<(f32, String)>,
+}
+
+/// An editor the plug-in brings: an X11 UI and where its code is.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UiInfo {
+    pub uri: String,
+    pub binary: PathBuf,
+    pub bundle: PathBuf,
 }
 
 /// One plug-in a [`World`] found.
@@ -104,6 +167,14 @@ pub struct PluginInfo {
     pub uri: String,
     pub name: String,
     pub ports: Vec<PortInfo>,
+    /// Its author, if it names one.
+    pub vendor: Option<String>,
+    /// It is an `lv2:InstrumentPlugin`.
+    pub instrument: bool,
+    /// The bundle folder it's in.
+    pub bundle: PathBuf,
+    /// Its X11 UI, if it has one.
+    pub ui: Option<UiInfo>,
 }
 
 /// A MIDI message on a frame of the block: a channel message of up to
@@ -113,6 +184,21 @@ pub struct MidiEvent {
     pub frame: u32,
     pub len: u8,
     pub data: [u8; 3],
+}
+
+/// Where the song is, for the plug-ins whose Atom port takes
+/// `time:Position`: sent at the first frame of each block.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Transport {
+    /// The song position in frames.
+    pub frame: i64,
+    pub playing: bool,
+    pub bpm: f32,
+    /// The bar the position is in, from 0, and the beat in it.
+    pub bar: i64,
+    pub bar_beat: f32,
+    pub beats_per_bar: f32,
+    pub beat_unit: u32,
 }
 
 /// The URIDs the host maps itself: URIs to numbers, for lilv and for the
@@ -128,6 +214,10 @@ impl Urids {
             names.len() - 1
         });
         Urid::try_from(at + 1).unwrap_or(0)
+    }
+
+    fn uri(&self, prefix: &str, name: &str) -> Urid {
+        self.map(&CString::new(format!("{prefix}{name}")).expect("a URI without NUL"))
     }
 }
 
@@ -147,6 +237,70 @@ unsafe extern "C" fn urid_unmap(handle: *mut c_void, urid: Urid) -> *const c_cha
         .map_or(ptr::null(), |name| name.as_ptr())
 }
 
+/// The nodes the host asks lilv about: classes and properties.
+struct Nodes {
+    audio: sys::Node,
+    control: sys::Node,
+    input: sys::Node,
+    atom: sys::Node,
+    midi: sys::Node,
+    position: sys::Node,
+    toggled: sys::Node,
+    integer: sys::Node,
+    enumeration: sys::Node,
+    logarithmic: sys::Node,
+    not_on_gui: sys::Node,
+    not_automatic: sys::Node,
+    sidechain: sys::Node,
+    unit: sys::Node,
+    rdf_type: sys::Node,
+    instrument: sys::Node,
+    x11_ui: sys::Node,
+}
+
+impl Nodes {
+    fn all(&self) -> [sys::Node; 17] {
+        [
+            self.audio,
+            self.control,
+            self.input,
+            self.atom,
+            self.midi,
+            self.position,
+            self.toggled,
+            self.integer,
+            self.enumeration,
+            self.logarithmic,
+            self.not_on_gui,
+            self.not_automatic,
+            self.sidechain,
+            self.unit,
+            self.rdf_type,
+            self.instrument,
+            self.x11_ui,
+        ]
+    }
+}
+
+/// The URIDs the host writes into Atom buffers.
+struct Known {
+    midi_event: Urid,
+    sequence: Urid,
+    chunk: Urid,
+    float: Urid,
+    int: Urid,
+    long: Urid,
+    object: Urid,
+    position: Urid,
+    frame: Urid,
+    speed: Urid,
+    bar: Urid,
+    bar_beat: Urid,
+    beat_unit: Urid,
+    beats_per_bar: Urid,
+    beats_per_minute: Urid,
+}
+
 /// lilv's world, the library it was loaded from, and the class nodes the
 /// host asks ports about.
 struct Shared {
@@ -156,18 +310,11 @@ struct Shared {
     /// nodes.
     lock: Mutex<()>,
     /// The map's handle: kept here so it outlives the plug-ins.
-    _urids: Box<Urids>,
+    urids: Box<Urids>,
     map: sys::UridMap,
     unmap: sys::UridUnmap,
-    audio: sys::Node,
-    control: sys::Node,
-    input: sys::Node,
-    atom: sys::Node,
-    midi: sys::Node,
-    midi_event: Urid,
-    sequence: Urid,
-    chunk: Urid,
-    float: Urid,
+    nodes: Nodes,
+    known: Known,
 }
 
 // SAFETY: the raw pointers belong to lilv's world, which the `lock` guards.
@@ -182,6 +329,10 @@ impl Shared {
 
     fn map_ptr(&self) -> *mut sys::UridMap {
         ptr::from_ref(&self.map).cast_mut()
+    }
+
+    fn unmap_ptr(&self) -> *mut sys::UridUnmap {
+        ptr::from_ref(&self.unmap).cast_mut()
     }
 
     fn node(&self, uri: &CStr) -> sys::Node {
@@ -200,17 +351,53 @@ impl Shared {
             .into_owned()
     }
 
+    /// A node's text, and the node freed; empty for no node.
+    fn take_string(&self, node: sys::Node) -> String {
+        let text = self.string(node);
+        if !node.is_null() {
+            // SAFETY: `node` is one lilv gave to free.
+            unsafe { (self.api.lilv_node_free)(node) };
+        }
+        text
+    }
+
+    /// A numeric node's value, without freeing it.
+    fn number(&self, node: sys::Node) -> Option<f32> {
+        if node.is_null() {
+            return None;
+        }
+        // SAFETY: a live node.
+        unsafe {
+            ((self.api.lilv_node_is_float)(node) || (self.api.lilv_node_is_int)(node))
+                .then(|| (self.api.lilv_node_as_float)(node))
+        }
+    }
+
     /// A numeric node's value, and the node freed; `fallback` for no node.
     fn take_number(&self, node: sys::Node, fallback: f32) -> f32 {
-        if node.is_null() {
-            return fallback;
+        let number = self.number(node);
+        if !node.is_null() {
+            // SAFETY: `node` is one lilv gave to free.
+            unsafe { (self.api.lilv_node_free)(node) };
         }
-        // SAFETY: `node` is one lilv gave to free.
+        number.unwrap_or(fallback)
+    }
+
+    /// The folder a file URI node names, without its trailing slash.
+    fn path(&self, node: sys::Node) -> Option<PathBuf> {
+        if node.is_null() {
+            return None;
+        }
+        // SAFETY: a live node; the path lilv gives is freed here.
         unsafe {
-            let number = ((self.api.lilv_node_is_float)(node) || (self.api.lilv_node_is_int)(node))
-                .then(|| (self.api.lilv_node_as_float)(node));
-            (self.api.lilv_node_free)(node);
-            number.unwrap_or(fallback)
+            let path = (self.api.lilv_node_get_path)(node, ptr::null_mut());
+            if path.is_null() {
+                return None;
+            }
+            let text = CStr::from_ptr(path).to_string_lossy().into_owned();
+            (self.api.lilv_free)(path.cast());
+            let text = text.strip_suffix('/').map_or(text.as_str(), |t| t);
+            Some(PathBuf::from(if text.is_empty() { "/" } else { text }))
         }
     }
 
@@ -218,10 +405,16 @@ impl Shared {
         let api = &self.api;
         // SAFETY: `plugin` is one of the world's, and the caller holds the lock.
         unsafe {
-            let name = (api.lilv_plugin_get_name)(plugin);
-            let info = PluginInfo {
+            let author = (api.lilv_plugin_get_author_name)(plugin);
+            let vendor = self.take_string(author);
+            let types = (api.lilv_plugin_get_value)(plugin, self.nodes.rdf_type);
+            let instrument = !types.is_null() && (api.lilv_nodes_contains)(types, self.nodes.instrument);
+            if !types.is_null() {
+                (api.lilv_nodes_free)(types);
+            }
+            PluginInfo {
                 uri: self.string((api.lilv_plugin_get_uri)(plugin)),
-                name: self.string(name),
+                name: self.take_string((api.lilv_plugin_get_name)(plugin)),
                 ports: (0..(api.lilv_plugin_get_num_ports)(plugin))
                     .map(|i| {
                         self.describe_port(
@@ -231,11 +424,44 @@ impl Shared {
                         )
                     })
                     .collect(),
-            };
-            if !name.is_null() {
-                (api.lilv_node_free)(name);
+                vendor: Some(vendor).filter(|v| !v.is_empty()),
+                instrument,
+                bundle: self
+                    .path((api.lilv_plugin_get_bundle_uri)(plugin))
+                    .unwrap_or_default(),
+                ui: self.x11_ui(plugin),
             }
-            info
+        }
+    }
+
+    /// The plug-in's first X11 UI, if it has one.
+    fn x11_ui(&self, plugin: sys::Plugin) -> Option<UiInfo> {
+        let api = &self.api;
+        // SAFETY: as `describe`.
+        unsafe {
+            let uis = (api.lilv_plugin_get_uis)(plugin);
+            if uis.is_null() {
+                return None;
+            }
+            let mut found = None;
+            let mut it = (api.lilv_uis_begin)(uis);
+            while found.is_none() && !(api.lilv_uis_is_end)(uis, it) {
+                let ui = (api.lilv_uis_get)(uis, it);
+                if (api.lilv_ui_is_a)(ui, self.nodes.x11_ui) {
+                    found = Some(UiInfo {
+                        uri: self.string((api.lilv_ui_get_uri)(ui)),
+                        binary: self
+                            .path((api.lilv_ui_get_binary_uri)(ui))
+                            .unwrap_or_default(),
+                        bundle: self
+                            .path((api.lilv_ui_get_bundle_uri)(ui))
+                            .unwrap_or_default(),
+                    });
+                }
+                it = (api.lilv_uis_next)(uis, it);
+            }
+            (api.lilv_uis_free)(uis);
+            found
         }
     }
 
@@ -244,13 +470,14 @@ impl Shared {
         // SAFETY: as `describe`.
         unsafe {
             let is = |class| (api.lilv_port_is_a)(plugin, port, class);
-            let kind = if is(self.audio) {
+            let has = |property| (api.lilv_port_has_property)(plugin, port, property);
+            let kind = if is(self.nodes.audio) {
                 PortKind::Audio
-            } else if is(self.control) {
+            } else if is(self.nodes.control) {
                 PortKind::Control
-            } else if is(self.atom) {
+            } else if is(self.nodes.atom) {
                 PortKind::Atom {
-                    midi: (api.lilv_port_supports_event)(plugin, port, self.midi),
+                    midi: (api.lilv_port_supports_event)(plugin, port, self.nodes.midi),
                 }
             } else {
                 PortKind::Other
@@ -258,14 +485,53 @@ impl Shared {
             let (mut default, mut min, mut max) =
                 (ptr::null_mut(), ptr::null_mut(), ptr::null_mut());
             (api.lilv_port_get_range)(plugin, port, &raw mut default, &raw mut min, &raw mut max);
+            let mut scale_points = Vec::new();
+            let points = (api.lilv_port_get_scale_points)(plugin, port);
+            if !points.is_null() {
+                let mut it = (api.lilv_scale_points_begin)(points);
+                while !(api.lilv_scale_points_is_end)(points, it) {
+                    let point = (api.lilv_scale_points_get)(points, it);
+                    if let Some(value) = self.number((api.lilv_scale_point_get_value)(point)) {
+                        scale_points
+                            .push((value, self.string((api.lilv_scale_point_get_label)(point))));
+                    }
+                    it = (api.lilv_scale_points_next)(points, it);
+                }
+                (api.lilv_scale_points_free)(points);
+            }
+            scale_points.sort_by(|a, b| a.0.total_cmp(&b.0));
+            let units = (api.lilv_port_get_value)(plugin, port, self.nodes.unit);
+            let mut unit = ParamUnit::None;
+            if !units.is_null() {
+                let first = (api.lilv_nodes_begin)(units);
+                if !(api.lilv_nodes_is_end)(units, first) {
+                    let node = (api.lilv_nodes_get)(units, first);
+                    if (api.lilv_node_is_uri)(node) {
+                        unit = describe::unit(self.string(node).strip_prefix(UNITS).unwrap_or(""));
+                    }
+                }
+                (api.lilv_nodes_free)(units);
+            }
             PortInfo {
                 index,
                 symbol: self.string((api.lilv_port_get_symbol)(plugin, port)),
+                name: self.take_string((api.lilv_port_get_name)(plugin, port)),
                 kind,
-                input: is(self.input),
+                input: is(self.nodes.input),
                 default: self.take_number(default, 0.0),
                 min: self.take_number(min, 0.0),
                 max: self.take_number(max, 1.0),
+                toggled: has(self.nodes.toggled),
+                integer: has(self.nodes.integer),
+                enumeration: has(self.nodes.enumeration),
+                logarithmic: has(self.nodes.logarithmic),
+                hidden: has(self.nodes.not_on_gui),
+                not_automatic: has(self.nodes.not_automatic),
+                sidechain: has(self.nodes.sidechain),
+                position: matches!(kind, PortKind::Atom { .. })
+                    && (api.lilv_port_supports_event)(plugin, port, self.nodes.position),
+                unit,
+                scale_points,
             }
         }
     }
@@ -275,7 +541,7 @@ impl Drop for Shared {
     fn drop(&mut self) {
         // SAFETY: the nodes and the world are this value's.
         unsafe {
-            for node in [self.audio, self.control, self.input, self.atom, self.midi] {
+            for node in self.nodes.all() {
                 (self.api.lilv_node_free)(node);
             }
             (self.api.lilv_world_free)(self.world);
@@ -323,21 +589,50 @@ impl World {
         }
         let urids = Box::new(Urids(Mutex::new(Vec::new())));
         let handle = ptr::from_ref::<Urids>(&urids).cast_mut().cast::<c_void>();
-        let node = |uri: String| {
+        let node = |uri: &str| {
             let uri = CString::new(uri).expect("a URI without NUL");
             // SAFETY: the world was just made.
             unsafe { (api.lilv_new_uri)(world, uri.as_ptr()) }
         };
+        let nodes = Nodes {
+            audio: node(&format!("{CORE}AudioPort")),
+            control: node(&format!("{CORE}ControlPort")),
+            input: node(&format!("{CORE}InputPort")),
+            atom: node(&format!("{ATOM}AtomPort")),
+            midi: node("http://lv2plug.in/ns/ext/midi#MidiEvent"),
+            position: node(&format!("{TIME}Position")),
+            toggled: node(&format!("{CORE}toggled")),
+            integer: node(&format!("{CORE}integer")),
+            enumeration: node(&format!("{CORE}enumeration")),
+            logarithmic: node(&format!("{PORT_PROPS}logarithmic")),
+            not_on_gui: node(&format!("{PORT_PROPS}notOnGUI")),
+            not_automatic: node(&format!("{PORT_PROPS}notAutomatic")),
+            sidechain: node(&format!("{CORE}isSideChain")),
+            unit: node(&format!("{UNITS}unit")),
+            rdf_type: node("http://www.w3.org/1999/02/22-rdf-syntax-ns#type"),
+            instrument: node(&format!("{CORE}InstrumentPlugin")),
+            x11_ui: node(&format!("{UI}X11UI")),
+        };
+        let known = Known {
+            midi_event: urids.uri("http://lv2plug.in/ns/ext/midi#", "MidiEvent"),
+            sequence: urids.uri(ATOM, "Sequence"),
+            chunk: urids.uri(ATOM, "Chunk"),
+            float: urids.uri(ATOM, "Float"),
+            int: urids.uri(ATOM, "Int"),
+            long: urids.uri(ATOM, "Long"),
+            object: urids.uri(ATOM, "Object"),
+            position: urids.uri(TIME, "Position"),
+            frame: urids.uri(TIME, "frame"),
+            speed: urids.uri(TIME, "speed"),
+            bar: urids.uri(TIME, "bar"),
+            bar_beat: urids.uri(TIME, "barBeat"),
+            beat_unit: urids.uri(TIME, "beatUnit"),
+            beats_per_bar: urids.uri(TIME, "beatsPerBar"),
+            beats_per_minute: urids.uri(TIME, "beatsPerMinute"),
+        };
         let shared = Shared {
-            audio: node(format!("{CORE}AudioPort")),
-            control: node(format!("{CORE}ControlPort")),
-            input: node(format!("{CORE}InputPort")),
-            atom: node(format!("{ATOM}AtomPort")),
-            midi: node("http://lv2plug.in/ns/ext/midi#MidiEvent".into()),
-            midi_event: urids.map(c"http://lv2plug.in/ns/ext/midi#MidiEvent"),
-            sequence: urids.map(c"http://lv2plug.in/ns/ext/atom#Sequence"),
-            chunk: urids.map(c"http://lv2plug.in/ns/ext/atom#Chunk"),
-            float: urids.map(c"http://lv2plug.in/ns/ext/atom#Float"),
+            nodes,
+            known,
             map: sys::UridMap {
                 handle,
                 map: urid_map,
@@ -346,7 +641,7 @@ impl World {
                 handle,
                 unmap: urid_unmap,
             },
-            _urids: urids,
+            urids,
             api,
             world,
             lock: Mutex::new(()),
@@ -404,6 +699,21 @@ impl World {
         found
     }
 
+    /// The plug-in `uri`, if the world knows it.
+    pub fn plugin(&self, uri: &str) -> Option<PluginInfo> {
+        let uri = CString::new(uri).ok()?;
+        let _lock = self.0.lock();
+        let api = &self.0.api;
+        // SAFETY: the world is alive and locked; the node is freed here.
+        unsafe {
+            let node = self.0.node(&uri);
+            let plugin =
+                (api.lilv_plugins_get_by_uri)((api.lilv_world_get_all_plugins)(self.0.world), node);
+            (api.lilv_node_free)(node);
+            (!plugin.is_null()).then(|| self.0.describe(plugin))
+        }
+    }
+
     /// Instantiates the plug-in `uri` at `sample_rate`, for blocks of up to
     /// `max_frames`, with its ports connected and the plug-in activated.
     ///
@@ -421,19 +731,14 @@ impl World {
         let uri_c = CString::new(uri).map_err(|_| failed("the URI has a NUL"))?;
         let _lock = shared.lock();
         let api = &shared.api;
-        let map_uri = CString::new(format!("{URID}map")).expect("a URI");
-        let unmap_uri = CString::new(format!("{URID}unmap")).expect("a URI");
-        let features = [
-            Feature {
-                uri: map_uri.as_ptr(),
-                data: shared.map_ptr().cast(),
-            },
-            Feature {
-                uri: unmap_uri.as_ptr(),
-                data: ptr::from_ref(&shared.unmap).cast_mut().cast(),
-            },
-        ];
-        let list = [&raw const features[0], &raw const features[1], ptr::null()];
+        let mut features = Features::new(
+            &shared.urids,
+            shared.map_ptr(),
+            shared.unmap_ptr(),
+            sample_rate,
+            max_frames,
+            ATOM_WORDS * 8,
+        );
         // SAFETY: the world is alive and locked; the features outlive the call.
         let (plugin, info, raw) = unsafe {
             let node = shared.node(&uri_c);
@@ -443,7 +748,7 @@ impl World {
             if plugin.is_null() {
                 return Err(failed(format!("no LV2 plug-in {uri}")));
             }
-            let raw = (api.lilv_plugin_instantiate)(plugin, sample_rate, list.as_ptr());
+            let raw = (api.lilv_plugin_instantiate)(plugin, sample_rate, features.list.as_ptr());
             if raw.is_null() {
                 return Err(failed(format!("{uri} won't instantiate")));
             }
@@ -454,29 +759,62 @@ impl World {
             (api.lilv_plugin_has_latency)(plugin)
                 .then(|| (api.lilv_plugin_get_latency_port_index)(plugin) as usize)
         };
-        let mut instance = Instance {
+        // A plug-in with a worker gets a thread for it, stopped before the
+        // plug-in is freed.
+        // SAFETY: `raw` is live; `extension_data` answers for the plug-in.
+        let interface = unsafe {
+            (*(*raw).descriptor)
+                .extension_data
+                .map_or(ptr::null(), |f| f(WORKER_INTERFACE.as_ptr()))
+        }
+        .cast::<sys::WorkerInterface>();
+        let (worker, responses) = match (
+            interface.is_null(),
+            features.jobs.take(),
+            features.responses_in.take(),
+        ) {
+            (false, Some(jobs), Some(responses_in)) => (
+                // SAFETY: `raw` is live.
+                Some(WorkerThread::start(interface, unsafe { (*raw).handle }, jobs, responses_in)),
+                features.responses_out.take(),
+            ),
+            _ => (None, None),
+        };
+        let has_worker = worker.is_some();
+        let ports: Arc<[PortInfo]> = info.ports.into();
+        let core = Arc::new(Core {
             shared: Arc::clone(shared),
             plugin,
             raw,
-            controls: info.ports.iter().map(|p| p.default).collect(),
+            features,
+            worker,
+        });
+        let controls: Vec<f32> = ports.iter().map(|p| p.default).collect();
+        let mirror: Arc<[AtomicU32]> = controls
+            .iter()
+            .map(|c| AtomicU32::new(c.to_bits()))
+            .collect();
+        let mut instance = Instance {
+            core,
+            controls,
+            mirror,
             atoms: Vec::new(),
             silence: vec![0.0; max_frames].into(),
             sink: vec![0.0; max_frames].into(),
             latency,
             max_frames,
-            active: false,
-            ports: info.ports,
+            transport: None,
+            responses,
+            interface: if has_worker { interface } else { ptr::null() },
+            ports,
         };
         for (at, port) in instance.ports.iter().enumerate() {
             if let PortKind::Atom { midi } = port.kind {
-                let role = match (midi, port.input) {
-                    (true, true) => Role::MidiIn,
-                    (true, false) => Role::MidiOut,
-                    _ => Role::Other,
-                };
                 instance.atoms.push(AtomPort {
                     port: at,
-                    role,
+                    input: port.input,
+                    midi,
+                    position: port.position,
                     words: vec![0; ATOM_WORDS].into(),
                 });
             }
@@ -488,41 +826,70 @@ impl World {
                 activate((*raw).handle);
             }
         }
-        instance.active = true;
         Ok(instance)
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Role {
-    MidiIn,
-    MidiOut,
-    /// An Atom port the host doesn't use: an empty sequence in, a chunk out.
-    Other,
+/// A lilv instance, freed when the last holder lets go: the [`Instance`]
+/// that runs it, and the [`StateHandle`]s that save its state.
+struct Core {
+    shared: Arc<Shared>,
+    plugin: sys::Plugin,
+    raw: *mut sys::Instance,
+    /// What the plug-in was given; it must outlive the plug-in.
+    features: Features,
+    worker: Option<WorkerThread>,
+}
+
+// SAFETY: `run` is called by one thread at a time (the `Instance`'s owner),
+// and the state interface's `save` may run beside it (the state extension).
+unsafe impl Send for Core {}
+// SAFETY: as above.
+unsafe impl Sync for Core {}
+
+impl Drop for Core {
+    fn drop(&mut self) {
+        // The worker stops before the plug-in goes.
+        self.worker.take();
+        // SAFETY: `raw` is this value's, live until freed here.
+        unsafe {
+            if let Some(deactivate) = (*(*self.raw).descriptor).deactivate {
+                deactivate((*self.raw).handle);
+            }
+            (self.shared.api.lilv_instance_free)(self.raw);
+        }
+    }
 }
 
 struct AtomPort {
     /// The index into the instance's ports.
     port: usize,
-    role: Role,
+    input: bool,
+    midi: bool,
+    position: bool,
     /// 64-bit words, so the atoms in it are aligned.
     words: Box<[u64]>,
 }
 
 /// One running plug-in. Not `Sync`: one thread runs it at a time.
 pub struct Instance {
-    shared: Arc<Shared>,
-    plugin: sys::Plugin,
-    raw: *mut sys::Instance,
-    ports: Vec<PortInfo>,
+    core: Arc<Core>,
+    ports: Arc<[PortInfo]>,
     /// One slot per port; only control ports' slots are connected.
     controls: Vec<f32>,
+    /// The control slots as of the end of the last block, for the threads
+    /// that don't run the plug-in.
+    mirror: Arc<[AtomicU32]>,
     atoms: Vec<AtomPort>,
     silence: Box<[f32]>,
     sink: Box<[f32]>,
     latency: Option<usize>,
     max_frames: usize,
-    active: bool,
+    transport: Option<Transport>,
+    /// The worker's answers, delivered at the start of each block.
+    responses: Option<Consumer<Msg>>,
+    /// The plug-in's worker interface, if it has one.
+    interface: *const sys::WorkerInterface,
 }
 
 // SAFETY: the plug-in's handle is used by one thread at a time (`&mut self`
@@ -539,6 +906,7 @@ impl Instance {
     pub fn set_control(&mut self, index: u32, value: f32) {
         if let Some(slot) = self.controls.get_mut(index as usize) {
             *slot = value;
+            self.mirror[index as usize].store(value.to_bits(), Relaxed);
         }
     }
 
@@ -555,13 +923,31 @@ impl Instance {
             .map_or(0, |port| self.controls[port].max(0.0) as u32)
     }
 
+    /// Where the song is for the next block's `time:Position`, for the
+    /// plug-ins that take it; none sends none.
+    pub fn set_transport(&mut self, transport: Option<Transport>) {
+        self.transport = transport;
+    }
+
+    /// A handle that saves this plug-in's state while it runs, and reads
+    /// what it did in its last block, from any thread.
+    pub fn handle(&self) -> StateHandle {
+        StateHandle {
+            core: Arc::clone(&self.core),
+            ports: Arc::clone(&self.ports),
+            mirror: Arc::clone(&self.mirror),
+            latency: self.latency,
+        }
+    }
+
     fn connect(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]]) {
         let (mut next_in, mut next_out) = (0, 0);
+        let raw = self.core.raw;
         // SAFETY: `raw` is live. Every buffer is at least `max_frames` long
         // (or the caller's, checked by `run`) and outlives the block; the
         // plug-in reads or writes each only inside `run`.
         unsafe {
-            let (descriptor, handle) = ((*self.raw).descriptor, (*self.raw).handle);
+            let (descriptor, handle) = ((*raw).descriptor, (*raw).handle);
             for (at, port) in self.ports.iter().enumerate() {
                 let data: *mut c_void = match port.kind {
                     PortKind::Control => self.controls.as_mut_ptr().add(at).cast(),
@@ -616,31 +1002,54 @@ impl Instance {
         {
             return Err(Lv2Error::BadBlock);
         }
-        let (sequence, chunk) = (self.shared.sequence, self.shared.chunk);
+        let shared = Arc::clone(&self.core.shared);
+        let known = &shared.known;
+        let transport = self.transport;
         for atom in &mut self.atoms {
-            match atom.role {
-                Role::MidiIn => {
-                    write_events(&mut atom.words, sequence, self.shared.midi_event, midi)?
-                }
-                Role::MidiOut => write_header(&mut atom.words, chunk, (ATOM_WORDS * 8 - 8) as u32),
-                Role::Other if self.ports[atom.port].input => {
-                    write_header(&mut atom.words, sequence, 8)
-                }
-                Role::Other => write_header(&mut atom.words, chunk, (ATOM_WORDS * 8 - 8) as u32),
+            if atom.input && (atom.midi || atom.position) {
+                let position = transport.filter(|_| atom.position);
+                let midi = if atom.midi { midi } else { &[] };
+                write_events(&mut atom.words, known, position.as_ref(), midi)?;
+            } else if atom.input {
+                write_header(&mut atom.words, known.sequence, 8);
+            } else {
+                write_header(&mut atom.words, known.chunk, (ATOM_WORDS * 8 - 8) as u32);
             }
         }
         self.connect(inputs, outputs);
-        // SAFETY: `raw` is live and activated, its ports connected above.
-        unsafe { ((*(*self.raw).descriptor).run)((*self.raw).handle, frames as u32) };
+        let raw = self.core.raw;
+        // The worker's answers come first, in the thread that runs the
+        // plug-in, and it is told when they are all in.
+        // SAFETY: `raw` is live and activated, its ports connected above;
+        // the interface is the plug-in's own.
+        unsafe {
+            let handle = (*raw).handle;
+            let interface = self.interface.as_ref();
+            if let (Some(interface), Some(responses)) = (interface, self.responses.as_mut()) {
+                while let Ok(msg) = responses.pop() {
+                    if let Some(response) = interface.work_response {
+                        response(handle, msg.bytes().len() as u32, msg.bytes().as_ptr().cast());
+                    }
+                }
+            }
+            ((*(*raw).descriptor).run)(handle, frames as u32);
+            if let Some(end_run) = interface.and_then(|i| i.end_run) {
+                end_run(handle);
+            }
+        }
+        for (slot, value) in self.mirror.iter().zip(&self.controls) {
+            slot.store(value.to_bits(), Relaxed);
+        }
         Ok(())
     }
 
     /// The MIDI the plug-in sent in its last block, in frame order.
     pub fn midi_out(&self) -> MidiOut<'_> {
+        let known = &self.core.shared.known;
         let bytes = self
             .atoms
             .iter()
-            .find(|a| a.role == Role::MidiOut)
+            .find(|a| !a.input && a.midi)
             .map_or(&[][..], |a| bytes_of(&a.words));
         let type_ = u32::from_ne_bytes(
             bytes
@@ -655,71 +1064,31 @@ impl Instance {
         // After the atom's header and the sequence's own: the events.
         let end = (8 + size as usize).min(bytes.len());
         MidiOut {
-            bytes: if type_ == self.shared.sequence {
+            bytes: if type_ == known.sequence {
                 &bytes[..end]
             } else {
                 &[]
             },
             at: 16,
-            midi_event: self.shared.midi_event,
+            midi_event: known.midi_event,
         }
     }
 
     /// The plug-in's state as text: its control inputs and whatever its own
-    /// state interface stores. Not while the audio thread runs the plug-in,
-    /// unless it saves state thread-safely.
+    /// state interface stores. LV2 lets a plug-in save while it runs, so
+    /// this can be called from any thread through a
+    /// [`handle`](Self::handle) too.
     ///
     /// # Errors
     ///
     /// [`Lv2Error::Failed`] when lilv can't read the state or write it.
     pub fn save_state(&self) -> Result<String, Lv2Error> {
-        let mut ctx = PortValues {
-            ports: &self.ports,
-            controls: self.controls.as_ptr().cast_mut(),
-            float: self.shared.float,
-        };
-        let shared = &self.shared;
-        let api = &shared.api;
-        let _lock = shared.lock();
-        // SAFETY: the world is alive and locked; `ctx` outlives the calls,
-        // and lilv gives back a state and a string it owns until freed here.
-        unsafe {
-            let state = (api.lilv_state_new_from_instance)(
-                self.plugin,
-                self.raw,
-                shared.map_ptr(),
-                ptr::null(),
-                ptr::null(),
-                ptr::null(),
-                ptr::null(),
-                Some(get_port_value),
-                ptr::from_mut(&mut ctx).cast(),
-                STATE_FLAGS,
-                ptr::null(),
-            );
-            if state.is_null() {
-                return Err(failed("the plug-in's state couldn't be read"));
-            }
-            let text = (api.lilv_state_to_string)(
-                shared.world,
-                shared.map_ptr(),
-                ptr::from_ref(&shared.unmap).cast_mut(),
-                state,
-                STATE_URI.as_ptr(),
-                ptr::null(),
-            );
-            (api.lilv_state_free)(state);
-            if text.is_null() {
-                return Err(failed("the plug-in's state couldn't be written"));
-            }
-            let saved = CStr::from_ptr(text).to_string_lossy().into_owned();
-            (api.lilv_free)(text.cast());
-            Ok(saved)
-        }
+        save(&self.core, &self.ports, self.controls.as_ptr().cast_mut())
     }
 
     /// Restores a state [`save_state`](Self::save_state) wrote: the control
-    /// inputs, and the plug-in's own through its state interface.
+    /// inputs, and the plug-in's own through its state interface. Not while
+    /// another thread runs the plug-in.
     ///
     /// # Errors
     ///
@@ -729,12 +1098,12 @@ impl Instance {
         let mut ctx = PortValues {
             ports: &self.ports,
             controls: self.controls.as_mut_ptr(),
-            float: self.shared.float,
+            float: self.core.shared.known.float,
         };
-        let shared = &self.shared;
+        let shared = &self.core.shared;
         let api = &shared.api;
         let _lock = shared.lock();
-        // SAFETY: as `save_state`.
+        // SAFETY: as `save`.
         unsafe {
             let state =
                 (api.lilv_state_new_from_string)(shared.world, shared.map_ptr(), text.as_ptr());
@@ -743,29 +1112,111 @@ impl Instance {
             }
             (api.lilv_state_restore)(
                 state,
-                self.raw,
+                self.core.raw,
                 Some(set_port_value),
                 ptr::from_mut(&mut ctx).cast(),
                 0,
-                ptr::null(),
+                self.core.features.list.as_ptr(),
             );
             (api.lilv_state_free)(state);
+        }
+        for (slot, value) in self.mirror.iter().zip(&self.controls) {
+            slot.store(value.to_bits(), Relaxed);
         }
         Ok(())
     }
 }
 
-impl Drop for Instance {
-    fn drop(&mut self) {
-        // SAFETY: `raw` is this value's, live until freed here.
-        unsafe {
-            if self.active
-                && let Some(deactivate) = (*(*self.raw).descriptor).deactivate
-            {
-                deactivate((*self.raw).handle);
-            }
-            (self.shared.api.lilv_instance_free)(self.raw);
+/// Saves a plug-in's state through lilv, its control inputs read from
+/// `controls`.
+fn save(core: &Core, ports: &[PortInfo], controls: *mut f32) -> Result<String, Lv2Error> {
+    let mut ctx = PortValues {
+        ports,
+        controls,
+        float: core.shared.known.float,
+    };
+    let shared = &core.shared;
+    let api = &shared.api;
+    let _lock = shared.lock();
+    // SAFETY: the world is alive and locked; `ctx` outlives the calls, and
+    // lilv gives back a state and a string it owns until freed here.
+    unsafe {
+        let state = (api.lilv_state_new_from_instance)(
+            core.plugin,
+            core.raw,
+            shared.map_ptr(),
+            ptr::null(),
+            ptr::null(),
+            ptr::null(),
+            ptr::null(),
+            Some(get_port_value),
+            ptr::from_mut(&mut ctx).cast(),
+            STATE_FLAGS,
+            core.features.list.as_ptr(),
+        );
+        if state.is_null() {
+            return Err(failed("the plug-in's state couldn't be read"));
         }
+        let text = (api.lilv_state_to_string)(
+            shared.world,
+            shared.map_ptr(),
+            shared.unmap_ptr(),
+            state,
+            STATE_URI.as_ptr(),
+            ptr::null(),
+        );
+        (api.lilv_state_free)(state);
+        if text.is_null() {
+            return Err(failed("the plug-in's state couldn't be written"));
+        }
+        let saved = CStr::from_ptr(text).to_string_lossy().into_owned();
+        (api.lilv_free)(text.cast());
+        Ok(saved)
+    }
+}
+
+/// What the main thread keeps of a running [`Instance`]: it saves the
+/// plug-in's state beside the audio thread (LV2's state extension allows
+/// it) and reads the control values the plug-in had after its last block.
+/// It keeps the plug-in alive, so it never dangles.
+#[derive(Clone)]
+pub struct StateHandle {
+    core: Arc<Core>,
+    ports: Arc<[PortInfo]>,
+    mirror: Arc<[AtomicU32]>,
+    latency: Option<usize>,
+}
+
+impl StateHandle {
+    /// The plug-in's ports, in index order.
+    pub fn ports(&self) -> &[PortInfo] {
+        &self.ports
+    }
+
+    /// A control port's value as of the end of the plug-in's last block.
+    pub fn control(&self, index: u32) -> f32 {
+        self.mirror
+            .get(index as usize)
+            .map_or(0.0, |slot| f32::from_bits(slot.load(Relaxed)))
+    }
+
+    /// The latency the plug-in reported in its last block, in frames.
+    pub fn latency(&self) -> u32 {
+        self.latency.map_or(0, |port| self.control(port as u32).max(0.0) as u32)
+    }
+
+    /// The plug-in's state as text, as [`Instance::save_state`].
+    ///
+    /// # Errors
+    ///
+    /// [`Lv2Error::Failed`] when lilv can't read the state or write it.
+    pub fn save_state(&self) -> Result<String, Lv2Error> {
+        let mut controls: Vec<f32> = self
+            .mirror
+            .iter()
+            .map(|slot| f32::from_bits(slot.load(Relaxed)))
+            .collect();
+        save(&self.core, &self.ports, controls.as_mut_ptr())
     }
 }
 
@@ -847,15 +1298,93 @@ fn write_header(words: &mut [u64], type_: Urid, size: u32) {
     bytes[8..16].fill(0);
 }
 
-/// An `atom:Sequence` of `events`, each a `midi:MidiEvent` on its frame.
+/// One property of an `atom:Object`, at `at`: its key, and a value of
+/// `type_` that is `value`'s bytes. Returns where the next one goes.
+fn write_property(bytes: &mut [u8], at: usize, key: Urid, type_: Urid, value: &[u8]) -> usize {
+    bytes[at..at + 4].copy_from_slice(&key.to_ne_bytes());
+    // The property's context, unused.
+    bytes[at + 4..at + 8].fill(0);
+    bytes[at + 8..at + 12].copy_from_slice(&(value.len() as u32).to_ne_bytes());
+    bytes[at + 12..at + 16].copy_from_slice(&type_.to_ne_bytes());
+    bytes[at + 16..at + 16 + value.len()].copy_from_slice(value);
+    let end = at + 16 + value.len();
+    let padded = end.next_multiple_of(8);
+    bytes[end..padded].fill(0);
+    padded
+}
+
+/// The `time:Position` object for `transport` as a sequence event at frame
+/// 0, written at `at`. Returns where the next event goes.
+fn write_position(bytes: &mut [u8], mut at: usize, known: &Known, transport: &Transport) -> usize {
+    let start = at;
+    bytes[at..at + 8].copy_from_slice(&0i64.to_ne_bytes());
+    // The object atom's header: its size is filled in below.
+    bytes[at + 12..at + 16].copy_from_slice(&known.object.to_ne_bytes());
+    // The object's body: no ID, and its type.
+    bytes[at + 16..at + 20].fill(0);
+    bytes[at + 20..at + 24].copy_from_slice(&known.position.to_ne_bytes());
+    at += 24;
+    let long = |value: i64| value.to_ne_bytes();
+    let float = |value: f32| {
+        let mut bytes = [0; 4];
+        bytes.copy_from_slice(&value.to_ne_bytes());
+        bytes
+    };
+    at = write_property(bytes, at, known.frame, known.long, &long(transport.frame));
+    at = write_property(
+        bytes,
+        at,
+        known.speed,
+        known.float,
+        &float(if transport.playing { 1.0 } else { 0.0 }),
+    );
+    at = write_property(bytes, at, known.bar, known.long, &long(transport.bar));
+    at = write_property(
+        bytes,
+        at,
+        known.bar_beat,
+        known.float,
+        &float(transport.bar_beat),
+    );
+    at = write_property(
+        bytes,
+        at,
+        known.beat_unit,
+        known.int,
+        &transport.beat_unit.to_ne_bytes(),
+    );
+    at = write_property(
+        bytes,
+        at,
+        known.beats_per_bar,
+        known.float,
+        &float(transport.beats_per_bar),
+    );
+    at = write_property(
+        bytes,
+        at,
+        known.beats_per_minute,
+        known.float,
+        &float(transport.bpm),
+    );
+    let size = (at - start - 16) as u32;
+    bytes[start + 8..start + 12].copy_from_slice(&size.to_ne_bytes());
+    at
+}
+
+/// An `atom:Sequence` of the position (when there is one) and `events`,
+/// each a `midi:MidiEvent` on its frame.
 fn write_events(
     words: &mut [u64],
-    sequence: Urid,
-    midi_event: Urid,
+    known: &Known,
+    position: Option<&Transport>,
     events: &[MidiEvent],
 ) -> Result<(), Lv2Error> {
     let bytes = bytes_of_mut(words);
     let mut at = 16;
+    if let Some(transport) = position {
+        at = write_position(bytes, at, known, transport);
+    }
     for event in events {
         let len = usize::from(event.len.min(3));
         if at + 16 + 8 > bytes.len() {
@@ -863,12 +1392,12 @@ fn write_events(
         }
         bytes[at..at + 8].copy_from_slice(&i64::from(event.frame).to_ne_bytes());
         bytes[at + 8..at + 12].copy_from_slice(&(len as u32).to_ne_bytes());
-        bytes[at + 12..at + 16].copy_from_slice(&midi_event.to_ne_bytes());
+        bytes[at + 12..at + 16].copy_from_slice(&known.midi_event.to_ne_bytes());
         bytes[at + 16..at + 24].fill(0);
         bytes[at + 16..at + 16 + len].copy_from_slice(&event.data[..len]);
         at += 24;
     }
-    write_header(words, sequence, (at - 8) as u32);
+    write_header(words, known.sequence, (at - 8) as u32);
     Ok(())
 }
 

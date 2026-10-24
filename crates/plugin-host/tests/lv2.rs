@@ -6,9 +6,11 @@
 
 use std::path::Path;
 
-use bl_plugin_host::lv2::{Instance, Lv2Error, MidiEvent, PortKind, World};
+use bl_model::ParamUnit;
+use bl_plugin_host::lv2::{Instance, Lv2Error, MidiEvent, PortKind, Transport, World};
 use bl_test_lv2::{
-    ECHO_TRANSPOSE, GAIN, GAIN_MAX, LAST_NOTE_PORT, LATENCY, PLUGIN_NAME, PLUGIN_URI,
+    BAR_BEAT_PORT, CUTOFF, ECHO_TRANSPOSE, GAIN, GAIN_MAX, LAST_NOTE_PORT, LATENCY, MODE,
+    PLUGIN_NAME, PLUGIN_URI, SPEED_PORT, STEPS, TOGGLE, WORKED_PORT, WORKER_ADDS,
 };
 
 const RATE: f64 = 48_000.0;
@@ -88,10 +90,47 @@ fn the_plug_in_is_found_with_its_ports() {
             ("last_note", PortKind::Control, false),
             ("midi_in", PortKind::Atom { midi: true }, true),
             ("midi_out", PortKind::Atom { midi: true }, false),
+            ("toggle", PortKind::Control, true),
+            ("mode", PortKind::Control, true),
+            ("cutoff", PortKind::Control, true),
+            ("steps", PortKind::Control, true),
+            ("worked", PortKind::Control, false),
+            ("bar_beat", PortKind::Control, false),
+            ("speed", PortKind::Control, false),
         ]
     );
     let gain = &found.ports[GAIN as usize];
     assert_eq!((gain.min, gain.max, gain.default), (0.0, GAIN_MAX, 1.0));
+}
+
+#[test]
+fn the_ports_carry_what_the_metadata_says() {
+    let Some(world) = world() else { return };
+    let plugins = world.plugins();
+    let found = plugins.iter().find(|p| p.uri == PLUGIN_URI).unwrap();
+    let port = |index: u32| &found.ports[index as usize];
+    assert_eq!(port(GAIN).name, "Gain");
+    assert!(port(TOGGLE).toggled);
+    let mode = port(MODE);
+    assert!(mode.enumeration && mode.integer);
+    assert_eq!(
+        mode.scale_points,
+        [
+            (0.0, "Clean".to_owned()),
+            (1.0, "Warm".to_owned()),
+            (2.0, "Hot".to_owned())
+        ]
+    );
+    let cutoff = port(CUTOFF);
+    assert!(cutoff.logarithmic);
+    assert_eq!(cutoff.unit, ParamUnit::Hertz);
+    assert_eq!((cutoff.min, cutoff.max, cutoff.default), (20.0, 20_000.0, 1000.0));
+    assert!(port(STEPS).integer && !port(STEPS).toggled);
+    assert!(port(bl_test_lv2::MIDI_IN).position, "it takes time:Position");
+    assert!(!port(bl_test_lv2::IN_L).sidechain);
+    assert!(!found.instrument);
+    assert_eq!(found.bundle, std::fs::canonicalize(bl_test_lv2::bundle()).unwrap());
+    assert!(found.ui.is_none());
 }
 
 #[test]
@@ -123,6 +162,58 @@ fn notes_go_in_and_come_back_an_octave_up_on_their_frames() {
     // A block with none sends none: the last block's notes don't linger.
     run(&mut instance, &[0.0; 100], &[]);
     assert_eq!(instance.midi_out().count(), 0);
+}
+
+// Spec: lv2-hosting R9. The plug-in's worker runs a job on a thread of its
+// own, and its answer reaches the plug-in on the thread that runs it.
+#[test]
+fn the_worker_answers_on_the_audio_thread() {
+    let Some(world) = world() else { return };
+    let mut instance = instance(&world);
+    run(&mut instance, &[0.0; 64], &[note(0, 0x90, 60, 100)]);
+    // The worker thread takes the job when it next looks; the answer comes
+    // with a later block.
+    while instance.control(WORKED_PORT) == 0.0 {
+        std::thread::yield_now();
+        run(&mut instance, &[0.0; 64], &[]);
+    }
+    assert_eq!(instance.control(WORKED_PORT), (60 + WORKER_ADDS) as f32);
+}
+
+// Spec: lv2-hosting R4. A plug-in whose Atom port takes `time:Position` is
+// sent it at the first frame of the block.
+#[test]
+fn the_position_is_sent_to_a_port_that_takes_it() {
+    let Some(world) = world() else { return };
+    let mut instance = instance(&world);
+    instance.set_transport(Some(Transport {
+        frame: 96_000,
+        playing: true,
+        bpm: 120.0,
+        bar: 1,
+        bar_beat: 2.5,
+        beats_per_bar: 4.0,
+        beat_unit: 4,
+    }));
+    run(&mut instance, &[0.0; 64], &[]);
+    assert_eq!(instance.control(BAR_BEAT_PORT), 2.5);
+    assert_eq!(instance.control(SPEED_PORT), 1.0);
+    // The beat is also heard as a note, on the block's first frame.
+    let notes: Vec<MidiEvent> = instance.midi_out().collect();
+    assert_eq!(notes.len(), 1, "{notes:?}");
+    assert_eq!((notes[0].frame, notes[0].data[1]), (0, bl_test_lv2::BEAT_NOTE + 2));
+    instance.set_transport(Some(Transport {
+        frame: 0,
+        playing: false,
+        bpm: 120.0,
+        bar: 0,
+        bar_beat: 0.0,
+        beats_per_bar: 4.0,
+        beat_unit: 4,
+    }));
+    run(&mut instance, &[0.0; 64], &[]);
+    assert_eq!(instance.control(SPEED_PORT), 0.0);
+    assert_eq!(instance.midi_out().count(), 0, "stopped sends no beat");
 }
 
 #[test]

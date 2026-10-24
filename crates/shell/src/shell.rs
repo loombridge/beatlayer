@@ -1326,6 +1326,26 @@ impl Shell {
         self.touch();
     }
 
+    /// The Status Bar's list of the open MIDI Tools chain (Spec: midi-tools
+    /// R30).
+    fn chain_status(&self) -> Option<String> {
+        self.clip_view.midi_tools().chain_status(
+            self.editor.document(),
+            &self.clip_view,
+            &self.arrangement,
+        )
+    }
+
+    /// Shows the open chain's list in the Status Bar when a command changed
+    /// it from `listed` (Spec: midi-tools R30).
+    fn announce_chain(&mut self, listed: Option<String>) {
+        if let Some(text) = self.chain_status()
+            && Some(&text) != listed.as_ref()
+        {
+            self.set_message(text, false);
+        }
+    }
+
     /// The line the Status Bar shows while it has no message: what the
     /// pointer is over says about itself, such as a drum rack's pad
     /// (WP-5.6).
@@ -1578,6 +1598,7 @@ impl Shell {
             // Spec: midi-tools R23. The MIDI Tools' panels, choices,
             // settings and applications.
             let before = self.editor.document().clone();
+            let listed = self.chain_status();
             let result = midi_tools::run(
                 id,
                 args,
@@ -1589,6 +1610,9 @@ impl Shell {
             if *self.editor.document() != before {
                 self.dirty = true;
                 self.document_changed();
+            }
+            if result.is_ok() {
+                self.announce_chain(listed);
             }
             self.touch();
             return result;

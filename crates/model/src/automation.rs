@@ -575,6 +575,100 @@ impl Envelope {
         }
     }
 
+    /// Opens `length` of time at `at`: every breakpoint at or after `at`
+    /// moves later by `length`, and the envelope holds the value it had at
+    /// `at` across the inserted span (time editing R17). Nothing holds
+    /// where no breakpoint comes before `at` or none from `at` on: the
+    /// envelope already runs flat there.
+    // shortcut: the two halves of a bent segment the insert splits both keep its bend, which only approximates the curve; upgrade if a golden render ever needs it exact.
+    pub(crate) fn insert_time(&mut self, at: Ticks, length: Ticks) {
+        let Some(value) = self.value_at(at).filter(|_| length > Ticks::ZERO) else {
+            return;
+        };
+        let before = self.points.partition_point(|point| point.at < at);
+        let anchored = before > 0 && before < self.points.len();
+        let bend = before
+            .checked_sub(1)
+            .map_or(0.0, |last| self.points[last].bend);
+        for point in &mut self.points[before..] {
+            point.at += length;
+        }
+        if !anchored {
+            return;
+        }
+        let held = [
+            Breakpoint {
+                at,
+                value,
+                bend: 0.0,
+            },
+            Breakpoint {
+                at: at + length,
+                value,
+                bend,
+            },
+        ];
+        // A breakpoint that sat at `at` is at `at + length` now, with the
+        // value the hold would give it.
+        let kept = if self.points[before].at == at + length {
+            &held[..1]
+        } else {
+            &held[..]
+        };
+        self.points.splice(before..before, kept.iter().copied());
+    }
+
+    /// Removes the time from `start` to `end`: the breakpoints inside it go
+    /// and every one from `end` on moves earlier by the span's length. The
+    /// envelope keeps its shape up to `start` and takes the shape it had
+    /// from `end` on, stepping from the value it had at `start` to the one
+    /// it had at `end` over one tick where they differ (time editing R15).
+    // shortcut: a breakpoint made at an edge is straight, so a bent segment the span cut takes the line from its edge value; upgrade if a golden render ever needs the curve exact.
+    pub(crate) fn delete_time(&mut self, start: Ticks, end: Ticks) {
+        if end <= start || !self.points.iter().any(|point| point.at >= start) {
+            return;
+        }
+        let length = end - start;
+        let (Some(at_start), Some(at_end)) = (self.value_at(start), self.value_at(end)) else {
+            return;
+        };
+        let mut tail: Vec<Breakpoint> = self
+            .points
+            .iter()
+            .filter(|point| point.at >= end)
+            .map(|point| Breakpoint {
+                at: point.at - length,
+                ..*point
+            })
+            .collect();
+        self.points.retain(|point| point.at < start);
+        let straight = |at, value| Breakpoint {
+            at,
+            value,
+            bend: 0.0,
+        };
+        let joined = tail.first().is_some_and(|point| point.at == start);
+        if at_start == at_end {
+            if !joined {
+                self.points.push(straight(start, at_start));
+            }
+        } else {
+            self.points.push(straight(start, at_start));
+            let step = start + Ticks(1);
+            match tail.first().map(|first| first.at) {
+                Some(at) if at == start => {
+                    tail[0].at = step;
+                    if tail.get(1).is_some_and(|next| next.at == step) {
+                        tail.remove(0);
+                    }
+                }
+                Some(at) if at == step => {}
+                _ => tail.insert(0, straight(step, at_end)),
+            }
+        }
+        self.points.extend(tail);
+    }
+
     /// Writes `points` over the span from `start` to `end`, replacing the
     /// envelope there: the breakpoints inside the span go, and the ones
     /// given are put in their place, at positions from `start`. The

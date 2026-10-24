@@ -318,6 +318,7 @@ fn selection_menu(shell: &Shell) -> SelectionMenu {
         clips,
         automation,
         take_lane: view.take_lane_selected(),
+        time_commands: true,
     }
 }
 

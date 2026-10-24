@@ -465,7 +465,11 @@ const CREATE: &[Row] = &[
     ("M-CREATE-003", "Insert Return Track", Key(&["S-TRACK-003"])),
     ("M-CREATE-004", "Insert Take Lane", Key(&["S-COMP-004"])),
     SEPARATOR,
-    ("M-CREATE-005", "Insert Scene", Key(&["S-SES-008"])),
+    (
+        "M-CREATE-005",
+        "Insert Scene",
+        Key(&["S-SES-008", "S-ARR-014"]),
+    ),
     (
         "M-CREATE-006",
         "Capture and Insert Scene",

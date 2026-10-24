@@ -513,6 +513,8 @@ pub fn pending_package(row: &str) -> Option<&'static str> {
 pub struct SelectionMenu {
     /// The selection holds clips.
     pub clips: bool,
+    /// A time selection's menu brings the …Time commands (C-TIME-018).
+    pub time_commands: bool,
     /// The time selection covers an automation lane, which brings the
     /// shapes and Simplify Envelope (C-TIME-021).
     pub automation: bool,
@@ -574,6 +576,19 @@ const CLIP_SELECTION: &[Row] = &[
     SEPARATOR,
     ("C-CLIP-ARR-025", "Split", Key(&["S-ARR-001"])),
     ("C-CLIP-ARR-026", "Consolidate", Key(&["S-ARR-002"])),
+];
+
+/// The …Time commands a time selection's menu adds after Duplicate
+/// (C-TIME-018; time editing R22). menus.md doesn't place them in the
+/// observed menu, so [`SelectionMenu::time_commands`] brings them and the
+/// base menu stays as observed.
+const TIME_COMMANDS: &[Row] = &[
+    SEPARATOR,
+    ("C-TIME-018a", "Cut Time", Key(&["S-ARR-015"])),
+    ("C-TIME-018b", "Copy Time", Key(&["S-ARR-016"])),
+    ("C-TIME-018c", "Paste Time", Key(&["S-ARR-017"])),
+    ("C-TIME-018d", "Duplicate Time", Key(&["S-ARR-018"])),
+    ("C-TIME-018e", "Delete Time", Key(&["S-ARR-019"])),
 ];
 
 /// The rows a time selection that holds clips adds to its menu.
@@ -690,8 +705,12 @@ pub fn arrangement_time_in(state: SelectionMenu) -> Vec<MenuItem> {
     if state.automation {
         rows.extend_from_slice(TIME_AUTOMATION);
     }
+    let mut time = with_selection(TIME, TIME_SELECTION, "C-TIME-007", state);
+    if state.time_commands {
+        time = insert_after(&time, TIME_COMMANDS, "C-TIME-003");
+    }
     rows.extend(with_take_lane(
-        with_selection(TIME, TIME_SELECTION, "C-TIME-007", state),
+        time,
         "C-TIME-011",
         (
             R29_COPY_TIME,
@@ -727,6 +746,11 @@ fn with_selection(base: &[Row], extra: &[Row], after: &str, state: SelectionMenu
     if !state.clips {
         return base.to_vec();
     }
+    insert_after(base, extra, after)
+}
+
+/// `base` with `extra` inserted after the row `after`.
+fn insert_after(base: &[Row], extra: &[Row], after: &str) -> Vec<Row> {
     let mut rows = Vec::with_capacity(base.len() + extra.len());
     for &row in base {
         rows.push(row);
@@ -914,6 +938,30 @@ mod tests {
         }
     }
 
+    // Spec: time-editing R22
+    #[test]
+    fn a_time_selections_menu_brings_the_time_commands_after_duplicate() {
+        let base = arrangement_time();
+        assert!(!base.iter().any(|i| i.row.starts_with("C-TIME-018")));
+        let with = arrangement_time_in(SelectionMenu {
+            time_commands: true,
+            ..SelectionMenu::default()
+        });
+        let labels: Vec<_> = with.iter().map(|i| i.label).collect();
+        let duplicate = labels.iter().position(|l| *l == "Duplicate").unwrap();
+        assert_eq!(
+            labels[duplicate + 2..duplicate + 7],
+            [
+                "Cut Time",
+                "Copy Time",
+                "Paste Time",
+                "Duplicate Time",
+                "Delete Time"
+            ]
+        );
+        assert!(with[duplicate + 1].is_separator() && with[duplicate + 7].is_separator());
+    }
+
     #[test]
     fn the_menus_follow_lives_rows_and_separators_in_order() {
         for (menu, heading) in [
@@ -991,6 +1039,7 @@ mod tests {
     fn a_selection_on_a_take_lane_adds_copy_selection_to_main_lane_after_paste_bounced_audio() {
         let on = SelectionMenu {
             clips: true,
+            time_commands: false,
             automation: false,
             take_lane: true,
         };

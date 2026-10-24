@@ -347,6 +347,54 @@ fn the_fade_keys_are_bound() {
     }
 }
 
+// Spec: time-editing R21. Insert Silence and the …Time commands have their
+// keys in the Arrangement (S-ARR-014 to S-ARR-019), which Shift with Cut,
+// Copy, Paste, Duplicate and Delete is (S-EDIT-015).
+#[test]
+fn the_time_command_keys_reach_their_commands_in_the_arrangement() {
+    let keymap = Keymap::live12();
+    let arrangement = [Context::Arrangement, Context::Global];
+    for (shortcut, command, key) in [
+        ("S-ARR-014", "arrangement.insert_silence", Key::I),
+        ("S-ARR-015", "arrangement.cut_time", Key::X),
+        ("S-ARR-016", "arrangement.copy_time", Key::C),
+        ("S-ARR-017", "arrangement.paste_time", Key::V),
+        ("S-ARR-018", "arrangement.duplicate_time", Key::D),
+        ("S-ARR-019", "arrangement.delete_time", Key::Delete),
+    ] {
+        let entry = keymap.entry_for(shortcut).unwrap();
+        assert_eq!(entry.status, Status::Bound, "{shortcut}");
+        assert_eq!(entry.context, "arrangement", "{shortcut}");
+        assert_eq!(entry.commands[0].id, command, "{shortcut}");
+        let (mac, other) = (
+            mods(true, false, false, shortcut != "S-ARR-014"),
+            mods(false, true, false, shortcut != "S-ARR-014"),
+        );
+        for (platform, held) in [(Platform::Mac, mac), (Platform::Other, other)] {
+            let hit = keymap.resolve(platform, key, held, &arrangement);
+            assert_eq!(
+                hit.map(|hit| hit.command.id.clone()).as_deref(),
+                Some(command),
+                "{shortcut} on {platform:?}"
+            );
+        }
+    }
+    match &keymap.entry_for("S-EDIT-015").unwrap().status {
+        Status::Widget(handler) => {
+            for command in [
+                "arrangement.cut_time",
+                "arrangement.copy_time",
+                "arrangement.paste_time",
+                "arrangement.duplicate_time",
+                "arrangement.delete_time",
+            ] {
+                assert!(handler.contains(command), "{handler}");
+            }
+        }
+        other => panic!("S-EDIT-015 is {other:?}"),
+    }
+}
+
 // Spec: comping R15, R28. Every S-COMP shortcut is bound: the take-lanes
 // context's keys run the comp commands, Cmd-D still duplicates time or clips
 // on a take lane, and the two with two directions are the Arrangement's own.

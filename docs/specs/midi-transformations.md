@@ -132,7 +132,7 @@ Every tool here is applied as [midi-tools.md](midi-tools.md) says: to the select
   | Dimension | a choice: Position, Pitch, Duration, Velocity | Position |
   | Shuffle | a switch | off |
   | Mirror | a switch | off |
-  | Rotation Steps | a whole number, −(n − 1) to n − 1 | 0 |
+  | Rotation Steps | a whole number, −(n − 1) to n − 1 (the parameter holds −255 to 255, as n depends on the notes; the display and the buttons keep it within n − 1, and a value past it turns as its remainder) | 0 |
   | Rotate on Grid | a switch, available with Position only | off |
 
 - **R24.** Recombine takes its input in the clip's order ([piano-roll.md](piano-roll.md) R3) and makes a list of each note's chosen value: its start for Position, its key for Pitch, its length for Duration, its velocity for Velocity. Shuffle puts the list in a random order; then Mirror reverses it; then Rotation Steps r moves each value r places later in the list, going round from the end to the start, and a negative r earlier. The first note then takes the list's first value, the second its second, and so on, each note keeping its other values. Each application with Shuffle on shuffles afresh ([midi-tools.md](midi-tools.md) R20). (S8; which way a positive rotation turns is Beatlayer's own)
@@ -254,19 +254,19 @@ Every tool here is applied as [midi-tools.md](midi-tools.md) says: to the select
 | R20 | `crates/shell/tests/midi_tools.rs`, `r20_r19_cmd_u_quantizes_with_the_tools_settings_which_are_saved_and_reloaded`; `crates/ui/tests/keymap.rs`, `quantize_and_quantize_settings_are_bound_in_the_note_editor` | unit, UI script |
 | R21 | `crates/shell/tests/midi_tools.rs`, `r21_quantize_settings_shows_the_transform_panel_with_quantize_chosen_without_an_undo_step`; `crates/ui/tests/midi_tools.rs`, `cmd_shift_u_and_the_edit_menu_show_the_transform_panel_with_quantize_chosen`; `crates/ui/tests/keymap.rs`, `quantize_and_quantize_settings_are_bound_in_the_sample_editor` | unit, UI script |
 | R22 | `crates/shell/tests/warping.rs`, `the_audio_clips_quantize_panel_gives_the_same_markers_as_quantize_audio`; `crates/ui/tests/audio_panel.rs`, `the_right_group_holds_audio_utilities_and_a_transform_panel_of_quantize` | unit, UI script |
-| R23 | to be written in WP-6.13 | |
-| R24 | to be written in WP-6.13 | |
-| R25 | to be written in WP-6.13 | |
-| R26 | to be written in WP-6.13 | |
-| R27 | to be written in WP-6.13 | |
-| R28 | to be written in WP-6.13 | |
-| R29 | to be written in WP-6.13 | |
-| R30 | to be written in WP-6.13 | |
-| R31 | to be written in WP-6.13 | |
-| R32 | to be written in WP-6.13 | |
-| R33 | to be written in WP-6.13 | |
-| R34 | to be written in WP-6.13 | |
-| R35 | to be written in WP-6.13 | |
+| R23 | `crates/midi-tools/tests/transformations_2.rs`, `r23_r26_r29_r31_r34_each_tools_parameters_have_their_ranges_and_defaults`, `r24_rotation_moves_values_later_and_mirror_reverses_them`; `crates/ui/tests/transformation_displays.rs`, `recombines_columns_rotate_by_dragging_and_the_step_buttons_by_one`; `crates/agent/tests/midi_tools.rs`, `each_transformation_applies_by_id_with_a_seed_as_one_undo_step` | unit, UI script, MCP script |
+| R24 | `crates/midi-tools/tests/transformations_2.rs`, `r24_rotation_moves_values_later_and_mirror_reverses_them`, `r24_each_dimension_moves_its_own_value_and_nothing_else`, `r24_shuffle_is_the_seeds_and_leaves_the_multiset_of_values_unchanged` | unit |
+| R25 | `crates/midi-tools/tests/transformations_2.rs`, `r25_rotate_on_grid_moves_starts_by_grid_steps_and_wraps_round_the_range` | unit |
+| R26 | `crates/midi-tools/tests/transformations_2.rs`, `r23_r26_r29_r31_r34_each_tools_parameters_have_their_ranges_and_defaults`, `r27_tenuto_keeps_lengths_and_staccato_halves_the_smallest_gap` | unit |
+| R27 | `crates/midi-tools/tests/transformations_2.rs`, `r27_legato_lasts_each_note_to_the_next_start_and_the_last_to_the_ranges_end`, `r27_tenuto_keeps_lengths_and_staccato_halves_the_smallest_gap`, `r27_a_note_span_shortens_keeps_its_envelopes_as_a_shortened_note_does` | unit |
+| R28 | `crates/midi-tools/tests/transformations_2.rs`, `r28_variation_shortens_or_lengthens_from_the_seed_and_no_start_ever_moves` (a property test over seeds: no start moves) | unit |
+| R29 | `crates/midi-tools/tests/transformations_2.rs`, `r23_r26_r29_r31_r34_each_tools_parameters_have_their_ranges_and_defaults`; `crates/ui/tests/transformation_displays.rs`, `strums_breakpoints_set_its_values_in_one_gesture_and_esc_puts_the_notes_back`, `dragging_strums_curve_sets_tension` | unit, UI script |
+| R30 | `crates/midi-tools/tests/transformations_2.rs`, `r30_a_chords_notes_move_along_the_strum_law_with_their_ends_in_place`, `r30_a_note_alone_at_its_start_does_not_move_and_chords_are_apart`, `r30_a_start_never_goes_before_zero_or_closer_than_a_tick_to_its_end`, `r30_strum_moves_only_chord_starts_and_never_past_an_end` (a property test over seeds); `crates/devices/tests/stack.rs` (the law Chord shares, unchanged) | unit |
+| R31 | `crates/midi-tools/tests/transformations_2.rs`, `r31_the_defaults_leave_the_notes_where_they_are`, `r31_at_least_one_breakpoint_stays_on`; `crates/ui/tests/transformation_displays.rs`, `time_warps_breakpoints_drag_to_set_time_and_speed_together`, `time_warp_keeps_one_breakpoint_on` | unit, UI script |
+| R32 | `crates/midi-tools/tests/transformations_2.rs`, `r32_a_constant_speed_scales_starts_and_the_lengths_stay_unless_ends_are_warped`, `r32_an_accelerando_draws_the_notes_closer_along_the_integral_of_the_inverse_speed`, `r32_preserve_time_range_keeps_every_start_in_the_range_and_in_order` (a property test over seeds), `r32_a_note_outside_the_range_takes_the_level_speed_beyond_the_breakpoints`, `r14_time_warp_scales_a_notes_envelopes_by_the_factor_it_scales_the_note` | unit |
+| R33 | `crates/midi-tools/tests/transformations_2.rs`, `r33_quantize_puts_warped_starts_and_ends_on_the_nearest_line` | unit |
+| R34 | `crates/midi-tools/tests/transformations_2.rs`, `r34_an_envelope_has_two_to_thirty_two_breakpoints_from_the_start_to_the_end`; `crates/ui/tests/transformation_displays.rs`, `velocity_shapers_envelope_takes_clicks_to_add_and_drags_to_move` | unit, UI script |
+| R35 | `crates/midi-tools/tests/transformations_2.rs`, `r35_the_default_envelope_ramps_from_the_minimum_to_the_maximum`, `r35_loop_repeats_the_envelope_and_rotate_shifts_it_by_steps_of_the_division`, `r35_a_shaped_envelope_is_read_along_straight_lines_and_stays_within_the_range` (a property test over seeds: velocities stay within Minimum and Maximum) | unit |
 | R36 | to be written in WP-6.13b | |
 | R37 | to be written in WP-6.13b | |
 | R38 | to be written in WP-6.13b | |
@@ -274,4 +274,4 @@ Every tool here is applied as [midi-tools.md](midi-tools.md) says: to the select
 | R40 | to be written in WP-6.13b | |
 | R41 | to be written in WP-6.13b | |
 | R42 | to be written in WP-6.13b | |
-| R43 | Chop's toggles, WP-6.12's: `crates/ui/tests/midi_tools.rs`, `chops_pattern_and_emphasis_toggles_each_click_a_set_and_gaps_shows_a_dash`; `crates/shell/tests/midi_tools.rs`, `r8_r43_chops_gaps_write_its_pattern_and_a_toggle_click_is_a_set`. The other displays: to be written in WP-6.13 and WP-6.13b | UI script, unit |
+| R43 | Chop's toggles, WP-6.12's: `crates/ui/tests/midi_tools.rs`, `chops_pattern_and_emphasis_toggles_each_click_a_set_and_gaps_shows_a_dash`; `crates/shell/tests/midi_tools.rs`, `r8_r43_chops_gaps_write_its_pattern_and_a_toggle_click_is_a_set`. Recombine, Strum, Time Warp and Velocity Shaper, WP-6.13's: `crates/ui/tests/transformation_displays.rs`, `recombines_columns_rotate_by_dragging_and_the_step_buttons_by_one`, `strums_breakpoints_set_its_values_in_one_gesture_and_esc_puts_the_notes_back`, `dragging_strums_curve_sets_tension`, `time_warps_breakpoints_drag_to_set_time_and_speed_together`, `velocity_shapers_envelope_takes_clicks_to_add_and_drags_to_move`. The other displays: to be written in WP-6.13b | UI script, unit |

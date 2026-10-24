@@ -858,3 +858,78 @@ fn switching_mpe_mode_while_playing_changes_what_a_plugin_gets() {
         "and none after"
     );
 }
+
+// Spec: mpe R17. A note held when MPE Mode is switched on, for a plug-in that
+// gets MPE through its MIDI mapping, is ended: the layout knows only the
+// notes it laid out.
+#[test]
+fn a_note_held_while_mpe_mode_goes_on_is_ended() {
+    let _ = std::fs::remove_file(log_path(Format::Vst3));
+    // SAFETY: the plug-in reads these when it is made and activated, and
+    // this test runs in a process of its own.
+    unsafe {
+        std::env::set_var(bl_test_vst3::LOG_VAR, log_path(Format::Vst3));
+        std::env::set_var(bl_test_vst3::MAPPING_VAR, "1");
+    }
+    let host = Vst3Host::new();
+    host.load(vst3_bundle()).expect("the test plug-in loads");
+    let mut registry = testing::registry(&Arc::new(Probe::default()));
+    registry.add(host.factory());
+    let mut offline = Offline::new(EngineConfig::new(RATE, 128), registry);
+    let mut editor = Editor::new();
+    let track = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: track,
+            kind: TrackKind::Midi,
+            name: String::new(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    let id = editor.new_id();
+    let mut plugin = vst3_device_with_role(1, &[], DeviceRole::Instrument);
+    plugin.id = id;
+    editor
+        .apply(Command::InsertDevice {
+            track,
+            index: 0,
+            device: plugin,
+        })
+        .unwrap();
+    let clip = editor.new_id();
+    editor
+        .apply(Command::CreateClip {
+            track,
+            clip: Clip::new(
+                clip,
+                Ticks::ZERO,
+                BEAT * 4,
+                ClipData::Midi(MidiData::new([Note::new(62, Ticks::ZERO, BEAT * 4, 100)])),
+            ),
+        })
+        .unwrap();
+    offline.sync(editor.document());
+    offline.sender().transport(TransportCommand::Play);
+    offline.render(BEAT_FRAMES as u64, |_| {});
+    editor
+        .apply(Command::SetPluginMpeMode {
+            device: id,
+            on: true,
+        })
+        .unwrap();
+    offline.sync(editor.document());
+    offline.render(BEAT_FRAMES as u64, |_| {});
+    let log = read_log(Format::Vst3);
+    let ons: Vec<_> = log.iter().filter(|l| l.what == "on").collect();
+    let offs: Vec<_> = log.iter().filter(|l| l.what == "off").collect();
+    assert_eq!(ons.len(), 1, "the note started once, as a plain note");
+    assert_eq!(ons[0].channel, 0);
+    assert_eq!(offs.len(), 1, "and was ended when MPE Mode went on");
+    assert_eq!((offs[0].channel, offs[0].key), (0, 62));
+    assert!(
+        (offs[0].frame - BEAT_FRAMES).abs() <= 128,
+        "{}",
+        offs[0].frame
+    );
+}

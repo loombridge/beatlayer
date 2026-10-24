@@ -288,11 +288,15 @@ fn apply_mpe(
     mpe: &mut PluginMpe,
     layout: &mut MpeLayout,
     input: &mut InputList,
+    midi_notes: bool,
 ) {
     let Some(new) = pending.take() else {
         return;
     };
-    if mpe.on != new.on {
+    // A note port that takes CLAP's own events hears the same notes either
+    // way; one that takes MIDI has the notes it started the other way
+    // stopped.
+    if mpe.on != new.on && midi_notes {
         layout.release_all(0, &mut |offset, message| input.midi(offset, message));
         input.choke_all();
     }
@@ -431,6 +435,7 @@ impl Node for ClapNode {
             &mut self.mpe,
             &mut self.layout,
             &mut self.input,
+            midi_notes,
         );
         if self.mpe.on && midi_notes {
             let input = &mut self.input;

@@ -25,7 +25,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicU64, Ordering::Relaxed};
 
 use bl_core::midi::MidiMessage;
-use bl_engine::mpe_layout::MpeLayout;
+use bl_engine::mpe_layout::{MpeLayout, PlainNotes};
 use bl_engine::{
     AutomationList, Block, Node, NodeConfig, NodeData, NodeEvent, NoteEvent, NoteExpression,
     NoteKind, ParamValue, PluginMpeData,
@@ -266,6 +266,8 @@ pub struct AuNode {
     /// MPE MIDI laid out for the unit's MIDI block (R17), made with the
     /// node.
     layout: MpeLayout,
+    /// The notes it was given as plain notes, which MPE Mode turned on ends.
+    plain: PlainNotes,
 }
 
 impl AuNode {
@@ -290,6 +292,7 @@ impl AuNode {
             mpe: PluginMpe::default(),
             pending_mpe: None,
             layout: MpeLayout::new(PluginMpe::default().settings),
+            plain: PlainNotes::default(),
         };
         let ends = HostEnds {
             to_node,
@@ -389,7 +392,12 @@ impl Node for AuNode {
             &status,
             processor,
             list,
-            (&mut self.pending_mpe, &mut self.mpe, &mut self.layout),
+            (
+                &mut self.pending_mpe,
+                &mut self.mpe,
+                &mut self.layout,
+                &mut self.plain,
+            ),
         );
         self.pending.clear();
 
@@ -495,7 +503,12 @@ fn collect(
     status: &Status,
     processor: &mut Processor,
     list: Option<&AutomationList>,
-    (pending_mpe, mpe, layout): (&mut Option<PluginMpe>, &mut PluginMpe, &mut MpeLayout),
+    (pending_mpe, mpe, layout, plain): (
+        &mut Option<PluginMpe>,
+        &mut PluginMpe,
+        &mut MpeLayout,
+        &mut PlainNotes,
+    ),
 ) {
     events.clear();
     let capacity = events.capacity();
@@ -536,6 +549,7 @@ fn collect(
         };
         if mpe.on != new.on {
             layout.release_all(0, &mut sink);
+            plain.release_all(0, &mut sink);
         }
         layout.configure(new.settings, &mut sink);
         *mpe = new;
@@ -567,7 +581,10 @@ fn collect(
                     }
                 }
                 NoteKind::Expression { .. } => {}
-                _ => push(events, note.offset, In::Note(*note)),
+                _ => {
+                    plain.track(note);
+                    push(events, note.offset, In::Note(*note));
+                }
             }
         }
     }

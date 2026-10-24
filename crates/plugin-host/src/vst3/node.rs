@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering::Relaxed};
 
 use bl_core::midi::MidiMessage;
 use bl_core::time::TICKS_PER_QUARTER;
-use bl_engine::mpe_layout::MpeLayout;
+use bl_engine::mpe_layout::{MpeLayout, PlainNotes};
 use bl_engine::{
     AutomationList, Block, Node, NodeData, NodeEvent, NoteEvent, NoteExpression, NoteKind,
     ParamValue, PluginMpeData,
@@ -616,6 +616,9 @@ pub struct Vst3Node {
     /// MPE MIDI laid out for a controller without note expression (R17),
     /// made with the node.
     layout: MpeLayout,
+    /// The notes it was given as plain notes, which MPE MIDI laid out through
+    /// the MIDI mapping takes over from.
+    plain: PlainNotes,
     /// The notes the plug-in sent: ID, channel, key, in a ring, so its note
     /// expressions name them (R21).
     sent: [(i32, u8, u8); SENT_NOTES],
@@ -671,6 +674,7 @@ impl Vst3Node {
             mpe: PluginMpe::default(),
             pending_mpe: None,
             layout: MpeLayout::new(PluginMpe::default().settings),
+            plain: PlainNotes::default(),
             sent: [(-1, 0, 0); SENT_NOTES],
             sent_next: 0,
         };
@@ -990,9 +994,9 @@ impl Node for Vst3Node {
         take_mpe(
             &mut self.pending_mpe,
             &mut self.mpe,
-            &mut self.layout,
+            (&mut self.layout, &mut self.plain),
             (&self.events_in, &self.incoming),
-            map,
+            (map, !expressions.controller),
         );
         if self.mpe.on && !expressions.controller {
             // Spec: vst3-hosting R20. A controller without note expression
@@ -1016,6 +1020,7 @@ impl Node for Vst3Node {
                         self.incoming.push(id, offset, value);
                     }
                 } else {
+                    self.plain.track(note);
                     self.events_in.push_note(note, self.mpe.on, &expressions);
                 }
             }
@@ -1149,9 +1154,9 @@ impl Node for Vst3Node {
 fn take_mpe(
     pending: &mut Option<PluginMpe>,
     mpe: &mut PluginMpe,
-    layout: &mut MpeLayout,
+    (layout, plain): (&mut MpeLayout, &mut PlainNotes),
     (events, incoming): (&ComWrapper<HostEvents>, &ComWrapper<HostParams>),
-    map: &[Option<u32>],
+    (map, through_mapping): (&[Option<u32>], bool),
 ) {
     let Some(new) = pending.take() else {
         return;
@@ -1161,6 +1166,10 @@ fn take_mpe(
     };
     if mpe.on != new.on {
         layout.release_all(0, &mut sink);
+        // The layout knows none of the notes given as plain ones.
+        if new.on && through_mapping {
+            plain.release_all(0, &mut sink);
+        }
     }
     layout.configure(new.settings, &mut sink);
     *mpe = new;

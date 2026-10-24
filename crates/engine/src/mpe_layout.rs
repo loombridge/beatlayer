@@ -15,11 +15,6 @@ use bl_model::{MpeMode, MpeSettings, MpeZone};
 
 use crate::node::{NoteEvent, NoteExpression, NoteKind};
 
-/// The most messages [`MpeLayout::setup`] sends: a configuration message and
-/// a bend sensitivity for each of 15 member channels, five or six messages
-/// each, with room to spare.
-pub const SETUP_MESSAGES: usize = 96;
-
 /// The per-note bend range every member channel is set to, in semitones
 /// (the MPE spec, R17).
 pub const BEND_RANGE: u8 = 48;
@@ -236,9 +231,9 @@ impl MpeLayout {
         free.or(oldest).unwrap_or(usize::from(self.member(0)))
     }
 
-    /// Sends `value` on `channel` unless the channel holds it already.
-    /// `rest` is what a note without a value of its own leaves the channel
-    /// at, sent only if the channel was moved off it.
+    /// Sends `value` on channel `c` unless the channel holds it already; with
+    /// none, puts the channel back at rest (the bend centred, the slide and
+    /// pressure 0) if it was moved off.
     fn put(
         &mut self,
         offset: u32,
@@ -400,6 +395,39 @@ impl MpeLayout {
     #[must_use]
     pub fn is_holding(&self) -> bool {
         self.channels.iter().any(|channel| channel.held.is_some())
+    }
+}
+
+/// The notes a node was given as plain notes, with MPE Mode off, so that
+/// switching MPE Mode on can end them: a layout knows only its own.
+#[derive(Clone, Debug, Default)]
+pub struct PlainNotes {
+    /// Which keys are held, one bit each, per channel.
+    held: [u128; 16],
+}
+
+impl PlainNotes {
+    /// Follows `note`: a note-on holds its key, a note-off or choke lets it
+    /// go.
+    pub fn track(&mut self, note: &NoteEvent) {
+        let bit = 1u128 << (note.key & 0x7F);
+        let held = &mut self.held[usize::from(note.channel & 0x0F)];
+        match note.kind {
+            NoteKind::On => *held |= bit,
+            NoteKind::Off | NoteKind::Choke => *held &= !bit,
+            _ => {}
+        }
+    }
+
+    /// Ends every note held, at `offset`.
+    pub fn release_all(&mut self, offset: u32, sink: &mut impl FnMut(u32, MidiMessage)) {
+        for (channel, held) in self.held.iter_mut().enumerate() {
+            while *held != 0 {
+                let key = held.trailing_zeros() as u8;
+                *held &= *held - 1;
+                sink(offset, MidiMessage::note_off(channel as u8, key));
+            }
+        }
     }
 }
 
@@ -631,6 +659,23 @@ mod tests {
         );
         // Its notes take the range's channels.
         assert_eq!(lay(&mut multi, &[on(0, 60, 1)]), [(0, vec![0x92, 60, 100])]);
+    }
+
+    // Spec: mpe R17
+    #[test]
+    fn plain_notes_held_end_when_the_layout_takes_over() {
+        let mut plain = PlainNotes::default();
+        let mut note = on(0, 60, 1);
+        note.channel = 3;
+        plain.track(&note);
+        plain.track(&on(0, 64, 2));
+        plain.track(&off(5, 64, 2));
+        let mut sent = Vec::new();
+        plain.release_all(7, &mut |offset, message: MidiMessage| {
+            sent.push((offset, message.bytes().to_vec()));
+        });
+        assert_eq!(sent, [(7, vec![0x83, 60, 64])]);
+        plain.release_all(7, &mut |_, _| panic!("nothing is held now"));
     }
 
     // Spec: mpe R17

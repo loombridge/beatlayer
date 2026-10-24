@@ -1,0 +1,249 @@
+//! Commands in this area that have no key and no menu item, and how each is reached.
+
+use crate::accessibility::reachability::setups::*;
+use crate::accessibility::reachability::*;
+use egui::Key;
+
+pub(crate) fn entries() -> Vec<(&'static str, Path)> {
+    use Path::Exception;
+    use Reason::{Equivalent, Gap, LaterView, Query};
+    vec![
+        (
+            "transport.play",
+            main(nothing, control_bar, "Play", Key::Enter),
+        ),
+        (
+            "transport.stop",
+            main(nothing, control_bar, "Stop", Key::Enter),
+        ),
+        (
+            "transport.set_loop_enabled",
+            main(nothing, control_bar, "Arrangement Loop", Key::Enter),
+        ),
+        (
+            "transport.set_punch_in",
+            main(nothing, control_bar, "Punch-In", Key::Enter),
+        ),
+        (
+            "transport.set_punch_out",
+            main(nothing, control_bar, "Punch-Out", Key::Enter),
+        ),
+        (
+            "transport.set_metronome_count_in",
+            Exception(METRONOME_MENU),
+        ),
+        ("transport.set_metronome_sound", Exception(METRONOME_MENU)),
+        ("transport.set_metronome_rhythm", Exception(METRONOME_MENU)),
+        // The Control Bar's scale controls (scales R9, R12, R14): the
+        // switch changes the selected clips' scales, or the set's current
+        // scale when no clip is selected.
+        (
+            "song.set_scale",
+            main(nothing, control_bar, "Scale Mode", Key::Enter),
+        ),
+        // Tuning systems (WP-6.9): the browser's Tunings label and the
+        // Tuning section, which load, change and remove the tuning, come with
+        // WP-6.10; until then agents reach these.
+        ("tuning.load", Exception(TUNING_SECTION)),
+        ("tuning.remove", Exception(TUNING_SECTION)),
+        ("tuning.set", Exception(TUNING_SECTION)),
+        ("tuning.set_range", Exception(TUNING_SECTION)),
+        ("tuning.set_reference", Exception(TUNING_SECTION)),
+        ("tuning.state", Exception(Query)),
+        ("groove.add", Exception(GROOVE_POOL)),
+        ("groove.commit", Exception(GROOVE_POOL)),
+        ("groove.delete", Exception(GROOVE_POOL)),
+        ("groove.extract", Exception(GROOVE_POOL)),
+        ("groove.load", Exception(GROOVE_POOL)),
+        ("groove.pool", Exception(Query)),
+        ("groove.rename", Exception(GROOVE_POOL)),
+        ("groove.save", Exception(GROOVE_POOL)),
+        ("groove.set", Exception(GROOVE_POOL)),
+        ("groove.set_auto_load", Exception(GROOVE_POOL)),
+        ("groove.set_global_amount", Exception(GROOVE_POOL)),
+        ("groove.to_clip", Exception(GROOVE_POOL)),
+        ("transport.set_recording", Exception(RECORDING)),
+        ("transport.stop_recording", Exception(RECORDING)),
+        // Tempo breakpoints and time-signature markers (WP-2.20): the
+        // arrangement's tempo envelope and marker lane aren't drawn yet, so
+        // agents reach these through the agent API until they are.
+        (
+            "song.set_tempo_breakpoint",
+            Exception(LaterView("the arrangement's tempo envelope (WP-2.20)")),
+        ),
+        (
+            "song.move_tempo_breakpoint",
+            Exception(LaterView("the arrangement's tempo envelope (WP-2.20)")),
+        ),
+        (
+            "song.delete_tempo_breakpoint",
+            Exception(LaterView("the arrangement's tempo envelope (WP-2.20)")),
+        ),
+        (
+            "song.set_time_signature_change",
+            Exception(LaterView(
+                "the arrangement's time-signature marker lane (WP-2.20)",
+            )),
+        ),
+        (
+            "song.move_time_signature_change",
+            Exception(LaterView(
+                "the arrangement's time-signature marker lane (WP-2.20)",
+            )),
+        ),
+        (
+            "song.delete_time_signature_change",
+            Exception(LaterView(
+                "the arrangement's time-signature marker lane (WP-2.20)",
+            )),
+        ),
+        // The Arrangement's locator buttons (time-editing R3, R4, R6).
+        (
+            "locator.add",
+            main(nothing, arrangement_view, "Set Locator", Key::Enter),
+        ),
+        (
+            "locator.delete",
+            main(a_locator, arrangement_view, "Delete Locator", Key::Enter),
+        ),
+        // The jumps between the locators need the audio engine, so the
+        // buttons that run them are named instead (time-editing R6, R13).
+        (
+            "locator.jump",
+            Exception(Equivalent(
+                "clicking a locator jumps to it, and the locators are in the Arrangement's Tab \
+                 order, where Enter jumps to the one reached (the time editing spec, R5 and R12)",
+            )),
+        ),
+        (
+            "locator.jump_previous",
+            Exception(Equivalent(
+                "the Previous Locator button, which the keyboard reaches with Tab; the jump \
+                 needs the audio engine (the time editing spec, R6 and R13)",
+            )),
+        ),
+        (
+            "locator.jump_next",
+            Exception(Equivalent(
+                "the Next Locator button, which the keyboard reaches with Tab; the jump needs \
+                 the audio engine (the time editing spec, R6 and R13)",
+            )),
+        ),
+        (
+            "locator.select",
+            Exception(Equivalent(
+                "clicking a locator selects it, and Tab reaches the locators in the \
+                 Arrangement's Tab order (the time editing spec, R5 and R12)",
+            )),
+        ),
+        (
+            "locator.move",
+            Exception(Equivalent(
+                "the arrow keys move the selected locators one grid step, and dragging one \
+                 moves it (the time editing spec, R7)",
+            )),
+        ),
+        (
+            "locator.loop_to_next",
+            Exception(Equivalent(
+                "a locator's context menu, which the pointer opens (the time editing spec, R9)",
+            )),
+        ),
+        (
+            "song.set_start_time",
+            Exception(Equivalent(
+                "a locator's and the loop brace's context menus, which the pointer open (the \
+                 time editing spec, R10)",
+            )),
+        ),
+        (
+            "locator.rename",
+            Exception(Equivalent(
+                "Cmd-R and Edit ▸ Rename while a locator is selected, which the Arrangement's \
+                 keyboard runs directly (the time editing spec, R8)",
+            )),
+        ),
+        (
+            "locator.set_info_text",
+            Exception(Gap(
+                "the user's own info text has no person's path until WP-6.58 (T276) builds Edit \
+                 Info Text",
+            )),
+        ),
+        // The document's own locator commands (the time editing spec, R1 to
+        // R13): the shell's locator.* commands run them, and agents reach
+        // them through the agent API.
+        (
+            "song.add_locator",
+            Exception(Equivalent(
+                "the shell's locator.add, which the Set Locator button, Create ▸ Add Locator and \
+                 a click in the scrub area run (the time editing spec, R3 and R13)",
+            )),
+        ),
+        (
+            "song.delete_locator",
+            Exception(Equivalent(
+                "the shell's locator.delete, which the Delete Locator button and the Delete key \
+                 run (the time editing spec, R4 and R13)",
+            )),
+        ),
+        (
+            "song.insert_time",
+            Exception(Equivalent(
+                "arrangement.insert_silence, which Cmd-I and Create ▸ Insert Silence run on the \
+                 time selection (the time editing spec, R17 and R24)",
+            )),
+        ),
+        (
+            "song.delete_time",
+            Exception(Equivalent(
+                "arrangement.delete_time, which Cmd-Shift-Delete and Edit ▸ Delete Time run on \
+                 the time selection (the time editing spec, R15 and R24)",
+            )),
+        ),
+        (
+            "song.move_locator",
+            Exception(Equivalent(
+                "the shell's locator.move, which dragging a locator and the arrow keys run (the \
+                 time editing spec, R7 and R13)",
+            )),
+        ),
+        (
+            "song.rename_locator",
+            Exception(Equivalent(
+                "the shell's locator.rename, which Cmd-R and Edit ▸ Rename run (the time editing \
+                 spec, R8 and R13)",
+            )),
+        ),
+        (
+            "song.set_locator_info_text",
+            Exception(Equivalent(
+                "the shell's locator.set_info_text, which waits on the same gap (the time \
+                 editing spec, R8 and R13)",
+            )),
+        ),
+        (
+            "song.loop_to_next_locator",
+            Exception(Equivalent(
+                "the shell's locator.loop_to_next, which a locator's context menu runs (the time \
+                 editing spec, R9 and R13)",
+            )),
+        ),
+        (
+            "song.set_start",
+            Exception(Equivalent(
+                "the shell's song.set_start_time, which a locator's and the loop brace's context \
+                 menus run (the time editing spec, R10 and R13)",
+            )),
+        ),
+        ("transport.state", Exception(Query)),
+        ("song.scales", Exception(Query)),
+        (
+            "song.unfollow_tempo_automation",
+            Exception(Equivalent(
+                "the tempo field's context menu (the Context Menu key or \
+                 Shift-F10 with the field focused)",
+            )),
+        ),
+    ]
+}

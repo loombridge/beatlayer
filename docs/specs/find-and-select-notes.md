@@ -47,7 +47,7 @@ This spec covers the filter bar, the eight filters, and Invert Selection. It lea
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1 | `crates/ui/tests/clip_view.rs`, `the_magnifier_and_cmd_shift_f_show_the_bar_above_the_ruler`; `crates/ui/tests/keymap.rs`, `the_note_filters_and_invert_selection_are_bound_in_the_note_editor`; `crates/shell/tests/note_filters.rs`, `the_bar_is_view_state_and_agents_read_the_filters_back` | UI script, unit |
+| R1 | `crates/ui/tests/clip_view.rs`, `the_magnifier_and_cmd_shift_f_show_the_bar_above_the_ruler`; `crates/ui/tests/keymap/editors.rs`, `the_note_filters_and_invert_selection_are_bound_in_the_note_editor`; `crates/shell/tests/note_filters.rs`, `the_bar_is_view_state_and_agents_read_the_filters_back` | UI script, unit |
 | R2 | `crates/ui/tests/clip_view.rs`, `the_magnifier_and_cmd_shift_f_show_the_bar_above_the_ruler`, `a_control_selects_live_and_a_click_switches_the_filters_off`; `crates/shell/tests/note_filters.rs`, `choosing_a_filter_keeps_the_selection_and_off_keeps_the_settings` | UI script, unit |
 | R3 | `crates/shell/tests/note_filters.rs`, `the_time_selection_follows_the_filters_and_nothing_is_an_undo_step`, `choosing_a_filter_keeps_the_selection_and_off_keeps_the_settings`, `filters_combine_and_each_keeps_its_own_invert`; `crates/ui/tests/clip_view.rs`, `a_control_selects_live_and_a_click_switches_the_filters_off` | unit, UI script |
 | R4 | `crates/shell/tests/note_filters.rs`, `invert_holds_back_exactly_what_each_filter_lets_through`, `pitch_lets_through_a_pitch_class_in_every_octave` | unit |

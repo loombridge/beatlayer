@@ -671,6 +671,15 @@ pub(crate) fn midi_tools_shown(h: &mut Harness) {
         .unwrap();
 }
 
+/// A MIDI clip in the first Session slot, shown in the Clip View on its MPE
+/// tab (WP-6.18).
+pub(crate) fn mpe_tab_shown(h: &mut Harness) {
+    midi_tools_shown(h);
+    h.shell
+        .run("view.clip_tab", json!({ "tab": "mpe" }))
+        .unwrap();
+}
+
 /// The same, with the shown tool's degrees off their default, so Reset can
 /// be pressed.
 pub(crate) fn midi_tools_changed(h: &mut Harness) {

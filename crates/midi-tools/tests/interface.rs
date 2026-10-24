@@ -63,7 +63,14 @@ fn r3_the_registry_lists_each_kind_apart() {
         .collect();
     assert_eq!(
         transformations,
-        ["arpeggiate", "chop", "connect", "ornament", "quantize", "test_transpose"],
+        [
+            "arpeggiate",
+            "chop",
+            "connect",
+            "ornament",
+            "quantize",
+            "test_transpose"
+        ],
         "the native tools in the selector's order, then the test tool"
     );
     assert_eq!(generators, ["test_fill"]);

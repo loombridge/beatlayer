@@ -15,6 +15,7 @@
 use bl_midi_tools::{DIVISION_NAMES, ParamKind, ParamSpec, ParamValue, ToolDescriptor, ToolKind};
 use bl_model::{ClipId, ParamDescriptor, ParamId, ParamUnit};
 use bl_shell::midi_tool_commands::Panel;
+use bl_shell::midi_tools::ToolView;
 use bl_shell::{Area, GesturePhase, Invocation, Shell};
 use egui::accesskit::{self, Role};
 use egui::{Align2, Id, Key, Rect, Sense, Ui, Vec2, WidgetInfo, WidgetType, pos2, vec2};
@@ -209,16 +210,6 @@ pub fn show(
     }
 }
 
-/// An audio clip's Transform panel: empty until Quantize arrives (WP-6.12).
-pub fn show_audio_transform(ui: &mut Ui, theme: &Theme, rect: Rect) {
-    ui.painter().rect_filled(rect, 0.0, theme.colors.panel.0);
-    let group = ui.interact(rect, group_id(Panel::Transform), Sense::hover());
-    ui.ctx().accesskit_node_builder(group.id, |node| {
-        node.set_role(Role::Group);
-        node.set_label(panel_name(Panel::Transform, true).to_owned());
-    });
-}
-
 /// A button drawn in place: returns whether it was clicked.
 fn button(ui: &mut Ui, theme: &Theme, salt: &str, rect: Rect, text: &str, enabled: bool) -> bool {
     let id = Id::new(("tool-button", salt));
@@ -313,21 +304,7 @@ fn tools(
     };
     let view = tools.view_of(tool);
     let descriptor = view.descriptor;
-    for (index, spec) in descriptor.parameters.iter().enumerate() {
-        let Some(value) = view.values.get(index) else {
-            continue;
-        };
-        ui.painter().with_clip_rect(rect).text(
-            pos2(left, y + CONTROL.y / 2.0),
-            Align2::LEFT_CENTER,
-            &spec.name,
-            theme.small_font(),
-            theme.colors.text_dim.0,
-        );
-        let at = Rect::from_min_size(pos2(rect.left() + CONTROLS_AT, y), CONTROL);
-        control(ui, theme, clip, descriptor, spec, value, at, events);
-        y += ROW;
-    }
+    y = parameters(ui, theme, rect, y, clip, &view, None, events);
     y += 4.0;
     let name = |what: &str| format!("{} {what}", descriptor.name);
     // Auto (R2).
@@ -389,6 +366,222 @@ fn tools(
         events.push(UiEvent::Invoke(Invocation::new(
             bl_shell::midi_tool_commands::RESET,
             json!({ "clip": clip, "tool": descriptor.id }),
+        )));
+    }
+}
+
+/// The rows of a tool's parameters, from `y` down, each with its name and
+/// control; `only` names the parameters to draw, all where it is `None`.
+/// Returns where the next row goes.
+#[expect(clippy::too_many_arguments, reason = "a panel's whole context")]
+fn parameters(
+    ui: &mut Ui,
+    theme: &Theme,
+    rect: Rect,
+    mut y: f32,
+    clip: ClipId,
+    view: &ToolView<'_>,
+    only: Option<&[&str]>,
+    events: &mut Vec<UiEvent>,
+) -> f32 {
+    let descriptor = view.descriptor;
+    let left = rect.left() + 6.0;
+    for (index, spec) in descriptor.parameters.iter().enumerate() {
+        let Some(value) = view.values.get(index) else {
+            continue;
+        };
+        if only.is_some_and(|only| !only.contains(&spec.id.as_str())) {
+            continue;
+        }
+        ui.painter().with_clip_rect(rect).text(
+            pos2(left, y + CONTROL.y / 2.0),
+            Align2::LEFT_CENTER,
+            &spec.name,
+            theme.small_font(),
+            theme.colors.text_dim.0,
+        );
+        // Chop's Pattern and Emphasis are rows of toggles (R43).
+        if descriptor.id == "chop" && matches!(value, ParamValue::Toggles(_)) {
+            y += CONTROL.y + 2.0;
+            toggles(ui, theme, rect, y, clip, view, index, events);
+            y += TOGGLE + 4.0;
+            continue;
+        }
+        let at = Rect::from_min_size(pos2(rect.left() + CONTROLS_AT, y), CONTROL);
+        let shown = chop_gaps_text(view, spec);
+        let enabled = available(descriptor, spec, &view.values);
+        control(
+            ui,
+            theme,
+            clip,
+            descriptor,
+            spec,
+            value,
+            Shown {
+                at,
+                text: shown,
+                enabled,
+            },
+            events,
+        );
+        y += ROW;
+    }
+    y
+}
+
+/// What a control is drawn with besides its value: where, a text standing
+/// for the value, and whether it can be used.
+struct Shown {
+    at: Rect,
+    text: Option<&'static str>,
+    enabled: bool,
+}
+
+/// Whether a parameter is available: Quantize's Triplets are not with
+/// Current Grid (the MIDI transformations spec, R18).
+fn available(tool: &ToolDescriptor, spec: &ParamSpec, values: &[ParamValue]) -> bool {
+    !(tool.id == "quantize"
+        && spec.id == "triplets"
+        && matches!(values.get(2), Some(ParamValue::Choice(0))))
+}
+
+/// Chop's Gaps shows a dash once a Pattern toggle has been clicked, until it
+/// is set again (R8).
+fn chop_gaps_text(view: &ToolView<'_>, spec: &ParamSpec) -> Option<&'static str> {
+    if view.descriptor.id != "chop" || spec.id != "gaps" {
+        return None;
+    }
+    let (
+        Some(ParamValue::Whole(parts)),
+        Some(ParamValue::Whole(gaps)),
+        Some(ParamValue::Toggles(pattern)),
+    ) = (view.values.first(), view.values.get(1), view.values.get(2))
+    else {
+        return None;
+    };
+    (!bl_midi_tools::pattern_follows_gaps(*gaps, *parts, pattern)).then_some("\u{2013}")
+}
+
+/// A pattern or emphasis toggle's size, and the step between them.
+const TOGGLE: f32 = 9.0;
+
+/// Chop's Pattern or Emphasis toggles (R8, R43): one for each of the first
+/// `min(Parts, 16)` elements, on for a part or an emphasis. A click is a
+/// `midi_tool.set` of the whole list. An element with Emphasis on keeps its
+/// Pattern state and its Pattern toggle is unavailable.
+#[expect(clippy::too_many_arguments, reason = "a control's whole context")]
+fn toggles(
+    ui: &mut Ui,
+    theme: &Theme,
+    rect: Rect,
+    y: f32,
+    clip: ClipId,
+    view: &ToolView<'_>,
+    index: usize,
+    events: &mut Vec<UiEvent>,
+) {
+    let descriptor = view.descriptor;
+    let spec = &descriptor.parameters[index];
+    let (Some(ParamValue::Whole(parts)), Some(ParamValue::Toggles(list))) =
+        (view.values.first(), view.values.get(index))
+    else {
+        return;
+    };
+    let emphasis = match view.values.get(3) {
+        Some(ParamValue::Toggles(emphasis)) if spec.id == "pattern" => emphasis.as_slice(),
+        _ => &[],
+    };
+    let shown = usize::try_from(*parts).unwrap_or(2).min(list.len());
+    let c = &theme.colors;
+    for at in 0..shown {
+        let box_ = Rect::from_min_size(
+            pos2(rect.left() + 6.0 + (TOGGLE + 1.0) * at as f32, y),
+            vec2(TOGGLE, TOGGLE),
+        );
+        let on = list[at];
+        let enabled = !emphasis.get(at).copied().unwrap_or(false);
+        let salt = format!("{}-{}-{at}", descriptor.id, spec.id);
+        let id = Id::new(("tool-toggle", salt.as_str()));
+        let response = ui.interact(
+            box_,
+            id,
+            if enabled {
+                Sense::click()
+            } else {
+                Sense::hover()
+            },
+        );
+        ui.painter().rect_filled(
+            box_,
+            theme.sizes.corner,
+            match (on, enabled) {
+                (true, true) => c.accent.0,
+                (true, false) => c.accent.0.gamma_multiply(0.4),
+                (false, true) => c.control.0,
+                (false, false) => c.control.0.gamma_multiply(0.55),
+            },
+        );
+        let name = format!("{} {}", spec.name, at + 1);
+        response.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, enabled, on, &name));
+        if enabled {
+            crate::focus::register(ui.ctx(), id, Area::Detail, None);
+        }
+        if ui.rect_contains_pointer(box_) {
+            control_info(ui, spec);
+        }
+        let pressed =
+            response.clicked() || (response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter)));
+        if enabled && pressed {
+            let mut next = list.clone();
+            next[at] = !on;
+            events.push(UiEvent::Invoke(set(clip, descriptor, spec, json!(next))));
+        }
+    }
+}
+
+/// An audio clip's Transform panel (the MIDI transformations spec, R22):
+/// Quantize's Grid, Triplets and Amount, and the apply button, which runs
+/// `clip.quantize_audio` with them. There is no Start, End or Auto.
+pub fn show_audio_transform(
+    ui: &mut Ui,
+    shell: &Shell,
+    theme: &Theme,
+    rect: Rect,
+    clip: ClipId,
+    events: &mut Vec<UiEvent>,
+) {
+    let group = ui.interact(rect, group_id(Panel::Transform), Sense::hover());
+    ui.ctx().accesskit_node_builder(group.id, |node| {
+        node.set_role(Role::Group);
+        node.set_label(panel_name(Panel::Transform, true).to_owned());
+    });
+    let Some(tool) = bl_midi_tools::Registry::native().find("quantize") else {
+        return;
+    };
+    let view = shell.clip_view().midi_tools().view_of(tool);
+    let body = Rect::from_min_max(pos2(rect.left(), rect.top() + SELECTOR + 4.0), rect.max);
+    let y = parameters(
+        ui,
+        theme,
+        body,
+        body.top(),
+        clip,
+        &view,
+        Some(&["grid", "triplets", "amount"]),
+        events,
+    ) + 4.0;
+    let half = (body.width() - 18.0) / 2.0;
+    if button(
+        ui,
+        theme,
+        "apply-audio-quantize",
+        Rect::from_min_size(pos2(body.left() + 6.0, y), vec2(half, CONTROL.y + 2.0)),
+        "Transform",
+        true,
+    ) {
+        events.push(UiEvent::Invoke(Invocation::new(
+            bl_shell::midi_tool_commands::APPLY,
+            json!({ "clip": clip, "tool": "quantize" }),
         )));
     }
 }
@@ -506,11 +699,35 @@ fn control(
     tool: &ToolDescriptor,
     spec: &ParamSpec,
     value: &ParamValue,
-    rect: Rect,
+    shown: Shown,
     events: &mut Vec<UiEvent>,
 ) {
+    let Shown {
+        at: rect,
+        text: shown_text,
+        enabled,
+    } = shown;
     let salt = format!("{}-{}", tool.id, spec.id);
     match (&spec.kind, value) {
+        (ParamKind::Switch, ParamValue::Switch(on)) if !enabled => {
+            // Unavailable: drawn dim and answering nothing.
+            let id = Id::new(("switch", salt.as_str()));
+            let response = ui.interact(rect, id, Sense::hover());
+            ui.painter().rect_filled(
+                rect,
+                theme.sizes.corner,
+                theme.colors.control.0.gamma_multiply(0.55),
+            );
+            ui.painter().text(
+                rect.center(),
+                Align2::CENTER_CENTER,
+                if *on { "On" } else { "Off" },
+                theme.font(),
+                theme.colors.pending.0,
+            );
+            let name = spec.name.clone();
+            response.widget_info(|| WidgetInfo::selected(WidgetType::Button, false, *on, &name));
+        }
         (ParamKind::Switch, ParamValue::Switch(on)) => {
             crate::focus::register(
                 ui.ctx(),
@@ -605,7 +822,7 @@ fn control(
                     spec,
                     &descriptor,
                     shown,
-                    rect,
+                    (rect, shown_text),
                     events,
                 );
             }
@@ -657,7 +874,7 @@ fn value_control(
     spec: &ParamSpec,
     descriptor: &ParamDescriptor,
     value: f64,
-    rect: Rect,
+    (rect, shown_text): (Rect, Option<&str>),
     events: &mut Vec<UiEvent>,
 ) {
     let id = Id::new(("tool-value", &tool.id, &spec.id));
@@ -786,8 +1003,9 @@ fn value_control(
         ),
     );
     painter.rect_filled(fill, theme.sizes.corner, c.accent.0.gamma_multiply(0.35));
-    let text = match &spec.unit {
-        Some(unit) if !matches!(unit.as_str(), "%" | "st") => {
+    let text = match (&spec.unit, shown_text) {
+        (_, Some(text)) => text.to_owned(),
+        (Some(unit), None) if !matches!(unit.as_str(), "%" | "st") => {
             format!("{} {unit}", descriptor.format(value))
         }
         _ => descriptor.format(value),

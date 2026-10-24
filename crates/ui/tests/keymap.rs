@@ -889,6 +889,47 @@ fn quantize_and_quantize_settings_are_bound_in_the_sample_editor() {
     assert_eq!(entry_002.status, Status::Bound);
 }
 
+// Spec: midi-transformations R21. Cmd+Shift+U (Ctrl+Shift+U on Windows;
+// S-NOTE-012) shows the Transform panel with Quantize chosen, in the note
+// editor, beside Cmd+U (S-NOTE-011), which quantises.
+#[test]
+fn quantize_and_quantize_settings_are_bound_in_the_note_editor() {
+    let keymap = Keymap::live12();
+    let contexts = [Context::NoteEditor, Context::Global];
+    for (platform, u_mods, shift_u_mods) in [
+        (
+            Platform::Mac,
+            mods(true, false, false, false),
+            mods(true, false, false, true),
+        ),
+        (
+            Platform::Other,
+            mods(false, true, false, false),
+            mods(false, true, false, true),
+        ),
+    ] {
+        let resolve = |modifiers| {
+            keymap
+                .resolve(platform, Key::U, modifiers, &contexts)
+                .map(|hit| hit.command.id.clone())
+        };
+        assert_eq!(
+            resolve(u_mods).as_deref(),
+            Some("note.quantize"),
+            "{platform:?}"
+        );
+        assert_eq!(
+            resolve(shift_u_mods).as_deref(),
+            Some("clip_view.quantize_settings"),
+            "{platform:?}"
+        );
+    }
+    assert_eq!(
+        keymap.entry_for("S-NOTE-012").unwrap().status,
+        Status::Bound
+    );
+}
+
 // Spec: find-and-select-notes R1, R13. Cmd+Shift+F (Ctrl+Shift+F on Windows;
 // S-NOTE-037) shows the note filters and Cmd+Shift+A (S-NOTE-034) inverts the
 // selection, in the note editor.

@@ -5307,7 +5307,7 @@ impl Shell {
                 || self.is_device_command(id)
                 || track_ids::handles(id)
                 || note_ids::handles(id)
-                || tool_ids::handles(id)
+                || (tool_ids::handles(id) && self.audio_apply(id, &args).is_none())
                 || midi_ids::handles(id)
                 || matches!(
                     id,
@@ -7152,7 +7152,12 @@ impl Shell {
                     self.editor.document(),
                     &self.clip_view,
                     &self.arrangement,
-                );
+                ) || self.audio_apply(id, args).is_some_and(|clip| {
+                    matches!(
+                        self.editor.document().clip(clip).map(|clip| &clip.data),
+                        Some(ClipData::Audio(audio)) if audio.warp
+                    )
+                });
             }
             // The whole-track copies (the track context menu spec, R3):
             // Cut, Copy and Duplicate work on the selected tracks, and
@@ -7582,6 +7587,22 @@ impl Shell {
         spec.args
             .as_ref()
             .is_some_and(|schema| bl_commands::validate(schema, &args).is_ok())
+    }
+
+    /// The audio clip `midi_tool.apply` is for, if it is for one.
+    fn audio_apply(&self, id: &str, args: &Value) -> Option<bl_model::ClipId> {
+        if id != tool_ids::APPLY {
+            return None;
+        }
+        let named = args
+            .get("clip")
+            .and_then(|clip| serde_json::from_value(clip.clone()).ok());
+        midi_tools::audio_clip(
+            self.editor.document(),
+            &self.clip_view,
+            &self.arrangement,
+            named,
+        )
     }
 
     /// The arguments a person's invocation implies: a new track's ID, name,
@@ -8975,6 +8996,15 @@ impl Shell {
                 self.preview_selected();
             }
             return result;
+        }
+        if let Some(clip) = self.audio_apply(id, &args) {
+            // Spec: midi-transformations R22. On an audio clip the Transform
+            // panel's apply button and Cmd+Enter quantise it with the
+            // panel's settings.
+            return self.run(
+                bl_shell_spec::warping::QUANTIZE_AUDIO,
+                json!({ "clip": clip }),
+            );
         }
         if tool_ids::handles(id) {
             // Spec: midi-tools R23. The MIDI Tools' panels, choices,

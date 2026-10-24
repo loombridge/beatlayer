@@ -109,7 +109,11 @@ impl MidiTool for Chop {
         let gaps = whole(after, 1);
         if gaps.abs() >= p {
             if changed.contains(&1) {
-                return Err(format!("`gaps` goes from {} to {} with {p} parts", 1 - p, p - 1));
+                return Err(format!(
+                    "`gaps` goes from {} to {} with {p} parts",
+                    1 - p,
+                    p - 1
+                ));
             }
             after[1] = ParamValue::Whole(gaps.clamp(1 - p, p - 1));
         }
@@ -134,7 +138,9 @@ impl MidiTool for Chop {
         let p = parts.min(TOGGLES);
         let (pattern, emphasis) = (toggles(values, 2), toggles(values, 3));
         if !pattern[..p].contains(&true) {
-            return Err(ToolError::Input("the pattern needs at least one part".to_owned()));
+            return Err(ToolError::Input(
+                "the pattern needs at least one part".to_owned(),
+            ));
         }
         let stretch = whole(values, 4);
         let variation = whole(values, 5);

@@ -3,7 +3,9 @@
 
 use bl_core::time::Ticks;
 
-use crate::descriptor::{ParamKind, ParamSpec, ParamValue, ToolDescriptor, ToolKind, division_ticks};
+use crate::descriptor::{
+    ParamKind, ParamSpec, ParamValue, ToolDescriptor, ToolKind, division_ticks,
+};
 use crate::input::{ToolInput, ToolNote, ToolOutput};
 use crate::random::Rng;
 use crate::registry::{MAX_NOTES, MidiTool, ToolError};
@@ -139,7 +141,9 @@ impl MidiTool for Arpeggiate {
                         } else if style == RANDOM_OTHER {
                             // Any held note but the step before's, while more than one is held.
                             let skip = last.and_then(|l| held.iter().position(|h| *h == l));
-                            let mut pick = rng.below((k - usize::from(skip.is_some() && k > 1)) as u32) as usize;
+                            let mut pick = rng
+                                .below((k - usize::from(skip.is_some() && k > 1)) as u32)
+                                as usize;
                             if skip.is_some_and(|s| k > 1 && pick >= s) {
                                 pick += 1;
                             }

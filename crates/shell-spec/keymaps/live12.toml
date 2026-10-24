@@ -1793,7 +1793,10 @@ trigger = "press"
 milestone = "M2"
 mac = ["Cmd+Shift+U"]
 win = ["Ctrl+Shift+U"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "clip_view.quantize_settings", contexts = ["note-editor"] },
+]
 
 [[shortcut]]
 id = "S-NOTE-013"

@@ -89,12 +89,20 @@ pub fn grid_ticks(grid: usize, triplets: bool, current: Ticks) -> Ticks {
 fn nearest(at: i64, step: i64, bar: i64) -> i64 {
     if step >= bar && step % bar == 0 {
         let start = at.div_euclid(step) * step;
-        return if at - start <= start + step - at { start } else { start + step };
+        return if at - start <= start + step - at {
+            start
+        } else {
+            start + step
+        };
     }
     let start = at.div_euclid(bar) * bar;
     let end = start + bar;
     let snapped = (start + ((at - start) as f64 / step as f64).round() as i64 * step).min(end);
-    if end - at < (at - snapped).abs() { end } else { snapped }
+    if end - at < (at - snapped).abs() {
+        end
+    } else {
+        snapped
+    }
 }
 
 /// The first grid line after `at`.
@@ -119,7 +127,9 @@ impl MidiTool for Quantize {
 
     fn run(&self, input: &ToolInput, values: &[ParamValue]) -> Result<ToolOutput, ToolError> {
         let (start, end, amount) = (switch(values, 0), switch(values, 1), whole(values, 4));
-        let step = grid_ticks(choice(values, 2), switch(values, 3), input.grid_step).0.max(1);
+        let step = grid_ticks(choice(values, 2), switch(values, 3), input.grid_step)
+            .0
+            .max(1);
         let bar = input.signature.bar_length().0.max(1);
         let notes = input
             .notes
@@ -127,7 +137,11 @@ impl MidiTool for Quantize {
             .map(|note| {
                 let mut note = note.clone();
                 if start {
-                    note.start = Ticks(toward(note.start.0, nearest(note.start.0, step, bar), amount));
+                    note.start = Ticks(toward(
+                        note.start.0,
+                        nearest(note.start.0, step, bar),
+                        amount,
+                    ));
                 }
                 if end {
                     let at = note.end().0;

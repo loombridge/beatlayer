@@ -215,7 +215,8 @@ impl ToolInput {
     /// Drum Rack's keys goes on round the list.
     #[must_use]
     pub fn stepped(&self, key: u8, degrees: i32) -> i16 {
-        let clamp = |key: i32| i16::try_from(key).unwrap_or(if key < 0 { i16::MIN } else { i16::MAX });
+        let clamp =
+            |key: i32| i16::try_from(key).unwrap_or(if key < 0 { i16::MIN } else { i16::MAX });
         if let Some(keys) = self.drum_keys.as_ref().filter(|keys| !keys.is_empty()) {
             let below = keys.iter().rposition(|k| *k <= key).unwrap_or(0);
             let len = keys.len() as i64;
@@ -223,7 +224,12 @@ impl ToolInput {
             return clamp(i32::from(key) + i32::from(keys[at]) - i32::from(keys[below]));
         }
         match &self.scale {
-            Some(scale) => clamp(bl_core::scale::move_off(scale.root, &scale.steps, key, degrees)),
+            Some(scale) => clamp(bl_core::scale::move_off(
+                scale.root,
+                &scale.steps,
+                key,
+                degrees,
+            )),
             None => clamp(i32::from(key) + degrees),
         }
     }
@@ -234,7 +240,10 @@ impl ToolInput {
     pub fn steps_between(&self, from: u8, to: u8) -> i32 {
         let index = |key: u8| -> i64 {
             if let Some(keys) = &self.drum_keys {
-                return keys.iter().rposition(|k| *k <= key).map_or(0, |at| at as i64);
+                return keys
+                    .iter()
+                    .rposition(|k| *k <= key)
+                    .map_or(0, |at| at as i64);
             }
             match &self.scale {
                 Some(scale) => {

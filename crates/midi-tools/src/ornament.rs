@@ -55,7 +55,11 @@ impl Ornament {
                     ParamValue::Choice(0),
                     "Whether every other grace note sits a step above the note, a step below it, or all sit at its pitch.",
                 ),
-                position("grace_notes_position", "Grace Notes Position", "grace notes"),
+                position(
+                    "grace_notes_position",
+                    "Grace Notes Position",
+                    "grace notes",
+                ),
                 ParamSpec::new(
                     "grace_notes_velocity",
                     "Grace Notes Velocity",
@@ -102,12 +106,20 @@ impl MidiTool for Ornament {
         for note in &input.notes {
             // R15: before the note, or over its start with the note moved later.
             let over = position > 0;
-            let room = if over { span.min(note.length.0 - 1) } else { span.min(note.start.0) };
+            let room = if over {
+                span.min(note.length.0 - 1)
+            } else {
+                span.min(note.start.0)
+            };
             if room <= 0 {
                 notes.push(note.clone());
                 continue;
             }
-            let from = if over { note.start.0 } else { note.start.0 - room };
+            let from = if over {
+                note.start.0
+            } else {
+                note.start.0 - room
+            };
             let key = u8::try_from(note.key.clamp(0, 127)).unwrap_or(0);
             let velocity = u8::try_from(percent(i64::from(note.velocity), velocity).clamp(1, 127))
                 .unwrap_or(1);
@@ -122,7 +134,12 @@ impl MidiTool for Ornament {
                 let mut ornament = if over {
                     note.part(Ticks(a - note.start.0), Ticks(b - note.start.0))
                 } else {
-                    ToolNote { pitch: Vec::new(), slide: Vec::new(), pressure: Vec::new(), ..note.clone() }
+                    ToolNote {
+                        pitch: Vec::new(),
+                        slide: Vec::new(),
+                        pressure: Vec::new(),
+                        ..note.clone()
+                    }
                 };
                 ornament.start = Ticks(a);
                 ornament.length = Ticks(b - a);
@@ -135,7 +152,11 @@ impl MidiTool for Ornament {
                 }
                 notes.push(ornament);
             }
-            notes.push(if over { note.part(Ticks(room), note.length) } else { note.clone() });
+            notes.push(if over {
+                note.part(Ticks(room), note.length)
+            } else {
+                note.clone()
+            });
         }
         Ok(ToolOutput { notes })
     }

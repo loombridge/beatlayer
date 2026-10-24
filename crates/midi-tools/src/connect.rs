@@ -3,7 +3,9 @@
 
 use bl_core::time::Ticks;
 
-use crate::descriptor::{ParamKind, ParamSpec, ParamValue, ToolDescriptor, ToolKind, division_ticks};
+use crate::descriptor::{
+    ParamKind, ParamSpec, ParamValue, ToolDescriptor, ToolKind, division_ticks,
+};
 use crate::input::{ToolInput, ToolNote, ToolOutput};
 use crate::random::Rng;
 use crate::registry::{MAX_NOTES, MidiTool, ToolError};

@@ -4,10 +4,10 @@
 use std::fmt;
 use std::sync::OnceLock;
 
-use crate::descriptor::{ParamValue, ToolDescriptor, ToolKind};
 use crate::arpeggiate::Arpeggiate;
 use crate::chop::Chop;
 use crate::connect::Connect;
+use crate::descriptor::{ParamValue, ToolDescriptor, ToolKind};
 use crate::input::{ToolInput, ToolOutput, fold_octaves};
 use crate::ornament::Ornament;
 use crate::quantize::Quantize;
@@ -142,7 +142,6 @@ fn native_tools() -> Vec<Box<dyn MidiTool>> {
         Box::new(Quantize::new()),
     ]
 }
-
 
 /// The tools, in the order the selectors list them.
 pub struct Registry {

@@ -114,6 +114,7 @@ fn a_chain_edit_makes_only_the_nodes_it_adds() {
             params: [(GAIN_PARAM, 0.25)].into_iter().collect(),
             name: "Quiet".to_owned(),
             shape: None,
+            mpe: None,
         },
     ] {
         let synced = rig.apply(command.clone());

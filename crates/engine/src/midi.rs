@@ -32,11 +32,12 @@ use std::time::{Duration, Instant};
 
 use bl_core::midi::{MidiInputEvent, MidiMessage, MidiOutputEvent, MidiSource, PortId};
 use bl_core::time::SampleRate;
-use bl_model::{DeviceId, Document, Expression, Input, MidiTo, TrackId, TrackKind};
+use bl_model::{DeviceId, Document, Expression, Input, MidiTo, MpeSettings, TrackId, TrackKind};
 use rtrb::{Consumer, Producer};
 
 use crate::disjoint::Shared;
 use crate::mpe::{MpeReader, MpeRole};
+use crate::mpe_layout::MpeLayout;
 use crate::node::{NoteBuffer, NoteEvent, NoteExpression, NoteKind};
 use crate::program::Task;
 
@@ -228,6 +229,10 @@ struct OutRoute {
     compensation: u32,
     /// Which keys were sent a note-on and no note-off, one bit each.
     held: u128,
+    /// MPE, when MIDI To is MPE: the notes and expressions leave as MPE MIDI
+    /// laid out in its zone, in place of the rewrite onto `channel` (the
+    /// MPE spec, R19). It holds the notes sent, so `held` stays empty.
+    mpe: Option<MpeLayout>,
     /// Whether the held notes end in the next block (the transport stopped).
     release: bool,
     /// This block's messages, reserved when the program is compiled.
@@ -237,13 +242,15 @@ struct OutRoute {
 }
 
 impl OutRoute {
-    /// A route to the port called `name` on `channel` (1 to 16).
-    fn new(name: &str, channel: u8) -> Self {
+    /// A route to the port called `name` on `channel` (1 to 16), or as MPE
+    /// MIDI in the zone `mpe` names.
+    fn new(name: &str, channel: u8, mpe: Option<MpeSettings>) -> Self {
         Self {
             port: PortId::from_name(name),
             channel: channel.saturating_sub(1).min(15),
             compensation: 0,
             held: 0,
+            mpe: mpe.map(MpeLayout::new),
             release: false,
             outgoing: Vec::with_capacity(MIDI_OUT_PER_ROUTE),
             dropped: 0,
@@ -259,7 +266,12 @@ struct Orphan {
     channel: u8,
     compensation: u32,
     held: u128,
+    /// The key held on each channel of an MPE route, `NONE` for none.
+    mpe: [u8; 16],
 }
+
+/// Marks a channel of an [`Orphan`] holding no key.
+const NONE: u8 = u8::MAX;
 
 /// The MIDI tracks' inputs in a program: what each takes, and what it took
 /// in the last block; and the routes to output ports with what they send.
@@ -312,6 +324,15 @@ fn offs(channel: u8, mut held: u128) -> impl Iterator<Item = MidiMessage> {
     })
 }
 
+/// The note-off of every key in `keys`, one per channel: an MPE route's
+/// held notes, `NONE` for a channel holding none.
+fn mpe_offs(keys: [u8; 16]) -> impl Iterator<Item = MidiMessage> {
+    keys.into_iter()
+        .enumerate()
+        .filter(|&(_, key)| key != NONE)
+        .map(|(channel, key)| MidiMessage::note_off(channel as u8, key))
+}
+
 impl MidiRoutes {
     /// The routes for `document`'s MIDI tracks, whose tasks are among
     /// `tasks`. Off the audio thread: it reserves every buffer.
@@ -351,10 +372,10 @@ impl MidiRoutes {
             };
             // Spec: external-devices R2
             if track.kind() == TrackKind::Midi
-                && let Some(MidiTo::Port { name, channel }) = &track.routing().midi_output
+                && let Some(MidiTo::Port { name, channel, mpe }) = &track.routing().midi_output
             {
                 owners.push(OutOwner::Track(entry.track));
-                outs.push(OutRoute::new(name, *channel));
+                outs.push(OutRoute::new(name, *channel, *mpe));
             }
             // Spec: external-devices R10
             for device in track.devices_deep() {
@@ -362,7 +383,7 @@ impl MidiRoutes {
                     && let Some(port) = &external.port
                 {
                     owners.push(OutOwner::Device(device.id));
-                    outs.push(OutRoute::new(port, external.channel));
+                    outs.push(OutRoute::new(port, external.channel, external.mpe));
                 }
             }
         }
@@ -400,6 +421,24 @@ impl MidiRoutes {
         // SAFETY: a route belongs to its owner's task, which is the one
         // thread sending to it in this block.
         let route = unsafe { self.outs.element(at) };
+        if let Some(layout) = route.mpe.as_mut() {
+            // Spec: mpe R17, R19, R21. The notes leave laid out as MPE MIDI.
+            let (outgoing, dropped) = (&mut route.outgoing, &mut route.dropped);
+            let base = from + route.compensation;
+            let mut sink = |offset: u32, message: MidiMessage| {
+                if outgoing.len() == outgoing.capacity() {
+                    *dropped += 1;
+                } else {
+                    outgoing.push(Outgoing {
+                        offset: base + offset,
+                        message,
+                    });
+                }
+            };
+            layout.open(&mut sink);
+            layout.lay_out(notes, &mut sink);
+            return;
+        }
         for note in notes {
             let Some(message) = out_message(note, route.channel) else {
                 continue;
@@ -429,32 +468,34 @@ impl MidiRoutes {
         // SAFETY: a route belongs to its owner's task, which is the one
         // thread sending to it in this block.
         let route = unsafe { self.outs.element(at) };
-        route.release |= route.held != 0;
+        route.release |= route.held != 0 || route.mpe.as_ref().is_some_and(MpeLayout::is_holding);
     }
 
     /// Ends every held note in the next block (R6): the transport stopped.
     pub(crate) fn release_all(&mut self) {
         for route in self.outs.iter_mut() {
-            route.release = route.held != 0;
+            route.release =
+                route.held != 0 || route.mpe.as_ref().is_some_and(MpeLayout::is_holding);
         }
     }
 
     /// Every note the routes have sent and not ended, as a note-off each,
     /// for a stream that stops (R6). Allocates: off the audio thread.
     pub(crate) fn drain_held(&mut self) -> Vec<(PortId, MidiMessage)> {
-        let mut held: Vec<(PortId, u8, u128)> = self
-            .orphans
-            .drain(..)
-            .map(|o| (o.port, o.channel, o.held))
-            .collect();
-        held.extend(
-            self.outs
-                .iter_mut()
-                .map(|r| (r.port, r.channel, std::mem::take(&mut r.held))),
-        );
-        held.into_iter()
-            .flat_map(|(port, channel, keys)| offs(channel, keys).map(move |m| (port, m)))
-            .collect()
+        let mut messages = Vec::new();
+        for o in self.orphans.drain(..) {
+            messages.extend(offs(o.channel, o.held).map(|m| (o.port, m)));
+            messages.extend(mpe_offs(o.mpe).map(|m| (o.port, m)));
+        }
+        for route in self.outs.iter_mut() {
+            let port = route.port;
+            messages
+                .extend(offs(route.channel, std::mem::take(&mut route.held)).map(|m| (port, m)));
+            if let Some(layout) = route.mpe.as_mut() {
+                layout.release_all(0, &mut |_, message| messages.push((port, message)));
+            }
+        }
+        messages
     }
 
     /// What `track`'s input received in the last block, if it's a MIDI
@@ -504,18 +545,29 @@ impl MidiRoutes {
             if let Some(at) = old.owners.iter().position(|o| o == owner) {
                 let was = &mut old.outs[at];
                 if was.port == route.port && was.channel == route.channel {
-                    route.held = std::mem::take(&mut was.held);
-                    route.release = was.release;
+                    if route.mpe.is_none() && was.mpe.is_none() {
+                        route.held = std::mem::take(&mut was.held);
+                        route.release = was.release;
+                    } else if route.mpe.as_ref().map(MpeLayout::settings)
+                        == was.mpe.as_ref().map(MpeLayout::settings)
+                    {
+                        // Spec: mpe R19. A route that lays out as it did
+                        // keeps its channel table and the notes on it.
+                        std::mem::swap(&mut route.mpe, &mut was.mpe);
+                        route.release = was.release;
+                    }
                 }
             }
         }
         for was in old.outs.iter_mut() {
-            if was.held != 0 {
+            let mpe = was.mpe.as_ref().map_or([NONE; 16], MpeLayout::keys);
+            if was.held != 0 || mpe != [NONE; 16] {
                 let orphan = Orphan {
                     port: was.port,
                     channel: was.channel,
                     compensation: was.compensation,
                     held: std::mem::take(&mut was.held),
+                    mpe,
                 };
                 self.orphan(orphan);
             }
@@ -953,7 +1005,7 @@ impl MidiIn {
         // Spec: external-devices R6. The notes of routes that went or moved
         // in a swap, and of routes whose transport stopped, end first.
         for orphan in routes.orphans.drain(..) {
-            for message in offs(orphan.channel, orphan.held) {
+            for message in offs(orphan.channel, orphan.held).chain(mpe_offs(orphan.mpe)) {
                 push(orphan.port, orphan.compensation, message);
             }
         }
@@ -962,6 +1014,12 @@ impl MidiIn {
             if std::mem::take(&mut route.release) {
                 for message in offs(route.channel, std::mem::take(&mut route.held)) {
                     push(route.port, route.compensation, message);
+                }
+                if let Some(layout) = route.mpe.as_mut() {
+                    let (port, compensation) = (route.port, route.compensation);
+                    layout.release_all(0, &mut |offset, message| {
+                        push(port, compensation + offset, message);
+                    });
                 }
             }
             for event in route.outgoing.drain(..) {

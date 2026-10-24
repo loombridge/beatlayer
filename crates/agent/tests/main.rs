@@ -18,6 +18,7 @@ mod perception;
 mod permissions;
 mod plugin_lv2;
 mod plugin_midi_effect;
+mod plugin_mpe;
 mod plugin_vst3;
 mod polysynth;
 mod readback;

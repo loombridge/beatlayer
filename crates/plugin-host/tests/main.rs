@@ -17,6 +17,7 @@ mod engine_lv2;
 mod lv2;
 mod lv2_host;
 mod midi_effect;
+mod mpe;
 mod offline;
 mod offline_au;
 mod offline_lv2;

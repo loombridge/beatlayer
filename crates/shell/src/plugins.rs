@@ -396,6 +396,7 @@ pub fn info(
             window_shown: status.editor_open && !status.editor_hidden,
             window: None,
             values: status.values,
+            mpe: bl_model::PluginMpe::default(),
             ara: None,
         });
     }
@@ -423,6 +424,7 @@ pub fn info(
             window_shown: status.editor_open && !status.editor_hidden,
             window: None,
             values: status.values,
+            mpe: bl_model::PluginMpe::default(),
             ara,
         });
     }
@@ -439,6 +441,7 @@ pub fn info(
         window_shown: status.editor_open && !status.editor_hidden,
         window: None,
         values: status.values,
+        mpe: bl_model::PluginMpe::default(),
         ara: None,
     })
 }

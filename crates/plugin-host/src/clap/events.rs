@@ -2,9 +2,11 @@
 //! room made before the audio thread uses them: an event past that room
 //! is dropped and counted (real-time rule 4), never allocated for.
 
-use bl_engine::{NoteEvent, NoteKind};
+use bl_core::midi::MidiMessage;
+use bl_engine::{NoteEvent, NoteExpression, NoteKind};
 use clack_host::events::event_types::{
-    MidiEvent, NoteChokeEvent, NoteOffEvent, NoteOnEvent, ParamModEvent, ParamValueEvent,
+    MidiEvent, NoteChokeEvent, NoteExpressionEvent, NoteExpressionType, NoteOffEvent, NoteOnEvent,
+    ParamModEvent, ParamValueEvent,
 };
 use clack_host::events::io::{InputEventBuffer, OutputEventBuffer, TryPushError};
 use clack_host::events::spaces::CoreEventSpace;
@@ -23,7 +25,22 @@ enum In {
     Off(NoteOffEvent),
     Choke(NoteChokeEvent),
     Midi(MidiEvent),
+    Expression(NoteExpressionEvent),
 }
+
+/// How a plug-in is sent a note's expressions (the MPE spec, R15, R16).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Expressions {
+    /// MPE Mode is off: the pressure as polyphonic key pressure, nothing
+    /// else.
+    PolyPressure,
+    /// MPE Mode is on and the note port takes CLAP's events: note
+    /// expressions.
+    Clap,
+}
+
+/// The semitones a note's bend of 1 is (the MPE spec, R6).
+const BEND_SEMITONES: f64 = 48.0;
 
 impl In {
     fn time(&self) -> u32 {
@@ -38,6 +55,7 @@ impl In {
             Self::Off(e) => e.as_ref(),
             Self::Choke(e) => e.as_ref(),
             Self::Midi(e) => e.as_ref(),
+            Self::Expression(e) => e.as_ref(),
         }
     }
 }
@@ -94,8 +112,18 @@ impl InputList {
         }
     }
 
-    /// Adds a note.
-    pub(crate) fn note(&mut self, note: &NoteEvent) {
+    /// Stops every note the plug-in holds.
+    pub(crate) fn choke_all(&mut self) {
+        self.push(In::Choke(NoteChokeEvent::new(0, Pckn::match_all())));
+    }
+
+    /// Adds a MIDI message on note port 0 (the MPE spec, R17).
+    pub(crate) fn midi(&mut self, time: u32, message: MidiMessage) {
+        self.push(In::Midi(MidiEvent::new(time, 0, message.padded())));
+    }
+
+    /// Adds a note, with its expressions sent as `expressions` says.
+    pub(crate) fn note(&mut self, note: &NoteEvent, expressions: Expressions) {
         // Spec: clap-hosting R20. A channel message goes in as the MIDI
         // event it is.
         if let Some(message) = note.message() {
@@ -109,12 +137,43 @@ impl InputList {
             note.note_id.map_or(Match::All, Match::Specific),
         );
         let velocity = f64::from(note.velocity.clamp(0.0, 1.0));
+        if let NoteKind::Expression { expression, value } = note.kind {
+            let value = f64::from(value);
+            match (expressions, expression) {
+                // Spec: clap-hosting R21
+                (Expressions::PolyPressure, NoteExpression::Pressure) => {
+                    let seven = (value.clamp(0.0, 1.0) * 127.0).round() as u8;
+                    let status = 0xA0 | note.channel.min(15);
+                    if let Some(message) =
+                        MidiMessage::from_bytes(&[status, note.key.min(127), seven])
+                    {
+                        self.midi(note.offset, message);
+                    }
+                }
+                (Expressions::PolyPressure, _) => {}
+                // Spec: clap-hosting R22
+                (Expressions::Clap, expression) => {
+                    let (kind, value) = match expression {
+                        NoteExpression::Bend => {
+                            (NoteExpressionType::Tuning, value * BEND_SEMITONES)
+                        }
+                        NoteExpression::Slide => (NoteExpressionType::Brightness, value),
+                        NoteExpression::Pressure => (NoteExpressionType::Pressure, value),
+                    };
+                    self.push(In::Expression(NoteExpressionEvent::new(
+                        note.offset,
+                        pckn,
+                        kind,
+                        value,
+                    )));
+                }
+            }
+            return;
+        }
         self.push(match note.kind {
             NoteKind::On => In::On(NoteOnEvent::new(note.offset, pckn, velocity)),
             NoteKind::Off => In::Off(NoteOffEvent::new(note.offset, pckn, velocity)),
             NoteKind::Choke => In::Choke(NoteChokeEvent::new(note.offset, pckn)),
-            // Per-note expressions wait for MPE hosting (the parity
-            // matrix's note): a plug-in's note port takes them then.
             NoteKind::Expression { .. }
             | NoteKind::Control { .. }
             | NoteKind::PitchBend { .. }
@@ -152,6 +211,9 @@ impl InputEventBuffer for InputList {
 pub(crate) enum Out {
     /// A note, which the node sends on.
     Note(NoteEvent),
+    /// A MIDI message from the plug-in's note port, which the node reads
+    /// as MPE MIDI while its MPE Mode is on (the MPE spec, R20).
+    Midi(u32, [u8; 3]),
     /// A parameter's new value, from the plug-in itself (its editor).
     Param(u32, f64),
     /// A person started changing a parameter in its editor.
@@ -195,6 +257,35 @@ impl OutputList {
             Some(CoreEventSpace::NoteOn(e)) => note(NoteKind::On, e.pckn(), e.velocity()),
             Some(CoreEventSpace::NoteOff(e)) => note(NoteKind::Off, e.pckn(), e.velocity()),
             Some(CoreEventSpace::NoteChoke(e)) => note(NoteKind::Choke, e.pckn(), 0.0),
+            // Spec: clap-hosting R23. Tuning in semitones over 48 is a bend;
+            // brightness is the slide.
+            Some(CoreEventSpace::NoteExpression(e)) => {
+                let value = e.value();
+                let expression = match e.expression_type() {
+                    Some(NoteExpressionType::Tuning) => Some((
+                        NoteExpression::Bend,
+                        (value / BEND_SEMITONES).clamp(-1.0, 1.0),
+                    )),
+                    Some(NoteExpressionType::Brightness) => {
+                        Some((NoteExpression::Slide, value.clamp(0.0, 1.0)))
+                    }
+                    Some(NoteExpressionType::Pressure) => {
+                        Some((NoteExpression::Pressure, value.clamp(0.0, 1.0)))
+                    }
+                    _ => None,
+                };
+                expression.and_then(|(expression, value)| {
+                    note(
+                        NoteKind::Expression {
+                            expression,
+                            value: value as f32,
+                        },
+                        e.pckn(),
+                        0.0,
+                    )
+                })
+            }
+            Some(CoreEventSpace::Midi(e)) => Some(Out::Midi(time, e.data())),
             Some(CoreEventSpace::ParamValue(e)) => e
                 .param_id()
                 .filter(|_| e.value().is_finite())

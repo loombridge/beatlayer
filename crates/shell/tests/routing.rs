@@ -838,12 +838,14 @@ fn midi_to_lists_the_output_ports_before_configure() {
     assert_eq!(output.text, "No Output");
     assert_eq!(channel.labels(), Vec::<&str>::new());
 
-    // Choosing a port takes channel 1, and lists 1 to 16.
+    // Choosing a port takes channel 1, and lists 1 to 16, then MPE (the MPE
+    // spec, R19).
     choose(&mut shell, &output, "Synth");
     let (output, channel) = to(&shell, &interface);
     assert_eq!(output.text, "Synth");
     assert_eq!(channel.text, "1");
-    assert_eq!(channel.labels().len(), 16);
+    assert_eq!(channel.labels().len(), 17);
+    assert_eq!(channel.labels().last(), Some(&"MPE"));
     assert_eq!(
         shell
             .editor()
@@ -953,4 +955,141 @@ fn a_drum_rack_offers_its_return_chains_taps() {
             )
             .is_err()
     );
+}
+
+/// What the track's MIDI To holds.
+fn midi_output(shell: &Shell, track: TrackId) -> Option<MidiTo> {
+    shell
+        .editor()
+        .document()
+        .track(track)
+        .unwrap()
+        .routing()
+        .midi_output
+        .clone()
+}
+
+// Spec: mpe R18, R19
+#[test]
+fn midi_to_lists_mpe_after_the_channels_and_offers_its_settings() {
+    let Set {
+        mut shell, midi, ..
+    } = observed_set();
+    let interface = routing::Interface {
+        midi_outputs: vec!["Synth".to_owned()],
+        ..routing::Interface::default()
+    };
+    let to = |shell: &Shell| match section_with(shell, midi[0], &interface) {
+        InOut::Clips {
+            output,
+            output_channel,
+            ..
+        } => (output, output_channel),
+        other => panic!("not a clip track's section: {other:?}"),
+    };
+    let step = |shell: &Shell| shell.editor().undo_history().next().map(str::to_owned);
+
+    // With a port chosen, the channels 1 to 16 and MPE; MPE Settings…
+    // appears only once MPE is chosen.
+    let (output, _) = to(&shell);
+    choose(&mut shell, &output, "Synth");
+    let (_, channel) = to(&shell);
+    assert_eq!(channel.labels()[15], "16");
+    assert_eq!(channel.labels()[16..], ["MPE"]);
+
+    // Choosing MPE sends the new settings, one undo step; the chooser shows
+    // MPE and offers the settings.
+    let before = shell.editor().undo_history().len();
+    choose(&mut shell, &channel, "MPE");
+    assert_eq!(shell.editor().undo_history().len(), before + 1);
+    assert_eq!(
+        midi_output(&shell, midi[0]),
+        Some(MidiTo::Port {
+            name: "Synth".to_owned(),
+            channel: 1,
+            mpe: Some(bl_model::MpeSettings::default()),
+        })
+    );
+    let (_, channel) = to(&shell);
+    assert_eq!(channel.text, "MPE");
+    assert_eq!(channel.labels()[16..], ["MPE", "MPE Settings…"]);
+    // No channel is chosen while MPE is.
+    let chosen: Vec<&str> = channel
+        .entries
+        .iter()
+        .filter_map(|entry| match entry {
+            routing::Entry::Choice {
+                label,
+                chosen: true,
+                ..
+            } => Some(label.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(chosen, ["MPE"]);
+
+    // MPE Settings… opens the dialog on this track's MIDI To; changes made
+    // there run the routing command and are one undo step each.
+    choose(&mut shell, &channel, "MPE Settings…");
+    let dialog = shell.mpe_settings_dialog();
+    assert!(dialog.open);
+    assert_eq!(dialog.track, Some(midi[0]));
+    assert_eq!(dialog.settings, Some(bl_model::MpeSettings::default()));
+    let upper = json!({ "zone": "upper", "channels": 4 });
+    shell
+        .invoke(
+            "routing.set_midi_output",
+            json!({ "track": midi[0], "to": { "name": "Synth", "channel": 1, "mpe": upper } }),
+        )
+        .unwrap();
+    assert_eq!(step(&shell).as_deref(), Some("Change \"Routing\""));
+    assert_eq!(
+        shell
+            .mpe_settings_dialog()
+            .settings
+            .map(|s| (s.zone, s.channels)),
+        Some((bl_model::MpeZone::Upper, 4))
+    );
+    // A zone of 16 note channels is refused with nothing changed.
+    let history = shell.editor().undo_history().len();
+    assert!(
+        shell
+            .invoke(
+                "routing.set_midi_output",
+                json!({ "track": midi[0],
+                    "to": { "name": "Synth", "channel": 1, "mpe": { "channels": 16 } } }),
+            )
+            .is_err()
+    );
+    assert_eq!(shell.editor().undo_history().len(), history);
+
+    // The same port chosen again keeps MPE and its settings.
+    let (output, _) = to(&shell);
+    choose(&mut shell, &output, "Synth");
+    assert_eq!(
+        midi_output(&shell, midi[0]).and_then(|to| match to {
+            MidiTo::Port { mpe, .. } => mpe.map(|m| m.channels),
+            MidiTo::Track(_) => None,
+        }),
+        Some(4)
+    );
+
+    // A channel chosen takes MPE's place; undo brings MPE back.
+    let (_, channel) = to(&shell);
+    choose(&mut shell, &channel, "7");
+    assert_eq!(
+        midi_output(&shell, midi[0]),
+        Some(MidiTo::Port {
+            name: "Synth".to_owned(),
+            channel: 7,
+            mpe: None
+        })
+    );
+    // With no MPE, the dialog closes by itself.
+    assert!(!shell.mpe_settings_dialog().open);
+    shell.run("edit.undo", json!({})).unwrap();
+    assert!(matches!(
+        midi_output(&shell, midi[0]),
+        Some(MidiTo::Port { mpe: Some(_), .. })
+    ));
 }

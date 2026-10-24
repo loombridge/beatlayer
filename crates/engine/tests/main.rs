@@ -40,6 +40,7 @@ mod midi_sidechain;
 mod mixer;
 mod modulation;
 mod mpe_input;
+mod mpe_output;
 mod multi_output;
 mod pdc;
 mod performance;

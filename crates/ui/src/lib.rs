@@ -72,6 +72,7 @@ pub mod mapping;
 pub mod menus;
 pub mod middle;
 pub mod mixer;
+pub mod mpe_settings_dialog;
 pub mod mpe_tab;
 pub mod multisampler;
 pub mod note_filters;

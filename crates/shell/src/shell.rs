@@ -446,6 +446,15 @@ impl fmt::Display for ShellError {
 
 impl std::error::Error for ShellError {}
 
+/// What the MPE/Multi-channel Settings dialog edits (the MPE spec, R18).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MpeDialogTarget {
+    /// A plug-in device's, or an External Instrument's MIDI To.
+    Device(bl_model::DeviceId),
+    /// A MIDI track's MIDI To.
+    Track(bl_model::TrackId),
+}
+
 /// The app shell without a window: the document, the set's file, the
 /// window and view state, the preferences, and the audio device, and the
 /// one place every command runs.
@@ -615,6 +624,9 @@ pub struct Shell {
     stems: stems::StemsState,
     /// The Export Audio/Video dialog and the export under way (WP-6.71).
     export: export_dialog::ExportState,
+    /// What the MPE/Multi-channel Settings dialog edits, while it is open
+    /// (the MPE spec, R18): never part of the set.
+    mpe_dialog: Option<MpeDialogTarget>,
     /// The autosampler at work (WP-5.16, IMP-27).
     autosample: Option<autosample::Job>,
     /// The autosampler's dialog, open for an instrument.
@@ -1115,6 +1127,7 @@ impl Shell {
             processed: Vec::new(),
             stems: stems::StemsState::default(),
             export: export_dialog::ExportState::default(),
+            mpe_dialog: None,
             autosample: None,
             autosample_dialog: None,
             autosample_result_value: None,

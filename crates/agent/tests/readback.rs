@@ -443,6 +443,11 @@ fn fixture() -> Project {
     device.external = Some(External {
         port: Some("Synth".to_owned()),
         channel: 5,
+        mpe: Some(bl_model::MpeSettings {
+            zone: bl_model::MpeZone::Upper,
+            channels: 7,
+            ..bl_model::MpeSettings::default()
+        }),
         audio_from: Channel::Mono(3),
         audio_to: None,
         hardware_latency: HardwareLatency::Samples { value: 96 },

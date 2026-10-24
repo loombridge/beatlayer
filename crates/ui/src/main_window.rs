@@ -713,6 +713,9 @@ impl MainWindowUi {
             // window while it's open.
             crate::autosampler::show(ctx, shell, theme, &mut events);
             crate::slice_dialog::show(ctx, shell, theme, &mut events);
+            // Spec: mpe R18. The MPE/Multi-channel Settings dialog sits over
+            // the window while it's open.
+            crate::mpe_settings_dialog::show(ctx, shell, theme, &mut events);
             // Spec: crash-recovery R22. The recovery prompt sits over the
             // window while there are sets a crash left to offer.
             crate::recovery_dialog::show(ctx, shell, theme, &mut events);
@@ -728,7 +731,8 @@ impl MainWindowUi {
                     || shell.export_dialog().is_some()
                     || shell.export_running()
                     || shell.autosampler_dialog().is_some()
-                    || shell.slice_dialog().is_some()));
+                    || shell.slice_dialog().is_some()
+                    || shell.mpe_settings_dialog().open));
         // The track whose control has the focus, for the neighbour items'
         // state (the accessibility spec, R4).
         let order = crate::focus::drawn(ctx);

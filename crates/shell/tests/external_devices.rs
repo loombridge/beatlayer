@@ -82,7 +82,9 @@ fn the_external_instrument_is_described_and_its_choosers_list_the_interface() {
         ["Synth", "No Output", "─", "Configure…"]
     );
     assert_eq!(choosers.midi_to.text, "No Output");
-    assert_eq!(choosers.channel.labels().len(), 16);
+    // The 16 channels, then MPE (the MPE spec, R19).
+    assert_eq!(choosers.channel.labels().len(), 17);
+    assert_eq!(choosers.channel.labels().last(), Some(&"MPE"));
     assert_eq!(choosers.channel.text, "1");
     assert_eq!(
         choosers.audio_from.labels(),
@@ -236,4 +238,74 @@ fn an_offline_render_silences_the_external_devices_and_names_them() {
         .unwrap();
     assert!(result.get("silenced_external_devices").is_none());
     let _ = std::fs::remove_dir_all(&folder);
+}
+
+// Spec: mpe R18, R19; external-devices R1 to R3
+#[test]
+fn the_external_instruments_midi_to_takes_mpe_in_place_of_a_channel() {
+    let mut shell = Shell::headless();
+    let device = add_hardware(&mut shell);
+    let interface = Interface {
+        midi_outputs: vec!["Synth".to_owned()],
+        ..Interface::default()
+    };
+    let choosers = |shell: &Shell| {
+        routing::external_choosers(shell.editor().document(), device, &interface).unwrap()
+    };
+    let external = |shell: &Shell| {
+        shell
+            .editor()
+            .document()
+            .device(device)
+            .unwrap()
+            .external
+            .clone()
+            .unwrap()
+    };
+    let run = |shell: &mut Shell, label: &str| {
+        let run = choosers(shell).channel.run_for(label).unwrap().clone();
+        shell.invoke(&run.id, run.args).unwrap();
+    };
+
+    // The 16 channels, then MPE; MPE Settings… only once MPE is chosen.
+    assert_eq!(choosers(&shell).channel.labels()[16..], ["MPE"]);
+    let before = shell.editor().undo_history().len();
+    run(&mut shell, "MPE");
+    assert_eq!(shell.editor().undo_history().len(), before + 1);
+    assert_eq!(external(&shell).mpe, Some(bl_model::MpeSettings::default()));
+    let channel = choosers(&shell).channel;
+    assert_eq!(channel.text, "MPE");
+    assert_eq!(channel.labels()[16..], ["MPE", "MPE Settings…"]);
+
+    // The settings dialog edits the device's own, as `device.set_external`
+    // saves them.
+    run(&mut shell, "MPE Settings…");
+    let dialog = shell.mpe_settings_dialog();
+    assert!(dialog.open);
+    assert_eq!(dialog.device, Some(device));
+    shell
+        .invoke(
+            "device.set_external",
+            json!({ "device": device, "mpe": { "mode": "multi_channel", "first": 3, "last": 6 } }),
+        )
+        .unwrap();
+    let settings = external(&shell).mpe.unwrap();
+    assert_eq!(
+        (settings.mode, settings.first, settings.last),
+        (bl_model::MpeMode::MultiChannel, 3, 6)
+    );
+    assert_eq!(shell.mpe_settings_dialog().settings, Some(settings));
+
+    // A channel and MPE together are refused; a channel alone takes MPE's
+    // place.
+    assert!(
+        shell
+            .invoke(
+                "device.set_external",
+                json!({ "device": device, "channel": 3, "mpe": {} }),
+            )
+            .is_err()
+    );
+    run(&mut shell, "3");
+    assert_eq!((external(&shell).channel, external(&shell).mpe), (3, None));
 }

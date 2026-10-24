@@ -1404,6 +1404,7 @@ impl DeviceView {
             floating: d.floating,
             b_active: d.b_active,
             configure: self.configuring.contains(&d.id),
+            mpe: matches!(d.kind, DeviceKind::Plugin { .. }).then_some(d.mpe),
             selected: self.selected == Some(d.id),
             hot_swap: self.hot_swap == Some(d.id),
             multisampler: self.multisampler_state(d),
@@ -2636,13 +2637,14 @@ impl DeviceView {
                 index,
                 device,
             })?;
-            if let Some((params, name, shape, articulations)) = state {
+            if let Some((params, name, shape, articulations, mpe)) = state {
                 editor.apply(Command::SetDeviceState {
                     device: id,
                     params,
                     name,
                     shape,
                     articulations,
+                    mpe,
                 })?;
             }
             map_inner_copies(editor, &pairs)
@@ -2690,6 +2692,7 @@ impl DeviceView {
                 preset::preset_name(&path),
                 preset.shape,
                 preset.articulations,
+                preset.mpe,
             )
         });
         Ready {
@@ -2743,13 +2746,14 @@ impl DeviceView {
                     index,
                     device,
                 })?;
-                if let Some((params, name, shape, articulations)) = state {
+                if let Some((params, name, shape, articulations, mpe)) = state {
                     editor.apply(Command::SetDeviceState {
                         device: id,
                         params,
                         name,
                         shape,
                         articulations,
+                        mpe,
                     })?;
                 }
                 map_inner_copies(editor, &pairs)
@@ -3198,7 +3202,7 @@ impl DeviceView {
                     chain.receive = bl_model::Receive::Note(note);
                 }
                 editor.apply(Command::AddChain { rack, index, chain })?;
-                if let (Some(device), Some((params, name, shape, articulations))) =
+                if let (Some(device), Some((params, name, shape, articulations, mpe))) =
                     (device_id, state)
                 {
                     editor.apply(Command::SetDeviceState {
@@ -3207,6 +3211,7 @@ impl DeviceView {
                         name,
                         shape,
                         articulations,
+                        mpe,
                     })?;
                 }
                 if let Some(device) = move_device {
@@ -3472,6 +3477,7 @@ fn load_preset(
             name: preset::preset_name(path),
             shape: loaded.shape,
             articulations: loaded.articulations,
+            mpe: loaded.mpe,
         })
         .map(|_| ())
         .map_err(|e| DeviceError::Failed(e.to_string()))

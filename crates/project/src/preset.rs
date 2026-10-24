@@ -63,6 +63,9 @@ pub struct Preset {
     /// An Articulation Map's articulations (the articulation map spec, R16),
     /// in order; `None` for any other device.
     pub articulations: Option<Vec<bl_model::Articulation>>,
+    /// A plug-in's MPE Mode and settings (the MPE spec, R14); `None` for
+    /// the default, off, and for any other device.
+    pub mpe: Option<bl_model::PluginMpe>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -77,6 +80,8 @@ struct File {
     shape: Option<Vec<bl_model::modulator::ShapePoint>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     articulations: Vec<bl_model::Articulation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    mpe: Option<bl_model::PluginMpe>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -143,6 +148,7 @@ impl Preset {
             params: device.params.clone(),
             shape: device.shape.clone(),
             articulations: (!device.articulations.is_empty()).then(|| device.articulations.clone()),
+            mpe: matches!(device.kind, DeviceKind::Plugin { .. }).then_some(device.mpe),
         }
     }
 
@@ -183,6 +189,7 @@ impl Preset {
             params: self.params.iter().map(|(&p, &v)| (p, v)).collect(),
             shape: self.shape.clone(),
             articulations: self.articulations.clone().unwrap_or_default(),
+            mpe: self.mpe,
         };
         let mut bytes = serde_json::to_vec_pretty(&file).unwrap_or_default();
         bytes.push(b'\n');
@@ -255,6 +262,10 @@ impl Preset {
             params,
             shape: file.shape,
             articulations: (!file.articulations.is_empty()).then_some(file.articulations),
+            mpe: match file.mpe {
+                Some(mpe) if mpe.settings.check().is_ok() => Some(mpe),
+                _ => None,
+            },
         })
     }
 
@@ -423,6 +434,45 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("bl-preset-{name}-{}", std::process::id()));
         fs::remove_dir_all(&dir).ok();
         dir
+    }
+
+    // Spec: mpe R14. A plug-in's MPE Mode and settings are in its preset,
+    // off too, so loading it switches a device's MPE Mode off.
+    #[test]
+    fn a_preset_keeps_a_plugins_mpe_mode_and_settings() {
+        let mut plugin = Device::new(
+            DeviceId(Id::new(9).unwrap()),
+            "Synth",
+            DeviceKind::Plugin {
+                format: bl_model::PluginFormat::Clap,
+                plugin_id: "com.example.synth".to_owned(),
+            },
+        );
+        assert_eq!(
+            Preset::of(&plugin).mpe,
+            Some(bl_model::PluginMpe::default())
+        );
+        plugin.mpe = bl_model::PluginMpe {
+            on: true,
+            settings: bl_model::MpeSettings {
+                zone: bl_model::MpeZone::Upper,
+                channels: 5,
+                ..bl_model::MpeSettings::default()
+            },
+        };
+        let preset = Preset::of(&plugin);
+        assert_eq!(preset.mpe, Some(plugin.mpe));
+        let back = Preset::decode(&preset.encode()).unwrap();
+        assert_eq!(back, preset);
+        // A preset file saved before MPE has none.
+        let mut file: serde_json::Value = serde_json::from_slice(&preset.encode()).unwrap();
+        file.as_object_mut().unwrap().remove("mpe");
+        let older = Preset::decode(&serde_json::to_vec(&file).unwrap()).unwrap();
+        assert_eq!(older.mpe, None);
+        // Settings out of range are dropped on load, the rest kept.
+        file["mpe"] = serde_json::json!({ "on": true, "settings": { "channels": 16 } });
+        let broken = Preset::decode(&serde_json::to_vec(&file).unwrap()).unwrap();
+        assert_eq!(broken.mpe, None);
     }
 
     // Spec: device-chains R16

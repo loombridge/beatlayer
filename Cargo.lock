@@ -716,6 +716,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "bl-ara-sys"
+version = "0.2.0"
+
+[[package]]
 name = "bl-assistant"
 version = "0.2.0"
 dependencies = [

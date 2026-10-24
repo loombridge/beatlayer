@@ -1,0 +1,14 @@
+[package]
+name = "bl-ara-sys"
+description = "The ARA 2 C API's types and function tables, as Rust bindings generated once from the ARA SDK's ARAInterface.h and committed."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+# The bindings are derived from the ARA SDK's headers (Apache-2.0), so the
+# crate carries both licences and `cargo deny` checks each against its
+# allow-list (IMP-20).
+license = "GPL-3.0-or-later AND Apache-2.0"
+publish.workspace = true
+
+[lints]
+workspace = true

@@ -214,9 +214,12 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
         ),
         (
             "midi_tool.choose",
-            Exception(LaterView(
-                "the native tools (WP-6.12 to WP-6.14): until they land the registry holds one                  tool of each kind, and the Selectors have nothing to choose between",
-            )),
+            main(
+                midi_tools_shown,
+                detail_area,
+                "Transformation Selector",
+                Key::ArrowUp,
+            ),
         ),
         (
             "midi_tool.reseed",

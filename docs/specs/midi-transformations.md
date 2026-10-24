@@ -1,6 +1,6 @@
 # MIDI Tools: the transformations
 
-- **Status:** draft
+- **Status:** partial (R1 to R22, and R43 for Chop's toggles, each have a passing test; R23 to R42, and R43 for the other tools' displays, are WP-6.13's and WP-6.13b's)
 - **Work packages:** WP-6.12 (what every transformation shares, Arpeggiate, Chop, Connect, Ornament and Quantize: R1 to R22); WP-6.13 (Recombine, Span, Strum, Time Warp and Velocity Shaper: R23 to R35); WP-6.13b (the MPE transformations, Glissando and LFO: R36 to R42); R43, the tools' displays, is built by each of the three packages for its own tools. The Transform panel, choosing a tool, what a tool acts on, applying, undo, seeds and chains are [midi-tools.md](midi-tools.md)'s (WP-6.11, WP-6.15)
 - **Parity-matrix row:** MIDI editing: "MIDI Tools, transformations (Arpeggiate, Chop, Connect, Glissando, LFO, Ornament, Quantize, Recombine, Span, Strum, Time Warp, Velocity Shaper)"
 - **Checked against:** the Live 12 reference manual (online edition), read 20 October 2026: chapter 11, sections 11.2.1 to 11.2.12, chapter 10, section 10.5.11, and chapter 8, section 8.6; the Live 12 release notes, 12.0.5 and 12.1; the UI parity reference's M-EDIT-035, M-EDIT-036, S-NOTE-011, S-NOTE-012 and S-SAMPLE-002
@@ -232,28 +232,28 @@ Every tool here is applied as [midi-tools.md](midi-tools.md) says: to the select
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1 | to be written in WP-6.12 | |
-| R2 | to be written in WP-6.12 | |
-| R3 | to be written in WP-6.12 | |
-| R4 | to be written in WP-6.12 | |
-| R5 | to be written in WP-6.12 | |
-| R6 | to be written in WP-6.12 | |
-| R7 | to be written in WP-6.12 | |
-| R8 | to be written in WP-6.12 | |
-| R9 | to be written in WP-6.12 | |
-| R10 | to be written in WP-6.12 | |
-| R11 | to be written in WP-6.12 | |
-| R12 | to be written in WP-6.12 | |
-| R13 | to be written in WP-6.12 | |
-| R14 | to be written in WP-6.12 | |
-| R15 | to be written in WP-6.12 | |
-| R16 | to be written in WP-6.12 | |
-| R17 | to be written in WP-6.12 | |
-| R18 | to be written in WP-6.12 | |
-| R19 | to be written in WP-6.12 | |
-| R20 | to be written in WP-6.12 | |
-| R21 | to be written in WP-6.12 | |
-| R22 | to be written in WP-6.12 | |
+| R1 | `crates/midi-tools/tests/interface.rs`, `r1_note_divisions_are_whole_note_fractions_and_triplets`; `crates/midi-tools/tests/transformations.rs`, `r3_arpeggiates_parameters_have_the_rules_ranges_and_defaults` | unit |
+| R2 | `crates/midi-tools/tests/transformations.rs`, `r2_ids_are_names_in_lower_case_and_a_length_keeps_a_tick`, `r2_a_note_keeps_a_tick_and_ids_name_the_tools` | unit |
+| R3 | `crates/midi-tools/tests/transformations.rs`, `r3_arpeggiates_parameters_have_the_rules_ranges_and_defaults`; `crates/shell/tests/midi_tools.rs`, `r2_r3_r5_the_list_describes_every_tool_in_order`; `crates/agent/tests/midi_tools.rs`, `each_transformation_applies_by_id_with_a_seed_and_reads_back` | unit, agent |
+| R4 | `crates/midi-tools/tests/transformations.rs`, `r4_overlapping_notes_make_a_group_and_a_step_with_nothing_held_writes_nothing`, `r4_a_step_holds_only_the_notes_that_sound_then` | unit |
+| R5 | `crates/midi-tools/tests/transformations.rs`, `r5_steps_raise_the_cycle_each_time_the_place_goes_round`, `r5_the_styles_order_the_held_notes_as_arpeggiator_does`, `r5_chord_trigger_writes_every_held_note_and_the_random_styles_follow_the_seed`, `r5_and_r9_arpeggiate_stays_on_a_drum_racks_keys`; `crates/shell/tests/midi_tools.rs`, `r4_to_r6_arpeggiate_in_and_out_of_scale_mode_and_on_a_drum_rack` | unit |
+| R6 | `crates/midi-tools/tests/transformations.rs`, `r6_a_step_lasts_rate_times_gate_and_takes_its_held_notes_values`, `r6_a_step_carries_the_stretch_of_its_notes_envelopes`, `r6_arpeggiates_notes_start_on_its_steps_and_stay_on_the_keyboard` | unit, property |
+| R7 | `crates/midi-tools/tests/transformations.rs`, `r7_chops_parameters_have_the_rules_ranges_and_defaults` | unit |
+| R8 | `crates/midi-tools/tests/transformations.rs`, `r8_gaps_write_the_pattern_and_a_toggle_leaves_gaps_without_a_number`; `crates/shell/tests/midi_tools.rs`, `r8_r43_chops_gaps_write_its_pattern_and_a_toggle_click_is_a_set` | unit |
+| R9 | `crates/midi-tools/tests/transformations.rs`, `r9_pieces_come_in_proportion_to_their_weights_and_gaps_write_nothing`, `r9_chops_pieces_tile_each_note_exactly` | unit, property |
+| R10 | `crates/midi-tools/tests/transformations.rs`, `r10_variation_moves_starts_and_ends_within_the_note` | unit |
+| R11 | `crates/midi-tools/tests/transformations.rs`, `r11_connects_parameters_have_the_rules_ranges_and_defaults` | unit |
+| R12 | `crates/midi-tools/tests/transformations.rs`, `r12_and_r13_a_gap_gets_slots_whose_keys_follow_the_line_between_the_notes`, `r12_connect_never_adds_a_note_outside_a_gap` | unit, property |
+| R13 | `crates/midi-tools/tests/transformations.rs`, `r12_and_r13_a_gap_gets_slots_whose_keys_follow_the_line_between_the_notes`, `r13_connect_counts_steps_in_a_scale_and_on_a_drum_rack`; `crates/shell/tests/midi_tools.rs`, `r12_to_r13_connect_in_a_scale_and_on_a_drum_rack_stays_on_their_keys` | unit |
+| R14 | `crates/midi-tools/tests/transformations.rs`, `r14_ornaments_parameters_have_the_rules_ranges_and_defaults` | unit |
+| R15 | `crates/midi-tools/tests/transformations.rs`, `r15_a_flam_ends_where_the_note_starts_or_takes_over_its_start` | unit |
+| R16 | `crates/midi-tools/tests/transformations.rs`, `r16_grace_notes_fill_the_span_and_alternate_the_note_and_its_step` | unit |
+| R17 | `crates/midi-tools/tests/transformations.rs`, `r17_applying_ornament_again_ornaments_the_notes_as_they_are`; `crates/shell/tests/midi_tools.rs`, `r3_to_r19_each_transformation_applies_by_id_with_a_seed_as_one_undo_step` | unit |
+| R18 | `crates/midi-tools/tests/transformations.rs`, `r18_quantizes_parameters_have_the_rules_defaults`; `crates/ui/tests/midi_tools.rs`, `quantize_has_its_five_controls_and_triplets_wait_for_a_grid` | unit, UI script |
+| R19 | `crates/midi-tools/tests/transformations.rs`, `r19_quantize_moves_starts_and_ends_toward_the_lines`, `r19_an_end_whose_line_is_at_or_before_the_start_goes_to_the_first_line_after_it`, `r19_at_100_percent_every_start_is_on_a_line`; `crates/shell/tests/clip_view.rs`, `quantising_both_moves_the_start_and_then_the_end` | unit, property |
+| R20 | `crates/shell/tests/midi_tools.rs`, `r20_r19_cmd_u_quantizes_with_the_tools_settings_which_are_saved_and_reloaded`; `crates/ui/tests/keymap.rs`, `quantize_and_quantize_settings_are_bound_in_the_note_editor` | unit, UI script |
+| R21 | `crates/shell/tests/midi_tools.rs`, `r21_quantize_settings_shows_the_transform_panel_with_quantize_chosen_without_an_undo_step`; `crates/ui/tests/midi_tools.rs`, `cmd_shift_u_and_the_edit_menu_show_the_transform_panel_with_quantize_chosen`; `crates/ui/tests/keymap.rs`, `quantize_and_quantize_settings_are_bound_in_the_sample_editor` | unit, UI script |
+| R22 | `crates/shell/tests/warping.rs`, `the_audio_clips_quantize_panel_gives_the_same_markers_as_quantize_audio`; `crates/ui/tests/audio_panel.rs`, `the_right_group_holds_audio_utilities_and_a_transform_panel_of_quantize` | unit, UI script |
 | R23 | to be written in WP-6.13 | |
 | R24 | to be written in WP-6.13 | |
 | R25 | to be written in WP-6.13 | |
@@ -274,4 +274,4 @@ Every tool here is applied as [midi-tools.md](midi-tools.md) says: to the select
 | R40 | to be written in WP-6.13b | |
 | R41 | to be written in WP-6.13b | |
 | R42 | to be written in WP-6.13b | |
-| R43 | to be written in WP-6.12, WP-6.13 and WP-6.13b | |
+| R43 | Chop's toggles, WP-6.12's: `crates/ui/tests/midi_tools.rs`, `chops_pattern_and_emphasis_toggles_each_click_a_set_and_gaps_shows_a_dash`; `crates/shell/tests/midi_tools.rs`, `r8_r43_chops_gaps_write_its_pattern_and_a_toggle_click_is_a_set`. The other displays: to be written in WP-6.13 and WP-6.13b | UI script, unit |

@@ -201,15 +201,23 @@ fn r2_r3_r5_the_list_describes_every_tool_in_order() {
     let names: Vec<&str> = list.tools.iter().map(|tool| tool.id.as_str()).collect();
     assert_eq!(
         names,
-        ["test_transpose", "test_fill"],
+        [
+            "arpeggiate",
+            "chop",
+            "connect",
+            "ornament",
+            "quantize",
+            "test_transpose",
+            "test_fill"
+        ],
         "transformations, then generators"
     );
-    let transpose = &list.tools[0];
+    let transpose = &list.tools[5];
     assert_eq!(transpose.parameters[0].id, "degrees");
     assert_eq!(transpose.parameters[0].kind, "whole");
     assert!(transpose.parameters[0].scale_aware);
     assert_eq!(transpose.parameters[0].default, json!(0));
-    let fill = &list.tools[1];
+    let fill = &list.tools[6];
     assert_eq!(fill.parameters[1].kind, "division");
     assert_eq!(fill.parameters[1].default, json!("1/16"));
     assert_eq!(fill.parameters[2].unit.as_deref(), Some("%"));
@@ -711,6 +719,8 @@ fn r19_the_default_tool_is_the_chosen_tool_of_the_panel_shown_last() {
         ids::SET,
         json!({ "tool": "test_transpose", "values": { "degrees": 7 } }),
     );
+    song.tool(ids::CHOOSE, json!({ "tool": "test_fill" }));
+    song.tool(ids::CHOOSE, json!({ "tool": "test_transpose" }));
     song.tool(ids::SHOW_PANEL, json!({ "panel": "generate" }));
     assert_eq!(song.state().current_tool.as_deref(), Some("test_fill"));
     song.tool(ids::SHOW_PANEL, json!({ "panel": "transform" }));
@@ -1146,4 +1156,294 @@ fn r5_a_saved_value_outside_its_range_loads_as_the_default() {
     assert_eq!(fill.values["key"], json!(60), "out of range: the default");
     assert_eq!(fill.values["length"], json!(70), "in range: kept");
     assert!(!fill.values.contains_key("colour"), "no such parameter");
+}
+
+// The transformations of WP-6.12 (the MIDI transformations spec, R3 to R22),
+// through the commands.
+
+/// Three notes with room between them, none on the grid.
+fn spaced() -> Vec<Note> {
+    vec![
+        note(60, 37, SIXTEENTH),
+        note(64, 2 * QUARTER + 1000, SIXTEENTH),
+        note(67, 3 * QUARTER + 11, SIXTEENTH),
+    ]
+}
+
+#[test]
+fn r3_to_r19_each_transformation_applies_by_id_with_a_seed_as_one_undo_step() {
+    for (tool, name, values) in [
+        (
+            "arpeggiate",
+            "Arpeggiate",
+            json!({ "steps": 1, "gate": 50 }),
+        ),
+        ("chop", "Chop", json!({ "parts": 4 })),
+        ("connect", "Connect", json!({ "spread": 2 })),
+        ("ornament", "Ornament", json!({})),
+        ("quantize", "Quantize", json!({ "end": true })),
+    ] {
+        let mut one = song(spaced());
+        one.select_notes(&[0, 1, 2]);
+        let before = one.notes();
+        let steps = one.steps();
+        let args = json!({ "tool": tool, "values": values, "seed": 5 });
+        let run = one.tool(ids::APPLY, args.clone()).run.unwrap();
+        assert_eq!(run.seed, 5, "{tool}");
+        assert!(run.undo_step, "{tool}");
+        assert_eq!(one.steps(), steps + 1, "{tool}: one undo step");
+        assert_eq!(one.last_step().as_deref(), Some(name), "{tool}");
+        assert_ne!(one.notes(), before, "{tool} changed the notes");
+        // The same input, settings and seed give the same notes.
+        let mut two = song(spaced());
+        two.select_notes(&[0, 1, 2]);
+        two.tool(ids::APPLY, args);
+        assert_eq!(one.notes(), two.notes(), "{tool}");
+        one.shell.run("edit.undo", json!({})).unwrap();
+        assert_eq!(one.notes(), before, "{tool}: undo");
+    }
+}
+
+#[test]
+fn r4_to_r6_arpeggiate_in_and_out_of_scale_mode_and_on_a_drum_rack() {
+    let chord = || {
+        vec![
+            note(60, 0, BAR / 2),
+            note(64, 0, BAR / 2),
+            note(67, 0, BAR / 2),
+        ]
+    };
+    let values = json!({ "steps": 1, "distance": 1, "rate": "1/16" });
+    // Without a scale a degree is a semitone.
+    let mut plain = song(chord());
+    plain.select_notes(&[0, 1, 2]);
+    plain.tool(
+        ids::APPLY,
+        json!({ "tool": "arpeggiate", "values": values }),
+    );
+    assert_eq!(plain.keys()[..6], [60, 64, 67, 61, 65, 68]);
+    // In C major one degree up from C is D, from E is F and from G is A.
+    let mut major = song_with(MidiData::new(chord()), Scale::new(0, ScaleName::Major));
+    major.select_notes(&[0, 1, 2]);
+    major.tool(
+        ids::APPLY,
+        json!({ "tool": "arpeggiate", "values": values }),
+    );
+    assert_eq!(major.keys()[..6], [60, 64, 67, 62, 65, 69]);
+    // On a Drum Rack a step counts through the pads' keys.
+    let pads = |editor: &mut Editor, track: TrackId| {
+        let rack = editor.new_id();
+        editor
+            .apply(Command::InsertDevice {
+                track,
+                index: 0,
+                device: bl_model::Device::rack(rack, RackKind::Drum),
+            })
+            .unwrap();
+        for key in [36u8, 38, 42] {
+            let chain = editor.new_id();
+            editor
+                .apply(Command::AddChain {
+                    rack,
+                    index: 0,
+                    chain: Chain::for_pad(chain, "Pad", key),
+                })
+                .unwrap();
+        }
+    };
+    let mut drums = song_on(
+        MidiData::new(vec![note(36, 0, BAR / 2), note(38, 0, BAR / 2)]),
+        Scale::default(),
+        pads,
+    );
+    drums.select_notes(&[0, 1]);
+    drums.tool(
+        ids::APPLY,
+        json!({ "tool": "arpeggiate", "values": values }),
+    );
+    assert!(
+        drums.keys().iter().all(|key| [36, 38, 42].contains(key)),
+        "{:?}",
+        drums.keys()
+    );
+}
+
+#[test]
+fn r12_to_r13_connect_in_a_scale_and_on_a_drum_rack_stays_on_their_keys() {
+    let ends = || vec![note(60, 0, SIXTEENTH), note(71, 4 * QUARTER, SIXTEENTH)];
+    let mut major = song_with(MidiData::new(ends()), Scale::new(0, ScaleName::Major));
+    major.select_notes(&[0, 1]);
+    major.tool(
+        ids::APPLY,
+        json!({ "tool": "connect", "values": { "spread": 3 }, "seed": 2 }),
+    );
+    assert!(major.notes().len() > 2);
+    assert!(
+        major
+            .keys()
+            .iter()
+            .all(|key| [0, 2, 4, 5, 7, 9, 11].contains(&(key % 12))),
+        "{:?}",
+        major.keys()
+    );
+}
+
+#[test]
+fn r20_r19_cmd_u_quantizes_with_the_tools_settings_which_are_saved_and_reloaded() {
+    // Spec: midi-transformations R19, R20; piano-roll R19.
+    let mut editor = factory_default_set();
+    let track = editor.document().top_level().next().unwrap();
+    let clip = editor.new_id();
+    editor
+        .apply(Command::CreateClip {
+            track,
+            clip: Clip::new(
+                clip,
+                Ticks::ZERO,
+                Ticks(4 * BAR),
+                ClipData::Midi(MidiData::new(vec![note(60, QUARTER + 200, QUARTER - 100)])),
+            ),
+        })
+        .unwrap();
+    let dir = std::env::temp_dir().join(format!(
+        "bl-shell-quantize-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("Quantize.blset");
+    bl_shell::files::ProjectFiles::new()
+        .save(&path, &editor)
+        .unwrap();
+    let mut shell = Shell::new(
+        Preferences::default(),
+        None,
+        AudioHost::null(Default::default()),
+        Box::new(bl_shell::files::ProjectFiles::new()),
+    );
+    let open = |shell: &mut Shell| {
+        shell
+            .run("set.open", json!({ "path": path.to_string_lossy() }))
+            .unwrap();
+        shell
+            .run("arrangement.select_clips", json!({ "clips": [clip] }))
+            .unwrap();
+    };
+    open(&mut shell);
+    let steps = shell.editor().undo_history().len();
+    let settings = shell
+        .run(
+            "clip_view.quantize_settings",
+            json!({ "grid": QUARTER, "target": "both", "triplets": true, "amount": 100 }),
+        )
+        .unwrap();
+    assert_eq!(settings["target"], json!("both"));
+    assert_eq!(settings["triplets"], json!(true));
+    assert_eq!(shell.editor().undo_history().len(), steps, "no undo step");
+    shell.run("set.save", json!({})).unwrap();
+    shell.run("set.new", json!({})).unwrap();
+    open(&mut shell);
+    let settings = shell
+        .run("clip_view.quantize_settings", json!({ "amount": 100 }))
+        .unwrap();
+    assert_eq!(settings["grid"], json!(QUARTER));
+    assert_eq!(settings["target"], json!("both"));
+    assert_eq!(settings["triplets"], json!(true));
+    let state: MidiToolState =
+        serde_json::from_value(shell.run(ids::STATE, json!({})).unwrap()).unwrap();
+    let quantize = state.tools.iter().find(|t| t.tool == "quantize").unwrap();
+    assert_eq!(quantize.values["start"], json!(true));
+    assert_eq!(quantize.values["end"], json!(true));
+    assert_eq!(quantize.values["grid"], json!("1_4"));
+    assert_eq!(quantize.values["triplets"], json!(true));
+    // Cmd+U quantises through `note.quantize` with them: lines a quarter
+    // triplet apart, the start first and then the end.
+    shell
+        .run("clip_view.select_notes", json!({ "notes": [0] }))
+        .unwrap();
+    shell.run("note.quantize", json!({})).unwrap();
+    let ClipData::Midi(midi) = &shell.editor().document().clip(clip).unwrap().data else {
+        panic!("a MIDI clip");
+    };
+    let third = QUARTER * 2 / 3;
+    let moved = notes_in_order(midi);
+    assert_eq!(
+        (moved[0].start, moved[0].length),
+        (Ticks(2 * third), Ticks(third))
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn r21_quantize_settings_shows_the_transform_panel_with_quantize_chosen_without_an_undo_step() {
+    let mut song = song(three());
+    let (steps, notes) = (song.steps(), song.notes());
+    assert_eq!(song.state().panel, Panel::Utilities);
+    song.shell
+        .run("clip_view.quantize_settings", json!({}))
+        .unwrap();
+    let state = song.state();
+    assert_eq!(state.panel, Panel::Transform);
+    assert_eq!(state.transformation, "quantize");
+    assert_eq!((song.steps(), song.notes()), (steps, notes));
+    // Reading a field back does not move the panel.
+    song.tool(ids::SHOW_PANEL, json!({ "panel": "utilities" }));
+    song.shell
+        .run("clip_view.quantize_settings", json!({ "amount": 40 }))
+        .unwrap();
+    assert_eq!(song.state().panel, Panel::Utilities);
+}
+
+#[test]
+fn r8_r43_chops_gaps_write_its_pattern_and_a_toggle_click_is_a_set() {
+    let mut song = song(three());
+    let chop = |state: &MidiToolState| {
+        state
+            .tools
+            .iter()
+            .find(|t| t.tool == "chop")
+            .unwrap()
+            .values
+            .clone()
+    };
+    song.tool(ids::SET_AUTO, json!({ "tool": "chop", "auto": false }));
+    let state = song.tool(
+        ids::SET,
+        json!({ "tool": "chop", "values": { "parts": 4, "gaps": 1 } }),
+    );
+    let values = chop(&state);
+    assert_eq!(
+        values["pattern"].as_array().unwrap()[..4],
+        [json!(true), json!(false), json!(true), json!(false)]
+    );
+    // A toggle click sets the pattern; the change is refused if it leaves no part.
+    let mut toggles = vec![true; 16];
+    toggles[1] = false;
+    let state = song.tool(
+        ids::SET,
+        json!({ "tool": "chop", "values": { "pattern": toggles } }),
+    );
+    assert_eq!(
+        chop(&state)["pattern"].as_array().unwrap()[..4],
+        [json!(true), json!(false), json!(true), json!(true)]
+    );
+    let message = song.refused(
+        ids::SET,
+        json!({ "tool": "chop", "values": { "pattern": vec![false; 16] } }),
+    );
+    assert!(message.contains("at least one part"), "{message}");
+    assert!(
+        song.refused(ids::SET, json!({ "tool": "chop", "values": { "gaps": 9 } }))
+            .contains("gaps"),
+    );
+    // Applying cuts the selected notes; the gaps write nothing.
+    song.select_notes(&[0]);
+    song.tool(
+        ids::APPLY,
+        json!({ "tool": "chop", "values": { "gaps": 1, "parts": 4 } }),
+    );
+    assert_eq!(song.notes().iter().filter(|n| n.key == 60).count(), 2);
 }

@@ -66,26 +66,7 @@ pub const ROOTS: [&str; 12] = [
 ];
 
 /// The Style choices.
-pub const STYLES: [&str; 18] = [
-    "Up",
-    "Down",
-    "UpDown",
-    "DownUp",
-    "Up & Down",
-    "Down & Up",
-    "Converge",
-    "Diverge",
-    "Con & Diverge",
-    "Pinky Up",
-    "Pinky UpDown",
-    "Thumb Up",
-    "Thumb UpDown",
-    "Play Order",
-    "Chord Trigger",
-    "Random",
-    "Random Other",
-    "Random Once",
-];
+pub const STYLES: [&str; 18] = bl_midi_tools::STYLE_NAMES;
 
 /// The Retrigger choices.
 pub const RETRIGGERS: [&str; 3] = ["Off", "Note", "Beat"];
@@ -401,211 +382,35 @@ impl Arpeggiator {
         }
     }
 
-    fn write_converge(buf: &mut Vec<usize>, k: usize) {
-        let mut low = 0;
-        let mut high = k - 1;
-        while low <= high {
-            buf.push(low);
-            if low != high {
-                buf.push(high);
-            }
-            low += 1;
-            high = high.saturating_sub(1);
-        }
-    }
-
-    fn write_diverge(buf: &mut Vec<usize>, k: usize) {
-        let mid = k / 2;
-        if k % 2 == 1 {
-            buf.push(mid);
-            let mut step = 1;
-            while mid >= step || mid + step < k {
-                if mid >= step {
-                    buf.push(mid - step);
-                }
-                if mid + step < k {
-                    buf.push(mid + step);
-                }
-                step += 1;
-            }
-        } else {
-            let mut low = mid - 1;
-            let mut high = mid;
-            while high < k {
-                buf.push(low);
-                buf.push(high);
-                low = low.saturating_sub(1);
-                high += 1;
-            }
-        }
-    }
-
-    /// Build pattern indices into `pattern_buf` for the held notes.
+    /// Builds the pattern indices into `pattern_buf` for `k` held notes
+    /// (the style order is `bl_midi_tools::style_order`, which Arpeggiate
+    /// shares).
     fn update_pattern(&mut self, style: usize, k: usize) {
         self.pattern_buf.clear();
         if k == 0 {
             return;
         }
-        match style {
-            0 => {
-                // Up
-                for i in 0..k {
-                    self.pattern_buf.push(i);
-                }
+        if style == bl_midi_tools::RANDOM_ONCE {
+            if self.random_once_pattern.len() != k {
+                let rng = &mut self.rng;
+                bl_midi_tools::style_order(
+                    style,
+                    k,
+                    &mut self.random_once_pattern,
+                    &mut self.scratch_pool,
+                    &mut |n| rng.gen_range(n),
+                );
             }
-            1 => {
-                // Down
-                for i in (0..k).rev() {
-                    self.pattern_buf.push(i);
-                }
-            }
-            2 => {
-                // UpDown
-                if k <= 2 {
-                    for i in 0..k {
-                        self.pattern_buf.push(i);
-                    }
-                } else {
-                    for i in 0..k {
-                        self.pattern_buf.push(i);
-                    }
-                    for i in (1..k - 1).rev() {
-                        self.pattern_buf.push(i);
-                    }
-                }
-            }
-            3 => {
-                // DownUp
-                if k <= 2 {
-                    for i in (0..k).rev() {
-                        self.pattern_buf.push(i);
-                    }
-                } else {
-                    for i in (0..k).rev() {
-                        self.pattern_buf.push(i);
-                    }
-                    for i in 1..k - 1 {
-                        self.pattern_buf.push(i);
-                    }
-                }
-            }
-            4 => {
-                // Up & Down (endpoints repeated)
-                for i in 0..k {
-                    self.pattern_buf.push(i);
-                }
-                for i in (0..k).rev() {
-                    self.pattern_buf.push(i);
-                }
-            }
-            5 => {
-                // Down & Up (endpoints repeated)
-                for i in (0..k).rev() {
-                    self.pattern_buf.push(i);
-                }
-                for i in 0..k {
-                    self.pattern_buf.push(i);
-                }
-            }
-            6 => {
-                // Converge: 0, k-1, 1, k-2, 2, ...
-                Self::write_converge(&mut self.pattern_buf, k);
-            }
-            7 => {
-                // Diverge: inside outward
-                Self::write_diverge(&mut self.pattern_buf, k);
-            }
-            8 => {
-                // Con & Diverge
-                Self::write_converge(&mut self.pattern_buf, k);
-                Self::write_diverge(&mut self.pattern_buf, k);
-            }
-            9 => {
-                // Pinky Up: alternate top note with ascending notes below it
-                if k == 1 {
-                    self.pattern_buf.push(0);
-                } else {
-                    let top = k - 1;
-                    for i in 0..top {
-                        self.pattern_buf.push(top);
-                        self.pattern_buf.push(i);
-                    }
-                }
-            }
-            10 => {
-                // Pinky UpDown
-                if k == 1 {
-                    self.pattern_buf.push(0);
-                } else {
-                    let top = k - 1;
-                    for i in 0..top {
-                        self.pattern_buf.push(top);
-                        self.pattern_buf.push(i);
-                    }
-                    for i in (1..top - 1).rev() {
-                        self.pattern_buf.push(top);
-                        self.pattern_buf.push(i);
-                    }
-                }
-            }
-            11 => {
-                // Thumb Up: alternate bottom note with ascending notes above it
-                if k == 1 {
-                    self.pattern_buf.push(0);
-                } else {
-                    for i in 1..k {
-                        self.pattern_buf.push(0);
-                        self.pattern_buf.push(i);
-                    }
-                }
-            }
-            12 => {
-                // Thumb UpDown
-                if k == 1 {
-                    self.pattern_buf.push(0);
-                } else {
-                    for i in 1..k {
-                        self.pattern_buf.push(0);
-                        self.pattern_buf.push(i);
-                    }
-                    for i in (2..k - 1).rev() {
-                        self.pattern_buf.push(0);
-                        self.pattern_buf.push(i);
-                    }
-                }
-            }
-            13 => {
-                // Play Order: sorted by order counter
-                for i in 0..k {
-                    self.pattern_buf.push(i);
-                }
-            }
-            14..=16 => {
-                // Chord Trigger, Random, Random Other
-                self.pattern_buf.push(0);
-            }
-            17 => {
-                // Random Once
-                if self.random_once_pattern.len() != k {
-                    self.random_once_pattern.clear();
-                    self.scratch_pool.clear();
-                    for i in 0..k {
-                        self.scratch_pool.push(i);
-                    }
-                    while !self.scratch_pool.is_empty() {
-                        let idx = self.rng.gen_range(self.scratch_pool.len());
-                        self.random_once_pattern
-                            .push(self.scratch_pool.swap_remove(idx));
-                    }
-                }
-                self.pattern_buf
-                    .extend_from_slice(&self.random_once_pattern);
-            }
-            _ => {
-                for i in 0..k {
-                    self.pattern_buf.push(i);
-                }
-            }
+            self.pattern_buf
+                .extend_from_slice(&self.random_once_pattern);
+        } else {
+            bl_midi_tools::style_order(
+                style,
+                k,
+                &mut self.pattern_buf,
+                &mut self.scratch_pool,
+                &mut |_| 0,
+            );
         }
     }
 }

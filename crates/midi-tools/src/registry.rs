@@ -8,9 +8,13 @@ use crate::arpeggiate::Arpeggiate;
 use crate::chop::Chop;
 use crate::connect::Connect;
 use crate::descriptor::{ParamValue, ToolDescriptor, ToolKind};
+use crate::euclidean::Euclidean;
 use crate::input::{ToolInput, ToolOutput, fold_octaves};
 use crate::ornament::Ornament;
 use crate::quantize::Quantize;
+use crate::rhythm::Rhythm;
+use crate::seed::Seed;
+use crate::shape::Shape;
 use bl_core::time::Ticks;
 
 /// The most notes one run may write; a run that would write more is
@@ -140,6 +144,10 @@ fn native_tools() -> Vec<Box<dyn MidiTool>> {
         Box::new(Connect::new()),
         Box::new(Ornament::new()),
         Box::new(Quantize::new()),
+        Box::new(Rhythm::new()),
+        Box::new(Seed::new()),
+        Box::new(Shape::new()),
+        Box::new(Euclidean::new()),
     ]
 }
 

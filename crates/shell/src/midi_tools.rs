@@ -16,6 +16,7 @@ use bl_core::time::Ticks;
 use bl_midi_tools::{
     Breakpoint, DIVISION_NAMES, MidiTool, ParamKind, ParamSpec, ParamValue, QUANTIZE_GRIDS,
     Registry, Rng, ToolDescriptor, ToolError, ToolInput, ToolKind, ToolNote, ToolPoint, ToolScale,
+    random_rotations, rotation_id,
 };
 use bl_model::{
     Breakpoint as NotePoint, Clip, ClipData, ClipId, Document, Editor, MidiData, Note, RackKind,
@@ -24,8 +25,8 @@ use bl_model::{
 use bl_project::midi_tools::{ChosenTools, MidiToolSettings, SavedTool};
 use bl_shell_spec::midi_tools::{
     self as ids, ApplicationState, ApplyArgs, ChooseArgs, ClipArgs, MidiToolState, Panel,
-    ParamInfo, RangeArgs, ReseedArgs, ResetArgs, SetArgs, SetAutoArgs, ShowPanelArgs, TargetState,
-    ToolInfo, ToolList, ToolRun, ToolSettingsState,
+    ParamInfo, RandomizeArgs, RangeArgs, ReseedArgs, ResetArgs, SetArgs, SetAutoArgs,
+    ShowPanelArgs, TargetState, ToolInfo, ToolList, ToolRun, ToolSettingsState,
 };
 use bl_shell_spec::notes::{QuantizeSettings, QuantizeTarget};
 use serde::de::DeserializeOwned;
@@ -39,6 +40,9 @@ use crate::clip_view::{ClipView, notes_in_order, span_of};
 const DEFAULT_TRANSFORMATION: &str = "arpeggiate";
 /// The generator a new track shows.
 const DEFAULT_GENERATOR: &str = "rhythm";
+/// The generator whose randomise button `midi_tool.randomize` presses (the
+/// MIDI generators spec, R16).
+const EUCLIDEAN: &str = "euclidean";
 /// The Quantize tool, whose settings are the Clip View's Quantize settings
 /// (the MIDI transformations spec, R20), and its parameters' places.
 const QUANTIZE: &str = "quantize";
@@ -859,6 +863,31 @@ fn tool_input(
     }
 }
 
+/// `keys` each moved `degrees` steps as a generator's pitch steps, through
+/// the clip's scale or its Drum Rack's keys (the MIDI generators spec, R1,
+/// R14); a key that can't move stays where it is.
+#[must_use]
+pub fn stepped_keys(doc: &Document, clip: ClipId, keys: &[u8], degrees: i32) -> Vec<u8> {
+    let Some(value) = doc.clip(clip) else {
+        return keys.to_vec();
+    };
+    let input = ToolInput {
+        notes: Vec::new(),
+        range: (Ticks::ZERO, Ticks::ZERO),
+        grid_step: Ticks::ZERO,
+        signature: doc.settings().time_signatures.signature_at(value.start),
+        scale: value.scale.enabled.then(|| ToolScale {
+            root: value.scale.root,
+            steps: value.scale.steps().to_vec(),
+        }),
+        drum_keys: doc.clip_track(clip).and_then(|track| drum_keys(doc, track)),
+        seed: 0,
+    };
+    keys.iter()
+        .map(|key| input.step_key(*key, degrees).unwrap_or(*key))
+        .collect()
+}
+
 /// The clip's notes once `written` replace what the tool took (R11, R12),
 /// in the editor's order, and the places of the written notes.
 fn merged(app: &Application, kind: ToolKind, written: &[Note]) -> (Vec<Note>, Vec<u32>) {
@@ -1495,6 +1524,39 @@ pub fn run(
                 arrangement,
                 Some(subject.clip),
                 Some(run),
+            )))
+        }
+        ids::RANDOMIZE => {
+            let RandomizeArgs { clip, seed } = parse(args)?;
+            let subject = subject(&doc, view, arrangement, clip)?;
+            let found = Registry::native()
+                .find(EUCLIDEAN)
+                .ok_or_else(|| unavailable("Euclidean is missing"))?;
+            let descriptor = found.descriptor();
+            let seed = seed.unwrap_or_else(|| view.tools.draw_seed());
+            let (at, _) = descriptor.parameter("steps").expect("Euclidean has Steps");
+            let steps = match view.tools.settings_of(descriptor).values[at] {
+                ParamValue::Whole(steps) => usize::try_from(steps).unwrap_or(1),
+                _ => 1,
+            };
+            let values: Map<String, Value> = random_rotations(steps, seed)
+                .into_iter()
+                .enumerate()
+                .map(|(voice, rotation)| (rotation_id(voice), json!(rotation)))
+                .collect();
+            set_values(&mut view.tools, found, &values)?;
+            let run = if view.tools.settings_of(descriptor).auto {
+                auto_apply(editor, view, arrangement, subject.clip, found)?
+            } else {
+                None
+            };
+            let doc = editor.document().clone();
+            Ok(to_value(&state(
+                &doc,
+                view,
+                arrangement,
+                Some(subject.clip),
+                run,
             )))
         }
         other => Err(invalid(format!("`{other}` isn't a MIDI Tools command"))),

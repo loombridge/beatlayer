@@ -61,6 +61,7 @@ pub mod external;
 pub mod file_manager;
 pub mod focus;
 pub mod follow_controls;
+mod generator_panel;
 pub mod in_out;
 pub mod input;
 pub mod keymap;

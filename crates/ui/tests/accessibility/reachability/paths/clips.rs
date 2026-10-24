@@ -228,6 +228,15 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             )),
         ),
         (
+            "midi_tool.randomize",
+            main(
+                euclidean_shown,
+                detail_area,
+                "Randomize Rotations",
+                Key::Enter,
+            ),
+        ),
+        (
             "midi_tool.close",
             Exception(Equivalent(
                 "changing the selected notes or the time selection, which closes the open                  application (the MIDI Tools spec, R21)",

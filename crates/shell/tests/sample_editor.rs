@@ -283,6 +283,84 @@ fn marker_edits_reach_every_selected_clip_of_one_length() {
     assert_eq!(shell.sample_edit_clips(a, &[2]), [a]);
 }
 
+// Spec: linked-track editing R10, sample-editor R19. Selecting a clip on a
+// linked track selects its matching clips, and a warp-marker edit reaches
+// those whose file is as long as the shown clip's, and not one of another
+// length.
+#[test]
+fn a_marker_edit_reaches_a_linked_clip_of_the_same_length_and_not_another() {
+    let scratch = Scratch::new("linked");
+    let (mut shell, clips) = shell_with(&scratch, &[(1, 220.0)]);
+    let a = clips[0];
+    let audio: Vec<_> = shell
+        .editor()
+        .document()
+        .tracks()
+        .filter(|t| t.kind() == TrackKind::Audio)
+        .map(|t| t.id())
+        .collect();
+    let third = shell.new_id();
+    shell
+        .run(
+            "track.create",
+            json!({ "id": third, "kind": "audio", "name": "Third", "index": 4 }),
+        )
+        .unwrap();
+    let (second, third_track) = (audio[1], third);
+    // The same length of file on the second track; a longer file on the
+    // third, cut to the same stretch of the Arrangement.
+    let mut placed = Vec::new();
+    for (track, seconds) in [(second, 1), (third_track, 2)] {
+        let path = scratch.0.join(format!("Linked {seconds}.wav"));
+        wav(&path, seconds, 440.0);
+        shell
+            .run(
+                "browser.add_to_arrangement",
+                json!({ "paths": [path.display().to_string()], "track": track, "at": 0 }),
+            )
+            .unwrap();
+        let clip = shell
+            .editor()
+            .document()
+            .track(track)
+            .unwrap()
+            .clips()
+            .next()
+            .unwrap()
+            .id;
+        shell
+            .run("clip.set_warp", json!({ "clip": clip, "warp": true }))
+            .unwrap();
+        placed.push(clip);
+    }
+    let length = shell.editor().document().clip(a).unwrap().length;
+    shell
+        .run(
+            "clip.set_length",
+            json!({ "clip": placed[1], "length": length, "linked": false }),
+        )
+        .unwrap();
+    shell
+        .run(
+            "track.link",
+            json!({ "tracks": [audio[0], second, third_track] }),
+        )
+        .unwrap();
+    shell
+        .run("arrangement.select_clips", json!({ "clips": [a] }))
+        .unwrap();
+    assert_eq!(shell.arrangement().selected_clips().len(), 3);
+    assert_eq!(shell.sample_edit_clips(a, &[]), [a, placed[0]]);
+    shell
+        .run("clip_view.set_insert_marker", json!({ "time": 0.5 }))
+        .unwrap();
+    shell.set_focused_area(bl_shell::Area::Detail);
+    shell.invoke("clip.insert_warp_marker", json!({})).unwrap();
+    assert_eq!(markers(&shell, a).len(), 2);
+    assert_eq!(markers(&shell, placed[0]).len(), 2);
+    assert_eq!(markers(&shell, placed[1]).len(), 1, "another length");
+}
+
 // Spec: sample-editor R7, R8
 #[test]
 fn a_gesture_that_inserts_a_marker_then_moves_it_is_one_undo_step_and_esc_undoes_it() {

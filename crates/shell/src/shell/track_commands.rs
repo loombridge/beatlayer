@@ -321,6 +321,68 @@ impl Shell {
                 self.touch();
                 Ok(to_value(&track_ids::TracksUngrouped { tracks: children }))
             }
+            track_ids::LINK | track_ids::UNLINK => {
+                // Spec: linked-track editing R2 to R5.
+                let (named, into) = if id == track_ids::LINK {
+                    let track_ids::LinkTracksArgs { tracks, into } = Self::args(id, args)?;
+                    (tracks, into)
+                } else {
+                    let track_ids::UnlinkTracksArgs { tracks } = Self::args(id, args)?;
+                    (tracks, None)
+                };
+                let selected = named.unwrap_or_else(|| self.arrangement.selected_tracks().to_vec());
+                let doc = self.editor.document();
+                let mut tracks = crate::tracks::linkable(doc, &selected);
+                let unavailable = |reason: &str| ShellError::Unavailable {
+                    command: id.to_owned(),
+                    reason: reason.to_owned(),
+                };
+                let group = if id == track_ids::LINK {
+                    let group = match into {
+                        Some(into) => {
+                            let group = doc.track(into).and_then(bl_model::Track::link);
+                            Some(group.ok_or_else(|| unavailable("`into` isn't a linked track"))?)
+                        }
+                        None => None,
+                    };
+                    let enough = match group {
+                        Some(_) => tracks
+                            .iter()
+                            .any(|t| doc.track(*t).and_then(bl_model::Track::link) != group),
+                        None => tracks.len() >= 2,
+                    };
+                    if !enough {
+                        return Err(unavailable("linking needs two audio or MIDI tracks"));
+                    }
+                    Some(group.unwrap_or_else(|| self.editor.new_id()))
+                } else {
+                    tracks.retain(|t| doc.track(*t).is_some_and(|t| t.link().is_some()));
+                    if tracks.is_empty() {
+                        return Err(unavailable("no selected track is linked"));
+                    }
+                    None
+                };
+                let step = if group.is_some() {
+                    track_ids::LINK_STEP
+                } else {
+                    track_ids::UNLINK_STEP
+                };
+                self.editor
+                    .transact(step, |editor| {
+                        editor.apply(bl_model::Command::SetTrackLinks {
+                            tracks: tracks.clone(),
+                            group,
+                        })
+                    })
+                    .map_err(|error| ShellError::Failed {
+                        command: id.to_owned(),
+                        message: error.to_string(),
+                    })?;
+                self.dirty = true;
+                self.document_changed();
+                self.touch();
+                Ok(to_value(&track_ids::TracksLinked { tracks }))
+            }
             track_ids::SET_DEVICES_ENABLED => {
                 // Spec: device-chains R39. Deactivate All Devices switches
                 // off every top-level device on the selected tracks, and

@@ -678,6 +678,23 @@ impl Shell {
                         named.unwrap_or_else(|| self.arrangement.selected_tracks().to_vec());
                     return !crate::tracks::groupable(self.editor.document(), &tracks).is_empty();
                 }
+                track_ids::LINK | track_ids::UNLINK => {
+                    let named: Option<Vec<TrackId>> = args
+                        .get("tracks")
+                        .and_then(|v| serde_json::from_value(v.clone()).ok());
+                    let into = args.get("into").is_some();
+                    let tracks =
+                        named.unwrap_or_else(|| self.arrangement.selected_tracks().to_vec());
+                    let doc = self.editor.document();
+                    let tracks = crate::tracks::linkable(doc, &tracks);
+                    return if id == track_ids::LINK {
+                        tracks.len() + usize::from(into) >= 2
+                    } else {
+                        tracks
+                            .iter()
+                            .any(|t| doc.track(*t).is_some_and(|t| t.link().is_some()))
+                    };
+                }
                 track_ids::SET_DEVICES_ENABLED => {
                     // IMP-25. It works while the selected tracks hold a
                     // top-level device to switch.

@@ -64,6 +64,10 @@ pub struct InsertArgs {
     /// take lane.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub after: Vec<TakeLaneId>,
+    /// Whether it reaches the tracks linked with the ones it names (the
+    /// linked-track editing spec, R15). `true` if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub linked: Option<bool>,
 }
 
 /// Arguments of `take_lane.duplicate`.
@@ -93,6 +97,10 @@ pub struct CopyToMainLaneArgs {
     /// Where the range ends, after `start`. Left out, the selection's end.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub end: Option<Position>,
+    /// Whether it reaches the tracks linked with the ones it names (the
+    /// linked-track editing spec, R15). `true` if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub linked: Option<bool>,
 }
 
 /// Which way `take_lane.replace_with_take` goes.
@@ -128,6 +136,10 @@ pub struct ReplaceWithTakeArgs {
     /// left out with `track`, the selection says.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lane: Option<TakeLaneId>,
+    /// Whether it reaches the tracks linked with the ones it names (the
+    /// linked-track editing spec, R15). `true` if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub linked: Option<bool>,
 }
 
 /// Arguments of `take_lane.audition`.
@@ -142,6 +154,10 @@ pub struct AuditionArgs {
     /// off when every one of them is auditioned already.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on: Option<bool>,
+    /// Whether it reaches the tracks linked with the ones it names (the
+    /// linked-track editing spec, R15). `true` if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub linked: Option<bool>,
 }
 
 /// Arguments of `take_lane.move_comp_edge`.
@@ -154,6 +170,10 @@ pub struct MoveCompEdgeArgs {
     pub from: Position,
     /// Where they should meet.
     pub to: Position,
+    /// Whether it reaches the tracks linked with the ones it names (the
+    /// linked-track editing spec, R15). `true` if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub linked: Option<bool>,
 }
 
 /// Arguments of `take_lane.comp_sources`.

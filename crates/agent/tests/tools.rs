@@ -179,6 +179,7 @@ fn discovery_lists_areas_searches_and_describes_with_schemas() {
             "track.duplicate_without_clips",
             "track.freeze",
             "track.group",
+            "track.link",
             "track.move",
             "track.paste",
             "track.paste_bounced_audio",
@@ -186,9 +187,11 @@ fn discovery_lists_areas_searches_and_describes_with_schemas() {
             "track.set_bounced",
             "track.set_devices_enabled",
             "track.set_frozen",
+            "track.set_link_group",
             "track.set_tuning_bypass",
             "track.unfreeze",
-            "track.ungroup"
+            "track.ungroup",
+            "track.unlink"
         ]
     );
     let delete = tracks["commands"]

@@ -73,6 +73,24 @@ pub fn fold_id(track: TrackId) -> Id {
     Id::new(("arrangement-fold", track))
 }
 
+/// The ID of a track's linked-track indicator (L-ARR-022).
+#[must_use]
+pub fn linked_id(track: TrackId) -> Id {
+    Id::new(("arrangement-linked", track))
+}
+
+/// How wide the linked-track indicator is.
+const LINKED_WIDTH: f32 = 14.0;
+
+/// The link group whose indicator the pointer was over in the last frame or
+/// this one: the frame, the track whose indicator it is, and the group. The
+/// headers drawn before that indicator read it a frame late.
+type LinkedHover = (u64, TrackId, Vec<TrackId>);
+
+fn linked_hover_key() -> Id {
+    Id::new("arrangement-linked-hover")
+}
+
 /// The ID of the split line under a track's header, dragged to resize it.
 #[must_use]
 pub fn split_id(track: TrackId) -> Id {
@@ -93,6 +111,61 @@ pub fn volume_text(volume: f64) -> String {
 #[must_use]
 pub fn pan_text(pan: f64) -> String {
     bl_shell::mixer_controls::pan_text(pan)
+}
+
+/// Draws the linked-track indicator of `track` in `rect`: a chain link in
+/// the title's text colour, the same on every group. Hovering it marks its
+/// group for the headers to highlight; clicking it selects the group's title
+/// bars (spec: linked-track editing R6; I-CLICK-041).
+#[expect(clippy::too_many_arguments, reason = "the header's own pieces")]
+fn linked_indicator(
+    ui: &mut Ui,
+    theme: &Theme,
+    shell: &Shell,
+    rect: Rect,
+    track: TrackId,
+    group: &[TrackId],
+    pass: u64,
+    events: &mut Vec<UiEvent>,
+) {
+    let response = ui.interact(rect, linked_id(track), Sense::click());
+    // Headers drawn before this one read the hover a frame late, so a change
+    // asks for one more frame.
+    let was = ui
+        .data(|d| d.get_temp::<LinkedHover>(linked_hover_key()))
+        .is_some_and(|(at, owner, _)| owner == track && at + 1 == pass);
+    if response.hovered() {
+        ui.data_mut(|d| d.insert_temp(linked_hover_key(), (pass, track, group.to_vec())));
+    }
+    if response.hovered() != was {
+        ui.ctx().request_repaint();
+    }
+    // Two interlocked links, side by side.
+    let stroke = Stroke::new(1.3, theme.colors.clip_text.0);
+    let c = rect.center();
+    let painter = ui.painter_at(rect);
+    for dx in [-2.5, 2.5] {
+        let link = Rect::from_center_size(pos2(c.x + dx, c.y), vec2(8.0, 5.0));
+        painter.rect_stroke(link, 2.5, stroke, StrokeKind::Middle);
+    }
+    if response.clicked() {
+        invoke(
+            events,
+            ids::SELECT_TRACKS,
+            json!({ "tracks": group, "add": false, "title_bars": true }),
+        );
+    }
+    let document = shell.editor().document();
+    let names: Vec<&str> = group
+        .iter()
+        .filter_map(|t| document.track(*t).map(Track::name))
+        .collect();
+    let label = format!("Linked tracks: {}", names.join(", "));
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, label.clone()));
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_role(Role::Button);
+        node.set_label(label);
+    });
 }
 
 /// Draws one track's header and adds what the person did to `events`.
@@ -136,8 +209,14 @@ pub fn header(
     );
     let painter = ui.painter_at(rect);
 
+    // Spec: linked-track editing R6. Hovering a linked track's indicator
+    // fills the title of every track in its group like a selected one's.
+    let pass = ui.ctx().cumulative_pass_nr();
+    let hovered_group = ui
+        .data(|d| d.get_temp::<LinkedHover>(linked_hover_key()))
+        .filter(|(at, _, group)| pass.saturating_sub(*at) <= 1 && group.contains(&id));
     // The title, filled with the track's colour.
-    let fill = if selected {
+    let fill = if selected || hovered_group.is_some() {
         colour
     } else {
         colour.gamma_multiply(0.82)
@@ -272,6 +351,15 @@ pub fn header(
             vec2(super::take_lanes::BUTTON, super::take_lanes::BUTTON),
         );
         super::take_lanes::toggle(ui, theme, id, rect, shown, events);
+        name_right = rect.left() - 2.0;
+    }
+    let group = shell.editor().document().linked_with(id);
+    if !group.is_empty() {
+        let rect = Rect::from_min_size(
+            pos2(name_right - LINKED_WIDTH, row_top + 1.0),
+            vec2(LINKED_WIDTH, 13.0),
+        );
+        linked_indicator(ui, theme, shell, rect, id, &group, pass, events);
         name_right = rect.left() - 2.0;
     }
     let name_rect = Rect::from_min_max(pos2(name_left, row_top), pos2(name_right, row_top + 15.0));

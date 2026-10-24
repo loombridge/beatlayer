@@ -228,6 +228,14 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             ),
         ),
         ("track.set_devices_enabled", Exception(TRACK_MENU)),
+        ("track.link", Exception(TRACK_MENU)),
+        ("track.unlink", Exception(TRACK_MENU)),
+        (
+            "track.set_link_group",
+            Exception(Equivalent(
+                "Link Tracks and Unlink Track(s) in a track header's menu, which choose the group",
+            )),
+        ),
         (
             "arrangement.set_crossfade",
             Exception(Live(

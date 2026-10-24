@@ -781,6 +781,10 @@ pub struct Track {
     /// plays twelve equal steps whatever tuning the set holds. Off in a new
     /// track, and saved only when on.
     pub(crate) tuning_bypass: bool,
+    /// The group of linked tracks the track is in, if any (WP-6.23; the
+    /// linked-track editing spec, R1). A group always has two tracks or
+    /// more.
+    pub(crate) link: Option<crate::ids::LinkGroupId>,
 }
 
 impl Track {
@@ -804,6 +808,7 @@ impl Track {
             automation: TrackAutomation::new(),
             frozen: None,
             tuning_bypass: false,
+            link: None,
         }
     }
 
@@ -895,6 +900,13 @@ impl Track {
     #[must_use]
     pub const fn tuning_bypass(&self) -> bool {
         self.tuning_bypass
+    }
+
+    /// The group of linked tracks the track is in, if any (the linked-track
+    /// editing spec, R1).
+    #[must_use]
+    pub const fn link(&self) -> Option<crate::ids::LinkGroupId> {
+        self.link
     }
 
     /// Whether the track holds a Drum Rack, at any depth, which makes it
@@ -1182,6 +1194,7 @@ impl Track {
             || self.delay != other.delay
             || self.keep_monitoring_latency != other.keep_monitoring_latency
             || self.tuning_bypass != other.tuning_bypass
+            || self.link != other.link
             || self.removed_stop_buttons != other.removed_stop_buttons
             || self.frozen != other.frozen
             || self.audition != other.audition

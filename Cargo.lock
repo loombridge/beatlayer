@@ -959,6 +959,7 @@ dependencies = [
  "bl-model",
  "bl-rt",
  "bl-test-clap",
+ "bl-test-lv2",
  "bl-test-vst3",
  "block2 0.6.2",
  "clack-extensions",
@@ -1067,6 +1068,10 @@ dependencies = [
  "clack-extensions",
  "clack-plugin",
 ]
+
+[[package]]
+name = "bl-test-lv2"
+version = "0.2.0"
 
 [[package]]
 name = "bl-test-vst3"

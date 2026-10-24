@@ -79,6 +79,15 @@ fn fixture() -> Project {
     let drums = track(&mut editor, TrackKind::Audio, "Drums", Some(bus), 0);
     let verb = track(&mut editor, TrackKind::Return, "Verb", None, 0);
     let pad = track(&mut editor, TrackKind::Midi, "Pad", None, 3);
+    // Spec: linked-track editing R1, R16. Two tracks linked.
+    let link: bl_model::LinkGroupId = editor.new_id();
+    apply(
+        &mut editor,
+        Command::SetTrackLinks {
+            tracks: vec![vox, pad],
+            group: Some(link),
+        },
+    );
 
     // The song.
     apply(
@@ -1367,6 +1376,11 @@ fn every_query_readback_the_command_table_names_is_in_a_real_full_result() {
         .iter()
         .map(|saved| query(&mut client, json!({ "id": saved["id"], "detail": "full" })))
         .collect();
+    // The track's whole results too, for the fields listed beside `saved`.
+    let track_results: Vec<Value> = tracks
+        .iter()
+        .map(|saved| query(&mut client, json!({ "id": saved["id"], "detail": "full" })))
+        .collect();
     let mut full = |ids: &[Value]| -> Vec<Value> {
         ids.iter()
             .map(|saved| {
@@ -1395,7 +1409,11 @@ fn every_query_readback_the_command_table_names_is_in_a_real_full_result() {
         };
         let found = match object {
             Object::Song => present(&song, field) || present(&song["saved"], field),
-            Object::Track => tracks.iter().any(|saved| present(saved, field)),
+            Object::Track => {
+                tracks.iter().any(|saved| present(saved, field))
+                    || (Object::Track.listed().contains(field)
+                        && track_results.iter().any(|result| present(result, field)))
+            }
             Object::Clip => clips.iter().any(|saved| present(saved, field)),
             Object::Device => {
                 devices.iter().any(|saved| present(saved, field))

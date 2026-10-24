@@ -11,11 +11,12 @@ use crate::common;
 use bl_model::{TrackId, TrackKind};
 use bl_shell::mixer_view::MixerOf;
 use bl_shell::mixer_view_commands::TOGGLE;
+use bl_ui::arrangement::headers::{linked_id, title_id};
 use bl_ui::layout::mixer::{MixerLayout, Sections, SessionLayout, TrackColumn};
 use bl_ui::layout::{REFERENCE, ShellLayout, TITLE_BAR};
 use bl_ui::main_window::{UiEvent, main_view_id};
 use bl_ui::mixer::column_id;
-use common::{Harness, Node, Window};
+use common::{Harness, Node, Window, painted_rects};
 use egui::accesskit::Role;
 use egui::{Event, FullOutput, Key, Modifiers, PointerButton, Pos2, Rect, pos2, vec2};
 use serde_json::json;
@@ -337,9 +338,10 @@ fn with_several_tracks_selected_each_item_acts_on_all_of_them() {
         .unwrap();
     let at = header_title(&mut h, "4 Audio");
     let nodes = Harness::nodes(&right_click(&mut h, at));
-    // The right-click kept the selection; Link Tracks is drawn for it.
+    // The right-click kept the selection; Link Tracks is drawn for it, and
+    // Unlink Track(s) waits for a linked track.
     assert_eq!(h.shell.arrangement().selected_tracks(), [all[2], all[3]]);
-    assert!(item(&nodes, "Link Tracks").disabled);
+    assert!(!item(&nodes, "Link Tracks").disabled);
     assert!(item(&nodes, "Unlink Track(s)").disabled);
     let steps = h.shell.editor().undo_history().count();
     choose(&mut h, "Delete");
@@ -347,6 +349,100 @@ fn with_several_tracks_selected_each_item_acts_on_all_of_them() {
     assert!(!left.contains(&all[2]) && !left.contains(&all[3]));
     assert_eq!(h.shell.editor().undo_history().count(), steps + 1);
     assert_eq!(last_step(&h), "Delete Track(s)");
+}
+
+// Spec: linked-track editing R2, R5, track-context-menu R11. Link Tracks in
+// the menu links the selected tracks in one undo step, and Unlink Track(s)
+// takes the selection out.
+#[test]
+fn link_tracks_and_unlink_tracks_in_the_menu_run_on_the_selected_tracks() {
+    let mut h = arrangement();
+    let all = tracks(&h);
+    h.shell
+        .run(
+            "arrangement.select_tracks",
+            json!({ "tracks": [all[2], all[3]], "title_bars": true }),
+        )
+        .unwrap();
+    let at = header_title(&mut h, "4 Audio");
+    right_click(&mut h, at);
+    let steps = h.shell.editor().undo_history().count();
+    choose(&mut h, "Link Tracks");
+    assert_eq!(
+        h.shell.editor().document().linked_with(all[2]),
+        [all[2], all[3]]
+    );
+    assert_eq!(h.shell.editor().undo_history().count(), steps + 1);
+    assert_eq!(last_step(&h), "Link Tracks");
+
+    let nodes = Harness::nodes(&right_click(&mut h, at));
+    assert!(!item(&nodes, "Unlink Track(s)").disabled);
+    choose(&mut h, "Unlink Track(s)");
+    assert!(h.shell.editor().document().linked_with(all[2]).is_empty());
+    assert_eq!(last_step(&h), "Unlink Tracks");
+}
+
+// Spec: linked-track editing R3, track-context-menu R11. Cmd held while
+// choosing Link Tracks in a linked track's menu adds the selection to its
+// group.
+#[test]
+fn link_tracks_with_command_held_adds_the_selection_to_the_clicked_tracks_group() {
+    let mut h = arrangement();
+    let all = tracks(&h);
+    h.shell
+        .run("track.link", json!({ "tracks": [all[0], all[1]] }))
+        .unwrap();
+    h.shell
+        .run(
+            "arrangement.select_tracks",
+            json!({ "tracks": [all[0], all[2]], "title_bars": true }),
+        )
+        .unwrap();
+    let at = header_title(&mut h, "1 MIDI");
+    right_click(&mut h, at);
+    h.frame(vec![Event::ModifiersChanged(Modifiers::COMMAND)]);
+    choose(&mut h, "Link Tracks");
+    h.frame(vec![Event::ModifiersChanged(Modifiers::NONE)]);
+    assert_eq!(
+        h.shell.editor().document().linked_with(all[0]),
+        [all[0], all[1], all[2]]
+    );
+}
+
+// Spec: track-context-menu R11, linked-track editing R4. A group track's
+// menu offers both items whatever else is selected, and acts on the audio
+// and MIDI tracks inside it.
+#[test]
+fn a_group_tracks_menu_links_the_tracks_inside_it() {
+    let mut h = arrangement();
+    let all = tracks(&h);
+    h.shell
+        .run(
+            "arrangement.select_tracks",
+            json!({ "tracks": [all[2], all[3]], "title_bars": true }),
+        )
+        .unwrap();
+    h.shell.run("track.group", json!({})).unwrap();
+    h.settle();
+    let group = h.shell.arrangement().selected_tracks()[0];
+    let name = name_of(&h, group);
+    let at = header_title(&mut h, &name);
+    let nodes = Harness::nodes(&right_click(&mut h, at));
+    assert!(!item(&nodes, "Link Tracks").disabled);
+    choose(&mut h, "Link Tracks");
+    assert_eq!(
+        h.shell.editor().document().linked_with(all[2]),
+        [all[2], all[3]]
+    );
+    assert!(
+        h.shell
+            .editor()
+            .document()
+            .track(group)
+            .unwrap()
+            .link()
+            .is_none()
+    );
 }
 
 // Spec: device-chains R39; IMP-25. The menu's Deactivate All Devices
@@ -699,4 +795,115 @@ fn the_take_lane_items_show_the_lanes_and_delete_them() {
             .len(),
         0
     );
+}
+
+fn bounds_of(h: &mut Harness, id: egui::Id) -> Option<Rect> {
+    let nodes = Harness::nodes(&h.settle());
+    let b = nodes.iter().find(|n| n.id == id.accesskit_id())?.bounds?;
+    Some(Rect::from_min_max(
+        pos2(b.x0 as f32, b.y0 as f32),
+        pos2(b.x1 as f32, b.y1 as f32),
+    ))
+}
+
+/// The colour a frame fills a track's title with.
+fn title_fill(h: &mut Harness, track: TrackId) -> egui::Color32 {
+    let title = bounds_of(h, title_id(track)).expect("a title");
+    let output = h.settle();
+    painted_rects(&output)
+        .into_iter()
+        .find(|(rect, _)| {
+            (rect.min - title.min).abs().max_elem() < 0.6
+                && (rect.width() - title.width()).abs() < 0.6
+        })
+        .map(|(_, fill)| fill)
+        .expect("the title's fill")
+}
+
+// Spec: linked-track editing R6 (L-ARR-022, I-CLICK-041). Only linked tracks
+// show the indicator, as a button naming the group's tracks; hovering it
+// fills the group's titles like a selected track's, headers only, and the
+// pointer elsewhere on a header highlights nothing.
+#[test]
+fn the_linked_track_indicator_highlights_its_group_on_hover() {
+    let mut h = arrangement();
+    let all = tracks(&h);
+    h.shell
+        .run("track.link", json!({ "tracks": [all[0], all[1]] }))
+        .unwrap();
+    h.settle();
+    assert!(bounds_of(&mut h, linked_id(all[2])).is_none());
+    let indicator = bounds_of(&mut h, linked_id(all[0])).expect("an indicator");
+    let title = bounds_of(&mut h, title_id(all[0])).unwrap();
+    assert!(title.contains_rect(indicator) && indicator.right() > title.center().x);
+    let nodes = Harness::nodes(&h.settle());
+    let node = nodes
+        .iter()
+        .find(|n| n.id == linked_id(all[0]).accesskit_id())
+        .unwrap();
+    assert_eq!(node.role, Role::Button);
+    let name = |t: TrackId| {
+        h.shell
+            .editor()
+            .document()
+            .track(t)
+            .unwrap()
+            .name()
+            .to_owned()
+    };
+    assert_eq!(
+        node.label,
+        format!("Linked tracks: {}, {}", name(all[0]), name(all[1]))
+    );
+
+    let rest = [
+        title_fill(&mut h, all[0]),
+        title_fill(&mut h, all[1]),
+        title_fill(&mut h, all[2]),
+    ];
+    // The pointer on the title away from the indicator highlights nothing.
+    h.frame(vec![Event::PointerMoved(pos2(
+        title.left() + 30.0,
+        title.center().y,
+    ))]);
+    assert_eq!(title_fill(&mut h, all[1]), rest[1]);
+    h.frame(vec![Event::PointerMoved(indicator.center())]);
+    let hovered = [
+        title_fill(&mut h, all[0]),
+        title_fill(&mut h, all[1]),
+        title_fill(&mut h, all[2]),
+    ];
+    assert_ne!(hovered[0], rest[0]);
+    assert_ne!(hovered[1], rest[1]);
+    assert_eq!(hovered[2], rest[2]);
+    h.frame(vec![Event::PointerMoved(pos2(
+        title.left() + 30.0,
+        title.center().y,
+    ))]);
+    assert_eq!(title_fill(&mut h, all[1]), rest[1]);
+}
+
+// Spec: linked-track editing R6 (I-CLICK-041). Clicking the indicator selects
+// the title bars of every track in its group, and is no undo step.
+#[test]
+fn clicking_the_linked_track_indicator_selects_its_group() {
+    let mut h = arrangement();
+    let all = tracks(&h);
+    h.shell
+        .run("track.link", json!({ "tracks": [all[1], all[2], all[3]] }))
+        .unwrap();
+    h.shell
+        .run("arrangement.select_tracks", json!({ "tracks": [all[0]] }))
+        .unwrap();
+    h.settle();
+    let steps = h.shell.editor().undo_history().count();
+    let at = bounds_of(&mut h, linked_id(all[2])).unwrap().center();
+    h.click(at);
+    h.settle();
+    assert_eq!(
+        h.shell.arrangement().selected_tracks(),
+        [all[1], all[2], all[3]]
+    );
+    assert!(h.shell.arrangement().title_bars_selected());
+    assert_eq!(h.shell.editor().undo_history().count(), steps);
 }

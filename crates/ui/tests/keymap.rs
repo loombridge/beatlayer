@@ -395,6 +395,77 @@ fn the_time_command_keys_reach_their_commands_in_the_arrangement() {
     }
 }
 
+// Spec: comping R15, R28. Every S-COMP shortcut is bound: the take-lanes
+// context's keys run the comp commands, Cmd-D still duplicates time or clips
+// on a take lane, and the two with two directions are the Arrangement's own.
+#[test]
+fn every_take_lane_shortcut_is_bound() {
+    let keymap = Keymap::live12();
+    for id in [
+        "S-COMP-001",
+        "S-COMP-002",
+        "S-COMP-003",
+        "S-COMP-004",
+        "S-COMP-005",
+        "S-COMP-006",
+        "S-COMP-007",
+        "S-COMP-008",
+    ] {
+        let entry = keymap.entry_for(id).unwrap_or_else(|| panic!("{id}"));
+        assert!(
+            matches!(entry.status, Status::Bound | Status::Widget(_)),
+            "{id} is {:?}",
+            entry.status
+        );
+    }
+    let lanes = [Context::TakeLanes, Context::Arrangement, Context::Global];
+    let arrangement = [Context::Arrangement, Context::Global];
+    for platform in [Platform::Mac, Platform::Other] {
+        let none = mods(false, false, false, false);
+        let (command, command_alt) = match platform {
+            Platform::Mac => (
+                mods(true, false, false, false),
+                mods(true, false, true, false),
+            ),
+            Platform::Other => (
+                mods(false, true, false, false),
+                mods(false, true, true, false),
+            ),
+        };
+        let hit = |contexts: &[Context], key, m| {
+            keymap
+                .resolve(platform, key, m, contexts)
+                .map(|hit| (hit.command.id.clone(), hit.command.args.len()))
+        };
+        assert_eq!(
+            hit(&arrangement, Key::U, command_alt)
+                .map(|h| h.0)
+                .as_deref(),
+            Some("arrangement.show_take_lanes"),
+            "{platform:?}"
+        );
+        assert_eq!(
+            hit(&lanes, Key::Enter, none).map(|h| h.0).as_deref(),
+            Some("take_lane.copy_to_main_lane")
+        );
+        assert_eq!(
+            hit(&lanes, Key::T, none).map(|h| h.0).as_deref(),
+            Some("take_lane.audition")
+        );
+        assert_eq!(
+            hit(&lanes, Key::ArrowLeft, none),
+            Some(("arrangement.show_take_lanes".to_owned(), 2)),
+            "Left fixes `on` and `title_bars`"
+        );
+        // Cmd-D: the Arrangement's duplicate or the take lanes' own.
+        assert!(hit(&lanes, Key::D, command).is_some());
+        // The keys with two directions are the view's, in the take-lanes
+        // context, and stop wider contexts from running a command for them.
+        assert_eq!(hit(&lanes, Key::ArrowUp, command), None);
+        assert_eq!(hit(&lanes, Key::ArrowDown, command), None);
+    }
+}
+
 // Spec: racks R9, R11. Group and Ungroup have their keys in the Device View
 // (S-DEV-001, S-DEV-002), and the Edit menu's items reach them there.
 #[test]
@@ -1084,6 +1155,53 @@ fn the_tags_shortcuts_reach_their_commands() {
     );
     assert_eq!(entry.mac, vec!["Cmd+E".to_owned()]);
     assert_eq!(entry.win, vec!["Ctrl+E".to_owned()]);
+}
+
+#[test]
+fn the_filter_and_history_shortcuts_reach_their_commands() {
+    // Spec: browser-tags R18, R30.
+    let keymap = Keymap::live12();
+    for (shortcut, mac, win, command) in [
+        (
+            "S-BRW-013",
+            "Cmd+Option+G",
+            "Ctrl+Alt+G",
+            "browser.set_filter_view",
+        ),
+        (
+            "S-BRW-011",
+            "Cmd+LeftBracket",
+            "Ctrl+LeftBracket",
+            "browser.back",
+        ),
+        (
+            "S-BRW-012",
+            "Cmd+RightBracket",
+            "Ctrl+RightBracket",
+            "browser.forward",
+        ),
+    ] {
+        let entry = keymap.entry_for(shortcut).expect("the shortcut");
+        assert_eq!(entry.status, Status::Bound, "{shortcut}");
+        assert_eq!(entry.mac, vec![mac.to_owned()]);
+        assert_eq!(entry.win, vec![win.to_owned()]);
+        assert!(
+            entry.commands.iter().any(|c| c.id == command),
+            "{shortcut}: {:?}",
+            entry.commands
+        );
+    }
+    // Rename (Cmd-R) renames the chosen label while the sidebar has the
+    // keyboard (browser-tags R25).
+    let rename = keymap.entry_for("S-EDIT-008").expect("the shortcut");
+    assert!(
+        rename
+            .commands
+            .iter()
+            .any(|c| c.id == "browser.rename_label"),
+        "{:?}",
+        rename.commands
+    );
 }
 
 // Spec: note-editing R35 to R41, R47 (WP-6.3). Join, Fit to Time Range and

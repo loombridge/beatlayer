@@ -86,6 +86,7 @@ mod locator;
 mod metronome;
 pub mod modulation;
 pub mod modulator;
+pub mod note_expression;
 pub mod note_ops;
 pub mod param;
 pub mod rack;
@@ -111,16 +112,16 @@ pub use auto_warp::{
     nearest_bars,
 };
 pub use automation::{
-    Automation, AutomationTarget, Breakpoint, Envelope, MixerParam, TrackAutomation, curve_value,
-    envelope_value,
+    Automation, AutomationTarget, Breakpoint, Envelope, LinearRange, MixerParam, ParamScale, Shape,
+    TrackAutomation, curve_value, envelope_value,
 };
 pub use bl_stretch::WarpMap;
 pub use bounce::{BouncedAutomation, BouncedTrack};
 pub use changes::{Change, ChangeSet};
 pub use clip::{
     AudioData, Clip, ClipData, ClipEnvelope, ClipFolds, Crossfade, EDGE_FADE_SECONDS, EnvelopeKind,
-    GroupKind, MidiData, NewTakeLane, Note, NoteGroup, PressurePoint, TakeClip, TakeClipData,
-    TakeLane, consolidated_midi, crossfades, fade_power,
+    GroupKind, MidiData, NewTakeLane, Note, NoteGroup, TakeClip, TakeClipData, TakeLane,
+    consolidated_midi, crossfades, fade_power,
 };
 pub use clip_param::ClipParam;
 pub use command::{Command, tempo_shape, write_tempo_shape};
@@ -134,6 +135,7 @@ pub use document::{ArrangementLoop, Document, MAX_CUE_VOLUME, Settings};
 pub use editor::{EditError, Editor, HistoryStep, Maker};
 pub use error::ModelError;
 pub use fades::{EdgeRoom, FadeLimits};
+pub use note_expression::Expression;
 pub mod freeze;
 pub use external::{
     External, ExternalPort, HardwareLatency, MAX_HARDWARE_LATENCY_MS, MAX_HARDWARE_LATENCY_SAMPLES,

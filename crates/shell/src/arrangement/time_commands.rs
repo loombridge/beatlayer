@@ -300,7 +300,7 @@ pub fn can_run(
     if id == ids::PASTE_TIME {
         return match clipboard {
             Some(Clipboard::Time(_)) => true,
-            Some(Clipboard::Material(material)) => !material.tracks.is_empty(),
+            Some(Clipboard::Material(material)) => !material.lanes.is_empty(),
             _ => false,
         };
     }
@@ -395,7 +395,7 @@ pub fn run(
                     })?;
                     (copied.length, recorded)
                 }
-                Some(Clipboard::Material(copied)) if !copied.tracks.is_empty() => {
+                Some(Clipboard::Material(copied)) if !copied.lanes.is_empty() => {
                     let copied = copied.clone();
                     let (_, recorded) = settled(editor, label, (doc, edge_fades), |editor| {
                         paste_clips(editor, view, &copied, at)
@@ -419,7 +419,7 @@ fn paste_clips(
     copied: &Material,
     at: Ticks,
 ) -> Result<(), EditFailure> {
-    let plan = paste_plan(editor.document(), view, copied, at, None)?;
+    let plan = paste_plan(editor.document(), view, copied, at, (None, None))?;
     apply(
         editor,
         Command::InsertTime {

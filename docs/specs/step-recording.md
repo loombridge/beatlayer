@@ -1,7 +1,7 @@
 # Step recording: the Preview switch, MIDI step recording, and Step Input Mode
 
-- **Status:** implemented (R1 to R11 and R13 have passing tests; R12 comes with the map modes, milestone M7)
-- **Work packages:** WP-6.5 (R1 to R13). The insert marker and the editing grid it moves by are [piano-roll.md](piano-roll.md)'s; a track's MIDI input, monitoring and the computer MIDI keyboard [midi-io.md](midi-io.md)'s; recording while the transport runs [recording.md](recording.md)'s; mapping the step buttons to keys and MIDI comes with the map modes (milestone M7)
+- **Status:** partial (R1 to R11 and R13 have passing tests; R12 is built with the map modes, WP-7.3b)
+- **Work packages:** WP-6.5 (R1 to R11 and R13); WP-7.3b (R12). The insert marker and the editing grid it moves by are [piano-roll.md](piano-roll.md)'s; a track's MIDI input, monitoring and the computer MIDI keyboard [midi-io.md](midi-io.md)'s; recording while the transport runs [recording.md](recording.md)'s; mapping the step buttons to keys and MIDI is [map modes](map-modes.md) R21
 - **Parity-matrix row:** MIDI editing: Step input and step recording
 - **Checked against:** the Live 12 reference manual (online edition), read 20 October 2026; the Live 12 release notes, 12.0 and 12.0.5; the UI parity reference's rows L-CLIP-012, M-OPT-004, M-OPT-005, M-OPT-018 and S-NOTE-044, recorded from Live 12.4.3 on macOS
 
@@ -47,7 +47,7 @@ This spec covers the Preview switch, step recording and Step Input Mode. It leav
 - **R9.** Options ▸ Step Input Mode (M-OPT-018) and Cmd-Shift-B (Ctrl-Shift-B on Windows; S-NOTE-044) run a command, not a switch, so the item never shows a tick; it is enabled while the editor shows a MIDI clip. It arms the clip's track as the track's arm button does (`mixer.set_arm`), moves the keyboard focus to the Clip View, and switches the computer MIDI keyboard on when it's off and off when it's on ([midi-io.md](midi-io.md) R17). The arming is an undo step as arming is; the rest isn't. (S4, S6, S7)
 - **R10.** While the computer MIDI keyboard is on, its keys play notes that R3 counts as held ([midi-io.md](midi-io.md) R18 to R23), and Left and Right still step. (S1, S7)
 - **R11.** Assistive technology announces each step: the notes added, made longer or removed, and where the insert marker now stands; and Step Input Mode announces what it switched. (S5; the wording is Beatlayer's own)
-- **R12.** The step buttons that the map modes show beside the grid's chooser, which map stepping to keys or MIDI, come with the map modes (milestone M7). (S3, S4)
+- **R12.** In MIDI Map Mode and Key Map Mode the editor shows Step Back and Step Forward buttons just before its grid chooser, which step as Left and Right do (R4 to R6) when pressed by a mapping or a click, so stepping maps to keys or MIDI; their place, their mappings and what a press runs are [map modes](map-modes.md) R11, R12 and R21. (S3, S4)
 - **R13.** Every action here is a registered command, run by the switch, the keys, the menu and agents alike: `clip_view.set_preview` (edit, as a preference), `note.preview` (edit; plays a note on a clip's track and changes nothing in the set), `note.step_record` (edit; steps forward or back from the insert marker with the held notes given as keys and velocities, so an agent can step-record without holding keys) and `clip_view.step_input_mode` (edit). `view.state`'s `clip_view` reads the Preview switch and the insert marker, the query tool's clip the notes, and the query tool's track the arm. (S8)
 
 ## Tests
@@ -65,5 +65,5 @@ This spec covers the Preview switch, step recording and Step Input Mode. It leav
 | R9 | `crates/shell/tests/step_recording.rs`, `step_input_mode_arms_the_track_focuses_the_clip_view_and_switches_the_keyboard`; `crates/ui/tests/keymap.rs`, `cmd_shift_b_runs_step_input_mode_and_the_arrows_step_in_the_note_editor`; `crates/ui/tests/clip_view.rs`, `cmd_shift_b_arms_the_track_and_switches_the_computer_keyboard` | unit, UI script |
 | R10 | `crates/shell/tests/step_recording.rs`, `holding_two_keys_and_pressing_right_twice_adds_two_notes_two_steps_long` (the computer MIDI keyboard's keys); `crates/ui/tests/clip_view.rs`, `left_and_right_step_while_step_recording_and_move_the_marker_otherwise` | unit, UI script |
 | R11 | `crates/shell/tests/step_recording.rs`, `each_step_is_announced` | unit |
-| R12 | Waits for the map modes (milestone M7) | |
+| R12 | to be written in WP-7.3b, with [map modes](map-modes.md) R21 | UI script, integration |
 | R13 | `crates/shell-spec/src/notes.rs`, `every_listed_id_is_registered_and_complete`; `crates/shell/tests/step_recording.rs`, `step_record_by_id_takes_the_held_notes_as_keys_and_velocities`; `cargo xtask commands` (the readback table) | unit |

@@ -98,6 +98,16 @@ const WIDGET: &[(&str, &str)] = &[
          Option-Minus (Alt-Minus) shorter (`arrangement.set_track_height`)",
     ),
     (
+        "S-COMP-006",
+        "the Arrangement View: Cmd-Down and Cmd-Up replace the main lane's material in the \
+         selection with the next or previous take (`take_lane.replace_with_take`)",
+    ),
+    (
+        "S-COMP-008",
+        "the Arrangement View: with take lane headers selected, Cmd-Up and Cmd-Down move the \
+         lanes up or down a place (`take_lane.move`)",
+    ),
+    (
         "S-A11Y-003",
         "the Arrangement View: Up and Down select the track above or below \
          (`arrangement.select_tracks`)",

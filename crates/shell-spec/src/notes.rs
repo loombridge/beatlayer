@@ -26,7 +26,7 @@ use bl_commands::Context::{
 };
 use bl_commands::{Binding, CommandSpec, NoArgs, Permission, RegisterError, Registry};
 use bl_core::time::Ticks;
-use bl_model::{AutomationTarget, ClipId, GroupKind};
+use bl_model::{AutomationTarget, Breakpoint, ClipId, Expression, GroupKind};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -51,6 +51,9 @@ pub const QUANTIZE_SETTINGS: &str = "clip_view.quantize_settings";
 /// `note.set_value`: set one value of notes (velocity, release velocity,
 /// chance, or velocity deviation).
 pub const SET_VALUE: &str = "note.set_value";
+/// `note.set_expression`: replace one expression envelope of notes (Pitch,
+/// Slide or Pressure).
+pub const SET_EXPRESSION: &str = "note.set_expression";
 /// `note.ramp_value`: spread evenly spaced values across notes.
 pub const RAMP_VALUE: &str = "note.ramp_value";
 /// `note.adjust_value`: change one value of notes by an amount.
@@ -115,6 +118,7 @@ pub const IDS: &[&str] = &[
     QUANTIZE_NOTES,
     QUANTIZE_SETTINGS,
     SET_VALUE,
+    SET_EXPRESSION,
     RAMP_VALUE,
     ADJUST_VALUE,
     RANDOMIZE,
@@ -344,6 +348,29 @@ pub struct SetValueArgs {
     /// or `value`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub values: Option<Vec<f64>>,
+}
+
+/// Arguments of `note.set_expression`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetExpressionArgs {
+    /// The MIDI clip. Left out, the one the Clip View shows (the
+    /// Arrangement's selected clip).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<ClipId>,
+    /// The notes, by their place in the clip's notes in order (by start,
+    /// then pitch). Left out, the selected notes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<Vec<u32>>,
+    /// Which envelope to replace: `pitch` (semitones from the note's key,
+    /// −48 to 48), `slide` or `pressure` (0 to 127).
+    pub envelope: Expression,
+    /// The breakpoints every one of the notes gets, each at a position in
+    /// ticks counted from the note's start (0 to its length, in order, none
+    /// twice), with a value in the envelope's range and an optional `bend`
+    /// from −1 to 1 for the segment starting there. An empty list clears
+    /// the envelope.
+    pub breakpoints: Vec<Breakpoint>,
 }
 
 /// Arguments of `note.ramp_value`.
@@ -1349,6 +1376,22 @@ fn specs() -> Vec<CommandSpec> {
              edited notes stay selected, and the whole drag is one undo step.",
         )
         .args::<SetValueArgs>(),
+        edit(
+            SET_EXPRESSION,
+            "Set Note Expression",
+            Permission::Edit,
+            "Replaces one expression envelope of notes (`notes`, or the selected notes) with \
+             `breakpoints`, as editing the Clip View's MPE tab does: `envelope` is `pitch` \
+             (the note's own pitch bend in semitones from its key, -48 to 48), `slide` (0 to \
+             127) or `pressure` (0 to 127). Each breakpoint is an `at` in ticks counted from \
+             the note's start, from 0 to the note's length, a `value` in the envelope's range, \
+             and a `bend` from -1 to 1 for the segment starting there (0 is straight); they go \
+             in order of `at`, none twice. An empty list clears the envelope. Nothing changes \
+             if a value, a position or a bend is out of range, two breakpoints share a \
+             position, or the clip isn't a MIDI clip. One undo step, Set Note Expression; \
+             the notes stay selected. The clip query's notes read each envelope back.",
+        )
+        .args::<SetExpressionArgs>(),
         edit(
             RAMP_VALUE,
             "Ramp Note Values",

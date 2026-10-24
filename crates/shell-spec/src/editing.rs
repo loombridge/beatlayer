@@ -15,14 +15,14 @@
 
 use std::borrow::Cow;
 
-use bl_commands::Context::{Arrangement, LoopBrace};
+use bl_commands::Context::{Arrangement, LoopBrace, TakeLanes};
 use bl_commands::{Binding, CommandSpec, NoArgs, Permission, RegisterError, Registry};
 use bl_core::time::{Ticks, TimeSignatureMap};
 use bl_model::{ClipId, TrackId};
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::{Deserialize, Serialize};
 
-use crate::arrangement::{ArrangementState, TimeRange};
+use crate::arrangement::{ArrangementState, Lane, TimeRange};
 
 /// `arrangement.select_clips`: select clips, as clicking their title bars
 /// does.
@@ -221,6 +221,11 @@ pub struct TargetArgs {
     /// The tracks a span of time covers. Left out, the selected tracks.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tracks: Option<Vec<TrackId>>,
+    /// The lanes a span of time covers, each a track's own lane or one of
+    /// its take lanes (the comping spec, R27). Left out, the lanes of the
+    /// time selection, or `tracks`' own lanes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lanes: Option<Vec<Lane>>,
     /// Where the span starts. Left out, the time selection's start.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub start: Option<Position>,
@@ -297,6 +302,11 @@ pub struct MoveClipsArgs {
     /// it in the track list. Left out, every clip stays on its track.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub track: Option<TrackId>,
+    /// The lane `anchor` moves to, a track's own lane or one of its take
+    /// lanes (the comping spec, R27); the other clips keep their distance
+    /// from it among the track's lanes. Give `track` or `lane`, not both.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lane: Option<Lane>,
     /// Copy the clips instead, leaving the originals where they are.
     #[serde(default)]
     pub copy: bool,
@@ -348,6 +358,11 @@ pub struct SplitArgs {
     /// the clips on the selected tracks.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tracks: Option<Vec<TrackId>>,
+    /// The lanes whose clips are split, each a track's own lane or one of its
+    /// take lanes (the comping spec, R27). Left out, `tracks`' own lanes, or
+    /// the lanes the time selection covers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lanes: Option<Vec<Lane>>,
     /// Where to split. Left out, the time selection's start and end, or the
     /// insert marker.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -367,6 +382,13 @@ pub struct PasteArgs {
     /// selected track, or the track the material was copied from.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub track: Option<TrackId>,
+    /// The lane the clipboard's first lane goes to, a track's own lane or
+    /// one of its take lanes (the comping spec, R27); its other lanes keep
+    /// their distance from it, among the tracks and among a track's lanes.
+    /// Left out, the first lane selected, or the first selected track's main
+    /// lane.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lane: Option<Lane>,
 }
 
 /// Arguments of `arrangement.delete_fades`.
@@ -582,6 +604,9 @@ fn specs() -> Vec<CommandSpec> {
              Arrangement's selection.",
         )
         .binding("S-EDIT-004")
+        // Cmd-D also reaches it with a time selection or clips on a take
+        // lane, where S-COMP-005 is the take-lane context's own Cmd-D.
+        .context(TakeLanes)
         .args::<TargetArgs>(),
         CommandSpec::new(COPY, "Copy")
             .description(

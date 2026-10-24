@@ -56,6 +56,9 @@ pub struct Header<'a> {
     pub show_in_out: bool,
     /// Whether the header shows its volume, pan, and sends (R22).
     pub show_volume: bool,
+    /// The Show/Hide Take Lanes toggle (L-ARR-021): `None` where the track
+    /// shows none, otherwise whether its take lanes show.
+    pub take_toggle: Option<bool>,
 }
 
 /// The ID of a track's title, for tests and focus.
@@ -116,6 +119,7 @@ pub fn header(
         keys,
         show_in_out,
         show_volume,
+        take_toggle,
     } = *header;
     let id = track.id();
     let colors = &theme.colors;
@@ -257,10 +261,20 @@ pub fn header(
         });
         name_left = fold.right() + 3.0;
     }
-    let name_rect = Rect::from_min_max(
-        pos2(name_left, row_top),
-        pos2(title.right() - 1.0, row_top + 15.0),
-    );
+    // Spec: comping R24. The toggle sits at the title's right end.
+    let mut name_right = title.right() - 1.0;
+    if let Some(shown) = take_toggle {
+        let rect = Rect::from_min_size(
+            pos2(
+                title.right() - super::take_lanes::BUTTON - 3.0,
+                row_top + 1.0,
+            ),
+            vec2(super::take_lanes::BUTTON, super::take_lanes::BUTTON),
+        );
+        super::take_lanes::toggle(ui, theme, id, rect, shown, events);
+        name_right = rect.left() - 2.0;
+    }
+    let name_rect = Rect::from_min_max(pos2(name_left, row_top), pos2(name_right, row_top + 15.0));
     if !rename_edit(ui, theme, name_rect, id, name, events) {
         painter.with_clip_rect(title.shrink(1.0)).text(
             pos2(name_left, row_top + 7.5),

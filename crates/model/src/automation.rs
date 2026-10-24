@@ -26,6 +26,10 @@ use crate::clip_param::ClipParam;
 use crate::error::ModelError;
 use crate::ids::{ChainId, DeviceId, ParamId, TrackId};
 
+mod shapes;
+
+pub use shapes::{LinearRange, ParamScale, Shape};
+
 /// One of a track's mixer controls.
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,

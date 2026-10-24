@@ -623,6 +623,16 @@ pub fn save_points(set: &Path, follows: Follows) -> Vec<SavePoint> {
 /// the save point is no longer in it, and any error of loading the saved
 /// form it holds.
 pub fn restore(point: &SavePoint) -> Result<Project, LoadError> {
+    restore_with_info(point).map(|(project, _)| project)
+}
+
+/// [`restore`], with what the save point's saved form says about itself, as
+/// opening the set would migrate it by (the schema it was saved in).
+///
+/// # Errors
+///
+/// As [`restore`].
+pub fn restore_with_info(point: &SavePoint) -> Result<(Project, SetInfo), LoadError> {
     let options = LoadOptions::default();
     let bytes = read_whole(&point.journal)?;
     let read = read_up_to(&bytes, &options, Some(point.index));
@@ -630,7 +640,7 @@ pub fn restore(point: &SavePoint) -> Result<Project, LoadError> {
         .committed
         .filter(|_| read.entries.get(point.index) == Some(&point.entry))
         .ok_or_else(|| LoadError::corrupt("the save point is no longer in its journal"))?;
-    Ok(decode_value(&value, &options)?.0)
+    decode_value(&value, &options)
 }
 
 fn read_whole(path: &Path) -> Result<Vec<u8>, LoadError> {

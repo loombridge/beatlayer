@@ -102,6 +102,15 @@ pub trait SetStore {
         Err("this set store can't read a set".to_owned())
     }
 
+    /// Adds the entries of a restored version's media table that the set's
+    /// own table lacks (the crash-recovery spec, R16), so every clip of the
+    /// restored song still finds its file. Where both name a file, the
+    /// set's own entry stays: it is the one pointing at the files from where
+    /// the set is now. A store that keeps no media table ignores it.
+    fn merge_media(&mut self, media: &Media) {
+        let _ = media;
+    }
+
     /// Records a file the set's clips play (WP-1.10), by its content hash,
     /// its path on disk, and its size, so the next save lists it in the
     /// set's media table. A store that keeps no media table ignores it.
@@ -431,6 +440,14 @@ impl SetStore for ProjectFiles {
         self.launch = project.launch;
         self.window_views = project.window_views;
         self.added.clear();
+    }
+
+    fn merge_media(&mut self, media: &Media) {
+        for file in media.iter() {
+            if self.media.get(&file.hash).is_none() {
+                self.media.insert(file.clone());
+            }
+        }
     }
 
     fn set_multisampler_views(&mut self, views: MultisamplerViews) {

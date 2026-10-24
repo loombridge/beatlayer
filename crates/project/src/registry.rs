@@ -154,7 +154,8 @@ pub struct ContinuousSave {
     pub on: bool,
 }
 
-/// Adds the commands to a registry.
+/// Adds the commands to a registry, with the save history's
+/// ([`crate::history`]).
 ///
 /// # Errors
 ///
@@ -163,7 +164,8 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     for spec in specs() {
         registry.register(spec)?;
     }
-    Ok(())
+    // The save history's commands (WP-6.39) go where these go.
+    crate::history::register(registry)
 }
 
 fn specs() -> Vec<CommandSpec> {
@@ -367,7 +369,7 @@ mod tests {
         // Spec: crash-recovery R11 (the command)
         let mut registry = Registry::new();
         register(&mut registry).unwrap();
-        assert_eq!(registry.len(), IDS.len());
+        assert_eq!(registry.len(), IDS.len() + crate::history::IDS.len());
         assert_eq!(registry.problems(), Vec::new());
         for id in IDS {
             assert!(handles(id));

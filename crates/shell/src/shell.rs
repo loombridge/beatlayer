@@ -17,6 +17,7 @@ use bl_model::{
 };
 use bl_project::ProjectFolder;
 use bl_project::autosave::{Autosave, Recoverable, Recovered};
+use bl_project::history;
 use bl_project::registry as recovery_ids;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -126,6 +127,7 @@ mod plugin_list;
 mod processed_files;
 mod sample_edits;
 mod sample_keys;
+mod save_history;
 pub use sample_keys::TransientList;
 mod search;
 mod session_recording;
@@ -341,6 +343,10 @@ pub enum Effect {
     /// person types the new name; Return runs `locator.rename` with it
     /// (WP-6.24; the time editing spec, R8).
     RenameLocator(bl_model::LocatorId),
+    /// Start renaming a take lane in its header, where the person types the
+    /// new name; Return runs `take_lane.rename` with it, and Tab goes on to
+    /// the next lane or track's name (WP-6.22; the comping spec, R28).
+    RenameTakeLane(bl_model::TakeLaneId),
     /// Bring a floating device's window to the front (the mixer view spec,
     /// R28).
     RaiseDeviceWindow(bl_model::DeviceId),
@@ -571,6 +577,9 @@ pub struct Shell {
     /// Whether the Undo History panel shows (WP-6.28): view state, never
     /// part of the set, like the browser's.
     undo_history_open: bool,
+    /// The Save History panel (IMP-05, WP-6.39): whether it shows and the
+    /// rows it lists. View state, like the Undo History's.
+    save_history: save_history::SaveHistory,
     /// What the Arrangement View shows (WP-1.8a).
     arrangement: ArrangementView,
     /// What the Clip View shows (WP-2.3): whether it's open, Draw Mode, and
@@ -1149,6 +1158,7 @@ impl Shell {
             assistant_conversation: Arc::default(),
             assistant_stop_flag: Arc::default(),
             undo_history_open: false,
+            save_history: save_history::SaveHistory::default(),
             arrangement: ArrangementView::new(),
             clip_view: {
                 let mut view = ClipView::default();
@@ -2041,6 +2051,7 @@ impl Shell {
             inputs,
             outputs,
             midi_inputs: self.midi.input_names(),
+            mpe_inputs: self.midi.mpe_input_names(),
             midi_outputs: self.midi.output_names(),
             device_outputs,
         }
@@ -3886,6 +3897,7 @@ impl Shell {
         let user_library = self.browser_view.user_library().map(Path::to_path_buf);
         let zoom = self.zoom();
         let auto_hide = self.prefs.auto_hide_plug_in_windows.0;
+        let swapping = self.devices.hot_swap_targets();
         let result = self.devices.run(
             id,
             args,
@@ -3900,6 +3912,12 @@ impl Shell {
             },
         );
         let outcome = result.map_err(|error| device_error(id, error))?;
+        // Spec: browser-tags R31. Starting hot-swap clears the search words
+        // and the selected tags as a new step.
+        let now_swapping = self.devices.hot_swap_targets();
+        if now_swapping != swapping && now_swapping != Default::default() {
+            self.browser_view.hot_swap_started();
+        }
         // Spec: drum-racks R5. A held Preview button plays its chain.
         for &(chain, on) in &outcome.previews {
             self.audio.send_param(
@@ -4945,6 +4963,9 @@ impl Shell {
             self.set_message(message, true);
         }
         let mut changed = polled.changed | self.poll_processed() | self.poll_stems();
+        // Spec: crash-recovery R15. The Save History follows new save points
+        // and saves while it shows.
+        changed |= self.refresh_save_history();
         // Spec: export R41. The export on its thread: its share moves the
         // progress window, and its end lands in the Status Bar.
         changed |= self.poll_export();
@@ -6118,6 +6139,12 @@ impl Shell {
                 }
             }
         }
+        let take_lanes_before: Vec<(TrackId, usize)> = self
+            .editor
+            .document()
+            .tracks()
+            .map(|track| (track.id(), track.take_lanes().len()))
+            .collect();
         let applied = match take.wrap {
             None => {
                 let mut placed = std::collections::BTreeSet::new();
@@ -6187,6 +6214,22 @@ impl Shell {
         if let Err(error) = applied {
             self.fail_recording(format!("Recording failed: {error}"));
             return;
+        }
+        // Spec: comping R13. A recording that adds a take lane to a track
+        // shows the track's take lanes.
+        let grown: Vec<TrackId> = self
+            .editor
+            .document()
+            .tracks()
+            .filter(|track| {
+                take_lanes_before
+                    .iter()
+                    .any(|(id, was)| *id == track.id() && track.take_lanes().len() > *was)
+            })
+            .map(bl_model::Track::id)
+            .collect();
+        for track in grown {
+            self.arrangement.keep_take_lanes_shown(track);
         }
         if let Some(report) = &mut self.last_recording {
             report.clips_made = true;
@@ -6490,6 +6533,13 @@ impl Shell {
                             if self.arrangement.title_bars_selected() {
                                 contexts.push(Context::TrackHeaders);
                             }
+                            // Spec: comping R28. A take lane is selected: its
+                            // header, the time on it or a clip on it.
+                            if !self.arrangement.title_bars_selected()
+                                && self.arrangement.take_lane_selected()
+                            {
+                                contexts.push(Context::TakeLanes);
+                            }
                             // Spec: automation-editing R20. A selected
                             // automation lane's keys come ahead of the
                             // Arrangement's.
@@ -6595,6 +6645,7 @@ impl Shell {
             ids::VIEW_FULL_SCREEN => Some(self.full_screen_of(self.acting_window())),
             ids::VIEW_TOGGLE_SECOND_WINDOW => Some(self.second.open),
             ids::VIEW_TOGGLE_BROWSER => Some(self.browser_of(self.acting_window())),
+            ids::VIEW_TOGGLE_FULL_HEIGHT_BROWSER => Some(self.browser_view.full_height()),
             ids::VIEW_TOGGLE_CLIP_VIEW => Some(self.detail_of(self.acting_window()).clip_shown()),
             ids::VIEW_TOGGLE_DEVICE_VIEW => {
                 Some(self.detail_of(self.acting_window()).device_shown())
@@ -6611,6 +6662,7 @@ impl Shell {
             ids::VIEW_TOGGLE_INFO_VIEW => Some(self.info_view),
             assistant_ids::VIEW_TOGGLE_ASSISTANT => Some(self.assistant_open),
             ids::VIEW_TOGGLE_UNDO_HISTORY => Some(self.undo_history_open),
+            ids::VIEW_TOGGLE_SAVE_HISTORY => Some(self.save_history.open),
             ids::VIEW_TOGGLE_PLUG_IN_WINDOWS => Some(self.plug_in_windows),
             ids::FOCUS_TOGGLE_TAB_NAVIGATION => Some(self.prefs.tab_navigation),
             ids::FOCUS_TOGGLE_WRAP_NAVIGATION => Some(self.prefs.wrap_navigation.0),
@@ -6635,6 +6687,7 @@ impl Shell {
             ),
             ids::AUDIO_TOGGLE_ENGINE => Some(self.audio.engine_on()),
             browser_ids::SET_PREVIEW => Some(self.browser_view.preview_on()),
+            browser_ids::SET_FILTER_VIEW => Some(self.browser_view.filter_view_shown()),
             "device.set_show_preset_name" => self
                 .devices
                 .selected()
@@ -6674,6 +6727,10 @@ impl Shell {
     /// Delete Locator and deletes while a locator is selected (the time
     /// editing spec, R4).
     pub fn menu_command<'a>(&self, id: &'a str) -> &'a str {
+        // Spec: comping R28. Edit ▸ Rename renames the selected take lanes.
+        if id == "clip.rename" && !self.arrangement.selected_take_lanes().is_empty() {
+            return "take_lane.rename";
+        }
         if self.arrangement.selected_locators().is_empty() {
             return id;
         }
@@ -6843,17 +6900,46 @@ impl Shell {
                 }),
             comping_ids::DUPLICATE => serde_json::from_value::<comping_ids::DuplicateArgs>(args)
                 .ok()
-                .is_some_and(|args| !args.lanes.is_empty() && args.lanes.iter().all(lane)),
+                .is_some_and(|args| match args.lanes {
+                    Some(lanes) => !lanes.is_empty() && lanes.iter().all(lane),
+                    None => !self.arrangement.selected_take_lanes().is_empty(),
+                }),
             comping_ids::COPY_TO_MAIN_LANE => {
+                // Spec: comping R17, R29. Named lanes and a range, or the
+                // selection's: a take lane and the time on it.
                 serde_json::from_value::<comping_ids::CopyToMainLaneArgs>(args)
                     .ok()
-                    .is_some_and(|args| !args.lanes.is_empty() && args.lanes.iter().all(lane))
+                    .is_some_and(|args| {
+                        let lanes_ok = match &args.lanes {
+                            Some(lanes) => !lanes.is_empty() && lanes.iter().all(lane),
+                            None => self.arrangement.take_lane_selected(),
+                        };
+                        let range_ok = (args.start.is_some() && args.end.is_some())
+                            || self.arrangement.time_selection().is_some();
+                        lanes_ok && range_ok
+                    })
             }
             comping_ids::REPLACE_WITH_TAKE => {
+                // Spec: comping R19. A named track, or the selection's audio
+                // and MIDI tracks and its time.
                 serde_json::from_value::<comping_ids::ReplaceWithTakeArgs>(args)
                     .ok()
-                    .is_some_and(|args| track(&args.track))
+                    .is_some_and(|args| {
+                        let tracks_ok = match args.track {
+                            Some(named) => track(&named),
+                            None => self.arrangement.selected_tracks().iter().any(track),
+                        };
+                        let range_ok = (args.start.is_some() && args.end.is_some())
+                            || self.arrangement.time_selection().is_some();
+                        tracks_ok && range_ok
+                    })
             }
+            comping_ids::AUDITION => serde_json::from_value::<comping_ids::AuditionArgs>(args)
+                .ok()
+                .is_some_and(|args| match args.lanes {
+                    Some(lanes) => !lanes.is_empty() && lanes.iter().all(lane),
+                    None => self.arrangement.take_lane_selected(),
+                }),
             comping_ids::MOVE_COMP_EDGE => {
                 serde_json::from_value::<comping_ids::MoveCompEdgeArgs>(args)
                     .ok()
@@ -7076,7 +7162,27 @@ impl Shell {
             ids::FOCUS_PREVIOUS_NEIGHBOR => return self.has_neighbor(true),
             // Spec: time-editing R8. Cmd-R renames the selected locators
             // while there are any.
-            "clip.rename" => return self.arrangement.selected_locators().is_empty(),
+            "clip.rename" => {
+                return self.arrangement.selected_locators().is_empty()
+                    && self.arrangement.selected_take_lanes().is_empty();
+            }
+            // Spec: comping R28, R29. Rename on a take lane's header types the
+            // name in place; without a name it needs a header selected or a
+            // lane named.
+            "take_lane.rename" if args.get("name").is_none() => {
+                return args.get("lane").is_some()
+                    || !self.arrangement.selected_take_lanes().is_empty();
+            }
+            // Spec: track-context-menu R10. The two deletes of a track's
+            // take lanes act on the selected tracks, and are enabled when one
+            // has a take lane.
+            "take_lane.delete_all" | "take_lane.delete_unused" if args.get("tracks").is_none() => {
+                let doc = self.editor.document();
+                return self.arrangement.selected_tracks().iter().any(|track| {
+                    doc.track(*track)
+                        .is_some_and(|held| held.take_lanes().len() > 0)
+                });
+            }
             // Zoom In and Zoom Out stop at the zoom's ends (interface-zoom
             // R3).
             ids::VIEW_ZOOM_IN | ids::VIEW_ZOOM_OUT => {
@@ -7153,6 +7259,11 @@ impl Shell {
         if capture_ids::handles(id) {
             // Spec: capture-midi R1. Nothing played, nothing to capture.
             return self.capture_midi_ready() && self.audio.engine_running();
+        }
+        if id == automation_ids::SIMPLIFY && args.get("lanes").is_none() {
+            // Spec: automation-editing R18. Disabled without a time selection
+            // in an automation lane.
+            return automation::can_run(id, &self.arrangement, None);
         }
         if ids::handles(id) || transport_ids::handles(id) {
             return true;
@@ -7842,6 +7953,44 @@ impl Shell {
                 self.effects.push(Effect::RenameTrack(track));
                 self.touch();
                 Ok(Value::Null)
+            }
+            "take_lane.rename" if !has("name") => {
+                // Spec: comping R6, R28. Cmd-R and a take lane header's
+                // Rename type the new name in the header.
+                let lane = args
+                    .get("lane")
+                    .and_then(|v| serde_json::from_value(v.clone()).ok())
+                    .or_else(|| self.arrangement.selected_take_lanes().first().copied())
+                    .ok_or_else(|| ShellError::Unavailable {
+                        command: id.to_owned(),
+                        reason: "select a take lane first".to_owned(),
+                    })?;
+                self.effects.push(Effect::RenameTakeLane(lane));
+                self.touch();
+                Ok(Value::Null)
+            }
+            "take_lane.delete_all" | "take_lane.delete_unused" if !has("tracks") => {
+                // Spec: track-context-menu R10. They act on the selected
+                // audio and MIDI tracks.
+                let doc = self.editor.document();
+                let tracks: Vec<TrackId> = self
+                    .arrangement
+                    .selected_tracks()
+                    .iter()
+                    .copied()
+                    .filter(|track| {
+                        doc.track(*track).is_some_and(|held| {
+                            matches!(held.kind(), TrackKind::Audio | TrackKind::Midi)
+                        })
+                    })
+                    .collect();
+                if tracks.is_empty() {
+                    return Err(ShellError::Unavailable {
+                        command: id.to_owned(),
+                        reason: "select an audio or MIDI track first".to_owned(),
+                    });
+                }
+                self.run(id, json!({ "tracks": tracks }))
             }
             locator_ids::RENAME if !has("name") => {
                 // Spec: time-editing R8. Cmd-R and Edit ▸ Rename type the
@@ -8637,6 +8786,10 @@ impl Shell {
     }
 
     fn run_command(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        if history::handles(id) {
+            // Spec: crash-recovery R20.
+            return self.run_save_history(id, args);
+        }
         if recovery_ids::handles(id) {
             // Spec: crash-recovery R26. The recovery commands run against
             // the app's own recovery.
@@ -8688,7 +8841,7 @@ impl Shell {
             // Spec: comping R4, R5, R17 to R21.
             let before = self.editor.document().clone();
             let result =
-                crate::arrangement::comping::run(id, args, &mut self.editor, &self.arrangement)
+                crate::arrangement::comping::run(id, args, &mut self.editor, &mut self.arrangement)
                     .map_err(|failure| edit_error(id, failure));
             if *self.editor.document() != before {
                 self.dirty = true;
@@ -8983,6 +9136,14 @@ impl Shell {
             if id != view_ids::STATE {
                 // A query changes nothing a window shows.
                 self.touch();
+            }
+            if result.is_ok()
+                && id == view_ids::SELECT_TAKE_LANES
+                && (self.detail.clip_shown() || self.detail.device_shown())
+            {
+                // Spec: comping R26. With the Clip View or the Device View
+                // open, selecting a take lane's header selects its clips.
+                self.arrangement.select_header_clips(self.editor.document());
             }
             if result.is_ok() && id == view_ids::FOCUS_TITLE_BAR {
                 // Spec: accessibility R4. Esc from a track's control gives
@@ -9434,6 +9595,7 @@ impl Shell {
                         args.track,
                         args.sync,
                         args.remote,
+                        args.mpe,
                     )
                     .map_err(failed)?;
                 self.prefs.midi = self.midi.prefs();
@@ -10283,6 +10445,18 @@ impl Shell {
                 self.touch();
                 Ok(to_value(&ids::ClosedPlugInWindows { closed }))
             }
+            ids::VIEW_TOGGLE_FULL_HEIGHT_BROWSER => {
+                // Spec: browser R26. The column runs down to the Status Bar;
+                // kept between launches.
+                Self::args::<NoArgs>(id, args)?;
+                let on = !self.browser_view.full_height();
+                self.browser_view.set_full_height(on);
+                self.prefs.browser = self
+                    .browser_view
+                    .prefs(self.prefs.browser.user_library.clone());
+                self.save_preferences();
+                Ok(self.view_result())
+            }
             ids::VIEW_TOGGLE_PLUGIN_LIST => {
                 // Spec: plugin-list R1, R3. View state only.
                 Self::args::<NoArgs>(id, args)?;
@@ -10463,6 +10637,7 @@ impl Shell {
                     plugin_list: self.plugin_list.state(),
                     assistant: self.assistant_panel_state(),
                     undo_history: self.undo_history_open,
+                    save_history: self.save_history.open,
                     plug_in_windows: self.plug_in_windows,
                 }))
             }
@@ -10471,8 +10646,18 @@ impl Shell {
                 // isn't saved with the set and isn't an undo step.
                 Self::args::<NoArgs>(id, args)?;
                 self.undo_history_open = !self.undo_history_open;
+                if self.undo_history_open {
+                    // They share the right-hand area (crash-recovery R12).
+                    self.save_history.open = false;
+                }
                 self.touch();
                 Ok(to_value(&self.undo_history_state()))
+            }
+            ids::VIEW_TOGGLE_SAVE_HISTORY => {
+                // Spec: crash-recovery R12. View state: not saved with the
+                // set and no undo step.
+                Self::args::<NoArgs>(id, args)?;
+                Ok(self.toggle_save_history())
             }
             ids::VIEW_TOGGLE_INFO_VIEW => {
                 Self::args::<NoArgs>(id, args)?;

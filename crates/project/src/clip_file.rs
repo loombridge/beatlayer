@@ -39,7 +39,7 @@ pub const CLIP_EXTENSION: &str = "blclip";
 pub const CLIP_FORMAT: &str = "beatlayer-clip";
 
 /// The clip file schema this build writes, and the newest it reads.
-pub const CLIP_SCHEMA: u32 = 1;
+pub const CLIP_SCHEMA: u32 = 2;
 
 /// The most JSON a clip file may hold, in bytes (R14): far more than a clip
 /// and a chain need, so a small damaged or hostile file can't make the reader
@@ -221,6 +221,12 @@ impl ClipFile {
                 found: u32::try_from(schema).unwrap_or(u32::MAX),
             });
         }
+        // Schema 1 held a note's pressure as points; schema 2 holds it as an
+        // envelope of breakpoints (the MPE spec, R2).
+        let mut value = value;
+        if schema == 1 {
+            crate::migrate::pressure_to_breakpoints(&mut value);
+        }
         let read: Reading = serde_json::from_value(value).map_err(|e| invalid(e.to_string()))?;
         if read.kind != ClipKind::of(&read.clip.data) {
             return Err(invalid("its kind isn't the kind of its clip"));
@@ -335,8 +341,8 @@ mod tests {
     use bl_core::id::Id;
     use bl_core::time::Ticks;
     use bl_model::{
-        AutomationTarget, Chain, ChainId, ClipEnvelope, ClipId, DeviceId, DeviceKind, MidiData,
-        Note, ParamId, PressurePoint, RackKind,
+        AutomationTarget, Breakpoint, Chain, ChainId, ClipEnvelope, ClipId, DeviceId, DeviceKind,
+        MidiData, Note, ParamId, RackKind,
     };
 
     use super::*;
@@ -390,9 +396,10 @@ mod tests {
             note.probability = 0.5 + 0.25 * i as f64;
             note.velocity_deviation = -20 * i as i8;
             note.mute = i == 1;
-            note.pressure = vec![PressurePoint {
+            note.pressure = vec![Breakpoint {
                 at: Ticks(10),
-                value: 99,
+                value: 99.0,
+                bend: 0.0,
             }];
             note
         });
@@ -467,6 +474,32 @@ mod tests {
         assert_eq!(ClipFile::decode(&file.encode().unwrap()).unwrap(), file);
     }
 
+    // Spec: mpe R2. A clip file of schema 1 holds a note's pressure as
+    // points, which load as steps.
+    #[test]
+    fn a_schema_1_clip_file_loads_its_pressure_points_as_steps() {
+        let good = file().encode().unwrap();
+        let json = crate::format::decompress(&good, MAX_CLIP_JSON_BYTES).unwrap();
+        let mut value: serde_json::Value = serde_json::from_slice(&json).unwrap();
+        value["schema"] = 1.into();
+        value["clip"]["data"]["midi"]["notes"][0]["pressure"] =
+            serde_json::json!([{ "at": 0, "value": 5 }, { "at": 100, "value": 90 }]);
+        let old = crate::format::compress(&serde_json::to_vec(&value).unwrap());
+        let loaded = ClipFile::decode(&old).unwrap();
+        let ClipData::Midi(midi) = &loaded.clip.data else {
+            panic!("a MIDI clip");
+        };
+        let at = |at: i64, value: f64| Breakpoint {
+            at: Ticks(at),
+            value,
+            bend: 0.0,
+        };
+        assert_eq!(
+            midi.notes[0].pressure,
+            [at(0, 5.0), at(99, 5.0), at(100, 90.0)]
+        );
+    }
+
     // Spec: clip files R1, R14
     #[test]
     fn newer_and_damaged_clip_files_are_refused() {
@@ -480,7 +513,7 @@ mod tests {
         let newer = reframe(&|v| v["schema"] = (CLIP_SCHEMA + 1).into());
         assert!(matches!(
             ClipFile::decode(&newer),
-            Err(ClipFileError::TooNew { found: 2 })
+            Err(ClipFileError::TooNew { found: 3 })
         ));
         let not_a_clip = reframe(&|v| v["format"] = "beatlayer-set".into());
         assert!(matches!(

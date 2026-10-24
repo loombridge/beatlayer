@@ -218,6 +218,8 @@ impl Shell {
         ViewResult {
             main_view: self.main_view_of(window).id().to_owned(),
             browser: self.browser_of(window),
+            // Spec: browser R26. The second window's browser keeps its height.
+            full_height_browser: window == WindowKind::Main && self.browser_view.full_height(),
             info_view: self.info_view_of(window),
             full_screen: self.full_screen_of(window),
             zoom: self.zoom_of(window),

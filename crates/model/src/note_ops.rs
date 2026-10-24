@@ -8,7 +8,8 @@
 
 use bl_core::time::Ticks;
 
-use crate::{Note, PressurePoint};
+use crate::note_expression::{Expression, window};
+use crate::{Breakpoint, Note};
 
 /// The most parts a chop makes of a note (note-editing R36).
 pub const MOST_PARTS: u32 = 64;
@@ -18,22 +19,17 @@ fn end(note: &Note) -> Ticks {
 }
 
 /// The part of `note` from `from` to `to`, which lie inside it: the note's
-/// values, and the pressure points that fall in the part, counted from the
-/// part's start (note-editing R34).
+/// values, and the stretch of each expression envelope over the part, counted
+/// from the part's start (note-editing R34; MPE R4).
 fn part(note: &Note, from: Ticks, to: Ticks) -> Note {
     let into = from - note.start;
     let mut part = note.clone();
     part.start = from;
     part.length = to - from;
-    part.pressure = note
-        .pressure
-        .iter()
-        .filter(|point| point.at >= into && point.at < into + part.length)
-        .map(|point| PressurePoint {
-            at: point.at - into,
-            value: point.value,
-        })
-        .collect();
+    for expression in Expression::ALL {
+        *part.envelope_mut(expression) =
+            window(note.envelope(expression), into, into + part.length);
+    }
     part
 }
 
@@ -72,8 +68,8 @@ pub fn chop_equal(note: &Note, parts: u32) -> Vec<Note> {
 
 /// The notes of one pitch, earliest first, as one note: from the earliest
 /// start to the latest end, with the earliest note's values, and every
-/// note's pressure points at their places in time, the later note's where
-/// two overlap (note-editing R39).
+/// note's expression breakpoints at their places in time, the later note's
+/// where two overlap (note-editing R39; MPE R4).
 ///
 /// # Panics
 ///
@@ -84,19 +80,22 @@ pub fn join(notes: &[Note]) -> Note {
     let to = notes.iter().map(end).max().unwrap_or(end(first));
     let mut joined = first.clone();
     joined.length = to - first.start;
-    let mut points: Vec<PressurePoint> = Vec::new();
-    for note in notes {
-        let offset = note.start - first.start;
-        if !note.pressure.is_empty() {
-            points.retain(|kept| kept.at < offset || kept.at >= offset + note.length);
+    for expression in Expression::ALL {
+        let mut points: Vec<Breakpoint> = Vec::new();
+        for note in notes {
+            let offset = note.start - first.start;
+            let source = note.envelope(expression);
+            if !source.is_empty() {
+                points.retain(|kept| kept.at < offset || kept.at > offset + note.length);
+            }
+            points.extend(source.iter().map(|point| Breakpoint {
+                at: offset + point.at,
+                ..*point
+            }));
         }
-        points.extend(note.pressure.iter().map(|point| PressurePoint {
-            at: offset + point.at,
-            value: point.value,
-        }));
+        points.sort_by_key(|point| point.at);
+        *joined.envelope_mut(expression) = points;
     }
-    points.sort_by_key(|point| point.at);
-    joined.pressure = points;
     joined
 }
 
@@ -159,7 +158,7 @@ impl Mapping {
 }
 
 /// `note` with its start and end carried through `map`, which may reverse
-/// time, and its pressure points with them.
+/// time, and its expression envelopes with them (MPE R4).
 ///
 /// # Errors
 ///
@@ -176,30 +175,44 @@ pub fn remap(note: &Note, map: impl Fn(Ticks) -> Ticks) -> Result<Note, String> 
             "a note would start at {from}, before the clip's contents begin"
         ));
     }
-    let mut points: Vec<(Ticks, u8)> = note
-        .pressure
-        .iter()
-        .map(|point| (map(note.start + point.at), point.value))
-        .collect();
-    points.sort_by_key(|(at, _)| *at);
-    let mut pressure: Vec<PressurePoint> = Vec::with_capacity(points.len());
-    for (at, value) in points {
-        if at < from || at >= to {
-            continue;
-        }
-        let point = PressurePoint {
-            at: at - from,
-            value,
-        };
-        match pressure.last_mut() {
-            Some(last) if last.at == point.at => *last = point,
-            _ => pressure.push(point),
-        }
-    }
     let mut mapped = note.clone();
     mapped.start = from;
     mapped.length = to - from;
-    mapped.pressure = pressure;
+    for expression in Expression::ALL {
+        let mut points: Vec<Breakpoint> = note
+            .envelope(expression)
+            .iter()
+            .map(|point| Breakpoint {
+                at: map(note.start + point.at),
+                ..*point
+            })
+            .collect();
+        points.sort_by_key(|point| point.at);
+        if b < a {
+            // Time runs backwards, so a segment's bend bows the other way
+            // and belongs to the breakpoint that now starts it.
+            let bends: Vec<f64> = points.iter().map(|point| point.bend).collect();
+            let last = points.len().saturating_sub(1);
+            for (i, point) in points.iter_mut().enumerate() {
+                point.bend = if i < last { -bends[i + 1] } else { 0.0 };
+            }
+        }
+        let mut kept: Vec<Breakpoint> = Vec::with_capacity(points.len());
+        for point in points {
+            if point.at < from || point.at > to {
+                continue;
+            }
+            let point = Breakpoint {
+                at: point.at - from,
+                ..point
+            };
+            match kept.last_mut() {
+                Some(last) if last.at == point.at => *last = point,
+                _ => kept.push(point),
+            }
+        }
+        *mapped.envelope_mut(expression) = kept;
+    }
     Ok(mapped)
 }
 
@@ -207,10 +220,11 @@ pub fn remap(note: &Note, map: impl Fn(Ticks) -> Ticks) -> Result<Note, String> 
 mod tests {
     use super::*;
 
-    fn point(at: i64, value: u8) -> PressurePoint {
-        PressurePoint {
+    fn point(at: i64, value: u8) -> Breakpoint {
+        Breakpoint {
             at: Ticks(at),
-            value,
+            value: f64::from(value),
+            bend: 0.0,
         }
     }
 
@@ -218,7 +232,8 @@ mod tests {
         Note::new(60, Ticks(start), Ticks(length), 100)
     }
 
-    // Spec: note-editing R34.
+    // Spec: note-editing R34; mpe R4. Each part has the stretch of the
+    // envelope over its span, with the value there at both its ends.
     #[test]
     fn a_split_covers_the_note_and_puts_pressure_in_its_part() {
         let held = Note {
@@ -230,8 +245,15 @@ mod tests {
         assert_eq!(parts.len(), 2, "cuts at the ends and repeats split nothing");
         assert_eq!((parts[0].start, parts[0].length), (Ticks(1000), Ticks(500)));
         assert_eq!((parts[1].start, parts[1].length), (Ticks(1500), Ticks(500)));
-        assert_eq!(parts[0].pressure, [point(0, 10), point(300, 20)]);
-        assert_eq!(parts[1].pressure, [point(200, 30)], "counted from the part");
+        assert_eq!(
+            parts[0].pressure,
+            [point(0, 10), point(300, 20), point(500, 25)]
+        );
+        assert_eq!(
+            parts[1].pressure,
+            [point(0, 25), point(200, 30), point(500, 30)],
+            "counted from the part"
+        );
         assert!(parts.iter().all(|part| part.release_velocity == 40));
     }
 
@@ -247,7 +269,7 @@ mod tests {
         assert_eq!(chop_equal(&note(0, 5), 64).len(), 5, "a part is a tick");
     }
 
-    // Spec: note-editing R39.
+    // Spec: note-editing R39; mpe R4.
     #[test]
     fn a_join_keeps_the_earliest_values_and_every_pressure_point() {
         let a = Note {
@@ -268,6 +290,26 @@ mod tests {
             [point(0, 1), point(100, 3)],
             "where they overlap the later note's points win"
         );
+    }
+
+    // Spec: mpe R1, R4. Two notes whose envelopes both end on one tick join
+    // with one breakpoint there, the later note's.
+    #[test]
+    fn a_join_keeps_one_breakpoint_where_two_ends_meet() {
+        let a = Note {
+            pressure: vec![point(0, 1), point(1000, 5)],
+            ..note(0, 1000)
+        };
+        let b = Note {
+            pressure: vec![point(0, 2), point(800, 9)],
+            ..note(200, 800)
+        };
+        let joined = join(&[a, b]);
+        assert_eq!(
+            joined.pressure,
+            [point(0, 1), point(200, 2), point(1000, 9)]
+        );
+        assert!(joined.expressions_fit());
     }
 
     // Spec: note-editing R43, R44, R45.

@@ -629,12 +629,18 @@ fn velocity_shaper(ui: &mut Ui, place: &Place<'_>, events: &mut Vec<UiEvent>) ->
         drag_gesture(ui, &response, events, |_, now, ran| {
             let y = round_to_hundredths(f64::from((rect.bottom() - PAD - now.y) / height))
                 .clamp(0.0, 1.0);
-            // The first stays at the start and the last at the end.
-            let x = if index == 0 || index == last {
-                point.x
+            // The first stays at the start and the last at the end, and one
+            // with no room between its neighbours stays where it is.
+            let (lowest, highest) = if index == 0 || index == last {
+                (point.x, point.x)
             } else {
-                let x = round_to_hundredths(f64::from((now.x - rect.left() - PAD) / width));
-                x.clamp(points[index - 1].x + GAP, points[index + 1].x - GAP)
+                (points[index - 1].x + GAP, points[index + 1].x - GAP)
+            };
+            let x = if lowest < highest {
+                round_to_hundredths(f64::from((now.x - rect.left() - PAD) / width))
+                    .clamp(lowest, highest)
+            } else {
+                point.x
             };
             ((x, y) != (point.x, point.y) || ran).then(|| {
                 let mut next = points.clone();

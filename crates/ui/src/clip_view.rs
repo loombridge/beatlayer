@@ -2466,14 +2466,17 @@ impl ClipViewUi {
         // pitch or a one-key range, and Option-dragging sets Seed's and
         // Shape's range to the keys dragged over: a gesture of
         // `midi_tool.set`, one undo step that Esc puts back.
-        let option = ui.input(|i| i.modifiers.alt)
-            && crate::tool_panel::ruler_set(shell, clip, 0, 0).is_some();
+        // A drag that began with Option held stays a ruler drag to its end,
+        // so letting go of Option first still ends the gesture.
+        let drag = keys_response.id.with("ruler-drag");
+        let option = ui.data(|d| d.get_temp::<(u8, bool)>(drag).is_some())
+            || ui.input(|i| i.modifiers.alt)
+                && crate::tool_panel::ruler_set(shell, clip, 0, 0).is_some();
         let pick = |pos: Pos2| {
             rows.key_at(grid, pos.y)
                 .map(|key| key.round().clamp(0.0, 127.0) as u8)
         };
         if option {
-            let drag = keys_response.id.with("ruler-drag");
             if keys_response.drag_started()
                 && let Some(key) = ui.input(|i| i.pointer.press_origin()).and_then(pick)
             {

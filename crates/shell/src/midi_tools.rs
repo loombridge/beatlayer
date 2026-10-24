@@ -1835,7 +1835,7 @@ pub fn run(
                 .collect();
             set_values(&mut view.tools, found, &values)?;
             let run = if view.tools.settings_of(descriptor).auto {
-                auto_apply(editor, view, arrangement, subject.clip, found)?
+                auto_apply(editor, view, arrangement, subject.clip, found, None)?
             } else {
                 None
             };

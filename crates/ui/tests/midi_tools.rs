@@ -591,3 +591,252 @@ fn cmd_shift_u_and_the_edit_menu_show_the_transform_panel_with_quantize_chosen()
     );
     assert_eq!((self::steps(&h), keys(&h, clip)), (steps, notes));
 }
+
+/// Chooses a generator and shows the Generate panel, with Auto as given.
+fn generator(h: &mut Harness, tool: &str, auto: bool) {
+    h.shell
+        .run("midi_tool.choose", json!({ "tool": tool }))
+        .unwrap();
+    h.shell
+        .run("midi_tool.set_auto", json!({ "tool": tool, "auto": auto }))
+        .unwrap();
+    h.shell
+        .run("clip_view.show_panel", json!({ "panel": "generate" }))
+        .unwrap();
+}
+
+fn set_values(h: &mut Harness, tool: &str, values: serde_json::Value) {
+    h.shell
+        .run("midi_tool.set", json!({ "tool": tool, "values": values }))
+        .unwrap();
+}
+
+fn type_text(h: &mut Harness, text: &str) {
+    h.frame(vec![Event::Text(text.to_owned())]);
+    h.key(Key::Enter, Modifiers::NONE);
+    h.settle();
+}
+
+#[test]
+fn rhythm_draws_its_step_pattern_names_its_pitch_and_steps_accent_offset_with_arrows() {
+    // Spec: midi-generators R3, R4, R5. The step pattern shows the steps that
+    // hold notes, a pitch shows by name and takes a typed name or number, and
+    // Accent Offset moves with two arrows that stop at its ends.
+    let (mut h, _) = set();
+    generator(&mut h, "rhythm", false);
+    let all = nodes(&mut h);
+    assert_eq!(
+        Harness::node(&all, "Step pattern").value,
+        "steps 1, 5, 9, 13"
+    );
+    set_values(&mut h, "rhythm", json!({ "steps": 8, "density": 3 }));
+    let all = nodes(&mut h);
+    assert_eq!(Harness::node(&all, "Step pattern").value, "steps 1, 4, 7");
+    // The pitch reads C3; a typed name or number sets it.
+    assert_eq!(Harness::node(&all, "Pitch").value, "C3");
+    h.click(centre(Harness::node(&all, "Pitch")));
+    type_text(&mut h, "d#3");
+    assert_eq!(values(&mut h, "rhythm")["pitch"], 63);
+    type_text(&mut h, "72");
+    assert_eq!(values(&mut h, "rhythm")["pitch"], 72);
+    let all = nodes(&mut h);
+    assert_eq!(Harness::node(&all, "Pitch").value, "C4");
+    // A name that isn't a key changes nothing, and Esc drops the entry.
+    type_text(&mut h, "H9");
+    assert_eq!(values(&mut h, "rhythm")["pitch"], 72);
+    h.frame(vec![Event::Text("6".to_owned())]);
+    h.key(Key::Escape, Modifiers::NONE);
+    h.key(Key::Enter, Modifiers::NONE);
+    assert_eq!(values(&mut h, "rhythm")["pitch"], 72);
+    // Accent Offset: arrows stop at 0 and at Density − 1.
+    let all = nodes(&mut h);
+    assert!(Harness::node(&all, "<").disabled, "the offset is 0");
+    for expected in [1, 2] {
+        let all = nodes(&mut h);
+        h.click(centre(Harness::node(&all, ">")));
+        assert_eq!(values(&mut h, "rhythm")["accent_offset"], expected);
+    }
+    let all = nodes(&mut h);
+    assert!(Harness::node(&all, ">").disabled, "Density − 1 is 2");
+    assert!(!Harness::node(&all, "<").disabled);
+}
+
+/// The slider's x for `key`, and its centre line.
+fn slider_at(h: &mut Harness, key: f32) -> Pos2 {
+    let all = nodes(h);
+    let b = Harness::node(&all, "Pitch Range slider")
+        .bounds
+        .expect("the slider has bounds");
+    let (left, right) = (b.x0 as f32, b.x1 as f32);
+    Pos2::new(
+        left + (key + 0.5) / 128.0 * (right - left),
+        ((b.y0 + b.y1) / 2.0) as f32,
+    )
+}
+
+fn range(h: &mut Harness, tool: &str) -> serde_json::Value {
+    values(h, tool)["pitch_range"].clone()
+}
+
+#[test]
+fn seeds_pitch_range_slider_moves_a_handle_or_both_and_merges_handles() {
+    // Spec: midi-generators R8. Dragging a handle moves that end, the bar
+    // between them moves both (Key Track), the handles merge where they meet,
+    // and a drag is one undo step that Esc puts back.
+    let (mut h, _) = set();
+    generator(&mut h, "seed", true);
+    let before = steps(&h);
+    let (low, to) = (slider_at(&mut h, 48.0), slider_at(&mut h, 60.0));
+    press(&mut h, low);
+    h.frame(vec![Event::PointerMoved(to)]);
+    release(&mut h, to);
+    assert_eq!(range(&mut h, "seed"), json!({ "low": 60, "high": 72 }));
+    assert_eq!(steps(&h), before + 1, "one undo step");
+    // The bar between the handles moves both, keeping the width.
+    let (from, to) = (slider_at(&mut h, 66.0), slider_at(&mut h, 78.0));
+    press(&mut h, from);
+    h.frame(vec![Event::PointerMoved(to)]);
+    release(&mut h, to);
+    assert_eq!(range(&mut h, "seed"), json!({ "low": 72, "high": 84 }));
+    // Pulling one handle to the other merges them, and they part again the
+    // way the pointer pulls.
+    let (high, to) = (slider_at(&mut h, 84.0), slider_at(&mut h, 40.0));
+    press(&mut h, high);
+    h.frame(vec![Event::PointerMoved(to)]);
+    release(&mut h, to);
+    assert_eq!(range(&mut h, "seed"), json!({ "low": 72, "high": 72 }));
+    let (merged, to) = (slider_at(&mut h, 72.0), slider_at(&mut h, 80.0));
+    press(&mut h, merged);
+    h.frame(vec![Event::PointerMoved(to)]);
+    release(&mut h, to);
+    assert_eq!(range(&mut h, "seed"), json!({ "low": 72, "high": 80 }));
+    // Esc puts a drag back.
+    let kept = steps(&h);
+    let (from, to) = (slider_at(&mut h, 76.0), slider_at(&mut h, 90.0));
+    press(&mut h, from);
+    h.frame(vec![Event::PointerMoved(to)]);
+    h.frame(vec![Event::Key {
+        key: Key::Escape,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: Modifiers::NONE,
+    }]);
+    release(&mut h, to);
+    assert_eq!(range(&mut h, "seed"), json!({ "low": 72, "high": 80 }));
+    assert_eq!(steps(&h), kept, "and recorded nothing");
+    // The range also reads as two pitches by name.
+    let all = nodes(&mut h);
+    assert_eq!(Harness::node(&all, "Pitch Range low").value, "C4");
+    assert_eq!(Harness::node(&all, "Pitch Range high").value, "G#4");
+}
+
+#[test]
+fn shapes_levels_display_draws_levels_and_the_preset_reads_user() {
+    // Spec: midi-generators R11. Pressing and dragging across the display
+    // sets the levels under the pointer, the preset chooser then reads User,
+    // and the drag is one undo step that Esc puts back.
+    let (mut h, _) = set();
+    generator(&mut h, "shape", true);
+    let all = nodes(&mut h);
+    let b = Harness::node(&all, "Shape Levels").bounds.expect("bounds");
+    let (left, right, top, bottom) = (b.x0 as f32, b.x1 as f32, b.y0 as f32, b.y1 as f32);
+    let each = (right - left) / 16.0;
+    let at = |column: f32, level: f32| {
+        Pos2::new(
+            left + (column + 0.5) * each,
+            bottom - level * (bottom - top),
+        )
+    };
+    assert_eq!(values(&mut h, "shape")["preset"], "rise");
+    let before = steps(&h);
+    press(&mut h, at(2.0, 0.5));
+    h.frame(vec![Event::PointerMoved(at(4.0, 0.5))]);
+    h.frame(vec![Event::PointerMoved(at(6.0, 0.5))]);
+    release(&mut h, at(6.0, 0.5));
+    let now = values(&mut h, "shape");
+    assert_eq!(now["preset"], "user");
+    let levels: Vec<f64> = now["levels"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|l| l.as_f64().unwrap())
+        .collect();
+    for column in 2..=6 {
+        assert!((levels[column] - 0.5).abs() < 0.02, "{column}: {levels:?}");
+    }
+    assert!((levels[0] - 0.0).abs() < 1e-9 && (levels[15] - 1.0).abs() < 1e-9);
+    assert_eq!(steps(&h), before + 1, "one undo step");
+    // Choosing a preset writes its levels again.
+    set_values(&mut h, "shape", json!({ "preset": "fall" }));
+    assert!((values(&mut h, "shape")["levels"][0].as_f64().unwrap() - 1.0).abs() < 1e-9);
+    // Esc puts a drag back.
+    let kept = (steps(&h), values(&mut h, "shape"));
+    press(&mut h, at(1.0, 0.1));
+    h.frame(vec![Event::PointerMoved(at(3.0, 0.1))]);
+    h.frame(vec![Event::Key {
+        key: Key::Escape,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: Modifiers::NONE,
+    }]);
+    release(&mut h, at(3.0, 0.1));
+    assert_eq!((steps(&h), values(&mut h, "shape")), kept);
+}
+
+#[test]
+fn euclideans_tabs_have_the_voices_rotations_pitches_arrows_and_randomise_button() {
+    // Spec: midi-generators R14, R16. The Pattern tab has a switch and a
+    // Rotation for each voice and the button that sets every Rotation at
+    // random; the Voices tab each voice's pitch and Velocity and the arrows
+    // that move every pitch together.
+    let (mut h, _) = set();
+    // The tabs are taller than the Clip View is by default.
+    h.shell.run("view.expand_clip_view", json!({})).unwrap();
+    generator(&mut h, "euclidean", false);
+    let all = nodes(&mut h);
+    assert_eq!(radio(&all, "Pattern").toggled, Some(true));
+    assert_eq!(Harness::node(&all, "Voice 1").toggled, Some(true));
+    assert_eq!(Harness::node(&all, "Voice 2").toggled, Some(false));
+    assert_eq!(
+        Harness::node(&all, "Voice 1 pattern").value,
+        "steps 1, 5, 9, 13"
+    );
+    // A voice's switch is a `midi_tool.set`.
+    h.click(centre(Harness::node(&all, "Voice 2")));
+    assert_eq!(values(&mut h, "euclidean")["voice_2"], json!(true));
+    // The button sets every Rotation, from 0 to Steps − 1.
+    let all = nodes(&mut h);
+    h.click(centre(Harness::node(&all, "Randomize Rotations")));
+    let now = values(&mut h, "euclidean");
+    let rotations: Vec<u64> = (1..=4)
+        .map(|voice| now[format!("rotation_{voice}")].as_u64().unwrap())
+        .collect();
+    assert!(rotations.iter().all(|r| *r < 16), "{rotations:?}");
+    assert!(rotations.iter().any(|r| *r > 0), "{rotations:?}");
+    let all = nodes(&mut h);
+    assert_eq!(
+        Harness::node(&all, "Voice 1 Rotation").value,
+        rotations[0].to_string()
+    );
+    // The Voices tab: pitches by name, then the arrows move all four.
+    h.click(centre(radio(&all, "Voices")));
+    let all = nodes(&mut h);
+    assert_eq!(radio(&all, "Voices").toggled, Some(true));
+    for (voice, name) in [(1, "C1"), (2, "D1"), (3, "F#1"), (4, "A#1")] {
+        assert_eq!(
+            Harness::node(&all, &format!("Voice {voice} Pitch")).value,
+            name
+        );
+    }
+    h.click(centre(Harness::node(&all, ">")));
+    let now = values(&mut h, "euclidean");
+    let pitches: Vec<u64> = (1..=4)
+        .map(|voice| now[format!("pitch_{voice}")].as_u64().unwrap())
+        .collect();
+    assert_eq!(pitches, [37, 39, 43, 47]);
+    let all = nodes(&mut h);
+    h.click(centre(Harness::node(&all, "<")));
+    assert_eq!(values(&mut h, "euclidean")["pitch_1"], 36);
+}

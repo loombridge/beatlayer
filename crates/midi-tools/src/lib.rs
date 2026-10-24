@@ -16,9 +16,15 @@
 mod descriptor;
 mod input;
 mod random;
+mod recombine;
 mod registry;
+mod span;
+mod strum;
 #[cfg(feature = "testing")]
 mod testing;
+mod time_warp;
+mod values;
+mod velocity_shaper;
 
 pub use descriptor::{
     Breakpoint, ChoiceOption, DIVISION_NAMES, ParamKind, ParamSpec, ParamValue, ToolDescriptor,
@@ -29,3 +35,5 @@ pub use random::Rng;
 pub use registry::{
     GENERATOR_ORDER, MAX_NOTES, MidiTool, Registry, TRANSFORMATION_ORDER, ToolError, run,
 };
+pub use strum::strum_position;
+pub use velocity_shaper::ENVELOPE_POINTS;

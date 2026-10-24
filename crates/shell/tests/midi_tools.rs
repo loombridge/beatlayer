@@ -199,17 +199,20 @@ fn r2_r3_r5_the_list_describes_every_tool_in_order() {
     let list: ToolList =
         serde_json::from_value(song.shell.run(ids::LIST, json!({})).unwrap()).unwrap();
     let names: Vec<&str> = list.tools.iter().map(|tool| tool.id.as_str()).collect();
-    assert_eq!(
-        names,
-        ["test_transpose", "test_fill"],
-        "transformations, then generators"
-    );
-    let transpose = &list.tools[0];
+    // The shipped transformations in the selector's order, then the test
+    // tools: the transformation, then the generator.
+    let (shipped, tests) = names.split_at(names.len() - 2);
+    assert_eq!(tests, ["test_transpose", "test_fill"]);
+    let order = bl_midi_tools::TRANSFORMATION_ORDER;
+    let place = |id: &&str| order.iter().position(|listed| listed == id).unwrap();
+    assert!(shipped.iter().map(place).is_sorted(), "{shipped:?}");
+    let tool = |id: &str| list.tools.iter().find(|tool| tool.id == id).unwrap();
+    let transpose = tool("test_transpose");
     assert_eq!(transpose.parameters[0].id, "degrees");
     assert_eq!(transpose.parameters[0].kind, "whole");
     assert!(transpose.parameters[0].scale_aware);
     assert_eq!(transpose.parameters[0].default, json!(0));
-    let fill = &list.tools[1];
+    let fill = tool("test_fill");
     assert_eq!(fill.parameters[1].kind, "division");
     assert_eq!(fill.parameters[1].default, json!("1/16"));
     assert_eq!(fill.parameters[2].unit.as_deref(), Some("%"));
@@ -711,6 +714,7 @@ fn r19_the_default_tool_is_the_chosen_tool_of_the_panel_shown_last() {
         ids::SET,
         json!({ "tool": "test_transpose", "values": { "degrees": 7 } }),
     );
+    song.tool(ids::CHOOSE, json!({ "tool": "test_transpose" }));
     song.tool(ids::SHOW_PANEL, json!({ "panel": "generate" }));
     assert_eq!(song.state().current_tool.as_deref(), Some("test_fill"));
     song.tool(ids::SHOW_PANEL, json!({ "panel": "transform" }));

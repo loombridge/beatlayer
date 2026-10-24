@@ -69,6 +69,7 @@ mod stems_dialog;
 mod take_lanes;
 mod theme_page;
 mod track_menu;
+mod transformation_displays;
 mod transport;
 mod undo_history;
 mod user_keymap;

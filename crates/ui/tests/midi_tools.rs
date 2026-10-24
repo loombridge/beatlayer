@@ -48,6 +48,10 @@ fn set() -> (Harness, ClipId) {
     h.shell
         .run("clip_view.select_notes", json!({ "notes": [0, 1, 2] }))
         .unwrap();
+    // The test tool, not the first shipped one the panel shows otherwise.
+    h.shell
+        .run("midi_tool.choose", json!({ "tool": "test_transpose" }))
+        .unwrap();
     h.settle();
     (h, clip)
 }

@@ -822,6 +822,7 @@ dependencies = [
  "bl-dsp",
  "bl-engine",
  "bl-media",
+ "bl-midi-tools",
  "bl-model",
  "bl-rt",
  "lspk-dsp",

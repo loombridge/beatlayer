@@ -1775,6 +1775,10 @@ fn midi_tools_shown(h: &mut Harness) {
     h.shell
         .run("clip_view.show_panel", json!({ "panel": "transform" }))
         .unwrap();
+    // The test tool, not the first shipped one the panel shows otherwise.
+    h.shell
+        .run("midi_tool.choose", json!({ "tool": "test_transpose" }))
+        .unwrap();
 }
 
 /// The same, with the shown tool's degrees off their default, so Reset can

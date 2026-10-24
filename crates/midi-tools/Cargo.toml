@@ -1,4 +1,5 @@
 [package]
+autotests = false
 name = "bl-midi-tools"
 description = "The MIDI Tools' interface: a tool's description, its input and output as plain data, the seeded generator, and the registry."
 version.workspace = true
@@ -14,6 +15,10 @@ testing = []
 
 [dependencies]
 bl-core.workspace = true
+
+[[test]]
+name = "midi_tools_tests"
+path = "tests/main.rs"
 
 [lints]
 workspace = true

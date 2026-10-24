@@ -62,6 +62,17 @@ pub trait MidiTool: Send + Sync {
     /// The tool's name, kind and parameters.
     fn descriptor(&self) -> &ToolDescriptor;
 
+    /// Whether `values` suit the tool together, beyond each one's kind and
+    /// range, such as Velocity Shaper's envelope. [`run`] and the shell check
+    /// it before the settings change.
+    ///
+    /// # Errors
+    ///
+    /// [`ToolError::Values`] saying what is wrong.
+    fn validate(&self, _values: &[ParamValue]) -> Result<(), ToolError> {
+        Ok(())
+    }
+
     /// The notes the tool writes for `input` and `values`, one value per
     /// parameter. Call it through [`run`], which checks the values and
     /// finishes the notes.
@@ -88,6 +99,7 @@ pub fn run(
 ) -> Result<ToolOutput, ToolError> {
     let descriptor = tool.descriptor();
     descriptor.check(values)?;
+    tool.validate(values)?;
     let mut output = tool.run(input, values)?;
     if output.notes.len() > MAX_NOTES {
         return Err(ToolError::TooManyNotes(output.notes.len()));
@@ -110,15 +122,28 @@ pub fn run(
 }
 
 /// The tools Beatlayer ships: each native tool's task adds itself here.
+fn shipped_tools() -> Vec<Box<dyn MidiTool>> {
+    vec![
+        Box::new(crate::recombine::Recombine::new()),
+        Box::new(crate::span::Span::new()),
+        Box::new(crate::strum::Strum::new()),
+        Box::new(crate::time_warp::TimeWarp::new()),
+        Box::new(crate::velocity_shaper::VelocityShaper::new()),
+    ]
+}
+
+/// The tools Beatlayer ships.
 #[cfg(not(feature = "testing"))]
 fn native_tools() -> Vec<Box<dyn MidiTool>> {
-    Vec::new()
+    shipped_tools()
 }
 
 /// The tools Beatlayer ships, and the test tools after them.
 #[cfg(feature = "testing")]
 fn native_tools() -> Vec<Box<dyn MidiTool>> {
-    crate::testing::tools()
+    let mut tools = shipped_tools();
+    tools.extend(crate::testing::tools());
+    tools
 }
 
 /// The tools, in the order the selectors list them.

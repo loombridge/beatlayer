@@ -17,7 +17,7 @@ use bl_model::{ClipId, ParamDescriptor, ParamId, ParamUnit};
 use bl_shell::midi_tool_commands::Panel;
 use bl_shell::{Area, GesturePhase, Invocation, Shell};
 use egui::accesskit::{self, Role};
-use egui::{Align2, Id, Key, Rect, Sense, Ui, Vec2, WidgetInfo, WidgetType, pos2, vec2};
+use egui::{Align2, Id, Key, Pos2, Rect, Sense, Ui, Vec2, WidgetInfo, WidgetType, pos2, vec2};
 use serde_json::{Value, json};
 
 use crate::main_window::{InfoViewContent, UiEvent};
@@ -29,10 +29,10 @@ pub const WIDTH: f32 = crate::audio_panel::WIDTH;
 /// The panel selector row's height (L-CLIP-003).
 pub const SELECTOR: f32 = 16.0;
 /// A control's size, and the step between rows.
-const CONTROL: Vec2 = vec2(84.0, 14.0);
-const ROW: f32 = 17.0;
+pub(crate) const CONTROL: Vec2 = vec2(84.0, 14.0);
+pub(crate) const ROW: f32 = 17.0;
 /// Where the controls start, from the panel's left edge.
-const CONTROLS_AT: f32 = 70.0;
+pub(crate) const CONTROLS_AT: f32 = 70.0;
 /// How wide the Auto switch is.
 const SWITCH: f32 = 40.0;
 /// Points of vertical drag that move a control from one end of its range to
@@ -221,6 +221,19 @@ pub fn show_audio_transform(ui: &mut Ui, theme: &Theme, rect: Rect) {
 
 /// A button drawn in place: returns whether it was clicked.
 fn button(ui: &mut Ui, theme: &Theme, salt: &str, rect: Rect, text: &str, enabled: bool) -> bool {
+    button_named(ui, theme, salt, rect, text, text, enabled)
+}
+
+/// A button that shows `text` and is named `name` for assistive technology.
+pub(crate) fn button_named(
+    ui: &mut Ui,
+    theme: &Theme,
+    salt: &str,
+    rect: Rect,
+    text: &str,
+    name: &str,
+    enabled: bool,
+) -> bool {
     let id = Id::new(("tool-button", salt));
     let response = ui.interact(
         rect,
@@ -250,7 +263,7 @@ fn button(ui: &mut Ui, theme: &Theme, salt: &str, rect: Rect, text: &str, enable
         theme.small_font(),
         if enabled { c.text.0 } else { c.pending.0 },
     );
-    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, text));
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, name));
     if enabled {
         crate::focus::register(ui.ctx(), id, Area::Detail, None);
     }
@@ -313,10 +326,27 @@ fn tools(
     };
     let view = tools.view_of(tool);
     let descriptor = view.descriptor;
+    // A tool with a display draws it above its controls, and leaves out the
+    // controls the display replaces (the MIDI transformations spec, R43).
+    let drawn = crate::tool_displays::show(
+        ui,
+        shell,
+        theme,
+        clip,
+        descriptor,
+        &view.values,
+        pos2(left, y),
+        rect.width() - 12.0,
+        events,
+    );
+    y += drawn.height;
     for (index, spec) in descriptor.parameters.iter().enumerate() {
         let Some(value) = view.values.get(index) else {
             continue;
         };
+        if drawn.hidden.contains(&spec.id.as_str()) {
+            continue;
+        }
         ui.painter().with_clip_rect(rect).text(
             pos2(left, y + CONTROL.y / 2.0),
             Align2::LEFT_CENTER,
@@ -497,9 +527,58 @@ pub(crate) fn took_escape(ctx: &egui::Context) -> bool {
         .unwrap_or(false)
 }
 
+/// A drag on a display's handle (the MIDI transformations spec, R43): every
+/// frame of it runs the command `next` makes from where the drag started, where
+/// the pointer is and whether a frame has run, as a gesture of
+/// `midi_tool.set`. Releasing it is one undo step, and Esc puts the notes back.
+pub(crate) fn drag_gesture(
+    ui: &Ui,
+    response: &egui::Response,
+    events: &mut Vec<UiEvent>,
+    next: impl FnOnce(Pos2, Pos2, bool) -> Option<Invocation>,
+) {
+    let id = response.id.with("gesture");
+    if response.drag_started() {
+        let at = response.interact_pointer_pos().unwrap_or_default();
+        ui.data_mut(|d| d.insert_temp(id, (at, false)));
+    }
+    if response.dragged() {
+        let state = ui.data(|d| d.get_temp::<(Pos2, bool)>(id));
+        if let (Some(now), Some((start, ran))) = (response.interact_pointer_pos(), state)
+            && let Some(invocation) = next(start, now, ran)
+        {
+            events.push(UiEvent::Gesture {
+                phase: GesturePhase::Update,
+                invocation: Some(invocation),
+            });
+            ui.data_mut(|d| d.insert_temp(id, (start, true)));
+        }
+    }
+    if response.drag_stopped() {
+        let ran = ui
+            .data_mut(|d| d.remove_temp::<(Pos2, bool)>(id))
+            .is_some_and(|(_, ran)| ran);
+        // Esc ends a drag too (egui stops it as a release).
+        let escaped = ui.input(|i| i.key_pressed(Key::Escape));
+        if ran {
+            events.push(UiEvent::Gesture {
+                phase: if escaped {
+                    GesturePhase::Cancel
+                } else {
+                    GesturePhase::Commit
+                },
+                invocation: None,
+            });
+            if escaped {
+                ui.ctx().data_mut(|d| d.insert_temp(escape_id(), true));
+            }
+        }
+    }
+}
+
 /// One parameter's control.
 #[expect(clippy::too_many_arguments, reason = "a control's whole context")]
-fn control(
+pub(crate) fn control(
     ui: &mut Ui,
     theme: &Theme,
     clip: ClipId,

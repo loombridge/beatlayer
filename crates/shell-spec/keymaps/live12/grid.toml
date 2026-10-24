@@ -68,6 +68,7 @@ win = ["Ctrl+4"]
 status = "bound"
 commands = [
   { id = "arrangement.snap_to_grid", contexts = ["arrangement"] },
+  { id = "view.mpe_grid", contexts = ["note-editor"] },
 ]
 
 [[shortcut]]

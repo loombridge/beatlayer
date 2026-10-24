@@ -223,6 +223,7 @@ impl Importer<'_, '_> {
             launch: bl_model::LaunchSettings::default(),
             multisamplers: bl_model::MultisamplerViews::new(),
             window_views: bl_model::WindowViews::default(),
+            mpe_view: bl_model::MpeView::default(),
         };
         Ok(Imported {
             project,

@@ -13,6 +13,7 @@
 //!      "rack_views": { "14": { "macros": false, "chain_list": true, "devices": true } },
 //!      "folds": [ 12, 15 ],     the clips whose note editors are folded
 //!      "midi_tools": { … },     the MIDI Tools' chosen tools and settings
+//!      "mpe_view": { … },       the MPE tab's lanes, their heights and the clips with its grid on
 //!      "document": { … }         the song, as bl-model serialises it
 //!    }
 //! ```
@@ -39,8 +40,8 @@ use std::io::Read;
 
 use bl_core::id::IdAllocator;
 use bl_model::{
-    ClipFolds, DeviceWindows, Document, Editor, LaunchSettings, MultisamplerViews, RackViewMap,
-    WindowViews,
+    ClipFolds, DeviceWindows, Document, Editor, LaunchSettings, MpeView, MultisamplerViews,
+    RackViewMap, WindowViews,
 };
 use ruzstd::decoding::StreamingDecoder;
 use ruzstd::encoding::{CompressionLevel, compress_to_vec};
@@ -98,6 +99,11 @@ pub struct Project {
     /// open (second-window R14): saved with the set, but not part of the
     /// document, so switching either is no undo step.
     pub window_views: WindowViews,
+    /// Which expression lanes the Clip View's MPE tab shows, how tall they
+    /// are, and the clips whose tab has its grid on (the MPE spec, R23,
+    /// R27): saved with the set, but not part of the document, so changing
+    /// them is no undo step.
+    pub mpe_view: MpeView,
 }
 
 impl Project {
@@ -122,6 +128,7 @@ impl Project {
             launch: LaunchSettings::default(),
             multisamplers: MultisamplerViews::new(),
             window_views: WindowViews::default(),
+            mpe_view: MpeView::default(),
         }
     }
 
@@ -176,6 +183,17 @@ impl Project {
             .filter(|clip| self.document.clip(**clip).is_some())
             .copied()
             .collect();
+        self
+    }
+
+    /// The same project with this MPE tab state, keeping the grids only of
+    /// clips its document has.
+    #[must_use]
+    pub fn with_mpe_view(mut self, view: &MpeView) -> Self {
+        self.mpe_view = view.clone();
+        self.mpe_view
+            .grid
+            .retain(|clip| self.document.clip(*clip).is_some());
         self
     }
 
@@ -297,6 +315,8 @@ struct Saving<'a> {
     multisamplers: &'a MultisamplerViews,
     #[serde(skip_serializing_if = "WindowViews::is_default")]
     window_views: WindowViews,
+    #[serde(skip_serializing_if = "MpeView::is_default")]
+    mpe_view: &'a MpeView,
     document: &'a Document,
 }
 
@@ -316,6 +336,7 @@ impl<'a> Saving<'a> {
             launch: project.launch,
             multisamplers: &project.multisamplers,
             window_views: project.window_views,
+            mpe_view: &project.mpe_view,
             document: &project.document,
         }
     }
@@ -356,6 +377,10 @@ struct Saved {
     /// open in the Arrangement View with one window.
     #[serde(default)]
     window_views: WindowViews,
+    /// The MPE tab's lanes and grids (WP-6.18). Sets saved before it open
+    /// with a new set's.
+    #[serde(default)]
+    mpe_view: MpeView,
     document: Document,
 }
 
@@ -462,6 +487,7 @@ pub fn decode_json(json: &[u8], options: &LoadOptions) -> Result<(Project, SetIn
         launch,
         multisamplers,
         window_views,
+        mpe_view,
         document,
         ..
     } = saved;
@@ -491,10 +517,12 @@ pub fn decode_json(json: &[u8], options: &LoadOptions) -> Result<(Project, SetIn
         launch,
         multisamplers: MultisamplerViews::new(),
         window_views,
+        mpe_view: MpeView::default(),
     }
     .with_windows(&windows)
     .with_rack_views(&rack_views)
     .with_folds(&folds)
+    .with_mpe_view(&mpe_view)
     .with_midi_tools(&midi_tools)
     .with_multisamplers(&multisamplers);
     let info = SetInfo {

@@ -127,6 +127,34 @@ fn clips_of(shell: &Shell, media: bl_model::ContentHash) -> Vec<ClipId> {
         .collect()
 }
 
+// Spec: warp-modes R2. A new clip warped through `clip.set_warp` is Beats
+// with Loop Back-and-Forth, as Live's is, and the mode can be changed.
+#[test]
+fn a_new_warped_clip_loops_back_and_forth_by_default() {
+    use bl_model::TransientLoopMode::{LoopBackAndForth, LoopForward};
+    let scratch = Scratch::new("loop-default");
+    let (mut shell, clip, _) = shell_with(&scratch);
+    shell
+        .run("clip.set_warp", json!({ "clip": clip, "warp": true }))
+        .unwrap();
+    let new = audio(&shell, clip);
+    assert_eq!(new.warp_mode, bl_model::WarpMode::Beats);
+    assert_eq!(
+        new.warp_settings.beats.transient_loop_mode,
+        LoopBackAndForth
+    );
+    shell
+        .run(
+            "clip.set_warp_settings",
+            json!({ "clip": clip, "beats": { "transient_loop_mode": "loop_forward" } }),
+        )
+        .unwrap();
+    assert_eq!(
+        audio(&shell, clip).warp_settings.beats.transient_loop_mode,
+        LoopForward
+    );
+}
+
 /// Replacing a clip's file keeps its gain, and its warp markers only when
 /// the new file is exactly as long as the old one (R18, warping R27).
 #[test]

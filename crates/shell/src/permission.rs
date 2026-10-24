@@ -46,6 +46,7 @@ pub const RAISED_BY_ARGUMENTS: &[&str] = &[
     tool_ids::SET,
     tool_ids::SET_AUTO,
     tool_ids::RESEED,
+    tool_ids::RANDOMIZE,
     audio_ids::CROP,
     edit_ids::MOVE_CLIPS,
     edit_ids::RESIZE_CLIPS,
@@ -204,9 +205,11 @@ pub(crate) fn assess(
         }
         audio_ids::CROP => cropping(args, registered, scene),
         SET_CLIP_DATA => notes_set(args, registered, scene.editor),
-        tool_ids::APPLY | tool_ids::SET | tool_ids::SET_AUTO | tool_ids::RESEED => {
-            tool_notes(id, args, registered, scene)
-        }
+        tool_ids::APPLY
+        | tool_ids::SET
+        | tool_ids::SET_AUTO
+        | tool_ids::RESEED
+        | tool_ids::RANDOMIZE => tool_notes(id, args, registered, scene),
         bounce_ids::PASTE_BOUNCED_AUDIO => paste_bounced(args, registered, scene),
         _ => tried(id, args, registered, scene),
     }

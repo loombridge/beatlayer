@@ -39,7 +39,7 @@ pub const CLIP_EXTENSION: &str = "blclip";
 pub const CLIP_FORMAT: &str = "beatlayer-clip";
 
 /// The clip file schema this build writes, and the newest it reads.
-pub const CLIP_SCHEMA: u32 = 2;
+pub const CLIP_SCHEMA: u32 = 3;
 
 /// The most JSON a clip file may hold, in bytes (R14): far more than a clip
 /// and a chain need, so a small damaged or hostile file can't make the reader
@@ -226,6 +226,11 @@ impl ClipFile {
         let mut value = value;
         if schema == 1 {
             crate::migrate::pressure_to_breakpoints(&mut value);
+        }
+        // Schemas 1 and 2 leave Loop Forward out of an audio clip's Beats
+        // settings, which default to Loop Back-and-Forth from schema 3.
+        if schema < 3 {
+            crate::migrate::pin_loop_forward(&mut value);
         }
         let read: Reading = serde_json::from_value(value).map_err(|e| invalid(e.to_string()))?;
         if read.kind != ClipKind::of(&read.clip.data) {
@@ -500,6 +505,40 @@ mod tests {
         );
     }
 
+    // Spec: warp-modes R2. A clip file of schema 2 names no Transient Loop
+    // Mode for a clip that had the default, Loop Forward then.
+    #[test]
+    fn a_schema_2_audio_clip_file_keeps_loop_forward() {
+        let audio = ClipFile {
+            clip: Clip::new(
+                ClipId(id(2)),
+                Ticks(0),
+                Ticks(1920),
+                ClipData::Audio(bl_model::AudioData::new(HASH)),
+            ),
+            devices: Vec::new(),
+            media: Media::new(),
+            seconds: Some(1.5),
+        };
+        let json =
+            crate::format::decompress(&audio.encode().unwrap(), MAX_CLIP_JSON_BYTES).unwrap();
+        let mut value: serde_json::Value = serde_json::from_slice(&json).unwrap();
+        value["schema"] = 2.into();
+        assert!(
+            value["clip"]["data"]["audio"]
+                .get("warp_settings")
+                .is_none()
+        );
+        let old = crate::format::compress(&serde_json::to_vec(&value).unwrap());
+        let ClipData::Audio(loaded) = ClipFile::decode(&old).unwrap().clip.data else {
+            panic!("an audio clip");
+        };
+        assert_eq!(
+            loaded.warp_settings.beats.transient_loop_mode,
+            bl_model::TransientLoopMode::LoopForward
+        );
+    }
+
     // Spec: clip files R1, R14
     #[test]
     fn newer_and_damaged_clip_files_are_refused() {
@@ -513,7 +552,7 @@ mod tests {
         let newer = reframe(&|v| v["schema"] = (CLIP_SCHEMA + 1).into());
         assert!(matches!(
             ClipFile::decode(&newer),
-            Err(ClipFileError::TooNew { found: 3 })
+            Err(ClipFileError::TooNew { found: 4 })
         ));
         let not_a_clip = reframe(&|v| v["format"] = "beatlayer-set".into());
         assert!(matches!(

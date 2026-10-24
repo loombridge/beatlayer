@@ -9,8 +9,9 @@ use std::path::{Path, PathBuf};
 use bl_model::{ClipDefaults, ContentHash};
 use serde::{Deserialize, Serialize};
 
-/// The format version of the file.
-const VERSION: u32 = 1;
+/// The format version of the file. Version 1 left Loop Forward, then Beats'
+/// default Transient Loop Mode, out of the settings.
+const VERSION: u32 = 2;
 
 /// What is added to the sample's file name to name its defaults file.
 const SUFFIX: &str = ".beatlayer-clip";
@@ -36,8 +37,20 @@ pub fn path_for(sample: &Path) -> PathBuf {
 /// this format version and made for the content `media`.
 #[must_use]
 pub fn load(sample: &Path, media: ContentHash) -> Option<ClipDefaults> {
-    let file: DefaultsFile = serde_json::from_slice(&fs::read(path_for(sample)).ok()?).ok()?;
-    (file.version == VERSION && file.media == media).then_some(file.defaults)
+    let mut value: serde_json::Value =
+        serde_json::from_slice(&fs::read(path_for(sample)).ok()?).ok()?;
+    if value.get("version")? == 1 {
+        value
+            .pointer_mut("/defaults/warp_settings")?
+            .as_object_mut()?
+            .entry("beats")
+            .or_insert_with(|| serde_json::json!({}))
+            .as_object_mut()?
+            .entry("transient_loop_mode")
+            .or_insert_with(|| serde_json::json!("loop_forward"));
+    }
+    let file: DefaultsFile = serde_json::from_value(value).ok()?;
+    (matches!(file.version, 1 | VERSION) && file.media == media).then_some(file.defaults)
 }
 
 /// Saves `defaults` beside `sample`, replacing any saved before, and returns

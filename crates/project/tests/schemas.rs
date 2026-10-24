@@ -18,7 +18,9 @@
 //! devices to Live's names; a set saved before it opens with the new names.
 //! Version 8 (WP-6.21) gave take lanes and their clips IDs. Version 9
 //! (WP-6.17) made a note's pressure an envelope of breakpoints; a
-//! set saved before it opens with each pressure point a step.
+//! set saved before it opens with each pressure point a step. Version 10
+//! (T348) made Loop Back-and-Forth the default Transient Loop Mode; a set
+//! saved before it names Loop Forward on each audio clip that had it by default.
 //! `schema-0-fake.json` is an invented version 0, with a migration to
 //! version 1 defined below, to show the scaffold carries an old file through
 //! to the current model.
@@ -31,7 +33,7 @@ use bl_core::time::{
 };
 use bl_model::{
     AudioData, Clip, ClipData, Command, ContentHash, Device, DeviceKind, Editor, MidiData, Note,
-    ParamId, PluginFormat, TrackKind,
+    ParamId, PluginFormat, TrackKind, TransientLoopMode,
 };
 use bl_project::migrate::{MIGRATIONS, OLDEST_SCHEMA_VERSION};
 use bl_project::{
@@ -124,7 +126,13 @@ fn fixture_project() -> Project {
         editor.new_id(),
         Ticks::ZERO,
         Ticks::WHOLE * 4,
-        ClipData::Audio(AudioData::new(kick_sample)),
+        // Sets of the versions before 10 name no Transient Loop Mode, which
+        // then meant Loop Forward and migrates to it.
+        ClipData::Audio({
+            let mut audio = AudioData::new(kick_sample);
+            audio.warp_settings.beats.transient_loop_mode = TransientLoopMode::LoopForward;
+            audio
+        }),
     );
     clip.name = "Kick loop".to_owned();
     editor
@@ -525,6 +533,7 @@ static FAKE_MIGRATIONS: &[Migration] = &[
     MIGRATIONS[5],
     MIGRATIONS[6],
     MIGRATIONS[7],
+    MIGRATIONS[8],
 ];
 
 /// The scaffold migrates an old file: the invented version 0 fixture loads

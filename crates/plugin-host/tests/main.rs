@@ -12,6 +12,7 @@ mod clap;
 mod common;
 mod editor;
 mod engine;
+mod lv2;
 mod midi_effect;
 mod offline;
 mod offline_au;

@@ -128,8 +128,22 @@ impl TrackMenus {
                 palette(ui, theme, package.unwrap_or_default());
                 continue;
             }
-            let response =
-                crate::menus::item_in(ui, item, shell, &keymap, self.platform, &contexts, events);
+            // Spec: linked-track editing R3. Cmd (Ctrl) held on Link Tracks in
+            // a linked track's menu adds the selection to its group.
+            let into = (item.row == "C-TRACK-018a"
+                && ui.input(|i| i.modifiers.command)
+                && doc.track(track).is_some_and(|t| t.link().is_some()))
+            .then(|| json!({ "into": track }));
+            let response = crate::menus::item_in_with_args(
+                ui,
+                item,
+                shell,
+                &keymap,
+                self.platform,
+                &contexts,
+                events,
+                into,
+            );
             let response = match package {
                 Some(package) => {
                     let text = format!("Not built yet: arrives with {package}.");

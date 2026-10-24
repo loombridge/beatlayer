@@ -55,7 +55,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        252,
+        253,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
              the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
              routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -95,17 +95,21 @@ fn every_document_command_is_registered() {
              set_global_groove_amount, set_auto_load_groove and set_clip_groove, WP-6.9 \
              five for tunings: set_tuning, remove_tuning, set_tuning_reference, \
              set_tuning_range and set_tuning_bypass, WP-6.22 move_clip_to_lane, and WP-6.24b \
-             the two for time: insert_time and delete_time"
+             the two for time: insert_time and delete_time, and WP-6.23 set_track_links"
     );
 
     for op in &ops {
         let variant = tagged_variant(&enum_schema, "op", op).unwrap();
         // The fan-out commands (WP-6.6) also take `clips` in place of `clip`.
         let fanned = registry::with_clips(&variant);
+        // The linked-track commands (WP-6.23) also take `linked`.
+        let linked = registry::with_linked(&variant);
         let registered: Vec<&str> = commands
             .iter()
             .filter(|spec| {
-                spec.args.as_ref() == Some(&variant) || spec.args.as_ref() == Some(&fanned)
+                [&variant, &fanned, &linked]
+                    .into_iter()
+                    .any(|schema| spec.args.as_ref() == Some(schema))
             })
             .map(|spec| spec.id.as_ref())
             .collect();
@@ -750,6 +754,15 @@ fn every_command_runs_by_id() {
         json!({ "track": bass, "bypass": true }),
     );
     assert!(changes.tracks.contains_key(&bass));
+    // Spec: linked-track editing R16.
+    let link: bl_model::LinkGroupId = agent.new_id();
+    agent.run(
+        "track.set_link_group",
+        json!({ "tracks": [drums, bass], "group": link }),
+    );
+    assert_eq!(agent.editor.document().linked_with(drums), [drums, bass]);
+    agent.run("track.set_link_group", json!({ "tracks": [drums, bass] }));
+    assert!(agent.editor.document().linked_with(drums).is_empty());
     agent.run("tuning.remove", json!({ "retune": true }));
     agent.run(
         "clip.set_fades",
@@ -4181,6 +4194,13 @@ fn schemas_match_what_commands_serialise() {
             Command::SetTuningBypass {
                 track,
                 bypass: true,
+            },
+        ),
+        (
+            "track.set_link_group",
+            Command::SetTrackLinks {
+                tracks: vec![track],
+                group: None,
             },
         ),
     ];

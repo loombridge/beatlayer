@@ -12,6 +12,11 @@ use crate::keymap::{
 };
 use bl_commands::Context;
 
+use super::to_value;
+use crate::commands as ids;
+use bl_commands::NoArgs;
+use serde_json::Value;
+
 impl Shell {
     /// The keymap in use: Live 12's shortcuts with the person's own layered
     /// over them (R3).
@@ -335,6 +340,37 @@ impl Shell {
             }
         }
         self.rebuild_keymap();
+    }
+
+    /// Runs the `keymap` commands.
+    pub(super) fn run_keymap(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        match id {
+            ids::KEYMAP_STATE => {
+                Self::args::<NoArgs>(id, args)?;
+                Ok(to_value(&self.keymap_state()))
+            }
+            ids::KEYMAP_BIND => {
+                let bind: crate::keymap::BindArgs = Self::args(id, args)?;
+                self.bind_keys(id, &bind)?;
+                Ok(to_value(&self.keymap_result()))
+            }
+            ids::KEYMAP_UNBIND => {
+                let crate::keymap::UnbindArgs {
+                    shortcut,
+                    command,
+                    keys,
+                    platform,
+                } = Self::args(id, args)?;
+                self.unbind_keys(id, shortcut.as_deref(), command.as_deref(), &keys, platform)?;
+                Ok(to_value(&self.keymap_result()))
+            }
+            ids::KEYMAP_RESET => {
+                let crate::keymap::ResetArgs { command } = Self::args(id, args)?;
+                self.reset_keys(command.as_deref());
+                Ok(to_value(&self.keymap_result()))
+            }
+            _ => Err(ShellError::UnknownCommand(id.to_owned())),
+        }
     }
 }
 

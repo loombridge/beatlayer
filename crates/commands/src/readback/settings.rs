@@ -1,0 +1,65 @@
+//! Settings, the agent server, the assistant, the keymap, views and the audio device.
+
+use super::{Readback, nothing, read};
+
+/// Why a token has nothing to read.
+const TOKEN: &str = "a new random token, which an agent is never told: the Settings window \
+                     shows it to the person";
+/// The readback of this area's commands, one line each, so a command's entry is easy to find.
+#[rustfmt::skip]
+pub(super) const ROWS: &[(&str, Readback)] = &[
+    ("agent.approve_client", read("settings.state", "agents.clients")),
+    ("agent.forget_client", read("settings.state", "agents.clients")),
+    ("agent.new_client_token", nothing(TOKEN)),
+    ("agent.new_token", nothing(TOKEN)),
+    ("agent.set_autonomous", read("settings.state", "agents.clients[].autonomous")),
+    ("agent.set_server", read("settings.state", "agents.server")),
+    ("app.quit", nothing("the app ends, so there is nothing left to read from")),
+    ("assistant.forget_key", read("settings.state", "assistant.key_set")),
+    ("assistant.set_base_url", read("settings.state", "assistant.base_url")),
+    ("assistant.set_key", read("settings.state", "assistant.key_set")),
+    ("assistant.set_model", read("settings.state", "assistant.model")),
+    ("assistant.set_provider", read("settings.state", "assistant.provider")),
+    ("audio.configure", read("audio.status", "settings")),
+    ("audio.set_test_tone", read("audio.status", "test_tone")),
+    ("audio.toggle_engine", read("audio.status", "engine_on")),
+    ("keymap.bind", read("keymap.state", "shortcuts")),
+    ("keymap.reset", read("keymap.state", "shortcuts")),
+    ("keymap.unbind", read("keymap.state", "shortcuts")),
+    ("settings.set_auto_hide_plug_in_windows", read("settings.state", "auto_hide_plug_in_windows")),
+    ("settings.set_continuous_save", read("settings.state", "file_folder.save_continuously")),
+    ("settings.set_auto_warp_long_samples", read("settings.state", "warp.auto_warp_long_samples")),
+    ("settings.set_default_warp_mode", read("settings.state", "warp.default_warp_mode")),
+    ("settings.set_loop_warp_short_samples", read("settings.state", "warp.loop_warp_short_samples")),
+    ("settings.set_create_fades_on_clip_edges", read("settings.state", "create_fades_on_clip_edges")),
+    ("settings.set_retune_on_tuning_load", read("settings.state", "retune_on_tuning_load")),
+    ("settings.set_sample_editor", read("settings.state", "file_folder.sample_editor")),
+    ("settings.set_collect_files_on_export", read("settings.state", "library.collect_files_on_export")),
+    ("settings.set_user_library", read("settings.state", "library.user_library")),
+    ("settings.set_temporary_folder", read("settings.state", "file_folder.temporary_folder")),
+    ("settings.set_outline_view_in_focus", read("settings.state", "display_input.outline_view_in_focus")),
+    ("settings.set_default_launch_mode", read("settings.state", "launch.default_mode")),
+    ("settings.set_default_launch_quantization", read("settings.state", "launch.default_quantization")),
+    ("settings.set_record_session_automation_in", read("settings.state", "record_session_automation_in")),
+    ("settings.set_automation_record_mode", read("settings.state", "automation_record_mode")),
+    ("settings.set_select_next_scene_on_launch", read("settings.state", "launch.select_next_scene_on_launch")),
+    ("settings.set_select_on_launch", read("settings.state", "launch.select_on_launch")),
+    ("settings.set_start_recording_on_scene_launch", read("settings.state", "launch.start_recording_on_scene_launch")),
+    ("settings.set_theme", read("settings.state", "theme_colors.theme")),
+    ("settings.set_appearance", read("settings.state", "theme_colors.appearance")),
+    ("settings.set_tone", read("settings.state", "theme_colors.tone")),
+    ("settings.set_high_contrast", read("settings.state", "theme_colors.high_contrast")),
+    ("settings.set_grid_line_intensity", read("settings.state", "theme_colors.grid_line_intensity")),
+    ("settings.set_brightness", read("settings.state", "theme_colors.brightness")),
+    ("settings.set_color_intensity", read("settings.state", "theme_colors.color_intensity")),
+    ("settings.set_color_hue", read("settings.state", "theme_colors.color_hue")),
+    ("settings.set_warp_recorded_audio", read("settings.state", "warp_recorded_audio")),
+    ("view.set_zoom", read("view.state", "window.zoom")),
+    (
+        "view.toggle_full_height_browser",
+        read("view.state", "window.full_height_browser"),
+    ),
+    ("view.zoom_in", read("view.state", "window.zoom")),
+    ("view.zoom_out", read("view.state", "window.zoom")),
+    ("view.zoom_reset", read("view.state", "window.zoom")),
+];

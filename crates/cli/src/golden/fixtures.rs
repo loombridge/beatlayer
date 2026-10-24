@@ -168,6 +168,21 @@ pub(super) const FIXTURES: &[Fixture] = &[
         build: comp_from_two_takes,
     },
     Fixture {
+        name: "comp-three-parts",
+        about: "A comp of three parts copied from three takes of the chirp (WP-6.22b), with \
+                Create Fades on Clip Edges on: its two boundaries are crossfaded 2 ms either \
+                side, the later parts read from before their starts.",
+        build: comp_three_parts,
+    },
+    Fixture {
+        name: "comp-edge-moved",
+        about: "The three-part comp after the boundary between its first two parts is dragged \
+                a beat later (Move Comp Edge): the first part plays on from its take, the \
+                second starts later in its own, and the crossfade sits at the new boundary \
+                with its span unchanged.",
+        build: comp_edge_moved,
+    },
+    Fixture {
         name: "linked-comp",
         about: "A comp made on one of two linked tracks (WP-6.23): each track holds two takes \
                 of the chirp, the second started three quarters of a second later in its file, \
@@ -1434,6 +1449,86 @@ fn comp_from_two_takes() -> Scene {
     }
     let seconds = song.to_last_clip();
     song.finish(seconds)
+}
+
+/// Spec: comping R17, R22. Three takes of the chirp, their start markers a
+/// second apart, and a comp of two beats from each, with the crossfade Create
+/// Fades on Clip Edges gives the boundaries (2 ms each side, a straight line).
+/// With `moved`, the first boundary is then moved a beat later as
+/// `take_lane.move_comp_edge` moves it.
+fn three_part_comp(moved: bool) -> Scene {
+    let mut song = Song::new();
+    let chirp = song.chirp();
+    let track = song.track(TrackKind::Audio, "Vocal", None);
+    let tempo = TempoMap::default();
+    let beat = Ticks::QUARTER;
+    let mut takes = Vec::new();
+    for (n, start) in [0.0, 1.0, 2.0].into_iter().enumerate() {
+        let lane = song.editor.new_id();
+        song.apply(Command::AddTakeLane {
+            track,
+            lane: bl_model::NewTakeLane {
+                id: Some(lane),
+                name: format!("Take {}", n + 1),
+                clips: Vec::new(),
+            },
+            index: None,
+        });
+        let clip = Clip::new(
+            song.editor.new_id(),
+            Ticks::ZERO,
+            beat * 8,
+            ClipData::Audio(AudioData {
+                start,
+                ..AudioData::new(chirp)
+            }),
+        );
+        song.apply(Command::CreateTakeClip {
+            lane,
+            clip: clip.clone(),
+        });
+        takes.push(clip);
+    }
+    let mut parts = Vec::new();
+    for (n, take) in takes.iter().enumerate() {
+        let part = Clip {
+            id: song.editor.new_id(),
+            ..take.part(beat * 2 * n as i64, beat * 2 * (n as i64 + 1), &tempo)
+        };
+        parts.push(part.id);
+        song.apply(Command::CreateClip { track, clip: part });
+    }
+    for boundary in [beat * 2, beat * 4] {
+        song.apply(Command::SetCrossfade {
+            track,
+            boundary,
+            before: bl_model::EDGE_FADE_SECONDS / 2.0,
+            after: bl_model::EDGE_FADE_SECONDS / 2.0,
+            curve: 0.0,
+        });
+    }
+    if moved {
+        // The later part is trimmed first and then the earlier one grows, as
+        // the command orders them when the boundary goes later.
+        song.apply(Command::TrimClipStart {
+            clip: parts[1],
+            start: beat * 3,
+        });
+        song.apply(Command::SetClipLength {
+            clip: parts[0],
+            length: beat * 3,
+        });
+    }
+    let seconds = song.to_last_clip();
+    song.finish(seconds)
+}
+
+fn comp_three_parts() -> Scene {
+    three_part_comp(false)
+}
+
+fn comp_edge_moved() -> Scene {
+    three_part_comp(true)
 }
 
 /// Spec: linked-track editing R12, comping R17, R18. Two linked tracks with

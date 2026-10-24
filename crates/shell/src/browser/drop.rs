@@ -3,7 +3,7 @@
 //! or the drop area under the last track, which makes a new track.
 
 use bl_core::time::Ticks;
-use bl_model::{Document, TrackId, TrackKind};
+use bl_model::{Document, TakeLaneId, TrackId, TrackKind};
 
 use crate::arrangement::ArrangementView;
 
@@ -21,6 +21,10 @@ pub struct DropTarget {
     pub top: f32,
     /// Its height in points.
     pub height: f32,
+    /// The take lane of the track the pointer is over, whose row is the one
+    /// highlighted, or `None` over the track's own lane (the comping spec,
+    /// R36).
+    pub lane: Option<TakeLaneId>,
 }
 
 /// Where files dropped at `(x, y)`, in points from the lanes' top-left
@@ -74,15 +78,21 @@ pub fn drop_target_on(
             at,
             top,
             height: height - top,
+            lane: None,
         });
     }
     let row = rows
         .iter()
         .find(|row| row.top <= content_y && content_y < row.bottom())?;
+    // Spec: comping R36. Over a take lane, that lane's row.
+    let lane = view
+        .take_lane_rows(doc, row)
+        .find(|lane| content_y >= lane.top && content_y < lane.top + lane.height);
     (row.kind == kind).then_some(DropTarget {
         track: Some(row.track),
         at,
-        top: row.top - scroll,
-        height: row.height,
+        top: lane.map_or(row.top, |lane| lane.top) - scroll,
+        height: lane.map_or(row.height, |lane| lane.height),
+        lane: lane.map(|lane| lane.lane),
     })
 }

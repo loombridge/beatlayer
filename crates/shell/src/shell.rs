@@ -86,6 +86,7 @@ use bl_shell_spec::transport as transport_ids;
 use bl_shell_spec::transport::RecordingReport;
 use bl_shell_spec::tunings as tuning_ids;
 
+mod ara;
 pub(crate) mod audio_editing;
 mod audio_panel;
 pub mod autosample;
@@ -752,6 +753,9 @@ pub struct Shell {
     /// The CLAP host's generation when the shell last looked for plug-ins'
     /// commands.
     plugins_generation: u64,
+    /// The clips and tracks the ARA plug-ins' editors were last told are
+    /// selected (IMP-20).
+    ara_selection: (Vec<bl_model::ClipId>, Vec<bl_model::TrackId>),
     /// The recording under way, or the one whose take just ended
     /// (WP-2.13): its writer's report and the frames the engine dropped.
     recording: Option<crate::recording::Recording>,
@@ -1076,6 +1080,8 @@ impl Shell {
         // VST3 plug-ins (WP-2.7): this thread is their main thread too.
         let vst3 = Vst3Host::new();
         audio.set_vst3(vst3.clone());
+        // ARA plug-ins read the set's files through the same store (IMP-20).
+        vst3.set_ara_media(Arc::clone(&media) as Arc<dyn bl_plugin_host::ara::AraMedia>);
         // The plug-in scanner (WP-2.9): finds the plug-ins on this machine
         // in a child process, caching and blocklisting what it finds. Its
         // cache lives with the preferences.
@@ -1232,6 +1238,7 @@ impl Shell {
             device_commands: std::collections::BTreeMap::new(),
             device_commands_key: Vec::new(),
             plugins_generation: 0,
+            ara_selection: (Vec::new(), Vec::new()),
         };
         // Spec: second-window R14. A saved default set keeps its main view
         // and the second window.
@@ -1410,6 +1417,11 @@ impl Shell {
         // The kit plug-ins' instances first, so a node the engine makes at once
         // finds its device's.
         self.kit.sync(self.editor.document());
+        // Spec: ara-hosting R2, R4. The ARA plug-ins' documents follow the
+        // set, and the compiler knows which devices are ARA plug-ins.
+        self.vst3.know(self.editor.document());
+        self.vst3
+            .sync_ara(self.editor.document(), self.document_revision);
         self.audio.sync(self.editor.document());
         self.start_analyses();
         self.refresh_device_commands(false);

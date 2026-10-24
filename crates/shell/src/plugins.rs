@@ -233,6 +233,10 @@ pub fn capture_states(
     kit: &KitHost,
     editor: &mut Editor,
 ) {
+    // Spec: ara-hosting R10. The ARA plug-ins' document archives go in the
+    // set too.
+    let archives = vst3.ara_archives(&editor.document().settings().ara_archives);
+    editor.amend_ara_archives(archives);
     for device in clap_devices(editor.document()) {
         if let Ok(state) = plugins.save_state(device) {
             let _ = editor.amend_plugin_state(device, Some(state));
@@ -361,9 +365,21 @@ pub fn info(
             window_shown: status.editor_open && !status.editor_hidden,
             window: None,
             values: status.values,
+            ara: None,
         });
     }
     let status = vst3.status(device)?;
+    let ara = vst3.ara_status().into_iter().find_map(|plugin| {
+        plugin
+            .devices
+            .iter()
+            .find(|(bound, _)| *bound == device)
+            .map(|(_, track)| bl_shell_spec::plugins::AraDevice {
+                factory: plugin.plugin.clone(),
+                track: *track,
+                regions: plugin.regions.len(),
+            })
+    });
     Some(PluginInfo {
         device,
         plugin: status.plugin_id,
@@ -376,7 +392,55 @@ pub fn info(
         window_shown: status.editor_open && !status.editor_hidden,
         window: None,
         values: status.values,
+        ara,
     })
+}
+
+/// What `ara.state` reports: every running ARA plug-in's document.
+#[must_use]
+pub fn ara_state(vst3: &Vst3Host) -> bl_shell_spec::plugins::AraState {
+    let mut plugins: Vec<bl_shell_spec::plugins::AraPlugin> = vst3
+        .ara_status()
+        .into_iter()
+        .map(|status| bl_shell_spec::plugins::AraPlugin {
+            factory: status.plugin,
+            name: status.name,
+            timestretch: status.timestretch,
+            devices: status
+                .devices
+                .into_iter()
+                .map(|(device, track)| bl_shell_spec::plugins::AraBoundDevice { device, track })
+                .collect(),
+            sequences: status.sequences,
+            sources: status.sources,
+            modifications: status.modifications,
+            regions: status
+                .regions
+                .into_iter()
+                .map(|region| bl_shell_spec::plugins::AraRegionInfo {
+                    clip: region.clip,
+                    piece: region.piece,
+                    track: region.track,
+                    start_in_audio: region.start_in_modification,
+                    duration_in_audio: region.duration_in_modification,
+                    start: region.start_in_playback,
+                    duration: region.duration_in_playback,
+                    stretched: region.flags != 0,
+                })
+                .collect(),
+            edit_cycles: status.edit_cycles,
+            readers_opened: status.readers_opened,
+            reader_calls: status.reader_calls,
+            frames_read: status.frames_read,
+            audio_thread_reads: status.audio_thread_reads,
+            missing: status.missing,
+            restored: status
+                .restored
+                .map(|done| done.map_or_else(|why| why, |()| "restored".to_owned())),
+        })
+        .collect();
+    plugins.sort_by(|a, b| a.factory.cmp(&b.factory));
+    bl_shell_spec::plugins::AraState { plugins }
 }
 
 /// Runs a scan (or a rescan) over every format the scanner describes and

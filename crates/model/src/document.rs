@@ -120,6 +120,11 @@ pub struct Settings {
     /// plays twelve equal steps, and a set saved before tunings has none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tuning: Option<Tuning>,
+    /// The archives of the set's ARA plug-ins (IMP-20), taken from the
+    /// running plug-ins when the set is saved and given back when it opens.
+    /// A set with no ARA plug-in doesn't write them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ara_archives: Vec<crate::ara::AraArchive>,
 }
 
 impl Default for Settings {
@@ -147,6 +152,7 @@ impl Default for Settings {
             grooves: GroovePool::default(),
             scale: Scale::default(),
             tuning: None,
+            ara_archives: Vec::new(),
         }
     }
 }

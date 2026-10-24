@@ -28,7 +28,8 @@
 //! don't scale ([`title_bar_height`]).
 
 use bl_shell::commands::{
-    CLIP_VIEW_HEIGHT, CLIP_VIEW_MIN_HEIGHT, DETAIL_GAP, DEVICE_VIEW_HEIGHT, MAIN_VIEW_MIN_HEIGHT,
+    BROWSER_MIN_WIDTH, BROWSER_WIDTH, CLIP_VIEW_HEIGHT, CLIP_VIEW_MIN_HEIGHT, DETAIL_GAP,
+    DEVICE_VIEW_HEIGHT, MAIN_VIEW_MIN_HEIGHT, MAIN_VIEW_MIN_WIDTH,
 };
 use egui::{Pos2, Rect, Vec2, pos2, vec2};
 
@@ -507,6 +508,8 @@ pub struct DetailViews {
     /// Whether the browser runs down to the Status Bar, the detail area
     /// beside it (Full-Height Browser, browser R26).
     pub full_height_browser: bool,
+    /// The browser's width as it was set, in layout points (browser R29).
+    pub browser_width: f32,
 }
 
 impl DetailViews {
@@ -519,6 +522,7 @@ impl DetailViews {
             clip_height: detail.clip_height() as f32,
             expanded: detail.expanded(),
             full_height_browser: false,
+            browser_width: BROWSER_WIDTH,
         }
     }
 
@@ -526,6 +530,13 @@ impl DetailViews {
     #[must_use]
     pub const fn with_full_height_browser(mut self, on: bool) -> Self {
         self.full_height_browser = on;
+        self
+    }
+
+    /// The same, with the browser `width` points wide as it was set.
+    #[must_use]
+    pub const fn with_browser_width(mut self, width: f32) -> Self {
+        self.browser_width = width;
         self
     }
 }
@@ -540,6 +551,7 @@ impl Default for DetailViews {
             clip_height: CLIP_VIEW_HEIGHT,
             expanded: false,
             full_height_browser: false,
+            browser_width: BROWSER_WIDTH,
         }
     }
 }
@@ -575,6 +587,9 @@ pub struct ShellLayout {
     /// The tallest the Clip View can be in this window, in layout points:
     /// the height that leaves the main view its smallest (R10).
     pub largest_clip_view: f32,
+    /// The widest the browser can be in this window, in layout points: the
+    /// width that leaves the main view its least (browser R29).
+    pub largest_browser: f32,
     /// The Status Bar strip (L-WIN-007).
     pub status_bar: Rect,
     /// The assistant's pane, at the right edge, while it's docked and open
@@ -742,8 +757,16 @@ impl ShellLayout {
         // Spec: browser R26. With the Full-Height Browser the detail area
         // starts to the right of the browser's column.
         let full_height = browser && detail_views.full_height_browser;
+        // Spec: browser R29. The browser keeps its width as it was set, less
+        // in a window too narrow for it, where the main view keeps its
+        // least width; never narrower than its narrowest.
+        let largest_browser = (right - MAIN_VIEW_MIN_WIDTH - 2.0 * MARGIN).max(BROWSER_MIN_WIDTH);
+        let browser_right = MARGIN
+            + detail_views
+                .browser_width
+                .clamp(BROWSER_MIN_WIDTH, largest_browser);
         let detail_left = if full_height {
-            BROWSER_RIGHT + MARGIN
+            browser_right + MARGIN
         } else {
             MARGIN
         };
@@ -778,7 +801,7 @@ impl ShellLayout {
             info_view.map_or(views_bottom, |info| info.top() - DETAIL_GAP)
         };
         let browser_rect = browser.then(|| {
-            Rect::from_min_max(pos2(MARGIN, y(61.0)), pos2(BROWSER_RIGHT, browser_bottom))
+            Rect::from_min_max(pos2(MARGIN, y(61.0)), pos2(browser_right, browser_bottom))
         });
         let main_left = browser_rect.map_or(MARGIN, |b| b.right() + MARGIN);
         let main_view = Rect::from_min_max(pos2(main_left, y(61.0)), pos2(right, views_bottom));
@@ -836,6 +859,7 @@ impl ShellLayout {
             clip_view,
             device_view,
             largest_clip_view,
+            largest_browser,
             status_bar,
             assistant,
             undo_history,
@@ -919,6 +943,7 @@ impl ShellLayout {
             scale(rect);
         }
         self.largest_clip_view *= factor;
+        self.largest_browser *= factor;
         if let Some(browser) = &mut self.browser {
             scale(browser);
         }
@@ -988,12 +1013,17 @@ impl ShellLayout {
     }
 }
 
-/// The browser column's right edge (L-WIN-004).
-const BROWSER_RIGHT: f32 = 311.0;
-
 /// A row's height in the browser's sidebar and content pane. Not measured
 /// in Live (browser, "To observe in Live").
 pub const BROWSER_ROW: f32 = 17.0;
+
+/// The content pane's least width, which a narrowed browser keeps before
+/// its sidebar narrows, as observed in Live 12.4.6 (browser R29).
+pub const CONTENT_MIN_WIDTH: f32 = 57.0;
+
+/// The sidebar's narrowest width, which the browser's narrowest leaves it
+/// (browser R29).
+pub const SIDEBAR_MIN_WIDTH: f32 = BROWSER_MIN_WIDTH - CONTENT_MIN_WIDTH - 1.0;
 
 /// How high the Quick Tags section is, when it shows (L-BRW-012). Live's
 /// isn't measured; this is Beatlayer's own.
@@ -1108,11 +1138,19 @@ impl BrowserLayout {
         let row = |x0: f32, x1: f32| Rect::from_min_max(pos2(x0, top(62.0)), pos2(x1, top(80.0)));
         let right = column.right();
         let body_top = top(84.0);
+        // Spec: browser R29. A narrowed browser narrows its content pane to
+        // its least width, then the sidebar, down to its narrowest.
+        let sidebar_right = (right - CONTENT_MIN_WIDTH - 1.0)
+            .min(x(109.0))
+            .max(column.left() + SIDEBAR_MIN_WIDTH);
         let sidebar = Rect::from_min_max(
             pos2(column.left(), body_top),
-            pos2(x(109.0), column.bottom()),
+            pos2(sidebar_right, column.bottom()),
         );
-        let content = Rect::from_min_max(pos2(x(110.0), body_top), pos2(right, column.bottom()));
+        let content = Rect::from_min_max(
+            pos2(sidebar_right + 1.0, body_top),
+            pos2(right, column.bottom()),
+        );
         // The Filter View fills the pane's top, the Results bar follows, and
         // the column header row and the list move down under them.
         let band = |top: f32, height: f32| {
@@ -1176,7 +1214,7 @@ impl BrowserLayout {
             forward: row(x(29.0), x(47.0)),
             // The search field ends 41 points short of the column's right,
             // and the filter controls keep their place from the right.
-            search: row(x(50.0), right - 41.0),
+            search: row(x(50.0), (right - 41.0).max(x(50.0))),
             filter_toggle: row(right - 36.0, right - 18.0),
             filter_menu: row(right - 14.0, right - 2.0),
             sidebar,

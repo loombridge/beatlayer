@@ -45,6 +45,7 @@ pub mod assistant_panel;
 pub mod audio_panel;
 pub mod autosampler;
 pub mod browser;
+pub mod browser_edge;
 pub mod chain_strips;
 pub mod clip_envelope;
 pub mod clip_view;

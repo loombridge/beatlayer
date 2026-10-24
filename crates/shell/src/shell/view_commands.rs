@@ -237,6 +237,24 @@ impl Shell {
                 self.save_preferences();
                 Ok(self.view_result())
             }
+            ids::VIEW_SET_BROWSER_WIDTH => {
+                // Spec: browser R29. Both windows' browsers take the width,
+                // kept between launches; no undo step.
+                let ids::BrowserWidthArgs { points } = Self::args(id, args)?;
+                if !points.is_finite() {
+                    return Err(ShellError::InvalidArgs {
+                        command: id.to_owned(),
+                        message: "`points` must be a number".to_owned(),
+                    });
+                }
+                self.browser_view.set_width(points as f32);
+                self.prefs.browser = self
+                    .browser_view
+                    .prefs(self.prefs.browser.user_library.clone());
+                self.save_preferences();
+                self.touch();
+                Ok(self.view_result())
+            }
             ids::VIEW_TOGGLE_PLUGIN_LIST => {
                 // Spec: plugin-list R1, R3. View state only.
                 Self::args::<NoArgs>(id, args)?;

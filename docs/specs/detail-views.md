@@ -75,7 +75,7 @@ This spec covers the detail area of the main window: which views it shows, where
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1 | `crates/shell/tests/detail_views.rs`, `each_view_has_its_own_switch`; `crates/ui/tests/detail_views.rs`, `the_toggles_and_selectors_run_their_commands`, `the_keys_reach_the_detail_commands`, `the_menu_items_reach_their_commands_and_follow_the_views`; `crates/ui/tests/keymap.rs`, `the_detail_views_shortcuts_reach_their_commands` | unit, UI script |
+| R1 | `crates/shell/tests/detail_views.rs`, `each_view_has_its_own_switch`; `crates/ui/tests/detail_views.rs`, `the_toggles_and_selectors_run_their_commands`, `the_keys_reach_the_detail_commands`, `the_menu_items_reach_their_commands_and_follow_the_views`; `crates/ui/tests/keymap/views.rs`, `the_detail_views_shortcuts_reach_their_commands` | unit, UI script |
 | R2 | `crates/shell/tests/detail_views.rs`, `option_click_shows_both_and_changes_nothing_when_both_show`; `crates/ui/tests/detail_views.rs`, `the_toggles_and_selectors_run_their_commands` | unit, UI script |
 | R3 | `crates/ui/tests/detail_views.rs`, `the_toggles_and_selectors_run_their_commands`, `the_toggles_and_selectors_reach_assistive_technology` | UI script |
 | R4 | `crates/ui/tests/detail_views.rs`, `double_clicking_an_arrangement_clip_shows_the_clip_view`, `double_clicking_a_session_slot_shows_the_clip_view`, `double_clicking_a_title_bar_shows_the_device_view` | UI script |
@@ -92,7 +92,7 @@ This spec covers the detail area of the main window: which views it shows, where
 | R15 | `crates/shell/tests/detail_views.rs`, `the_focus_commands_show_their_view_and_set_the_keys_contexts`; `crates/ui/tests/detail_views.rs`, `a_note_editor_key_reaches_only_the_view_with_the_focus` | unit, UI script |
 | R16 | `crates/shell/tests/detail_views.rs`, `a_new_session_shows_the_device_view_alone`, `no_detail_command_changes_the_set_or_adds_an_undo_step` | unit |
 | R17 | `crates/shell/tests/detail_views.rs`, `view_state_reports_the_detail_area`; `crates/agent/tests/readback_runtime.rs`, `view_state_reads_back_the_detail_area` | unit, agent API |
-| R18 | `crates/ui/tests/detail_views.rs`, `the_toggles_and_selectors_reach_assistive_technology`, `the_top_edge_is_a_splitter`; `crates/ui/tests/accessibility.rs`, `every_m1_command_is_reachable_from_the_keyboard` | UI script |
+| R18 | `crates/ui/tests/detail_views.rs`, `the_toggles_and_selectors_reach_assistive_technology`, `the_top_edge_is_a_splitter`; `crates/ui/tests/accessibility/reachability/mod.rs`, `every_m1_command_is_reachable_from_the_keyboard` | UI script |
 | R19 | to be written in WP-6.72 | |
 | R20 | to be written in WP-6.72 | |
 | R21 | to be written in WP-6.72 | |

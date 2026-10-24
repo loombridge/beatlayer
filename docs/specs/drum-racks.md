@@ -111,7 +111,7 @@ This spec covers the drum rack's notes and chains, choke groups, previews, sends
 | R15 | `crates/shell/tests/drum_racks.rs`, `several_samples_rise_chromatically_or_layer_with_cmd` | unit |
 | R16 | `crates/shell/tests/drum_racks.rs`, `dragging_a_pad_swaps_notes_or_layers_with_cmd` | unit |
 | R17 | `crates/shell/tests/drum_racks.rs`, `save_as_default_pad_shapes_the_next_dropped_sample` | unit |
-| R18 | `crates/ui/tests/keymap.rs`, `d_switches_hot_swap_between_the_rack_and_its_pad`; `crates/shell/tests/drum_racks.rs`, `a_hot_swapped_pad_takes_what_the_browser_loads` | keymap test; unit |
+| R18 | `crates/ui/tests/keymap/device_view.rs`, `d_switches_hot_swap_between_the_rack_and_its_pad`; `crates/shell/tests/drum_racks.rs`, `a_hot_swapped_pad_takes_what_the_browser_loads` | keymap test; unit |
 | R19 | `crates/ui/tests/drum_racks.rs`, `hot_swap_sample_shows_on_hover_and_swaps_the_sample` | UI script |
 | R20 | `crates/ui/tests/drum_racks.rs`, `auto_select_selects_each_chain_its_note_reaches` | UI script |
 | R21 | `crates/ui/tests/drum_racks.rs`, `the_view_column_shows_input_output_send_and_return` | UI script |

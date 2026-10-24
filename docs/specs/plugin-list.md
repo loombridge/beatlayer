@@ -49,7 +49,7 @@ This spec covers the view, the preset names it shows, its export, and its comman
 | R5 | `crates/shell/tests/plugin_list.rs`, `the_set_list_names_the_plug_ins_with_their_tracks_and_preset_names`, `a_preset_name_survives_the_set_being_saved_and_opened_again`, `an_audio_unit_keeps_the_name_of_the_preset_it_reports` (macOS) | unit |
 | R6 | `crates/ui/tests/plugin_list.rs`, `a_click_on_a_track_name_selects_the_device` | UI script |
 | R7 | `crates/shell/tests/plugin_list.rs`, `the_export_writes_the_list_as_tab_separated_text`; `crates/cli/tests/agent.rs`, `an_agent_writes_the_plug_in_list_only_when_it_may` | unit, through the agent API |
-| R8 | `crates/ui/tests/plugin_list.rs`, `the_list_opens_in_the_detail_area_and_its_rows_reach_assistive_technology`; `crates/ui/tests/accessibility.rs`, `every_m1_command_is_reachable_from_the_keyboard` | UI script |
+| R8 | `crates/ui/tests/plugin_list.rs`, `the_list_opens_in_the_detail_area_and_its_rows_reach_assistive_technology`; `crates/ui/tests/accessibility/reachability/mod.rs`, `every_m1_command_is_reachable_from_the_keyboard` | UI script |
 | R9 | `crates/ui/tests/plugin_list.rs`, `the_list_scales_with_the_interface_zoom` | UI script |
 | R10 | `crates/shell/tests/plugin_list.rs`, `the_view_state_says_whether_the_list_shows_and_shows_only_the_missing`; `cargo xtask commands` | unit |
 | R11 | `crates/shell/tests/plugin_list.rs`, `the_set_list_names_the_plug_ins_with_their_tracks_and_preset_names` | unit |

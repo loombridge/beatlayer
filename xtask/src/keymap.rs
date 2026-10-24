@@ -1,6 +1,6 @@
 //! The default keymap (WP-1.7; the architecture, "The keymap").
 //!
-//! `crates/shell-spec/keymaps/live12.toml` is generated from the UI parity
+//! `crates/shell-spec/keymaps/live12/` is generated from the UI parity
 //! reference's shortcuts and the command registry: every shortcut in
 //! the shortcut reference, in its order, with what it does in
 //! Beatlayer. A shortcut is `bound` when a registered command binds it, and
@@ -11,7 +11,14 @@
 //!
 //! `cargo xtask check` fails if the file is out of date, and generation
 //! fails if an M1 shortcut is neither bound nor owned by a package, so the
-//! keymap test in `bl-ui` (`tests/keymap.rs`) holds by construction.
+//! keymap test in `bl-ui` (`tests/keymap/`) holds by construction.
+//!
+//! The keymap is one file per run of shortcuts of the same area (the part of
+//! an ID between `S-` and its number), in the reference's order, so a change to
+//! one area rarely touches another's file and the order, which decides which
+//! shortcut wins, is the reference's. A file after the first of its area is
+//! `<area>-2.toml`, and so on. `bl_shell_spec::keymap::LIVE12` joins the
+//! files in that order; the check fails when its list is out of step.
 
 use std::fmt::Write as _;
 use std::path::Path;
@@ -22,8 +29,8 @@ use serde_json::Value;
 use crate::commands;
 use crate::ui_parity::{self, KeySource};
 
-/// The generated keymap, relative to the workspace root.
-pub const PATH: &str = "crates/shell-spec/keymaps/live12.toml";
+/// The generated keymap's folder, relative to the workspace root.
+pub const DIR: &str = "crates/shell-spec/keymaps/live12";
 
 /// Shortcuts the operating system handles, with how: the platform's menus,
 /// and items its standard menus provide with their keys.
@@ -594,31 +601,91 @@ fn owner(id: &str) -> Option<&'static str> {
 
 /// Regenerates the keymap.
 pub fn generate(root: &Path) -> Result<(), String> {
-    let (rendered, summary) = build(root)?;
-    std::fs::write(root.join(PATH), rendered).map_err(|e| format!("couldn't write {PATH}: {e}"))?;
-    eprintln!("wrote {PATH}: {summary}");
+    let (files, summary) = build(root)?;
+    let dir = root.join(DIR);
+    std::fs::create_dir_all(&dir).map_err(|e| format!("couldn't make {DIR}: {e}"))?;
+    for (name, text) in &files {
+        std::fs::write(dir.join(name), text)
+            .map_err(|e| format!("couldn't write {DIR}/{name}: {e}"))?;
+    }
+    for name in on_disk(&dir)? {
+        if !files.iter().any(|(file, _)| *file == name) {
+            std::fs::remove_file(dir.join(&name))
+                .map_err(|e| format!("couldn't remove {DIR}/{name}: {e}"))?;
+        }
+    }
+    eprintln!("wrote {DIR}: {summary}");
     Ok(())
 }
 
 /// Fails if the keymap is out of date with the shortcuts and the registry.
 pub fn check(root: &Path) -> Result<(), String> {
-    let (expected, summary) = build(root)?;
-    let actual = std::fs::read_to_string(root.join(PATH))
-        .map_err(|e| format!("couldn't read {PATH}: {e}"))?;
-    if actual.replace("\r\n", "\n") != expected {
-        return Err(format!(
-            "{PATH} is out of date with the shortcut reference and the command registry; \
+    let (files, summary) = build(root)?;
+    let dir = root.join(DIR);
+    let stale = || {
+        format!(
+            "{DIR} is out of date with the shortcut reference and the command registry; \
              regenerate it with `cargo xtask keymap`"
+        )
+    };
+    let mut on_disk = on_disk(&dir)?;
+    on_disk.sort();
+    let mut expected: Vec<&String> = files.iter().map(|(name, _)| name).collect();
+    expected.sort();
+    if on_disk.iter().ne(expected) {
+        return Err(stale());
+    }
+    for (name, text) in &files {
+        let actual = std::fs::read_to_string(dir.join(name))
+            .map_err(|e| format!("couldn't read {DIR}/{name}: {e}"))?;
+        if actual.replace("\r\n", "\n") != *text {
+            return Err(stale());
+        }
+    }
+    let joined: String = files.iter().map(|(_, text)| text.as_str()).collect();
+    if bl_shell_spec::keymap::LIVE12.replace("\r\n", "\n") != joined {
+        let order: Vec<&str> = files.iter().map(|(name, _)| name.as_str()).collect();
+        return Err(format!(
+            "`LIVE12` in crates/shell-spec/src/keymap.rs doesn't join the keymap's files in \
+             their order; it must list, in this order: {}",
+            order.join(", ")
         ));
     }
-    eprintln!("{PATH} is in sync: {summary}");
+    eprintln!("{DIR} is in sync: {summary}");
     Ok(())
 }
 
-fn build(root: &Path) -> Result<(String, String), String> {
+/// The names of the `.toml` files in the keymap's folder.
+fn on_disk(dir: &Path) -> Result<Vec<String>, String> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Ok(Vec::new());
+    };
+    let mut names = Vec::new();
+    for entry in entries {
+        let name = entry
+            .map_err(|e| format!("couldn't read {DIR}: {e}"))?
+            .file_name()
+            .to_string_lossy()
+            .into_owned();
+        if name.ends_with(".toml") {
+            names.push(name);
+        }
+    }
+    Ok(names)
+}
+
+fn build(root: &Path) -> Result<(Vec<(String, String)>, String), String> {
     let (live_version, sources) = ui_parity::key_sources(root)?;
     let registry = commands::catalogue()?;
     render(&live_version, &sources, &registry)
+}
+
+/// A shortcut ID's area: `S-ARR-007` is `arr`.
+fn area(id: &str) -> Result<String, String> {
+    id.strip_prefix("S-")
+        .and_then(|rest| rest.rsplit_once('-'))
+        .map(|(area, _)| area.to_lowercase())
+        .ok_or_else(|| format!("{id} isn't an ID of the form S-<AREA>-<number>"))
 }
 
 /// A string as a TOML basic string.
@@ -658,9 +725,9 @@ fn render(
     live_version: &str,
     sources: &[KeySource],
     registry: &Registry,
-) -> Result<(String, String), String> {
-    let mut out = String::new();
-    out.push_str(
+) -> Result<(Vec<(String, String)>, String), String> {
+    let mut header = String::new();
+    header.push_str(
         "# Beatlayer's default keymap: Live 12's shortcuts (D16).\n\
          #\n\
          # Generated by `cargo xtask keymap` from the shortcut reference and the\n\
@@ -670,11 +737,37 @@ fn render(
          # platform handles it), `widget` (the focused control does), or `pending`\n\
          # (nothing yet; the milestone binds it, and `package` names the package for M1).\n\n",
     );
-    let _ = writeln!(out, "schema = 1\nlive_version = {}", quote(live_version));
+    let _ = writeln!(header, "schema = 1\nlive_version = {}", quote(live_version));
 
+    let mut files = vec![("header.toml".to_owned(), header)];
+    let mut runs: Vec<(String, usize)> = Vec::new();
+    let mut current = String::new();
     let (mut bound, mut system, mut widget, mut pending) = (0, 0, 0, 0);
     let mut problems = Vec::new();
     for source in sources {
+        let area = area(&source.id)?;
+        if area != current {
+            let count = match runs.iter_mut().find(|(name, _)| *name == area) {
+                Some((_, count)) => {
+                    *count += 1;
+                    *count
+                }
+                None => {
+                    runs.push((area.clone(), 1));
+                    1
+                }
+            };
+            let name = if count == 1 {
+                format!("{area}.toml")
+            } else {
+                format!("{area}-{count}.toml")
+            };
+            let note = "# A part of Beatlayer's default keymap, generated by `cargo xtask keymap`; \
+                        don't edit it by hand.\n";
+            files.push((name, note.to_owned()));
+            current = area;
+        }
+        let out = &mut files.last_mut().expect("the header is first").1;
         let _ = write!(
             out,
             "\n[[shortcut]]\nid = {}\naction = {}\ncontext = {}\nkind = {}\ntrigger = {}\n\
@@ -761,7 +854,7 @@ fn render(
          focused control, {pending} pending",
         sources.len()
     );
-    Ok((out, summary))
+    Ok((files, summary))
 }
 
 #[cfg(test)]
@@ -787,6 +880,6 @@ mod tests {
             eprintln!("{}", ui_parity::ABSENT);
             return;
         }
-        check(root).expect("crates/shell-spec/keymaps/live12.toml is in sync");
+        check(root).expect("crates/shell-spec/keymaps/live12 is in sync");
     }
 }

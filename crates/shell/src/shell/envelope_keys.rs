@@ -16,6 +16,7 @@ use bl_shell_spec::envelope_keys::{
     MoveSelectedArgs, SelectAdjacentArgs, SelectBreakpointArgs, SelectEnvelopeBreakpointArgs,
     SetValueArgs,
 };
+use bl_shell_spec::notes::ClipTab;
 
 use super::*;
 use crate::arrangement::automation::{Travel, rest_of, selected_breakpoints, share_scale, travel};

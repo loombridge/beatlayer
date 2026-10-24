@@ -1739,6 +1739,15 @@ fn clip_view_shown(h: &mut Harness) {
 }
 
 /// The keyboard focus in the detail area, off any control.
+fn browser_area(h: &mut Harness) {
+    h.shell.set_focused_area(bl_shell::Area::Browser);
+    h.ctx.memory_mut(|m| {
+        if let Some(id) = m.focused() {
+            m.surrender_focus(id);
+        }
+    });
+}
+
 fn detail_area(h: &mut Harness) {
     h.shell.set_focused_area(bl_shell::Area::Detail);
     h.ctx.memory_mut(|m| {
@@ -3301,6 +3310,12 @@ fn paths() -> BTreeMap<&'static str, Path> {
             Exception(Equivalent(
                 "Option-click on a view's toggle; Cmd+Option+3 and Cmd+Option+4 show both views in turn",
             )),
+        ),
+        // The browser's right edge is a splitter the keyboard reaches and
+        // the arrow keys move (browser R29).
+        (
+            "view.set_browser_width",
+            main(nothing, browser_area, "Browser Width", Key::ArrowRight),
         ),
         (
             "view.set_detail_height",

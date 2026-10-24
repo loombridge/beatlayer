@@ -20,6 +20,7 @@ use bl_model::{ClipData, Command, ContentHash, DeviceRole, Editor, WarpMarker};
 use bl_plugin_host::Hosts;
 use bl_plugin_host::au::AuHost;
 use bl_plugin_host::clap::ClapHost;
+use bl_plugin_host::lv2::Lv2Host;
 use bl_plugin_host::vst3::Vst3Host;
 use bl_project::clip_file::ClipFile;
 
@@ -429,11 +430,17 @@ pub fn render_midi(
     .map_err(|e| e.to_string())?;
     // Hosts made on this thread are this thread's main thread: the render
     // makes its plug-ins here and they end with it.
-    let (clap, vst3, au) = (ClapHost::new(), Vst3Host::new(), AuHost::new());
+    let (clap, vst3, au, lv2) = (
+        ClapHost::new(),
+        Vst3Host::new(),
+        AuHost::new(),
+        Lv2Host::new(),
+    );
     let hosts = Hosts {
         clap: Some(&clap),
         vst3: Some(&vst3),
         au: Some(&au),
+        lv2: Some(&lv2),
     };
     let spec = crate::export::Render {
         start: Ticks::ZERO,

@@ -1,5 +1,5 @@
 //! LV2 plug-in devices through the shell (WP-5.39; the LV2 hosting spec, R1,
-//! R5, R8, R9, R10, R15, R16): the test plug-in, built from source, loads by
+//! R2, R3, R5, R8, R10, R11, R17): the test plug-in, built from source, loads by
 //! its bundle as a device the Device View describes, takes parameter changes,
 //! reports its latency, keeps its state when the set is saved and opened
 //! again, is found by the scanner on Linux, and plays in an offline render,
@@ -73,7 +73,7 @@ fn load(shell: &mut Shell, track: TrackId) -> PluginLoaded {
     .unwrap()
 }
 
-// Spec: lv2-hosting R1, R5, R16. `plugin.load` takes a bundle folder and
+// Spec: lv2-hosting R1, R5, R17. `plugin.load` takes a bundle folder and
 // offers its plug-in as a device the Device View describes.
 #[test]
 fn an_lv2_plugin_loads_by_bundle_and_the_device_view_describes_it() {
@@ -112,7 +112,7 @@ fn an_lv2_plugin_loads_by_bundle_and_the_device_view_describes_it() {
     assert_eq!(shell.editor().undo_history().len(), history);
 }
 
-// Spec: lv2-hosting R2, R3, R8, R9, R10, R11, R16. The engine runs it, a
+// Spec: lv2-hosting R2, R3, R8, R10, R11, R17. The engine runs it, a
 // parameter change reaches the plug-in, its latency is reported, and its
 // state round-trips a saved set with the bundle it came from.
 #[test]
@@ -269,7 +269,8 @@ fn render(shell: &Shell, block: usize) -> Vec<f32> {
 #[test]
 fn an_export_renders_the_lv2_plugin_and_the_engines_one_is_untouched() {
     let Some(mut shell) = shell() else { return };
-    let scratch: PathBuf = std::env::temp_dir().join(format!("bl-shell-lv2-ex-{}", std::process::id()));
+    let scratch: PathBuf =
+        std::env::temp_dir().join(format!("bl-shell-lv2-ex-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&scratch);
     std::fs::create_dir_all(&scratch).unwrap();
     let file = scratch.join("Ramp.wav");

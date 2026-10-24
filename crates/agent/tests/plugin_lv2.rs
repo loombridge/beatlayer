@@ -1,4 +1,4 @@
-//! LV2 hosting (WP-5.39; the LV2 hosting spec, R1, R5, R9 and R16):
+//! LV2 hosting (WP-5.39; the LV2 hosting spec, R1, R3, R5 and R17):
 //! `plugin.load` loads an LV2 bundle through the agent API, the set holds it
 //! as an LV2 device, an engine starts its plug-in, `device.set_param` and
 //! `plugin.info` reach it, and on Linux the scanner finds the bundle. They run
@@ -33,7 +33,7 @@ fn run(client: &mut Client<InProcess>, command: &str, args: Value) -> Value {
         .unwrap_or_else(|error| panic!("{command} failed: {error}"))
 }
 
-// Spec: lv2-hosting R1, R3, R5, R16
+// Spec: lv2-hosting R1, R3, R5, R17
 #[test]
 fn an_lv2_plugin_loads_by_bundle_and_takes_a_parameter_through_the_agent_api() {
     // Loading a plug-in reaches outside the set, so this agent is

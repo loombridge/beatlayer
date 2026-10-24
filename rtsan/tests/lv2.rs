@@ -1,5 +1,5 @@
 //! An LV2 plug-in on the audio thread under RealtimeSanitizer (WP-5.39; the
-//! LV2 hosting spec, R17): the test plug-in processes blocks that split at
+//! LV2 hosting spec, R18): the test plug-in processes blocks that split at
 //! parameter changes, take notes, send them on, get the song's position and
 //! schedule worker jobs, while the allocation trap fails the test at any heap
 //! use. RTSan stops the process at the first allocation, free, lock or

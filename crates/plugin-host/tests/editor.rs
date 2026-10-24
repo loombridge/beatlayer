@@ -119,7 +119,11 @@ fn a_resize_the_plugin_asks_for_reaches_the_host_window() {
 /// An LV2 host with a running node for the test plug-in's device, or `None`
 /// without lilv.
 #[cfg(all(unix, not(target_os = "macos")))]
-fn lv2_running() -> Option<(bl_plugin_host::lv2::Lv2Host, DeviceId, Box<dyn bl_engine::Node>)> {
+fn lv2_running() -> Option<(
+    bl_plugin_host::lv2::Lv2Host,
+    DeviceId,
+    Box<dyn bl_engine::Node>,
+)> {
     let host = common::lv2_host()?;
     let device = common::lv2_device(1, &[]);
     let node = host.factory().create(&device, &config()).unwrap();

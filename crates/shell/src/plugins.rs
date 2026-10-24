@@ -201,7 +201,8 @@ pub fn is_plugin(doc: &Document, device: DeviceId) -> bool {
 /// Whether `path` names an LV2 bundle: a folder whose name ends in `.lv2`.
 #[must_use]
 pub fn is_lv2_path(path: &Path) -> bool {
-    path.extension().is_some_and(|e| e.eq_ignore_ascii_case("lv2"))
+    path.extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("lv2"))
 }
 
 /// Whether `path` names a VST3 bundle or module: its own name or a folder

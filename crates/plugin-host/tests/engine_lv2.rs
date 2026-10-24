@@ -1,10 +1,10 @@
 //! An LV2 plug-in in a track's device chain, through the engine (WP-5.39;
-//! the LV2 hosting spec, R2, R3, R10, R16): the engine's parameter changes
+//! the LV2 hosting spec, R2, R3, R10, R15): the engine's parameter changes
 //! reach it, a chain edit keeps its instance, a device deleted and brought
 //! back gets the same plug-in, and the latency it reports lines the tracks
 //! up. Every block runs under the allocation trap.
 //!
-//! Spec: lv2-hosting R17.
+//! Spec: lv2-hosting R18.
 
 use crate::common;
 use std::sync::Arc;
@@ -161,7 +161,15 @@ fn the_latency_a_plugin_reports_lines_the_tracks_up() {
     let mut out = Vec::new();
     second.render(FRAMES as u64, |o| out.extend_from_slice(o.channel(0)));
     let latency = LATENCY as usize;
-    assert!(out[..latency].iter().all(|s| *s == 1.0), "{:?}", &out[..latency]);
-    assert!(out[latency..].iter().all(|s| *s == 2.0), "{:?}", &out[latency..]);
+    assert!(
+        out[..latency].iter().all(|s| *s == 1.0),
+        "{:?}",
+        &out[..latency]
+    );
+    assert!(
+        out[latency..].iter().all(|s| *s == 2.0),
+        "{:?}",
+        &out[latency..]
+    );
     assert_eq!(second.heap_operations(), 0);
 }

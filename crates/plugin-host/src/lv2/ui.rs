@@ -19,7 +19,9 @@ use std::sync::{Arc, Mutex, PoisonError};
 use libloading::Library;
 
 use super::host::{Entry, Main, ParamChange};
-use super::sys::{self, Feature, OptionsOption, UiDescriptor, UiIdle, UiPortMap, UiResize, UiTouch};
+use super::sys::{
+    self, Feature, OptionsOption, UiDescriptor, UiIdle, UiPortMap, UiResize, UiTouch,
+};
 use super::{Lv2Error, PluginInfo, PortInfo, PortKind, StateHandle, UiInfo, failed};
 use crate::window::{EditorWindow, GuiSize, WindowEvent};
 use bl_model::{DeviceId, ParamId};
@@ -65,7 +67,13 @@ impl Controller {
     }
 }
 
-unsafe extern "C" fn write(controller: *mut c_void, port: u32, size: u32, protocol: u32, data: *const c_void) {
+unsafe extern "C" fn write(
+    controller: *mut c_void,
+    port: u32,
+    size: u32,
+    protocol: u32,
+    data: *const c_void,
+) {
     // Only the float protocol, to a control port: the others are ignored, as
     // the UI specification asks of a host that doesn't know them.
     if protocol != 0 || size != 4 || data.is_null() {
@@ -74,7 +82,8 @@ unsafe extern "C" fn write(controller: *mut c_void, port: u32, size: u32, protoc
     // SAFETY: `controller` is the `Controller` the UI was made with, and
     // `data` holds a float.
     unsafe {
-        (*controller.cast::<Controller>()).push(Event::Write(port, data.cast::<f32>().read_unaligned()));
+        (*controller.cast::<Controller>())
+            .push(Event::Write(port, data.cast::<f32>().read_unaligned()));
     }
 }
 
@@ -117,7 +126,13 @@ struct UiFeatures {
 }
 
 impl UiFeatures {
-    fn new(support: &Support, controller: *mut c_void, parent: usize, scale: f32, rate: f32) -> Self {
+    fn new(
+        support: &Support,
+        controller: *mut c_void,
+        parent: usize,
+        scale: f32,
+        rate: f32,
+    ) -> Self {
         // SAFETY: the host's map outlives the editor (it belongs to the world
         // the plug-in's handle keeps alive).
         let map = unsafe { &*support.map };
@@ -250,7 +265,8 @@ impl Ui {
         let descriptor = {
             // SAFETY: the UI exports it or it doesn't.
             let find = unsafe {
-                library.get::<unsafe extern "C" fn(u32) -> *const UiDescriptor>(b"lv2ui_descriptor\0")
+                library
+                    .get::<unsafe extern "C" fn(u32) -> *const UiDescriptor>(b"lv2ui_descriptor\0")
             }
             .map_err(|_| failed("its editor has no lv2ui_descriptor"))?;
             (0..)
@@ -366,14 +382,16 @@ impl Ui {
             .take()
     }
 
-    /// Gives the UI each control input's value that it doesn't have yet.
-    fn send_values(&mut self, handle: &StateHandle) {
+    /// Gives the UI each control input's value that it doesn't have yet,
+    /// except a port whose value the UI wrote and the plug-in hasn't taken
+    /// yet: its value would be the old one.
+    fn send_values(&mut self, handle: &StateHandle, awaiting: &BTreeMap<u32, (f32, f32)>) {
         // SAFETY: the descriptor is the UI's own, valid while it is loaded.
         let Some(port_event) = (unsafe { (*self.descriptor).port_event }) else {
             return;
         };
         for port in handle.ports() {
-            if port.kind != PortKind::Control || !port.input {
+            if port.kind != PortKind::Control || !port.input || awaiting.contains_key(&port.index) {
                 continue;
             }
             let value = handle.control(port.index);
@@ -407,6 +425,9 @@ struct Editor {
     /// The controls a person is holding, with the last value written: one
     /// change of the set when they let go.
     held: BTreeMap<u32, f32>,
+    /// The ports the UI wrote that the plug-in hasn't taken yet, with the
+    /// value written and the one the port had.
+    awaiting: BTreeMap<u32, (f32, f32)>,
 }
 
 /// The open editors, by device. Declared before the entries in `Main`, so
@@ -499,8 +520,9 @@ pub(super) fn open_with(
         window,
         hidden: false,
         held: BTreeMap::new(),
+        awaiting: BTreeMap::new(),
     };
-    editor.ui.send_values(&editor.handle);
+    editor.ui.send_values(&editor.handle, &editor.awaiting);
     main.editors.0.insert(device, editor);
     Ok(())
 }
@@ -523,7 +545,11 @@ pub(super) fn close(main: &mut Main, device: DeviceId) {
 
 /// Makes the device's editor window `size`, as dragging its edge does, and
 /// tells the UI.
-pub(super) fn resize_window(main: &mut Main, device: DeviceId, size: GuiSize) -> Result<(), Lv2Error> {
+pub(super) fn resize_window(
+    main: &mut Main,
+    device: DeviceId,
+    size: GuiSize,
+) -> Result<(), Lv2Error> {
     let editor = main
         .editors
         .0
@@ -540,7 +566,12 @@ pub(super) fn resize_window(main: &mut Main, device: DeviceId, size: GuiSize) ->
 
 /// The size of the device's editor window, while it is open in one.
 pub(super) fn size(main: &Main, device: DeviceId) -> Option<GuiSize> {
-    main.editors.0.get(&device)?.window.as_ref().map(EditorWindow::size)
+    main.editors
+        .0
+        .get(&device)?
+        .window
+        .as_ref()
+        .map(EditorWindow::size)
 }
 
 /// The devices whose editor is open.
@@ -629,6 +660,15 @@ impl Editor {
                     if let Some(slot) = self.ui.sent.get_mut(port as usize) {
                         *slot = Some(value);
                     }
+                    let old = self.handle.control(port);
+                    if old == value {
+                        self.awaiting.remove(&port);
+                    } else {
+                        self.awaiting
+                            .entry(port)
+                            .and_modify(|(written, _)| *written = value)
+                            .or_insert((value, old));
+                    }
                     if let Some(held) = self.held.get_mut(&port) {
                         *held = value;
                     } else {
@@ -645,7 +685,10 @@ impl Editor {
                 }
             }
         }
-        self.ui.send_values(&self.handle);
+        // A port is awaited until its value moves off the one it had.
+        self.awaiting
+            .retain(|&port, &mut (_, old)| self.handle.control(port) == old);
+        self.ui.send_values(&self.handle, &self.awaiting);
         (true, active)
     }
 }
@@ -657,7 +700,7 @@ fn param_change(entry: &Entry, device: DeviceId, port: u32, value: f32) -> Optio
     Some(ParamChange {
         device,
         param: ParamId(port),
-        value: param.map.from_port(value),
+        value: param.map.plain_value(value),
     })
 }
 
@@ -676,8 +719,8 @@ mod tests {
     use bl_model::{Device, DeviceId, DeviceKind, ParamId, PluginFormat};
     use bl_test_lv2::{GAIN, MODE, PLUGIN_NAME, PLUGIN_URI, STEPS, TOGGLE};
 
-    use super::super::{Lv2Error, Lv2Host};
     use super::super::host::ParamChange;
+    use super::super::{Lv2Error, Lv2Host};
 
     const FRAMES: usize = 64;
 
@@ -775,20 +818,25 @@ mod tests {
         run(node.as_mut(), &[(TOGGLE, 1.0)]);
         host.idle();
         host.idle();
+        let change = |param, value| ParamChange {
+            device,
+            param: ParamId(param),
+            value,
+        };
+        // The editor answers its own gain, as it does any.
         assert_eq!(
             host.take_param_changes(),
-            [ParamChange {
-                device,
-                param: ParamId(GAIN),
-                value: 1.75
-            }]
+            [change(GAIN, 1.75), change(STEPS, 7.0)]
         );
+        // The plug-in hasn't taken the gain yet, and the editor isn't told
+        // the old one meanwhile, which it would answer.
+        host.idle();
+        host.idle();
+        assert!(host.take_param_changes().is_empty());
         assert_eq!(run(node.as_mut(), &[]), 1.75, "the gain the editor wrote");
         host.idle();
-        assert!(
-            host.take_param_changes().is_empty(),
-            "its own value isn't told back to it, so it isn't answered"
-        );
+        host.idle();
+        assert!(host.take_param_changes().is_empty());
 
         // The editor asks to be closed.
         run(node.as_mut(), &[(MODE, 2.0)]);
@@ -826,6 +874,9 @@ mod tests {
         };
         host.clear();
         let refused = host.open_editor_headless(device);
-        assert!(matches!(refused, Err(Lv2Error::NoInstance(_))), "{refused:?}");
+        assert!(
+            matches!(refused, Err(Lv2Error::NoInstance(_))),
+            "{refused:?}"
+        );
     }
 }

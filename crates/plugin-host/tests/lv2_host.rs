@@ -7,7 +7,7 @@
 //! where lilv is: on Linux always, elsewhere when `BL_TEST_LILV` names a
 //! lilv library.
 //!
-//! Spec: lv2-hosting R1 to R12.
+//! Spec: lv2-hosting R1 to R12, R14.
 
 use crate::common;
 use bl_core::time::{Frames, Ticks};
@@ -19,9 +19,7 @@ use bl_plugin_host::lv2::{Lv2Error, Lv2Host};
 use bl_test_lv2::{
     BEAT_NOTE, CUTOFF, ECHO_TRANSPOSE, GAIN, LATENCY, MODE, PLUGIN_NAME, PLUGIN_URI, STEPS, TOGGLE,
 };
-use common::{
-    CHANNELS, FRAMES, config, lv2_device, lv2_host, modulation_for, run, run_at, set,
-};
+use common::{CHANNELS, FRAMES, config, lv2_device, lv2_host, modulation_for, run, run_at, set};
 
 fn note(offset: u32, kind: NoteKind, key: u8, velocity: f32) -> NoteEvent {
     NoteEvent {
@@ -186,6 +184,49 @@ fn audio_runs_through_the_plugin_and_a_change_lands_on_its_frame() {
     assert!(channel[34..].iter().all(|s| *s == 0.75), "{channel:?}");
 }
 
+// Spec: lv2-hosting R2, R3, R4, R18. Blocks of 1, 100, 512 and 4,096 frames,
+// each a real-time section under the allocation trap: the gain on every
+// frame, a change on its frame, and a note on its frame.
+#[test]
+fn blocks_of_every_size_are_run_with_changes_and_notes_on_their_frames() {
+    let Some(host) = lv2_host() else { return };
+    let config = bl_engine::NodeConfig {
+        max_frames: 4096,
+        ..config()
+    };
+    let mut node = host
+        .factory()
+        .create(&lv2_device(1, &[(GAIN, 0.5)]), &config)
+        .unwrap();
+    for frames in [1usize, 100, 512, 4096] {
+        let change = (frames / 2) as u32;
+        let key = 40 + (frames % 40) as u8;
+        let out = run(
+            node.as_mut(),
+            &vec![1.0; frames],
+            &[set(change, GAIN, 0.25)],
+            &[note(change, NoteKind::On, key, 1.0)],
+        );
+        for channel in &out.channels {
+            assert!(
+                channel[..change as usize].iter().all(|s| *s == 0.5),
+                "{frames} frames"
+            );
+            assert!(
+                channel[change as usize..].iter().all(|s| *s == 0.25),
+                "{frames} frames"
+            );
+        }
+        assert_eq!(
+            out.notes,
+            [note(change, NoteKind::On, key + ECHO_TRANSPOSE, 1.0)],
+            "{frames} frames"
+        );
+        // Put the gain back for the next size.
+        run(node.as_mut(), &[0.0; 1], &[set(0, GAIN, 0.5)], &[]);
+    }
+}
+
 // Spec: lv2-hosting R4
 #[test]
 fn notes_reach_the_plugin_and_come_back_out_on_their_frames() {
@@ -313,7 +354,7 @@ fn a_switched_off_plugin_keeps_changes_for_its_next_block() {
     assert!(out.channels[0].iter().all(|s| *s == 0.75));
 }
 
-// Spec: lv2-hosting R8, R9, R11 (as clap-hosting's R8, R9, R11). The state
+// Spec: lv2-hosting R8, R11 (as clap-hosting's R8, R9, R11). The state
 // saves with the plug-in's own, a reopened set gives it back, and a state the
 // plug-in refuses changes nothing.
 #[test]
@@ -360,9 +401,11 @@ fn state_saves_and_loads_into_a_new_instance() {
     let mut other = lv2_device(3, &[]);
     other.plugin = None;
     let mut node = reopened.factory().create(&other, &config()).unwrap();
-    assert!(run(node.as_mut(), &[1.0; FRAMES], &[], &[]).channels[0]
-        .iter()
-        .all(|s| *s == 1.0));
+    assert!(
+        run(node.as_mut(), &[1.0; FRAMES], &[], &[]).channels[0]
+            .iter()
+            .all(|s| *s == 1.0)
+    );
     reopened.load_state(other.id, &saved.data).unwrap();
     let out = run(node.as_mut(), &[1.0; FRAMES], &[], &[]);
     assert!(out.channels[0].iter().all(|s| *s == 1.5));
@@ -372,6 +415,27 @@ fn state_saves_and_loads_into_a_new_instance() {
     assert!(matches!(refused, Err(Lv2Error::Failed(_))), "{refused:?}");
     let out = run(node.as_mut(), &[1.0; FRAMES], &[], &[]);
     assert!(out.channels[0].iter().all(|s| *s == 1.5));
+}
+
+// Spec: lv2-hosting R11. A state the plug-in refuses leaves it at its
+// defaults, and `plugin.info` says so; the set's values still go on it.
+#[test]
+fn a_state_the_plugin_refuses_leaves_it_at_its_defaults() {
+    let Some(host) = lv2_host() else { return };
+    let mut device = lv2_device(1, &[(GAIN, 0.75)]);
+    device.plugin = Some(PluginState {
+        path: bl_test_lv2::bundle().to_string_lossy().into_owned(),
+        data: b"not a state".to_vec(),
+    });
+    let mut node = host.factory().create(&device, &config()).unwrap();
+    let out = run(node.as_mut(), &[1.0; FRAMES], &[], &[]);
+    assert!(out.channels[0].iter().all(|s| *s == 0.75));
+    let status = host.status(device.id).unwrap();
+    assert!(status.active);
+    assert!(
+        status.failure.is_some_and(|f| f.contains("defaults")),
+        "it says it starts from its defaults"
+    );
 }
 
 // Spec: lv2-hosting R10. The plug-in's latency port is the node's latency,
@@ -426,23 +490,25 @@ fn a_plugin_that_cant_be_found_leaves_its_device_passing_audio_through() {
     assert_eq!(lost.plugin.as_ref().unwrap().data, b"kept");
 }
 
-// Spec: lv2-hosting R12. Without lilv, the device passes its input through
-// and the host says LV2 is unavailable.
+// Spec: lv2-hosting R12, R19. Without lilv, the device passes its input
+// through and the host says LV2 is unavailable.
 #[cfg(not(target_os = "linux"))]
 #[test]
 fn without_lilv_lv2_is_unavailable_and_a_device_passes_audio_through() {
     let host = Lv2Host::new();
-    assert_eq!(
-        host.load(bl_test_lv2::bundle()),
-        Err(Lv2Error::Unavailable)
-    );
+    assert_eq!(host.load(bl_test_lv2::bundle()), Err(Lv2Error::Unavailable));
     let mut node = host
         .factory()
         .create(&lv2_device(1, &[]), &config())
         .unwrap();
     let out = run(node.as_mut(), &[1.0; FRAMES], &[], &[]);
     assert!(out.channels.iter().flatten().all(|s| *s == 1.0));
-    assert!(host.status(lv2_device(1, &[]).id).unwrap().failure.is_some());
+    assert!(
+        host.status(lv2_device(1, &[]).id)
+            .unwrap()
+            .failure
+            .is_some()
+    );
 }
 
 // Spec: lv2-hosting R14
@@ -451,10 +517,7 @@ fn main_thread_calls_from_another_thread_are_refused() {
     let Some(host) = lv2_host() else { return };
     std::thread::scope(|s| {
         s.spawn(|| {
-            assert_eq!(
-                host.load(bl_test_lv2::bundle()),
-                Err(Lv2Error::WrongThread)
-            );
+            assert_eq!(host.load(bl_test_lv2::bundle()), Err(Lv2Error::WrongThread));
         });
     });
 }

@@ -6,7 +6,7 @@
 //! stops. The engine's node runs on a thread of its own here, as on an audio
 //! device, and every block is a real-time section under the allocation trap.
 //!
-//! Spec: lv2-hosting R15, as clap-hosting R17.
+//! Spec: lv2-hosting R16, as clap-hosting R17.
 
 use crate::common;
 use bl_core::time::SampleRate;
@@ -156,7 +156,10 @@ fn a_device_without_a_plugin_yet_gets_one_from_its_saved_state() {
     let mut device = lv2_device(2, &[(GAIN, 0.75)]);
     device.plugin = Some(saved);
     let mut node = loan.factory().create(&device, &render_config()).unwrap();
-    assert_eq!(run(node.as_mut(), &[1.0; 32], &[], &[]).channels[0][0], 0.75);
+    assert_eq!(
+        run(node.as_mut(), &[1.0; 32], &[], &[]).channels[0][0],
+        0.75
+    );
     drop(node);
     drop(loan);
     // The host keeps it for the engine, inactive until a node asks.

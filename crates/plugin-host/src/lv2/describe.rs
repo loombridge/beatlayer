@@ -34,12 +34,12 @@ pub(crate) struct ParamMap {
 
 impl ParamMap {
     /// The port's value for the device's `plain` one.
-    pub(crate) fn to_port(&self, plain: f64) -> f32 {
+    pub(crate) fn port_value(&self, plain: f64) -> f32 {
         (plain + self.offset).clamp(self.min, self.max) as f32
     }
 
     /// The device's value for the port's.
-    pub(crate) fn from_port(&self, value: f32) -> f64 {
+    pub(crate) fn plain_value(&self, value: f32) -> f64 {
         f64::from(value) - self.offset
     }
 }
@@ -118,13 +118,20 @@ fn parameter(port: &PortInfo) -> Option<Parameter> {
     };
     let (min, max) = (f64::from(port.min), f64::from(port.max));
     let (kind, offset, range, default) = if port.toggled {
-        (ParamKind::Toggle, 0.0, (0.0, 1.0), f64::from(port.default > 0.0))
+        (
+            ParamKind::Toggle,
+            0.0,
+            (0.0, 1.0),
+            f64::from(port.default > 0.0),
+        )
     } else if port.enumeration
         && port.scale_points.len() > 1
         && let Some(first) = consecutive(&port.scale_points)
     {
         let last = port.scale_points.len() - 1;
-        let default = (f64::from(port.default) - first).clamp(0.0, last as f64).round();
+        let default = (f64::from(port.default) - first)
+            .clamp(0.0, last as f64)
+            .round();
         (
             ParamKind::Choice {
                 choices: port.scale_points.iter().map(|(_, l)| l.clone()).collect(),
@@ -133,7 +140,7 @@ fn parameter(port: &PortInfo) -> Option<Parameter> {
             (first, first + last as f64),
             default,
         )
-    } else if !(min < max) {
+    } else if min >= max {
         return None;
     } else if port.integer && min.abs() < 1e15 && max.abs() < 1e15 {
         (

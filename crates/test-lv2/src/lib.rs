@@ -32,7 +32,7 @@
 //!   there is none), and is scripted so a test sees every call between it
 //!   and the host: it answers a new gain with `steps` of four times the gain;
 //!   when `toggle` goes to 1 it takes hold of the gain, writes 1.5 and 1.75
-//!   and lets go; it asks to be closed when `mode` is 2; and when its view is
+//!   and lets go (and answers its own gain, as it does any); it asks to be closed when `mode` is 2; and when its view is
 //!   resized it writes the new width to `cutoff`.
 //! - **Scan modes.** `BL_TEST_LV2_SCAN` set to `crash` or `hang` makes
 //!   instantiating the plug-in crash or hang, so the scanner's child process
@@ -437,12 +437,16 @@ struct TestUi {
     gestured: bool,
     /// The view in the host's window, where there is one.
     #[cfg(all(unix, not(target_os = "macos")))]
-    view: Option<(x11rb::rust_connection::RustConnection, u32)>,
+    _view: Option<(x11rb::rust_connection::RustConnection, u32)>,
 }
 
 impl TestUi {
-    /// Writes a control port's value to the host.
-    unsafe fn send(&self, port: u32, value: f32) {
+    /// Writes a control port's value to the host, and keeps it as the
+    /// editor's own.
+    unsafe fn send(&mut self, port: u32, value: f32) {
+        if let Some(slot) = self.values.get_mut(port as usize) {
+            *slot = value;
+        }
         // SAFETY: the host's own write function, given its controller.
         unsafe { (self.write)(self.controller, port, 4, 0, ptr::from_ref(&value).cast()) };
     }
@@ -505,7 +509,7 @@ unsafe extern "C" fn ui_instantiate(
             last_gain: 0.0,
             gestured: false,
             #[cfg(all(unix, not(target_os = "macos")))]
-            view,
+            _view: view,
         }))
         .cast()
     }
@@ -545,7 +549,13 @@ unsafe extern "C" fn ui_cleanup(ui: *mut c_void) {
     drop(unsafe { Box::from_raw(ui.cast::<TestUi>()) });
 }
 
-unsafe extern "C" fn ui_port_event(ui: *mut c_void, port: u32, size: u32, format: u32, data: *const c_void) {
+unsafe extern "C" fn ui_port_event(
+    ui: *mut c_void,
+    port: u32,
+    size: u32,
+    format: u32,
+    data: *const c_void,
+) {
     if format != 0 || size != 4 {
         return;
     }
@@ -721,7 +731,9 @@ unsafe extern "C" fn run(plugin: *mut c_void, frames: u32) {
         p.ports[WORKED_PORT as usize]
             .cast::<f32>()
             .write(p.worked as f32);
-        p.ports[BAR_BEAT_PORT as usize].cast::<f32>().write(p.bar_beat);
+        p.ports[BAR_BEAT_PORT as usize]
+            .cast::<f32>()
+            .write(p.bar_beat);
         p.ports[SPEED_PORT as usize].cast::<f32>().write(p.speed);
     }
 }

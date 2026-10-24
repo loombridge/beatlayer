@@ -407,7 +407,8 @@ impl Shared {
             let author = (api.lilv_plugin_get_author_name)(plugin);
             let vendor = self.take_string(author);
             let types = (api.lilv_plugin_get_value)(plugin, self.nodes.rdf_type);
-            let instrument = !types.is_null() && (api.lilv_nodes_contains)(types, self.nodes.instrument);
+            let instrument =
+                !types.is_null() && (api.lilv_nodes_contains)(types, self.nodes.instrument);
             if !types.is_null() {
                 (api.lilv_nodes_free)(types);
             }
@@ -767,14 +768,20 @@ impl World {
                 .map_or(ptr::null(), |f| f(WORKER_INTERFACE.as_ptr()))
         }
         .cast::<sys::WorkerInterface>();
+        // SAFETY: `raw` is live.
+        let instance_handle = unsafe { (*raw).handle };
         let (worker, responses) = match (
             interface.is_null(),
             features.jobs.take(),
             features.responses_in.take(),
         ) {
             (false, Some(jobs), Some(responses_in)) => (
-                // SAFETY: `raw` is live.
-                Some(WorkerThread::start(interface, unsafe { (*raw).handle }, jobs, responses_in)),
+                Some(WorkerThread::start(
+                    interface,
+                    instance_handle,
+                    jobs,
+                    responses_in,
+                )),
                 features.responses_out.take(),
             ),
             _ => (None, None),
@@ -1027,7 +1034,11 @@ impl Instance {
             if let (Some(interface), Some(responses)) = (interface, self.responses.as_mut()) {
                 while let Ok(msg) = responses.pop() {
                     if let Some(response) = interface.work_response {
-                        response(handle, msg.bytes().len() as u32, msg.bytes().as_ptr().cast());
+                        response(
+                            handle,
+                            msg.bytes().len() as u32,
+                            msg.bytes().as_ptr().cast(),
+                        );
                     }
                 }
             }
@@ -1205,7 +1216,8 @@ impl StateHandle {
 
     /// The latency the plug-in reported in its last block, in frames.
     pub fn latency(&self) -> u32 {
-        self.latency.map_or(0, |port| self.control(port as u32).max(0.0) as u32)
+        self.latency
+            .map_or(0, |port| self.control(port as u32).max(0.0) as u32)
     }
 
     /// What an editor of the plug-in is given: the URID map and unmap, and the

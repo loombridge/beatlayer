@@ -246,7 +246,7 @@ impl ScannedPlugin {
             found.path,
             found.device_type,
             found.vendor,
-            found.version,
+            None,
         )
     }
 

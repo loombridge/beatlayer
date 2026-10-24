@@ -38,8 +38,6 @@ pub struct Lv2Type {
     pub device_type: DeviceType,
     /// Its author, if it names one.
     pub vendor: Option<String>,
-    /// LV2 plug-ins carry no version the host reads.
-    pub version: Option<String>,
 }
 
 /// What a device's plug-in is doing, for `plugin.info`.
@@ -327,7 +325,14 @@ impl Lv2Host {
             ..
         } = &mut *main;
         for (&device, entry) in entries.iter_mut() {
-            changed |= pump(device, entry, garbage, latency_changes, &mut latencies, &self.inner);
+            changed |= pump(
+                device,
+                entry,
+                garbage,
+                latency_changes,
+                &mut latencies,
+                &self.inner,
+            );
         }
         garbage.clear();
         drop(latencies);
@@ -435,7 +440,7 @@ impl Lv2Host {
                 let port = param.map.port;
                 let value = entry.handle.as_ref().map_or_else(
                     || param.descriptor.default,
-                    |h| param.map.from_port(h.control(port)),
+                    |h| param.map.plain_value(h.control(port)),
                 );
                 (ParamId(port), value)
             })
@@ -728,7 +733,6 @@ impl Lv2Type {
             path: path.to_owned(),
             device_type,
             vendor: info.vendor.clone(),
-            version: None,
         }
     }
 }
@@ -798,7 +802,7 @@ fn made(
     }
     for &(port, plain) in &entry.values {
         if let Some(param) = entry.params.iter().find(|p| p.map.port == port) {
-            instance.set_control(port, param.map.to_port(plain));
+            instance.set_control(port, param.map.port_value(plain));
         }
     }
     let mut channel = 0;
@@ -820,7 +824,7 @@ fn made(
     let drive = Driver::new(entry.params.iter().map(|p| {
         // Each control starts where the plug-in is: the set's values and
         // its saved state are on it.
-        let plain = p.map.from_port(instance.control(p.map.port));
+        let plain = p.map.plain_value(instance.control(p.map.port));
         (p.descriptor.clone(), false, plain)
     }));
     let handle = instance.handle();
@@ -904,7 +908,11 @@ fn ensure_entry(main: &mut Main, device: &Device, inner: &Inner) -> bool {
             // stays, passing its input through.
             main.missing.insert(
                 device.id,
-                (plugin_id.clone(), saved.unwrap_or_default(), error.to_string()),
+                (
+                    plugin_id.clone(),
+                    saved.unwrap_or_default(),
+                    error.to_string(),
+                ),
             );
             return false;
         }
@@ -987,7 +995,9 @@ fn borrow(
     entry.values = engine_values;
     let mut ends = ends;
     if let Ok((active, _)) = copy {
-        ends.status.latency.store(active.instance.latency(), Relaxed);
+        ends.status
+            .latency
+            .store(active.instance.latency(), Relaxed);
         let _ = ends.to_node.push(active);
     }
     entry.lent = Some(Lent { ends, config });
@@ -1060,7 +1070,10 @@ fn pump(
         && entry.refused.is_none()
         && !entry.silenced
         && entry.config.is_some()
-        && entry.ends.as_ref().is_some_and(|e| !e.to_node.is_abandoned());
+        && entry
+            .ends
+            .as_ref()
+            .is_some_and(|e| !e.to_node.is_abandoned());
     if ready {
         let config = entry.config.expect("the check above");
         // The state the plug-in has now, else the one it was given.

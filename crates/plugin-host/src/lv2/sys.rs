@@ -88,7 +88,8 @@ pub type WorkerRespond = unsafe extern "C" fn(*mut c_void, u32, *const c_void) -
 /// `LV2_Worker_Interface`.
 #[repr(C)]
 pub struct WorkerInterface {
-    pub work: unsafe extern "C" fn(*mut c_void, WorkerRespond, *mut c_void, u32, *const c_void) -> i32,
+    pub work:
+        unsafe extern "C" fn(*mut c_void, WorkerRespond, *mut c_void, u32, *const c_void) -> i32,
     pub work_response: Option<unsafe extern "C" fn(*mut c_void, u32, *const c_void) -> i32>,
     pub end_run: Option<unsafe extern "C" fn(*mut c_void) -> i32>,
 }

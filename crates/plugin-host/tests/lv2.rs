@@ -124,13 +124,24 @@ fn the_ports_carry_what_the_metadata_says() {
     let cutoff = port(CUTOFF);
     assert!(cutoff.logarithmic);
     assert_eq!(cutoff.unit, ParamUnit::Hertz);
-    assert_eq!((cutoff.min, cutoff.max, cutoff.default), (20.0, 20_000.0, 1000.0));
+    assert_eq!(
+        (cutoff.min, cutoff.max, cutoff.default),
+        (20.0, 20_000.0, 1000.0)
+    );
     assert!(port(STEPS).integer && !port(STEPS).toggled);
-    assert!(port(bl_test_lv2::MIDI_IN).position, "it takes time:Position");
+    assert!(
+        port(bl_test_lv2::MIDI_IN).position,
+        "it takes time:Position"
+    );
     assert!(!port(bl_test_lv2::IN_L).sidechain);
     assert!(!found.instrument);
-    assert_eq!(found.bundle, std::fs::canonicalize(bl_test_lv2::bundle()).unwrap());
-    assert!(found.ui.is_none());
+    assert_eq!(
+        found.bundle,
+        std::fs::canonicalize(bl_test_lv2::bundle()).unwrap()
+    );
+    let ui = found.ui.as_ref().expect("it has an X11 editor");
+    assert_eq!(ui.uri, bl_test_lv2::UI_URI);
+    assert!(ui.binary.is_file(), "{:?}", ui.binary);
 }
 
 #[test]
@@ -201,7 +212,10 @@ fn the_position_is_sent_to_a_port_that_takes_it() {
     // The beat is also heard as a note, on the block's first frame.
     let notes: Vec<MidiEvent> = instance.midi_out().collect();
     assert_eq!(notes.len(), 1, "{notes:?}");
-    assert_eq!((notes[0].frame, notes[0].data[1]), (0, bl_test_lv2::BEAT_NOTE + 2));
+    assert_eq!(
+        (notes[0].frame, notes[0].data[1]),
+        (0, bl_test_lv2::BEAT_NOTE + 2)
+    );
     instance.set_transport(Some(Transport {
         frame: 0,
         playing: false,

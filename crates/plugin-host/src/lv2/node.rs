@@ -170,7 +170,9 @@ impl Lv2Node {
             }
             self.dead = false;
             if let Some(active) = self.active.as_ref() {
-                self.status.latency.store(active.instance.latency(), Relaxed);
+                self.status
+                    .latency
+                    .store(active.instance.latency(), Relaxed);
             }
         }
     }
@@ -356,7 +358,7 @@ impl Node for Lv2Node {
                     push(Change {
                         offset: play.offset,
                         port: play.id,
-                        value: map.to_port(play.played),
+                        value: map.port_value(play.played),
                     });
                 }
             });
@@ -367,7 +369,7 @@ impl Node for Lv2Node {
                     push(Change {
                         offset: 0,
                         port,
-                        value: map.to_port(plain_of(map, value)),
+                        value: map.port_value(plain_of(map, value)),
                     });
                 }
             }
@@ -379,7 +381,7 @@ impl Node for Lv2Node {
                     push(Change {
                         offset: event.offset,
                         port: event.param.0,
-                        value: map.to_port(plain_of(map, event.value)),
+                        value: map.port_value(plain_of(map, event.value)),
                     });
                 }
             }

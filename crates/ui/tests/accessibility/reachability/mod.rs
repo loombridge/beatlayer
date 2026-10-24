@@ -75,6 +75,14 @@ pub(crate) const GROOVE_POOL: Reason = LaterView(
 pub(crate) const NOTE_EDITOR: Reason =
     LaterView("the note editor's keys (the note-editor shortcuts, milestone M2)");
 
+// The Clip View's MPE tab (WP-6.18): the pointer edits a note's breakpoints,
+// and the keyboard reaches the toggles and the triangle and reads each
+// envelope as a list (the MPE spec, R34); moving breakpoints by key waits
+// for the envelope keys' extension to this tab.
+pub(crate) const MPE_BREAKPOINTS: Reason = LaterView(
+    "moving, adding and deleting a note's expression breakpoints from the keyboard in the MPE tab",
+);
+
 pub(crate) const NOTE_FOOTER: Reason =
     LaterView("the note editor's footer and Lane Selector in the Tab order (WP-6.1's follow-up)");
 

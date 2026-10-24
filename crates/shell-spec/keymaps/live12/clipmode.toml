@@ -17,7 +17,7 @@ commands = [
 [[shortcut]]
 id = "S-CLIPMODE-002"
 action = "Cycle the Notes, Envelopes and MPE tabs"
-context = "note-editor"
+context = "clip-view"
 kind = "key"
 trigger = "press"
 milestone = "M3"
@@ -25,7 +25,7 @@ mac = ["Option+Tab"]
 win = ["Ctrl+Tab"]
 status = "bound"
 commands = [
-  { id = "view.clip_tab", contexts = ["note-editor"] },
+  { id = "view.clip_tab", contexts = ["clip-view"] },
 ]
 
 [[shortcut]]
@@ -65,4 +65,7 @@ trigger = "press"
 milestone = "M6"
 mac = ["Option+Shift+3"]
 win = ["Alt+Shift+3"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "view.clip_tab", contexts = ["clip-view"], args = { tab = "mpe" } },
+]

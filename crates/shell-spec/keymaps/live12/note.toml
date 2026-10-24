@@ -276,7 +276,10 @@ trigger = "press"
 milestone = "M2"
 mac = ["Z"]
 win = ["Z"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "clip_view.mpe_zoom", contexts = ["note-editor"] },
+]
 
 [[shortcut]]
 id = "S-NOTE-024"

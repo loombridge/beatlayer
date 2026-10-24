@@ -138,6 +138,8 @@ pub enum Clipboard {
     Material(Material),
     /// Whole tracks, with everything they hold.
     Tracks(crate::tracks::CopiedTracks),
+    /// A span of time from every track (the time editing spec, R18).
+    Time(super::time_commands::TimeMaterial),
 }
 
 impl Clipboard {
@@ -146,7 +148,7 @@ impl Clipboard {
     pub fn material(&self) -> Option<&Material> {
         match self {
             Self::Material(material) => Some(material),
-            Self::Tracks(_) => None,
+            Self::Tracks(_) | Self::Time(_) => None,
         }
     }
 }
@@ -453,7 +455,7 @@ fn place_clip(
 /// and whether it recorded an undo step. A failure puts the document back.
 pub(crate) fn transaction<T>(
     editor: &mut Editor,
-    label: &'static str,
+    label: impl Into<std::borrow::Cow<'static, str>>,
     edit: impl FnOnce(&mut Editor) -> Result<T, EditFailure>,
 ) -> Result<(T, bool), EditFailure> {
     editor.begin(label);
@@ -471,7 +473,7 @@ pub(crate) fn transaction<T>(
 
 /// Runs `edit` as [`transaction`] does, then settles the fades the edit left
 /// (R26) in the same undo step: `before` is the document the edit began from.
-fn settled<T>(
+pub(super) fn settled<T>(
     editor: &mut Editor,
     label: &'static str,
     (before, edge_fades): (&Document, bool),
@@ -731,7 +733,7 @@ fn clipboard_of(doc: &Document, target: &Target) -> Material {
 
 /// The envelopes over a track's span: each parameter's shape, with its
 /// positions from the span's start.
-fn envelopes_over(
+pub(super) fn envelopes_over(
     doc: &Document,
     track: TrackId,
     start: Ticks,
@@ -814,7 +816,7 @@ fn envelope_material(
 /// with a clip to another track: the mixer controls and the sends that
 /// track also has. A device's parameters stay on the track they're on (the
 /// automation editing spec, R9).
-fn write_envelopes(
+pub(super) fn write_envelopes(
     editor: &mut Editor,
     materials: &[EnvelopeMaterial],
     tracks: &BTreeMap<usize, TrackId>,
@@ -1210,13 +1212,13 @@ pub fn resize_limits(
     (earliest.min(Ticks::ZERO), latest.max(Ticks::ZERO))
 }
 
-fn to_value<T: Serialize>(value: &T) -> Value {
+pub(super) fn to_value<T: Serialize>(value: &T) -> Value {
     serde_json::to_value(value).unwrap_or(Value::Null)
 }
 
 /// What a finished edit reports: what changed between `before` and the
 /// document now, and the selection.
-fn result(
+pub(super) fn result(
     before: &Document,
     editor: &Editor,
     view: &ArrangementView,
@@ -1257,6 +1259,11 @@ pub fn label(id: &str, args: &Value) -> &'static str {
         ids::DUPLICATE => "Duplicate",
         ids::CUT => "Cut",
         ids::PASTE => "Paste",
+        ids::INSERT_SILENCE => "Insert Silence",
+        ids::CUT_TIME => "Cut Time",
+        ids::PASTE_TIME => "Paste Time",
+        ids::DUPLICATE_TIME => "Duplicate Time",
+        ids::DELETE_TIME => "Delete Time",
         ids::LOOP_SELECTION => "Loop selection",
         ids::CREATE_FADE => "Create Fade",
         ids::DELETE_FADES => "Delete Fades",
@@ -1292,6 +1299,12 @@ pub fn can_run(
             given("clips") || given("start") || has_selection || headers
         }
         ids::COPY | ids::CUT => given("clips") || given("start") || has_selection,
+        ids::INSERT_SILENCE
+        | ids::CUT_TIME
+        | ids::COPY_TIME
+        | ids::PASTE_TIME
+        | ids::DUPLICATE_TIME
+        | ids::DELETE_TIME => super::time_commands::can_run(id, args, view, clipboard),
         ids::CREATE_FADE => create_fade_plan(doc, view, args).is_some_and(|plan| !plan.is_empty()),
         ids::DELETE_FADES => given("clips") || !view.selected_clips.is_empty(),
         ids::PASTE => {
@@ -1886,75 +1899,11 @@ pub fn run(
                     .time_selection
                     .map_or(view.insert_marker, |(start, _)| start),
             };
-            let lanes = lanes(doc);
-            let positions = lane_positions(doc);
-            // The lane the material's first lane goes to.
-            let first: Place = match (track, lane) {
-                (Some(track), None) => {
-                    tracks_exist(doc, &[track])?;
-                    Place::main(track)
-                }
-                (None, Some(lane)) => places_of(doc, view, None, Some(vec![lane]))?
-                    .first()
-                    .copied()
-                    .ok_or_else(|| invalid("`lane` names no lane"))?,
-                _ => view
-                    .selected_places()
-                    .into_iter()
-                    .filter(|place| lane_index(&lanes, place.track).is_some())
-                    .min_by_key(|place| place.row(doc, &positions))
-                    .or_else(|| {
-                        copied
-                            .source
-                            .first()
-                            .copied()
-                            .filter(|t| doc.track(*t).is_some())
-                            .map(Place::main)
-                    })
-                    .ok_or_else(|| unavailable("no track is selected to paste onto"))?,
-            };
-            let base = lane_index(&lanes, first.track)
-                .ok_or_else(|| refused("clips can't go on a return track or the Main track"))?;
-            // The material's lanes keep their distance from its first, among
-            // the tracks and among a track's lanes, the main lane above the
-            // take lanes.
-            let slot_pos = |slot: Option<usize>| slot.map_or(-1isize, |at| at as isize);
-            let slot_shift = first.slot(doc).map_or(-1isize, |at| at as isize)
-                - slot_pos(copied.lanes.first().and_then(|lane| lane.slot));
-            let mut placements = Vec::with_capacity(copied.lanes.len());
-            let mut destinations = Vec::with_capacity(copied.lanes.len());
-            let mut landed: BTreeMap<usize, TrackId> = BTreeMap::new();
-            for held in &copied.lanes {
-                let track = lanes
-                    .get(base + held.distance)
-                    .copied()
-                    .ok_or_else(|| refused("there aren't enough tracks below to paste onto"))?;
-                let at_slot = slot_pos(held.slot) + slot_shift;
-                let take = match usize::try_from(at_slot) {
-                    Ok(at_slot) => Some(
-                        doc.track(track)
-                            .and_then(|t| t.take_lanes().nth(at_slot))
-                            .map(|t| t.id)
-                            .ok_or_else(|| {
-                                refused("there aren't enough take lanes below to paste onto")
-                            })?,
-                    ),
-                    Err(_) if at_slot == -1 => None,
-                    Err(_) => return Err(refused("there isn't a lane that far up to paste onto")),
-                };
-                let place = Place { track, lane: take };
-                destinations.push(place);
-                landed.insert(held.distance, track);
-                let clips = held
-                    .clips
-                    .iter()
-                    .map(|c| Clip {
-                        start: c.start + at,
-                        ..c.clone()
-                    })
-                    .collect();
-                placements.push((place, clips));
-            }
+            let PastePlan {
+                placements,
+                landed,
+                destinations,
+            } = paste_plan(doc, view, copied, at, (track, lane))?;
             let length = copied.length;
             // Spec: automation-editing R9. The pasted material carries the
             // envelopes over the same spans.
@@ -2076,8 +2025,109 @@ pub fn run(
             view.select_span(lanes(doc), brace.start, brace.start + brace.length);
             Ok(to_value(&view.state(doc)))
         }
+        ids::INSERT_SILENCE
+        | ids::CUT_TIME
+        | ids::COPY_TIME
+        | ids::PASTE_TIME
+        | ids::DUPLICATE_TIME
+        | ids::DELETE_TIME => {
+            super::time_commands::run(id, args, editor, view, clipboard, edge_fades)
+        }
         other => Err(invalid(format!("`{other}` isn't an editing command"))),
     }
+}
+
+/// Where pasted material lands: each destination lane with its clips
+/// placed from `at`, and which track each of the material's distances went
+/// to.
+pub(super) struct PastePlan {
+    pub(super) placements: Vec<(Place, Vec<Clip>)>,
+    pub(super) landed: BTreeMap<usize, TrackId>,
+    pub(super) destinations: Vec<Place>,
+}
+
+/// Works out where `copied` goes when pasted at `at`: its first lane on
+/// `track` or `lane` (both left out, the first selected lane, or the track
+/// it was copied from), the others keeping their distance from it.
+pub(super) fn paste_plan(
+    doc: &Document,
+    view: &ArrangementView,
+    copied: &Material,
+    at: Ticks,
+    (track, lane): (Option<TrackId>, Option<Lane>),
+) -> Result<PastePlan, EditFailure> {
+    let lanes = lanes(doc);
+    let positions = lane_positions(doc);
+    // The lane the material's first lane goes to.
+    let first: Place = match (track, lane) {
+        (Some(track), None) => {
+            tracks_exist(doc, &[track])?;
+            Place::main(track)
+        }
+        (None, Some(lane)) => places_of(doc, view, None, Some(vec![lane]))?
+            .first()
+            .copied()
+            .ok_or_else(|| invalid("`lane` names no lane"))?,
+        _ => view
+            .selected_places()
+            .into_iter()
+            .filter(|place| lane_index(&lanes, place.track).is_some())
+            .min_by_key(|place| place.row(doc, &positions))
+            .or_else(|| {
+                copied
+                    .source
+                    .first()
+                    .copied()
+                    .filter(|t| doc.track(*t).is_some())
+                    .map(Place::main)
+            })
+            .ok_or_else(|| unavailable("no track is selected to paste onto"))?,
+    };
+    let base = lane_index(&lanes, first.track)
+        .ok_or_else(|| refused("clips can't go on a return track or the Main track"))?;
+    // The material's lanes keep their distance from its first, among
+    // the tracks and among a track's lanes, the main lane above the
+    // take lanes.
+    let slot_pos = |slot: Option<usize>| slot.map_or(-1isize, |at| at as isize);
+    let slot_shift = first.slot(doc).map_or(-1isize, |at| at as isize)
+        - slot_pos(copied.lanes.first().and_then(|lane| lane.slot));
+    let mut placements = Vec::with_capacity(copied.lanes.len());
+    let mut destinations = Vec::with_capacity(copied.lanes.len());
+    let mut landed: BTreeMap<usize, TrackId> = BTreeMap::new();
+    for held in &copied.lanes {
+        let track = lanes
+            .get(base + held.distance)
+            .copied()
+            .ok_or_else(|| refused("there aren't enough tracks below to paste onto"))?;
+        let at_slot = slot_pos(held.slot) + slot_shift;
+        let take = match usize::try_from(at_slot) {
+            Ok(at_slot) => Some(
+                doc.track(track)
+                    .and_then(|t| t.take_lanes().nth(at_slot))
+                    .map(|t| t.id)
+                    .ok_or_else(|| refused("there aren't enough take lanes below to paste onto"))?,
+            ),
+            Err(_) if at_slot == -1 => None,
+            Err(_) => return Err(refused("there isn't a lane that far up to paste onto")),
+        };
+        let place = Place { track, lane: take };
+        destinations.push(place);
+        landed.insert(held.distance, track);
+        let clips = held
+            .clips
+            .iter()
+            .map(|c| Clip {
+                start: c.start + at,
+                ..c.clone()
+            })
+            .collect();
+        placements.push((place, clips));
+    }
+    Ok(PastePlan {
+        placements,
+        landed,
+        destinations,
+    })
 }
 
 /// What Create Fade would make from the selection or the arguments, if they

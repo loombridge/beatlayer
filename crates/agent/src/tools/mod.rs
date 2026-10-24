@@ -138,16 +138,28 @@ pub(crate) fn question_line(
         .filter(|class| class.asks_first())
         .collect();
     let classes = class_names(&asking);
-    let args = describe_args(shell, args);
-    let mut line = if args.is_empty() {
+    let described = describe_args(shell, args);
+    let mut line = if described.is_empty() {
         format!("{label} ({classes})")
     } else {
-        format!("{label} ({classes}): {args}")
+        format!("{label} ({classes}): {described}")
     };
     let replaced = replaced_clips(shell, call);
     if !replaced.is_empty() {
         line.push_str(". ");
         line.push_str(&replaced);
+    }
+    // A MIDI Tool's call that names no clip acts on the one the Clip View
+    // shows, which the question then names (the MIDI Tools spec, R24).
+    if let Some(fewer) = call.fewer_notes
+        && args.get("clip").is_none()
+    {
+        line.push_str(&format!(
+            ". It leaves {} {} of its {} notes.",
+            clip_name(shell, fewer.clip),
+            fewer.leaves,
+            fewer.has
+        ));
     }
     if let Some(clip) = call.cropped {
         line.push_str(". ");

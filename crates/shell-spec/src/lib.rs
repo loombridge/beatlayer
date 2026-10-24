@@ -63,6 +63,9 @@
 //!   (`midi.import_file`, `midi.export_clip`, WP-2.21).
 //! - [`midi_io`]: MIDI ports and the computer MIDI keyboard (`midi.ports`,
 //!   `midi.set_port`, `midi.computer_keyboard_*`, WP-2.2).
+//! - [`midi_tools`]: the MIDI Tools' commands (`midi_tool.*`, WP-6.11): the
+//!   Transform and Generate panels, choosing a tool, its settings, applying
+//!   it and the seed.
 //! - [`modulation`]: what a track's clips modulate (`modulation.state`,
 //!   WP-5.9).
 //! - [`perception`]: how agents hear and see the set (`perception.*`,
@@ -109,6 +112,7 @@ pub mod locator;
 pub mod menus;
 pub mod midi_files;
 pub mod midi_io;
+pub mod midi_tools;
 pub mod mixer_view;
 pub mod modulation;
 pub mod multisampler;
@@ -157,6 +161,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     midi_files::register(registry)?;
     dawproject::register(registry)?;
     midi_io::register(registry)?;
+    midi_tools::register(registry)?;
     devices::register(registry)?;
     multisampler::register(registry)?;
     autosampler::register(registry)?;

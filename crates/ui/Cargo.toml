@@ -16,6 +16,9 @@ bl-core.workspace = true
 # The multisampler's parameter IDs, for the zone editor's header (WP-5.13).
 bl-devices.workspace = true
 bl-model.workspace = true
+# The MIDI Tools' descriptions, which the Transform and Generate panels draw
+# their controls from (WP-6.11).
+bl-midi-tools.workspace = true
 bl-engine.workspace = true
 bl-shell.workspace = true
 # The recovery prompt lists the sets a crash left (WP-6.62, the
@@ -52,6 +55,8 @@ bl-assistant.workspace = true
 # The test MIDI backend, and the queue the computer MIDI keyboard fills, for
 # the MIDI input tests (WP-2.2).
 bl-midi-io.workspace = true
+# The test tools, so the MIDI Tools panels have tools to show (WP-6.11).
+bl-midi-tools = { workspace = true, features = ["testing"] }
 rtrb = "0.4.0"
 # Every registered command, for the keyboard-reachability test (WP-1.14),
 # which walks the whole registry the command reference lists.

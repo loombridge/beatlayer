@@ -168,6 +168,9 @@ pub struct MainWindowUi {
     assistant: crate::assistant_panel::AssistantPanelUi,
     /// The Undo History panel (WP-6.28): the row the keyboard has moved to.
     undo_history: crate::undo_history_panel::UndoHistoryPanelUi,
+    /// The Save History panel (WP-6.39), which shares the Undo History's
+    /// place.
+    save_history: crate::save_history_panel::SaveHistoryPanelUi,
     /// The detail area's top edge (detail-views R10).
     detail_edge: crate::detail_area::DetailEdge,
     /// The File Manager's switches (WP-6.63).
@@ -266,6 +269,7 @@ impl MainWindowUi {
             chain_names: Vec::new(),
             assistant: crate::assistant_panel::AssistantPanelUi::default(),
             undo_history: crate::undo_history_panel::UndoHistoryPanelUi::default(),
+            save_history: crate::save_history_panel::SaveHistoryPanelUi::default(),
             detail_edge: crate::detail_area::DetailEdge::default(),
         }
     }
@@ -505,8 +509,7 @@ impl MainWindowUi {
             let assistant = shell
                 .assistant_docked_width()
                 .map(|width| self.assistant.drag_width().unwrap_or(width));
-            let undo_history = shell
-                .undo_history_open()
+            let undo_history = (shell.undo_history_open() || shell.save_history_open())
                 .then_some(crate::layout::UNDO_HISTORY_WIDTH);
             let detail = crate::layout::DetailViews::of(shell.detail_of(self.window));
             let layout = if second {
@@ -638,10 +641,20 @@ impl MainWindowUi {
                 self.assistant
                     .show(ui, shell, theme, pane, true, &mut events);
             }
-            if let Some(pane) = layout.undo_history {
-                self.undo_history.show(ui, shell, theme, pane, &mut events);
-            } else if !second {
-                self.undo_history.hide(&mut events);
+            match layout.undo_history {
+                Some(pane) if shell.save_history_open() => {
+                    self.undo_history.hide(&mut events);
+                    self.save_history.show(ui, shell, theme, pane, &mut events);
+                }
+                Some(pane) => {
+                    self.save_history.hide(&mut events);
+                    self.undo_history.show(ui, shell, theme, pane, &mut events);
+                }
+                None if !second => {
+                    self.undo_history.hide(&mut events);
+                    self.save_history.hide(&mut events);
+                }
+                None => {}
             }
             outline_focused_area(ui, shell, theme, &layout, self.window);
             // Spec: command-palette R2. The search field sits above every
@@ -1401,7 +1414,10 @@ impl MainWindowUi {
         // while the pointer is over empty space.
         let keymap =
             crate::keymap::keymap_in_use(&mut self.keymap, &mut self.keymap_revision, shell);
+        // A MIDI Tool's control under the pointer says its own name and
+        // description (the MIDI Tools spec, R7).
         self.info = crate::search_field::info(shell)
+            .or_else(|| crate::tool_panel::take_info(ui.ctx()))
             .unwrap_or_else(|| info_content(self.hovered.or(self.other_hovered), shell, keymap));
         if self.info.title.is_empty() {
             return;

@@ -194,9 +194,21 @@ fn every_cited_row_exists_and_every_control_bar_row_is_placed() {
         );
     }
     // Every Control Bar and Status Bar row is placed, except those hidden in
-    // Live's default state and the Status Bar's note readout, which shares the
-    // message area.
-    let not_placed = ["L-CTRL-002", "L-CTRL-003", "L-CTRL-008", "L-STAT-003"];
+    // Live's default state (Phase 7's EXT, Resync, Link progress, New, and the
+    // MIDI mapping mode chooser, which show only with sync, Link peers or a
+    // map mode) and the Status Bar's note readout, which shares the message
+    // area.
+    let not_placed = [
+        "L-CTRL-002",
+        "L-CTRL-003",
+        "L-CTRL-008",
+        "L-CTRL-028",
+        "L-CTRL-029",
+        "L-CTRL-030",
+        "L-CTRL-031",
+        "L-STAT-003",
+        "L-STAT-009",
+    ];
     for line in text.lines() {
         let Some(row) = line
             .strip_prefix("| ")

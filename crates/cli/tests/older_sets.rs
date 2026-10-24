@@ -99,6 +99,7 @@ fn a_version_1_set_with_split_audio_clips_loads_and_plays_as_it_did() {
         windows: bl_model::DeviceWindows::new(),
         rack_views: bl_model::RackViewMap::new(),
         folds: bl_model::ClipFolds::new(),
+        midi_tools: bl_project::midi_tools::MidiToolSettings::default(),
         launch: bl_model::LaunchSettings::default(),
         multisamplers: bl_model::MultisamplerViews::new(),
         window_views: bl_model::WindowViews::default(),
@@ -181,6 +182,7 @@ fn a_set_saved_before_crossfades_opens_with_the_same_fades_and_none_between_clip
         windows: bl_model::DeviceWindows::new(),
         rack_views: bl_model::RackViewMap::new(),
         folds: bl_model::ClipFolds::new(),
+        midi_tools: bl_project::midi_tools::MidiToolSettings::default(),
         launch: bl_model::LaunchSettings::default(),
         multisamplers: bl_model::MultisamplerViews::new(),
         window_views: bl_model::WindowViews::default(),
@@ -259,6 +261,7 @@ fn sets_from_before_racks_load_unchanged() {
         windows: bl_model::DeviceWindows::new(),
         rack_views: bl_model::RackViewMap::new(),
         folds: bl_model::ClipFolds::new(),
+        midi_tools: bl_project::midi_tools::MidiToolSettings::default(),
         launch: bl_model::LaunchSettings::default(),
         multisamplers: bl_model::MultisamplerViews::new(),
         window_views: bl_model::WindowViews::default(),
@@ -302,6 +305,7 @@ fn a_set_saved_before_the_scales_loads_unchanged() {
         windows: bl_model::DeviceWindows::new(),
         rack_views: bl_model::RackViewMap::new(),
         folds: bl_model::ClipFolds::new(),
+        midi_tools: bl_project::midi_tools::MidiToolSettings::default(),
         launch: bl_model::LaunchSettings::default(),
         multisamplers: bl_model::MultisamplerViews::new(),
         window_views: bl_model::WindowViews::default(),
@@ -379,6 +383,7 @@ fn a_set_saved_before_use_current_scale_loads_its_devices_unchanged() {
         windows: bl_model::DeviceWindows::new(),
         rack_views: bl_model::RackViewMap::new(),
         folds: bl_model::ClipFolds::new(),
+        midi_tools: bl_project::midi_tools::MidiToolSettings::default(),
         launch: bl_model::LaunchSettings::default(),
         multisamplers: bl_model::MultisamplerViews::new(),
         window_views: bl_model::WindowViews::default(),
@@ -457,6 +462,7 @@ fn a_set_saved_before_the_lanes_loads_unchanged_and_every_note_value_round_trips
         windows: bl_model::DeviceWindows::new(),
         rack_views: bl_model::RackViewMap::new(),
         folds: bl_model::ClipFolds::new(),
+        midi_tools: bl_project::midi_tools::MidiToolSettings::default(),
         launch: bl_model::LaunchSettings::default(),
         multisamplers: bl_model::MultisamplerViews::new(),
         window_views: bl_model::WindowViews::default(),
@@ -545,6 +551,7 @@ fn probability_groups_are_saved_with_the_clip_and_broken_ones_load_ungrouped() {
         windows: bl_model::DeviceWindows::new(),
         rack_views: bl_model::RackViewMap::new(),
         folds: bl_model::ClipFolds::new(),
+        midi_tools: bl_project::midi_tools::MidiToolSettings::default(),
         launch: bl_model::LaunchSettings::default(),
         multisamplers: bl_model::MultisamplerViews::new(),
         window_views: bl_model::WindowViews::default(),
@@ -776,6 +783,7 @@ fn an_older_clip_envelope_renders_the_same() {
         windows: bl_model::DeviceWindows::new(),
         rack_views: bl_model::RackViewMap::new(),
         folds: bl_model::ClipFolds::new(),
+        midi_tools: bl_project::midi_tools::MidiToolSettings::default(),
         launch: bl_model::LaunchSettings::default(),
         multisamplers: bl_model::MultisamplerViews::new(),
         window_views: bl_model::WindowViews::default(),
@@ -838,6 +846,7 @@ fn a_set_without_b_loads_with_b_equal_to_a() {
         windows: bl_model::DeviceWindows::new(),
         rack_views: bl_model::RackViewMap::new(),
         folds: bl_model::ClipFolds::new(),
+        midi_tools: bl_project::midi_tools::MidiToolSettings::default(),
         launch: bl_model::LaunchSettings::default(),
         multisamplers: bl_model::MultisamplerViews::new(),
         window_views: bl_model::WindowViews::default(),
@@ -1037,6 +1046,7 @@ fn a_set_saved_before_locators_loads_with_none() {
         windows: bl_model::DeviceWindows::new(),
         rack_views: bl_model::RackViewMap::new(),
         folds: bl_model::ClipFolds::new(),
+        midi_tools: bl_project::midi_tools::MidiToolSettings::default(),
         launch: bl_model::LaunchSettings::default(),
         multisamplers: bl_model::MultisamplerViews::new(),
         window_views: bl_model::WindowViews::default(),
@@ -1087,6 +1097,7 @@ fn the_locators_and_the_song_start_time_are_saved_and_load_again() {
         windows: bl_model::DeviceWindows::new(),
         rack_views: bl_model::RackViewMap::new(),
         folds: bl_model::ClipFolds::new(),
+        midi_tools: bl_project::midi_tools::MidiToolSettings::default(),
         launch: bl_model::LaunchSettings::default(),
         multisamplers: bl_model::MultisamplerViews::new(),
         window_views: bl_model::WindowViews::default(),
@@ -1107,6 +1118,7 @@ fn project_of(editor: &Editor) -> Project {
         windows: bl_model::DeviceWindows::new(),
         rack_views: bl_model::RackViewMap::new(),
         folds: bl_model::ClipFolds::new(),
+        midi_tools: bl_project::midi_tools::MidiToolSettings::default(),
         launch: bl_model::LaunchSettings::default(),
         multisamplers: bl_model::MultisamplerViews::new(),
         window_views: bl_model::WindowViews::default(),
@@ -1227,6 +1239,45 @@ fn the_grooves_are_saved_with_the_set_and_load_again() {
     .unwrap();
     assert_eq!(loaded.document.clip(clip).unwrap().groove, None);
     assert_eq!(loaded.document.settings().grooves.auto_load_groove, None);
+}
+
+/// A set saved before the MIDI Tools has no `midi_tools` and loads unchanged,
+/// with every track on the default tools; chosen tools and settings are
+/// saved beside the song and load again, a choice for a track the set no
+/// longer has is dropped (the MIDI Tools spec, R4, R5).
+#[test]
+fn a_set_saved_before_the_midi_tools_loads_unchanged_and_their_settings_load_again() {
+    use bl_project::midi_tools::{ChosenTools, MidiToolSettings, SavedTool};
+    let (editor, _) = midi_clip_song();
+    let track = editor.document().top_level().next().unwrap();
+    let before = encode_json(&project_of(&editor), 1).unwrap();
+    let value: Value = serde_json::from_slice(&before).unwrap();
+    assert!(value.get("midi_tools").is_none());
+    let (loaded, _) = decode_json(&before, &LoadOptions::default()).unwrap();
+    assert_eq!(loaded.midi_tools, MidiToolSettings::default());
+    assert_eq!(loaded.document, *editor.document());
+
+    let gone = bl_model::TrackId(bl_core::id::Id::new(9_999).unwrap());
+    let chosen = ChosenTools {
+        transformation: Some("strum".to_owned()),
+        generator: Some("shape".to_owned()),
+    };
+    let settings = MidiToolSettings {
+        chosen: [(track, chosen.clone()), (gone, chosen.clone())].into(),
+        tools: [(
+            "strum".to_owned(),
+            SavedTool {
+                auto: false,
+                values: [("amount".to_owned(), serde_json::json!(40))].into(),
+            },
+        )]
+        .into(),
+    };
+    let project = project_of(&editor).with_midi_tools(&settings);
+    let saved = encode_json(&project, 1).unwrap();
+    let (loaded, _) = decode_json(&saved, &LoadOptions::default()).unwrap();
+    assert_eq!(loaded.midi_tools.chosen, [(track, chosen)].into());
+    assert_eq!(loaded.midi_tools.tools, settings.tools);
 }
 
 // Spec: tunings R11, R14
@@ -1456,6 +1507,7 @@ fn a_set_saved_with_pressure_points_opens_and_sends_the_same_pressure() {
         launch: bl_model::LaunchSettings::default(),
         multisamplers: bl_model::MultisamplerViews::new(),
         window_views: bl_model::WindowViews::default(),
+        midi_tools: bl_project::midi_tools::MidiToolSettings::default(),
     };
     // As version 7 saved it: two pressure points, whole-number values.
     let mut saved: Value = serde_json::from_slice(&encode_json(&project, 1).unwrap()).unwrap();

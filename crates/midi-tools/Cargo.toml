@@ -1,0 +1,19 @@
+[package]
+name = "bl-midi-tools"
+description = "The MIDI Tools' interface: a tool's description, its input and output as plain data, the seeded generator, and the registry."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+# One transformation and one generator for the framework's own tests
+# (WP-6.11), listed after the native tools.
+testing = []
+
+[dependencies]
+bl-core.workspace = true
+
+[lints]
+workspace = true

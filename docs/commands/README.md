@@ -50,6 +50,7 @@ The commands, by the part of their ID before its first dot:
 - [`keymap`](keymap.md)
 - [`locator`](locator.md)
 - [`midi`](midi.md)
+- [`midi_tool`](midi_tool.md)
 - [`mixer`](mixer.md)
 - [`mixer_view`](mixer_view.md)
 - [`modulation`](modulation.md)
@@ -462,6 +463,72 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `ApplicationState`
+
+The open application.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `tool` | string | yes | The tool. |
+| `clip` | [`ClipId`](#clipid) | yes | The clip. |
+| `input_notes` | integer, at least 0 | yes | How many input notes it keeps. |
+| `range` | pair of [`Ticks`](#ticks) and [`Ticks`](#ticks) | yes | The range it keeps. |
+| `seed` | integer, at least 0 | yes | The seed its random choices come from. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The open application.",
+  "properties": {
+    "clip": {
+      "$ref": "#/$defs/ClipId",
+      "description": "The clip."
+    },
+    "input_notes": {
+      "description": "How many input notes it keeps.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "range": {
+      "description": "The range it keeps.",
+      "maxItems": 2,
+      "minItems": 2,
+      "prefixItems": [
+        {
+          "$ref": "#/$defs/Ticks"
+        },
+        {
+          "$ref": "#/$defs/Ticks"
+        }
+      ],
+      "type": "array"
+    },
+    "seed": {
+      "description": "The seed its random choices come from.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "tool": {
+      "description": "The tool.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "tool",
+    "clip",
+    "input_notes",
+    "range",
+    "seed"
+  ],
+  "type": "object"
 }
 ```
 
@@ -12097,6 +12164,52 @@ A key held on the track's MIDI input, with the velocity it was played at.
 
 </details>
 
+### `HistoryRow`
+
+A row, as `set.save_history` reports it.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | string | yes | The ID `set.restore` takes. |
+| `kind` | [`Kind`](#kind) | yes | What the row is. |
+| `time` | string | yes | When it was journalled or saved, in UTC (RFC 3339). |
+| `label` | string | yes | A save point's edit, as the undo history names it; `Saved` for the others. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A row, as `set.save_history` reports it.",
+  "properties": {
+    "id": {
+      "description": "The ID `set.restore` takes.",
+      "type": "string"
+    },
+    "kind": {
+      "$ref": "#/$defs/Kind",
+      "description": "What the row is."
+    },
+    "label": {
+      "description": "A save point's edit, as the undo history names it; `Saved` for the others.",
+      "type": "string"
+    },
+    "time": {
+      "description": "When it was journalled or saved, in UTC (RFC 3339).",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "kind",
+    "time",
+    "label"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `HotSwap`
 
 Hot-swapping, while it lasts.
@@ -13110,6 +13223,43 @@ The keymap in use, as `keymap.state` reports it.
     "skipped"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `Kind`
+
+What a row of the history is.
+
+One of:
+
+- `"save_point"`: A song Save Continuously kept after an edit.
+- `"saved"`: The set as its file last saved it.
+- `"backup"`: A version of the set that a save replaced, from the `Backup` folder.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a row of the history is.",
+  "oneOf": [
+    {
+      "const": "save_point",
+      "description": "A song Save Continuously kept after an edit.",
+      "type": "string"
+    },
+    {
+      "const": "saved",
+      "description": "The set as its file last saved it.",
+      "type": "string"
+    },
+    {
+      "const": "backup",
+      "description": "A version of the set that a save replaced, from the `Backup` folder.",
+      "type": "string"
+    }
+  ]
 }
 ```
 
@@ -15975,6 +16125,115 @@ One of:
 
 </details>
 
+### `MidiToolState`
+
+What `midi_tool.state` returns, and what the commands that change a tool's choice, settings or application return.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `panel` | [`Panel`](#panel) | yes | The right group's shown panel. |
+| `clip` | [`ClipId`](#clipid) or null | yes | The clip the state is for. |
+| `current_tool` | string or null | yes | The ID of the tool the Transform and Generate panels' Cmd+Enter, Edit menu item and `tool`-less commands act on: the chosen tool of the one of them that showed last. |
+| `transformation` | string | yes | The ID of the transformation the clip's track shows. |
+| `generator` | string | yes | The ID of the generator the clip's track shows. |
+| `tools` | array of [`ToolSettingsState`](#toolsettingsstate) | yes | Every tool's settings. |
+| `target` | [`TargetState`](#targetstate) or null | yes | What a tool would act on now; none without a MIDI clip. |
+| `application` | [`ApplicationState`](#applicationstate) or null | yes | The open application, if there is one. |
+| `run` | [`ToolRun`](#toolrun) or null | no | What the command that returned this state applied, if it applied a tool. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `midi_tool.state` returns, and what the commands that change a tool's choice, settings or application return.",
+  "properties": {
+    "application": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ApplicationState"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The open application, if there is one."
+    },
+    "clip": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ClipId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The clip the state is for."
+    },
+    "current_tool": {
+      "description": "The ID of the tool the Transform and Generate panels' Cmd+Enter, Edit menu item and `tool`-less commands act on: the chosen tool of the one of them that showed last.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "generator": {
+      "description": "The ID of the generator the clip's track shows.",
+      "type": "string"
+    },
+    "panel": {
+      "$ref": "#/$defs/Panel",
+      "description": "The right group's shown panel."
+    },
+    "run": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ToolRun"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "What the command that returned this state applied, if it applied a tool."
+    },
+    "target": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TargetState"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "What a tool would act on now; none without a MIDI clip."
+    },
+    "tools": {
+      "description": "Every tool's settings.",
+      "items": {
+        "$ref": "#/$defs/ToolSettingsState"
+      },
+      "type": "array"
+    },
+    "transformation": {
+      "description": "The ID of the transformation the clip's track shows.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "panel",
+    "clip",
+    "current_tool",
+    "transformation",
+    "generator",
+    "tools",
+    "target",
+    "application"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `Mixer`
 
 A track's mixer settings: its volume, pan, and switches. Its sends are [`Track::sends`]. The rules are in the mixer spec.
@@ -18011,6 +18270,43 @@ One of:
 
 </details>
 
+### `Panel`
+
+A panel of the Clip View's right group: `utilities` (Pitch and Time Utilities on a MIDI clip, Audio Utilities on an audio clip), `transform` (the MIDI Transformation Tools) or `generate` (the MIDI Generative Tools; a MIDI clip's only).
+
+One of:
+
+- `"utilities"`: Pitch and Time Utilities, or Audio Utilities.
+- `"transform"`: The Transform panel.
+- `"generate"`: The Generate panel.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A panel of the Clip View's right group: `utilities` (Pitch and Time Utilities on a MIDI clip, Audio Utilities on an audio clip), `transform` (the MIDI Transformation Tools) or `generate` (the MIDI Generative Tools; a MIDI clip's only).",
+  "oneOf": [
+    {
+      "const": "utilities",
+      "description": "Pitch and Time Utilities, or Audio Utilities.",
+      "type": "string"
+    },
+    {
+      "const": "transform",
+      "description": "The Transform panel.",
+      "type": "string"
+    },
+    {
+      "const": "generate",
+      "description": "The Generate panel.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `ParamDescriptor`
 
 What one of a device's parameters is.
@@ -18083,6 +18379,108 @@ Type: integer, at least 0.
   "format": "uint32",
   "minimum": 0,
   "type": "integer"
+}
+```
+
+</details>
+
+### `ParamInfo`
+
+One parameter of a tool, as `midi_tool.list` gives it.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | string | yes | The parameter's ID, which `midi_tool.set` names it by. |
+| `name` | string | yes | The name the panel shows. |
+| `kind` | string | yes | The kind of value: `number`, `whole`, `choice`, `switch`, `pitch`, `pitch_range`, `division`, `breakpoints`, `levels`, `toggles` or `structured`. |
+| `scale_aware` | boolean | yes | Whether it counts scale degrees where the clip has a scale. |
+| `default` | see the schema | yes | The value a new set starts with, in the form `midi_tool.set` takes. |
+| `description` | string | yes | What the parameter does. |
+| `decimals` | integer or null | no | How many decimals a number shows. |
+| `max` | number or null | no | The greatest value, of a number, a whole number or a display's data. |
+| `min` | number or null | no | The least value, of a number, a whole number or a display's data. |
+| `options` | array of string | no | A choice's options by ID, a note division's names, or how many levels or toggles a display has. |
+| `unit` | string or null | no | The unit the value is shown with. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One parameter of a tool, as `midi_tool.list` gives it.",
+  "properties": {
+    "decimals": {
+      "description": "How many decimals a number shows.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "default": {
+      "description": "The value a new set starts with, in the form `midi_tool.set` takes."
+    },
+    "description": {
+      "description": "What the parameter does.",
+      "type": "string"
+    },
+    "id": {
+      "description": "The parameter's ID, which `midi_tool.set` names it by.",
+      "type": "string"
+    },
+    "kind": {
+      "description": "The kind of value: `number`, `whole`, `choice`, `switch`, `pitch`, `pitch_range`, `division`, `breakpoints`, `levels`, `toggles` or `structured`.",
+      "type": "string"
+    },
+    "max": {
+      "description": "The greatest value, of a number, a whole number or a display's data.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "min": {
+      "description": "The least value, of a number, a whole number or a display's data.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "name": {
+      "description": "The name the panel shows.",
+      "type": "string"
+    },
+    "options": {
+      "description": "A choice's options by ID, a note division's names, or how many levels or toggles a display has.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "scale_aware": {
+      "description": "Whether it counts scale degrees where the clip has a scale.",
+      "type": "boolean"
+    },
+    "unit": {
+      "description": "The unit the value is shown with.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "id",
+    "name",
+    "kind",
+    "scale_aware",
+    "default",
+    "description"
+  ],
+  "type": "object"
 }
 ```
 
@@ -20043,6 +20441,41 @@ The Randomize amount of each lane, which the footer's control holds (Spec: note-
 
 </details>
 
+### `RangeArgs`
+
+A range of the clip's contents.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `start` | [`Ticks`](#ticks) | yes | Where it starts, in ticks of the clip's contents. |
+| `end` | [`Ticks`](#ticks) | yes | Where it ends. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "additionalProperties": false,
+  "description": "A range of the clip's contents.",
+  "properties": {
+    "end": {
+      "$ref": "#/$defs/Ticks",
+      "description": "Where it ends."
+    },
+    "start": {
+      "$ref": "#/$defs/Ticks",
+      "description": "Where it starts, in ticks of the clip's contents."
+    }
+  },
+  "required": [
+    "start",
+    "end"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `RangeSource`
 
 Where an export's range came from.
@@ -20944,6 +21377,43 @@ What `clip.replace_sample` returns.
 
 </details>
 
+### `Restored`
+
+What `set.restore` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | string | yes | The row that was restored. |
+| `undo_step` | string or null | yes | The undo step the restore is, or null when the song already was the row's, so nothing changed. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `set.restore` returns.",
+  "properties": {
+    "id": {
+      "description": "The row that was restored.",
+      "type": "string"
+    },
+    "undo_step": {
+      "description": "The undo step the restore is, or null when the song already was the row's, so nothing changed.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "id",
+    "undo_step"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `ReturnChoice`
 
 An entry of a return chain's Audio To chooser.
@@ -21802,6 +22272,85 @@ What `clip.save_file` returns.
     "name",
     "kind",
     "copied"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `SaveHistory`
+
+What `set.save_history` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `continuous` | boolean | yes | Whether Save Continuously is on. |
+| `rows` | array of [`HistoryRow`](#historyrow) | yes | The rows, newest first. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `set.save_history` returns.",
+  "properties": {
+    "continuous": {
+      "description": "Whether Save Continuously is on.",
+      "type": "boolean"
+    },
+    "rows": {
+      "description": "The rows, newest first.",
+      "items": {
+        "$ref": "#/$defs/HistoryRow"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "continuous",
+    "rows"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `SaveHistoryState`
+
+What `view.toggle_save_history` returns: the Save History panel's state afterwards.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `open` | boolean | yes | Whether the panel shows. |
+| `rows` | integer, at least 0 | yes | How many rows the history lists (`set.save_history` lists them). |
+| `continuous` | boolean | yes | Whether Save Continuously is on. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `view.toggle_save_history` returns: the Save History panel's state afterwards.",
+  "properties": {
+    "continuous": {
+      "description": "Whether Save Continuously is on.",
+      "type": "boolean"
+    },
+    "open": {
+      "description": "Whether the panel shows.",
+      "type": "boolean"
+    },
+    "rows": {
+      "description": "How many rows the history lists (`set.save_history` lists them).",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "open",
+    "rows",
+    "continuous"
   ],
   "type": "object"
 }
@@ -24990,6 +25539,85 @@ One of:
 
 </details>
 
+### `TargetState`
+
+What a tool would act on now.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `range` | pair of [`Ticks`](#ticks) and [`Ticks`](#ticks) | yes | The range: from its start to its end, in ticks of the clip's contents. |
+| `time_selection` | array or null | yes | The note editor's time selection, if it has one. |
+| `selected` | array of integer, at least 0 | yes | The selected notes' places in the clip's notes in order. |
+| `input` | array of integer, at least 0 | yes | The places of the notes a transformation would take as input. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a tool would act on now.",
+  "properties": {
+    "input": {
+      "description": "The places of the notes a transformation would take as input.",
+      "items": {
+        "format": "uint32",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": "array"
+    },
+    "range": {
+      "description": "The range: from its start to its end, in ticks of the clip's contents.",
+      "maxItems": 2,
+      "minItems": 2,
+      "prefixItems": [
+        {
+          "$ref": "#/$defs/Ticks"
+        },
+        {
+          "$ref": "#/$defs/Ticks"
+        }
+      ],
+      "type": "array"
+    },
+    "selected": {
+      "description": "The selected notes' places in the clip's notes in order.",
+      "items": {
+        "format": "uint32",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": "array"
+    },
+    "time_selection": {
+      "description": "The note editor's time selection, if it has one.",
+      "maxItems": 2,
+      "minItems": 2,
+      "prefixItems": [
+        {
+          "$ref": "#/$defs/Ticks"
+        },
+        {
+          "$ref": "#/$defs/Ticks"
+        }
+      ],
+      "type": [
+        "array",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "range",
+    "time_selection",
+    "selected",
+    "input"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `TempoMap`
 
 The song's tempo over time, as segments in order of position. The first starts at tick 0, each starts after the one before it, and the last is constant. A song at one tempo is a single constant segment.
@@ -25483,6 +26111,82 @@ The Time filter's controls in `clip_view.note_filters`.
 
 </details>
 
+### `TimeClipboardState`
+
+What `arrangement.copy_time` put on the clipboard.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clips` | integer, at least 0 | yes | How many clips it holds, on the main lanes and the take lanes. |
+| `tracks` | integer, at least 0 | yes | How many tracks it holds clips or envelopes of. |
+| `envelopes` | integer, at least 0 | yes | How many envelopes it holds, over every track. |
+| `tempo_breakpoints` | integer, at least 0 | yes | How many tempo breakpoints it holds. |
+| `time_signatures` | integer, at least 0 | yes | How many time-signature markers it holds. |
+| `locators` | integer, at least 0 | yes | How many locators it holds. |
+| `length` | [`Ticks`](#ticks) | yes | How long the span is. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `arrangement.copy_time` put on the clipboard.",
+  "properties": {
+    "clips": {
+      "description": "How many clips it holds, on the main lanes and the take lanes.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "envelopes": {
+      "description": "How many envelopes it holds, over every track.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "length": {
+      "$ref": "#/$defs/Ticks",
+      "description": "How long the span is."
+    },
+    "locators": {
+      "description": "How many locators it holds.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "tempo_breakpoints": {
+      "description": "How many tempo breakpoints it holds.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "time_signatures": {
+      "description": "How many time-signature markers it holds.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "tracks": {
+      "description": "How many tracks it holds clips or envelopes of.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "clips",
+    "tracks",
+    "envelopes",
+    "tempo_breakpoints",
+    "time_signatures",
+    "locators",
+    "length"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `TimeFilter`
 
 The Time filter, in beats of the clip's time signature.
@@ -25801,6 +26505,231 @@ Changes to Tones' controls.
       ]
     }
   },
+  "type": "object"
+}
+```
+
+</details>
+
+### `ToolInfo`
+
+One tool, as `midi_tool.list` gives it.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | string | yes | The tool's ID. |
+| `name` | string | yes | The tool's name. |
+| `kind` | [`ToolKind`](#toolkind) | yes | Whether it changes notes or writes them. |
+| `parameters` | array of [`ParamInfo`](#paraminfo) | yes | Its parameters, in the order the panel shows them. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One tool, as `midi_tool.list` gives it.",
+  "properties": {
+    "id": {
+      "description": "The tool's ID.",
+      "type": "string"
+    },
+    "kind": {
+      "$ref": "#/$defs/ToolKind",
+      "description": "Whether it changes notes or writes them."
+    },
+    "name": {
+      "description": "The tool's name.",
+      "type": "string"
+    },
+    "parameters": {
+      "description": "Its parameters, in the order the panel shows them.",
+      "items": {
+        "$ref": "#/$defs/ParamInfo"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "id",
+    "name",
+    "kind",
+    "parameters"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ToolKind`
+
+Whether a tool changes notes or writes them.
+
+One of:
+
+- `"transformation"`: Takes notes and changes them.
+- `"generator"`: Writes new notes.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Whether a tool changes notes or writes them.",
+  "oneOf": [
+    {
+      "const": "transformation",
+      "description": "Takes notes and changes them.",
+      "type": "string"
+    },
+    {
+      "const": "generator",
+      "description": "Writes new notes.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `ToolList`
+
+What `midi_tool.list` returns: the tools in the order the selectors list them.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `tools` | array of [`ToolInfo`](#toolinfo) | yes | Every transformation, then every generator. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `midi_tool.list` returns: the tools in the order the selectors list them.",
+  "properties": {
+    "tools": {
+      "description": "Every transformation, then every generator.",
+      "items": {
+        "$ref": "#/$defs/ToolInfo"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "tools"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ToolRun`
+
+What the last application wrote.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `tool` | string | yes | The tool. |
+| `seed` | integer, at least 0 | yes | The seed. |
+| `wrote` | integer, at least 0 | yes | How many notes the tool wrote. |
+| `notes` | array of integer, at least 0 | yes | The written notes' places in the clip's notes in order: the notes selected afterwards. |
+| `undo_step` | boolean | yes | Whether the application recorded an undo step. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What the last application wrote.",
+  "properties": {
+    "notes": {
+      "description": "The written notes' places in the clip's notes in order: the notes selected afterwards.",
+      "items": {
+        "format": "uint32",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": "array"
+    },
+    "seed": {
+      "description": "The seed.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "tool": {
+      "description": "The tool.",
+      "type": "string"
+    },
+    "undo_step": {
+      "description": "Whether the application recorded an undo step.",
+      "type": "boolean"
+    },
+    "wrote": {
+      "description": "How many notes the tool wrote.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "tool",
+    "seed",
+    "wrote",
+    "notes",
+    "undo_step"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ToolSettingsState`
+
+One tool's settings, as `midi_tool.state` gives them.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `tool` | string | yes | The tool's ID. |
+| `kind` | [`ToolKind`](#toolkind) | yes | Whether it changes notes or writes them. |
+| `auto` | boolean | yes | Its Auto switch. |
+| `values` | object | yes | Every parameter's value by ID. |
+| `at_defaults` | boolean | yes | Whether every parameter is at its default, so Reset is disabled. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One tool's settings, as `midi_tool.state` gives them.",
+  "properties": {
+    "at_defaults": {
+      "description": "Whether every parameter is at its default, so Reset is disabled.",
+      "type": "boolean"
+    },
+    "auto": {
+      "description": "Its Auto switch.",
+      "type": "boolean"
+    },
+    "kind": {
+      "$ref": "#/$defs/ToolKind",
+      "description": "Whether it changes notes or writes them."
+    },
+    "tool": {
+      "description": "The tool's ID.",
+      "type": "string"
+    },
+    "values": {
+      "additionalProperties": true,
+      "description": "Every parameter's value by ID.",
+      "type": "object"
+    }
+  },
+  "required": [
+    "tool",
+    "kind",
+    "auto",
+    "values",
+    "at_defaults"
+  ],
   "type": "object"
 }
 ```
@@ -27546,6 +28475,7 @@ What `view.state` returns: what the view commands switch, without switching any 
 | `plugin_list` | [`PluginListState`](#pluginliststate) | yes | The list of the set's plug-ins: whether it shows, and whether Show Only Missing is on. |
 | `assistant` | [`AssistantPanelState`](#assistantpanelstate) | yes | The assistant's panel. |
 | `undo_history` | boolean | yes | Whether the Undo History panel shows. |
+| `save_history` | boolean | yes | Whether the Save History panel shows. |
 | `plug_in_windows` | boolean | yes | Whether floating devices' and plug-ins' windows are shown, as `view.toggle_plug_in_windows` sets it. |
 
 <details><summary>JSON Schema</summary>
@@ -27578,6 +28508,10 @@ What `view.state` returns: what the view commands switch, without switching any 
       "$ref": "#/$defs/PluginListState",
       "description": "The list of the set's plug-ins: whether it shows, and whether Show Only Missing is on."
     },
+    "save_history": {
+      "description": "Whether the Save History panel shows.",
+      "type": "boolean"
+    },
     "second_window": {
       "$ref": "#/$defs/SecondWindowState",
       "description": "The second window: whether it is open, the main view it shows, its browser, zoom, frame and detail area."
@@ -27600,6 +28534,7 @@ What `view.state` returns: what the view commands switch, without switching any 
     "plugin_list",
     "assistant",
     "undo_history",
+    "save_history",
     "plug_in_windows"
   ],
   "type": "object"

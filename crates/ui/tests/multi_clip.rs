@@ -87,10 +87,11 @@ impl Multi {
         let output = self.h.settle();
         let nodes = Harness::nodes(&output);
         let bounds = Harness::node(&nodes, "Clip View").bounds.unwrap();
-        Rect::from_min_max(
+        // The editor sits beside the panel groups (L-CLIP-003).
+        bl_ui::clip_view::editor_rect(Rect::from_min_max(
             pos2(bounds.x0 as f32, bounds.y0 as f32),
             pos2(bounds.x1 as f32, bounds.y1 as f32),
-        )
+        ))
     }
 
     /// The loop bar of the clip named `name`: its rectangle and whether it's

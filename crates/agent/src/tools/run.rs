@@ -298,6 +298,16 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
                     if raised_by_arguments(&step.id) {
                         checked["permission"] = json!(class_names(&step.call.classes()));
                         checked["replaces"] = json!(step.call.replaces);
+                        // The MIDI Tools' calls are the shell's, not the
+                        // document's, and say it the same way
+                        // `clip.set_data` does (the MIDI Tools spec, R24).
+                        if let Some(fewer) = step.call.fewer_notes {
+                            checked["fewer_notes"] = json!({
+                                "clip": fewer.clip,
+                                "has": fewer.has,
+                                "leaves": fewer.leaves,
+                            });
+                        }
                         if let Some(clip) = step.call.cropped {
                             checked["crop"] = json!({ "clip": clip });
                         }

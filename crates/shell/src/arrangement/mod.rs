@@ -19,6 +19,7 @@ pub mod locator;
 pub mod placing;
 pub mod rows;
 pub mod take_lanes;
+pub mod time_commands;
 
 use std::collections::{BTreeMap, BTreeSet};
 

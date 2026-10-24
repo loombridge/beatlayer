@@ -124,7 +124,7 @@ pub use clip::{
     consolidated_midi, crossfades, fade_power,
 };
 pub use clip_param::ClipParam;
-pub use command::Command;
+pub use command::{Command, tempo_shape, write_tempo_shape};
 pub use device::{
     Device, DeviceKind, DeviceRole, DeviceWarp, DeviceWindows, MAX_MEDIA_SLOTS, MidiSidechain,
     PluginFormat, PluginState, Sidechain, WindowFrame,

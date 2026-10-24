@@ -3514,6 +3514,40 @@ const ENTRIES: &[Entry] = &[
             marker. One undo step, `Set Song Start Time`.",
     },
     Entry {
+        id: "song.insert_time",
+        action: Action::Apply("insert_time"),
+        label: "Insert Silence",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Opens `length` ticks of empty time at `at` on every track, whichever \
+            tracks are selected: a clip across `at` is split there (leave out `clips` and the \
+            part after the split gets a new ID), and every Arrangement clip, take-lane clip, \
+            automation breakpoint, tempo breakpoint, time-signature marker and locator at or \
+            after `at` moves later by `length`. Each envelope, the tempo and the signature hold \
+            across the new time the value they had at `at`. The Session View's slots and the \
+            loop brace are left as they are. One undo step, `Insert Silence`. To insert \
+            silence at the time selection as a person does, use `arrangement.insert_silence`.",
+    },
+    Entry {
+        id: "song.delete_time",
+        action: Action::Apply("delete_time"),
+        label: "Delete Time",
+        permission: Permission::Destructive,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Removes the span from `start` to `end` on every track, whichever tracks \
+            are selected, so what follows closes up: clips inside it are deleted, a clip across \
+            an edge is cut or split there (leave out `clips` and the part after a split gets a \
+            new ID), and every Arrangement clip, take-lane clip, automation breakpoint, tempo \
+            breakpoint, time-signature marker and locator at or after `end` moves earlier by \
+            the span's length. Markers and locators inside the span are deleted. The Session \
+            View's slots and the loop brace are left as they are. One undo step, `Delete \
+            Time`. Undo restores it, but because it removes the person's work an agent asks \
+            first. To delete the time selected as a person does, use \
+            `arrangement.delete_time`.",
+    },
+    Entry {
         id: "groove.add",
         action: Action::Apply("add_groove"),
         label: "Add Groove",

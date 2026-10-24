@@ -17,6 +17,7 @@ use bl_model::{
 };
 use bl_project::ProjectFolder;
 use bl_project::autosave::{Autosave, Recoverable, Recovered};
+use bl_project::history;
 use bl_project::registry as recovery_ids;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -53,6 +54,7 @@ use crate::detail::DetailArea;
 use crate::devices::{self, DeviceError, DeviceView};
 use crate::files::{ProjectFiles, SetStore, new_set_from};
 use crate::midi::MidiHost;
+use crate::midi_tools;
 use crate::mixer_controls::{self, Switch};
 use crate::mixer_view::{MixerOf, MixerView, MixerViewError};
 use crate::permission::CallPermission;
@@ -86,6 +88,7 @@ use bl_shell_spec::freeze as freeze_ids;
 use bl_shell_spec::locator as locator_ids;
 use bl_shell_spec::midi_files as midi_ids;
 use bl_shell_spec::midi_io as midi_io_ids;
+use bl_shell_spec::midi_tools as tool_ids;
 use bl_shell_spec::mixer_view as mixer_ids;
 use bl_shell_spec::multisampler as multisampler_ids;
 use bl_shell_spec::notes::{self as note_ids, ClipTab, RandomizeAmounts};
@@ -126,6 +129,7 @@ mod plugin_list;
 mod processed_files;
 mod sample_edits;
 mod sample_keys;
+mod save_history;
 pub use sample_keys::TransientList;
 mod search;
 mod session_recording;
@@ -575,6 +579,9 @@ pub struct Shell {
     /// Whether the Undo History panel shows (WP-6.28): view state, never
     /// part of the set, like the browser's.
     undo_history_open: bool,
+    /// The Save History panel (IMP-05, WP-6.39): whether it shows and the
+    /// rows it lists. View state, like the Undo History's.
+    save_history: save_history::SaveHistory,
     /// What the Arrangement View shows (WP-1.8a).
     arrangement: ArrangementView,
     /// What the Clip View shows (WP-2.3): whether it's open, Draw Mode, and
@@ -623,6 +630,11 @@ pub struct Shell {
     analysis_options: bl_analysis::cache::AnalysisOptions,
     /// The analysis cache, made when first used.
     analysis: Option<bl_analysis::cache::AnalysisCache>,
+    /// The cache as the engine reads it for the files' transients: the
+    /// live engine's, previews' and exports' (the warp modes spec, R14).
+    analysis_slot: crate::analysed_media::AnalysisSlot,
+    /// The files whose analysis the live engine hasn't heard is ready.
+    analysis_unheard: std::collections::HashSet<bl_media::ContentHash>,
     /// How the peaks of the files an export writes are kept (WP-6.71, R34):
     /// in memory only until the app says otherwise.
     peak_options: bl_media::PeakCacheOptions,
@@ -1053,6 +1065,8 @@ impl Shell {
         // The engine's clips stream from the set's media (WP-1.4b).
         let media = Arc::new(MediaStore::new());
         audio.set_media(Arc::clone(&media));
+        let analysis_slot = crate::analysed_media::AnalysisSlot::default();
+        audio.set_analysis(analysis_slot.clone());
         // CLAP plug-ins (WP-2.6): this thread is their main thread.
         let plugins = ClapHost::new();
         audio.set_plugins(plugins.clone());
@@ -1093,6 +1107,8 @@ impl Shell {
             auditioning: None,
             analysis_options: bl_analysis::cache::AnalysisOptions::memory_only(),
             analysis: None,
+            analysis_slot,
+            analysis_unheard: std::collections::HashSet::new(),
             peak_options: bl_media::PeakCacheOptions::memory_only(),
             peaks: None,
             analysed: std::collections::HashSet::new(),
@@ -1153,6 +1169,7 @@ impl Shell {
             assistant_conversation: Arc::default(),
             assistant_stop_flag: Arc::default(),
             undo_history_open: false,
+            save_history: save_history::SaveHistory::default(),
             arrangement: ArrangementView::new(),
             clip_view: {
                 let mut view = ClipView::default();
@@ -1504,6 +1521,7 @@ impl Shell {
         self.devices
             .set_multisampler_views(self.store.multisampler_views());
         self.clip_view.set_folds(self.store.folds());
+        self.clip_view.restore_midi_tools(&self.store.midi_tools());
         for (hash, path, size) in self.store.media_files() {
             self.media
                 .add_reference(bl_media::ContentHash::from_bytes(hash.0), path, size);
@@ -4934,6 +4952,7 @@ impl Shell {
     /// anything a window shows changed.
     pub fn poll(&mut self) -> bool {
         self.analysis_cache();
+        self.hear_analyses();
         let warping = auto_warp::Warping {
             prefs: self.prefs.warp,
             analysis: self.analysis.as_ref(),
@@ -4957,6 +4976,9 @@ impl Shell {
             self.set_message(message, true);
         }
         let mut changed = polled.changed | self.poll_processed() | self.poll_stems();
+        // Spec: crash-recovery R15. The Save History follows new save points
+        // and saves while it shows.
+        changed |= self.refresh_save_history();
         // Spec: export R41. The export on its thread: its share moves the
         // progress window, and its end lands in the Status Bar.
         changed |= self.poll_export();
@@ -5285,6 +5307,7 @@ impl Shell {
                 || self.is_device_command(id)
                 || track_ids::handles(id)
                 || note_ids::handles(id)
+                || tool_ids::handles(id)
                 || midi_ids::handles(id)
                 || matches!(
                     id,
@@ -5333,6 +5356,7 @@ impl Shell {
                 insert_marker: self.arrangement.insert_marker(),
                 selected_track: self.arrangement.selected_tracks().first().copied(),
                 shown_clip: shown,
+                clip_view: &self.clip_view,
                 editor: &mut self.editor,
                 view: &self.arrangement,
                 clipboard: &self.clipboard,
@@ -5378,6 +5402,7 @@ impl Shell {
             if !edit_ids::handles(&invocation.id)
                 && !locator_ids::handles(&invocation.id)
                 && !note_ids::handles(&invocation.id)
+                && !tool_ids::handles(&invocation.id)
                 && !is_automation_edit(&invocation.id)
                 && !automation_ids::handles(&invocation.id)
                 && !clip_marker_command(&invocation.id)
@@ -5420,6 +5445,16 @@ impl Shell {
         } else {
             editing::label(&invocation.id, &invocation.args)
         };
+        // Spec: midi-tools R22. A tool's control drag is one undo step
+        // named after the tool.
+        let label: std::borrow::Cow<'static, str> = midi_tools::gesture_label(
+            &invocation.id,
+            &invocation.args,
+            self.editor.document(),
+            &self.clip_view,
+            &self.arrangement,
+        )
+        .map_or(std::borrow::Cow::Borrowed(label), std::borrow::Cow::Owned);
         // Sample editor R8: a frame that inserts a warp marker begins the
         // gesture's base, on which the frames that follow move it.
         let makes_base = invocation.id == "clip.insert_warp_marker";
@@ -5446,7 +5481,7 @@ impl Shell {
                 self.clip_view = gesture.clip_view.clone();
             }
         }
-        self.editor.begin(label);
+        self.editor.begin(label.clone());
         let launch = self.launch_settings();
         let edge_fades = self.create_fades_on_clip_edges();
         let run = |editor: &mut Editor,
@@ -5464,6 +5499,14 @@ impl Shell {
                     .map_err(|error| EditFailure::Refused(error.to_string()))
             } else if note_ids::handles(&invocation.id) {
                 clip_view::run(
+                    &invocation.id,
+                    invocation.args.clone(),
+                    editor,
+                    clip_view,
+                    arrangement,
+                )
+            } else if tool_ids::handles(&invocation.id) {
+                midi_tools::run(
                     &invocation.id,
                     invocation.args.clone(),
                     editor,
@@ -5561,7 +5604,7 @@ impl Shell {
         &mut self,
         base: &Option<Invocation>,
         id: &str,
-        label: &'static str,
+        label: std::borrow::Cow<'static, str>,
         failure: EditFailure,
     ) -> Result<Value, ShellError> {
         let Some(last) = self.edit_gesture.as_ref().and_then(|g| g.last.clone()) else {
@@ -5580,6 +5623,15 @@ impl Shell {
                     .map_err(|error| EditFailure::Refused(error.to_string()))
             } else if note_ids::handles(&step.id) {
                 clip_view::run(
+                    &step.id,
+                    step.args.clone(),
+                    &mut self.editor,
+                    &mut self.clip_view,
+                    &self.arrangement,
+                )
+                .map(|_| ())
+            } else if tool_ids::handles(&step.id) {
+                midi_tools::run(
                     &step.id,
                     step.args.clone(),
                     &mut self.editor,
@@ -6653,6 +6705,7 @@ impl Shell {
             ids::VIEW_TOGGLE_INFO_VIEW => Some(self.info_view),
             assistant_ids::VIEW_TOGGLE_ASSISTANT => Some(self.assistant_open),
             ids::VIEW_TOGGLE_UNDO_HISTORY => Some(self.undo_history_open),
+            ids::VIEW_TOGGLE_SAVE_HISTORY => Some(self.save_history.open),
             ids::VIEW_TOGGLE_PLUG_IN_WINDOWS => Some(self.plug_in_windows),
             ids::FOCUS_TOGGLE_TAB_NAVIGATION => Some(self.prefs.tab_navigation),
             ids::FOCUS_TOGGLE_WRAP_NAVIGATION => Some(self.prefs.wrap_navigation.0),
@@ -6740,6 +6793,9 @@ impl Shell {
             // Spec: time-editing R4. The Create menu's Add Locator reads
             // Delete Locator while a locator is selected.
             locator_ids::DELETE => Some("Delete Locator".to_owned()),
+            // Spec: time-editing R17. Create ▸ Insert Scene reads Insert
+            // Silence with the Arrangement focused.
+            edit_ids::INSERT_SILENCE => Some("Insert Silence".to_owned()),
             // Spec: audio-clips R28. Create ▸ Create Fade reads Create Fade
             // In/Out or Create Crossfade as the selection gives one.
             edit_ids::CREATE_FADE => Some(
@@ -7089,6 +7145,15 @@ impl Shell {
         match id {
             model::UNDO => return self.editor.can_undo(),
             model::REDO => return self.editor.can_redo(),
+            // Spec: midi-tools R19. Apply Transformation/Generator is
+            // disabled while no MIDI clip shows.
+            tool_ids::APPLY => {
+                return midi_tools::can_apply(
+                    self.editor.document(),
+                    &self.clip_view,
+                    &self.arrangement,
+                );
+            }
             // The whole-track copies (the track context menu spec, R3):
             // Cut, Copy and Duplicate work on the selected tracks, and
             // Paste on the tracks on the clipboard.
@@ -7101,7 +7166,7 @@ impl Shell {
                     .as_ref()
                     .is_some_and(|clipboard| match clipboard {
                         Clipboard::Tracks(copied) => !copied.tracks.is_empty(),
-                        Clipboard::Material(_) => false,
+                        Clipboard::Material(_) | Clipboard::Time(_) => false,
                     });
             }
             ids::APP_HIDE => return cfg!(target_os = "macos"),
@@ -8773,6 +8838,10 @@ impl Shell {
     }
 
     fn run_command(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        if history::handles(id) {
+            // Spec: crash-recovery R20.
+            return self.run_save_history(id, args);
+        }
         if recovery_ids::handles(id) {
             // Spec: crash-recovery R26. The recovery commands run against
             // the app's own recovery.
@@ -8795,6 +8864,7 @@ impl Shell {
                 || comping_ids::handles(id)
                 || edit_ids::handles(id)
                 || note_ids::handles(id)
+                || tool_ids::handles(id)
                 || device_ids::handles(id)
                 || multisampler_ids::handles(id)
                 || self.is_device_command(id)
@@ -8906,6 +8976,25 @@ impl Shell {
             }
             return result;
         }
+        if tool_ids::handles(id) {
+            // Spec: midi-tools R23. The MIDI Tools' panels, choices,
+            // settings and applications.
+            let before = self.editor.document().clone();
+            let result = midi_tools::run(
+                id,
+                args,
+                &mut self.editor,
+                &mut self.clip_view,
+                &self.arrangement,
+            )
+            .map_err(|failure| edit_error(id, failure));
+            if *self.editor.document() != before {
+                self.dirty = true;
+                self.document_changed();
+            }
+            self.touch();
+            return result;
+        }
         if sample_ids::handles(id) {
             // Spec: sample-editor R21. The Sample Editor's selections and
             // view are the shell's, and change nothing in the set.
@@ -8929,6 +9018,11 @@ impl Shell {
             return self.run_device_command(id, device, command, args);
         }
         if model::handles(id) {
+            // Spec: midi-tools R21. Undo and redo close the open MIDI Tool
+            // application.
+            if matches!(id, model::UNDO | model::REDO | model::GO_TO_STEP) {
+                self.clip_view.tools.close();
+            }
             let args = self.prepare_edit(id, args)?;
             let args_floating = args.get("floating") == Some(&Value::Bool(true));
             // Spec: automation R17. With Automation Arm on and the transport
@@ -9756,7 +9850,7 @@ impl Shell {
         let playing = self.audio.transport_state().playing;
         let source = crate::perception::Source {
             document: self.editor.document(),
-            media: Arc::clone(&self.media) as Arc<dyn bl_engine::MediaLibrary>,
+            media: self.engine_media(),
             selection: self.arrangement.time_selection(),
             engine_rate,
             plugins: self.plugin_hosts(),
@@ -10041,6 +10135,8 @@ impl Shell {
                 self.devices
                     .set_multisampler_views(bl_model::MultisamplerViews::new());
                 self.clip_view.set_folds(bl_model::ClipFolds::new());
+                self.clip_view
+                    .restore_midi_tools(&bl_project::midi_tools::MidiToolSettings::default());
                 self.set_path = None;
                 self.dirty = false;
                 self.message = None;
@@ -10075,6 +10171,7 @@ impl Shell {
                     .set_multisampler_views(self.store.multisampler_views());
                 // Spec: piano-roll. Folded note editors too.
                 self.clip_view.set_folds(self.store.folds());
+                self.clip_view.restore_midi_tools(&self.store.midi_tools());
                 self.saved = snapshot(&editor);
                 self.set_replaced();
                 self.editor = editor;
@@ -10136,6 +10233,8 @@ impl Shell {
                 self.store
                     .set_multisampler_views(self.devices.multisampler_views().clone());
                 self.store.set_folds(self.clip_view.folds().clone());
+                self.store
+                    .set_midi_tools(self.clip_view.midi_tools().saved());
                 let warnings = self.store.save(&path, &self.editor).map_err(failed)?;
                 self.saved_as(path, &warnings);
                 Ok(self.set_result())
@@ -10156,6 +10255,8 @@ impl Shell {
                 self.store
                     .set_multisampler_views(self.devices.multisampler_views().clone());
                 self.store.set_folds(self.clip_view.folds().clone());
+                self.store
+                    .set_midi_tools(self.clip_view.midi_tools().saved());
                 self.store.set_temporary_folder(self.temporary_folder());
                 let (path, warnings) = self
                     .store
@@ -10310,6 +10411,8 @@ impl Shell {
                 self.store
                     .set_multisampler_views(self.devices.multisampler_views().clone());
                 self.store.set_folds(self.clip_view.folds().clone());
+                self.store
+                    .set_midi_tools(self.clip_view.midi_tools().saved());
                 let files = self
                     .store
                     .collect_groups(&groups, library)
@@ -10620,6 +10723,7 @@ impl Shell {
                     plugin_list: self.plugin_list.state(),
                     assistant: self.assistant_panel_state(),
                     undo_history: self.undo_history_open,
+                    save_history: self.save_history.open,
                     plug_in_windows: self.plug_in_windows,
                 }))
             }
@@ -10628,8 +10732,18 @@ impl Shell {
                 // isn't saved with the set and isn't an undo step.
                 Self::args::<NoArgs>(id, args)?;
                 self.undo_history_open = !self.undo_history_open;
+                if self.undo_history_open {
+                    // They share the right-hand area (crash-recovery R12).
+                    self.save_history.open = false;
+                }
                 self.touch();
                 Ok(to_value(&self.undo_history_state()))
+            }
+            ids::VIEW_TOGGLE_SAVE_HISTORY => {
+                // Spec: crash-recovery R12. View state: not saved with the
+                // set and no undo step.
+                Self::args::<NoArgs>(id, args)?;
+                Ok(self.toggle_save_history())
             }
             ids::VIEW_TOGGLE_INFO_VIEW => {
                 Self::args::<NoArgs>(id, args)?;

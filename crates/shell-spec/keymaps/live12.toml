@@ -935,7 +935,8 @@ trigger = "held"
 milestone = "M6"
 mac = ["Shift (with the command)"]
 win = ["Shift (with the command)"]
-status = "pending"
+status = "widget"
+handler = "the Arrangement: Shift with Cut, Copy, Paste, Duplicate or Delete is S-ARR-015 to S-ARR-019, which run `arrangement.cut_time`, `arrangement.copy_time`, `arrangement.paste_time`, `arrangement.duplicate_time` and `arrangement.delete_time` (the time editing spec, R21)"
 
 [[shortcut]]
 id = "S-EDIT-016"
@@ -2041,7 +2042,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+Enter"]
 win = ["Ctrl+Enter"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "midi_tool.apply", contexts = ["note-editor"] },
+]
 
 [[shortcut]]
 id = "S-NOTE-034"
@@ -2749,7 +2753,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+I"]
 win = ["Ctrl+I"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "arrangement.insert_silence", contexts = ["arrangement"] },
+]
 
 [[shortcut]]
 id = "S-ARR-015"
@@ -2760,7 +2767,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+Shift+X"]
 win = ["Ctrl+Shift+X"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "arrangement.cut_time", contexts = ["arrangement"] },
+]
 
 [[shortcut]]
 id = "S-ARR-016"
@@ -2771,7 +2781,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+Shift+C"]
 win = ["Ctrl+Shift+C"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "arrangement.copy_time", contexts = ["arrangement"] },
+]
 
 [[shortcut]]
 id = "S-ARR-017"
@@ -2782,7 +2795,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+Shift+V"]
 win = ["Ctrl+Shift+V"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "arrangement.paste_time", contexts = ["arrangement"] },
+]
 
 [[shortcut]]
 id = "S-ARR-018"
@@ -2793,7 +2809,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+Shift+D"]
 win = ["Ctrl+Shift+D"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "arrangement.duplicate_time", contexts = ["arrangement"] },
+]
 
 [[shortcut]]
 id = "S-ARR-019"
@@ -2804,7 +2823,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+Shift+Delete"]
 win = ["Ctrl+Shift+Delete"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "arrangement.delete_time", contexts = ["arrangement"] },
+]
 
 [[shortcut]]
 id = "S-ARR-020"

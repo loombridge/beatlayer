@@ -12,13 +12,16 @@
 //!      "windows": { "12": { "x": 80, "y": 120, "width": 320, "height": 174 } },
 //!      "rack_views": { "14": { "macros": false, "chain_list": true, "devices": true } },
 //!      "folds": [ 12, 15 ],     the clips whose note editors are folded
+//!      "midi_tools": { … },     the MIDI Tools' chosen tools and settings
 //!      "document": { … }         the song, as bl-model serialises it
 //!    }
 //! ```
 //!
 //! `windows` holds where each floating device's window sits (WP-2.5b),
 //! `rack_views` which views each rack shows (WP-5.2), and `folds` the clips
-//! whose MIDI Note Editors are folded (WP-2.3). All are left out when empty.
+//! whose MIDI Note Editors are folded (WP-2.3), and `midi_tools` each track's
+//! chosen MIDI Tools and each tool's settings (WP-6.11). All are left out when
+//! empty.
 //! They sit beside the document rather than in it, so moving a window,
 //! hiding a rack's chain list or folding an editor is never an undo step.
 //!
@@ -46,6 +49,7 @@ use serde_json::Value;
 
 use crate::error::{LoadError, SaveError};
 use crate::media::Media;
+use crate::midi_tools::MidiToolSettings;
 use crate::migrate::{self, MIGRATIONS, Migration, SCHEMA_VERSION};
 
 /// The `format` field of every set file.
@@ -78,6 +82,10 @@ pub struct Project {
     /// (WP-2.3): saved with the set, but not part of the document, so
     /// folding is no undo step.
     pub folds: ClipFolds,
+    /// The tools each track's MIDI Tool panels show and each tool's settings
+    /// (WP-6.11): saved with the set, but not part of the document, so
+    /// changing them is no undo step (the MIDI Tools spec, R4, R5).
+    pub midi_tools: MidiToolSettings,
     /// The global launch quantisation and its enabled switch (WP-3.2),
     /// saved with the set but not part of the document, so changing them is
     /// no undo step (the launch quantisation spec, R1).
@@ -110,6 +118,7 @@ impl Project {
             windows: DeviceWindows::new(),
             rack_views: RackViewMap::new(),
             folds: ClipFolds::new(),
+            midi_tools: MidiToolSettings::default(),
             launch: LaunchSettings::default(),
             multisamplers: MultisamplerViews::new(),
             window_views: WindowViews::default(),
@@ -167,6 +176,22 @@ impl Project {
             .filter(|clip| self.document.clip(**clip).is_some())
             .copied()
             .collect();
+        self
+    }
+
+    /// The same project with these MIDI Tool settings, keeping only the
+    /// choices of tracks its document has.
+    #[must_use]
+    pub fn with_midi_tools(mut self, settings: &MidiToolSettings) -> Self {
+        self.midi_tools = MidiToolSettings {
+            chosen: settings
+                .chosen
+                .iter()
+                .filter(|(track, _)| self.document.track(**track).is_some())
+                .map(|(track, chosen)| (*track, chosen.clone()))
+                .collect(),
+            tools: settings.tools.clone(),
+        };
         self
     }
 
@@ -264,6 +289,8 @@ struct Saving<'a> {
     rack_views: &'a RackViewMap,
     #[serde(skip_serializing_if = "ClipFolds::is_empty")]
     folds: &'a ClipFolds,
+    #[serde(skip_serializing_if = "MidiToolSettings::is_empty")]
+    midi_tools: &'a MidiToolSettings,
     /// The global launch quantisation and its switch (WP-3.2).
     launch: LaunchSettings,
     #[serde(skip_serializing_if = "MultisamplerViews::is_empty")]
@@ -285,6 +312,7 @@ impl<'a> Saving<'a> {
             windows: &project.windows,
             rack_views: &project.rack_views,
             folds: &project.folds,
+            midi_tools: &project.midi_tools,
             launch: project.launch,
             multisamplers: &project.multisamplers,
             window_views: project.window_views,
@@ -312,6 +340,10 @@ struct Saved {
     rack_views: RackViewMap,
     #[serde(default)]
     folds: ClipFolds,
+    /// The MIDI Tools' chosen tools and settings (WP-6.11). Sets saved
+    /// before it open with every track on the default tools.
+    #[serde(default)]
+    midi_tools: MidiToolSettings,
     /// The global launch quantisation and its switch (WP-3.2). Sets saved
     /// before WP-3.2 load with a new set's.
     #[serde(default)]
@@ -426,6 +458,7 @@ pub fn decode_json(json: &[u8], options: &LoadOptions) -> Result<(Project, SetIn
         windows,
         rack_views,
         folds,
+        midi_tools,
         launch,
         multisamplers,
         window_views,
@@ -454,6 +487,7 @@ pub fn decode_json(json: &[u8], options: &LoadOptions) -> Result<(Project, SetIn
         windows: DeviceWindows::new(),
         rack_views: RackViewMap::new(),
         folds: ClipFolds::new(),
+        midi_tools: MidiToolSettings::default(),
         launch,
         multisamplers: MultisamplerViews::new(),
         window_views,
@@ -461,6 +495,7 @@ pub fn decode_json(json: &[u8], options: &LoadOptions) -> Result<(Project, SetIn
     .with_windows(&windows)
     .with_rack_views(&rack_views)
     .with_folds(&folds)
+    .with_midi_tools(&midi_tools)
     .with_multisamplers(&multisamplers);
     let info = SetInfo {
         revision,
@@ -735,6 +770,39 @@ mod tests {
         let shown = Project::from_editor(&editor, Media::new()).with_rack_views(&all);
         assert!(json_of(&shown, 1).get("rack_views").is_none());
         assert!(json_of(&song(), 1).get("rack_views").is_none());
+    }
+
+    // Spec: midi-tools R4, R5
+    #[test]
+    fn midi_tool_settings_are_saved_beside_the_document() {
+        use crate::midi_tools::{ChosenTools, MidiToolSettings, SavedTool};
+        let project = song();
+        let track = project.document.top_level().next().unwrap();
+        let gone = bl_model::TrackId(Id::new(9_999).unwrap());
+        let chosen = ChosenTools {
+            transformation: Some("strum".to_owned()),
+            generator: None,
+        };
+        let saved = SavedTool {
+            auto: false,
+            values: [("amount".to_owned(), json!(30))].into(),
+        };
+        let settings = MidiToolSettings {
+            chosen: [(track, chosen.clone()), (gone, chosen)].into(),
+            tools: [("strum".to_owned(), saved)].into(),
+        };
+        let project = project.with_midi_tools(&settings);
+        assert_eq!(
+            project.midi_tools.chosen.len(),
+            1,
+            "only tracks the set has"
+        );
+        let value = json_of(&project, 1);
+        assert_eq!(value["midi_tools"]["tools"]["strum"]["auto"], json!(false));
+        let (loaded, _) = load_json(&value).unwrap();
+        assert_eq!(loaded, project);
+        // Nothing chosen, nothing saved: older sets read the same.
+        assert!(json_of(&song(), 1).get("midi_tools").is_none());
     }
 
     #[test]

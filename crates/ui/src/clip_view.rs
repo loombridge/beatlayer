@@ -175,16 +175,10 @@ fn end_tick(midi: &MidiData, length: Ticks) -> Ticks {
 }
 
 /// How wide the Clip View's panels are: the left group, and the right group
-/// on an audio clip.
+/// (L-CLIP-003).
 #[must_use]
-pub fn panels_width(view: Rect, audio: bool) -> f32 {
-    let left = launch_panel::panel_width(view);
-    let right = if audio {
-        crate::audio_panel::WIDTH
-    } else {
-        0.0
-    };
-    (left + right).min(view.width())
+pub fn panels_width(view: Rect) -> f32 {
+    (launch_panel::panel_width(view) + crate::tool_panel::WIDTH).min(view.width())
 }
 
 /// The Clip View's panels: the title bar over them, and the panel groups
@@ -193,7 +187,7 @@ pub fn panels_width(view: Rect, audio: bool) -> f32 {
 pub fn panels_rect(view: Rect) -> Rect {
     Rect::from_min_max(
         pos2(view.left(), view.top() + TITLE_BAR_HEIGHT),
-        pos2(view.left() + panels_width(view, true), view.bottom()),
+        pos2(view.left() + panels_width(view), view.bottom()),
     )
 }
 
@@ -208,11 +202,8 @@ pub fn title_bar_rect(view: Rect, wide: f32) -> Rect {
 
 /// The Clip View's editor: the place beside the panels.
 #[must_use]
-pub fn editor_rect(view: Rect, audio: bool) -> Rect {
-    Rect::from_min_max(
-        pos2(view.left() + panels_width(view, audio), view.top()),
-        view.max,
-    )
+pub fn editor_rect(view: Rect) -> Rect {
+    Rect::from_min_max(pos2(view.left() + panels_width(view), view.top()), view.max)
 }
 
 /// The clip title bar over the panels (L-CLIP-002): the clip's name, and on
@@ -1409,24 +1400,28 @@ impl ClipViewUi {
             self.envelope.reset();
             return;
         };
-        // A Session clip's Launch Properties panel takes the left of the view.
-        let rect = if shell
+        // The panel groups take the left of the view (L-CLIP-003): the left
+        // group's Launch Properties on a Session clip, or Main Properties
+        // alone, and the right group's Utilities, Transform and Generate.
+        let left = Rect::from_min_size(
+            rect.min,
+            vec2(launch_panel::panel_width(rect), rect.height()),
+        );
+        if shell
             .clip_view()
             .shown_session_clip(doc, shell.arrangement())
             .is_some()
         {
-            launch_panel::show(
-                ui,
-                shell,
-                theme,
-                launch_panel::panel_rect(rect),
-                clip,
-                events,
-            );
-            launch_panel::editor_rect(rect)
+            launch_panel::show(ui, shell, theme, left, clip, events);
         } else {
-            rect
-        };
+            launch_panel::show_main_only(ui, theme, left);
+        }
+        let right = crate::tool_panel::panel_rect(
+            Rect::from_min_max(rect.min, pos2(rect.right(), rect.bottom())),
+            left.right(),
+        );
+        crate::tool_panel::show(ui, shell, theme, right, clip, events);
+        let rect = Rect::from_min_max(pos2(right.right(), rect.top()), rect.max);
         let folded = shell.clip_view().is_folded(clip);
         if self.shown != Some(clip) || self.folded != folded {
             // Another clip shows, or the editor was folded or unfolded:
@@ -2303,6 +2298,9 @@ impl ClipViewUi {
         if ui.input(|i| i.key_pressed(Key::Escape)) {
             let note = self.drag.take().is_some();
             let lanes = self.lanes.cancel();
+            // A drag on a MIDI Tool's control that Esc ended (the MIDI Tools
+            // spec, R22) has put the notes back already.
+            let tool = crate::tool_panel::took_escape(ui.ctx());
             let split = self.split_drag.take().is_some();
             let chopping = self.chop_drag.take().is_some();
             let chopped = self.chop.take().is_some();
@@ -2314,7 +2312,7 @@ impl ClipViewUi {
                     phase: GesturePhase::Cancel,
                     invocation: None,
                 });
-            } else if lanes == Cancelled::Typed {
+            } else if tool || lanes == Cancelled::Typed {
                 // Spec: note-editing R14. Esc drops a number being typed.
             } else if shell.active_contexts().contains(&Context::NoteEditor) {
                 // Spec: piano-roll R24, R25. Esc deselects the notes and

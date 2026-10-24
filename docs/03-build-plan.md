@@ -692,7 +692,7 @@ Total to 1.0: 293 packages planned in Phases 0 to 7, and about 95 estimated in P
 | 6.9 | done | 23 October 2026 | [#353](https://github.com/loombridge/beatlayer/pull/353); a set holds one tuning read from a `.scl` file (or an `.ascl` file read as one), with its reference pitch, note range, per-track Bypass Tuning and Retune Set On Loading, and Drift, Simpler, Sampler and Drum Sampler play its keys within 0.1 cent at any block size; the `.ascl` extras and `tuning.save` wait on the decision about the ASCL specification |
 | 6.9b | todo |  |  |
 | 6.10 | todo |  |  |
-| 6.11 | todo |  |  |
+| 6.11 | done | 24 October 2026 | [#355](https://github.com/loombridge/beatlayer/pull/355); the MIDI Tools framework: the Transform and Generate panels in the Clip View, choosing a tool per track, what a tool acts on, Auto, the Apply button and Cmd+Enter as one undo step named for the tool, re-running from the kept input as parameters move, seeds, settings saved with the set, and the tool interface the extension API reuses ([MIDI Tools](specs/midi-tools.md)) |
 | 6.12 | todo |  |  |
 | 6.13 | todo |  |  |
 | 6.13b | todo |  |  |
@@ -710,7 +710,7 @@ Total to 1.0: 293 packages planned in Phases 0 to 7, and about 95 estimated in P
 | 6.22b | todo |  |  |
 | 6.23 | todo |  |  |
 | 6.24 | done | 22 October 2026 | [#314](https://github.com/loombridge/beatlayer/pull/314); locators in the Arrangement's scrub area, the song start time, and playing from the scrub area on the global launch quantisation ([time editing](specs/time-editing.md) R1 to R13) |
-| 6.24b | todo |  |  |
+| 6.24b | done | 24 October 2026 | [#373](https://github.com/loombridge/beatlayer/pull/373); Insert Silence and Cut, Copy, Paste, Duplicate and Delete Time across every track, the tempo, the time-signature markers and the locators, with Shift and an edit command acting on time ([time editing](specs/time-editing.md) R14 to R23) |
 | 6.25 | done | 22 October 2026 | [#305](https://github.com/loombridge/beatlayer/pull/305); a time selection in the Arrangement's automation lanes names the lanes it covers, the breakpoints it covers and a segment drag move as one undo step each, Cut, Copy, Paste, Duplicate and Delete act on the selected lanes' envelopes and a copied shape pastes onto another parameter, and Lock Envelopes keeps the tracks' envelopes where they are while clip edits carry them over the clips' spans when it's off ([automation editing](specs/automation-editing.md) R1 to R10) |
 | 6.25b | done | 24 October 2026 | [#371](https://github.com/loombridge/beatlayer/pull/371); the ten automation shapes, stretching values and time, skewing with the selection's handles, and Simplify Envelope act on the selected lanes' envelopes in the Arrangement, one undo step each ([automation editing](specs/automation-editing.md) R11 to R19) |
 | 6.25c | todo |  |  |
@@ -734,7 +734,7 @@ Total to 1.0: 293 packages planned in Phases 0 to 7, and about 95 estimated in P
 | 6.37 | todo |  |  |
 | 6.37b | todo |  |  |
 | 6.38 | done | 22 October 2026 | [#310](https://github.com/loombridge/beatlayer/pull/310); View ▸ Return Tracks Scroll with Tracks (`mixer_view.return_tracks_scroll`, off by default and kept in the preferences) puts the returns after the drop area in the Session View's grid, both mixers and the Arrangement's lanes, scrolling with the tracks, with only Main pinned |
-| 6.39 | todo |  |  |
+| 6.39 | done | 24 October 2026 | [#367](https://github.com/loombridge/beatlayer/pull/367); File ▸ Save History (`view.toggle_save_history`) lists the set's save points, saved version and backups newest first in the Undo History's place, and `set.restore` restores one as a single undo step ([crash recovery](specs/crash-recovery.md) R12 to R20) |
 | 6.40 | done | 23 October 2026 | [#369](https://github.com/loombridge/beatlayer/pull/369); View ▸ Mixer Controls ▸ Devices (`mixer_view.devices`) shows each track's top-level devices in its mixer column, between In/Out and Sends, where a click on a name shows the device and a click on its activator switches it |
 | 6.41 | done | 21 October 2026 | [#288](https://github.com/loombridge/beatlayer/pull/288); the set's plug-ins listed in the detail area's place, with each device's preset name, the tracks it is on, the missing ones marked, and a tab-separated text export ([plug-in list](specs/plugin-list.md) R1 to R11); IMP-29's acceptance is still open |
 | 6.42 | done | 22 October 2026 | [#321](https://github.com/loombridge/beatlayer/pull/321); one search field over the main view with a Commands scope built from the menus, context menus and keymap and a Tracks scope that outlines matches and hides the rest with Show Only Matches ([command search](specs/command-palette.md) R1 to R16); IMP-16 and IMP-18's acceptance is still open |

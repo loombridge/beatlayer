@@ -46,7 +46,7 @@ Menu-bar order on macOS: Live (application menu), File, Edit, Create, Playback, 
 | M-FILE-007 | Manage Files | | | | Opens the File Manager (L-OTH-002); built in WP-6.63 |
 | IMP-29 | Manage Plug-Ins | | | | Beatlayer addition: the set's plug-ins, in the File Manager's place (L-OTH-002; [plug-in list](../specs/plugin-list.md) R1); built in WP-6.41 |
 | M-FILE-008 | Open Live Set Backups ▸ | | | | Beatlayer: Open Beatlayer Set Backups (D21). A submenu of the set's backups; its contents weren't recorded. Beatlayer lists the open set's backups, newest first, by local time; choosing one opens it as the set (WP-6.63) |
-| IMP-05 | Save History | | | | Beatlayer addition: the set's save points and saved versions, in the right-hand area (L-OTH-001; [crash recovery](../specs/crash-recovery.md) R12) |
+| IMP-05 | Save History | | | | Beatlayer addition: the set's save points and saved versions, in the right-hand area (L-OTH-001; [crash recovery](../specs/crash-recovery.md) R12); built in WP-6.39 |
 | | — | | | | |
 | M-FILE-009 | Save Live Set | ⌘S | S-FILE-003 | | Beatlayer: Save Beatlayer Set (D21) |
 | M-FILE-010 | Save Live Set As... | ⇧⌘S | S-FILE-004 | | Beatlayer: Save Beatlayer Set As... (D21) |
@@ -700,7 +700,7 @@ Other states, including the scrub area's own menu:
 
 | ID | Command | Source |
 |---|---|---|
-| C-TIME-018 | Paste, Delete, and the ... Time commands | manual 6.9, 6.11 |
+| C-TIME-018 | Paste, Delete, and the ... Time commands | manual 6.9, 6.11. Beatlayer's time selection menu shows Cut, Copy, Paste, Duplicate and Delete Time after Duplicate, a placement of its own ([time editing](../specs/time-editing.md) R22) |
 | C-TIME-019 | Split, Consolidate, Crop Clip (a selection that holds clips) | manual 6.12, 6.13, 22.2 |
 | C-TIME-020 | Consolidate Time to New Scene | manual 7.5 |
 | C-TIME-021 | Insert automation shapes, Simplify Envelope (automation lanes) | manual 25.5.5, 25.5.4 |

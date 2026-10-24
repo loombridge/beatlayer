@@ -139,14 +139,6 @@ struct PlacedRegion {
     region: Region,
 }
 
-/// What an edit cycle did to the plug-in's playback regions, for the host to
-/// move them between the plug-in's renderers.
-#[derive(Debug, Default)]
-pub(crate) struct Changes {
-    /// Regions made, which renderers can take.
-    pub(crate) created: Vec<(TrackId, RegionKey, sys::ARAPlaybackRegionRef)>,
-}
-
 /// One ARA document controller.
 pub(crate) struct Controller {
     pub(crate) factory: Factory,
@@ -378,10 +370,8 @@ impl Controller {
     /// Gives the plug-in `model` in one edit cycle (R2): objects that left
     /// it are destroyed or, for the audio, deactivated for the undo history;
     /// objects that are new are made, or brought back; the rest are updated
-    /// where they changed. `changes` collects the regions that went and
-    /// came, in the order the renderers must be told: the removals before
-    /// anything is destroyed, which the caller does through
-    /// [`Controller::apply`]'s `before_destroy`.
+    /// where they changed. A region is destroyed only after `before_destroy`
+    /// has let its renderers go of it.
     ///
     /// # Errors
     ///
@@ -390,23 +380,23 @@ impl Controller {
         &mut self,
         model: Model,
         before_destroy: &mut dyn FnMut(TrackId, sys::ARAPlaybackRegionRef),
-    ) -> Result<Changes, String> {
-        let mut changes = Changes::default();
+    ) -> Result<(), String> {
         call!(self, beginEditing());
-        let result = self.edit(&model, before_destroy, &mut changes);
+        let result = self.edit(&model, before_destroy);
         call!(self, endEditing());
         self.edit_cycles += 1;
+        // Even after a failure: the plug-in is in whatever state it is in,
+        // and trying the same model again at every poll would only repeat it.
+        self.applied = Some(model);
         result?;
         call!(self, notifyModelUpdates());
-        self.applied = Some(model);
-        Ok(changes)
+        Ok(())
     }
 
     fn edit(
         &mut self,
         model: &Model,
         before_destroy: &mut dyn FnMut(TrackId, sys::ARAPlaybackRegionRef),
-        changes: &mut Changes,
     ) -> Result<(), String> {
         // The musical context, with the tempo and signatures it reads.
         let content = Content::of(&model.tempo, &model.signatures);
@@ -680,7 +670,6 @@ impl Controller {
                             &raw const properties
                         )
                     );
-                    changes.created.push((wanted.track, *key, reference));
                     self.regions.insert(
                         *key,
                         PlacedRegion {

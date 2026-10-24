@@ -193,6 +193,9 @@ pub(super) struct State {
     /// Something changed since the last sync that the revision doesn't show
     /// (an instance bound).
     dirty: bool,
+    /// Plug-in files `know` couldn't load, so it doesn't try them again at
+    /// every edit.
+    unloadable: BTreeSet<std::path::PathBuf>,
     /// Counts the sets the host has had, so an instance made for a new set
     /// never binds to the old set's controller.
     generation: u64,
@@ -243,6 +246,7 @@ impl State {
                 .push((self.generation, std::mem::take(&mut self.controllers)));
         }
         self.generation += 1;
+        self.unloadable.clear();
         self.seconds.clear();
         self.synced = None;
     }
@@ -319,6 +323,11 @@ impl Vst3Host {
     pub fn know(&self, document: &Document) {
         let unknown: Vec<std::path::PathBuf> = {
             let types = lock(&self.inner.types);
+            let mut guard = lock(&self.inner.main);
+            let skip = guard
+                .get()
+                .map(|main| main.ara.unloadable.clone())
+                .unwrap_or_default();
             let mut paths = Vec::new();
             for track in document.tracks() {
                 for device in track.devices_deep() {
@@ -335,7 +344,7 @@ impl Vst3Host {
                             .any(|known| known.device_type.kind == device.kind)
                     {
                         let path = std::path::PathBuf::from(&plugin.path);
-                        if !paths.contains(&path) {
+                        if !paths.contains(&path) && !skip.contains(&path) {
                             paths.push(path);
                         }
                     }
@@ -343,13 +352,13 @@ impl Vst3Host {
             }
             paths
         };
-        for path in unknown {
-            // A plug-in that can't be loaded is reported when its device
-            // asks for it.
-            let _ = self.load(&path);
-        }
+        let failed: Vec<std::path::PathBuf> = unknown
+            .into_iter()
+            .filter(|path| self.load(path).is_err())
+            .collect();
         let mut guard = lock(&self.inner.main);
         if let Ok(main) = guard.get() {
+            main.ara.unloadable.extend(failed);
             let held = &main.ara.controllers;
             main.ara.archives = document
                 .settings()
@@ -466,7 +475,7 @@ impl Vst3Host {
                     }
                 };
                 match controller.apply(model, &mut before) {
-                    Ok(_) => edited = true,
+                    Ok(()) => edited = true,
                     Err(why) => {
                         for instance in instances.values_mut() {
                             if instance.ara.as_ref().is_some_and(|b| b.plugin == plugin) {

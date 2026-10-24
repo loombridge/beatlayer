@@ -57,6 +57,8 @@ bl-audio-io.workspace = true
 # The tests of the external effect register the real device, so they show
 # the device's own behaviour and not a stand-in's (WP-5.35).
 bl-devices.workspace = true
+# A tool's notes play as it writes them (WP-6.13b).
+bl-midi-tools.workspace = true
 
 [[test]]
 name = "engine_tests"

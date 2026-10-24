@@ -91,6 +91,10 @@ struct TrackRepr {
     /// writes it only when it's on.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     tuning_bypass: bool,
+    /// The group of linked tracks the track is in (WP-6.23). Sets saved
+    /// before it have none, which loads unlinked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    link: Option<crate::ids::LinkGroupId>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     children: Vec<TrackRepr>,
     /// The track's frozen audio (WP-4.14). Sets saved before it have none,
@@ -226,6 +230,7 @@ impl TrackRepr {
             delay: track.delay(),
             keep_monitoring_latency: track.keep_monitoring_latency(),
             tuning_bypass: track.tuning_bypass(),
+            link: track.link(),
             frozen: track.frozen.clone(),
             children: if with_children {
                 track
@@ -421,6 +426,7 @@ impl Loader {
         }
         track.keep_monitoring_latency = repr.keep_monitoring_latency;
         track.tuning_bypass = repr.tuning_bypass;
+        track.link = repr.link;
         track.frozen = repr.frozen;
         if let Some(routing) = repr.routing {
             track.routing = routing;

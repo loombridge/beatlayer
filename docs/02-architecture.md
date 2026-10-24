@@ -298,7 +298,7 @@ What runs in the stream is a `StreamClient`'s: each time a stream opens, the cli
 | CLAP | `clack-host` 0.2 | Feature-complete; its API can still change, so pin it |
 | VST3 | `vst3` 0.3 (Coupler) | The VST3 SDK has been MIT-licensed since version 3.8 (October 2025), and the bindings ship pre-generated |
 | Audio Unit v2 and v3 | `objc2-audio-toolbox`, `objc2-avf-audio` | `rack` is a reference for AU hosting in Rust |
-| LV2 | `livi` | Not fully tested by its author, and no UI hosting; expect to extend it in WP-5.39 |
+| LV2 | Beatlayer's own host on the system's lilv (WP-5.39) | The `lilv` C functions it calls are declared by hand and loaded when the host starts, so there is no new crate and a machine without lilv runs Beatlayer with LV2 unavailable; Linux only |
 
 - **Scanning** runs in `beatlayer-scan`, a child process with a timeout. A plug-in that crashes or hangs during a scan goes on a blocklist, and the main app never loads it. Results are cached by path, modification time, and format.
 - **Per-note expression** (WP-6.17b): a plug-in device's MPE Mode decides whether per-note pitch and slide reach it; with it on, CLAP plug-ins get note expressions, VST3 plug-ins note expression through `INoteExpressionController`, and Audio Units MPE MIDI; with it off, only per-note pressure, as polyphonic key pressure.
@@ -516,7 +516,7 @@ The rules the design follows, each with its ID.
 | D7 | Native UI in Rust, not a web view. |
 | D8 | UI toolkit: egui, through egui-winit and egui-wgpu from Beatlayer's own event loop, with dense views on Beatlayer's own wgpu pipelines. |
 | D9 | Audio I/O: Beatlayer's own device trait; Core Audio written in-house; `azo` for ASIO; `cpal` for WASAPI shared, PipeWire, JACK, and ALSA; `wasapi` for exclusive mode. |
-| D10 | Plug-in formats: CLAP (`clack-host`), VST3 (`vst3`), AU (`objc2`), LV2 (`livi`); in-process first, sandbox in Phase 10. No VST2. |
+| D10 | Plug-in formats: CLAP (`clack-host`), VST3 (`vst3`), AU (`objc2`), LV2 (Beatlayer's own host on the system's lilv, loaded at run time, without the `livi` crate); in-process first, sandbox in Phase 10. No VST2. |
 | D11 | Time stretch for Complex and Complex Pro: Signalsmith Stretch. |
 | D12 | Extensions as WebAssembly components plus a native modular device. |
 | D13 | Project file: folder bundle, zstd-compressed JSON (one checksummed frame), versioned migrations. |

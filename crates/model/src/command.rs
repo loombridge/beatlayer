@@ -1,6 +1,6 @@
 //! Commands: the only way to change a document.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use bl_core::id::Id;
 use bl_core::time::{
@@ -27,8 +27,8 @@ use crate::external::{ExternalPort, HardwareLatency};
 use crate::follow::FollowPatch;
 use crate::groove::{GLOBAL_AMOUNT_MAX, Groove, GrooveBase, check_percent};
 use crate::ids::{
-    ChainId, ClipId, ContentHash, DeviceId, GrooveId, LocatorId, ParamId, SceneId, TakeLaneId,
-    TrackId,
+    ChainId, ClipId, ContentHash, DeviceId, GrooveId, LinkGroupId, LocatorId, ParamId, SceneId,
+    TakeLaneId, TrackId,
 };
 use crate::launch::{ClipLaunch, LaunchMode, LaunchQuantization};
 use crate::layers::{
@@ -2584,6 +2584,18 @@ pub enum Command {
         /// Whether it bypasses the tuning.
         bypass: bool,
     },
+    /// Puts audio and MIDI tracks into the link group `group`, or takes them
+    /// out of their groups when it is left out (the linked-track editing
+    /// spec, R2, R3, R5). A track leaves the group it was in, and a group
+    /// left with one track ends.
+    SetTrackLinks {
+        /// The audio or MIDI tracks.
+        tracks: Vec<TrackId>,
+        /// The group they join; an existing group to add to it, or a new
+        /// ID for a new one. Left out, the tracks are unlinked.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        group: Option<LinkGroupId>,
+    },
     /// Adds a groove to the end of the Groove Pool (the grooves spec, R1):
     /// what loading a groove file and extracting a groove make.
     AddGroove {
@@ -2959,6 +2971,8 @@ impl Command {
             Self::SetTuningReference { .. } => "Change Reference Pitch",
             Self::SetTuningRange { .. } => "Change Tuning Range",
             Self::SetTuningBypass { .. } => "Bypass Tuning",
+            Self::SetTrackLinks { group: None, .. } => "Unlink Tracks",
+            Self::SetTrackLinks { .. } => "Link Tracks",
             // Spec: grooves R5, R16, R17, R32. Live's undo names for the
             // groove edits are to observe; Beatlayer's name the edit.
             Self::AddGroove { .. } => "Add Groove",
@@ -3219,6 +3233,7 @@ impl Document {
             } => self.create_track(*id, *kind, name, *parent, *index),
             Command::DeleteTrack { track } => {
                 self.delete_track(*track)?;
+                self.end_single_links();
                 self.prune_mappings();
                 Ok(())
             }
@@ -3829,6 +3844,23 @@ impl Document {
                 if self.track_ref(*track)?.tuning_bypass != *bypass {
                     self.track_mut(*track)?.tuning_bypass = *bypass;
                 }
+                Ok(())
+            }
+            Command::SetTrackLinks { tracks, group } => {
+                for track in tracks {
+                    if !matches!(
+                        self.track_ref(*track)?.kind(),
+                        TrackKind::Audio | TrackKind::Midi
+                    ) {
+                        return Err(ModelError::InvalidInput(
+                            "only audio and MIDI tracks can be linked",
+                        ));
+                    }
+                }
+                for track in tracks {
+                    self.track_mut(*track)?.link = *group;
+                }
+                self.end_single_links();
                 Ok(())
             }
             Command::SetClipLaunchMode { clip, mode } => {
@@ -5499,6 +5531,22 @@ impl Document {
             }
         }
         Ok(())
+    }
+
+    /// Takes a track out of its link group when it is the group's only
+    /// member left (the linked-track editing spec, R5).
+    fn end_single_links(&mut self) {
+        let mut members: BTreeMap<LinkGroupId, Vec<TrackId>> = BTreeMap::new();
+        for (id, track) in &self.tracks {
+            if let Some(group) = track.link {
+                members.entry(group).or_default().push(*id);
+            }
+        }
+        for alone in members.into_values().filter(|m| m.len() == 1).flatten() {
+            if let Some(track) = self.tracks.get_mut(&alone) {
+                Shared::make_mut(track).link = None;
+            }
+        }
     }
 
     /// Changes a track's routing and checks it.

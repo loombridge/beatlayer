@@ -60,6 +60,20 @@ pub const UNGROUP: &str = "track.ungroup";
 /// The undo step's name: Live's "Ungroup Tracks" (observed in Live 12.4.3).
 pub const UNGROUP_STEP: &str = "Ungroup Tracks";
 
+/// `track.link`: link the selected audio and MIDI tracks, so one edit
+/// reaches them all (WP-6.23).
+pub const LINK: &str = "track.link";
+
+/// The undo step's name for Link Tracks.
+pub const LINK_STEP: &str = "Link Tracks";
+
+/// `track.unlink`: take the selected tracks out of their link groups
+/// (WP-6.23).
+pub const UNLINK: &str = "track.unlink";
+
+/// The undo step's name for Unlink Track(s).
+pub const UNLINK_STEP: &str = "Unlink Tracks";
+
 /// `track.set_devices_enabled`: switch every top-level device on the selected
 /// tracks on or off as one undo step (IMP-25).
 pub const SET_DEVICES_ENABLED: &str = "track.set_devices_enabled";
@@ -80,6 +94,8 @@ pub const IDS: &[&str] = &[
     PASTE,
     GROUP,
     UNGROUP,
+    LINK,
+    UNLINK,
     SET_DEVICES_ENABLED,
 ];
 
@@ -154,6 +170,36 @@ pub struct UngroupTracksArgs {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct TracksUngrouped {
     /// The former members of the group, in order; the first of them is now selected.
+    pub tracks: Vec<TrackId>,
+}
+
+/// Arguments of `track.link`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LinkTracksArgs {
+    /// The tracks to link; the selected tracks if left out. A group track
+    /// stands for the audio and MIDI tracks inside it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tracks: Option<Vec<TrackId>>,
+    /// A linked track: the tracks join its link group instead of a new one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub into: Option<TrackId>,
+}
+
+/// Arguments of `track.unlink`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct UnlinkTracksArgs {
+    /// The tracks to unlink; the selected tracks if left out. A group track
+    /// stands for the audio and MIDI tracks inside it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tracks: Option<Vec<TrackId>>,
+}
+
+/// What `track.link` and `track.unlink` return.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct TracksLinked {
+    /// The tracks whose link changed, in display order.
     pub tracks: Vec<TrackId>,
 }
 
@@ -293,6 +339,36 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
             .binding("S-TRACK-007")
             .args::<UngroupTracksArgs>()
             .result::<TracksUngrouped>(),
+    )?;
+    registry.register(
+        CommandSpec::new(LINK, "Link Tracks")
+            .description(
+                "Links audio and MIDI tracks (`tracks`, or the selected tracks; a group track \
+                 stands for the audio and MIDI tracks inside it, at any depth) into a new \
+                 link group, so the Arrangement edits them as one: selecting, moving, \
+                 resizing, splitting and consolidating clips, fades, arming, and the take \
+                 lanes and comps all reach every track of the group. Each track leaves the \
+                 group it was in, and a group left with one track ends. With `into`, naming a \
+                 linked track, the tracks join its group instead. Needs two audio or MIDI \
+                 tracks, or one with `into`. One undo step, named Link Tracks. Read the group \
+                 back with the query tool's `track`, field `linked`.",
+            )
+            .permission(Permission::Edit)
+            .contexts([Global, Arrangement, Session, TrackHeaders])
+            .args::<LinkTracksArgs>()
+            .result::<TracksLinked>(),
+    )?;
+    registry.register(
+        CommandSpec::new(UNLINK, "Unlink Track(s)")
+            .description(
+                "Takes tracks (`tracks`, or the selected tracks; a group track stands for the \
+                 audio and MIDI tracks inside it) out of their link groups; a group left with \
+                 one track ends. One undo step, named Unlink Tracks.",
+            )
+            .permission(Permission::Edit)
+            .contexts([Global, Arrangement, Session, TrackHeaders])
+            .args::<UnlinkTracksArgs>()
+            .result::<TracksLinked>(),
     )?;
     registry.register(
         CommandSpec::new(SET_DEVICES_ENABLED, "Deactivate All Devices")

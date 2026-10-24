@@ -627,6 +627,20 @@ impl Document {
         self.tracks.get(&id).map(|track| &**track)
     }
 
+    /// The tracks linked with this one, itself included, in display order:
+    /// empty for a track that isn't in a link group (the linked-track editing
+    /// spec, R1).
+    #[must_use]
+    pub fn linked_with(&self, id: TrackId) -> Vec<TrackId> {
+        let Some(group) = self.track(id).and_then(Track::link) else {
+            return Vec::new();
+        };
+        self.track_order()
+            .into_iter()
+            .filter(|t| self.track(*t).and_then(Track::link) == Some(group))
+            .collect()
+    }
+
     /// The tracks that aren't in a group, other than the returns and Main, in
     /// order.
     pub fn top_level(&self) -> impl ExactSizeIterator<Item = TrackId> + DoubleEndedIterator + '_ {

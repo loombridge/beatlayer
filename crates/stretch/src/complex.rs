@@ -70,7 +70,7 @@ const WIDEST_HALF: f64 = PRO_BLOCK_SECONDS / 2.0;
 /// song frame, at `sample_rate`: the audio a prime seeks with, so a locate or a
 /// launch starts at the right level (R7, R24).
 #[must_use]
-fn seek_reach(sample_rate: f64, rate: f64) -> usize {
+pub fn seek_reach(sample_rate: f64, rate: f64) -> usize {
     let half = sample_rate * WIDEST_HALF;
     ((half * (1.0 + rate.max(0.0))).ceil() as usize).max(1) + MARGIN
 }

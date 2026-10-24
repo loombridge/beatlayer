@@ -858,6 +858,7 @@ dependencies = [
  "bl-devices",
  "bl-dsp",
  "bl-media",
+ "bl-midi-tools",
  "bl-model",
  "bl-rt",
  "bl-stretch",
@@ -966,6 +967,7 @@ dependencies = [
  "bl-rt",
  "bl-test-ara",
  "bl-test-clap",
+ "bl-test-lv2",
  "bl-test-vst3",
  "block2 0.6.2",
  "clack-extensions",
@@ -1083,6 +1085,10 @@ dependencies = [
  "clack-extensions",
  "clack-plugin",
 ]
+
+[[package]]
+name = "bl-test-lv2"
+version = "0.2.0"
 
 [[package]]
 name = "bl-test-vst3"

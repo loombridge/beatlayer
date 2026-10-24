@@ -552,6 +552,28 @@ impl Shell {
                         .is_some_and(|held| held.take_lanes().len() > 0)
                 });
             }
+            // Spec: mpe R22. The MPE tab is for a MIDI clip: View ▸ Expression
+            // Editor is disabled while none shows.
+            ids::VIEW_CLIP_TAB if args["tab"].as_str() == Some("mpe") => {
+                return self
+                    .clip_view
+                    .shown_clip(self.editor.document(), &self.arrangement)
+                    .is_some();
+            }
+            // Spec: mpe R27, R29, R31. The tab's own keys work in the tab.
+            // Cmd-A takes the breakpoints only while an envelope has the
+            // keyboard, and selects the notes otherwise.
+            ids::VIEW_MPE_GRID | note_ids::MPE_ZOOM | note_ids::SELECT_EXPRESSION_BREAKPOINTS => {
+                let clip = self
+                    .clip_view
+                    .shown_clip(self.editor.document(), &self.arrangement);
+                return self.clip_view.tab() == ClipTab::Mpe
+                    && clip.is_some_and(|clip| {
+                        id != note_ids::SELECT_EXPRESSION_BREAKPOINTS
+                            || args.get("envelope").is_some()
+                            || self.clip_view.selected_breakpoints(clip).is_some()
+                    });
+            }
             // Zoom In and Zoom Out stop at the zoom's ends (interface-zoom
             // R3).
             ids::VIEW_ZOOM_IN | ids::VIEW_ZOOM_OUT => {

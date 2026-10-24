@@ -6734,6 +6734,42 @@ What `device.convert` returns.
 
 </details>
 
+### `CopiedClips`
+
+What copying clips between the views did.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `changes` | [`ChangeSet`](#changeset) | yes | What the edit changed in the set. |
+| `skipped` | integer, at least 0 | yes | How many clips weren't placed, because they would land on a track of another kind or past the last track. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What copying clips between the views did.",
+  "properties": {
+    "changes": {
+      "$ref": "#/$defs/ChangeSet",
+      "description": "What the edit changed in the set."
+    },
+    "skipped": {
+      "description": "How many clips weren't placed, because they would land on a track of another kind or past the last track.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "changes",
+    "skipped"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `CountArgs`
 
 The Count filter's controls in `clip_view.note_filters`.
@@ -9564,6 +9600,7 @@ What an edit did, and what's selected afterwards.
 | `time_selection` | [`TimeRange`](#timerange) or null | yes | The time selected afterwards, if any. |
 | `selected_tracks` | array of [`TrackId`](#trackid) | yes | The tracks selected afterwards. |
 | `undo_step` | boolean | yes | Whether the edit was recorded as an undo step: false when it changed nothing. |
+| `skipped` | integer, at least 0 | no | How many copied Session clips a paste didn't place, because they would land on a track of the other kind or past the last track (the second window spec, R20). |
 
 <details><summary>JSON Schema</summary>
 
@@ -9605,6 +9642,12 @@ What an edit did, and what's selected afterwards.
         "$ref": "#/$defs/TrackId"
       },
       "type": "array"
+    },
+    "skipped": {
+      "description": "How many copied Session clips a paste didn't place, because they would land on a track of the other kind or past the last track (the second window spec, R20).",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
     },
     "time_selection": {
       "anyOf": [
@@ -24369,6 +24412,44 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `SessionClipboardState`
+
+What `session.copy` and `session.cut` put on the clipboard.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clips` | integer, at least 0 | yes | How many slot clips it holds. |
+| `scenes` | integer, at least 0 | yes | How many scenes it holds. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `session.copy` and `session.cut` put on the clipboard.",
+  "properties": {
+    "clips": {
+      "description": "How many slot clips it holds.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "scenes": {
+      "description": "How many scenes it holds.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "clips",
+    "scenes"
+  ],
+  "type": "object"
 }
 ```
 

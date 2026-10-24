@@ -163,6 +163,7 @@ pub fn run(args: &Args, path: &Path) -> Result<(), String> {
                 | UiEvent::BeginGesture(_)
                 | UiEvent::BeginNamedGesture(_)
                 | UiEvent::EndGesture
+                | UiEvent::ClipDrag(_)
                 | UiEvent::Gesture { .. } => {}
             }
         }

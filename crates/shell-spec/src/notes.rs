@@ -22,11 +22,12 @@
 use crate::editing::EditResult;
 use crate::note_filters::{InvertSelectionArgs, NoteFilters, NoteFiltersArgs, NoteFiltersResult};
 use bl_commands::Context::{
-    ClipView, Global, LoopBrace, NoteEditor, NoteSelection as NoteSelectionContext, SampleEditor,
+    ClipView, Envelope, Global, LoopBrace, NoteEditor, NoteSelection as NoteSelectionContext,
+    SampleEditor,
 };
 use bl_commands::{Binding, CommandSpec, NoArgs, Permission, RegisterError, Registry};
 use bl_core::time::Ticks;
-use bl_model::{AutomationTarget, Breakpoint, ClipId, Expression, GroupKind};
+use bl_model::{AutomationTarget, Breakpoint, ClipId, Expression, GroupKind, MpeLane};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -54,6 +55,26 @@ pub const SET_VALUE: &str = "note.set_value";
 /// `note.set_expression`: replace one expression envelope of notes (Pitch,
 /// Slide or Pressure).
 pub const SET_EXPRESSION: &str = "note.set_expression";
+/// `note.add_expression_breakpoint`: add a breakpoint to notes' envelopes.
+pub const ADD_EXPRESSION_BREAKPOINT: &str = "note.add_expression_breakpoint";
+/// `note.move_expression_breakpoints`: move breakpoints in time and value.
+pub const MOVE_EXPRESSION_BREAKPOINTS: &str = "note.move_expression_breakpoints";
+/// `note.delete_expression_breakpoints`: delete breakpoints.
+pub const DELETE_EXPRESSION_BREAKPOINTS: &str = "note.delete_expression_breakpoints";
+/// `note.set_expression_curve`: bend the segment a breakpoint starts.
+pub const SET_EXPRESSION_CURVE: &str = "note.set_expression_curve";
+/// `note.scale_expression`: scale a value over the whole length of notes.
+pub const SCALE_EXPRESSION: &str = "note.scale_expression";
+/// `note.draw_expression`: draw an envelope freehand.
+pub const DRAW_EXPRESSION: &str = "note.draw_expression";
+/// `note.clear_expressions`: clear every envelope of notes.
+pub const CLEAR_EXPRESSIONS: &str = "note.clear_expressions";
+/// `clip_view.select_expression_breakpoints`: select breakpoints in the
+/// MPE tab.
+pub const SELECT_EXPRESSION_BREAKPOINTS: &str = "clip_view.select_expression_breakpoints";
+/// `clip_view.mpe_zoom`: bring the key rows of the Pitch values in the time
+/// selection into view in the MPE tab.
+pub const MPE_ZOOM: &str = "clip_view.mpe_zoom";
 /// `note.ramp_value`: spread evenly spaced values across notes.
 pub const RAMP_VALUE: &str = "note.ramp_value";
 /// `note.adjust_value`: change one value of notes by an amount.
@@ -119,6 +140,15 @@ pub const IDS: &[&str] = &[
     QUANTIZE_SETTINGS,
     SET_VALUE,
     SET_EXPRESSION,
+    ADD_EXPRESSION_BREAKPOINT,
+    MOVE_EXPRESSION_BREAKPOINTS,
+    DELETE_EXPRESSION_BREAKPOINTS,
+    SET_EXPRESSION_CURVE,
+    SCALE_EXPRESSION,
+    DRAW_EXPRESSION,
+    CLEAR_EXPRESSIONS,
+    SELECT_EXPRESSION_BREAKPOINTS,
+    MPE_ZOOM,
     RAMP_VALUE,
     ADJUST_VALUE,
     RANDOMIZE,
@@ -219,12 +249,13 @@ pub enum NoteSelection {
 }
 
 /// The Clip View's tabs (layout.md, L-CLIP-010): which editor it shows for
-/// the clip. The MPE tab comes with its own package.
+/// the clip.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 #[schemars(
-    description = "A tab of the Clip View: `notes` (the MIDI Note Editor) or `envelopes` (the \
-                   clip's envelopes)."
+    description = "A tab of the Clip View: `notes` (the MIDI Note Editor), `envelopes` (the \
+                   clip's envelopes) or `mpe` (the Expression Editor, a MIDI clip's per-note \
+                   Pitch, Slide and Pressure)."
 )]
 pub enum ClipTab {
     /// The MIDI Note Editor.
@@ -232,12 +263,15 @@ pub enum ClipTab {
     Notes,
     /// The clip's envelopes (WP-3.16).
     Envelopes,
+    /// The Expression Editor, the MPE tab (WP-6.18): a MIDI clip's per-note
+    /// Pitch, Slide and Pressure envelopes.
+    Mpe,
 }
 
 impl ClipTab {
     /// The tabs `view.clip_tab` cycles through, in the order the Clip View
     /// lists them.
-    pub const ALL: [Self; 2] = [Self::Notes, Self::Envelopes];
+    pub const ALL: [Self; 3] = [Self::Notes, Self::Envelopes, Self::Mpe];
 
     /// The tab after this one, going back to the first after the last.
     #[must_use]
@@ -371,6 +405,227 @@ pub struct SetExpressionArgs {
     /// from −1 to 1 for the segment starting there. An empty list clears
     /// the envelope.
     pub breakpoints: Vec<Breakpoint>,
+}
+
+/// A breakpoint of a note's expression envelope, named by the note and its
+/// position (Spec: mpe R32).
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(deny_unknown_fields)]
+pub struct BreakpointRef {
+    /// The note, by its place in the clip's notes in order (by start, then
+    /// pitch).
+    pub note: u32,
+    /// The breakpoint's position in ticks counted from the note's start.
+    pub at: Ticks,
+}
+
+/// Arguments of `note.add_expression_breakpoint`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AddExpressionBreakpointArgs {
+    /// The MIDI clip. Left out, the one the Clip View shows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<ClipId>,
+    /// The notes, by their place in the clip's notes in order. Left out, the
+    /// selected notes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<Vec<u32>>,
+    /// Which envelope: `pitch`, `slide` or `pressure`.
+    pub envelope: Expression,
+    /// The breakpoint's position in ticks counted from each note's start,
+    /// from 0 to the note's length.
+    pub at: Ticks,
+    /// The value in the envelope's range.
+    pub value: f64,
+    /// The bend of the segment starting there, from −1 to 1. Left out, a
+    /// breakpoint already there keeps its bend and a new one is straight.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bend: Option<f64>,
+}
+
+/// Arguments of `note.move_expression_breakpoints`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MoveExpressionBreakpointsArgs {
+    /// The MIDI clip. Left out, the one the Clip View shows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<ClipId>,
+    /// Which envelope: `pitch`, `slide` or `pressure`.
+    pub envelope: Expression,
+    /// The breakpoints to move. Left out, the breakpoints selected in the
+    /// MPE tab.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub breakpoints: Option<Vec<BreakpointRef>>,
+    /// How far to move them in time, in ticks; negative moves them earlier.
+    /// The move is held so that every breakpoint of a note stays inside it.
+    #[serde(default)]
+    pub time: Ticks,
+    /// How far to move them in value, in the envelope's units. The move is
+    /// held so that every breakpoint stays inside the envelope's range.
+    #[serde(default)]
+    pub value: f64,
+    /// A breakpoint moved past another in time takes that one's place and
+    /// removes it. With `fill`, a segment inside this stretch of the clip's
+    /// contents first gets breakpoints at the stretch's edges and moves
+    /// whole: every breakpoint of the named notes' envelopes inside the
+    /// stretch moves, and `breakpoints` only names the notes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fill: Option<TickRange>,
+}
+
+/// Arguments of `note.delete_expression_breakpoints`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DeleteExpressionBreakpointsArgs {
+    /// The MIDI clip. Left out, the one the Clip View shows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<ClipId>,
+    /// Which envelope: `pitch`, `slide` or `pressure`.
+    pub envelope: Expression,
+    /// The breakpoints to delete. Left out, the breakpoints selected in the
+    /// MPE tab.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub breakpoints: Option<Vec<BreakpointRef>>,
+}
+
+/// Arguments of `note.set_expression_curve`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetExpressionCurveArgs {
+    /// The MIDI clip. Left out, the one the Clip View shows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<ClipId>,
+    /// The note, by its place in the clip's notes in order.
+    pub note: u32,
+    /// Which envelope: `pitch`, `slide` or `pressure`.
+    pub envelope: Expression,
+    /// The position of the breakpoint the segment starts at.
+    pub at: Ticks,
+    /// The segment's bend, from −1 to 1; 0 is straight.
+    pub bend: f64,
+}
+
+/// Arguments of `note.scale_expression`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ScaleExpressionArgs {
+    /// The MIDI clip. Left out, the one the Clip View shows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<ClipId>,
+    /// The notes, by their place in the clip's notes in order. Left out, the
+    /// selected notes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<Vec<u32>>,
+    /// Which value: `slide`, `pressure`, `velocity` or `release_velocity`
+    /// (`pitch_bend` doesn't scale).
+    pub lane: MpeLane,
+    /// What every value is multiplied by, 0 or more; values stay inside the
+    /// range.
+    pub factor: f64,
+}
+
+/// One step of a freehand drawing: a value held for a stretch.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DrawStep {
+    /// Where the step starts, in ticks from the beginning of the clip's
+    /// contents.
+    pub at: Ticks,
+    /// How long it lasts, in ticks, 1 or more.
+    pub length: Ticks,
+    /// The value it holds.
+    pub value: f64,
+}
+
+/// Arguments of `note.draw_expression`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DrawExpressionArgs {
+    /// The MIDI clip. Left out, the one the Clip View shows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<ClipId>,
+    /// The notes, by their place in the clip's notes in order. Left out, the
+    /// selected notes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<Vec<u32>>,
+    /// Which envelope: `pitch`, `slide` or `pressure`.
+    pub envelope: Expression,
+    /// The steps drawn, in order of `at`. In each note, the stretch from the
+    /// first step's start to the last step's end gets the steps in place of
+    /// its breakpoints.
+    pub steps: Vec<DrawStep>,
+    /// For `pitch`: the steps' values are pitches in semitones above key 0
+    /// (the note area's rows), and each note takes the value less its own
+    /// key. Otherwise they are values in the envelope's range.
+    #[serde(default)]
+    pub absolute: bool,
+}
+
+/// Arguments of `note.clear_expressions`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ClearExpressionsArgs {
+    /// The MIDI clip. Left out, the one the Clip View shows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<ClipId>,
+    /// The notes, by their place in the clip's notes in order. Left out, the
+    /// selected notes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<Vec<u32>>,
+}
+
+/// Arguments of `clip_view.select_expression_breakpoints`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SelectExpressionBreakpointsArgs {
+    /// The MIDI clip. Left out, the one the Clip View shows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<ClipId>,
+    /// Which envelope the breakpoints are on, and the envelope that has the
+    /// keyboard afterwards. Left out, the one that has it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub envelope: Option<Expression>,
+    /// The breakpoints to select. Left out with `all` false, none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub breakpoints: Option<Vec<BreakpointRef>>,
+    /// `replace` them (the default) or `toggle` each in or out.
+    #[serde(default)]
+    pub mode: NoteSelectMode,
+    /// Select every breakpoint of the envelope in the selected notes, as
+    /// Cmd-A does.
+    #[serde(default)]
+    pub all: bool,
+}
+
+/// The MPE tab's selection and lanes, as `view.state` reports them (Spec:
+/// mpe R23, R25).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct MpeTabState {
+    /// The lanes whose selector toggle is on, in lane order.
+    pub toggled: Vec<MpeLane>,
+    /// Whether the triangle has hidden the lanes and their toggles.
+    pub hidden: bool,
+    /// The lanes drawn now, from the top, with their heights in points:
+    /// the Pitch Bend lane first on a Drum Rack's track.
+    pub lanes: Vec<MpeLaneState>,
+    /// Whether the tab's own grid is on for the clip shown.
+    pub grid: bool,
+    /// The envelope that has the keyboard, if a breakpoint was selected.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub envelope: Option<Expression>,
+    /// The selected breakpoints of that envelope.
+    pub breakpoints: Vec<BreakpointRef>,
+}
+
+/// A lane drawn in the MPE tab.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct MpeLaneState {
+    /// Which lane.
+    pub lane: MpeLane,
+    /// How tall it is, in points.
+    pub height: f32,
 }
 
 /// Arguments of `note.ramp_value`.
@@ -1154,6 +1409,9 @@ pub struct ClipViewState {
     /// `clip.select_envelope_breakpoint` sets it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub envelope_breakpoint: Option<Ticks>,
+    /// The MPE tab's lanes, grid and selected breakpoints (WP-6.18).
+    #[serde(default)]
+    pub mpe: MpeTabState,
 }
 
 /// Arguments of `clip_view.foreground`.
@@ -1392,6 +1650,117 @@ fn specs() -> Vec<CommandSpec> {
              the notes stay selected. The clip query's notes read each envelope back.",
         )
         .args::<SetExpressionArgs>(),
+        edit(
+            ADD_EXPRESSION_BREAKPOINT,
+            "Add Expression Breakpoint",
+            Permission::Edit,
+            "Adds a breakpoint at `at` (ticks counted from each note's start, from 0 to its \
+             length) with `value` to the `envelope` (`pitch`, `slide` or `pressure`) of notes \
+             (`notes`, or the selected notes), as clicking a segment in the Clip View's MPE \
+             tab does. A breakpoint already at `at` takes the value, and `bend` if given. \
+             Nothing changes if the value, the position or the bend is out of range for any \
+             of the notes. One undo step, Add Expression Breakpoint. The clip query's notes \
+             read the envelope back.",
+        )
+        .args::<AddExpressionBreakpointArgs>(),
+        edit(
+            MOVE_EXPRESSION_BREAKPOINTS,
+            "Move Expression Breakpoints",
+            Permission::Edit,
+            "Moves breakpoints of one `envelope` in time by `time` ticks and in value by \
+             `value`, as dragging one in the MPE tab does. They are named in `breakpoints` \
+             (a note's place and the breakpoint's position in ticks from its start), or are \
+             the breakpoints selected in the tab. The move is held so every breakpoint of a \
+             note stays inside the note and inside the envelope's range, and a breakpoint \
+             that is not moved and that a moved one passes or lands on is removed. With \
+             `fill`, a stretch of the clip's contents, the breakpoints of the named notes \
+             inside it move whole, after breakpoints are added at its edges. One undo step, \
+             Move Expression Breakpoints; a drag runs this once per frame, measured from \
+             where it began, in one transaction.",
+        )
+        .args::<MoveExpressionBreakpointsArgs>(),
+        edit(
+            DELETE_EXPRESSION_BREAKPOINTS,
+            "Delete Expression Breakpoints",
+            Permission::Destructive,
+            "Deletes breakpoints of one `envelope`, named in `breakpoints` (a note's place and \
+             the breakpoint's position in ticks from its start) or selected in the MPE tab, \
+             as clicking one does. One undo step, Delete Expression Breakpoints. The clip \
+             query's notes read the envelopes back.",
+        )
+        .args::<DeleteExpressionBreakpointsArgs>(),
+        edit(
+            SET_EXPRESSION_CURVE,
+            "Set Expression Curve",
+            Permission::Edit,
+            "Bends the segment that starts at the breakpoint at `at` in a note's `envelope`, \
+             by `bend` from −1 to 1 (0 is straight), as an Option-drag on a segment does; a \
+             double-click with Option sets 0. Nothing changes if there is no such breakpoint. \
+             One undo step, Set Expression Curve.",
+        )
+        .args::<SetExpressionCurveArgs>(),
+        edit(
+            SCALE_EXPRESSION,
+            "Scale Expression",
+            Permission::Edit,
+            "Multiplies a value of notes (`notes`, or the selected notes) by `factor` over \
+             the note's whole length, as dragging up or down outside a note over its \
+             highlighted lane in the MPE tab does: `lane` is `slide` or `pressure` (every \
+             breakpoint's value, 0 to 127), or `velocity` or `release_velocity` (1 to 127). \
+             Values scale in proportion from 0 and stay in the range. One undo step, Scale \
+             Expression.",
+        )
+        .args::<ScaleExpressionArgs>(),
+        edit(
+            DRAW_EXPRESSION,
+            "Draw Expression",
+            Permission::Edit,
+            "Draws an `envelope` freehand over notes (`notes`, or the selected notes) as \
+             Draw Mode does in the MPE tab: in each note, the stretch from the first step's \
+             start to the last step's end loses its breakpoints and gets the `steps`, each a \
+             value held for `length` ticks (a breakpoint at its start and one tick before the \
+             next). With `absolute`, a pitch step is in semitones above key 0 and each note \
+             takes it less its own key. Values outside the range are held in it. One undo \
+             step, Draw Expression; a drag runs this once per frame in one transaction.",
+        )
+        .args::<DrawExpressionArgs>(),
+        edit(
+            CLEAR_EXPRESSIONS,
+            "Clear All Envelopes",
+            Permission::Destructive,
+            "Clears the Pitch, Slide and Pressure envelopes of notes (`notes`, or the \
+             selected notes), as Clear All Envelopes in the MPE tab's context menus does. One \
+             undo step, Clear All Envelopes. The clip query's notes read the envelopes back.",
+        )
+        .args::<ClearExpressionsArgs>(),
+        CommandSpec::new(SELECT_EXPRESSION_BREAKPOINTS, "Select Expression Breakpoints")
+            .description(
+                "Selects breakpoints of one `envelope` in the Clip View's MPE tab, as a \
+                 marquee, a click on a segment or Cmd-A does: the `breakpoints` named (a \
+                 note's place and the breakpoint's position in ticks from its start), \
+                 replacing the selection or, with `mode` `toggle`, each in or out; or with \
+                 `all`, every breakpoint of the envelope in the selected notes (Cmd-A with an \
+                 envelope focused). The envelope becomes the one that has the keyboard. \
+                 Selecting is never an undo step and changes nothing in the set. The result \
+                 is the Clip View's state, whose `mpe` lists the selection.",
+            )
+            .permission(Permission::Read)
+            .contexts([Envelope])
+            .binding(Binding::new("S-NOTE-053").arg("all", true))
+            .args::<SelectExpressionBreakpointsArgs>()
+            .result::<ClipViewState>(),
+        CommandSpec::new(MPE_ZOOM, "Zoom to Expression")
+            .description(
+                "Scrolls the MPE tab's note area to the key rows that the Pitch envelopes of \
+                 the selected notes reach inside the time selection (Z). The editor has no \
+                 time zoom yet, so only the key rows move. Changes only the view, so it is \
+                 no undo step. The result is the Clip View's state.",
+            )
+            .permission(Permission::Read)
+            .contexts([NoteEditor])
+            .binding("S-NOTE-023")
+            .args::<NoArgs>()
+            .result::<ClipViewState>(),
         edit(
             RAMP_VALUE,
             "Ramp Note Values",

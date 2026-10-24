@@ -443,6 +443,13 @@ impl Recipe {
                 session: self.id_skip.is_multiple_of(3),
                 second_window: self.id_skip.is_multiple_of(2),
             },
+            // WP-6.18: the MPE tab's lanes save beside the song.
+            mpe_view: bl_model::MpeView {
+                hidden: self.id_skip.is_multiple_of(5),
+                shown: [bl_model::MpeLane::Slide, bl_model::MpeLane::Velocity].into(),
+                heights: [(bl_model::MpeLane::Slide, 60.0)].into(),
+                ..bl_model::MpeView::default()
+            },
             // WP-3.2: the global launch quantisation and its switch save
             // beside the song.
             launch: bl_model::LaunchSettings {

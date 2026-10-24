@@ -43,11 +43,11 @@ use crate::clip_view::{self, ClipView};
 use crate::commands::{
     self as ids, AutomationRecordModeArgs, ClipEnvelopeArgs, ClipTabArgs, CollectFilesArgs,
     DefaultLaunchModeArgs, DefaultLaunchQuantizationArgs, DefaultSetArgs, DefaultWarpModeArgs,
-    FileReport, FoldNotesArgs, LaneArgs, LanesArgs, LoopWarpShortSamplesArgs, PathArgs,
-    RecordSessionAutomationInArgs, SampleEditorArgs, SampleEditorResult, SaveAsArgs, SetResult,
-    SettingsArgs, SwitchArgs, SwitchResult, TemplateArgs, TemporaryFolderArgs,
-    TemporaryFolderResult, TestToneArgs, TestToneState, ThemeArgs, UserLibraryArgs,
-    UserLibraryResult, ViewResult, ViewState, ZoomArgs,
+    FileReport, FoldNotesArgs, LaneArgs, LanesArgs, LoopWarpShortSamplesArgs, MpeGridArgs,
+    MpeLanesArgs, PathArgs, RecordSessionAutomationInArgs, SampleEditorArgs, SampleEditorResult,
+    SaveAsArgs, SetResult, SettingsArgs, SwitchArgs, SwitchResult, TemplateArgs,
+    TemporaryFolderArgs, TemporaryFolderResult, TestToneArgs, TestToneState, ThemeArgs,
+    UserLibraryArgs, UserLibraryResult, ViewResult, ViewState, ZoomArgs,
 };
 use crate::commands::{AppearanceArgs, BrightnessArgs, HueArgs, PercentArgs, ToneArgs};
 use crate::detail::DetailArea;
@@ -1523,6 +1523,7 @@ impl Shell {
         self.devices
             .set_multisampler_views(self.store.multisampler_views());
         self.clip_view.set_folds(self.store.folds());
+        self.clip_view.restore_mpe(self.store.mpe_view());
         self.clip_view.restore_midi_tools(&self.store.midi_tools());
         for (hash, path, size) in self.store.media_files() {
             self.media
@@ -6640,6 +6641,18 @@ impl Shell {
                             // is the Sample Editor.
                             contexts.push(Context::SampleEditor);
                         } else {
+                            // Spec: mpe R29. In the MPE tab, an envelope with
+                            // the keyboard takes Cmd-A for its breakpoints.
+                            if self.clip_view.tab() == ClipTab::Mpe
+                                && self
+                                    .clip_view
+                                    .shown_clip(self.editor.document(), &self.arrangement)
+                                    .is_some_and(|clip| {
+                                        self.clip_view.selected_breakpoints(clip).is_some()
+                                    })
+                            {
+                                contexts.push(Context::Envelope);
+                            }
                             contexts.push(Context::NoteEditor);
                             if self
                                 .clip_view
@@ -7251,6 +7264,22 @@ impl Shell {
                     doc.track(*track)
                         .is_some_and(|held| held.take_lanes().len() > 0)
                 });
+            }
+            // Spec: mpe R22. The MPE tab is for a MIDI clip: View ▸ Expression
+            // Editor is disabled while none shows.
+            ids::VIEW_CLIP_TAB if args["tab"].as_str() == Some("mpe") => {
+                return self
+                    .clip_view
+                    .shown_clip(self.editor.document(), &self.arrangement)
+                    .is_some();
+            }
+            // Spec: mpe R27, R29, R31. The tab's own keys work in the tab.
+            ids::VIEW_MPE_GRID | note_ids::MPE_ZOOM | note_ids::SELECT_EXPRESSION_BREAKPOINTS => {
+                return self.clip_view.tab() == ClipTab::Mpe
+                    && self
+                        .clip_view
+                        .shown_clip(self.editor.document(), &self.arrangement)
+                        .is_some();
             }
             // Zoom In and Zoom Out stop at the zoom's ends (interface-zoom
             // R3).
@@ -10184,6 +10213,7 @@ impl Shell {
                 self.devices
                     .set_multisampler_views(bl_model::MultisamplerViews::new());
                 self.clip_view.set_folds(bl_model::ClipFolds::new());
+                self.clip_view.restore_mpe(bl_model::MpeView::default());
                 self.clip_view
                     .restore_midi_tools(&bl_project::midi_tools::MidiToolSettings::default());
                 self.set_path = None;
@@ -10220,6 +10250,7 @@ impl Shell {
                     .set_multisampler_views(self.store.multisampler_views());
                 // Spec: piano-roll. Folded note editors too.
                 self.clip_view.set_folds(self.store.folds());
+                self.clip_view.restore_mpe(self.store.mpe_view());
                 self.clip_view.restore_midi_tools(&self.store.midi_tools());
                 self.saved = snapshot(&editor);
                 self.set_replaced();
@@ -10282,6 +10313,7 @@ impl Shell {
                 self.store
                     .set_multisampler_views(self.devices.multisampler_views().clone());
                 self.store.set_folds(self.clip_view.folds().clone());
+                self.store.set_mpe_view(self.clip_view.mpe().clone());
                 self.store
                     .set_midi_tools(self.clip_view.midi_tools().saved());
                 let warnings = self.store.save(&path, &self.editor).map_err(failed)?;
@@ -10304,6 +10336,7 @@ impl Shell {
                 self.store
                     .set_multisampler_views(self.devices.multisampler_views().clone());
                 self.store.set_folds(self.clip_view.folds().clone());
+                self.store.set_mpe_view(self.clip_view.mpe().clone());
                 self.store
                     .set_midi_tools(self.clip_view.midi_tools().saved());
                 self.store.set_temporary_folder(self.temporary_folder());
@@ -10460,6 +10493,7 @@ impl Shell {
                 self.store
                     .set_multisampler_views(self.devices.multisampler_views().clone());
                 self.store.set_folds(self.clip_view.folds().clone());
+                self.store.set_mpe_view(self.clip_view.mpe().clone());
                 self.store
                     .set_midi_tools(self.clip_view.midi_tools().saved());
                 let files = self
@@ -10681,8 +10715,20 @@ impl Shell {
             ids::VIEW_CLIP_TAB => {
                 // Spec: piano-roll R1; S-CLIPMODE-001 to 004. View state only.
                 let ClipTabArgs { tab } = Self::args(id, args)?;
-                self.clip_view
-                    .set_tab(tab.unwrap_or_else(|| self.clip_view.tab().next()));
+                // Spec: mpe R22. An audio clip has no MPE tab: it cycles
+                // through the other two.
+                let audio = self
+                    .clip_view
+                    .shown_audio_clip(self.editor.document(), &self.arrangement)
+                    .is_some();
+                if audio && tab == Some(ClipTab::Mpe) {
+                    return Err(unavailable("an audio clip has no MPE tab"));
+                }
+                let next = match self.clip_view.tab().next() {
+                    ClipTab::Mpe if audio => ClipTab::Notes,
+                    next => next,
+                };
+                self.clip_view.set_tab(tab.unwrap_or(next));
                 Ok(to_value(
                     &self
                         .clip_view
@@ -10767,6 +10813,85 @@ impl Shell {
                 if let Some(on) = all {
                     self.clip_view.show_all_lanes(on);
                 }
+                Ok(to_value(
+                    &self
+                        .clip_view
+                        .state(self.editor.document(), &self.arrangement),
+                ))
+            }
+            ids::VIEW_MPE_LANES => {
+                // Spec: mpe R23. View state saved with the set; no undo step.
+                let MpeLanesArgs {
+                    lane,
+                    show,
+                    swap,
+                    height,
+                    visible,
+                    all,
+                } = Self::args(id, args)?;
+                if lane.is_none() && (show.is_some() || swap.is_some() || height.is_some()) {
+                    return Err(ShellError::InvalidArgs {
+                        command: id.to_owned(),
+                        message: "`show`, `swap` and `height` need a `lane`".to_owned(),
+                    });
+                }
+                if height.is_some_and(|h| !(8.0..=400.0).contains(&h)) {
+                    return Err(ShellError::InvalidArgs {
+                        command: id.to_owned(),
+                        message: "`height` must be from 8 to 400 points".to_owned(),
+                    });
+                }
+                if lane == Some(bl_model::MpeLane::PitchBend) && (show.is_some() || swap.is_some())
+                {
+                    return Err(ShellError::InvalidArgs {
+                        command: id.to_owned(),
+                        message: "the Pitch Bend lane has no toggle: it shows first on a Drum \
+                                  Rack's track"
+                            .to_owned(),
+                    });
+                }
+                let mpe = self.clip_view.mpe_mut();
+                if let Some(lane) = lane {
+                    if let Some(height) = height {
+                        mpe.heights.insert(lane, height);
+                    }
+                    if swap == Some(true) {
+                        mpe.swap(lane);
+                    } else if let Some(on) = show {
+                        mpe.show(lane, on);
+                    } else if height.is_none() {
+                        let on = !mpe.shown.contains(&lane);
+                        mpe.show(lane, on);
+                    }
+                }
+                if let Some(visible) = visible {
+                    mpe.hidden = !visible;
+                }
+                if all == Some(true) {
+                    mpe.show_all();
+                }
+                Ok(to_value(
+                    &self
+                        .clip_view
+                        .state(self.editor.document(), &self.arrangement),
+                ))
+            }
+            ids::VIEW_MPE_GRID => {
+                // Spec: mpe R27. The tab's own grid, saved with the set.
+                let MpeGridArgs { clip, on } = Self::args(id, args)?;
+                let doc = self.editor.document();
+                let clip = clip
+                    .or_else(|| self.clip_view.shown_clip(doc, &self.arrangement))
+                    .ok_or_else(|| unavailable("no MIDI clip is shown in the Clip View"))?;
+                if !doc
+                    .clip(clip)
+                    .is_some_and(|c| matches!(c.data, ClipData::Midi(_)))
+                {
+                    return Err(unavailable("the clip isn't a MIDI clip"));
+                }
+                let mpe = self.clip_view.mpe_mut();
+                let on = on.unwrap_or(!mpe.grid_on(clip));
+                mpe.set_grid(clip, on);
                 Ok(to_value(
                     &self
                         .clip_view

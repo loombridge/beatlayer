@@ -21,28 +21,31 @@ use std::collections::{BTreeMap, BTreeSet};
 use bl_core::time::{Ticks, TimeSignature, TimeSignatureMap};
 use bl_model::note_ops::{self, MOST_PARTS, Mapping};
 use bl_model::{
-    AutomationTarget, ClipData, ClipFolds, ClipId, Command, Document, Editor, GroupKind, MidiData,
-    Note, NoteGroup,
+    AutomationTarget, ClipData, ClipFolds, ClipId, Command, Document, Editor, Expression,
+    GroupKind, MidiData, MpeView, Note, NoteGroup,
 };
 use bl_shell_spec::editing::{Position, SplitArgs};
 use bl_shell_spec::note_filters::{
     InvertSelectionArgs, NoteFilter, NoteFilters, NoteFiltersArgs, NoteFiltersResult,
 };
 use bl_shell_spec::notes::{
-    self as ids, AddNoteArgs, AdjustValueArgs, ChopNotesArgs, ChopStep, ClipEdit, ClipNotes,
-    ClipTab, ClipViewState, CopyNotesArgs, DeactivateArgs, DeleteNotesArgs, DuplicateLoopArgs,
-    DuplicateNotesArgs, FitToTimeArgs, FocusModeArgs, ForegroundArgs, GroupNotesArgs, HeldKey,
-    JoinNotesArgs, MoveNotesArgs, NoteClipboardState, NoteEditResult, NoteField, NoteSelectMode,
-    NoteSelection, PasteNotesArgs, QuantizeNotesArgs, QuantizeSettings, QuantizeSettingsArgs,
-    QuantizeTarget, RampValueArgs, RandomizeAmounts, RandomizeArgs, ResizeNotesArgs,
-    SelectLoopBarsArgs, SelectNotesArgs, SetExpressionArgs, SetValueArgs, SplitNotesArgs,
-    StepRecordArgs, StepRecordResult, StretchNotesArgs, UngroupNotesArgs,
+    self as ids, AddNoteArgs, AdjustValueArgs, BreakpointRef, ChopNotesArgs, ChopStep, ClipEdit,
+    ClipNotes, ClipTab, ClipViewState, CopyNotesArgs, DeactivateArgs, DeleteNotesArgs,
+    DuplicateLoopArgs, DuplicateNotesArgs, FitToTimeArgs, FocusModeArgs, ForegroundArgs,
+    GroupNotesArgs, HeldKey, JoinNotesArgs, MoveNotesArgs, MpeLaneState, MpeTabState,
+    NoteClipboardState, NoteEditResult, NoteField, NoteSelectMode, NoteSelection, PasteNotesArgs,
+    QuantizeNotesArgs, QuantizeSettings, QuantizeSettingsArgs, QuantizeTarget, RampValueArgs,
+    RandomizeAmounts, RandomizeArgs, ResizeNotesArgs, SelectLoopBarsArgs, SelectNotesArgs,
+    SetExpressionArgs, SetValueArgs, SplitNotesArgs, StepRecordArgs, StepRecordResult,
+    StretchNotesArgs, UngroupNotesArgs,
 };
 use bl_shell_spec::sample_editor as sample_ids;
 use bl_shell_spec::sample_editor::{SelectTimeArgs, SetInsertMarkerArgs};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
+
+mod mpe;
 
 use crate::arrangement::ArrangementView;
 use crate::arrangement::editing::{EditFailure, transaction};
@@ -584,6 +587,14 @@ pub struct ClipView {
     quantize: QuantizeSettings,
     /// The tab the Clip View shows (L-CLIP-010).
     tab: ClipTab,
+    /// The MPE tab's lanes, their heights and the clips with its grid on
+    /// (Spec: mpe R23, R27). Saved with the set.
+    mpe: MpeView,
+    /// The breakpoints selected in the MPE tab (Spec: mpe R26, R29).
+    breakpoints: Option<BreakpointSelection>,
+    /// The latest Z in the MPE tab (Spec: mpe R31), which the editor scrolls
+    /// to once.
+    mpe_zoom: Option<MpeZoom>,
     /// The parameter whose envelope the Envelopes tab shows.
     envelope: Option<AutomationTarget>,
     /// Find and Select Notes: the filter bar and the filters' settings,
@@ -614,6 +625,30 @@ pub struct ClipView {
     /// start of each, in `stepped_clip` (Spec: step-recording R5, R6).
     stepped_clip: Option<ClipId>,
     stepped: Vec<(u8, Ticks)>,
+}
+
+/// The breakpoints selected in the MPE tab: the clip, the envelope that has
+/// the keyboard, and the breakpoints on it.
+#[derive(Clone, Debug, PartialEq)]
+struct BreakpointSelection {
+    clip: ClipId,
+    envelope: Expression,
+    refs: BTreeSet<BreakpointRef>,
+}
+
+/// A request to scroll the MPE tab's note area to some key rows (Spec: mpe
+/// R31): the keys it reaches, counted in semitones above key 0, and a serial
+/// the editor compares to see that it is new.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MpeZoom {
+    /// The clip the request is for.
+    pub clip: ClipId,
+    /// The lowest key row to show, fractional.
+    pub low: f64,
+    /// The highest key row to show, fractional.
+    pub high: f64,
+    /// Counts the requests, so a second Z on the same rows scrolls again.
+    pub serial: u64,
 }
 
 impl ClipView {
@@ -738,6 +773,79 @@ impl ClipView {
         } else {
             self.folds.remove(&clip);
         }
+    }
+
+    /// The MPE tab's lanes and grids.
+    #[must_use]
+    pub fn mpe(&self) -> &MpeView {
+        &self.mpe
+    }
+
+    /// The MPE tab's lanes and grids, to change.
+    pub fn mpe_mut(&mut self) -> &mut MpeView {
+        &mut self.mpe
+    }
+
+    /// Replaces the MPE tab's lanes and grids, as opening a set does.
+    pub fn restore_mpe(&mut self, mpe: MpeView) {
+        self.mpe = mpe;
+    }
+
+    /// The envelope that has the keyboard in `clip`'s MPE tab and the
+    /// breakpoints selected on it, in the order of their notes and positions.
+    /// Those of a note that isn't selected don't count.
+    #[must_use]
+    pub fn selected_breakpoints(&self, clip: ClipId) -> Option<(Expression, Vec<BreakpointRef>)> {
+        let selection = self.breakpoints.as_ref().filter(|b| b.clip == clip)?;
+        let notes = self.selection_of(clip);
+        Some((
+            selection.envelope,
+            selection
+                .refs
+                .iter()
+                .filter(|point| notes.contains(&point.note))
+                .copied()
+                .collect(),
+        ))
+    }
+
+    /// Selects breakpoints on `envelope` in `clip`'s MPE tab, which gives that
+    /// envelope the keyboard; none leaves it with the keyboard and nothing
+    /// selected.
+    pub fn select_breakpoints(
+        &mut self,
+        clip: ClipId,
+        envelope: Expression,
+        refs: BTreeSet<BreakpointRef>,
+    ) {
+        self.breakpoints = Some(BreakpointSelection {
+            clip,
+            envelope,
+            refs,
+        });
+    }
+
+    /// Lets go of the envelope that has the keyboard and its selection.
+    pub fn clear_breakpoints(&mut self) {
+        self.breakpoints = None;
+    }
+
+    /// The latest request to scroll the MPE tab's note area (Z).
+    #[must_use]
+    pub fn mpe_zoom(&self) -> Option<MpeZoom> {
+        self.mpe_zoom
+    }
+
+    /// Asks the MPE tab's note area to scroll to the key rows from `low` to
+    /// `high`.
+    pub fn zoom_mpe(&mut self, clip: ClipId, low: f64, high: f64) {
+        let serial = self.mpe_zoom.map_or(1, |zoom| zoom.serial + 1);
+        self.mpe_zoom = Some(MpeZoom {
+            clip,
+            low,
+            high,
+            serial,
+        });
     }
 
     /// Records whether the Clip View shows: the detail area decides, and
@@ -1379,6 +1487,7 @@ impl ClipView {
             randomize: self.amounts,
             folded: clip.is_some_and(|clip| self.is_folded(clip)),
             tab: self.tab,
+            mpe: self.mpe_state(doc, clip),
             preview: self.preview,
             envelope: self.envelope,
             filters: self.filters.clone(),
@@ -1391,6 +1500,35 @@ impl ClipView {
                     Some(*selected) == any_shown && Some(*target) == self.envelope
                 })
                 .map(|(_, _, at)| at),
+        }
+    }
+
+    /// The MPE tab's lanes and selection for the clip it shows.
+    fn mpe_state(&self, doc: &Document, clip: Option<ClipId>) -> MpeTabState {
+        let drum = clip
+            .and_then(|clip| doc.clip_track(clip))
+            .and_then(|track| doc.track(track))
+            .is_some_and(|track| track.holds_drum_rack());
+        let (envelope, breakpoints) = clip
+            .and_then(|clip| self.selected_breakpoints(clip))
+            .map_or((None, Vec::new()), |(envelope, refs)| {
+                (Some(envelope), refs)
+            });
+        MpeTabState {
+            toggled: self.mpe.shown.iter().copied().collect(),
+            hidden: self.mpe.hidden,
+            lanes: self
+                .mpe
+                .lanes(drum)
+                .into_iter()
+                .map(|lane| MpeLaneState {
+                    lane,
+                    height: self.mpe.height(lane),
+                })
+                .collect(),
+            grid: clip.is_some_and(|clip| self.mpe.grid_on(clip)),
+            envelope,
+            breakpoints,
         }
     }
 
@@ -1408,6 +1546,8 @@ impl ClipView {
         self.switch_filters_off();
         self.envelope_marker = None;
         self.envelope_breakpoint = None;
+        self.breakpoints = None;
+        self.mpe_zoom = None;
         self.stepped.clear();
         self.sample = SampleView::default();
         self.tools.close();
@@ -1801,6 +1941,13 @@ pub fn label(id: &str) -> &'static str {
         ids::QUANTIZE_NOTES => "Quantize notes",
         ids::SET_VALUE => "Set note values",
         ids::SET_EXPRESSION => "Set Note Expression",
+        ids::ADD_EXPRESSION_BREAKPOINT => "Add Expression Breakpoint",
+        ids::MOVE_EXPRESSION_BREAKPOINTS => "Move Expression Breakpoints",
+        ids::DELETE_EXPRESSION_BREAKPOINTS => "Delete Expression Breakpoints",
+        ids::SET_EXPRESSION_CURVE => "Set Expression Curve",
+        ids::SCALE_EXPRESSION => "Scale Expression",
+        ids::DRAW_EXPRESSION => "Draw Expression",
+        ids::CLEAR_EXPRESSIONS => "Clear All Envelopes",
         ids::RAMP_VALUE => "Ramp note values",
         ids::SPLIT => "Split Notes",
         ids::CHOP => "Chop Notes",
@@ -2091,6 +2238,9 @@ pub fn run(
     let doc = &before;
     if let Some(targets) = edit_targets(id, &args, doc, view, arrangement)? {
         return run_across(id, &args, targets, editor, view, arrangement);
+    }
+    if mpe::handles(id) {
+        return mpe::run(id, args, doc, editor, view, arrangement);
     }
     match id {
         ids::SELECT_NOTES => {

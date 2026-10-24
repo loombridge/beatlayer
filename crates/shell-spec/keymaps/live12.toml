@@ -1454,7 +1454,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Option+Shift+3"]
 win = ["Alt+Shift+3"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "view.clip_tab", contexts = ["clip-view"], args = { tab = "mpe" } },
+]
 
 [[shortcut]]
 id = "S-SAMPLE-001"
@@ -1919,7 +1922,10 @@ trigger = "press"
 milestone = "M2"
 mac = ["Z"]
 win = ["Z"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "clip_view.mpe_zoom", contexts = ["note-editor"] },
+]
 
 [[shortcut]]
 id = "S-NOTE-024"
@@ -2168,6 +2174,7 @@ win = ["Ctrl+4"]
 status = "bound"
 commands = [
   { id = "arrangement.snap_to_grid", contexts = ["arrangement"] },
+  { id = "view.mpe_grid", contexts = ["note-editor"] },
 ]
 
 [[shortcut]]
@@ -4806,7 +4813,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+A"]
 win = ["Ctrl+A"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "clip_view.select_expression_breakpoints", contexts = ["envelope"], args = { all = true } },
+]
 
 [[shortcut]]
 id = "S-LOOP-012"

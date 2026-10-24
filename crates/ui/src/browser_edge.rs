@@ -62,9 +62,10 @@ impl BrowserEdge {
             ),
             // Hidden by this drag: the edge waits at the window's left
             // until the pointer brings the browser back.
-            (None, Some(drag)) => {
-                Rect::from_min_max(pos2(drag.left - MARGIN, drag.top), pos2(drag.left, drag.bottom))
-            }
+            (None, Some(drag)) => Rect::from_min_max(
+                pos2(drag.left - MARGIN, drag.top),
+                pos2(drag.left, drag.bottom),
+            ),
             (None, None) => return,
         };
         let id = Id::new("browser-edge");

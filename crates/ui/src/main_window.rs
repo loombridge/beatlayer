@@ -548,11 +548,12 @@ impl MainWindowUi {
                     tag_editor = shell.browser_view().tag_editor().then_some(browser);
                 }
             }
-            self.main_view(ui, shell, theme, layout.main_view, &mut events);
             // Spec: browser R29. The browser's right edge, in the gap
-            // between it and the main view.
+            // between it and the main view, under the main view's own
+            // controls where they reach into the gap.
             self.browser_edge
                 .show(ui, theme, shell, &layout, &mut events);
+            self.main_view(ui, shell, theme, layout.main_view, &mut events);
             // Spec: browser-tags R10. The Tag Editor opens beside the
             // content pane (L-BRW-013), over the main view, so it is drawn
             // after it.

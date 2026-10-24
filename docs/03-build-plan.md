@@ -692,7 +692,7 @@ Total to 1.0: 293 packages planned in Phases 0 to 7, and about 95 estimated in P
 | 6.9 | done | 23 October 2026 | [#353](https://github.com/loombridge/beatlayer/pull/353); a set holds one tuning read from a `.scl` file (or an `.ascl` file read as one), with its reference pitch, note range, per-track Bypass Tuning and Retune Set On Loading, and Drift, Simpler, Sampler and Drum Sampler play its keys within 0.1 cent at any block size; the `.ascl` extras and `tuning.save` wait on the decision about the ASCL specification |
 | 6.9b | todo |  |  |
 | 6.10 | todo |  |  |
-| 6.11 | todo |  |  |
+| 6.11 | done | 24 October 2026 | [#355](https://github.com/loombridge/beatlayer/pull/355); the MIDI Tools framework: the Transform and Generate panels in the Clip View, choosing a tool per track, what a tool acts on, Auto, the Apply button and Cmd+Enter as one undo step named for the tool, re-running from the kept input as parameters move, seeds, settings saved with the set, and the tool interface the extension API reuses ([MIDI Tools](specs/midi-tools.md)) |
 | 6.12 | todo |  |  |
 | 6.13 | todo |  |  |
 | 6.13b | todo |  |  |

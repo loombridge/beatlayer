@@ -2589,7 +2589,7 @@ Beats' controls.
 |---|---|---|---|
 | `preserve` | [`Preserve`](#preserve) | no | What it preserves: transients unless given. |
 | `transient_envelope` | integer from 0 to 100 | no | How far each segment fades, 0 to 100: 100 (no fade) unless given. |
-| `transient_loop_mode` | [`TransientLoopMode`](#transientloopmode) | no | What it does when a segment runs out: Loop Forward unless given. |
+| `transient_loop_mode` | [`TransientLoopMode`](#transientloopmode) | no | What it does when a segment runs out: Loop Back-and-Forth unless given. |
 
 <details><summary>JSON Schema</summary>
 
@@ -2610,7 +2610,7 @@ Beats' controls.
     },
     "transient_loop_mode": {
       "$ref": "#/$defs/TransientLoopMode",
-      "description": "What it does when a segment runs out: Loop Forward unless given."
+      "description": "What it does when a segment runs out: Loop Back-and-Forth unless given."
     }
   },
   "type": "object"
@@ -27426,8 +27426,8 @@ How Beats fills the time a segment's own audio doesn't (R2).
 One of:
 
 - `"loop_off"`: Silence until the next segment.
-- `"loop_forward"`: Back to the segment's middle, forwards again; the default.
-- `"loop_back_and_forth"`: Backwards to the middle, then forwards.
+- `"loop_forward"`: Back to the segment's middle, forwards again.
+- `"loop_back_and_forth"`: Backwards to the middle, then forwards; the default.
 
 <details><summary>JSON Schema</summary>
 
@@ -27442,12 +27442,12 @@ One of:
     },
     {
       "const": "loop_forward",
-      "description": "Back to the segment's middle, forwards again; the default.",
+      "description": "Back to the segment's middle, forwards again.",
       "type": "string"
     },
     {
       "const": "loop_back_and_forth",
-      "description": "Backwards to the middle, then forwards.",
+      "description": "Backwards to the middle, then forwards; the default.",
       "type": "string"
     }
   ]

@@ -205,6 +205,8 @@ fn r2_r3_r5_the_list_describes_every_tool_in_order() {
             "arpeggiate",
             "chop",
             "connect",
+            "glissando",
+            "lfo",
             "ornament",
             "quantize",
             "recombine",
@@ -222,12 +224,12 @@ fn r2_r3_r5_the_list_describes_every_tool_in_order() {
         ],
         "transformations, then generators"
     );
-    let transpose = &list.tools[10];
+    let transpose = &list.tools[12];
     assert_eq!(transpose.parameters[0].id, "degrees");
     assert_eq!(transpose.parameters[0].kind, "whole");
     assert!(transpose.parameters[0].scale_aware);
     assert_eq!(transpose.parameters[0].default, json!(0));
-    let fill = &list.tools[16];
+    let fill = &list.tools[18];
     assert_eq!(fill.parameters[1].kind, "division");
     assert_eq!(fill.parameters[1].default, json!("1/16"));
     assert_eq!(fill.parameters[2].unit.as_deref(), Some("%"));
@@ -1835,4 +1837,80 @@ fn r8_r43_chops_gaps_write_its_pattern_and_a_toggle_click_is_a_set() {
         json!({ "tool": "chop", "values": { "gaps": 1, "parts": 4 } }),
     );
     assert_eq!(song.notes().iter().filter(|n| n.key == 60).count(), 2);
+}
+
+// The MPE transformations of WP-6.13b (the MIDI transformations spec, R36 to
+// R42), through the commands.
+
+#[test]
+fn r37_glissando_is_refused_with_one_note_and_changes_nothing() {
+    let mut one = song(spaced());
+    one.select_notes(&[1]);
+    let (before, steps) = (one.notes(), one.steps());
+    let message = one.refused(ids::APPLY, json!({ "tool": "glissando" }));
+    assert!(message.contains("two notes"), "{message}");
+    assert_eq!((one.notes(), one.steps()), (before, steps));
+}
+
+#[test]
+fn r39_lfos_settings_keep_attack_and_decay_within_100_and_amount_within_its_target() {
+    let mut song = song(spaced());
+    let set = |song: &mut Song, values: Value| {
+        let state = song.tool(ids::SET, json!({ "tool": "lfo", "values": values }));
+        state
+            .tools
+            .into_iter()
+            .find(|t| t.tool == "lfo")
+            .unwrap()
+            .values
+    };
+    set(&mut song, json!({ "attack": 60 }));
+    let values = set(&mut song, json!({ "decay": 70 }));
+    assert_eq!(
+        (values["attack"].clone(), values["decay"].clone()),
+        (json!(30), json!(70))
+    );
+    let values = set(&mut song, json!({ "attack": 100 }));
+    assert_eq!(
+        (values["attack"].clone(), values["decay"].clone()),
+        (json!(100), json!(0))
+    );
+    // Amount reaches 96 semitones with Pitch Bend, and 127 with Slide.
+    song.refused(
+        ids::SET,
+        json!({ "tool": "lfo", "values": { "amount": 100 } }),
+    );
+    let values = set(&mut song, json!({ "target": "slide", "amount": 120 }));
+    assert_eq!(values["amount"], json!(120.0));
+    let values = set(&mut song, json!({ "target": "pitch_bend" }));
+    assert_eq!(values["amount"], json!(96.0), "held within the new range");
+}
+
+#[test]
+fn r41_lfo_random_draws_from_the_seed_and_reseed_runs_it_again() {
+    let mut song = song(spaced());
+    song.select_notes(&[0, 1, 2]);
+    let random = json!({ "shape_type": "random", "rate": "1_32", "amount": 10 });
+    let envelopes = |song: &Song| -> Vec<_> { song.notes().into_iter().map(|n| n.pitch).collect() };
+    song.tool(
+        ids::APPLY,
+        json!({ "tool": "lfo", "values": random, "seed": 3 }),
+    );
+    let first = envelopes(&song);
+    assert!(first.iter().all(|points| points.len() > 2));
+    assert_eq!(
+        song.tool(ids::RESEED, json!({ "seed": 4 }))
+            .run
+            .unwrap()
+            .seed,
+        4
+    );
+    let other = envelopes(&song);
+    assert_ne!(other, first, "another seed draws other values");
+    song.tool(ids::RESEED, json!({ "seed": 3 }));
+    assert_eq!(
+        envelopes(&song),
+        first,
+        "the same seed draws the same values"
+    );
 }

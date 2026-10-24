@@ -18,7 +18,9 @@ mod chop;
 mod connect;
 mod descriptor;
 mod euclidean;
+mod glissando;
 mod input;
+mod lfo;
 mod ornament;
 mod quantize;
 mod random;
@@ -46,6 +48,7 @@ pub use euclidean::{
     rotation_id,
 };
 pub use input::{ToolInput, ToolNote, ToolOutput, ToolPoint, ToolScale, fold_octaves};
+pub use lfo::lfo_curve;
 pub use quantize::{GRIDS as QUANTIZE_GRIDS, grid_ticks};
 pub use random::Rng;
 pub use registry::{

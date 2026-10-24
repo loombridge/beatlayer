@@ -507,6 +507,66 @@ fn quantising_audio_moves_each_lines_nearest_transient() {
     assert!(err.is_err(), "unwarped clip is refused");
 }
 
+// Spec: midi-transformations R22. The audio clip's Transform panel holds
+// Quantize with Grid, Triplets and Amount; its apply button and Cmd+Enter
+// (`midi_tool.apply`) quantise as `clip.quantize_audio` does.
+#[test]
+fn the_audio_clips_quantize_panel_gives_the_same_markers_as_quantize_audio() {
+    let sixteenth = Ticks::QUARTER.get() / 4;
+    let scratch = Scratch::new("quantise-panel-direct");
+    let (mut direct, direct_clip) = drum_clip(&scratch);
+    direct
+        .run(
+            "clip.quantize_audio",
+            json!({ "clip": direct_clip, "amount": 100, "grid": sixteenth }),
+        )
+        .unwrap();
+    let want = audio(&direct, direct_clip).warp_markers;
+
+    let scratch = Scratch::new("quantise-panel");
+    let (mut shell, clip) = drum_clip(&scratch);
+    let initial_steps = shell.editor().undo_history().len();
+    let state = shell
+        .run(
+            "midi_tool.set",
+            json!({ "clip": clip, "tool": "quantize", "values": { "grid": "1_16", "amount": 100 } }),
+        )
+        .unwrap();
+    assert!(
+        state["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|t| t["tool"] == "quantize" && t["values"]["grid"] == "1_16")
+    );
+    assert_eq!(
+        shell.editor().undo_history().len(),
+        initial_steps,
+        "the panel's settings are no undo step"
+    );
+    // Cmd+Enter with the audio clip shown.
+    shell
+        .run("arrangement.select_clips", json!({ "clips": [clip] }))
+        .unwrap();
+    assert!(shell.can_invoke_in(
+        "midi_tool.apply",
+        &json!({}),
+        &[
+            bl_commands::Context::SampleEditor,
+            bl_commands::Context::Global
+        ],
+    ));
+    shell.run("midi_tool.apply", json!({})).unwrap();
+    assert_eq!(audio(&shell, clip).warp_markers, want);
+    assert_eq!(shell.editor().undo_history().len(), initial_steps + 1);
+    // Triplets make the lines two-thirds as far apart, as clip_view.quantize_settings says.
+    let triplets = shell
+        .run("clip_view.quantize_settings", json!({ "triplets": true }))
+        .unwrap();
+    assert_eq!(triplets["grid"], json!(sixteenth));
+    assert_eq!(triplets["triplets"], json!(true));
+}
+
 // Spec: warping R49
 #[test]
 fn quantising_at_zero_changes_nothing() {

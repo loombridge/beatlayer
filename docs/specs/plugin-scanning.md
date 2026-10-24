@@ -69,7 +69,7 @@ CLAP and VST3 are scanned, each in its format's own folders, and Audio Units on 
 | R9 | `crates/shell-spec/src/plugins.rs`, `every_listed_id_is_registered_and_complete` | unit |
 | R10 | `crates/plugin-host/src/scan.rs`, `files_are_taken_by_extension_and_bundles_by_name`; `crates/plugin-host/tests/scan.rs`, `the_vst3_folders_follow_the_formats_locations`, `vst3_bundles_are_taken_by_extension_and_name` | unit |
 | R11 | `crates/shell/tests/plugin_scanning.rs`, `a_scanned_plug_in_is_selected_in_the_browser_and_loads_onto_a_track`, `scanning_finds_audio_units_and_they_join_the_browser` | agent command |
-| R12 | `crates/shell/tests/plugin_scanning.rs`, `the_plug_in_sources_switches_choose_the_formats_listed`, `a_scan_finds_vst3_plug_ins_and_the_format_preference_chooses`; `crates/ui/tests/accessibility.rs` (Rescan Plug-Ins and the switches reached by keyboard) | agent command, UI |
+| R12 | `crates/shell/tests/plugin_scanning.rs`, `the_plug_in_sources_switches_choose_the_formats_listed`, `a_scan_finds_vst3_plug_ins_and_the_format_preference_chooses`; `crates/ui/tests/accessibility/` (Rescan Plug-Ins and the switches reached by keyboard) | agent command, UI |
 | R13 | `crates/plugin-host/tests/scan.rs`, `a_scan_answers_reads_while_it_runs`, `a_plugin_removed_from_a_scanned_folder_is_forgotten`; the packaged app's acceptance check in WP-2.9b | unit, manual |
 | R14 | `xtask/src/package.rs`, `the_app_ships_the_plug_in_scanner`, and the macOS package's smoke test, which checks every listed binary is in the bundle and signed | unit, package |
 | R15 | to be written in WP-6.66 | |

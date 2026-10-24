@@ -4,8 +4,18 @@
 use std::fmt;
 use std::sync::OnceLock;
 
+use crate::arpeggiate::Arpeggiate;
+use crate::chop::Chop;
+use crate::connect::Connect;
 use crate::descriptor::{ParamValue, ToolDescriptor, ToolKind};
 use crate::input::{ToolInput, ToolOutput, fold_octaves};
+use crate::ornament::Ornament;
+use crate::quantize::Quantize;
+use crate::recombine::Recombine;
+use crate::span::Span;
+use crate::strum::Strum;
+use crate::time_warp::TimeWarp;
+use crate::velocity_shaper::VelocityShaper;
 use bl_core::time::Ticks;
 
 /// The most notes one run may write; a run that would write more is
@@ -73,6 +83,24 @@ pub trait MidiTool: Send + Sync {
         Ok(())
     }
 
+    /// Settles the values after a change that named the parameters at
+    /// `changed`: `after` holds them all, `before` the values the change
+    /// started from. A tool whose parameters depend on one another, as
+    /// Chop's Gaps writes its Pattern, adjusts them here, or refuses the
+    /// change, saying why. The default leaves them as they are.
+    ///
+    /// # Errors
+    ///
+    /// Why the values can't stand.
+    fn settle(
+        &self,
+        _before: &[ParamValue],
+        _after: &mut [ParamValue],
+        _changed: &[usize],
+    ) -> Result<(), String> {
+        Ok(())
+    }
+
     /// The notes the tool writes for `input` and `values`, one value per
     /// parameter. Call it through [`run`], which checks the values and
     /// finishes the notes.
@@ -122,28 +150,19 @@ pub fn run(
 }
 
 /// The tools Beatlayer ships: each native tool's task adds itself here.
-fn shipped_tools() -> Vec<Box<dyn MidiTool>> {
+fn native_tools() -> Vec<Box<dyn MidiTool>> {
     vec![
-        Box::new(crate::recombine::Recombine::new()),
-        Box::new(crate::span::Span::new()),
-        Box::new(crate::strum::Strum::new()),
-        Box::new(crate::time_warp::TimeWarp::new()),
-        Box::new(crate::velocity_shaper::VelocityShaper::new()),
+        Box::new(Arpeggiate::new()),
+        Box::new(Chop::new()),
+        Box::new(Connect::new()),
+        Box::new(Ornament::new()),
+        Box::new(Quantize::new()),
+        Box::new(Recombine::new()),
+        Box::new(Span::new()),
+        Box::new(Strum::new()),
+        Box::new(TimeWarp::new()),
+        Box::new(VelocityShaper::new()),
     ]
-}
-
-/// The tools Beatlayer ships.
-#[cfg(not(feature = "testing"))]
-fn native_tools() -> Vec<Box<dyn MidiTool>> {
-    shipped_tools()
-}
-
-/// The tools Beatlayer ships, and the test tools after them.
-#[cfg(feature = "testing")]
-fn native_tools() -> Vec<Box<dyn MidiTool>> {
-    let mut tools = shipped_tools();
-    tools.extend(crate::testing::tools());
-    tools
 }
 
 /// The tools, in the order the selectors list them.
@@ -159,6 +178,8 @@ impl Registry {
         static NATIVE: OnceLock<Registry> = OnceLock::new();
         NATIVE.get_or_init(|| {
             let mut tools = native_tools();
+            #[cfg(feature = "testing")]
+            tools.extend(crate::testing::tools());
             let rank = |tool: &dyn MidiTool| {
                 let descriptor = tool.descriptor();
                 let order: &[&str] = match descriptor.kind {

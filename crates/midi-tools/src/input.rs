@@ -242,6 +242,52 @@ impl ToolInput {
         }
     }
 
+    /// The key `degrees` degrees from `key`, as [`Self::step_key`] counts
+    /// them, but a move off the keyboard gives the key it would reach (the
+    /// caller folds it back by octaves, R13) and a move past the end of a
+    /// Drum Rack's keys goes on round the list.
+    #[must_use]
+    pub fn stepped(&self, key: u8, degrees: i32) -> i16 {
+        let clamp =
+            |key: i32| i16::try_from(key).unwrap_or(if key < 0 { i16::MIN } else { i16::MAX });
+        if let Some(keys) = self.drum_keys.as_ref().filter(|keys| !keys.is_empty()) {
+            let below = keys.iter().rposition(|k| *k <= key).unwrap_or(0);
+            let len = keys.len() as i64;
+            let at = (below as i64 + i64::from(degrees)).rem_euclid(len) as usize;
+            return clamp(i32::from(key) + i32::from(keys[at]) - i32::from(keys[below]));
+        }
+        match &self.scale {
+            Some(scale) => clamp(bl_core::scale::move_off(
+                scale.root,
+                &scale.steps,
+                key,
+                degrees,
+            )),
+            None => clamp(i32::from(key) + degrees),
+        }
+    }
+
+    /// How many degrees it is from `from` up to `to`, as [`Self::stepped`]
+    /// counts them; negative where `to` is lower.
+    #[must_use]
+    pub fn steps_between(&self, from: u8, to: u8) -> i32 {
+        let index = |key: u8| -> i64 {
+            if let Some(keys) = &self.drum_keys {
+                return keys
+                    .iter()
+                    .rposition(|k| *k <= key)
+                    .map_or(0, |at| at as i64);
+            }
+            match &self.scale {
+                Some(scale) => {
+                    bl_core::scale::index_at_or_below(scale.root, &scale.steps, i32::from(key))
+                }
+                None => i64::from(key),
+            }
+        };
+        i32::try_from(index(to) - index(from)).unwrap_or(0)
+    }
+
     /// Whether a tool may write a note on `key`: a drum key, or a key of the
     /// scale, or any key (R8, R9).
     #[must_use]

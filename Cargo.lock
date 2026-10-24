@@ -931,6 +931,7 @@ name = "bl-midi-tools"
 version = "0.2.0"
 dependencies = [
  "bl-core",
+ "proptest",
 ]
 
 [[package]]

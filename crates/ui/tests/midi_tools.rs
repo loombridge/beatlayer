@@ -48,10 +48,12 @@ fn set() -> (Harness, ClipId) {
     h.shell
         .run("clip_view.select_notes", json!({ "notes": [0, 1, 2] }))
         .unwrap();
-    // The test tool, not the first shipped one the panel shows otherwise.
-    h.shell
-        .run("midi_tool.choose", json!({ "tool": "test_transpose" }))
-        .unwrap();
+    // These tests drive the framework through the test tools.
+    for tool in ["test_fill", "test_transpose"] {
+        h.shell
+            .run("midi_tool.choose", json!({ "tool": tool }))
+            .unwrap();
+    }
     h.settle();
     (h, clip)
 }
@@ -347,4 +349,154 @@ fn cmd_enter_and_the_edit_menu_apply_the_chosen_tool() {
     let before = keys(&h, clip);
     h.key(Key::Enter, common::command());
     assert_ne!(keys(&h, clip), before, "Cmd+Enter applied the tool");
+}
+
+/// The values of one tool, as `midi_tool.state` reports them.
+fn values(h: &mut Harness, tool: &str) -> serde_json::Value {
+    let state: bl_shell::midi_tool_commands::MidiToolState =
+        serde_json::from_value(h.shell.run("midi_tool.state", json!({})).unwrap()).unwrap();
+    serde_json::Value::Object(
+        state
+            .tools
+            .into_iter()
+            .find(|t| t.tool == tool)
+            .unwrap()
+            .values,
+    )
+}
+
+fn choose(h: &mut Harness, tool: &str) {
+    h.shell
+        .run("midi_tool.choose", json!({ "tool": tool }))
+        .unwrap();
+    h.shell
+        .run("midi_tool.set_auto", json!({ "tool": tool, "auto": false }))
+        .unwrap();
+    h.shell
+        .run("clip_view.show_panel", json!({ "panel": "transform" }))
+        .unwrap();
+}
+
+#[test]
+fn chops_pattern_and_emphasis_toggles_each_click_a_set_and_gaps_shows_a_dash() {
+    // Spec: midi-transformations R8, R43. Each click on a toggle is a
+    // `midi_tool.set`; Gaps shows a dash once the pattern is not what it
+    // writes; an element with Emphasis on has its Pattern toggle unavailable.
+    let (mut h, _) = set();
+    choose(&mut h, "chop");
+    h.shell
+        .run(
+            "midi_tool.set",
+            json!({ "tool": "chop", "values": { "parts": 4 } }),
+        )
+        .unwrap();
+    let all = nodes(&mut h);
+    assert_eq!(Harness::node(&all, "Gaps").value, "0");
+    for at in 1..=4 {
+        assert_eq!(
+            Harness::node(&all, &format!("Pattern {at}")).toggled,
+            Some(true)
+        );
+    }
+    assert!(
+        all.iter().all(|n| n.label != "Pattern 5"),
+        "one toggle for each of the parts"
+    );
+    let steps = steps(&h);
+    h.click(centre(Harness::node(&all, "Pattern 2")));
+    assert_eq!(
+        values(&mut h, "chop")["pattern"][1],
+        json!(false),
+        "the click set the pattern"
+    );
+    assert_eq!(self::steps(&h), steps, "settings are no undo step");
+    let all = nodes(&mut h);
+    assert_eq!(Harness::node(&all, "Pattern 2").toggled, Some(false));
+    assert_eq!(Harness::node(&all, "Gaps").value, "\u{2013}");
+    // Emphasis on the first element makes its Pattern toggle unavailable.
+    h.click(centre(Harness::node(&all, "Emphasis 1")));
+    assert_eq!(values(&mut h, "chop")["emphasis"][0], json!(true));
+    let all = nodes(&mut h);
+    assert!(Harness::node(&all, "Pattern 1").disabled);
+    assert!(!Harness::node(&all, "Pattern 3").disabled);
+    // Setting Gaps writes the pattern afresh and the number shows again.
+    h.shell
+        .run(
+            "midi_tool.set",
+            json!({ "tool": "chop", "values": { "gaps": 1 } }),
+        )
+        .unwrap();
+    let all = nodes(&mut h);
+    assert_eq!(Harness::node(&all, "Gaps").value, "1");
+    assert_eq!(Harness::node(&all, "Pattern 2").toggled, Some(false));
+    assert_eq!(Harness::node(&all, "Pattern 3").toggled, Some(true));
+}
+
+#[test]
+fn quantize_has_its_five_controls_and_triplets_wait_for_a_grid() {
+    // Spec: midi-transformations R18. Triplets are unavailable with Current
+    // Grid.
+    let (mut h, _) = set();
+    choose(&mut h, "quantize");
+    let all = nodes(&mut h);
+    for control in ["Start", "End", "Grid", "Triplets", "Amount"] {
+        Harness::node(&all, control);
+    }
+    // The Clip View's own editing grid is named Grid too.
+    assert!(
+        all.iter()
+            .any(|n| n.label == "Grid" && n.value == "Current Grid"),
+        "the tool's chooser"
+    );
+    assert!(Harness::node(&all, "Triplets").disabled);
+    h.shell
+        .run(
+            "midi_tool.set",
+            json!({ "tool": "quantize", "values": { "grid": "1_8" } }),
+        )
+        .unwrap();
+    let all = nodes(&mut h);
+    assert!(!Harness::node(&all, "Triplets").disabled);
+    h.click(centre(Harness::node(&all, "Triplets")));
+    assert_eq!(values(&mut h, "quantize")["triplets"], json!(true));
+}
+
+#[test]
+fn cmd_shift_u_and_the_edit_menu_show_the_transform_panel_with_quantize_chosen() {
+    // Spec: midi-transformations R21; S-NOTE-012, M-EDIT-036. Neither changes
+    // notes or is an undo step.
+    let keymap = bl_ui::keymap::Keymap::live12();
+    let entry = keymap.entry_for("S-NOTE-012").unwrap();
+    assert_eq!(entry.status, bl_ui::keymap::Status::Bound);
+    assert_eq!(entry.commands[0].id, "clip_view.quantize_settings");
+    let (mut h, clip) = set();
+    h.shell.run("focus.clip_view", json!({})).unwrap();
+    h.settle();
+    let menus = bl_shell::menus::menu_bar(bl_shell::menus::MenuPlatform::current());
+    let item = menus
+        .iter()
+        .flat_map(bl_shell::menus::Menu::walk)
+        .find(|item| item.row == "M-EDIT-036")
+        .unwrap();
+    let state = bl_ui::menus::item_state(
+        item,
+        &h.shell,
+        &h.keymap,
+        bl_ui::keymap::Platform::current(),
+    );
+    assert!(state.enabled, "the item works with the note editor focused");
+    assert_eq!(
+        state.invocation.as_ref().map(|i| i.id.as_str()),
+        Some("clip_view.quantize_settings")
+    );
+    let (steps, notes) = (steps(&h), keys(&h, clip));
+    assert_eq!(h.shell.clip_view().midi_tools().panel(), Panel::Utilities);
+    h.key(Key::U, common::command() | Modifiers::SHIFT);
+    assert_eq!(h.shell.clip_view().midi_tools().panel(), Panel::Transform);
+    let all = nodes(&mut h);
+    assert_eq!(
+        Harness::node(&all, "Transformation Selector").value,
+        "Quantize"
+    );
+    assert_eq!((self::steps(&h), keys(&h, clip)), (steps, notes));
 }

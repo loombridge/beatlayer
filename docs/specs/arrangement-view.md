@@ -89,7 +89,7 @@ This spec covers what WP-1.8a builds: the view, navigation, Follow, the grid, tr
 | R12 | `crates/shell/tests/arrangement.rs`, `snapping_follows_the_grid`, `the_insert_marker_and_selection_are_view_state`; `crates/ui/tests/arrangement.rs`, `clicks_and_drags_place_the_marker_and_select_time` | unit, UI script |
 | R13 | `crates/ui/tests/arrangement.rs`, `the_follow_switch_and_the_optimize_buttons_work` (the playhead pages the view), `the_loop_brace_is_painted_in_its_on_and_off_colours` (the loop brace's on and off colours); `beatlayer --screenshot` (the loop brace) | UI script, image |
 | R14 | `crates/shell/tests/arrangement.rs`, `folding_tracks_and_groups`, `track_heights_stay_in_range`; `crates/ui/tests/arrangement.rs`, `headers_fold_select_and_resize`, `keys_run_the_view_commands` | unit, UI script |
-| R15 | `crates/shell/tests/arrangement.rs`, `the_insert_marker_and_selection_are_view_state`; `crates/ui/tests/arrangement.rs`, `keys_run_the_view_commands`; `crates/ui/tests/keymap.rs`, `keys_resolve_to_commands_in_their_contexts` | unit, UI script |
+| R15 | `crates/shell/tests/arrangement.rs`, `the_insert_marker_and_selection_are_view_state`; `crates/ui/tests/arrangement.rs`, `keys_run_the_view_commands`; `crates/ui/tests/keymap/resolve.rs`, `keys_resolve_to_commands_in_their_contexts` | unit, UI script |
 | R16 | `crates/shell/tests/arrangement.rs`, `every_view_command_is_registered_read_only_and_reachable`; `crates/shell-spec/src/arrangement.rs`, `every_listed_id_is_registered_and_complete`; `cargo xtask commands` | unit |
 | R17 | `crates/ui/tests/arrangement.rs`, `only_visible_clips_are_built_each_frame`; `cargo run --release -p bl-ui --example arrangement_bench` (CPU and GPU time per frame) | UI script, measurement |
 | R18 | `crates/ui/tests/arrangement.rs`, `the_return_tracks_rows_scroll_with_the_tracks_when_the_switch_is_on` | UI script |
@@ -98,7 +98,7 @@ This spec covers what WP-1.8a builds: the view, navigation, Follow, the grid, tr
 | R21 | `crates/ui/tests/arrangement.rs`, `the_track_controls_hide_their_parts` | UI script |
 | R22 | `crates/ui/tests/arrangement.rs`, `the_track_controls_hide_their_parts` | UI script |
 | R23 | `crates/ui/tests/arrangement.rs`, `the_track_controls_hide_their_parts` | UI script |
-| R24 | `crates/ui/tests/accessibility.rs`, `the_hidden_track_controls_leave_the_tab_order`; `crates/ui/tests/arrangement.rs`, `the_track_controls_hide_their_parts` | UI script |
+| R24 | `crates/ui/tests/accessibility/tab_order.rs`, `the_hidden_track_controls_leave_the_tab_order`; `crates/ui/tests/arrangement.rs`, `the_track_controls_hide_their_parts` | UI script |
 
 ## Not built yet
 

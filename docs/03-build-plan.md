@@ -289,7 +289,7 @@ Broken into packages on 17 October 2026, with Phase 3 more than half done. The s
 
 Goal: build racks with macros, program drum racks, modulate anything, and use every core effect and MIDI effect.
 
-Broken into packages on 17 October 2026. The specs are [racks](specs/racks.md), [drum racks](specs/drum-racks.md), [macros](specs/macros.md), [modulation](specs/modulation.md), [device A/B compare](specs/device-compare.md), [the multisample sampler](specs/multisampler.md), and [external devices](specs/external-devices.md). Each device package writes its device's spec first, as Phase 2's devices did; IMP-15, IMP-24, IMP-25, IMP-27, IMP-30 and IMP-31 were accepted on 20 October 2026; the package for IMP-20 waits on its acceptance. Four packages build what several others share: the effect devices' common parts (WP-5.42), device displays (WP-5.43), channel messages between devices (WP-5.44), and multi-output instruments (WP-5.45).
+Broken into packages on 17 October 2026. The specs are [racks](specs/racks.md), [drum racks](specs/drum-racks.md), [macros](specs/macros.md), [modulation](specs/modulation.md), [device A/B compare](specs/device-compare.md), [the multisample sampler](specs/multisampler.md), and [external devices](specs/external-devices.md). Each device package writes its device's spec first, as Phase 2's devices did; IMP-15, IMP-24, IMP-25, IMP-27, IMP-30 and IMP-31 were accepted on 20 October 2026, and IMP-20's ARA hosting on 24 October 2026. Four packages build what several others share: the effect devices' common parts (WP-5.42), device displays (WP-5.43), channel messages between devices (WP-5.44), and multi-output instruments (WP-5.45).
 
 | WP | Package | Size | Depends on | Acceptance in short |
 |---|---|---|---|---|
@@ -675,7 +675,7 @@ Total to 1.0: 293 packages planned in Phases 0 to 7, and about 95 estimated in P
 | 5.38 | done | 21 October 2026 | [#272](https://github.com/loombridge/beatlayer/pull/272); the Performance Impact indicator ([mixer](specs/mixer.md) R31, [mixer view](specs/mixer-view.md) R12), the engine timing each track's task on the thread that ran it and publishing each track's share of the set's processing time for the Mixer's six segments, and a switched-off device not run while it is off ([device chains](specs/device-chains.md) R6) |
 | 5.39 | todo |  |  |
 | 5.40 | done | 19 October 2026 | [#232](https://github.com/loombridge/beatlayer/pull/232); plug-in Configure Mode, the configured parameter list saved with the device, the panel's eight knobs over the list's first eight entries with the per-plug-in remap, and the temporary chooser entries a parameter moved outside configure mode adds ([the spec](specs/clap-hosting.md) R5) |
-| 5.41 | todo |  | Waits on IMP-20's acceptance |
+| 5.41 | todo |  |  |
 | 5.42 | done | 17 October 2026 | [#103](https://github.com/loombridge/beatlayer/pull/103); the effects LFO, envelope follower and seeded randomness every effect device shares, the Show Options menu items and expand toggle (`device.expand`), with Delay moved onto the shared LFO; [the spec](specs/device-framework.md) |
 | 5.43 | done | 17 October 2026 | [#117](https://github.com/loombridge/beatlayer/pull/117); devices publish display data after each block through a lock-free triple buffer, `device.display` reads it with Compressor's views as view state, and EQ Eight's spectrum, curves and band dots and Compressor's gain reduction meter and views are drawn in their cells; [the spec](specs/device-framework.md) |
 | 5.44 | done | 17 October 2026 | [#124](https://github.com/loombridge/beatlayer/pull/124); control changes, channel pitch bend and channel pressure travel beside the notes from monitored input through MIDI effects, switched-off devices and MIDI effect racks, into CLAP plug-ins as MIDI events, VST3 plug-ins through their MIDI mapping, Audio Units through their MIDI block, and the polysynth's pitch wheel and mod wheel; [device framework](specs/device-framework.md) R39 |
@@ -693,7 +693,7 @@ Total to 1.0: 293 packages planned in Phases 0 to 7, and about 95 estimated in P
 | 6.9b | todo |  |  |
 | 6.10 | todo |  |  |
 | 6.11 | done | 24 October 2026 | [#355](https://github.com/loombridge/beatlayer/pull/355); the MIDI Tools framework: the Transform and Generate panels in the Clip View, choosing a tool per track, what a tool acts on, Auto, the Apply button and Cmd+Enter as one undo step named for the tool, re-running from the kept input as parameters move, seeds, settings saved with the set, and the tool interface the extension API reuses ([MIDI Tools](specs/midi-tools.md)) |
-| 6.12 | todo |  |  |
+| 6.12 | done | 24 October 2026 | [#398](https://github.com/loombridge/beatlayer/pull/398); the first five MIDI transformations, Arpeggiate (sharing the Arpeggiator's styles), Chop, Connect, Ornament and Quantize, with Cmd+U applying Quantize's saved settings, Cmd+Shift+U showing it, and the audio clip's Quantize panel ([MIDI transformations](specs/midi-transformations.md) R1 to R22) |
 | 6.13 | todo |  |  |
 | 6.13b | todo |  |  |
 | 6.14 | todo |  |  |
@@ -727,7 +727,7 @@ Total to 1.0: 293 packages planned in Phases 0 to 7, and about 95 estimated in P
 | 6.33 | todo |  |  |
 | 6.34 | done | 23 October 2026 | [#326](https://github.com/loombridge/beatlayer/pull/326); `.blclip` clip files saved from the Session View or the Arrangement into the browser, listed under the Clips label, placed with their track's devices on an empty or new track, and previewed through their own warp settings, with Collect Files on Export and the User Library's location on the Library settings page ([clip files](specs/clip-files.md) R1 to R15, [file management](specs/file-management.md) R7 to R9) |
 | 6.34b | todo |  |  |
-| 6.35 | todo |  |  |
+| 6.35 | done | 24 October 2026 | [#366](https://github.com/loombridge/beatlayer/pull/366); a set opens in the browser to list its tracks, groups, returns, Main, Session clips and devices, and merges whole (without its returns and Main), by track or by chain, as one undo step with sends mapped by position; tracks and Session clips save as a new set, by command or by dragging onto a place ([set exchange](specs/set-exchange.md)) |
 | 6.35b | todo |  |  |
 | 6.36 | todo |  |  |
 | 6.36b | todo |  |  |

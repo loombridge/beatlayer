@@ -3,7 +3,7 @@
 use crate::descriptor::{ParamKind, ParamSpec, ParamValue, ToolDescriptor, ToolKind};
 use crate::input::{ToolInput, ToolNote, ToolOutput};
 use crate::registry::{MidiTool, ToolError};
-use crate::values::{round_ticks, switch, whole};
+use crate::value::{round_ticks, switch, whole};
 use bl_core::time::Ticks;
 
 /// The breakpoints' places in the parameter list: each has a switch, a Time

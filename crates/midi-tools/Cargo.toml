@@ -16,6 +16,9 @@ testing = []
 [dependencies]
 bl-core.workspace = true
 
+[dev-dependencies]
+proptest = { version = "1.11", default-features = false, features = ["std"] }
+
 [[test]]
 name = "midi_tools_tests"
 path = "tests/main.rs"

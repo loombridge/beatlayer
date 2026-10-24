@@ -287,9 +287,10 @@ impl Shell {
             (clip, audio.clone(), clip_entry.start, clip_entry.length)
         };
         let settings = self.clip_view.quantize();
-        let grid = grid
-            .or(settings.grid)
-            .unwrap_or_else(|| self.arrangement.grid_ticks(self.editor.document()));
+        let grid = grid.unwrap_or_else(|| {
+            self.clip_view
+                .quantize_grid(self.arrangement.grid_ticks(self.editor.document()))
+        });
         if grid <= Ticks::ZERO {
             return Err(ShellError::InvalidArgs {
                 command: id.to_owned(),

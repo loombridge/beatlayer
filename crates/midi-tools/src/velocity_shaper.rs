@@ -6,7 +6,7 @@ use crate::descriptor::{
 };
 use crate::input::{ToolInput, ToolOutput};
 use crate::registry::{MidiTool, ToolError};
-use crate::values::{choice, whole};
+use crate::value::{choice, whole};
 
 /// The fewest and the most breakpoints the envelope has (R34).
 pub const ENVELOPE_POINTS: (usize, usize) = (2, 32);

@@ -15,7 +15,7 @@ use serde_json::{Value, json};
 
 use crate::main_window::UiEvent;
 use crate::theme::Theme;
-use crate::tool_panel::{CONTROL, CONTROLS_AT, ROW, button_named, control, drag_gesture};
+use crate::tool_panel::{CONTROL, CONTROLS_AT, ROW, Shown, button_named, control, drag_gesture};
 use crate::widgets;
 
 /// How tall a display is.
@@ -547,7 +547,11 @@ fn time_warp(ui: &mut Ui, place: &Place<'_>, events: &mut Vec<UiEvent>) -> Drawn
                     place.tool,
                     &spec,
                     value,
-                    field,
+                    Shown {
+                        at: field,
+                        text: None,
+                        enabled: true,
+                    },
                     events,
                 );
             }

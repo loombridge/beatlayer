@@ -4,7 +4,7 @@ use crate::descriptor::{ChoiceOption, ParamKind, ParamSpec, ParamValue, ToolDesc
 use crate::input::{ToolInput, ToolOutput};
 use crate::random::Rng;
 use crate::registry::{MidiTool, ToolError};
-use crate::values::{choice, percent_of, round_ticks, whole};
+use crate::value::{choice, percent, round_ticks, whole};
 use bl_core::time::Ticks;
 
 /// `span`: sets the notes' lengths by articulation.
@@ -65,7 +65,7 @@ impl MidiTool for Span {
 
     fn run(&self, input: &ToolInput, values: &[ParamValue]) -> Result<ToolOutput, ToolError> {
         let mode = choice(values, 0);
-        let offset = percent_of(input.grid_step, whole(values, 1));
+        let offset = Ticks(percent(input.grid_step.0, whole(values, 1)));
         let variation = whole(values, 2) as f64 / 100.0;
         let mut starts: Vec<Ticks> = input.notes.iter().map(|note| note.start).collect();
         starts.sort_unstable();

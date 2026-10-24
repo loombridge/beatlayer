@@ -14,8 +14,8 @@ use std::collections::BTreeMap;
 
 use bl_core::time::Ticks;
 use bl_midi_tools::{
-    Breakpoint, DIVISION_NAMES, MidiTool, ParamKind, ParamSpec, ParamValue, Registry, Rng,
-    ToolDescriptor, ToolError, ToolInput, ToolKind, ToolNote, ToolPoint, ToolScale,
+    Breakpoint, DIVISION_NAMES, MidiTool, ParamKind, ParamSpec, ParamValue, QUANTIZE_GRIDS,
+    Registry, Rng, ToolDescriptor, ToolError, ToolInput, ToolKind, ToolNote, ToolPoint, ToolScale,
 };
 use bl_model::{
     Breakpoint as NotePoint, Clip, ClipData, ClipId, Document, Editor, MidiData, Note, RackKind,
@@ -27,6 +27,7 @@ use bl_shell_spec::midi_tools::{
     ParamInfo, RangeArgs, ReseedArgs, ResetArgs, SetArgs, SetAutoArgs, ShowPanelArgs, TargetState,
     ToolInfo, ToolList, ToolRun, ToolSettingsState,
 };
+use bl_shell_spec::notes::{QuantizeSettings, QuantizeTarget};
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value, json};
 
@@ -38,6 +39,14 @@ use crate::clip_view::{ClipView, notes_in_order, span_of};
 const DEFAULT_TRANSFORMATION: &str = "arpeggiate";
 /// The generator a new track shows.
 const DEFAULT_GENERATOR: &str = "rhythm";
+/// The Quantize tool, whose settings are the Clip View's Quantize settings
+/// (the MIDI transformations spec, R20), and its parameters' places.
+const QUANTIZE: &str = "quantize";
+const START: usize = 0;
+const END: usize = 1;
+const GRID: usize = 2;
+const TRIPLETS: usize = 3;
+const AMOUNT: usize = 4;
 
 fn invalid(message: impl Into<String>) -> EditFailure {
     EditFailure::InvalidArgs(message.into())
@@ -237,6 +246,109 @@ impl MidiTools {
     /// Closes the open application (R21).
     pub fn close(&mut self) {
         self.open = None;
+    }
+
+    /// The Quantize tool's settings (the MIDI transformations spec, R18).
+    fn quantize_settings(&self) -> Vec<ParamValue> {
+        let tool = Registry::native()
+            .find(QUANTIZE)
+            .expect("Quantize is a native tool");
+        self.settings_of(tool.descriptor()).values
+    }
+
+    /// Whether the Quantize tool moves starts and whether it moves ends.
+    #[must_use]
+    pub fn quantize_moves(&self) -> (bool, bool) {
+        let values = self.quantize_settings();
+        (
+            values[START] == ParamValue::Switch(true),
+            values[END] == ParamValue::Switch(true),
+        )
+    }
+
+    /// The Quantize tool's settings as the Clip View's Quantize settings
+    /// (R20). Start and End both off read as note starts, which
+    /// [`Self::quantize_moves`] tells apart.
+    #[must_use]
+    pub fn quantize(&self) -> QuantizeSettings {
+        let values = self.quantize_settings();
+        let (start, end) = self.quantize_moves();
+        let ParamValue::Choice(grid) = values[GRID] else {
+            return QuantizeSettings::default();
+        };
+        QuantizeSettings {
+            grid: grid
+                .checked_sub(1)
+                .and_then(|at| QUANTIZE_GRIDS.get(at))
+                .map(|n| Ticks(Ticks::WHOLE.get() / n)),
+            target: match (start, end) {
+                (true, true) => QuantizeTarget::Both,
+                (false, true) => QuantizeTarget::NoteEnd,
+                _ => QuantizeTarget::NoteStart,
+            },
+            triplets: values[TRIPLETS] == ParamValue::Switch(true),
+            amount: match values[AMOUNT] {
+                ParamValue::Whole(n) => u8::try_from(n.clamp(0, 100)).unwrap_or(100),
+                _ => 100,
+            },
+        }
+    }
+
+    /// Changes the Quantize tool's settings: the fields given, keeping the
+    /// rest. A `grid` is a note division in ticks (R18).
+    ///
+    /// # Errors
+    ///
+    /// [`EditFailure::InvalidArgs`] for a grid that isn't one.
+    pub fn set_quantize(
+        &mut self,
+        grid: Option<Ticks>,
+        target: Option<QuantizeTarget>,
+        triplets: Option<bool>,
+        amount: Option<u8>,
+    ) -> Result<(), EditFailure> {
+        let tool = Registry::native()
+            .find(QUANTIZE)
+            .expect("Quantize is a native tool");
+        let descriptor = tool.descriptor();
+        let mut settings = self.settings_of(descriptor);
+        if let Some(grid) = grid {
+            let at = QUANTIZE_GRIDS
+                .iter()
+                .position(|n| Ticks::WHOLE.get() / n == grid.get())
+                .ok_or_else(|| {
+                    invalid(format!(
+                        "`grid` must be a whole note divided by 1, 2, 4, 8, 16 or 32, \
+                         in ticks; {grid} isn't"
+                    ))
+                })?;
+            settings.values[GRID] = ParamValue::Choice(at + 1);
+        }
+        if let Some(target) = target {
+            let (start, end) = match target {
+                QuantizeTarget::NoteStart => (true, false),
+                QuantizeTarget::NoteEnd => (false, true),
+                QuantizeTarget::Both => (true, true),
+            };
+            settings.values[START] = ParamValue::Switch(start);
+            settings.values[END] = ParamValue::Switch(end);
+        }
+        if let Some(triplets) = triplets {
+            settings.values[TRIPLETS] = ParamValue::Switch(triplets);
+        }
+        if let Some(amount) = amount {
+            settings.values[AMOUNT] = ParamValue::Whole(i64::from(amount));
+        }
+        self.settings.insert(descriptor.id.clone(), settings);
+        Ok(())
+    }
+
+    /// Shows the Transform panel with Quantize chosen for `track` (R21).
+    pub fn show_quantize(&mut self, track: Option<TrackId>) {
+        if let Some(track) = track {
+            self.chosen.entry(track).or_default().transformation = Some(QUANTIZE.to_owned());
+        }
+        self.show_panel(Panel::Transform);
     }
 
     /// The settings as the set saves them (R4, R5): the choices of tracks,
@@ -899,6 +1011,34 @@ fn subject(
     }
 }
 
+/// The audio clip a command is for, if it is for one: the named clip, or the
+/// one the Clip View shows. Its Transform panel holds Quantize alone (the
+/// MIDI transformations spec, R22), whose settings are the tool's, not the
+/// clip's.
+#[must_use]
+pub fn audio_clip(
+    doc: &Document,
+    view: &ClipView,
+    arrangement: &ArrangementView,
+    clip: Option<ClipId>,
+) -> Option<ClipId> {
+    let clip = clip.or_else(|| view.shown_audio_clip(doc, arrangement))?;
+    matches!(doc.clip(clip)?.data, ClipData::Audio(_)).then_some(clip)
+}
+
+/// Quantize, for a command on an audio clip: only it has a Transform panel
+/// there.
+fn audio_tool(tool: Option<&str>) -> Result<&'static dyn MidiTool, EditFailure> {
+    if tool.is_some_and(|tool| tool != QUANTIZE) {
+        return Err(refused(
+            "an audio clip's Transform panel holds Quantize alone",
+        ));
+    }
+    Registry::native()
+        .find(QUANTIZE)
+        .ok_or_else(|| unavailable("Quantize is missing"))
+}
+
 /// The tool a command names, or the chosen tool of the panel shown last.
 fn resolve_tool(
     tools: &MidiTools,
@@ -926,6 +1066,8 @@ fn set_values(
 ) -> Result<(), EditFailure> {
     let descriptor = tool.descriptor();
     let mut settings = tools.settings_of(descriptor);
+    let before = settings.values.clone();
+    let mut changed = Vec::with_capacity(values.len());
     for (id, json) in values {
         let (at, spec) = descriptor.parameter(id).ok_or_else(|| {
             let known: Vec<&str> = descriptor
@@ -940,7 +1082,14 @@ fn set_values(
             ))
         })?;
         settings.values[at] = value_from_json(spec, json).map_err(invalid)?;
+        changed.push(at);
     }
+    // A tool whose parameters depend on one another adjusts them, or refuses.
+    tool.settle(&before, &mut settings.values, &changed)
+        .map_err(invalid)?;
+    descriptor
+        .check(&settings.values)
+        .map_err(|error| invalid(error.to_string()))?;
     tool.validate(&settings.values).map_err(failure)?;
     tools.settings.insert(descriptor.id.clone(), settings);
     Ok(())
@@ -1187,6 +1336,14 @@ pub fn run(
         }
         ids::SET => {
             let SetArgs { clip, tool, values } = parse(args)?;
+            if audio_clip(&doc, view, arrangement, clip).is_some() {
+                // R22: Quantize's Grid, Triplets and Amount; nothing to apply to.
+                if values.is_empty() {
+                    return Err(invalid("`values` names no parameter"));
+                }
+                set_values(&mut view.tools, audio_tool(tool.as_deref())?, &values)?;
+                return Ok(to_value(&state(&doc, view, arrangement, clip, None)));
+            }
             let subject = subject(&doc, view, arrangement, clip)?;
             let found = resolve_tool(&view.tools, subject.track, tool.as_deref())?;
             if values.is_empty() {
@@ -1252,6 +1409,13 @@ pub fn run(
         }
         ids::RESET => {
             let ResetArgs { clip, tool } = parse(args)?;
+            if audio_clip(&doc, view, arrangement, clip).is_some() {
+                let descriptor = audio_tool(tool.as_deref())?.descriptor();
+                let mut settings = view.tools.settings_of(descriptor);
+                settings.values = descriptor.defaults();
+                view.tools.settings.insert(descriptor.id.clone(), settings);
+                return Ok(to_value(&state(&doc, view, arrangement, clip, None)));
+            }
             let subject = subject(&doc, view, arrangement, clip)?;
             let found = resolve_tool(&view.tools, subject.track, tool.as_deref())?;
             let descriptor = found.descriptor();

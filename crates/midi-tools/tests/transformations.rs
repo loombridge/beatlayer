@@ -1,22 +1,22 @@
-//! Recombine, Span, Strum, Time Warp and Velocity Shaper (the MIDI
-//! transformations spec, R23 to R35), each as a function of its input, its
-//! settings and its seed.
+//! Arpeggiate, Chop, Connect, Ornament and Quantize (the MIDI
+//! transformations spec, R1 to R19 and R43's Chop), on generated notes with
+//! fixed seeds.
 
 use bl_core::time::{Ticks, TimeSignature};
 use bl_midi_tools::{
-    Breakpoint, ParamValue, Registry, Rng, ToolError, ToolInput, ToolNote, ToolPoint, run,
-    strum_position,
+    ParamValue, Registry, ToolInput, ToolNote, ToolPoint, ToolScale, division_ticks, gaps_pattern,
+    run,
 };
+use proptest::prelude::*;
 
-const SIXTEENTH: i64 = Ticks::SIXTEENTH.0;
-const EIGHTH: i64 = 2 * SIXTEENTH;
-const BAR: i64 = 16 * SIXTEENTH;
+const S: i64 = 176_400; // a 1/16 note
+const BAR: i64 = 2_822_400;
 
 fn input(notes: Vec<ToolNote>, range: (i64, i64)) -> ToolInput {
     ToolInput {
         notes,
         range: (Ticks(range.0), Ticks(range.1)),
-        grid_step: Ticks::SIXTEENTH,
+        grid_step: Ticks(S),
         signature: TimeSignature::FOUR_FOUR,
         scale: None,
         drum_keys: None,
@@ -28,1001 +28,970 @@ fn note(key: i16, start: i64, length: i64) -> ToolNote {
     ToolNote::new(key, Ticks(start), Ticks(length), 100)
 }
 
-/// The tool's defaults with these parameters set.
-fn settings(id: &str, set: &[(&str, ParamValue)]) -> Vec<ParamValue> {
-    let descriptor = Registry::native().find(id).unwrap().descriptor();
+fn major() -> Option<ToolScale> {
+    Some(ToolScale {
+        root: 0,
+        steps: vec![0, 2, 4, 5, 7, 9, 11],
+    })
+}
+
+/// The tool's defaults with these parameters changed.
+fn settings(id: &str, changes: &[(&str, ParamValue)]) -> Vec<ParamValue> {
+    let descriptor = Registry::native().find(id).expect("a tool").descriptor();
     let mut values = descriptor.defaults();
-    for (name, value) in set {
-        let (at, _) = descriptor.parameter(name).unwrap();
+    for (name, value) in changes {
+        let (at, _) = descriptor.parameter(name).expect("a parameter");
         values[at] = value.clone();
     }
     values
 }
 
-fn apply(
-    id: &str,
-    input: &ToolInput,
-    set: &[(&str, ParamValue)],
-) -> Result<Vec<ToolNote>, ToolError> {
-    let tool = Registry::native().find(id).unwrap();
-    run(tool, input, &settings(id, set)).map(|out| out.notes)
+fn apply(id: &str, input: &ToolInput, changes: &[(&str, ParamValue)]) -> Vec<ToolNote> {
+    let tool = Registry::native().find(id).expect("a tool");
+    run(tool, input, &settings(id, changes))
+        .expect("runs")
+        .notes
 }
 
-fn applied(id: &str, input: &ToolInput, set: &[(&str, ParamValue)]) -> Vec<ToolNote> {
-    apply(id, input, set).expect("runs")
-}
-
-/// A random phrase: notes at random places, with random keys, lengths and
-/// velocities, in the clip's order.
-fn phrase(seed: u32, count: usize) -> Vec<ToolNote> {
-    let mut rng = Rng::new(seed);
-    let mut notes: Vec<ToolNote> = (0..count)
-        .map(|_| {
-            let mut note = note(
-                36 + rng.below(48) as i16,
-                i64::from(rng.below(16)) * SIXTEENTH,
-                (1 + i64::from(rng.below(8))) * SIXTEENTH,
-            );
-            note.velocity = 1 + rng.below(127) as u8;
-            note
-        })
-        .collect();
-    notes.sort_by_key(|note| (note.start, note.key));
-    notes
+fn placed(notes: &[ToolNote]) -> Vec<(i64, i16)> {
+    notes.iter().map(|n| (n.start.0, n.key)).collect()
 }
 
 fn whole(n: i64) -> ParamValue {
     ParamValue::Whole(n)
 }
 
-fn on(yes: bool) -> ParamValue {
-    ParamValue::Switch(yes)
-}
-
-fn choice(n: usize) -> ParamValue {
-    ParamValue::Choice(n)
-}
-
-fn keys(notes: &[ToolNote]) -> Vec<i16> {
-    notes.iter().map(|note| note.key).collect()
-}
-
-fn starts(notes: &[ToolNote]) -> Vec<i64> {
-    notes.iter().map(|note| note.start.0).collect()
-}
-
-// Recombine.
-
-fn cdef() -> Vec<ToolNote> {
-    [60, 62, 64, 65]
-        .into_iter()
-        .enumerate()
-        .map(|(at, key)| note(key, at as i64 * EIGHTH, EIGHTH))
-        .collect()
-}
-
-#[test]
-fn r24_rotation_moves_values_later_and_mirror_reverses_them() {
-    let notes = input(cdef(), (0, BAR));
-    let pitch = ("dimension", choice(1));
-    assert_eq!(
-        keys(&applied(
-            "recombine",
-            &notes,
-            &[pitch.clone(), ("rotation_steps", whole(1))]
-        )),
-        [65, 60, 62, 64],
-        "each value moves a place later, the last going round to the first"
-    );
-    assert_eq!(
-        keys(&applied(
-            "recombine",
-            &notes,
-            &[pitch.clone(), ("rotation_steps", whole(-1))]
-        )),
-        [62, 64, 65, 60]
-    );
-    assert_eq!(
-        keys(&applied(
-            "recombine",
-            &notes,
-            &[pitch.clone(), ("mirror", on(true))]
-        )),
-        [65, 64, 62, 60]
-    );
-    // Mirror comes before rotation.
-    assert_eq!(
-        keys(&applied(
-            "recombine",
-            &notes,
-            &[pitch, ("mirror", on(true)), ("rotation_steps", whole(1))]
-        )),
-        [60, 65, 64, 62]
-    );
-}
-
-#[test]
-fn r24_each_dimension_moves_its_own_value_and_nothing_else() {
-    let mut given = cdef();
-    given[1].length = Ticks(3 * EIGHTH);
-    given[3].velocity = 30;
-    let notes = input(given.clone(), (0, 2 * BAR));
-    let rotate = ("rotation_steps", whole(1));
-    let out = applied(
-        "recombine",
-        &notes,
-        &[("dimension", choice(0)), rotate.clone()],
-    );
-    assert_eq!(starts(&out), [3 * EIGHTH, 0, EIGHTH, 2 * EIGHTH]);
-    assert_eq!(keys(&out), keys(&given), "a note keeps its other values");
-    let out = applied(
-        "recombine",
-        &notes,
-        &[("dimension", choice(2)), rotate.clone()],
-    );
-    assert_eq!(
-        out.iter().map(|n| n.length.0).collect::<Vec<_>>(),
-        [EIGHTH, EIGHTH, 3 * EIGHTH, EIGHTH]
-    );
-    assert_eq!(starts(&out), starts(&given));
-    let out = applied("recombine", &notes, &[("dimension", choice(3)), rotate]);
-    assert_eq!(
-        out.iter().map(|n| n.velocity).collect::<Vec<_>>(),
-        [30, 100, 100, 100]
-    );
-}
-
-#[test]
-fn r24_shuffle_is_the_seeds_and_leaves_the_multiset_of_values_unchanged() {
-    for seed in 0..64 {
-        let mut notes = input(phrase(seed, 12), (0, BAR));
-        notes.seed = seed;
-        for (dimension, value) in [
-            (0, (|n: &ToolNote| n.start.0) as fn(&ToolNote) -> i64),
-            (1, |n| i64::from(n.key)),
-            (2, |n| n.length.0),
-            (3, |n| i64::from(n.velocity)),
-        ] {
-            let set = [
-                ("dimension", choice(dimension)),
-                ("shuffle", on(true)),
-                ("mirror", on(seed % 2 == 0)),
-                ("rotation_steps", whole(i64::from(seed) % 7 - 3)),
-            ];
-            let out = applied("recombine", &notes, &set);
-            let sorted = |notes: &[ToolNote]| {
-                let mut values: Vec<i64> = notes.iter().map(value).collect();
-                values.sort_unstable();
-                values
-            };
-            assert_eq!(sorted(&out), sorted(&notes.notes), "seed {seed}");
-            assert_eq!(out, applied("recombine", &notes, &set), "the same seed");
-        }
-    }
-    let mut a = input(phrase(5, 12), (0, BAR));
-    let mut b = a.clone();
-    (a.seed, b.seed) = (1, 2);
-    let set = [("dimension", choice(1)), ("shuffle", on(true))];
-    assert_ne!(
-        keys(&applied("recombine", &a, &set)),
-        keys(&applied("recombine", &b, &set)),
-        "a different seed shuffles differently"
-    );
-}
-
-#[test]
-fn r25_rotate_on_grid_moves_starts_by_grid_steps_and_wraps_round_the_range() {
-    let mut notes = input(
-        vec![
-            note(60, 0, EIGHTH),
-            note(62, EIGHTH, EIGHTH),
-            note(64, 7 * EIGHTH, EIGHTH),
-        ],
-        (0, BAR),
-    );
-    notes.grid_step = Ticks(EIGHTH);
-    let on_grid = |steps: i64| {
-        applied(
-            "recombine",
-            &notes,
-            &[
-                ("rotate_on_grid", on(true)),
-                ("rotation_steps", whole(steps)),
-            ],
-        )
+fn style(name: &str) -> ParamValue {
+    let descriptor = Registry::native().find("arpeggiate").unwrap().descriptor();
+    let (_, spec) = descriptor.parameter("style").unwrap();
+    let bl_midi_tools::ParamKind::Choice { options } = &spec.kind else {
+        panic!("a choice")
     };
-    assert_eq!(
-        starts(&on_grid(1)),
-        [EIGHTH, 2 * EIGHTH, 0],
-        "the last eighth goes round to the start"
-    );
-    assert_eq!(starts(&on_grid(-1)), [7 * EIGHTH, 0, 6 * EIGHTH]);
-    // Only Position rotates on the grid.
-    let pitch = applied(
-        "recombine",
-        &notes,
-        &[
-            ("dimension", choice(1)),
-            ("rotate_on_grid", on(true)),
-            ("rotation_steps", whole(1)),
-        ],
-    );
-    assert_eq!(keys(&pitch), [64, 60, 62]);
-    // Shuffle and Mirror rearrange the starts first.
-    let mirrored = applied(
-        "recombine",
-        &notes,
-        &[
-            ("rotate_on_grid", on(true)),
-            ("mirror", on(true)),
-            ("rotation_steps", whole(1)),
-        ],
-    );
-    assert_eq!(starts(&mirrored), [0, 2 * EIGHTH, EIGHTH]);
-}
-
-// Span.
-
-#[test]
-fn r27_legato_lasts_each_note_to_the_next_start_and_the_last_to_the_ranges_end() {
-    let notes = input(
-        vec![
-            note(60, 0, SIXTEENTH),
-            note(62, 4 * SIXTEENTH, SIXTEENTH),
-            note(64, 6 * SIXTEENTH, SIXTEENTH),
-            note(65, 6 * SIXTEENTH, 3 * SIXTEENTH),
-        ],
-        (0, BAR),
-    );
-    let out = applied("span", &notes, &[]);
-    let lengths: Vec<i64> = out.iter().map(|n| n.length.0).collect();
-    assert_eq!(
-        lengths,
-        [4 * SIXTEENTH, 2 * SIXTEENTH, 10 * SIXTEENTH, 10 * SIXTEENTH]
-    );
-    // A note starting at or after the range's end keeps its length.
-    let late = input(
-        vec![note(60, 0, SIXTEENTH), note(62, BAR, 3 * SIXTEENTH)],
-        (0, BAR),
-    );
-    assert_eq!(applied("span", &late, &[])[1].length, Ticks(3 * SIXTEENTH));
+    ParamValue::Choice(options.iter().position(|o| o.id == name).expect("a style"))
 }
 
 #[test]
-fn r27_tenuto_keeps_lengths_and_staccato_halves_the_smallest_gap() {
-    let notes = input(
-        vec![
-            note(60, 0, 2 * SIXTEENTH),
-            note(62, 4 * SIXTEENTH, SIXTEENTH),
-            note(64, 4 * SIXTEENTH, 5 * SIXTEENTH),
-            note(65, 6 * SIXTEENTH, SIXTEENTH),
-        ],
-        (0, BAR),
-    );
-    let lengths = |mode: usize, extra: &[(&str, ParamValue)]| -> Vec<i64> {
-        let mut set = vec![("mode", choice(mode))];
-        set.extend_from_slice(extra);
-        applied("span", &notes, &set)
+fn r2_ids_are_names_in_lower_case_and_a_length_keeps_a_tick() {
+    let registry = Registry::native();
+    let ids = |tool: &str| -> Vec<String> {
+        registry
+            .find(tool)
+            .unwrap()
+            .descriptor()
+            .parameters
             .iter()
-            .map(|n| n.length.0)
+            .map(|p| p.id.clone())
             .collect()
     };
     assert_eq!(
-        lengths(1, &[]),
-        [2 * SIXTEENTH, SIXTEENTH, 5 * SIXTEENTH, SIXTEENTH]
+        ids("arpeggiate"),
+        ["style", "distance", "steps", "rate", "gate"]
     );
-    // The different starts are 0, 4 and 6 sixteenths: the smallest gap is
-    // two, so every note lasts one.
-    assert_eq!(lengths(2, &[]), [SIXTEENTH; 4]);
-    // Offset moves every end by a share of the grid step.
     assert_eq!(
-        lengths(1, &[("offset", whole(50))]),
+        ids("chop"),
         [
-            2 * SIXTEENTH + SIXTEENTH / 2,
-            SIXTEENTH + SIXTEENTH / 2,
-            5 * SIXTEENTH + SIXTEENTH / 2,
-            SIXTEENTH + SIXTEENTH / 2
+            "parts",
+            "gaps",
+            "pattern",
+            "emphasis",
+            "stretch_chunks",
+            "variation"
         ]
     );
-    // With one start there is no gap, and the lengths stay.
-    let chord = input(
-        vec![note(60, 0, SIXTEENTH), note(64, 0, 2 * SIXTEENTH)],
-        (0, BAR),
+    assert_eq!(ids("connect"), ["spread", "density", "rate", "tie"]);
+    assert_eq!(
+        ids("ornament"),
+        [
+            "mode",
+            "flam_position",
+            "flam_velocity",
+            "grace_notes_pitch",
+            "grace_notes_position",
+            "grace_notes_velocity",
+            "grace_notes_chance",
+            "grace_notes_amount"
+        ]
     );
-    let out = applied("span", &chord, &[("mode", choice(2))]);
-    assert_eq!(out[1].length, Ticks(2 * SIXTEENTH));
-    // A note keeps at least a tick.
-    let out = applied(
-        "span",
-        &chord,
-        &[("mode", choice(1)), ("offset", whole(-100))],
+    assert_eq!(
+        ids("quantize"),
+        ["start", "end", "grid", "triplets", "amount"]
+    );
+    // A gate of 1 % of a 1/128 note rounds to a tick at least.
+    let out = apply(
+        "arpeggiate",
+        &input(vec![note(60, 0, S)], (0, S)),
+        &[("rate", ParamValue::Division(12)), ("gate", whole(1))],
     );
     assert!(out.iter().all(|n| n.length >= Ticks(1)));
 }
 
 #[test]
-fn r28_variation_shortens_or_lengthens_from_the_seed_and_no_start_ever_moves() {
-    for seed in 0..64 {
-        let mut notes = input(phrase(seed, 10), (0, BAR));
-        notes.seed = seed;
-        for mode in 0..3 {
-            let set = [
-                ("mode", choice(mode)),
-                ("offset", whole(i64::from(seed) % 5 * 25 - 50)),
-                ("variation", whole(i64::from(seed) % 9 * 25 - 100)),
-            ];
-            let out = applied("span", &notes, &set);
-            assert_eq!(starts(&out), starts(&notes.notes), "seed {seed}");
-            assert!(out.iter().all(|n| n.length >= Ticks(1)));
-            assert_eq!(out, applied("span", &notes, &set), "the same seed");
-        }
-    }
-    let notes = input(
-        vec![
-            note(60, 0, 8 * SIXTEENTH),
-            note(62, 8 * SIXTEENTH, 8 * SIXTEENTH),
-        ],
-        (0, BAR),
+fn r3_arpeggiates_parameters_have_the_rules_ranges_and_defaults() {
+    let d = Registry::native().find("arpeggiate").unwrap().descriptor();
+    let defaults = d.defaults();
+    assert_eq!(defaults[0], ParamValue::Choice(0), "Up");
+    assert_eq!(defaults[1], whole(12));
+    assert_eq!(defaults[2], whole(0));
+    assert_eq!(defaults[3], ParamValue::Division(7), "1/16");
+    assert_eq!(defaults[4], whole(100));
+    assert!(d.parameters[1].scale_aware);
+    assert!(
+        d.check(&settings("arpeggiate", &[("distance", whole(48))]))
+            .is_ok()
     );
-    let tenuto = |variation: i64| {
-        applied(
-            "span",
-            &notes,
-            &[("mode", choice(1)), ("variation", whole(variation))],
-        )
+    assert!(
+        d.check(&settings("arpeggiate", &[("distance", whole(49))]))
+            .is_err()
+    );
+    assert!(
+        d.check(&settings("arpeggiate", &[("steps", whole(9))]))
+            .is_err()
+    );
+    assert!(
+        d.check(&settings("arpeggiate", &[("gate", whole(201))]))
+            .is_err()
+    );
+    assert!(
+        d.check(&settings("arpeggiate", &[("gate", whole(0))]))
+            .is_err()
+    );
+    let bl_midi_tools::ParamKind::Choice { options } = &d.parameters[0].kind else {
+        panic!("a choice")
     };
-    assert!(
-        tenuto(100).iter().all(|n| n.length < Ticks(8 * SIXTEENTH)),
-        "positive shortens"
-    );
-    assert!(
-        tenuto(-100).iter().all(|n| n.length > Ticks(8 * SIXTEENTH)),
-        "negative lengthens"
+    assert_eq!(options.len(), 18, "Arpeggiator's styles");
+}
+
+#[test]
+fn r4_overlapping_notes_make_a_group_and_a_step_with_nothing_held_writes_nothing() {
+    // Two chords 8 steps apart: each plays its own arpeggio, and the steps
+    // between them write nothing.
+    let notes = vec![
+        note(60, 0, 2 * S),
+        note(64, 0, 2 * S),
+        note(67, 8 * S, 2 * S),
+    ];
+    let out = apply("arpeggiate", &input(notes, (0, 10 * S)), &[]);
+    assert_eq!(
+        placed(&out),
+        [(0, 60), (S, 64), (8 * S, 67), (9 * S, 67)],
+        "the second group starts at its own earliest start"
     );
 }
 
 #[test]
-fn r27_a_note_span_shortens_keeps_its_envelopes_as_a_shortened_note_does() {
-    let mut long = note(60, 0, 4 * SIXTEENTH);
-    long.pressure = vec![
+fn r4_a_step_holds_only_the_notes_that_sound_then() {
+    // C holds for 4 steps, E joins at step 2 and leaves at step 3.
+    let notes = vec![note(60, 0, 4 * S), note(64, 2 * S, S)];
+    let out = apply("arpeggiate", &input(notes, (0, 4 * S)), &[]);
+    // Place 0 of [60], 1 of [60]: order [0] is length 1; at step 2 held
+    // [60, 64], place 0 -> 60; step 3 held [60], place 0 -> 60.
+    assert_eq!(placed(&out), [(0, 60), (S, 60), (2 * S, 60), (3 * S, 60)]);
+    let out = apply(
+        "arpeggiate",
+        &input(vec![note(60, 0, 4 * S), note(64, 0, 4 * S)], (0, 4 * S)),
+        &[],
+    );
+    assert_eq!(placed(&out), [(0, 60), (S, 64), (2 * S, 60), (3 * S, 64)]);
+}
+
+#[test]
+fn r5_steps_raise_the_cycle_each_time_the_place_goes_round() {
+    let chord = vec![note(60, 0, 6 * S), note(64, 0, 6 * S), note(67, 0, 6 * S)];
+    let out = apply(
+        "arpeggiate",
+        &input(chord.clone(), (0, 6 * S)),
+        &[("steps", whole(1)), ("distance", whole(12))],
+    );
+    let keys: Vec<i16> = out.iter().map(|n| n.key).collect();
+    assert_eq!(keys, [60, 64, 67, 72, 76, 79]);
+    // Back to cycle 0 after Steps.
+    let out = apply(
+        "arpeggiate",
+        &input(
+            vec![note(60, 0, 8 * S), note(64, 0, 8 * S), note(67, 0, 8 * S)],
+            (0, 8 * S),
+        ),
+        &[("steps", whole(1))],
+    );
+    assert_eq!(
+        out.iter().map(|n| n.key).collect::<Vec<_>>(),
+        [60, 64, 67, 72, 76, 79, 60, 64]
+    );
+    // Distance counts degrees where the clip has a scale.
+    let mut with = input(vec![note(60, 0, 4 * S)], (0, 4 * S));
+    with.scale = major();
+    let out = apply(
+        "arpeggiate",
+        &with,
+        &[("steps", whole(1)), ("distance", whole(1))],
+    );
+    assert_eq!(
+        out.iter().map(|n| n.key).collect::<Vec<_>>(),
+        [60, 62, 60, 62],
+        "a degree of C major above C is D"
+    );
+}
+
+#[test]
+fn r5_the_styles_order_the_held_notes_as_arpeggiator_does() {
+    let chord = |len| {
+        vec![
+            note(60, 0, len),
+            note(64, 0, len),
+            note(67, 0, len),
+            note(71, 0, len),
+        ]
+    };
+    let keys = |name: &str, steps: i64| -> Vec<i16> {
+        apply(
+            "arpeggiate",
+            &input(chord(steps * S), (0, steps * S)),
+            &[("style", style(name))],
+        )
+        .iter()
+        .map(|n| n.key)
+        .collect()
+    };
+    assert_eq!(keys("up", 4), [60, 64, 67, 71]);
+    assert_eq!(keys("down", 4), [71, 67, 64, 60]);
+    assert_eq!(keys("updown", 6), [60, 64, 67, 71, 67, 64]);
+    assert_eq!(keys("converge", 4), [60, 71, 64, 67]);
+    assert_eq!(keys("thumb_up", 6), [60, 64, 60, 67, 60, 71]);
+    assert_eq!(keys("pinky_up", 6), [71, 60, 71, 64, 71, 67]);
+    // Play Order: earliest start first, then lowest key.
+    let staggered = vec![note(67, 0, 4 * S), note(60, 0, 4 * S)];
+    let out = apply(
+        "arpeggiate",
+        &input(staggered, (0, 2 * S)),
+        &[("style", style("play_order"))],
+    );
+    assert_eq!(
+        out.iter().map(|n| n.key).collect::<Vec<_>>(),
+        [60, 67, 60, 67]
+    );
+}
+
+#[test]
+fn r5_chord_trigger_writes_every_held_note_and_the_random_styles_follow_the_seed() {
+    let chord = vec![note(60, 0, 2 * S), note(64, 0, 2 * S)];
+    let out = apply(
+        "arpeggiate",
+        &input(chord, (0, 2 * S)),
+        &[("style", style("chord_trigger"))],
+    );
+    assert_eq!(placed(&out), [(0, 60), (0, 64), (S, 60), (S, 64)]);
+    let many: Vec<ToolNote> = (0..5).map(|k| note(60 + 2 * k, 0, 40 * S)).collect();
+    for name in ["random", "random_other", "random_once"] {
+        let with = input(many.clone(), (0, 40 * S));
+        let one = apply("arpeggiate", &with, &[("style", style(name))]);
+        assert_eq!(
+            one,
+            apply("arpeggiate", &with, &[("style", style(name))]),
+            "{name}"
+        );
+        let mut other = with.clone();
+        other.seed = 99;
+        assert_ne!(
+            one,
+            apply("arpeggiate", &other, &[("style", style(name))]),
+            "{name}: another seed"
+        );
+    }
+    // Random Other never plays the note of the step before.
+    let out = apply(
+        "arpeggiate",
+        &input(many.clone(), (0, 40 * S)),
+        &[("style", style("random_other"))],
+    );
+    assert!(out.windows(2).all(|pair| pair[0].key != pair[1].key));
+    // Random Once plays one order, whole, over and over.
+    let out = apply(
+        "arpeggiate",
+        &input(many, (0, 40 * S)),
+        &[("style", style("random_once"))],
+    );
+    let keys: Vec<i16> = out.iter().map(|n| n.key).collect();
+    assert_eq!(keys[..5], keys[5..10]);
+    let mut sorted = keys[..5].to_vec();
+    sorted.sort_unstable();
+    assert_eq!(sorted, [60, 62, 64, 66, 68]);
+}
+
+#[test]
+fn r6_a_step_lasts_rate_times_gate_and_takes_its_held_notes_values() {
+    let mut held = note(60, 0, 2 * S);
+    held.velocity = 77;
+    held.chance = 0.5;
+    held.velocity_deviation = 9;
+    held.release_velocity = 33;
+    held.deactivated = true;
+    let out = apply(
+        "arpeggiate",
+        &input(vec![held], (0, 2 * S)),
+        &[("gate", whole(150))],
+    );
+    assert_eq!(out.len(), 2);
+    assert_eq!(out[0].length, Ticks(S * 3 / 2), "overlaps the next step");
+    assert_eq!(
+        (
+            out[0].velocity,
+            out[0].chance,
+            out[0].velocity_deviation,
+            out[0].release_velocity,
+            out[0].deactivated
+        ),
+        (77, 0.5, 9, 33, true)
+    );
+    // Keys past the keyboard move back by octaves.
+    let tool = Registry::native().find("arpeggiate").unwrap();
+    let values = settings("arpeggiate", &[("steps", whole(1)), ("distance", whole(7))]);
+    let high = input(vec![note(125, 0, 2 * S)], (0, 2 * S));
+    let out = run(tool, &high, &values).unwrap().notes;
+    assert_eq!(out.iter().map(|n| n.key).collect::<Vec<_>>(), [125, 120]);
+}
+
+#[test]
+fn r6_a_step_carries_the_stretch_of_its_notes_envelopes() {
+    let mut held = note(60, 0, 4 * S);
+    held.pressure = vec![
         ToolPoint {
             at: Ticks(0),
             value: 0.0,
             bend: 0.0,
         },
         ToolPoint {
-            at: Ticks(4 * SIXTEENTH),
+            at: Ticks(4 * S),
             value: 100.0,
             bend: 0.0,
         },
     ];
-    let notes = input(vec![long, note(62, 2 * SIXTEENTH, SIXTEENTH)], (0, BAR));
-    let out = applied("span", &notes, &[]);
-    assert_eq!(out[0].length, Ticks(2 * SIXTEENTH));
-    let last = out[0].pressure.last().unwrap();
-    assert_eq!(last.at, Ticks(2 * SIXTEENTH));
-    assert!((last.value - 50.0).abs() < 1e-9, "the value at the new end");
-}
-
-// Strum.
-
-fn chord(keys: &[i16], start: i64, length: i64) -> Vec<ToolNote> {
-    keys.iter().map(|key| note(*key, start, length)).collect()
-}
-
-#[test]
-fn r30_a_chords_notes_move_along_the_strum_law_with_their_ends_in_place() {
-    let notes = input(chord(&[67, 60, 64, 72], BAR, 8 * SIXTEENTH), (0, 4 * BAR));
-    for (low, high, tension) in [
-        (100, 0, 0),
-        (0, 100, 0),
-        (100, 100, 0),
-        (-100, -100, 0),
-        (100, 0, 100),
-        (100, 0, -100),
-        (50, -25, 40),
-    ] {
-        let out = applied(
-            "strum",
-            &notes,
-            &[
-                ("strum_low", whole(low)),
-                ("strum_high", whole(high)),
-                ("tension", whole(tension)),
-            ],
-        );
-        let (low, high, t) = (
-            low as f64 / 100.0,
-            high as f64 / 100.0,
-            tension as f64 / 100.0,
-        );
-        // The lowest key is rank 0, whatever order the notes come in.
-        for (note, rank) in out.iter().zip([2usize, 0, 1, 3]) {
-            let law = strum_position(rank, 4, t);
-            let moved = (SIXTEENTH as f64 * (low + (high - low) * law) + 0.5).floor() as i64;
-            assert_eq!(
-                note.start.0,
-                BAR + moved,
-                "key {} at ({low}, {high}, {t})",
-                note.key
-            );
-            assert_eq!(note.end(), Ticks(BAR + 8 * SIXTEENTH), "the end stays put");
-        }
-    }
-    // Strum Low 100 % with Strum High 0 %: the lowest note a whole step
-    // later, the highest not at all, the notes between along the law.
-    let out = applied("strum", &notes, &[("strum_low", whole(100))]);
-    assert_eq!(out[1].start, Ticks(BAR + SIXTEENTH));
-    assert_eq!(out[3].start, Ticks(BAR));
-}
-
-#[test]
-fn r30_a_note_alone_at_its_start_does_not_move_and_chords_are_apart() {
-    let mut given = chord(&[60, 64], 0, 2 * SIXTEENTH);
-    given.push(note(70, 4 * SIXTEENTH, 2 * SIXTEENTH));
-    given.extend(chord(&[50, 55, 59], 8 * SIXTEENTH, 4 * SIXTEENTH));
-    let notes = input(given.clone(), (0, BAR));
-    let out = applied(
-        "strum",
-        &notes,
-        &[("strum_low", whole(100)), ("strum_high", whole(100))],
-    );
-    assert_eq!(out[2], given[2], "a note alone at its start");
+    let out = apply("arpeggiate", &input(vec![held], (0, 4 * S)), &[]);
+    assert_eq!(out[1].pressure[0].value, 25.0, "the value at the step");
     assert_eq!(
-        starts(&out),
-        [
-            SIXTEENTH,
-            SIXTEENTH,
-            4 * SIXTEENTH,
-            9 * SIXTEENTH,
-            9 * SIXTEENTH,
-            9 * SIXTEENTH
-        ]
+        out[1].pressure.last().unwrap().value,
+        50.0,
+        "and at its end"
     );
 }
 
 #[test]
-fn r30_a_start_never_goes_before_zero_or_closer_than_a_tick_to_its_end() {
-    let early = input(chord(&[60, 64], 10, 5), (0, BAR));
-    let out = applied(
-        "strum",
-        &early,
-        &[("strum_low", whole(-100)), ("strum_high", whole(-100))],
+fn r5_and_r9_arpeggiate_stays_on_a_drum_racks_keys() {
+    let mut with = input(
+        vec![note(36, 0, 6 * S), note(38, 0, 6 * S), note(42, 0, 6 * S)],
+        (0, 6 * S),
+    );
+    with.drum_keys = Some(vec![36, 38, 42, 46]);
+    let out = apply(
+        "arpeggiate",
+        &with,
+        &[("steps", whole(1)), ("distance", whole(1))],
+    );
+    assert_eq!(
+        out.iter().map(|n| n.key).collect::<Vec<_>>(),
+        [36, 38, 42, 38, 42, 46],
+        "a step counts through the keys"
     );
     assert!(
         out.iter()
-            .all(|n| n.start == Ticks(0) && n.end() == Ticks(15))
-    );
-    let out = applied(
-        "strum",
-        &early,
-        &[("strum_low", whole(100)), ("strum_high", whole(100))],
-    );
-    assert!(
-        out.iter()
-            .all(|n| n.start == Ticks(14) && n.length == Ticks(1))
+            .all(|n| with.allows(u8::try_from(n.key).unwrap()))
     );
 }
 
-#[test]
-fn r30_strum_moves_only_chord_starts_and_never_past_an_end() {
-    for seed in 0..64 {
-        let notes = input(phrase(seed, 14), (0, 2 * BAR));
-        let low = i64::from(seed) % 5 * 50 - 100;
-        let out = applied(
-            "strum",
-            &notes,
-            &[
-                ("strum_low", whole(low)),
-                ("strum_high", whole(i64::from(seed) % 3 * 100 - 100)),
-                ("tension", whole(i64::from(seed) % 7 * 33 - 99)),
-            ],
-        );
-        assert_eq!(out.len(), notes.notes.len());
-        for (before, after) in notes.notes.iter().zip(&out) {
-            assert_eq!(before.end(), after.end(), "seed {seed}: the end stays put");
-            assert!(after.start >= Ticks::ZERO && after.start < after.end());
-            let in_chord = notes
-                .notes
-                .iter()
-                .filter(|n| n.start == before.start)
-                .count()
-                > 1;
-            if !in_chord {
-                assert_eq!(before, after, "seed {seed}: a lone note doesn't move");
-            }
-            assert_eq!((before.key, before.velocity), (after.key, after.velocity));
-        }
-    }
-}
-
-// Time Warp.
-
-fn eight_sixteenths() -> ToolInput {
-    input(
-        (0..8)
-            .map(|n| note(60 + n, n as i64 * SIXTEENTH, SIXTEENTH / 2))
-            .collect(),
-        (0, 8 * SIXTEENTH),
-    )
-}
-
-/// The settings of two breakpoints, the third off.
-fn two(time_1: i64, speed_1: i64, time_2: i64, speed_2: i64) -> Vec<(&'static str, ParamValue)> {
-    vec![
-        ("breakpoint_1_time", whole(time_1)),
-        ("breakpoint_1_speed", whole(speed_1)),
-        ("breakpoint_2_time", whole(time_2)),
-        ("breakpoint_2_speed", whole(speed_2)),
-    ]
-}
-
-#[test]
-fn r31_the_defaults_leave_the_notes_where_they_are() {
-    let notes = eight_sixteenths();
-    assert_eq!(applied("time_warp", &notes, &[]), notes.notes);
-}
-
-#[test]
-fn r32_a_constant_speed_scales_starts_and_the_lengths_stay_unless_ends_are_warped() {
-    let notes = eight_sixteenths();
-    let half_time = {
-        let mut set = two(0, 200, 100, 200);
-        set.push(("preserve_time_range", on(false)));
-        set
-    };
-    let out = applied("time_warp", &notes, &half_time);
-    assert_eq!(
-        starts(&out),
-        [
-            0,
-            SIXTEENTH / 2,
-            SIXTEENTH,
-            3 * SIXTEENTH / 2,
-            2 * SIXTEENTH,
-            5 * SIXTEENTH / 2,
-            3 * SIXTEENTH,
-            7 * SIXTEENTH / 2
-        ]
-        .map(|n| n)
-    );
-    assert!(
-        out.iter().all(|n| n.length == Ticks(SIXTEENTH / 2)),
-        "the lengths stay"
-    );
-    let mut with_ends = half_time;
-    with_ends.push(("include_note_end", on(true)));
-    let out = applied("time_warp", &notes, &with_ends);
-    assert!(
-        out.iter().all(|n| n.length == Ticks(SIXTEENTH / 4)),
-        "the ends warp too"
-    );
-    // Preserve Time Range puts the end back where it was: a constant speed
-    // then changes nothing.
-    let out = applied("time_warp", &notes, &two(0, 200, 100, 200));
-    assert_eq!(out, notes.notes);
-}
-
-#[test]
-fn r32_an_accelerando_draws_the_notes_closer_along_the_integral_of_the_inverse_speed() {
-    // Speed 100 % rising to 200 % across the range: U(u) = ln(1 + u).
-    let notes = eight_sixteenths();
-    let range = 8.0 * SIXTEENTH as f64;
-    let free = applied("time_warp", &notes, &{
-        let mut set = two(0, 100, 100, 200);
-        set.push(("preserve_time_range", on(false)));
-        set
-    });
-    let preserved = applied("time_warp", &notes, &two(0, 100, 100, 200));
-    for (at, (free, preserved)) in free.iter().zip(&preserved).enumerate() {
-        let u = at as f64 / 8.0;
-        assert!(
-            (free.start.0 as f64 - range * (1.0 + u).ln()).abs() <= 1.0,
-            "note {at}"
-        );
-        assert!((preserved.start.0 as f64 - range * (1.0 + u).ln() / 2f64.ln()).abs() <= 1.0);
-    }
-    assert!(
-        free[7].start.0 < 7 * SIXTEENTH,
-        "the notes draw closer together"
-    );
-}
-
-#[test]
-fn r32_preserve_time_range_keeps_every_start_in_the_range_and_in_order() {
-    for seed in 0..64 {
-        let mut rng = Rng::new(seed);
-        let notes = input(phrase(seed, 12), (0, BAR));
-        let mut set = vec![
-            ("breakpoint_1_time", whole(i64::from(rng.below(40)))),
-            ("breakpoint_1_speed", whole(25 + i64::from(rng.below(376)))),
-            ("breakpoint_2_time", whole(40 + i64::from(rng.below(61)))),
-            ("breakpoint_2_speed", whole(25 + i64::from(rng.below(376)))),
-            ("breakpoint_3", on(seed % 2 == 0)),
-            ("breakpoint_3_time", whole(i64::from(rng.below(101)))),
-            ("breakpoint_3_speed", whole(25 + i64::from(rng.below(376)))),
-        ];
-        for (quantize, ends) in [(false, false), (true, false), (false, true), (true, true)] {
-            set.truncate(7);
-            set.push(("quantize", on(quantize)));
-            set.push(("include_note_end", on(ends)));
-            let out = applied("time_warp", &notes, &set);
-            assert!(
-                out.iter()
-                    .all(|n| n.start >= Ticks(0) && n.start < Ticks(BAR)),
-                "seed {seed}"
-            );
-            // The notes are in order of start, so the warped starts keep it.
-            assert!(
-                out.windows(2).all(|pair| pair[0].start <= pair[1].start),
-                "seed {seed}"
-            );
-            assert!(out.iter().all(|n| n.length >= Ticks(1)));
-            assert_eq!(keys(&out), keys(&notes.notes));
-            if quantize {
-                assert!(
-                    out.iter().all(|n| n.start.0 % SIXTEENTH == 0),
-                    "on the grid"
-                );
-            }
-            if !ends {
-                assert!(
-                    out.iter()
-                        .zip(&notes.notes)
-                        .all(|(a, b)| a.length == b.length)
-                );
-            }
-        }
-    }
-}
-
-#[test]
-fn r32_a_note_outside_the_range_takes_the_level_speed_beyond_the_breakpoints() {
-    // Breakpoints at 25 % and 75 % of the range, speed 200 % then 200 %:
-    // time runs at twice the speed everywhere, before and after.
-    let notes = input(
-        vec![note(60, 0, SIXTEENTH), note(61, 3 * BAR, SIXTEENTH)],
-        (BAR, 2 * BAR),
-    );
-    let out = applied("time_warp", &notes, &{
-        let mut set = two(25, 200, 75, 200);
-        set.push(("preserve_time_range", on(false)));
-        set
-    });
-    assert_eq!(starts(&out), [BAR / 2, 2 * BAR]);
-}
-
-#[test]
-fn r31_at_least_one_breakpoint_stays_on() {
-    let notes = eight_sixteenths();
-    let off = [("breakpoint_1", on(false)), ("breakpoint_2", on(false))];
-    let error = apply("time_warp", &notes, &off).unwrap_err();
-    assert!(matches!(error, ToolError::Values(_)), "{error}");
-    // One breakpoint is a level speed.
-    let one = applied(
-        "time_warp",
-        &notes,
-        &[
-            ("breakpoint_2", on(false)),
-            ("breakpoint_1_speed", whole(200)),
-            ("preserve_time_range", on(false)),
-        ],
-    );
-    assert_eq!(one[4].start, Ticks(2 * SIXTEENTH));
-}
-
-#[test]
-fn r33_quantize_puts_warped_starts_and_ends_on_the_nearest_line() {
-    let notes = eight_sixteenths();
-    let set = |ends: bool| {
-        let mut set = two(0, 100, 100, 200);
-        set.extend([
-            ("quantize", on(true)),
-            ("preserve_time_range", on(false)),
-            ("include_note_end", on(ends)),
+proptest! {
+    #[test]
+    fn r6_arpeggiates_notes_start_on_its_steps_and_stay_on_the_keyboard(
+        keys in proptest::collection::vec(0i16..128, 1..6),
+        len in 1i64..40,
+        steps in 0i64..9,
+        distance in -48i64..49,
+        style_at in 0usize..18,
+        rate in 3usize..13,
+    ) {
+        let notes: Vec<ToolNote> = keys.iter().map(|k| note(*k, 0, len * S / 4)).collect();
+        let with = input(notes, (0, len * S));
+        let tool = Registry::native().find("arpeggiate").unwrap();
+        let values = settings("arpeggiate", &[
+            ("style", ParamValue::Choice(style_at)),
+            ("steps", whole(steps)),
+            ("distance", whole(distance)),
+            ("rate", ParamValue::Division(rate)),
         ]);
-        set
-    };
-    let out = applied("time_warp", &notes, &set(false));
-    assert!(out.iter().all(|n| n.start.0 % SIXTEENTH == 0));
-    let out = applied("time_warp", &notes, &set(true));
-    assert!(
-        out.iter()
-            .all(|n| n.start.0 % SIXTEENTH == 0 && n.end().0 % SIXTEENTH == 0)
-    );
-    assert!(
-        out.iter().all(|n| n.length >= Ticks(1)),
-        "an end on or before its start goes to the next line"
-    );
-}
-
-#[test]
-fn r14_time_warp_scales_a_notes_envelopes_by_the_factor_it_scales_the_note() {
-    let mut long = note(60, 0, 4 * SIXTEENTH);
-    long.pitch = vec![
-        ToolPoint {
-            at: Ticks(0),
-            value: 0.0,
-            bend: 0.0,
-        },
-        ToolPoint {
-            at: Ticks(2 * SIXTEENTH),
-            value: 12.0,
-            bend: 0.0,
-        },
-        ToolPoint {
-            at: Ticks(4 * SIXTEENTH),
-            value: -3.0,
-            bend: 0.0,
-        },
-    ];
-    let notes = input(vec![long.clone()], (0, 4 * SIXTEENTH));
-    let set = [
-        ("breakpoint_1_speed", whole(200)),
-        ("breakpoint_2_speed", whole(200)),
-        ("preserve_time_range", on(false)),
-        ("include_note_end", on(true)),
-    ];
-    let out = &applied("time_warp", &notes, &set)[0];
-    assert_eq!(out.length, Ticks(2 * SIXTEENTH));
-    let at: Vec<i64> = out.pitch.iter().map(|p| p.at.0).collect();
-    assert_eq!(
-        at,
-        [0, SIXTEENTH, 2 * SIXTEENTH],
-        "positions halve with the length"
-    );
-    assert_eq!(out.pitch[1].value, 12.0);
-    // Without Include Note End the note keeps its length, and its envelopes.
-    let kept = &applied(
-        "time_warp",
-        &notes,
-        &[
-            ("breakpoint_1_speed", whole(200)),
-            ("breakpoint_2_speed", whole(200)),
-            ("preserve_time_range", on(false)),
-        ],
-    )[0];
-    assert_eq!(kept.pitch, long.pitch);
-}
-
-// Velocity Shaper.
-
-fn ramp_notes(count: i64) -> ToolInput {
-    input(
-        (0..count)
-            .map(|n| note(60, n * BAR / count, SIXTEENTH))
-            .collect(),
-        (0, BAR),
-    )
-}
-
-fn velocities(notes: &[ToolNote]) -> Vec<u8> {
-    notes.iter().map(|n| n.velocity).collect()
-}
-
-#[test]
-fn r35_the_default_envelope_ramps_from_the_minimum_to_the_maximum() {
-    let out = applied("velocity_shaper", &ramp_notes(4), &[]);
-    // 1 + 126 × (0, ¼, ½, ¾), rounded.
-    assert_eq!(velocities(&out), [1, 33, 64, 96]);
-    let out = applied(
-        "velocity_shaper",
-        &ramp_notes(4),
-        &[
-            ("minimum_velocity", whole(20)),
-            ("maximum_velocity", whole(100)),
-        ],
-    );
-    assert_eq!(velocities(&out), [20, 40, 60, 80]);
-    // A minimum above the maximum turns the shape upside down.
-    let out = applied(
-        "velocity_shaper",
-        &ramp_notes(4),
-        &[
-            ("minimum_velocity", whole(100)),
-            ("maximum_velocity", whole(20)),
-        ],
-    );
-    assert_eq!(velocities(&out), [100, 80, 60, 40]);
-}
-
-fn envelope(points: &[(f64, f64)]) -> ParamValue {
-    ParamValue::Breakpoints(
-        points
-            .iter()
-            .map(|(x, y)| Breakpoint { x: *x, y: *y })
-            .collect(),
-    )
-}
-
-#[test]
-fn r35_loop_repeats_the_envelope_and_rotate_shifts_it_by_steps_of_the_division() {
-    let notes = ramp_notes(8);
-    let min_max = [
-        ("minimum_velocity", whole(1)),
-        ("maximum_velocity", whole(101)),
-    ];
-    let with = |extra: &[(&str, ParamValue)]| {
-        let mut set = min_max.to_vec();
-        set.extend_from_slice(extra);
-        velocities(&applied("velocity_shaper", &notes, &set))
-    };
-    assert_eq!(with(&[]), [1, 14, 26, 39, 51, 64, 76, 89]);
-    assert_eq!(with(&[("loop", whole(2))]), [1, 26, 51, 76, 1, 26, 51, 76]);
-    // Rotate 1 of a division of an eighth of the range: the envelope moves
-    // one note later, so each note reads the one before's phase, and the
-    // first wraps round to the last.
-    let rotated = with(&[("rotate", whole(1)), ("division", choice(1 + 5))]);
-    assert_eq!(rotated, [89, 1, 14, 26, 39, 51, 64, 76]);
-    let by_grid = with(&[("rotate", whole(-1))]);
-    // Division Grid is a sixteenth here.
-    assert_eq!(by_grid.len(), 8);
-    assert!(by_grid[0] > 1, "the first note reads ahead of its phase");
-}
-
-#[test]
-fn r35_a_shaped_envelope_is_read_along_straight_lines_and_stays_within_the_range() {
-    let notes = ramp_notes(4);
-    let triangle = envelope(&[(0.0, 0.0), (0.5, 1.0), (1.0, 0.0)]);
-    let out = applied(
-        "velocity_shaper",
-        &notes,
-        &[
-            ("envelope", triangle),
-            ("minimum_velocity", whole(1)),
-            ("maximum_velocity", whole(101)),
-        ],
-    );
-    assert_eq!(velocities(&out), [1, 51, 101, 51]);
-    for seed in 0..64 {
-        let mut rng = Rng::new(seed);
-        let points = 2 + rng.below(8) as usize;
-        let mut xs: Vec<f64> = (1..points - 1).map(|_| rng.unit()).collect();
-        xs.sort_by(f64::total_cmp);
-        xs.dedup();
-        let mut shape = vec![(0.0, rng.unit())];
-        shape.extend(xs.iter().map(|x| (*x, rng.unit())));
-        shape.push((1.0, rng.unit()));
-        let (low, high) = (1 + rng.below(127) as i64, 1 + rng.below(127) as i64);
-        let notes = input(phrase(seed, 16), (0, BAR));
-        let out = applied(
-            "velocity_shaper",
-            &notes,
-            &[
-                ("envelope", envelope(&shape)),
-                ("minimum_velocity", whole(low)),
-                ("maximum_velocity", whole(high)),
-                ("loop", whole(1 + i64::from(seed) % 16)),
-                ("rotate", whole(i64::from(seed) % 33 - 16)),
-            ],
-        );
-        let (floor, ceiling) = (low.min(high) as u8, low.max(high) as u8);
-        assert!(
-            out.iter().all(|n| (floor..=ceiling).contains(&n.velocity)),
-            "seed {seed}: {:?} within {floor} to {ceiling}",
-            velocities(&out)
-        );
-        assert_eq!(starts(&out), starts(&notes.notes), "nothing else changes");
-        assert_eq!(keys(&out), keys(&notes.notes));
+        let out = run(tool, &with, &values).unwrap().notes;
+        let step = division_ticks(rate).0;
+        for n in &out {
+            prop_assert_eq!(n.start.0 % step, 0, "on a step");
+            prop_assert!((0..=127).contains(&n.key));
+            prop_assert!(n.length >= Ticks(1));
+        }
     }
 }
 
+// Chop.
+
 #[test]
-fn r34_an_envelope_has_two_to_thirty_two_breakpoints_from_the_start_to_the_end() {
-    let notes = ramp_notes(4);
-    let refused =
-        |points: ParamValue| apply("velocity_shaper", &notes, &[("envelope", points)]).is_err();
-    assert!(refused(envelope(&[(0.0, 0.5)])), "one breakpoint");
-    assert!(
-        refused(envelope(&[(0.1, 0.0), (1.0, 1.0)])),
-        "the first isn't at 0"
+fn r7_chops_parameters_have_the_rules_ranges_and_defaults() {
+    let d = Registry::native().find("chop").unwrap().descriptor();
+    let defaults = d.defaults();
+    assert_eq!(defaults[0], whole(2));
+    assert_eq!(defaults[1], whole(0));
+    assert_eq!(
+        defaults[2],
+        ParamValue::Toggles(vec![true; 16]),
+        "as Gaps writes it"
     );
+    assert_eq!(defaults[3], ParamValue::Toggles(vec![false; 16]));
+    assert_eq!(defaults[4], whole(2));
+    assert_eq!(defaults[5], whole(0));
+    assert!(d.check(&settings("chop", &[("parts", whole(64))])).is_ok());
+    assert!(d.check(&settings("chop", &[("parts", whole(65))])).is_err());
     assert!(
-        refused(envelope(&[(0.0, 0.0), (0.9, 1.0)])),
-        "the last isn't at 1"
+        d.check(&settings("chop", &[("stretch_chunks", whole(9))]))
+            .is_err()
     );
-    let many: Vec<(f64, f64)> = (0..33).map(|n| (f64::from(n) / 32.0, 0.5)).collect();
-    assert!(refused(envelope(&many)), "thirty-three breakpoints");
-    let thirty_two: Vec<(f64, f64)> = (0..32).map(|n| (f64::from(n) / 31.0, 0.5)).collect();
-    assert!(!refused(envelope(&thirty_two)), "thirty-two");
 }
 
 #[test]
-fn r23_r26_r29_r31_r34_each_tools_parameters_have_their_ranges_and_defaults() {
-    let describe = |id: &str| -> Vec<(String, String)> {
-        Registry::native()
-            .find(id)
-            .unwrap()
-            .descriptor()
-            .parameters
+fn r8_gaps_write_the_pattern_and_a_toggle_leaves_gaps_without_a_number() {
+    let on = |p: &[bool]| p.iter().take(6).copied().collect::<Vec<_>>();
+    assert_eq!(on(&gaps_pattern(0)), [true; 6]);
+    assert_eq!(
+        on(&gaps_pattern(2)),
+        [true, true, false, true, true, false],
+        "g parts before each gap"
+    );
+    assert_eq!(
+        on(&gaps_pattern(-2)),
+        [true, false, false, true, false, false],
+        "a part, then g gaps"
+    );
+    let tool = Registry::native().find("chop").unwrap();
+    let before = settings("chop", &[("parts", whole(6))]);
+    // Setting Gaps writes the pattern.
+    let mut after = before.clone();
+    after[1] = whole(2);
+    tool.settle(&before, &mut after, &[1]).unwrap();
+    assert_eq!(after[2], ParamValue::Toggles(gaps_pattern(2)));
+    // A pattern set in the same change stands.
+    let mut both = before.clone();
+    both[1] = whole(2);
+    both[2] = ParamValue::Toggles(vec![
+        false, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+        true,
+    ]);
+    let want = both[2].clone();
+    tool.settle(&before, &mut both, &[1, 2]).unwrap();
+    assert_eq!(both[2], want);
+    // Gaps beyond what Parts allows are refused.
+    let mut too_many = before.clone();
+    too_many[0] = whole(2);
+    too_many[1] = whole(3);
+    assert!(tool.settle(&before, &mut too_many, &[1]).is_err());
+    // The last part can't be switched to a gap.
+    let mut none = before.clone();
+    none[2] = ParamValue::Toggles(vec![false; 16]);
+    assert!(tool.settle(&before, &mut none, &[2]).is_err());
+    // An emphasised element keeps its Pattern state when Gaps writes.
+    let mut kept = before.clone();
+    kept[2] = ParamValue::Toggles({
+        let mut p = vec![true; 16];
+        p[1] = false;
+        p
+    });
+    kept[3] = ParamValue::Toggles({
+        let mut e = vec![false; 16];
+        e[1] = true;
+        e
+    });
+    let before_kept = kept.clone();
+    kept[1] = whole(0);
+    tool.settle(&before_kept, &mut kept, &[1]).unwrap();
+    assert_eq!(kept[2], before_kept[2], "element 1 is emphasised");
+}
+
+#[test]
+fn r9_pieces_come_in_proportion_to_their_weights_and_gaps_write_nothing() {
+    let with = input(vec![note(60, 1000, 4000)], (0, 10_000));
+    let out = apply("chop", &with, &[("parts", whole(4))]);
+    assert_eq!(
+        out.iter()
+            .map(|n| (n.start.0, n.length.0))
+            .collect::<Vec<_>>(),
+        [(1000, 1000), (2000, 1000), (3000, 1000), (4000, 1000)]
+    );
+    // Parts 4 with Gaps 1: part, gap, part, gap.
+    let pattern = ParamValue::Toggles(gaps_pattern(1));
+    let out = apply(
+        "chop",
+        &with,
+        &[
+            ("parts", whole(4)),
+            ("gaps", whole(1)),
+            ("pattern", pattern),
+        ],
+    );
+    assert_eq!(placed(&out), [(1000, 60), (3000, 60)]);
+    // Emphasis stretches: weights 1 and 3.
+    let mut emphasis = vec![false; 16];
+    emphasis[1] = true;
+    let out = apply(
+        "chop",
+        &with,
+        &[
+            ("parts", whole(2)),
+            ("emphasis", ParamValue::Toggles(emphasis)),
+            ("stretch_chunks", whole(3)),
+        ],
+    );
+    assert_eq!(
+        out.iter()
+            .map(|n| (n.start.0, n.length.0))
+            .collect::<Vec<_>>(),
+        [(1000, 1000), (2000, 3000)]
+    );
+    // The pattern repeats past 16 parts; 32 parts of a gap-every-other pattern.
+    let long = input(vec![note(60, 0, 3200)], (0, 3200));
+    let out = apply(
+        "chop",
+        &long,
+        &[
+            ("parts", whole(32)),
+            ("gaps", whole(1)),
+            ("pattern", ParamValue::Toggles(gaps_pattern(1))),
+        ],
+    );
+    assert_eq!(out.len(), 16);
+    assert_eq!(out[15].start, Ticks(3000));
+    // A piece shorter than a tick is left out.
+    let tiny = input(vec![note(60, 0, 3)], (0, 3));
+    assert_eq!(apply("chop", &tiny, &[("parts", whole(8))]).len(), 3);
+    // Values of the input note are kept.
+    let mut loud = note(60, 0, 100);
+    loud.velocity = 42;
+    loud.chance = 0.25;
+    let out = apply("chop", &input(vec![loud], (0, 100)), &[]);
+    assert!(out.iter().all(|n| n.velocity == 42 && n.chance == 0.25));
+}
+
+#[test]
+fn r10_variation_moves_starts_and_ends_within_the_note() {
+    let with = input(vec![note(60, 1000, 4000)], (0, 10_000));
+    let straight = apply("chop", &with, &[("parts", whole(8))]);
+    let varied = apply(
+        "chop",
+        &with,
+        &[("parts", whole(8)), ("variation", whole(100))],
+    );
+    assert_ne!(straight, varied);
+    assert_eq!(
+        varied,
+        apply(
+            "chop",
+            &with,
+            &[("parts", whole(8)), ("variation", whole(100))]
+        )
+    );
+    for n in &varied {
+        assert!(n.start >= Ticks(1000) && n.end() <= Ticks(5000) && n.length >= Ticks(1));
+    }
+    // Each end moves by at most v x half its piece (250 ticks of a 500-tick piece).
+    for (a, b) in straight.iter().zip(&varied) {
+        assert!((a.start.0 - b.start.0).abs() <= 250 && (a.end().0 - b.end().0).abs() <= 250);
+    }
+}
+
+proptest! {
+    #[test]
+    fn r9_chops_pieces_tile_each_note_exactly(
+        length in 1i64..2_000_000,
+        parts in 2i64..65,
+        stretch in 2i64..9,
+        emphasis in proptest::collection::vec(any::<bool>(), 16),
+    ) {
+        let with = input(vec![note(60, 5000, length)], (0, 10_000_000));
+        let out = apply("chop", &with, &[
+            ("parts", whole(parts)),
+            ("stretch_chunks", whole(stretch)),
+            ("emphasis", ParamValue::Toggles(emphasis)),
+        ]);
+        // Every piece of a note with no gaps is a note: they meet end to start and fill it.
+        let mut at = 5000;
+        for n in &out {
+            prop_assert_eq!(n.start.0, at);
+            at = n.end().0;
+        }
+        prop_assert_eq!(at, 5000 + length);
+    }
+}
+
+// Connect.
+
+#[test]
+fn r11_connects_parameters_have_the_rules_ranges_and_defaults() {
+    let d = Registry::native().find("connect").unwrap().descriptor();
+    assert_eq!(
+        d.defaults(),
+        [whole(0), whole(100), ParamValue::Division(7), whole(0)]
+    );
+    assert!(d.parameters[0].scale_aware);
+    assert!(
+        d.check(&settings("connect", &[("spread", whole(13))]))
+            .is_err()
+    );
+}
+
+#[test]
+fn r12_and_r13_a_gap_gets_slots_whose_keys_follow_the_line_between_the_notes() {
+    let with = input(vec![note(60, 0, S), note(64, 4 * S, S)], (0, 5 * S));
+    let out = apply("connect", &with, &[]);
+    assert_eq!(out.len(), 5, "the input is kept and three slots are filled");
+    let added = &out[2..];
+    assert_eq!(
+        added
             .iter()
-            .map(|p| (p.id.clone(), format!("{:?} {:?}", p.kind, p.default)))
-            .collect()
-    };
-    let ids = |id: &str| -> Vec<String> { describe(id).into_iter().map(|(id, _)| id).collect() };
+            .map(|n| (n.start.0, n.key, n.length.0))
+            .collect::<Vec<_>>(),
+        [(S, 62, S), (2 * S, 63, S), (3 * S, 64, S)]
+    );
+    // Density picks that share of the slots; 0 picks none.
+    assert_eq!(apply("connect", &with, &[("density", whole(0))]).len(), 2);
     assert_eq!(
-        ids("recombine"),
+        apply("connect", &with, &[("density", whole(34))]).len(),
+        3,
+        "one of three"
+    );
+    // Tie: the first filled note lasts to the next start and the rest stay empty.
+    let out = apply("connect", &with, &[("tie", whole(100))]);
+    assert_eq!(out.len(), 3);
+    assert_eq!(out[2].length, Ticks(3 * S));
+    // Velocity of the highest note starting at s, and its other values.
+    let mut loud = note(60, 0, S);
+    loud.velocity = 88;
+    loud.chance = 0.5;
+    let with = input(vec![loud, note(64, 4 * S, S)], (0, 5 * S));
+    let out = apply("connect", &with, &[]);
+    assert!(
+        out[2..5]
+            .iter()
+            .all(|n| n.velocity == 88 && n.chance == 0.5)
+    );
+    // A spread moves keys by up to that many steps and follows the seed.
+    let spread = apply("connect", &with, &[("spread", whole(3))]);
+    assert_eq!(spread, apply("connect", &with, &[("spread", whole(3))]));
+    assert!(spread[2..5].iter().all(|n| (n.key - 63).abs() <= 3 + 1));
+    // A gap with no time in it gets nothing.
+    let touching = input(vec![note(60, 0, S), note(64, S, S)], (0, 2 * S));
+    assert_eq!(apply("connect", &touching, &[]).len(), 2);
+}
+
+#[test]
+fn r13_connect_counts_steps_in_a_scale_and_on_a_drum_rack() {
+    let mut with = input(vec![note(60, 0, S), note(67, 8 * S, S)], (0, 9 * S));
+    with.scale = major();
+    // C to G is four degrees; seven slots, the key at each middle in degrees.
+    let out = apply("connect", &with, &[]);
+    for n in &out {
+        assert!(with.allows(u8::try_from(n.key).unwrap()), "{}", n.key);
+    }
+    let mut drums = input(vec![note(36, 0, S), note(46, 8 * S, S)], (0, 9 * S));
+    drums.drum_keys = Some(vec![36, 38, 42, 46]);
+    let out = apply("connect", &drums, &[("spread", whole(2))]);
+    assert!(out.len() > 2);
+    assert!(
+        out.iter()
+            .all(|n| drums.allows(u8::try_from(n.key).unwrap()))
+    );
+}
+
+proptest! {
+    #[test]
+    fn r12_connect_never_adds_a_note_outside_a_gap(
+        starts in proptest::collection::vec((0i64..40, 1i64..6, 0i16..128), 1..8),
+        density in 0i64..101,
+        tie in 0i64..101,
+        rate in 3usize..11,
+        seed in any::<u32>(),
+    ) {
+        let notes: Vec<ToolNote> = starts.iter().map(|(s, l, k)| note(*k, s * S / 2, l * S / 2)).collect();
+        let mut with = input(notes.clone(), (0, 100 * S));
+        with.seed = seed;
+        let out = apply("connect", &with, &[("density", whole(density)), ("tie", whole(tie)), ("rate", ParamValue::Division(rate))]);
+        prop_assert_eq!(&out[..notes.len()], &notes[..]);
+        for added in &out[notes.len()..] {
+            // Inside the gap after some start: after the latest end of the notes starting there and before the next start.
+            let before: Vec<&ToolNote> = notes.iter().filter(|n| n.start <= added.start).collect();
+            let s = before.iter().map(|n| n.start).max().expect("a start before");
+            let end = before.iter().filter(|n| n.start == s).map(|n| n.end()).max().unwrap();
+            let next = notes.iter().map(|n| n.start).filter(|t| *t > s).min().expect("a start after");
+            prop_assert!(added.start >= end && added.end() <= next);
+        }
+    }
+}
+
+// Ornament.
+
+#[test]
+fn r14_ornaments_parameters_have_the_rules_ranges_and_defaults() {
+    let d = Registry::native().find("ornament").unwrap().descriptor();
+    assert_eq!(
+        d.defaults(),
         [
-            "dimension",
-            "shuffle",
-            "mirror",
-            "rotation_steps",
-            "rotate_on_grid"
-        ]
-    );
-    assert_eq!(ids("span"), ["mode", "offset", "variation"]);
-    assert_eq!(ids("strum"), ["strum_low", "strum_high", "tension"]);
-    assert_eq!(
-        ids("velocity_shaper"),
-        [
-            "envelope",
-            "minimum_velocity",
-            "maximum_velocity",
-            "loop",
-            "rotate",
-            "division"
-        ]
-    );
-    // Time Warp: three breakpoints of a switch, a Time and a Speed, then the
-    // three switches.
-    let time_warp = ids("time_warp");
-    assert_eq!(time_warp.len(), 12);
-    assert_eq!(
-        time_warp[0..3],
-        ["breakpoint_1", "breakpoint_1_time", "breakpoint_1_speed"]
-    );
-    assert_eq!(
-        time_warp[9..],
-        ["quantize", "preserve_time_range", "include_note_end"]
-    );
-    let defaults = |id: &str| Registry::native().find(id).unwrap().descriptor().defaults();
-    assert_eq!(
-        defaults("time_warp"),
-        [
-            on(true),
-            whole(0),
-            whole(100),
-            on(true),
-            whole(100),
-            whole(100),
-            on(false),
+            ParamValue::Choice(0),
+            whole(-50),
+            whole(50),
+            ParamValue::Choice(0),
+            whole(-50),
             whole(50),
             whole(100),
-            on(false),
-            on(true),
-            on(false),
+            whole(2)
         ]
     );
-    assert_eq!(defaults("span"), [choice(0), whole(0), whole(0)]);
-    assert_eq!(defaults("strum"), [whole(0), whole(0), whole(0)]);
-    assert_eq!(
-        defaults("recombine"),
-        [choice(0), on(false), on(false), whole(0), on(false)]
-    );
-    assert_eq!(
-        defaults("velocity_shaper")[1..],
-        [whole(1), whole(127), whole(1), whole(0), choice(0)]
-    );
-    // The ranges: Speed 25 % to 400 %, Rotate and Loop as R34 gives them.
-    let tool = Registry::native().find("time_warp").unwrap();
-    let mut values = tool.descriptor().defaults();
-    values[2] = whole(401);
     assert!(
-        run(tool, &eight_sixteenths(), &values).is_err(),
-        "Speed tops out at 400 %"
+        d.check(&settings("ornament", &[("flam_position", whole(-101))]))
+            .is_err()
     );
-    values[2] = whole(24);
     assert!(
-        run(tool, &eight_sixteenths(), &values).is_err(),
-        "and starts at 25 %"
+        d.check(&settings("ornament", &[("flam_velocity", whole(0))]))
+            .is_err()
     );
-    let shaper = Registry::native().find("velocity_shaper").unwrap();
-    for (at, out_of_range) in [(3, 0), (3, 17), (4, -17), (4, 17), (1, 0), (2, 128)] {
-        let mut values = shaper.descriptor().defaults();
-        values[at] = whole(out_of_range);
-        assert!(
-            run(shaper, &ramp_notes(4), &values).is_err(),
-            "parameter {at} at {out_of_range}"
-        );
+    assert!(
+        d.check(&settings("ornament", &[("grace_notes_amount", whole(9))]))
+            .is_err()
+    );
+}
+
+#[test]
+fn r15_a_flam_ends_where_the_note_starts_or_takes_over_its_start() {
+    let with = input(vec![note(60, 4 * S, 2 * S)], (0, 8 * S));
+    let out = apply("ornament", &with, &[]);
+    let flam = &out[0];
+    assert_eq!(
+        (flam.start.0, flam.length.0, flam.key, flam.velocity),
+        (4 * S - S / 2, S / 2, 60, 50)
+    );
+    assert_eq!(
+        (out[1].start.0, out[1].length.0),
+        (4 * S, 2 * S),
+        "the note stays"
+    );
+    // Positive: the flam starts where the note did and the note starts later.
+    let out = apply("ornament", &with, &[("flam_position", whole(100))]);
+    assert_eq!((out[0].start.0, out[0].length.0), (4 * S, S));
+    assert_eq!(
+        (out[1].start.0, out[1].end().0),
+        (5 * S, 6 * S),
+        "its end stays put"
+    );
+    // At most the note's length less a tick.
+    let short = input(vec![note(60, 4 * S, 100)], (0, 8 * S));
+    let out = apply("ornament", &short, &[("flam_position", whole(100))]);
+    assert_eq!((out[0].length.0, out[1].length.0), (99, 1));
+    // 0 % adds nothing.
+    assert_eq!(
+        apply("ornament", &with, &[("flam_position", whole(0))]),
+        with.notes
+    );
+    // A flam before tick 0 is cut at 0.
+    let early = input(vec![note(60, S / 4, S)], (0, 4 * S));
+    let out = apply("ornament", &early, &[]);
+    assert_eq!((out[0].start.0, out[0].length.0), (0, S / 4));
+}
+
+#[test]
+fn r16_grace_notes_fill_the_span_and_alternate_the_note_and_its_step() {
+    let with = input(vec![note(60, 4 * S, 2 * S)], (0, 8 * S));
+    let mode = ("mode", ParamValue::Choice(1));
+    let out = apply(
+        "ornament",
+        &with,
+        &[
+            mode.clone(),
+            ("grace_notes_position", whole(-100)),
+            ("grace_notes_amount", whole(3)),
+        ],
+    );
+    // Three grace notes of a third of a step... filling one step, then the note.
+    assert_eq!(out.len(), 4);
+    assert_eq!(out[0].start.0, 3 * S);
+    assert_eq!(out[2].end().0, 4 * S);
+    // Counting back: next to the note a step above, then its key, then a step above.
+    assert_eq!(
+        out.iter().map(|n| n.key).collect::<Vec<_>>(),
+        [61, 60, 61, 60]
+    );
+    let low = apply(
+        "ornament",
+        &with,
+        &[
+            mode.clone(),
+            ("grace_notes_pitch", ParamValue::Choice(1)),
+            ("grace_notes_position", whole(-100)),
+        ],
+    );
+    assert_eq!(low.iter().map(|n| n.key).collect::<Vec<_>>(), [60, 59, 60]);
+    let same = apply(
+        "ornament",
+        &with,
+        &[
+            mode.clone(),
+            ("grace_notes_pitch", ParamValue::Choice(2)),
+            ("grace_notes_position", whole(-100)),
+        ],
+    );
+    assert!(same.iter().all(|n| n.key == 60));
+    // Velocity and chance relative to the note's.
+    let mut n = note(60, 4 * S, 2 * S);
+    n.velocity = 80;
+    n.chance = 0.8;
+    let out = apply(
+        "ornament",
+        &input(vec![n], (0, 8 * S)),
+        &[
+            mode,
+            ("grace_notes_velocity", whole(25)),
+            ("grace_notes_chance", whole(50)),
+        ],
+    );
+    assert_eq!(out[0].velocity, 20);
+    assert!((out[0].chance - 0.4).abs() < 1e-9);
+    // In C major a step above C is D.
+    let mut scaled = input(vec![note(60, 4 * S, 2 * S)], (0, 8 * S));
+    scaled.scale = major();
+    let out = apply("ornament", &scaled, &[("mode", ParamValue::Choice(1))]);
+    assert_eq!(out[1].key, 62);
+}
+
+#[test]
+fn r17_applying_ornament_again_ornaments_the_notes_as_they_are() {
+    let with = input(vec![note(60, 4 * S, 2 * S)], (0, 8 * S));
+    let once = apply("ornament", &with, &[]);
+    assert_eq!(once.len(), 2);
+    let twice = apply("ornament", &input(once, (0, 8 * S)), &[]);
+    assert_eq!(twice.len(), 4, "the flam gets a flam too");
+}
+
+// Quantize.
+
+#[test]
+fn r18_quantizes_parameters_have_the_rules_defaults() {
+    let d = Registry::native().find("quantize").unwrap().descriptor();
+    assert_eq!(
+        d.defaults(),
+        [
+            ParamValue::Switch(true),
+            ParamValue::Switch(false),
+            ParamValue::Choice(0),
+            ParamValue::Switch(false),
+            whole(100)
+        ]
+    );
+    assert!(
+        d.check(&settings("quantize", &[("amount", whole(101))]))
+            .is_err()
+    );
+}
+
+#[test]
+fn r19_quantize_moves_starts_and_ends_toward_the_lines() {
+    let with = input(vec![note(60, S + 1000, S - 3000)], (0, 8 * S));
+    // The editor's grid (a 1/16) by default: the start lands on a line, the length stays.
+    let out = apply("quantize", &with, &[]);
+    assert_eq!((out[0].start.0, out[0].length.0), (S, S - 3000));
+    // Amount moves part of the way.
+    let out = apply("quantize", &with, &[("amount", whole(50))]);
+    assert_eq!(out[0].start.0, S + 500);
+    // Ends: the start stays put and the end lands on its line.
+    let out = apply(
+        "quantize",
+        &with,
+        &[
+            ("start", ParamValue::Switch(false)),
+            ("end", ParamValue::Switch(true)),
+        ],
+    );
+    assert_eq!((out[0].start.0, out[0].end().0), (S + 1000, 2 * S));
+    // Both: the start, then the end.
+    let out = apply("quantize", &with, &[("end", ParamValue::Switch(true))]);
+    assert_eq!((out[0].start.0, out[0].end().0), (S, 2 * S));
+    // Both off changes nothing.
+    let off = apply("quantize", &with, &[("start", ParamValue::Switch(false))]);
+    assert_eq!(off, with.notes);
+    // A named grid and triplets: lines a 1/8 triplet apart, laid out from the bar.
+    let third = BAR / 8 * 2 / 3;
+    let out = apply(
+        "quantize",
+        &input(vec![note(60, third + 100, 1000)], (0, BAR)),
+        &[
+            ("grid", ParamValue::Choice(4)),
+            ("triplets", ParamValue::Switch(true)),
+        ],
+    );
+    assert_eq!(out[0].start.0, third);
+    // The current grid ignores Triplets.
+    assert_eq!(
+        apply("quantize", &with, &[("triplets", ParamValue::Switch(true))]),
+        apply("quantize", &with, &[])
+    );
+    // Whole bars count from the contents' start.
+    let bars = apply(
+        "quantize",
+        &input(vec![note(60, BAR + 100, 1000)], (0, 4 * BAR)),
+        &[("grid", ParamValue::Choice(1))],
+    );
+    assert_eq!(bars[0].start.0, BAR);
+}
+
+#[test]
+fn r19_an_end_whose_line_is_at_or_before_the_start_goes_to_the_first_line_after_it() {
+    let with = input(vec![note(60, 10, 20)], (0, 8 * S));
+    let out = apply(
+        "quantize",
+        &with,
+        &[
+            ("start", ParamValue::Switch(false)),
+            ("end", ParamValue::Switch(true)),
+        ],
+    );
+    assert_eq!((out[0].start.0, out[0].end().0), (10, S));
+    // A shortened note ends its envelopes at its new end.
+    let mut long = note(60, 0, 2 * S - 500);
+    long.pressure = vec![ToolPoint {
+        at: Ticks(2 * S - 500),
+        value: 9.0,
+        bend: 0.0,
+    }];
+    let out = apply(
+        "quantize",
+        &input(vec![long], (0, 8 * S)),
+        &[
+            ("start", ParamValue::Switch(false)),
+            ("end", ParamValue::Switch(true)),
+        ],
+    );
+    assert_eq!(out[0].length.0, 2 * S);
+}
+
+proptest! {
+    #[test]
+    fn r19_at_100_percent_every_start_is_on_a_line(
+        starts in proptest::collection::vec((0i64..20_000_000, 1i64..2_000_000), 1..10),
+        grid in 0usize..7,
+        triplets in any::<bool>(),
+    ) {
+        let notes: Vec<ToolNote> = starts.iter().map(|(s, l)| note(60, *s, *l)).collect();
+        let out = apply("quantize", &input(notes, (0, 30_000_000)), &[("grid", ParamValue::Choice(grid)), ("triplets", ParamValue::Switch(triplets))]);
+        let step = bl_midi_tools::grid_ticks(grid, triplets && grid > 0, Ticks(S)).0;
+        for n in &out {
+            // Lines are laid out from each bar's start, and a bar's end is a line too.
+            let into = n.start.0.rem_euclid(BAR);
+            prop_assert!(into % step == 0 || into == 0, "start {} step {}", n.start.0, step);
+        }
+    }
+}
+
+#[test]
+fn r2_a_note_keeps_a_tick_and_ids_name_the_tools() {
+    let registry = Registry::native();
+    for id in ["arpeggiate", "chop", "connect", "ornament", "quantize"] {
+        assert_eq!(registry.find(id).unwrap().descriptor().id, id);
     }
 }

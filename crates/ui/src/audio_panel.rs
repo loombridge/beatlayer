@@ -367,7 +367,8 @@ pub fn show(
     ui.painter().rect_filled(rect, 0.0, c.panel.0);
 
     // The panel selector row (L-CLIP-003): Audio Utilities and Transform.
-    // The Transform panel is empty until Quantize arrives (WP-6.12).
+    // The Transform panel holds Quantize alone (the MIDI transformations
+    // spec, R22).
     let shown = shell.clip_view().midi_tools().panel();
     let shown = if shown == bl_shell::midi_tool_commands::Panel::Transform {
         shown
@@ -383,6 +384,7 @@ pub fn show(
         events,
     );
     if shown == bl_shell::midi_tool_commands::Panel::Transform {
+        crate::tool_panel::show_audio_transform(ui, shell, theme, rect, clip, events);
         return;
     }
 

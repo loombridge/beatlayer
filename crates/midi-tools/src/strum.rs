@@ -4,7 +4,7 @@
 use crate::descriptor::{ParamKind, ParamSpec, ParamValue, ToolDescriptor, ToolKind};
 use crate::input::{ToolInput, ToolOutput};
 use crate::registry::{MidiTool, ToolError};
-use crate::values::{round_ticks, whole};
+use crate::value::{round_ticks, whole};
 use bl_core::time::Ticks;
 
 /// How far into a strum of `n` notes note `j` sounds, from 0 to 1, under

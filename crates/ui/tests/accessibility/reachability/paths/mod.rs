@@ -1,0 +1,9 @@
+pub(super) mod arrangement;
+pub(super) mod browser;
+pub(super) mod clips;
+pub(super) mod control_bar;
+pub(super) mod devices;
+pub(super) mod files;
+pub(super) mod mixer;
+pub(super) mod session;
+pub(super) mod settings;

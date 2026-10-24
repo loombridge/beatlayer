@@ -770,7 +770,7 @@ fn the_loop_brace_is_painted_in_its_on_and_off_colours() {
     assert_ne!(on, off, "the theme gives the brace two colours");
     let near = |a: f32, b: f32| (a - b).abs() < 0.51;
     // The fill of the rectangle painted where the brace sits, found by its
-    // rectangle, the way `accessibility.rs` finds the focus strokes.
+    // rectangle, the way `accessibility/outline_view.rs` finds the focus strokes.
     let the_brace = |output: &FullOutput, want: Rect| {
         common::painted_rects(output)
             .into_iter()

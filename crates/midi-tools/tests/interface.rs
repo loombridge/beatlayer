@@ -61,22 +61,24 @@ fn r3_the_registry_lists_each_kind_apart() {
         .tools(ToolKind::Generator)
         .map(|tool| tool.descriptor().id.clone())
         .collect();
-    // The shipped tools come in the selector's order, the test tool after.
     assert_eq!(
-        transformations.last().map(String::as_str),
-        Some("test_transpose")
+        transformations,
+        [
+            "arpeggiate",
+            "chop",
+            "connect",
+            "ornament",
+            "quantize",
+            "recombine",
+            "span",
+            "strum",
+            "time_warp",
+            "velocity_shaper",
+            "test_transpose"
+        ],
+        "the native tools in the selector's order, then the test tool"
     );
-    let places: Vec<usize> = transformations[..transformations.len() - 1]
-        .iter()
-        .map(|id| {
-            bl_midi_tools::TRANSFORMATION_ORDER
-                .iter()
-                .position(|listed| listed == id)
-                .expect("a listed tool")
-        })
-        .collect();
-    assert!(places.windows(2).all(|pair| pair[0] < pair[1]));
-    assert_eq!(generators.last().map(String::as_str), Some("test_fill"));
+    assert_eq!(generators, ["test_fill"]);
     assert!(
         registry
             .get(ToolKind::Generator, "test_transpose")

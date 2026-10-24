@@ -6,7 +6,7 @@
 //!   rows into rectangles, so placement isn't scattered through the code.
 //! - [`theme`]: Beatlayer's colours, sizes, and bundled typeface, as tokens
 //!   from theme files, dark and light.
-//! - [`keymap`] and [`input`]: the default keymap (`keymaps/live12.toml`,
+//! - [`keymap`] and [`input`]: the default keymap (`keymaps/live12/`,
 //!   generated from the parity reference) and the dispatcher that turns key
 //!   presses into commands for the contexts that apply.
 //! - [`main_window`], [`settings_window`], [`menus`], [`widgets`]: the

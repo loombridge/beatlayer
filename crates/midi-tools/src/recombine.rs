@@ -4,7 +4,7 @@ use crate::descriptor::{ChoiceOption, ParamKind, ParamSpec, ParamValue, ToolDesc
 use crate::input::{ToolInput, ToolOutput};
 use crate::random::Rng;
 use crate::registry::{MidiTool, ToolError};
-use crate::values::{choice, switch, whole};
+use crate::value::{choice, switch, whole};
 use bl_core::time::Ticks;
 
 /// How many steps Rotation Steps reaches either way. A rotation counts

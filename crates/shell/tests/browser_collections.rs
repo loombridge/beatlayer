@@ -559,7 +559,7 @@ fn a_collection_is_renamed_hidden_and_keeps_its_place() {
 fn show_in_places_shows_a_collected_file_in_its_place() {
     let scratch = Scratch::new("places");
     let (mut shell, _, lib) = library(&scratch);
-    let kick = text(&lib.join("Drums/Kick 2.wav"));
+    let kick = text(&lib.join("Drums").join("Kick 2.wav"));
     run::<BrowserState>(
         &mut shell,
         ids::SET_COLLECTION,

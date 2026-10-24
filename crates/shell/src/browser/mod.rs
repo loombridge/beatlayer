@@ -3019,6 +3019,7 @@ impl BrowserView {
                     track,
                     at: Some(ctx.insert_marker),
                     spread: false,
+                    lane: None,
                 };
                 self.add(&args, ctx, &mut outcome)?;
             }

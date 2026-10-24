@@ -15,7 +15,9 @@ use std::collections::{HashMap, HashSet};
 
 use bl_core::time::{TempoMap, Ticks};
 use bl_media::Peaks;
-use bl_model::{ClipData, ClipId, ContentHash, Document, TakeLaneId, Track, TrackId, WarpMap};
+use bl_model::{
+    ClipData, ClipId, ContentHash, Document, TakeLaneId, Track, TrackId, WarpMap, comp,
+};
 use bl_shell::arrangement::grid::{self, Step};
 use bl_shell::arrangement::rows::{Row, rows_between};
 use bl_shell::arrangement::{ArrangementView, Horizontal};
@@ -111,6 +113,9 @@ pub struct ClipIndex {
     tracks: HashMap<TrackId, TrackClips>,
     /// Each track's take lanes' clips, in the lanes' order (WP-6.22).
     lanes: HashMap<TrackId, Vec<(TakeLaneId, TrackClips)>>,
+    /// Each take-lane clip's stretches the main lane uses (the comping spec,
+    /// R20), for the highlights (R33), found when its track changes.
+    used: HashMap<TrackId, HashMap<ClipId, Vec<(i64, i64)>>>,
     total: usize,
 }
 
@@ -125,6 +130,7 @@ impl ClipIndex {
         let old = self.doc.replace(doc.clone());
         self.tracks.retain(|id, _| doc.track(*id).is_some());
         self.lanes.retain(|id, _| doc.track(*id).is_some());
+        self.used.retain(|id, _| doc.track(*id).is_some());
         self.total = 0;
         // A new tempo map moves where every audio clip's file starts.
         let tempo = &doc.settings().tempo;
@@ -147,7 +153,15 @@ impl ClipIndex {
                 }
                 if track.take_lanes().len() == 0 {
                     self.lanes.remove(&id);
+                    self.used.remove(&id);
                 } else {
+                    let mut used: HashMap<ClipId, Vec<(i64, i64)>> = HashMap::new();
+                    for source in comp::sources(track, tempo) {
+                        used.entry(source.source)
+                            .or_default()
+                            .push((source.start.get(), source.end.get()));
+                    }
+                    self.used.insert(id, used);
                     let lanes = track
                         .take_lanes()
                         .map(|lane| (lane.id, TrackClips::of_clips(lane.clips.iter(), tempo)))
@@ -177,6 +191,16 @@ impl ClipIndex {
             .iter()
             .find(|(id, _)| *id == lane)
             .map(|(_, clips)| clips)
+    }
+
+    /// The stretches of a take-lane clip that the track's main lane uses,
+    /// as start and end ticks.
+    #[must_use]
+    pub fn used(&self, track: TrackId, clip: ClipId) -> &[(i64, i64)] {
+        self.used
+            .get(&track)
+            .and_then(|used| used.get(&clip))
+            .map_or(&[], Vec::as_slice)
     }
 
     /// Every clip in the document.
@@ -278,6 +302,17 @@ fn rgba(colour: Color32) -> [u8; 4] {
 fn body_colour(clip: Color32, lane: Color32, dark: bool) -> Color32 {
     let t = if dark { 0.18 } else { 0.35 };
     let mix = |a: u8, b: u8| (f32::from(a) * (1.0 - t) + f32::from(b) * t).round() as u8;
+    Color32::from_rgb(
+        mix(clip.r(), lane.r()),
+        mix(clip.g(), lane.g()),
+        mix(clip.b(), lane.b()),
+    )
+}
+
+/// A take-lane clip's material the main lane doesn't use (the comping spec,
+/// R33): its colour taken further towards the lane's than a clip's body is.
+fn pale(clip: Color32, lane: Color32) -> Color32 {
+    let mix = |a: u8, b: u8| (f32::from(a) * 0.4 + f32::from(b) * 0.6).round() as u8;
     Color32::from_rgb(
         mix(clip.r(), lane.r()),
         mix(clip.g(), lane.g()),
@@ -500,22 +535,46 @@ pub fn build_lanes(
                     lane,
                     lane_height: h,
                 });
+                // Spec: comping R33. A take-lane clip is drawn pale, with the
+                // stretches the main lane uses in the track's colour over it;
+                // a deactivated one is drawn as any deactivated clip is.
+                let (shade, used) = match lane {
+                    Some(_) if !span.muted => {
+                        (pale(colour, colors.lane.0), index.used(row.track, span.id))
+                    }
+                    _ => (colour, &[][..]),
+                };
+                let stretches = || {
+                    used.iter().filter_map(|&(from, to)| {
+                        let ux0 = (lanes.left() + horizontal.x(Ticks(from)) as f32).max(dx0);
+                        let ux1 = (lanes.left() + horizontal.x(Ticks(to)) as f32).min(dx1);
+                        (ux1 > ux0).then_some((ux0, ux1))
+                    })
+                };
                 if row.folded || h < 2.0 {
                     // Folded: a bar of the clip's colour.
-                    rect(out, [dx0, top, dx1, bottom], colour);
+                    rect(out, [dx0, top, dx1, bottom], shade);
+                    for (ux0, ux1) in stretches() {
+                        rect(out, [ux0, top, ux1, bottom], colour);
+                    }
                 } else {
                     let title = title_height(h);
-                    rect(
-                        out,
-                        [dx0, top, dx1, bottom],
+                    let body = |colour| {
                         if h >= 20.0 {
                             body_colour(colour, colors.lane.0, theme.dark)
                         } else {
                             colour
-                        },
-                    );
+                        }
+                    };
+                    rect(out, [dx0, top, dx1, bottom], body(shade));
                     if title > 0.0 {
-                        rect(out, [dx0, top, dx1, top + title], colour);
+                        rect(out, [dx0, top, dx1, top + title], shade);
+                    }
+                    for (ux0, ux1) in stretches() {
+                        rect(out, [ux0, top, ux1, bottom], body(colour));
+                        if title > 0.0 {
+                            rect(out, [ux0, top, ux1, top + title], colour);
+                        }
                     }
                     // The clip's left edge, on lanes tall enough to show it.
                     let edge = if h >= 6.0 { px } else { 0.0 };

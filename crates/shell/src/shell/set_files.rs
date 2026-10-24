@@ -112,6 +112,7 @@ impl Shell {
         self.plugins.clear();
         self.au.clear();
         self.vst3.clear();
+        self.lv2.clear();
         self.kit.clear();
     }
 
@@ -530,6 +531,7 @@ impl Shell {
                     &self.plugins,
                     &self.au,
                     &self.vst3,
+                    &self.lv2,
                     &self.kit,
                     &mut self.editor,
                 );
@@ -552,6 +554,7 @@ impl Shell {
                     &self.plugins,
                     &self.au,
                     &self.vst3,
+                    &self.lv2,
                     &self.kit,
                     &mut self.editor,
                 );
@@ -623,6 +626,7 @@ impl Shell {
                     &self.plugins,
                     &self.au,
                     &self.vst3,
+                    &self.lv2,
                     &self.kit,
                     &mut self.editor,
                 );
@@ -659,6 +663,7 @@ impl Shell {
                     &self.plugins,
                     &self.au,
                     &self.vst3,
+                    &self.lv2,
                     &self.kit,
                     &mut self.editor,
                 );
@@ -708,6 +713,7 @@ impl Shell {
                     &self.plugins,
                     &self.au,
                     &self.vst3,
+                    &self.lv2,
                     &self.kit,
                     &mut self.editor,
                 );

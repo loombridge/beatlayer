@@ -459,6 +459,47 @@ impl Lv2Host {
         })
     }
 
+    /// Opens the device's plug-in's editor in a host window titled `title`.
+    ///
+    /// # Errors
+    ///
+    /// [`Lv2Error::NoInstance`] if the device has no plug-in, and
+    /// [`Lv2Error::Failed`] if it has no editor, or it won't open.
+    pub fn open_editor(&self, device: DeviceId, title: &str) -> Result<(), Lv2Error> {
+        let mut guard = lock(&self.inner.main);
+        open_editor(guard.get()?, device, title)
+    }
+
+    /// Closes the device's plug-in's editor, if it's open.
+    ///
+    /// # Errors
+    ///
+    /// [`Lv2Error::WrongThread`] off the main thread.
+    pub fn close_editor(&self, device: DeviceId) -> Result<(), Lv2Error> {
+        let mut guard = lock(&self.inner.main);
+        close_editor(guard.get()?, device);
+        Ok(())
+    }
+
+    /// Shows or hides the device's editor window without closing it, as
+    /// View ▸ Plug-In Windows does. Does nothing while its editor is closed.
+    ///
+    /// # Errors
+    ///
+    /// [`Lv2Error::WrongThread`] off the main thread.
+    pub fn set_editor_visible(&self, device: DeviceId, shown: bool) -> Result<(), Lv2Error> {
+        let mut guard = lock(&self.inner.main);
+        set_editor_visible(guard.get()?, device, shown);
+        Ok(())
+    }
+
+    /// The devices whose plug-in's editor window is open, hidden or shown.
+    #[must_use]
+    pub fn open_editors(&self) -> Vec<DeviceId> {
+        let mut guard = lock(&self.inner.main);
+        guard.get().map(open_editors).unwrap_or_default()
+    }
+
     /// Lets go of every plug-in whose device isn't in `keep`, as when a set
     /// closes. Their nodes keep the instances they hold until they're dropped.
     pub fn retain(&self, keep: &BTreeSet<DeviceId>) {
@@ -472,8 +513,7 @@ impl Lv2Host {
             .copied()
             .collect();
         for device in gone {
-            #[cfg(all(unix, not(target_os = "macos")))]
-            super::ui::close(main, device);
+            close_editor(main, device);
             main.entries.remove(&device);
         }
         lock(&self.inner.latencies).retain(|device, _| keep.contains(device));
@@ -699,6 +739,27 @@ fn editor_state(_: &Main, _: DeviceId) -> (bool, bool) {
     (false, false)
 }
 
+#[cfg(all(unix, not(target_os = "macos")))]
+use super::ui::{close as close_editor, open as open_editor, open_devices as open_editors, set_visible as set_editor_visible};
+
+#[cfg(not(all(unix, not(target_os = "macos"))))]
+fn open_editor(_: &mut Main, _: DeviceId, _: &str) -> Result<(), Lv2Error> {
+    Err(Lv2Error::Failed(
+        "LV2 editors are shown in X11 windows, which this platform doesn't host".to_owned(),
+    ))
+}
+
+#[cfg(not(all(unix, not(target_os = "macos"))))]
+fn close_editor(_: &mut Main, _: DeviceId) {}
+
+#[cfg(not(all(unix, not(target_os = "macos"))))]
+fn set_editor_visible(_: &mut Main, _: DeviceId, _: bool) {}
+
+#[cfg(not(all(unix, not(target_os = "macos"))))]
+fn open_editors(_: &mut Main) -> Vec<DeviceId> {
+    Vec::new()
+}
+
 /// The device's running plug-in, or why it has none.
 fn entry(main: &mut Main, device: DeviceId) -> Result<&mut Entry, Lv2Error> {
     main.entries
@@ -839,6 +900,14 @@ fn ensure_entry(main: &mut Main, device: &Device, inner: &Inner) -> bool {
         }
     };
     main.missing.remove(&device.id);
+    // A set that opens brings its plug-in's type, so the device shows its
+    // parameters without a load.
+    {
+        let mut types = lock(&inner.types);
+        if !types.iter().any(|t| t.device_type.kind == device.kind) {
+            types.push(Lv2Type::new(&info, &info.bundle));
+        }
+    }
     let (_, params) = describe::device_type(&info);
     let restore = device
         .plugin

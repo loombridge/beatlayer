@@ -87,9 +87,11 @@ pub fn handles(id: &str) -> bool {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct LoadPluginArgs {
-    /// The plug-in's file or bundle (`.clap`, or `.vst3` for VST3).
+    /// The plug-in's file or bundle (`.clap`, `.vst3` for VST3, or an LV2
+    /// bundle folder, `.lv2`, on Linux).
     pub path: String,
-    /// Which of the file's plug-ins, by its ID; the first if left out.
+    /// Which of the file's plug-ins, by its ID (an LV2 plug-in's URI); the
+    /// first if left out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plugin: Option<String>,
     /// The track; the selected track if left out.
@@ -132,7 +134,7 @@ pub struct PluginLoaded {
     /// Whether a new MIDI track was made for it, as `device.add` does for
     /// an instrument or MIDI effect.
     pub new_track: bool,
-    /// The plug-in's ID: a CLAP ID, or a VST3 class ID.
+    /// The plug-in's ID: a CLAP ID, a VST3 class ID, or an LV2 URI.
     pub plugin: String,
     /// Its name.
     pub name: String,
@@ -164,7 +166,7 @@ pub struct PluginInfoArgs {
 pub struct PluginInfo {
     /// The device.
     pub device: DeviceId,
-    /// The plug-in's ID: a CLAP ID, or a VST3 class ID.
+    /// The plug-in's ID: a CLAP ID, a VST3 class ID, or an LV2 URI.
     pub plugin: String,
     /// The file it was loaded from.
     pub path: String,
@@ -499,11 +501,13 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     registry.register(
         CommandSpec::new(LOAD, "Load Plug-In")
             .description(
-                "Loads a plug-in from its file or bundle (`path`: a `.clap` file, or a \
-                 `.vst3` bundle or module) and adds it as a device, as `device.add` adds one: \
+                "Loads a plug-in from its file or bundle (`path`: a `.clap` file, a \
+                 `.vst3` bundle or module, or on Linux an `.lv2` bundle folder) and adds it \
+                 as a device, as `device.add` adds one: \
                  to the selected track (or `track`), at `index` or where its role goes, \
                  selected, one undo step (Insert Device). `plugin` picks one of the file's \
-                 plug-ins by its ID (CLAP's, or a VST3 class ID); the first if left out. Its \
+                 plug-ins by its ID (CLAP's, a VST3 class ID, or an LV2 URI); the first if \
+                 left out. Its \
                  parameters become the device's, which `device.parameters` lists and \
                  `device.set_param` and automation change. The plug-in's code runs inside \
                  Beatlayer, so load only plug-ins you trust. The scanner (`plugin.scan`) \
@@ -655,7 +659,8 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                 "Finds the plug-ins installed on this machine and describes each one: its \
                  format, its file, its identifier, name, vendor, version, and role in a chain. \
                  Scans the files or folders in `paths` for every hosted format, or, when \
-                 `paths` is left out, the system plug-in folders of CLAP and of the formats \
+                 `paths` is left out, the system plug-in folders of CLAP, of LV2 on Linux \
+                 (`LV2_PATH` names them when it is set), and of the formats \
                  the Plug-Ins settings switch on (`plugin.settings`: `vst3_system_folders`, \
                  and on macOS `use_audio_units_v2`). The app also runs this at start, in the \
                  background, and when one of those switches turns on. Each \

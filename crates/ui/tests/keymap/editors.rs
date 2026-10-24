@@ -254,7 +254,7 @@ fn cmd_g_and_cmd_shift_g_group_and_ungroup_notes_while_notes_are_selected() {
 // Spec: note-editing R14, R15, R18. 0 deactivates the selected notes through
 // the keymap (S-NOTE-041); the keys that read a number or a direction are the
 // note editor's, and Cmd-Up and Cmd-Down with the Chord Selector Pad focused
-// (S-NOTE-052) wait for Stacks.
+// (S-NOTE-052) are the Chord Selector Pad's.
 #[test]
 fn zero_deactivates_the_selected_notes_and_the_value_keys_are_the_editors() {
     let keymap = Keymap::live12();
@@ -281,8 +281,8 @@ fn zero_deactivates_the_selected_notes_and_the_value_keys_are_the_editors() {
     }
     let entry = keymap.entry_for("S-NOTE-052").unwrap();
     assert!(
-        matches!(entry.status, Status::Pending { .. }),
-        "the Chord Selector Pad's keys wait for Stacks: {:?}",
+        matches!(entry.status, Status::Widget(_)),
+        "the Chord Selector Pad handles its own keys: {:?}",
         entry.status
     );
 }

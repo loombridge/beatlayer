@@ -12,7 +12,7 @@
 //! The behaviour is in the arrangement editing spec.
 
 use bl_core::time::Ticks;
-use bl_model::{ClipData, ClipId, Document, TakeLaneId, TrackId};
+use bl_model::{ClipData, ClipId, Document, TakeLaneId, TrackId, comp};
 use bl_shell::arrangement::editing::{earliest_move, resize_limits};
 use bl_shell::arrangement::rows::{Row, first_row_at};
 use bl_shell::arrangement::{ArrangementView, Horizontal};
@@ -36,6 +36,11 @@ pub const EDGE_GRAB: f32 = 4.0;
 const STRETCH: &str = "clip.stretch";
 /// `clip.slide_contents`: slide a clip's contents inside it (R54).
 const SLIDE_CONTENTS: &str = "clip.slide_contents";
+/// `take_lane.copy_to_main_lane`: what Draw Mode comping runs (the comping
+/// spec, R31, R32).
+const COPY_TO_MAIN_LANE: &str = "take_lane.copy_to_main_lane";
+/// `take_lane.move_comp_edge`: what dragging a highlight's edge runs (R34).
+const MOVE_COMP_EDGE: &str = "take_lane.move_comp_edge";
 
 /// The `edge` argument [`STRETCH`] takes for an Arrangement edge.
 fn stretch_edge(edge: Edge) -> &'static str {
@@ -81,6 +86,9 @@ pub(super) struct Lanes<'a> {
     pub shown: &'a [ShownClip],
     pub rows: &'a [Row],
     pub scroll_y: f32,
+    /// Whether Draw Mode is on (`view.draw_mode`), which comps by dragging
+    /// across a take lane (the comping spec, R31).
+    pub draw_mode: bool,
 }
 
 impl Lanes<'_> {
@@ -117,6 +125,55 @@ impl Lanes<'_> {
             Some(lane) => Lane::Take { track, lane },
             None => Lane::Track { track },
         })
+    }
+
+    /// Whether the point is on a take lane where Draw Mode comps: Draw Mode
+    /// is on and nothing there takes a drag of its own, a clip's title bar or
+    /// edge, which still move and resize it. Returns the take lane.
+    fn drawing_lane(&self, pos: Pos2) -> Option<(TrackId, TakeLaneId)> {
+        if !self.draw_mode {
+            return None;
+        }
+        let (row, Some(lane)) = self.place_at(pos)? else {
+            return None;
+        };
+        self.hit(pos)
+            .is_none_or(|hit| hit.zone == Zone::Body)
+            .then_some((self.rows[row].track, lane))
+    }
+
+    /// The comp boundary whose highlight edge is under a point on a take
+    /// lane (the comping spec, R34): a boundary of two adjacent main-lane
+    /// clips that both play take-lane clips, where the stretch one plays
+    /// from this lane ends or the other's starts. Returns the track and the
+    /// boundary.
+    fn comp_edge_at(&self, pos: Pos2) -> Option<(TrackId, Ticks)> {
+        if !self.rect.contains(pos) {
+            return None;
+        }
+        let (row, Some(lane)) = self.place_at(pos)? else {
+            return None;
+        };
+        let track = self.rows[row].track;
+        let held = self.doc.track(track)?;
+        let x_of = |at: Ticks| self.rect.left() + self.horizontal.x(at) as f32;
+        let near = |at: Ticks| (x_of(at) - pos.x).abs() <= EDGE_GRAB;
+        // Boundaries are cheap to find; the matching behind a highlight is
+        // only worked out when the pointer is at one.
+        let meets = held.clips().filter(|a| near(a.end())).find_map(|a| {
+            held.clips()
+                .find(|b| b.start == a.end() && b.id != a.id)
+                .map(|b| (a.id, b.id, a.end()))
+        })?;
+        let (earlier, later, boundary) = meets;
+        let sources = comp::sources(held, &self.doc.settings().tempo);
+        let plays = |clip: ClipId| sources.iter().any(|s| s.clip == clip);
+        let edge = sources.iter().any(|s| {
+            s.lane == lane
+                && ((s.clip == earlier && s.end == boundary)
+                    || (s.clip == later && s.start == boundary))
+        });
+        (edge && plays(earlier) && plays(later)).then_some((track, boundary))
     }
 
     /// The clip under a point, and where on it.
@@ -248,6 +305,23 @@ enum ClipDrag {
     },
     /// Dragging one of a fade's handles (the audio clips spec, R27).
     Fade(FadeDrag),
+    /// Draw Mode comping (the comping spec, R31): dragging across a take
+    /// lane selects the stretch and, on release, copies it to the main lane.
+    Draw {
+        track: TrackId,
+        lane: TakeLaneId,
+        /// Where the drag began, snapped.
+        from: Ticks,
+    },
+    /// Dragging a highlight's edge, which moves the comp boundary there
+    /// (R34).
+    CompEdge {
+        track: TrackId,
+        /// The boundary when the drag began.
+        from: Ticks,
+        /// From the boundary to where it was grabbed.
+        grab: Ticks,
+    },
 }
 
 /// A resize from the keyboard (S-ARR-004): Enter, then Left and Right, then
@@ -344,6 +418,28 @@ impl ClipGestures {
         {
             select_handle(events, drag.state());
             self.drag = Some(ClipDrag::Fade(drag));
+            return true;
+        }
+        // Spec: comping R34. A highlight's edge where two comp parts meet.
+        if let Some((track, boundary)) = lanes.comp_edge_at(press) {
+            self.drag = Some(ClipDrag::CompEdge {
+                track,
+                from: boundary,
+                grab: lanes.at(press) - boundary,
+            });
+            return true;
+        }
+        // Spec: comping R31. In Draw Mode, a drag across a take lane comps.
+        if !keys.extend
+            && let Some((track, lane)) = lanes.drawing_lane(press)
+        {
+            self.drag = Some(ClipDrag::Draw {
+                track,
+                lane,
+                from: lanes
+                    .view
+                    .snap_drag(lanes.doc, lanes.at(press), keys.bypass),
+            });
             return true;
         }
         let Some(hit) = lanes.hit(press) else {
@@ -512,6 +608,55 @@ impl ClipGestures {
             ClipDrag::Fade(drag) => drag.frame(lanes, pointer, |at| {
                 lanes.view.snap_drag(lanes.doc, at, keys.bypass)
             }),
+            // Spec: comping R31. The stretch dragged over, snapped; nothing
+            // to copy until the drag has length.
+            ClipDrag::Draw { lane, .. } => {
+                let (start, end) = self.drawn(lanes, pointer, keys)?;
+                Some((
+                    COPY_TO_MAIN_LANE,
+                    json!({ "lanes": [lane], "start": start, "end": end }),
+                ))
+            }
+            // Spec: comping R34. The boundary goes where the pointer is,
+            // snapped as R31 snaps.
+            ClipDrag::CompEdge { track, from, grab } => {
+                let to = lanes.view.snap_drag(lanes.doc, at - *grab, keys.bypass);
+                Some((
+                    MOVE_COMP_EDGE,
+                    json!({ "track": track, "from": from, "to": to }),
+                ))
+            }
+        }
+    }
+
+    /// The stretch a Draw Mode drag has covered at `pointer`, earliest first,
+    /// once it has length.
+    fn drawn(&self, lanes: &Lanes<'_>, pointer: Pos2, keys: EditKeys) -> Option<(Ticks, Ticks)> {
+        let Some(ClipDrag::Draw { from, .. }) = &self.drag else {
+            return None;
+        };
+        let to = lanes
+            .view
+            .snap_drag(lanes.doc, lanes.at(pointer), keys.bypass);
+        let (start, end) = (*from.min(&to), *from.max(&to));
+        (start < end).then_some((start, end))
+    }
+
+    /// Selects the stretch a Draw Mode drag covered, on the lane it was
+    /// dragged on, after the copy it made: the selection is never part of
+    /// the drag's undo step, and Esc leaves it as it was.
+    fn select_drawn(drag: &ClipDrag, range: Option<(Ticks, Ticks)>, events: &mut Vec<UiEvent>) {
+        if let (ClipDrag::Draw { track, lane, .. }, Some((start, end))) = (drag, range) {
+            invoke(
+                events,
+                view_ids::SELECT_TIME,
+                json!({
+                    "start": start,
+                    "end": end,
+                    "tracks": [track],
+                    "lanes": [Lane::Take { track: *track, lane: *lane }],
+                }),
+            );
         }
     }
 
@@ -525,6 +670,9 @@ impl ClipGestures {
     ) {
         if let Some((id, args)) = self.frame(lanes, pointer, keys) {
             gesture(events, GesturePhase::Update, id, args);
+            if let Some(drag) = &self.drag {
+                Self::select_drawn(drag, self.drawn(lanes, pointer, keys), events);
+            }
         }
     }
 
@@ -537,11 +685,14 @@ impl ClipGestures {
         events: &mut Vec<UiEvent>,
     ) {
         let last = pointer.and_then(|pointer| self.frame(lanes, pointer, keys));
-        if self.drag.take().is_some() {
+        let drawn = pointer.and_then(|pointer| self.drawn(lanes, pointer, keys));
+        if let Some(drag) = self.drag.take() {
             events.push(UiEvent::Gesture {
                 phase: GesturePhase::Commit,
                 invocation: last.map(|(id, args)| Invocation::new(id, args)),
             });
+            // Spec: comping R31. The stretch stays selected, after the copy.
+            Self::select_drawn(&drag, drawn, events);
         }
     }
 
@@ -575,6 +726,23 @@ impl ClipGestures {
                     edge: spot.edge,
                     handle: spot.handle,
                 },
+            );
+            return true;
+        }
+        // Spec: comping R32. In Draw Mode, a click on a take lane inside a
+        // time selection on its track's main lane copies that lane's
+        // material in the selection to the main lane.
+        if !keys.toggle
+            && !keys.extend
+            && let Some((track, lane)) = lanes.drawing_lane(pos)
+            && let Some((start, end)) = lanes.view.time_selection()
+            && (start..=end).contains(&lanes.at(pos))
+            && main_lane_selected(lanes.view, track)
+        {
+            invoke(
+                events,
+                COPY_TO_MAIN_LANE,
+                json!({ "lanes": [lane], "start": start, "end": end }),
             );
             return true;
         }
@@ -698,7 +866,13 @@ impl ClipGestures {
             Some(ClipDrag::Stretch { .. }) => return Some(CursorIcon::ResizeHorizontal),
             Some(ClipDrag::Slide { .. }) => return Some(CursorIcon::Grabbing),
             Some(ClipDrag::Fade(_)) => return Some(CursorIcon::Grabbing),
+            Some(ClipDrag::Draw { .. }) => return Some(CursorIcon::Crosshair),
+            Some(ClipDrag::CompEdge { .. }) => return Some(CursorIcon::ResizeHorizontal),
             None => {}
+        }
+        // Spec: comping R34. The resize cursor over a highlight's edge.
+        if lanes.comp_edge_at(hover).is_some() {
+            return Some(CursorIcon::ResizeHorizontal);
         }
         if let Some(spot) = fades::spot_at(lanes, hover, self.handles_held) {
             return Some(match spot.handle {
@@ -903,6 +1077,21 @@ impl ClipGestures {
                 }
             }
         }
+    }
+}
+
+/// Whether the time selection is on `track`'s main lane: the lanes it names
+/// include it, or, naming none, the track is selected.
+fn main_lane_selected(view: &ArrangementView, track: TrackId) -> bool {
+    let named: Vec<&Lane> = view
+        .time_selection_lanes()
+        .iter()
+        .filter(|lane| !matches!(lane, Lane::Automation { .. }))
+        .collect();
+    if named.is_empty() {
+        view.selected_tracks().contains(&track)
+    } else {
+        named.contains(&&Lane::Track { track })
     }
 }
 

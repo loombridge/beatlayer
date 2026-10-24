@@ -83,7 +83,14 @@ fn r3_the_registry_lists_each_kind_apart() {
     );
     assert_eq!(
         generators,
-        ["rhythm", "seed", "shape", "euclidean", "test_fill"],
+        [
+            "rhythm",
+            "seed",
+            "shape",
+            "stacks",
+            "euclidean",
+            "test_fill"
+        ],
         "the native generators in the selector's order, then the test tool"
     );
     assert!(

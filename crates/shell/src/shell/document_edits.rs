@@ -515,9 +515,15 @@ impl Shell {
     pub(super) fn run_comping(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
         // Spec: comping R4, R5, R17 to R21.
         let before = self.editor.document().clone();
-        let result =
-            crate::arrangement::comping::run(id, args, &mut self.editor, &mut self.arrangement)
-                .map_err(|failure| edit_error(id, failure));
+        let edge_fades = self.create_fades_on_clip_edges();
+        let result = crate::arrangement::comping::run(
+            id,
+            args,
+            &mut self.editor,
+            &mut self.arrangement,
+            edge_fades,
+        )
+        .map_err(|failure| edit_error(id, failure));
         if *self.editor.document() != before {
             self.dirty = true;
             self.document_changed();

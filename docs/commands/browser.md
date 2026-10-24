@@ -116,7 +116,7 @@ Result: [`TagsState`](README.md#tagsstate).
 
 **Add Files to Arrangement**. Permission: `external`. Contexts: `arrangement`, `browser`.
 
-Puts audio files into the Arrangement as clips, as dragging them from the browser does: onto the audio track `track` starting at `at` (or the insert marker), one after another; or, with no `track`, onto a new audio track below the last track (the drop area), named after the first file. With `spread`, each file goes on a track of its own, new tracks below the target. Each clip is named after its file and lasts as long as the file plays at the song's tempo. A clip placed over part of another replaces that part: the other is shortened, split around it, or removed, so a track never plays two clips at once; when a clip on `track` ends after `at`, it's destructive as well as external. One undo step. Reads the files, outside the project, and registers them so the set keeps them.
+Puts audio files into the Arrangement as clips, as dragging them from the browser does: onto the audio track `track` starting at `at` (or the insert marker), one after another; or, with no `track`, onto a new audio track below the last track (the drop area), named after the first file. With `spread`, each file goes on a track of its own, new tracks below the target. With `lane`, a take lane of the track, they go on that lane as takes instead, and with `spread` the others go on the take lane at the same place of the tracks below, which must be audio tracks (a lane is added where one has none there). Each clip is named after its file and lasts as long as the file plays at the song's tempo. A clip placed over part of another replaces that part: the other is shortened, split around it, or removed, so a track never plays two clips at once; when a clip on `track` ends after `at`, it's destructive as well as external. One undo step. Reads the files, outside the project, and registers them so the set keeps them.
 
 Default keys: none.
 
@@ -126,6 +126,7 @@ Arguments:
 |---|---|---|---|
 | `paths` | array of string | yes | The audio files, in the order they go down. |
 | `at` | [`Ticks`](README.md#ticks) or null | no | Where the first clip starts. Left out, the insert marker. It isn't snapped: snap first if you want the grid. |
+| `lane` | [`TakeLaneId`](README.md#takelaneid) or null | no | A take lane of `track` to put them on in place of its main lane (the comping spec, R36): the clips go one after another on that lane, as takes. With `spread`, the first goes on the lane and each of the others on the take lane at the same place among the take lanes of the next track below, in turn, a lane being added where a track has none there. `track` may be left out; given, it must be the lane's. |
 | `spread` | boolean | no | Put each file on a track of its own (as dropping with Cmd or Ctrl held does), new tracks going below the target, instead of one after another on one track. |
 | `track` | [`TrackId`](README.md#trackid) or null | no | The audio track to put them on. Left out (or `null`), a new audio track below the last track, as dropping in the drop area does. |
 

@@ -24,6 +24,7 @@ use bl_shell_spec::audio_editing as audio_ids;
 use bl_shell_spec::automation as automation_ids;
 use bl_shell_spec::bounce as bounce_ids;
 use bl_shell_spec::browser as browser_ids;
+use bl_shell_spec::comping as comping_ids;
 use bl_shell_spec::devices as device_ids;
 use bl_shell_spec::editing as edit_ids;
 use bl_shell_spec::freeze as freeze_ids;
@@ -34,6 +35,15 @@ use bl_shell_spec::multisampler as multisampler_ids;
 use bl_shell_spec::notes as note_ids;
 use bl_shell_spec::tracks as track_ids;
 use serde_json::Value;
+
+/// Whether `id` is a comping command a drag runs: Draw Mode comping and a
+/// highlight's edge (the comping spec, R31 and R34).
+fn comping_drag(id: &str) -> bool {
+    matches!(
+        id,
+        comping_ids::COPY_TO_MAIN_LANE | comping_ids::MOVE_COMP_EDGE
+    )
+}
 
 impl Shell {
     /// Whether a gesture that edits the set is under way.
@@ -185,6 +195,7 @@ impl Shell {
                 && !automation_ids::handles(&invocation.id)
                 && !clip_marker_command(&invocation.id)
                 && !arrangement_clip_command(&invocation.id)
+                && !comping_drag(&invocation.id)
             {
                 return Err(ShellError::Unavailable {
                     command: invocation.id.clone(),
@@ -221,6 +232,12 @@ impl Shell {
             automation_label(&invocation.id)
         } else if clip_marker_command(&invocation.id) || arrangement_clip_command(&invocation.id) {
             marker_label(&invocation.id)
+        } else if comping_drag(&invocation.id) {
+            if invocation.id == comping_ids::MOVE_COMP_EDGE {
+                "Move Comp Edge"
+            } else {
+                "Copy Selection to Main Lane"
+            }
         } else {
             editing::label(&invocation.id, &invocation.args)
         };
@@ -276,6 +293,16 @@ impl Shell {
                 model::run(editor, &invocation.id, invocation.args.clone())
                     .map(|changes| to_value(&changes))
                     .map_err(|error| EditFailure::Refused(error.to_string()))
+            } else if comping_drag(&invocation.id) {
+                // Spec: comping R31, R34. Draw Mode comping and a highlight's
+                // edge, run per frame as the Arrangement's drags are.
+                crate::arrangement::comping::run(
+                    &invocation.id,
+                    invocation.args.clone(),
+                    editor,
+                    arrangement,
+                    edge_fades,
+                )
             } else if note_ids::handles(&invocation.id) {
                 clip_view::run(
                     &invocation.id,
@@ -403,6 +430,15 @@ impl Shell {
                 model::run(&mut self.editor, &step.id, step.args.clone())
                     .map(|_| ())
                     .map_err(|error| EditFailure::Refused(error.to_string()))
+            } else if comping_drag(&step.id) {
+                crate::arrangement::comping::run(
+                    &step.id,
+                    step.args.clone(),
+                    &mut self.editor,
+                    &mut self.arrangement,
+                    self.prefs.create_fades_on_clip_edges.0,
+                )
+                .map(|_| ())
             } else if note_ids::handles(&step.id) {
                 clip_view::run(
                     &step.id,

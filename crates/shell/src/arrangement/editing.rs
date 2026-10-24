@@ -1893,6 +1893,7 @@ pub fn run(
                     serde_json::json!({}),
                     editor,
                     view,
+                    edge_fades,
                 )?;
                 let recorded = editor.document() != doc;
                 return Ok(to_value(&result(doc, editor, view, recorded)));

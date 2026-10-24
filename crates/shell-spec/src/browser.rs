@@ -13,7 +13,7 @@ use bl_commands::Context::{
 };
 use bl_commands::{CommandSpec, NoArgs, Permission, RegisterError, Registry};
 use bl_core::time::Ticks;
-use bl_model::{ClipId, TrackId};
+use bl_model::{ClipId, TakeLaneId, TrackId};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -389,6 +389,8 @@ pub enum ItemKind {
     /// A Beatlayer device preset, which loads into the device being
     /// hot-swapped (WP-2.4).
     Preset,
+    /// A Stacks chord bank (`.blstacks`), which loads into Stacks (WP-6.14b).
+    ChordBank,
     /// A plug-in the scanner found (WP-2.9).
     Plugin,
     /// One of Beatlayer's own devices, listed under a device label (the
@@ -1262,6 +1264,14 @@ pub struct AddToArrangementArgs {
     /// another on one track.
     #[serde(default)]
     pub spread: bool,
+    /// A take lane of `track` to put them on in place of its main lane (the
+    /// comping spec, R36): the clips go one after another on that lane, as
+    /// takes. With `spread`, the first goes on the lane and each of the others
+    /// on the take lane at the same place among the take lanes of the next
+    /// track below, in turn, a lane being added where a track has none there.
+    /// `track` may be left out; given, it must be the lane's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lane: Option<TakeLaneId>,
 }
 
 /// Arguments of `clip.save_file`.
@@ -1329,6 +1339,9 @@ pub struct PlacedClip {
     pub name: String,
     /// The file it plays.
     pub path: String,
+    /// The take lane it is on, if it is on one rather than a main lane.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lane: Option<TakeLaneId>,
 }
 
 /// What `browser.add_to_arrangement` and `browser.load_selected` return.
@@ -1338,6 +1351,10 @@ pub struct AddResult {
     pub created_tracks: Vec<TrackId>,
     /// The clips placed, in the order of the files.
     pub clips: Vec<PlacedClip>,
+    /// Take lanes added to tracks that had none at the place a file was
+    /// dropped on (the comping spec, R36).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub created_lanes: Vec<TakeLaneId>,
 }
 
 /// Adds the browser's commands to a registry.
@@ -1557,7 +1574,11 @@ fn specs() -> Vec<CommandSpec> {
                  browser does: onto the audio track `track` starting at `at` (or the insert \
                  marker), one after another; or, with no `track`, onto a new audio track below \
                  the last track (the drop area), named after the first file. With `spread`, each \
-                 file goes on a track of its own, new tracks below the target. Each clip is named \
+                 file goes on a track of its own, new tracks below the target. With `lane`, a \
+                 take lane of the track, they go on that lane as takes instead, and with \
+                 `spread` the others go on the take lane at the same place of the tracks below, \
+                 which must be audio tracks (a lane is added where one has none there). Each \
+                 clip is named \
                  after its file and lasts as long as the file plays at the song's tempo. A clip \
                  placed over part of another replaces that part: the other is shortened, split \
                  around it, or removed, so a track never plays two clips at once; when a clip on \

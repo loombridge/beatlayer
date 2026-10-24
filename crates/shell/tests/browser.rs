@@ -1030,6 +1030,174 @@ fn several_files_go_in_sequence_or_spread() {
     assert_eq!(shell.editor().undo_history().len(), 3, "a step each");
 }
 
+// Spec: comping R36 (I-DROP-016, I-DROP-020). Files dropped on a take lane
+// become takes on it, one after another; with `spread` each goes on the take
+// lane at the same place of the next tracks down, a lane being added where a
+// track has none there. One undo step.
+#[test]
+fn files_dropped_on_a_take_lane_become_takes_and_spread_goes_down_the_tracks() {
+    let scratch = Scratch::new("drop-take-lane");
+    let (mut shell, root) = shell_with_library(&scratch);
+    let files = [
+        root.join("Loop 120.wav"),
+        root.join("Samples").join("Pads").join("Warm Pad.wav"),
+    ]
+    .map(|p| text(&p));
+    let [first, second] = audio_tracks(&shell)[..] else {
+        panic!("the factory set has two audio tracks")
+    };
+    let lanes =
+        |shell: &Shell, track: TrackId| -> Vec<(bl_model::TakeLaneId, Vec<(Ticks, Ticks)>)> {
+            shell
+                .editor()
+                .document()
+                .track(track)
+                .unwrap()
+                .take_lanes()
+                .map(|lane| {
+                    (
+                        lane.id,
+                        lane.clips.iter().map(|c| (c.start, c.length)).collect(),
+                    )
+                })
+                .collect()
+        };
+    let inserted: bl_shell_spec::comping::LanesResult =
+        run(&mut shell, "take_lane.insert", json!({ "tracks": [first] }));
+    let lane = inserted.lanes[0];
+    let steps = shell.editor().undo_history().len();
+
+    // Several files go one after another on the lane, and not on the main lane.
+    let result: AddResult = run(
+        &mut shell,
+        ids::ADD_TO_ARRANGEMENT,
+        json!({ "paths": files, "lane": lane, "at": BAR }),
+    );
+    assert!(result.created_tracks.is_empty() && result.created_lanes.is_empty());
+    let placed: Vec<_> = result
+        .clips
+        .iter()
+        .map(|c| (c.track, c.lane, c.start))
+        .collect();
+    assert_eq!(
+        placed,
+        [
+            (first, Some(lane), Ticks(BAR)),
+            (first, Some(lane), Ticks(2 * BAR))
+        ]
+    );
+    assert_eq!(
+        lanes(&shell, first)[0].1,
+        [(Ticks(BAR), Ticks(BAR)), (Ticks(2 * BAR), Ticks(BAR / 2))]
+    );
+    assert_eq!(
+        shell
+            .editor()
+            .document()
+            .track(first)
+            .unwrap()
+            .clips()
+            .count(),
+        0
+    );
+    assert_eq!(shell.editor().undo_history().len(), steps + 1);
+    assert!(shell.arrangement().shows_take_lanes(first));
+    // A drop over part of a take replaces that part, as on a main lane.
+    let _: AddResult = run(
+        &mut shell,
+        ids::ADD_TO_ARRANGEMENT,
+        json!({ "paths": [files[1]], "track": first, "lane": lane, "at": BAR }),
+    );
+    assert_eq!(lanes(&shell, first)[0].1.len(), 3);
+
+    // Spread: the second file goes on the next track's lane at the same
+    // place, which has none, so one is added.
+    let before = shell.editor().document().clone();
+    let steps = shell.editor().undo_history().len();
+    let result: AddResult = run(
+        &mut shell,
+        ids::ADD_TO_ARRANGEMENT,
+        json!({ "paths": files, "lane": lane, "at": 8 * BAR, "spread": true }),
+    );
+    assert_eq!(result.created_lanes.len(), 1);
+    assert!(result.created_tracks.is_empty());
+    let other = lanes(&shell, second);
+    assert_eq!(other.len(), 1);
+    assert_eq!(other[0].0, result.created_lanes[0]);
+    assert_eq!(other[0].1, [(Ticks(8 * BAR), Ticks(BAR / 2))]);
+    assert_eq!(
+        shell
+            .editor()
+            .document()
+            .track(second)
+            .unwrap()
+            .take_lanes()
+            .next()
+            .unwrap()
+            .name,
+        "Take 1"
+    );
+    assert_eq!(result.clips[0].start, result.clips[1].start);
+    assert_eq!(result.clips[1].track, second);
+    assert_eq!(shell.editor().undo_history().len(), steps + 1);
+    assert!(shell.arrangement().shows_take_lanes(second));
+    shell.run("edit.undo", json!({})).unwrap();
+    assert_eq!(*shell.editor().document(), before);
+    // Dropped again, a lane that is there is used: no lane is added.
+    let _: AddResult = run(
+        &mut shell,
+        ids::ADD_TO_ARRANGEMENT,
+        json!({ "paths": files, "lane": lane, "at": 8 * BAR, "spread": true }),
+    );
+    let again: AddResult = run(
+        &mut shell,
+        ids::ADD_TO_ARRANGEMENT,
+        json!({ "paths": files, "lane": lane, "at": 12 * BAR, "spread": true }),
+    );
+    assert!(again.created_lanes.is_empty());
+    assert_eq!(lanes(&shell, second)[0].1.len(), 2);
+}
+
+// Spec: comping R36. A drop on a take lane that can't go there changes
+// nothing: files that need more audio tracks than there are from the lane's
+// down, a track named that isn't the lane's, a lane that isn't there, a MIDI
+// track's lane for samples.
+#[test]
+fn drops_on_take_lanes_that_cant_go_are_refused() {
+    let scratch = Scratch::new("drop-take-lane-refused");
+    let (mut shell, root) = shell_with_library(&scratch);
+    let file = text(&root.join("Loop 120.wav"));
+    let tracks: Vec<TrackId> = shell.editor().document().top_level().collect();
+    let [midi, _, first, second] = tracks[..4] else {
+        panic!("the factory set has four tracks")
+    };
+    let mut lane_of = |track: TrackId| -> bl_model::TakeLaneId {
+        let inserted: bl_shell_spec::comping::LanesResult =
+            run(&mut shell, "take_lane.insert", json!({ "tracks": [track] }));
+        inserted.lanes[0]
+    };
+    let (on_midi, on_second) = (lane_of(midi), lane_of(second));
+    let before = shell.editor().document().clone();
+    for args in [
+        // Three files from the last audio track down.
+        json!({ "paths": [file, file, file], "lane": on_second, "spread": true }),
+        // A track that isn't the lane's.
+        json!({ "paths": [file], "track": first, "lane": on_second }),
+        // A MIDI track's lane takes no samples.
+        json!({ "paths": [file], "lane": on_midi }),
+        json!({ "paths": [file], "lane": 999_999 }),
+    ] {
+        let error = shell
+            .run(ids::ADD_TO_ARRANGEMENT, args.clone())
+            .unwrap_err();
+        assert!(
+            matches!(error, ShellError::InvalidArgs { .. }),
+            "{args}: {error}"
+        );
+        assert_eq!(*shell.editor().document(), before, "{args}");
+    }
+}
+
 // Spec: browser R13.
 #[test]
 fn drops_on_other_tracks_are_refused() {
@@ -1297,6 +1465,49 @@ fn the_browser_lists_sfz_files_and_loads_one_as_a_multisampler() {
     let again = shell.run(ids::LOAD_SELECTED, json!({})).unwrap();
     assert_ne!(again["track"], json!(audio));
     assert_eq!(shell.editor().document().top_level().count(), tracks + 1);
+}
+
+// Spec: midi-generators R26. The browser lists `.blstacks` files as chord
+// banks in every folder it lists, and Load Selected, which double-clicking
+// runs, loads the bank into Stacks; a file that breaks the format is refused
+// and the bank stays.
+#[test]
+fn the_browser_lists_chord_banks_and_loading_one_replaces_stacks_bank() {
+    let scratch = Scratch::new("chord-banks");
+    let (first, second) = (scratch.path("Jazz"), scratch.path("Pop/Deep"));
+    std::fs::create_dir_all(&first).unwrap();
+    std::fs::create_dir_all(&second).unwrap();
+    let bank = r#"{"format":"beatlayer-stacks","schema":1,"name":"Jazz Voicings","chords":[
+        {"name":"Shell","semitones":[0,4,10]}]}"#;
+    std::fs::write(first.join("Jazz.blstacks"), bank).unwrap();
+    std::fs::write(second.join("Broken.blstacks"), "{}").unwrap();
+    let mut shell = Shell::headless();
+    for folder in [&first, &second] {
+        let listed: BrowserState =
+            run(&mut shell, ids::ADD_FOLDER, json!({ "path": text(folder) }));
+        let row = listed
+            .rows
+            .iter()
+            .find(|row| row.name.ends_with(".blstacks"))
+            .expect("the chord bank is listed");
+        assert_eq!(row.kind, ItemKind::ChordBank);
+    }
+    shell.set_focused_area(Area::Browser);
+    let jazz = first.join("Jazz.blstacks");
+    run::<BrowserState>(&mut shell, ids::SELECT, json!({ "paths": [text(&jazz)] }));
+    assert!(shell.can_invoke(ids::LOAD_SELECTED, &json!({})));
+    let loaded = shell.run(ids::LOAD_SELECTED, json!({})).unwrap();
+    assert_eq!(loaded["stacks"]["bank"]["name"], json!("Jazz Voicings"));
+    assert_eq!(loaded["stacks"]["bank"]["built_in"], json!(false));
+    let read = shell.run("midi_tool.state", json!({})).unwrap();
+    assert_eq!(read["stacks"]["bank"]["chords"][0]["name"], json!("Shell"));
+    // A broken file is refused, naming it, and the bank stays.
+    let broken = second.join("Broken.blstacks");
+    run::<BrowserState>(&mut shell, ids::SELECT, json!({ "paths": [text(&broken)] }));
+    let error = shell.run(ids::LOAD_SELECTED, json!({})).unwrap_err();
+    assert!(error.to_string().contains("Broken.blstacks"), "{error}");
+    let read = shell.run("midi_tool.state", json!({})).unwrap();
+    assert_eq!(read["stacks"]["bank"]["name"], json!("Jazz Voicings"));
 }
 
 /// A click track file, and where each click starts.

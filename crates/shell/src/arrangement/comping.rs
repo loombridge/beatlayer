@@ -22,7 +22,7 @@ use serde_json::Value;
 
 use super::editing::linked;
 use super::editing::{
-    EditFailure, apply, invalid, place_on_main, refused, transaction, unavailable,
+    EditFailure, apply, invalid, place_on_main, refused, settled, transaction, unavailable,
 };
 use super::{ArrangementView, parse};
 
@@ -164,7 +164,9 @@ fn pieces(doc: &Document, lane: TakeLaneId, start: Ticks, end: Ticks) -> Vec<Cli
     clips
 }
 
-/// Runs comping command `id` with `args`.
+/// Runs comping command `id` with `args`. With `edge_fades` (Create Fades on
+/// Clip Edges), the commands that change the main lane give the clips they
+/// leave meeting the 4 ms crossfade (the comping spec, R22).
 ///
 /// # Errors
 ///
@@ -174,6 +176,7 @@ pub fn run(
     args: Value,
     editor: &mut Editor,
     view: &mut ArrangementView,
+    edge_fades: bool,
 ) -> Result<Value, EditFailure> {
     let doc = editor.document().clone();
     let doc = &doc;
@@ -347,15 +350,19 @@ pub fn run(
             };
             // Of the lanes on one track, the last listed.
             let from = last_per_track(doc, lanes)?;
-            let (created, recorded) =
-                transaction(editor, "Copy Selection to Main Lane", |editor| {
+            let (created, recorded) = settled(
+                editor,
+                "Copy Selection to Main Lane",
+                (doc, edge_fades),
+                |editor| {
                     let mut created = Vec::new();
                     for (track, lane) in &from {
                         let copies = pieces(editor.document(), *lane, start, end);
                         created.extend(place_on_main(editor, vec![(*track, copies)])?);
                     }
                     Ok(created)
-                })?;
+                },
+            )?;
             Ok(to_value(&CompResult {
                 created,
                 undo_step: recorded,
@@ -432,7 +439,7 @@ pub fn run(
                 TakeDirection::Next => "Replace with Next Take",
                 TakeDirection::Previous => "Replace with Previous Take",
             };
-            let (outcome, recorded) = transaction(editor, label, |editor| {
+            let (outcome, recorded) = settled(editor, label, (doc, edge_fades), |editor| {
                 let mut placements = Vec::new();
                 // The lane each target's selection takes its part from.
                 let mut taken: Vec<(TrackId, Option<TakeLaneId>)> = Vec::new();
@@ -511,7 +518,7 @@ pub fn run(
                     edges.extend(comp_edge(doc, other, from, to).unwrap_or_default());
                 }
             }
-            let (_, recorded) = transaction(editor, "Move Comp Edge", |editor| {
+            let (_, recorded) = settled(editor, "Move Comp Edge", (doc, edge_fades), |editor| {
                 edges
                     .into_iter()
                     .try_for_each(|command| apply(editor, command).map(drop))

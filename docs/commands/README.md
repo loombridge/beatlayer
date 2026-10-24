@@ -142,6 +142,7 @@ What `browser.add_to_arrangement` and `browser.load_selected` return.
 |---|---|---|---|
 | `created_tracks` | array of [`TrackId`](#trackid) | yes | Audio tracks made for the files, top to bottom. |
 | `clips` | array of [`PlacedClip`](#placedclip) | yes | The clips placed, in the order of the files. |
+| `created_lanes` | array of [`TakeLaneId`](#takelaneid) | no | Take lanes added to tracks that had none at the place a file was dropped on (the comping spec, R36). |
 
 <details><summary>JSON Schema</summary>
 
@@ -153,6 +154,13 @@ What `browser.add_to_arrangement` and `browser.load_selected` return.
       "description": "The clips placed, in the order of the files.",
       "items": {
         "$ref": "#/$defs/PlacedClip"
+      },
+      "type": "array"
+    },
+    "created_lanes": {
+      "description": "Take lanes added to tracks that had none at the place a file was dropped on (the comping spec, R36).",
+      "items": {
+        "$ref": "#/$defs/TakeLaneId"
       },
       "type": "array"
     },
@@ -2911,6 +2919,95 @@ One octave band.
 
 </details>
 
+### `BankEntryState`
+
+One entry of Stacks' chord bank.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | The entry's name. |
+| `degrees` | boolean | yes | Whether `intervals` are degrees of a scale rather than semitones. |
+| `intervals` | array of integer from 0 to 255 | yes | The intervals above the root. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One entry of Stacks' chord bank.",
+  "properties": {
+    "degrees": {
+      "description": "Whether `intervals` are degrees of a scale rather than semitones.",
+      "type": "boolean"
+    },
+    "intervals": {
+      "description": "The intervals above the root.",
+      "items": {
+        "format": "uint8",
+        "maximum": 255,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": "array"
+    },
+    "name": {
+      "description": "The entry's name.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "name",
+    "degrees",
+    "intervals"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `BankState`
+
+Stacks' chord bank.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | The bank's name. |
+| `built_in` | boolean | yes | Whether it is Beatlayer's built-in bank. |
+| `chords` | array of [`BankEntryState`](#bankentrystate) | yes | Its entries, in order. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Stacks' chord bank.",
+  "properties": {
+    "built_in": {
+      "description": "Whether it is Beatlayer's built-in bank.",
+      "type": "boolean"
+    },
+    "chords": {
+      "description": "Its entries, in order.",
+      "items": {
+        "$ref": "#/$defs/BankEntryState"
+      },
+      "type": "array"
+    },
+    "name": {
+      "description": "The bank's name.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "name",
+    "built_in",
+    "chords"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `BeatsSettings`
 
 Beats' controls.
@@ -4693,6 +4790,66 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `ChordState`
+
+One chord of Stacks' progression.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `chord` | integer, at least 0 | yes | Which entry of the bank, by its place. |
+| `root` | integer from 0 to 255 | yes | The root key, 0 to 127. |
+| `inversion` | integer | yes | The inversion. |
+| `duration` | integer | yes | How many eighths of its slot the chord lasts. |
+| `offset` | integer | yes | How many eighths of its slot after the slot's start the chord starts. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One chord of Stacks' progression.",
+  "properties": {
+    "chord": {
+      "description": "Which entry of the bank, by its place.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "duration": {
+      "description": "How many eighths of its slot the chord lasts.",
+      "format": "int64",
+      "type": "integer"
+    },
+    "inversion": {
+      "description": "The inversion.",
+      "format": "int64",
+      "type": "integer"
+    },
+    "offset": {
+      "description": "How many eighths of its slot after the slot's start the chord starts.",
+      "format": "int64",
+      "type": "integer"
+    },
+    "root": {
+      "description": "The root key, 0 to 127.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "chord",
+    "root",
+    "inversion",
+    "duration",
+    "offset"
+  ],
+  "type": "object"
 }
 ```
 
@@ -13382,6 +13539,7 @@ One of:
 - `"sfz"`: An SFZ multisample instrument, which imports as a multisampler (WP-5.14).
 - `"set"`: A Beatlayer set.
 - `"preset"`: A Beatlayer device preset, which loads into the device being hot-swapped (WP-2.4).
+- `"chord_bank"`: A Stacks chord bank (`.blstacks`), which loads into Stacks (WP-6.14b).
 - `"plugin"`: A plug-in the scanner found (WP-2.9).
 - `"device"`: One of Beatlayer's own devices, listed under a device label (the Modulators label, WP-5.10); its path is the device type's ID.
 - `"clip"`: A clip file (WP-6.34); the row's `clip_kind` says whether it holds an audio clip or a MIDI clip.
@@ -13422,6 +13580,11 @@ One of:
     {
       "const": "preset",
       "description": "A Beatlayer device preset, which loads into the device being hot-swapped (WP-2.4).",
+      "type": "string"
+    },
+    {
+      "const": "chord_bank",
+      "description": "A Stacks chord bank (`.blstacks`), which loads into Stacks (WP-6.14b).",
       "type": "string"
     },
     {
@@ -16777,6 +16940,7 @@ What `midi_tool.state` returns, and what the commands that change a tool's choic
 | `transformation` | string | yes | The ID of the transformation the clip's track shows. |
 | `generator` | string | yes | The ID of the generator the clip's track shows. |
 | `tools` | array of [`ToolSettingsState`](#toolsettingsstate) | yes | Every tool's settings. |
+| `stacks` | [`StacksState`](#stacksstate) | yes | Stacks' progression and its chord bank. |
 | `target` | [`TargetState`](#targetstate) or null | yes | What a tool would act on now; none without a MIDI clip. |
 | `application` | [`ApplicationState`](#applicationstate) or null | yes | The open application, if there is one. |
 | `run` | [`ToolRun`](#toolrun) or null | no | What the command that returned this state applied, if it applied a tool. |
@@ -16835,6 +16999,10 @@ What `midi_tool.state` returns, and what the commands that change a tool's choic
       ],
       "description": "What the command that returned this state applied, if it applied a tool."
     },
+    "stacks": {
+      "$ref": "#/$defs/StacksState",
+      "description": "Stacks' progression and its chord bank."
+    },
     "target": {
       "anyOf": [
         {
@@ -16865,6 +17033,7 @@ What `midi_tool.state` returns, and what the commands that change a tool's choic
     "transformation",
     "generator",
     "tools",
+    "stacks",
     "target",
     "application"
   ],
@@ -19772,6 +19941,7 @@ A clip a browser command placed.
 | `length` | [`Ticks`](#ticks) | yes | How long it is. |
 | `name` | string | yes | Its name: the file's, without the extension. |
 | `path` | string | yes | The file it plays. |
+| `lane` | [`TakeLaneId`](#takelaneid) or null | no | The take lane it is on, if it is on one rather than a main lane. |
 
 <details><summary>JSON Schema</summary>
 
@@ -19782,6 +19952,17 @@ A clip a browser command placed.
     "clip": {
       "$ref": "#/$defs/ClipId",
       "description": "The new clip."
+    },
+    "lane": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TakeLaneId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The take lane it is on, if it is on one rather than a main lane."
     },
     "length": {
       "$ref": "#/$defs/Ticks",
@@ -25641,6 +25822,51 @@ A coarse spectrum.
   },
   "required": [
     "bands"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `StacksState`
+
+Stacks' progression and bank.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `progression` | array of [`ChordState`](#chordstate) | yes | The chords, one after another. |
+| `selected` | integer, at least 0 | yes | The selected chord's place. |
+| `bank` | [`BankState`](#bankstate) | yes | The chord bank. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Stacks' progression and bank.",
+  "properties": {
+    "bank": {
+      "$ref": "#/$defs/BankState",
+      "description": "The chord bank."
+    },
+    "progression": {
+      "description": "The chords, one after another.",
+      "items": {
+        "$ref": "#/$defs/ChordState"
+      },
+      "type": "array"
+    },
+    "selected": {
+      "description": "The selected chord's place.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "progression",
+    "selected",
+    "bank"
   ],
   "type": "object"
 }

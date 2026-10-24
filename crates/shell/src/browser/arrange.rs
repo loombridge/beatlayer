@@ -10,7 +10,8 @@ use std::path::{Path, PathBuf};
 use bl_core::time::Ticks;
 use bl_media::MediaStore;
 use bl_model::{
-    Clip, ClipData, ClipId, Command, ContentHash, Document, Editor, TrackId, TrackKind,
+    Clip, ClipData, ClipId, Command, ContentHash, Document, EditError, Editor, NewTakeLane,
+    TakeLaneId, TrackId, TrackKind,
 };
 use bl_shell_spec::browser::{AddResult, AddToArrangementArgs, ItemKind, PlacedClip};
 
@@ -119,25 +120,123 @@ pub(crate) fn length_at(doc: &Document, start: Ticks, seconds: f64) -> Ticks {
     Ticks((end.get() - start.get()).max(1))
 }
 
+/// The tracks beside `track` in its group, or at the top level: its siblings,
+/// itself among them, in order.
+fn siblings(doc: &Document, track: TrackId) -> Vec<TrackId> {
+    match doc.parent(track) {
+        Some(group) => doc
+            .track(group)
+            .map(|g| g.children().collect())
+            .unwrap_or_default(),
+        None => doc.top_level().collect(),
+    }
+}
+
 /// Where a new track goes: below `track` after the `n` tracks already made
 /// there, or below the last top-level track. Returns its parent and index.
 fn place_below(doc: &Document, track: Option<TrackId>, n: usize) -> (Option<TrackId>, usize) {
     match track {
         Some(track) => {
             let parent = doc.parent(track);
-            let siblings: Vec<TrackId> = match parent {
-                Some(group) => doc
-                    .track(group)
-                    .map(|g| g.children().collect())
-                    .unwrap_or_default(),
-                None => doc.top_level().collect(),
-            };
-            let at = siblings.iter().position(|id| *id == track).unwrap_or(0);
+            let at = siblings(doc, track)
+                .iter()
+                .position(|id| *id == track)
+                .unwrap_or(0);
             (parent, at + 1 + n)
         }
         // The tracks made so far are already at the bottom.
         None => (None, doc.top_level().len()),
     }
+}
+
+/// Where files dropped on a take lane go (the comping spec, R36): the track
+/// of each file, and the lane's place among its track's take lanes.
+struct LanePlan {
+    /// The track each file goes on: the lane's own for all of them, or with
+    /// `spread` the lane's track and those below it, one for each file.
+    tracks: Vec<TrackId>,
+    /// The lane's place among its track's take lanes.
+    position: usize,
+}
+
+fn lane_plan(
+    doc: &Document,
+    args: &AddToArrangementArgs,
+    lane: TakeLaneId,
+) -> Result<LanePlan, AddError> {
+    let invalid = |message: String| AddError::InvalidArgs(message);
+    let owner = doc
+        .take_lane_track(lane)
+        .ok_or_else(|| invalid(format!("no take lane has the ID {}", lane.0)))?;
+    if let Some(given) = args.track.filter(|track| *track != owner) {
+        return Err(invalid(format!(
+            "take lane {} isn't on track {}",
+            lane.0, given.0
+        )));
+    }
+    let position = doc
+        .track(owner)
+        .and_then(|track| track.take_lanes().position(|held| held.id == lane))
+        .unwrap_or(0);
+    let wanted = if args.spread { args.paths.len() } else { 1 };
+    let tracks: Vec<TrackId> = siblings(doc, owner)
+        .into_iter()
+        .skip_while(|track| *track != owner)
+        .take(wanted)
+        .collect();
+    if tracks.len() < wanted {
+        return Err(invalid(format!(
+            "{wanted} files need {wanted} tracks from track {} down, and there are {}",
+            owner.0,
+            tracks.len()
+        )));
+    }
+    for track in &tracks {
+        let held = doc.track(*track);
+        if held.map(bl_model::Track::kind) != Some(TrackKind::Audio) {
+            return Err(invalid(format!(
+                "audio files go on audio tracks, and track {} isn't one",
+                track.0
+            )));
+        }
+        if held.is_some_and(bl_model::Track::is_frozen) {
+            return Err(invalid(format!(
+                "the track {} is frozen; unfreeze it to add takes",
+                track.0
+            )));
+        }
+    }
+    Ok(LanePlan { tracks, position })
+}
+
+/// The take lane of `track` at `position` among its take lanes, adding one
+/// there (after its last, when it has fewer) if it has none.
+fn lane_at(
+    editor: &mut Editor,
+    track: TrackId,
+    position: usize,
+    result: &mut AddResult,
+) -> Result<TakeLaneId, EditError> {
+    let held = editor.document().track(track);
+    if let Some(lane) = held.and_then(|t| t.take_lanes().nth(position)) {
+        return Ok(lane.id);
+    }
+    let name = held
+        .map(bl_model::Track::next_take_name)
+        .unwrap_or_default();
+    let index = held.map_or(0, |t| t.take_lanes().len());
+    let id: TakeLaneId = editor.new_id();
+    editor.apply(Command::AddTakeLane {
+        track,
+        lane: NewTakeLane {
+            id: Some(id),
+            name,
+            clips: Vec::new(),
+        },
+        index: Some(index),
+    })?;
+    result.created_lanes.push(id);
+    Ok(id)
 }
 
 /// Puts `args.paths` into the Arrangement as one undo step, as
@@ -168,6 +267,11 @@ pub fn add_files(
             "`at` can't be before the song's start".to_owned(),
         ));
     }
+    // Spec: comping R36. Dropped on a take lane, they go on take lanes.
+    let lanes = args
+        .lane
+        .map(|lane| lane_plan(editor.document(), args, lane))
+        .transpose()?;
     if let Some(track) = args.track {
         match editor.document().track(track).map(bl_model::Track::kind) {
             Some(TrackKind::Audio) => {}
@@ -207,7 +311,7 @@ pub fn add_files(
             } else {
                 index == 0 && args.track.is_none()
             };
-            if new_track {
+            if new_track && lanes.is_none() {
                 let (parent, place) = place_below(editor.document(), args.track, made);
                 let id: TrackId = editor.new_id();
                 editor.apply(Command::CreateTrack {
@@ -224,7 +328,21 @@ pub fn add_files(
             if args.spread {
                 at = start;
             }
-            let track = current.expect("a track is chosen or made above");
+            // Spec: comping R36. On a take lane: the one dropped on for the
+            // first file, and for the others with `spread` the take lane at
+            // the same place of the next tracks down.
+            let (track, lane) = match (&lanes, args.lane) {
+                (Some(plan), Some(first)) => {
+                    let track = plan.tracks[if args.spread { index } else { 0 }];
+                    let lane = if index == 0 || !args.spread {
+                        first
+                    } else {
+                        lane_at(editor, track, plan.position, &mut result)?
+                    };
+                    (track, Some(lane))
+                }
+                _ => (current.expect("a track is chosen or made above"), None),
+            };
             // Spec: warping R33. The warp settings come from the file.
             let new = new_clip(&file.media, file.seconds, editor.document(), at, warping);
             let length = new.length;
@@ -239,9 +357,12 @@ pub fn add_files(
             };
             let mut clip = Clip::new(id, at, length, ClipData::Audio(audio));
             clip.name.clone_from(&file.name);
-            placing::clear(editor, track, at, at.saturating_add(length), &placed)?;
+            placing::clear_on(editor, track, lane, at, at.saturating_add(length), &placed)?;
             placed.insert(id);
-            editor.apply(Command::CreateClip { track, clip })?;
+            editor.apply(match lane {
+                Some(lane) => Command::CreateTakeClip { lane, clip },
+                None => Command::CreateClip { track, clip },
+            })?;
             result.clips.push(PlacedClip {
                 clip: id,
                 track,
@@ -249,6 +370,7 @@ pub fn add_files(
                 length,
                 name: file.name.clone(),
                 path: file.path.clone(),
+                lane,
             });
             at = at.saturating_add(length);
         }
@@ -359,6 +481,7 @@ pub fn add_clip_files(
                         .clip(done.clip)
                         .map_or_else(String::new, |clip| clip.name.clone()),
                     path: args.paths[index].clone(),
+                    lane: None,
                 });
                 current = Some(done.track);
                 at = at.saturating_add(done.length);

@@ -2112,7 +2112,7 @@ impl BrowserUi {
             ),
             ItemKind::Audio | ItemKind::Sfz => glyph(&painter, mark, Glyph::Wave, ink),
             ItemKind::Clip | ItemKind::SessionClip => glyph(&painter, mark, Glyph::Clip, ink),
-            ItemKind::Preset => glyph(&painter, mark, Glyph::Preset, ink),
+            ItemKind::Preset | ItemKind::ChordBank => glyph(&painter, mark, Glyph::Preset, ink),
             ItemKind::Plugin | ItemKind::Device | ItemKind::Devices => {
                 glyph(&painter, mark, Glyph::Plugin, ink);
             }
@@ -2260,6 +2260,13 @@ impl BrowserUi {
                 // Spec: device-chains R19. While a device is hot-swapped, a
                 // preset loads into it.
                 ItemKind::Preset => {
+                    if !selected {
+                        invoke(events, ids::SELECT, json!({ "paths": [item.path] }));
+                    }
+                    invoke(events, ids::LOAD_SELECTED, json!({}));
+                }
+                // Spec: midi-generators R26. A chord bank loads into Stacks.
+                ItemKind::ChordBank => {
                     if !selected {
                         invoke(events, ids::SELECT, json!({ "paths": [item.path] }));
                     }
@@ -2416,6 +2423,7 @@ impl BrowserUi {
             ItemKind::Sfz => "SFZ instrument",
             ItemKind::Set => "Beatlayer set",
             ItemKind::Preset => "Beatlayer device preset",
+            ItemKind::ChordBank => "Stacks chord bank",
             ItemKind::Plugin => match item.format {
                 Some(bl_model::PluginFormat::Clap) => "CLAP plug-in",
                 Some(bl_model::PluginFormat::Vst3) => "VST3 plug-in",
@@ -3015,6 +3023,13 @@ impl BrowserUi {
                     args["at"] = json!(target.at);
                     if let Some(track) = target.track {
                         args["track"] = json!(track);
+                    }
+                    // Spec: comping R36 (I-DROP-016, I-DROP-020). Audio files
+                    // dropped on a take lane go on it as takes.
+                    if let Some(lane) = target.lane
+                        && !clips
+                    {
+                        args["lane"] = json!(lane);
                     }
                 }
                 // From Finder without a pointer position: a new track at the

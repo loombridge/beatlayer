@@ -11,7 +11,7 @@ use bl_shell::files::factory_default_set;
 use bl_shell::midi_tool_commands::Panel;
 use bl_ui::arrangement::benchmark;
 use common::{Harness, Node, Window};
-use egui::{Event, Key, Modifiers, PointerButton, Pos2, Rect};
+use egui::{Event, FullOutput, Id, Key, Modifiers, PointerButton, Pos2, Rect, Shape};
 use serde_json::json;
 
 const QUARTER: i64 = Ticks::QUARTER.get();
@@ -349,6 +349,97 @@ fn cmd_enter_and_the_edit_menu_apply_the_chosen_tool() {
     let before = keys(&h, clip);
     h.key(Key::Enter, common::command());
     assert_ne!(keys(&h, clip), before, "Cmd+Enter applied the tool");
+}
+
+/// Every shape of a frame, the nested ones flattened.
+fn shapes(output: &FullOutput) -> Vec<Shape> {
+    fn walk(shape: &Shape, out: &mut Vec<Shape>) {
+        match shape {
+            Shape::Vec(shapes) => shapes.iter().for_each(|s| walk(s, out)),
+            other => out.push(other.clone()),
+        }
+    }
+    let mut out = Vec::new();
+    for clipped in &output.shapes {
+        walk(&clipped.shape, &mut out);
+    }
+    out
+}
+
+/// Opens the Transformation Selector and reads which tools its list marks
+/// with the accent LED, then closes it.
+fn marked_in_the_list(h: &mut Harness) -> Vec<String> {
+    let all = nodes(h);
+    let selector = Harness::node(&all, "Transformation Selector");
+    let b = selector.bounds.expect("the selector has bounds");
+    let chooser = Rect::from_min_max(
+        Pos2::new(b.x0 as f32, b.y0 as f32),
+        Pos2::new(b.x1 as f32, b.y1 as f32),
+    );
+    h.accesskit(
+        Id::new(("chooser", "tool-selector-transformation")),
+        egui::accesskit::Action::Click,
+    );
+    // The list fades in.
+    for _ in 0..12 {
+        h.frame(vec![]);
+    }
+    let found = shapes(&h.frame(vec![]));
+    let accent = h.theme.colors.accent.0;
+    let leds: Vec<Pos2> = found
+        .iter()
+        .filter_map(|shape| match shape {
+            Shape::Circle(c) if c.fill == accent => Some(c.center),
+            _ => None,
+        })
+        .collect();
+    let mut marked = Vec::new();
+    for shape in &found {
+        let Shape::Text(text) = shape else { continue };
+        let row = text.galley.rect.translate(text.pos.to_vec2());
+        let label = text.galley.text();
+        // The list's rows lie below the chooser's box.
+        if row.top() < chooser.bottom() || !label.starts_with("Test ") {
+            continue;
+        }
+        if leds.iter().any(|led| {
+            (led.y - row.center().y).abs() < 4.0
+                && (chooser.left()..=chooser.right()).contains(&led.x)
+        }) {
+            marked.push(label.to_owned());
+        }
+    }
+    h.key(Key::Escape, Modifiers::NONE);
+    h.settle();
+    marked.sort();
+    marked
+}
+
+#[test]
+fn the_selector_marks_the_tools_in_the_open_chain() {
+    // Spec: midi-tools R29. The list marks each tool of the open chain, and
+    // none once the chain is closed.
+    let (mut h, _) = set();
+    h.shell
+        .run("clip_view.show_panel", json!({ "panel": "transform" }))
+        .unwrap();
+    assert!(marked_in_the_list(&mut h).is_empty(), "no chain is open");
+    h.shell
+        .run(
+            "midi_tool.apply",
+            json!({ "tool": "test_transpose", "values": { "degrees": 1 } }),
+        )
+        .unwrap();
+    assert_eq!(marked_in_the_list(&mut h), ["Test Transpose"]);
+    h.shell
+        .run(
+            "midi_tool.apply",
+            json!({ "tool": "test_shift", "values": { "sixteenths": 1 } }),
+        )
+        .unwrap();
+    assert_eq!(marked_in_the_list(&mut h), ["Test Shift", "Test Transpose"]);
+    h.shell.run("midi_tool.close", json!({})).unwrap();
+    assert!(marked_in_the_list(&mut h).is_empty(), "the chain closed");
 }
 
 /// The values of one tool, as `midi_tool.state` reports them.

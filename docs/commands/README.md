@@ -14793,6 +14793,25 @@ The Library page's settings (L-SET-016).
 
 </details>
 
+### `LinkGroupId`
+
+The ID of a link group: a positive integer, unique within the project and never reused.
+
+Type: integer, at least 1.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The ID of a link group: a positive integer, unique within the project and never reused.",
+  "format": "uint64",
+  "minimum": 1,
+  "type": "integer"
+}
+```
+
+</details>
+
 ### `LoadSampleResult`
 
 What `device.load_sample` returns.
@@ -27278,6 +27297,37 @@ What `track.group` returns.
   },
   "required": [
     "track"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `TracksLinked`
+
+What `track.link` and `track.unlink` return.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `tracks` | array of [`TrackId`](#trackid) | yes | The tracks whose link changed, in display order. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `track.link` and `track.unlink` return.",
+  "properties": {
+    "tracks": {
+      "description": "The tracks whose link changed, in display order.",
+      "items": {
+        "$ref": "#/$defs/TrackId"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "tracks"
   ],
   "type": "object"
 }

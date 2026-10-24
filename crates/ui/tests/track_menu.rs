@@ -337,9 +337,10 @@ fn with_several_tracks_selected_each_item_acts_on_all_of_them() {
         .unwrap();
     let at = header_title(&mut h, "4 Audio");
     let nodes = Harness::nodes(&right_click(&mut h, at));
-    // The right-click kept the selection; Link Tracks is drawn for it.
+    // The right-click kept the selection; Link Tracks is drawn for it, and
+    // Unlink Track(s) waits for a linked track.
     assert_eq!(h.shell.arrangement().selected_tracks(), [all[2], all[3]]);
-    assert!(item(&nodes, "Link Tracks").disabled);
+    assert!(!item(&nodes, "Link Tracks").disabled);
     assert!(item(&nodes, "Unlink Track(s)").disabled);
     let steps = h.shell.editor().undo_history().count();
     choose(&mut h, "Delete");
@@ -347,6 +348,100 @@ fn with_several_tracks_selected_each_item_acts_on_all_of_them() {
     assert!(!left.contains(&all[2]) && !left.contains(&all[3]));
     assert_eq!(h.shell.editor().undo_history().count(), steps + 1);
     assert_eq!(last_step(&h), "Delete Track(s)");
+}
+
+// Spec: linked-track editing R2, R5, track-context-menu R11. Link Tracks in
+// the menu links the selected tracks in one undo step, and Unlink Track(s)
+// takes the selection out.
+#[test]
+fn link_tracks_and_unlink_tracks_in_the_menu_run_on_the_selected_tracks() {
+    let mut h = arrangement();
+    let all = tracks(&h);
+    h.shell
+        .run(
+            "arrangement.select_tracks",
+            json!({ "tracks": [all[2], all[3]], "title_bars": true }),
+        )
+        .unwrap();
+    let at = header_title(&mut h, "4 Audio");
+    right_click(&mut h, at);
+    let steps = h.shell.editor().undo_history().count();
+    choose(&mut h, "Link Tracks");
+    assert_eq!(
+        h.shell.editor().document().linked_with(all[2]),
+        [all[2], all[3]]
+    );
+    assert_eq!(h.shell.editor().undo_history().count(), steps + 1);
+    assert_eq!(last_step(&h), "Link Tracks");
+
+    let nodes = Harness::nodes(&right_click(&mut h, at));
+    assert!(!item(&nodes, "Unlink Track(s)").disabled);
+    choose(&mut h, "Unlink Track(s)");
+    assert!(h.shell.editor().document().linked_with(all[2]).is_empty());
+    assert_eq!(last_step(&h), "Unlink Tracks");
+}
+
+// Spec: linked-track editing R3, track-context-menu R11. Cmd held while
+// choosing Link Tracks in a linked track's menu adds the selection to its
+// group.
+#[test]
+fn link_tracks_with_command_held_adds_the_selection_to_the_clicked_tracks_group() {
+    let mut h = arrangement();
+    let all = tracks(&h);
+    h.shell
+        .run("track.link", json!({ "tracks": [all[0], all[1]] }))
+        .unwrap();
+    h.shell
+        .run(
+            "arrangement.select_tracks",
+            json!({ "tracks": [all[0], all[2]], "title_bars": true }),
+        )
+        .unwrap();
+    let at = header_title(&mut h, "1 MIDI");
+    right_click(&mut h, at);
+    h.frame(vec![Event::ModifiersChanged(Modifiers::COMMAND)]);
+    choose(&mut h, "Link Tracks");
+    h.frame(vec![Event::ModifiersChanged(Modifiers::NONE)]);
+    assert_eq!(
+        h.shell.editor().document().linked_with(all[0]),
+        [all[0], all[1], all[2]]
+    );
+}
+
+// Spec: track-context-menu R11, linked-track editing R4. A group track's
+// menu offers both items whatever else is selected, and acts on the audio
+// and MIDI tracks inside it.
+#[test]
+fn a_group_tracks_menu_links_the_tracks_inside_it() {
+    let mut h = arrangement();
+    let all = tracks(&h);
+    h.shell
+        .run(
+            "arrangement.select_tracks",
+            json!({ "tracks": [all[2], all[3]], "title_bars": true }),
+        )
+        .unwrap();
+    h.shell.run("track.group", json!({})).unwrap();
+    h.settle();
+    let group = h.shell.arrangement().selected_tracks()[0];
+    let name = name_of(&h, group);
+    let at = header_title(&mut h, &name);
+    let nodes = Harness::nodes(&right_click(&mut h, at));
+    assert!(!item(&nodes, "Link Tracks").disabled);
+    choose(&mut h, "Link Tracks");
+    assert_eq!(
+        h.shell.editor().document().linked_with(all[2]),
+        [all[2], all[3]]
+    );
+    assert!(
+        h.shell
+            .editor()
+            .document()
+            .track(group)
+            .unwrap()
+            .link()
+            .is_none()
+    );
 }
 
 // Spec: device-chains R39; IMP-25. The menu's Deactivate All Devices

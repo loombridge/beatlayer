@@ -8,6 +8,7 @@ mod command_registry;
 mod device_media;
 mod drum_racks;
 mod grooves;
+mod linked_tracks;
 mod macros;
 mod metronome;
 mod midi_controller_data;

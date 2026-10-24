@@ -168,6 +168,15 @@ pub(super) const FIXTURES: &[Fixture] = &[
         build: comp_from_two_takes,
     },
     Fixture {
+        name: "linked-comp",
+        about: "A comp made on one of two linked tracks (WP-6.23): each track holds two takes \
+                of the chirp, the second started three quarters of a second later in its file, \
+                the right track's both a tenth of a second later than the left's. Copying the \
+                first half of the bar from the first take and the second half from the second \
+                on the left track comps the right track too, each from its own takes.",
+        build: linked_comp,
+    },
+    Fixture {
         name: "looped-clip",
         about: "A looped audio clip at -6 dB: it plays from its Start marker into its loop \
                 brace and repeats the brace nine times, each wrap on its exact frame.",
@@ -1422,6 +1431,67 @@ fn comp_from_two_takes() -> Scene {
             ..take.part(from, to, &tempo)
         };
         song.apply(Command::CreateClip { track, clip: part });
+    }
+    let seconds = song.to_last_clip();
+    song.finish(seconds)
+}
+
+/// Spec: linked-track editing R12, comping R17, R18. Two linked tracks with
+/// two takes each, comped as one: the main lanes hold the stretches of each
+/// track's own takes, as Copy Selection to Main Lane makes them on a linked
+/// pair (the shell's `linked_tracks` tests make the same document by the
+/// command).
+fn linked_comp() -> Scene {
+    let mut song = Song::new();
+    let chirp = song.chirp();
+    let tempo = TempoMap::default();
+    let bar = Ticks::QUARTER * 4;
+    let half = Ticks::QUARTER * 2;
+    let tracks = [
+        song.track(TrackKind::Audio, "Overhead L", None),
+        song.track(TrackKind::Audio, "Overhead R", None),
+    ];
+    let group = song.editor.new_id();
+    song.apply(Command::SetTrackLinks {
+        tracks: tracks.to_vec(),
+        group: Some(group),
+    });
+    for (n, track) in tracks.into_iter().enumerate() {
+        let late = 0.1 * n as f64;
+        let mut takes = Vec::new();
+        for (name, start) in [("Take 1", late), ("Take 2", 0.75 + late)] {
+            let lane = song.editor.new_id();
+            song.apply(Command::AddTakeLane {
+                track,
+                lane: bl_model::NewTakeLane {
+                    id: Some(lane),
+                    name: name.to_owned(),
+                    clips: Vec::new(),
+                },
+                index: None,
+            });
+            let clip = Clip::new(
+                song.editor.new_id(),
+                Ticks::ZERO,
+                bar,
+                ClipData::Audio(AudioData {
+                    start,
+                    ..AudioData::new(chirp)
+                }),
+            );
+            song.apply(Command::CreateTakeClip {
+                lane,
+                clip: clip.clone(),
+            });
+            takes.push(clip);
+        }
+        for (take, from, to) in [(&takes[0], Ticks::ZERO, half), (&takes[1], half, bar)] {
+            let part = Clip {
+                id: song.editor.new_id(),
+                ..take.part(from, to, &tempo)
+            };
+            song.apply(Command::CreateClip { track, clip: part });
+        }
     }
     let seconds = song.to_last_clip();
     song.finish(seconds)

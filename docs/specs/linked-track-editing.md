@@ -1,6 +1,6 @@
 # Linked-track editing: linking tracks so one edit reaches them all
 
-- **Status:** draft
+- **Status:** partial (every rule but R6 has a passing test; R6's linked-track indicator waits for where Live puts it in the header)
 - **Work packages:** WP-6.23 (R1 to R16). It builds on the Arrangement's edits ([arrangement editing](arrangement-editing.md), WP-1.8b), Consolidate ([audio clip editing](audio-clip-editing.md), WP-4.13), the Sample Editor's edits to several clips ([sample editor](sample-editor.md) R19, WP-4.10), and take lanes and comping ([comping](comping.md), WP-6.21 and WP-6.22); fade handles and crossfades are WP-6.51's ([audio clips](audio-clips.md) R23 to R31)
 - **Parity-matrix row:** Recording: Linked-track editing
 - **Checked against:** the Live 12 reference manual (online edition), read 20 October 2026 (chapter 6, section 6.14 "Linked-Track Editing" with 6.14.1 and 6.14.2; chapter 9, section 9.2.4.4; chapter 21), and the UI parity reference's row C-TRACK-018
@@ -53,19 +53,19 @@ This spec covers linking and unlinking, and which edits reach the linked tracks.
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1 | to be written in WP-6.23 | unit, migration |
-| R2 | to be written in WP-6.23 | unit, UI script |
-| R3 | to be written in WP-6.23 | UI script |
-| R4 | to be written in WP-6.23 | unit, UI script |
-| R5 | to be written in WP-6.23 | unit |
+| R1 | `crates/model/tests/linked_tracks.rs`, `link_groups_are_saved_and_older_sets_open_unlinked`, `linking_takes_a_track_out_of_its_group_and_refuses_other_kinds`; `crates/model/tests/undo_properties.rs`, `undo_all_then_redo_all` | unit, migration |
+| R2 | `crates/shell/tests/linked_tracks.rs`, `link_tracks_and_unlink_tracks_are_one_undo_step_each`, `link_tracks_is_unavailable_with_fewer_than_two_audio_or_midi_tracks`; `crates/ui/tests/track_menu.rs`, `link_tracks_and_unlink_tracks_in_the_menu_run_on_the_selected_tracks` | unit, UI script |
+| R3 | `crates/ui/tests/track_menu.rs`, `link_tracks_with_command_held_adds_the_selection_to_the_clicked_tracks_group`; `crates/shell/tests/linked_tracks.rs`, `link_tracks_and_unlink_tracks_are_one_undo_step_each` | UI script |
+| R4 | `crates/shell/tests/linked_tracks.rs`, `a_group_tracks_menu_links_the_tracks_inside_it_at_any_depth`; `crates/ui/tests/track_menu.rs`, `a_group_tracks_menu_links_the_tracks_inside_it` | unit, UI script |
+| R5 | `crates/model/tests/linked_tracks.rs`, `a_group_left_with_one_track_ends_and_a_deleted_track_leaves_its_group`; `crates/shell/tests/linked_tracks.rs`, `a_duplicate_is_unlinked_and_a_deleted_track_leaves_its_group` | unit |
 | R6 | to be written in WP-6.23 | UI script |
-| R7 | to be written in WP-6.23 | shell test |
-| R8 | to be written in WP-6.23 | shell test |
-| R9 | to be written in WP-6.23 | shell test |
-| R10 | to be written in WP-6.23 | shell test |
-| R11 | to be written in WP-6.23 | shell test |
-| R12 | to be written in WP-6.23 | shell test, golden render |
-| R13 | to be written in WP-6.23 | shell test |
-| R14 | to be written in WP-6.23 | shell test |
-| R15 | to be written in WP-6.23 | agent API |
-| R16 | to be written in WP-6.23 | unit, agent API, `cargo xtask commands` |
+| R7 | `crates/shell/tests/linked_tracks.rs`, `selecting_clips_selects_the_matching_clips_of_the_group`, `selecting_time_selects_the_same_lane_of_every_track` | shell test |
+| R8 | `crates/shell/tests/linked_tracks.rs`, `moving_resizing_and_splitting_reach_the_group`, `consolidating_reaches_the_group`; `crates/model/tests/linked_tracks.rs`, `arming_reaches_the_group`, `moving_and_resizing_reach_the_matching_clips`, `fades_follow_where_they_start` | shell test |
+| R9 | `crates/shell/tests/linked_tracks.rs`, `delete_duplicate_cut_and_copy_act_on_all_of_the_selection` | shell test |
+| R10 | `crates/shell/tests/sample_editor.rs`, `a_marker_edit_reaches_a_linked_clip_of_the_same_length_and_not_another` | shell test |
+| R11 | `crates/shell/tests/linked_tracks.rs`, `take_lane_edits_reach_the_group`; `crates/model/tests/linked_tracks.rs`, `take_lane_edits_reach_the_lane_at_the_same_place` | shell test |
+| R12 | `crates/shell/tests/linked_tracks.rs`, `the_comp_commands_reach_the_group`; `crates/cli/tests/clip_goldens.rs`, `a_comp_made_on_one_linked_track_comps_both` | shell test, golden render |
+| R13 | `crates/shell/tests/linked_tracks.rs`, `other_edits_act_on_what_they_name` | shell test |
+| R14 | `crates/shell/tests/linked_tracks.rs`, `other_edits_act_on_what_they_name` | shell test |
+| R15 | `crates/agent/tests/linked_tracks.rs`, `an_agent_links_tracks_by_id_edits_with_and_without_linked_and_reads_both_back` | agent API |
+| R16 | `crates/model/tests/linked_tracks.rs`, `link_groups_are_saved_and_older_sets_open_unlinked`; `crates/agent/tests/linked_tracks.rs`, `an_agent_links_tracks_by_id_edits_with_and_without_linked_and_reads_both_back`; `crates/agent/tests/readback.rs`, `every_query_readback_the_command_table_names_is_in_a_real_full_result`; `cargo xtask commands` | unit, agent API, `cargo xtask commands` |

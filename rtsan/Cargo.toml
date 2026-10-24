@@ -43,12 +43,15 @@ bl-media = { path = "../crates/media" }
 # The MIDI input queue's sending end (WP-2.2).
 bl-midi-io = { path = "../crates/midi-io" }
 bl-model = { path = "../crates/model" }
-# A CLAP plug-in's node and the test plug-in built from source, for the MPE
-# note expressions (WP-6.17b); ARA 2 hosting (IMP-20): the VST3 host and a
-# plug-in built from source that plays its track's clips through it.
+# The plug-in host, with test plug-ins built from source: a CLAP plug-in's
+# node, for the MPE note expressions (WP-6.17b); ARA 2 hosting (IMP-20), a
+# plug-in that plays its track's clips through the VST3 host; and the LV2
+# host's node (WP-5.39), every block of its processing on the audio thread
+# under RTSan.
 bl-plugin-host = { path = "../crates/plugin-host" }
 bl-test-ara = { path = "../crates/test-ara" }
 bl-test-clap = { path = "../crates/test-clap" }
+bl-test-lv2 = { path = "../crates/test-lv2" }
 # The app's audio callback, which runs the engine (WP-1.18), and the ring
 # that hands it the engine's processor.
 bl-shell = { path = "../crates/shell" }

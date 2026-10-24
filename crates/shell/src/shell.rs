@@ -45,6 +45,7 @@ use crate::settings::{BUNDLED_THEME, Preferences};
 use bl_devices::KitHost;
 use bl_plugin_host::au::AuHost;
 use bl_plugin_host::clap::ClapHost;
+use bl_plugin_host::lv2::Lv2Host;
 use bl_plugin_host::scan::Scanner;
 use bl_plugin_host::vst3::Vst3Host;
 use bl_shell_spec::arrangement as view_ids;
@@ -736,6 +737,8 @@ pub struct Shell {
     au: AuHost,
     /// The VST3 host: VST3 devices' instances, on this thread (WP-2.7).
     vst3: Vst3Host,
+    /// The LV2 host: LV2 devices' instances, on this thread (WP-5.39).
+    lv2: Lv2Host,
     /// The plug-in scanner (WP-2.9): the plug-ins found on this machine,
     /// their blocklist, and their cache. Shared with the background scan
     /// (WP-2.9b).
@@ -1094,6 +1097,9 @@ impl Shell {
         audio.set_vst3(vst3.clone());
         // ARA plug-ins read the set's files through the same store (IMP-20).
         vst3.set_ara_media(Arc::clone(&media) as Arc<dyn bl_plugin_host::ara::AraMedia>);
+        // LV2 plug-ins (WP-5.39): this thread is their main thread too.
+        let lv2 = Lv2Host::new();
+        audio.set_lv2(lv2.clone());
         // The plug-in scanner (WP-2.9): finds the plug-ins on this machine
         // in a child process, caching and blocklisting what it finds. Its
         // cache lives with the preferences.
@@ -1243,6 +1249,7 @@ impl Shell {
             native_types,
             plugins,
             vst3,
+            lv2,
             scanner,
             plugin_scan: None,
             plugin_scan_again: None,

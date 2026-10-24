@@ -16,6 +16,7 @@ mod midi_effects;
 mod midi_tools;
 mod perception;
 mod permissions;
+mod plugin_lv2;
 mod plugin_midi_effect;
 mod plugin_mpe;
 mod plugin_vst3;

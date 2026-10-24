@@ -33,7 +33,7 @@ impl Shell {
             }
         };
         let info = |shell: &Self, device| {
-            crate::plugins::info(&shell.plugins, &shell.au, &shell.vst3, device)
+            crate::plugins::info(&shell.plugins, &shell.au, &shell.vst3, &shell.lv2, device)
                 .map(|mut info| {
                     // WP-2.10: where the window sits, from the frame store
                     // the set keeps.
@@ -66,6 +66,15 @@ impl Shell {
                 let found: Vec<(bl_engine::DeviceType, std::path::PathBuf)> =
                     if crate::plugins::is_vst3_path(&path) {
                         self.vst3
+                            .load(&path)
+                            .map_err(|e| failed(e.to_string()))?
+                            .into_iter()
+                            .map(|t| (t.device_type, t.path))
+                            .collect()
+                    } else if crate::plugins::is_lv2_path(&path) {
+                        // Spec: lv2-hosting R1. A bundle folder, whose
+                        // plug-ins are chosen by URI.
+                        self.lv2
                             .load(&path)
                             .map_err(|e| failed(e.to_string()))?
                             .into_iter()
@@ -211,10 +220,13 @@ impl Shell {
                     ));
                 }
                 let is_au = crate::plugins::is_au(self.editor.document(), device);
+                let is_lv2 = crate::plugins::is_lv2(self.editor.document(), device);
                 self.plugins.idle();
                 self.au.idle();
-                let open = crate::plugins::info(&self.plugins, &self.au, &self.vst3, device)
-                    .is_some_and(|info| info.window_open);
+                self.lv2.idle();
+                let open =
+                    crate::plugins::info(&self.plugins, &self.au, &self.vst3, &self.lv2, device)
+                        .is_some_and(|info| info.window_open);
                 if shown.unwrap_or(!open) {
                     // Spec: clap-hosting R13 and au-hosting's second part.
                     // Titled "<device>/<track>", as Live titles a plug-in's
@@ -236,6 +248,14 @@ impl Shell {
                                 command: id.to_owned(),
                                 message: e.to_string(),
                             })?;
+                    } else if is_lv2 {
+                        // Spec: lv2-hosting R13.
+                        self.lv2
+                            .open_editor(device, &title)
+                            .map_err(|e| ShellError::Failed {
+                                command: id.to_owned(),
+                                message: e.to_string(),
+                            })?;
                     } else {
                         self.plugins.open_editor(device, &title).map_err(|e| {
                             ShellError::Failed {
@@ -249,6 +269,13 @@ impl Shell {
                     self.apply_plug_in_windows();
                 } else if is_au {
                     self.au
+                        .close_editor(device)
+                        .map_err(|e| ShellError::Failed {
+                            command: id.to_owned(),
+                            message: e.to_string(),
+                        })?;
+                } else if is_lv2 {
+                    self.lv2
                         .close_editor(device)
                         .map_err(|e| ShellError::Failed {
                             command: id.to_owned(),
@@ -307,6 +334,7 @@ impl Shell {
                 self.plugins.idle();
                 self.au.idle();
                 self.vst3.idle();
+                self.lv2.idle();
                 info(self, device)
             }
             plugin_ids::SET_WINDOW => {

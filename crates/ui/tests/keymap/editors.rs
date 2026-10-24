@@ -1,7 +1,7 @@
 //! The Sample Editor and note editor keys.
 
 use bl_commands::Context;
-use bl_ui::keymap::{Keymap, Platform, Status};
+use bl_ui::keymap::{Keymap, Mods, Platform, Status};
 use egui::Key;
 
 use crate::keymap::helpers::*;
@@ -442,4 +442,90 @@ fn the_note_operations_keys_reach_their_commands() {
         &contexts,
     );
     assert!(plain.is_none(), "the note editor reads Cmd-E itself");
+}
+
+// Spec: mpe R22, R27, R29, R30, R31. The MPE tab's keys reach its commands:
+// Option+Shift+3 and Option+Tab the tabs, Cmd+4 the tab's own grid, B Draw
+// Mode, Z the zoom, and Cmd+A the breakpoints of an envelope that has the
+// keyboard, where without one it selects the notes.
+#[test]
+fn the_mpe_tabs_keys_reach_its_commands() {
+    let keymap = Keymap::live12();
+    let tab = [Context::ClipView, Context::NoteEditor, Context::Global];
+    for platform in [Platform::Mac, Platform::Other] {
+        let command = |key, mods, contexts: &[Context]| {
+            keymap.resolve(platform, key, mods, contexts).map(|hit| {
+                (
+                    hit.command.id.clone(),
+                    hit.command.args.get("tab").cloned(),
+                    hit.command.args.get("all").cloned(),
+                )
+            })
+        };
+        let (cmd, alt, ctrl_or_cmd) = match platform {
+            Platform::Mac => (
+                mods(true, false, false, false),
+                mods(false, false, true, false),
+                mods(true, false, false, false),
+            ),
+            Platform::Other => (
+                mods(false, true, false, false),
+                mods(false, false, true, false),
+                mods(false, true, false, false),
+            ),
+        };
+        let option_shift = Mods {
+            alt: true,
+            shift: true,
+            ..Mods::default()
+        };
+        let next = match platform {
+            Platform::Mac => alt,
+            Platform::Other => mods(false, true, false, false),
+        };
+        let (id, tab_arg, _) = command(Key::Num3, option_shift, &tab).expect("Option+Shift+3");
+        assert_eq!(
+            (id.as_str(), tab_arg),
+            ("view.clip_tab", Some("mpe".into()))
+        );
+        // Option+Tab cycles from any of the three tabs, the Envelopes
+        // tab's contexts among them.
+        for contexts in [
+            &tab[..],
+            &[Context::ClipView, Context::Envelope, Context::Global],
+        ] {
+            let (id, ..) = command(Key::Tab, next, contexts).expect("Option+Tab");
+            assert_eq!(id, "view.clip_tab", "{platform:?} {contexts:?}");
+        }
+        assert_eq!(command(Key::Num4, cmd, &tab).unwrap().0, "view.mpe_grid");
+        // In the Arrangement the same keys are Snap to Grid.
+        assert_eq!(
+            command(Key::Num4, cmd, &[Context::Arrangement, Context::Global])
+                .unwrap()
+                .0,
+            "arrangement.snap_to_grid"
+        );
+        assert_eq!(
+            command(Key::B, Mods::default(), &tab).unwrap().0,
+            "view.draw_mode"
+        );
+        assert_eq!(
+            command(Key::Z, Mods::default(), &tab).unwrap().0,
+            "clip_view.mpe_zoom"
+        );
+        let (id, _, all) = command(Key::A, ctrl_or_cmd, &tab).expect("Cmd+A");
+        assert_eq!(
+            (id.as_str(), all),
+            ("clip_view.select_expression_breakpoints", Some(true.into())),
+            "{platform:?}"
+        );
+        // Without an envelope with the keyboard the shell refuses it, and
+        // Cmd+A selects the notes.
+        let notes = keymap
+            .resolve_with(platform, Key::A, ctrl_or_cmd, &tab, |hit| {
+                hit.command.id != "clip_view.select_expression_breakpoints"
+            })
+            .expect("Cmd+A without an envelope");
+        assert_eq!(notes.command.id, "clip_view.select_notes", "{platform:?}");
+    }
 }

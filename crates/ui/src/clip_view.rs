@@ -33,6 +33,7 @@
 
 use bl_commands::Context;
 use bl_core::time::Ticks;
+use bl_model::MpeLane;
 use bl_model::registry::{SET_MIDI_LOOP, SET_MIDI_REGION};
 use bl_model::{ClipData, ClipId, Document, MidiData, Note};
 use bl_shell::arrangement::ArrangementView;
@@ -41,7 +42,7 @@ use bl_shell::clip_view::{move_limits, notes_in_order, resize_limit, span};
 use bl_shell::context_menus;
 use bl_shell::menus::{Action, MenuItem, shown};
 use bl_shell::note_commands as ids;
-use bl_shell::note_commands::{ChopStep, ClipTab, NoteField};
+use bl_shell::note_commands::{BreakpointRef, ChopStep, ClipTab, NoteField};
 use bl_shell::{Area, GesturePhase, Invocation, Shell};
 use egui::{
     Align2, CursorIcon, Id, Key, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, WidgetInfo, WidgetType,
@@ -54,6 +55,7 @@ use crate::clip_envelope::{self, EnvelopeEditor};
 use crate::keymap::{Keymap, Platform};
 use crate::launch_panel;
 use crate::main_window::UiEvent;
+use crate::mpe_tab::{self, MpeUi};
 use crate::note_filters;
 use crate::note_lanes::{self, Cancelled, LaneUi, NoteLayout};
 use crate::sample_editor::SampleEditorUi;
@@ -106,11 +108,11 @@ pub fn toolbar_rect(view: Rect) -> Rect {
 }
 
 /// The tabs in the order the toolbar lists them: the tab each shows, with
-/// its name. The MPE tab comes with its own package, so it shows disabled.
+/// its name.
 const TABS: [(Option<ClipTab>, &str); 3] = [
     (Some(ClipTab::Notes), "Notes"),
     (Some(ClipTab::Envelopes), "Envelopes"),
-    (None, "MPE"),
+    (Some(ClipTab::Mpe), "MPE"),
 ];
 
 /// The tab at `index` in [`TABS`].
@@ -1116,7 +1118,11 @@ fn toolbar(
     events: &mut Vec<UiEvent>,
 ) {
     let colours = &theme.colors;
-    let shown = shell.clip_view().tab();
+    // An audio clip has no MPE tab: its editor is the Sample Editor.
+    let shown = match shell.clip_view().tab() {
+        ClipTab::Mpe if audio => ClipTab::Notes,
+        tab => tab,
+    };
     ui.painter()
         .rect_filled(toolbar_rect(view), 0.0, colours.bar.0);
     // Find and Select Notes' switch leads the Notes tab's toolbar
@@ -1126,7 +1132,7 @@ fn toolbar(
     }
     for (index, (tab, name)) in TABS.iter().enumerate() {
         // An audio clip has the Sample and Envelopes tabs (sample editor R1).
-        if audio && tab.is_none() {
+        if audio && *tab == Some(ClipTab::Mpe) {
             continue;
         }
         let name = if audio && *tab == Some(ClipTab::Notes) {
@@ -1262,6 +1268,11 @@ pub struct ClipViewUi {
     stretch_drag: Option<StretchDrag>,
     /// The Envelopes tab's editor.
     envelope: EnvelopeEditor,
+    /// The MPE tab's drag, typed value and menu (WP-6.18).
+    mpe: MpeUi,
+    /// Whether the MPE tab is what the editor draws now, which greys the
+    /// notes that aren't selected.
+    mpe_on: bool,
     /// The Sample Editor, for an audio clip (WP-4.10).
     sample: SampleEditorUi,
     /// The note editor's context menus (C-NOTE, C-KEYS).
@@ -1293,6 +1304,8 @@ impl Default for ClipViewUi {
             chop_drag: None,
             stretch_drag: None,
             envelope: EnvelopeEditor::default(),
+            mpe: MpeUi::default(),
+            mpe_on: false,
             sample: SampleEditorUi::default(),
             menus: NoteMenus::default(),
             bar_height: BAR_HEIGHT,
@@ -1324,13 +1337,19 @@ impl ClipViewUi {
     /// R14).
     #[must_use]
     pub fn is_typing(&self) -> bool {
-        self.lanes.is_typing()
+        self.lanes.is_typing() || self.mpe.is_typing()
     }
 
     /// The lanes' heights, for the layout the editor draws.
     #[must_use]
     pub fn lane_heights(&self, shown: &[NoteField]) -> Vec<(NoteField, f32)> {
         self.lanes.heights(shown)
+    }
+
+    /// How many notes' Pitch envelopes the MPE tab drew in its last frame.
+    #[must_use]
+    pub fn mpe_pitch_drawn(&self) -> usize {
+        self.mpe.pitch_drawn()
     }
 
     /// The key at the note area's top edge, while unfolded.
@@ -1394,6 +1413,7 @@ impl ClipViewUi {
             self.chop_drag = None;
             self.stretch_drag = None;
             self.envelope.reset();
+            self.mpe.reset();
             return;
         };
         // The panel groups take the left of the view (L-CLIP-003): the left
@@ -1436,22 +1456,41 @@ impl ClipViewUi {
             self.chop_drag = None;
             self.stretch_drag = None;
             self.envelope.reset();
+            self.mpe.reset();
         }
         let envelopes = shell.clip_view().tab() == ClipTab::Envelopes;
+        let mpe_tab = shell.clip_view().tab() == ClipTab::Mpe;
+        self.mpe_on = mpe_tab;
         // Spec: multi-clip-editing R1. Several clips share the note editor,
-        // under loop bars.
+        // under loop bars. The MPE tab edits the foreground clip's notes.
         let several = shell.clip_view().shown(doc, shell.arrangement());
-        if several.len() > 1 && !envelopes {
+        if several.len() > 1 && !envelopes && !mpe_tab {
             self.show_multi(ui, shell, theme, rect, &several, events);
             return;
         }
         self.bar_drag = None;
         // Find and Select Notes' bar sits above the editor's ruler and moves
         // everything below it down (L-CLIP-019).
-        let bar = !envelopes && shell.clip_view().note_filters().visible;
+        let bar = !envelopes && !mpe_tab && shell.clip_view().note_filters().visible;
         let body = note_filters::body_rect(rect, bar);
         let shown = shell.clip_view().lanes().shown();
-        let layout = note_lanes::note_layout(body, &self.lanes.heights(&shown));
+        // Spec: mpe R23, R24. The MPE tab's lanes take the velocity lane's
+        // place; a Drum Rack's track has its Pitch Bend lane first.
+        let mpe_view = shell.clip_view().mpe();
+        let drum = doc
+            .clip_track(clip)
+            .and_then(|track| doc.track(track))
+            .is_some_and(|track| track.holds_drum_rack());
+        let mpe_heights: Vec<(MpeLane, f32)> = mpe_view
+            .lanes(drum)
+            .into_iter()
+            .map(|lane| (lane, mpe_view.height(lane)))
+            .collect();
+        let mpe_layout = mpe_tab.then(|| mpe_tab::layout(body, &mpe_heights, mpe_view.hidden));
+        let layout = match &mpe_layout {
+            Some(mpe) => mpe.note_layout(),
+            None => note_lanes::note_layout(body, &self.lanes.heights(&shown)),
+        };
         let grid = if envelopes {
             grid_rect(rect)
         } else {
@@ -1496,6 +1535,22 @@ impl ClipViewUi {
             return;
         }
         let notes = notes_in_order(&midi);
+        // Spec: mpe R31. Z scrolls the key rows to the Pitch values in the
+        // time selection, once.
+        if mpe_tab
+            && !folded
+            && let Some(zoom) = shell.clip_view().mpe_zoom()
+            && zoom.clip == clip
+            && self.mpe.take_zoom(zoom.serial)
+        {
+            let visible = f64::from(layout.grid.height() / KEY_HEIGHT);
+            let top = if zoom.high - zoom.low + 2.0 <= visible {
+                (zoom.low + zoom.high) / 2.0 + visible / 2.0
+            } else {
+                zoom.high + 1.0
+            };
+            self.top = top.clamp(0.0, 127.0) as f32;
+        }
         let rows = KeyRows::of(folded, &notes, self.top, self.first);
         let selected = shell
             .clip_view()
@@ -1525,9 +1580,67 @@ impl ClipViewUi {
             step: shell.arrangement().grid_ticks(doc),
             snap: shell.arrangement().grid().snap,
         };
+        // Spec: mpe R24, R25. Each selected note's Pitch envelope is drawn
+        // over it, except while Fold is on or on a Drum Rack's track.
+        let held = shell.clip_view().selected_breakpoints(clip);
+        // Only breakpoints that are still there count as chosen: a note edit
+        // can move one.
+        let chosen: Vec<BreakpointRef> = held
+            .as_ref()
+            .map(|(envelope, chosen)| {
+                chosen
+                    .iter()
+                    .filter(|point| {
+                        notes.get(point.note as usize).is_some_and(|note| {
+                            note.envelope(*envelope).iter().any(|p| p.at == point.at)
+                        })
+                    })
+                    .copied()
+                    .collect()
+            })
+            .unwrap_or_default();
+        let pitch_rows: Vec<(u32, f32)> = if mpe_tab && !folded && !drum {
+            notes
+                .iter()
+                .enumerate()
+                .filter_map(|(place, note)| {
+                    Some((
+                        u32::try_from(place).ok()?,
+                        rows.y_of(layout.grid, note.key)? + KEY_HEIGHT / 2.0,
+                    ))
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let mpe_frame = mpe_tab.then(|| mpe_tab::Frame {
+            clip,
+            grid: layout.grid,
+            start: axis,
+            length,
+            notes: &notes,
+            selected: &selected,
+            face,
+            step: shell.arrangement().grid_ticks(doc),
+            grid_on: mpe_view.grid_on(clip),
+            pitch: pitch_rows
+                .iter()
+                .filter(|(place, _)| selected.contains(place))
+                .copied()
+                .collect(),
+            focus: held.as_ref().map(|(envelope, _)| *envelope),
+            chosen: &chosen,
+            time: shell.clip_view().time_selection(doc, shell.arrangement()),
+            draw_mode: shell.clip_view().draw_mode(),
+        });
+        let toggled: Vec<MpeLane> = mpe_view.shown.iter().copied().collect();
         self.paint(
             ui, shell, theme, clip, strip, &frame, &rows, &midi, axis, length, &notes, &selected,
         );
+        if let (Some(mpe_frame), Some(mpe_layout)) = (&mpe_frame, &mpe_layout) {
+            mpe_tab::paint_band(ui, theme, mpe_frame, mpe_layout, &toggled, mpe_view.hidden);
+            self.mpe.paint_pitch(ui, theme, mpe_frame, &pitch_rows);
+        }
         self.input(
             ui,
             shell,
@@ -1543,9 +1656,22 @@ impl ClipViewUi {
             length,
             &notes,
             &selected,
+            mpe_frame.as_ref(),
             events,
         );
-        self.lanes.footer(ui, shell, theme, &frame, events);
+        if let (Some(mpe_frame), Some(mpe_layout)) = (&mpe_frame, &mpe_layout) {
+            self.mpe
+                .band_input(ui, mpe_frame, mpe_layout, &toggled, mpe_view.hidden, events);
+            self.mpe.paint_overlay(
+                ui,
+                theme,
+                mpe_frame,
+                &MpeUi::all_targets(mpe_frame, mpe_layout),
+            );
+            self.mpe.describe(ui, mpe_frame, mpe_layout);
+        } else {
+            self.lanes.footer(ui, shell, theme, &frame, events);
+        }
         Self::preview_switch(ui, shell, theme, strip, events);
     }
 
@@ -1756,6 +1882,7 @@ impl ClipViewUi {
             self.chop_drag = None;
             self.stretch_drag = None;
             self.envelope.reset();
+            self.mpe.reset();
             self.sample.reset();
         }
         toolbar(ui, shell, theme, rect, true, events);
@@ -1775,6 +1902,7 @@ impl ClipViewUi {
             return;
         }
         self.envelope.reset();
+        self.mpe.reset();
         let ready = peaks(audio.media);
         self.sample
             .show(ui, shell, theme, rect, clip, ready, events);
@@ -1830,7 +1958,9 @@ impl ClipViewUi {
             let corner = theme.sizes.corner.min(2.0);
             // Spec: piano-roll R43. The note is drawn in its clip's colour,
             // paler the softer its velocity; a deactivated note is grey.
-            let colour = if note.mute {
+            let colour = if note.mute
+                || (self.mpe_on && !selected.contains(&u32::try_from(place).unwrap_or(u32::MAX)))
+            {
                 colours.clip_muted.0
             } else {
                 crate::theme::note_colour(face, note.velocity)
@@ -2081,6 +2211,7 @@ impl ClipViewUi {
         length: Ticks,
         notes: &[Note],
         selected: &[u32],
+        mpe: Option<&mpe_tab::Frame<'_>>,
         events: &mut Vec<UiEvent>,
     ) {
         let grid = frame.layout.grid;
@@ -2117,6 +2248,16 @@ impl ClipViewUi {
         let draw_mode = shell.clip_view().draw_mode();
         let start = axis;
         let hit = |pos: Pos2| hit_note(grid, start, length, rows, notes, pos);
+        // Spec: mpe R26 to R30. In the MPE tab a selected note's Pitch
+        // envelope takes the press, click or drag before the note does, and
+        // a value being typed takes the keys.
+        let pitch_taken = match mpe {
+            Some(mpe) => {
+                self.mpe.type_keys(ui, mpe, events);
+                self.mpe.pitch_input(ui, mpe, &response, events)
+            }
+            None => false,
+        };
         // Spec: note-editing R16. A click or a drag in the note area gives
         // the keyboard back from a lane.
         if response.clicked() || response.drag_started() {
@@ -2125,8 +2266,8 @@ impl ClipViewUi {
 
         // Spec: find-and-select-notes R6. With the bar showing, Shift-dragging
         // sideways sets the Time filter's window instead of selecting or
-        // moving notes.
-        let shift_drag = shell.clip_view().note_filters().visible && keys.extend;
+        // moving notes. The MPE tab doesn't show the bar.
+        let shift_drag = mpe.is_none() && shell.clip_view().note_filters().visible && keys.extend;
         // Spec: note-editing R33, R37. With Draw Mode off, E held changes
         // what the pointer does: a click or drag splits the notes it crosses,
         // and with Option (Cmd, Ctrl on Windows) held, a drag on a selected
@@ -2140,6 +2281,7 @@ impl ClipViewUi {
             self.time_drag = Some(arrangement.snap_drag(doc, at, keys.bypass));
         }
         if response.drag_started()
+            && !pitch_taken
             && self.time_drag.is_none()
             && let Some(press) = ui.input(|i| i.pointer.press_origin())
             && e_down
@@ -2158,6 +2300,7 @@ impl ClipViewUi {
                 });
             }
         } else if response.drag_started()
+            && !pitch_taken
             && self.time_drag.is_none()
             && let Some(press) = ui.input(|i| i.pointer.press_origin())
             && !draw_mode
@@ -2294,6 +2437,7 @@ impl ClipViewUi {
         if ui.input(|i| i.key_pressed(Key::Escape)) {
             let note = self.drag.take().is_some();
             let lanes = self.lanes.cancel();
+            let expression = self.mpe.cancel();
             // A drag on a MIDI Tool's control that Esc ended (the MIDI Tools
             // spec, R22) has put the notes back already.
             let tool = crate::tool_panel::took_escape(ui.ctx());
@@ -2303,12 +2447,18 @@ impl ClipViewUi {
             if chopping {
                 events.push(UiEvent::StatusHint(None));
             }
-            if note || lanes == Cancelled::Gesture || split || chopping || chopped {
+            if note
+                || lanes == Cancelled::Gesture
+                || expression == mpe_tab::Cancelled::Gesture
+                || split
+                || chopping
+                || chopped
+            {
                 events.push(UiEvent::Gesture {
                     phase: GesturePhase::Cancel,
                     invocation: None,
                 });
-            } else if tool || lanes == Cancelled::Typed {
+            } else if tool || lanes == Cancelled::Typed || expression == mpe_tab::Cancelled::Typed {
                 // Spec: note-editing R14. Esc drops a number being typed.
             } else if shell.active_contexts().contains(&Context::NoteEditor) {
                 // Spec: piano-roll R24, R25. Esc deselects the notes and
@@ -2373,6 +2523,7 @@ impl ClipViewUi {
             });
         }
         if response.clicked()
+            && !pitch_taken
             && let Some(pos) = response.interact_pointer_pos()
         {
             // Spec: find-and-select-notes R3. A click switches every filter
@@ -2553,6 +2704,9 @@ impl ClipViewUi {
         }
         response.context_menu(|ui| {
             self.menus.show(ui, shell, &context_menus::note(), events);
+            if let Some(mpe) = mpe {
+                self.mpe.menu_items(ui, mpe, events);
+            }
         });
         // Spec: note-editing R19. Right-clicking a key selects that key's
         // notes first, so the menu's Deactivate Note(s) acts on them.

@@ -22,8 +22,7 @@
 use crate::editing::EditResult;
 use crate::note_filters::{InvertSelectionArgs, NoteFilters, NoteFiltersArgs, NoteFiltersResult};
 use bl_commands::Context::{
-    ClipView, Envelope, Global, LoopBrace, NoteEditor, NoteSelection as NoteSelectionContext,
-    SampleEditor,
+    ClipView, Global, LoopBrace, NoteEditor, NoteSelection as NoteSelectionContext, SampleEditor,
 };
 use bl_commands::{Binding, CommandSpec, NoArgs, Permission, RegisterError, Registry};
 use bl_core::time::Ticks;
@@ -1745,7 +1744,7 @@ fn specs() -> Vec<CommandSpec> {
                  is the Clip View's state, whose `mpe` lists the selection.",
             )
             .permission(Permission::Read)
-            .contexts([Envelope])
+            .contexts([ClipView])
             .binding(Binding::new("S-NOTE-053").arg("all", true))
             .args::<SelectExpressionBreakpointsArgs>()
             .result::<ClipViewState>(),

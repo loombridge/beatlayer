@@ -792,7 +792,7 @@ impl MpeUi {
                         ids::DRAW_EXPRESSION,
                         json!({ "clip": frame.clip, "notes": frame.selected,
                             "envelope": expression, "steps": steps,
-                            "absolute": *expression == Expression::Pitch }),
+                            "absolute": matches!(plot, Plot::Pitch { .. }) }),
                     )
                 })
             }
@@ -857,11 +857,17 @@ impl MpeUi {
             let index = tick.div_euclid(width);
             let mut value = plot.value(point.y, expression);
             value = if expression == Expression::Pitch {
-                let absolute = key + value;
-                if keys.bypass && !frame.grid_on {
-                    absolute.round()
+                // Over the notes Pitch is drawn in key rows; the Pitch Bend
+                // lane's axis is the same for every pad.
+                let drawn = if matches!(plot, Plot::Pitch { .. }) {
+                    key + value
                 } else {
-                    absolute
+                    value
+                };
+                if keys.bypass && !frame.grid_on {
+                    drawn.round()
+                } else {
+                    drawn
                 }
             } else if modifiers.shift {
                 (value * 10.0).round() / 10.0

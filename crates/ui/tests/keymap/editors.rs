@@ -411,12 +411,6 @@ fn the_note_operations_keys_reach_their_commands() {
 fn the_mpe_tabs_keys_reach_its_commands() {
     let keymap = Keymap::live12();
     let tab = [Context::ClipView, Context::NoteEditor, Context::Global];
-    let envelope = [
-        Context::ClipView,
-        Context::Envelope,
-        Context::NoteEditor,
-        Context::Global,
-    ];
     for platform in [Platform::Mac, Platform::Other] {
         let command = |key, mods, contexts: &[Context]| {
             keymap.resolve(platform, key, mods, contexts).map(|hit| {
@@ -478,16 +472,19 @@ fn the_mpe_tabs_keys_reach_its_commands() {
             command(Key::Z, Mods::default(), &tab).unwrap().0,
             "clip_view.mpe_zoom"
         );
-        let (id, _, all) = command(Key::A, ctrl_or_cmd, &envelope).expect("Cmd+A");
+        let (id, _, all) = command(Key::A, ctrl_or_cmd, &tab).expect("Cmd+A");
         assert_eq!(
             (id.as_str(), all),
             ("clip_view.select_expression_breakpoints", Some(true.into())),
             "{platform:?}"
         );
-        assert_eq!(
-            command(Key::A, ctrl_or_cmd, &tab).unwrap().0,
-            "clip_view.select_notes",
-            "{platform:?}"
-        );
+        // Without an envelope with the keyboard the shell refuses it, and
+        // Cmd+A selects the notes.
+        let notes = keymap
+            .resolve_with(platform, Key::A, ctrl_or_cmd, &tab, |hit| {
+                hit.command.id != "clip_view.select_expression_breakpoints"
+            })
+            .expect("Cmd+A without an envelope");
+        assert_eq!(notes.command.id, "clip_view.select_notes", "{platform:?}");
     }
 }

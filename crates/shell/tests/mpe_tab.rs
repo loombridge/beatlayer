@@ -455,6 +455,18 @@ fn drawing_replaces_the_stretch_dragged_with_steps() {
         ids::DRAW_EXPRESSION,
         json!({ "envelope": "slide", "steps": [{ "at": 0, "length": 0, "value": 1.0 }] }),
     );
+    song.refused(
+        ids::DRAW_EXPRESSION,
+        json!({ "envelope": "slide", "steps": [
+            { "at": 0, "length": 200, "value": 1.0 },
+            { "at": 100, "length": 50, "value": 2.0 },
+        ] }),
+    );
+    song.refused(
+        ids::DRAW_EXPRESSION,
+        json!({ "envelope": "slide",
+            "steps": [{ "at": 1, "length": i64::MAX, "value": 1.0 }] }),
+    );
     // One drag, one step.
     let start = song.steps();
     for to in [50, 100, 150] {
@@ -516,8 +528,9 @@ fn the_mpe_tab_opens_for_a_midi_clip_and_cycles_with_the_other_tabs() {
     let steps = song.steps();
     song.view("view.clip_tab", json!({ "tab": "mpe" }));
     assert_eq!(song.steps(), steps, "choosing a tab is no undo step");
-    // The editor's contexts: the note editor still, and the envelope's once
-    // one has the keyboard.
+    // The editor's contexts: the note editor's, never the automation
+    // envelope's, whose keys would reach the Arrangement's lanes. Cmd-A
+    // takes the breakpoints once an envelope has the keyboard.
     song.view(ids::SELECT_NOTES, json!({ "notes": [0] }));
     song.shell.run("focus.clip_view", json!({})).unwrap();
     assert!(
@@ -526,13 +539,23 @@ fn the_mpe_tab_opens_for_a_midi_clip_and_cycles_with_the_other_tabs() {
     );
     let contexts = song.shell.active_contexts();
     assert!(contexts.contains(&bl_commands::Context::NoteEditor));
-    assert!(!contexts.contains(&bl_commands::Context::Envelope));
+    let all = json!({ "all": true });
+    assert!(
+        !song
+            .shell
+            .can_invoke(ids::SELECT_EXPRESSION_BREAKPOINTS, &all)
+    );
     song.view(
         ids::SELECT_EXPRESSION_BREAKPOINTS,
         json!({ "envelope": "slide", "breakpoints": [] }),
     );
     assert!(
         song.shell
+            .can_invoke(ids::SELECT_EXPRESSION_BREAKPOINTS, &all)
+    );
+    assert!(
+        !song
+            .shell
             .active_contexts()
             .contains(&bl_commands::Context::Envelope)
     );

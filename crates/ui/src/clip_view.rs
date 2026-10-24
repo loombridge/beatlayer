@@ -1418,7 +1418,6 @@ impl ClipViewUi {
             self.stretch_drag = None;
             self.envelope.reset();
             self.mpe.reset();
-            self.mpe.reset();
             return;
         };
         // The panel groups take the left of the view (L-CLIP-003): the left
@@ -1461,7 +1460,6 @@ impl ClipViewUi {
             self.chop_drag = None;
             self.stretch_drag = None;
             self.envelope.reset();
-            self.mpe.reset();
             self.mpe.reset();
         }
         let envelopes = shell.clip_view().tab() == ClipTab::Envelopes;
@@ -1889,7 +1887,6 @@ impl ClipViewUi {
             self.stretch_drag = None;
             self.envelope.reset();
             self.mpe.reset();
-            self.mpe.reset();
             self.sample.reset();
         }
         toolbar(ui, shell, theme, rect, true, events);
@@ -2273,8 +2270,8 @@ impl ClipViewUi {
 
         // Spec: find-and-select-notes R6. With the bar showing, Shift-dragging
         // sideways sets the Time filter's window instead of selecting or
-        // moving notes.
-        let shift_drag = shell.clip_view().note_filters().visible && keys.extend;
+        // moving notes. The MPE tab doesn't show the bar.
+        let shift_drag = mpe.is_none() && shell.clip_view().note_filters().visible && keys.extend;
         // Spec: note-editing R33, R37. With Draw Mode off, E held changes
         // what the pointer does: a click or drag splits the notes it crosses,
         // and with Option (Cmd, Ctrl on Windows) held, a drag on a selected

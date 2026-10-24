@@ -60,8 +60,10 @@ const SYSTEM: &[(&str, &str)] = &[
 /// when it can't run (`declines` in the keymap): Tab selects the next
 /// breakpoint only while one is selected, Esc drops an edit only while there
 /// is one, and Delete deletes a breakpoint only while one is selected or at
-/// the insert marker (the automation editing spec, R22 to R24).
-const DECLINES: &[&str] = &["S-A11Y-022", "S-A11Y-024", "S-A11Y-025"];
+/// the insert marker (the automation editing spec, R22 to R24); in the MPE
+/// tab Cmd-A selects an envelope's breakpoints only while one has the
+/// keyboard, and the notes otherwise (mpe R29).
+const DECLINES: &[&str] = &["S-A11Y-022", "S-A11Y-024", "S-A11Y-025", "S-NOTE-053"];
 
 /// Shortcuts the focused control handles, with which control. The
 /// Arrangement View reads three itself because each has keys that act

@@ -435,6 +435,40 @@ fn a_drum_rack_track_shows_its_pitch_bend_lane_and_draws_nothing_over_pads() {
     assert_eq!(e.notes()[0].pitch.len(), 4);
 }
 
+// Spec: mpe R24, R30. Draw Mode in the Pitch Bend lane gives every selected
+// pad the same bend: the lane's axis doesn't depend on a pad's key.
+#[test]
+fn drawing_in_the_pitch_bend_lane_bends_every_pad_alike() {
+    let mut e = set(vec![shaped(36, 0), shaped(38, 0)]);
+    e.h.shell
+        .run("arrangement.select_tracks", json!({ "tracks": [e.track] }))
+        .unwrap();
+    e.h.shell.set_focused_area(bl_shell::Area::Detail);
+    e.h.shell
+        .invoke(
+            "device.add",
+            json!({ "device": {
+                "kind": { "rack": { "kind": "drum" } },
+                "name": "Drum Rack",
+                "role": "instrument",
+            } }),
+        )
+        .unwrap();
+    e.run("arrangement.select_clips", json!({ "clips": [e.clip] }));
+    e.select(&[0, 1]);
+    e.run("view.draw_mode", json!({}));
+    let from = e.lane_at(MpeLane::PitchBend, BAR / 4, 12.0);
+    let to = e.lane_at(MpeLane::PitchBend, BAR / 2, 12.0);
+    e.drag(from, to, Modifiers::NONE);
+    let notes = e.notes();
+    assert!(
+        notes[0].pitch.iter().any(|p| (p.value - 12.0).abs() < 2.0),
+        "drawn: {:?}",
+        notes[0].pitch
+    );
+    assert_eq!(notes[0].pitch, notes[1].pitch);
+}
+
 // Spec: mpe R26, R32. A click on a segment of a selected note's envelope
 // adds a breakpoint on it, and a click on a breakpoint deletes it, each one
 // undo step of its command.

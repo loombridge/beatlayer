@@ -127,18 +127,6 @@ impl Shell {
                             // is the Sample Editor.
                             contexts.push(Context::SampleEditor);
                         } else {
-                            // Spec: mpe R29. In the MPE tab, an envelope with
-                            // the keyboard takes Cmd-A for its breakpoints.
-                            if self.clip_view.tab() == ClipTab::Mpe
-                                && self
-                                    .clip_view
-                                    .shown_clip(self.editor.document(), &self.arrangement)
-                                    .is_some_and(|clip| {
-                                        self.clip_view.selected_breakpoints(clip).is_some()
-                                    })
-                            {
-                                contexts.push(Context::Envelope);
-                            }
                             contexts.push(Context::NoteEditor);
                             if self
                                 .clip_view
@@ -568,12 +556,18 @@ impl Shell {
                     .is_some();
             }
             // Spec: mpe R27, R29, R31. The tab's own keys work in the tab.
+            // Cmd-A takes the breakpoints only while an envelope has the
+            // keyboard, and selects the notes otherwise.
             ids::VIEW_MPE_GRID | note_ids::MPE_ZOOM | note_ids::SELECT_EXPRESSION_BREAKPOINTS => {
+                let clip = self
+                    .clip_view
+                    .shown_clip(self.editor.document(), &self.arrangement);
                 return self.clip_view.tab() == ClipTab::Mpe
-                    && self
-                        .clip_view
-                        .shown_clip(self.editor.document(), &self.arrangement)
-                        .is_some();
+                    && clip.is_some_and(|clip| {
+                        id != note_ids::SELECT_EXPRESSION_BREAKPOINTS
+                            || args.get("envelope").is_some()
+                            || self.clip_view.selected_breakpoints(clip).is_some()
+                    });
             }
             // Zoom In and Zoom Out stop at the zoom's ends (interface-zoom
             // R3).

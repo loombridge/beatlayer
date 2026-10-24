@@ -35,8 +35,8 @@ A shortcut applies in its context. The same keys may mean different things in di
 | [`track-headers`](#track-headers) | A track title bar is selected, in either view. | 13 |
 | [`take-lanes`](#take-lanes) | A take lane is selected in the Arrangement. | 6 |
 | [`loop-brace`](#loop-brace) | A loop brace or a clip start or end marker is selected, or a multi-clip loop bar. | 11 |
-| [`envelope`](#envelope) | An automation lane or the Clip View's Envelope Editor has focus. | 17 |
-| [`clip-view`](#clip-view) | The Clip View has focus, whichever editor it shows. | 10 |
+| [`envelope`](#envelope) | An automation lane or the Clip View's Envelope Editor has focus. | 16 |
+| [`clip-view`](#clip-view) | The Clip View has focus, whichever editor it shows. | 11 |
 | [`sample-editor`](#sample-editor) | The Clip View shows an audio clip's Sample Editor. | 16 |
 | [`note-editor`](#note-editor) | The Clip View shows a MIDI clip's MIDI Note Editor. | 41 |
 | [`note-selection`](#note-selection) | Notes are selected in the MIDI Note Editor. | 16 |
@@ -375,7 +375,6 @@ An automation lane or the Clip View's Envelope Editor has focus.
 | S-A11Y-023 | Change the selected breakpoint's value | `Up` or `Down` | `Up` or `Down` | key | press | M6 | manual 41.5 |
 | S-A11Y-024 | Cancel the breakpoint edit and deselect | `Esc` | `Esc` | key | press | M6 | manual 41.5 |
 | S-A11Y-025 | Delete the selected breakpoint | `Delete` | `Delete` | key | press | M6 | manual 41.5 |
-| S-NOTE-053 | Select every breakpoint of the focused expression envelope | `Cmd+A` | `Ctrl+A` | key | press | M6 | manual 12.2 |
 | S-A11Y-028 | Cycle the automated parameters in the Clip View's Envelope Editor | `Option+Up` or `Option+Down` | `Alt+Up` or `Alt+Down` | key | press | M6 | Live 12 release notes, 12.2, bug fixes (the Clip View's Envelope Editor) |
 | S-A11Y-029 | Cycle all of the clip's device parameters in the Clip View's Envelope Editor | `Shift+Option+Up` or `Shift+Option+Down` | `Shift+Alt+Up` or `Shift+Alt+Down` | key | press | M6 | Live 12 release notes, 12.2, bug fixes (the Clip View's Envelope Editor) |
 | S-A11Y-030 | Move the selected breakpoint in time by the grid | `Left` or `Right` | `Left` or `Right` | key | press | M6 | manual 41.5.1; Live 12 release notes, 12.2 |
@@ -396,6 +395,7 @@ The Clip View has focus, whichever editor it shows.
 | S-CLIPMODE-005 | Show the Expression Editor (the MPE tab) | `Option+Shift+3` | `Alt+Shift+3` | key | press | M6 | manual 42.10; observed in 12.4.3 (macOS), 10 October 2026: View menu |
 | S-NOTE-030 | Expand the Clip View to full size | `Cmd+Option+E` | `Ctrl+Alt+E` | key | press | M6 | manual 42.12; observed in 12.4.3 (macOS), 10 October 2026: View menu |
 | S-NOTE-052 | Choose the previous or next chord in Stacks' Chord Selector Pad | `Cmd+Up` or `Cmd+Down` | `Ctrl+Up` or `Ctrl+Down` | key | press | M6 | manual 11.3.4 |
+| S-NOTE-053 | Select every breakpoint of the focused expression envelope | `Cmd+A` | `Ctrl+A` | key | press | M6 | manual 12.2 |
 
 ## sample-editor
 

@@ -195,7 +195,7 @@ Result: [`SampleEditorState`](README.md#sampleeditorstate).
 
 ### `clip_view.select_expression_breakpoints`
 
-**Select Expression Breakpoints**. Permission: `read`. Contexts: `envelope`.
+**Select Expression Breakpoints**. Permission: `read`. Contexts: `clip-view`.
 
 Selects breakpoints of one `envelope` in the Clip View's MPE tab, as a marquee, a click on a segment or Cmd-A does: the `breakpoints` named (a note's place and the breakpoint's position in ticks from its start), replacing the selection or, with `mode` `toggle`, each in or out; or with `all`, every breakpoint of the envelope in the selected notes (Cmd-A with an envelope focused). The envelope becomes the one that has the keyboard. Selecting is never an undo step and changes nothing in the set. The result is the Clip View's state, whose `mpe` lists the selection.
 
@@ -203,7 +203,7 @@ Default keys:
 
 | Shortcut | macOS | Windows | Context | Action in the reference | Binding |
 |---|---|---|---|---|---|
-| S-NOTE-053 | `Cmd+A` | `Ctrl+A` | `envelope` | Select every breakpoint of the focused expression envelope | fixes `all` = `true` |
+| S-NOTE-053 | `Cmd+A` | `Ctrl+A` | `clip-view` | Select every breakpoint of the focused expression envelope | fixes `all` = `true` |
 
 Arguments:
 

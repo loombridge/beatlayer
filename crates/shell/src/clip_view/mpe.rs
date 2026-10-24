@@ -317,8 +317,17 @@ pub(super) fn run(
                     "each step needs a number for `value` and a `length` of 1 tick or more",
                 ));
             }
-            if steps.windows(2).any(|pair| pair[0].at > pair[1].at) {
-                return Err(invalid("`steps` must be in order of `at`"));
+            if steps
+                .iter()
+                .any(|step| step.at.0.checked_add(step.length.0).is_none())
+            {
+                return Err(invalid("a step ends past the last tick"));
+            }
+            if steps
+                .windows(2)
+                .any(|pair| pair[1].at < pair[0].at + pair[0].length)
+            {
+                return Err(invalid("`steps` must be in order of `at` and not overlap"));
             }
             let (clip, midi) = clip_and_data(doc, view, arrangement, clip)?;
             let ordered = notes_in_order(&midi);
@@ -339,8 +348,10 @@ pub(super) fn run(
                         let drawn: Vec<(Ticks, Ticks, f64)> = steps
                             .iter()
                             .filter_map(|step| {
-                                let from = (step.at - start).max(Ticks::ZERO);
-                                let to = (step.at + step.length - start).min(length);
+                                let from =
+                                    Ticks(step.at.0.saturating_sub(start.0)).max(Ticks::ZERO);
+                                let to = Ticks((step.at + step.length).0.saturating_sub(start.0))
+                                    .min(length);
                                 let value = if absolute && envelope == Expression::Pitch {
                                     step.value - key
                                 } else {
@@ -554,8 +565,8 @@ fn existing(
 fn fill_window(note: &Note, fill: bl_shell_spec::notes::TickRange) -> (Ticks, Ticks) {
     let (a, b) = (fill.start.min(fill.end), fill.start.max(fill.end));
     (
-        (a - note.start).clamp(Ticks::ZERO, note.length),
-        (b - note.start).clamp(Ticks::ZERO, note.length),
+        Ticks(a.0.saturating_sub(note.start.0)).clamp(Ticks::ZERO, note.length),
+        Ticks(b.0.saturating_sub(note.start.0)).clamp(Ticks::ZERO, note.length),
     )
 }
 

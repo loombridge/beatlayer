@@ -4438,7 +4438,7 @@ notes = "Handled by the Chord Selector Pad while it has the keyboard focus."
 [[shortcut]]
 id = "S-NOTE-053"
 action = "Select every breakpoint of the focused expression envelope"
-context = "envelope"
+context = "clip-view"
 mac = ["Cmd+A"]
 win = ["Ctrl+A"]
 kind = "key"

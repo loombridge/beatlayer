@@ -98,7 +98,7 @@ status = "pending"
 [[shortcut]]
 id = "S-NOTE-053"
 action = "Select every breakpoint of the focused expression envelope"
-context = "envelope"
+context = "clip-view"
 kind = "key"
 trigger = "press"
 milestone = "M6"
@@ -106,5 +106,5 @@ mac = ["Cmd+A"]
 win = ["Ctrl+A"]
 status = "bound"
 commands = [
-  { id = "clip_view.select_expression_breakpoints", contexts = ["envelope"], args = { all = true } },
+  { id = "clip_view.select_expression_breakpoints", contexts = ["clip-view"], args = { all = true }, declines = true },
 ]

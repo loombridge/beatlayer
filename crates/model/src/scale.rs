@@ -15,12 +15,13 @@
 //! (WP-6.8), the note editor (WP-6.7b) and the MIDI Tools (WP-6.12 to
 //! WP-6.16) can all use it without a UI crate.
 
+use bl_core::scale::saturate;
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// The chromatic scale's steps: every semitone, so a degree of it is a
 /// semitone (the scales spec, R2).
-pub const CHROMATIC: [u8; 12] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+pub use bl_core::scale::CHROMATIC;
 
 /// The names of the scales in the scale list, in the order the chooser
 /// shows them (the scales spec, R1).
@@ -257,22 +258,13 @@ impl Scale {
     /// scales spec, R2).
     #[must_use]
     pub fn notes(&self) -> Vec<u8> {
-        let mut notes = Vec::new();
-        for key in 0..=127u8 {
-            if self.holds(key) {
-                notes.push(key);
-            }
-        }
-        notes
+        bl_core::scale::notes(self.root, self.steps())
     }
 
     /// Whether the scale holds `key`.
     #[must_use]
     pub fn holds(&self, key: u8) -> bool {
-        let above = key % 12;
-        let root = self.root % 12;
-        let step = (above + 12 - root) % 12;
-        self.steps().contains(&step)
+        bl_core::scale::holds(self.root, self.steps(), key)
     }
 
     /// The key `degrees` degrees from `key` (the scales spec, R2): a key in
@@ -285,9 +277,7 @@ impl Scale {
     /// device can call it on the audio thread.
     #[must_use]
     pub fn move_by(&self, key: u8, degrees: i32) -> Option<u8> {
-        u8::try_from(self.move_off(key, degrees))
-            .ok()
-            .filter(|key| *key <= 127)
+        bl_core::scale::move_by(self.root, self.steps(), key, degrees)
     }
 
     /// As [`move_by`](Self::move_by), but the key a move off the keyboard
@@ -295,9 +285,7 @@ impl Scale {
     /// that folds or limits such a key needs.
     #[must_use]
     pub fn move_off(&self, key: u8, degrees: i32) -> i32 {
-        let below = self.index_at_or_below(i32::from(key));
-        let moved = i64::from(key) + self.note_at(below + i64::from(degrees)) - self.note_at(below);
-        saturate(moved)
+        bl_core::scale::move_off(self.root, self.steps(), key, degrees)
     }
 
     /// The key `degrees` degrees from the scale note at or below `key`,
@@ -322,15 +310,7 @@ impl Scale {
     /// lower of two equally near (the scales spec, R2).
     #[must_use]
     pub fn nearest(&self, key: u8) -> u8 {
-        let below = self.index_at_or_below(i32::from(key));
-        let (lower, upper) = (self.note_at(below), self.note_at(below + 1));
-        let key = i64::from(key);
-        let picked = if lower < 0 || (upper <= 127 && upper - key < key - lower) {
-            upper
-        } else {
-            lower
-        };
-        picked.clamp(0, 127) as u8
+        bl_core::scale::nearest(self.root, self.steps(), key)
     }
 
     /// The per-note bend `bend` (from −1 to +1, ±48 semitones) of a note
@@ -357,24 +337,12 @@ impl Scale {
     /// integers, 0 the root in the octave of key 0 to 11, and the notes rise
     /// with the index, below the keyboard and above it.
     fn note_at(&self, index: i64) -> i64 {
-        let steps = self.steps();
-        let count = steps.len() as i64;
-        i64::from(self.root % 12)
-            + 12 * index.div_euclid(count)
-            + i64::from(steps[index.rem_euclid(count) as usize])
+        bl_core::scale::note_at(self.root, self.steps(), index)
     }
 
     /// The index of the highest scale note at or below `key`.
     fn index_at_or_below(&self, key: i32) -> i64 {
-        let steps = self.steps();
-        let above = key - i32::from(self.root % 12);
-        let (octave, within) = (above.div_euclid(12), above.rem_euclid(12));
-        // Every list starts at the root, so a step is always found.
-        let place = steps
-            .iter()
-            .rposition(|step| i32::from(*step) <= within)
-            .unwrap_or(0);
-        i64::from(octave) * steps.len() as i64 + place as i64
+        bl_core::scale::index_at_or_below(self.root, self.steps(), key)
     }
 
     /// Where the pitch `semitones` falls among the scale's notes, counted in
@@ -396,11 +364,6 @@ impl Scale {
         );
         lower + (position - below) * (upper - lower)
     }
-}
-
-/// `value` as an `i32`, held at its ends.
-fn saturate(value: i64) -> i32 {
-    i32::try_from(value).unwrap_or(if value < 0 { i32::MIN } else { i32::MAX })
 }
 
 /// What a per-note bend of 1 means, in semitones: MPE's per-note range (the

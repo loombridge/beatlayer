@@ -8,6 +8,7 @@
 pub mod clock;
 pub mod id;
 pub mod midi;
+pub mod scale;
 #[cfg(feature = "schemars")]
 mod schema;
 pub mod time;

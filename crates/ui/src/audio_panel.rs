@@ -366,23 +366,25 @@ pub fn show(
     });
     ui.painter().rect_filled(rect, 0.0, c.panel.0);
 
-    // The panel selector row (L-CLIP-003): the Audio Utilities panel is the
-    // one the right group shows on an audio clip.
-    let selector = Rect::from_min_size(rect.min, vec2(rect.width(), SELECTOR));
-    let id = Id::new("audio-panel-selector");
-    let response = ui.interact(selector, id, Sense::hover());
-    ui.painter()
-        .rect_filled(selector, theme.sizes.corner, c.control_pressed.0);
-    ui.painter().text(
-        selector.center(),
-        Align2::CENTER_CENTER,
-        "Audio Utilities",
-        theme.small_font(),
-        c.text.0,
+    // The panel selector row (L-CLIP-003): Audio Utilities and Transform.
+    // The Transform panel is empty until Quantize arrives (WP-6.12).
+    let shown = shell.clip_view().midi_tools().panel();
+    let shown = if shown == bl_shell::midi_tool_commands::Panel::Transform {
+        shown
+    } else {
+        bl_shell::midi_tool_commands::Panel::Utilities
+    };
+    crate::tool_panel::selector(
+        ui,
+        theme,
+        Rect::from_min_size(rect.min, vec2(rect.width(), SELECTOR)),
+        true,
+        shown,
+        events,
     );
-    response.widget_info(|| {
-        WidgetInfo::selected(WidgetType::RadioButton, true, true, "Audio Utilities")
-    });
+    if shown == bl_shell::midi_tool_commands::Panel::Transform {
+        return;
+    }
 
     let painter = ui.painter_at(rect);
     let y = Cell::new(rect.top() + SELECTOR + 4.0);

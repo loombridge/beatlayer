@@ -1,6 +1,6 @@
 # MIDI Tools: the Transform and Generate panels, applying a tool, what it acts on, and chains
 
-- **Status:** draft
+- **Status:** partial (R1 to R26 each have a passing test; R27 to R33, chained MIDI Tools, are WP-6.15's; R34 to R36, mapping them, are WP-7.3b's)
 - **Work packages:** WP-6.11 (the panels, choosing a tool, its settings, what a tool acts on, applying and Auto, undo, seeds, the commands: R1 to R26); WP-6.15 (chained MIDI Tools: R27 to R33); WP-7.3b (mapping tools and chains to keys and MIDI: R34 to R36). Each tool's own parameters and what it does are [midi-transformations.md](midi-transformations.md)'s (WP-6.12, WP-6.13, WP-6.13b) and [midi-generators.md](midi-generators.md)'s (WP-6.14, WP-6.14b); the Pitch and Time Utilities panel's controls are [pitch-and-time-utilities.md](pitch-and-time-utilities.md)'s (WP-6.16). Which of a tool's controls the map modes offer, and how a mapping is made, are [map modes](map-modes.md)'s (R11, R12 and R23); what a mapped message does to them is R34 to R36 here
 - **Parity-matrix row:** MIDI editing: "MIDI Tools, transformations (…)", "MIDI Tools, generators (…)" and "Chained MIDI Tools, mapped to keys or MIDI"
 - **Checked against:** the Live 12 reference manual (online edition), read 20 October 2026: chapter 8 (8.1.2, 8.2.4, 8.6), chapter 10 (10.5.2, 10.5.10) and chapter 11 (its introduction and 11.1); the Live 12 release notes, 12.0, 12.0.5, 12.1, 12.1.5 and 12.2; the UI parity reference's L-CLIP-003, L-CLIP-006, L-CLIP-007, L-STAT-002, M-EDIT-023 and S-NOTE-033
@@ -95,32 +95,32 @@ This spec covers the panels, choosing a tool, its settings, what it acts on, app
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1 | to be written in WP-6.11 | |
-| R2 | to be written in WP-6.11 | |
-| R3 | to be written in WP-6.11 | |
-| R4 | to be written in WP-6.11 | |
-| R5 | to be written in WP-6.11 | |
-| R6 | to be written in WP-6.11 | |
-| R7 | to be written in WP-6.11 | |
-| R8 | to be written in WP-6.11 | |
-| R9 | to be written in WP-6.11 | |
-| R10 | to be written in WP-6.11 | |
-| R11 | to be written in WP-6.11 | |
-| R12 | to be written in WP-6.11 | |
-| R13 | to be written in WP-6.11 | |
-| R14 | to be written in WP-6.11 | |
-| R15 | to be written in WP-6.11 | |
-| R16 | to be written in WP-6.11 | |
-| R17 | to be written in WP-6.11 | |
-| R18 | to be written in WP-6.11 | |
-| R19 | to be written in WP-6.11 | |
-| R20 | to be written in WP-6.11 | |
-| R21 | to be written in WP-6.11 | |
-| R22 | to be written in WP-6.11 | |
-| R23 | to be written in WP-6.11 | |
-| R24 | to be written in WP-6.11 | |
-| R25 | to be written in WP-6.11 | |
-| R26 | to be written in WP-6.11 | |
+| R1 | `crates/shell/tests/midi_tools.rs`, `r1_r23_the_panels_are_view_state_and_the_commands_read_back`; `crates/ui/tests/midi_tools.rs`, `the_selector_row_shows_the_three_panels_and_a_click_shows_one`; `crates/ui/tests/audio_panel.rs`, `the_right_group_holds_audio_utilities_and_an_empty_transform_panel` | UI script |
+| R2 | `crates/ui/tests/midi_tools.rs`, `a_tool_panel_has_the_selector_the_controls_auto_apply_and_reset`, `the_apply_button_applies_the_tool_and_auto_switches_it` | UI script |
+| R3 | `crates/midi-tools/tests/interface.rs`, `r3_the_registry_lists_each_kind_apart`, `r3_the_selectors_list_the_tools_in_the_manuals_order`; `crates/shell/tests/midi_tools.rs`, `r2_r3_r5_the_list_describes_every_tool_in_order` | unit |
+| R4 | `crates/shell/tests/midi_tools.rs`, `r4_each_track_keeps_its_choice_and_choosing_is_no_undo_step`, `r4_r5_choices_and_settings_are_saved_with_the_set_and_older_sets_load_unchanged`; `crates/project/src/format.rs`, `midi_tool_settings_are_saved_beside_the_document`; `crates/cli/tests/older_sets.rs`, `a_set_saved_before_the_midi_tools_loads_unchanged_and_their_settings_load_again` | shell test |
+| R5 | `crates/shell/tests/midi_tools.rs`, `r5_r6_settings_are_checked_reset_and_never_undo_steps`, `r5_a_saved_value_outside_its_range_loads_as_the_default`; `crates/midi-tools/tests/interface.rs`, `r5_a_descriptor_checks_values_against_its_parameters` | shell test |
+| R6 | `crates/shell/tests/midi_tools.rs`, `r5_r6_settings_are_checked_reset_and_never_undo_steps`; `crates/ui/tests/midi_tools.rs`, `a_tool_panel_has_the_selector_the_controls_auto_apply_and_reset` | shell test |
+| R7 | `crates/ui/tests/midi_tools.rs`, `the_info_view_shows_a_controls_name_and_description`, `a_controls_drag_with_auto_on_is_one_undo_step_and_esc_puts_the_notes_back`, `a_tool_panel_has_the_selector_the_controls_auto_apply_and_reset` (each control's role, name and value) | UI script |
+| R8 | `crates/shell/tests/midi_tools.rs`, `r8_with_a_scale_a_degree_is_a_scale_step`; `crates/midi-tools/tests/interface.rs`, `r8_a_tool_counts_scale_degrees_and_a_chromatic_scale_counts_semitones` | shell test |
+| R9 | `crates/shell/tests/midi_tools.rs`, `r9_a_drum_racks_keys_take_the_scales_place`; `crates/midi-tools/tests/interface.rs`, `r9_drum_keys_take_the_scales_place` | shell test |
+| R10 | `crates/shell/tests/midi_tools.rs`, `r10_r11_a_transformation_acts_on_the_selected_notes_first` (the time selection, the loop, and the loop off) | shell test |
+| R11 | `crates/shell/tests/midi_tools.rs`, `r10_r11_a_transformation_acts_on_the_selected_notes_first` | shell test |
+| R12 | `crates/shell/tests/midi_tools.rs`, `r12_r13_a_generator_replaces_overlaps_and_is_cut_at_the_range_end` | shell test |
+| R13 | `crates/shell/tests/midi_tools.rs`, `r12_r13_a_generator_replaces_overlaps_and_is_cut_at_the_range_end`, `r13_a_key_past_the_keyboard_moves_by_octaves`; `crates/midi-tools/tests/interface.rs`, `r13_keys_fold_by_octaves_and_a_generator_is_cut_at_the_ranges_end` | shell test |
+| R14 | `crates/shell/tests/midi_tools.rs`, `r14_a_note_a_tool_makes_carries_what_the_input_note_had`, `r12_r13_a_generator_replaces_overlaps_and_is_cut_at_the_range_end`; `crates/midi-tools/tests/interface.rs`, `r14_pieces_take_the_stretch_of_the_pressure_over_their_span` | shell test |
+| R15 | `crates/shell/tests/midi_tools.rs`, `r15_the_written_notes_are_selected_and_the_time_selection_follows`, `r10_r11_a_transformation_acts_on_the_selected_notes_first` | shell test |
+| R16 | `crates/shell/tests/midi_tools.rs`, `r16_a_run_of_more_than_65536_notes_is_refused_and_changes_nothing`; `crates/midi-tools/tests/interface.rs`, `r16_the_same_input_settings_and_seed_give_the_same_notes`, `r16_a_run_of_more_than_the_limit_is_refused` | shell test |
+| R17 | `crates/shell/tests/midi_tools.rs`, `r17_auto_runs_again_from_the_kept_input`, `r17_with_nothing_selected_a_transformations_control_starts_nothing`, `r19_a_transformation_with_no_input_is_refused_saying_why` | shell test |
+| R18 | `crates/shell/tests/midi_tools.rs`, `r18_auto_off_puts_the_input_back_as_one_step` | shell test |
+| R19 | `crates/shell/tests/midi_tools.rs`, `r19_applying_twice_builds_up`, `r19_the_default_tool_is_the_chosen_tool_of_the_panel_shown_last`, `r19_a_transformation_with_no_input_is_refused_saying_why`; `crates/ui/tests/midi_tools.rs`, `cmd_enter_and_the_edit_menu_apply_the_chosen_tool` | shell test |
+| R20 | `crates/shell/tests/midi_tools.rs`, `r20_the_same_input_settings_and_seed_give_the_same_notes`; `crates/midi-tools/src/random.rs`, `the_same_seed_gives_the_same_numbers_everywhere`; `crates/agent/tests/midi_tools.rs`, `midi_tool_apply_by_id_with_values_and_a_seed_reads_back` | shell test |
+| R21 | `crates/shell/tests/midi_tools.rs`, `r21_the_application_closes_when_something_else_changes_the_notes`, `r21_another_clip_showing_closes_the_application` | shell test |
+| R22 | `crates/shell/tests/midi_tools.rs`, `r22_each_application_is_one_step_named_for_its_tool_even_when_nothing_changes`, `r22_a_controls_drag_is_one_step_and_esc_puts_the_notes_back`; `crates/ui/tests/midi_tools.rs`, `a_controls_drag_with_auto_on_is_one_undo_step_and_esc_puts_the_notes_back`; `crates/model/src/editor.rs`, `a_kept_step_is_recorded_though_the_document_ends_as_it_began` | UI script |
+| R23 | `crates/shell/tests/midi_tools.rs`, `r1_r23_the_panels_are_view_state_and_the_commands_read_back`, `r2_r3_r5_the_list_describes_every_tool_in_order`; `crates/agent/tests/midi_tools.rs`, `midi_tool_apply_by_id_with_values_and_a_seed_reads_back` | MCP script |
+| R24 | `crates/shell/tests/midi_tools.rs`, `r24_a_tool_that_leaves_fewer_notes_is_destructive_as_well`; `crates/agent/tests/midi_tools.rs`, `an_apply_that_leaves_fewer_notes_reports_fewer_notes_and_asks_first` | MCP script |
+| R25 | `crates/shell/tests/midi_tools.rs`, `r25_the_notes_reach_the_engine_as_a_change_of_the_clips_notes` | shell test |
+| R26 | `crates/midi-tools/tests/interface.rs` (a tool run as a function of its input, with no access to the document) | unit |
 | R27 | to be written in WP-6.15 | |
 | R28 | to be written in WP-6.15 | |
 | R29 | to be written in WP-6.15 | |

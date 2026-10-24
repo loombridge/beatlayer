@@ -63,6 +63,7 @@ mod menus;
 mod midi_controller_recording;
 mod midi_files;
 mod midi_io;
+mod midi_tools;
 mod mixer_view;
 mod mpe_recording;
 mod multi_clip;

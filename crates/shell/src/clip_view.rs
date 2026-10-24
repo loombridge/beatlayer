@@ -237,7 +237,7 @@ fn select_by(
 
 /// The time selection the notes at `places` cover: from their earliest
 /// start to their latest end (piano-roll R24).
-fn span_of(doc: &Document, clip: ClipId, places: &[u32]) -> Option<(Ticks, Ticks)> {
+pub(crate) fn span_of(doc: &Document, clip: ClipId, places: &[u32]) -> Option<(Ticks, Ticks)> {
     let midi = match &doc.clip(clip)?.data {
         ClipData::Midi(midi) => midi,
         ClipData::Audio(_) => return None,
@@ -604,6 +604,9 @@ pub struct ClipView {
     /// What the Sample Editor has selected and shows for the audio clip the
     /// Clip View shows (WP-4.10).
     sample: SampleView,
+    /// The MIDI Tools' panel, choices, settings and open application
+    /// (WP-6.11).
+    pub(crate) tools: crate::midi_tools::MidiTools,
     /// Whether the Preview switch is on (Spec: step-recording R1): the
     /// shell keeps it as a preference.
     preview: bool,
@@ -614,6 +617,18 @@ pub struct ClipView {
 }
 
 impl ClipView {
+    /// Takes the MIDI Tool choices and settings a set saved (WP-6.11).
+    pub fn restore_midi_tools(&mut self, saved: &bl_project::midi_tools::MidiToolSettings) {
+        self.tools.restore(saved);
+    }
+
+    /// The MIDI Tools: the shown panel, the tool each track shows, every
+    /// tool's settings, and the open application (WP-6.11).
+    #[must_use]
+    pub fn midi_tools(&self) -> &crate::midi_tools::MidiTools {
+        &self.tools
+    }
+
     /// Whether the Clip View shows.
     #[must_use]
     pub fn visible(&self) -> bool {
@@ -1395,6 +1410,7 @@ impl ClipView {
         self.envelope_breakpoint = None;
         self.stepped.clear();
         self.sample = SampleView::default();
+        self.tools.close();
     }
 }
 

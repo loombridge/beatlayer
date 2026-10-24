@@ -41,6 +41,7 @@ mod locator;
 mod macros;
 mod main_window;
 mod midi_input;
+mod midi_tools;
 mod mixer;
 mod modulation;
 mod modulators;

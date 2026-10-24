@@ -11,11 +11,12 @@ use crate::common;
 use bl_model::{TrackId, TrackKind};
 use bl_shell::mixer_view::MixerOf;
 use bl_shell::mixer_view_commands::TOGGLE;
+use bl_ui::arrangement::headers::{linked_id, title_id};
 use bl_ui::layout::mixer::{MixerLayout, Sections, SessionLayout, TrackColumn};
 use bl_ui::layout::{REFERENCE, ShellLayout, TITLE_BAR};
 use bl_ui::main_window::{UiEvent, main_view_id};
 use bl_ui::mixer::column_id;
-use common::{Harness, Node, Window};
+use common::{Harness, Node, Window, painted_rects};
 use egui::accesskit::Role;
 use egui::{Event, FullOutput, Key, Modifiers, PointerButton, Pos2, Rect, pos2, vec2};
 use serde_json::json;
@@ -794,4 +795,115 @@ fn the_take_lane_items_show_the_lanes_and_delete_them() {
             .len(),
         0
     );
+}
+
+fn bounds_of(h: &mut Harness, id: egui::Id) -> Option<Rect> {
+    let nodes = Harness::nodes(&h.settle());
+    let b = nodes.iter().find(|n| n.id == id.accesskit_id())?.bounds?;
+    Some(Rect::from_min_max(
+        pos2(b.x0 as f32, b.y0 as f32),
+        pos2(b.x1 as f32, b.y1 as f32),
+    ))
+}
+
+/// The colour a frame fills a track's title with.
+fn title_fill(h: &mut Harness, track: TrackId) -> egui::Color32 {
+    let title = bounds_of(h, title_id(track)).expect("a title");
+    let output = h.settle();
+    painted_rects(&output)
+        .into_iter()
+        .find(|(rect, _)| {
+            (rect.min - title.min).abs().max_elem() < 0.6
+                && (rect.width() - title.width()).abs() < 0.6
+        })
+        .map(|(_, fill)| fill)
+        .expect("the title's fill")
+}
+
+// Spec: linked-track editing R6 (L-ARR-022, I-CLICK-041). Only linked tracks
+// show the indicator, as a button naming the group's tracks; hovering it
+// fills the group's titles like a selected track's, headers only, and the
+// pointer elsewhere on a header highlights nothing.
+#[test]
+fn the_linked_track_indicator_highlights_its_group_on_hover() {
+    let mut h = arrangement();
+    let all = tracks(&h);
+    h.shell
+        .run("track.link", json!({ "tracks": [all[0], all[1]] }))
+        .unwrap();
+    h.settle();
+    assert!(bounds_of(&mut h, linked_id(all[2])).is_none());
+    let indicator = bounds_of(&mut h, linked_id(all[0])).expect("an indicator");
+    let title = bounds_of(&mut h, title_id(all[0])).unwrap();
+    assert!(title.contains_rect(indicator) && indicator.right() > title.center().x);
+    let nodes = Harness::nodes(&h.settle());
+    let node = nodes
+        .iter()
+        .find(|n| n.id == linked_id(all[0]).accesskit_id())
+        .unwrap();
+    assert_eq!(node.role, Role::Button);
+    let name = |t: TrackId| {
+        h.shell
+            .editor()
+            .document()
+            .track(t)
+            .unwrap()
+            .name()
+            .to_owned()
+    };
+    assert_eq!(
+        node.label,
+        format!("Linked tracks: {}, {}", name(all[0]), name(all[1]))
+    );
+
+    let rest = [
+        title_fill(&mut h, all[0]),
+        title_fill(&mut h, all[1]),
+        title_fill(&mut h, all[2]),
+    ];
+    // The pointer on the title away from the indicator highlights nothing.
+    h.frame(vec![Event::PointerMoved(pos2(
+        title.left() + 30.0,
+        title.center().y,
+    ))]);
+    assert_eq!(title_fill(&mut h, all[1]), rest[1]);
+    h.frame(vec![Event::PointerMoved(indicator.center())]);
+    let hovered = [
+        title_fill(&mut h, all[0]),
+        title_fill(&mut h, all[1]),
+        title_fill(&mut h, all[2]),
+    ];
+    assert_ne!(hovered[0], rest[0]);
+    assert_ne!(hovered[1], rest[1]);
+    assert_eq!(hovered[2], rest[2]);
+    h.frame(vec![Event::PointerMoved(pos2(
+        title.left() + 30.0,
+        title.center().y,
+    ))]);
+    assert_eq!(title_fill(&mut h, all[1]), rest[1]);
+}
+
+// Spec: linked-track editing R6 (I-CLICK-041). Clicking the indicator selects
+// the title bars of every track in its group, and is no undo step.
+#[test]
+fn clicking_the_linked_track_indicator_selects_its_group() {
+    let mut h = arrangement();
+    let all = tracks(&h);
+    h.shell
+        .run("track.link", json!({ "tracks": [all[1], all[2], all[3]] }))
+        .unwrap();
+    h.shell
+        .run("arrangement.select_tracks", json!({ "tracks": [all[0]] }))
+        .unwrap();
+    h.settle();
+    let steps = h.shell.editor().undo_history().count();
+    let at = bounds_of(&mut h, linked_id(all[2])).unwrap().center();
+    h.click(at);
+    h.settle();
+    assert_eq!(
+        h.shell.arrangement().selected_tracks(),
+        [all[1], all[2], all[3]]
+    );
+    assert!(h.shell.arrangement().title_bars_selected());
+    assert_eq!(h.shell.editor().undo_history().count(), steps);
 }

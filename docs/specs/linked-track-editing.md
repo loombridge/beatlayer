@@ -1,6 +1,6 @@
 # Linked-track editing: linking tracks so one edit reaches them all
 
-- **Status:** partial (every rule but R6 has a passing test; R6's linked-track indicator waits for where Live puts it in the header)
+- **Status:** implemented (every rule has a passing test)
 - **Work packages:** WP-6.23 (R1 to R16). It builds on the Arrangement's edits ([arrangement editing](arrangement-editing.md), WP-1.8b), Consolidate ([audio clip editing](audio-clip-editing.md), WP-4.13), the Sample Editor's edits to several clips ([sample editor](sample-editor.md) R19, WP-4.10), and take lanes and comping ([comping](comping.md), WP-6.21 and WP-6.22); fade handles and crossfades are WP-6.51's ([audio clips](audio-clips.md) R23 to R31)
 - **Parity-matrix row:** Recording: Linked-track editing
 - **Checked against:** the Live 12 reference manual (online edition), read 20 October 2026 (chapter 6, section 6.14 "Linked-Track Editing" with 6.14.1 and 6.14.2; chapter 9, section 9.2.4.4; chapter 21), and the UI parity reference's row C-TRACK-018
@@ -31,7 +31,7 @@ This spec covers linking and unlinking, and which edits reach the linked tracks.
 - **R3.** Holding Cmd (Ctrl) while choosing Link Tracks in the menu of a track already in a link group adds the other selected audio and MIDI tracks to that group instead (`track.link` with `into` naming the group's track), taking them out of any group they were in. (S1)
 - **R4.** Link Tracks in a group track's header menu links the audio and MIDI tracks inside the group, at any depth, into one link group, and Unlink Track(s) there takes them out of theirs. Beatlayer's own: tracks in nested groups too. (S1)
 - **R5.** Unlink Track(s) (`track.unlink`; the menu of a linked track's header) takes the selected tracks out of their link groups, one undo step, `Unlink Tracks`; a group left with one track ends. A deleted track leaves its group the same way, and undoing the deletion puts it back; a duplicated track isn't linked. Beatlayer's own: the duplicate. (S1)
-- **R6.** A linked track's header shows the linked-track indicator (L-ARR-022). Hovering over it highlights every track of its group; clicking it (I-CLICK-041) selects every track of its group's title bars, not an undo step. Assistive technology reads it as a button naming the group's tracks. (S1)
+- **R6.** A linked track's header shows the linked-track indicator (L-ARR-022): in the title row, right-aligned after the fold button and the name, a small horizontal chain link in the title text's colour, the same on every group (no group number or colour), on every track of the group. Hovering over it fills the title area of every track of its group with the selected-track header colour, headers only; the pointer elsewhere on a header highlights nothing. Clicking it (I-CLICK-041) selects the title bars of every track of its group, not an undo step. Assistive technology reads it as a button naming the group's tracks. The glyph is Beatlayer's own icon. (S1; observed in Live 12)
 
 **Which edits reach linked tracks (WP-6.23)**
 
@@ -58,7 +58,7 @@ This spec covers linking and unlinking, and which edits reach the linked tracks.
 | R3 | `crates/ui/tests/track_menu.rs`, `link_tracks_with_command_held_adds_the_selection_to_the_clicked_tracks_group`; `crates/shell/tests/linked_tracks.rs`, `link_tracks_and_unlink_tracks_are_one_undo_step_each` | UI script |
 | R4 | `crates/shell/tests/linked_tracks.rs`, `a_group_tracks_menu_links_the_tracks_inside_it_at_any_depth`; `crates/ui/tests/track_menu.rs`, `a_group_tracks_menu_links_the_tracks_inside_it` | unit, UI script |
 | R5 | `crates/model/tests/linked_tracks.rs`, `a_group_left_with_one_track_ends_and_a_deleted_track_leaves_its_group`; `crates/shell/tests/linked_tracks.rs`, `a_duplicate_is_unlinked_and_a_deleted_track_leaves_its_group` | unit |
-| R6 | to be written in WP-6.23 | UI script |
+| R6 | `crates/ui/tests/track_menu.rs`, `the_linked_track_indicator_highlights_its_group_on_hover`, `clicking_the_linked_track_indicator_selects_its_group` | UI script |
 | R7 | `crates/shell/tests/linked_tracks.rs`, `selecting_clips_selects_the_matching_clips_of_the_group`, `selecting_time_selects_the_same_lane_of_every_track` | shell test |
 | R8 | `crates/shell/tests/linked_tracks.rs`, `moving_resizing_and_splitting_reach_the_group`, `consolidating_reaches_the_group`; `crates/model/tests/linked_tracks.rs`, `arming_reaches_the_group`, `moving_and_resizing_reach_the_matching_clips`, `fades_follow_where_they_start` | shell test |
 | R9 | `crates/shell/tests/linked_tracks.rs`, `delete_duplicate_cut_and_copy_act_on_all_of_the_selection` | shell test |

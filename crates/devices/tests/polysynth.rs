@@ -22,7 +22,7 @@ use bl_devices::polysynth::{
     LFO_RETRIGGER, LFO_SHAPE, LFO_SHAPES, LFO_SYNC, MOD_DESTINATIONS, MOD_SOURCES, MOD1_AMOUNT,
     MOD1_DEST, MOD1_SOURCE, MOD2_AMOUNT, MOD2_DEST, MOD2_SOURCE, NOISE, NOISE_GAIN, NOTE_PB,
     OSC1_GAIN, OSC1_SHAPE, OSC1_WAVE, OSC2, OSC2_DETUNE, PB_RANGE, PITCH_MOD1_AMOUNT,
-    PITCH_MOD1_SOURCE, POLYSYNTH, RES, RETRIGGER, VOLUME,
+    PITCH_MOD1_SOURCE, POLYSYNTH, RES, RETRIGGER, VEL_VOL, VOLUME,
 };
 
 /// The sample rate the tests run at, in hertz.
@@ -454,6 +454,30 @@ fn a_released_note_falls_silent() {
     );
     let tail = rms(&signal[72_000..]);
     assert!(tail < 1e-6, "the tail is silent, {tail:.9}");
+}
+
+// Spec: polysynth R15 (Vel > Vol)
+#[test]
+fn vel_vol_scales_the_level_by_velocity_and_never_boosts_it() {
+    let registry = registry();
+    let peak_at = |amount: f64, velocity: f32| -> f64 {
+        let params = [(OSC1_WAVE, 0.0), (VEL_VOL, amount)];
+        let mut node = node(&registry, &device_with(&params), 4_096);
+        let signal = play_blocks(node.as_mut(), 8_192, 4_096, &[on(0, 60, velocity)]);
+        f64::from(signal.iter().fold(0.0f32, |peak, x| peak.max(x.abs())))
+    };
+    let full = peak_at(0.0, 1.0);
+    for amount in [0.0, 50.0, 100.0] {
+        for velocity in [1.0f32, 64.0 / 127.0, 1.0 / 127.0] {
+            let a = amount / 100.0;
+            let law = 1.0 - a + a * f64::from(velocity);
+            let ratio = peak_at(amount, velocity) / full;
+            assert!(
+                (ratio - law).abs() < 1e-3 * law.max(1e-3) + 1e-4,
+                "Vel > Vol {amount} % at velocity {velocity}: {ratio:.5} against {law:.5}"
+            );
+        }
+    }
 }
 
 // Spec: polysynth R5 (the Shape knob)

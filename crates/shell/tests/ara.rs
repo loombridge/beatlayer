@@ -5,9 +5,9 @@
 //! commands as an agent runs them, and reported by `ara.state` and
 //! `plugin.info`.
 //!
-//! The plug-in is the SDK's example, built on the test machine and never
-//! committed; `BL_ARA_TEST_PLUGIN` names its bundle, and the test says it
-//! was skipped without it.
+//! It runs against `bl-test-ara`, built from source, and against the SDK's
+//! example plug-in, built on the test machine and never committed, when
+//! `BL_ARA_TEST_PLUGIN` names its bundle.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -27,7 +27,14 @@ struct Scratch(PathBuf);
 
 impl Scratch {
     fn new() -> Self {
-        let path = std::env::temp_dir().join(format!("bl-shell-ara-{}", std::process::id()));
+        let path = std::env::temp_dir().join(format!(
+            "bl-shell-ara-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
         let _ = std::fs::remove_dir_all(&path);
         std::fs::create_dir_all(&path).unwrap();
         Self(path)
@@ -97,13 +104,23 @@ fn info(shell: &mut Shell, device: DeviceId) -> PluginInfo {
     serde_json::from_value(shell.run(ids::INFO, json!({ "device": device })).unwrap()).unwrap()
 }
 
-// Spec: ara-hosting R2, R4, R9, R10, R11, R13
+// Spec: ara-hosting R2, R4, R9, R10, R13
 #[test]
 fn an_ara_plugin_follows_the_set_through_commands_and_keeps_its_archive() {
+    follows_the_set(bl_test_ara::bundle().as_os_str());
+}
+
+// Spec: ara-hosting R2, R4, R9, R10, R13
+#[test]
+fn the_sdks_example_plugin_follows_the_set_through_commands_too() {
     let Some(bundle) = std::env::var_os("BL_ARA_TEST_PLUGIN") else {
         eprintln!("skipped: BL_ARA_TEST_PLUGIN names the ARA SDK's example plug-in");
         return;
     };
+    follows_the_set(&bundle);
+}
+
+fn follows_the_set(bundle: &std::ffi::OsStr) {
     let scratch = Scratch::new();
     let file = scratch.path("Take.wav");
     wav(&file);

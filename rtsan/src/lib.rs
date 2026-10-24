@@ -34,6 +34,10 @@
 //!   clips, new clip lists swapped in as clips are edited (the old ones
 //!   freed by the collector), locates into clips, and tempo changes that
 //!   swap programs (WP-1.4).
+//! - `tests/ara.rs`: ARA 2 playback (IMP-20): a track whose plug-in renders
+//!   its clips beside a clip the clip player keeps, edited while it plays, the
+//!   plug-in handed back and activated again between blocks, and none of the
+//!   plug-in's audio readers reached from the audio thread.
 //! - `tests/multisampler.rs`: a multisampler's notes, loops and long layers
 //!   read in the background, with zone edits sent as node data while it
 //!   plays (WP-5.13).

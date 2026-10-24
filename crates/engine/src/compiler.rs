@@ -415,6 +415,18 @@ impl Compiler {
             .flat_map(|&clip| [old.clip_track(clip), document.clip_track(clip)])
             .flatten()
             .collect();
+        // Spec: ara-hosting R4. A device that makes a track's clips an ARA
+        // plug-in's, or stops doing so, moves them between the plug-in and
+        // the player.
+        tracks.extend(document.tracks().map(Track::id).filter(|&id| {
+            let hosts = |doc: &Document| {
+                doc.track(id).and_then(|track| {
+                    bl_model::ara_device(track, |device| self.registry.ara_support(device))
+                        .map(|(device, support)| (device.id, support))
+                })
+            };
+            hosts(&old) != hosts(document)
+        }));
         // Auditioning a take lane swaps the clips the track plays (the
         // comping spec, R14): its player gets them again.
         tracks.extend(changes.tracks.keys().copied().filter(|&id| {
@@ -759,9 +771,13 @@ impl Compiler {
         let loop_start = self.loop_start_frame(document);
         let previous = previous.and_then(|last| last.track(track.id()));
         let pool = self.pool_specs.get(&track.id()).copied();
+        // Spec: ara-hosting R4. The clips an ARA plug-in on the track
+        // renders aren't the player's.
+        let ara = self.ara_support(track);
         let built = ClipList::build(
             track,
             previous,
+            ara,
             &document.settings().tempo,
             self.config.sample_rate,
             self.config.channels,
@@ -778,6 +794,12 @@ impl Compiler {
         update
             .data
             .push((NodeKey::Player(track.id()), self.gc.data(built.list)));
+    }
+
+    /// What the ARA plug-in on `track` supports, if it has one (IMP-20).
+    fn ara_support(&self, track: &Track) -> Option<bl_model::AraSupport> {
+        bl_model::ara_device(track, |device| self.registry.ara_support(device))
+            .map(|(_, support)| support)
     }
 
     /// Sends `track`'s clip player its clips: a list placed under `document`'s

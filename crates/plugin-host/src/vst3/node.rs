@@ -955,7 +955,12 @@ impl Node for Vst3Node {
         };
         // SAFETY: the plug-in is active and gets a valid ProcessData with
         // its buses, changes and events, which live through the call.
-        let result = unsafe { active.processor.process(&raw mut data) };
+        let result = {
+            // Spec: ara-hosting R7. An ARA plug-in's audio readers must not
+            // be reached from inside this call.
+            let _rendering = crate::ara::Rendering::enter();
+            unsafe { active.processor.process(&raw mut data) }
+        };
         self.steady = self.steady.wrapping_add(frames as u64);
         if result != kResultOk {
             self.events_out.reset();

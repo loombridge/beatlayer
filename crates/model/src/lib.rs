@@ -57,6 +57,7 @@
 //!
 //! The rules taken from Live are in the tracks and undo spec.
 
+pub mod ara;
 pub mod articulation;
 mod auto_warp;
 pub mod automation;
@@ -103,6 +104,7 @@ mod warp;
 mod warp_settings;
 mod window_views;
 
+pub use ara::{AraArchive, AraSupport, ara_device, ara_renders};
 pub use articulation::{
     ARTICULATION_MAP, Articulation, ArticulationOutput, ArticulationTrigger,
     Entry as ArticulationEntry, List as ArticulationList, MAX_ARTICULATIONS, MAX_OUTPUTS,

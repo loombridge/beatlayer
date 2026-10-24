@@ -4,6 +4,9 @@
 //!   device in a chain, with sample-accurate note and parameter events in
 //!   and out, its state saved with the set, its latency reported, and its
 //!   editor in a window of its own.
+//! - [`ara`]: ARA 2 hosting (IMP-20): a plug-in that implements Audio Random
+//!   Access sees whole clips and renders its track's clips itself; VST3
+//!   plug-ins are hosted, Audio Units and CLAP aren't yet.
 //! - [`au`]: Audio Unit hosting (WP-2.8), macOS only: a unit found by its
 //!   component description runs as a device in a chain, with its
 //!   parameters and notes on their frames, its state saved with the set,
@@ -21,6 +24,7 @@
 //!   Windows, an AppKit utility panel on macOS, and an X11 window
 //!   elsewhere, with the editor's view embedded as a child.
 
+pub mod ara;
 pub mod au;
 pub mod clap;
 mod drive;

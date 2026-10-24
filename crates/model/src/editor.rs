@@ -286,6 +286,19 @@ impl Editor {
         Ok(())
     }
 
+    /// Records the ARA plug-ins' document archives in the set (IMP-20)
+    /// without an undo step, as [`Editor::amend_plugin_state`] does a
+    /// plug-in's own state: the running plug-ins already hold what they
+    /// archive, so it is a note for the set file. Returns whether the set
+    /// changed.
+    pub fn amend_ara_archives(&mut self, archives: Vec<crate::ara::AraArchive>) -> bool {
+        if self.document.settings.ara_archives == archives {
+            return false;
+        }
+        self.document.settings.ara_archives = archives;
+        true
+    }
+
     /// Records the name of the preset a device holds (the plug-in list spec,
     /// R5) without an undo step: saving a preset names it, and the name is
     /// a note for the set file, not a change to the sound.

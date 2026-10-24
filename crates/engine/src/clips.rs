@@ -1050,6 +1050,7 @@ impl ClipList {
     pub(crate) fn build(
         track: &Track,
         previous: Option<&Track>,
+        ara: Option<bl_model::AraSupport>,
         tempo: &TempoMap,
         rate: SampleRate,
         channels: usize,
@@ -1073,6 +1074,10 @@ impl ClipList {
                 continue;
             };
             if own.mute {
+                continue;
+            }
+            // Spec: ara-hosting R4. The ARA plug-in on the track plays it.
+            if ara.is_some_and(|support| bl_model::ara_renders(own, support)) {
                 continue;
             }
             let reach = Reach::of(own.id, &joined);

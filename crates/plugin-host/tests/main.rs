@@ -7,6 +7,7 @@
 // can't install its own global allocator.
 bl_rt::install_trap!();
 
+mod ara_sdk;
 mod au;
 mod clap;
 mod common;

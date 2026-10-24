@@ -721,6 +721,8 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
         // (WP-2.9); the window's button is in the plug-in device's title
         // bar (WP-2.10, L-DEV-010).
         ("plugin.info", Exception(Query)),
+        // ARA plug-ins (IMP-20): what their documents hold, for agents.
+        ("ara.state", Exception(Query)),
         (
             "plugin.load",
             Exception(LaterView("the browser's plug-ins (WP-2.9)")),

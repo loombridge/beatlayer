@@ -9,16 +9,13 @@
 //! example plug-in, built on the test machine and never committed, when
 //! `BL_ARA_TEST_PLUGIN` names its bundle.
 
-use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
-
+use bl_audio_io::NullControl;
 use bl_model::{DeviceId, TrackId, TrackKind};
 use bl_shell::Shell;
-use bl_shell::audio::AudioHost;
-use bl_shell::files::ProjectFiles;
 use bl_shell::plugin_commands::{self as ids, AraState, PluginInfo, PluginLoaded};
-use bl_shell::settings::Preferences;
+use bl_shell::testing::{rig, wait_for};
 use serde_json::json;
+use std::path::{Path, PathBuf};
 
 /// A quarter note, in ticks.
 const QUARTER: i64 = 705_600;
@@ -71,33 +68,25 @@ fn wav(path: &Path) {
     writer.finish().unwrap();
 }
 
-fn new_shell(scratch: &Scratch) -> Shell {
-    let mut shell = Shell::new(
-        Preferences::default(),
-        Some(scratch.path("config")),
-        AudioHost::null(Default::default()),
-        Box::new(ProjectFiles::new()),
-    );
+/// A shell on a null device paced by hand, with its audio running.
+fn new_shell() -> (Shell, NullControl) {
+    let (mut shell, control) = rig();
     shell.start_audio();
-    shell
+    (shell, control)
 }
 
 fn ara_state(shell: &mut Shell) -> AraState {
     serde_json::from_value(shell.run("ara.state", json!({})).unwrap()).unwrap()
 }
 
-/// Polls the shell as the app's frames do until `ready` holds of the state.
-fn wait(shell: &mut Shell, ready: impl Fn(&AraState) -> bool) -> AraState {
-    let until = Instant::now() + Duration::from_secs(10);
-    loop {
+/// Runs the engine and polls the shell as the app's frames do until `ready`
+/// holds of the state.
+fn wait(control: &NullControl, shell: &mut Shell, ready: impl Fn(&AraState) -> bool) -> AraState {
+    wait_for(control, shell, "ARA to get ready", |shell| {
         shell.poll();
-        let state = ara_state(shell);
-        if ready(&state) {
-            return state;
-        }
-        assert!(Instant::now() < until, "ARA never got ready: {state:?}");
-        std::thread::sleep(Duration::from_millis(5));
-    }
+        ready(&ara_state(shell))
+    });
+    ara_state(shell)
 }
 
 fn info(shell: &mut Shell, device: DeviceId) -> PluginInfo {
@@ -124,7 +113,7 @@ fn follows_the_set(bundle: &std::ffi::OsStr) {
     let scratch = Scratch::new();
     let file = scratch.path("Take.wav");
     wav(&file);
-    let mut shell = new_shell(&scratch);
+    let (mut shell, control) = new_shell();
     let track: TrackId = shell
         .editor()
         .document()
@@ -150,7 +139,7 @@ fn follows_the_set(bundle: &std::ffi::OsStr) {
     )
     .unwrap();
     let device = loaded.device;
-    let state = wait(&mut shell, |state| {
+    let state = wait(&control, &mut shell, |state| {
         state.plugins.first().is_some_and(|p| p.regions.len() == 1)
     });
     let plugin = &state.plugins[0];
@@ -174,7 +163,9 @@ fn follows_the_set(bundle: &std::ffi::OsStr) {
             json!({ "clip": clip, "track": track, "start": 2 * QUARTER }),
         )
         .unwrap();
-    let state = wait(&mut shell, |s| s.plugins[0].regions[0].start == 1.0);
+    let state = wait(&control, &mut shell, |s| {
+        s.plugins[0].regions[0].start == 1.0
+    });
     assert_eq!(state.plugins[0].modifications, 1);
     shell
         .run(
@@ -182,13 +173,15 @@ fn follows_the_set(bundle: &std::ffi::OsStr) {
             json!({ "clip": clip, "start": 2 * QUARTER + QUARTER / 2 }),
         )
         .unwrap();
-    let state = wait(&mut shell, |s| {
+    let state = wait(&control, &mut shell, |s| {
         s.plugins[0].regions[0].start_in_audio == 0.25
     });
     assert_eq!(state.plugins[0].regions[0].duration, 0.75);
     shell.run("edit.undo", json!({})).unwrap();
     shell.run("edit.undo", json!({})).unwrap();
-    let state = wait(&mut shell, |s| s.plugins[0].regions[0].start == 0.5);
+    let state = wait(&control, &mut shell, |s| {
+        s.plugins[0].regions[0].start == 0.5
+    });
     assert_eq!(state.plugins[0].sources, 1);
     assert_eq!(
         state.plugins[0].readers_opened, 1,
@@ -204,9 +197,9 @@ fn follows_the_set(bundle: &std::ffi::OsStr) {
         .unwrap();
     let path = saved["path"].as_str().unwrap().to_owned();
     drop(shell);
-    let mut shell = new_shell(&scratch);
+    let (mut shell, control) = new_shell();
     shell.run("set.open", json!({ "path": path })).unwrap();
-    let state = wait(&mut shell, |s| {
+    let state = wait(&control, &mut shell, |s| {
         s.plugins.first().is_some_and(|p| p.regions.len() == 1)
     });
     assert_eq!(state.plugins[0].restored.as_deref(), Some("restored"));
@@ -223,7 +216,9 @@ fn an_export_has_the_plugins_clips_once_as_the_clip_player_would_play_them() {
     let scratch = Scratch::new();
     let file = scratch.path("Take.wav");
     wav(&file);
-    let mut shell = new_shell(&scratch);
+    // No audio device, as `bl-cli export` runs: the render makes the
+    // plug-in itself.
+    let mut shell = Shell::headless();
     let track: TrackId = shell
         .editor()
         .document()
@@ -246,9 +241,6 @@ fn an_export_has_the_plugins_clips_once_as_the_clip_player_would_play_them() {
             .unwrap(),
     )
     .unwrap();
-    wait(&mut shell, |state| {
-        state.plugins.first().is_some_and(|p| p.regions.len() == 1)
-    });
 
     let render = |shell: &Shell| -> Vec<f32> {
         let mut samples = Vec::new();

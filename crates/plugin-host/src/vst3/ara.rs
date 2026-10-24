@@ -23,7 +23,7 @@ use bl_model::{
 use vst3::ComPtr;
 use vst3::Steinberg::{TUID, tresult};
 
-use super::{Instance, Main, Vst3Host, lock};
+use super::{Inner, Instance, Main, Vst3Host, lock};
 use crate::ara::model::Model;
 use crate::ara::{AraMedia, AraStatus, Controller, Extension, Factory, PlaybackRequest};
 
@@ -124,7 +124,7 @@ impl Entry {
             let table = &**unknown.cast::<*const UnknownVtbl>();
             (table.query)(unknown, iid, &mut object)
         };
-        (result == vst3::Steinberg::kResultOk && !object.is_null()).then_some(Self(object))
+        (result == vst3::Steinberg::kResultOk && !object.is_null()).then(|| Self(object))
     }
 
     fn vtbl<T>(&self) -> &T {
@@ -193,6 +193,9 @@ pub(super) struct State {
     /// Something changed since the last sync that the revision doesn't show
     /// (an instance bound).
     dirty: bool,
+    /// The newest set `sync_ara` was given, and its revision.
+    last: Option<Document>,
+    last_revision: Option<u64>,
     /// Plug-in files `know` couldn't load, so it doesn't try them again at
     /// every edit.
     unloadable: BTreeSet<std::path::PathBuf>,
@@ -378,196 +381,16 @@ impl Vst3Host {
     /// after [`Vst3Host::idle`] each poll; `revision` changes whenever the
     /// set does. Returns whether it edited a document.
     pub fn sync_ara(&self, document: &Document, revision: u64) -> bool {
-        let ara_types: Vec<(DeviceKind, Factory)> = lock(&self.inner.types)
-            .iter()
-            .filter_map(|known| {
-                known
-                    .ara
-                    .clone()
-                    .map(|factory| (known.device_type.kind.clone(), factory))
-            })
-            .collect();
+        let ara_types = ara_types(&self.inner);
         let mut guard = lock(&self.inner.main);
         let Ok(main) = guard.get() else { return false };
-        let waiting = main
-            .instances
-            .values()
-            .any(|instance| instance.ara.as_ref().is_some_and(|binding| binding.hold));
-        if main.ara.controllers.is_empty()
-            || (main.ara.synced == Some(revision) && !main.ara.dirty && !waiting)
-        {
-            main.ara.synced = Some(revision);
-            return false;
+        // The newest set, for a plug-in made later by a render that has no
+        // poll to sync it.
+        if main.ara.last_revision != Some(revision) {
+            main.ara.last = Some(document.clone());
+            main.ara.last_revision = Some(revision);
         }
-        main.ara.synced = Some(revision);
-        main.ara.dirty = false;
-        let hosts = |device: &Device| {
-            ara_types
-                .iter()
-                .find(|(kind, _)| *kind == device.kind)
-                .map(|(_, factory)| (factory.id.clone(), factory.support))
-        };
-        let support =
-            |device: &Device| hosts(device).map(|(_, support): (String, AraSupport)| support);
-
-        // Which track each bound device renders.
-        let mut renders: BTreeMap<DeviceId, TrackId> = BTreeMap::new();
-        for track in document.tracks() {
-            if let Some((device, _)) = ara_device(track, support) {
-                renders.insert(device.id, track.id());
-            }
-        }
-        for (&device, instance) in &mut main.instances {
-            if let Some(binding) = &mut instance.ara {
-                binding.track = renders.get(&device).copied();
-            }
-        }
-
-        let mut edited = false;
-        let ids: Vec<String> = main.ara.controllers.keys().cloned().collect();
-        let Main { ara, instances, .. } = main;
-        for plugin in ids {
-            let seconds = &mut ara.seconds;
-            let media = ara.media.clone();
-            let mut length = |file: ContentHash| -> Option<f64> {
-                if let Some(known) = seconds.get(&file) {
-                    return Some(*known);
-                }
-                let found = media.as_ref()?.seconds(file)?;
-                seconds.insert(file, found);
-                Some(found)
-            };
-            let model = Model::of(document, &plugin, &hosts, &mut length);
-            let Some(controller) = ara.controllers.get_mut(&plugin) else {
-                continue;
-            };
-            // Instances whose track gains or loses a region while they run
-            // are asked for first (R8).
-            let (added, removed) = controller.membership(&model);
-            let mut waiting = false;
-            for instance in instances.values_mut() {
-                let Some(binding) = &instance.ara else {
-                    continue;
-                };
-                if binding.plugin != plugin {
-                    continue;
-                }
-                let affected = binding
-                    .track
-                    .is_some_and(|track| added.contains(&track) || removed.contains(&track));
-                if affected && busy(instance) {
-                    waiting = true;
-                    hold(instance);
-                }
-            }
-            if waiting {
-                continue;
-            }
-            if controller.differs(&model) {
-                let mut before = |track: TrackId, region: sys::ARAPlaybackRegionRef| {
-                    for instance in instances.values_mut() {
-                        if let Some(binding) = &mut instance.ara
-                            && binding.track == Some(track)
-                            && binding.regions.remove(&(region as usize))
-                        {
-                            binding.extension.remove_region(region);
-                        }
-                    }
-                };
-                match controller.apply(model, &mut before) {
-                    Ok(()) => edited = true,
-                    Err(why) => {
-                        for instance in instances.values_mut() {
-                            if instance.ara.as_ref().is_some_and(|b| b.plugin == plugin) {
-                                instance.failure = Some(format!("ARA: {why}"));
-                            }
-                        }
-                    }
-                }
-            }
-            // Each idle instance holds the regions of its track.
-            for instance in instances.values_mut() {
-                let idle = !busy(instance);
-                let Some(binding) = &mut instance.ara else {
-                    continue;
-                };
-                if binding.plugin != plugin {
-                    continue;
-                }
-                let want: BTreeMap<usize, sys::ARAPlaybackRegionRef> = binding
-                    .track
-                    .map(|track| {
-                        controller
-                            .regions_of(track)
-                            .map(|(_, region)| (region as usize, region))
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                let sequence = binding
-                    .track
-                    .and_then(|track| controller.sequence_of(track));
-                let sequence_key = sequence.map(|s| s as usize);
-                let settled =
-                    binding.regions.iter().eq(want.keys()) && binding.sequence == sequence_key;
-                if settled {
-                    binding.hold = false;
-                    continue;
-                }
-                if !idle {
-                    // Something moved onto a running plug-in: have it back.
-                    hold(instance);
-                    continue;
-                }
-                for (key, region) in &want {
-                    if binding.regions.insert(*key) {
-                        binding.extension.add_region(*region);
-                    }
-                }
-                let stale: Vec<usize> = binding
-                    .regions
-                    .iter()
-                    .filter(|key| !want.contains_key(key))
-                    .copied()
-                    .collect();
-                for key in stale {
-                    binding.regions.remove(&key);
-                }
-                if binding.sequence != sequence_key {
-                    if let Some(old) = binding.sequence {
-                        binding
-                            .extension
-                            .remove_sequence(old as sys::ARARegionSequenceRef);
-                    }
-                    if let Some(new) = sequence {
-                        binding.extension.add_sequence(new);
-                    }
-                    binding.sequence = sequence_key;
-                }
-                binding.hold = false;
-            }
-        }
-        // A controller nothing in the set needs any more goes.
-        let used: BTreeSet<&str> = main
-            .instances
-            .values()
-            .filter_map(|instance| instance.ara.as_ref().map(|b| b.plugin.as_str()))
-            .collect();
-        let wanted: BTreeSet<String> = document
-            .tracks()
-            .flat_map(|track| track.devices())
-            .filter_map(|device| hosts(device).map(|(id, _)| id))
-            .collect();
-        let stale: Vec<String> = main
-            .ara
-            .controllers
-            .keys()
-            .filter(|plugin| !used.contains(plugin.as_str()) && !wanted.contains(*plugin))
-            .cloned()
-            .collect();
-        for plugin in stale {
-            main.ara.controllers.remove(&plugin);
-        }
-        edited
+        sync(main, document, &ara_types, revision)
     }
 
     /// The archives of the ARA plug-ins' documents, to keep in the set (R10):
@@ -688,4 +511,216 @@ pub(super) fn bound_generations(main: &Main) -> BTreeSet<u64> {
         .chain(main.closing.iter().map(|(_, instance)| instance))
         .filter_map(|instance| instance.ara.as_ref().map(|binding| binding.generation))
         .collect()
+}
+
+/// The device types that are ARA plug-ins, with their factories.
+fn ara_types(inner: &Inner) -> Vec<(DeviceKind, Factory)> {
+    lock(&inner.types)
+        .iter()
+        .filter_map(|known| {
+            known
+                .ara
+                .clone()
+                .map(|factory| (known.device_type.kind.clone(), factory))
+        })
+        .collect()
+}
+
+/// Gives a plug-in made after the last poll its regions, from the newest set
+/// the host was synced with: an offline render with no engine, as
+/// `bl-cli export` runs, makes its plug-ins itself.
+pub(super) fn resync(main: &mut Main, inner: &Inner) {
+    let Some(document) = main.ara.last.clone() else {
+        return;
+    };
+    main.ara.dirty = true;
+    let revision = main.ara.synced.unwrap_or(0);
+    sync(main, &document, &ara_types(inner), revision);
+}
+
+/// [`Vst3Host::sync_ara`]'s work, on the host's main-thread state.
+fn sync(
+    main: &mut Main,
+    document: &Document,
+    ara_types: &[(DeviceKind, Factory)],
+    revision: u64,
+) -> bool {
+    let waiting = main
+        .instances
+        .values()
+        .any(|instance| instance.ara.as_ref().is_some_and(|binding| binding.hold));
+    if main.ara.controllers.is_empty()
+        || (main.ara.synced == Some(revision) && !main.ara.dirty && !waiting)
+    {
+        main.ara.synced = Some(revision);
+        return false;
+    }
+    main.ara.synced = Some(revision);
+    main.ara.dirty = false;
+    let hosts = |device: &Device| {
+        ara_types
+            .iter()
+            .find(|(kind, _)| *kind == device.kind)
+            .map(|(_, factory)| (factory.id.clone(), factory.support))
+    };
+    let support = |device: &Device| hosts(device).map(|(_, support): (String, AraSupport)| support);
+
+    // Which track each bound device renders.
+    let mut renders: BTreeMap<DeviceId, TrackId> = BTreeMap::new();
+    for track in document.tracks() {
+        if let Some((device, _)) = ara_device(track, support) {
+            renders.insert(device.id, track.id());
+        }
+    }
+    for (&device, instance) in &mut main.instances {
+        if let Some(binding) = &mut instance.ara {
+            binding.track = renders.get(&device).copied();
+        }
+    }
+
+    let mut edited = false;
+    let ids: Vec<String> = main.ara.controllers.keys().cloned().collect();
+    let Main { ara, instances, .. } = main;
+    for plugin in ids {
+        let seconds = &mut ara.seconds;
+        let media = ara.media.clone();
+        let mut length = |file: ContentHash| -> Option<f64> {
+            if let Some(known) = seconds.get(&file) {
+                return Some(*known);
+            }
+            let found = media.as_ref()?.seconds(file)?;
+            seconds.insert(file, found);
+            Some(found)
+        };
+        let model = Model::of(document, &plugin, &hosts, &mut length);
+        let Some(controller) = ara.controllers.get_mut(&plugin) else {
+            continue;
+        };
+        // Instances whose track gains or loses a region while they run
+        // are asked for first (R8).
+        let (added, removed) = controller.membership(&model);
+        let mut waiting = false;
+        for instance in instances.values_mut() {
+            let Some(binding) = &instance.ara else {
+                continue;
+            };
+            if binding.plugin != plugin {
+                continue;
+            }
+            let affected = binding
+                .track
+                .is_some_and(|track| added.contains(&track) || removed.contains(&track));
+            if affected && busy(instance) {
+                waiting = true;
+                hold(instance);
+            }
+        }
+        if waiting {
+            continue;
+        }
+        if controller.differs(&model) {
+            let mut before = |track: TrackId, region: sys::ARAPlaybackRegionRef| {
+                for instance in instances.values_mut() {
+                    if let Some(binding) = &mut instance.ara
+                        && binding.track == Some(track)
+                        && binding.regions.remove(&(region as usize))
+                    {
+                        binding.extension.remove_region(region);
+                    }
+                }
+            };
+            match controller.apply(model, &mut before) {
+                Ok(()) => edited = true,
+                Err(why) => {
+                    for instance in instances.values_mut() {
+                        if instance.ara.as_ref().is_some_and(|b| b.plugin == plugin) {
+                            instance.failure = Some(format!("ARA: {why}"));
+                        }
+                    }
+                }
+            }
+        }
+        // Each idle instance holds the regions of its track.
+        for instance in instances.values_mut() {
+            let idle = !busy(instance);
+            let Some(binding) = &mut instance.ara else {
+                continue;
+            };
+            if binding.plugin != plugin {
+                continue;
+            }
+            let want: BTreeMap<usize, sys::ARAPlaybackRegionRef> = binding
+                .track
+                .map(|track| {
+                    controller
+                        .regions_of(track)
+                        .map(|(_, region)| (region as usize, region))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let sequence = binding
+                .track
+                .and_then(|track| controller.sequence_of(track));
+            let sequence_key = sequence.map(|s| s as usize);
+            let settled =
+                binding.regions.iter().eq(want.keys()) && binding.sequence == sequence_key;
+            if settled {
+                binding.hold = false;
+                continue;
+            }
+            if !idle {
+                // Something moved onto a running plug-in: have it back.
+                hold(instance);
+                continue;
+            }
+            for (key, region) in &want {
+                if binding.regions.insert(*key) {
+                    binding.extension.add_region(*region);
+                }
+            }
+            let stale: Vec<usize> = binding
+                .regions
+                .iter()
+                .filter(|key| !want.contains_key(key))
+                .copied()
+                .collect();
+            for key in stale {
+                binding.regions.remove(&key);
+            }
+            if binding.sequence != sequence_key {
+                if let Some(old) = binding.sequence {
+                    binding
+                        .extension
+                        .remove_sequence(old as sys::ARARegionSequenceRef);
+                }
+                if let Some(new) = sequence {
+                    binding.extension.add_sequence(new);
+                }
+                binding.sequence = sequence_key;
+            }
+            binding.hold = false;
+        }
+    }
+    // A controller nothing in the set needs any more goes.
+    let used: BTreeSet<&str> = main
+        .instances
+        .values()
+        .filter_map(|instance| instance.ara.as_ref().map(|b| b.plugin.as_str()))
+        .collect();
+    let wanted: BTreeSet<String> = document
+        .tracks()
+        .flat_map(|track| track.devices())
+        .filter_map(|device| hosts(device).map(|(id, _)| id))
+        .collect();
+    let stale: Vec<String> = main
+        .ara
+        .controllers
+        .keys()
+        .filter(|plugin| !used.contains(plugin.as_str()) && !wanted.contains(*plugin))
+        .cloned()
+        .collect();
+    for plugin in stale {
+        main.ara.controllers.remove(&plugin);
+    }
+    edited
 }

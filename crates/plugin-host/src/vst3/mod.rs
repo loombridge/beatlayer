@@ -1596,7 +1596,13 @@ fn ensure_instance(main: &mut Main, device: &Device, inner: &Inner) -> bool {
         instance.failure = Some(format!("{error}; it starts from its defaults"));
     }
     set_values(&mut instance, device);
+    let bound = instance.ara.is_some();
     main.instances.insert(device.id, instance);
+    // Spec: ara-hosting R2. A plug-in made after the last poll, such as one
+    // an offline render makes, is given its regions before it is activated.
+    if bound {
+        ara::resync(main, inner);
+    }
     true
 }
 

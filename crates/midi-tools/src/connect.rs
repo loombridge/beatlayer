@@ -68,19 +68,20 @@ impl MidiTool for Connect {
         let tie = whole(values, 3) as f64 / 100.0;
         let mut rng = Rng::new(input.seed);
         // R12: the different starts in order; for each, the latest end and the highest note.
+        let mut ordered: Vec<&ToolNote> = input.notes.iter().collect();
+        ordered.sort_by_key(|note| note.start);
         let mut starts: Vec<(Ticks, Ticks, &ToolNote)> = Vec::new();
-        for note in &input.notes {
-            match starts.iter_mut().find(|(start, ..)| *start == note.start) {
-                Some((_, end, top)) => {
+        for note in ordered {
+            match starts.last_mut() {
+                Some((start, end, top)) if *start == note.start => {
                     *end = (*end).max(note.end());
                     if note.key > top.key {
                         *top = note;
                     }
                 }
-                None => starts.push((note.start, note.end(), note)),
+                _ => starts.push((note.start, note.end(), note)),
             }
         }
-        starts.sort_by_key(|(start, ..)| *start);
         let mut notes = input.notes.clone();
         for pair in starts.windows(2) {
             let ((start, end, from), (next, _, to)) = (pair[0], pair[1]);

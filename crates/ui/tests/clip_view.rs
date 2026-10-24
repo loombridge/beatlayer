@@ -3206,3 +3206,510 @@ fn option_clicking_the_piano_ruler_sets_the_selected_chords_root_in_stacks() {
     n.drag(from, to, Modifiers::ALT);
     assert_eq!(tool_values(&mut n, "stacks")["chord_root"], 57);
 }
+
+// ---- WP-6.54: the note editor's view, clip markers and time commands ----
+
+impl Notes {
+    /// What the Clip View reports of the part of the clip in view.
+    fn state(&self) -> bl_shell::note_commands::ClipViewState {
+        self.h
+            .shell
+            .clip_view()
+            .state(self.doc(), self.h.shell.arrangement())
+    }
+
+    /// The span in view: its first tick and its width.
+    fn window(&self) -> (Ticks, Ticks) {
+        let (from, to) = self.state().span.expect("a MIDI clip shows");
+        (from, to - from)
+    }
+
+    /// A point in the strip's upper part at `x`, where no marker is.
+    fn ruler_at(&mut self, x: f32) -> Pos2 {
+        let strip = self.strip();
+        pos2(x, strip.top() + 3.0)
+    }
+
+    /// The contents tick under `x` in the note area as it shows now.
+    fn tick_now(&mut self, x: f32) -> Ticks {
+        let grid = self.grid();
+        let (from, width) = self.window();
+        tick_at(grid, from, width, x)
+    }
+
+    /// Lets the double-click window pass, so the next click starts afresh.
+    fn rest(&mut self) {
+        for _ in 0..40 {
+            self.h.frame(Vec::new());
+        }
+    }
+
+    fn select_time(&mut self, start: Ticks, end: Ticks) {
+        self.h
+            .shell
+            .run(
+                "clip_view.select_time",
+                json!({ "clip": self.clip, "start": start, "end": end }),
+            )
+            .unwrap();
+        self.h.settle();
+    }
+}
+
+// Spec: piano-roll R34.
+#[test]
+fn dragging_the_ruler_zooms_about_the_pointer_and_sideways_scrolls() {
+    let mut n = set(vec![Note::new(60, Ticks::ZERO, n_step(), 100)]);
+    let steps = n.steps();
+    let whole = n.window();
+    assert_eq!(whole, (Ticks::ZERO, Ticks(16 * BAR)));
+    let grid = n.grid();
+    let press = n.ruler_at(grid.left() + grid.width() / 2.0);
+    let anchor = n.tick_now(press.x);
+    // Dragging down zooms in about the pressed tick, which stays under the
+    // pointer.
+    n.drag(press, press + vec2(0.0, 60.0), Modifiers::NONE);
+    let (from, width) = n.window();
+    assert!(
+        width < whole.1 && width > Ticks::ZERO,
+        "zoomed in: {width:?}"
+    );
+    let expected = (16.0 * BAR as f64 * (-0.6f64).exp()).round();
+    assert!(
+        (width.get() as f64 - expected).abs() < expected * 0.05,
+        "the width follows the drag: {width:?} against {expected}"
+    );
+    let under = n.tick_now(press.x);
+    assert!(
+        (under - anchor).get().abs() < width.get() / 100,
+        "the pressed tick stays under the pointer: {under:?} against {anchor:?}"
+    );
+    // Dragging sideways scrolls: to the left shows later time.
+    let press = n.ruler_at(grid.left() + grid.width() / 2.0);
+    n.drag(press, press + vec2(-40.0, 0.0), Modifiers::NONE);
+    let (later, same) = n.window();
+    assert!(
+        later > from,
+        "scrolled to later time: {later:?} after {from:?}"
+    );
+    assert_eq!(same, width, "and the width stays");
+    // None of it is an undo step or a zoom X goes back through: X shows the
+    // whole clip again.
+    assert_eq!(n.steps(), steps);
+    n.focus();
+    n.h.key(egui::Key::X, Modifiers::NONE);
+    assert_eq!(n.window(), whole, "X with no zoom to go back to");
+}
+
+// Spec: piano-roll R34.
+#[test]
+fn cmd_with_the_wheel_zooms_time_and_option_makes_the_rows_taller() {
+    let mut n = set(vec![Note::new(60, Ticks::ZERO, n_step(), 100)]);
+    let at = n.at(60, Ticks(8 * BAR));
+    let wheel = |n: &mut Notes, modifiers: Modifiers, y: f32| {
+        n.h.frame(vec![
+            Event::ModifiersChanged(modifiers),
+            Event::PointerMoved(at),
+            Event::MouseWheel {
+                unit: MouseWheelUnit::Point,
+                delta: vec2(0.0, y),
+                phase: TouchPhase::Move,
+                modifiers,
+            },
+        ]);
+        for _ in 0..30 {
+            n.h.frame(vec![Event::ModifiersChanged(modifiers)]);
+        }
+        n.h.frame(vec![Event::ModifiersChanged(Modifiers::NONE)]);
+    };
+    let (_, whole) = n.window();
+    wheel(&mut n, Modifiers::COMMAND, 100.0);
+    let (_, zoomed) = n.window();
+    assert!(zoomed < whole, "Cmd with the wheel zooms in: {zoomed:?}");
+    assert!(n.state().rows.is_none(), "and leaves the rows alone");
+    // Option with the wheel: fewer, taller rows.
+    wheel(&mut n, Modifiers::ALT, 100.0);
+    let (first, last) = n.state().rows.expect("the rows were chosen");
+    let grid = n.grid();
+    let height = grid.height() / (last - first) as f32;
+    assert!(height > KEY_HEIGHT, "taller rows: {height}");
+}
+
+// Spec: piano-roll R33, R32.
+#[test]
+fn the_page_keys_scroll_an_octave_a_row_and_a_width_and_plus_and_minus_zoom() {
+    let mut n = set(vec![Note::new(60, Ticks::ZERO, n_step(), 100)]);
+    n.focus();
+    let steps = n.steps();
+    let top = n.h.main.clip_view().top();
+    n.h.key(egui::Key::PageDown, Modifiers::NONE);
+    n.h.settle();
+    assert!(
+        (top - n.h.main.clip_view().top() - 12.0).abs() < 0.01,
+        "an octave down: {top} to {}",
+        n.h.main.clip_view().top()
+    );
+    let top = n.h.main.clip_view().top();
+    n.h.key(egui::Key::PageUp, Modifiers::SHIFT);
+    n.h.settle();
+    assert!(
+        (n.h.main.clip_view().top() - top - 1.0).abs() < 0.01,
+        "a row up with Shift"
+    );
+    // Plus zooms in about the insert marker, Minus out; Cmd-Page Down
+    // scrolls time by the width.
+    let (_, whole) = n.window();
+    n.h.key(egui::Key::Plus, Modifiers::NONE);
+    n.h.key(egui::Key::Plus, Modifiers::NONE);
+    n.h.settle();
+    let (from, width) = n.window();
+    assert_eq!(width, whole / 4, "Plus halves the span, twice");
+    n.h.key(egui::Key::PageDown, Modifiers::COMMAND);
+    n.h.settle();
+    let (later, same) = n.window();
+    assert_eq!((later - from, same), (width, width), "a width to the right");
+    n.h.key(egui::Key::Minus, Modifiers::NONE);
+    n.h.key(egui::Key::Minus, Modifiers::NONE);
+    n.h.settle();
+    assert_eq!(
+        n.window(),
+        (Ticks::ZERO, whole),
+        "Minus shows the clip again"
+    );
+    assert_eq!(n.steps(), steps, "none of it is an undo step");
+}
+
+// Spec: piano-roll R32, R38. Z, W and H run `clip_view.note_view`; Cmd-F9 to
+// Cmd-F12 set the clip's markers to the time selection.
+#[test]
+fn z_w_and_h_fit_the_view_and_cmd_f9_to_f12_set_the_markers() {
+    let step = n_step();
+    let mut n = set(vec![
+        Note::new(48, Ticks::ZERO, step, 100),
+        Note::new(72, Ticks(BAR), step, 100),
+    ]);
+    n.focus();
+    n.select_time(Ticks(BAR), Ticks(2 * BAR));
+    n.h.key(egui::Key::Z, Modifiers::NONE);
+    n.h.settle();
+    assert_eq!(
+        n.window(),
+        (Ticks(BAR), Ticks(BAR)),
+        "Z zooms to the selection"
+    );
+    n.h.key(egui::Key::W, Modifiers::NONE);
+    n.h.settle();
+    assert_eq!(
+        n.window(),
+        (Ticks::ZERO, Ticks(16 * BAR)),
+        "W fits the clip"
+    );
+    n.h.key(egui::Key::H, Modifiers::NONE);
+    n.h.settle();
+    let (first, last) = n.state().rows.expect("H chose the rows");
+    assert_eq!(
+        (first, last),
+        (127.0 - 72.0 - 1.0, 127.0 - 48.0 + 2.0),
+        "from the lowest note to the highest"
+    );
+    // The markers take the time selection, one undo step each.
+    let before = n.doc().clone();
+    n.h.key(egui::Key::F9, command());
+    assert_eq!(n.marker(), Ticks(BAR), "Cmd-F9 sets the Start marker");
+    n.one_step(&before, "Change clip region");
+    let before = n.doc().clone();
+    n.h.key(egui::Key::F12, command());
+    n.one_step(&before, "Change clip region");
+    let before = n.doc().clone();
+    n.h.key(egui::Key::F11, command());
+    n.one_step(&before, "Change clip loop");
+    assert_eq!(
+        n.loop_brace().1,
+        Some(Ticks(2 * BAR)),
+        "Cmd-F11 sets the loop end"
+    );
+}
+
+// Spec: piano-roll R38. A marker selected in the strip takes Cmd-click and
+// the region keys.
+#[test]
+fn cmd_click_moves_the_selected_start_marker_and_shift_arrows_move_the_region() {
+    let mut n = set(vec![Note::new(60, Ticks::ZERO, n_step(), 100)]);
+    let step = n.step();
+    // Clicking the Start marker selects it.
+    let at = n.at_strip(Ticks::ZERO, true);
+    n.click(at, Modifiers::NONE);
+    // Cmd-click moves it to the clicked place, on the grid.
+    let left = n.grid().left();
+    let place = n.ruler_at(left + 200.0);
+    let tick = n.tick_now(place.x);
+    let before = n.doc().clone();
+    n.click(place, command());
+    let grid_tick = (tick.get() as f64 / step.get() as f64).round() as i64 * step.get();
+    assert_eq!(
+        n.marker(),
+        Ticks(grid_tick),
+        "the Start marker took the click"
+    );
+    n.one_step(&before, "Change clip region");
+    // Shift with Right moves the whole region a grid step.
+    let was = n.marker();
+    n.h.key(egui::Key::ArrowRight, Modifiers::SHIFT);
+    assert_eq!(n.marker(), was + step, "the region moved a grid step");
+}
+
+// Spec: piano-roll R39. Cmd-Shift-D and Cmd-Shift-Delete act on the notes
+// while the note editor has the keyboard.
+#[test]
+fn cmd_shift_d_and_delete_run_the_time_commands_in_the_note_editor() {
+    let step = n_step();
+    let mut n = set(vec![
+        Note::new(60, Ticks::ZERO, step, 100),
+        Note::new(62, Ticks(BAR), step, 100),
+    ]);
+    n.focus();
+    // With no time selection nothing runs.
+    let before = n.doc().clone();
+    n.h.key(egui::Key::D, command() | Modifiers::SHIFT);
+    assert_eq!(*n.doc(), before);
+    n.select_time(Ticks(BAR), Ticks(2 * BAR));
+    n.h.key(egui::Key::D, command() | Modifiers::SHIFT);
+    n.one_step(&before, "Duplicate Time");
+    assert_eq!(n.notes().len(), 3);
+    let before = n.doc().clone();
+    n.select_time(Ticks(BAR), Ticks(2 * BAR));
+    n.h.key(egui::Key::Delete, command() | Modifiers::SHIFT);
+    n.one_step(&before, "Delete Time");
+}
+
+// Spec: piano-roll R39. The Edit menu's Duplicate Time and Delete Time act
+// on the notes with the note editor focused.
+#[test]
+fn the_edit_menus_time_items_run_the_note_commands_with_the_note_editor_focused() {
+    let mut n = set(vec![Note::new(60, Ticks::ZERO, n_step(), 100)]);
+    n.focus();
+    n.select_time(Ticks::ZERO, Ticks(BAR));
+    let menus = bl_shell::menus::menu_bar(bl_shell::menus::MenuPlatform::current());
+    let state = |n: &Notes, row: &str| {
+        let item = menus
+            .iter()
+            .flat_map(bl_shell::menus::Menu::walk)
+            .find(|item| item.row == row)
+            .unwrap();
+        bl_ui::menus::item_state(
+            item,
+            &n.h.shell,
+            &n.h.keymap,
+            bl_ui::keymap::Platform::current(),
+        )
+    };
+    for (row, command) in [
+        ("M-EDIT-021", "note.duplicate_time"),
+        ("M-EDIT-022", "note.delete_time"),
+        ("M-EDIT-013a", "clip_view.set_marker"),
+        ("M-EDIT-013d", "clip_view.set_marker"),
+    ] {
+        let item = state(&n, row);
+        assert!(item.enabled, "{row} is enabled");
+        assert_eq!(item.invocation.unwrap().id, command, "{row}");
+    }
+}
+
+// Spec: piano-roll R36. The Clip View Selector in the Status Bar shows the
+// clip with an outline round the part in view.
+#[test]
+fn dragging_the_clip_view_selectors_outline_scrolls_and_zooms_the_note_area() {
+    let mut n = set(vec![Note::new(60, Ticks::ZERO, n_step(), 100)]);
+    n.h.shell
+        .run(
+            "clip_view.note_view",
+            json!({ "show": "span", "start": 4 * BAR, "end": 8 * BAR }),
+        )
+        .unwrap();
+    n.h.settle();
+    let selector =
+        n.h.main
+            .drawn_layout()
+            .expect("the last frame's layout")
+            .rect(bl_ui::layout::Element::ClipSelector);
+    let inner = selector.shrink2(vec2(2.0, 2.0));
+    let x_of = |tick: i64| inner.left() + (tick as f32 / (16 * BAR) as f32) * inner.width();
+    // Inside the outline, dragging sideways scrolls.
+    let middle = pos2(x_of(6 * BAR), inner.center().y);
+    n.drag(
+        middle,
+        middle + vec2(inner.width() / 4.0, 0.0),
+        Modifiers::NONE,
+    );
+    let (from, width) = n.window();
+    assert_eq!(width, Ticks(4 * BAR), "the width stays");
+    assert!(
+        (from.get() - 8 * BAR).abs() < BAR / 4,
+        "a quarter of the clip to the right: {from:?}"
+    );
+    // The right edge, dragged, widens it.
+    let edge = pos2(x_of(from.get() + width.get()), inner.center().y);
+    n.drag(edge, edge + vec2(inner.width() / 8.0, 0.0), Modifiers::NONE);
+    let (_, wider) = n.window();
+    assert!(wider > width, "the right edge widened it: {wider:?}");
+    // Dragging down inside zooms in.
+    let (from, width) = n.window();
+    let inside = pos2(x_of(from.get() + width.get() / 2), inner.center().y);
+    n.drag(inside, inside + vec2(0.0, 30.0), Modifiers::NONE);
+    let (_, zoomed) = n.window();
+    assert!(zoomed < width, "dragging down zoomed in: {zoomed:?}");
+    assert_eq!(n.steps(), 0, "none of it is an undo step");
+}
+
+// Spec: piano-roll R35. Follow turns the page with the playhead; an edit in
+// the editor pauses it until playback starts or stops. The null device is
+// paced by hand, so the test's clock drives the song.
+#[test]
+fn follow_turns_the_page_with_the_playhead_and_an_edit_pauses_it() {
+    let mut h = Harness::manual_with_title_bar(Window::Main);
+    let track = h.shell.editor().document().top_level().next().unwrap();
+    let clip: ClipId = h.shell.new_id();
+    h.shell
+        .run(
+            "clip.create",
+            json!({ "track": track, "clip": {
+                "id": clip, "name": "", "start": 0, "length": 16 * BAR, "mute": false,
+                "data": { "midi": { "notes": [
+                    { "key": 60, "velocity": 100, "start": 0, "length": 705_600 }
+                ] } } } }),
+        )
+        .unwrap();
+    h.shell
+        .run("arrangement.select_clips", json!({ "clips": [clip] }))
+        .unwrap();
+    h.shell.run("view.toggle_clip_view", json!({})).unwrap();
+    h.settle();
+    let span = |h: &Harness| {
+        let state = h
+            .shell
+            .clip_view()
+            .state(h.shell.editor().document(), h.shell.arrangement());
+        state.span.expect("a MIDI clip shows")
+    };
+    // Zoomed to the first bar, with the song about to play from the start.
+    h.shell
+        .run(
+            "clip_view.note_view",
+            json!({ "show": "span", "start": 0, "end": BAR }),
+        )
+        .unwrap();
+    h.settle();
+    assert_eq!(span(&h), (Ticks::ZERO, Ticks(BAR)));
+    h.shell.run("transport.play", json!({})).unwrap();
+    h.wait("the view turns the page", |h| span(h).0 > Ticks::ZERO);
+    let (from, to) = span(&h);
+    assert_eq!(to - from, Ticks(BAR), "the width stays");
+    assert!(h.shell.playing(), "the song plays");
+    // An edit pauses Follow: the page stays where it is while the song goes
+    // on.
+    h.shell
+        .run(
+            "note.add",
+            json!({ "clip": clip, "key": 62, "start": 0, "length": 705_600 }),
+        )
+        .unwrap();
+    assert!(h.shell.clip_view().note_view().follow_paused());
+    h.shell
+        .run(
+            "clip_view.note_view",
+            json!({ "show": "page", "start": 0, "end": BAR }),
+        )
+        .unwrap();
+    for _ in 0..240 {
+        h.frame(vec![]);
+    }
+    assert_eq!(
+        span(&h),
+        (Ticks::ZERO, Ticks(BAR)),
+        "paused: no page turned"
+    );
+    // Stopping the song lets it follow again.
+    h.shell.run("transport.stop", json!({})).unwrap();
+    h.wait("playback to stop", |h| !h.shell.playing());
+    assert!(!h.shell.clip_view().note_view().follow_paused());
+}
+
+// Spec: piano-roll R34. Double-clicking the editor ruler zooms to the time
+// selection, or with none from the first note to the last; with the
+// selection out of view it zooms out until it shows.
+#[test]
+fn double_clicking_the_ruler_zooms_to_the_selection_or_the_notes() {
+    let step = n_step();
+    let mut n = set(vec![
+        Note::new(60, Ticks::ZERO, step, 100),
+        Note::new(64, Ticks(5 * BAR), step, 100),
+    ]);
+    let grid = n.grid();
+    let at = n.ruler_at(grid.left() + grid.width() / 2.0);
+    // With no time selection: from the first note to the last.
+    n.double_click(at, Modifiers::NONE);
+    assert_eq!(n.window(), (Ticks::ZERO, Ticks(5 * BAR) + step));
+    // With one: to it.
+    n.rest();
+    n.select_time(Ticks(2 * BAR), Ticks(3 * BAR));
+    let at = n.ruler_at(grid.left() + grid.width() / 2.0);
+    n.double_click(at, Modifiers::NONE);
+    assert_eq!(n.window(), (Ticks(2 * BAR), Ticks(BAR)));
+    // The selection out of view: it zooms out until it shows.
+    n.rest();
+    n.select_time(Ticks(8 * BAR), Ticks(9 * BAR));
+    let at = n.ruler_at(grid.left() + grid.width() / 2.0);
+    n.double_click(at, Modifiers::NONE);
+    assert_eq!(n.window(), (Ticks(2 * BAR), Ticks(7 * BAR)));
+}
+
+// Spec: piano-roll R34. Double-clicking the piano ruler fits the selected
+// notes' rows, or with none the clip's lowest note to its highest; with
+// those out of view, it zooms out until they show.
+#[test]
+fn double_clicking_the_piano_ruler_fits_the_selected_notes_or_all_of_them() {
+    let step = n_step();
+    let mut n = set(vec![
+        Note::new(48, Ticks::ZERO, step, 100),
+        Note::new(72, Ticks(BAR), step, 100),
+    ]);
+    // The view starts on the high note: the top key is two above it.
+    let first = 127.0 - 74.0;
+    n.select(&[1]);
+    let at = n.key_at(65);
+    n.double_click(at, Modifiers::NONE);
+    assert_eq!(
+        n.state().rows,
+        Some((127.0 - 72.0 - 1.0, 127.0 - 72.0 + 3.0)),
+        "the selected note's row, with four rows at least"
+    );
+    assert_eq!(n.selected(), [1], "and the selection is as it was");
+    // The low note is out of view: the rows zoom out until it shows.
+    n.rest();
+    n.h.shell
+        .run("clip_view.note_view", json!({ "show": "back" }))
+        .unwrap();
+    n.h.settle();
+    n.select(&[0]);
+    let at = n.key_at(65);
+    n.double_click(at, Modifiers::NONE);
+    assert_eq!(
+        n.state().rows,
+        Some((first, 127.0 - 48.0 + 3.0)),
+        "from the top of the view down to the low note"
+    );
+    // With none selected, the lowest note to the highest.
+    n.rest();
+    n.h.shell
+        .run("clip_view.note_view", json!({ "show": "back" }))
+        .unwrap();
+    n.h.settle();
+    n.select(&[]);
+    let at = n.key_at(65);
+    n.double_click(at, Modifiers::NONE);
+    assert_eq!(
+        n.state().rows,
+        Some((first, 127.0 - 48.0 + 2.0)),
+        "the lowest note to the highest, zoomed out to show both"
+    );
+}

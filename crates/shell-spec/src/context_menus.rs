@@ -433,14 +433,10 @@ const NOTE: &[Row] = &[
     ("C-NOTE-012", "Join Notes", Key(&["S-NOTE-007"])),
     ("C-NOTE-013", "Fit to Time Range", Key(&["S-NOTE-008"])),
     ("C-NOTE-014", "Clip Markers", Submenu),
-    (
-        "C-NOTE-014a",
-        "Set Start Marker",
-        Pending(Some("S-LOOP-001")),
-    ),
-    ("C-NOTE-014b", "Set Loop Start", Pending(Some("S-LOOP-002"))),
-    ("C-NOTE-014c", "Set Loop End", Pending(Some("S-LOOP-003"))),
-    ("C-NOTE-014d", "Set End Marker", Pending(Some("S-LOOP-004"))),
+    ("C-NOTE-014a", "Set Start Marker", Key(&["S-LOOP-001"])),
+    ("C-NOTE-014b", "Set Loop Start", Key(&["S-LOOP-002"])),
+    ("C-NOTE-014c", "Set Loop End", Key(&["S-LOOP-003"])),
+    ("C-NOTE-014d", "Set End Marker", Key(&["S-LOOP-004"])),
     ("C-NOTE-015", "Split Clip", Key(&["S-NOTE-036"])),
     (
         "C-NOTE-016",

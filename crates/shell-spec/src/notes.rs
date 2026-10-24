@@ -124,6 +124,17 @@ pub const STRETCH: &str = "note.stretch";
 /// `note.split_clip`: split the Arrangement clip the editor shows at the
 /// time selection.
 pub const SPLIT_CLIP: &str = "note.split_clip";
+/// `clip_view.note_view`: zoom and scroll the MIDI Note Editor.
+pub const NOTE_VIEW: &str = "clip_view.note_view";
+/// `clip_view.set_marker`: set one of the shown clip's markers to the time
+/// selection, the insert marker or the play position.
+pub const SET_MARKER: &str = "clip_view.set_marker";
+/// `note.duplicate_time`: copy the notes in a span of time straight after it.
+pub const DUPLICATE_TIME: &str = "note.duplicate_time";
+/// `note.insert_time`: make empty time in a clip by moving later notes on.
+pub const INSERT_TIME: &str = "note.insert_time";
+/// `note.delete_time`: remove a span of time from a clip's notes.
+pub const DELETE_TIME: &str = "note.delete_time";
 
 /// Every command [`register`] adds, so a host knows which IDs to send to
 /// `bl-shell`'s `Shell::run`.
@@ -172,6 +183,11 @@ pub const IDS: &[&str] = &[
     FIT_TO_TIME,
     STRETCH,
     SPLIT_CLIP,
+    NOTE_VIEW,
+    SET_MARKER,
+    DUPLICATE_TIME,
+    INSERT_TIME,
+    DELETE_TIME,
 ];
 
 /// Whether `id` is one of the Clip View's note-editing commands that edits
@@ -1425,6 +1441,22 @@ pub struct ClipViewState {
     /// The MPE tab's lanes, grid and selected breakpoints (WP-6.18).
     #[serde(default)]
     pub mpe: MpeTabState,
+    /// The span of the clip's contents the note area shows, in ticks from
+    /// the beginning of the contents (Spec: piano-roll R32, R42); the clip's
+    /// whole span until `clip_view.note_view` zooms or scrolls. `null` when
+    /// no MIDI clip is shown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub span: Option<(Ticks, Ticks)>,
+    /// The key rows the note area shows, as the row at its top edge and the
+    /// row at its bottom edge, counting down from the top of the keyboard
+    /// (row 0 is key 127; while the editor is folded, row 0 is its highest
+    /// key). `null` shows the rows the editor lays out by default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rows: Option<(f64, f64)>,
+    /// Whether the note area has stopped following playback until the song
+    /// starts or stops (Spec: piano-roll R35).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub follow_paused: bool,
 }
 
 /// Arguments of `clip_view.foreground`.
@@ -1455,6 +1487,120 @@ pub struct FocusModeArgs {
     /// Whether Focus Mode ends up on; left out, it switches.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on: Option<bool>,
+}
+
+/// How `clip_view.note_view` changes the view.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[schemars(
+    description = "How to change the MIDI Note Editor's view: `selection` zooms to the time \
+                   selection and the key rows of the selected notes (Z), `back` goes to the \
+                   view before the last zoom, or to the whole clip with none (X), `whole` fits \
+                   the clip's span to the note area's width (W), `height` fits the key rows \
+                   from the lowest note to the highest to its height (H), `in` and `out` zoom \
+                   time about the time selection or the insert marker (Plus and Minus), `span` \
+                   shows the ticks `start` to `end` and the key rows `top` to `bottom`, \
+                   `scroll` shows them without remembering the view before, and `page` does \
+                   the same without pausing Follow."
+)]
+pub enum NoteViewChange {
+    /// Zoom to the time selection and the selected notes' key rows.
+    Selection,
+    /// Go back to the view before the last zoom.
+    Back,
+    /// Fit the clip's span to the note area's width.
+    Whole,
+    /// Fit the key rows from the lowest note to the highest.
+    Height,
+    /// Zoom time in about the time selection or the insert marker.
+    In,
+    /// Zoom time out about the time selection or the insert marker.
+    Out,
+    /// Show a span of ticks and of key rows.
+    Span,
+    /// Show a span without remembering the view before, as scrolling does.
+    Scroll,
+    /// Show a span without remembering the view before or pausing Follow, as
+    /// Follow turning the page does.
+    Page,
+}
+
+/// Arguments of `clip_view.note_view`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct NoteViewArgs {
+    /// The MIDI clip. Left out, the one the note editor shows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<ClipId>,
+    /// What to change; left out, nothing changes and the view is reported
+    /// (and a click in the editor's scrub area resumes Follow).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub show: Option<NoteViewChange>,
+    /// With `span`, `scroll` and `page`, where the view starts, in ticks
+    /// from the beginning of the clip's contents. Left out, the time shown
+    /// stays as it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start: Option<Ticks>,
+    /// Where the view ends, after `start`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end: Option<Ticks>,
+    /// With `span`, `scroll` and `page`, the key row at the view's top edge
+    /// (row 0 is key 127). Give `top` and `bottom` together.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub top: Option<f64>,
+    /// The key row at the view's bottom edge, below `top`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bottom: Option<f64>,
+}
+
+/// Which of a MIDI clip's markers `clip_view.set_marker` sets.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ClipMarker {
+    /// The Start marker (Cmd-F9).
+    Start,
+    /// The loop brace's start (Cmd-F10).
+    LoopStart,
+    /// The loop brace's end (Cmd-F11).
+    LoopEnd,
+    /// The End marker (Cmd-F12).
+    End,
+}
+
+/// Arguments of `clip_view.set_marker`.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetMarkerArgs {
+    /// The MIDI clip. Left out, the one the note editor shows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<ClipId>,
+    /// The marker to set.
+    pub marker: ClipMarker,
+    /// Where to put it, in ticks from the beginning of the clip's contents.
+    /// Left out: the start of the time selection for the Start marker and
+    /// the loop start, its end for the loop end and the End marker; with no
+    /// time selection the insert marker; with neither, where the clip is
+    /// playing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<Ticks>,
+}
+
+/// Arguments of `note.duplicate_time`, `note.insert_time` and
+/// `note.delete_time`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct NoteTimeArgs {
+    /// The MIDI clip. Left out, the one the note editor shows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<ClipId>,
+    /// Where the span starts, in ticks from the beginning of the clip's
+    /// contents. Give `start` and `end` together, or neither to take the
+    /// editor's time selection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start: Option<Ticks>,
+    /// Where the span ends, after `start`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end: Option<Ticks>,
 }
 
 /// Arguments of `clip.duplicate_loop`.
@@ -1773,14 +1919,13 @@ fn specs() -> Vec<CommandSpec> {
             .result::<ClipViewState>(),
         CommandSpec::new(MPE_ZOOM, "Zoom to Expression")
             .description(
-                "Scrolls the MPE tab's note area to the key rows that the Pitch envelopes of \
-                 the selected notes reach inside the time selection (Z). The editor has no \
-                 time zoom yet, so only the key rows move. Changes only the view, so it is \
-                 no undo step. The result is the Clip View's state.",
+                "Zooms the MPE tab's note area to the time selection and the key rows that the \
+                 Pitch envelopes of the selected notes reach inside it, as `clip_view.note_view` \
+                 with `selection` does there (Z). Changes only the view, so it is no undo \
+                 step. The result is the Clip View's state.",
             )
             .permission(Permission::Read)
             .contexts([NoteEditor])
-            .binding("S-NOTE-023")
             .args::<NoArgs>()
             .result::<ClipViewState>(),
         edit(
@@ -2121,6 +2266,92 @@ fn specs() -> Vec<CommandSpec> {
             .binding("S-NOTE-036")
             .args::<NoArgs>()
             .result::<EditResult>(),
+        CommandSpec::new(NOTE_VIEW, "Zoom Note Editor")
+            .description(
+                "Changes the part of the clip's contents the MIDI Note Editor shows, in ticks \
+                 and in key rows: `selection` zooms to the time selection and the key rows of \
+                 the selected notes (Z; in the MPE tab, the rows the Pitch envelopes reach), \
+                 `back` goes back to the view before the last zoom, a step at a time, and to the \
+                 whole clip with none (X), `whole` fits the clip's span across the note area \
+                 (W), `height` fits the key rows from the lowest note to the highest to its \
+                 height (H), `in` and `out` zoom time about the time selection, or the insert \
+                 marker with none (Plus and Minus), and `span` shows the ticks `start` to `end` \
+                 and the key rows `top` to `bottom`; `scroll` does the same without remembering \
+                 the view before, as dragging a ruler, the wheel and the Page keys do (scrolling \
+                 pauses Follow until playback starts or stops), and `page` is Follow turning the \
+                 page, which doesn't pause it. Row 0 is key 127, or the highest key while the \
+                 editor is folded. Changes only the view, so it is no undo step; the result is \
+                 the Clip View's state, whose `span` and `rows` report the view.",
+            )
+            .permission(Permission::Read)
+            .contexts([NoteEditor, NoteSelectionContext])
+            .binding(Binding::new("S-NOTE-023").arg("show", "selection"))
+            .binding(Binding::new("S-NOTE-024").arg("show", "back"))
+            .binding(Binding::new("S-NOTE-009").arg("show", "whole"))
+            .binding(Binding::new("S-NOTE-010").arg("show", "height"))
+            .args::<NoteViewArgs>()
+            .result::<ClipViewState>(),
+        CommandSpec::new(SET_MARKER, "Set Clip Marker")
+            .description(
+                "Sets one of the shown MIDI clip's markers: `start` its Start marker, \
+                 `loop_start` and `loop_end` its loop brace's ends, `end` its End marker, as \
+                 Edit \u{25b8} Clip Markers and Cmd-F9 to Cmd-F12 (Ctrl on Windows) do. `at` \
+                 gives the place in ticks from the beginning of the clip's contents; left out, \
+                 the marker takes the time selection's start (Start marker, loop start) or end \
+                 (loop end, End marker), or the insert marker with no time selection, or where \
+                 the clip is playing with neither. It runs `clip.set_midi_region` or \
+                 `clip.set_midi_loop` for the one marker, so it is one undo step, and an order \
+                 between the markers those refuse (the Start marker before the End marker and, \
+                 while the loop is on, before the loop's end; the loop's start before its end) \
+                 refuses it too.",
+            )
+            .permission(Permission::Edit)
+            .contexts([ClipView, NoteEditor, NoteSelectionContext])
+            .binding(Binding::new("S-LOOP-001").arg("marker", "start"))
+            .binding(Binding::new("S-LOOP-002").arg("marker", "loop_start"))
+            .binding(Binding::new("S-LOOP-003").arg("marker", "loop_end"))
+            .binding(Binding::new("S-LOOP-004").arg("marker", "end"))
+            .args::<SetMarkerArgs>()
+            .result::<ClipViewState>(),
+        CommandSpec::new(DUPLICATE_TIME, "Duplicate Time")
+            .description(
+                "Puts a copy of the notes that start inside a span of the clip's contents \
+                 (`start` to `end`, or the editor's time selection) straight after it, and \
+                 moves the notes that start at its end or later on by its length. The clip's \
+                 Start and End markers and loop brace stay where they are. The copy becomes the \
+                 time selection. Refused with no span. One undo step. With the note editor focused, \
+                 Cmd-Shift-D (Ctrl-Shift-D) and Edit \u{25b8} Duplicate Time run it.",
+            )
+            .permission(Permission::Edit)
+            .contexts([NoteEditor, NoteSelectionContext])
+            .args::<NoteTimeArgs>()
+            .result::<NoteEditResult>(),
+        CommandSpec::new(INSERT_TIME, "Insert Time")
+            .description(
+                "Puts empty time as long as a span of the clip's contents (`start` to `end`, \
+                 or the editor's time selection) before it, by moving the notes that start at \
+                 its start or later on by its length. The clip's Start and End markers and loop \
+                 brace stay where they are. Refused with no span. One undo step.",
+            )
+            .permission(Permission::Edit)
+            .contexts([NoteEditor, NoteSelectionContext])
+            .args::<NoteTimeArgs>()
+            .result::<NoteEditResult>(),
+        CommandSpec::new(DELETE_TIME, "Delete Time")
+            .description(
+                "Removes a span of the clip's contents (`start` to `end`, or the editor's time \
+                 selection): deletes the notes that start inside it, shortens a note that runs \
+                 into it to end at its start, and moves the notes that start at its end or \
+                 later earlier by its length. The clip's Start and End markers and loop brace \
+                 stay where they are. The insert marker goes to the span's start and the time \
+                 selection is cleared. Refused with no span. One undo step. With the note editor \
+                 focused, Cmd-Shift-Delete (Ctrl-Shift-Delete) and Edit \u{25b8} Delete Time run \
+                 it.",
+            )
+            .permission(Permission::Destructive)
+            .contexts([NoteEditor, NoteSelectionContext])
+            .args::<NoteTimeArgs>()
+            .result::<NoteEditResult>(),
     ]
 }
 

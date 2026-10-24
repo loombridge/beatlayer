@@ -392,6 +392,9 @@ impl Shell {
                 if sample_edit_command(&invocation.id) {
                     self.clip_view.sample_follow(true);
                 }
+                if clip_view::pauses_follow(&invocation.id) {
+                    self.clip_view.note_follow(true);
+                }
                 if tool_ids::handles(&invocation.id) {
                     self.announce_chain(listed);
                 }

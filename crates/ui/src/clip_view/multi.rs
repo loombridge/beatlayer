@@ -439,6 +439,7 @@ impl ClipViewUi {
             &fg.midi,
             &fg.notes,
             &any,
+            &rows_of_keys,
             events,
         );
         for event in &mut events[before..] {

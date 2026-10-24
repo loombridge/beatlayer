@@ -73,6 +73,15 @@ pub fn item_state_in(
         }
         Action::Shortcut(shortcuts) => {
             let chord = keymap.chord_for_shortcut(shortcuts[0], platform);
+            // Spec: piano-roll R39. With the note editor focused, Duplicate
+            // Time and Delete Time act on the clip's notes.
+            if contexts.contains(&Context::NoteEditor)
+                && let Some((_, command)) = bl_shell::menus::NOTE_EDITOR_ROWS
+                    .iter()
+                    .find(|(row, _)| *row == item.row)
+            {
+                return resolved(command, json!({}), chord);
+            }
             shortcuts
                 .iter()
                 .find_map(|shortcut| keymap.command_for(shortcut, contexts))

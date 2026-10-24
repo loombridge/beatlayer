@@ -10,7 +10,9 @@
 //! the command reference; `bl-shell` runs them by ID. The behaviour they follow
 //! is in the arrangement view spec.
 
-use bl_commands::Context::{Arrangement, Global, SampleEditor, TakeLanes, TrackHeaders};
+use bl_commands::Context::{
+    Arrangement, Global, NoteEditor, SampleEditor, TakeLanes, TrackHeaders,
+};
 use bl_commands::{Binding, CommandSpec, NoArgs, Permission, RegisterError, Registry};
 use bl_core::time::Ticks;
 use bl_model::{AutomationTarget, ClipId, LocatorId, TakeLaneId, TrackId};
@@ -919,13 +921,15 @@ fn specs() -> Vec<CommandSpec> {
              playhead stays in sight. Scrolling sideways by hand, or clicking the beat-time \
              ruler, pauses it until playback starts or stops, or a click lands in the track \
              lanes or the scrub area; `paused` does the same directly. The Sample Editor \
-             follows playback on the same switch (Option-Shift-F there too). With no arguments it \
+             follows playback on the same switch (Option-Shift-F there too), and so does the MIDI Note 
+             Editor. With no arguments it \
              toggles Follow, which also resumes it. Changes only the view.",
         )
-        .contexts([Global, Arrangement, SampleEditor])
+        .contexts([Global, Arrangement, SampleEditor, NoteEditor])
         .binding("S-ZOOM-005")
         .binding("S-ARR-023")
         .binding("S-SAMPLE-005")
+        .binding("S-NOTE-021")
         .args::<FollowArgs>(),
         view(
             OVERVIEW,

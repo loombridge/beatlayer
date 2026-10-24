@@ -31,6 +31,7 @@ mod export_plugins;
 mod golden;
 mod m2_assistant;
 mod m2_song;
+mod m5_demo;
 mod mixer_goldens;
 mod mpe_render;
 mod older_sets;

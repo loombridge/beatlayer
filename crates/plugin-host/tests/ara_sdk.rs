@@ -18,7 +18,7 @@ use bl_core::time::{Frames, SampleRate, Ticks};
 use bl_engine::{Node, NodeConfig, NodeFactory, TransportInfo};
 use bl_media::SampleData;
 use bl_model::{
-    AudioData, Clip, ClipData, ClipId, Command, ContentHash, Device, DeviceId, DeviceKind, Editor,
+    AudioData, Clip, ClipData, ClipId, Command, ContentHash, Device, DeviceId, Editor,
     PluginState, TrackId, TrackKind,
 };
 use bl_plugin_host::ara::AraMedia;
@@ -106,14 +106,23 @@ impl World {
     fn new(bundle: &PathBuf) -> Self {
         let host = Vst3Host::new();
         let types = host.load(bundle).expect("the example plug-in loads");
-        let found = &types[0];
+        let media = ContentHash([7; 32]);
+        let mut files = Files::default();
+        files.0.insert(media, audio(48_000));
+        host.set_ara_media(Arc::new(files));
+        Self::with_archives(host, bundle, &types[0], Vec::new())
+    }
+
+    /// A set that holds `archives`, as an opened set does.
+    fn with_archives(
+        host: Vst3Host,
+        bundle: &PathBuf,
+        found: &bl_plugin_host::vst3::Vst3Type,
+        archives: Vec<bl_model::AraArchive>,
+    ) -> Self {
         assert!(found.ara.is_some(), "the example plug-in is an ARA plug-in");
         let media = ContentHash([7; 32]);
         let audio = audio(48_000);
-        let mut files = Files::default();
-        files.0.insert(media, Arc::clone(&audio));
-        host.set_ara_media(Arc::new(files));
-
         let mut editor = Editor::new();
         let track = editor.new_id();
         editor
@@ -150,6 +159,8 @@ impl World {
                 ),
             })
             .unwrap();
+        editor.amend_ara_archives(archives);
+        host.know(editor.document());
         let node = host
             .factory()
             .create(editor.document().device(device).unwrap(), &node_config())
@@ -180,21 +191,17 @@ impl World {
         self.settle();
     }
 
-    /// Runs the host's main-thread work and the node's blocks until the
-    /// plug-in is active with every region the set gives it.
+    /// Runs the host's main-thread work and the node's blocks for a few
+    /// rounds, which is enough for the plug-in to be handed back, edited and
+    /// activated again.
     fn settle(&mut self) {
-        for _ in 0..400 {
+        for _ in 0..20 {
             self.host.idle();
             self.host.sync_ara(self.editor.document(), self.revision);
             self.block(0, 64, false);
-            let status = self.host.status(self.device);
-            let ara = self.host.ara_status();
-            let regions = ara.first().map_or(0, |a| a.regions.len());
-            if status.is_some_and(|s| s.active) && regions > 0 {
-                return;
-            }
         }
-        panic!(
+        assert!(
+            self.host.status(self.device).is_some_and(|s| s.active),
             "the plug-in never became active: {:?} {:?}",
             self.host.status(self.device),
             self.host.ara_status()
@@ -262,4 +269,157 @@ fn the_plugin_gets_a_document_of_the_set() {
     assert_eq!(region.start_in_modification, 0.0);
     assert_eq!(region.duration_in_modification, 1.0);
     let _ = (&world.media, &world.audio);
+}
+
+impl World {
+    /// What the file plays at song frames `from..to` when it starts at song
+    /// frame `start` with `skip` frames of it left out: silence outside.
+    fn expected(&self, from: i64, to: i64, start: i64, skip: i64, length: i64) -> Vec<Vec<f32>> {
+        (0..2)
+            .map(|channel| {
+                let file = self.audio.channel(channel).unwrap();
+                (from..to)
+                    .map(|frame| {
+                        let at = frame - start;
+                        if (0..length).contains(&at) {
+                            file[usize::try_from(at + skip).unwrap()]
+                        } else {
+                            0.0
+                        }
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
+    /// The one region the plug-in has.
+    fn region(&self) -> bl_plugin_host::ara::AraRegion {
+        let status = self.host.ara_status();
+        assert_eq!(status[0].regions.len(), 1, "{status:?}");
+        status[0].regions[0].clone()
+    }
+}
+
+// Spec: ara-hosting R7
+#[test]
+fn the_plugin_reads_the_whole_clip_and_plays_it_at_its_place_at_any_block_size() {
+    let bundle = sdk_plugin!();
+    let _turn = one_at_a_time();
+    let mut world = World::new(&bundle);
+    let start = world.frame(QUARTER);
+    assert_eq!(start, 24_000);
+    for size in [1, 100, 512, 4096] {
+        let (from, to) = (start - 300, start + 48_000 + 300);
+        let heard = world.render(from, to, size);
+        let wanted = world.expected(from, to, start, 0, 48_000);
+        assert!(heard == wanted, "block size {size}: the plug-in's rendering differs from the decoded file");
+    }
+    let status = &world.host.ara_status()[0];
+    // It read the file whole, once, on its own thread, and the audio thread
+    // read nothing.
+    assert_eq!(status.readers_opened, 1);
+    assert!(status.frames_read >= 48_000);
+    assert_eq!(status.audio_thread_reads, 0);
+}
+
+// Spec: ara-hosting R2, R6
+#[test]
+fn moving_and_trimming_a_clip_and_undoing_reach_the_plugin_as_edits() {
+    let bundle = sdk_plugin!();
+    let _turn = one_at_a_time();
+    let mut world = World::new(&bundle);
+    let first = world.host.ara_status()[0].edit_cycles;
+
+    // Moved a beat later.
+    world.edit(Command::MoveClip {
+        clip: world.clip,
+        track: world.track,
+        start: Ticks(2 * QUARTER),
+    });
+    let region = world.region();
+    assert_eq!((region.start_in_playback, region.duration_in_playback), (1.0, 1.0));
+    let start = world.frame(2 * QUARTER);
+    let heard = world.render(start - 10, start + 48_010, 512);
+    assert!(heard == world.expected(start - 10, start + 48_010, start, 0, 48_000));
+
+    // Trimmed at the start by half a beat (a quarter of a second): the Start
+    // marker follows.
+    world.edit(Command::TrimClipStart {
+        clip: world.clip,
+        start: Ticks(2 * QUARTER + QUARTER / 2),
+    });
+    let region = world.region();
+    assert_eq!(region.start_in_modification, 0.25);
+    assert_eq!(region.start_in_playback, 1.25);
+    assert_eq!(region.duration_in_playback, 0.75);
+    let start = world.frame(2 * QUARTER + QUARTER / 2);
+    let heard = world.render(start - 10, start + 36_010, 100);
+    assert!(heard == world.expected(start - 10, start + 36_010, start, 12_000, 36_000));
+
+    // Shortened to a beat.
+    world.edit(Command::SetClipLength {
+        clip: world.clip,
+        length: Ticks(QUARTER),
+    });
+    assert_eq!(world.region().duration_in_playback, 0.5);
+
+    // Three edits, three steps back.
+    for _ in 0..3 {
+        world.editor.undo().unwrap();
+        world.changed();
+    }
+    let region = world.region();
+    assert_eq!(
+        (region.start_in_playback, region.duration_in_playback, region.start_in_modification),
+        (0.5, 1.0, 0.0)
+    );
+    let status = &world.host.ara_status()[0];
+    // Each was an edit cycle of the same document: no object was made again.
+    assert_eq!(status.edit_cycles, first + 6);
+    assert_eq!((status.sources, status.modifications, status.readers_opened), (1, 1, 1));
+}
+
+// Spec: ara-hosting R6, R8
+#[test]
+fn a_deleted_clip_comes_back_with_the_plugins_edits_by_undo() {
+    let bundle = sdk_plugin!();
+    let _turn = one_at_a_time();
+    let mut world = World::new(&bundle);
+    world.edit(Command::DeleteClip { clip: world.clip });
+    let status = &world.host.ara_status()[0];
+    assert!(status.regions.is_empty());
+    // The track is the plug-in's with nothing on it: it renders silence.
+    let heard = world.render(0, 100, 100);
+    assert!(heard.iter().all(|channel| channel.iter().all(|s| *s == 0.0)));
+    world.editor.undo().unwrap();
+    world.changed();
+    let status = &world.host.ara_status()[0];
+    assert_eq!((status.regions.len(), status.modifications, status.sources), (1, 1, 1));
+    let start = world.frame(QUARTER);
+    let heard = world.render(start, start + 1000, 100);
+    assert!(heard == world.expected(start, start + 1000, start, 0, 48_000));
+}
+
+// Spec: ara-hosting R10
+#[test]
+fn the_plugins_archive_is_saved_with_the_set_and_restored_when_it_opens() {
+    let bundle = sdk_plugin!();
+    let _turn = one_at_a_time();
+    let archives = {
+        let world = World::new(&bundle);
+        let archives = world.host.ara_archives(&[]);
+        assert_eq!(archives.len(), 1, "{:?}", world.host.ara_status());
+        assert!(!archives[0].data.is_empty());
+        archives
+    };
+    // Another host opens a set that holds it.
+    let host = Vst3Host::new();
+    let types = host.load(&bundle).unwrap();
+    let mut files = Files::default();
+    let media = ContentHash([7; 32]);
+    files.0.insert(media, audio(48_000));
+    host.set_ara_media(Arc::new(files));
+    let mut world = World::with_archives(host, &bundle, &types[0], archives);
+    world.settle();
+    assert_eq!(world.host.ara_status()[0].restored, Some(Ok(())));
 }

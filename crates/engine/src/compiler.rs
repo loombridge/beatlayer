@@ -3635,6 +3635,92 @@ mod tests {
             .map(|(_, data)| data.downcast_ref::<ClipList>().unwrap().len())
     }
 
+    /// A factory that says its device is an ARA plug-in, and makes no node.
+    struct AraDevices;
+
+    impl crate::NodeFactory for AraDevices {
+        fn create(
+            &self,
+            _device: &bl_model::Device,
+            _config: &crate::NodeConfig,
+        ) -> Option<Box<dyn crate::Node>> {
+            None
+        }
+
+        fn ara_support(&self, device: &bl_model::Device) -> Option<bl_model::AraSupport> {
+            matches!(&device.kind, bl_model::DeviceKind::Native { device_type } if device_type == "test.ara")
+                .then(bl_model::AraSupport::default)
+        }
+    }
+
+    // Spec: ara-hosting R4
+    #[test]
+    fn an_ara_plugin_on_a_track_takes_the_clips_it_renders_from_the_player() {
+        use bl_core::time::Ticks;
+        use bl_model::{AudioData, Clip, ClipData, ContentHash, Device, DeviceKind};
+
+        let mut f = Fixture::new();
+        let audio = track(&mut f.editor, TrackKind::Audio, None);
+        let mut media = crate::MediaMap::new();
+        let file = bl_media::SampleData::new(48_000, vec![vec![0.5; 480]]).unwrap();
+        media.insert(ContentHash([1; 32]), std::sync::Arc::new(file));
+        f.compiler.registry.set_media(std::sync::Arc::new(media));
+        f.compiler.registry.add(AraDevices);
+        // One clip as it is, and one at half gain, which the plug-in can't
+        // do.
+        let plain = f.editor.new_id();
+        let quiet = f.editor.new_id();
+        let mut update = f.sync();
+        for (id, gain) in [(plain, 1.0), (quiet, 0.5)] {
+            let mut data = AudioData::new(ContentHash([1; 32]));
+            data.gain = gain;
+            update = f.apply(Command::CreateClip {
+                track: audio,
+                clip: Clip::new(id, Ticks::ZERO, Ticks::WHOLE, ClipData::Audio(data)),
+            });
+        }
+        assert_eq!(clips_in(&update, audio), Some(2));
+
+        // The plug-in arrives: the player keeps only the clip it can't play.
+        let device = f.editor.new_id();
+        let update = f.apply(Command::InsertDevice {
+            track: audio,
+            index: 0,
+            device: Device::new(
+                device,
+                "ARA",
+                DeviceKind::Native {
+                    device_type: "test.ara".to_owned(),
+                },
+            ),
+        });
+        assert_eq!(clips_in(&update, audio), Some(1));
+
+        // Switched off, it renders nothing, and the player has both again.
+        let update = f.apply(Command::SetDeviceEnabled {
+            device,
+            enabled: false,
+        });
+        assert_eq!(clips_in(&update, audio), Some(2));
+        let update = f.apply(Command::SetDeviceEnabled {
+            device,
+            enabled: true,
+        });
+        assert_eq!(clips_in(&update, audio), Some(1));
+
+        // A muted clip is nobody's, and a track that isn't an audio track
+        // has no plug-in clips to take.
+        f.apply(Command::SetClipMute {
+            clip: plain,
+            mute: true,
+        });
+        let update = f.apply(Command::SetClipMute {
+            clip: plain,
+            mute: false,
+        });
+        assert_eq!(clips_in(&update, audio), Some(1));
+    }
+
     // Spec: audio-clips R12
     #[test]
     fn clip_edits_send_the_tracks_clips_and_never_a_program() {

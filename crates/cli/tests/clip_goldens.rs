@@ -325,7 +325,7 @@ fn comp_crossfades(scene: &Scene) -> Vec<(usize, f64, f64)> {
             )
         })
         .collect();
-    found.sort_by(|a, b| a.0.cmp(&b.0));
+    found.sort_by_key(|found| found.0);
     found
 }
 

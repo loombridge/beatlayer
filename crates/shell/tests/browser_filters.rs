@@ -952,3 +952,40 @@ fn the_full_height_browser_switches_reads_back_and_survives_a_restart() {
         false
     );
 }
+
+// Spec: browser R29. `view.set_browser_width` sets the browser's width,
+// brought within 70 to 4000 points, reads it back in `view.state`, changes
+// nothing in the set, and keeps it for the next start.
+#[test]
+fn the_browser_width_is_set_within_its_limits_read_back_and_kept() {
+    let scratch = Scratch::new("browser-width");
+    let config = scratch.path("config");
+    let mut shell = shell_on(&config);
+    let width = |shell: &mut Shell| -> Value {
+        shell.run("view.state", json!({})).unwrap()["window"]["browser_width"].clone()
+    };
+    assert_eq!(width(&mut shell), 302.0);
+    let steps = shell.editor().undo_history().len();
+    let set = shell
+        .run("view.set_browser_width", json!({ "points": 420.0 }))
+        .unwrap();
+    assert_eq!(set["browser_width"], 420.0);
+    assert_eq!(width(&mut shell), 420.0);
+    shell
+        .run("view.set_browser_width", json!({ "points": 12.0 }))
+        .unwrap();
+    assert_eq!(width(&mut shell), 70.0, "never narrower than its narrowest");
+    shell
+        .run("view.set_browser_width", json!({ "points": 9000.0 }))
+        .unwrap();
+    assert_eq!(width(&mut shell), 4000.0);
+    shell
+        .run("view.set_browser_width", json!({ "points": 455.0 }))
+        .unwrap();
+    assert!(shell.run("view.set_browser_width", json!({})).is_err());
+    assert_eq!(shell.editor().undo_history().len(), steps);
+    assert!(!shell.is_dirty());
+
+    let mut relaunched = shell_on(&config);
+    assert_eq!(width(&mut relaunched), 455.0);
+}

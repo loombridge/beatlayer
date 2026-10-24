@@ -212,6 +212,12 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
                 "Option-click on a view's toggle; Cmd+Option+3 and Cmd+Option+4 show both views in turn",
             )),
         ),
+        // The browser's right edge is a splitter the keyboard reaches and
+        // the arrow keys move (browser R29).
+        (
+            "view.set_browser_width",
+            main(nothing, browser_area, "Browser Width", Key::ArrowRight),
+        ),
         (
             "view.set_detail_height",
             main(

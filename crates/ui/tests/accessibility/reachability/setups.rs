@@ -633,6 +633,15 @@ pub(crate) fn clip_view_shown(h: &mut Harness) {
 }
 
 /// The keyboard focus in the detail area, off any control.
+pub(crate) fn browser_area(h: &mut Harness) {
+    h.shell.set_focused_area(bl_shell::Area::Browser);
+    h.ctx.memory_mut(|m| {
+        if let Some(id) = m.focused() {
+            m.surrender_focus(id);
+        }
+    });
+}
+
 pub(crate) fn detail_area(h: &mut Harness) {
     h.shell.set_focused_area(bl_shell::Area::Detail);
     h.ctx.memory_mut(|m| {

@@ -140,7 +140,7 @@ Goal: a workspace that builds, tests, and packages on all three platforms; sound
 ### WP-0.14 Command registry for people and agents (M)
 
 - **Depends on:** WP-0.6.
-- **Build:** the command registry (D16, D17): every command has an ID, a label, contexts, default bindings, an argument and result schema generated from its Rust types (`schemars`), a description written for a model, and a permission class (read, edit, destructive, external). Convert WP-0.6's commands to it. `cargo xtask commands` generates `docs/commands.md`, the command reference.
+- **Build:** the command registry (D16, D17): every command has an ID, a label, contexts, default bindings, an argument and result schema generated from its Rust types (`schemars`), a description written for a model, and a permission class (read, edit, destructive, external). Convert WP-0.6's commands to it. `cargo xtask commands` generates `docs/commands/`, the command reference: an index and a file for each command namespace.
 - **Acceptance:** a test fails when a command lacks a schema, a description, or a permission class (show it failing, then passing). Every WP-0.6 command is registered. The generated reference is in sync, checked by `cargo xtask check`.
 
 ## Phase 1: Playback core (M1)

@@ -154,6 +154,10 @@ fn midi_tool_apply_by_id_with_values_and_a_seed_reads_back() {
             "velocity_shaper",
             "test_transpose",
             "test_shift",
+            "rhythm",
+            "seed",
+            "shape",
+            "euclidean",
             "test_fill"
         ]
     );
@@ -228,6 +232,7 @@ fn an_apply_that_leaves_fewer_notes_reports_fewer_notes_and_asks_first() {
         "midi_tool.set",
         "midi_tool.set_auto",
         "midi_tool.reseed",
+        "midi_tool.randomize",
     ] {
         let described = call(
             &mut client,
@@ -579,4 +584,157 @@ fn each_transformation_applies_by_id_with_a_seed_as_one_undo_step() {
             assert_eq!(&kept["values"][name], value, "{tool} {name}");
         }
     }
+}
+
+/// A clip called Keys with these notes (key, start, length) on the first MIDI
+/// track.
+fn keys_clip(client: &mut Client<InProcess>, notes: &[(u64, u64, u64)]) -> u64 {
+    let track = call(client, "query", json!({ "path": "track \"1 MIDI\"" }))["id"]
+        .as_u64()
+        .unwrap();
+    let notes: Vec<Value> = notes
+        .iter()
+        .map(|(key, start, length)| {
+            json!({ "key": key, "velocity": 100, "start": start, "length": length })
+        })
+        .collect();
+    let made = call(
+        client,
+        "run",
+        json!({ "commands": [{ "command": "clip.create", "args": {
+            "track": track,
+            "clip": { "id": { "$new": "Keys" }, "name": "Keys", "start": 0,
+                      "length": 4 * 4 * BEAT, "mute": false,
+                      "data": { "midi": { "notes": notes } } } } }] }),
+    );
+    made["ids"]["Keys"].as_u64().unwrap()
+}
+
+#[test]
+fn each_generator_applies_by_id_with_a_seed_replacing_only_the_notes_it_overlaps() {
+    // Spec: midi-generators R4 to R16, midi-tools R12. The four generators of
+    // WP-6.14 by ID, with values and a seed into a one-bar range, one undo
+    // step each; the same seed writes the same notes.
+    let originals = [
+        (60, 0, BEAT + 7),
+        (60, 2 * BEAT, BEAT + 7),
+        (61, 0, BEAT),
+        (60, 8 * BEAT, BEAT),
+    ];
+    for (tool, values, wrote) in [
+        (
+            "rhythm",
+            json!({ "pitch": 60, "steps": 8, "density": 3, "step_duration": "1/8" }),
+            Some(3),
+        ),
+        (
+            "seed",
+            json!({ "pitch_range": { "low": 60, "high": 61 }, "density": 100, "voices": 3 }),
+            None,
+        ),
+        (
+            "shape",
+            json!({ "pitch_range": { "low": 60, "high": 61 }, "rate": "1/4" }),
+            Some(4),
+        ),
+        (
+            "euclidean",
+            json!({ "steps": 8, "density": 3, "division": "1/8", "pitch_1": 60 }),
+            Some(3),
+        ),
+    ] {
+        let apply = |client: &mut Client<InProcess>, clip: u64| {
+            run(
+                client,
+                "midi_tool.apply",
+                json!({ "clip": clip, "tool": tool, "values": values, "seed": 7,
+                        "range": { "start": 0, "end": 4 * BEAT } }),
+            )
+        };
+        let mut client = app();
+        let clip = keys_clip(&mut client, &originals);
+        let before = notes(&mut client, clip);
+        let result = apply(&mut client, clip);
+        assert_eq!(result["run"]["tool"], tool);
+        assert_eq!(result["run"]["seed"], 7);
+        let after = notes(&mut client, clip);
+        let kept =
+            |(key, start, length): &(u64, u64, u64)| after.contains(&(*start, *key, *length));
+        let generated: Vec<_> = after
+            .iter()
+            .filter(|(start, key, length)| !originals.contains(&(*key, *start, *length)))
+            .collect();
+        assert!(!generated.is_empty(), "{tool} wrote notes");
+        assert_eq!(result["run"]["wrote"], generated.len(), "{tool}");
+        if let Some(wrote) = wrote {
+            assert_eq!(generated.len(), wrote, "{tool}");
+        }
+        for original in &originals {
+            let (key, start, length) = *original;
+            let overlapped = generated
+                .iter()
+                .any(|(s, k, l)| *k == key && *s < start + length && start < s + l);
+            assert_eq!(kept(original), !overlapped, "{tool}: the note {original:?}");
+        }
+        // One undo step puts the notes back.
+        run(&mut client, "edit.undo", json!({}));
+        assert_eq!(notes(&mut client, clip), before, "{tool}: undo");
+        // The same seed, the same notes.
+        let mut other = app();
+        let clip = keys_clip(&mut other, &originals);
+        apply(&mut other, clip);
+        assert_eq!(notes(&mut other, clip), after, "{tool}: the same seed");
+    }
+}
+
+#[test]
+fn the_randomise_button_sets_every_rotation_from_a_seed_and_reads_back() {
+    // Spec: midi-generators R16. `midi_tool.randomize` with a seed sets the
+    // four Rotations, the same seed the same ones, and with Auto on applies
+    // Euclidean as one undo step.
+    let rotations = |client: &mut Client<InProcess>| -> Vec<Value> {
+        let state = run(client, "midi_tool.state", json!({}));
+        let settings = state["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["tool"] == "euclidean")
+            .unwrap()
+            .clone();
+        (1..=4)
+            .map(|voice| settings["values"][format!("rotation_{voice}")].clone())
+            .collect()
+    };
+    let mut client = app();
+    let clip = keys_clip(&mut client, &[(61, 0, BEAT)]);
+    let before = notes(&mut client, clip);
+    let result = run(
+        &mut client,
+        "midi_tool.randomize",
+        json!({ "clip": clip, "seed": 3 }),
+    );
+    assert_eq!(result["run"]["tool"], "euclidean");
+    let first = rotations(&mut client);
+    assert!(
+        first.iter().all(|r| r.as_u64().is_some_and(|r| r < 16)),
+        "{first:?}"
+    );
+    assert!(
+        notes(&mut client, clip).len() > before.len(),
+        "Auto applied it"
+    );
+    run(&mut client, "edit.undo", json!({}));
+    assert_eq!(notes(&mut client, clip), before, "one undo step");
+    run(
+        &mut client,
+        "midi_tool.randomize",
+        json!({ "clip": clip, "seed": 3 }),
+    );
+    assert_eq!(rotations(&mut client), first, "the same seed");
+    run(
+        &mut client,
+        "midi_tool.randomize",
+        json!({ "clip": clip, "seed": 4 }),
+    );
+    assert_ne!(rotations(&mut client), first, "another seed");
 }

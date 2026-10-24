@@ -81,7 +81,11 @@ fn r3_the_registry_lists_each_kind_apart() {
         ],
         "the native tools in the selector's order, then the test tools"
     );
-    assert_eq!(generators, ["test_fill"]);
+    assert_eq!(
+        generators,
+        ["rhythm", "seed", "shape", "euclidean", "test_fill"],
+        "the native generators in the selector's order, then the test tool"
+    );
     assert!(
         registry
             .get(ToolKind::Generator, "test_transpose")

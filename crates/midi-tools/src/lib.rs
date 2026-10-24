@@ -17,6 +17,7 @@ mod arpeggiate;
 mod chop;
 mod connect;
 mod descriptor;
+mod euclidean;
 mod glissando;
 mod input;
 mod lfo;
@@ -25,6 +26,9 @@ mod quantize;
 mod random;
 mod recombine;
 mod registry;
+mod rhythm;
+mod seed;
+mod shape;
 mod span;
 mod strum;
 mod style;
@@ -39,6 +43,10 @@ pub use descriptor::{
     Breakpoint, ChoiceOption, DIVISION_NAMES, ParamKind, ParamSpec, ParamValue, ToolDescriptor,
     ToolKind, division_ticks,
 };
+pub use euclidean::{
+    MAX_STEPS as EUCLIDEAN_MAX_STEPS, VOICES as EUCLIDEAN_VOICES, euclid, random_rotations,
+    rotation_id,
+};
 pub use input::{ToolInput, ToolNote, ToolOutput, ToolPoint, ToolScale, fold_octaves};
 pub use lfo::lfo_curve;
 pub use quantize::{GRIDS as QUANTIZE_GRIDS, grid_ticks};
@@ -46,8 +54,11 @@ pub use random::Rng;
 pub use registry::{
     GENERATOR_ORDER, MAX_NOTES, MidiTool, Registry, TRANSFORMATION_ORDER, ToolError, run,
 };
+pub use rhythm::{MAX_STEPS as RHYTHM_MAX_STEPS, pattern_count, rhythm_steps};
+pub use shape::{LEVELS as SHAPE_LEVELS, preset_levels};
 pub use strum::strum_position;
 pub use style::{
     CHORD_TRIGGER, PLAY_ORDER, RANDOM, RANDOM_ONCE, RANDOM_OTHER, STYLE_NAMES, style_order,
 };
+pub use value::{key_name, parse_key};
 pub use velocity_shaper::ENVELOPE_POINTS;

@@ -8,12 +8,16 @@ use crate::arpeggiate::Arpeggiate;
 use crate::chop::Chop;
 use crate::connect::Connect;
 use crate::descriptor::{ParamValue, ToolDescriptor, ToolKind};
+use crate::euclidean::Euclidean;
 use crate::glissando::Glissando;
 use crate::input::{ToolInput, ToolOutput, fold_octaves};
 use crate::lfo::Lfo;
 use crate::ornament::Ornament;
 use crate::quantize::Quantize;
 use crate::recombine::Recombine;
+use crate::rhythm::Rhythm;
+use crate::seed::Seed;
+use crate::shape::Shape;
 use crate::span::Span;
 use crate::strum::Strum;
 use crate::time_warp::TimeWarp;
@@ -166,6 +170,10 @@ fn native_tools() -> Vec<Box<dyn MidiTool>> {
         Box::new(Strum::new()),
         Box::new(TimeWarp::new()),
         Box::new(VelocityShaper::new()),
+        Box::new(Rhythm::new()),
+        Box::new(Seed::new()),
+        Box::new(Shape::new()),
+        Box::new(Euclidean::new()),
     ]
 }
 

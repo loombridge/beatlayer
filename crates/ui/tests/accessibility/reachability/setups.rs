@@ -713,6 +713,18 @@ pub(crate) fn midi_tools_lfo_random(h: &mut Harness) {
         .unwrap();
 }
 
+/// The same, with the Generate panel showing Euclidean, whose Pattern tab
+/// has the randomise button.
+pub(crate) fn euclidean_shown(h: &mut Harness) {
+    midi_tools_shown(h);
+    h.shell
+        .run("midi_tool.choose", json!({ "tool": "euclidean" }))
+        .unwrap();
+    h.shell
+        .run("clip_view.show_panel", json!({ "panel": "generate" }))
+        .unwrap();
+}
+
 pub(crate) fn plugin_list(h: &mut Harness) {
     h.shell
         .run("view.toggle_plugin_list", json!({}))

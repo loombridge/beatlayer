@@ -41,9 +41,12 @@ pub const APPLY: &str = "midi_tool.apply";
 /// again.
 pub const RESEED: &str = "midi_tool.reseed";
 
+/// `midi_tool.randomize`: set every voice's Rotation of Euclidean at random.
+pub const RANDOMIZE: &str = "midi_tool.randomize";
+
 /// Every command [`register`] adds.
 pub const IDS: &[&str] = &[
-    LIST, STATE, SHOW_PANEL, CLOSE, CHOOSE, SET, SET_AUTO, RESET, APPLY, RESEED,
+    LIST, STATE, SHOW_PANEL, CLOSE, CHOOSE, SET, SET_AUTO, RESET, APPLY, RESEED, RANDOMIZE,
 ];
 
 /// Whether `id` is one of the MIDI Tools' commands.
@@ -362,6 +365,18 @@ pub struct ReseedArgs {
     pub seed: Option<u32>,
 }
 
+/// Arguments of `midi_tool.randomize`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RandomizeArgs {
+    /// The MIDI clip. Left out, the one the Clip View shows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<ClipId>,
+    /// The seed, from 0 to 4294967295. Left out, a new one is drawn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seed: Option<u32>,
+}
+
 /// Adds the MIDI Tools' commands to a registry.
 ///
 /// # Errors
@@ -518,6 +533,17 @@ fn specs() -> Vec<CommandSpec> {
              leave the clip fewer notes asks first. Read the seed in `midi_tool.state`.",
         )
         .args::<ReseedArgs>(),
+        tool(
+            RANDOMIZE,
+            "Randomize Euclidean Rotations",
+            Permission::Edit,
+            "Sets the Rotation of every voice of Euclidean to a random value from 0 to Steps - \
+             1, as the Pattern tab's randomise button does. `seed` (0 to 4294967295) makes the \
+             draw repeatable; left out, a new one is drawn. With Euclidean's Auto switch on it \
+             applies at once, like `midi_tool.set`. Changes no notes by itself and is no undo \
+             step; read the Rotations back in `midi_tool.state`.",
+        )
+        .args::<RandomizeArgs>(),
     ]
 }
 

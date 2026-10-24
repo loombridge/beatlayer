@@ -12,7 +12,9 @@
 //! package (WP-6.16) and is drawn empty. The rules are in the MIDI Tools
 //! spec.
 
-use bl_midi_tools::{DIVISION_NAMES, ParamKind, ParamSpec, ParamValue, ToolDescriptor, ToolKind};
+use bl_midi_tools::{
+    DIVISION_NAMES, ParamKind, ParamSpec, ParamValue, ToolDescriptor, ToolKind, parse_key,
+};
 use bl_model::{ClipId, ParamDescriptor, ParamId, ParamUnit};
 use bl_shell::midi_tool_commands::Panel;
 use bl_shell::midi_tools::ToolView;
@@ -21,6 +23,7 @@ use egui::accesskit::{self, Role};
 use egui::{Align2, Id, Key, Pos2, Rect, Sense, Ui, Vec2, WidgetInfo, WidgetType, pos2, vec2};
 use serde_json::{Value, json};
 
+use crate::clip_view::key_name;
 use crate::main_window::{InfoViewContent, UiEvent};
 use crate::theme::Theme;
 use crate::widgets::{self, Choice, NO_LEDS};
@@ -139,7 +142,7 @@ fn info_id() -> Id {
 }
 
 /// Says what the pointer is over, for the Info View.
-fn control_info(ui: &Ui, spec: &ParamSpec) {
+pub(crate) fn control_info(ui: &Ui, spec: &ParamSpec) {
     ui.ctx().data_mut(|d| {
         d.insert_temp(
             info_id(),
@@ -211,7 +214,14 @@ pub fn show(
 }
 
 /// A button drawn in place: returns whether it was clicked.
-fn button(ui: &mut Ui, theme: &Theme, salt: &str, rect: Rect, text: &str, enabled: bool) -> bool {
+pub(crate) fn button(
+    ui: &mut Ui,
+    theme: &Theme,
+    salt: &str,
+    rect: Rect,
+    text: &str,
+    enabled: bool,
+) -> bool {
     button_named(ui, theme, salt, rect, text, text, enabled)
 }
 
@@ -344,7 +354,9 @@ fn tools(
         .map(|spec| spec.id.as_str())
         .filter(|id| !drawn.hidden.contains(id))
         .collect();
-    y = parameters(ui, theme, rect, y, clip, &view, Some(&only), events);
+    // With no display, a generator draws its own among its controls.
+    let only = (!drawn.hidden.is_empty()).then_some(only.as_slice());
+    y = parameters(ui, shell, theme, rect, y, clip, &view, only, events);
     if descriptor.id == "lfo" {
         y = lfo_curve(ui, theme, rect, y, clip, &view.values, events);
     }
@@ -419,6 +431,7 @@ fn tools(
 #[expect(clippy::too_many_arguments, reason = "a panel's whole context")]
 fn parameters(
     ui: &mut Ui,
+    shell: &Shell,
     theme: &Theme,
     rect: Rect,
     mut y: f32,
@@ -428,6 +441,12 @@ fn parameters(
     events: &mut Vec<UiEvent>,
 ) -> f32 {
     let descriptor = view.descriptor;
+    // The generators draw their own displays among their controls.
+    if only.is_none()
+        && let Some(y) = crate::generator_panel::rows(ui, shell, theme, rect, y, clip, view, events)
+    {
+        return y;
+    }
     let left = rect.left() + 6.0;
     for (index, spec) in descriptor.parameters.iter().enumerate() {
         let Some(value) = view.values.get(index) else {
@@ -451,7 +470,7 @@ fn parameters(
             continue;
         }
         let at = Rect::from_min_size(pos2(rect.left() + CONTROLS_AT, y), CONTROL);
-        let shown = chop_gaps_text(view, spec);
+        let shown = chop_gaps_text(view, spec).map(str::to_owned);
         let enabled = available(descriptor, spec, &view.values);
         control(
             ui,
@@ -539,7 +558,7 @@ fn lfo_curve(
 /// for the value, and whether it can be used.
 pub(crate) struct Shown {
     pub(crate) at: Rect,
-    pub(crate) text: Option<&'static str>,
+    pub(crate) text: Option<String>,
     pub(crate) enabled: bool,
 }
 
@@ -668,6 +687,7 @@ pub fn show_audio_transform(
     let body = Rect::from_min_max(pos2(rect.left(), rect.top() + SELECTOR + 4.0), rect.max);
     let y = parameters(
         ui,
+        shell,
         theme,
         body,
         body.top(),
@@ -693,7 +713,12 @@ pub fn show_audio_transform(
 }
 
 /// The `midi_tool.set` for one parameter.
-fn set(clip: ClipId, tool: &ToolDescriptor, spec: &ParamSpec, value: Value) -> Invocation {
+pub(crate) fn set(
+    clip: ClipId,
+    tool: &ToolDescriptor,
+    spec: &ParamSpec,
+    value: Value,
+) -> Invocation {
     Invocation::new(
         bl_shell::midi_tool_commands::SET,
         json!({ "clip": clip, "tool": tool.id, "values": { spec.id.clone(): value } }),
@@ -702,7 +727,7 @@ fn set(clip: ClipId, tool: &ToolDescriptor, spec: &ParamSpec, value: Value) -> I
 
 /// A number-like parameter as the device framework describes one: the
 /// framework's descriptor gives its range, its steps and how it reads.
-fn framework_descriptor(spec: &ParamSpec) -> Option<(ParamDescriptor, f64)> {
+pub(crate) fn framework_descriptor(spec: &ParamSpec) -> Option<(ParamDescriptor, f64)> {
     let id = ParamId(0);
     let unit = match spec.unit.as_deref() {
         Some("%") => ParamUnit::Percent,
@@ -766,13 +791,147 @@ fn framework_descriptor(spec: &ParamSpec) -> Option<(ParamDescriptor, f64)> {
 }
 
 /// A number as the JSON `midi_tool.set` takes for a parameter of this kind.
-fn json_of(spec: &ParamSpec, value: f64) -> Value {
+pub(crate) fn json_of(spec: &ParamSpec, value: f64) -> Value {
     match &spec.kind {
         ParamKind::Whole { .. } => json!(value.round() as i64),
         ParamKind::Pitch => json!(value.round() as u8),
         ParamKind::Division => json!(DIVISION_NAMES.get(value.round() as usize)),
         _ => json!(value),
     }
+}
+
+/// The `midi_tool.set` that Option-clicking or Option-dragging the piano
+/// ruler from key `from` to key `to` makes (the MIDI generators spec, R2): the
+/// shown Rhythm's Pitch, or the range of Seed or Shape. `None` unless the
+/// Generate panel shows one of them.
+pub(crate) fn ruler_set(shell: &Shell, clip: ClipId, from: u8, to: u8) -> Option<Invocation> {
+    let tools = shell.clip_view().midi_tools();
+    if tools.panel() != Panel::Generate {
+        return None;
+    }
+    let track = shell.editor().document().clip_track(clip);
+    let tool = tools.chosen(track, ToolKind::Generator)?.descriptor();
+    let (spec, value) = match tool.id.as_str() {
+        "rhythm" => (tool.parameter("pitch")?.1, json!(to)),
+        "seed" | "shape" => (
+            tool.parameter("pitch_range")?.1,
+            json!({ "low": from.min(to), "high": from.max(to) }),
+        ),
+        _ => return None,
+    };
+    Some(set(clip, tool, spec, value))
+}
+
+/// Ends the gesture a drag on a tool's control ran, if it ran: committed, or
+/// cancelled when Esc ended the drag (egui stops it as a release), which puts
+/// the notes back as they were before it.
+pub(crate) fn end_gesture(ui: &Ui, ran: bool, events: &mut Vec<UiEvent>) {
+    let escaped = ui.input(|i| i.key_pressed(Key::Escape));
+    if ran {
+        events.push(UiEvent::Gesture {
+            phase: if escaped {
+                GesturePhase::Cancel
+            } else {
+                GesturePhase::Commit
+            },
+            invocation: None,
+        });
+        if escaped {
+            ui.ctx().data_mut(|d| d.insert_temp(escape_id(), true));
+        }
+    }
+}
+
+/// What ties a value control to the parameter it sets: the salt that keeps
+/// its ID apart from the others of the same parameter, how a value becomes
+/// the JSON `midi_tool.set` takes, and whether it is a pitch, which shows by
+/// name and takes a typed name or number.
+pub(crate) struct Binding<'a> {
+    pub(crate) salt: &'a str,
+    pub(crate) json: &'a dyn Fn(f64) -> Value,
+    pub(crate) pitch: bool,
+}
+
+/// What a key press or typed text did to the entry of a pitch control.
+enum Typed {
+    Text(String),
+    Backspace,
+    Enter,
+    Escape,
+}
+
+/// The note name or number being typed into the pitch control `id` while it
+/// has the keyboard: typed text builds it, Backspace takes a character off,
+/// Enter hands the key it reads as to `commit`, and Esc drops it. Returns the
+/// entry so far.
+fn typing(ui: &Ui, entry: Id, focused: bool, commit: &mut dyn FnMut(u8)) -> Option<String> {
+    let mut text = ui.data(|d| d.get_temp::<String>(entry));
+    if !focused {
+        if text.is_some() {
+            ui.data_mut(|d| d.remove::<String>(entry));
+        }
+        return None;
+    }
+    let started = text.is_some();
+    let taken: Vec<Typed> = ui.input_mut(|i| {
+        let mut taken = Vec::new();
+        i.events.retain(|event| match event {
+            egui::Event::Text(typed) if !typed.chars().any(char::is_control) => {
+                taken.push(Typed::Text(typed.clone()));
+                false
+            }
+            egui::Event::Key {
+                key,
+                pressed: true,
+                modifiers,
+                ..
+            } if (started || !taken.is_empty()) && !modifiers.command && !modifiers.ctrl => {
+                let typed = match key {
+                    Key::Backspace => Typed::Backspace,
+                    Key::Enter => Typed::Enter,
+                    Key::Escape => Typed::Escape,
+                    _ => return true,
+                };
+                taken.push(typed);
+                false
+            }
+            _ => true,
+        });
+        taken
+    });
+    for typed in taken {
+        match typed {
+            Typed::Text(more) => {
+                let text = text.get_or_insert_with(String::new);
+                if text.len() < 8 {
+                    text.push_str(&more);
+                }
+            }
+            Typed::Backspace => {
+                if let Some(text) = &mut text {
+                    text.pop();
+                }
+                if text.as_deref() == Some("") {
+                    text = None;
+                }
+            }
+            Typed::Enter => {
+                if let Some(key) = text.take().and_then(|text| parse_key(&text)) {
+                    commit(key);
+                }
+            }
+            Typed::Escape => text = None,
+        }
+    }
+    ui.data_mut(|d| match &text {
+        Some(text) => {
+            d.insert_temp(entry, text.clone());
+        }
+        None => {
+            d.remove::<String>(entry);
+        }
+    });
+    text
 }
 
 /// A value being dragged: where it started in its range, and how far the
@@ -929,46 +1088,13 @@ pub(crate) fn control(
             }
         }
         (ParamKind::PitchRange, ParamValue::PitchRange { low, high }) => {
-            let half = (rect.width() - 4.0) / 2.0;
-            for (index, (name, shown)) in [("low", *low), ("high", *high)].into_iter().enumerate() {
-                let part = Rect::from_min_size(
-                    rect.min + vec2((half + 4.0) * index as f32, 0.0),
-                    vec2(half, rect.height()),
-                );
-                let id = format!("{salt}-{name}");
-                crate::focus::register(
-                    ui.ctx(),
-                    Id::new(("number-box", id.as_str())),
-                    Area::Detail,
-                    None,
-                );
-                if let Some(next) = widgets::number_box(
-                    ui,
-                    theme,
-                    &id,
-                    &format!("{} {name}", spec.name),
-                    part,
-                    f64::from(shown),
-                    (0.0, 127.0),
-                    &|value, steps| value + f64::from(steps),
-                    &shown.to_string(),
-                ) {
-                    let (low, high) = if name == "low" {
-                        (next as u8, (*high).max(next as u8))
-                    } else {
-                        ((*low).min(next as u8), next as u8)
-                    };
-                    events.push(UiEvent::Invoke(set(
-                        clip,
-                        tool,
-                        spec,
-                        json!({ "low": low, "high": high }),
-                    )));
-                }
-            }
+            pitch_range_boxes(ui, theme, clip, tool, spec, (*low, *high), rect, events);
         }
         _ => match framework_descriptor(spec).zip(number_of(value)) {
             Some(((descriptor, _), shown)) => {
+                let pitch = matches!(spec.kind, ParamKind::Pitch);
+                let name = pitch.then(|| key_name(shown as u8));
+                let json = |value: f64| json_of(spec, value);
                 value_control(
                     ui,
                     theme,
@@ -977,7 +1103,12 @@ pub(crate) fn control(
                     spec,
                     &descriptor,
                     shown,
-                    (rect, shown_text),
+                    (rect, shown_text.or(name).as_deref()),
+                    Binding {
+                        salt: &spec.id,
+                        json: &json,
+                        pitch,
+                    },
                     events,
                 );
             }
@@ -991,8 +1122,62 @@ pub(crate) fn control(
     }
 }
 
+/// A pitch range's two ends as pitch controls, the low and the high; setting
+/// one past the other moves the other with it (the MIDI generators spec, R8).
+#[expect(clippy::too_many_arguments, reason = "a control's whole context")]
+fn pitch_range_boxes(
+    ui: &mut Ui,
+    theme: &Theme,
+    clip: ClipId,
+    tool: &ToolDescriptor,
+    spec: &ParamSpec,
+    (low, high): (u8, u8),
+    rect: Rect,
+    events: &mut Vec<UiEvent>,
+) {
+    let half = (rect.width() - 4.0) / 2.0;
+    for (index, name) in ["low", "high"].into_iter().enumerate() {
+        let part = Rect::from_min_size(
+            rect.min + vec2((half + 4.0) * index as f32, 0.0),
+            vec2(half, rect.height()),
+        );
+        let shown = if index == 0 { low } else { high };
+        let descriptor = ParamDescriptor::integer(
+            ParamId(0),
+            &format!("{} {name}", spec.name),
+            (0, 127),
+            i64::from(shown),
+            ParamUnit::None,
+        );
+        let json = |value: f64| {
+            let key = value.round() as u8;
+            if index == 0 {
+                json!({ "low": key, "high": high.max(key) })
+            } else {
+                json!({ "low": low.min(key), "high": key })
+            }
+        };
+        value_control(
+            ui,
+            theme,
+            clip,
+            tool,
+            spec,
+            &descriptor,
+            f64::from(shown),
+            (part, Some(&key_name(shown))),
+            Binding {
+                salt: &format!("{}-{name}", spec.id),
+                json: &json,
+                pitch: true,
+            },
+            events,
+        );
+    }
+}
+
 /// A number-like value as a number.
-fn number_of(value: &ParamValue) -> Option<f64> {
+pub(crate) fn number_of(value: &ParamValue) -> Option<f64> {
     match value {
         ParamValue::Number(n) => Some(*n),
         ParamValue::Whole(n) => Some(*n as f64),
@@ -1021,7 +1206,7 @@ fn display_data(ui: &mut Ui, theme: &Theme, spec: &ParamSpec, rect: Rect) {
 /// drag is a gesture of `midi_tool.set`, so it is one undo step and Esc puts
 /// the notes back.
 #[expect(clippy::too_many_arguments, reason = "a control's whole context")]
-fn value_control(
+pub(crate) fn value_control(
     ui: &mut Ui,
     theme: &Theme,
     clip: ClipId,
@@ -1030,13 +1215,14 @@ fn value_control(
     descriptor: &ParamDescriptor,
     value: f64,
     (rect, shown_text): (Rect, Option<&str>),
+    bind: Binding<'_>,
     events: &mut Vec<UiEvent>,
 ) {
-    let id = Id::new(("tool-value", &tool.id, &spec.id));
+    let id = Id::new(("tool-value", &tool.id, bind.salt));
     let response = ui.interact(rect, id, Sense::click_and_drag());
     crate::focus::register(ui.ctx(), id, Area::Detail, None);
     let drag_id = id.with("drag");
-    let invoke = |value: f64| set(clip, tool, spec, json_of(spec, descriptor.clamp(value)));
+    let invoke = |value: f64| set(clip, tool, spec, (bind.json)(descriptor.clamp(value)));
     if response.clicked() || response.drag_started() {
         response.request_focus();
     }
@@ -1083,22 +1269,7 @@ fn value_control(
         let drag = ui
             .data_mut(|d| d.remove_temp::<Drag>(drag_id))
             .unwrap_or_default();
-        // Esc ends a drag too (egui stops it as a release): the notes go
-        // back as they were before it.
-        let escaped = ui.input(|i| i.key_pressed(Key::Escape));
-        if drag.ran {
-            events.push(UiEvent::Gesture {
-                phase: if escaped {
-                    GesturePhase::Cancel
-                } else {
-                    GesturePhase::Commit
-                },
-                invocation: None,
-            });
-            if escaped {
-                ui.ctx().data_mut(|d| d.insert_temp(escape_id(), true));
-            }
-        }
+        end_gesture(ui, drag.ran, events);
     }
     // Arrow keys and a screen reader's steps, and a double-click for the
     // default.
@@ -1120,6 +1291,15 @@ fn value_control(
             i32::from(i.key_pressed(Key::ArrowUp)) - i32::from(i.key_pressed(Key::ArrowDown))
         });
     }
+    // A pitch takes a typed note name or number (the MIDI generators spec,
+    // R3); the keys then go to it, not to shortcuts.
+    let typed = bind.pitch.then(|| {
+        ui.data_mut(|d| d.insert_temp(id.with("typed-field"), true));
+        typing(ui, id.with("typing"), response.has_focus(), &mut |key| {
+            events.push(UiEvent::Invoke(invoke(f64::from(key))));
+        })
+    });
+    let typed = typed.flatten();
     let delete = response.has_focus()
         && ui.input(|i| i.key_pressed(Key::Delete) || i.key_pressed(Key::Backspace));
     if response.double_clicked() || delete {
@@ -1159,6 +1339,7 @@ fn value_control(
     );
     painter.rect_filled(fill, theme.sizes.corner, c.accent.0.gamma_multiply(0.35));
     let text = match (&spec.unit, shown_text) {
+        _ if typed.is_some() => format!("{}_", typed.unwrap_or_default()),
         (_, Some(text)) => text.to_owned(),
         (Some(unit), None) if !matches!(unit.as_str(), "%" | "st") => {
             format!("{} {unit}", descriptor.format(value))
@@ -1180,10 +1361,10 @@ fn value_control(
             egui::StrokeKind::Outside,
         );
     }
-    response.widget_info(|| WidgetInfo::slider(true, value, &spec.name));
+    response.widget_info(|| WidgetInfo::slider(true, value, &descriptor.name));
     ui.ctx().accesskit_node_builder(id, |node| {
         node.set_role(Role::SpinButton);
-        node.set_label(spec.name.clone());
+        node.set_label(descriptor.name.clone());
         node.set_value(text);
         node.set_numeric_value(value);
         node.set_min_numeric_value(descriptor.min());

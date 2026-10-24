@@ -36,9 +36,9 @@ A shortcut applies in its context. The same keys may mean different things in di
 | [`take-lanes`](#take-lanes) | A take lane is selected in the Arrangement. | 6 |
 | [`loop-brace`](#loop-brace) | A loop brace or a clip start or end marker is selected, or a multi-clip loop bar. | 11 |
 | [`envelope`](#envelope) | An automation lane or the Clip View's Envelope Editor has focus. | 17 |
-| [`clip-view`](#clip-view) | The Clip View has focus, whichever editor it shows. | 9 |
+| [`clip-view`](#clip-view) | The Clip View has focus, whichever editor it shows. | 10 |
 | [`sample-editor`](#sample-editor) | The Clip View shows an audio clip's Sample Editor. | 16 |
-| [`note-editor`](#note-editor) | The Clip View shows a MIDI clip's MIDI Note Editor. | 42 |
+| [`note-editor`](#note-editor) | The Clip View shows a MIDI clip's MIDI Note Editor. | 41 |
 | [`note-selection`](#note-selection) | Notes are selected in the MIDI Note Editor. | 16 |
 | [`device-view`](#device-view) | The Device View has focus. | 12 |
 | [`rack-chains`](#rack-chains) | A rack's chain list has focus. | 1 |
@@ -390,6 +390,7 @@ The Clip View has focus, whichever editor it shows.
 | S-LOOP-002 | Set the loop start at the play position | `Cmd+F10` | `Ctrl+F10` | key | press | M2 | manual 42.8; Live 12 release notes, 12.0 |
 | S-LOOP-003 | Set the loop end at the play position | `Cmd+F11` | `Ctrl+F11` | key | press | M2 | manual 42.8; Live 12 release notes, 12.0 |
 | S-LOOP-004 | Set the clip end marker at the play position | `Cmd+F12` | `Ctrl+F12` | key | press | M2 | manual 42.8; Live 12 release notes, 12.0 |
+| S-CLIPMODE-002 | Cycle the Notes, Envelopes and MPE tabs (unconfirmed) | `Option+Tab` | `Ctrl+Tab` | key | press | M3 | manual 42.10 |
 | S-CLIPMODE-003 | Show the Content Editor (the Sample or Notes tab) | `Option+Shift+1` | `Alt+Shift+1` | key | press | M2 | manual 42.10; observed in 12.4.3 (macOS), 10 October 2026: View menu |
 | S-CLIPMODE-004 | Show the Envelope Editor (the Envelopes tab) | `Option+Shift+2` | `Alt+Shift+2` | key | press | M3 | manual 42.10; observed in 12.4.3 (macOS), 10 October 2026: View menu |
 | S-CLIPMODE-005 | Show the Expression Editor (the MPE tab) | `Option+Shift+3` | `Alt+Shift+3` | key | press | M6 | manual 42.10; observed in 12.4.3 (macOS), 10 October 2026: View menu |
@@ -425,7 +426,6 @@ The Clip View shows a MIDI clip's MIDI Note Editor.
 
 | ID | Action | macOS | Windows | Kind | Trigger | Milestone | Source |
 |---|---|---|---|---|---|---|---|
-| S-CLIPMODE-002 | Cycle the Notes, Envelopes and MPE tabs (unconfirmed) | `Option+Tab` | `Ctrl+Tab` | key | press | M3 | manual 42.10 |
 | S-NOTE-001 | Select all notes | `Cmd+A` | `Ctrl+A` | key | press | M2 | manual 42.12 |
 | S-NOTE-002 | Copy notes by dragging | Option+drag | Ctrl+drag | mouse | press | M2 | manual 42.12 |
 | S-NOTE-003 | Chop the selected notes on the grid, or split them at the time selection's edges | `Cmd+E` | `Ctrl+E` | key | press | M6 | manual 42.12 |

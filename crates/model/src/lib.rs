@@ -67,6 +67,7 @@ mod changes;
 mod clip;
 mod clip_param;
 mod colour;
+mod column_widths;
 mod command;
 pub mod comp;
 mod device;
@@ -103,8 +104,10 @@ mod sample_edits;
 mod scale;
 mod scene;
 mod shared;
+mod spelling;
 mod track;
 mod tuning;
+pub mod vst3_state;
 mod warp;
 mod warp_settings;
 mod window_views;
@@ -131,6 +134,7 @@ pub use clip::{
     consolidated_midi, crossfades, fade_power,
 };
 pub use clip_param::ClipParam;
+pub use column_widths::{ColumnWidths, MAX_COLUMN_WIDTH, MIN_COLUMN_WIDTH, clamp_column_width};
 pub use command::{Command, tempo_shape, write_tempo_shape};
 pub use device::{
     Device, DeviceKind, DeviceRole, DeviceWarp, DeviceWindows, MAX_MEDIA_SLOTS, MidiSidechain,
@@ -147,7 +151,7 @@ pub use mpe_settings::{MAX_NOTE_CHANNELS, MpeMode, MpeSettings, MpeZone, PluginM
 pub use mpe_view::{DEFAULT_LANE_HEIGHT, MpeLane, MpeView};
 pub use note_expression::Expression;
 pub mod freeze;
-pub use colour::{SWATCHES, TRACK_COLOURS, id_swatch};
+pub use colour::{DEFAULT_TRACK_PALETTE, SWATCHES, TRACK_COLOURS, id_swatch, swatch_rgb};
 pub use external::{
     External, ExternalPort, HardwareLatency, MAX_HARDWARE_LATENCY_MS, MAX_HARDWARE_LATENCY_SAMPLES,
 };
@@ -187,6 +191,7 @@ pub use repr::{SavedSong, saved_schema};
 pub use sample_edits::{SampleEdit, SampleEditKind, SampleRange};
 pub use scale::{CHROMATIC, Scale, ScaleName};
 pub use scene::{DEFAULT_SCENE_COUNT, SCENE_TEMPO_MAX, SCENE_TEMPO_MIN, Scene};
+pub use spelling::NoteSpelling;
 pub use track::{
     Channel, CrossfadeAssign, DeviceOutput, Input, MAX_TRACK_DELAY_MS, MAX_TRACK_DELAY_SAMPLES,
     MidiTo, Mixer, Monitor, Output, PanMode, Routing, SendTap, Tap, Track, TrackDelay, TrackKind,

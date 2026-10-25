@@ -128,6 +128,14 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             )),
         ),
         (
+            "transport.scrub",
+            Exception(Equivalent(
+                "a press or hold in the scrub area or the beat-time ruler; the keyboard plays \
+                 from a point with Play and Tab to a locator, which Enter jumps to (time \
+                 editing R5, R12)",
+            )),
+        ),
+        (
             "edit.go_to_step",
             Exception(Equivalent(
                 "the Undo History panel's rows: click one, or move to it with the arrow keys \
@@ -231,6 +239,14 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             )),
         ),
         ("view.lane", Exception(NOTE_EDITOR)),
+        // The piano ruler's context menu (C-KEYS) is opened by the pointer;
+        // the ruler takes no keyboard focus yet.
+        (
+            "view.note_spelling",
+            Exception(Unobserved(
+                "the piano ruler's context menu, which the pointer opens; whether Live's ruler has a keyboard path isn't observed",
+            )),
+        ),
         ("view.lanes", Exception(NOTE_FOOTER)),
         // The MPE tab's lane toggles are switches Tab reaches (the MPE spec,
         // R34).

@@ -149,13 +149,16 @@ fn the_track_controls_are_view_state() {
     assert!(!shell.editor().can_undo(), "nor is it an undo step");
     // The mixers' own sections don't change (R20).
     let mixer = shell.run("mixer_view.state", json!({})).unwrap();
-    assert!(
-        mixer["in_out"].as_bool().unwrap()
-            && mixer["sends"].as_bool().unwrap()
-            && mixer["volume"].as_bool().unwrap()
-            && mixer["return_tracks"].as_bool().unwrap(),
-        "{mixer}"
-    );
+    for view in ["session", "arrangement"] {
+        let mixer = &mixer[view];
+        assert!(
+            mixer["in_out"].as_bool().unwrap()
+                && mixer["sends"].as_bool().unwrap()
+                && mixer["volume"].as_bool().unwrap()
+                && mixer["return_tracks"].as_bool().unwrap(),
+            "{mixer}"
+        );
+    }
 }
 
 #[test]

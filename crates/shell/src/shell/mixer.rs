@@ -88,6 +88,15 @@ impl Shell {
     pub fn set_meters(&mut self, meters: &[bl_engine::TrackMeter]) {
         self.meters.clear();
         self.meters.extend_from_slice(meters);
+        self.observe_peaks();
+    }
+
+    /// Hands the mixers the meters as they stand, with the time the shell's
+    /// clock reads (the test clock's, when there is one), for the peaks they
+    /// hold (the mixer view spec, R33, R34).
+    pub(super) fn observe_peaks(&mut self) {
+        let now = self.midi.now();
+        self.mixer.observe_peaks(&self.meters, now);
     }
 
     /// Sets the chains processing, for a host with no engine and for tests;

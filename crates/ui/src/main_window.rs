@@ -1532,6 +1532,7 @@ impl MainWindowUi {
                         shell,
                         theme,
                         mixer,
+                        rect,
                         bl_shell::mixer_view::MixerOf::Arrangement,
                         events,
                     );
@@ -1959,13 +1960,12 @@ fn look(element: Element, shell: &Shell, window: WindowKind) -> Look {
         }
         Element::RootNote => {
             let display = shell.scale_display();
-            let name = display.root.map_or("*", bl_model::Scale::root_name);
+            let name = display
+                .root
+                .map_or_else(|| "*".to_owned(), |root| shell.root_name(root));
             Look {
-                text: Some(name.to_owned()),
-                value: Some(display.root.map_or_else(
-                    || "mixed".to_owned(),
-                    |root| bl_model::Scale::root_name(root).to_owned(),
-                )),
+                text: Some(name.clone()),
+                value: Some(display.root.map_or_else(|| "mixed".to_owned(), |_| name)),
                 description: Some("The root note of the scale.".to_owned()),
                 ..Look::default()
             }
@@ -2278,8 +2278,7 @@ fn scale_command(shell: &Shell, change: &[(&str, serde_json::Value)]) -> Invocat
 fn root_note_menu(ui: &mut egui::Ui, shell: &Shell, events: &mut Vec<UiEvent>) {
     let display = shell.scale_display();
     for root in 0..12u8 {
-        let item =
-            ui.selectable_label(display.root == Some(root), bl_model::Scale::root_name(root));
+        let item = ui.selectable_label(display.root == Some(root), shell.root_name(root));
         if item.clicked() {
             events.push(UiEvent::Invoke(scale_command(
                 shell,

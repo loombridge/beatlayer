@@ -97,6 +97,16 @@ fn the_transport_passes_under_rtsan() {
             15 => Some(TransportCommand::Stop),
             16 => Some(TransportCommand::Continue),
             20 => Some(TransportCommand::QuantizedLocate(Ticks::WHOLE * 2)),
+            // A held scrub loop beside the Arrangement loop (the transport
+            // spec, R23): pressed and released while the song plays or is stopped.
+            5 | 33 => Some(TransportCommand::Scrub {
+                point: Ticks::WHOLE * 2 + Ticks::QUARTER,
+                held: true,
+            }),
+            10 | 35 => Some(TransportCommand::Scrub {
+                point: Ticks::WHOLE * 2 + Ticks::QUARTER,
+                held: false,
+            }),
             25 => Some(TransportCommand::InsertMarkerToPlayhead),
             30 => Some(TransportCommand::PlayStop),
             31 => Some(TransportCommand::Stop),

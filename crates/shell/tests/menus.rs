@@ -142,6 +142,9 @@ fn every_shell_command_is_on_a_menu_or_a_control() {
         // The Display & Input page's Outline View in Focus (the
         // accessibility spec, R7).
         commands::SETTINGS_SET_OUTLINE_VIEW_IN_FOCUS,
+        // Permanent Scrub Areas, a switch on Display & Input (the time editing
+        // spec, R26).
+        commands::SETTINGS_SET_PERMANENT_SCRUB_AREAS,
         commands::AUDIO_DEVICES,
         commands::AUDIO_STATUS,
         commands::AUDIO_CONFIGURE,
@@ -157,6 +160,13 @@ fn every_shell_command_is_on_a_menu_or_a_control() {
         // its Show/Hide All switch and the lane header's Swap Lane reach
         // view.lanes (note-editing R1, R2).
         commands::VIEW_FOLD_NOTES,
+        // Fold to Scale likewise: View ▸ Fold to Scale reaches view.fold_scale
+        // through its key (M-VIEW-040, S-NOTE-039), and the toolbar's Scale
+        // button runs it (the scales spec, R23).
+        commands::VIEW_FOLD_SCALE,
+        // The note spelling is chosen in the piano ruler's context menu
+        // (C-KEYS-002; the scales spec, R24), not in the menu bar.
+        commands::VIEW_NOTE_SPELLING,
         commands::VIEW_LANE,
         commands::VIEW_LANES,
         // The Clip View's Envelopes tab (WP-3.16): the View menu's Content

@@ -59,6 +59,19 @@ pub struct LocateArgs {
     pub quantized: bool,
 }
 
+/// The arguments of `transport.scrub`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ScrubArgs {
+    /// The point pressed or clicked in the scrub area, in ticks from the
+    /// start of the arrangement.
+    pub position: Ticks,
+    /// Whether the mouse button is held: loops the span at `position`
+    /// until a call with `held` false ends it.
+    #[serde(default)]
+    pub held: bool,
+}
+
 /// The arguments of `transport.set_recording`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -118,6 +131,13 @@ pub fn command_from_args(id: &str, args: Value) -> Result<TransportCommand, RunE
                 TransportCommand::Locate(position)
             })
         }
+        Action::Scrub => {
+            let ScrubArgs { position, held } = serde_json::from_value(args).map_err(invalid)?;
+            Ok(TransportCommand::Scrub {
+                point: position,
+                held,
+            })
+        }
         Action::SetRecording => {
             let SetRecordingArgs { recording } = serde_json::from_value(args).map_err(invalid)?;
             Ok(TransportCommand::SetRecording(recording))
@@ -160,6 +180,8 @@ enum Action {
     Run(TransportCommand),
     /// [`TransportCommand::Locate`], at the position in [`LocateArgs`].
     Locate,
+    /// [`TransportCommand::Scrub`], with [`ScrubArgs`].
+    Scrub,
     /// [`TransportCommand::SetRecording`], with [`SetRecordingArgs`].
     SetRecording,
 }
@@ -194,6 +216,7 @@ impl Entry {
         spec = match self.action {
             Action::Run(_) => spec.args::<NoArgs>(),
             Action::Locate => spec.args::<LocateArgs>(),
+            Action::Scrub => spec.args::<ScrubArgs>(),
             Action::SetRecording => spec.args::<SetRecordingArgs>(),
         };
         for &(shortcut, position) in self.keys {
@@ -284,6 +307,24 @@ const ENTRIES: &[Entry] = &[
             project.",
     },
     Entry {
+        id: "transport.scrub",
+        action: Action::Scrub,
+        label: "Scrub",
+        contexts: &[Global],
+        keys: &[],
+        description: "Presses or releases the Arrangement's scrub area at `position`, in ticks \
+            from the start of the arrangement. With `held` true it loops one step of the global \
+            launch quantisation (a bar with the quantisation off or None) from the grid line at \
+            or before `position`, until you call it again with `held` false: while the song \
+            plays, playback jumps to the span's start on the next quantisation line, and while \
+            it's stopped, playback starts there. The Arrangement loop is left as it is and \
+            applies again afterwards. With `held` false and a loop held, it ends that loop and \
+            playback carries on from where it is; with none held, it plays from `position`, \
+            as a click in the scrub area does (the jump waits for the quantisation line while \
+            the song plays; while it's stopped, playback starts there). It changes nothing in \
+            the project.",
+    },
+    Entry {
         id: "transport.return_to_start",
         action: Action::Run(TransportCommand::Locate(Ticks::ZERO)),
         label: "Return Play Position to 1.1.1",
@@ -367,6 +408,20 @@ mod tests {
             command_from_args("transport.locate", json!({ "position": "1.1.1" })),
             Err(RunError::InvalidArgs { .. })
         ));
+        assert_eq!(
+            command_from_args("transport.scrub", json!({ "position": 0, "held": true })),
+            Ok(TransportCommand::Scrub {
+                point: Ticks::ZERO,
+                held: true
+            })
+        );
+        assert_eq!(
+            command_from_args("transport.scrub", json!({ "position": 0 })),
+            Ok(TransportCommand::Scrub {
+                point: Ticks::ZERO,
+                held: false
+            })
+        );
         assert_eq!(
             command_from_args("transport.rewind", json!({})),
             Err(RunError::UnknownCommand("transport.rewind".to_owned()))

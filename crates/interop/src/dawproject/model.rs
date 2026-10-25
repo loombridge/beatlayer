@@ -231,6 +231,8 @@ pub struct TimelineInfo {
 pub struct RealParameter {
     pub id: Option<String>,
     pub name: Option<String>,
+    /// The plug-in's own number for the parameter (R57).
+    pub parameter_id: Option<i64>,
     /// The unit the value is in (R8).
     pub unit: Option<Unit>,
     /// The value, when it reads (R8).
@@ -246,6 +248,8 @@ pub struct RealParameter {
 pub struct BoolParameter {
     pub id: Option<String>,
     pub name: Option<String>,
+    /// The plug-in's own number for the parameter (R57).
+    pub parameter_id: Option<i64>,
     /// The value, when it reads (R8).
     pub value: Option<bool>,
 }
@@ -313,55 +317,43 @@ pub struct Send {
 
 /// A device in a channel's chain (R44 to R55).
 #[derive(Clone, Debug, PartialEq)]
-pub enum Device {
+pub struct Device {
+    pub info: TimelineInfo,
+    /// The device's ID in its format: a plug-in's, or a built-in device's.
+    pub device_id: Option<String>,
+    /// The device's name.
+    pub device_name: Option<String>,
+    /// The device's vendor.
+    pub device_vendor: Option<String>,
+    /// The device's role in the chain.
+    pub role: Option<DeviceRole>,
+    /// Whether the device is loaded.
+    pub loaded: Option<bool>,
+    /// The device's switch (R45).
+    pub enabled: Option<BoolParameter>,
+    /// The device's state file.
+    pub state: Option<FileReference>,
+    /// The parameters the device's automation names.
+    pub parameters: Vec<Parameter>,
+    /// What kind of device it is.
+    pub body: DeviceBody,
+}
+
+/// What a device is (R46 to R54).
+#[derive(Clone, Debug, PartialEq)]
+pub enum DeviceBody {
     /// A plug-in: VST2, VST3, CLAP or an Audio Unit.
-    Plugin {
-        info: TimelineInfo,
-        /// The plug-in's format.
-        format: PluginFormat,
-        /// The plug-in's ID.
-        device_id: Option<String>,
-        /// The plug-in's name.
-        device_name: Option<String>,
-        /// The plug-in's vendor.
-        device_vendor: Option<String>,
-        /// The plug-in's role in the chain.
-        role: Option<DeviceRole>,
-        /// Whether the plug-in is loaded.
-        loaded: Option<bool>,
-        /// The plug-in's state file.
-        state: Option<FileReference>,
-        /// The parameters the plug-in's automation names.
-        parameters: Vec<Parameter>,
-    },
-    /// A generic built-in device (R50 to R54).
-    Builtin {
-        info: TimelineInfo,
-        /// The device's ID.
-        device_id: Option<String>,
-        /// The device's name.
-        device_name: Option<String>,
-        /// The device's vendor.
-        device_vendor: Option<String>,
-        /// The device's role in the chain.
-        role: Option<DeviceRole>,
-        /// Whether the device is loaded.
-        loaded: Option<bool>,
-        /// The device's state file.
-        state: Option<FileReference>,
-        /// The parameters the device's automation names.
-        parameters: Vec<Parameter>,
-    },
+    Plugin(PluginFormat),
+    /// A built-in device the schema doesn't describe (R50).
+    Builtin,
     /// The generic equaliser (R54).
     Equalizer {
-        info: TimelineInfo,
         bands: Vec<EqBand>,
         input_gain: Option<RealParameter>,
         output_gain: Option<RealParameter>,
     },
     /// The generic compressor (R51).
     Compressor {
-        info: TimelineInfo,
         attack: Option<RealParameter>,
         auto_makeup: Option<BoolParameter>,
         input_gain: Option<RealParameter>,
@@ -372,7 +364,6 @@ pub enum Device {
     },
     /// The generic gate (R52).
     NoiseGate {
-        info: TimelineInfo,
         attack: Option<RealParameter>,
         range: Option<RealParameter>,
         ratio: Option<RealParameter>,
@@ -381,7 +372,6 @@ pub enum Device {
     },
     /// The generic limiter (R53).
     Limiter {
-        info: TimelineInfo,
         attack: Option<RealParameter>,
         input_gain: Option<RealParameter>,
         output_gain: Option<RealParameter>,
@@ -451,10 +441,7 @@ impl Channel {
     /// Whether the channel holds a device with the given role (R15).
     #[must_use]
     pub fn holds_role(&self, role: DeviceRole) -> bool {
-        self.devices.iter().any(|device| match device {
-            Device::Plugin { role: r, .. } | Device::Builtin { role: r, .. } => *r == Some(role),
-            _ => false,
-        })
+        self.devices.iter().any(|device| device.role == Some(role))
     }
 }
 
@@ -500,6 +487,7 @@ pub enum Parameter {
     Integer {
         id: Option<String>,
         name: Option<String>,
+        parameter_id: Option<i64>,
         value: Option<i64>,
         min: Option<i64>,
         max: Option<i64>,
@@ -507,6 +495,7 @@ pub enum Parameter {
     Enumerated {
         id: Option<String>,
         name: Option<String>,
+        parameter_id: Option<i64>,
         value: Option<i64>,
         count: Option<i64>,
         labels: Vec<String>,
@@ -757,6 +746,8 @@ pub struct Arrangement {
     pub tempo_automation: Option<Points>,
     /// The time-signature automation (R14).
     pub signature_automation: Option<Points>,
+    /// The Arrangement's markers (R63).
+    pub markers: Option<Markers>,
 }
 
 /// A scene of the Session View (R42).

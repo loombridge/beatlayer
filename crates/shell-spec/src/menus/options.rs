@@ -3,7 +3,7 @@
 use super::Action::{Choice, Command as Cmd, Omitted, Pending, Shortcut as Key, Submenu};
 use super::{Row, SEPARATOR};
 use crate::browser::SET_PREVIEW as BROWSER_PREVIEW;
-use crate::commands::{AUDIO_TOGGLE_ENGINE, VIEW_DRAW_MODE};
+use crate::commands::{AUDIO_TOGGLE_ENGINE, VIEW_DRAW_MODE, VIEW_HIGHLIGHT_SCALES};
 use crate::notes::SET_PREVIEW as NOTE_PREVIEW;
 
 pub(super) const OPTIONS: &[Row] = &[
@@ -82,7 +82,7 @@ pub(super) const OPTIONS: &[Row] = &[
     ("M-OPT-017", "Draw Mode", Cmd(VIEW_DRAW_MODE)),
     ("M-OPT-018", "Step Input Mode", Key(&["S-NOTE-044"])),
     SEPARATOR,
-    ("M-OPT-019", "Highlight Scales", Key(&["S-NOTE-035"])),
+    ("M-OPT-019", "Highlight Scales", Cmd(VIEW_HIGHLIGHT_SCALES)),
     ("M-OPT-020", "Chase MIDI Notes", Pending(None)),
     ("M-OPT-021", "MIDI Envelope Auto-Reset", Pending(None)),
     (

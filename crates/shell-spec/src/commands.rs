@@ -99,6 +99,13 @@ pub const VIEW_DRAW_MODE: &str = "view.draw_mode";
 /// `view.fold_notes`: fold the note editor to the rows that hold notes (F,
 /// WP-2.3).
 pub const VIEW_FOLD_NOTES: &str = "view.fold_notes";
+/// `view.fold_scale`: fold the note editor to the rows of the clip's scale
+/// and those that hold notes (G, WP-6.7b).
+pub const VIEW_FOLD_SCALE: &str = "view.fold_scale";
+/// `view.highlight_scales`: switch Highlight Scales (K, WP-6.7b).
+pub const VIEW_HIGHLIGHT_SCALES: &str = "view.highlight_scales";
+/// `view.note_spelling`: choose how the note editor spells keys (WP-6.7b).
+pub const VIEW_NOTE_SPELLING: &str = "view.note_spelling";
 /// `view.lane`: choose which value the Clip View's lane shows (WP-2.3).
 pub const VIEW_LANE: &str = "view.lane";
 /// `view.lanes`: show, hide and swap the Clip View's expression lanes, and
@@ -163,6 +170,9 @@ pub const FOCUS_TOGGLE_WRAP_NAVIGATION: &str = "focus.toggle_wrap_navigation";
 /// `settings.set_outline_view_in_focus`: switch Outline View in Focus
 /// (WP-1.14).
 pub const SETTINGS_SET_OUTLINE_VIEW_IN_FOCUS: &str = "settings.set_outline_view_in_focus";
+/// `settings.set_permanent_scrub_areas`: switch Permanent Scrub Areas
+/// (WP-6.59; the time editing spec, R26).
+pub const SETTINGS_SET_PERMANENT_SCRUB_AREAS: &str = "settings.set_permanent_scrub_areas";
 /// `settings.next_page`: show the next Settings page.
 pub const SETTINGS_NEXT_PAGE: &str = "settings.next_page";
 /// `settings.previous_page`: show the previous Settings page.
@@ -304,6 +314,9 @@ pub const IDS: &[&str] = &[
     VIEW_SET_PLUGIN_LIST_ONLY_MISSING,
     VIEW_DRAW_MODE,
     VIEW_FOLD_NOTES,
+    VIEW_FOLD_SCALE,
+    VIEW_HIGHLIGHT_SCALES,
+    VIEW_NOTE_SPELLING,
     VIEW_LANE,
     VIEW_LANES,
     VIEW_MPE_LANES,
@@ -361,6 +374,7 @@ pub const IDS: &[&str] = &[
     SETTINGS_SET_AUTOMATION_RECORD_MODE,
     SETTINGS_SET_AUTO_HIDE_PLUG_IN_WINDOWS,
     SETTINGS_SET_OUTLINE_VIEW_IN_FOCUS,
+    SETTINGS_SET_PERMANENT_SCRUB_AREAS,
     SETTINGS_SET_COLLECT_FILES_ON_EXPORT,
     SETTINGS_SET_USER_LIBRARY,
     AUDIO_DEVICES,
@@ -810,6 +824,23 @@ pub struct FoldNotesArgs {
     /// Fold (true) or unfold (false); switches if left out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub folded: Option<bool>,
+}
+
+/// Arguments of `view.highlight_scales`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct HighlightScalesArgs {
+    /// Whether Highlight Scales is on. Left out, the switch flips.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on: Option<bool>,
+}
+
+/// Arguments of `view.note_spelling`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct NoteSpellingArgs {
+    /// How the note editor spells keys.
+    pub spelling: bl_model::NoteSpelling,
 }
 
 /// Arguments of `view.lane`.
@@ -1635,6 +1666,55 @@ fn specs() -> Vec<CommandSpec> {
             .binding("S-NOTE-038")
             .args::<FoldNotesArgs>()
             .result::<ClipViewState>(),
+        CommandSpec::new(VIEW_FOLD_SCALE, "Fold to Scale")
+            .description(
+                "Folds or unfolds the MIDI Note Editor to the clip's scale (G, View \u{25b8} Fold \
+                 to Scale, the toolbar's Scale button): while it's folded, the editor shows \
+                 only the key rows of the clip's scale and the rows that hold notes, one \
+                 under the next. With Fold to Notes on too, a row shows only if each fold \
+                 that is on shows it. It works only while the clip's Scale Mode is on, and \
+                 turning Scale Mode off shows every row until it is on again. `clip` names \
+                 the clip; left out, the one the editor shows. `folded` says which way; left \
+                 out, it switches. Folding changes nothing in the set and isn't an undo step: \
+                 it's saved with the set beside the song. The result lists the clips folded \
+                 to their scale in `scale_folds`.",
+            )
+            .permission(Permission::Read)
+            .contexts([ClipView, NoteEditor])
+            .binding("S-NOTE-039")
+            .args::<FoldNotesArgs>()
+            .result::<ClipViewState>(),
+        CommandSpec::new(VIEW_HIGHLIGHT_SCALES, "Highlight Scales")
+            .description(
+                "Switches Highlight Scales (K, Options \u{25b8} Highlight Scales, the toolbar's \
+                 Highlight Scale button): in every clip with Scale Mode on, the note area \
+                 shades the rows of the scale and the piano ruler marks the root more \
+                 strongly than the scale's other keys. `on` says which way; left out, it \
+                 flips. It is one switch for all clips, off in a new install and kept between \
+                 launches as a preference; it isn't part of the set and is never an undo \
+                 step. The result reads it in `highlight_scales`.",
+            )
+            .permission(Permission::Edit)
+            .contexts([Global, ClipView, NoteEditor])
+            .binding("S-NOTE-035")
+            .args::<HighlightScalesArgs>()
+            .result::<ClipViewState>(),
+        CommandSpec::new(VIEW_NOTE_SPELLING, "Note Spelling")
+            .description(
+                "Chooses how the note editor spells keys (the piano ruler's context menu): \
+                 `sharps`, `flats`, `sharps_and_flats`, `auto` (flats when the clip's scale \
+                 has a root of F, B\u{266d}, E\u{266d}, A\u{266d}, D\u{266d} or G\u{266d}) or \
+                 `note_numbers`. A seven-note scale that is on spells its own keys with one \
+                 letter a degree, and the choice names the keys outside it. The rows, the \
+                 Root Note choosers follow the choice. It is one choice for every editor, \
+                 sharps in a new install and kept between launches as a preference; it isn't \
+                 part of the set and is never an undo step. The result reads it in \
+                 `note_spelling`.",
+            )
+            .permission(Permission::Edit)
+            .contexts([Global, ClipView, NoteEditor])
+            .args::<NoteSpellingArgs>()
+            .result::<ClipViewState>(),
         CommandSpec::new(VIEW_LANE, "Note Editor Lane")
             .description(
                 "Makes one of the MIDI Note Editor's expression lanes the active lane, whose \
@@ -2420,6 +2500,25 @@ fn specs() -> Vec<CommandSpec> {
             .context(Settings)
             .args::<SwitchArgs>()
             .result::<SwitchResult>(),
+        // Display & Input, Mouse and Pen Input (L-SET-010; WP-6.59).
+        CommandSpec::new(
+            SETTINGS_SET_PERMANENT_SCRUB_AREAS,
+            "Permanent Scrub Areas",
+        )
+        .description(
+            "Switches Permanent Scrub Areas, on the Settings window's Display & Input page: \
+             while it's on, as it is in a new install (as Live's is), a click in the \
+             Arrangement's scrub area plays from that point and holding the mouse button there \
+             loops a short span (`transport.scrub` does both); while it's off, a click there \
+             places the insert marker, as a click in a track does, and a hold loops nothing, \
+             but Shift-click and Shift-hold still scrub. The setting is kept for the next \
+             start, and isn't part of the set or an undo step. The result's `on` is the \
+             setting afterwards.",
+        )
+        .permission(Permission::Edit)
+        .context(Settings)
+        .args::<SwitchArgs>()
+        .result::<SwitchResult>(),
         CommandSpec::new(AUDIO_DEVICES, "List Audio Devices")
             .description(
                 "Lists the driver types this computer offers and, for the chosen one, its \

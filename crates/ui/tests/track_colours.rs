@@ -202,3 +202,37 @@ fn the_palette_s_rows_are_the_tracks_colours_lightened_and_darkened() {
     }
     assert!(lighter > 0, "the rows differ");
 }
+
+// Spec: themes R15; dawproject R23. The palette an import places a file's
+// colours on, which `bl_model::swatch_rgb` draws from a theme's 14 track
+// colours, is the palette the theme draws, and a shell with no window has the
+// bundled dark theme's colours.
+#[test]
+fn the_palette_an_import_places_colours_on_is_the_one_the_theme_draws() {
+    use bl_ui::theme::Theme;
+
+    let dark = Theme::bundled(true);
+    let colours: Vec<[u8; 3]> = dark
+        .colors
+        .track_palette
+        .iter()
+        .map(|colour| [colour.0.r(), colour.0.g(), colour.0.b()])
+        .collect();
+    assert_eq!(colours, bl_model::DEFAULT_TRACK_PALETTE);
+    for theme in [dark, Theme::bundled(false)] {
+        let colours: Vec<[u8; 3]> = theme
+            .colors
+            .track_palette
+            .iter()
+            .map(|colour| [colour.0.r(), colour.0.g(), colour.0.b()])
+            .collect();
+        for swatch in 0..bl_model::SWATCHES {
+            let drawn = theme.swatch(swatch);
+            assert_eq!(
+                bl_model::swatch_rgb(&colours, swatch),
+                [drawn.r(), drawn.g(), drawn.b()],
+                "swatch {swatch}"
+            );
+        }
+    }
+}

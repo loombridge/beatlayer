@@ -28,12 +28,6 @@
     {
       "count": 1,
       "did": "left out",
-      "what": "a clip's fades",
-      "where": "the clip \"Faded\" at 2.1.1 on the track \"Pad\""
-    },
-    {
-      "count": 1,
-      "did": "left out",
       "what": "a further lane of clips",
       "where": "the track \"Bass\""
     }

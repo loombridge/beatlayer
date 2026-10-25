@@ -10,10 +10,10 @@ use quick_xml::events::Event;
 
 use super::model::{
     Application, BoolParameter, Channel, Clip, ClipSlot, Clips, Content, ContentKind, Device,
-    DeviceRole, EqBand, Expression, FileReference, Interpolation, Lanes, Marker, Markers,
-    MediaFile, MixerRole, Note, Parameter, PluginFormat, Points, Project, RealParameter, Send,
-    Structure, Target, TimeSignatureParameter, TimeUnit, Timeline, TimelineInfo, Track, Transport,
-    Unit, Warp, Warps,
+    DeviceBody, DeviceRole, EqBand, Expression, FileReference, Interpolation, Lanes, Marker,
+    Markers, MediaFile, MixerRole, Note, Parameter, PluginFormat, Points, Project, RealParameter,
+    Send, Structure, Target, TimeSignatureParameter, TimeUnit, Timeline, TimelineInfo, Track,
+    Transport, Unit, Warp, Warps,
 };
 
 /// How deep elements may nest before the reader leaves the deeper ones out
@@ -493,6 +493,7 @@ fn real_parameter(node: &Node) -> RealParameter {
     RealParameter {
         id: node.attribute("id").map(str::to_owned),
         name: node.attribute("name").map(str::to_owned),
+        parameter_id: node.attribute("parameterID").and_then(integer),
         unit: node.attribute("unit").and_then(Unit::parse),
         value: node.attribute("value").and_then(real),
         min: node.attribute("min").and_then(real),
@@ -505,6 +506,7 @@ fn bool_parameter(node: &Node) -> BoolParameter {
     BoolParameter {
         id: node.attribute("id").map(str::to_owned),
         name: node.attribute("name").map(str::to_owned),
+        parameter_id: node.attribute("parameterID").and_then(integer),
         value: node.attribute("value").and_then(boolean),
     }
 }
@@ -543,6 +545,7 @@ fn parameters(node: &Node) -> Vec<Parameter> {
                     "IntegerParameter" => Some(Parameter::Integer {
                         id: child.attribute("id").map(str::to_owned),
                         name: child.attribute("name").map(str::to_owned),
+                        parameter_id: child.attribute("parameterID").and_then(integer),
                         value: child.attribute("value").and_then(integer),
                         min: child.attribute("min").and_then(integer),
                         max: child.attribute("max").and_then(integer),
@@ -550,6 +553,7 @@ fn parameters(node: &Node) -> Vec<Parameter> {
                     "EnumParameter" => Some(Parameter::Enumerated {
                         id: child.attribute("id").map(str::to_owned),
                         name: child.attribute("name").map(str::to_owned),
+                        parameter_id: child.attribute("parameterID").and_then(integer),
                         value: child.attribute("value").and_then(integer),
                         count: child.attribute("count").and_then(integer),
                         labels: child
@@ -569,13 +573,6 @@ fn parameters(node: &Node) -> Vec<Parameter> {
 
 /// A device in a channel's chain.
 fn device(node: &Node, report: &mut ReadReport) -> Option<Device> {
-    let info = timeline_info(node, report);
-    let device_id = node.attribute("deviceID").map(str::to_owned);
-    let device_name = node.attribute("deviceName").map(str::to_owned);
-    let device_vendor = node.attribute("deviceVendor").map(str::to_owned);
-    let role = node.attribute("deviceRole").and_then(DeviceRole::parse);
-    let loaded = node.attribute("loaded").and_then(boolean);
-    let state = node.child("State").map(file_reference);
     let format = match node.name.as_str() {
         "Vst2Plugin" => Some(PluginFormat::Vst2),
         "Vst3Plugin" => Some(PluginFormat::Vst3),
@@ -583,32 +580,10 @@ fn device(node: &Node, report: &mut ReadReport) -> Option<Device> {
         "AuPlugin" => Some(PluginFormat::Au),
         _ => None,
     };
-    if let Some(format) = format {
-        return Some(Device::Plugin {
-            info,
-            format,
-            device_id,
-            device_name,
-            device_vendor,
-            role,
-            loaded,
-            state,
-            parameters: parameters(node),
-        });
-    }
-    match node.name.as_str() {
-        "Device" | "BuiltinDevice" => Some(Device::Builtin {
-            info,
-            device_id,
-            device_name,
-            device_vendor,
-            role,
-            loaded,
-            state,
-            parameters: parameters(node),
-        }),
-        "Equalizer" => Some(Device::Equalizer {
-            info,
+    let body = match node.name.as_str() {
+        _ if format.is_some() => DeviceBody::Plugin(format?),
+        "Device" | "BuiltinDevice" => DeviceBody::Builtin,
+        "Equalizer" => DeviceBody::Equalizer {
             bands: node
                 .children_named("Band")
                 .map(|band| EqBand {
@@ -622,9 +597,8 @@ fn device(node: &Node, report: &mut ReadReport) -> Option<Device> {
                 .collect(),
             input_gain: node.child("InputGain").map(real_parameter),
             output_gain: node.child("OutputGain").map(real_parameter),
-        }),
-        "Compressor" => Some(Device::Compressor {
-            info,
+        },
+        "Compressor" => DeviceBody::Compressor {
             attack: node.child("Attack").map(real_parameter),
             auto_makeup: node.child("AutoMakeup").map(bool_parameter),
             input_gain: node.child("InputGain").map(real_parameter),
@@ -632,25 +606,35 @@ fn device(node: &Node, report: &mut ReadReport) -> Option<Device> {
             ratio: node.child("Ratio").map(real_parameter),
             release: node.child("Release").map(real_parameter),
             threshold: node.child("Threshold").map(real_parameter),
-        }),
-        "NoiseGate" => Some(Device::NoiseGate {
-            info,
+        },
+        "NoiseGate" => DeviceBody::NoiseGate {
             attack: node.child("Attack").map(real_parameter),
             range: node.child("Range").map(real_parameter),
             ratio: node.child("Ratio").map(real_parameter),
             release: node.child("Release").map(real_parameter),
             threshold: node.child("Threshold").map(real_parameter),
-        }),
-        "Limiter" => Some(Device::Limiter {
-            info,
+        },
+        "Limiter" => DeviceBody::Limiter {
             attack: node.child("Attack").map(real_parameter),
             input_gain: node.child("InputGain").map(real_parameter),
             output_gain: node.child("OutputGain").map(real_parameter),
             release: node.child("Release").map(real_parameter),
             threshold: node.child("Threshold").map(real_parameter),
-        }),
-        _ => None,
-    }
+        },
+        _ => return None,
+    };
+    Some(Device {
+        info: timeline_info(node, report),
+        device_id: node.attribute("deviceID").map(str::to_owned),
+        device_name: node.attribute("deviceName").map(str::to_owned),
+        device_vendor: node.attribute("deviceVendor").map(str::to_owned),
+        role: node.attribute("deviceRole").and_then(DeviceRole::parse),
+        loaded: node.attribute("loaded").and_then(boolean),
+        enabled: node.child("Enabled").map(bool_parameter),
+        state: node.child("State").map(file_reference),
+        parameters: parameters(node),
+        body,
+    })
 }
 
 /// A channel.
@@ -790,16 +774,7 @@ fn timeline(node: &Node, report: &mut ReadReport) -> Option<Timeline> {
         }),
         "Audio" => Timeline::Audio(media_file(node, report)),
         "Video" => Timeline::Video(media_file(node, report)),
-        "Markers" => Timeline::Markers(Markers {
-            info,
-            markers: node
-                .children_named("Marker")
-                .map(|child| Marker {
-                    info: timeline_info(child, report),
-                    time: child.attribute("time").and_then(number),
-                })
-                .collect(),
-        }),
+        "Markers" => Timeline::Markers(markers_of(node, report)),
         "Points" => Timeline::Points(points(node, report)),
         "Lanes" => Timeline::Lanes(Lanes {
             info,
@@ -942,6 +917,9 @@ pub fn project(node: &Node, report: &mut ReadReport) -> Option<Project> {
             signature_automation: arrangement
                 .child("TimeSignatureAutomation")
                 .map(|points| points_of(points, report)),
+            markers: arrangement
+                .child("Markers")
+                .map(|markers| markers_of(markers, report)),
         });
     let scenes = node
         .child("Scenes")
@@ -985,4 +963,18 @@ pub fn project(node: &Node, report: &mut ReadReport) -> Option<Project> {
 /// A set of points under a name the schema gives them.
 fn points_of(node: &Node, report: &mut ReadReport) -> Points {
     points(node, report)
+}
+
+/// A timeline of markers.
+fn markers_of(node: &Node, report: &mut ReadReport) -> Markers {
+    Markers {
+        info: timeline_info(node, report),
+        markers: node
+            .children_named("Marker")
+            .map(|child| Marker {
+                info: timeline_info(child, report),
+                time: child.attribute("time").and_then(number),
+            })
+            .collect(),
+    }
 }

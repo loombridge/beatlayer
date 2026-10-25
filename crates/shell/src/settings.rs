@@ -50,6 +50,11 @@ pub struct Preferences {
     /// new install, as observed in Live 12.4.6 (WP-1.14; the accessibility
     /// spec, R7).
     pub outline_view_in_focus: OnByDefault,
+    /// Permanent Scrub Areas (Display & Input, L-SET-010): a click and a
+    /// hold in the Arrangement's scrub area play and loop. On in a new
+    /// install and in preferences saved before the setting existed (WP-6.59;
+    /// the time editing spec, R26).
+    pub permanent_scrub_areas: OnByDefault,
     /// The interface zoom, where 1 is 100%, or none for 100% (WP-1.17).
     /// Read through `Shell::zoom`, which keeps it within 50% to 200%.
     pub zoom: Option<f32>,
@@ -92,6 +97,13 @@ pub struct Preferences {
     /// Preview; WP-6.5, the step recording spec, R1): one switch for every
     /// MIDI clip, off in a new install.
     pub note_preview: bool,
+    /// Highlight Scales (Options, M-OPT-019; the scales spec, R22): one
+    /// switch for every clip, off in a new install.
+    pub highlight_scales: bool,
+    /// How the note editor spells keys (the piano ruler's menu, C-KEYS-002;
+    /// the scales spec, R24): one choice for every editor, Sharps in a new
+    /// install.
+    pub note_spelling: bl_model::NoteSpelling,
     /// Create Fades on Clip Edges (Record, Warp & Launch, L-SET-018): new
     /// audio clips get 4 ms fades at their edges (WP-1.4b; the audio clips
     /// spec, R7 and R22). On by default, as observed in Live 12.4.6, and on
@@ -361,6 +373,7 @@ mod tests {
         prefs.audio.buffer_size = Some(128);
         prefs.tone.volume_db = -48.0;
         prefs.create_fades_on_clip_edges = OnByDefault(false);
+        prefs.permanent_scrub_areas = OnByDefault(false);
         prefs.save(&dir).unwrap();
         assert_eq!(Preferences::load(&dir).unwrap(), prefs);
         std::fs::write(dir.join(PREFERENCES_FILE), "not json").unwrap();
@@ -413,6 +426,18 @@ mod tests {
         assert!(!off.warp_recorded_audio.0);
         let saved = serde_json::to_value(&off).unwrap();
         assert_eq!(saved["warp_recorded_audio"], false);
+    }
+
+    #[test]
+    fn permanent_scrub_areas_is_on_unless_saved_off() {
+        // Spec: time-editing R26.
+        assert!(Preferences::default().permanent_scrub_areas.0);
+        let older: Preferences = serde_json::from_str(r#"{"tab_navigation": true}"#).unwrap();
+        assert!(older.permanent_scrub_areas.0);
+        let off: Preferences = serde_json::from_str(r#"{"permanent_scrub_areas": false}"#).unwrap();
+        assert!(!off.permanent_scrub_areas.0);
+        let saved = serde_json::to_value(&off).unwrap();
+        assert_eq!(saved["permanent_scrub_areas"], false);
     }
 
     #[test]

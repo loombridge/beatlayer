@@ -478,7 +478,7 @@ pub fn show(
                 set(events, json!({ "use_clip_scale": !scale.use_clip_scale }));
             }
             let roots: Vec<Choice<u8>> = (0..12u8)
-                .map(|root| plain(bl_model::Scale::root_name(root), root))
+                .map(|root| plain(shell.root_name(root), root))
                 .collect();
             if let Some(root) = choose(
                 ui,

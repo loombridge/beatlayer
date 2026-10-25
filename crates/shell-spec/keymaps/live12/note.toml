@@ -447,7 +447,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["K"]
 win = ["K"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "view.highlight_scales", contexts = ["note-editor"] },
+]
 
 [[shortcut]]
 id = "S-NOTE-036"

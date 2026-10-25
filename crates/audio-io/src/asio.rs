@@ -16,8 +16,8 @@
 use std::cell::UnsafeCell;
 use std::ffi::{c_long, c_void};
 use std::ptr;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicPtr, AtomicU32, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use azo::driver::{Driver, Metadata, Proxy};
 use azo::dto::{BufferSize, ChannelId, Granularity};
@@ -37,6 +37,14 @@ use crate::{
 
 /// The open stream's shared state, or null. ASIO callbacks find it here.
 static ACTIVE: AtomicPtr<Shared> = AtomicPtr::new(ptr::null_mut());
+
+/// The open stream's driver as `devices()` lists it, while the stream has it
+/// loaded. Behind a lock rather than in [`Shared`], because the app lists
+/// devices on its own thread while another can drop the stream.
+static OPEN: Mutex<Option<DeviceInfo>> = Mutex::new(None);
+
+/// The rate the open stream's driver last announced, in hertz.
+static OPEN_RATE: AtomicU32 = AtomicU32::new(0);
 
 /// The callbacks every driver gets. Static, so they outlive any buffers.
 static CALLBACKS: Callbacks = Callbacks {
@@ -124,14 +132,13 @@ fn list(info: &mut DeviceInfo, proxy: &Proxy) {
 }
 
 /// The entry for the driver of the open stream, with the rate the driver last
-/// announced, if `id` is that driver. Call it from the thread that opens and
-/// drops streams, which is the only one that frees what `ACTIVE` points at.
+/// announced, if `id` is that driver.
 fn open_listing(id: &DeviceId) -> Option<DeviceInfo> {
-    // SAFETY: the stream frees `shared` only on this thread, after clearing `ACTIVE`.
-    let shared = unsafe { ACTIVE.load(Ordering::Acquire).as_ref() }?;
-    (shared.listing.id == *id).then(|| DeviceInfo {
-        current_sample_rate: Some(shared.rate.load(Ordering::Relaxed)),
-        ..shared.listing.clone()
+    let open = OPEN.lock().unwrap_or_else(PoisonError::into_inner);
+    let listing = open.as_ref().filter(|listing| listing.id == *id)?;
+    Some(DeviceInfo {
+        current_sample_rate: Some(OPEN_RATE.load(Ordering::Relaxed)),
+        ..listing.clone()
     })
 }
 
@@ -404,8 +411,6 @@ impl Backend for AsioBackend {
             render: UnsafeCell::new(render),
             counters: Arc::clone(&counters),
             sample_rate: f64::from(sample_rate),
-            listing,
-            rate: AtomicU32::new(sample_rate),
         }));
         if ACTIVE
             .compare_exchange(ptr::null_mut(), shared, Ordering::AcqRel, Ordering::Acquire)
@@ -451,6 +456,8 @@ impl Backend for AsioBackend {
             info,
             counters,
         };
+        OPEN_RATE.store(sample_rate, Ordering::Relaxed);
+        *OPEN.lock().unwrap_or_else(PoisonError::into_inner) = Some(listing);
 
         // SAFETY: `CALLBACKS` is static, so it outlives the buffers.
         let halves = unsafe {
@@ -502,11 +509,6 @@ struct Shared {
     /// Lock-free, so any callback on any thread can count events.
     counters: Arc<Counters>,
     sample_rate: f64,
-    /// The driver as `devices()` lists it, for as long as the stream has it
-    /// loaded.
-    listing: DeviceInfo,
-    /// The rate the driver last announced, in hertz.
-    rate: AtomicU32,
 }
 
 struct Render {
@@ -604,8 +606,8 @@ extern "system" fn buffer_switch_time_info(
 }
 
 extern "system" fn sample_rate_did_change(rate: SampleRate) {
+    OPEN_RATE.store(rate_hz(rate), Ordering::Relaxed);
     with_shared(|shared| {
-        shared.rate.store(rate_hz(rate), Ordering::Relaxed);
         if (rate - shared.sample_rate).abs() >= 1.0 {
             shared.counters.record_invalidated();
         }
@@ -692,6 +694,7 @@ impl Drop for AsioStream {
             Ordering::AcqRel,
             Ordering::Acquire,
         );
+        *OPEN.lock().unwrap_or_else(PoisonError::into_inner) = None;
         // SAFETY: the driver has stopped and released its buffers, so no
         // callback reaches `shared` any more, and `ACTIVE` no longer points
         // at it. It came from `Box::into_raw` in `open_stream`.
@@ -739,30 +742,12 @@ mod tests {
         assert_eq!(buffer_sizes(&sizes(0, 256, None)), BufferSizes::Unknown);
     }
 
-    struct Silent;
-
-    impl AudioCallback for Silent {
-        fn process(
-            &mut self,
-            _: &crate::ProcessContext,
-            _: &crate::AudioBuffer<'_>,
-            _: &mut crate::AudioBufferMut<'_>,
-        ) {
-        }
-    }
-
     #[test]
     fn the_open_driver_is_listed_without_loading_it_again() {
         let id = DeviceId::new(BackendKind::Asio, "open");
         let other = DeviceId::new(BackendKind::Asio, "other");
         assert!(open_listing(&id).is_none());
 
-        let counters = Arc::new(Counters::new());
-        let config = RtThreadConfig {
-            period: frames_to_duration(64, 48_000),
-            promote: false,
-            workgroup: None,
-        };
         let listing = DeviceInfo {
             id: id.clone(),
             name: "Open".to_owned(),
@@ -775,28 +760,8 @@ mod tests {
             buffer_sizes: BufferSizes::Unknown,
             default_buffer_size: None,
         };
-        let shared = Box::into_raw(Box::new(Shared {
-            render: UnsafeCell::new(Render {
-                runner: CallbackRunner::new(
-                    Box::new(Silent),
-                    Arc::clone(&counters),
-                    48_000,
-                    true,
-                    config,
-                ),
-                frames: 64,
-                inputs: Vec::new(),
-                outputs: Vec::new(),
-                input_scratch: PlanarScratch::new(2, 64),
-                output_scratch: PlanarScratch::new(2, 64),
-                sample_rate: 48_000,
-            }),
-            counters,
-            sample_rate: 48_000.0,
-            listing,
-            rate: AtomicU32::new(48_000),
-        }));
-        ACTIVE.store(shared, Ordering::Release);
+        OPEN_RATE.store(48_000, Ordering::Relaxed);
+        *OPEN.lock().unwrap() = Some(listing);
 
         // The driver announces a new rate: its entry follows, with no load.
         sample_rate_did_change(44_100.0);
@@ -805,9 +770,8 @@ mod tests {
         assert_eq!(open.output_channels, 2);
         assert!(open_listing(&other).is_none());
 
-        ACTIVE.store(ptr::null_mut(), Ordering::Release);
-        // SAFETY: `shared` came from `Box::into_raw` above and nothing reaches it now.
-        drop(unsafe { Box::from_raw(shared) });
+        *OPEN.lock().unwrap() = None;
+        assert!(open_listing(&id).is_none());
     }
 
     #[test]

@@ -70,6 +70,7 @@ pub(super) const ROWS: &[(&str, Readback)] = &[
     ("device.remove", query(Track, "devices")),
     ("device.reverse_sample", query(Device, "media")),
     ("device.rename", query(Device, "name")),
+    ("device.set_info_text", query(Device, "info_text")),
     ("device.rename_layer", query(Device, "layers")),
     ("device.replace", query(Track, "devices")),
     ("device.save_default_preset", nothing(FILE)),

@@ -835,6 +835,15 @@ const ENTRIES: &[Entry] = &[
             changes only the name in the track's title bar.",
     },
     Entry {
+        id: "track.set_info_text",
+        action: Action::Apply("set_track_info_text"),
+        label: "Edit Info Text",
+        permission: Permission::Edit,
+        contexts: &[TrackHeaders],
+        keys: &[],
+        description: "Sets the info text of a track, which the Info View shows while the pointer is over it (Edit Info Text). Empty clears it. One undo step, `Change Info Text`.",
+    },
+    Entry {
         id: "track.set_colour",
         action: Action::Apply("set_track_colour"),
         label: "Change Track Color",
@@ -1685,6 +1694,15 @@ const ENTRIES: &[Entry] = &[
         keys: &[Key::Runs("S-EDIT-008")],
         description: "Renames a clip. A name may be empty. It changes only the name shown on \
             the clip.",
+    },
+    Entry {
+        id: "clip.set_info_text",
+        action: Action::Apply("set_clip_info_text"),
+        label: "Edit Info Text",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Sets the info text of a clip, in the Arrangement, a Session slot or a take lane, which the Info View shows while the pointer is over it (Edit Info Text). Empty clears it. One undo step, `Change Info Text`.",
     },
     Entry {
         id: "clip.set_colour",
@@ -2613,6 +2631,15 @@ const ENTRIES: &[Entry] = &[
             number, which is its position.",
     },
     Entry {
+        id: "scene.set_info_text",
+        action: Action::Apply("set_scene_info_text"),
+        label: "Edit Info Text",
+        permission: Permission::Edit,
+        contexts: &[Session],
+        keys: &[],
+        description: "Sets the info text of a scene, which the Info View shows while the pointer is over it (Edit Info Text). Empty clears it. One undo step, `Change Info Text`.",
+    },
+    Entry {
         id: "scene.set_colour",
         action: Action::Apply("set_scene_colour"),
         label: "Change Scene Color",
@@ -2724,6 +2751,15 @@ const ENTRIES: &[Entry] = &[
         description: "Renames a device: the name its title bar shows while Show Preset Name \
             is on (`device.set_show_preset_name`). An empty name gives the device back its \
             own name, such as `Auto Filter`. It changes nothing in the sound.",
+    },
+    Entry {
+        id: "device.set_info_text",
+        action: Action::Apply("set_device_info_text"),
+        label: "Edit Info Text",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Sets the info text of a device, which the Info View shows while the pointer is over it (Edit Info Text). Empty clears it. One undo step, `Change Info Text`.",
     },
     Entry {
         id: "device.set_show_preset_name",

@@ -47,6 +47,7 @@ fn frozen_output_clip(output: crate::freeze::FrozenOutput) -> Clip {
         scale: crate::scale::Scale::default(),
         groove: None,
         colour: None,
+        info_text: String::new(),
     }
 }
 
@@ -797,6 +798,9 @@ pub struct Track {
     /// The track's colour, a swatch from 0 to 69 (the themes spec, R14). A
     /// new track takes swatch `id mod 14`.
     pub(crate) colour: u8,
+    /// The user's own info text (Edit Info Text); empty for none (the Info
+    /// View spec, R9).
+    pub(crate) info_text: String,
 }
 
 impl Track {
@@ -822,6 +826,7 @@ impl Track {
             frozen: None,
             tuning_bypass: false,
             link: None,
+            info_text: String::new(),
         }
     }
 
@@ -874,6 +879,12 @@ impl Track {
     #[must_use]
     pub fn id(&self) -> TrackId {
         self.id
+    }
+
+    /// The track's own info text, empty for none.
+    #[must_use]
+    pub fn info_text(&self) -> &str {
+        &self.info_text
     }
 
     /// The track's colour: a swatch from 0 to 69.

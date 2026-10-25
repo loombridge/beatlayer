@@ -60,6 +60,7 @@ mod floating_windows;
 mod freeze;
 mod gain_reduction;
 mod grooves;
+mod info_text;
 mod interface_zoom;
 mod keymap;
 mod kitbag;

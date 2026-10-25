@@ -192,19 +192,19 @@
     "question": "What is the sum of the velocity of all notes?"
   },
   {
-    "answer": "75",
+    "answer": "90",
     "fixture": "commands_clip",
     "id": "commands-total",
     "question": "How many commands are listed?"
   },
   {
-    "answer": "1",
+    "answer": "3",
     "fixture": "commands_clip",
     "id": "commands-destructive",
     "question": "How many commands have the permission destructive?"
   },
   {
-    "answer": "clip.delete, clip.edit_sample, clip.save_default, clip.save_file",
+    "answer": "clip.cut_envelope, clip.delete, clip.delete_envelope_range, clip.edit_sample, clip.save_default, clip.save_file",
     "fixture": "commands_clip",
     "id": "commands-refused",
     "question": "Which commands are refused to agents? Give their ids, in the order they are listed."
@@ -216,7 +216,7 @@
     "question": "What is the label of the command clip.set_gain?"
   },
   {
-    "answer": "31",
+    "answer": "33",
     "fixture": "commands_clip",
     "id": "commands-set-prefix",
     "question": "How many command ids start with clip.set_?"

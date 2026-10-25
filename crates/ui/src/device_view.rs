@@ -33,7 +33,7 @@ use bl_shell::device_commands::{
     self as ids, DEVICE_GAP, DeviceFrame, DeviceViewState, FloatingWindow, TITLE_BAR_HEIGHT,
 };
 use bl_shell::menus::{MenuItem, shown};
-use bl_shell::{Area, Invocation, Shell};
+use bl_shell::{Area, InfoTarget, Invocation, Shell};
 use egui::accesskit::Role;
 use egui::{
     Align2, Color32, DragAndDrop, Id, Key, Rect, Sense, Shape, Stroke, StrokeKind, Ui, UiBuilder,
@@ -808,6 +808,7 @@ impl DeviceViewUi {
                 .to_owned(),
             );
         });
+        crate::info_text::describe(ui.ctx(), &response, shell, InfoTarget::Device(frame.id));
     }
 
     /// The Device Activator: a round button, lit while the device is on.

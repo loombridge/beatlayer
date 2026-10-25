@@ -163,6 +163,7 @@ pub fn run(
         }
         ids::SET_INFO_TEXT => {
             let SetInfoTextArgs { locator, info_text } = parse(args)?;
+            let info_text = info_text.ok_or_else(|| invalid("`info_text` says the text"))?;
             let doc = editor.document();
             let target = match locator {
                 Some(locator) => locator,

@@ -413,6 +413,14 @@ pub enum Command {
         /// The new name.
         name: String,
     },
+    /// Sets a track's info text (Edit Info Text), which the Info View shows
+    /// while the pointer is over the track. Empty clears it.
+    SetTrackInfoText {
+        /// The track.
+        track: TrackId,
+        /// The text.
+        info_text: String,
+    },
     /// Marks tracks frozen with the files a freeze rendered (WP-4.14, R13).
     /// The track's devices, clips, and their settings stay as they are, so
     /// unfreezing plays them again (R10).
@@ -928,6 +936,14 @@ pub enum Command {
         clip: ClipId,
         /// The new name.
         name: String,
+    },
+    /// Sets a clip's info text (Edit Info Text), in the Arrangement, a
+    /// Session slot or a take lane. Empty clears it.
+    SetClipInfoText {
+        /// The clip.
+        clip: ClipId,
+        /// The text.
+        info_text: String,
     },
     /// Mutes or unmutes a clip.
     SetClipMute {
@@ -1640,6 +1656,13 @@ pub enum Command {
         /// The new name.
         name: String,
     },
+    /// Sets a scene's info text (Edit Info Text). Empty clears it.
+    SetSceneInfoText {
+        /// The scene.
+        scene: SceneId,
+        /// The text.
+        info_text: String,
+    },
 
     /// Colours scenes with a swatch of the palette of 5 rows of 14 (0 to
     /// 69), or clears their colour with `null`.
@@ -1720,6 +1743,13 @@ pub enum Command {
         device: DeviceId,
         /// The new name.
         name: String,
+    },
+    /// Sets a device's info text (Edit Info Text). Empty clears it.
+    SetDeviceInfoText {
+        /// The device.
+        device: DeviceId,
+        /// The text.
+        info_text: String,
     },
     /// Switches a device's Show Preset Name: its title bar shows its
     /// preset's or given name (on) or its own name (off).
@@ -2799,6 +2829,11 @@ impl Command {
             Self::DeleteTrack { .. } => "Delete track",
             Self::MoveTrack { .. } => "Move track",
             Self::RenameTrack { .. } => "Rename track",
+            // Spec: info-view R10. Live's name for the menu item.
+            Self::SetTrackInfoText { .. }
+            | Self::SetClipInfoText { .. }
+            | Self::SetSceneInfoText { .. }
+            | Self::SetDeviceInfoText { .. } => "Change Info Text",
             // Spec: themes R16, R17. Beatlayer's own names.
             Self::SetTrackColour { .. } => "Change Track Color",
             Self::AssignColourToClips { .. } => "Assign Track Color to Clips",
@@ -3355,6 +3390,12 @@ impl Document {
                 parent,
                 index,
             } => self.move_track(*track, *parent, *index),
+            Command::SetTrackInfoText { track, info_text } => {
+                if self.track_ref(*track)?.info_text != *info_text {
+                    self.track_mut(*track)?.info_text.clone_from(info_text);
+                }
+                Ok(())
+            }
             Command::RenameTrack { track, name } => {
                 if self.track_ref(*track)?.name != *name {
                     self.track_mut(*track)?.name.clone_from(name);
@@ -3891,6 +3932,12 @@ impl Document {
                 check_extent(current.start, *length)?;
                 if current.length != *length {
                     self.clip_mut(*clip)?.length = *length;
+                }
+                Ok(())
+            }
+            Command::SetClipInfoText { clip, info_text } => {
+                if self.clip_ref(*clip)?.info_text != *info_text {
+                    self.clip_mut(*clip)?.info_text.clone_from(info_text);
                 }
                 Ok(())
             }
@@ -4437,6 +4484,9 @@ impl Document {
                 self.duplicate_scene(*scene, *id, clips)
             }
             Command::RenameScene { scene, name } => self.rename_scene(*scene, name),
+            Command::SetSceneInfoText { scene, info_text } => {
+                self.set_scene_info_text(*scene, info_text)
+            }
             Command::SetSceneColour { scenes, colour } => {
                 if let Some(colour) = colour {
                     crate::colour::check_swatch("scene colour", *colour)?;
@@ -4503,6 +4553,12 @@ impl Document {
                 renamed.set_name(name);
                 if renamed != *self.device_ref(*device)? {
                     *self.device_mut(*device)? = renamed;
+                }
+                Ok(())
+            }
+            Command::SetDeviceInfoText { device, info_text } => {
+                if self.device_ref(*device)?.info_text != *info_text {
+                    self.device_mut(*device)?.info_text.clone_from(info_text);
                 }
                 Ok(())
             }
@@ -6232,6 +6288,16 @@ impl Document {
             && scene.name != *name
         {
             scene.name = name.to_owned();
+        }
+        Ok(())
+    }
+
+    fn set_scene_info_text(&mut self, id: SceneId, info_text: &str) -> Result<(), ModelError> {
+        let position = self.scene_position(id).ok_or(ModelError::NoSuchScene(id))?;
+        if let Some(scene) = self.scenes.get_mut(position)
+            && scene.info_text != *info_text
+        {
+            scene.info_text = info_text.to_owned();
         }
         Ok(())
     }

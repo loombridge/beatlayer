@@ -4560,7 +4560,7 @@ What a command changed: whether the song settings (the tempo map, the time-signa
 | `scenes` | object of [`Change`](#change) by integer key | yes | Scenes that were added, removed, renamed, or moved. A scene whose clips changed only is listed under `clips`, not here. |
 | `clips` | object of [`Change`](#change) by integer key | yes | Clips that changed, including clips moved to another track or between the Arrangement and a Session slot. |
 | `devices` | object of [`Change`](#change) by integer key | yes | Devices whose settings changed, including devices moved to another track. |
-| `colours` | boolean | no | The colour of a track, a clip, or a scene changed. The engine never hears a colour, so nothing else is listed for it (the themes spec, R27), but the set did change. |
+| `colours` | boolean | no | The colour of a track, a clip, or a scene changed, or a track's info text. The engine never hears a colour, so nothing else is listed for it (the themes spec, R27), but the set did change. |
 
 <details><summary>JSON Schema</summary>
 
@@ -4579,7 +4579,7 @@ What a command changed: whether the song settings (the tempo map, the time-signa
       "type": "object"
     },
     "colours": {
-      "description": "The colour of a track, a clip, or a scene changed. The engine never hears a colour, so nothing else is listed for it (the themes spec, R27), but the set did change.",
+      "description": "The colour of a track, a clip, or a scene changed, or a track's info text. The engine never hears a colour, so nothing else is listed for it (the themes spec, R27), but the set did change.",
       "type": "boolean"
     },
     "devices": {
@@ -4893,6 +4893,7 @@ A clip on a track's arrangement lane.
 | `colour` | integer or null | no | The clip's colour, a swatch from 0 to 69 (the themes spec, R14). A clip handed to a command without one takes its track's colour as it goes in, and a set saved before colours gives each clip its track's on loading, so a clip in a document always has one. |
 | `envelopes` | array of [`ClipEnvelope`](#clipenvelope) | no | The clip's envelopes (WP-3.15): one per parameter of its track it modulates, in target order. Empty for a clip with none, which is what a set saved before this package holds. |
 | `groove` | [`GrooveId`](#grooveid) or null | no | The clip's groove (WP-6.19): one of the set's Groove Pool, or none. It changes when the clip's notes play, or where its audio plays, and nothing in the clip itself until it is committed. |
+| `info_text` | string | no | The user's own info text (Edit Info Text), which the Info View shows while the pointer is over the clip; empty for none, and left out of the saved set then (the Info View spec, R9). |
 | `launch` | [`ClipLaunch`](#cliplaunch) | no | The clip's launch settings (WP-3.4), which only a Session clip's launching reads. The defaults for a clip saved without them. |
 | `offset` | [`Ticks`](#ticks) | no | How far into its contents a MIDI clip starts: its notes are placed from `start - offset`, and the part before the clip's start doesn't play. 0 (or left out) plays the contents from their beginning. Never negative. Splitting a MIDI clip or trimming its left edge changes it, so each part plays what it played before. An audio clip's is always 0: its Start marker moves instead, as Live's does. |
 | `scale` | [`Scale`](#scale) | no | The clip's scale (WP-6.7): its Scale Mode switch, its root and its scale name. It never changes what the clip plays; it tells the rest of the set which keys belong. A clip off at C, in Major, writes nothing, so a set saved before the scales loads unchanged. |
@@ -4938,6 +4939,10 @@ A clip on a track's arrangement lane.
     "id": {
       "$ref": "#/$defs/ClipId",
       "description": "The clip's ID."
+    },
+    "info_text": {
+      "description": "The user's own info text (Edit Info Text), which the Info View shows while the pointer is over the clip; empty for none, and left out of the saved set then (the Info View spec, R9).",
+      "type": "string"
     },
     "launch": {
       "$ref": "#/$defs/ClipLaunch",
@@ -7498,6 +7503,7 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
 | `configured` | array or null | no | The plug-in parameters the device's panel holds, in order (clap-hosting R5, configure mode): the list Configure Mode edits, saved with the set. Left out until it's set: until then all of a plug-in's parameters are configured when it has no more than [`CONFIGURE_THRESHOLD`], and none when it has more (manual 24.1). Native devices never set it. |
 | `external` | [`External`](#external) or null | no | The device's routing to external hardware, if its type declares one (WP-5.34): an external instrument's output port and channel, the interface inputs it comes back on, and its Hardware Latency. Left out of the saved set for a device without one. |
 | `floating` | boolean | no | Whether the device floats in a window of its own rather than showing in the Device View (IMP-14, WP-2.5b), where its place in the chain shows as a strip. Only native devices float. Left out of the saved set while docked. Where its window sits isn't part of the document: moving or resizing a window isn't an undo step ([`WindowFrame`]). |
+| `info_text` | string | no | The user's own info text (Edit Info Text), which the Info View shows while the pointer is over the device; empty for none, and left out of the saved set then (the Info View spec, R9). |
 | `layers` | [`Layers`](#layers) | no | A multisampler's layers and the options of its layer list (WP-5.13, the multisampler spec, R2). Left out of the saved set for a device that holds none. |
 | `macros` | [`RackMacros`](#rackmacros) | no | A rack's macros' settings and mappings (WP-5.4; the macros spec, R17). Left out of the saved set while it has neither. |
 | `mappings` | array of [`Mapping`](#mapping) | no | The parameters a modulator maps, one per slot (the modulation spec, R19). Left out of the saved set for a device that maps none. |
@@ -7572,6 +7578,10 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
     "id": {
       "$ref": "#/$defs/DeviceId",
       "description": "The device's ID."
+    },
+    "info_text": {
+      "description": "The user's own info text (Edit Info Text), which the Info View shows while the pointer is over the device; empty for none, and left out of the saved set then (the Info View spec, R9).",
+      "type": "string"
     },
     "kind": {
       "$ref": "#/$defs/DeviceKind",

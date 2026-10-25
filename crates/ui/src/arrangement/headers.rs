@@ -8,9 +8,9 @@
 
 use bl_model::{Track, TrackId, TrackKind};
 use bl_shell::Invocation;
-use bl_shell::Shell;
 use bl_shell::arrangement_commands as ids;
 use bl_shell::mixer_controls::Switch;
+use bl_shell::{InfoTarget, Shell};
 use egui::accesskit::Role;
 use egui::{
     Align2, Color32, CursorIcon, Id, Rect, Sense, Shape, Stroke, StrokeKind, Ui, WidgetInfo,
@@ -295,6 +295,7 @@ pub fn header(
             if folded { ", folded" } else { "" }
         ));
     });
+    crate::info_text::describe(ui.ctx(), &title_response, shell, InfoTarget::Track(id));
 
     if height < 12.0 {
         return;

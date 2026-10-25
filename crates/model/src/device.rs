@@ -182,6 +182,9 @@ pub struct Device {
     /// articulation map, and left out of the saved set then.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub articulations: Vec<crate::articulation::Articulation>,
+    /// The user's own info text (Edit Info Text), which the Info View shows while the pointer is over the device; empty for none, and left out of the saved set then (the Info View spec, R9).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub info_text: String,
 }
 
 /// Warp settings for a device that plays media (WP-5.15b, Simpler).
@@ -461,6 +464,7 @@ impl Device {
             warp: DeviceWarp::default(),
             slices: Vec::new(),
             articulations,
+            info_text: String::new(),
         }
     }
 

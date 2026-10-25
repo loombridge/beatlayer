@@ -117,6 +117,9 @@ pub const VIEW_CLIP_TAB: &str = "view.clip_tab";
 pub const VIEW_CLIP_ENVELOPE: &str = "view.clip_envelope";
 /// `view.toggle_info_view`: show or hide the Info View.
 pub const VIEW_TOGGLE_INFO_VIEW: &str = "view.toggle_info_view";
+/// `edit.edit_info_text`: turn the Info View into a text field for the
+/// selected item's info text (Edit ▸ Edit Info Text).
+pub const EDIT_INFO_TEXT: &str = "edit.edit_info_text";
 /// `view.toggle_plug_in_windows`: show or hide the plug-in windows: the
 /// floating devices' windows and the plug-ins' editor windows (View ▸
 /// Plug-In Windows, WP-2.5b).
@@ -308,6 +311,7 @@ pub const IDS: &[&str] = &[
     VIEW_CLIP_TAB,
     VIEW_CLIP_ENVELOPE,
     VIEW_TOGGLE_INFO_VIEW,
+    EDIT_INFO_TEXT,
     VIEW_TOGGLE_PLUG_IN_WINDOWS,
     CLOSE_PLUG_IN_WINDOWS,
     VIEW_TOGGLE_SESSION_ARRANGEMENT,
@@ -1740,6 +1744,20 @@ fn specs() -> Vec<CommandSpec> {
             .binding("S-VIEW-008")
             .args::<NoArgs>()
             .result::<ViewResult>(),
+        CommandSpec::new(EDIT_INFO_TEXT, "Edit Info Text")
+            .description(
+                "Turns the Info View into a text field for the info text of the selected \
+                 item, showing the Info View first if it is hidden: a locator, clip or track \
+                 in the Arrangement, a scene, clip or track in the Session View, or a macro, \
+                 chain or device in the Device View, whichever the area with the keyboard \
+                 focus has selected. Return keeps the text, Option-Return (Alt-Return) starts \
+                 a new line, and Esc drops the change. Changes nothing until the text is \
+                 kept; to set it directly, run the item's own command with its text.",
+            )
+            .permission(Permission::Read)
+            .context(Global)
+            .args::<NoArgs>()
+            .result::<()>(),
         CommandSpec::new(
             VIEW_TOGGLE_SESSION_ARRANGEMENT,
             "Toggle Arrangement/Session View",

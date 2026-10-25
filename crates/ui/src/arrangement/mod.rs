@@ -38,7 +38,7 @@ use bl_shell::arrangement::{ArrangementView, Horizontal};
 use bl_shell::arrangement_commands::{self as ids, Lane};
 use bl_shell::clip_drag::{ClipDragEvent, DragSource, DropSpot};
 use bl_shell::locator_commands as locator_ids;
-use bl_shell::{GesturePhase, Invocation, Shell};
+use bl_shell::{GesturePhase, InfoTarget, Invocation, Shell};
 use egui::accesskit::Role;
 use egui::{
     Align2, CursorIcon, EventFilter, Id, Key, Pos2, Rect, Sense, Stroke, StrokeKind, Ui,
@@ -779,7 +779,7 @@ impl ArrangementUi {
         self.header_drag = take_lanes::is_dragging(ui.ctx());
         // Over the pinned rows' lanes, in the lanes' lower right corner.
         self.grid_indicator(ui, view, doc, theme, layout.grid_indicator);
-        self.accessibility(ui, view, doc, &layout);
+        self.accessibility(ui, shell, view, doc, &layout);
         self.keys(ui, shell, view, layout.lanes, events);
 
         if transport.playing {
@@ -1590,6 +1590,7 @@ impl ArrangementUi {
             response.context_menu(|ui| self.menus.show(ui, theme, shell, events));
             let name = locator.name.clone();
             response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, &name));
+            crate::info_text::describe(ui.ctx(), &response, shell, InfoTarget::Locator(locator.id));
             ui.ctx().accesskit_node_builder(id, |node| {
                 node.set_role(Role::Button);
                 node.set_label(name.as_str());
@@ -2321,10 +2322,19 @@ impl ArrangementUi {
     fn accessibility(
         &mut self,
         ui: &mut Ui,
+        shell: &Shell,
         view: &ArrangementView,
         doc: &Document,
         layout: &ArrangementLayout,
     ) {
+        // Spec: info-view R11. A clip with info text shows it in the Info
+        // View while the pointer is over it.
+        if let Some(pos) = ui.ctx().pointer_hover_pos()
+            && layout.lanes.contains(pos)
+            && let Some(shown) = self.shown.iter().rev().find(|s| s.rect.contains(pos))
+        {
+            crate::info_text::hover(ui.ctx(), InfoTarget::Clip(shown.clip));
+        }
         let enabled = ui
             .ctx()
             .accesskit_node_builder(lanes_id(), |node| {
@@ -2395,6 +2405,9 @@ impl ArrangementUi {
                     &clip.name
                 };
                 node.set_label(name.to_owned());
+                if let Some((_, text)) = shell.info_text_shown(InfoTarget::Clip(clip.id)) {
+                    node.set_description(text);
+                }
                 // Spec: arrangement-editing R15.
                 node.set_selected(view.is_clip_selected(clip.id));
                 node.set_value(format!(

@@ -247,7 +247,7 @@ impl View<'_> {
 
     fn track_summary(&self, track: &Track) -> Value {
         let mixer = track.mixer();
-        json!({
+        let mut value = json!({
             "id": track.id(),
             "kind": track.kind(),
             "name": track.name(),
@@ -271,7 +271,9 @@ impl View<'_> {
             "devices": track.devices().len(),
             "frozen": track.frozen(),
             "tracks_inside": track.children().len(),
-        })
+        });
+        with_info_text(&mut value, track.info_text());
+        value
     }
 
     fn found(&self, found: Found<'_>) -> Value {
@@ -359,6 +361,7 @@ impl View<'_> {
         if let Some(lane) = self.document.clip_lane(clip.id) {
             value["lane"] = json!(lane);
         }
+        with_info_text(&mut value, &clip.info_text);
         // Only a clip with a groove shows one.
         if let Some(groove) = clip.groove {
             value["groove"] = json!(groove);
@@ -398,6 +401,7 @@ impl View<'_> {
             "enabled": device.enabled,
             "params_set": device.params.len(),
         });
+        with_info_text(&mut value, &device.info_text);
         // A rack's chains, each with its mixer and its devices, racks inside
         // included (the racks spec, R17).
         if device.rack_kind().is_some() {
@@ -559,7 +563,10 @@ impl View<'_> {
 
     fn scene_summary(&self, scene: &Scene) -> Value {
         let number = self.document.scene_position(scene.id).map(|at| at + 1);
-        json!({ "id": scene.id, "name": scene.name, "colour": scene.colour, "number": number })
+        let mut value =
+            json!({ "id": scene.id, "name": scene.name, "colour": scene.colour, "number": number });
+        with_info_text(&mut value, &scene.info_text);
+        value
     }
 
     fn scene(&self, scene: &Scene) -> Value {
@@ -635,6 +642,14 @@ impl View<'_> {
 }
 
 /// A linear gain in decibels, or `null` for silence.
+/// Adds the user's own info text to an item's summary while it has any, so
+/// a summary of items with none keeps its shape (the Info View spec, R12).
+fn with_info_text(value: &mut Value, info_text: &str) {
+    if !info_text.is_empty() {
+        value["info_text"] = json!(info_text);
+    }
+}
+
 fn decibels(gain: f64) -> Option<f64> {
     (gain > 0.0).then(|| (20.0 * gain.log10() * 100.0).round() / 100.0)
 }

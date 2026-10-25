@@ -119,8 +119,10 @@ pub struct SetInfoTextArgs {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub locator: Option<LocatorId>,
     /// The info text, which the Info View shows while the pointer is over
-    /// the locator.
-    pub info_text: String,
+    /// the locator. Left out, the Info View takes the text, as Edit Info
+    /// Text does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub info_text: Option<String>,
 }
 
 /// Arguments of `locator.loop_to_next`.
@@ -251,8 +253,8 @@ fn specs() -> Vec<CommandSpec> {
         CommandSpec::new(SET_INFO_TEXT, "Set Locator Info Text")
             .description(
                 "Sets the info text of a locator (`locator`, or the selected one), which the \
-                 Info View shows while the pointer is over it. The person's own way of \
-                 typing it comes later.",
+                 Info View shows while the pointer is over it. Without `info_text`, the \
+                 Info View becomes a text field for it, as Edit Info Text does.",
             )
             .permission(Permission::Edit)
             .context(Arrangement)

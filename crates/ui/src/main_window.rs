@@ -144,6 +144,8 @@ pub struct MainWindowUi {
     devices: crate::device_view::DeviceViewUi,
     /// The Clip View's note editor (WP-2.3): its scroll and drags.
     clip_view: crate::clip_view::ClipViewUi,
+    /// The Clip View Selector's outline drag (piano-roll R36).
+    clip_selector: crate::clip_selector::ClipSelectorUi,
     /// The list of the set's plug-ins (IMP-29, WP-6.41).
     plugin_list: crate::plugin_list::PluginListUi,
     /// The keymap in use, read the first time something shows a key from it
@@ -271,6 +273,7 @@ impl MainWindowUi {
             mixer: MixerUi::new(),
             devices: crate::device_view::DeviceViewUi::new(),
             clip_view: crate::clip_view::ClipViewUi::default(),
+            clip_selector: crate::clip_selector::ClipSelectorUi::default(),
             plugin_list: crate::plugin_list::PluginListUi::default(),
             keymap: None,
             file_manager: crate::file_manager::FileManagerUi::default(),
@@ -709,6 +712,10 @@ impl MainWindowUi {
             // the window while it's open, and the progress window while an
             // export runs.
             crate::export_dialog::show(ctx, shell, theme, &mut events);
+            // Spec: set-exchange R20, R23. A pack dropped on the window is
+            // unpacked, and a pack or unpack under way shows its progress.
+            crate::file_manager::drop_pack(ctx, &mut events);
+            crate::file_manager::pack_progress(ctx, shell, theme, &mut events);
             // Spec: multisampler R64. The autosampler's dialog sits over the
             // window while it's open.
             crate::autosampler::show(ctx, shell, theme, &mut events);
@@ -730,6 +737,7 @@ impl MainWindowUi {
                 && (shell.stems_dialog().is_some()
                     || shell.export_dialog().is_some()
                     || shell.export_running()
+                    || shell.pack_status().job.is_some()
                     || shell.autosampler_dialog().is_some()
                     || shell.slice_dialog().is_some()
                     || shell.mpe_settings_dialog().open));
@@ -1149,6 +1157,10 @@ impl MainWindowUi {
                 let invocations = detail_click(*el, shell, self.window, option)
                     .unwrap_or_else(|| click(*el, shell, self.window).into_iter().collect());
                 events.extend(invocations.into_iter().map(UiEvent::Invoke));
+            }
+            if *el == Element::ClipSelector {
+                self.clip_selector
+                    .show(ui, shell, theme, *rect, &response, events);
             }
             if *el == Element::Metronome {
                 response.context_menu(|ui| {

@@ -21,6 +21,9 @@ impl Shell {
             ids::IMPORT => self.run_set_import(id, args),
             ids::EXPORT_TRACKS => self.run_export_tracks(id, args),
             ids::EXPORT_CLIPS => self.run_export_clips(id, args),
+            ids::CREATE_PACK | ids::INSTALL_PACK | ids::CANCEL_PACK | ids::PACK_STATUS => {
+                self.run_pack(id, args)
+            }
             other => Err(ShellError::UnknownCommand(other.to_owned())),
         }
     }

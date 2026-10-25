@@ -441,14 +441,10 @@ const NOTE: &[Row] = &[
     ("C-NOTE-012", "Join Notes", Key(&["S-NOTE-007"])),
     ("C-NOTE-013", "Fit to Time Range", Key(&["S-NOTE-008"])),
     ("C-NOTE-014", "Clip Markers", Submenu),
-    (
-        "C-NOTE-014a",
-        "Set Start Marker",
-        Pending(Some("S-LOOP-001")),
-    ),
-    ("C-NOTE-014b", "Set Loop Start", Pending(Some("S-LOOP-002"))),
-    ("C-NOTE-014c", "Set Loop End", Pending(Some("S-LOOP-003"))),
-    ("C-NOTE-014d", "Set End Marker", Pending(Some("S-LOOP-004"))),
+    ("C-NOTE-014a", "Set Start Marker", Key(&["S-LOOP-001"])),
+    ("C-NOTE-014b", "Set Loop Start", Key(&["S-LOOP-002"])),
+    ("C-NOTE-014c", "Set Loop End", Key(&["S-LOOP-003"])),
+    ("C-NOTE-014d", "Set End Marker", Key(&["S-LOOP-004"])),
     ("C-NOTE-015", "Split Clip", Key(&["S-NOTE-036"])),
     (
         "C-NOTE-016",
@@ -1092,12 +1088,12 @@ mod tests {
                 }
             }
         }
-        // The Clip Markers submenu's items wait for their package too.
+        // The Clip Markers submenu's items run the shortcuts' commands
+        // (piano-roll R37).
         let markers = note().into_iter().find(|i| i.row == "C-NOTE-014").unwrap();
         assert_eq!(markers.items.len(), 4);
         for item in markers.items {
-            assert!(matches!(item.action, Pending(_)), "{}", item.row);
-            assert!(pending_package(item.row).is_some(), "{}", item.row);
+            assert!(matches!(item.action, Key(_)), "{}", item.row);
         }
     }
 }

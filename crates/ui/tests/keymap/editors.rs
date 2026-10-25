@@ -509,9 +509,11 @@ fn the_mpe_tabs_keys_reach_its_commands() {
             command(Key::B, Mods::default(), &tab).unwrap().0,
             "view.draw_mode"
         );
+        // Spec: mpe R31, piano-roll R32. Z zooms to the time selection and,
+        // in the MPE tab, the rows its Pitch values reach.
         assert_eq!(
             command(Key::Z, Mods::default(), &tab).unwrap().0,
-            "clip_view.mpe_zoom"
+            "clip_view.note_view"
         );
         let (id, _, all) = command(Key::A, ctrl_or_cmd, &tab).expect("Cmd+A");
         assert_eq!(
@@ -527,5 +529,83 @@ fn the_mpe_tabs_keys_reach_its_commands() {
             })
             .expect("Cmd+A without an envelope");
         assert_eq!(notes.command.id, "clip_view.select_notes", "{platform:?}");
+    }
+}
+
+// Spec: piano-roll R32 to R38 (WP-6.54). Z, X, W and H, Option-Shift-F and
+// Cmd-F9 to Cmd-F12 are bound to commands; the keys with two directions or a
+// pointer (Page keys, Plus and Minus, the region move, Cmd-click) are read
+// by the note editor itself.
+#[test]
+fn the_note_editors_view_keys_and_clip_marker_keys_are_all_handled() {
+    let keymap = Keymap::live12();
+    let contexts = [Context::ClipView, Context::NoteEditor, Context::Global];
+    let none = mods(false, false, false, false);
+    for (key, show) in [
+        (Key::Z, "selection"),
+        (Key::X, "back"),
+        (Key::W, "whole"),
+        (Key::H, "height"),
+    ] {
+        let hit = keymap
+            .resolve(Platform::Mac, key, none, &contexts)
+            .unwrap_or_else(|| panic!("{key:?} is bound in the note editor"));
+        assert_eq!(hit.command.id, "clip_view.note_view", "{key:?}");
+        assert_eq!(hit.command.args["show"], show, "{key:?}");
+    }
+    // Option-Shift-F (Alt-Shift-F on Windows) follows playback.
+    let hit = keymap
+        .resolve(
+            Platform::Mac,
+            Key::F,
+            mods(false, false, true, true),
+            &contexts,
+        )
+        .expect("Option-Shift-F");
+    assert_eq!(hit.command.id, "arrangement.follow");
+    // Cmd-F9 to Cmd-F12 set the clip's markers (Ctrl on Windows).
+    for (platform, command) in [
+        (Platform::Mac, mods(true, false, false, false)),
+        (Platform::Other, mods(false, true, false, false)),
+    ] {
+        for (key, marker) in [
+            (Key::F9, "start"),
+            (Key::F10, "loop_start"),
+            (Key::F11, "loop_end"),
+            (Key::F12, "end"),
+        ] {
+            let hit = keymap
+                .resolve(platform, key, command, &contexts)
+                .unwrap_or_else(|| panic!("{key:?} sets a marker on {platform:?}"));
+            assert_eq!(hit.command.id, "clip_view.set_marker", "{key:?}");
+            assert_eq!(hit.command.args["marker"], marker, "{key:?}");
+        }
+    }
+    for id in [
+        "S-NOTE-009",
+        "S-NOTE-010",
+        "S-NOTE-021",
+        "S-NOTE-023",
+        "S-NOTE-024",
+        "S-LOOP-001",
+        "S-LOOP-002",
+        "S-LOOP-003",
+        "S-LOOP-004",
+    ] {
+        assert_eq!(keymap.entry_for(id).unwrap().status, Status::Bound, "{id}");
+    }
+    for id in [
+        "S-NOTE-013",
+        "S-NOTE-014",
+        "S-NOTE-015",
+        "S-NOTE-022",
+        "S-NOTE-025",
+        "S-LOOP-005",
+        "S-LOOP-006",
+    ] {
+        assert!(
+            matches!(keymap.entry_for(id).unwrap().status, Status::Widget(_)),
+            "{id} is read by the note editor"
+        );
     }
 }

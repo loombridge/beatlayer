@@ -149,6 +149,16 @@ pub const SAMPLE_INSERT: &str = "WP-4.10-insert";
 /// See [`SAMPLE_WARP`].
 pub const SAMPLE_DELETE: &str = "WP-4.10-delete";
 
+/// The Edit menu rows that run another command while the MIDI Note Editor is
+/// focused, with the command: the Arrangement's Duplicate Time and Delete
+/// Time act on the clip's notes there (piano-roll R39). Their keys in the
+/// editor are the editor's own, because the Arrangement's shortcut rows
+/// belong to the Arrangement.
+pub const NOTE_EDITOR_ROWS: &[(&str, &str)] = &[
+    ("M-EDIT-021", crate::notes::DUPLICATE_TIME),
+    ("M-EDIT-022", crate::notes::DELETE_TIME),
+];
+
 /// Whether a row is one of Live's, in menus.md, rather than one of
 /// Beatlayer's improvements.
 #[must_use]

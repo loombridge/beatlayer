@@ -553,6 +553,46 @@ const WIDGET: &[(&str, &str)] = &[
          start or extend a time selection by one step of the editing grid \
          (`clip_view.select_time`)",
     ),
+    // WP-6.54: the note editor reads the keys that scroll and zoom its view,
+    // and the clip markers' clicks and arrows, itself, because each of
+    // these shortcuts has two keys that act differently or reads the
+    // pointer; each runs a registered command.
+    (
+        "S-NOTE-013",
+        "the Clip View's note editor: Page Up and Page Down scroll the key rows by an octave \
+         (`clip_view.note_view`)",
+    ),
+    (
+        "S-NOTE-014",
+        "the Clip View's note editor: Shift-Page Up and Shift-Page Down scroll the key rows by \
+         one row (`clip_view.note_view`)",
+    ),
+    (
+        "S-NOTE-015",
+        "the Clip View's note editor: Cmd-Page Up and Cmd-Page Down scroll time by the note \
+         area's width (`clip_view.note_view`)",
+    ),
+    (
+        "S-NOTE-022",
+        "the Clip View's note editor: with the Start or End marker selected, Shift-Left and \
+         Shift-Right move the clip's region by one step of the editing grid \
+         (`clip.set_midi_region`)",
+    ),
+    (
+        "S-NOTE-025",
+        "the Clip View's note editor: Plus and Minus zoom time in and out about the time \
+         selection or the insert marker (`clip_view.note_view`)",
+    ),
+    (
+        "S-LOOP-005",
+        "the Clip View's note editor: with the Start or End marker selected, Cmd-clicking the \
+         ruler moves the Start marker to the clicked place (`clip_view.set_marker`)",
+    ),
+    (
+        "S-LOOP-006",
+        "the Clip View's note editor: with the Start or End marker selected, Cmd-Shift-clicking \
+         the ruler moves the End marker to the clicked place (`clip_view.set_marker`)",
+    ),
     // WP-3.7: the Session View grid reads its arrows, Page keys, Home and
     // End, and Esc itself, because each shortcut has keys that act
     // differently and the keymap gives a shortcut one command with one set of

@@ -46,6 +46,10 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 mod mpe;
+mod note_time;
+mod note_view;
+
+pub use note_view::{NoteView, fit_key_rows, pauses_follow, region_moved};
 
 use crate::arrangement::ArrangementView;
 use crate::arrangement::editing::{EditFailure, transaction};
@@ -618,6 +622,9 @@ pub struct ClipView {
     /// What the Sample Editor has selected and shows for the audio clip the
     /// Clip View shows (WP-4.10).
     sample: SampleView,
+    /// What the note area shows of the MIDI clip the Clip View shows
+    /// (WP-6.54).
+    note_view: NoteView,
     /// The MIDI Tools' panel, choices, settings and open application
     /// (WP-6.11).
     pub(crate) tools: crate::midi_tools::MidiTools,
@@ -776,6 +783,8 @@ impl ClipView {
         } else {
             self.folds.remove(&clip);
         }
+        // The rows count differently once folded.
+        self.note_view.forget_rows(clip);
     }
 
     /// The MPE tab's lanes and grids.
@@ -1532,6 +1541,15 @@ impl ClipView {
             folded: clip.is_some_and(|clip| self.is_folded(clip)),
             tab: self.tab,
             mpe: self.mpe_state(doc, clip),
+            span: clip.and_then(|id| {
+                let value = doc.clip(id)?;
+                match &value.data {
+                    ClipData::Midi(midi) => Some(self.note_span(value, midi)),
+                    ClipData::Audio(_) => None,
+                }
+            }),
+            rows: clip.and_then(|id| self.note_view.rows(id)),
+            follow_paused: clip.is_some() && self.note_view.follow_paused(),
             preview: self.preview,
             envelope: self.envelope,
             filters: self.filters.clone(),
@@ -1602,6 +1620,7 @@ impl ClipView {
         self.mpe_zoom = None;
         self.stepped.clear();
         self.sample = SampleView::default();
+        self.note_view = NoteView::default();
         self.tools.close();
     }
 }
@@ -2293,6 +2312,12 @@ pub fn run(
     }
     if mpe::handles(id) {
         return mpe::run(id, args, doc, editor, view, arrangement);
+    }
+    if note_view::handles(id) {
+        return note_view::run(id, args, doc, editor, view, arrangement);
+    }
+    if note_time::handles(id) {
+        return note_time::run(id, args, doc, editor, view, arrangement);
     }
     match id {
         ids::SELECT_NOTES => {

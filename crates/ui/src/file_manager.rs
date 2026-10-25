@@ -11,6 +11,7 @@ use bl_shell::Shell;
 use bl_shell::file_manager_commands::{
     ExternalGroup, FileManagerState, FileRow, Location, Scope, UnusedFiles,
 };
+use bl_shell::set_exchange_commands::PackJob;
 
 use crate::main_window::UiEvent;
 use crate::theme::Theme;
@@ -33,6 +34,12 @@ const RELINK_MISSING: &str = "set.relink_missing";
 const COLLECT_ALL: &str = "set.collect_all_and_save";
 /// `file_manager.set_search_folder`: the Set Folder… button.
 const SET_SEARCH_FOLDER: &str = "file_manager.set_search_folder";
+/// `set.create_pack`: the Packing section's Create Pack button.
+const CREATE_PACK: &str = "set.create_pack";
+/// `set.install_pack`: a pack dropped on the window.
+const INSTALL_PACK: &str = "set.install_pack";
+/// `set.cancel_pack`: the progress window's Cancel button.
+const CANCEL_PACK: &str = "set.cancel_pack";
 
 /// What the File Manager shows that the shell doesn't keep: the switches
 /// the person sets, which the commands then use.
@@ -112,14 +119,94 @@ pub fn show(
                     unused(ui, theme, &state.unused, panel, events);
                 }
                 if state.packing {
-                    // Spec: file-management R16. The Packing section's
-                    // content is WP-6.35b's; only the heading is drawn.
-                    ui.heading("Packing");
+                    packing(ui, shell, &state, events);
                 }
                 collect_and_save(ui, &state, panel, events);
             });
         },
     );
+}
+
+/// The Packing section (file management R16): Create Pack, which asks where
+/// to save the pack of the project folder (set exchange R16).
+fn packing(ui: &mut Ui, shell: &Shell, state: &FileManagerState, events: &mut Vec<UiEvent>) {
+    ui.heading("Packing");
+    ui.label("Packs the project folder, with all its sets, into one file.");
+    let busy = shell.pack_status().job.is_some();
+    let create = ui.add_enabled(!busy, egui::Button::new("Create Pack"));
+    if create.clicked() {
+        let args = state
+            .project
+            .as_ref()
+            .map_or_else(|| json!({}), |project| json!({ "project": project }));
+        events.push(UiEvent::Invoke(Invocation::new(CREATE_PACK, args)));
+    }
+}
+
+/// A pack dropped on the main window asks where to unpack it (set exchange
+/// R20, I-DROP-023).
+pub fn drop_pack(ctx: &egui::Context, events: &mut Vec<UiEvent>) {
+    let packs: Vec<String> = ctx.input(|i| {
+        i.raw
+            .dropped_files
+            .iter()
+            .map(|file| file.path().to_string_lossy().into_owned())
+            .filter(|path| {
+                std::path::Path::new(path)
+                    .extension()
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case(bl_project::pack::EXTENSION))
+            })
+            .collect()
+    });
+    for pack in packs {
+        events.push(UiEvent::Invoke(Invocation::new(
+            INSTALL_PACK,
+            json!({ "pack": pack }),
+        )));
+    }
+}
+
+/// The window that shows a pack or unpack under way, with Cancel, which Esc
+/// presses too (set exchange R23).
+pub fn pack_progress(ctx: &egui::Context, shell: &Shell, theme: &Theme, events: &mut Vec<UiEvent>) {
+    let status = shell.pack_status();
+    let Some(job) = status.job else {
+        return;
+    };
+    let cancel = |events: &mut Vec<UiEvent>| {
+        events.push(UiEvent::Invoke(Invocation::new(CANCEL_PACK, json!({}))));
+    };
+    if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+        cancel(events);
+    }
+    egui::Modal::new(egui::Id::new("pack-progress")).show(ctx, |ui| {
+        ui.set_width(320.0);
+        ui.vertical_centered(|ui| {
+            let title = match job {
+                PackJob::Create => "Creating Pack",
+                PackJob::Install => "Installing Pack",
+            };
+            ui.label(
+                egui::RichText::new(title)
+                    .size(theme.sizes.heading)
+                    .strong(),
+            );
+        });
+        ui.add_space(8.0);
+        crate::export_dialog::bar(ui, theme, status.share as f32, "Pack progress");
+        ui.label(
+            egui::RichText::new(format!("{:.0}%", status.share * 100.0))
+                .font(theme.small_font())
+                .color(theme.colors.text_dim.0),
+        );
+        ui.add_space(10.0);
+        ui.vertical_centered(|ui| {
+            if ui.button("Cancel").clicked() {
+                cancel(events);
+            }
+        });
+    });
+    ctx.request_repaint_after(std::time::Duration::from_millis(50));
 }
 
 /// The three buttons that choose the File Manager's view (R10).

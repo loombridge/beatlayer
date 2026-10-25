@@ -397,7 +397,8 @@ impl NativeDevice for Squeeze {
             } else if log_envelope {
                 // Beatlayer's own Log shape: deeper reductions release
                 // faster, so sharply compressed peaks let go sooner.
-                let depth = -20.0 * f64::from(gain.max(1e-6)).log10();
+                // Expansion's gain is above 1: no depth, so no stall.
+                let depth = (-20.0 * f64::from(gain.max(1e-6)).log10()).max(0.0);
                 (f64::from(release_step) * (1.0 + depth / f64::from(LOG_DEPTH_DB))).min(1.0) as f32
             } else {
                 release_step

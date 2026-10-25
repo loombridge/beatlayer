@@ -410,3 +410,40 @@ fn the_scrub_areas_add_locator_adds_one_where_it_was_right_clicked() {
     let clicked = horizontal.at(f64::from(at.x - layout.scrub.left()));
     assert_eq!(locators(&h)[0].1, h.shell.arrangement().snap(doc, clicked));
 }
+
+#[test]
+fn a_locators_menu_edit_info_text_types_the_text_in_the_info_view() {
+    // Spec: info-view R10, R11 (C-TIME-025).
+    let mut h = Harness::with_title_bar(Window::Main);
+    h.shell.run(ids::ADD, json!({ "at": 2 * BAR })).unwrap();
+    h.settle();
+    let locator = locators(&h)[0].0;
+    let layout = layout(&h);
+    let horizontal = h
+        .shell
+        .arrangement()
+        .horizontal(h.shell.editor().document());
+    let x = layout.scrub.left() + (horizontal.x(Ticks(2 * BAR)) as f32);
+    right_click(&mut h, pos2(x, layout.scrub.center().y));
+    let nodes = Harness::nodes(&h.settle());
+    let item = nodes
+        .iter()
+        .find(|node| node.label == "Edit Info Text")
+        .expect("the locator's menu lists Edit Info Text");
+    assert!(!item.disabled, "it works now");
+    h.frame(vec![Event::AccessKitActionRequest(
+        egui::accesskit::ActionRequest {
+            action: egui::accesskit::Action::Click,
+            target_tree: egui::accesskit::TreeId::ROOT,
+            target_node: item.id,
+            data: None,
+        },
+    )]);
+    h.settle();
+    assert!(h.main.is_typing(), "the Info View is a text field");
+    h.frame(vec![Event::Text("Drop here".to_owned())]);
+    h.key(Key::Enter, Modifiers::NONE);
+    h.settle();
+    let doc = h.shell.editor().document();
+    assert_eq!(doc.locator(locator).unwrap().info_text, "Drop here");
+}

@@ -52,6 +52,8 @@ pub fn element(
         _ if !live => Sense::hover(),
         Kind::Indicator => Sense::hover(),
         Kind::Value => Sense::click_and_drag(),
+        // Spec: piano-roll R36. The Clip View Selector's outline is dragged.
+        _ if placement.element == Element::ClipSelector => Sense::click_and_drag(),
         _ => Sense::click(),
     };
     let id = Id::new(("element", placement.element));

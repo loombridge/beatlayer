@@ -1,5 +1,6 @@
 //! What the menus show: contexts, switches, labels and whether a command can run.
 
+use super::info_text;
 use super::{
     Area, CUE_MODE, DELAY_COMPENSATION, LOCK_ENVELOPES, MainView, REDUCED_LATENCY_MONITORING,
     SOLO_IN_PLACE, Shell, WindowKind,
@@ -450,6 +451,12 @@ impl Shell {
         if !spec.contexts.iter().any(|context| active.contains(context)) {
             return false;
         }
+        if info_text::is_info_command(id) && !Self::has_info_text(id, args) {
+            return self.info_target_of(id, args).is_some();
+        }
+        if id == ids::EDIT_INFO_TEXT {
+            return self.info_target_selected().is_some();
+        }
         if envelope_key_ids::handles(id) {
             return self.can_envelope_key(id);
         }
@@ -586,6 +593,23 @@ impl Shell {
                     .clip_view
                     .shown_clip(self.editor.document(), &self.arrangement)
                     .is_some();
+            }
+            // Spec: piano-roll R37. The clip markers are the MIDI Note
+            // Editor's; the Sample Editor's shortcuts share their keys.
+            note_ids::SET_MARKER => {
+                return self
+                    .clip_view
+                    .shown_clip(self.editor.document(), &self.arrangement)
+                    .is_some();
+            }
+            // Spec: piano-roll R39. The …Time commands need a span: a time
+            // selection, or the call's own.
+            note_ids::DUPLICATE_TIME | note_ids::INSERT_TIME | note_ids::DELETE_TIME => {
+                return args.get("start").is_some_and(|start| !start.is_null())
+                    || self
+                        .clip_view
+                        .time_selection(self.editor.document(), &self.arrangement)
+                        .is_some();
             }
             // Spec: mpe R27, R29, R31. The tab's own keys work in the tab.
             // Cmd-A takes the breakpoints only while an envelope has the

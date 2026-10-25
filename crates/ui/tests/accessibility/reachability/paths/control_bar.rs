@@ -6,7 +6,7 @@ use egui::Key;
 
 pub(crate) fn entries() -> Vec<(&'static str, Path)> {
     use Path::Exception;
-    use Reason::{Equivalent, Gap, LaterView, Query};
+    use Reason::{Equivalent, LaterView, Query};
     vec![
         (
             "transport.play",
@@ -165,9 +165,9 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
         ),
         (
             "locator.set_info_text",
-            Exception(Gap(
-                "the user's own info text has no person's path until WP-6.58 (T276) builds Edit \
-                 Info Text",
+            Exception(Equivalent(
+                "Edit ▸ Edit Info Text (M-EDIT-025) while a locator is selected: it opens the Info \
+                 View's field for it (the Info View spec, R10)",
             )),
         ),
         // The document's own locator commands (the time editing spec, R1 to
@@ -218,7 +218,7 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
         (
             "song.set_locator_info_text",
             Exception(Equivalent(
-                "the shell's locator.set_info_text, which waits on the same gap (the time \
+                "the shell's locator.set_info_text, which Edit ▸ Edit Info Text runs (the time \
                  editing spec, R8 and R13)",
             )),
         ),

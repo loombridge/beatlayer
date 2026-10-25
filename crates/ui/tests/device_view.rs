@@ -266,13 +266,9 @@ fn the_context_menu_lists_lives_items_and_names_later_packages() {
     }
     // Show Preset Name is ticked on a new device (observed).
     assert!(item("Show Preset Name").label.starts_with('✔'));
+    // Spec: info-view R10. Edit Info Text works since WP-6.58.
     let node: Node = item("Edit Info Text");
-    assert!(node.disabled, "Edit Info Text waits");
-    assert!(
-        node.description.contains("WP-2.24"),
-        "Edit Info Text: {}",
-        node.description
-    );
+    assert!(!node.disabled, "Edit Info Text works");
 }
 
 // Spec: multisampler R64 (C-DEVICE-015)
@@ -1358,4 +1354,41 @@ fn the_choosers_a_device_takes_from_the_current_scale_are_disabled() {
     );
     let arpeggio = panel(&h, arp);
     assert_eq!(arpeggio.locked, [arpeggiator::ROOT, arpeggiator::SCALE]);
+}
+
+// Spec: info-view R10, R11 (C-DEVICE-005).
+#[test]
+fn a_devices_menu_edit_info_text_types_the_text_in_the_info_view() {
+    let mut h = harness();
+    let device = add(&mut h, gain());
+    let frame = frame_of(&mut h, device);
+    let out = right_click(&mut h, title_rect(frame, false).center());
+    let nodes = Harness::nodes(&out);
+    let item = nodes
+        .iter()
+        .find(|n| n.label == "Edit Info Text")
+        .expect("the device's menu lists Edit Info Text");
+    h.frame(vec![Event::AccessKitActionRequest(
+        egui::accesskit::ActionRequest {
+            action: egui::accesskit::Action::Click,
+            target_tree: egui::accesskit::TreeId::ROOT,
+            target_node: item.id,
+            data: None,
+        },
+    )]);
+    h.settle();
+    assert!(h.main.is_typing(), "the Info View is a text field");
+    h.frame(vec![Event::Text("Gain staging".to_owned())]);
+    h.key(Key::Enter, Modifiers::NONE);
+    h.settle();
+    assert_eq!(
+        h.shell
+            .editor()
+            .document()
+            .device(device)
+            .unwrap()
+            .info_text,
+        "Gain staging"
+    );
+    assert_eq!(last_step(&h), "Change Info Text");
 }

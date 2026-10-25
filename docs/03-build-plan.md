@@ -728,7 +728,7 @@ Total to 1.0: 293 packages planned in Phases 0 to 7, and about 95 estimated in P
 | 6.34 | done | 23 October 2026 | [#326](https://github.com/loombridge/beatlayer/pull/326); `.blclip` clip files saved from the Session View or the Arrangement into the browser, listed under the Clips label, placed with their track's devices on an empty or new track, and previewed through their own warp settings, with Collect Files on Export and the User Library's location on the Library settings page ([clip files](specs/clip-files.md) R1 to R15, [file management](specs/file-management.md) R7 to R9) |
 | 6.34b | done | 25 October 2026 | [#435](https://github.com/loombridge/beatlayer/pull/435); a MIDI clip file in the browser previews as an offline render of one loop through its own chain at the set's tempo, cached until the file or tempo changes, and a chain with no instrument previews nothing and says why ([clip files](specs/clip-files.md) R16) |
 | 6.35 | done | 24 October 2026 | [#366](https://github.com/loombridge/beatlayer/pull/366); a set opens in the browser to list its tracks, groups, returns, Main, Session clips and devices, and merges whole (without its returns and Main), by track or by chain, as one undo step with sends mapped by position; tracks and Session clips save as a new set, by command or by dragging onto a place ([set exchange](specs/set-exchange.md)) |
-| 6.35b | todo |  |  |
+| 6.35b | done | 25 October 2026 | [#437](https://github.com/loombridge/beatlayer/pull/437); Create Pack writes a project into one `.blpack` file without its Backup folder or journals, and Install Pack... unpacks it after checking every name, with progress and cancel. |
 | 6.36 | todo |  |  |
 | 6.36b | todo |  |  |
 | 6.37 | todo |  |  |
@@ -750,11 +750,11 @@ Total to 1.0: 293 packages planned in Phases 0 to 7, and about 95 estimated in P
 | 6.51 | done | 23 October 2026 | [#330](https://github.com/loombridge/beatlayer/pull/330); fade curves, crossfades between audio clips that meet (with the 4 ms crossfade that edits leave under Create Fades on Clip Edges), fade handles, Create Fade and Delete Fades on Cmd+Option+F and Cmd+Option+Delete, and the engine reading each crossfaded clip past its edge ([audio clips](specs/audio-clips.md) R23 to R31) |
 | 6.52 | done | 23 October 2026 | [#318](https://github.com/loombridge/beatlayer/pull/318); Cut, Copy, Paste and Duplicate on whole tracks from the track menu and the title bars' keys, copying clips, take lanes, devices, routing, automation and frozen audio under new IDs, and pasting into another set with references settled by place and files added to its media table ([track context menu](specs/track-context-menu.md) R12 to R16; colour waits on tracks having one) |
 | 6.53 | done | 22 October 2026 | [#302](https://github.com/loombridge/beatlayer/pull/302); the MIDI Note Editor's insert marker and time selection, its keyboard selection and moves, Shift-click and the piano ruler's keys, the note clipboard with Option-drag copies, and the editor's context menus ([the spec](specs/piano-roll.md) R23 to R31) |
-| 6.54 | todo |  |  |
+| 6.54 | done | 25 October 2026 | [#440](https://github.com/loombridge/beatlayer/pull/440); the MIDI Note Editor's zoom and scroll (`clip_view.note_view`: Z, X, W, H, Plus and Minus, the Page keys, the rulers, the wheel and the Clip View Selector's outline), Follow in the editor, the Clip Markers items and Cmd-F9 to Cmd-F12 (`clip_view.set_marker`), Duplicate, Insert and Delete Time on the clip's notes, and Crop Clip to the editor's time selection ([the piano roll spec](specs/piano-roll.md) R32 to R40, R42); the note-editor shortcut rows for Duplicate and Delete Time and Insert Time's menu place wait on a maintainer |
 | 6.55 | todo |  |  |
 | 6.56 | todo |  |  |
 | 6.57 | todo |  |  |
-| 6.58 | todo |  |  |
+| 6.58 | done | 25 October 2026 | [#447](https://github.com/loombridge/beatlayer/pull/447); Edit Info Text from the Edit menu and the track, clip, device, chain, macro and locator context menus edits the item's own info text in the Info View as one undo step (`track`, `clip`, `scene` and `device.set_info_text`), hovering shows it, and it saves with the set; the scene and Session clip menus' items wait on WP-6.56 |
 | 6.59 | todo |  |  |
 | 6.60 | todo |  |  |
 | 6.61 | todo |  |  |

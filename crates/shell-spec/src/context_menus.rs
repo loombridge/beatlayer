@@ -62,7 +62,11 @@ const CLIP: &[Row] = &[
     ),
     SEPARATOR,
     ("C-CLIP-ARR-007", "Rename", Key(&["S-EDIT-008"])),
-    ("C-CLIP-ARR-008", "Edit Info Text", Pending(None)),
+    (
+        "C-CLIP-ARR-008",
+        "Edit Info Text",
+        Cmd("clip.set_info_text"),
+    ),
     ("C-CLIP-ARR-009", "Extract Groove(s)", Pending(None)),
     ("C-CLIP-ARR-010", "Deactivate Clip", Key(&["S-ARR-027"])),
     ("C-CLIP-ARR-011", "Export MIDI Clip...", Pending(None)),
@@ -153,7 +157,11 @@ const LOCATOR: &[Row] = &[
         Cmd(crate::locator::SET_START_TIME),
     ),
     SEPARATOR,
-    ("C-TIME-025a", "Edit Info Text", Pending(None)),
+    (
+        "C-TIME-025a",
+        "Edit Info Text",
+        Cmd(crate::locator::SET_INFO_TEXT),
+    ),
 ];
 
 /// The loop brace's menu (C-TIME-023).
@@ -193,7 +201,11 @@ const DEVICE: &[Row] = &[
     ("C-DEVICE-003", "Duplicate", Key(&["S-EDIT-004"])),
     SEPARATOR,
     ("C-DEVICE-004", "Rename", Key(&["S-EDIT-008"])),
-    ("C-DEVICE-005", "Edit Info Text", Pending(None)),
+    (
+        "C-DEVICE-005",
+        "Edit Info Text",
+        Cmd("device.set_info_text"),
+    ),
     SEPARATOR,
     ("C-DEVICE-006", "Delete", Key(&["S-EDIT-005"])),
     ("C-DEVICE-007", "Group", Key(&["S-DEV-001"])),
@@ -273,7 +285,7 @@ pub const CHAIN_COLOUR_ROW: &str = "R26-colour";
 
 const CHAIN: &[Row] = &[
     ("R26-rename", "Rename", Key(&["S-EDIT-008"])),
-    ("R26-info", "Edit Info Text", Pending(None)),
+    ("R26-info", "Edit Info Text", Cmd("chain.set_info")),
     SEPARATOR,
     (CHAIN_COLOUR_ROW, "Colour", Cmd(SET_CHAIN_COLOUR)),
 ];
@@ -299,7 +311,7 @@ const TRACK: &[Row] = &[
     ("C-TRACK-004", "Delete", Key(&["S-TRACK-018"])),
     SEPARATOR,
     ("C-TRACK-005", "Rename", Key(&["S-TRACK-004"])),
-    ("C-TRACK-006", "Edit Info Text", Pending(None)),
+    ("C-TRACK-006", "Edit Info Text", Cmd("track.set_info_text")),
     SEPARATOR,
     ("C-TRACK-007", "Freeze Track", Key(&["S-TRACK-017"])),
     (
@@ -441,14 +453,10 @@ const NOTE: &[Row] = &[
     ("C-NOTE-012", "Join Notes", Key(&["S-NOTE-007"])),
     ("C-NOTE-013", "Fit to Time Range", Key(&["S-NOTE-008"])),
     ("C-NOTE-014", "Clip Markers", Submenu),
-    (
-        "C-NOTE-014a",
-        "Set Start Marker",
-        Pending(Some("S-LOOP-001")),
-    ),
-    ("C-NOTE-014b", "Set Loop Start", Pending(Some("S-LOOP-002"))),
-    ("C-NOTE-014c", "Set Loop End", Pending(Some("S-LOOP-003"))),
-    ("C-NOTE-014d", "Set End Marker", Pending(Some("S-LOOP-004"))),
+    ("C-NOTE-014a", "Set Start Marker", Key(&["S-LOOP-001"])),
+    ("C-NOTE-014b", "Set Loop Start", Key(&["S-LOOP-002"])),
+    ("C-NOTE-014c", "Set Loop End", Key(&["S-LOOP-003"])),
+    ("C-NOTE-014d", "Set End Marker", Key(&["S-LOOP-004"])),
     ("C-NOTE-015", "Split Clip", Key(&["S-NOTE-036"])),
     (
         "C-NOTE-016",
@@ -491,9 +499,6 @@ pub fn keys() -> Vec<MenuItem> {
 #[must_use]
 pub fn pending_package(row: &str) -> Option<&'static str> {
     match row {
-        "C-DEVICE-005" | "C-CLIP-ARR-008" | "C-TRACK-006" | "R26-info" => {
-            Some("WP-2.24 (the Info View)")
-        }
         "C-TRACK-013" | "C-TRACK-014" => Some("a package not planned yet"),
         "C-CLIP-ARR-027a" | "C-CLIP-ARR-027b" | "C-CLIP-ARR-027c" => {
             Some("Phase 9 (audio to MIDI, IMP-06)")
@@ -1092,12 +1097,12 @@ mod tests {
                 }
             }
         }
-        // The Clip Markers submenu's items wait for their package too.
+        // The Clip Markers submenu's items run the shortcuts' commands
+        // (piano-roll R37).
         let markers = note().into_iter().find(|i| i.row == "C-NOTE-014").unwrap();
         assert_eq!(markers.items.len(), 4);
         for item in markers.items {
-            assert!(matches!(item.action, Pending(_)), "{}", item.row);
-            assert!(pending_package(item.row).is_some(), "{}", item.row);
+            assert!(matches!(item.action, Key(_)), "{}", item.row);
         }
     }
 }

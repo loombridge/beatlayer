@@ -23,7 +23,7 @@ use bl_shell::mixer_controls::{
 };
 use bl_shell::mixer_view::{ChainStrip, MixerOf, RackFold};
 use bl_shell::mixer_view_commands as ids;
-use bl_shell::{Invocation, Shell};
+use bl_shell::{InfoTarget, Invocation, Shell};
 use egui::accesskit::{self, Action, Role};
 use egui::{
     Align2, Color32, Event, Id, Key, Rect, Response, Sense, Shape, Stroke, StrokeKind, Ui,
@@ -808,6 +808,7 @@ fn title_bars(
             shell,
             events,
         );
+        crate::info_text::describe(ui.ctx(), &response, shell, InfoTarget::Track(track));
     }
     // A chain dropped out of the row leaves its rack (drum racks spec,
     // R23, R24) before a drop among the strips moves it (racks spec, R29).

@@ -20,7 +20,7 @@
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Beatlayer records from your microphone and other audio inputs.</string>
 
-	<!-- A project is a folder holding a .blset file (see "Project files and interop"). -->
+	<!-- A project is a folder holding a .blset file (see "Project files and interop"); a pack is a .blpack file (set exchange R20). -->
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>
@@ -33,6 +33,18 @@
 			<key>LSItemContentTypes</key>
 			<array>
 				<string>io.loombridge.beatlayer.project</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Beatlayer Pack</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>io.loombridge.beatlayer.pack</string>
 			</array>
 		</dict>
 	</array>
@@ -53,6 +65,24 @@
 				<key>public.filename-extension</key>
 				<array>
 					<string>blset</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>io.loombridge.beatlayer.pack</string>
+			<key>UTTypeDescription</key>
+			<string>Beatlayer Pack</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+				<string>public.content</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>blpack</string>
 				</array>
 			</dict>
 		</dict>

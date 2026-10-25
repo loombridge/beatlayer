@@ -50,6 +50,8 @@ impl Shell {
         // Spec: export R41. The export on its thread: its share moves the
         // progress window, and its end lands in the Status Bar.
         changed |= self.poll_export();
+        // Spec: set-exchange R23. A pack or unpack on its thread.
+        changed |= self.poll_pack();
         // Spec: multisampler R73. The autosampler makes one sample at a
         // time, so the dialog sees its progress and Cancel stops it.
         self.poll_autosample();
@@ -244,6 +246,7 @@ impl Shell {
         // Sample Editor follow it again.
         if engine.playing != self.arrangement.transport().playing {
             self.clip_view.sample_follow(false);
+            self.clip_view.note_follow(false);
         }
         let brace = self.editor.document().settings().arrangement_loop;
         self.set_transport(TransportView {

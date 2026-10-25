@@ -438,8 +438,6 @@ fn every_m1_command_is_reachable_from_the_keyboard() {
             "device.set_layer_zone",
             "device.snap_layer_markers",
             "device.sort_layers",
-            "locator.set_info_text",
-            "rack.set_macro_info_text",
             "set.export_clips",
             "set.export_tracks",
             "track.move",

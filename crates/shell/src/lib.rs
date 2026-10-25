@@ -213,6 +213,6 @@ pub use bl_shell_spec::{
 /// The autosampler's progress (WP-5.16).
 pub use shell::autosample::Status as AutosampleStatus;
 pub use shell::{
-    Area, Effect, ExportPrefs, GesturePhase, Invocation, KEY_TRACK_NUMBER, MainView, Message,
-    Shell, ShellError, TransientList, WindowKind,
+    Area, Effect, ExportPrefs, GesturePhase, InfoTarget, Invocation, KEY_TRACK_NUMBER, MainView,
+    Message, Shell, ShellError, TransientList, WindowKind,
 };

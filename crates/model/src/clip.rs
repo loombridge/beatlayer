@@ -93,6 +93,9 @@ pub struct Clip {
     /// on loading, so a clip in a document always has one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub colour: Option<u8>,
+    /// The user's own info text (Edit Info Text), which the Info View shows while the pointer is over the clip; empty for none, and left out of the saved set then (the Info View spec, R9).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub info_text: String,
 }
 
 impl Clip {
@@ -112,6 +115,7 @@ impl Clip {
             scale: Scale::default(),
             groove: None,
             colour: None,
+            info_text: String::new(),
         }
     }
 
@@ -1438,6 +1442,7 @@ pub fn consolidated_midi(
         scale: clips.first().map_or_else(Scale::default, |clip| clip.scale),
         groove: None,
         colour: None,
+        info_text: String::new(),
     }
 }
 

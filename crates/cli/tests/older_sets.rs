@@ -1782,3 +1782,67 @@ fn a_set_from_before_colours_loads_in_the_colours_it_was_drawn_in() {
     }
     assert!(loaded.document.scenes().all(|scene| scene.colour.is_none()));
 }
+
+// Spec: info-view R9. A set saved before the user's own info text loads with
+// none and writes none; a set whose track, clip, scene and device carry some
+// saves it and opens with it.
+#[test]
+fn a_set_saved_before_info_text_loads_with_none_and_a_set_with_some_keeps_it() {
+    let (mut editor, clip) = midi_clip_song();
+    let track = editor.document().track_order()[0];
+    let scene = editor.document().scenes().next().unwrap().id;
+    let device = editor.new_id();
+    editor
+        .apply(Command::InsertDevice {
+            track,
+            index: 0,
+            device: Device::new(
+                device,
+                "Utility",
+                DeviceKind::Native {
+                    device_type: "beatlayer.utility".to_owned(),
+                },
+            ),
+        })
+        .unwrap();
+    let saved = encode_json(&project_of(&editor), 1).unwrap();
+    assert!(
+        !String::from_utf8_lossy(&saved).contains("info_text"),
+        "a set with no info text writes none"
+    );
+    let (loaded, _) = decode_json(&saved, &LoadOptions::default()).unwrap();
+    assert_eq!(loaded.document.track(track).unwrap().info_text(), "");
+    assert_eq!(loaded.document.clip(clip).unwrap().info_text, "");
+    assert_eq!(loaded.document.scene(scene).unwrap().info_text, "");
+    assert_eq!(loaded.document.device(device).unwrap().info_text, "");
+
+    for command in [
+        Command::SetTrackInfoText {
+            track,
+            info_text: "Played live".to_owned(),
+        },
+        Command::SetClipInfoText {
+            clip,
+            info_text: "Intro\nsecond line".to_owned(),
+        },
+        Command::SetSceneInfoText {
+            scene,
+            info_text: "Verse".to_owned(),
+        },
+        Command::SetDeviceInfoText {
+            device,
+            info_text: "Gain staging".to_owned(),
+        },
+    ] {
+        editor.apply(command).unwrap();
+    }
+    let saved = encode_json(&project_of(&editor), 1).unwrap();
+    let (loaded, _) = decode_json(&saved, &LoadOptions::default()).unwrap();
+    let document = &loaded.document;
+    assert_eq!(document.track(track).unwrap().info_text(), "Played live");
+    assert_eq!(document.clip(clip).unwrap().info_text, "Intro\nsecond line");
+    assert_eq!(document.scene(scene).unwrap().info_text, "Verse");
+    assert_eq!(document.device(device).unwrap().info_text, "Gain staging");
+    assert_eq!(*document, *editor.document());
+    assert_eq!(encode_json(&loaded, 1).unwrap(), saved);
+}

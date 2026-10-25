@@ -9,7 +9,10 @@ trigger = "press"
 milestone = "M2"
 mac = ["Cmd+F9"]
 win = ["Ctrl+F9"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "clip_view.set_marker", contexts = ["clip-view"], args = { marker = "start" } },
+]
 
 [[shortcut]]
 id = "S-LOOP-002"
@@ -20,7 +23,10 @@ trigger = "press"
 milestone = "M2"
 mac = ["Cmd+F10"]
 win = ["Ctrl+F10"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "clip_view.set_marker", contexts = ["clip-view"], args = { marker = "loop_start" } },
+]
 
 [[shortcut]]
 id = "S-LOOP-003"
@@ -31,7 +37,10 @@ trigger = "press"
 milestone = "M2"
 mac = ["Cmd+F11"]
 win = ["Ctrl+F11"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "clip_view.set_marker", contexts = ["clip-view"], args = { marker = "loop_end" } },
+]
 
 [[shortcut]]
 id = "S-LOOP-004"
@@ -42,7 +51,10 @@ trigger = "press"
 milestone = "M2"
 mac = ["Cmd+F12"]
 win = ["Ctrl+F12"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "clip_view.set_marker", contexts = ["clip-view"], args = { marker = "end" } },
+]
 
 [[shortcut]]
 id = "S-LOOP-005"
@@ -53,7 +65,8 @@ trigger = "press"
 milestone = "M2"
 mac = ["Cmd+click"]
 win = ["Ctrl+click"]
-status = "pending"
+status = "widget"
+handler = "the Clip View's note editor: with the Start or End marker selected, Cmd-clicking the ruler moves the Start marker to the clicked place (`clip_view.set_marker`)"
 
 [[shortcut]]
 id = "S-LOOP-006"
@@ -64,7 +77,8 @@ trigger = "press"
 milestone = "M2"
 mac = ["Cmd+Shift+click"]
 win = ["Ctrl+Shift+click"]
-status = "pending"
+status = "widget"
+handler = "the Clip View's note editor: with the Start or End marker selected, Cmd-Shift-clicking the ruler moves the End marker to the clicked place (`clip_view.set_marker`)"
 
 [[shortcut]]
 id = "S-LOOP-007"

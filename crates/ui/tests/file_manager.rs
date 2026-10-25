@@ -122,3 +122,113 @@ fn the_file_manager_shows_the_set_s_files() {
         state.sections
     );
 }
+
+/// A folder for one test's files, removed when the test ends.
+struct Scratch(std::path::PathBuf);
+
+impl Scratch {
+    fn new(name: &str) -> Self {
+        let path = std::env::temp_dir().join(format!(
+            "bl-ui-packs-{name}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&path).unwrap();
+        Self(path)
+    }
+}
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// A file dropped into the window, as the app's drag and drop gives egui.
+#[derive(Debug)]
+struct Dropped(std::path::PathBuf);
+
+impl egui::DroppedFile for Dropped {
+    fn path(&self) -> &std::path::Path {
+        &self.0
+    }
+
+    fn bytes(&self) -> Result<Vec<u8>, String> {
+        std::fs::read(&self.0).map_err(|error| error.to_string())
+    }
+}
+
+#[test]
+fn the_packing_section_holds_create_pack() {
+    // Spec: set-exchange R16. Manage Project's Packing section has a Create
+    // Pack button, which asks where to save the pack of the project folder.
+    let scratch = Scratch::new("create");
+    let mut h = Harness::new(Window::Main);
+    h.shell
+        .run(
+            "set.save_as",
+            json!({ "path": scratch.0.join("Song.blset").to_string_lossy() }),
+        )
+        .unwrap();
+    h.shell
+        .run(
+            "view.toggle_file_manager",
+            json!({ "view": "project", "open": true }),
+        )
+        .unwrap();
+    let nodes = Harness::nodes(&h.settle());
+    let button = Harness::node(&nodes, "Create Pack");
+    assert!(!button.disabled);
+    let id = button.id;
+    h.take_events();
+    h.frame(vec![egui::Event::AccessKitActionRequest(
+        egui::accesskit::ActionRequest {
+            action: egui::accesskit::Action::Click,
+            target_tree: egui::accesskit::TreeId::ROOT,
+            target_node: id,
+            data: None,
+        },
+    )]);
+    h.settle();
+    assert!(
+        h.events.iter().any(|e| matches!(
+            e,
+            bl_ui::main_window::UiEvent::Invoke(i) if i.id == "set.create_pack"
+        )),
+        "the button runs the command"
+    );
+    assert!(
+        matches!(h.effects.as_slice(), [.., bl_shell::Effect::PickPackPath { file_name, .. }]
+            if file_name == "Song Project.blpack"),
+        "{:?}",
+        h.effects
+    );
+}
+
+#[test]
+fn a_pack_dropped_on_the_window_is_installed() {
+    // Spec: set-exchange R20 (I-DROP-023). A pack dropped on the main window
+    // asks where to unpack it; any other file dropped there is left alone.
+    let scratch = Scratch::new("drop");
+    let pack = scratch.0.join("Song.blpack");
+    std::fs::write(&pack, b"not read until a folder is chosen").unwrap();
+    let other = scratch.0.join("notes.txt");
+    std::fs::write(&other, b"text").unwrap();
+    let mut h = Harness::new(Window::Main);
+    h.settle();
+    h.dropped.push(std::sync::Arc::new(Dropped(other)));
+    h.frame(vec![]);
+    assert!(h.effects.is_empty(), "{:?}", h.effects);
+
+    h.dropped.push(std::sync::Arc::new(Dropped(pack.clone())));
+    h.frame(vec![]);
+    assert_eq!(
+        h.effects,
+        [bl_shell::Effect::PickInstallFolder {
+            pack: pack.to_string_lossy().into_owned()
+        }]
+    );
+}

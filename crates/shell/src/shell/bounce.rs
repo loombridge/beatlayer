@@ -247,6 +247,7 @@ impl Shell {
                     // A bounce plays the groove, so the audio holds it already.
                     groove: None,
                     colour: None,
+                    info_text: String::new(),
                 },
             ));
         }
@@ -315,6 +316,7 @@ impl Shell {
                 // A bounce plays the groove, so the audio holds it already.
                 groove: None,
                 colour: None,
+                info_text: String::new(),
             });
         }
         Ok(lane)
@@ -368,6 +370,7 @@ impl Shell {
             // A bounce plays the groove, so the audio holds it already.
             groove: None,
             colour: None,
+            info_text: String::new(),
         };
         Ok(BouncedTrack {
             name: bounced_name(name),
@@ -697,6 +700,7 @@ impl Shell {
                         // A bounce plays the groove, so the audio holds it already.
                         groove: None,
                         colour: None,
+                        info_text: String::new(),
                     },
                 ));
             }
@@ -797,6 +801,7 @@ impl Shell {
                     // A bounce plays the groove, so the audio holds it already.
                     groove: None,
                     colour: None,
+                    info_text: String::new(),
                 },
             ));
         }

@@ -31,6 +31,9 @@ pub struct Run {
     /// Where the clip launched, which is `from` unless the clip was already
     /// playing when the take began.
     pub launched: Ticks,
+    /// The clip time it had where it launched: not zero for a Legato start
+    /// or after a nudge, which splits a stretch (launch-quantisation R33).
+    pub offset: Ticks,
 }
 
 /// Pairs a take's starts and ends into the stretches the clips played: a
@@ -38,31 +41,32 @@ pub struct Run {
 /// playing when the take ends at `end` plays up to it.
 #[must_use]
 pub fn runs(events: &[SessionEvent], end: Frames, tempo: &TempoMap, rate: SampleRate) -> Vec<Run> {
-    let mut open: BTreeMap<Slot, (Frames, Frames)> = BTreeMap::new();
+    let mut open: BTreeMap<Slot, (Frames, Frames, Ticks)> = BTreeMap::new();
     let mut played = Vec::new();
     for event in events {
         let slot = (event.track, event.scene);
-        if let Some((from, launched)) = open.remove(&slot) {
-            played.push((slot, from, event.at, launched));
+        if let Some((from, launched, offset)) = open.remove(&slot) {
+            played.push((slot, from, event.at, launched, offset));
         }
         if let Some(launched) = event.launched {
-            open.insert(slot, (event.at, launched));
+            open.insert(slot, (event.at, launched, event.offset.ticks));
         }
     }
     played.extend(
         open.into_iter()
-            .map(|(slot, (from, launched))| (slot, from, end, launched)),
+            .map(|(slot, (from, launched, offset))| (slot, from, end, launched, offset)),
     );
     let ticks = |frame: Frames| tempo.frames_to_ticks(frame, rate);
     let mut runs: Vec<Run> = played
         .into_iter()
-        .filter_map(|(slot, from, to, launched)| {
+        .filter_map(|(slot, from, to, launched, offset)| {
             let to = to.min(end);
             (to > from).then(|| Run {
                 slot,
                 from: ticks(from),
                 to: ticks(to),
                 launched: ticks(launched),
+                offset,
             })
         })
         .collect();
@@ -180,11 +184,12 @@ pub fn place(
             let Some(source) = source else {
                 continue;
             };
+            // A clip that took over another's time, or was nudged, played as
+            // if it had launched its offset earlier (launch-quantisation R33).
+            let launched = run.launched - run.offset;
             let data = match source.data {
-                ClipData::Midi(midi) => ClipData::Midi(midi.moved_by(run.launched, from)),
-                ClipData::Audio(audio) => {
-                    ClipData::Audio(audio.moved_by(run.launched, from, &tempo))
-                }
+                ClipData::Midi(midi) => ClipData::Midi(midi.moved_by(launched, from)),
+                ClipData::Audio(audio) => ClipData::Audio(audio.moved_by(launched, from, &tempo)),
             };
             let id = editor.new_id();
             let mut clip = Clip::new(id, from, to - from, data);
@@ -307,6 +312,7 @@ mod tests {
             scene,
             at: Frames(at),
             launched: Some(Frames(launched)),
+            offset: bl_engine::ClipOffset::ZERO,
         }
     }
 
@@ -316,6 +322,7 @@ mod tests {
             scene,
             at: Frames(at),
             launched: None,
+            offset: bl_engine::ClipOffset::ZERO,
         }
     }
 
@@ -387,6 +394,7 @@ mod tests {
             scene,
             state: SlotState::Playing,
             started: Some(Frames(BAR)),
+            offset: bl_engine::ClipOffset::ZERO,
         }];
         // A second set has the same IDs, and the clip as it was.
         let (before, same, ..) = set();

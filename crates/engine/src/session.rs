@@ -68,6 +68,22 @@ pub struct SlotStatus {
     pub offset: ClipOffset,
 }
 
+impl SlotStatus {
+    /// The song frame the clip would have launched on to have the clip time
+    /// it has now with no offset: its launch frame moved back by its offset,
+    /// for what counts a clip's own time from its start, as an overdub does
+    /// (R29, R33). `None` while the clip isn't playing.
+    #[must_use]
+    pub fn origin(&self, tempo: &TempoMap, rate: SampleRate) -> Option<Frames> {
+        let started = self.started?;
+        if self.offset.ticks == Ticks::ZERO {
+            return Some(started);
+        }
+        let launched = tempo.frames_to_ticks(started, rate);
+        Some(tempo.ticks_to_frames(launched - self.offset.ticks, rate))
+    }
+}
+
 /// How far into its own time a Session clip was on its launch frame: what a
 /// Legato start or a nudge moved it by (the launch quantisation spec, R27 to
 /// R33). The clip time at any later song frame is this plus the time since
@@ -1202,6 +1218,21 @@ pub struct LaunchArgs {
     pub scene: SceneId,
 }
 
+/// The arguments of `session.nudge`: the slot whose playing clip moves, and
+/// by how many steps (the launch quantisation spec, R34).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct NudgeArgs {
+    /// The track whose slot it is.
+    pub track: TrackId,
+    /// The scene whose slot it is.
+    pub scene: SceneId,
+    /// How many steps of the global launch quantisation: a whole number
+    /// from −64 to 64 other than 0, negative to move backward.
+    #[schemars(range(min = -64, max = 64))]
+    pub steps: i32,
+}
+
 /// The arguments of `session.launch_scene`: the scene to launch.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -1271,6 +1302,24 @@ pub fn command_from_args(id: &str, args: Value) -> Result<SessionCommand, RunErr
             let LaunchArgs { track, scene } = serde_json::from_value(args).map_err(invalid)?;
             Ok(SessionCommand::Release { track, scene })
         }
+        Action::Nudge => {
+            let NudgeArgs {
+                track,
+                scene,
+                steps,
+            } = serde_json::from_value(args).map_err(invalid)?;
+            if steps == 0 || steps.unsigned_abs() > 64 {
+                return Err(RunError::InvalidArgs {
+                    command: entry.id,
+                    message: format!("`steps` is {steps}, not a whole number from -64 to 64 other than 0"),
+                });
+            }
+            Ok(SessionCommand::Nudge {
+                track,
+                scene,
+                steps,
+            })
+        }
         Action::LaunchScene => {
             let LaunchSceneArgs { scene } = serde_json::from_value(args).map_err(invalid)?;
             Ok(SessionCommand::LaunchScene(scene))
@@ -1334,6 +1383,8 @@ enum Action {
     Launch,
     /// [`SessionCommand::Release`].
     Release,
+    /// [`SessionCommand::Nudge`].
+    Nudge,
     /// [`SessionCommand::LaunchScene`].
     LaunchScene,
     /// [`SessionCommand::CancelSceneLaunch`].
@@ -1374,6 +1425,7 @@ impl Entry {
         }
         spec = match self.action {
             Action::Launch | Action::Release => spec.args::<LaunchArgs>(),
+            Action::Nudge => spec.args::<NudgeArgs>(),
             Action::LaunchScene | Action::CancelSceneLaunch => spec.args::<LaunchSceneArgs>(),
             Action::StopTrack => spec.args::<StopTrackArgs>(),
             Action::StopAll | Action::BackToArrangement => spec.args::<NoArgs>(),
@@ -1417,6 +1469,24 @@ const ENTRIES: &[Entry] = &[
             stops. A Trigger or Toggle clip ignores the release, and so does a slot that \
             isn't playing. The clip's mode is read at the release. It changes nothing in the \
             set.",
+    },
+    Entry {
+        id: "session.nudge",
+        action: Action::Nudge,
+        label: "Nudge Clip",
+        contexts: &[Session],
+        key: None,
+        description: "Moves the playing clip in the slot at `track` and `scene` by `steps` steps \
+            of the global launch quantisation, as the Launch Properties panel's Nudge Backward \
+            and Nudge Forward buttons do, at once and not on the grid: a negative `steps` moves \
+            it back, from -64 to 64 and never 0. A step is the length of the global value at \
+            the playhead, or a thirty-second note with the value None or the switch off. \
+            Forward, the clip goes on round its loop as if it had played that much longer. \
+            Backward, where the move would fall before the clip's start, a looping clip goes the \
+            fewest whole loops later and a clip without Loop goes to its start. A slot that is \
+            empty, stopped or still waiting to start changes nothing, and a launch or a stop \
+            already queued keeps its frame. The slot's `clip_time` in `session.state`'s \
+            `slot_states` shows the move. It changes nothing in the set.",
     },
     Entry {
         id: "session.launch_scene",

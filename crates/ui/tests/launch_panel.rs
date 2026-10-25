@@ -1,8 +1,8 @@
 //! The Clip View's Launch Properties panel, headless (WP-3.9): it shows for
 //! a Session clip only, shows the recorded defaults, and each live control
-//! runs the clip launch command agents run, one undo step each. The
-//! follow-action controls and the nudge buttons are drawn in place and
-//! disabled. Spec: launch-quantisation R14; L-CLIP-003, L-CLIP-005.
+//! runs the clip launch command agents run, one undo step each. The two
+//! nudge buttons run `session.nudge` and change nothing in the set.
+//! Spec: launch-quantisation R14, R24, R36; L-CLIP-003, L-CLIP-005.
 
 use crate::common;
 use bl_core::time::Ticks;
@@ -18,7 +18,10 @@ use serde_json::json;
 /// A Session clip on the first MIDI track, selected, with the Clip View
 /// open and Launch Properties chosen in the left group.
 fn session_clip() -> (Harness, ClipId) {
-    let mut h = Harness::with_title_bar(Window::Main);
+    session_clip_in(Harness::with_title_bar(Window::Main))
+}
+
+fn session_clip_in(mut h: Harness) -> (Harness, ClipId) {
     let track = h.shell.editor().document().top_level().next().unwrap();
     let scene = h.shell.editor().document().scenes().next().unwrap().id;
     h.shell
@@ -111,10 +114,10 @@ fn the_panel_shows_for_session_clips_only() {
 }
 
 // The recorded defaults: Trigger, Legato off, Global, 0.0 %; the follow
-// actions off, A Next 100 % and B No Action 0 %, Linked 1x, all live; only
-// the nudge buttons are pending.
+// actions off, A Next 100 % and B No Action 0 %, Linked 1x, all live, and the
+// nudge buttons live too, named and described (R36).
 #[test]
-fn the_recorded_defaults_show_and_only_the_nudge_buttons_are_pending() {
+fn the_recorded_defaults_show_and_the_nudge_buttons_are_live() {
     let (mut h, _) = session_clip();
     let all = nodes(&mut h);
     assert_eq!(Harness::node(&all, "Launch Mode").value, "Trigger");
@@ -143,12 +146,72 @@ fn the_recorded_defaults_show_and_only_the_nudge_buttons_are_pending() {
         all.iter().all(|n| n.label != "Jump A"),
         "Jump shows only for Jump"
     );
-    for (name, value) in [("Nudge Back", "«"), ("Nudge Forward", "»")] {
+    // Spec: launch-quantisation R36. Buttons named Nudge Backward and
+    // Nudge Forward, live whether or not the clip plays, with descriptions.
+    for (name, word) in [("Nudge Backward", "back"), ("Nudge Forward", "forward")] {
         let node = Harness::node(&all, name);
-        assert!(node.disabled, "{name} is pending");
-        assert_eq!(node.value, value, "{name}");
-        assert!(node.description.starts_with("Not built yet"), "{name}");
+        assert!(!node.disabled, "{name} is live");
+        assert_eq!(node.role, egui::accesskit::Role::Button, "{name}");
+        assert!(node.description.contains(word), "{name}: {}", node.description);
+        assert!(node.description.contains("global launch quantization"), "{name}");
     }
+}
+
+// Spec: launch-quantisation R30, R34, R36. Each nudge button runs
+// `session.nudge` for the clip's slot: the clip time `session.state` lists
+// moves by a step at once, backward and forward, and neither click is an
+// undo step or an unsaved change.
+#[test]
+fn the_nudge_buttons_move_the_playing_clip_and_change_nothing_in_the_set() {
+    let (mut h, clip) = session_clip_in(Harness::manual_with_title_bar(Window::Main));
+    let track = h.shell.editor().document().top_level().next().unwrap();
+    let scene = h.shell.editor().document().scenes().next().unwrap().id;
+    let clip_time = |h: &mut Harness| -> Option<i64> {
+        let state = h.shell.run("session.state", json!({})).unwrap();
+        state["launches"]
+            .as_array()?
+            .iter()
+            .find(|slot| slot["scene"] == json!(scene))?["clip_time"]
+            .as_i64()
+    };
+    // A nudge of a clip that isn't playing changes nothing, and the buttons
+    // are live all the same.
+    let all = nodes(&mut h);
+    h.click(centre(Harness::node(&all, "Nudge Forward")));
+    h.advance(4);
+    assert_eq!(clip_time(&mut h), None);
+
+    // With the global value None the step is a thirty-second note.
+    h.shell
+        .run("session.set_quantization", json!({ "quantization": "none" }))
+        .unwrap();
+    h.shell
+        .run("session.launch", json!({ "track": track, "scene": scene }))
+        .unwrap();
+    h.wait("the clip to play", |h| {
+        h.shell
+            .session_states()
+            .iter()
+            .any(|slot| slot.state == bl_engine::SlotState::Playing)
+    });
+    // Park the transport so the clip time stands still between reads.
+    h.shell.run("transport.stop", json!({})).unwrap();
+    h.wait("the transport to stop", |h| !h.engine.playing);
+    let offset = |h: &Harness| h.shell.session_states().first().map(|s| s.offset.ticks);
+    let thirty_second = Ticks::SIXTEENTH.get() / 2;
+    let before = clip_time(&mut h).expect("the playing clip's clip time");
+    let (undo, saved) = (steps(&h), h.shell.is_dirty());
+    let all = nodes(&mut h);
+    h.click(centre(Harness::node(&all, "Nudge Forward")));
+    h.wait("the nudge", |h| offset(h) == Some(Ticks(thirty_second)));
+    assert_eq!(clip_time(&mut h), Some(before + thirty_second));
+    let all = nodes(&mut h);
+    h.click(centre(Harness::node(&all, "Nudge Backward")));
+    h.wait("the nudge back", |h| offset(h) == Some(Ticks::ZERO));
+    assert_eq!(clip_time(&mut h), Some(before));
+    assert_eq!(steps(&h), undo, "no undo step");
+    assert_eq!(h.shell.is_dirty(), saved, "no unsaved change");
+    let _ = clip;
 }
 
 // Spec: follow-actions R3, R4, R9, R13. Each follow control runs the clip's

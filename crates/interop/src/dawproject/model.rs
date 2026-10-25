@@ -329,6 +329,8 @@ pub struct Device {
     pub role: Option<DeviceRole>,
     /// Whether the device is loaded.
     pub loaded: Option<bool>,
+    /// A plug-in's version, as the file writes it (R77).
+    pub plugin_version: Option<String>,
     /// The device's switch (R45).
     pub enabled: Option<BoolParameter>,
     /// The device's state file.

@@ -4,6 +4,7 @@
 //! `cargo xtask check` fails on a file in tests/ that isn't listed.
 
 mod dawproject;
+mod dawproject_export;
 mod midi_files;
 mod scala;
 mod sfz;

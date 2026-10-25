@@ -386,6 +386,78 @@ impl Shell {
                     report: imported.report,
                 }))
             }
+            dawproject_ids::EXPORT_DAWPROJECT => {
+                let args = Self::args::<dawproject_ids::ExportDawProjectArgs>(id, args)?;
+                if args.path.is_empty() {
+                    return Err(failed("`path` is empty".to_owned()));
+                }
+                // Spec: dawproject R65. `.dawproject` is added when it is
+                // missing, and a file already there is refused unless
+                // `replace` is set.
+                let mut path = PathBuf::from(&args.path);
+                if path
+                    .extension()
+                    .is_none_or(|extension| !extension.eq_ignore_ascii_case("dawproject"))
+                {
+                    let mut name = path.clone().into_os_string();
+                    name.push(".dawproject");
+                    path = PathBuf::from(name);
+                }
+                if path.exists() && !args.replace {
+                    return Err(failed(format!(
+                        "{} is already there; pass `replace` to write over it",
+                        path.display()
+                    )));
+                }
+                // The plug-ins' states are taken as a save takes them.
+                crate::plugins::capture_states(
+                    &self.plugins,
+                    &self.au,
+                    &self.vst3,
+                    &self.lv2,
+                    &self.kit,
+                    &mut self.editor,
+                );
+                let document = self.editor.document().clone();
+                let media = crate::dawproject::media_used(&document)
+                    .into_iter()
+                    .filter_map(|hash| {
+                        let found = self
+                            .media
+                            .entry(bl_media::ContentHash::from_bytes(hash.0))?;
+                        Some((hash, found.path))
+                    })
+                    .collect();
+                let settings = crate::dawproject::ExportSettings {
+                    document,
+                    title: self.set_name(),
+                    track_colours: self.track_palette.clone(),
+                    installed: self.installed_plugins(),
+                    media,
+                    embed_media: args.embed_media,
+                };
+                let mut job = crate::dawproject::ExportJob::start(&path, settings)
+                    .map_err(|error| failed(error.to_string()))?;
+                let result = loop {
+                    if let Some(result) = job.poll() {
+                        break result;
+                    }
+                    // The worker asks for a plug-in's parameters here, on
+                    // the thread that owns the plug-in hosts (R76).
+                    job.serve(|plugin| self.describe_plugin(plugin));
+                    self.set_message(
+                        format!("Exporting {} ({}%)", path.display(), job.percent()),
+                        false,
+                    );
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                };
+                let result = result.map_err(|error| {
+                    self.set_message(error.to_string(), true);
+                    failed(error.to_string())
+                })?;
+                self.set_message(format!("Exported {}", path.display()), false);
+                Ok(to_value(&result))
+            }
             dawproject_ids::IMPORT_REPORT => {
                 Self::args::<NoArgs>(id, args)?;
                 let report = self.import_report.clone().unwrap_or_default();
@@ -406,6 +478,8 @@ impl Shell {
                 plugin_id: plugin.plugin_id,
                 path: plugin.path.to_string_lossy().into_owned(),
                 name: plugin.name,
+                vendor: plugin.vendor,
+                version: plugin.version,
                 role: plugin.role,
             })
             .collect()

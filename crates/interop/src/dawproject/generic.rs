@@ -147,6 +147,55 @@ pub fn eq_band_type(band_type: &str) -> Option<usize> {
     })
 }
 
+/// The generic band type an EQ band's type choice becomes when a file is
+/// written (R78), and whether the EQ's type is steeper than the generic
+/// one's and so changed (a Low Cut or High Cut at 48 dB per octave).
+#[must_use]
+pub fn eq_band_name(index: usize) -> Option<(&'static str, bool)> {
+    Some(match index {
+        0 => ("highPass", true),
+        1 => ("highPass", false),
+        2 => ("lowShelf", false),
+        3 => ("bell", false),
+        4 => ("notch", false),
+        5 => ("highShelf", false),
+        6 => ("lowPass", false),
+        7 => ("lowPass", true),
+        _ => return None,
+    })
+}
+
+/// The band and the band slot of a parameter of the EQ's first curve, or
+/// `None` for any other parameter (R76, R78).
+#[must_use]
+pub fn eq_cell(param: ParamId) -> Option<(usize, usize)> {
+    (0..EQ_BANDS)
+        .flat_map(|band| (0..=EQ_Q).map(move |slot| (band, slot)))
+        .find(|&(band, slot)| eq_param(band, slot) == param)
+}
+
+/// A Beatlayer value as the file gives it, and its unit (R78): `convert`
+/// turned round. `range` is the parameter's, which says where a ratio is
+/// the largest.
+#[must_use]
+pub fn to_file(quantity: Quantity, value: f64, range: (f64, f64)) -> (f64, Unit) {
+    match quantity {
+        Quantity::Decibels => (value, Unit::Decibel),
+        Quantity::Gain => (gain_to_db(value), Unit::Decibel),
+        Quantity::Milliseconds => (value / 1000.0, Unit::Seconds),
+        Quantity::Hertz => (value, Unit::Hertz),
+        Quantity::Plain | Quantity::Toggle => (value, Unit::Linear),
+        Quantity::Ratio => (
+            if value >= range.1 || value <= 1.0 {
+                if value <= 1.0 { 0.0 } else { 100.0 }
+            } else {
+                100.0 * (1.0 - 1.0 / value)
+            },
+            Unit::Percent,
+        ),
+    }
+}
+
 /// The parameter of the EQ's first curve for a band's value (R54).
 #[must_use]
 pub const fn eq_param(band: usize, slot: usize) -> ParamId {

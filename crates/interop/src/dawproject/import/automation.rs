@@ -45,7 +45,7 @@ pub(super) enum Driven {
         device: bl_model::DeviceId,
         param: ParamId,
         quantity: Quantity,
-        device_type: &'static str,
+        device_type: String,
         unit: Option<Unit>,
         min: Option<f64>,
         max: Option<f64>,
@@ -262,7 +262,7 @@ impl Importer<'_, '_> {
             } => {
                 let unit = unit.or(own);
                 let types = self.native_types();
-                let range = crate::dawproject::generic::range_of(&types, device_type, param)
+                let range = crate::dawproject::generic::range_of(&types, &device_type, param)
                     .unwrap_or((f64::MIN, f64::MAX));
                 let converted = convert_steps(steps, |value| {
                     native_value(quantity, unit, value, min, max, range, offset_db)

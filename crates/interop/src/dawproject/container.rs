@@ -54,8 +54,10 @@ pub enum Error {
         /// The version the file says.
         version: String,
     },
-    /// The set couldn't be built.
+    /// The set couldn't be built or written.
     Failed(String),
+    /// A strict read found something the schema doesn't have (R4).
+    Strict(String),
 }
 
 impl fmt::Display for Error {
@@ -85,7 +87,11 @@ impl fmt::Display for Error {
                 "this DAWproject file is version {version}, which Beatlayer doesn't read; it reads \
                  version 1"
             ),
-            Self::Failed(reason) => write!(f, "this DAWproject file couldn't be read: {reason}"),
+            Self::Failed(reason) => write!(f, "this DAWproject file couldn't be made: {reason}"),
+            Self::Strict(what) => write!(
+                f,
+                "this DAWproject file holds {what}, which isn't in the schema"
+            ),
         }
     }
 }
@@ -259,4 +265,123 @@ fn utf16(bytes: &[u8], order: fn([u8; 2]) -> u16, part: &str) -> Result<String, 
     String::from_utf16(&units).map_err(|_| Error::Encoding {
         part: part.to_owned(),
     })
+}
+
+/// What an entry of a container being written holds (R66).
+#[derive(Clone, Debug)]
+pub enum Data {
+    /// Bytes made in memory.
+    Bytes(Vec<u8>),
+    /// A file on disk, copied into the container as it is written, so a
+    /// set's media are never all in memory at once (R73).
+    File(std::path::PathBuf),
+}
+
+/// An entry of a container being written (R66).
+#[derive(Clone, Debug)]
+pub struct Entry {
+    /// Its path in the container, with `/` between the parts.
+    pub name: String,
+    /// What it holds.
+    pub data: Data,
+    /// Whether it is deflated rather than stored.
+    pub deflate: bool,
+}
+
+/// Writes a container of `entries` in the order given to `out`. Every entry
+/// carries the same time stamp, 1 January 1980, so the same entries write the
+/// same bytes each time (R66).
+///
+/// # Errors
+///
+/// [`Error::Failed`] if the archive can't be written or a file in it can't
+/// be read.
+pub fn write_container<W: std::io::Write + std::io::Seek>(
+    out: W,
+    entries: &[Entry],
+) -> Result<W, Error> {
+    let failed = |error: &dyn fmt::Display| Error::Failed(error.to_string());
+    let stamp =
+        zip::DateTime::from_date_and_time(1980, 1, 1, 0, 0, 0).map_err(|error| failed(&error))?;
+    let mut writer = zip::ZipWriter::new(out);
+    for entry in entries {
+        let method = if entry.deflate {
+            CompressionMethod::Deflated
+        } else {
+            CompressionMethod::Stored
+        };
+        let mut file = match &entry.data {
+            Data::Bytes(_) => None,
+            Data::File(path) => Some(
+                std::fs::File::open(path)
+                    .map_err(|error| Error::Failed(format!("{}: {error}", path.display())))?,
+            ),
+        };
+        let size = match (&entry.data, &file) {
+            (Data::Bytes(bytes), _) => bytes.len() as u64,
+            (Data::File(_), Some(file)) => file.metadata().map_or(0, |meta| meta.len()),
+            (Data::File(_), None) => 0,
+        };
+        // A medium of 4 GiB or more needs the large-file extension.
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(method)
+            .last_modified_time(stamp)
+            .large_file(size >= u64::from(u32::MAX));
+        writer
+            .start_file(entry.name.as_str(), options)
+            .map_err(|error| failed(&error))?;
+        match (&entry.data, file.as_mut()) {
+            (Data::Bytes(bytes), _) => std::io::Write::write_all(&mut writer, bytes),
+            (Data::File(_), Some(file)) => std::io::copy(file, &mut writer).map(|_| ()),
+            (Data::File(_), None) => Ok(()),
+        }
+        .map_err(|error| failed(&error))?;
+    }
+    writer.finish().map_err(|error| failed(&error))
+}
+
+/// Reads the DAWproject file in `bytes` and refuses it for anything the
+/// schema doesn't have: an element, an attribute, an entity, an entry or an
+/// `id` the reader would have left out (R4). What an export is checked with.
+///
+/// # Errors
+///
+/// [`Error::Strict`] naming the first thing, or any error
+/// [`read_container`] gives.
+pub fn read_container_strict(bytes: &[u8]) -> Result<Container, Error> {
+    let container = read_container(bytes)?;
+    let report = &container.report;
+    let first = report
+        .unknown_elements
+        .first()
+        .map(|(name, _)| format!("the element `{name}`"))
+        .or_else(|| {
+            report
+                .unknown_attributes
+                .first()
+                .map(|(name, _)| format!("the attribute `{name}`"))
+        })
+        .or_else(|| {
+            report
+                .unknown_entities
+                .first()
+                .map(|(name, _)| format!("the entity `&{name};`"))
+        })
+        .or_else(|| report.left_out.first().cloned())
+        .or_else(|| {
+            report
+                .duplicate_ids
+                .first()
+                .map(|id| format!("the repeated `id` `{id}`"))
+        })
+        .or_else(|| {
+            report
+                .too_deep
+                .first()
+                .map(|name| format!("`{name}` nested too deep"))
+        });
+    match first {
+        Some(what) => Err(Error::Strict(what)),
+        None => Ok(container),
+    }
 }

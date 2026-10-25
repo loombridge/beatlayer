@@ -10469,6 +10469,40 @@ The Export Audio/Video dialog's controls, as the export spec's R29 to R37 list t
 
 </details>
 
+### `ExportDawProjectResult`
+
+What `set.export_dawproject` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | The file that was written, with `.dawproject` where it was added. |
+| `report` | [`ImportReport`](#importreport) | yes | What the format can't carry, which the file leaves out, in the form of the import report: each thing, where it was, how many there were and what the file holds in its place. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `set.export_dawproject` returns.",
+  "properties": {
+    "path": {
+      "description": "The file that was written, with `.dawproject` where it was added.",
+      "type": "string"
+    },
+    "report": {
+      "$ref": "#/$defs/ImportReport",
+      "description": "What the format can't carry, which the file leaves out, in the form of the import report: each thing, where it was, how many there were and what the file holds in its place."
+    }
+  },
+  "required": [
+    "path",
+    "report"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `ExportDialogStatus`
 
 The open dialog, as `export.status` reports it (R44).

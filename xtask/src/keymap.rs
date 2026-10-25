@@ -1071,7 +1071,7 @@ mod tests {
             assert!(done.contains("which is done"), "{milestone}: {done}");
             let unknown = run(milestone, &[("S-NOPE-001", "WP-99.9")]).unwrap_err();
             assert!(unknown.contains("doesn't have"), "{milestone}: {unknown}");
-            run(milestone, &[("S-NOPE-001", "WP-6.72")]).expect("a package still to do");
+            run(milestone, &[("S-NOPE-001", "WP-7.33")]).expect("a package still to do");
         }
         // A later milestone needs none.
         run("M6", &[]).expect("M6 may wait without a package");

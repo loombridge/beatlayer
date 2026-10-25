@@ -501,6 +501,16 @@ impl Scanner {
             .stderr(Stdio::null())
             .spawn()
             .map_err(|e| format!("couldn't start the scanner: {e}"))?;
+        // Read the reply while the child runs: a reply bigger than the pipe's
+        // buffer would otherwise block the child's write and look like a hang.
+        let mut out = child.stdout.take();
+        let reader = std::thread::spawn(move || {
+            let mut bytes = Vec::new();
+            if let Some(out) = &mut out {
+                let _ = out.read_to_end(&mut bytes);
+            }
+            bytes
+        });
         let deadline = Instant::now() + self.timeout;
         loop {
             match child.try_wait() {
@@ -524,13 +534,17 @@ impl Scanner {
                 Err(e) => return Err(format!("couldn't wait for the scanner: {e}")),
             }
         }
-        let mut text = String::new();
-        if let Some(mut out) = child.stdout.take() {
-            out.read_to_string(&mut text)
-                .map_err(|e| format!("couldn't read the scanner's answer: {e}"))?;
-        }
-        let reply: ChildReply = serde_json::from_str(&text)
-            .map_err(|_| "it crashed or wrote nothing readable".to_owned())?;
+        let bytes = reader
+            .join()
+            .map_err(|_| "couldn't read the scanner's answer".to_owned())?;
+        // The reply is the last line that reads as one: a plug-in may print
+        // its own text to standard output, before or after it.
+        let text = String::from_utf8_lossy(&bytes);
+        let reply: ChildReply = text
+            .lines()
+            .rev()
+            .find_map(|line| serde_json::from_str(line.trim()).ok())
+            .ok_or_else(|| "it crashed or wrote nothing readable".to_owned())?;
         if reply.ok {
             Ok(reply.plugins)
         } else {

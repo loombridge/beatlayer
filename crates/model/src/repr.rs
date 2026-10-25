@@ -12,7 +12,7 @@ use imbl::{OrdMap, Vector};
 use schemars::{JsonSchema, Schema, schema_for};
 use serde::{Deserialize, Serialize};
 
-use crate::automation::{AutomationTarget, Breakpoint, Envelope};
+use crate::automation::{AutomationTarget, Breakpoint, Envelope, MixerParam};
 use crate::clip::{Clip, ClipData, TakeLane};
 use crate::command::{
     check_chain, check_clip, check_clip_fits, check_crossfader, check_device, check_extent,
@@ -365,6 +365,16 @@ impl TryFrom<DocumentRepr> for Document {
                     return Err(ModelError::NoSuchScene(*scene));
                 }
             }
+        }
+        // A Track Activator envelope on Main, which earlier versions let a
+        // command draw, is dropped: Main has no Track Activator.
+        let main = document.main_id();
+        if let Some(track) = document.tracks.get_mut(&main) {
+            Shared::make_mut(track)
+                .automation
+                .remove(&AutomationTarget::Mixer {
+                    param: MixerParam::Mute,
+                });
         }
         // Routing, automation, and clips' envelopes name tracks and devices
         // anywhere in the tree, so they're checked once every track is in.
@@ -1374,6 +1384,33 @@ mod tests {
         bad["tracks"][0]["clips"][0]["data"]["audio"]["fade_out_curve"] = json!(2.0);
         let error = load(bad).unwrap_err();
         assert!(error.contains("fade-out curve"), "{error}");
+    }
+
+    // Spec: automation R1
+    #[test]
+    fn a_set_with_a_track_activator_envelope_on_main_loads_without_it() {
+        let mut editor = Editor::new();
+        let main = editor.document().main_id();
+        editor
+            .apply(Command::SetAutomationBreakpoint {
+                track: main,
+                target: AutomationTarget::Mixer {
+                    param: crate::MixerParam::Volume,
+                },
+                at: Ticks::ZERO,
+                value: 0.5,
+            })
+            .unwrap();
+        let doc = editor.document().clone();
+        let mut value = serde_json::to_value(&doc).unwrap();
+        let mut mute = value["main"]["automation"][0].clone();
+        mute["target"]["param"] = json!("mute");
+        value["main"]["automation"]
+            .as_array_mut()
+            .unwrap()
+            .push(mute);
+        let loaded = load(value).unwrap();
+        assert_eq!(loaded, doc, "the volume envelope stays");
     }
 
     // Spec: automation R7

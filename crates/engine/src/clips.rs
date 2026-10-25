@@ -1731,10 +1731,15 @@ impl Node for ClipPlayer {
             .find(|entry| entry.track == list.track)
             && let Some(scene) = entry.scene
             && let Some(at) = list.clips.iter().position(|clip| clip.scene == Some(scene))
+            // The clip is silent while the playhead is before its launch
+            // frame (after a stop, a locate or a loop wrap), as a launched
+            // MIDI clip is, and plays on from its start when the playhead
+            // reaches that frame again.
+            && transport.position >= entry.frame
         {
             let launch = entry.frame.get();
             let from = transport.position.get();
-            let elapsed = u64::try_from(from - launch).unwrap_or(0);
+            let elapsed = (from - launch) as u64;
             let clip = &list.clips[at];
             if let (Some(source), Some(warped)) = (bank[at].as_mut(), clip.geometry.warped.as_ref())
             {
@@ -1814,12 +1819,13 @@ impl Node for ClipPlayer {
             self.apply_gate(block);
             return;
         };
-        if block
+        let launched = block
             .session()
             .iter()
-            .any(|entry| entry.track == list.track)
-        {
-            self.playing_clip = false;
+            .find(|entry| entry.track == list.track);
+        if let Some(entry) = launched {
+            // Spec: routing R11. A launched slot clip is playing too.
+            self.playing_clip = entry.scene.is_some() && transport.position >= entry.frame;
             self.apply_gate(block);
             return;
         }
@@ -1831,7 +1837,7 @@ impl Node for ClipPlayer {
         self.playing_clip = list.clips[first..]
             .iter()
             .take_while(|clip| clip.geometry.start < to)
-            .any(|clip| clip.geometry.end > from);
+            .any(|clip| clip.scene.is_none() && clip.geometry.end > from);
         let played = list.clips[first..]
             .iter()
             .zip(&mut bank[first..])

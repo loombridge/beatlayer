@@ -267,9 +267,9 @@ impl MidiClipList {
     }
 }
 
-/// The most times round a launched clip's loop one block plays. A block is
-/// a few thousand frames at most, so this only bounds a loop shorter than a
-/// frame, which no clip holds for long.
+/// The most times round a launched clip's loop one block plays, counted from
+/// the lap the block reaches. A block is a few thousand frames at most, so
+/// this only bounds a loop shorter than a frame, which no clip holds for long.
 ///
 /// `shortcut:` a loop a 128th of a frame long would drop the rest of the
 /// block's notes; raise it if a real clip ever needs more.
@@ -352,10 +352,18 @@ fn play_session_clip(
     }
     let loop_len = loop_end - loop_start;
     let first_len = loop_end - start_marker;
-    let mut start = launch_tick;
-    let mut first = true;
-    for pass in 0..MAX_SESSION_REPEATS as u64 {
-        let (clip_start, repeat_len) = if first {
+    // Go straight to the lap before the block's, so a clip that has looped
+    // for ages still plays; the lap before covers the rounding of frames.
+    let from_tick = tempo.frames_to_ticks(Frames(from_frame), sample_rate);
+    let laps = (from_tick - launch_tick - first_len).get().max(0) / loop_len.get();
+    let first_pass = laps as u64;
+    let mut start = if laps == 0 {
+        launch_tick
+    } else {
+        launch_tick + first_len + loop_len * (laps - 1)
+    };
+    for pass in first_pass..first_pass + MAX_SESSION_REPEATS as u64 {
+        let (clip_start, repeat_len) = if pass == 0 {
             (start_marker, first_len)
         } else {
             (loop_start, loop_len)
@@ -394,7 +402,6 @@ fn play_session_clip(
             }
         }
         start = end;
-        first = false;
     }
 }
 
@@ -741,23 +748,54 @@ fn process_clip_segment(
             rng.next_in_range((base + dev).max(1), base) as u8
         };
 
-        let note_id = Some(*next_note_id);
-        *next_note_id = next_note_id.wrapping_add(1);
-
         let note_song_end = (note_song_start + note.length).min(segment_song_end);
         let mut note_off_frame = tempo.ticks_to_frames(note_song_end, sample_rate).get();
         if note_off_frame <= note_on_frame {
             note_off_frame = note_on_frame + 1;
         }
 
-        if scratch_notes.len() < scratch_notes.capacity() {
+        // A note-on goes out only with room kept for its release, or nothing
+        // would ever let the note go.
+        let off_in_block = note_off_frame < to_frame;
+        let room = if off_in_block {
+            scratch_notes.capacity() - scratch_notes.len() >= 2
+        } else {
+            scratch_notes.len() < scratch_notes.capacity() && sounding.len() < sounding.capacity()
+        };
+        if !room {
+            continue;
+        }
+
+        let note_id = Some(*next_note_id);
+        *next_note_id = next_note_id.wrapping_add(1);
+
+        scratch_notes.push(NoteEvent {
+            offset: (note_on_frame - from_frame) as u32,
+            kind: NoteKind::On,
+            channel: 0,
+            key: note.key,
+            velocity: vel as f32 / 127.0,
+            note_id,
+        });
+        if off_in_block {
             scratch_notes.push(NoteEvent {
-                offset: (note_on_frame - from_frame) as u32,
-                kind: NoteKind::On,
+                offset: (note_off_frame - from_frame) as u32,
+                kind: NoteKind::Off,
                 channel: 0,
                 key: note.key,
-                velocity: vel as f32 / 127.0,
+                velocity: note.release_velocity as f32 / 127.0,
                 note_id,
+            });
+        } else {
+            sounding.push(ActiveNote {
+                clip_id: clip.id,
+                key: note.key,
+                channel: 0,
+                note_id,
+                release_velocity: note.release_velocity,
+                off_frame: note_off_frame,
+                index,
+                song_start: note_song_start,
             });
         }
 
@@ -776,30 +814,6 @@ fn process_clip_segment(
             sample_rate,
             scratch_notes,
         );
-
-        if note_off_frame < to_frame {
-            if scratch_notes.len() < scratch_notes.capacity() {
-                scratch_notes.push(NoteEvent {
-                    offset: (note_off_frame - from_frame) as u32,
-                    kind: NoteKind::Off,
-                    channel: 0,
-                    key: note.key,
-                    velocity: note.release_velocity as f32 / 127.0,
-                    note_id,
-                });
-            }
-        } else if sounding.len() < sounding.capacity() {
-            sounding.push(ActiveNote {
-                clip_id: clip.id,
-                key: note.key,
-                channel: 0,
-                note_id,
-                release_velocity: note.release_velocity,
-                off_frame: note_off_frame,
-                index,
-                song_start: note_song_start,
-            });
-        }
     }
 }
 

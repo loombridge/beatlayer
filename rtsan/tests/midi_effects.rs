@@ -556,3 +556,121 @@ fn scale_aware_devices_pass_a_scale_change_under_rtsan() {
     // notes than the clip holds reach the instrument.
     assert!(ons >= 10, "{ons} notes reached the instrument");
 }
+
+// Spec: arpeggiator R19, R20. An Arpeggiator with Swing 16ths 60 at Rate 1/16
+// plays a chord through changes of the Global Amount, Sync and the groove,
+// and the notes it holds for their grooved frames pass on the audio thread.
+#[test]
+fn a_swung_arpeggio_passes_under_rtsan() {
+    use bl_devices::arpeggiator::{ARPEGGIATOR, GROOVE, RATE_SYNC, SYNC};
+
+    let config = EngineConfig::new(SampleRate::HZ_48000, 256);
+    let probe = Arc::new(Probe::default());
+    let mut collector = Collector::new();
+    let mut registry = testing::registry(&probe);
+    bl_devices::register(&mut registry);
+    let mut compiler = Compiler::new(config, registry, collector.handle());
+    let (mut sender, mut processor, _monitor) = channel(&config);
+
+    let mut editor = Editor::new();
+    let track = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: track,
+            kind: TrackKind::Midi,
+            name: String::new(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    let arpeggiator = editor.new_id();
+    let mut device = Device::new(
+        arpeggiator,
+        "",
+        DeviceKind::Native {
+            device_type: ARPEGGIATOR.to_owned(),
+        },
+    );
+    device.params.insert(RATE_SYNC, 2.0);
+    device.params.insert(GROOVE, 7.0);
+    let instrument = editor.new_id();
+    for (index, device) in [
+        device,
+        Device::new(
+            instrument,
+            "",
+            DeviceKind::Native {
+                device_type: testing::INSTRUMENT.to_owned(),
+            },
+        ),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        editor
+            .apply(Command::InsertDevice {
+                track,
+                index,
+                device,
+            })
+            .unwrap();
+    }
+    let notes =
+        [60, 64, 67].map(|key| Note::new(key, Ticks::ZERO, Ticks(TICKS_PER_QUARTER * 16), 90));
+    let clip = editor.new_id();
+    editor
+        .apply(Command::CreateClip {
+            track,
+            clip: Clip::new(
+                clip,
+                Ticks::ZERO,
+                Ticks(TICKS_PER_QUARTER * 16),
+                ClipData::Midi(MidiData::new(notes)),
+            ),
+        })
+        .unwrap();
+    sender.send_update(compiler.sync(editor.document()));
+    assert!(sender.flush());
+    sender.transport(TransportCommand::Play);
+
+    let mut change = |editor: &mut Editor, command: Command| {
+        editor.apply(command).unwrap();
+        sender.send_update(compiler.sync(editor.document()));
+        assert!(sender.flush());
+    };
+    for round in 0..800u32 {
+        match round {
+            100 => change(
+                &mut editor,
+                Command::SetGlobalGrooveAmount { amount: 130.0 },
+            ),
+            300 => change(&mut editor, Command::SetGlobalGrooveAmount { amount: 0.0 }),
+            400 => change(
+                &mut editor,
+                Command::SetGlobalGrooveAmount { amount: 100.0 },
+            ),
+            500 | 600 => change(
+                &mut editor,
+                Command::SetDeviceParam {
+                    device: arpeggiator,
+                    param: if round == 500 { SYNC } else { GROOVE },
+                    value: 0.0,
+                },
+            ),
+            _ => {}
+        }
+        bl_rt::rt_test!({
+            processor.process(256);
+        });
+        if round % 50 == 0 {
+            collector.collect();
+        }
+    }
+    let ons = probe
+        .recorded_notes()
+        .iter()
+        .filter(|n| n.event.kind == NoteKind::On)
+        .count();
+    // 800 blocks of 256 frames at 120 BPM hold 34 sixteenth steps.
+    assert!(ons >= 30, "{ons} notes reached the instrument");
+}

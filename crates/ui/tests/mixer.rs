@@ -3044,11 +3044,14 @@ fn a_click_on_an_activator_switches_only_that_device_as_one_undo_step() {
     let before = h.shell.editor().undo_history().count();
     let nodes = tree(&mut h);
     let column = Harness::node(&nodes, "1 MIDI").id;
-    let switch = nodes
+    let mut switches: Vec<&common::Node> = nodes
         .iter()
         .filter(|n| n.role == Role::Switch && Harness::descends_from(&nodes, n.id, column))
-        .nth(1)
-        .unwrap();
+        .collect();
+    // Top to bottom, as the devices are listed: a list of nodes is in the
+    // order of their IDs.
+    switches.sort_by(|a, b| a.bounds.unwrap().y0.total_cmp(&b.bounds.unwrap().y0));
+    let switch = switches[1];
     click(&mut h, rect_of(switch).center(), Modifiers::NONE);
     let doc = h.shell.editor().document();
     assert!(!doc.device(devices[1]).unwrap().enabled);

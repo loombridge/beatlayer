@@ -258,3 +258,45 @@ fn an_agent_sets_the_use_current_scale_switches_and_the_new_choosers_by_id() {
         .unwrap();
     assert_eq!(chooser["text"], json!("Dorian"));
 }
+
+// Spec: arpeggiator R18. An agent chooses a groove by ID with
+// `device.set_param` and reads it back from `device.parameters` as its name.
+#[test]
+fn an_agent_chooses_the_arpeggiators_groove_by_id() {
+    use bl_devices::arpeggiator;
+
+    let mut client = client();
+    let track = midi_track(&client.transport().shell);
+    let added = run(
+        &mut client,
+        "device.add",
+        json!({
+            "device": {
+                "kind": arpeggiator_type().kind,
+                "name": arpeggiator_type().name,
+                "role": arpeggiator_type().role,
+            },
+            "track": track,
+        }),
+    );
+    let device: DeviceId = serde_json::from_value(added["device"].clone()).unwrap();
+    let read = |client: &mut Client<InProcess>| {
+        let described = run(client, "device.parameters", json!({ "device": device }));
+        described["params"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["id"] == json!(arpeggiator::GROOVE.0))
+            .cloned()
+            .expect("the Groove chooser")
+    };
+    assert_eq!(read(&mut client)["text"], json!("None"));
+    run(
+        &mut client,
+        "device.set_param",
+        json!({ "device": device, "param": arpeggiator::GROOVE.0, "value": 7.0 }),
+    );
+    let groove = read(&mut client);
+    assert_eq!(groove["value"], json!(7.0));
+    assert_eq!(groove["text"], json!("Swing 16ths 60"));
+}

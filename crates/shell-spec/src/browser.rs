@@ -333,7 +333,6 @@ impl Label {
                 "Instrument presets appear here once Beatlayer has instruments (milestone M2); \
                  its own sound library comes in milestone M9.",
             ),
-            Self::Grooves => Some("Grooves arrive with the Groove Pool in milestone M6."),
             Self::Tunings => Some("Tunings arrive in milestone M6."),
             _ => None,
         }
@@ -427,6 +426,10 @@ pub enum ItemKind {
     Preset,
     /// A Stacks chord bank (`.blstacks`), which loads into Stacks (WP-6.14b).
     ChordBank,
+    /// A groove file (`.blgroove`), which loads into the Groove Pool, or
+    /// replaces the groove being hot-swapped (WP-6.20; the grooves spec R32,
+    /// R33).
+    Groove,
     /// A plug-in the scanner found (WP-2.9).
     Plugin,
     /// One of Beatlayer's own devices, listed under a device label (the
@@ -544,8 +547,9 @@ pub struct PreviewState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub playing: Option<String>,
     /// Why the file selected last doesn't preview, if it doesn't: a MIDI clip
-    /// file whose chain has no instrument, or a clip file whose audio is
-    /// missing. The preview strip shows it.
+    /// file whose chain has no instrument, a clip file whose audio is
+    /// missing, or a preset that is an effect's or needs a plug-in this
+    /// machine lacks. The preview strip shows it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
     /// How far it has played, in seconds.
@@ -1178,16 +1182,21 @@ pub enum Part {
     Content,
     /// The search field.
     Search,
+    /// The Groove Pool under the list (the grooves spec R24): its keys are its
+    /// own, so no browser key applies.
+    GroovePool,
 }
 
 impl Part {
-    /// The shortcut context this part gives key presses.
+    /// The shortcut context this part gives key presses: the global one for
+    /// the Groove Pool, whose keys the pool handles itself.
     #[must_use]
     pub const fn context(self) -> bl_commands::Context {
         match self {
             Self::Sidebar => BrowserSidebar,
             Self::Content => Browser,
             Self::Search => BrowserSearch,
+            Self::GroovePool => Global,
         }
     }
 }
@@ -1196,8 +1205,8 @@ impl Part {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FocusArgs {
-    /// The part to focus: `sidebar`, `content` (the list), or `search`.
-    /// Left out, the list.
+    /// The part to focus: `sidebar`, `content` (the list), `search`, or
+    /// `groove_pool`. Left out, the list.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub part: Option<Part>,
 }
@@ -1286,7 +1295,8 @@ pub struct FolderArgs {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PreviewArgs {
-    /// The audio file to preview. Left out, the selected file.
+    /// The audio file, clip file or instrument preset to preview. Left out,
+    /// the selected file.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
 }
@@ -1576,8 +1586,11 @@ fn specs() -> Vec<CommandSpec> {
                  start through the main output, at the preview volume, on a voice of its own, \
                  replacing any preview, whether or not the Preview switch is on, as Shift-Enter \
                  and Right do. The file is decoded in the background, so it starts a moment \
-                 later; `browser.state` reports it loading, then playing. Never changes the set. \
-                 Plays through the audio device.",
+                 later; `browser.state` reports it loading, then playing. An instrument, \
+                 Instrument Rack or Drum Rack preset is rendered offline playing a short phrase \
+                 instead, and plays once whatever the Raw switch says; any other preset plays \
+                 nothing, and `note` says why. Never changes the set. Plays through the audio \
+                 device.",
             )
             .permission(Permission::External)
             .context(Browser)

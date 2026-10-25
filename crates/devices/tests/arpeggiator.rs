@@ -7,8 +7,8 @@
 use crate::common;
 use bl_core::time::Bpm;
 use bl_devices::arpeggiator::{
-    ARPEGGIATOR, DECAY, DISTANCE, GATE, GROOVE, HOLD, OFFSET, RATE_MS, RATE_SYNC, REPEATS,
-    RETRIGGER, ROOT, SCALE, STEPS, STYLE, SYNC, TARGET, USE_SCALE, VELOCITY_ON,
+    ARPEGGIATOR, DECAY, DISTANCE, GATE, GROOVE, GROOVE_CHOICES, HOLD, OFFSET, RATE_MS, RATE_SYNC,
+    REPEATS, RETRIGGER, ROOT, SCALE, STEPS, STYLE, SYNC, TARGET, USE_SCALE, VELOCITY_ON,
 };
 use bl_engine::NoteKind;
 use bl_engine::scales::ScaleRuns;
@@ -216,12 +216,185 @@ fn velocity_decay_ramps_toward_target() {
     );
 }
 
-// Spec: arpeggiator R10. Scale and groove Phase 6 placeholders.
+/// [`play`] for two beats at Global Amount `amount` percent.
+fn swung(
+    params: &[(bl_model::ParamId, f64)],
+    amount: f64,
+    size: usize,
+) -> Vec<(i64, NoteKind, u8, f32)> {
+    let mut chain = Chain::new(4096);
+    chain.effect(ARPEGGIATOR, params);
+    chain.clip(8, [note(60, 0, 4)]);
+    chain.apply(Command::SetGlobalGrooveAmount { amount });
+    chain.play();
+    chain.run(2 * BEAT_FRAMES as usize, size);
+    chain.heard()
+}
+
+/// Rate Sync's entry for 1/16.
+const SIXTEENTHS: f64 = 2.0;
+/// The Groove entry of Swing 16ths 60.
+const SWING_16THS_60: f64 = 7.0;
+/// 6,000 frames: a 1/16 step at 120 BPM and 48 kHz.
+const STEP: i64 = 6_000;
+
+// Spec: arpeggiator R10, R18. The chooser lists None and the ten swing
+// grooves in order, and a new Arpeggiator chooses None.
 #[test]
-fn scale_and_groove_phase_6_placeholders() {
-    // Verify parameters load without panics or effects
-    let heard = play(&[(USE_SCALE, 1.0), (GROOVE, 0.0)], [note(60, 0, 1)], 512);
-    assert!(!heard.is_empty());
+fn the_groove_chooser_lists_none_and_the_ten_swing_grooves() {
+    let description = bl_devices::arpeggiator::arpeggiator_type().description;
+    let groove = description.param(GROOVE).expect("the chooser exists");
+    assert_eq!(groove.default, 0.0, "None");
+    assert_eq!(GROOVE_CHOICES[0], "None");
+    let names = [
+        "Swing 8ths 55",
+        "Swing 8ths 60",
+        "Swing 8ths 65",
+        "Swing 8ths 70",
+        "Swing 8ths 75",
+        "Swing 16ths 55",
+        "Swing 16ths 60",
+        "Swing 16ths 65",
+        "Swing 16ths 70",
+        "Swing 16ths 75",
+    ];
+    assert_eq!(GROOVE_CHOICES[1..], names);
+    assert!(groove.description.contains("Global Amount"));
+}
+
+// Spec: arpeggiator R19, R20. With Swing 16ths 60 at Rate 1/16 and a Global
+// Amount of 100 %, every second note-on lands a fifth of a step (1,200
+// frames) late, where a clip's note on that grid line plays; at any block
+// size.
+#[test]
+fn swing_moves_every_second_note_on_where_a_clip_note_would_play() {
+    let params = [
+        (SYNC, 1.0),
+        (RATE_SYNC, SIXTEENTHS),
+        (GROOVE, SWING_16THS_60),
+        (STEPS, 0.0),
+    ];
+    let expected: Vec<i64> = (0..8).map(|k| k * STEP + (k % 2) * 1_200).collect();
+    for size in [1, 64, 512] {
+        let heard = swung(&params, 100.0, size);
+        assert_eq!(times(&heard, NoteKind::On)[..8], expected, "size {size}");
+    }
+    // Swing 8ths 55 at Rate 1/8: the second step a tenth of its length late.
+    let heard = swung(&[(RATE_SYNC, 5.0), (GROOVE, 1.0), (STEPS, 0.0)], 100.0, 512);
+    assert_eq!(
+        times(&heard, NoteKind::On)[..4],
+        [0, 13_200, 24_000, 37_200]
+    );
+}
+
+// Spec: arpeggiator R19. At a Global Amount of 0 %, with Sync off, or with
+// None, every note-on lands on the grid.
+#[test]
+fn nothing_moves_at_zero_percent_with_sync_off_or_with_none() {
+    let straight: Vec<i64> = (0..8).map(|k| k * STEP).collect();
+    let swing = [
+        (RATE_SYNC, SIXTEENTHS),
+        (GROOVE, SWING_16THS_60),
+        (STEPS, 0.0),
+    ];
+    for size in [1, 64, 512] {
+        let heard = swung(&swing, 0.0, size);
+        assert_eq!(
+            times(&heard, NoteKind::On)[..8],
+            straight,
+            "0 %, size {size}"
+        );
+        let heard = swung(
+            &[
+                (SYNC, 0.0),
+                (RATE_MS, 125.0),
+                (GROOVE, SWING_16THS_60),
+                (STEPS, 0.0),
+            ],
+            100.0,
+            size,
+        );
+        assert_eq!(
+            times(&heard, NoteKind::On)[..8],
+            straight,
+            "Sync off, size {size}"
+        );
+        let heard = swung(&[(RATE_SYNC, SIXTEENTHS), (STEPS, 0.0)], 100.0, size);
+        assert_eq!(
+            times(&heard, NoteKind::On)[..8],
+            straight,
+            "None, size {size}"
+        );
+    }
+}
+
+// Spec: arpeggiator R19; grooves R10. The Global Amount scales the move: at
+// 130 % the second step is 0.26 of a step (1,560 frames) late.
+#[test]
+fn the_global_amount_scales_the_move() {
+    let params = [
+        (RATE_SYNC, SIXTEENTHS),
+        (GROOVE, SWING_16THS_60),
+        (STEPS, 0.0),
+    ];
+    for size in [1, 64, 512] {
+        let heard = swung(&params, 130.0, size);
+        assert_eq!(times(&heard, NoteKind::On)[..4], [0, 7_560, 12_000, 19_560]);
+    }
+    let heard = swung(&params, 50.0, 512);
+    assert_eq!(times(&heard, NoteKind::On)[..4], [0, 6_600, 12_000, 18_600]);
+}
+
+// Spec: arpeggiator R19, R20. Each note keeps the length Gate gives it, and
+// a swung pattern renders the same at every block size, ending cleanly.
+#[test]
+fn a_moved_note_keeps_its_gate_length_and_renders_the_same_every_time() {
+    let params = [
+        (RATE_SYNC, SIXTEENTHS),
+        (GROOVE, SWING_16THS_60),
+        (GATE, 50.0),
+        (STEPS, 0.0),
+    ];
+    let reference = swung(&params, 100.0, 512);
+    let ons = times(&reference, NoteKind::On);
+    let offs = times(&reference, NoteKind::Off);
+    for (on, off) in ons.iter().zip(&offs) {
+        assert_eq!(off - on, STEP / 2, "Gate 50 % of a step");
+    }
+    for size in [1, 64, 100, 4096] {
+        assert_eq!(swung(&params, 100.0, size), reference, "size {size}");
+    }
+    assert_eq!(swung(&params, 100.0, 512), reference, "twice");
+}
+
+// Spec: arpeggiator R12, R20. A note waiting for its grooved frame when the
+// key is released never sounds, and nothing hangs.
+#[test]
+fn a_note_waiting_for_its_frame_when_the_key_goes_up_never_sounds() {
+    // The key is released at frame 7,000, between the second step (6,000) and
+    // its grooved frame (7,200).
+    let mut chain = Chain::new(4096);
+    chain.effect(
+        ARPEGGIATOR,
+        &[
+            (RATE_SYNC, SIXTEENTHS),
+            (GROOVE, SWING_16THS_60),
+            (STEPS, 0.0),
+        ],
+    );
+    let mut note = note(60, 0, 1);
+    note.length = bl_core::time::Ticks(common::chain::BEAT.get() * 7 / 24);
+    chain.clip(8, [note]);
+    chain.sync();
+    chain.play();
+    chain.run(BEAT_FRAMES as usize, 64);
+    let heard = chain.heard();
+    assert_eq!(
+        times(&heard, NoteKind::On),
+        [0],
+        "the held note never sounds"
+    );
+    assert!(nothing_hangs(&heard));
 }
 
 // Spec: arpeggiator R11. Random styles are deterministic and repeat identically.

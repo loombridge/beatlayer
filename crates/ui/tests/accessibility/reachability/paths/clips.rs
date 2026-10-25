@@ -27,10 +27,17 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             "clip.set_scale",
             main(a_clip_selected, control_bar, "Scale Mode", Key::Enter),
         ),
-        // Grooves (WP-6.19): the Groove Pool, the Clip View's groove controls
-        // and the browser's Grooves label come with WP-6.20; until then
-        // agents reach these.
-        ("clip.set_groove", Exception(GROOVE_POOL)),
+        // Grooves (WP-6.20): the Clip View's Groove chooser, which Tab reaches
+        // and Up and Down step.
+        (
+            "clip.set_groove",
+            main(
+                a_clip_in_the_clip_view,
+                detail_area,
+                "Groove",
+                Key::ArrowDown,
+            ),
+        ),
         (
             "midi.set_port",
             settings("tempo-midi", a_midi_port, "In: Keys Track", Key::Enter),

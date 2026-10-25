@@ -905,3 +905,40 @@ pub(crate) fn crashed_session(h: &mut Harness) {
     drop(autosave);
     h.shell.use_recovery(dir).unwrap();
 }
+
+/// The Groove Pool showing, over the factory default set's groove, which a
+/// MIDI clip uses (the grooves spec R24 to R27), and a User Library for Save
+/// Groove.
+pub(crate) fn a_groove_pool(h: &mut Harness) {
+    a_clip_selected(h);
+    let clip = h.shell.arrangement().selected_clips()[0];
+    let groove = h.shell.groove_pool().grooves[0].groove.id;
+    h.shell
+        .run(
+            "clip.set_groove",
+            json!({ "clips": [clip], "groove": groove }),
+        )
+        .unwrap();
+    let library = std::env::temp_dir().join(format!("bl-reach-grooves-{}", std::process::id()));
+    bl_shell::browser::places::create_user_library(&library).unwrap();
+    h.shell.set_user_library(Some(library));
+    h.shell.run("view.toggle_groove_pool", json!({})).unwrap();
+}
+
+/// The keyboard in the Groove Pool (Option+6).
+pub(crate) fn pool_focused(h: &mut Harness) {
+    h.shell.run("focus.groove_pool", json!({})).unwrap();
+    h.settle();
+}
+
+/// The keyboard in the Groove Pool, with its first groove selected.
+pub(crate) fn pool_row_selected(h: &mut Harness) {
+    pool_focused(h);
+    h.key(Key::ArrowDown, Modifiers::NONE);
+}
+
+/// A MIDI clip selected and the Clip View showing it, for its Groove row.
+pub(crate) fn a_clip_in_the_clip_view(h: &mut Harness) {
+    a_clip_selected(h);
+    clip_view_shown(h);
+}

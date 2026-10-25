@@ -93,7 +93,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Option+6"]
 win = ["Alt+6"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "focus.groove_pool", contexts = ["global"] },
+]
 
 [[shortcut]]
 id = "S-FOCUS-008"

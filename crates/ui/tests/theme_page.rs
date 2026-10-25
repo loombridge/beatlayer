@@ -1,7 +1,7 @@
-//! The Theme & Colors page's Theme and Customization sections, headless
-//! (WP-6.30).
+//! The Theme & Colors page's Theme, Customization and Track and Clip Colors
+//! sections, headless (WP-6.30, WP-6.30b).
 //!
-//! Spec: themes R1, R3, R5, R7, R12, R13.
+//! Spec: themes R1, R3, R5, R7, R12, R13, R23, R24.
 
 use crate::common;
 use bl_shell::settings::{Appearance, SettingsPage, Tone};
@@ -170,4 +170,108 @@ fn the_number_boxes_step_by_key_by_drag_and_by_a_screen_reader() {
     let nodes = Harness::nodes(&h.frame(vec![]));
     assert_eq!(Harness::node(&nodes, "Color Hue").value, format!("{hue}°"));
     assert_eq!(Harness::node(&nodes, "Brightness").value, "50");
+}
+
+const COLOUR_ROWS: [&str; 4] = [
+    "Auto-Assign Track Colors",
+    "Default Track Color",
+    "Reduced Automatic Colors",
+    "Clip Color",
+];
+
+#[test]
+fn the_track_and_clip_colors_rows_follow_customization_in_order() {
+    // Spec: themes R23, R24; L-SET-011.
+    let mut h = open_page();
+    let nodes = Harness::nodes(&h.frame(vec![]));
+    let rows: Vec<_> = ROWS
+        .iter()
+        .chain(&COLOUR_ROWS)
+        .map(|name| Harness::node(&nodes, name).bounds.expect(name))
+        .collect();
+    for pair in rows.windows(2) {
+        assert!(pair[0].y0 < pair[1].y0, "in order");
+    }
+    let x0 = rows[0].x0;
+    for (name, b) in ROWS.iter().chain(&COLOUR_ROWS).zip(&rows) {
+        assert!((b.x0 - x0).abs() < 0.5, "{name} shares the control column");
+    }
+    // Rows of the section are 22 points apart, under a heading of their own.
+    for i in 8..11 {
+        assert!((rows[i + 1].y0 - rows[i].y0 - 22.0).abs() < 0.5, "row {i}");
+    }
+    assert!(
+        rows[8].y0 - rows[7].y0 > 22.0,
+        "Track and Clip Colors has a heading"
+    );
+    // The switches are 54 points wide, the choosers 108.
+    for i in [8, 10] {
+        assert!((rows[i].x1 - rows[i].x0 - 54.0).abs() < 0.5);
+    }
+    for i in [9, 11] {
+        assert!((rows[i].x1 - rows[i].x0 - 108.0).abs() < 0.5);
+    }
+    // The values of a new install, and Default Track Color waiting for
+    // Auto-Assign Track Colors to be off.
+    assert_eq!(Harness::node(&nodes, COLOUR_ROWS[0]).toggled, Some(true));
+    assert!(Harness::node(&nodes, COLOUR_ROWS[1]).disabled);
+    assert_eq!(
+        Harness::node(&nodes, COLOUR_ROWS[1]).value,
+        "Row 1, colour 13",
+        "swatch 12"
+    );
+    assert_eq!(Harness::node(&nodes, COLOUR_ROWS[2]).toggled, Some(false));
+    assert_eq!(Harness::node(&nodes, COLOUR_ROWS[3]).value, "Track Color");
+}
+
+#[test]
+fn the_track_and_clip_colors_rows_run_their_commands() {
+    // Spec: themes R23, R24.
+    let mut h = open_page();
+    h.accesskit(
+        Id::new(("switch", "reduced-automatic-colours")),
+        Action::Click,
+    );
+    h.settle();
+    assert!(h.shell.look().reduced_automatic_colours);
+
+    h.accesskit(Id::new(("chooser", "clip-colour")), Action::Focus);
+    h.settle();
+    h.key(Key::ArrowDown, Modifiers::NONE);
+    assert_eq!(
+        h.shell.look().clip_colour,
+        bl_shell::settings::ClipColour::Random
+    );
+
+    // Auto-Assign off enables Default Track Color, which steps by key and
+    // opens the palette by a click.
+    h.accesskit(
+        Id::new(("switch", "auto-assign-track-colours")),
+        Action::Click,
+    );
+    h.settle();
+    assert!(!h.shell.look().auto_assign_track_colours);
+    let nodes = Harness::nodes(&h.frame(vec![]));
+    assert!(!Harness::node(&nodes, COLOUR_ROWS[1]).disabled);
+    h.accesskit(Id::new(("chooser", "default-track-colour")), Action::Focus);
+    h.settle();
+    h.key(Key::ArrowDown, Modifiers::NONE);
+    assert_eq!(h.shell.look().default_track_colour, 13);
+
+    let nodes = Harness::nodes(&h.frame(vec![]));
+    let b = Harness::node(&nodes, COLOUR_ROWS[1]).bounds.unwrap();
+    h.click(pos2(
+        ((b.x0 + b.x1) / 2.0) as f32,
+        ((b.y0 + b.y1) / 2.0) as f32,
+    ));
+    let nodes = Harness::nodes(&h.settle());
+    let swatches = nodes.iter().filter(|n| n.label.starts_with("Row ")).count();
+    assert_eq!(swatches, 70, "the palette opens");
+    let b = Harness::node(&nodes, "Row 3, colour 4").bounds.unwrap();
+    h.click(pos2(
+        ((b.x0 + b.x1) / 2.0) as f32,
+        ((b.y0 + b.y1) / 2.0) as f32,
+    ));
+    h.settle();
+    assert_eq!(h.shell.look().default_track_colour, 2 * 14 + 3);
 }

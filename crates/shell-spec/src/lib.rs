@@ -21,6 +21,9 @@
 //! - [`automation`]: the Arrangement's automation editing commands
 //!   (WP-6.25): moving the breakpoints of an envelope, the clipboard of
 //!   envelope shapes, and the edit commands that act on them.
+//! - [`clip_envelope_editing`]: the Clip View's Envelope Editor (WP-6.25c):
+//!   a time selection, moving several breakpoints, the edit commands, shapes,
+//!   stretch and skew, and Simplify Envelope on a clip's envelope.
 //! - [`envelope_keys`]: editing envelopes from the keyboard (WP-6.26): the
 //!   insert marker along an envelope, and making, selecting, moving and
 //!   deleting its breakpoints, in the Arrangement's automation lanes and the
@@ -96,6 +99,7 @@ pub mod autosampler;
 pub mod bounce;
 pub mod browser;
 pub mod capture_midi;
+pub mod clip_envelope_editing;
 pub mod commands;
 pub mod comping;
 pub mod context_menus;
@@ -151,6 +155,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     editing::register(registry)?;
     automation::register(registry)?;
     envelope_keys::register(registry)?;
+    clip_envelope_editing::register(registry)?;
     groove::register(registry)?;
     locator::register(registry)?;
     notes::register(registry)?;

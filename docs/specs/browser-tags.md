@@ -1,6 +1,6 @@
 # The browser's tags, collections, filters, saved labels, columns and history
 
-- **Status:** partial (R1 to R33 each have a passing test; R34 to R48 are WP-6.32b's and WP-6.33's)
+- **Status:** partial (R1 to R40 each have a passing test; R41 to R48 are WP-6.33's)
 - **Work packages:** WP-6.31, the browser's database on disk, tags and tag groups, the Tag Editor, Quick Tags and searching by tag (R1 to R17); WP-6.32, the Filter View and its menu, saved labels, the Library labels' order, the content pane's columns, and the browser's history (R18 to R33); WP-6.32b, collections (R34 to R40); WP-6.33, hidden plug-ins and the format preference in the browser (IMP-07, R41 to R44), and nested collections (IMP-07, R45 to R48). The browser's places, search by name and preview are [the browser spec](browser.md)'s; the plug-ins' data and commands are [plug-in scanning](plugin-scanning.md)'s; clip files are [clip files](clip-files.md)'
 - **Parity-matrix row:** Views and workflow: Browser: collections, tags, tag groups, Tag Editor, Quick Tags, filter view, saved searches, columns, history; [the improvements](../05-improvements.md), IMP-07 (hiding plug-ins in the browser, nested collections)
 - **Checked against:** the Live 12 reference manual (online edition), read 20 October 2026; the Live 12 release notes, 12.0 to 12.4.5; the UI parity reference's rows L-BRW-001 to 016, L-SET-017, S-BRW-008 to 014, M-VIEW-027, M-NAV-016, M-NAV-017, C-BROWSER-004 to 011 and 018, I-CLICK-031 and I-FOCUS-007
@@ -162,13 +162,13 @@ This spec covers the database, tags and tag groups, the Tag Editor, Quick Tags, 
 | R31 | `crates/shell/tests/browser_filters.rs`, `starting_hot_swap_clears_the_search_and_the_tags_as_a_step` | unit |
 | R32 | `crates/shell/tests/browser_filters.rs`, `the_new_commands_are_registered_with_their_classes`; `crates/cli/tests/agent.rs`, `an_agent_filters_the_browser_keeps_labels_and_reads_them_back` | unit |
 | R33 | `crates/ui/tests/browser_filters.rs`, `the_filter_view_shows_groups_and_tag_buttons_and_clicks_select_them`, `the_library_sections_edit_mode_hides_labels_and_dragging_moves_them`, `the_content_options_menu_shows_columns_and_the_header_sorts_and_moves_them` | UI script |
-| R34 | to be written in WP-6.32b | |
-| R35 | to be written in WP-6.32b | |
-| R36 | to be written in WP-6.32b | |
-| R37 | to be written in WP-6.32b | |
-| R38 | to be written in WP-6.32b | |
-| R39 | to be written in WP-6.32b | |
-| R40 | to be written in WP-6.32b | |
+| R34 | `crates/shell/tests/browser_collections.rs`, `the_sidebar_lists_the_seven_collections_in_order`; `crates/ui/tests/browser_collections.rs`, `choosing_a_collection_lists_its_items` | unit, UI script |
+| R35 | `crates/shell/tests/browser_collections.rs`, `three_items_of_different_kinds_go_in_yellow_and_come_out_again`, `set_collection_names_its_items_and_refuses_what_does_not_fit`; `crates/shell/tests/browser_tags.rs`, `a_collected_file_moved_outside_beatlayer_keeps_its_collections_by_content`; `crates/ui/tests/browser_collections.rs`, `the_number_keys_put_the_selection_in_collections`, `the_item_context_menu_has_its_items_and_acts_on_the_selection`; `crates/ui/tests/keymap/views.rs`, `the_collection_keys_and_rename_reach_the_browser` | unit, UI script |
+| R36 | `crates/shell/tests/browser_collections.rs`, `a_collection_lists_in_the_browsers_order_and_searches_filters_and_opens`, `a_plug_in_in_a_collection_loads_onto_a_track` | unit |
+| R37 | `crates/ui/tests/browser_collections.rs`, `a_row_shows_three_squares_of_four_collections` | UI script |
+| R38 | `crates/shell/tests/browser_collections.rs`, `a_collection_is_renamed_hidden_and_keeps_its_place`, `collections_names_and_hiding_survive_a_restart`; `crates/ui/tests/browser_collections.rs`, `a_collection_is_renamed_by_its_menu_and_by_cmd_r`; `crates/ui/tests/keymap/views.rs`, `the_collection_keys_and_rename_reach_the_browser` | unit, UI script |
+| R39 | `crates/shell/tests/browser_collections.rs`, `collections_names_and_hiding_survive_a_restart`; `crates/ui/tests/browser_collections.rs`, `edit_and_done_show_and_hide_collections` | unit, UI script |
+| R40 | `crates/shell/tests/browser_collections.rs`, `set_collection_names_its_items_and_refuses_what_does_not_fit`, `the_new_commands_are_registered_with_their_classes`; `crates/cli/tests/agent.rs`, `an_agent_collects_browser_items_by_command_id_and_reads_them_back` | unit |
 | R41 | to be written in WP-6.33 | |
 | R42 | to be written in WP-6.33 | |
 | R43 | to be written in WP-6.33 | |

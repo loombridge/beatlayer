@@ -13,7 +13,7 @@ use egui::{
 use serde_json::json;
 
 use super::{
-    BROWSER_ROW, BrowserUi, COLLECTIONS, ClipDropTarget, SideRow, add_folder_id, bounds,
+    BROWSER_ROW, BrowserUi, ClipDropTarget, SideRow, add_folder_id, bounds, collection_colour,
     drop_chains, drop_tracks, invoke, label_id, note_clip_target, scrolled, sidebar_id,
 };
 use crate::layout::BrowserLayout;
@@ -28,6 +28,12 @@ struct LabelDrag(Label);
 #[must_use]
 pub fn labels_edit_id() -> Id {
     Id::new("browser-labels-edit")
+}
+
+/// The Collections heading's Edit and Done button.
+#[must_use]
+pub fn collections_edit_id() -> Id {
+    Id::new("browser-collections-edit")
 }
 
 /// The field a label's name is edited in.
@@ -131,11 +137,15 @@ impl BrowserUi {
     fn side_rows(&self, shell: &Shell) -> Vec<SideRow> {
         let labels = shell.browser_view().labels();
         let editing = self.editing_labels;
-        let mut rows = vec![SideRow::Heading("Collections")];
+        let mut rows = vec![SideRow::CollectionsHeading];
         rows.extend(
-            COLLECTIONS
+            labels
                 .iter()
-                .map(|(name, colour)| SideRow::Collection(name, *colour)),
+                .filter(|l| {
+                    l.section == Section::Collections && (l.shown || self.editing_collections)
+                })
+                .cloned()
+                .map(SideRow::Label),
         );
         rows.push(SideRow::LibraryHeading);
         rows.extend(
@@ -226,28 +236,17 @@ impl BrowserUi {
                         }
                     });
                 }
-                SideRow::LibraryHeading => {
-                    self.library_heading(&mut sidebar_ui, theme, rect, events);
-                }
-                SideRow::Collection(name, colour) => {
-                    let id = Id::new(("browser-collection", *name));
-                    let response = sidebar_ui.interact(rect, id, Sense::hover());
-                    let dot = colour.map_or(theme.colors.accent.0, |i| {
-                        theme.colors.track_palette[i % theme.colors.track_palette.len()].0
-                    });
-                    painter.circle_filled(pos2(rect.left() + 10.0, rect.center().y), 3.5, dot);
-                    painter.text(
-                        pos2(rect.left() + 18.0, rect.center().y),
-                        Align2::LEFT_CENTER,
-                        *name,
-                        theme.small_font(),
-                        theme.colors.pending.0,
+                SideRow::CollectionsHeading => {
+                    self.section_heading(
+                        &mut sidebar_ui,
+                        theme,
+                        rect,
+                        Section::Collections,
+                        events,
                     );
-                    response.widget_info(|| WidgetInfo::labeled(WidgetType::Other, false, *name));
-                    ui.ctx().accesskit_node_builder(id, |node| {
-                        node.set_role(Role::ListItem);
-                        node.set_description("Collections arrive in milestone M6.".to_owned());
-                    });
+                }
+                SideRow::LibraryHeading => {
+                    self.section_heading(&mut sidebar_ui, theme, rect, Section::Library, events);
                 }
                 SideRow::Label(info) => {
                     self.label_row(&mut sidebar_ui, shell, theme, rect, info, &order, events);
@@ -291,48 +290,67 @@ impl BrowserUi {
         }
     }
 
-    /// The Library heading: Edit (and Done) at its right while the pointer
-    /// is there, and a context menu with Reset Label Order (spec:
-    /// browser-tags R26).
-    fn library_heading(
+    /// The Library or Collections heading: Edit (and Done) at its right
+    /// while the pointer is there, and on the Library heading a context menu
+    /// with Reset Label Order (spec: browser-tags R26, R39).
+    fn section_heading(
         &mut self,
         ui: &mut Ui,
         theme: &Theme,
         rect: Rect,
+        section: Section,
         events: &mut Vec<UiEvent>,
     ) {
+        let collections = section == Section::Collections;
+        let title = if collections {
+            "Collections"
+        } else {
+            "Library"
+        };
+        let editing = if collections {
+            &mut self.editing_collections
+        } else {
+            &mut self.editing_labels
+        };
         let painter = ui.painter_at(rect);
         painter.text(
             pos2(rect.left() + 4.0, rect.center().y),
             Align2::LEFT_CENTER,
-            "Library",
+            title,
             theme.small_font(),
             theme.colors.text_dim.0,
         );
-        let id = Id::new(("browser-heading", "Library"));
+        let id = Id::new(("browser-heading", title));
         let heading = ui.interact(rect, id, Sense::click());
-        heading.context_menu(|ui| {
-            let item = ui.button("Reset Label Order");
-            crate::menus::register_item(ui.ctx(), &item);
-            crate::menus::take_focus_first(ui, &item);
-            if item.clicked() {
-                invoke(events, ids::RESET_LABEL_ORDER, json!({}));
-                ui.close();
-            }
-        });
+        if !collections {
+            heading.context_menu(|ui| {
+                let item = ui.button("Reset Label Order");
+                crate::menus::register_item(ui.ctx(), &item);
+                crate::menus::take_focus_first(ui, &item);
+                if item.clicked() {
+                    invoke(events, ids::RESET_LABEL_ORDER, json!({}));
+                    ui.close();
+                }
+            });
+        }
         ui.ctx().accesskit_node_builder(id, |node| {
             node.set_role(Role::Heading);
-            node.set_label("Library".to_owned());
+            node.set_label(title.to_owned());
             node.set_bounds(bounds(rect));
         });
         let button = Rect::from_min_max(pos2(rect.right() - 36.0, rect.top()), rect.max);
-        let response = ui.interact(button, labels_edit_id(), Sense::click());
-        let name = if self.editing_labels { "Done" } else { "Edit" };
+        let edit_id = if collections {
+            collections_edit_id()
+        } else {
+            labels_edit_id()
+        };
+        let response = ui.interact(button, edit_id, Sense::click());
+        let name = if *editing { "Done" } else { "Edit" };
         // Edit shows when the pointer is to the right of the heading.
         let right_of_heading = ui
             .input(|i| i.pointer.hover_pos())
             .is_some_and(|at| rect.contains(at) && at.x > rect.left() + 44.0);
-        if self.editing_labels || right_of_heading || response.hovered() {
+        if *editing || right_of_heading || response.hovered() {
             let colour = if response.hovered() {
                 theme.colors.text.0
             } else {
@@ -347,9 +365,9 @@ impl BrowserUi {
             );
         }
         if response.clicked() {
-            self.editing_labels = !self.editing_labels;
+            *editing = !*editing;
         }
-        ui.ctx().accesskit_node_builder(labels_edit_id(), |node| {
+        ui.ctx().accesskit_node_builder(edit_id, |node| {
             node.set_role(Role::Button);
             node.set_label(name.to_owned());
             node.set_bounds(bounds(button));
@@ -370,6 +388,12 @@ impl BrowserUi {
         let view = shell.browser_view();
         let id = label_id(&info.label);
         let library = info.section == Section::Library;
+        let collection = info.section == Section::Collections;
+        let editing = if collection {
+            self.editing_collections
+        } else {
+            self.editing_labels
+        };
         let movable = library && info.label != Label::All;
         let response = ui.interact(
             rect,
@@ -387,14 +411,14 @@ impl BrowserUi {
         } else if response.hovered() {
             painter.rect_filled(rect, 0.0, theme.colors.control_hover.0);
         }
-        let colour = if !info.available || (self.editing_labels && !info.shown) {
+        let colour = if !info.available || (editing && !info.shown) {
             theme.colors.pending.0
         } else {
             theme.colors.text.0
         };
         let mut left = rect.left() + 8.0;
-        // Edit mode: a check box that shows or hides the label (R26).
-        if library && self.editing_labels {
+        // Edit mode: a check box that shows or hides the label (R26, R39).
+        if (library || collection) && editing {
             let check =
                 Rect::from_center_size(pos2(rect.left() + 11.0, rect.center().y), vec2(9.0, 9.0));
             let box_response = ui.interact(
@@ -446,6 +470,14 @@ impl BrowserUi {
                 colour,
             );
             left += 14.0;
+        } else if let Label::Collection(number) = info.label {
+            // Spec: browser-tags R34. A collection's colour.
+            painter.circle_filled(
+                pos2(left + 3.5, rect.center().y),
+                3.5,
+                collection_colour(theme, number),
+            );
+            left += 12.0;
         }
         if view.renaming_label() == Some(&info.label) {
             self.rename_label_field(ui, theme, rect, left, info, events);
@@ -573,9 +605,15 @@ impl BrowserUi {
             invoke(events, ids::REMOVE_FOLDER, json!({ "path": path }));
             ui.close();
         }
-        if info.label.is_library() && button(ui, "Rename").clicked() {
+        if (info.label.is_library() || info.label.is_collection()) && button(ui, "Rename").clicked()
+        {
             invoke(events, ids::RENAME_LABEL, json!({ "label": info.label }));
             ui.close();
+        }
+        if info.label.is_collection() {
+            // A collection has its colour, not an icon (spec: browser-tags
+            // R38).
+            return;
         }
         let has_icon = info.icon.is_some();
         ui.menu_button("Choose Icon", |ui| {
@@ -666,8 +704,9 @@ impl BrowserUi {
     }
 }
 
-/// Whether a label has a context menu: a folder in Places, a Library label
-/// and a saved label do; All, the User Library and Current Project don't.
+/// Whether a label has a context menu: a folder in Places, a Library label,
+/// a saved label and a collection do; All, the User Library and Current
+/// Project don't.
 fn has_menu(label: &Label) -> bool {
     !matches!(
         label,

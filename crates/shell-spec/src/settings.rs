@@ -254,6 +254,34 @@ impl Tone {
     }
 }
 
+/// What Clip Color gives a new clip (themes R23).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum ClipColour {
+    /// The clip takes its track's colour, as it does in Live.
+    #[default]
+    TrackColor,
+    /// The clip takes swatch `h mod 70`, `h` being a hash of its ID.
+    Random,
+}
+
+impl ClipColour {
+    /// Every choice, in the chooser's order.
+    pub const ALL: [Self; 2] = [Self::TrackColor, Self::Random];
+
+    /// The choice's name in the Settings window.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::TrackColor => "Track Color",
+            Self::Random => "Random",
+        }
+    }
+}
+
+/// The swatch a new install's Default Track Color is (themes R23).
+pub const DEFAULT_TRACK_COLOUR: u8 = 12;
+
 /// The ranges of the Customization number boxes: smallest, largest, step
 /// and the value of a new install (themes R7).
 pub const GRID_LINE_INTENSITY: (i16, i16, i16, i16) = (0, 200, 5, 100);
@@ -284,6 +312,48 @@ pub struct ThemeLook {
     pub color_intensity: i16,
     /// Color Hue, in degrees.
     pub color_hue: i16,
+    /// Auto-Assign Track Colors (themes R23).
+    pub auto_assign_track_colours: bool,
+    /// Default Track Color, a swatch from 0 to 69, which new tracks take
+    /// while Auto-Assign Track Colors is off.
+    pub default_track_colour: u8,
+    /// Reduced Automatic Colors.
+    pub reduced_automatic_colours: bool,
+    /// Clip Color.
+    pub clip_colour: ClipColour,
+}
+
+impl ThemeLook {
+    /// The swatch a new track with this ID takes (themes R23).
+    #[must_use]
+    pub fn new_track_colour(&self, id: bl_model::TrackId) -> u8 {
+        if !self.auto_assign_track_colours {
+            return self.default_track_colour;
+        }
+        let raw = id.0.get();
+        if self.reduced_automatic_colours {
+            // The top row's even-numbered swatches, 0 to 12.
+            (raw % 7) as u8 * 2
+        } else {
+            (raw % u64::from(bl_model::TRACK_COLOURS)) as u8
+        }
+    }
+
+    /// The swatch a new clip with this ID is given, or none to let it take
+    /// its track's colour (themes R23).
+    #[must_use]
+    pub fn new_clip_colour(&self, id: bl_model::ClipId) -> Option<u8> {
+        match self.clip_colour {
+            ClipColour::TrackColor => None,
+            // SplitMix64's finalizer: a fixed hash, so a clip's swatch never changes.
+            ClipColour::Random => {
+                let mut h = id.0.get().wrapping_add(0x9E37_79B9_7F4A_7C15);
+                h = (h ^ (h >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+                h = (h ^ (h >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+                Some(((h ^ (h >> 31)) % u64::from(bl_model::SWATCHES)) as u8)
+            }
+        }
+    }
 }
 
 impl Default for ThemeLook {
@@ -296,6 +366,10 @@ impl Default for ThemeLook {
             brightness: BRIGHTNESS.3,
             color_intensity: COLOR_INTENSITY.3,
             color_hue: COLOR_HUE.3,
+            auto_assign_track_colours: true,
+            default_track_colour: DEFAULT_TRACK_COLOUR,
+            reduced_automatic_colours: false,
+            clip_colour: ClipColour::default(),
         }
     }
 }

@@ -4,6 +4,7 @@
 //! `Shell::run`, as an agent drives it (D17), on real files.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 use bl_core::time::{Bpm, TICKS_PER_QUARTER, TempoMap, Ticks};
@@ -1071,16 +1072,302 @@ fn an_audio_clip_file_previews_through_its_own_warp_settings() {
         let preview = shell.browser_preview();
         preview.playing.is_some() && preview.position_seconds < 1.0
     });
+}
 
-    // A MIDI clip file doesn't preview yet.
-    let midi_track = tracks(&shell, TrackKind::Midi)[0];
-    let midi = midi_clip(&mut shell, midi_track, "Idea", 0, None);
-    let midi_file = save(&mut shell, midi, json!({})).path;
-    assert!(
+/// A rig with a User Library and the audio running, and a MIDI track holding
+/// the native polysynth, then the test plug-in's gain at `gain` if given.
+fn rig_with_synth(
+    scratch: &Scratch,
+    gain: Option<f64>,
+) -> (Shell, bl_audio_io::NullControl, TrackId) {
+    let (mut shell, control) = testing::rig();
+    bl_shell::browser::places::create_user_library(&library(scratch)).unwrap();
+    shell.set_user_library(Some(library(scratch)));
+    shell.start_audio();
+    let track = tracks(&shell, TrackKind::Midi)[0];
+    shell
+        .run("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    let synth = bl_devices::polysynth_type();
+    shell
+        .run(
+            "device.add",
+            json!({ "device": { "kind": synth.kind, "name": synth.name, "role": synth.role }, "track": track }),
+        )
+        .unwrap();
+    if let Some(gain) = gain {
+        let loaded: bl_shell::plugin_commands::PluginLoaded = run(
+            &mut shell,
+            "plugin.load",
+            json!({ "path": bl_test_clap::bundle(), "track": track }),
+        );
         shell
-            .run("browser.preview", json!({ "path": midi_file }))
-            .is_err()
+            .run(
+                "device.set_param",
+                json!({ "device": loaded.device, "param": bl_test_clap::GAIN, "value": gain }),
+            )
+            .unwrap();
+    }
+    (shell, control, track)
+}
+
+/// Selects `file`, then lets the background render finish.
+fn select_and_render(shell: &mut Shell, file: &str) {
+    shell
+        .run("browser.select", json!({ "paths": [file] }))
+        .unwrap();
+    render_done(shell);
+}
+
+/// Polls until the background render is in: it takes real time, which no
+/// step of test time stands for.
+fn render_done(shell: &mut Shell) {
+    for _ in 0..5_000_000 {
+        shell.poll();
+        if shell.browser_preview().loading.is_none() {
+            return;
+        }
+        std::thread::yield_now();
+    }
+    panic!("the render never finished");
+}
+
+fn render_of(
+    file: &Path,
+    bpm: f64,
+) -> Result<(bl_media::SampleData, Box<bl_model::AudioData>), String> {
+    bl_shell::browser::preview::render_midi(
+        file,
+        ClipFile::load(file).unwrap(),
+        48_000,
+        bpm,
+        &[],
+        &AtomicBool::new(false),
+    )
+}
+
+// Spec: clip files R16. A MIDI clip file with a native instrument previews as
+// its offline render of one loop at the set's tempo, looping.
+#[test]
+fn a_midi_clip_file_with_an_instrument_previews_as_its_render_of_one_loop() {
+    let scratch = Scratch::new("midi-preview");
+    let (mut shell, control, track) = rig_with_synth(&scratch, None);
+    let clip = midi_clip(&mut shell, track, "Idea", 0, None);
+    let file = save(&mut shell, clip, json!({})).path;
+
+    // The render is what exporting the clip's set over its length gives.
+    let (data, _) = render_of(Path::new(&file), 120.0).unwrap();
+    let mut exported = Vec::new();
+    bl_shell::export::render(
+        shell.editor().document(),
+        shell.media_store(),
+        bl_shell::export::Hosts::default(),
+        &bl_shell::export::Render {
+            start: Ticks::ZERO,
+            length: bl_shell::export::Length::To(Ticks(BEAT * 4)),
+            sample_rate: 48_000,
+            engine_rate: 48_000,
+            block: bl_shell::export::BLOCK,
+        },
+        60.0,
+        &AtomicBool::new(false),
+        &mut |_| {},
+        &mut |block| {
+            exported.extend_from_slice(block);
+            Ok(())
+        },
+        None,
+    )
+    .unwrap();
+    let left: Vec<f32> = exported.iter().step_by(2).copied().collect();
+    assert_eq!(data.frames(), 96_000, "four beats at 120 BPM");
+    assert!(left.iter().any(|s| *s != 0.0), "the synth plays the notes");
+    assert_eq!(data.channel(0).unwrap(), &left[..], "sample for sample");
+    // At another tempo it's another length.
+    assert_eq!(
+        render_of(Path::new(&file), 90.0).unwrap().0.frames(),
+        128_000
     );
+
+    // Selecting it plays that render, looping: four beats last two seconds.
+    shell
+        .run("browser.select", json!({ "paths": [file.clone()] }))
+        .unwrap();
+    let wait = |shell: &mut Shell, what: &str, done: &mut dyn FnMut(&mut Shell) -> bool| {
+        testing::wait_for(&control, shell, what, |shell| {
+            shell.poll();
+            std::thread::yield_now();
+            done(shell)
+        });
+    };
+    wait(&mut shell, "the clip file to play", &mut |shell| {
+        shell.browser_preview().position_seconds > 1.0
+    });
+    let preview = shell.browser_preview();
+    assert_eq!(preview.playing, Some(file.clone()));
+    assert!((preview.length_seconds - 2.0).abs() < 0.01, "{preview:?}");
+    wait(&mut shell, "the preview to loop", &mut |shell| {
+        let preview = shell.browser_preview();
+        preview.playing.is_some() && preview.position_seconds < 1.0
+    });
+    // The audio thread played it, looping, without touching the heap.
+    shell.run("browser.stop_preview", json!({})).unwrap();
+    control.run_blocks(40);
+    let stats = shell.audio().stats().expect("a stream is open");
+    assert_eq!(stats.heap_operations, 0, "{stats:?}");
+}
+
+// Spec: clip files R16. While the transport runs the preview starts on the
+// next bar; with Raw on it plays at once, once.
+#[test]
+fn a_midi_clip_file_preview_starts_on_the_next_bar_and_raw_at_once() {
+    let scratch = Scratch::new("midi-bar");
+    let (mut shell, control, track) = rig_with_synth(&scratch, None);
+    let clip = midi_clip(&mut shell, track, "Idea", 0, None);
+    let file = save(&mut shell, clip, json!({})).path;
+    shell.run("transport.play", json!({})).unwrap();
+    testing::advance(&control, &mut shell, 500);
+    select_and_render(&mut shell, &file);
+    assert!(
+        shell.arrangement().transport().position < Ticks(BEAT * 2),
+        "selected in the song's first bar"
+    );
+    let mut waited = 0;
+    while shell.browser_preview().position_seconds == 0.0 {
+        testing::advance(&control, &mut shell, 5);
+        shell.poll();
+        waited += 5;
+        assert!(waited < 10_000, "the preview never started");
+    }
+    // It began where the second bar does, not before.
+    let at = shell.arrangement().transport().position;
+    assert!(
+        (Ticks(BEAT * 4)..Ticks(BEAT * 4 + BEAT / 2)).contains(&at),
+        "started with the song at {at:?}"
+    );
+
+    shell
+        .run("browser.set_raw", json!({ "raw": true }))
+        .unwrap();
+    shell
+        .run("browser.preview", json!({ "path": file }))
+        .unwrap();
+    render_done(&mut shell);
+    testing::advance(&control, &mut shell, 100);
+    shell.poll();
+    assert!(
+        shell.browser_preview().position_seconds > 0.0,
+        "Raw plays at once"
+    );
+}
+
+// Spec: clip files R16, offline plug-in renders R3, R11. A plug-in in the
+// clip file's chain is made fresh from its saved state: the set's instance
+// of a plug-in like it isn't touched.
+#[test]
+fn a_clip_file_with_a_clap_plugin_renders_through_a_fresh_instance() {
+    let scratch = Scratch::new("midi-clap");
+    let (mut shell, control, track) = rig_with_synth(&scratch, Some(0.5));
+    let clip = midi_clip(&mut shell, track, "Idea", 0, None);
+    let file = save(&mut shell, clip, json!({})).path;
+    let plugin = shell
+        .editor()
+        .document()
+        .track(track)
+        .unwrap()
+        .devices()
+        .last()
+        .map(|d| d.id)
+        .unwrap();
+    testing::wait_for(&control, &mut shell, "the plug-in to run", |shell| {
+        shell.poll();
+        shell.plugins().status(plugin).is_some_and(|s| s.active)
+    });
+    let before = (
+        shell.plugins().status(plugin),
+        shell.plugins().save_state(plugin).unwrap(),
+    );
+
+    // The same chain without the plug-in, to hear what it does: a gain of 0.5.
+    let (through, _) = render_of(Path::new(&file), 120.0).unwrap();
+    let plain = scratch.path("plain");
+    std::fs::create_dir_all(&plain).unwrap();
+    let mut without = ClipFile::load(Path::new(&file)).unwrap();
+    without.devices.pop();
+    without.save(&plain.join("Plain.blclip")).unwrap();
+    let (dry, _) = render_of(&plain.join("Plain.blclip"), 120.0).unwrap();
+    assert!(dry.channel(0).unwrap().iter().any(|s| *s != 0.0));
+    for (out, input) in through
+        .channel(0)
+        .unwrap()
+        .iter()
+        .zip(dry.channel(0).unwrap())
+    {
+        assert!((out - input * 0.5).abs() <= 1e-6, "{out} against {input}");
+    }
+    assert_eq!(
+        (
+            shell.plugins().status(plugin),
+            shell.plugins().save_state(plugin).unwrap()
+        ),
+        before,
+        "the set's instance is as it was"
+    );
+    assert!(
+        shell.plugins().lend().is_ok(),
+        "nothing of the set's is lent"
+    );
+}
+
+// Spec: clip files R16. Selecting another file during a render drops it, and
+// a chain without an instrument previews nothing and the strip says why.
+#[test]
+fn a_chain_without_an_instrument_previews_nothing_and_another_file_drops_a_render() {
+    let scratch = Scratch::new("midi-none");
+    let (mut shell, _control, track) = rig_with_synth(&scratch, None);
+    let clip = midi_clip(&mut shell, track, "Idea", 0, None);
+    let with_synth = save(&mut shell, clip, json!({})).path;
+    let mut bare = ClipFile::load(Path::new(&with_synth)).unwrap();
+    bare.devices.clear();
+    let bare_path = library(&scratch).join("Clips").join("Bare.blclip");
+    bare.save(&bare_path).unwrap();
+
+    // Another file straight after the first: the render under way is
+    // dropped, and the bare chain says why it plays nothing.
+    shell
+        .run("browser.select", json!({ "paths": [with_synth.clone()] }))
+        .unwrap();
+    select_and_render(&mut shell, &text(&bare_path));
+    let preview = shell.browser_preview();
+    assert_eq!(preview.playing, None);
+    assert!(
+        preview
+            .note
+            .as_deref()
+            .is_some_and(|n| n.contains("no instrument")),
+        "{preview:?}"
+    );
+    assert!(shell.message().is_some_and(|m| m.error));
+
+    // A file that does play clears the note.
+    select_and_render(&mut shell, &with_synth);
+    let preview = shell.browser_preview();
+    assert_eq!(preview.note, None);
+    assert_eq!(preview.playing, Some(with_synth.clone()));
+    assert!(render_of_cancelled(Path::new(&with_synth)));
+}
+
+/// A render told to stop at once gives no audio.
+fn render_of_cancelled(file: &Path) -> bool {
+    bl_shell::browser::preview::render_midi(
+        file,
+        ClipFile::load(file).unwrap(),
+        48_000,
+        120.0,
+        &[],
+        &AtomicBool::new(true),
+    )
+    .is_err()
 }
 
 // Spec: clip files R10. Enter places the selected clip file.

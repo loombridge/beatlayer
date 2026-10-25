@@ -87,6 +87,12 @@ pub struct Clip {
     /// nothing in the clip itself until it is committed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub groove: Option<GrooveId>,
+    /// The clip's colour, a swatch from 0 to 69 (the themes spec, R14). A
+    /// clip handed to a command without one takes its track's colour as it
+    /// goes in, and a set saved before colours gives each clip its track's
+    /// on loading, so a clip in a document always has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub colour: Option<u8>,
 }
 
 impl Clip {
@@ -105,7 +111,26 @@ impl Clip {
             launch: ClipLaunch::default(),
             scale: Scale::default(),
             groove: None,
+            colour: None,
         }
+    }
+
+    /// Whether the clip and `other` differ only in their colour, which the
+    /// engine never hears (the themes spec, R27).
+    #[must_use]
+    pub fn differs_only_in_colour(&self, other: &Self) -> bool {
+        self.colour != other.colour
+            && Self {
+                colour: other.colour,
+                ..self.clone()
+            } == *other
+    }
+
+    /// The clip with `colour` as its colour: `None` lets it take its
+    /// track's colour as it goes into the document (the themes spec, R20).
+    #[must_use]
+    pub fn with_colour(self, colour: Option<u8>) -> Self {
+        Self { colour, ..self }
     }
 
     /// The clip with `groove` as its groove: what a new MIDI clip is given
@@ -1412,6 +1437,7 @@ pub fn consolidated_midi(
         // clip it was made from.
         scale: clips.first().map_or_else(Scale::default, |clip| clip.scale),
         groove: None,
+        colour: None,
     }
 }
 

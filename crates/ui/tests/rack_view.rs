@@ -776,10 +776,10 @@ fn a_chains_menu_renames_and_colours() {
     assert!(!item(&nodes, "Rename").disabled);
     assert!(item(&nodes, "Edit Info Text").disabled);
     assert!(
-        nodes.iter().any(|n| n.label == "Colour 70"),
+        nodes.iter().any(|n| n.label == "Row 5, colour 14"),
         "the palette's 5 rows of 14"
     );
-    let swatch = Harness::node(&nodes, "Colour 15");
+    let swatch = Harness::node(&nodes, "Row 2, colour 1");
     let b = swatch.bounds.unwrap();
     click(
         &mut h,

@@ -442,7 +442,15 @@ impl Shell {
                     let keymap = &self.keymap;
                     let command = shortcuts
                         .iter()
-                        .find_map(|shortcut| keymap.command_for(shortcut, contexts))
+                        .find_map(|shortcut| {
+                            keymap.command_for_running(shortcut, contexts, |command| {
+                                self.can_invoke_in(
+                                    &command.id,
+                                    &Value::Object(command.args.clone()),
+                                    contexts,
+                                )
+                            })
+                        })
                         .or_else(|| {
                             shortcuts.iter().find_map(|shortcut| {
                                 let entry = keymap.entry_for(shortcut)?;

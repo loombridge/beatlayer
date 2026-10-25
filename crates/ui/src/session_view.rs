@@ -32,7 +32,6 @@ use egui::{
 };
 use serde_json::{Value, json};
 
-use crate::arrangement::scene::track_colour;
 use crate::layout::mixer::{
     Column, ColumnKind, MainStatusCells, MixerLayout, SLOT_ROW, SceneRow, SessionLayout,
     StatusCells,
@@ -381,7 +380,9 @@ impl GridUi {
         }
         let painter = ui.painter_at(cell.expand(1.0));
         let fill = match clip {
-            Some(_) => track_colour(theme, track).gamma_multiply(0.75),
+            Some(held) => theme
+                .swatch(held.colour.unwrap_or_default())
+                .gamma_multiply(0.75),
             None => theme.colors.lane.0,
         };
         painter.rect_filled(cell, 0.0, fill);
@@ -706,7 +707,15 @@ impl GridUi {
         }
         let selected = state.scenes.contains(&scene);
         let painter = ui.painter().clone();
-        painter.rect_filled(row.name.shrink(1.0), 0.0, theme.colors.lane.0);
+        // Spec: themes R18. A scene with a colour has its name field filled
+        // with it.
+        let fill = shell
+            .editor()
+            .document()
+            .scene(scene)
+            .and_then(|held| held.colour)
+            .map_or(theme.colors.lane.0, |swatch| theme.swatch(swatch));
+        painter.rect_filled(row.name.shrink(1.0), 0.0, fill);
         // Spec: session-view R21. View > Scene Tempo and Time Signature
         // puts the scene's fields where the name was (L-SES-007); they're
         // drawn last, above the row's own click.

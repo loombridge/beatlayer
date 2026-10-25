@@ -100,6 +100,12 @@ fn every_shell_command_is_on_a_menu_or_a_control() {
         commands::SETTINGS_SET_BRIGHTNESS,
         commands::SETTINGS_SET_COLOR_INTENSITY,
         commands::SETTINGS_SET_COLOR_HUE,
+        // The Theme & Colors page's Track and Clip Colors rows (the themes
+        // spec, R23, R24).
+        commands::SETTINGS_SET_AUTO_ASSIGN_TRACK_COLOURS,
+        commands::SETTINGS_SET_DEFAULT_TRACK_COLOUR,
+        commands::SETTINGS_SET_REDUCED_AUTOMATIC_COLOURS,
+        commands::SETTINGS_SET_CLIP_COLOUR,
         // The Record, Warp & Launch page's switch (the audio clips spec,
         // R22).
         commands::SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES,

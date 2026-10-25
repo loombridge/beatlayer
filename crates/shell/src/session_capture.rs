@@ -193,6 +193,8 @@ pub fn place(
             clip.envelopes = source.envelopes;
             // Spec: grooves R3. A copy keeps its groove.
             clip.groove = source.groove;
+            // Spec: themes R20. A copy keeps its colour.
+            clip.colour = source.colour;
             let track = run.slot.0;
             crate::arrangement::placing::clear(editor, track, from, to, &placed)?;
             placed.insert(id);

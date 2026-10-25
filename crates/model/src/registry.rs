@@ -835,6 +835,38 @@ const ENTRIES: &[Entry] = &[
             changes only the name in the track's title bar.",
     },
     Entry {
+        id: "track.set_colour",
+        action: Action::Apply("set_track_colour"),
+        label: "Change Track Color",
+        permission: Permission::Edit,
+        contexts: &[TrackHeaders],
+        keys: &[],
+        description: "Colours tracks, Main and the returns among them, with swatch `colour` of the \
+            palette of 5 rows of 14 (0 to 69, numbered from the top row's left, row by row: swatch \
+            14 is row 2, colour 1). Their clips keep their colours. A colour is never heard: the \
+            engine gets nothing.",
+    },
+    Entry {
+        id: "track.assign_colour_to_clips",
+        action: Action::Apply("assign_colour_to_clips"),
+        label: "Assign Track Color to Clips",
+        permission: Permission::Edit,
+        contexts: &[TrackHeaders],
+        keys: &[],
+        description: "Gives every clip of each track its track's colour: in the Arrangement, in \
+            its Session slots and in its take lanes. A track that holds no clips is left as it is.",
+    },
+    Entry {
+        id: "track.assign_colour_to_grouped",
+        action: Action::Apply("assign_colour_to_grouped"),
+        label: "Assign Track Color to Grouped Tracks and Clips",
+        permission: Permission::Edit,
+        contexts: &[TrackHeaders],
+        keys: &[],
+        description: "Gives each group track's colour to every track inside it, at any depth, and \
+            to all their clips in both views and their take lanes. The tracks must be group tracks.",
+    },
+    Entry {
         id: "track.set_frozen",
         action: Action::Apply("freeze_tracks"),
         label: "Set Tracks Frozen",
@@ -1627,6 +1659,17 @@ const ENTRIES: &[Entry] = &[
             the clip.",
     },
     Entry {
+        id: "clip.set_colour",
+        action: Action::Apply("set_clip_colour"),
+        label: "Change Clip Color",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Colours clips, in the Arrangement, a Session slot or a take lane, with swatch \
+            `colour` of the palette of 5 rows of 14 (0 to 69, numbered from the top row's left, row \
+            by row: swatch 14 is row 2, colour 1). A colour is never heard: the engine gets nothing.",
+    },
+    Entry {
         id: "clip.set_mute",
         action: Action::Apply("set_clip_mute"),
         label: "Activate/Deactivate Clip",
@@ -2411,6 +2454,22 @@ const ENTRIES: &[Entry] = &[
             one, so a switch thrown before anything is drawn sets what drawing will use.",
     },
     Entry {
+        id: "clip.set_envelope",
+        action: Action::Apply("set_clip_envelope"),
+        label: "Set Envelope",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Replaces one of a clip's envelopes with the breakpoints given, as the \
+            Envelope Editor's edits do when they write a shape, a stretch or a paste over a span \
+            of time. `clip` and `target` name the envelope as `clip.set_envelope_breakpoint` \
+            does, and `points` are the envelope's breakpoints in position order, each with its \
+            position in ticks from the beginning of the clip's contents, its value in the \
+            parameter's own units and the bend of the segment starting at it. The breakpoints \
+            must be in order, no two at one position, and no position before 1.1.1; an empty \
+            list takes the envelope with it. The envelope keeps its Linked switch.",
+    },
+    Entry {
         id: "clip.trim_start",
         action: Action::Apply("trim_clip_start"),
         label: "Trim Clip Start",
@@ -2524,6 +2583,17 @@ const ENTRIES: &[Entry] = &[
         keys: &[],
         description: "Renames a scene. A name may be empty: a scene without a name shows its \
             number, which is its position.",
+    },
+    Entry {
+        id: "scene.set_colour",
+        action: Action::Apply("set_scene_colour"),
+        label: "Change Scene Color",
+        permission: Permission::Edit,
+        contexts: &[Session],
+        keys: &[],
+        description: "Colours scenes with swatch `colour` of the palette of 5 rows of 14 (0 to 69, \
+            numbered from the top row's left, row by row: swatch 14 is row 2, colour 1), or clears \
+            their colour with null, as a new scene has none.",
     },
     Entry {
         id: "scene.set_tempo",

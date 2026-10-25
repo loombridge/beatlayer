@@ -157,6 +157,18 @@ impl Keymap {
         self.inner.command_for(shortcut, contexts)
     }
 
+    /// [`Keymap::command_for`], where the first command that `runs` decides,
+    /// and the first one at all if none does.
+    #[must_use]
+    pub fn command_for_running(
+        &self,
+        shortcut: &str,
+        contexts: &[Context],
+        runs: impl Fn(&KeyCommand) -> bool,
+    ) -> Option<&KeyCommand> {
+        self.inner.command_for_running(shortcut, contexts, runs)
+    }
+
     /// The first key chord that runs a command, for showing beside it in a
     /// menu.
     #[must_use]

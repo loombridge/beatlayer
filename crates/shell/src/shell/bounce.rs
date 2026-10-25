@@ -132,10 +132,11 @@ impl Shell {
             let bounced = self.bounce_track(id, track, args.channels, &mut files)?;
             bounces.push((track, bounced));
         }
-        let made = bounces
+        let made: Vec<ClipId> = bounces
             .iter()
             .flat_map(|(_, bounced)| bounced.clip_ids())
             .collect();
+        let look = &self.prefs.look;
         self.editor.transact("Bounce tracks in place", |editor| {
             for (track, bounced) in &bounces {
                 editor
@@ -145,7 +146,8 @@ impl Shell {
                     })
                     .map_err(|error| failed(id, error.to_string()))?;
             }
-            Ok(())
+            crate::colours::colour_new(editor, look, &[], &made)
+                .map_err(|error| failed(id, error.to_string()))
         })?;
         self.changed();
         Ok(to_value(&BounceResult {
@@ -244,6 +246,7 @@ impl Shell {
                     scale: clip.scale,
                     // A bounce plays the groove, so the audio holds it already.
                     groove: None,
+                    colour: None,
                 },
             ));
         }
@@ -311,6 +314,7 @@ impl Shell {
                 scale: clip.scale,
                 // A bounce plays the groove, so the audio holds it already.
                 groove: None,
+                colour: None,
             });
         }
         Ok(lane)
@@ -363,6 +367,7 @@ impl Shell {
             scale: doc.settings().scale,
             // A bounce plays the groove, so the audio holds it already.
             groove: None,
+            colour: None,
         };
         Ok(BouncedTrack {
             name: bounced_name(name),
@@ -550,10 +555,12 @@ impl Shell {
         if made.is_empty() {
             return Err(unavailable(id, "nothing is selected"));
         }
-        let clips = made
+        let clips: Vec<ClipId> = made
             .iter()
             .flat_map(|(_, _, bounced)| bounced.clip_ids())
             .collect();
+        let new_tracks: Vec<TrackId> = made.iter().map(|(_, track, _)| *track).collect();
+        let look = &self.prefs.look;
         self.editor.transact("Bounce to new tracks", |editor| {
             for (source, track, bounced) in &made {
                 editor
@@ -564,6 +571,8 @@ impl Shell {
                     })
                     .map_err(|error| failed(id, error.to_string()))?;
             }
+            crate::colours::colour_new(editor, look, &new_tracks, &clips)
+                .map_err(|error| failed(id, error.to_string()))?;
             // R22: the source material is switched off.
             switch_off(editor, &target).map_err(|error| failed(id, error))?;
             Ok(())
@@ -687,6 +696,7 @@ impl Shell {
                         scale: clip.scale,
                         // A bounce plays the groove, so the audio holds it already.
                         groove: None,
+                        colour: None,
                     },
                 ));
             }
@@ -786,6 +796,7 @@ impl Shell {
                     scale: self.editor.document().settings().scale,
                     // A bounce plays the groove, so the audio holds it already.
                     groove: None,
+                    colour: None,
                 },
             ));
         }
@@ -805,6 +816,7 @@ impl Shell {
                 .and_then(|held| held.take_lanes().position(|held| held.id == lane)),
             _ => None,
         };
+        let look = &self.prefs.look;
         let made = self.editor.transact("Paste bounced audio", |editor| {
             for (track, bounced) in &conversions {
                 editor
@@ -887,6 +899,8 @@ impl Shell {
                     .map_err(|failure| edit_error(id, failure))?;
                 created = ids;
             }
+            crate::colours::colour_new(editor, look, &[], &created)
+                .map_err(|error| failed(id, error.to_string()))?;
             Ok(created)
         });
         let made = made?;

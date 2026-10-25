@@ -163,6 +163,10 @@ fn each_settings_command_reads_back_from_settings_state() {
             "brightness": 0,
             "color_intensity": 100,
             "color_hue": 0,
+            "auto_assign_track_colours": true,
+            "default_track_colour": 12,
+            "reduced_automatic_colours": false,
+            "clip_colour": "track-color",
             "appearance": "dark",
             "drawn_appearance": "dark",
             "themes": ["Beatlayer"],
@@ -253,6 +257,27 @@ fn each_settings_command_reads_back_from_settings_state() {
         &mut client,
         "settings.set_color_hue",
         json!({ "degrees": -90 }),
+    );
+    // Spec: themes R23, R24.
+    run(
+        &mut client,
+        "settings.set_auto_assign_track_colours",
+        json!({ "on": false }),
+    );
+    run(
+        &mut client,
+        "settings.set_default_track_colour",
+        json!({ "colour": 33 }),
+    );
+    run(
+        &mut client,
+        "settings.set_reduced_automatic_colours",
+        json!({ "on": true }),
+    );
+    run(
+        &mut client,
+        "settings.set_clip_colour",
+        json!({ "clip_colour": "random" }),
     );
     run(
         &mut client,
@@ -361,6 +386,10 @@ fn each_settings_command_reads_back_from_settings_state() {
             "brightness": -20,
             "color_intensity": 50,
             "color_hue": -90,
+            "auto_assign_track_colours": false,
+            "default_track_colour": 33,
+            "reduced_automatic_colours": true,
+            "clip_colour": "random",
             "appearance": "follow-system",
             "drawn_appearance": "dark",
             "themes": ["Beatlayer"],

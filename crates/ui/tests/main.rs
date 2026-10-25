@@ -21,6 +21,7 @@ mod capture_midi;
 mod clip_edge_fades;
 mod clip_envelope;
 mod clip_files;
+mod clip_panels;
 mod clip_view;
 mod clips_between_views;
 mod common;

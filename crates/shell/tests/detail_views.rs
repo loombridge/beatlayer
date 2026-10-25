@@ -281,3 +281,168 @@ fn the_menu_items_follow_the_detail_area() {
     assert!(shell.can_invoke("focus.clip_view", &json!({})));
     assert!(shell.can_invoke("focus.device_view", &json!({})));
 }
+
+use bl_shell::clip_properties_commands::{ClipPanels, PanelArrangement};
+use bl_shell::files::ProjectFiles;
+use bl_shell::settings::Preferences;
+
+fn panels(shell: &mut Shell, id: &str, args: Value) -> ClipPanels {
+    let result = shell
+        .run(id, args)
+        .unwrap_or_else(|error| panic!("{id} failed: {error}"));
+    let panels: ClipPanels = serde_json::from_value(result).unwrap();
+    let state = shell.run("view.state", json!({})).unwrap();
+    let read: ClipPanels = serde_json::from_value(state["clip_view"]["panels"].clone()).unwrap();
+    assert_eq!(panels, read, "{id} returns what view.state reads back");
+    panels
+}
+
+fn shell_in(config: &std::path::Path) -> Shell {
+    Shell::new(
+        Preferences::load(config).unwrap_or_default(),
+        Some(config.to_path_buf()),
+        bl_shell::audio::AudioHost::null(Default::default()),
+        Box::new(ProjectFiles::new()),
+    )
+}
+
+#[test]
+fn the_panels_arrangement_is_a_preference_kept_between_launches() {
+    // Spec: detail-views R20, R22, R26.
+    let config = std::env::temp_dir().join(format!("bl-panels-{}", std::process::id()));
+    std::fs::create_dir_all(&config).unwrap();
+    let mut shell = shell_in(&config);
+    let first = panels(
+        &mut shell,
+        "clip_view.fold_panels",
+        json!({ "folded": false }),
+    );
+    assert_eq!(
+        first.arrangement,
+        PanelArrangement::Automatic,
+        "a new install"
+    );
+    let steps = shell.editor().undo_history().len();
+    let dirty = shell.is_dirty();
+    let choice = json!({ "arrangement": "vertical" });
+    assert_eq!(
+        shell.choice_state("clip_view.arrange_panels", &choice),
+        Some(false)
+    );
+    let chosen = panels(&mut shell, "clip_view.arrange_panels", choice.clone());
+    assert_eq!(
+        (chosen.arrangement, chosen.in_use),
+        (PanelArrangement::Vertical, PanelArrangement::Vertical)
+    );
+    assert_eq!(
+        shell.choice_state("clip_view.arrange_panels", &choice),
+        Some(true)
+    );
+    assert_eq!(shell.editor().undo_history().len(), steps, "no undo step");
+    assert_eq!(shell.is_dirty(), dirty, "and not part of the set");
+    assert_eq!(
+        Preferences::load(&config).unwrap().panel_arrangement,
+        PanelArrangement::Vertical
+    );
+
+    let mut restarted = shell_in(&config);
+    let again = panels(
+        &mut restarted,
+        "clip_view.fold_panels",
+        json!({ "folded": false }),
+    );
+    assert_eq!(
+        again.arrangement,
+        PanelArrangement::Vertical,
+        "after a relaunch"
+    );
+    std::fs::remove_file(config.join("preferences.json")).ok();
+}
+
+#[test]
+fn automatically_follows_the_clip_views_height_across_400_points() {
+    // Spec: detail-views R20.
+    let mut shell = Shell::headless();
+    run(&mut shell, "view.toggle_clip_view", json!({}));
+    let in_use = |shell: &mut Shell| {
+        panels(shell, "clip_view.fold_panels", json!({ "folded": false })).in_use
+    };
+    assert_eq!(
+        in_use(&mut shell),
+        PanelArrangement::Horizontal,
+        "225 points"
+    );
+    run(
+        &mut shell,
+        "view.set_detail_height",
+        json!({ "points": 399 }),
+    );
+    assert_eq!(in_use(&mut shell), PanelArrangement::Horizontal);
+    run(
+        &mut shell,
+        "view.set_detail_height",
+        json!({ "points": 400 }),
+    );
+    assert_eq!(in_use(&mut shell), PanelArrangement::Vertical);
+    run(
+        &mut shell,
+        "view.set_detail_height",
+        json!({ "points": 300 }),
+    );
+    assert_eq!(in_use(&mut shell), PanelArrangement::Horizontal);
+    // An expanded Clip View is as tall as the window allows.
+    run(&mut shell, "view.expand_clip_view", json!({}));
+    assert_eq!(in_use(&mut shell), PanelArrangement::Vertical);
+    run(&mut shell, "view.expand_clip_view", json!({}));
+    assert_eq!(in_use(&mut shell), PanelArrangement::Horizontal);
+    // The other two choices ignore the height.
+    let horizontal = json!({ "arrangement": "horizontal" });
+    run(
+        &mut shell,
+        "view.set_detail_height",
+        json!({ "points": 800 }),
+    );
+    let chosen = panels(&mut shell, "clip_view.arrange_panels", horizontal);
+    assert_eq!(chosen.in_use, PanelArrangement::Horizontal);
+}
+
+#[test]
+fn folding_the_panels_is_view_state_only() {
+    // Spec: detail-views R23, R26.
+    let mut shell = Shell::headless();
+    let steps = shell.editor().undo_history().len();
+    let dirty = shell.is_dirty();
+    assert_eq!(shell.switch_state("clip_view.fold_panels"), Some(false));
+    assert!(
+        panels(&mut shell, "clip_view.fold_panels", json!({})).folded,
+        "it switches"
+    );
+    assert_eq!(shell.switch_state("clip_view.fold_panels"), Some(true));
+    assert!(
+        panels(
+            &mut shell,
+            "clip_view.fold_panels",
+            json!({ "folded": true })
+        )
+        .folded
+    );
+    assert!(!panels(&mut shell, "clip_view.fold_panels", json!({})).folded);
+    assert_eq!(shell.editor().undo_history().len(), steps, "no undo step");
+    assert_eq!(shell.is_dirty(), dirty, "and no change to the set");
+}
+
+#[test]
+fn both_focus_keys_unfold_the_panels() {
+    // Spec: detail-views R24.
+    let mut shell = Shell::headless();
+    for id in ["focus.clip_panels", "focus.selected_clip_panel"] {
+        panels(
+            &mut shell,
+            "clip_view.fold_panels",
+            json!({ "folded": true }),
+        );
+        shell.run(id, json!({})).unwrap();
+        assert!(!shell.clip_view().panels_folded(), "{id}");
+        assert!(shell.clip_view().visible(), "{id} shows the Clip View");
+    }
+}

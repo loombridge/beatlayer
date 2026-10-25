@@ -427,6 +427,7 @@ impl MainWindowUi {
             }
             Effect::FocusArea(Area::Assistant) => self.assistant.focus_prompt(),
             Effect::FocusClipPanels => crate::main_panel::request_focus(ctx),
+            Effect::FocusSelectedClipPanel => crate::clip_panels::request_selected_focus(ctx),
             Effect::FocusTuning => crate::tuning_section::request_focus(ctx),
             Effect::RenameDevice(device) => {
                 // Spec: device-chains R10. Rename types the name in the

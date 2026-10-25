@@ -58,7 +58,7 @@ fn type_into(h: &mut Harness, name: &str, keys: &[Key]) {
 
 /// A Session MIDI clip on the first MIDI track, selected, with the Clip View
 /// open.
-fn session_clip() -> (Harness, ClipId) {
+pub(crate) fn session_clip() -> (Harness, ClipId) {
     let mut h = Harness::with_title_bar(Window::Main);
     let track = h.shell.editor().document().top_level().next().unwrap();
     let scene = h.shell.editor().document().scenes().next().unwrap().id;
@@ -104,7 +104,7 @@ fn arrangement_clips() -> (Harness, ClipId, ClipId) {
 }
 
 /// A folder under the system's temporary folder holding one WAV file.
-struct Tone(PathBuf);
+pub(crate) struct Tone(PathBuf);
 
 impl Tone {
     fn new(name: &str) -> Self {
@@ -146,7 +146,7 @@ impl Drop for Tone {
 }
 
 /// An Arrangement audio clip, selected, with the Clip View open.
-fn audio_clip(name: &str) -> (Harness, ClipId, Tone) {
+pub(crate) fn audio_clip(name: &str) -> (Harness, ClipId, Tone) {
     let tone = Tone::new(name);
     let mut h = Harness::with_title_bar(Window::Main);
     let track = h

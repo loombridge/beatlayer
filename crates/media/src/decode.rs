@@ -557,10 +557,16 @@ impl SymphoniaStream {
         let (lead, end) = match trim {
             Some(trim) if codec == Codec::Aac && container == Container::Mp4 => {
                 let trim = trim.at_rate(sample_rate);
-                frames = trim
-                    .valid
-                    .or_else(|| frames.map(|f| f.saturating_sub(trim.priming)));
-                (trim.priming, trim.valid.map(|v| trim.priming + v))
+                let end = trim.valid.map(|v| trim.priming.checked_add(v));
+                // A tag whose fields overflow is garbage: decode untrimmed.
+                if end == Some(None) {
+                    (0, None)
+                } else {
+                    frames = trim
+                        .valid
+                        .or_else(|| frames.map(|f| f.saturating_sub(trim.priming)));
+                    (trim.priming, end.flatten())
+                }
             }
             _ => (0, None),
         };

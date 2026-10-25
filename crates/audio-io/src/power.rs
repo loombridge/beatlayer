@@ -29,6 +29,12 @@ pub enum PowerEvent {
 pub trait PowerMonitor: Send {
     /// The next thing that happened since the last poll, if anything.
     fn poll(&mut self) -> Option<PowerEvent>;
+
+    /// Called after the supervisor's thread has been busy with something
+    /// that blocks, such as opening a device. A monitor that reads a wake from
+    /// the time between polls starts counting from now, so the busy time
+    /// isn't taken for a sleep.
+    fn rebaseline(&mut self) {}
 }
 
 /// The default threshold for [`ClockJump`]: a jump of more than this between
@@ -115,6 +121,10 @@ impl PowerMonitor for ClockJump {
         let gap = missing.max(monotonic);
         (gap > self.threshold).then_some(PowerEvent::Woke { slept: Some(gap) })
     }
+
+    fn rebaseline(&mut self) {
+        self.last = Some((self.clock)());
+    }
 }
 
 #[cfg(test)]
@@ -192,6 +202,18 @@ mod tests {
         assert_eq!(monitor.poll(), None);
         // The wall clock set back an hour.
         reading.lock().unwrap().wall -= Duration::from_secs(3_600);
+        advance(&reading, 50, 50);
+        assert_eq!(monitor.poll(), None);
+    }
+
+    // Spec: device-changes R4
+    #[test]
+    fn time_spent_blocked_is_not_a_sleep_once_rebaselined() {
+        let (mut monitor, reading) = manual();
+        monitor.poll();
+        // A device open that took four seconds, on both clocks.
+        advance(&reading, 4_000, 4_000);
+        monitor.rebaseline();
         advance(&reading, 50, 50);
         assert_eq!(monitor.poll(), None);
     }

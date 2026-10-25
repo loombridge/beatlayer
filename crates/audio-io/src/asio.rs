@@ -17,7 +17,7 @@ use std::cell::UnsafeCell;
 use std::ffi::{c_long, c_void};
 use std::ptr;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicPtr, Ordering};
+use std::sync::atomic::{AtomicPtr, AtomicU32, Ordering};
 
 use azo::driver::{Driver, Metadata, Proxy};
 use azo::dto::{BufferSize, ChannelId, Granularity};
@@ -76,37 +76,63 @@ impl AsioBackend {
     }
 
     fn describe(&self, driver: &Metadata, is_default: bool) -> DeviceInfo {
-        let mut info = DeviceInfo {
-            id: device_id(driver),
-            name: driver.description.to_string_lossy(),
-            is_default_output: is_default,
-            is_default_input: is_default,
-            output_channels: 0,
-            input_channels: 0,
-            sample_rates: Vec::new(),
-            current_sample_rate: None,
-            buffer_sizes: BufferSizes::Unknown,
-            default_buffer_size: None,
-        };
-        // A driver whose hardware is unplugged often won't load; list it anyway.
-        let Ok(proxy) = self.load(driver) else {
-            return info;
-        };
-        if let Ok(counts) = proxy.channel_counts() {
-            info.output_channels = clamp_channels(counts.out);
-            info.input_channels = clamp_channels(counts.in_);
+        // The driver of the open stream is already loaded: a second instance
+        // of it can fail, or disturb the running one.
+        if let Some(open) = open_listing(&device_id(driver)) {
+            return open;
         }
-        info.sample_rates = STANDARD_SAMPLE_RATES
-            .into_iter()
-            .filter(|&rate| proxy.can_sample_rate(f64::from(rate)).is_ok())
-            .collect();
-        info.current_sample_rate = proxy.get_sample_rate().ok().map(rate_hz);
-        if let Ok(sizes) = proxy.buffer_size() {
-            info.buffer_sizes = buffer_sizes(&sizes);
-            info.default_buffer_size = u32::try_from(sizes.preferred).ok();
+        let mut info = unlisted(driver, is_default);
+        // A driver whose hardware is unplugged often won't load; list it anyway.
+        if let Ok(proxy) = self.load(driver) {
+            list(&mut info, &proxy);
         }
         info
     }
+}
+
+/// A driver's entry in the device list before it has been asked anything.
+fn unlisted(driver: &Metadata, is_default: bool) -> DeviceInfo {
+    DeviceInfo {
+        id: device_id(driver),
+        name: driver.description.to_string_lossy(),
+        is_default_output: is_default,
+        is_default_input: is_default,
+        output_channels: 0,
+        input_channels: 0,
+        sample_rates: Vec::new(),
+        current_sample_rate: None,
+        buffer_sizes: BufferSizes::Unknown,
+        default_buffer_size: None,
+    }
+}
+
+/// Fills in what a loaded driver says about itself.
+fn list(info: &mut DeviceInfo, proxy: &Proxy) {
+    if let Ok(counts) = proxy.channel_counts() {
+        info.output_channels = clamp_channels(counts.out);
+        info.input_channels = clamp_channels(counts.in_);
+    }
+    info.sample_rates = STANDARD_SAMPLE_RATES
+        .into_iter()
+        .filter(|&rate| proxy.can_sample_rate(f64::from(rate)).is_ok())
+        .collect();
+    info.current_sample_rate = proxy.get_sample_rate().ok().map(rate_hz);
+    if let Ok(sizes) = proxy.buffer_size() {
+        info.buffer_sizes = buffer_sizes(&sizes);
+        info.default_buffer_size = u32::try_from(sizes.preferred).ok();
+    }
+}
+
+/// The entry for the driver of the open stream, with the rate the driver last
+/// announced, if `id` is that driver. Call it from the thread that opens and
+/// drops streams, which is the only one that frees what `ACTIVE` points at.
+fn open_listing(id: &DeviceId) -> Option<DeviceInfo> {
+    // SAFETY: the stream frees `shared` only on this thread, after clearing `ACTIVE`.
+    let shared = unsafe { ACTIVE.load(Ordering::Acquire).as_ref() }?;
+    (shared.listing.id == *id).then(|| DeviceInfo {
+        current_sample_rate: Some(shared.rate.load(Ordering::Relaxed)),
+        ..shared.listing.clone()
+    })
 }
 
 fn drivers() -> Result<Vec<Metadata>, Error> {
@@ -293,6 +319,13 @@ impl Backend for AsioBackend {
                 .get_sample_rate()
                 .map_err(|e| driver_error("couldn't read the sample rate", e))?,
         );
+        let mut listing = unlisted(
+            driver,
+            drivers
+                .first()
+                .is_some_and(|first| device_id(first) == device_id(driver)),
+        );
+        list(&mut listing, &proxy);
         let counts = proxy
             .channel_counts()
             .map_err(|e| driver_error("couldn't count channels", e))?;
@@ -371,6 +404,8 @@ impl Backend for AsioBackend {
             render: UnsafeCell::new(render),
             counters: Arc::clone(&counters),
             sample_rate: f64::from(sample_rate),
+            listing,
+            rate: AtomicU32::new(sample_rate),
         }));
         if ACTIVE
             .compare_exchange(ptr::null_mut(), shared, Ordering::AcqRel, Ordering::Acquire)
@@ -467,6 +502,11 @@ struct Shared {
     /// Lock-free, so any callback on any thread can count events.
     counters: Arc<Counters>,
     sample_rate: f64,
+    /// The driver as `devices()` lists it, for as long as the stream has it
+    /// loaded.
+    listing: DeviceInfo,
+    /// The rate the driver last announced, in hertz.
+    rate: AtomicU32,
 }
 
 struct Render {
@@ -565,6 +605,7 @@ extern "system" fn buffer_switch_time_info(
 
 extern "system" fn sample_rate_did_change(rate: SampleRate) {
     with_shared(|shared| {
+        shared.rate.store(rate_hz(rate), Ordering::Relaxed);
         if (rate - shared.sample_rate).abs() >= 1.0 {
             shared.counters.record_invalidated();
         }
@@ -696,6 +737,77 @@ mod tests {
             BufferSizes::List(vec![256])
         );
         assert_eq!(buffer_sizes(&sizes(0, 256, None)), BufferSizes::Unknown);
+    }
+
+    struct Silent;
+
+    impl AudioCallback for Silent {
+        fn process(
+            &mut self,
+            _: &crate::ProcessContext,
+            _: &crate::AudioBuffer<'_>,
+            _: &mut crate::AudioBufferMut<'_>,
+        ) {
+        }
+    }
+
+    #[test]
+    fn the_open_driver_is_listed_without_loading_it_again() {
+        let id = DeviceId::new(BackendKind::Asio, "open");
+        let other = DeviceId::new(BackendKind::Asio, "other");
+        assert!(open_listing(&id).is_none());
+
+        let counters = Arc::new(Counters::new());
+        let config = RtThreadConfig {
+            period: frames_to_duration(64, 48_000),
+            promote: false,
+            workgroup: None,
+        };
+        let listing = DeviceInfo {
+            id: id.clone(),
+            name: "Open".to_owned(),
+            is_default_output: true,
+            is_default_input: true,
+            output_channels: 2,
+            input_channels: 2,
+            sample_rates: vec![44_100, 48_000],
+            current_sample_rate: Some(48_000),
+            buffer_sizes: BufferSizes::Unknown,
+            default_buffer_size: None,
+        };
+        let shared = Box::into_raw(Box::new(Shared {
+            render: UnsafeCell::new(Render {
+                runner: CallbackRunner::new(
+                    Box::new(Silent),
+                    Arc::clone(&counters),
+                    48_000,
+                    true,
+                    config,
+                ),
+                frames: 64,
+                inputs: Vec::new(),
+                outputs: Vec::new(),
+                input_scratch: PlanarScratch::new(2, 64),
+                output_scratch: PlanarScratch::new(2, 64),
+                sample_rate: 48_000,
+            }),
+            counters,
+            sample_rate: 48_000.0,
+            listing,
+            rate: AtomicU32::new(48_000),
+        }));
+        ACTIVE.store(shared, Ordering::Release);
+
+        // The driver announces a new rate: its entry follows, with no load.
+        sample_rate_did_change(44_100.0);
+        let open = open_listing(&id).unwrap();
+        assert_eq!(open.current_sample_rate, Some(44_100));
+        assert_eq!(open.output_channels, 2);
+        assert!(open_listing(&other).is_none());
+
+        ACTIVE.store(ptr::null_mut(), Ordering::Release);
+        // SAFETY: `shared` came from `Box::into_raw` above and nothing reaches it now.
+        drop(unsafe { Box::from_raw(shared) });
     }
 
     #[test]

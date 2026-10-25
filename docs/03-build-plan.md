@@ -730,7 +730,7 @@ Total to 1.0: 293 packages planned in Phases 0 to 7, and about 95 estimated in P
 | 6.35 | done | 24 October 2026 | [#366](https://github.com/loombridge/beatlayer/pull/366); a set opens in the browser to list its tracks, groups, returns, Main, Session clips and devices, and merges whole (without its returns and Main), by track or by chain, as one undo step with sends mapped by position; tracks and Session clips save as a new set, by command or by dragging onto a place ([set exchange](specs/set-exchange.md)) |
 | 6.35b | done | 25 October 2026 | [#437](https://github.com/loombridge/beatlayer/pull/437); Create Pack writes a project into one `.blpack` file without its Backup folder or journals, and Install Pack... unpacks it after checking every name, with progress and cancel. |
 | 6.36 | todo |  |  |
-| 6.36b | todo |  |  |
+| 6.36b | done | 25 October 2026 | [#451](https://github.com/loombridge/beatlayer/pull/451); a DAWproject import now brings in colours, fades and crossfades, plug-ins with their saved states (missing ones keep them), the generic devices, automation, MIDI controller data, note expressions and markers ([DAWproject](specs/dawproject.md)) |
 | 6.37 | todo |  |  |
 | 6.37b | todo |  |  |
 | 6.38 | done | 22 October 2026 | [#310](https://github.com/loombridge/beatlayer/pull/310); View ▸ Return Tracks Scroll with Tracks (`mixer_view.return_tracks_scroll`, off by default and kept in the preferences) puts the returns after the drop area in the Session View's grid, both mixers and the Arrangement's lanes, scrolling with the tracks, with only Main pinned |

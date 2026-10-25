@@ -9038,6 +9038,7 @@ What `device_view.state` returns.
 | `can_paste_chain` | boolean | yes | Whether the chain clipboard holds chains to paste. |
 | `device_list` | array of [`DeviceListEntry`](#devicelistentry) | yes | Every device on the track as a hierarchy, each rack's devices under it chain by chain: the Device View selector's list (racks spec, R25). |
 | `meters` | array of [`ChainMeterValue`](#chainmetervalue) | yes | The meters between the devices of the track's chain and of its racks' chains, in signal order (the MIDI meters spec, R2 and R6); empty when no engine has published meters. |
+| `scroll` | number | yes | How far the chain is scrolled sideways, in points; the view keeps it within the chain's width. |
 | `armed_map` | [`ArmedMap`](#armedmap) or null | no | The Map button that is lit, on any track: a click on any parameter's control maps it to the slot (WP-5.10). |
 | `map_mode` | [`DeviceId`](#deviceid) or null | no | The rack whose Map mode is on, if one is (WP-5.4): the Macro Controls tint mappable parameters and show the mappings list. |
 
@@ -9112,6 +9113,12 @@ What `device_view.state` returns.
       },
       "type": "array"
     },
+    "scroll": {
+      "default": 0.0,
+      "description": "How far the chain is scrolled sideways, in points; the view keeps it within the chain's width.",
+      "format": "float",
+      "type": "number"
+    },
     "selected": {
       "anyOf": [
         {
@@ -9155,7 +9162,8 @@ What `device_view.state` returns.
     "can_paste",
     "can_paste_chain",
     "device_list",
-    "meters"
+    "meters",
+    "scroll"
   ],
   "type": "object"
 }

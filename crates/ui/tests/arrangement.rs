@@ -1072,3 +1072,38 @@ fn rect_of(node: &common::Node) -> Rect {
         pos2(b.x1 as f32, b.y1 as f32),
     )
 }
+
+#[test]
+fn a_time_selection_drag_survives_the_track_under_it_going() {
+    // The rows are rebuilt each frame: a track deleted mid-drag must not
+    // leave the press-time row index past the end.
+    let mut h = Harness::with_title_bar(Window::Main);
+    h.settle();
+    let l = layout(&h);
+    let tracks: Vec<_> = h.shell.editor().document().top_level().collect();
+    let last = tracks.len() - 1;
+    let from = pos2(
+        l.lanes.left() + 61.0,
+        l.lanes.top() + 88.0 * last as f32 + 40.0,
+    );
+    assert!(l.lanes.contains(from), "the last track's lane is on screen");
+    h.frame(vec![Event::PointerMoved(from)]);
+    h.frame(vec![Event::PointerButton {
+        pos: from,
+        button: PointerButton::Primary,
+        pressed: true,
+        modifiers: Modifiers::NONE,
+    }]);
+    h.frame(vec![Event::PointerMoved(from + vec2(30.0, 5.0))]);
+    h.shell
+        .run("track.delete", json!({ "track": tracks[last] }))
+        .unwrap();
+    h.frame(vec![Event::PointerMoved(from + vec2(60.0, 120.0))]);
+    h.frame(vec![Event::PointerButton {
+        pos: from + vec2(60.0, 120.0),
+        button: PointerButton::Primary,
+        pressed: false,
+        modifiers: Modifiers::NONE,
+    }]);
+    h.settle();
+}

@@ -1582,6 +1582,41 @@ impl ArrangementLayout {
             ),
             mixer: None,
         }
+        .fitted()
+    }
+
+    /// Squeezes every part into the view's height. A view shorter than the
+    /// rows above and below the lanes (the mixer's sections take the rest)
+    /// would otherwise put them over the mixer and the Control Bar, where
+    /// they'd still take the clicks.
+    fn fitted(mut self) -> Self {
+        let (top, bottom) = (self.view.top(), self.view.bottom());
+        for rect in [
+            &mut self.beat_ruler,
+            &mut self.scrub,
+            &mut self.set_locator,
+            &mut self.automation_mode,
+            &mut self.lock_envelopes,
+            &mut self.previous_locator,
+            &mut self.next_locator,
+            &mut self.lanes,
+            &mut self.headers,
+            &mut self.pinned_lanes,
+            &mut self.pinned_headers,
+            &mut self.grid_indicator,
+            &mut self.time_ruler,
+            &mut self.waveform_zoom,
+            &mut self.waveform_zoom_level,
+            &mut self.optimize_height,
+            &mut self.optimize_width,
+        ]
+        .into_iter()
+        .chain(self.overview.as_mut())
+        {
+            rect.min.y = rect.min.y.clamp(top, bottom);
+            rect.max.y = rect.max.y.clamp(top, bottom);
+        }
+        self
     }
 
     /// The same view with its mixer showing (L-ARR-018; the mixer view

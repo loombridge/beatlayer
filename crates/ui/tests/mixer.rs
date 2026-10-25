@@ -1410,6 +1410,44 @@ fn the_wheel_scrolls_the_mixer_continuously() {
     assert!((a.left() - 1298.0).abs() <= 2.0);
 }
 
+// Spec: mixer-view R6, R14.
+#[test]
+fn a_fader_drag_ends_when_its_column_scrolls_away_before_the_release() {
+    let mut h = session();
+    many_tracks(&mut h, 20);
+    let fader = control(&mut h, "3 Audio", "Track Volume");
+    let at = pos2(fader.center().x, fader.bottom() - 2.0);
+    h.frame(vec![Event::PointerMoved(at)]);
+    h.frame(vec![Event::PointerButton {
+        pos: at,
+        button: PointerButton::Primary,
+        pressed: true,
+        modifiers: Modifiers::NONE,
+    }]);
+    h.frame(vec![Event::PointerMoved(at + vec2(0.0, -10.0))]);
+    assert!(h.shell.gesture_under_way(), "the drag holds a gesture");
+    for _ in 0..10 {
+        h.frame(vec![Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(0.0, -40.0),
+            modifiers: Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+        }]);
+    }
+    assert!(
+        inside(&tree(&mut h), "Session Mixer", "3 Audio").is_none(),
+        "the dragged column is out of view"
+    );
+    h.frame(vec![Event::PointerButton {
+        pos: at,
+        button: PointerButton::Primary,
+        pressed: false,
+        modifiers: Modifiers::NONE,
+    }]);
+    h.settle();
+    assert!(!h.shell.gesture_under_way(), "the release ends the gesture");
+}
+
 // Spec: view-options R1, mixer-view R23.
 #[test]
 fn the_middle_button_pans_the_mixer() {

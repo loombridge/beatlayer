@@ -15116,6 +15116,49 @@ The global launch quantisation and its enabled switch (L-CTRL-010, M-OPT-014): s
 
 </details>
 
+### `LaunchState`
+
+What a slot's clip is doing, as the engine publishes it.
+
+One of:
+
+- `"queued"`: A launch or a restart waits for the launch quantisation grid.
+- `"playing"`: The clip plays.
+- `"queued_to_stop"`: A stop waits for the grid.
+- `"recording"`: A Session recording goes into the slot.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a slot's clip is doing, as the engine publishes it.",
+  "oneOf": [
+    {
+      "const": "queued",
+      "description": "A launch or a restart waits for the launch quantisation grid.",
+      "type": "string"
+    },
+    {
+      "const": "playing",
+      "description": "The clip plays.",
+      "type": "string"
+    },
+    {
+      "const": "queued_to_stop",
+      "description": "A stop waits for the grid.",
+      "type": "string"
+    },
+    {
+      "const": "recording",
+      "description": "A Session recording goes into the slot.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `Layer`
 
 One sample of a multisample (R2).
@@ -25577,6 +25620,7 @@ What `session.state` and its commands return: what the grid has selected.
 | `tracks` | array of [`TrackId`](#trackid) | yes | The selected track title bars. |
 | `title_tracks` | boolean | yes | Whether the selection is track title bars, so Esc has already gone up as far as it can. |
 | `scroll_y` | number | yes | How far the scenes are scrolled down, in points at 100%. |
+| `launches` | array of [`SlotLaunch`](#slotlaunch) | no | The slots the engine has queued, playing or recording, with what each is doing. Empty in the grid's own state; `session.state` fills it in. |
 
 <details><summary>JSON Schema</summary>
 
@@ -25584,6 +25628,13 @@ What `session.state` and its commands return: what the grid has selected.
 {
   "description": "What `session.state` and its commands return: what the grid has selected.",
   "properties": {
+    "launches": {
+      "description": "The slots the engine has queued, playing or recording, with what each is doing. Empty in the grid's own state; `session.state` fills it in.",
+      "items": {
+        "$ref": "#/$defs/SlotLaunch"
+      },
+      "type": "array"
+    },
     "scenes": {
       "description": "The selected scenes (their launch buttons or names).",
       "items": {
@@ -26798,6 +26849,46 @@ The parameters of a device's sample slots: slot `k`'s copy of a parameter is the
   "required": [
     "stride",
     "count"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `SlotLaunch`
+
+One slot that is not at rest, in `session.state`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track. |
+| `scene` | [`SceneId`](#sceneid) | yes | The scene. |
+| `state` | [`LaunchState`](#launchstate) | yes | What its clip is doing. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One slot that is not at rest, in `session.state`.",
+  "properties": {
+    "scene": {
+      "$ref": "#/$defs/SceneId",
+      "description": "The scene."
+    },
+    "state": {
+      "$ref": "#/$defs/LaunchState",
+      "description": "What its clip is doing."
+    },
+    "track": {
+      "$ref": "#/$defs/TrackId",
+      "description": "The track."
+    }
+  },
+  "required": [
+    "track",
+    "scene",
+    "state"
   ],
   "type": "object"
 }

@@ -1,6 +1,6 @@
 //! MIDI input, MIDI learn, MIDI I/O and MIDI files.
 
-use super::{MIDI_LAMP, Shell, ShellError, midi_file_error, to_value};
+use super::{Effect, MIDI_LAMP, Shell, ShellError, midi_file_error, to_value};
 use crate::midi::MidiHost;
 use bl_commands::NoArgs;
 use bl_shell_spec::midi_files as midi_ids;
@@ -337,6 +337,27 @@ impl Shell {
             }
             midi_ids::EXPORT => {
                 let args = Self::args::<midi_ids::MidiExportArgs>(id, args)?;
+                if args.path.is_none() {
+                    // Spec: session-context-menus R7, R16. The clip menus'
+                    // Export MIDI Clip... asks where to save the file; the
+                    // app then runs this again with the path.
+                    let clip = self.editor.document().clip(args.clip).ok_or_else(|| {
+                        ShellError::InvalidArgs {
+                            command: id.to_owned(),
+                            message: format!("no clip has the ID {}", args.clip.0),
+                        }
+                    })?;
+                    let name = if clip.name.is_empty() {
+                        "Clip"
+                    } else {
+                        &clip.name
+                    };
+                    self.effects.push(Effect::PickMidiExportPath {
+                        clip: args.clip,
+                        default_name: format!("{}.mid", bl_project::preset::file_safe(name)),
+                    });
+                    return Ok(Value::Null);
+                }
                 let result = crate::midi_files::export(self.editor.document(), &args)
                     .map_err(|error| midi_file_error(id, error))?;
                 self.touch();

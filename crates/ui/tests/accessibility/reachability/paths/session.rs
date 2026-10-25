@@ -9,8 +9,8 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
         // The Session View's grid (WP-3.7): the pointer's selection, drags,
         // drops, and the key the view reads itself.
         ("session.state", Exception(Query)),
-        // The scene's colour palette comes with the Session View's context
-        // menus (the themes spec, R16).
+        // The scene's colour palette is in the scene's context menu (the
+        // themes spec, R16; the session context menus spec, R3, R14).
         (
             "scene.set_info_text",
             Exception(Equivalent(
@@ -20,22 +20,24 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
         ),
         (
             "scene.set_colour",
-            Exception(LaterView(
-                "the scene's context menu and its colour palette, which come with the Session \
-                 View's context menus (WP-6.56)",
+            Exception(Equivalent(
+                "the scene's context menu, opened with the Context Menu key or Shift-F10 \
+                 (S-CTX-002) on the selected scene: No Color and the colour palette, whose \
+                 swatches the arrow keys move between and Enter chooses (themes R22)",
+            )),
+        ),
+        (
+            "session.cancel_scene_launch",
+            Exception(Equivalent(
+                "the scene's context menu, opened with the Context Menu key or Shift-F10 \
+                 (S-CTX-002) on the selected scene: Cancel Scene Launch (the session context \
+                 menus spec, R10, R14)",
             )),
         ),
         (
             "session.scroll",
             Exception(Equivalent(
                 "the wheel; the arrows and Page Up and Page Down bring the scenes into view",
-            )),
-        ),
-        (
-            "session.delete",
-            Exception(Equivalent(
-                "the Delete key with the grid focused; the slot and scene context menus arrive \
-                 with the Session View's menus",
             )),
         ),
         (
@@ -70,8 +72,8 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
         (
             "session.duplicate_scene",
             Exception(Equivalent(
-                "the scene's context menu, Edit ▸ Duplicate (the menu arrives with a later \
-                 package)",
+                "the scene's context menu and Edit ▸ Duplicate, which duplicate the selected \
+                 scenes through `session.duplicate`",
             )),
         ),
         // The Session View's launching (WP-3.2): the launch button on a slot

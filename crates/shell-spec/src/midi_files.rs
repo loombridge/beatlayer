@@ -95,7 +95,10 @@ pub struct MidiExportArgs {
     pub clip: ClipId,
     /// The file to write, absolute or relative to the app's working
     /// directory. Its folder must exist. `.mid` or `.midi` by convention.
-    pub path: String,
+    /// Left out, the app asks where to save the file, as the clip menus'
+    /// Export MIDI Clip... does, and then runs this again with the path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
     /// Replace a file already at `path`. Without it, an existing file is left
     /// alone and the export refused.
     #[serde(default)]
@@ -160,8 +163,9 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                  File menu's Export MIDI Clip does: its notes' pitches, starts, lengths and \
                  velocities, its tempo (the song's tempo where the clip starts) and its time \
                  signature. Fails for an audio clip, or for a file already at `path` unless \
-                 `replace` is true. Writes a file outside the project; changes nothing in the \
-                 set.",
+                 `replace` is true. With no `path` the app asks where to save the file (as the \
+                 clip menus' Export MIDI Clip... does), and runs this again with it. Writes a \
+                 file outside the project; changes nothing in the set.",
             )
             .permission(Permission::External)
             .context(Global)
@@ -206,6 +210,8 @@ mod tests {
         assert_eq!(export.permission, Some(Permission::External));
         let schema = export.args.as_ref().unwrap();
         assert!(bl_commands::validate(schema, &json!({ "clip": 3, "path": "/a/b.mid" })).is_ok());
-        assert!(bl_commands::validate(schema, &json!({ "clip": 3 })).is_err());
+        // Without a path the app asks where to save the file.
+        assert!(bl_commands::validate(schema, &json!({ "clip": 3 })).is_ok());
+        assert!(bl_commands::validate(schema, &json!({ "path": "/a/b.mid" })).is_err());
     }
 }

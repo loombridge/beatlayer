@@ -83,7 +83,7 @@ Result: [`KeyboardInfo`](README.md#keyboardinfo).
 
 **Export MIDI Clip**. Permission: `external`. Contexts: `global`.
 
-Writes a MIDI clip's notes as a type 1 Standard MIDI File at `path`, as the File menu's Export MIDI Clip does: its notes' pitches, starts, lengths and velocities, its tempo (the song's tempo where the clip starts) and its time signature. Fails for an audio clip, or for a file already at `path` unless `replace` is true. Writes a file outside the project; changes nothing in the set.
+Writes a MIDI clip's notes as a type 1 Standard MIDI File at `path`, as the File menu's Export MIDI Clip does: its notes' pitches, starts, lengths and velocities, its tempo (the song's tempo where the clip starts) and its time signature. Fails for an audio clip, or for a file already at `path` unless `replace` is true. With no `path` the app asks where to save the file (as the clip menus' Export MIDI Clip... does), and runs this again with it. Writes a file outside the project; changes nothing in the set.
 
 Default keys: none.
 
@@ -92,7 +92,7 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `clip` | [`ClipId`](README.md#clipid) | yes | The MIDI clip to write. |
-| `path` | string | yes | The file to write, absolute or relative to the app's working directory. Its folder must exist. `.mid` or `.midi` by convention. |
+| `path` | string or null | no | The file to write, absolute or relative to the app's working directory. Its folder must exist. `.mid` or `.midi` by convention. Left out, the app asks where to save the file, as the clip menus' Export MIDI Clip... does, and then runs this again with the path. |
 | `replace` | boolean | no | Replace a file already at `path`. Without it, an existing file is left alone and the export refused. |
 
 Result: [`MidiExportResult`](README.md#midiexportresult).

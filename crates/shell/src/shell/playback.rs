@@ -418,7 +418,16 @@ impl Shell {
             if self.session_run.is_some() {
                 return Err("a Session recording is under way; end it first".to_owned());
             }
-            if let Err(reason) = self.begin_recording() {
+            // A take is already under way, or its writer hasn't finished:
+            // a second plan would orphan the first's file and start its
+            // clips mid-take. The engine ignores record-on while it records.
+            if self.recording.is_some() {
+                if !self.audio.transport_state().recording {
+                    return Err(
+                        "a recording is already under way or still being finished".to_owned()
+                    );
+                }
+            } else if let Err(reason) = self.begin_recording() {
                 self.set_message(reason, true);
             }
         }

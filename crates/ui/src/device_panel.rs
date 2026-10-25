@@ -39,6 +39,14 @@ use crate::param_menu::ParamMenu;
 use crate::theme::Theme;
 use crate::widgets::{modulated_text, paint_ring_segment, ring_segment};
 
+/// What the panel asks of the device view for each parameter: its base and
+/// played value while a clip modulates it, and its context menu's automation
+/// items (the automation spec, R29).
+pub type ParamLookups<'a> = (
+    &'a dyn Fn(ParamId) -> Option<(f64, f64)>,
+    &'a dyn Fn(ParamId) -> Option<ParamMenu>,
+);
+
 /// Points of vertical drag that move a control from one end of its range to
 /// the other (observed in Live 12.4.6 on Dry/Wet: 0.8% of the range per
 /// point, as the mixer's pan).
@@ -153,10 +161,7 @@ pub fn show(
     frame: &DeviceFrame,
     display: Option<&DeviceDisplay>,
     body: Rect,
-    (played, menu): (
-        &dyn Fn(ParamId) -> Option<(f64, f64)>,
-        &dyn Fn(ParamId) -> Option<ParamMenu>,
-    ),
+    (played, menu): ParamLookups<'_>,
     renaming: &mut Option<crate::articulation_map::Renaming>,
     events: &mut Vec<UiEvent>,
 ) {

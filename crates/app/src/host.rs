@@ -1876,6 +1876,27 @@ impl Host {
                     ));
                 }
             }
+            Effect::PickMidiExportPath { clip, default_name } => {
+                // Spec: session-context-menus R7, R16. Export MIDI Clip...
+                // asks where to save the clip's file. The dialog asks about
+                // a file already there, so the export may replace it.
+                let mut dialog = rfd::FileDialog::new()
+                    .set_title("Export MIDI Clip")
+                    .add_filter("MIDI File", &["mid", "midi"])
+                    .set_file_name(default_name);
+                if let Some(folder) = self.shell.save_dialog_folder() {
+                    dialog = dialog.set_directory(folder);
+                }
+                if let Some(main) = &self.main {
+                    dialog = dialog.set_parent(main.window.as_ref());
+                }
+                if let Some(path) = dialog.save_file() {
+                    self.invoke(&Invocation::new(
+                        bl_shell::midi_file_commands::EXPORT,
+                        json!({ "clip": clip, "path": path.to_string_lossy(), "replace": true }),
+                    ));
+                }
+            }
             Effect::PickPackPath {
                 project,
                 file_name,
@@ -1960,6 +1981,8 @@ impl Host {
             | Effect::RenameMacro(_, _)
             | Effect::RenameVariation(_, _)
             | Effect::RenameTrack(_)
+            | Effect::RenameClip(_)
+            | Effect::RenameScene(_)
             | Effect::RenameLocator(_)
             | Effect::RenameTakeLane(_) => {
                 // The renaming happens in the window in front.
@@ -1971,6 +1994,14 @@ impl Host {
                 if let Some(surface) = surface {
                     ui.apply_effect(&surface.ctx, &effect);
                     surface.window.request_redraw();
+                }
+            }
+            Effect::EditInfoText(_) => {
+                // Spec: info-view R10. The Info View is the main window's.
+                if let Some(main) = &self.main {
+                    main.window.focus_window();
+                    self.main_ui.apply_effect(&main.ctx, &effect);
+                    main.window.request_redraw();
                 }
             }
             Effect::FocusSecondArea(area) => {
@@ -1992,7 +2023,8 @@ impl Host {
                         .apply_effect(&main.ctx, &Effect::FocusArea(area));
                 }
             }
-            Effect::MoveFocus { .. } => match self.shell.focused_window() {
+            Effect::MoveFocus { .. } | Effect::FocusClipPanels => match self.shell.focused_window()
+            {
                 WindowKind::Main => {
                     if let Some(main) = &self.main {
                         self.main_ui.apply_effect(&main.ctx, &effect);

@@ -245,13 +245,39 @@ fn title_bar(
             theme.swatch(*swatch),
         );
     }
-    ui.painter().text(
-        pos2(rect.left() + 6.0, rect.center().y),
-        Align2::LEFT_CENTER,
-        &value.name,
-        theme.small_font(),
-        c.text.0,
+    // Spec: session-context-menus R4, R9, R14. A right-click on the title
+    // bar, or the keys while the Clip View has the keyboard, open its menu;
+    // Rename types the name over it.
+    let bar = ui.interact(rect, Id::new("clip-title-bar"), Sense::click());
+    let focused = crate::window::has_focus(ui.ctx(), shell, Area::Detail);
+    let mut menu_events = Vec::new();
+    crate::session_menus::SessionMenus::default().clip_title(
+        ui,
+        theme,
+        &bar,
+        shell,
+        focused,
+        &mut menu_events,
     );
+    events.extend(menu_events);
+    let clips = crate::session_menus::title_clips(shell);
+    let renaming = crate::session_menus::rename_edit(
+        ui,
+        theme,
+        rect,
+        &crate::session_menus::Rename::Title(clips),
+        &value.name,
+        events,
+    );
+    if !renaming {
+        ui.painter().text(
+            pos2(rect.left() + 6.0, rect.center().y),
+            Align2::LEFT_CENTER,
+            &value.name,
+            theme.small_font(),
+            c.text.0,
+        );
+    }
     // The Save Default Clip button.
     let button = Rect::from_min_size(
         pos2(rect.right() - 98.0, rect.top() + 1.0),
@@ -1543,21 +1569,13 @@ impl ClipViewUi {
             return;
         };
         // The panel groups take the left of the view (L-CLIP-003): the left
-        // group's Launch Properties on a Session clip, or Main Properties
-        // alone, and the right group's Utilities, Transform and Generate.
+        // group's Main Properties or Launch Properties, and the right
+        // group's Utilities, Transform and Generate.
         let left = Rect::from_min_size(
             rect.min,
             vec2(launch_panel::panel_width(rect), rect.height()),
         );
-        if shell
-            .clip_view()
-            .shown_session_clip(doc, shell.arrangement())
-            .is_some()
-        {
-            launch_panel::show(ui, shell, theme, left, clip, events);
-        } else {
-            launch_panel::show_main_only(ui, theme, left);
-        }
+        crate::main_panel::show_left_group(ui, shell, theme, left, clip, events);
         let right = crate::tool_panel::panel_rect(
             Rect::from_min_max(rect.min, pos2(rect.right(), rect.bottom())),
             left.right(),
@@ -2019,10 +2037,6 @@ impl ClipViewUi {
         // The panels' groups: the left group holds the Launch Properties
         // panel (a Session clip), the right group the Audio Utilities panel
         // (an audio clip). The clip title bar is over them (L-CLIP-002).
-        let session = shell
-            .clip_view()
-            .shown_session_clip(doc, shell.arrangement())
-            .is_some();
         let panels = panels_rect(rect);
         title_bar(
             ui,
@@ -2032,14 +2046,13 @@ impl ClipViewUi {
             clip,
             events,
         );
-        // The left group holds the Launch Properties panel, a Session clip's.
+        // The left group holds Main Properties, or a Session clip's Launch
+        // Properties.
         let left = Rect::from_min_size(
             panels.min,
             vec2(launch_panel::panel_width(rect), panels.height()),
         );
-        if session {
-            launch_panel::show(ui, shell, theme, left, clip, events);
-        }
+        crate::main_panel::show_left_group(ui, shell, theme, left, clip, events);
         let right = crate::audio_panel::panel_rect(panels, left.right());
         crate::audio_panel::show(ui, shell, theme, right, clip, events);
         let rect = Rect::from_min_max(pos2(right.right(), rect.top()), rect.max);

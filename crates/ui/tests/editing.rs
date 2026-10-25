@@ -1024,3 +1024,122 @@ fn the_edit_and_create_menus_enable_the_time_items_as_the_selection_gives_a_span
     // The items show their keys.
     assert!(menu_item(&s, "M-EDIT-022").chord.is_some());
 }
+
+// Spec: info-view R10, R11 (C-CLIP-ARR-008). A clip's menu opens the Info
+// View's field for the clip, and hovering the clip then shows its text.
+#[test]
+fn a_clips_menu_edit_info_text_types_the_text_in_the_info_view() {
+    let mut s = set();
+    let a = s.a;
+    let output = s.right_click(pos2(x(3.0), AUDIO_3.1));
+    assert!(s.choose(&output, "Edit Info Text"), "it works now");
+    assert!(s.h.main.is_typing(), "the Info View is a text field");
+    s.h.frame(vec![Event::Text("Verse bass".to_owned())]);
+    s.h.key(Key::Enter, Modifiers::NONE);
+    s.h.settle();
+    assert_eq!(s.clip(a).info_text, "Verse bass");
+    assert_eq!(s.undo_label().as_deref(), Some("Change Info Text"));
+    // Hovering the clip shows the text; the other clip shows nothing.
+    s.h.frame(vec![Event::PointerMoved(pos2(x(3.0), AUDIO_3.1))]);
+    s.h.settle();
+    let content = s.h.main.info_view_content();
+    assert_eq!(content.body, "Verse bass");
+    s.h.frame(vec![Event::PointerMoved(pos2(x(9.0), AUDIO_4.1))]);
+    s.h.settle();
+    assert_ne!(s.h.main.info_view_content().body, "Verse bass");
+}
+
+/// Adds a locator `bars` bars in.
+fn add_locator(s: &mut Set, bars: f64) {
+    s.h.shell
+        .run(
+            "locator.add",
+            json!({ "at": Ticks((bars * BAR as f64) as i64) }),
+        )
+        .unwrap();
+    s.h.settle();
+}
+
+#[test]
+fn a_clip_dragged_near_another_clips_edge_snaps_to_it_and_shows_a_line() {
+    // Spec: arrangement-editing R21, R23 (I-DRAG-011). B starts at bar 8.25;
+    // A, dragged 2.1 bars later, would end at 8.1, 4.5 points short of it.
+    let mut s = set_with(&[(2, 2.0, 4.0), (3, 8.25, 2.0)], None);
+    let a = s.a;
+    let before = s.doc().clone();
+    s.drag(
+        pos2(x(3.0), AUDIO_3.0),
+        pos2(x(5.1), AUDIO_3.0),
+        Modifiers::NONE,
+        false,
+    );
+    assert_eq!(
+        s.h.main.arrangement().drawn_snap_line(),
+        Some(Ticks(8 * BAR + BAR / 4)),
+        "a line through the lanes at the edge"
+    );
+    s.release(pos2(x(5.1), AUDIO_3.0), Modifiers::NONE);
+    assert_eq!(s.bars(a), (4.25, 8.25), "its end lands on B's start");
+    assert_eq!(s.steps(), 1);
+    assert_eq!(s.h.main.arrangement().drawn_snap_line(), None);
+    s.undoes_to(&before);
+}
+
+#[test]
+fn a_clip_dragged_near_a_locator_snaps_to_it_unless_cmd_is_held() {
+    // Spec: arrangement-editing R21, R23. A locator at 5.25; A's start,
+    // dragged to 5.3, is 1.5 points from it and 9 from the grid line at 5.
+    let mut s = set();
+    let a = s.a;
+    add_locator(&mut s, 5.25);
+    let (before, steps) = (s.doc().clone(), s.steps());
+    s.drag(
+        pos2(x(3.0), AUDIO_3.0),
+        pos2(x(6.3), AUDIO_3.0),
+        Modifiers::NONE,
+        false,
+    );
+    assert_eq!(
+        s.h.main.arrangement().drawn_snap_line(),
+        Some(Ticks(5 * BAR + BAR / 4))
+    );
+    s.release(pos2(x(6.3), AUDIO_3.0), Modifiers::NONE);
+    assert_eq!(s.bars(a), (5.25, 9.25));
+    assert_eq!(s.steps(), steps + 1, "one undo step");
+    s.undoes_to(&before);
+
+    // Cmd held, from where it began: no snapping at all, and no line.
+    s.shortcut("S-EDIT-006");
+    s.drag(
+        pos2(x(3.0), AUDIO_3.0),
+        pos2(x(6.3), AUDIO_3.0),
+        bypass_key(),
+        false,
+    );
+    assert_eq!(s.h.main.arrangement().drawn_snap_line(), None);
+    s.release(pos2(x(6.3), AUDIO_3.0), bypass_key());
+    assert!((s.bars(a).0 - 5.3).abs() < 0.01, "{:?}", s.bars(a));
+}
+
+#[test]
+fn a_clip_edge_dragged_near_a_locator_snaps_to_it() {
+    // Spec: arrangement-editing R22. A's right edge, dragged to 7.3, is 1.5
+    // points from the locator at 7.25.
+    let mut s = set();
+    let a = s.a;
+    add_locator(&mut s, 7.25);
+    let steps = s.steps();
+    s.drag(
+        pos2(x(6.0) - 2.0, AUDIO_3.1),
+        pos2(x(7.3) - 2.0, AUDIO_3.1),
+        Modifiers::NONE,
+        false,
+    );
+    assert_eq!(
+        s.h.main.arrangement().drawn_snap_line(),
+        Some(Ticks(7 * BAR + BAR / 4))
+    );
+    s.release(pos2(x(7.3) - 2.0, AUDIO_3.1), Modifiers::NONE);
+    assert_eq!(s.bars(a), (2.0, 7.25));
+    assert_eq!(s.steps(), steps + 1);
+}

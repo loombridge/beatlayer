@@ -95,6 +95,7 @@ commands = [
   { id = "chain.delete", contexts = ["rack-chains"] },
   { id = "device.remove", contexts = ["device-view"] },
   { id = "note.delete", contexts = ["note-editor", "note-selection"] },
+  { id = "session.delete", contexts = ["session"] },
 ]
 
 [[shortcut]]
@@ -140,6 +141,7 @@ commands = [
   { id = "chain.rename", contexts = ["rack-chains"] },
   { id = "clip.rename", contexts = ["arrangement"] },
   { id = "device.rename", contexts = ["device-view"] },
+  { id = "session.rename", contexts = ["session"] },
 ]
 
 [[shortcut]]

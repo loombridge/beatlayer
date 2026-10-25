@@ -94,13 +94,9 @@ The test of R8 walks the whole registry. A command is reached by a key, a menu i
 
 11. `chain.save_preset`: a chain's row is saved by dragging it into the browser (R46), which has no keyboard form yet.
 
-**Gaps in macros** ([macros](macros.md), WP-5.4):
-
-12. `rack.set_macro_info_text`: a macro's info text has no menu item yet; M-EDIT-025 (Edit Info Text) adds it.
-
 **Gaps in the autosampler** ([multisampler](multisampler.md), WP-5.16):
 
-13. `device.autosample_open`: the device's title bar menu isn't opened from the keyboard (R64).
+12. `device.autosample_open`: the device's title bar menu isn't opened from the keyboard (R64).
 
 ## Tests
 

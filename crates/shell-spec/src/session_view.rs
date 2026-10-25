@@ -53,6 +53,9 @@ pub const TOGGLE_FOLLOW_ACTIONS: &str = "session.toggle_follow_actions";
 pub const CREATE_FOLLOW_ACTION_CHAIN: &str = "session.create_follow_action_chain";
 /// `session.drop_files`: drop audio files into a slot.
 pub const DROP_FILES: &str = "session.drop_files";
+/// `session.rename`: type a new name for the selected clip or scene
+/// (Cmd+R).
+pub const RENAME: &str = "session.rename";
 /// `session.focus`: move the keyboard focus to the Session View.
 pub const FOCUS: &str = "session.focus";
 /// `session.copy_to_arrangement`: copy Session clips into the Arrangement.
@@ -82,6 +85,7 @@ pub const IDS: &[&str] = &[
     INSERT_EMPTY_MIDI_CLIP,
     COPY_CLIP_TO_SLOT,
     DELETE,
+    RENAME,
     DEACTIVATE,
     TOGGLE_FOLLOW_ACTIONS,
     CREATE_FOLLOW_ACTION_CHAIN,
@@ -112,6 +116,30 @@ pub struct SlotRef {
     pub scene: SceneId,
 }
 
+/// What a slot's clip is doing, as the engine publishes it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LaunchState {
+    /// A launch or a restart waits for the launch quantisation grid.
+    Queued,
+    /// The clip plays.
+    Playing,
+    /// A stop waits for the grid.
+    QueuedToStop,
+    /// A Session recording goes into the slot.
+    Recording,
+}
+
+/// One slot that is not at rest, in `session.state`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SlotLaunch {
+    /// The slot.
+    #[serde(flatten)]
+    pub slot: SlotRef,
+    /// What its clip is doing.
+    pub state: LaunchState,
+}
+
 /// How a click changes the selection (the Session View's own modifier
 /// click rules).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -136,6 +164,10 @@ pub struct SessionViewState {
     pub scenes: Vec<SceneId>,
     /// The selected track title bars.
     pub tracks: Vec<TrackId>,
+    /// The slots the engine has queued, playing or recording, with what each
+    /// is doing. Empty in the grid's own state; `session.state` fills it in.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub launches: Vec<SlotLaunch>,
     /// Whether the selection is track title bars, so Esc has already gone
     /// up as far as it can.
     pub title_tracks: bool,
@@ -457,8 +489,21 @@ fn specs() -> Vec<CommandSpec> {
             )
             .permission(Permission::Destructive)
             .context(Session)
+            .binding("S-EDIT-005")
             .args::<NoArgs>()
             .result::<ChangeSet>(),
+        view(
+            RENAME,
+            "Rename in the Session View",
+            "Starts typing a new name for the selected Session clip, or for the selected \
+             scene when no clip is, in the slot or the scene's name field, as Cmd+R \
+             (Ctrl+R) and the context menus' Rename do. Return then runs `clip.rename` or \
+             `scene.rename` with the name. Changes only the view; an agent renames with \
+             those two commands.",
+        )
+        .context(Session)
+        .binding("S-EDIT-008")
+        .args::<NoArgs>(),
         CommandSpec::new(DEACTIVATE, "Deactivate Clips")
             .description(
                 "Switches the selected slots' clips off, or back on when they're all off, as \

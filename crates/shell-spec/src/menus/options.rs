@@ -72,7 +72,11 @@ pub(super) const OPTIONS: &[Row] = &[
         "Launch Quantization Enabled",
         Key(&["S-SES-027", "S-GRID-005"]),
     ),
-    ("M-OPT-015", "Snap Automation to Grid", Pending(None)),
+    (
+        "M-OPT-015",
+        "Snap Automation to Grid",
+        Cmd("settings.set_snap_automation_to_grid"),
+    ),
     ("M-OPT-016", "Fixed Grid", Key(&["S-GRID-006"])),
     SEPARATOR,
     ("M-OPT-017", "Draw Mode", Cmd(VIEW_DRAW_MODE)),

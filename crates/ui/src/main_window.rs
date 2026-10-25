@@ -156,6 +156,9 @@ pub struct MainWindowUi {
     keymap_revision: u64,
     /// What the Info View last showed, for headless reads (WP-2.24).
     info: InfoViewContent,
+    /// The field Edit Info Text opened in the Info View, while it's open
+    /// (the Info View spec, R10).
+    info_editing: Option<crate::info_text::InfoEditing>,
     /// Whether a value was being typed into a track header's volume field
     /// when the last frame ended.
     mixer_typing: bool,
@@ -280,6 +283,7 @@ impl MainWindowUi {
             search_field: crate::search_field::SearchFieldUi::default(),
             keymap_revision: 0,
             info: InfoViewContent::default(),
+            info_editing: None,
             mixer_typing: false,
             menu_open: false,
             drawn: None,
@@ -390,6 +394,7 @@ impl MainWindowUi {
             || self.clip_view.is_typing()
             || self.arrangement.is_dragging_header()
             || self.search_field.is_open()
+            || self.info_editing.is_some()
     }
 
     /// The Arrangement View, to give it a peak source or read what it drew.
@@ -413,6 +418,7 @@ impl MainWindowUi {
                 self.focus_request = Some(FocusRequest::MainView);
             }
             Effect::FocusArea(Area::Assistant) => self.assistant.focus_prompt(),
+            Effect::FocusClipPanels => crate::main_panel::request_focus(ctx),
             Effect::RenameDevice(device) => {
                 // Spec: device-chains R10. Rename types the name in the
                 // title bar.
@@ -435,6 +441,12 @@ impl MainWindowUi {
                 self.devices.start_variation_rename(*rack, *index);
             }
             Effect::RenameTrack(track) => crate::track_menu::start_rename(ctx, *track),
+            Effect::RenameClip(clip) => {
+                crate::session_menus::start_rename(ctx, crate::session_menus::Rename::Clip(*clip))
+            }
+            Effect::RenameScene(scene) => {
+                crate::session_menus::start_rename(ctx, crate::session_menus::Rename::Scene(*scene))
+            }
             Effect::RenameTakeLane(lane) => {
                 // Spec: comping R28. Rename types the name in the take
                 // lane's header.
@@ -444,6 +456,11 @@ impl MainWindowUi {
                 // Spec: time-editing R8. Rename types the name in the
                 // scrub area.
                 crate::arrangement::start_rename(ctx, *locator);
+            }
+            Effect::EditInfoText(target) => {
+                // Spec: info-view R10. The Info View becomes a field with
+                // the focus.
+                self.info_editing = Some(crate::info_text::InfoEditing::new(*target));
             }
             Effect::MoveFocus {
                 backwards,
@@ -605,7 +622,6 @@ impl MainWindowUi {
             // The Status Bar draws before the Info View, so the elements
             // under the pointer are known by the time it reads them.
             self.status_bar(ui, shell, theme, &layout, &mut events);
-            self.info_view(ui, theme, shell, layout.info_view);
             let scene = shell.scene_view_scene_in(self.window);
             // The File Manager and the list of the set's plug-ins show in the
             // main window only.
@@ -667,6 +683,9 @@ impl MainWindowUi {
             for device in &shown {
                 collect_titles(device, &mut self.device_titles);
             }
+            // The views draw before the Info View reads the item the pointer
+            // is over (info-view R11).
+            self.info_view(ui, theme, shell, layout.info_view, &mut events);
             if let Some(pane) = layout.assistant {
                 self.assistant
                     .show(ui, shell, theme, pane, true, &mut events);
@@ -729,6 +748,8 @@ impl MainWindowUi {
         }
         self.mixer_typing = crate::mixer::is_typing(ctx)
             || crate::track_menu::is_renaming(ctx)
+            || crate::session_menus::is_renaming(ctx)
+            || crate::session_menus::field_has_focus(ctx)
             || crate::arrangement::take_lanes::is_renaming(ctx)
             || crate::envelope_keys::is_typing(ctx);
         // An open menu, or a dialog, keeps the keys.
@@ -1532,10 +1553,20 @@ impl MainWindowUi {
         });
     }
 
-    fn info_view(&mut self, ui: &mut Ui, theme: &Theme, shell: &Shell, rect: Option<Rect>) {
+    fn info_view(
+        &mut self,
+        ui: &mut Ui,
+        theme: &Theme,
+        shell: &Shell,
+        rect: Option<Rect>,
+        events: &mut Vec<UiEvent>,
+    ) {
         let Some(rect) = rect else {
-            // Hidden: nothing to show, and nothing left over from before.
+            // Hidden: nothing to show, and nothing left over from before. A
+            // field open in it goes with it, so the keys don't stay with a
+            // field nobody sees.
             self.info = InfoViewContent::default();
+            self.info_editing = None;
             return;
         };
         let id = region(ui, "region-info-view", rect, Role::Group, "Info View");
@@ -1547,9 +1578,18 @@ impl MainWindowUi {
         // while the pointer is over empty space.
         let keymap =
             crate::keymap::keymap_in_use(&mut self.keymap, &mut self.keymap_revision, shell);
+        if self.info_editing.is_some() {
+            crate::info_text::edit(ui, theme, shell, rect, &mut self.info_editing, events);
+            self.info = InfoViewContent::default();
+            return;
+        }
+        // An item with info text of the user's own shows it in place of the
+        // registered description (info-view R11).
+        let item = crate::info_text::take_hovered(ui.ctx(), shell);
         // A MIDI Tool's control under the pointer says its own name and
         // description (the MIDI Tools spec, R7).
-        self.info = crate::search_field::info(shell)
+        self.info = item
+            .or_else(|| crate::search_field::info(shell))
             .or_else(|| crate::tool_panel::take_info(ui.ctx()))
             .unwrap_or_else(|| info_content(self.hovered.or(self.other_hovered), shell, keymap));
         if self.info.title.is_empty() {

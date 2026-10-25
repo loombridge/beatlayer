@@ -11,6 +11,7 @@ pub(super) const ROWS: &[(&str, Readback)] = &[
     ("scene.duplicate", query(Song, "scenes")),
     ("scene.move", query(Song, "scenes")),
     ("scene.rename", query(Scene, "name")),
+    ("scene.set_info_text", query(Scene, "info_text")),
     ("scene.set_colour", query(Scene, "colour")),
     ("scene.set_follow_actions", query(Scene, "follow")),
     ("scene.set_tempo", query(Scene, "tempo")),

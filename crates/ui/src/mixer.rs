@@ -23,7 +23,7 @@ use bl_shell::mixer_controls::{
 };
 use bl_shell::mixer_view::{ChainStrip, MixerOf, RackFold};
 use bl_shell::mixer_view_commands as ids;
-use bl_shell::{Invocation, Shell};
+use bl_shell::{InfoTarget, Invocation, Shell};
 use egui::accesskit::{self, Action, Role};
 use egui::{
     Align2, Color32, Event, Id, Key, Rect, Response, Sense, Shape, Stroke, StrokeKind, Ui,
@@ -808,6 +808,7 @@ fn title_bars(
             shell,
             events,
         );
+        crate::info_text::describe(ui.ctx(), &response, shell, InfoTarget::Track(track));
     }
     // A chain dropped out of the row leaves its rack (drum racks spec,
     // R23, R24) before a drop among the strips moves it (racks spec, R29).
@@ -1135,6 +1136,9 @@ impl StripParts<'_> {
             },
             events,
         );
+        // Spec: automation R29. The control's automation items.
+        crate::param_menu::ParamMenu::new(self.shell, self.track, AutomationTarget::Send { to })
+            .overlay(ui, rect, send_id(self.place, self.track, to), events);
     }
 
     fn send_knob(
@@ -2091,6 +2095,27 @@ impl StripParts<'_> {
     /// slider, dragged relative to the pointer, reset to centre on a
     /// double-click.
     pub fn split_pan(&self, ui: &mut Ui, rect: Rect, side: SplitSide, events: &mut Vec<UiEvent>) {
+        self.split_pan_control(ui, rect, side, events);
+        let param = match side {
+            SplitSide::Left => MixerParam::SplitLeft,
+            SplitSide::Right => MixerParam::SplitRight,
+        };
+        // Spec: automation R29. The control's automation items.
+        crate::param_menu::ParamMenu::new(
+            self.shell,
+            self.track,
+            AutomationTarget::Mixer { param },
+        )
+        .overlay(ui, rect, split_pan_id(self.place, self.track, side), events);
+    }
+
+    fn split_pan_control(
+        &self,
+        ui: &mut Ui,
+        rect: Rect,
+        side: SplitSide,
+        events: &mut Vec<UiEvent>,
+    ) {
         let Some(track) = self.doc().track(self.track) else {
             return;
         };
@@ -2426,6 +2451,19 @@ impl StripParts<'_> {
     /// A track header's volume field (R4, R6): the level in dB, dragged,
     /// stepped, reset, or typed (`-12` and Return gives −12.0 dB).
     pub fn volume_field(&self, ui: &mut Ui, rect: Rect, events: &mut Vec<UiEvent>) {
+        self.volume_field_control(ui, rect, events);
+        // Spec: automation R29. The control's automation items.
+        crate::param_menu::ParamMenu::new(
+            self.shell,
+            self.track,
+            AutomationTarget::Mixer {
+                param: MixerParam::Volume,
+            },
+        )
+        .overlay(ui, rect, volume_field_id(self.place, self.track), events);
+    }
+
+    fn volume_field_control(&self, ui: &mut Ui, rect: Rect, events: &mut Vec<UiEvent>) {
         let Some(track) = self.doc().track(self.track) else {
             return;
         };
@@ -2594,6 +2632,15 @@ impl StripParts<'_> {
             },
             events,
         );
+        // Spec: automation R29. The control's automation items.
+        crate::param_menu::ParamMenu::new(
+            self.shell,
+            self.track,
+            AutomationTarget::Mixer {
+                param: MixerParam::Volume,
+            },
+        )
+        .overlay(ui, rect, fader_id(self.place, self.track), events);
     }
 
     fn fader_control(&self, ui: &mut Ui, rect: Rect, events: &mut Vec<UiEvent>) {
@@ -2744,7 +2791,27 @@ impl StripParts<'_> {
                     ui.close();
                 }
             }
+            // Spec: automation R29. The automation items come after the
+            // control's own.
+            crate::param_menu::ParamMenu::new(
+                self.shell,
+                self.track,
+                AutomationTarget::Mixer {
+                    param: MixerParam::Pan,
+                },
+            )
+            .items(ui, true, events);
         });
+        // A click on the control while Automation Mode is on shows its
+        // envelope.
+        crate::param_menu::ParamMenu::new(
+            self.shell,
+            self.track,
+            AutomationTarget::Mixer {
+                param: MixerParam::Pan,
+            },
+        )
+        .click(ui, rect, events);
         if let Some(triangle) = triangle {
             // Spec: mixer-view R6 (I-CLICK-020): the triangle resets pan.
             let id = Id::new(("mixer-pan-reset", self.place, self.track));
@@ -2966,6 +3033,14 @@ impl StripParts<'_> {
                 },
                 events,
             );
+            crate::param_menu::ParamMenu::new(
+                self.shell,
+                self.track,
+                AutomationTarget::Mixer {
+                    param: MixerParam::Mute,
+                },
+            )
+            .overlay(ui, rect, switch_id(self.place, switch, self.track), events);
         }
     }
 

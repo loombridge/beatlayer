@@ -9,6 +9,13 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
     use Reason::{AgentOnly, Equivalent, Gap, LaterView, Live, Query, Unobserved};
     vec![
         (
+            "clip.set_info_text",
+            Exception(Equivalent(
+                "Edit ▸ Edit Info Text (M-EDIT-025) while a clip is selected: it opens the Info \
+                 View's field for it (the Info View spec, R10)",
+            )),
+        ),
+        (
             "clip.set_colour",
             Exception(Equivalent(
                 "the clip's context menu, opened with the Context Menu key or Shift-F10 \
@@ -73,6 +80,27 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             Exception(Equivalent(
                 "the loop bars above the note editor, which assistive technology reads by \
                  name and activates (multi-clip editing R10)",
+            )),
+        ),
+        // The Main Properties panel (WP-6.55).
+        (
+            "clip_view.show_marker",
+            main(midi_tools_shown, detail_area, "Show Start", Key::Enter),
+        ),
+        (
+            "clip_view.show_properties",
+            main(
+                midi_tools_shown,
+                detail_area,
+                "Launch Properties",
+                Key::Enter,
+            ),
+        ),
+        (
+            "clip.set_marker_at_playhead",
+            Exception(Equivalent(
+                "the Set buttons in the Main Properties panel, which Tab reaches and Return \
+                 presses while the clip plays (clip properties R5, R8)",
             )),
         ),
         ("clip.set_data", Exception(CLIP_VIEW)),

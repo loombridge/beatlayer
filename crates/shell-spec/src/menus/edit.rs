@@ -3,6 +3,7 @@
 use super::Action::{Command as Cmd, Pending, Shortcut as Key, Submenu, System};
 use super::{IMP_12, Row, SEPARATOR, SystemItem};
 use crate::automation::SIMPLIFY;
+use crate::commands::EDIT_INFO_TEXT;
 use crate::devices::COMPARE_COPY;
 
 pub(super) const EDIT: &[Row] = &[
@@ -63,7 +64,7 @@ pub(super) const EDIT: &[Row] = &[
     ),
     SEPARATOR,
     ("M-EDIT-024", "Rename", Key(&["S-EDIT-008"])),
-    ("M-EDIT-025", "Edit Info Text", Pending(None)),
+    ("M-EDIT-025", "Edit Info Text", Cmd(EDIT_INFO_TEXT)),
     SEPARATOR,
     ("M-EDIT-026", "Solo Track", Key(&["S-TRACK-014"])),
     ("M-EDIT-027", "Arm Track", Key(&["S-TRACK-013"])),

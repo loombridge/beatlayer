@@ -410,3 +410,99 @@ fn the_scrub_areas_add_locator_adds_one_where_it_was_right_clicked() {
     let clicked = horizontal.at(f64::from(at.x - layout.scrub.left()));
     assert_eq!(locators(&h)[0].1, h.shell.arrangement().snap(doc, clicked));
 }
+
+#[test]
+fn a_locators_menu_edit_info_text_types_the_text_in_the_info_view() {
+    // Spec: info-view R10, R11 (C-TIME-025).
+    let mut h = Harness::with_title_bar(Window::Main);
+    h.shell.run(ids::ADD, json!({ "at": 2 * BAR })).unwrap();
+    h.settle();
+    let locator = locators(&h)[0].0;
+    let layout = layout(&h);
+    let horizontal = h
+        .shell
+        .arrangement()
+        .horizontal(h.shell.editor().document());
+    let x = layout.scrub.left() + (horizontal.x(Ticks(2 * BAR)) as f32);
+    right_click(&mut h, pos2(x, layout.scrub.center().y));
+    let nodes = Harness::nodes(&h.settle());
+    let item = nodes
+        .iter()
+        .find(|node| node.label == "Edit Info Text")
+        .expect("the locator's menu lists Edit Info Text");
+    assert!(!item.disabled, "it works now");
+    h.frame(vec![Event::AccessKitActionRequest(
+        egui::accesskit::ActionRequest {
+            action: egui::accesskit::Action::Click,
+            target_tree: egui::accesskit::TreeId::ROOT,
+            target_node: item.id,
+            data: None,
+        },
+    )]);
+    h.settle();
+    assert!(h.main.is_typing(), "the Info View is a text field");
+    h.frame(vec![Event::Text("Drop here".to_owned())]);
+    h.key(Key::Enter, Modifiers::NONE);
+    h.settle();
+    let doc = h.shell.editor().document();
+    assert_eq!(doc.locator(locator).unwrap().info_text, "Drop here");
+}
+
+#[test]
+fn a_locator_dragged_near_a_clip_edge_snaps_to_it_and_shows_a_line() {
+    // Spec: arrangement-editing R22, R23. The scrub area is 30 points to a
+    // bar; the locator, dragged to 7.3, is 1.5 points from the clip edge at
+    // 7.25 and 9 from the grid line at 7.
+    let mut s = Harness::with_title_bar(Window::Main);
+    let mut editor = bl_shell::files::factory_default_set();
+    let track = editor.document().top_level().nth(2).unwrap();
+    let id: bl_model::ClipId = editor.new_id();
+    editor
+        .apply(bl_model::Command::CreateClip {
+            track,
+            clip: bl_model::Clip::new(
+                id,
+                Ticks(7 * BAR + BAR / 4),
+                Ticks(BAR),
+                bl_model::ClipData::Audio(bl_model::AudioData::new(bl_model::ContentHash([1; 32]))),
+            ),
+        })
+        .unwrap();
+    editor.clear_history().unwrap();
+    s.shell = bl_ui::arrangement::benchmark::shell_with(editor);
+    s.shell.run(ids::ADD, json!({ "at": 2 * BAR })).unwrap();
+    s.settle();
+    let layout = layout(&s);
+    let (x, y) = (locator_x(&s, &layout, 2), layout.scrub.center().y);
+    let to = locator_x(&s, &layout, 7) + 9.0;
+    let before = steps(&s);
+    s.frame(vec![
+        Event::PointerMoved(pos2(x, y)),
+        Event::PointerButton {
+            pos: pos2(x, y),
+            button: PointerButton::Primary,
+            pressed: true,
+            modifiers: Modifiers::NONE,
+        },
+    ]);
+    for step in 1..=6 {
+        s.frame(vec![Event::PointerMoved(pos2(
+            x + (to - x) * step as f32 / 6.0,
+            y,
+        ))]);
+    }
+    assert_eq!(
+        s.main.arrangement().drawn_snap_line(),
+        Some(Ticks(7 * BAR + BAR / 4))
+    );
+    s.frame(vec![Event::PointerButton {
+        pos: pos2(to, y),
+        button: PointerButton::Primary,
+        pressed: false,
+        modifiers: Modifiers::NONE,
+    }]);
+    s.settle();
+    assert_eq!(locators(&s)[0].1, Ticks(7 * BAR + BAR / 4));
+    assert_eq!(steps(&s), before + 1);
+    assert_eq!(s.main.arrangement().drawn_snap_line(), None);
+}

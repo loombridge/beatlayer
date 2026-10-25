@@ -33,7 +33,7 @@ use bl_shell::device_commands::{
     self as ids, DEVICE_GAP, DeviceFrame, DeviceViewState, FloatingWindow, TITLE_BAR_HEIGHT,
 };
 use bl_shell::menus::{MenuItem, shown};
-use bl_shell::{Area, Invocation, Shell};
+use bl_shell::{Area, InfoTarget, Invocation, Shell};
 use egui::accesskit::Role;
 use egui::{
     Align2, Color32, DragAndDrop, Id, Key, Rect, Sense, Shape, Stroke, StrokeKind, Ui, UiBuilder,
@@ -602,6 +602,17 @@ impl DeviceViewUi {
                             shell.played(track, &AutomationTarget::Device { device, param })
                         })
                     };
+                    // Spec: automation R29. The parameters' context menus.
+                    let menu = |param| {
+                        let device = frame.id;
+                        track.map(|track| {
+                            crate::param_menu::ParamMenu::new(
+                                shell,
+                                track,
+                                AutomationTarget::Device { device, param },
+                            )
+                        })
+                    };
                     match &frame.multisampler {
                         // Spec: multisampler R1. The tab chosen in the title
                         // bar shows its controls.
@@ -612,7 +623,7 @@ impl DeviceViewUi {
                             (frame, state),
                             display.as_ref(),
                             body,
-                            &played,
+                            (&played, &menu),
                             events,
                         ),
                         None => {
@@ -622,7 +633,7 @@ impl DeviceViewUi {
                                 frame,
                                 display.as_ref(),
                                 body,
-                                &played,
+                                (&played, &menu),
                                 &mut self.renaming_articulation,
                                 events,
                             );
@@ -797,6 +808,7 @@ impl DeviceViewUi {
                 .to_owned(),
             );
         });
+        crate::info_text::describe(ui.ctx(), &response, shell, InfoTarget::Device(frame.id));
     }
 
     /// The Device Activator: a round button, lit while the device is on.

@@ -117,6 +117,9 @@ pub const VIEW_CLIP_TAB: &str = "view.clip_tab";
 pub const VIEW_CLIP_ENVELOPE: &str = "view.clip_envelope";
 /// `view.toggle_info_view`: show or hide the Info View.
 pub const VIEW_TOGGLE_INFO_VIEW: &str = "view.toggle_info_view";
+/// `edit.edit_info_text`: turn the Info View into a text field for the
+/// selected item's info text (Edit ▸ Edit Info Text).
+pub const EDIT_INFO_TEXT: &str = "edit.edit_info_text";
 /// `view.toggle_plug_in_windows`: show or hide the plug-in windows: the
 /// floating devices' windows and the plug-ins' editor windows (View ▸
 /// Plug-In Windows, WP-2.5b).
@@ -194,6 +197,9 @@ pub const SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES: &str = "settings.set_create_f
 /// `settings.set_retune_on_tuning_load`: switch Retune Set On Loading Tuning
 /// Systems (WP-6.9; the tunings spec, R15).
 pub const SETTINGS_SET_RETUNE_ON_TUNING_LOAD: &str = "settings.set_retune_on_tuning_load";
+/// `settings.set_snap_automation_to_grid`: switch Snap Automation to Grid
+/// (WP-6.57; the automation spec, R31).
+pub const SETTINGS_SET_SNAP_AUTOMATION_TO_GRID: &str = "settings.set_snap_automation_to_grid";
 /// `settings.set_temporary_folder`: choose the Temporary Folder on the File &
 /// Folder page (WP-4.20).
 pub const SETTINGS_SET_TEMPORARY_FOLDER: &str = "settings.set_temporary_folder";
@@ -305,6 +311,7 @@ pub const IDS: &[&str] = &[
     VIEW_CLIP_TAB,
     VIEW_CLIP_ENVELOPE,
     VIEW_TOGGLE_INFO_VIEW,
+    EDIT_INFO_TEXT,
     VIEW_TOGGLE_PLUG_IN_WINDOWS,
     CLOSE_PLUG_IN_WINDOWS,
     VIEW_TOGGLE_SESSION_ARRANGEMENT,
@@ -338,6 +345,7 @@ pub const IDS: &[&str] = &[
     SETTINGS_SET_CLIP_COLOUR,
     SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES,
     SETTINGS_SET_RETUNE_ON_TUNING_LOAD,
+    SETTINGS_SET_SNAP_AUTOMATION_TO_GRID,
     SETTINGS_SET_TEMPORARY_FOLDER,
     SETTINGS_SET_SAMPLE_EDITOR,
     SETTINGS_SET_WARP_RECORDED_AUDIO,
@@ -1736,6 +1744,20 @@ fn specs() -> Vec<CommandSpec> {
             .binding("S-VIEW-008")
             .args::<NoArgs>()
             .result::<ViewResult>(),
+        CommandSpec::new(EDIT_INFO_TEXT, "Edit Info Text")
+            .description(
+                "Turns the Info View into a text field for the info text of the selected \
+                 item, showing the Info View first if it is hidden: a locator, clip or track \
+                 in the Arrangement, a scene, clip or track in the Session View, or a macro, \
+                 chain or device in the Device View, whichever the area with the keyboard \
+                 focus has selected. Return keeps the text, Option-Return (Alt-Return) starts \
+                 a new line, and Esc drops the change. Changes nothing until the text is \
+                 kept; to set it directly, run the item's own command with its text.",
+            )
+            .permission(Permission::Read)
+            .context(Global)
+            .args::<NoArgs>()
+            .result::<()>(),
         CommandSpec::new(
             VIEW_TOGGLE_SESSION_ARRANGEMENT,
             "Toggle Arrangement/Session View",
@@ -2101,6 +2123,24 @@ fn specs() -> Vec<CommandSpec> {
              a tuning is asked first (Retune, or Cancel to change nothing). The setting is kept \
              for the next start, and isn't part of the set or an undo step. The result's `on` \
              is the setting afterwards.",
+        )
+        .permission(Permission::Edit)
+        .context(Settings)
+        .args::<SwitchArgs>()
+        .result::<SwitchResult>(),
+        // Spec: automation R31 (M-OPT-015): an edit-class preference.
+        CommandSpec::new(
+            SETTINGS_SET_SNAP_AUTOMATION_TO_GRID,
+            "Snap Automation to Grid",
+        )
+        .description(
+            "Switches Snap Automation to Grid, the Options menu's item; it's on in a new \
+             install. With it on, breakpoints made or moved with the mouse on an automation \
+             lane snap to the editing grid. With it off they land where the pointer is, \
+             snapping only to their neighbours' positions, and holding Cmd (Alt on Windows) \
+             snaps that drag to the grid. The editing grid's own Snap to Grid still turns all \
+             snapping off. The setting is kept for the next start, and isn't part of the set \
+             or an undo step. The result's `on` is the setting afterwards.",
         )
         .permission(Permission::Edit)
         .context(Settings)

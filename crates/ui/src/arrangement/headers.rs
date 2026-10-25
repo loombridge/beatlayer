@@ -8,9 +8,9 @@
 
 use bl_model::{Track, TrackId, TrackKind};
 use bl_shell::Invocation;
-use bl_shell::Shell;
 use bl_shell::arrangement_commands as ids;
 use bl_shell::mixer_controls::Switch;
+use bl_shell::{InfoTarget, Shell};
 use egui::accesskit::Role;
 use egui::{
     Align2, Color32, CursorIcon, Id, Rect, Sense, Shape, Stroke, StrokeKind, Ui, WidgetInfo,
@@ -59,6 +59,11 @@ pub struct Header<'a> {
     /// The Show/Hide Take Lanes toggle (L-ARR-021): `None` where the track
     /// shows none, otherwise whether its take lanes show.
     pub take_toggle: Option<bool>,
+    /// The main automation lane's controls (the automation spec, R24 to
+    /// R26): `None` where the track shows none, which is while Automation
+    /// Mode is off; otherwise the toggle that shows or hides its lanes of its
+    /// own, `None` where it has none.
+    pub automation: Option<Option<bool>>,
 }
 
 /// The ID of a track's title, for tests and focus.
@@ -193,6 +198,7 @@ pub fn header(
         show_in_out,
         show_volume,
         take_toggle,
+        automation,
     } = *header;
     let id = track.id();
     let colors = &theme.colors;
@@ -289,6 +295,7 @@ pub fn header(
             if folded { ", folded" } else { "" }
         ));
     });
+    crate::info_text::describe(ui.ctx(), &title_response, shell, InfoTarget::Track(id));
 
     if height < 12.0 {
         return;
@@ -353,6 +360,19 @@ pub fn header(
         super::take_lanes::toggle(ui, theme, id, rect, shown, events);
         name_right = rect.left() - 2.0;
     }
+    // Spec: automation R26. With Automation Mode on, the toggle that shows or
+    // hides the track's lanes of its own takes the take toggle's place.
+    if let Some(Some(shown)) = automation {
+        let rect = Rect::from_min_size(
+            pos2(
+                title.right() - super::automation::BUTTON - 3.0,
+                row_top + 1.0,
+            ),
+            vec2(super::automation::BUTTON, super::automation::BUTTON),
+        );
+        super::automation::lanes_toggle(ui, theme, id, rect, shown, events);
+        name_right = rect.left() - 2.0;
+    }
     let group = shell.editor().document().linked_with(id);
     if !group.is_empty() {
         let rect = Rect::from_min_size(
@@ -371,6 +391,23 @@ pub fn header(
             theme.font(),
             colors.clip_text.0,
         );
+    }
+
+    // Spec: automation R24, R25. The main lane's choosers and lane button, in
+    // the track's header at the foot of its title.
+    if automation.is_some() && !folded && height >= 52.0 {
+        use super::automation::{BUTTON, CHOOSER_HEIGHT};
+        let bottom = rect.bottom() - 3.0;
+        let choosers = Rect::from_min_max(
+            pos2(title.left(), bottom - CHOOSER_HEIGHT),
+            pos2(title.right(), bottom),
+        );
+        let button = Rect::from_min_size(
+            pos2(title.right() - BUTTON - 3.0, choosers.top() - BUTTON - 3.0),
+            vec2(BUTTON, BUTTON),
+        );
+        super::automation::lane_choosers(ui, shell, theme, (id, 0), choosers, events);
+        super::automation::lane_button(ui, shell, theme, (id, 0), button, events);
     }
 
     // The split line under the header: drag to resize (I-DRAG-018).

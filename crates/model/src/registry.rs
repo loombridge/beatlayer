@@ -68,7 +68,8 @@ pub const GO_TO_STEP: &str = "edit.go_to_step";
 pub const SET_MIDI_REGION: &str = "clip.set_midi_region";
 /// The ID of `clip.set_midi_loop`: a MIDI clip's loop brace.
 pub const SET_MIDI_LOOP: &str = "clip.set_midi_loop";
-/// The ID of the command that sets a MIDI clip's time signature.
+/// The ID of the command that sets a MIDI or warped audio clip's time
+/// signature.
 pub const SET_SIGNATURE: &str = "clip.set_signature";
 
 /// The commands that take `clips` in place of `clip`, and make the same
@@ -76,6 +77,7 @@ pub const SET_SIGNATURE: &str = "clip.set_signature";
 /// carries the arguments that differ for it): the Clip View's clip
 /// properties for several selected clips (Spec: multi-clip-editing R9).
 pub const FAN_OUT: &[&str] = &[
+    SET_MIDI_REGION,
     SET_MIDI_LOOP,
     SET_SIGNATURE,
     "clip.set_loop_enabled",
@@ -835,6 +837,15 @@ const ENTRIES: &[Entry] = &[
             changes only the name in the track's title bar.",
     },
     Entry {
+        id: "track.set_info_text",
+        action: Action::Apply("set_track_info_text"),
+        label: "Edit Info Text",
+        permission: Permission::Edit,
+        contexts: &[TrackHeaders],
+        keys: &[],
+        description: "Sets the info text of a track, which the Info View shows while the pointer is over it (Edit Info Text). Empty clears it. One undo step, `Change Info Text`.",
+    },
+    Entry {
         id: "track.set_colour",
         action: Action::Apply("set_track_colour"),
         label: "Change Track Color",
@@ -1347,6 +1358,34 @@ const ENTRIES: &[Entry] = &[
             changes if the parameter has no automation.",
     },
     Entry {
+        id: "automation.clear_track",
+        action: Action::Apply("clear_track_automation"),
+        label: "Clear All Envelopes",
+        permission: Permission::Destructive,
+        contexts: &[Global],
+        keys: &[],
+        description: "Deletes every envelope of a track: the automation of its volume, pan, \
+            Track Activator, sends and every device parameter, as Clear All Envelopes in an \
+            automation lane's context menu does. The controls stay where they are and follow \
+            themselves again. It is one undo step, and nothing changes if the track has no \
+            automation. Use `automation.clear_device` for one device's or the mixer's, and \
+            `automation.delete` for one parameter's.",
+    },
+    Entry {
+        id: "automation.clear_device",
+        action: Action::Apply("clear_device_automation"),
+        label: "Clear Envelopes",
+        permission: Permission::Destructive,
+        contexts: &[Global],
+        keys: &[],
+        description: "Deletes every envelope of one device of a track, or with `device` left \
+            out or `null` of the track's mixer (its volume, pan, Track Activator and sends), \
+            as Clear Envelopes of the device an automation lane shows does. The controls stay \
+            where they are and follow themselves again. It is one undo step, and nothing \
+            changes if there is no automation to clear. A device the track doesn't have is \
+            refused.",
+    },
+    Entry {
         id: RE_ENABLE_AUTOMATION,
         action: Action::Apply("re_enable_automation"),
         label: "Re-Enable Automation",
@@ -1659,6 +1698,15 @@ const ENTRIES: &[Entry] = &[
             the clip.",
     },
     Entry {
+        id: "clip.set_info_text",
+        action: Action::Apply("set_clip_info_text"),
+        label: "Edit Info Text",
+        permission: Permission::Edit,
+        contexts: &[Arrangement, Session, ClipView],
+        keys: &[],
+        description: "Sets the info text of a clip, in the Arrangement, a Session slot or a take lane, which the Info View shows while the pointer is over it (Edit Info Text). Empty clears it. One undo step, `Change Info Text`.",
+    },
+    Entry {
         id: "clip.set_colour",
         action: Action::Apply("set_clip_colour"),
         label: "Change Clip Color",
@@ -1808,13 +1856,16 @@ const ENTRIES: &[Entry] = &[
     },
     Entry {
         id: SET_SIGNATURE,
-        action: Action::Apply("set_midi_clip_signature"),
-        label: "Set MIDI Clip Signature",
+        action: Action::Apply("set_clip_signature"),
+        label: "Set Clip Signature",
         permission: Permission::Edit,
         contexts: &[ClipView],
         keys: &[],
-        description: "Sets a MIDI clip's time signature, as the Clip View's Signature fields \
-            do; `signature` `null` makes the clip follow the song's signature at its position.",
+        description: "Sets a MIDI clip's or a warped audio clip's time signature, as the Clip \
+            View's Signature fields do: numerator 1 to 99, denominator 1, 2, 4, 8 or 16. It \
+            changes how the clip's positions read and nothing it plays. `signature` `null` \
+            makes the clip follow the song's signature at its position. An unwarped audio \
+            clip has none: switching Warp on first (`clip.set_warp`) is required.",
     },
     Entry {
         id: "clip.set_loop_enabled",
@@ -2585,6 +2636,15 @@ const ENTRIES: &[Entry] = &[
             number, which is its position.",
     },
     Entry {
+        id: "scene.set_info_text",
+        action: Action::Apply("set_scene_info_text"),
+        label: "Edit Info Text",
+        permission: Permission::Edit,
+        contexts: &[Session],
+        keys: &[],
+        description: "Sets the info text of a scene, which the Info View shows while the pointer is over it (Edit Info Text). Empty clears it. One undo step, `Change Info Text`.",
+    },
+    Entry {
         id: "scene.set_colour",
         action: Action::Apply("set_scene_colour"),
         label: "Change Scene Color",
@@ -2696,6 +2756,15 @@ const ENTRIES: &[Entry] = &[
         description: "Renames a device: the name its title bar shows while Show Preset Name \
             is on (`device.set_show_preset_name`). An empty name gives the device back its \
             own name, such as `Auto Filter`. It changes nothing in the sound.",
+    },
+    Entry {
+        id: "device.set_info_text",
+        action: Action::Apply("set_device_info_text"),
+        label: "Edit Info Text",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Sets the info text of a device, which the Info View shows while the pointer is over it (Edit Info Text). Empty clears it. One undo step, `Change Info Text`.",
     },
     Entry {
         id: "device.set_show_preset_name",

@@ -18,7 +18,7 @@ use bl_shell::device_commands::{
     RackFrame, TITLE_BAR_HEIGHT, frame_width, rack_chain_list_width, rack_pads_width,
 };
 use bl_shell::pad_commands::{DRUM_IO_WIDTH, DRUM_SEND_WIDTH, RETURN_HEADING_HEIGHT};
-use bl_shell::{Area, Invocation, Shell};
+use bl_shell::{Area, InfoTarget, Invocation, Shell};
 use egui::accesskit::Role;
 use egui::{
     Align2, Color32, DragAndDrop, Event, Id, Key, Modifiers, Rect, Response, Sense, Shape, Stroke,
@@ -2108,6 +2108,12 @@ impl DeviceViewUi {
                 ui, theme, frame, item, &name, &text, value, colour, stepped, events,
             )
         };
+        crate::info_text::describe(
+            ui.ctx(),
+            &response,
+            shell,
+            InfoTarget::Macro(frame.id, item.number),
+        );
         response.context_menu(|ui| {
             if ui.button("Rename").clicked() {
                 self.renaming_macro = Some(MacroRenaming {
@@ -2116,6 +2122,16 @@ impl DeviceViewUi {
                     text: None,
                     focused: false,
                 });
+                ui.close();
+            }
+            // Spec: info-view R10. Edit Info Text types the text in the
+            // Info View.
+            if ui.button("Edit Info Text").clicked() {
+                invoke(
+                    events,
+                    "rack.set_macro_info_text",
+                    json!({ "rack": frame.id, "macro_number": item.number }),
+                );
                 ui.close();
             }
             let excluded = info.is_some_and(|m| m.randomize_excluded);
@@ -2801,6 +2817,7 @@ impl DeviceViewUi {
                     .to_owned(),
             );
         });
+        crate::info_text::describe(ui.ctx(), &response, shell, InfoTarget::Chain(row.id));
         if rack.chain_list_focused && row.selected && response.has_focus() {
             painter.rect_stroke(
                 rects.row,

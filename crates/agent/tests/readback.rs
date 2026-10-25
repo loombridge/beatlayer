@@ -815,6 +815,28 @@ fn fixture() -> Project {
             name: "Verse".to_owned(),
         },
     );
+    // WP-6.58: the user's own info text on a track, a clip, a scene and a
+    // device, which a new one doesn't have.
+    for command in [
+        Command::SetTrackInfoText {
+            track: vox,
+            info_text: "Lead vocal".to_owned(),
+        },
+        Command::SetClipInfoText {
+            clip: slot_clip_id,
+            info_text: "Verse loop".to_owned(),
+        },
+        Command::SetSceneInfoText {
+            scene: scenes[0],
+            info_text: "Starts the song".to_owned(),
+        },
+        Command::SetDeviceInfoText {
+            device: rack,
+            info_text: "Parallel drive".to_owned(),
+        },
+    ] {
+        apply(&mut editor, command);
+    }
     // WP-6.30b: a colour on the scene, which a new one doesn't have.
     apply(
         &mut editor,

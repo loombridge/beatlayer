@@ -34,11 +34,12 @@ use bl_core::time::Ticks;
 use bl_media::PeakEvent;
 use bl_model::{ClipId, Document, TrackId, TrackKind};
 use bl_shell::arrangement::rows::{DROP_AREA, FOLDED_HEIGHT, Row, rows_between};
+use bl_shell::arrangement::snapping::Dragged;
 use bl_shell::arrangement::{ArrangementView, Horizontal};
 use bl_shell::arrangement_commands::{self as ids, Lane};
 use bl_shell::clip_drag::{ClipDragEvent, DragSource, DropSpot};
 use bl_shell::locator_commands as locator_ids;
-use bl_shell::{GesturePhase, Invocation, Shell};
+use bl_shell::{GesturePhase, InfoTarget, Invocation, Shell};
 use egui::accesskit::Role;
 use egui::{
     Align2, CursorIcon, EventFilter, Id, Key, Pos2, Rect, Sense, Stroke, StrokeKind, Ui,
@@ -48,7 +49,7 @@ use serde_json::{Value, json};
 
 use self::automation::AutomationGestures;
 use self::context_menu::ContextMenus;
-use self::editing::{ClipGestures, EditKeys, Lanes};
+use self::editing::{ClipGestures, EditKeys, Lanes, Zone};
 use self::gpu::{ArrangementCallback, Shared, SharedFrame, Slot, lock};
 use self::headers::Header;
 use self::peaks::{PeakLibrary, PeakSource};
@@ -205,6 +206,10 @@ pub struct ArrangementUi {
     /// The playhead the last frame drew: its position and its x, if it was
     /// in view (WP-1.18).
     playhead: Option<(Ticks, f32)>,
+    /// Where the drag under way is snapped to an item (a clip edge, a
+    /// locator or a signature marker), which the lanes show as a line
+    /// (arrangement-editing R23).
+    snap_line: Option<Ticks>,
     /// The locator being dragged in the scrub area, if a drag is under way
     /// (WP-6.24).
     locator_drag: Option<bl_model::LocatorId>,
@@ -361,6 +366,7 @@ impl ArrangementUi {
             track_menus: TrackMenus::default(),
             lane_menus: TakeLaneMenus::default(),
             playhead: None,
+            snap_line: None,
             locator_drag: None,
             locators_drawn: Vec::new(),
             mixer: None,
@@ -400,6 +406,13 @@ impl ArrangementUi {
         self.playhead
     }
 
+    /// The point the last frame drew the snap line at, if a drag was
+    /// snapped to an item (arrangement-editing R23).
+    #[must_use]
+    pub fn drawn_snap_line(&self) -> Option<Ticks> {
+        self.snap_line
+    }
+
     /// Where the last frame put the Arrangement's mixer, if it shows: the
     /// main window draws it there (WP-1.9).
     #[must_use]
@@ -407,7 +420,7 @@ impl ArrangementUi {
         self.mixer
     }
 
-    /// A track's automation lane as the last frame drew it (WP-2.12):
+    /// A track's main automation lane as the last frame drew it (WP-2.12):
     /// `None` while Automation Mode is off, the track is folded, or the
     /// track has no row in view.
     #[must_use]
@@ -417,9 +430,27 @@ impl ArrangementUi {
         doc: &Document,
         track: TrackId,
     ) -> Option<Rect> {
+        self.automation_lane_rect_of(view, doc, track, 0)
+    }
+
+    /// Lane `number` of a track's automation lanes as the last frame drew it:
+    /// 0 is the main lane over the track's clips, and 1 and up are the lanes
+    /// of its own under it (the automation spec, R24, R25). `None` while it
+    /// doesn't show.
+    #[must_use]
+    pub fn automation_lane_rect_of(
+        &self,
+        view: &ArrangementView,
+        doc: &Document,
+        track: TrackId,
+        number: usize,
+    ) -> Option<Rect> {
         let lanes = self.lanes?;
         let row = view.rows(doc).into_iter().find(|row| row.track == track)?;
-        (row.automation > 0.0).then(|| automation::lane_rect(&row, lanes, view.scroll_y() as f32))
+        let shown = view.automation_mode()
+            && !view.is_folded(track)
+            && number <= view.shown_own_lanes(track);
+        shown.then(|| automation::lane_rect(&row, number, lanes, view.scroll_y() as f32))
     }
 
     /// Takes waveform peaks from `source`, such as the app's
@@ -624,6 +655,7 @@ impl ArrangementUi {
                 scroll_y,
             }
             .lane_at(pos, shell)
+            .filter(|lane| lane.number > 0 || !self.clip_claims(&clip_lanes, pos))
             .and_then(|lane| match lane.hit(pos) {
                 automation::LaneHit::Breakpoint(at) => Some((lane.track, lane.target, at, false)),
                 automation::LaneHit::Segment(_) => {
@@ -751,6 +783,21 @@ impl ArrangementUi {
             );
         }
 
+        // Arrangement-editing R23: the point a drag snapped to, through the
+        // lanes.
+        if let Some(at) = self.snap_line {
+            let x = lanes.left() + horizontal.x(at) as f32;
+            if x >= lanes.left() && x <= lanes.right() {
+                rulers::marker(
+                    &ui.painter_at(lanes),
+                    x,
+                    lanes.top(),
+                    lanes.bottom(),
+                    theme.colors.insert_marker.0,
+                );
+            }
+        }
+
         // The controls above the track headers, then the headers: the
         // controls come first in the Tab order (accessibility R10).
         self.header_controls(ui, view, doc, theme, &layout, events);
@@ -760,7 +807,7 @@ impl ArrangementUi {
         self.header_drag = take_lanes::is_dragging(ui.ctx());
         // Over the pinned rows' lanes, in the lanes' lower right corner.
         self.grid_indicator(ui, view, doc, theme, layout.grid_indicator);
-        self.accessibility(ui, view, doc, &layout);
+        self.accessibility(ui, shell, view, doc, &layout);
         self.keys(ui, shell, view, layout.lanes, events);
 
         if transport.playing {
@@ -823,6 +870,15 @@ impl ArrangementUi {
         })
     }
 
+    /// Whether a clip's title bar, an edge or a fade handle is under `pos`:
+    /// in the main automation lane these keep the clip's own gestures, and
+    /// the rest of the lane belongs to the envelope (the automation spec,
+    /// R24).
+    fn clip_claims(&self, lanes: &Lanes<'_>, pos: Pos2) -> bool {
+        fades::spot_at(lanes, pos, self.clips.handles_held()).is_some()
+            || lanes.hit(pos).is_some_and(|hit| hit.zone != Zone::Body)
+    }
+
     /// The row under a point in the lanes, if any.
     fn row_at(&self, lanes: Rect, scroll_y: f32, pos: Pos2) -> Option<usize> {
         let y = pos.y - lanes.top() + scroll_y;
@@ -883,6 +939,7 @@ impl ArrangementUi {
             // segment curves it.
             let automation = automation_lanes
                 .lane_at(press, shell)
+                .filter(|lane| lane.number > 0 || !self.clip_claims(&clip_lanes, press))
                 .is_some_and(|lane| self.automation.begin(&lane, press, modifiers));
             self.drag = Some(if pan_keys {
                 Drag::Pan
@@ -1017,6 +1074,9 @@ impl ArrangementUi {
             }
             self.drag = None;
         }
+        self.snap_line = pointer
+            .filter(|_| response.dragged() && self.drag == Some(Drag::Clips))
+            .and_then(|pos| self.clips.snap_line(&clip_lanes, pos, keys));
         if let Some(hover) = response.hover_pos()
             && !pan_keys
             && let Some(icon) = self.clips.cursor(&clip_lanes, hover, keys)
@@ -1025,7 +1085,9 @@ impl ArrangementUi {
         }
         if response.double_clicked() {
             if let Some(pos) = response.interact_pointer_pos()
-                && let Some(lane) = automation_lanes.lane_at(pos, shell)
+                && let Some(lane) = automation_lanes
+                    .lane_at(pos, shell)
+                    .filter(|lane| lane.number > 0 || !self.clip_claims(&clip_lanes, pos))
             {
                 // WP-2.12: Alt/Option double-click straightens a segment; off
                 // a segment it adds a breakpoint.
@@ -1053,9 +1115,12 @@ impl ArrangementUi {
         {
             // WP-2.12: clicking a breakpoint deletes it, and a segment adds
             // one there.
-            let handled = automation_lanes.lane_at(pos, shell).is_some_and(|lane| {
+            let lane_here = automation_lanes
+                .lane_at(pos, shell)
+                .filter(|lane| lane.number > 0 || !self.clip_claims(&clip_lanes, pos));
+            let handled = lane_here.as_ref().is_some_and(|lane| {
                 self.automation
-                    .click(view, doc, &lane, pos, modifiers, events)
+                    .click(view, doc, lane, pos, modifiers, events)
             });
             if !handled && !self.clips.click(&clip_lanes, pos, keys, events) {
                 // I-CLICK-011: the insert marker, and the track under it; on
@@ -1073,8 +1138,8 @@ impl ArrangementUi {
                 // Spec: automation-editing R1. A click on an automation
                 // lane's background selects the lane, which gets the
                 // keyboard.
-                if automation_lanes.lane_at(pos, shell).is_some() {
-                    args["automation_lane"] = json!(true);
+                if let Some(lane) = &lane_here {
+                    args["automation_lane"] = json!(lane.number);
                 }
                 invoke(events, ids::SET_INSERT_MARKER, args);
             }
@@ -1250,68 +1315,89 @@ impl ArrangementUi {
         let keys = shell
             .keyboard_envelope()
             .filter(|keys| keys.envelope == bl_shell::envelope_commands::EnvelopeKeys::Lane);
-        let keyed = view.keyboard_lane().map(|(track, _)| track);
+        let keyed = view.keyboard_lane_number();
         let time = ui.input(|i| i.time);
         let typed = crate::envelope_keys::typed(ui.ctx());
         for row in &self.rows {
-            if row.automation <= 0.0 {
-                continue;
-            }
-            let rect = automation::lane_rect(row, lanes, scroll_y);
-            if !rect.intersects(lanes) {
-                continue;
-            }
-            automation::paint_lane(&painter, rect, theme);
-            // Spec: automation-editing R21, R22. The lane that has the
-            // keyboard shows the insert marker with its value, and the
-            // focused and selected breakpoints.
-            let own = keys.as_ref().filter(|_| keyed == Some(row.track));
-            let mut focused = None;
-            if let Some(lane) = automation_lanes.lane(row, shell) {
-                automation::paint_envelope(&painter, &lane, theme, own, time);
-                if let Some(keys) = own {
-                    focused = automation::paint_keys(
-                        ui,
-                        &painter,
-                        theme,
-                        shell,
-                        &lane,
-                        keys,
-                        typed.as_ref().map(|typed| typed.text.as_str()),
-                    );
-                    if keys.selected.is_some() {
-                        // The selected breakpoint pulses.
-                        ui.ctx()
-                            .request_repaint_after(crate::envelope_keys::PULSE_FRAME);
+            // The main lane draws over the track's clips, and the lanes of
+            // its own under them (the automation spec, R24, R25); a folded
+            // track shows none.
+            for lane_number in 0..=view.shown_own_lanes(row.track) {
+                if row.folded {
+                    break;
+                }
+                let rect = automation::lane_rect(row, lane_number, lanes, scroll_y);
+                if !rect.intersects(lanes) {
+                    continue;
+                }
+                if lane_number > 0 {
+                    automation::paint_lane(&painter, rect, theme);
+                }
+                // Spec: automation-editing R21, R22. The lane that has the
+                // keyboard shows the insert marker with its value, and the
+                // focused and selected breakpoints.
+                let own = keys
+                    .as_ref()
+                    .filter(|_| keyed == Some((row.track, lane_number)));
+                let mut focused = None;
+                let lane = automation_lanes
+                    .lanes_of(row, shell)
+                    .into_iter()
+                    .find(|lane| lane.number == lane_number);
+                if let Some(lane) = &lane {
+                    automation::paint_envelope(&painter, lane, theme, own, time);
+                    if let Some(keys) = own {
+                        focused = automation::paint_keys(
+                            ui,
+                            &painter,
+                            theme,
+                            shell,
+                            lane,
+                            keys,
+                            typed.as_ref().map(|typed| typed.text.as_str()),
+                        );
+                        if keys.selected.is_some() {
+                            // The selected breakpoint pulses.
+                            ui.ctx()
+                                .request_repaint_after(crate::envelope_keys::PULSE_FRAME);
+                        }
                     }
+                    let outline = ui.input(|i| {
+                        let pointer = i.pointer.interact_pos()?;
+                        self.automation.outline(
+                            (row.track, lane_number),
+                            view,
+                            doc,
+                            pointer,
+                            i.modifiers,
+                        )
+                    });
+                    automation::paint_handles(&painter, ui, lane, theme, outline);
                 }
-                let outline = ui.input(|i| {
-                    let pointer = i.pointer.interact_pos()?;
-                    self.automation
-                        .outline(row.track, view, doc, pointer, i.modifiers)
+                // The lane's accessible node, a group named for the
+                // parameter it shows and valued as the envelope is at the
+                // insert marker, with the focused or selected breakpoint as
+                // its active descendant (R28).
+                let id = automation::lane_id(row.track, lane_number);
+                let _ = ui.interact(rect, id, Sense::hover());
+                let name = match view
+                    .lane_choice(row.track, lane_number)
+                    .and_then(|choice| choice.target)
+                {
+                    Some(target) => automation::target_label(shell, doc, target),
+                    None => "None".to_owned(),
+                };
+                ui.ctx().accesskit_node_builder(id, |node| {
+                    node.set_role(Role::Group);
+                    node.set_label(format!("{name} Automation"));
+                    if let Some(keys) = own {
+                        node.set_value(keys.value.clone());
+                    }
+                    if let Some(focused) = focused {
+                        node.set_active_descendant(focused.accesskit_id());
+                    }
                 });
-                automation::paint_handles(&painter, ui, &lane, theme, outline);
             }
-            // The lane's accessible node, a group named for the parameter
-            // it shows and valued as the envelope is at the insert marker,
-            // with the focused or selected breakpoint as its active
-            // descendant (R28).
-            let id = automation::lane_id(row.track);
-            let _ = ui.interact(rect, id, Sense::hover());
-            let name = match view.automation_lane(row.track) {
-                Some(target) => automation::target_label(shell, doc, target),
-                None => "None".to_owned(),
-            };
-            ui.ctx().accesskit_node_builder(id, |node| {
-                node.set_role(Role::Group);
-                node.set_label(format!("{name} Automation"));
-                if let Some(keys) = own {
-                    node.set_value(keys.value.clone());
-                }
-                if let Some(focused) = focused {
-                    node.set_active_descendant(focused.accesskit_id());
-                }
-            });
         }
     }
 
@@ -1535,6 +1621,7 @@ impl ArrangementUi {
             response.context_menu(|ui| self.menus.show(ui, theme, shell, events));
             let name = locator.name.clone();
             response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, &name));
+            crate::info_text::describe(ui.ctx(), &response, shell, InfoTarget::Locator(locator.id));
             ui.ctx().accesskit_node_builder(id, |node| {
                 node.set_role(Role::Button);
                 node.set_label(name.as_str());
@@ -1610,7 +1697,23 @@ impl ArrangementUi {
                 && self.locator_drag == Some(locator.id)
                 && let Some(pos) = response.interact_pointer_pos()
             {
-                let to = view.snap(doc, scrub_at(pos));
+                // Spec: arrangement-editing R22. It snaps to clip edges,
+                // other locators and signature markers as well as the grid.
+                let mut carried = view.selected_locators().to_vec();
+                carried.push(locator.id);
+                let snapped = view.snap_to_items(
+                    doc,
+                    scrub_at(pos),
+                    Ticks::ZERO,
+                    Dragged {
+                        locators: &carried,
+                        ..Dragged::default()
+                    },
+                    horizontal.ticks_per_point,
+                    ui.input(|i| EditKeys::from(i.modifiers).bypass),
+                );
+                self.snap_line = snapped.line;
+                let to = snapped.at;
                 events.push(UiEvent::Gesture {
                     phase: GesturePhase::Update,
                     invocation: Some(Invocation::new(
@@ -1835,6 +1938,10 @@ impl ArrangementUi {
                     take_toggle: view
                         .take_toggle_shown(doc, row.track)
                         .then(|| view.shows_take_lanes(row.track)),
+                    automation: view.automation_mode().then(|| {
+                        (!view.own_lanes(row.track).is_empty())
+                            .then(|| !view.own_lanes_hidden(row.track))
+                    }),
                 },
                 &self.every_track,
                 events,
@@ -1884,23 +1991,26 @@ impl ArrangementUi {
                     events,
                 );
             }
-            // WP-2.12: the automation lane's device and parameter choosers,
-            // in the header column at the lane's row.
-            if row.automation > 0.0 {
-                let lane = Rect::from_min_max(
-                    pos2(column.left(), top + row.height),
+            // Spec: automation R25. A header beside each lane of the track's
+            // own: its choosers and its hide button.
+            for number in 1..=view.shown_own_lanes(row.track) {
+                let (lane_top, lane_bottom) = row.lane_span(number);
+                let rect = Rect::from_min_max(
+                    pos2(column.left(), column.top() + lane_top - scroll_y),
                     pos2(
                         column.left() + header_columns::title_width(view.show_in_out()),
-                        top + row.height + row.automation,
+                        column.top() + lane_bottom - scroll_y,
                     ),
                 );
-                automation::lane_header(
+                if rect.bottom() < column.top() || rect.top() > column.bottom() {
+                    continue;
+                }
+                automation::own_lane_header(
                     &mut header_ui,
                     shell,
                     theme,
-                    row.track,
-                    view.automation_lane(row.track),
-                    lane,
+                    (row.track, number),
+                    rect,
                     events,
                 );
             }
@@ -1960,6 +2070,7 @@ impl ArrangementUi {
                         show_in_out: view.show_in_out(),
                         show_volume: view.show_volume(),
                         take_toggle: None,
+                        automation: None,
                     },
                     &[],
                     events,
@@ -2011,6 +2122,7 @@ impl ArrangementUi {
                     show_in_out: view.show_in_out(),
                     show_volume: view.show_volume(),
                     take_toggle: None,
+                    automation: None,
                 },
                 &[],
                 events,
@@ -2035,8 +2147,8 @@ impl ArrangementUi {
     /// editing spec, R28).
     #[must_use]
     pub fn keyboard_lane_node(&self, view: &ArrangementView) -> Option<Id> {
-        view.keyboard_lane()
-            .map(|(track, _)| automation::lane_id(track))
+        view.keyboard_lane_number()
+            .map(|(track, number)| automation::lane_id(track, number))
     }
 
     fn header_controls(
@@ -2257,10 +2369,19 @@ impl ArrangementUi {
     fn accessibility(
         &mut self,
         ui: &mut Ui,
+        shell: &Shell,
         view: &ArrangementView,
         doc: &Document,
         layout: &ArrangementLayout,
     ) {
+        // Spec: info-view R11. A clip with info text shows it in the Info
+        // View while the pointer is over it.
+        if let Some(pos) = ui.ctx().pointer_hover_pos()
+            && layout.lanes.contains(pos)
+            && let Some(shown) = self.shown.iter().rev().find(|s| s.rect.contains(pos))
+        {
+            crate::info_text::hover(ui.ctx(), InfoTarget::Clip(shown.clip));
+        }
         let enabled = ui
             .ctx()
             .accesskit_node_builder(lanes_id(), |node| {
@@ -2331,6 +2452,9 @@ impl ArrangementUi {
                     &clip.name
                 };
                 node.set_label(name.to_owned());
+                if let Some((_, text)) = shell.info_text_shown(InfoTarget::Clip(clip.id)) {
+                    node.set_description(text);
+                }
                 // Spec: arrangement-editing R15.
                 node.set_selected(view.is_clip_selected(clip.id));
                 node.set_value(format!(
@@ -2396,8 +2520,8 @@ impl ArrangementUi {
         // the keyboard reads Left and Right, and Up and Down with a
         // breakpoint selected, itself; so does Option with Up and Down on the
         // selected track's lane.
-        let keyed = view.keyboard_lane();
-        if let Some((track, _)) = keyed
+        let keyed = view.keyboard_lane_number();
+        if let Some(lane) = keyed
             && let Some(keys) = shell
                 .keyboard_envelope()
                 .filter(|keys| keys.envelope == bl_shell::envelope_commands::EnvelopeKeys::Lane)
@@ -2405,7 +2529,7 @@ impl ArrangementUi {
             crate::envelope_keys::read(
                 ui,
                 &keys,
-                |forward, all| automation::cycle_lane(shell, track, forward, all),
+                |forward, all| automation::cycle_lane(shell, lane, forward, all),
                 events,
             );
         } else if view.automation_mode()
@@ -2428,7 +2552,7 @@ impl ArrangementUi {
                 found
             });
             if let Some((forward, all)) = cycle
-                && let Some(invocation) = automation::cycle_lane(shell, track, forward, all)
+                && let Some(invocation) = automation::cycle_lane(shell, (track, 0), forward, all)
             {
                 events.push(UiEvent::Invoke(invocation));
             }
@@ -2482,14 +2606,17 @@ impl ArrangementUi {
             )
         });
         if copy || cut || paste || duplicate || delete {
+            // Spec: automation R30. Every lane the selected tracks show.
             let lanes: Vec<Lane> = view
                 .selected_tracks()
                 .iter()
-                .filter_map(|track| {
-                    view.automation_lane(*track).map(|target| Lane::Automation {
-                        track: *track,
-                        target,
-                    })
+                .flat_map(|track| {
+                    view.shown_lane_targets(*track)
+                        .into_iter()
+                        .map(|(_, target)| Lane::Automation {
+                            track: *track,
+                            target,
+                        })
                 })
                 .collect();
             if !lanes.is_empty() {
@@ -2592,19 +2719,20 @@ impl ArrangementUi {
             // Spec: automation-editing R20. With Automation Mode on, Up and
             // Down move through each track's lane and then its automation
             // lane, in the order they're drawn.
-            let stops: Vec<(bl_model::TrackId, bool)> = self
+            let stops: Vec<(bl_model::TrackId, Option<usize>)> = self
                 .rows
                 .iter()
                 .flat_map(|row| {
-                    let lane = row.automation > 0.0 && view.automation_lane(row.track).is_some();
-                    [(row.track, false)]
-                        .into_iter()
-                        .chain(lane.then_some((row.track, true)))
+                    [(row.track, None)].into_iter().chain(
+                        view.shown_lane_targets(row.track)
+                            .into_iter()
+                            .map(|(number, _)| (row.track, Some(number))),
+                    )
                 })
                 .collect();
             let current = match (keyed, view.selected_tracks().first()) {
-                (Some((track, _)), _) => Some((track, true)),
-                (None, Some(track)) => Some((*track, false)),
+                (Some((track, number)), _) => Some((track, Some(number))),
+                (None, Some(track)) => Some((*track, None)),
                 (None, None) => None,
             };
             let at = current.and_then(|current| stops.iter().position(|stop| *stop == current));
@@ -2619,8 +2747,8 @@ impl ArrangementUi {
                     ids::SELECT_TRACKS,
                     json!({
                         "tracks": [track],
-                        "title_bars": view.title_bars_selected() && !lane,
-                        "automation_lane": lane,
+                        "title_bars": view.title_bars_selected() && lane.is_none(),
+                        "automation_lane": lane.map_or(json!(false), |number| json!(number)),
                     }),
                 );
             }
@@ -2646,7 +2774,19 @@ impl ArrangementUi {
             }
         }
         if (left || right) && view.title_bars_selected() {
-            invoke(events, ids::FOLD_TRACKS, json!({ "fold": left }));
+            // Spec: automation R26. With Automation Mode on, a selected title
+            // bar's Left hides the track's lanes of its own and Right shows
+            // them; a track with none folds and unfolds.
+            let lanes_of = |track: &bl_model::TrackId| !view.own_lanes(*track).is_empty();
+            if view.automation_mode() && view.selected_tracks().iter().any(lanes_of) {
+                invoke(
+                    events,
+                    ids::SHOW_AUTOMATION_LANES,
+                    json!({ "tracks": view.selected_tracks(), "on": right }),
+                );
+            } else {
+                invoke(events, ids::FOLD_TRACKS, json!({ "fold": left }));
+            }
         }
         if (taller || shorter) && !view.selected_tracks().is_empty() {
             let delta = if taller { HEIGHT_STEP } else { -HEIGHT_STEP };
@@ -2766,8 +2906,11 @@ fn ruler_drag(events: &mut Vec<UiEvent>, delta: egui::Vec2, anchor: Ticks, scale
 }
 
 /// The lanes a drag across the rows passed through: each row's own lane,
-/// its automation lane where the drag went into it (the automation editing
-/// spec, R1), and the take lanes it crossed (the comping spec, R26).
+/// its automation lanes where the drag went into them (the automation editing
+/// spec, R1), and the take lanes it crossed (the comping spec, R26). While
+/// Automation Mode is on, a track's main lane draws over its own lane, so
+/// where it shows an envelope that is the lane the drag covers (the
+/// automation spec, R24, R30).
 fn lanes_crossed(
     rows: &[Row],
     from: usize,
@@ -2780,21 +2923,26 @@ fn lanes_crossed(
     let (lo, hi) = (press_y.min(now_y), press_y.max(now_y));
     let mut out = Vec::new();
     for row in &rows[from..=to] {
-        let top = row.top;
-        let own = top + row.height;
-        let bottom = row.bottom();
-        if lo < own && hi > top {
-            out.push(Lane::Track { track: row.track });
-        }
-        if row.automation > 0.0
-            && hi > own
-            && lo < bottom
-            && let Some(target) = view.automation_lane(row.track)
-        {
-            out.push(Lane::Automation {
+        let shown = view.shown_lane_targets(row.track);
+        let covers = |number: usize| {
+            let (top, bottom) = row.lane_span(number);
+            hi > top && lo < bottom
+        };
+        match shown.iter().find(|(number, _)| *number == 0) {
+            Some((_, target)) if covers(0) => out.push(Lane::Automation {
                 track: row.track,
-                target,
-            });
+                target: *target,
+            }),
+            _ if covers(0) => out.push(Lane::Track { track: row.track }),
+            _ => {}
+        }
+        for (number, target) in shown.iter().filter(|(number, _)| *number > 0) {
+            if covers(*number) {
+                out.push(Lane::Automation {
+                    track: row.track,
+                    target: *target,
+                });
+            }
         }
         for lane in view.take_lane_rows(doc, row) {
             if hi > lane.top && lo < lane.top + lane.height {

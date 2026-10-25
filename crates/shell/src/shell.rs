@@ -94,9 +94,11 @@ mod audio_panel;
 pub mod autosample;
 mod bounce;
 mod capture;
+mod clip_properties;
 mod envelope_keys;
 mod export_dialog;
 pub use export_dialog::ExportPrefs;
+pub use info_text::InfoTarget;
 mod file_manager;
 mod freeze;
 mod grooves;
@@ -118,6 +120,7 @@ mod device_commands;
 mod document_edits;
 mod focus;
 mod gestures;
+mod info_text;
 mod invoke;
 mod menus;
 mod midi_input;
@@ -322,6 +325,9 @@ pub enum Effect {
     /// Move the keyboard focus to an area of the second window, and bring
     /// it to the front.
     FocusSecondArea(Area),
+    /// Move the keyboard focus to the first control of the Clip View's
+    /// panels (Navigate ▸ Clip Panels).
+    FocusClipPanels,
     /// Move the keyboard focus to the next or previous control, or to the
     /// same control on the next or previous track.
     MoveFocus {
@@ -353,6 +359,20 @@ pub enum Effect {
         /// The file name the dialog suggests.
         default_name: String,
     },
+    /// Ask where to save a MIDI clip as a Standard MIDI File, then run
+    /// `midi.export_clip` there (WP-6.56).
+    PickMidiExportPath {
+        /// The clip.
+        clip: bl_model::ClipId,
+        /// The file name the dialog suggests.
+        default_name: String,
+    },
+    /// Start renaming a Session clip in its slot, where the person types the
+    /// new name; Return runs `clip.rename` with it (WP-6.56).
+    RenameClip(bl_model::ClipId),
+    /// Start renaming a scene in its name field in the Main column; Return
+    /// runs `scene.rename` with the new name (WP-6.56).
+    RenameScene(bl_model::SceneId),
     /// Start renaming a device in its title bar, where the person types the
     /// new name; Return runs `device.rename` with it (WP-2.4).
     RenameDevice(bl_model::DeviceId),
@@ -372,6 +392,11 @@ pub enum Effect {
     /// person types the new name; Return runs `locator.rename` with it
     /// (WP-6.24; the time editing spec, R8).
     RenameLocator(bl_model::LocatorId),
+    /// Turn the Info View into a text field for an item's info text, with
+    /// the keyboard focus; Return runs the item's command with the text
+    /// ([`Shell::info_text_invocation`]), Option-Return starts a new line
+    /// and Esc drops the change (Edit Info Text; the Info View spec, R10).
+    EditInfoText(InfoTarget),
     /// Start renaming a take lane in its header, where the person types the
     /// new name; Return runs `take_lane.rename` with it, and Tab goes on to
     /// the next lane or track's name (WP-6.22; the comping spec, R28).
@@ -1962,6 +1987,9 @@ impl Shell {
         }
         if bl_shell_spec::audio_panel::handles(id) {
             return self.run_audio_panel(id, args);
+        }
+        if bl_shell_spec::clip_properties::handles(id) {
+            return self.run_clip_properties(id, args);
         }
         if bl_shell_spec::modulation::handles(id) {
             let bl_shell_spec::modulation::StateArgs { track } = Self::args(id, args)?;

@@ -158,6 +158,9 @@ pub struct MainWindowUi {
     keymap_revision: u64,
     /// What the Info View last showed, for headless reads (WP-2.24).
     info: InfoViewContent,
+    /// The Info View's text for the tuning selected in the browser, read
+    /// once for its path.
+    tuning_info: Option<(String, InfoViewContent)>,
     /// The field Edit Info Text opened in the Info View, while it's open
     /// (the Info View spec, R10).
     info_editing: Option<crate::info_text::InfoEditing>,
@@ -286,6 +289,7 @@ impl MainWindowUi {
             search_field: crate::search_field::SearchFieldUi::default(),
             keymap_revision: 0,
             info: InfoViewContent::default(),
+            tuning_info: None,
             info_editing: None,
             mixer_typing: false,
             menu_open: false,
@@ -423,6 +427,7 @@ impl MainWindowUi {
             }
             Effect::FocusArea(Area::Assistant) => self.assistant.focus_prompt(),
             Effect::FocusClipPanels => crate::main_panel::request_focus(ctx),
+            Effect::FocusTuning => crate::tuning_section::request_focus(ctx),
             Effect::RenameDevice(device) => {
                 // Spec: device-chains R10. Rename types the name in the
                 // title bar.
@@ -1170,6 +1175,15 @@ impl MainWindowUi {
             if self.window == WindowKind::Second && *el == Element::AssistantToggle {
                 continue;
             }
+            // Spec: tunings R16. A tuning of other than twelve notes hides
+            // the scale controls.
+            if matches!(
+                el,
+                Element::ScaleMode | Element::RootNote | Element::ScaleName
+            ) && shell.scales_hidden()
+            {
+                continue;
+            }
             // Spec: grooves R30. The Global Amount shows while the pool holds
             // a groove, and the layout has room for it.
             if *el == Element::GlobalAmount && rect.width() <= 0.0 {
@@ -1631,7 +1645,32 @@ impl MainWindowUi {
         self.info = item
             .or_else(|| crate::search_field::info(shell))
             .or_else(|| crate::tool_panel::take_info(ui.ctx()))
+            .or_else(|| crate::tuning_section::take_info(ui.ctx()))
             .unwrap_or_else(|| info_content(self.hovered.or(self.other_hovered), shell, keymap));
+        // Spec: tunings R26. With the pointer over nothing, a tuning
+        // selected in the browser shows its description.
+        if self.info.title.is_empty()
+            && let Some(path) = shell.browser_view().selected_tuning()
+        {
+            if self
+                .tuning_info
+                .as_ref()
+                .is_none_or(|(known, _)| *known != path)
+            {
+                let (title, body) = bl_shell::browser::tunings::info(&path);
+                self.tuning_info = Some((
+                    path,
+                    InfoViewContent {
+                        title,
+                        body,
+                        shortcut: None,
+                    },
+                ));
+            }
+            if let Some((_, content)) = &self.tuning_info {
+                self.info = content.clone();
+            }
+        }
         if self.info.title.is_empty() {
             return;
         }

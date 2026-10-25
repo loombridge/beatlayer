@@ -31,6 +31,7 @@ pub fn kind_text(kind: ItemKind, clip: Option<ClipFileKind>) -> &'static str {
         ItemKind::Set => "Beatlayer Set",
         ItemKind::Preset => "Device Preset",
         ItemKind::ChordBank => "Chord Bank",
+        ItemKind::Tuning => "Tuning",
         ItemKind::Groove => "Groove",
         ItemKind::Plugin => "Plug-In",
         ItemKind::Device => "Device",
@@ -118,7 +119,8 @@ impl BrowserView {
         }
         let mut details = ItemDetails::default();
         let path = Path::new(&item.path);
-        let on_disk = !matches!(item.kind, ItemKind::Plugin | ItemKind::Device);
+        let on_disk = !matches!(item.kind, ItemKind::Plugin | ItemKind::Device)
+            && !item.path.starts_with(super::tunings::BUNDLED_PREFIX);
         for column in &self.columns.shown {
             match column {
                 Column::DateModified | Column::Size if on_disk => {

@@ -282,8 +282,12 @@ impl Shell {
     /// says it. `None` if the set has no such device.
     #[must_use]
     pub fn device_display(&self, device: bl_model::DeviceId) -> Option<bl_model::DeviceDisplay> {
-        let device = self.editor.document().device(device)?;
-        Some(self.devices.display(device))
+        let doc = self.editor.document();
+        let device = doc.device(device)?;
+        Some(
+            self.devices
+                .display(device, crate::devices::followed_tuning(doc, device.id)),
+        )
     }
 
     /// Runs a Device View command and carries out what it asks of the rest

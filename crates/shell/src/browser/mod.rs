@@ -36,6 +36,7 @@ pub mod listing;
 pub mod places;
 pub mod preview;
 pub mod tags;
+pub mod tunings;
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -1767,6 +1768,14 @@ impl BrowserView {
             self.cursor = self.selected.last().and_then(|path| self.position_of(path));
             return;
         }
+        if label == Label::Tunings {
+            // Spec: tunings R25. Beatlayer's own tunings, then the files in
+            // the places.
+            let items = self.tuning_rows(&tags, &selection, &builtin);
+            self.rows = Rows::Items(items);
+            self.cursor = self.selected.last().and_then(|path| self.position_of(path));
+            return;
+        }
         if label == Label::PlugIns {
             let items = self.plugin_rows();
             let items = items
@@ -1942,6 +1951,64 @@ impl BrowserView {
             self.rows = Rows::Items(items);
         }
         self.cursor = self.selected.last().and_then(|path| self.position_of(path));
+    }
+
+    /// The Tunings label's rows (the tunings spec, R25): Beatlayer's own
+    /// tunings, then the `.scl` and `.ascl` files in the places, each by name
+    /// without its extension; a search matches those names.
+    fn tuning_rows(
+        &mut self,
+        tags: &[i64],
+        selection: &filter::Selection,
+        builtin: &filter::BuiltinIds,
+    ) -> Vec<Item> {
+        let (words, _, _) = self.search_terms();
+        let row = |path: String, name: String, folder: Option<String>| Item {
+            path,
+            name,
+            kind: ItemKind::Tuning,
+            depth: 0,
+            open: false,
+            folder,
+            format: None,
+            clip_kind: None,
+            details: None,
+            collections: Vec::new(),
+        };
+        let mut items: Vec<Item> = tunings::BUNDLED
+            .iter()
+            .filter(|(name, _)| {
+                let lower = name.to_lowercase();
+                words
+                    .iter()
+                    .all(|word| lower.contains(&word.to_lowercase()))
+            })
+            .map(|(name, _)| row(tunings::bundled_path(name), (*name).to_owned(), None))
+            .collect();
+        let snapshot = Arc::clone(self.index.snapshot());
+        let mut hits = self.search_hits(&snapshot, Scope::All, Some(ItemKind::Tuning));
+        self.sort_hits(&snapshot, &mut hits);
+        let searching = !self.search.trim().is_empty();
+        items.extend(hits.into_iter().map(|hit| {
+            let path = snapshot.path(hit);
+            row(
+                path.to_string_lossy().into_owned(),
+                listing::stem(&path),
+                searching.then(|| snapshot.folder_label(hit)),
+            )
+        }));
+        items.retain(|item| {
+            (tags.is_empty() || self.carries_all(&self.tag_key(&item.path), tags))
+                && self.item_passes(selection, builtin, item)
+        });
+        if items.is_empty() {
+            self.note = Some(if searching {
+                format!("Nothing matches \u{201c}{}\u{201d}.", self.search.trim())
+            } else {
+                "No tunings yet.".to_owned()
+            });
+        }
+        items
     }
 
     /// The Plug-Ins label's rows (spec: plugin-scanning R7 and R11): a
@@ -2633,6 +2700,18 @@ impl BrowserView {
         }
     }
 
+    /// The tuning selected, by its path, if one item is and it is that: a
+    /// bundled tuning or a `.scl` or `.ascl` file.
+    #[must_use]
+    pub fn selected_tuning(&self) -> Option<String> {
+        match self.selected.as_slice() {
+            [one] if listing::path_kind(one) == Some(ItemKind::Tuning) => {
+                Some(one.to_string_lossy().into_owned())
+            }
+            _ => None,
+        }
+    }
+
     /// The Stacks chord bank selected, if one file is and it is that.
     #[must_use]
     pub fn selected_chord_bank(&self) -> Option<PathBuf> {
@@ -2753,6 +2832,7 @@ impl BrowserView {
                     || self.selected_device().is_some()
                     || self.selected_sfz().is_some()
                     || self.selected_chord_bank().is_some()
+                    || self.selected_tuning().is_some()
                     || self.selected_groove().is_some()
             }
             ids::PREVIEW => {
@@ -2945,10 +3025,20 @@ impl BrowserView {
                 // type ID, and a Plug-Ins row by its key (plugin-scanning
                 // R11); neither is a path.
                 let is_device = |p: &str| device_by_id(p).is_some();
+                // One of Beatlayer's own tunings is named by its row's path,
+                // `tunings:/` and its name (the tunings spec, R25).
+                let is_bundled = |p: &str| {
+                    p.strip_prefix(tunings::BUNDLED_PREFIX)
+                        .is_some_and(|name| tunings::BUNDLED.iter().any(|(own, _)| *own == name))
+                };
                 let paths = paths
                     .iter()
                     .map(|p| {
-                        if is_device(p) || self.is_plugin_row(p) || self.is_set_row(p) {
+                        if is_device(p)
+                            || is_bundled(p)
+                            || self.is_plugin_row(p)
+                            || self.is_set_row(p)
+                        {
                             Ok(PathBuf::from(p))
                         } else {
                             absolute(p)
@@ -2959,6 +3049,7 @@ impl BrowserView {
                     let name = p.to_string_lossy();
                     !p.exists()
                         && !is_device(&name)
+                        && !is_bundled(&name)
                         && !self.is_plugin_row(&name)
                         && !self.is_set_row(&name)
                 }) {

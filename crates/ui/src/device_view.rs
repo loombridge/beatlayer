@@ -992,9 +992,23 @@ impl DeviceViewUi {
         events: &mut Vec<UiEvent>,
     ) {
         let id = control_id(frame.id, "title_switch");
-        let response = ui.interact(rect, id, Sense::click());
-        crate::focus::register(ui.ctx(), id, Area::Detail, None);
-        if response.clicked() || (response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter))) {
+        let enabled = !switch.disabled;
+        let response = ui.interact(
+            rect,
+            id,
+            if enabled {
+                Sense::click()
+            } else {
+                Sense::hover()
+            },
+        );
+        if enabled {
+            crate::focus::register(ui.ctx(), id, Area::Detail, None);
+        }
+        if enabled
+            && (response.clicked()
+                || (response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter))))
+        {
             let value = if switch.on { 0.0 } else { 1.0 };
             invoke(
                 events,
@@ -1008,13 +1022,23 @@ impl DeviceViewUi {
         let r = rect.width() / 2.0;
         let face = if switch.on {
             c.accent.0
-        } else if response.hovered() {
+        } else if response.hovered() && enabled {
             c.control_hover.0
         } else {
             c.window.0
         };
-        painter.circle_filled(centre, r, face);
-        let ink = if switch.on {
+        painter.circle_filled(
+            centre,
+            r,
+            if enabled {
+                face
+            } else {
+                face.gamma_multiply(0.55)
+            },
+        );
+        let ink = if !enabled {
+            c.pending.0
+        } else if switch.on {
             c.accent_text.0
         } else {
             c.text_dim.0
@@ -1034,7 +1058,7 @@ impl DeviceViewUi {
         focus_ring(ui, theme, rect, &response);
         let name = switch.name.to_owned();
         let on = switch.on;
-        response.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, true, on, &name));
+        response.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, enabled, on, &name));
         ui.ctx().accesskit_node_builder(id, |node| {
             node.set_role(Role::Switch);
             node.set_label(switch.name.to_owned());

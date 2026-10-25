@@ -160,7 +160,8 @@ impl Shell {
                         .document()
                         .device(*device)
                         .and_then(|device| device.params.get(&CHORD_USE_SCALE).copied())
-                        .is_some_and(|on| on >= 0.5);
+                        .is_some_and(|on| on >= 0.5)
+                        && !self.scales_hidden();
                     let scale = if degrees {
                         set_scale
                     } else {

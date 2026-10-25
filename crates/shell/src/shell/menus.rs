@@ -207,6 +207,7 @@ impl Shell {
             ids::VIEW_TOGGLE_SECOND_WINDOW => Some(self.second.open),
             ids::VIEW_TOGGLE_BROWSER => Some(self.browser_of(self.acting_window())),
             ids::VIEW_TOGGLE_FULL_HEIGHT_BROWSER => Some(self.browser_view.full_height()),
+            ids::VIEW_TUNING_SECTION => Some(self.tuning_section),
             bl_shell_spec::groove::VIEW_TOGGLE_GROOVE_POOL => Some(self.groove_pool.shown),
             ids::VIEW_TOGGLE_CLIP_VIEW => Some(self.detail_of(self.acting_window()).clip_shown()),
             ids::VIEW_TOGGLE_DEVICE_VIEW => {

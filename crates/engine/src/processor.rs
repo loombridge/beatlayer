@@ -282,6 +282,8 @@ pub struct Processor {
     groove_amount: f32,
     /// The set's current scale (the scales spec, R9).
     scale: Scale,
+    /// Whether the set's tuning hides the scales (the tunings spec, R16).
+    scales_hidden: bool,
     /// A jump waiting for the next line of the global launch quantisation
     /// (the transport spec, R22).
     pending_locate: Option<PendingLocate>,
@@ -369,6 +371,7 @@ impl Processor {
             song_start: None,
             groove_amount: 1.0,
             scale: Scale::default(),
+            scales_hidden: false,
             pending_locate: None,
             punch: Punch::default(),
             punch_frames: PunchFrames::default(),
@@ -1050,6 +1053,8 @@ impl Processor {
             }
             // Spec: scales R15
             TransportCommand::SetScale(scale) => self.scale = scale,
+            // Spec: tunings R16
+            TransportCommand::SetScalesHidden(hidden) => self.scales_hidden = hidden,
             TransportCommand::SetPunch(punch) => {
                 self.punch = punch;
                 self.update_loop_frames();
@@ -1833,6 +1838,7 @@ impl Processor {
                         session: &self.session_playback,
                         groove_amount: self.groove_amount,
                         set_scale: self.scale,
+                        scales_hidden: self.scales_hidden,
                         scale: ScaleRuns::of(self.scale),
                     },
                 );

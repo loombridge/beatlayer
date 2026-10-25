@@ -133,6 +133,7 @@ mod time_editing;
 mod track_devices;
 mod transport;
 mod tunings;
+mod tunings_browser;
 mod undo_history;
 mod warping;
 mod whole_tracks;

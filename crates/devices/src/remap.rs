@@ -9,7 +9,7 @@ use bl_engine::{DeviceType, NoteBuffer, NoteEvent, NoteKind, Registry};
 use bl_model::{DeviceDescription, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
 
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
-use crate::midi_fx::{Key, Router, scale_choices, scale_named, value};
+use crate::midi_fx::{Key, Router, scale_choices, scale_named, use_current_scale, value};
 
 /// The Scale device type's id.
 pub const REMAP: &str = "beatlayer.remap";
@@ -144,7 +144,8 @@ impl Remap {
     /// scale's Scale Mode off (the scale-map spec, R12).
     fn grid(audio: &Audio<'_, '_>, params: &ParamBank, offset: u32) -> Option<Grid> {
         let lowest = value(params, LOWEST) as i32;
-        let (base, named) = if value(params, USE_SCALE) >= 0.5 {
+        let use_scale = use_current_scale(audio, params, USE_SCALE);
+        let (base, named) = if use_scale {
             let scale = audio.scale_at(offset);
             (i32::from(scale.root), scale.enabled.then_some(scale.name))
         } else {
@@ -153,7 +154,7 @@ impl Remap {
                 scale_named(value(params, SCALE_NAME) as usize),
             )
         };
-        if value(params, USE_SCALE) >= 0.5 && named.is_none() {
+        if use_scale && named.is_none() {
             return None;
         }
         Some(Grid {

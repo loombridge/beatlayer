@@ -557,6 +557,7 @@ impl DeviceFrame {
             param: params[index].id,
             name: &params[index].name,
             on: panel.value(index) >= 0.5,
+            disabled: panel.locked.contains(&params[index].id),
         })
     }
 
@@ -636,6 +637,9 @@ pub struct TitleSwitch<'a> {
     pub name: &'a str,
     /// Whether it's on.
     pub on: bool,
+    /// Whether it can't be changed now: the set's tuning hides the scales
+    /// (the tunings spec, R16).
+    pub disabled: bool,
 }
 
 /// One of a device's own items in its Show Options menu: a switch its type

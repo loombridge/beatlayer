@@ -35,8 +35,9 @@ pub fn handles(id: &str) -> bool {
 #[serde(deny_unknown_fields)]
 pub struct LoadArgs {
     /// The `.scl` or `.ascl` file to read, absolute or relative to the
-    /// app's working directory. The tuning is named after the file, without
-    /// its extension.
+    /// app's working directory, or the path of one of Beatlayer's own
+    /// tunings, `tunings:/` and its name. The tuning is named after the
+    /// file, without its extension.
     pub path: String,
     /// Whether every note of the MIDI clips on tracks that play the tuning
     /// moves to the key whose new pitch is nearest the pitch it had. Left

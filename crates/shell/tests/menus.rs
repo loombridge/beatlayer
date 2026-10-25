@@ -142,6 +142,9 @@ fn every_shell_command_is_on_a_menu_or_a_control() {
         // The Display & Input page's Outline View in Focus (the
         // accessibility spec, R7).
         commands::SETTINGS_SET_OUTLINE_VIEW_IN_FOCUS,
+        // Permanent Scrub Areas, a switch on Display & Input (the time editing
+        // spec, R26).
+        commands::SETTINGS_SET_PERMANENT_SCRUB_AREAS,
         commands::AUDIO_DEVICES,
         commands::AUDIO_STATUS,
         commands::AUDIO_CONFIGURE,

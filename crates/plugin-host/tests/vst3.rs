@@ -585,3 +585,176 @@ fn a_vst3_parameter_takes_the_played_value() {
     let stopped = run(node.as_mut(), &[1.0; FRAMES], &[], &[]);
     assert!(stopped.channels[0].iter().all(|s| *s == 0.5));
 }
+
+/// A fresh file for the test plug-in's log, which it reads from the
+/// environment when it is first used: each test runs in a process of its own.
+fn plugin_log(name: &str) -> std::path::PathBuf {
+    let path = std::env::temp_dir().join(format!("bl-t304-{name}-{}.log", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    // SAFETY: nothing reads the environment concurrently, and the plug-in
+    // reads this when it first logs.
+    unsafe { std::env::set_var(bl_test_vst3::LOG_VAR, &path) };
+    path
+}
+
+fn logged(path: &std::path::Path) -> Vec<String> {
+    std::fs::read_to_string(path)
+        .unwrap_or_default()
+        .lines()
+        .map(str::to_owned)
+        .collect()
+}
+
+// Spec: vst3-hosting R2
+#[test]
+fn a_component_a_dropped_node_never_took_is_activated_for_the_next_node() {
+    let host = Vst3Host::new();
+    host.load(vst3_bundle()).unwrap();
+    let factory = host.factory();
+    let device = vst3_device(1, &[(bl_test_vst3::GAIN, 0.5)]);
+    // The first node is activated, then dropped before it runs a block:
+    // the component sits in its queue.
+    let first = factory.create(&device, &config()).expect("a node");
+    assert!(host.status(device.id).unwrap().active);
+    drop(first);
+    let mut second = factory.create(&device, &config()).expect("a node");
+    let out = run(second.as_mut(), &[1.0; FRAMES], &[], &[]);
+    assert!(
+        out.channels[0].iter().all(|s| *s == 0.5),
+        "{:?}",
+        out.channels[0]
+    );
+
+    // And the device can still be let go of: its plug-in is torn down.
+    drop(second);
+    host.retain(&Default::default());
+    host.idle();
+    assert!(host.status(device.id).is_none());
+}
+
+// Spec: vst3-hosting R3
+#[test]
+fn a_value_reaches_the_plugin_as_its_controller_maps_it() {
+    // SAFETY: the plug-in reads this when its parameters are described.
+    unsafe { std::env::set_var(bl_test_vst3::SKEWED_VAR, "1") };
+    // The gain is a square of its normalized value: 0.5 is a normalized 0.5
+    // here, but a linear map would send 0.25.
+    let (host, mut node) = running(&[(bl_test_vst3::GAIN, 0.5)]);
+    let out = run(node.as_mut(), &[1.0; FRAMES], &[], &[]);
+    assert!(
+        out.channels[0].iter().all(|s| *s == 0.5),
+        "{:?}",
+        out.channels[0]
+    );
+
+    // So does an automated change, on its frame.
+    let out = run(
+        node.as_mut(),
+        &[1.0; FRAMES],
+        &[set(10, bl_test_vst3::GAIN, 1.28)],
+        &[],
+    );
+    assert!(out.channels[0][..10].iter().all(|s| *s == 0.5));
+    for sample in &out.channels[0][10..] {
+        assert!((sample - 1.28).abs() < 1e-3, "{sample}");
+    }
+
+    // And the controller is told the same value, not a linear one.
+    host.idle();
+    let status = host.status(vst3_device(1, &[]).id).unwrap();
+    let (_, gain) = status
+        .values
+        .iter()
+        .find(|(id, _)| *id == ParamId(bl_test_vst3::GAIN))
+        .unwrap();
+    assert!((gain - 1.28).abs() < 1e-3, "{:?}", status.values);
+}
+
+// Spec: vst3-hosting R6
+#[test]
+fn the_component_and_the_controller_are_connected_both_ways_and_disconnected_both_ways() {
+    let log = plugin_log("connections");
+    let (host, node) = running(&[]);
+    let lines = logged(&log);
+    for call in ["connect:component", "connect:controller"] {
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.starts_with(&format!("call={call} "))),
+            "{lines:?}"
+        );
+    }
+    drop(node);
+    host.retain(&Default::default());
+    host.idle();
+    let lines = logged(&log);
+    for call in ["disconnect:component", "disconnect:controller"] {
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.starts_with(&format!("call={call} "))),
+            "{lines:?}"
+        );
+    }
+}
+
+/// How many channels the test plug-in's input bus `bus` was given in the
+/// blocks it processed, and whether the host activated it.
+fn bus_lines(lines: &[String], bus: usize) -> (Vec<String>, Vec<String>) {
+    let channels = |what: &str| {
+        lines
+            .iter()
+            .filter(|l| l.contains(&format!("{what}:in{bus} ")))
+            .map(|l| l.split("value=").nth(1).unwrap().to_owned())
+            .collect()
+    };
+    (channels("bus"), channels("bus-active"))
+}
+
+// Spec: vst3-hosting R2
+#[test]
+fn every_bus_is_given_the_channels_it_has_or_is_left_inactive() {
+    let log = plugin_log("aux-buses");
+    // SAFETY: the plug-in reads this when it describes its buses.
+    unsafe { std::env::set_var(bl_test_vst3::BUSES_VAR, "aux") };
+    let (_host, mut node) = running(&[]);
+    run(node.as_mut(), &[1.0; FRAMES], &[], &[]);
+    let lines = logged(&log);
+    // The main bus and three auxiliary ones fill the eight channels the
+    // node feeds, each with all its channels. The fourth doesn't fit, so
+    // it isn't activated, rather than active and fed none.
+    for bus in 0..4 {
+        assert_eq!(
+            bus_lines(&lines, bus),
+            (vec!["2".to_owned()], vec!["1".to_owned()]),
+            "bus {bus}"
+        );
+    }
+    assert_eq!(
+        bus_lines(&lines, 4),
+        (vec!["0".to_owned()], vec!["0".to_owned()]),
+        "{lines:?}"
+    );
+}
+
+// Spec: vst3-hosting R12
+#[test]
+fn a_plugin_whose_main_bus_has_more_channels_than_the_node_feeds_is_refused() {
+    let log = plugin_log("wide-bus");
+    // SAFETY: as above.
+    unsafe { std::env::set_var(bl_test_vst3::BUSES_VAR, "wide") };
+    let (host, mut node) = running(&[(bl_test_vst3::GAIN, 0.5)]);
+    let out = run(node.as_mut(), &[1.0; FRAMES], &[], &[]);
+    // It never gets a block with a short bus: its device passes its input
+    // through and says why.
+    assert!(out.channels[0].iter().all(|s| *s == 1.0));
+    let status = host.status(vst3_device(1, &[]).id).unwrap();
+    assert!(!status.active);
+    assert!(
+        status
+            .failure
+            .is_some_and(|why| why.contains("12 channels")),
+        "refusal reported"
+    );
+    assert!(!logged(&log).iter().any(|l| l.contains("bus:in")));
+}

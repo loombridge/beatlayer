@@ -2791,6 +2791,19 @@ impl BrowserView {
         (!rows.is_empty() && !several_devices).then(|| (set.unwrap_or_default(), rows))
     }
 
+    /// The one set or DAWproject file selected, which Enter or a double-click
+    /// opens or imports (the DAWproject spec, R84).
+    #[must_use]
+    pub fn selected_openable(&self) -> Option<&Path> {
+        let [path] = self.selected.as_slice() else {
+            return None;
+        };
+        let kind = path
+            .file_name()
+            .and_then(|n| file_kind(&n.to_string_lossy()));
+        matches!(kind, Some(ItemKind::Set | ItemKind::DawProject)).then_some(path)
+    }
+
     /// The selected clip files, in the content pane's order.
     pub(crate) fn selected_clip_files(&self) -> Vec<PathBuf> {
         self.selected_of(ItemKind::Clip)
@@ -2826,6 +2839,7 @@ impl BrowserView {
         match id {
             ids::LOAD_SELECTED => {
                 self.selected_set_rows().is_some()
+                    || self.selected_openable().is_some()
                     || !self.selected_audio().is_empty()
                     || !self.selected_clip_files().is_empty()
                     || self.selected_plugin().is_some()

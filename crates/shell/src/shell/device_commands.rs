@@ -277,6 +277,7 @@ impl Shell {
                 zoom,
                 auto_hide,
                 windows_shown: self.plug_in_windows,
+                look: &self.prefs.look,
             },
         );
         let outcome = result.map_err(|error| device_error(id, error))?;

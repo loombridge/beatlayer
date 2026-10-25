@@ -132,6 +132,25 @@ pub struct Theme {
 }
 
 impl Theme {
+    /// The colour of swatch `index` (0 to 69) of the palette of 5 rows of 14:
+    /// the top row is the theme's track colours, the second and third mix
+    /// 30 % and 60 % of the way towards white, the fourth and fifth 30 % and
+    /// 50 % towards black (the themes spec, R15; the racks spec, R26).
+    #[must_use]
+    pub fn swatch(&self, index: u8) -> Color32 {
+        let palette = &self.colors.track_palette;
+        let column = usize::from(index) % TRACK_COLOURS;
+        let row = usize::from(index) / TRACK_COLOURS;
+        let base = palette[column % palette.len()].0;
+        let mix: f32 = [0.0, 0.3, 0.6, -0.3, -0.5][row.min(4)];
+        let towards = if mix < 0.0 {
+            Color32::BLACK
+        } else {
+            Color32::WHITE
+        };
+        base.lerp_to_gamma(towards, mix.abs())
+    }
+
     /// Reads a theme file.
     ///
     /// # Errors

@@ -43,6 +43,8 @@ pub struct ClipSpan {
     pub id: ClipId,
     /// Whether it's deactivated.
     pub muted: bool,
+    /// Its colour, a swatch (the themes spec, R18).
+    pub colour: u8,
     /// Its media, for an audio clip.
     pub media: Option<ContentHash>,
 }
@@ -85,6 +87,7 @@ impl TrackClips {
                 origin: clip.origin(tempo).get(),
                 id: clip.id,
                 muted: clip.mute,
+                colour: clip.colour.unwrap_or_default(),
                 media: match &clip.data {
                     ClipData::Audio(audio) => Some(audio.media),
                     ClipData::Midi(_) => None,
@@ -281,16 +284,12 @@ pub struct LanesInput<'a> {
     pub grid_step: Step,
 }
 
-/// The colour a track and its clips take: Beatlayer's palette, in turn by
-/// the track's ID, so a new track takes the next colour and keeps it. The
-/// document has no colours yet (arrangement-view R3).
+/// The colour a track is drawn in: its swatch in the theme's palette
+/// (arrangement-view R3; the themes spec, R18).
 #[must_use]
-pub fn track_colour(theme: &Theme, track: TrackId) -> Color32 {
-    let palette = &theme.colors.track_palette;
-    if palette.is_empty() {
-        return theme.colors.control.0;
-    }
-    palette[(track.0.get() % palette.len() as u64) as usize].0
+pub fn track_colour(theme: &Theme, doc: &Document, track: TrackId) -> Color32 {
+    doc.track(track)
+        .map_or(theme.colors.control.0, |held| theme.swatch(held.colour()))
 }
 
 fn rgba(colour: Color32) -> [u8; 4] {
@@ -466,7 +465,7 @@ pub fn build_lanes(
             let fill = if selected_lanes.contains(&lane.lane) {
                 colors.lane_selected.0
             } else {
-                track_colour(theme, row.track).gamma_multiply(0.12)
+                track_colour(theme, doc, row.track).gamma_multiply(0.12)
             };
             rect(
                 out,
@@ -499,7 +498,6 @@ pub fn build_lanes(
     let left_limit = lanes.left() - 2.0;
     let right_limit = lanes.right() + 2.0;
     for row in &rows[visible] {
-        let track_colour = track_colour(theme, row.track);
         // The main lane, then its take lanes (comping R23): each lane's
         // clips are drawn alike.
         let main = std::iter::once((None, row_y(row), row.height, index.track(row.track)));
@@ -523,7 +521,7 @@ pub fn build_lanes(
                 let colour = if span.muted {
                     colors.clip_muted.0
                 } else {
-                    track_colour
+                    theme.swatch(span.colour)
                 };
                 let inset = if h >= 6.0 { px } else { 0.0 };
                 let (top, bottom) = (y0 + inset, y0 + h - inset.max(px));
@@ -863,7 +861,6 @@ pub fn build_overview(
         };
         let y0 = strip.top() + row_height * i as f32;
         let y1 = (y0 + row_height).max(y0 + 0.5);
-        let colour = track_colour(theme, row.track);
         for clip in &clips.clips {
             let x0 = strip.left() + (clip.start as f64 / ticks_per_point) as f32;
             let x1 = (strip.left() + (clip.end as f64 / ticks_per_point) as f32).max(x0 + 0.5);
@@ -872,7 +869,7 @@ pub fn build_overview(
                 color: rgba(if clip.muted {
                     theme.colors.clip_muted.0
                 } else {
-                    colour
+                    theme.swatch(clip.colour)
                 }),
             });
         }

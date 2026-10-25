@@ -647,6 +647,7 @@ impl Shell {
             launch: bl_model::ClipLaunch::default(),
             scale: bl_model::Scale::default(),
             groove: None,
+            colour: None,
         };
         self.editor.begin(STEP);
         let outcome = (|| -> Result<(), ShellError> {
@@ -677,8 +678,9 @@ impl Shell {
                     clip: midi_clip,
                 }),
             }
-            .map(drop)
-            .map_err(|error| failed(id, error))
+            .map_err(|error| failed(id, error))?;
+            crate::colours::colour_new(&mut self.editor, &self.prefs.look, &[track], &[clip])
+                .map_err(|error| failed(id, error))
         })();
         match outcome {
             Ok(()) => {

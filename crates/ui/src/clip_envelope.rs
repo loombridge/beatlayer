@@ -29,10 +29,12 @@ use egui::{
 use serde_json::{Value, json};
 
 use crate::arrangement::automation::{
-    AutomationDevice, BREAKPOINT_GRAB, BREAKPOINT_SIZE, CURVE_PER_POINT, FINE_VALUE, SEGMENT_GRAB,
-    belongs_to, clip_choices, control_choices, default_target, device_choices, device_of,
-    mark_controls, mark_devices, target_label,
+    AutomationDevice, BREAKPOINT_GRAB, BREAKPOINT_SIZE, BoxCommands, CURVE_PER_POINT, FINE_VALUE,
+    Handle, NEIGHBOUR_GRAB, SEGMENT_GRAB, SEGMENT_ON, belongs_to, box_command, clip_choices,
+    control_choices, default_target, device_choices, device_of, drag_box, mark_controls,
+    mark_devices, paint_handles_at, target_label,
 };
+use crate::arrangement::context_menu::shape_button;
 use crate::arrangement::editing::EditKeys;
 use crate::clip_view::{grid_rect, paint_grid_lines, tick_at, x_of_tick};
 use crate::main_window::UiEvent;
@@ -146,6 +148,9 @@ enum Menu {
     Edit(Ticks),
     /// Add Value, on the line, at a position.
     Add(Ticks),
+    /// The time selection's: the shapes and Simplify Envelope (the clip
+    /// envelopes spec, R13), with Add Value too where the line is.
+    Selection(Option<Ticks>),
 }
 
 /// The editor's area: the note area's width, down to the footer.
@@ -206,6 +211,18 @@ fn gesture(events: &mut Vec<UiEvent>, phase: GesturePhase, id: &str, args: Value
     });
 }
 
+/// Selects the time between two positions in the editor, or lets the
+/// selection go where they are the same.
+fn select_time(events: &mut Vec<UiEvent>, clip: ClipId, from: Ticks, to: Ticks) {
+    let (start, end) = (from.min(to), from.max(to));
+    let args = if end > start {
+        json!({ "clip": clip, "start": start, "end": end })
+    } else {
+        json!({ "clip": clip })
+    };
+    invoke(events, bl_shell::clip_envelope_commands::SELECT_TIME, args);
+}
+
 /// What is under the pointer in the editor.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Hit {
@@ -229,9 +246,36 @@ struct Lane<'a> {
     /// The share that modulates nothing: 100 % for a level, 0 for the rest.
     rest: f64,
     envelope: Option<&'a Envelope>,
+    /// The time selected in the editor, if any (R12).
+    span: Option<(Ticks, Ticks)>,
+    /// The breakpoints that are selected: the time selection's, or the
+    /// selected segment's.
+    selected: Vec<Ticks>,
 }
 
 impl Lane<'_> {
+    /// The box round the time selection: the span across the envelope's
+    /// whole range (the automation editing spec, R14).
+    fn span_box(&self) -> Option<Rect> {
+        let (start, end) = self.span?;
+        Some(Rect::from_min_max(
+            pos2(
+                x_of_tick(self.rect, self.start, self.length, start),
+                self.rect.top(),
+            ),
+            pos2(
+                x_of_tick(self.rect, self.start, self.length, end),
+                self.rect.bottom(),
+            ),
+        ))
+    }
+
+    /// How far a point is from the envelope's line, if it has one there.
+    fn segment_distance(&self, pos: Pos2) -> Option<f32> {
+        let value = self.envelope?.value_at(self.at(pos))?;
+        Some((self.y_of_value(value) - pos.y).abs())
+    }
+
     /// The contents position under a point, 0 or later.
     fn at(&self, pos: Pos2) -> Ticks {
         tick_at(self.rect, self.start, self.length, pos.x).max(Ticks::ZERO)
@@ -279,7 +323,7 @@ impl Lane<'_> {
 }
 
 /// A drag in the editor.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 enum Drag {
     /// Moving a breakpoint to another position and value.
     Breakpoint {
@@ -287,6 +331,21 @@ enum Drag {
         at: Ticks,
         /// The value it had then, for finer (Shift) moves.
         value: f64,
+        /// Where the pointer went down.
+        from: Pos2,
+    },
+    /// Moving the selected breakpoints, or the breakpoints of a segment,
+    /// together (the automation editing spec, R2, R4).
+    Selected {
+        /// The breakpoints that move.
+        at: Vec<Ticks>,
+        /// Where the grabbed one was when the drag began.
+        grabbed: Ticks,
+        /// The value the grabbed one had then.
+        value: f64,
+        /// The positions of the envelope's other breakpoints, which the
+        /// drag snaps to (S-ENV-006's neighbours).
+        neighbours: Vec<Ticks>,
         /// Where the pointer went down.
         from: Pos2,
     },
@@ -299,10 +358,37 @@ enum Drag {
         /// Where the pointer went down.
         from: Pos2,
     },
+    /// Dragging a handle of the time selection's box, to stretch the
+    /// envelope in value or in time, or to skew it (R14 to R17).
+    Handle {
+        handle: Handle,
+        /// The span the box began with.
+        span: (Ticks, Ticks),
+    },
+    /// Selecting time, from where the pointer went down. View state, not a
+    /// gesture.
+    Select {
+        /// The position the pointer went down at.
+        from: Ticks,
+    },
 }
 
+impl Drag {
+    /// Whether the drag edits the set, as one gesture and one undo step.
+    fn edits(&self) -> bool {
+        !matches!(self, Self::Select { .. })
+    }
+}
+
+/// The commands a handle's drag in the editor runs.
+const EDITOR_BOX: BoxCommands = BoxCommands {
+    stretch_values: "clip.stretch_envelope_values",
+    stretch_time: "clip.stretch_envelope_time",
+    skew: "clip.skew_envelope",
+};
+
 /// The drag's command for the pointer at `pos`, measured from where the
-/// drag began.
+/// drag began; `None` for a drag that selects.
 #[expect(clippy::too_many_arguments, reason = "the drag's whole geometry")]
 fn drag_command(
     shell: &Shell,
@@ -310,18 +396,20 @@ fn drag_command(
     clip: ClipId,
     target: AutomationTarget,
     lane: &Lane<'_>,
-    drag: Drag,
+    drag: &Drag,
     pos: Pos2,
     modifiers: Modifiers,
-) -> (&'static str, Value) {
-    match drag {
+) -> Option<(&'static str, Value)> {
+    let snap_drag = |at: Ticks| {
+        shell
+            .arrangement()
+            .snap_drag(doc, at, EditKeys::from(modifiers).bypass)
+    };
+    Some(match drag {
         Drag::Breakpoint { at, value, from } => {
             let by = tick_at(lane.rect, lane.start, lane.length, pos.x)
                 - tick_at(lane.rect, lane.start, lane.length, from.x);
-            let to = shell
-                .arrangement()
-                .snap_drag(doc, at + by, EditKeys::from(modifiers).bypass)
-                .max(Ticks::ZERO);
+            let to = snap_drag(*at + by).max(Ticks::ZERO);
             let raw = lane.value_at(pos.y);
             // S-ENV-002: Shift drags the value in finer steps.
             let value = if modifiers.shift {
@@ -334,6 +422,56 @@ fn drag_command(
                 json!({ "clip": clip, "target": target, "at": at, "to": to, "value": value }),
             )
         }
+        Drag::Selected {
+            at,
+            grabbed,
+            value: old_value,
+            neighbours,
+            from,
+        } => {
+            let by = tick_at(lane.rect, lane.start, lane.length, pos.x)
+                - tick_at(lane.rect, lane.start, lane.length, from.x);
+            // Spec: automation-editing R3. Shift keeps the drag to the axis
+            // it started along, and makes a vertical one finer.
+            let vertical = modifiers.shift && (pos.y - from.y).abs() > (pos.x - from.x).abs();
+            let by = if vertical { Ticks::ZERO } else { by };
+            let snapped = snap_drag(*grabbed + by);
+            // The drag snaps to the positions of the breakpoints next to it.
+            let to = if vertical {
+                *grabbed
+            } else {
+                let x = |at: Ticks| x_of_tick(lane.rect, lane.start, lane.length, at);
+                neighbours
+                    .iter()
+                    .map(|at| (*at, f64::from((x(*at) - x(snapped)).abs())))
+                    .filter(|(_, away)| *away <= NEIGHBOUR_GRAB)
+                    .min_by(|(_, away), (_, other)| away.total_cmp(other))
+                    .map_or(snapped, |(at, _)| at)
+            };
+            let raw = lane.value_at(pos.y);
+            // S-ENV-002: Shift drags the value in finer steps; along the
+            // time axis it keeps the value where it was.
+            let value = if vertical {
+                old_value + (raw - old_value) * FINE_VALUE
+            } else if modifiers.shift {
+                *old_value
+            } else {
+                raw
+            };
+            // Every breakpoint that moves goes by the same time and the
+            // same share of the envelope's travel (R2).
+            let share = lane.scale.position(value) - lane.scale.position(*old_value);
+            (
+                "clip.move_envelope_breakpoints",
+                json!({
+                    "clip": clip,
+                    "target": target,
+                    "at": at,
+                    "by": to - *grabbed,
+                    "share": share,
+                }),
+            )
+        }
         Drag::Curve { at, bend, from } => {
             let bend = (bend + f64::from(from.y - pos.y) * CURVE_PER_POINT).clamp(-1.0, 1.0);
             (
@@ -341,7 +479,16 @@ fn drag_command(
                 json!({ "clip": clip, "target": target, "at": at, "bend": bend }),
             )
         }
-    }
+        Drag::Handle { handle, span } => {
+            let at = snap_drag(lane.at(pos));
+            let shape = drag_box(*handle, *span, lane.rect, at, pos, modifiers);
+            let (id, mut args) = box_command(*handle, shape, modifiers.shift, EDITOR_BOX);
+            args["clip"] = json!(clip);
+            args["target"] = json!(target);
+            (id, args)
+        }
+        Drag::Select { .. } => return None,
+    })
 }
 
 /// The Envelopes tab's state between frames: the drag under way.
@@ -424,9 +571,17 @@ impl EnvelopeEditor {
                 midi: target.is_midi() || target.is_clip(),
                 rest: rest_of(target),
                 envelope,
+                span: shell.clip_view().envelope_time(clip.id),
+                selected: bl_shell::clip_envelope_edit::selected_breakpoints(
+                    doc,
+                    shell.clip_view(),
+                    clip.id,
+                    target,
+                ),
             };
             let time = ui.input(|i| i.time);
             self.paint(ui, theme, &lane, keys.as_ref(), time);
+            self.paint_handles(ui, shell, theme, &lane);
             if let Some(keys) = &keys {
                 focused = self.paint_keys(ui, shell, theme, frame, &lane, keys);
                 self.read_keys(ui, shell, frame, &response, keys, events);
@@ -440,6 +595,33 @@ impl EnvelopeEditor {
             });
         }
         self.footer(ui, shell, theme, frame, events);
+    }
+
+    /// Draws the handles of the time selection's box while the pointer is
+    /// over it or one is being dragged, and the outline of the box the drag
+    /// has made (R13; the automation editing spec, R14).
+    fn paint_handles(&self, ui: &Ui, shell: &Shell, theme: &Theme, lane: &Lane<'_>) {
+        let Some(rect) = lane.span_box() else {
+            return;
+        };
+        let modifiers = ui.input(|i| i.modifiers);
+        let outline = match (&self.drag, ui.input(|i| i.pointer.interact_pos())) {
+            (Some(Drag::Handle { handle, span }), Some(pos)) => {
+                let at = shell.arrangement().snap_drag(
+                    shell.editor().document(),
+                    lane.at(pos),
+                    EditKeys::from(modifiers).bypass,
+                );
+                Some(
+                    drag_box(*handle, *span, lane.rect, at, pos, modifiers)
+                        .corners(lane.rect, |at| {
+                            x_of_tick(lane.rect, lane.start, lane.length, at)
+                        }),
+                )
+            }
+            _ => None,
+        };
+        paint_handles_at(&ui.painter_at(lane.rect), ui, rect, theme, outline);
     }
 
     /// Draws the insert marker with the value beside it, or what is being
@@ -542,13 +724,19 @@ impl EnvelopeEditor {
         if response.secondary_clicked()
             && let Some(pos) = response.interact_pointer_pos()
         {
+            let add = || {
+                shell
+                    .arrangement()
+                    .snap_drag(shell.editor().document(), lane.at(pos), false)
+            };
+            let inside = lane.span_box().is_some_and(|rect| rect.contains(pos));
             self.menu = match lane.hit(pos) {
                 Hit::Breakpoint(at) => Some(Menu::Edit(at)),
-                Hit::Segment(_) => Some(Menu::Add(shell.arrangement().snap_drag(
-                    shell.editor().document(),
-                    lane.at(pos),
-                    false,
-                ))),
+                // Spec: clip-envelopes R13. Right-clicking the time selection
+                // offers the shapes and Simplify Envelope.
+                Hit::Segment(_) if inside => Some(Menu::Selection(Some(add()))),
+                Hit::Empty if inside => Some(Menu::Selection(None)),
+                Hit::Segment(_) => Some(Menu::Add(add())),
                 Hit::Empty => None,
             };
         }
@@ -562,6 +750,26 @@ impl EnvelopeEditor {
                 json!({ "clip": clip, "target": target, "at": at }),
             )
         };
+        let add_value = |ui: &mut Ui, at: Ticks| {
+            if ui.button("Add Value").clicked() {
+                crate::envelope_keys::set_typed(
+                    ui.ctx(),
+                    Some(crate::envelope_keys::Typed {
+                        text: String::new(),
+                        add_at: Some(at),
+                        release: None,
+                    }),
+                );
+                ui.close();
+            }
+        };
+        // The menu acts on what it was opened on, whatever has the
+        // keyboard.
+        let contexts = [
+            bl_commands::Context::ClipView,
+            bl_commands::Context::Envelope,
+            bl_commands::Context::Global,
+        ];
         response.context_menu(|ui| match menu {
             Menu::Edit(at) => {
                 if ui.button("Edit Value").clicked() {
@@ -578,17 +786,34 @@ impl EnvelopeEditor {
                     ui.close();
                 }
             }
-            Menu::Add(at) => {
-                if ui.button("Add Value").clicked() {
-                    crate::envelope_keys::set_typed(
-                        ui.ctx(),
-                        Some(crate::envelope_keys::Typed {
-                            text: String::new(),
-                            add_at: Some(at),
-                            release: None,
-                        }),
-                    );
+            Menu::Add(at) => add_value(ui, at),
+            Menu::Selection(add) => {
+                for shapes in [&bl_model::Shape::ALL[..5], &bl_model::Shape::ALL[5..]] {
+                    ui.horizontal(|ui| {
+                        for shape in shapes {
+                            shape_button(
+                                ui,
+                                shell,
+                                *shape,
+                                bl_shell::clip_envelope_commands::INSERT_SHAPE,
+                                &contexts,
+                                events,
+                            );
+                        }
+                    });
+                }
+                let simplify = bl_shell::clip_envelope_commands::SIMPLIFY;
+                let enabled = shell.can_invoke_in(simplify, &json!({}), &contexts);
+                if ui
+                    .add_enabled(enabled, egui::Button::new("Simplify Envelope"))
+                    .clicked()
+                {
+                    invoke(events, simplify, json!({ "clip": clip }));
                     ui.close();
+                }
+                if let Some(at) = add {
+                    ui.separator();
+                    add_value(ui, at);
                 }
             }
         });
@@ -604,6 +829,10 @@ impl EnvelopeEditor {
     ) {
         let painter = ui.painter_at(lane.rect);
         let colours = &theme.colors;
+        // Spec: clip-envelopes R12. The time selection is shaded.
+        if let Some(rect) = lane.span_box() {
+            painter.rect_filled(rect, 0.0, colours.time_selection.0.gamma_multiply(0.25));
+        }
         // Spec: modulation R9: the left axis reads in percent, and a MIDI
         // controller's in its own numbers.
         let (low, high) = (lane.scale.value(0.0), lane.scale.value(1.0));
@@ -657,7 +886,13 @@ impl EnvelopeEditor {
                 keys.and_then(|keys| {
                     crate::envelope_keys::breakpoint_colour(theme, point.at, keys, time)
                 })
-                .unwrap_or(colours.text.0),
+                // Spec: automation-editing R2. A selected breakpoint is drawn
+                // in the selection colour.
+                .unwrap_or(if lane.selected.contains(&point.at) {
+                    colours.time_selection.0
+                } else {
+                    colours.text.0
+                }),
             );
         }
     }
@@ -685,54 +920,43 @@ impl EnvelopeEditor {
         if response.drag_started()
             && let Some(press) = ui.input(|i| i.pointer.press_origin())
         {
-            self.drag = match lane.hit(press) {
-                Hit::Breakpoint(at) => Some(Drag::Breakpoint {
-                    at,
-                    value: lane
-                        .envelope
-                        .and_then(|envelope| envelope.point(at))
-                        .map_or(0.0, |point| point.value),
-                    from: press,
-                }),
-                Hit::Segment(at) if modifiers.alt => Some(Drag::Curve {
-                    at,
-                    bend: lane
-                        .envelope
-                        .and_then(|envelope| envelope.point(at))
-                        .map_or(0.0, |point| point.bend),
-                    from: press,
-                }),
-                _ => None,
-            };
+            self.drag = self.begin(lane, press, modifiers, snap(press));
         }
         let pointer = response
             .interact_pointer_pos()
             .or_else(|| ui.input(|i| i.pointer.interact_pos()));
-        let step = |drag: Drag, pos: Pos2| {
+        let step = |drag: &Drag, pos: Pos2| {
             drag_command(shell, doc, clip, target, lane, drag, pos, modifiers)
         };
         if response.dragged()
-            && let (Some(drag), Some(pos)) = (self.drag, pointer)
+            && let (Some(drag), Some(pos)) = (&self.drag, pointer)
         {
-            let (id, args) = step(drag, pos);
-            gesture(events, GesturePhase::Update, id, args);
+            match (drag, step(drag, pos)) {
+                (_, Some((id, args))) => gesture(events, GesturePhase::Update, id, args),
+                // Spec: clip-envelopes R12. Dragging across the background
+                // selects the time dragged over.
+                (Drag::Select { from }, None) => {
+                    select_time(events, clip, *from, snap(pos));
+                }
+                _ => {}
+            }
         }
-        if self.drag.is_some() && ui.input(|i| i.key_pressed(Key::Escape)) {
-            self.drag = None;
+        if ui.input(|i| i.key_pressed(Key::Escape))
+            && self.drag.take().is_some_and(|drag| drag.edits())
+        {
             events.push(UiEvent::Gesture {
                 phase: GesturePhase::Cancel,
                 invocation: None,
             });
         }
         if response.drag_stopped() {
-            let last = match (self.drag, pointer) {
+            let last = match (&self.drag, pointer) {
                 (Some(drag), Some(pos)) => {
-                    let (id, args) = step(drag, pos);
-                    Some(Invocation::new(id, args))
+                    step(drag, pos).map(|(id, args)| Invocation::new(id, args))
                 }
                 _ => None,
             };
-            if self.drag.take().is_some() {
+            if self.drag.take().is_some_and(|drag| drag.edits()) {
                 events.push(UiEvent::Gesture {
                     phase: GesturePhase::Commit,
                     invocation: last,
@@ -777,17 +1001,124 @@ impl EnvelopeEditor {
                     json!({ "clip": clip, "target": target, "at": at }),
                 )),
                 // With Option (Alt) held the segment is being curved.
-                Hit::Segment(_) if !modifiers.alt => {
+                Hit::Segment(_) if modifiers.alt => None,
+                // Spec: automation-editing R4. Clicking near a segment but
+                // not on it, or Shift-clicking on it, selects the segment.
+                Hit::Segment(at)
+                    if modifiers.shift
+                        || lane.segment_distance(pos).unwrap_or(0.0) > SEGMENT_ON =>
+                {
+                    Some((
+                        bl_shell::clip_envelope_commands::SELECT_SEGMENT,
+                        json!({ "clip": clip, "at": at }),
+                    ))
+                }
+                Hit::Segment(_) => {
                     let at = snap(pos);
                     Some(breakpoint(at, value_on_line(at)))
                 }
-                _ => None,
+                // Clicking the background lets the selection go.
+                Hit::Empty if lane.span.is_some() || !lane.selected.is_empty() => Some((
+                    bl_shell::clip_envelope_commands::SELECT_TIME,
+                    json!({ "clip": clip }),
+                )),
+                Hit::Empty => None,
             }
         } else {
             None
         };
         if let Some((id, args)) = command {
             invoke(events, id, args);
+        }
+    }
+
+    /// What a press at `press` in the editor starts dragging, if anything: a
+    /// handle of the time selection's box, a breakpoint (with the selected
+    /// ones, if it is one), a segment (R4), or the background, which selects
+    /// time.
+    fn begin(
+        &self,
+        lane: &Lane<'_>,
+        press: Pos2,
+        modifiers: Modifiers,
+        pressed_at: Ticks,
+    ) -> Option<Drag> {
+        let point = |at: Ticks| lane.envelope.and_then(|envelope| envelope.point(at));
+        let neighbours = |moving: &[Ticks]| -> Vec<Ticks> {
+            lane.envelope
+                .map(|envelope| {
+                    envelope
+                        .points()
+                        .filter(|point| !moving.contains(&point.at))
+                        .map(|point| point.at)
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        let hit = lane.hit(press);
+        // Spec: automation-editing R14. A press on a handle of the time
+        // selection's box takes it, unless a breakpoint is there too.
+        if let (Some(rect), Some(span)) = (lane.span_box(), lane.span)
+            && !matches!(hit, Hit::Breakpoint(_))
+            && let Some(handle) = Handle::at(rect, press)
+        {
+            return Some(Drag::Handle { handle, span });
+        }
+        match hit {
+            // Spec: automation-editing R2. Dragging a selected breakpoint
+            // moves every selected breakpoint with it.
+            Hit::Breakpoint(at) if lane.selected.contains(&at) => Some(Drag::Selected {
+                at: lane.selected.clone(),
+                grabbed: at,
+                value: point(at).map_or(0.0, |point| point.value),
+                neighbours: neighbours(&lane.selected),
+                from: press,
+            }),
+            Hit::Breakpoint(at) => Some(Drag::Breakpoint {
+                at,
+                value: point(at).map_or(0.0, |point| point.value),
+                from: press,
+            }),
+            Hit::Segment(at) if modifiers.alt => Some(Drag::Curve {
+                at,
+                bend: point(at).map_or(0.0, |point| point.bend),
+                from: press,
+            }),
+            // Spec: automation-editing R4. Dragging a segment moves its two
+            // breakpoints, or the stretch of envelope the time selection
+            // covers when the segment lies inside it, with breakpoints at
+            // the selection's edges.
+            Hit::Segment(at) => {
+                let mut moving = if lane.selected.contains(&at) {
+                    lane.selected.clone()
+                } else {
+                    let mut pair = vec![at];
+                    pair.extend(
+                        lane.envelope
+                            .and_then(|envelope| envelope.points().find(|p| p.at > at))
+                            .map(|next| next.at),
+                    );
+                    pair
+                };
+                if let Some((start, end)) = lane.span
+                    && at >= start
+                    && at < end
+                {
+                    for edge in [start, end] {
+                        if !moving.contains(&edge) {
+                            moving.push(edge);
+                        }
+                    }
+                }
+                Some(Drag::Selected {
+                    grabbed: at,
+                    value: point(at).map_or(0.0, |point| point.value),
+                    neighbours: neighbours(&moving),
+                    at: moving,
+                    from: press,
+                })
+            }
+            Hit::Empty => Some(Drag::Select { from: pressed_at }),
         }
     }
 

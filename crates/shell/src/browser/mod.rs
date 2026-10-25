@@ -23,6 +23,7 @@
 //! The behaviour is in the browser spec.
 
 pub mod arrange;
+pub mod collections;
 pub mod columns;
 pub mod db;
 pub mod drop;
@@ -47,15 +48,16 @@ use bl_media::MediaStore;
 use bl_model::{Editor, TrackId};
 pub use bl_shell_spec::browser::Part;
 use bl_shell_spec::browser::{
-    self as ids, AddTagArgs, AddTagGroupArgs, AddToArrangementArgs, BrowserState, ClearFiltersArgs,
-    ClipFileKind, ColumnsState, DeleteTagArgs, FilterArgs, FocusArgs, FolderArgs, IndexState, Item,
-    ItemKind, ItemTag, Label, LabelInfo, MAX_PREVIEW_VOLUME, MoveLabelArgs, MoveTagArgs,
-    OpenFolderArgs, OpenPlaceArgs, PreviewArgs, PreviewState, QuickTag, RemoveLabelArgs,
-    RenameFileArgs, RenameLabelArgs, RenameTagArgs, SaveClipFileArgs, SaveClipFileResult,
-    ScrubPreviewArgs, SearchArgs, Section, SelectArgs, SetColumnsArgs, SetFilterGroupsArgs,
-    SetFilterViewArgs, SetLabelIconArgs, SetLabelShownArgs, SetPreviewArgs, SetRawArgs,
-    ShowFileArgs, ShowQuickTagsArgs, ShowTagEditorArgs, StateArgs, TagEditorRow, TagEditorRowKind,
-    TagGroupInfo, TagInfo, TagItemsArgs, TagSource, TagState, TaggedItem, TagsArgs, TagsState,
+    self as ids, AddTagArgs, AddTagGroupArgs, AddToArrangementArgs, BrowserState,
+    ClearCollectionsArgs, ClearFiltersArgs, ClipFileKind, ColumnsState, DeleteTagArgs, FilterArgs,
+    FocusArgs, FolderArgs, IndexState, Item, ItemKind, ItemTag, Label, LabelInfo,
+    MAX_PREVIEW_VOLUME, MoveLabelArgs, MoveTagArgs, OpenFolderArgs, OpenPlaceArgs, PreviewArgs,
+    PreviewState, QuickTag, RemoveLabelArgs, RenameFileArgs, RenameLabelArgs, RenameTagArgs,
+    RevealArgs, SaveClipFileArgs, SaveClipFileResult, ScrubPreviewArgs, SearchArgs, Section,
+    SelectArgs, SetCollectionArgs, SetColumnsArgs, SetFilterGroupsArgs, SetFilterViewArgs,
+    SetLabelIconArgs, SetLabelShownArgs, SetPreviewArgs, SetRawArgs, ShowFileArgs,
+    ShowQuickTagsArgs, ShowTagEditorArgs, StateArgs, TagEditorRow, TagEditorRowKind, TagGroupInfo,
+    TagInfo, TagItemsArgs, TagSource, TagState, TaggedItem, TagsArgs, TagsState,
 };
 use bl_shell_spec::commands::{BROWSER_WIDTH, clamp_browser_width};
 use bl_shell_spec::settings::CollectFiles;
@@ -64,6 +66,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use self::arrange::{AddError, MediaFile};
+use self::collections::CollectionStore;
 use self::columns::DetailsCache;
 use self::db::{Db, FileOp, FileRow};
 use self::filter::FilterPrefs;
@@ -195,6 +198,9 @@ pub struct Outcome {
     pub focus: bool,
     /// What the Status Bar says, if anything.
     pub message: Option<String>,
+    /// Files and folders to show in the system's file manager (spec: browser
+    /// R25).
+    pub file_manager: Vec<PathBuf>,
 }
 
 /// What a browser command works with besides the browser.
@@ -225,6 +231,9 @@ pub struct Context<'a> {
     /// The set's tempo, in BPM, at the playhead: what a MIDI clip file's
     /// preview is rendered at (clip files R16).
     pub set_bpm: f64,
+    /// The colour settings, for the tracks and clips added (the themes spec,
+    /// R19, R20).
+    pub look: &'a bl_shell_spec::settings::ThemeLook,
 }
 
 /// What [`BrowserView::poll`] found.
@@ -335,6 +344,8 @@ pub struct BrowserView {
     filter: BTreeSet<i64>,
     /// The Filter View and the groups each label shows.
     filter_prefs: FilterPrefs,
+    /// The collections each item is in (spec: browser-tags R35).
+    collections: CollectionStore,
     /// The saved labels (spec: browser-tags R24).
     saved: Vec<SavedLabel>,
     /// The Library labels' order, visibility, names and icons.
@@ -579,6 +590,7 @@ impl BrowserView {
             renaming: None,
             filter: BTreeSet::new(),
             filter_prefs: prefs.filters.clone(),
+            collections: CollectionStore::default(),
             saved: Vec::new(),
             label_prefs: prefs.labels.clone(),
             renaming_label: None,
@@ -661,6 +673,8 @@ impl BrowserView {
         self.db_files = loaded.files.clone();
         // The saved labels the file holds (spec: browser-tags R24).
         self.saved = loaded.saved_labels.clone();
+        // The collections the file holds (spec: browser-tags R35).
+        self.collections.load(loaded.item_collections);
         // The files that carried a tag keep their hash, so a file moved
         // outside Beatlayer finds them again (spec: browser-tags R5).
         for row in &loaded.files {
@@ -1413,20 +1427,36 @@ impl BrowserView {
     /// (spec: browser R2, browser-tags R24 to R26).
     #[must_use]
     pub fn labels(&self) -> Vec<LabelInfo> {
-        let mut labels: Vec<LabelInfo> = self
-            .label_prefs
-            .ordered(&self.saved)
-            .into_iter()
-            .map(|label| LabelInfo {
-                available: label.pending().is_none(),
-                name: self.label_name(&label),
-                section: Section::Library,
-                path: None,
-                icon: self.label_icon(&label),
-                shown: self.label_prefs.shown(&label),
-                label,
+        // Spec: browser-tags R34. The collections come first, as the
+        // sidebar lists them.
+        let mut labels: Vec<LabelInfo> = (1..=7)
+            .map(|number| {
+                let label = Label::Collection(number);
+                LabelInfo {
+                    available: true,
+                    name: self.label_name(&label),
+                    section: Section::Collections,
+                    path: None,
+                    icon: None,
+                    shown: self.label_prefs.shown(&label),
+                    label,
+                }
             })
             .collect();
+        labels.extend(
+            self.label_prefs
+                .ordered(&self.saved)
+                .into_iter()
+                .map(|label| LabelInfo {
+                    available: label.pending().is_none(),
+                    name: self.label_name(&label),
+                    section: Section::Library,
+                    path: None,
+                    icon: self.label_icon(&label),
+                    shown: self.label_prefs.shown(&label),
+                    label,
+                }),
+        );
         let mut places = vec![Label::UserLibrary, Label::CurrentProject];
         places.extend(
             self.folders
@@ -1533,6 +1563,11 @@ impl BrowserView {
         let Some(entries) = self.listing(folder) else {
             return;
         };
+        self.push_entries(entries, depth, out);
+    }
+
+    /// Adds entries' items, and the open folders' items under them.
+    fn push_entries(&mut self, entries: Vec<Entry>, depth: u16, out: &mut Vec<Item>) {
         for entry in entries {
             let openable = matches!(entry.kind, ItemKind::Folder | ItemKind::Set);
             let open = openable && self.open.contains(&entry.path);
@@ -1546,6 +1581,7 @@ impl BrowserView {
                 format: None,
                 clip_kind: entry.clip,
                 details: None,
+                collections: Vec::new(),
             });
             if open && entry.kind == ItemKind::Set {
                 self.set_rows(&entry.path, depth.saturating_add(1), out);
@@ -1576,6 +1612,7 @@ impl BrowserView {
             format: None,
             clip_kind: None,
             details: None,
+            collections: Vec::new(),
         });
     }
 
@@ -1668,6 +1705,13 @@ impl BrowserView {
         } else {
             self.builtin_ids()
         };
+        if let Label::Collection(number) = label {
+            // Spec: browser-tags R36. A collection lists the items in it.
+            let items = self.collection_rows(number, &tags, &selection, &builtin);
+            self.rows = Rows::Items(items);
+            self.cursor = self.selected.last().and_then(|path| self.position_of(path));
+            return;
+        }
         if !label_devices(&label).is_empty() {
             // Spec: modulation R12, racks R43. These labels list devices.
             let query = self.search.trim().to_ascii_lowercase();
@@ -1685,6 +1729,7 @@ impl BrowserView {
                     format: None,
                     clip_kind: None,
                     details: None,
+                    collections: Vec::new(),
                 })
                 .filter(|item| self.item_passes(&selection, &builtin, item))
                 .collect();
@@ -1787,6 +1832,7 @@ impl BrowserView {
                             format: None,
                             clip_kind: None,
                             details: None,
+                            collections: Vec::new(),
                         });
                         if open {
                             self.list_into(&path, 1, &mut items);
@@ -1865,6 +1911,7 @@ impl BrowserView {
             format: Some(p.format),
             clip_kind: None,
             details: None,
+            collections: Vec::new(),
         };
         let mut items = Vec::new();
         if !query.is_empty() || !self.applied_selection().is_empty() {
@@ -1898,6 +1945,7 @@ impl BrowserView {
                 format: None,
                 clip_kind: None,
                 details: None,
+                collections: Vec::new(),
             });
             if open {
                 items.extend(
@@ -1975,11 +2023,18 @@ impl BrowserView {
                     format: None,
                     clip_kind: clip_kind_of(entry.kind, &snapshot.path(hit)),
                     details: None,
+                    collections: Vec::new(),
                 }
             }
         };
         // Spec: browser-tags R27. What the shown columns say about it.
         item.details = self.details_for(&item);
+        // Spec: browser-tags R37. The collections it is in.
+        item.collections = if item.kind == ItemKind::Plugin {
+            self.collections.of(&self.tag_key(&item.path))
+        } else {
+            self.collections.of(&item.path)
+        };
         Some(item)
     }
 
@@ -2623,11 +2678,25 @@ impl BrowserView {
                     || self.selected_audio().len() == 1
                     || self.selected_clip_files().len() == 1
             }
-            ids::RENAME_LABEL => args
-                .get("label")
-                .and_then(|label| serde_json::from_value::<Label>(label.clone()).ok())
-                .unwrap_or_else(|| self.label.clone())
-                .is_library(),
+            ids::RENAME_LABEL => {
+                let label = args
+                    .get("label")
+                    .and_then(|label| serde_json::from_value::<Label>(label.clone()).ok())
+                    .unwrap_or_else(|| self.label.clone());
+                label.is_library() || label.is_collection()
+            }
+            ids::SET_COLLECTION | ids::CLEAR_COLLECTIONS => {
+                let items: Option<Vec<String>> = args
+                    .get("items")
+                    .and_then(|items| serde_json::from_value(items.clone()).ok());
+                self.can_collect(items.as_deref())
+            }
+            ids::REVEAL => {
+                let paths: Option<Vec<String>> = args
+                    .get("paths")
+                    .and_then(|paths| serde_json::from_value(paths.clone()).ok());
+                self.can_collect(paths.as_deref())
+            }
             ids::BACK => self.can_back(),
             ids::FORWARD => self.can_forward(),
             ids::ADD_LABEL => self.results_bar(),
@@ -2886,9 +2955,9 @@ impl BrowserView {
                         ));
                     }
                 };
-                if !path.is_file() {
+                if !path.exists() {
                     return Err(BrowserError::InvalidArgs(format!(
-                        "{} isn't a file",
+                        "{} isn't a file or folder",
                         path.to_string_lossy()
                     )));
                 }
@@ -3441,6 +3510,21 @@ impl BrowserView {
                 outcome.prefs_changed = true;
                 outcome.value = state(self, ctx.audio);
             }
+            ids::SET_COLLECTION => {
+                let args: SetCollectionArgs = parse(args)?;
+                outcome.prefs_changed = self.set_collection(args)?;
+                outcome.value = state(self, ctx.audio);
+            }
+            ids::CLEAR_COLLECTIONS => {
+                let args: ClearCollectionsArgs = parse(args)?;
+                self.clear_collections(args)?;
+                outcome.value = state(self, ctx.audio);
+            }
+            ids::REVEAL => {
+                let args: RevealArgs = parse(args)?;
+                outcome.file_manager = self.reveal_targets(args)?;
+                outcome.value = state(self, ctx.audio);
+            }
             ids::SET_COLUMNS => {
                 let args: SetColumnsArgs = parse(args)?;
                 self.set_columns(args)?;
@@ -3585,12 +3669,25 @@ impl BrowserView {
             .collect();
         for old in orphans {
             let tags = self.tags.item_tags(&old);
-            if tags.is_empty() {
+            let collected = self.collections.of(&old);
+            if tags.is_empty() && collected.is_empty() {
                 continue;
             }
-            let mut ops = self.tags.set_item_tags(path, tags);
-            ops.extend(self.tags.set_item_tags(&old, Vec::new()));
-            self.save_tags(ops);
+            if !tags.is_empty() {
+                let mut ops = self.tags.set_item_tags(path, tags);
+                ops.extend(self.tags.set_item_tags(&old, Vec::new()));
+                self.save_tags(ops);
+            }
+            // Spec: browser-tags R5. Collections pass with the tags.
+            if !collected.is_empty() {
+                let mut kept: BTreeSet<u8> = self.collections.of(path).into_iter().collect();
+                kept.extend(collected);
+                let ops = [
+                    self.collections.set(path, kept),
+                    self.collections.set(&old, BTreeSet::new()),
+                ];
+                self.save_collections(ops.into_iter().flatten().collect());
+            }
             if let Some(tagged) = self.tagged_files.remove(&old) {
                 self.tagged_files.insert(path.to_owned(), tagged);
             }
@@ -3664,10 +3761,11 @@ impl BrowserView {
         self.label = label;
         self.search.clear();
         self.filter.clear();
-        for folder in path.ancestors().skip(1) {
-            if folder == root {
-                break;
-            }
+        for folder in path
+            .ancestors()
+            .skip(1)
+            .take_while(|folder| *folder != root && folder.starts_with(&root))
+        {
             self.listings.remove(folder);
             self.open.insert(folder.to_path_buf());
         }
@@ -3686,29 +3784,42 @@ impl BrowserView {
         ctx: Context<'_>,
         outcome: &mut Outcome,
     ) -> Result<(), BrowserError> {
-        let (result, media) = if args.paths.iter().any(|p| arrange::is_clip_file(p)) {
-            let (result, media, missing) =
-                arrange::add_clip_files(ctx.editor, ctx.media, ctx.insert_marker, ctx.search, args)
-                    .map_err(|error| match error {
-                        AddError::InvalidArgs(message) => BrowserError::InvalidArgs(message),
-                        AddError::Failed(message) => BrowserError::Failed(message),
-                    })?;
-            outcome.message = arrange::missing_message(missing);
-            (result, media)
-        } else {
-            arrange::add_files(
-                ctx.editor,
-                ctx.media,
-                ctx.insert_marker,
-                ctx.edge_fades,
-                ctx.warping,
-                args,
-            )
+        let clip_files = args.paths.iter().any(|p| arrange::is_clip_file(p));
+        let look = ctx.look;
+        // Spec: themes R19, R20. The new tracks and clips take their colours
+        // in the step that makes them.
+        let (result, media) = ctx
+            .editor
+            .transact(arrange::UNDO_LABEL, |editor| {
+                let (result, media) = if clip_files {
+                    let (result, media, missing) = arrange::add_clip_files(
+                        editor,
+                        ctx.media,
+                        ctx.insert_marker,
+                        ctx.search,
+                        args,
+                    )?;
+                    outcome.message = arrange::missing_message(missing);
+                    (result, media)
+                } else {
+                    arrange::add_files(
+                        editor,
+                        ctx.media,
+                        ctx.insert_marker,
+                        ctx.edge_fades,
+                        ctx.warping,
+                        args,
+                    )?
+                };
+                let clips: Vec<_> = result.clips.iter().map(|clip| clip.clip).collect();
+                crate::colours::colour_new(editor, look, &result.created_tracks, &clips)
+                    .map_err(|error| AddError::Failed(error.to_string()))?;
+                Ok((result, media))
+            })
             .map_err(|error| match error {
                 AddError::InvalidArgs(message) => BrowserError::InvalidArgs(message),
                 AddError::Failed(message) => BrowserError::Failed(message),
-            })?
-        };
+            })?;
         outcome.value = to_value(&result);
         outcome.media = media;
         outcome.document_changed = true;
@@ -3716,6 +3827,13 @@ impl BrowserView {
     }
 
     fn check_label(&self, label: &Label) -> Result<(), BrowserError> {
+        if let Label::Collection(number) = label
+            && !label.is_collection()
+        {
+            return Err(BrowserError::InvalidArgs(format!(
+                "{number} isn't a collection: they are 1 (Favorites) to 7 (Gray)"
+            )));
+        }
         if let Label::Saved(id) = label
             && !self.saved.iter().any(|saved| saved.id == *id)
         {

@@ -1,6 +1,6 @@
 //! The Browser's view, index and commands.
 
-use super::{Area, Shell, ShellError};
+use super::{Area, Effect, Shell, ShellError};
 use crate::auto_warp;
 use crate::browser;
 use crate::browser::BrowserError;
@@ -78,6 +78,7 @@ impl Shell {
             collect_files: self.prefs.collect_files_on_export,
             search: &search,
             set_bpm,
+            look: &self.prefs.look,
         };
         let outcome = self
             .browser_view
@@ -121,6 +122,10 @@ impl Shell {
         }
         if outcome.show_browser {
             self.show_browser_in(self.acting_window());
+        }
+        if !outcome.file_manager.is_empty() {
+            self.effects
+                .push(Effect::ShowInFileManager(outcome.file_manager));
         }
         if let Some(message) = outcome.message {
             self.set_message(message, false);

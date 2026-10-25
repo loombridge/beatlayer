@@ -293,7 +293,9 @@ fn specs() -> Vec<CommandSpec> {
         CommandSpec::new(DELETE_BREAKPOINT, "Delete Envelope Breakpoint")
             .description(
                 "Deletes the selected breakpoint of the envelope that has the keyboard, or \
-                 with none selected the one at the insert marker, if there is one. One undo \
+                 with none selected the one at the insert marker, if there is one. In the \
+                 Envelope Editor, with none selected and a time selected, it deletes the \
+                 selection's range instead, as `clip.delete_envelope_range` does. One undo \
                  step. Because it removes the person's work, an agent asks first.",
             )
             .permission(Permission::Destructive)

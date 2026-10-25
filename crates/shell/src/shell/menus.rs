@@ -27,6 +27,7 @@ use bl_shell_spec::autosampler as autosampler_ids;
 use bl_shell_spec::bounce as bounce_ids;
 use bl_shell_spec::browser as browser_ids;
 use bl_shell_spec::capture_midi as capture_ids;
+use bl_shell_spec::clip_envelope_editing as clip_envelope_ids;
 use bl_shell_spec::commands::DetailView;
 use bl_shell_spec::comping as comping_ids;
 use bl_shell_spec::devices as device_ids;
@@ -410,6 +411,26 @@ impl Shell {
         contexts
     }
 
+    /// Whether the Envelope Editor has the keyboard: the Clip View's
+    /// Envelopes tab, with the detail area focused, among `active`.
+    pub(super) fn envelope_editor_keyed(&self, active: &[Context]) -> bool {
+        active.contains(&Context::ClipView) && active.contains(&Context::Envelope)
+    }
+
+    /// Whether a person can run Envelope Editor command `id` now (the clip
+    /// envelopes spec, R12, R13).
+    pub(super) fn can_clip_envelope_edit(&self, id: &str, active: &[Context]) -> bool {
+        self.clip_view.tab() == ClipTab::Envelopes
+            && crate::clip_envelope_edit::can_run(
+                id,
+                self.editor.document(),
+                &self.clip_view,
+                &self.arrangement,
+                self.envelope_clipboard.as_ref(),
+                self.envelope_editor_keyed(active),
+            )
+    }
+
     /// [`Shell::can_invoke`] with `active` as the contexts that apply.
     #[must_use]
     pub fn can_invoke_in(&self, id: &str, args: &Value, active: &[Context]) -> bool {
@@ -431,6 +452,9 @@ impl Shell {
         }
         if envelope_key_ids::handles(id) {
             return self.can_envelope_key(id);
+        }
+        if clip_envelope_ids::handles(id) {
+            return self.can_clip_envelope_edit(id, active);
         }
         if freeze_ids::handles(id) {
             return self.can_freeze(id, args);
@@ -656,8 +680,10 @@ impl Shell {
         }
         if id == automation_ids::SIMPLIFY && args.get("lanes").is_none() {
             // Spec: automation-editing R18. Disabled without a time selection
-            // in an automation lane.
-            return automation::can_run(id, &self.arrangement, None);
+            // in an automation lane, or in the Envelope Editor (clip-envelopes
+            // R13).
+            return automation::can_run(id, &self.arrangement, None)
+                || self.can_clip_envelope_edit(clip_envelope_ids::SIMPLIFY, active);
         }
         if ids::handles(id) || transport_ids::handles(id) {
             return true;

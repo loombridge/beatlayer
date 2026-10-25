@@ -93,6 +93,13 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
                  (Ctrl+Option+Shift+M on macOS): its Show in Browser item",
             )),
         ),
+        (
+            "browser.reveal",
+            Exception(Equivalent(
+                "the browser item's context menu, opened from the keyboard with Shift+F10 \
+                 (Ctrl+Option+Shift+M on macOS): its Show in Finder item",
+            )),
+        ),
         // The search field (WP-6.42): Tab reaches its scope buttons and Show
         // Only Matches, and Enter presses them; the text, the arrows, Return
         // and Esc act on it from the keyboard.

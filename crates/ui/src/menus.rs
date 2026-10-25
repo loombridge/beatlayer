@@ -75,7 +75,15 @@ pub fn item_state_in(
             let chord = keymap.chord_for_shortcut(shortcuts[0], platform);
             shortcuts
                 .iter()
-                .find_map(|shortcut| keymap.command_for(shortcut, contexts))
+                .find_map(|shortcut| {
+                    keymap.command_for_running(shortcut, contexts, |command| {
+                        shell.can_invoke_in(
+                            &command.id,
+                            &Value::Object(command.args.clone()),
+                            contexts,
+                        )
+                    })
+                })
                 .map_or_else(
                     || inert(chord),
                     |command| {
@@ -153,7 +161,7 @@ pub fn menu_keys(ctx: &egui::Context) {
             })
             .sum::<i32>()
     });
-    if step == 0 {
+    if step == 0 || crate::palette::keeps_arrow(ctx, step) {
         return;
     }
     let focused = ctx.memory(egui::Memory::focused);
@@ -403,6 +411,8 @@ pub(crate) fn item_in_with_args(
     let mut state = item_state_in(item, shell, keymap, platform, contexts);
     if let (Some(args), Some(invocation)) = (args, state.invocation.as_mut()) {
         invocation.args = args;
+        // The arguments the menu adds are part of whether the item can run.
+        state.enabled = shell.can_invoke_in(&invocation.id, &invocation.args, contexts);
     }
     let mut text = state.label.clone();
     if state.checked == Some(true) {

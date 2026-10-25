@@ -390,6 +390,46 @@ fn a_tagged_file_moved_outside_beatlayer_keeps_its_tags_by_content() {
     });
 }
 
+// Spec: browser-tags R5. A collected file that moves outside Beatlayer keeps
+// its collections too.
+#[test]
+fn a_collected_file_moved_outside_beatlayer_keeps_its_collections_by_content() {
+    let scratch = Scratch::new("moved-collected");
+    let config = scratch.path("config");
+    let library = scratch.path("Library");
+    std::fs::create_dir_all(&library).unwrap();
+    let kick = library.join("Kick.wav");
+    wav(&kick, 100);
+    let mut shell = shell_on(&config);
+    shell.set_user_library(Some(library.clone()));
+    wait_for_index(&mut shell);
+    run::<Value>(
+        &mut shell,
+        ids::SET_COLLECTION,
+        json!({ "collection": 2, "items": [text(&kick)], "member": true }),
+    );
+    wait_until(&mut shell, "the file's hash", |shell| {
+        shell
+            .browser_view()
+            .tagged_file_hash(&text(&kick))
+            .is_some()
+    });
+    let moved = library.join("Renamed.wav");
+    std::fs::rename(&kick, &moved).unwrap();
+    shell.browser_view().flush_database();
+    let mut again = shell_on(&config);
+    again.set_user_library(Some(library.clone()));
+    wait_for_index(&mut again);
+    wait_until(&mut again, "the collections to follow the file", |shell| {
+        let state: bl_shell::browser_commands::BrowserState = run(
+            shell,
+            ids::OPEN_PLACE,
+            json!({ "label": { "collection": 2 } }),
+        );
+        state.rows.iter().any(|row| row.name == "Renamed.wav")
+    });
+}
+
 // Spec: browser-tags R7.
 #[test]
 fn beatlayers_groups_cant_be_renamed_or_deleted() {

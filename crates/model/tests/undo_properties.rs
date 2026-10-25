@@ -1166,24 +1166,31 @@ impl Flat {
                 track.children().collect(),
                 devices,
                 track.routing().clone(),
-                track.take_lanes().cloned().collect(),
+                track
+                    .take_lanes()
+                    .map(|lane| {
+                        let mut lane = lane.clone();
+                        lane.clips = lane.clips.iter().map(plain).collect();
+                        lane
+                    })
+                    .collect(),
                 track.audition(),
                 track.link(),
             );
             flat.tracks.insert(track.id(), own);
             for clip in track.clips() {
                 flat.clips
-                    .insert(clip.id, (track.id(), None, None, clip.clone()));
+                    .insert(clip.id, (track.id(), None, None, plain(clip)));
             }
             for lane in track.take_lanes() {
                 for clip in &lane.clips {
                     flat.clips
-                        .insert(clip.id, (track.id(), None, Some(lane.id), clip.clone()));
+                        .insert(clip.id, (track.id(), None, Some(lane.id), plain(clip)));
                 }
             }
             for (scene, clip) in track.slots() {
                 flat.clips
-                    .insert(clip.id, (track.id(), Some(scene), None, clip.clone()));
+                    .insert(clip.id, (track.id(), Some(scene), None, plain(clip)));
             }
             for device in track.devices() {
                 flat.devices.insert(device.id, (track.id(), device.clone()));
@@ -1227,6 +1234,7 @@ fn slow_changes(old: &Document, new: &Document) -> ChangeSet {
             .collect()
     };
     ChangeSet {
+        colours: colours_differ(old, new),
         settings: old.settings() != new.settings(),
         layout: a.main != b.main
             || a.top != b.top
@@ -1236,6 +1244,36 @@ fn slow_changes(old: &Document, new: &Document) -> ChangeSet {
         scenes: diff(&a.scenes, &b.scenes),
         clips: diff(&a.clips, &b.clips),
         devices: diff(&a.devices, &b.devices),
+    }
+}
+
+/// Whether a track, a clip or a scene that both versions hold has a different
+/// colour in them: the engine never hears a colour, so a change set lists it
+/// only as a change of one.
+fn colours_differ(old: &Document, new: &Document) -> bool {
+    let tracks =
+        |doc: &Document| -> BTreeMap<_, _> { doc.tracks().map(|t| (t.id(), t.colour())).collect() };
+    let clips = |doc: &Document| -> BTreeMap<_, _> {
+        doc.tracks()
+            .flat_map(bl_model::Track::all_clips)
+            .map(|c| (c.id, c.colour))
+            .collect()
+    };
+    let scenes =
+        |doc: &Document| -> BTreeMap<_, _> { doc.scenes().map(|s| (s.id, s.colour)).collect() };
+    fn any<K: Ord, V: PartialEq>(a: &BTreeMap<K, V>, b: &BTreeMap<K, V>) -> bool {
+        a.iter().any(|(k, v)| b.get(k).is_some_and(|w| w != v))
+    }
+    any(&tracks(old), &tracks(new))
+        || any(&clips(old), &clips(new))
+        || any(&scenes(old), &scenes(new))
+}
+
+/// `clip` as the engine hears it: without its colour.
+fn plain(clip: &Clip) -> Clip {
+    Clip {
+        colour: None,
+        ..clip.clone()
     }
 }
 

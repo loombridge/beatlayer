@@ -10,7 +10,7 @@ use bl_model::Shape;
 use bl_shell::Shell;
 use bl_shell::arrangement_commands::{self as view_ids, AdaptiveGrid, FixedGrid};
 use bl_shell::context_menus::{
-    self, ADAPTIVE_GRID_ROWS, FIXED_GRID_ROWS, SHAPE_ROWS, SelectionMenu,
+    self, ADAPTIVE_GRID_ROWS, CLIP_COLOUR_ROW, FIXED_GRID_ROWS, SHAPE_ROWS, SelectionMenu,
 };
 use bl_shell::editing_commands as ids;
 use bl_shell::menus::{Action, shown};
@@ -21,6 +21,7 @@ use super::editing::Lanes;
 use super::invoke;
 use crate::keymap::{Keymap, Platform};
 use crate::main_window::UiEvent;
+use crate::theme::Theme;
 
 /// Which menu a right-click opened.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -199,7 +200,7 @@ impl ContextMenus {
     /// Draws the open menu's items. A selection that holds clips brings the
     /// rows menus.md records for those states (C-CLIP-ARR-025, C-CLIP-ARR-026,
     /// C-TIME-019, C-TIME-020).
-    pub fn show(&self, ui: &mut Ui, shell: &Shell, events: &mut Vec<UiEvent>) {
+    pub fn show(&self, ui: &mut Ui, theme: &Theme, shell: &Shell, events: &mut Vec<UiEvent>) {
         if matches!(self.kind, MenuKind::Breakpoint | MenuKind::Line) {
             self.show_value(ui, events);
             return;
@@ -247,6 +248,22 @@ impl ContextMenus {
                         ui.close();
                     }
                 });
+            } else if item.row == CLIP_COLOUR_ROW {
+                // Spec: themes R16. The palette colours the selected clips.
+                let doc = shell.editor().document();
+                let selected = shell.arrangement().selected_clips();
+                let current = selected
+                    .first()
+                    .and_then(|clip| doc.clip(*clip))
+                    .and_then(|clip| clip.colour);
+                if let Some(colour) = crate::palette::show(ui, theme, "clip-colour", current) {
+                    invoke(
+                        events,
+                        "clip.set_colour",
+                        json!({ "clips": selected, "colour": colour }),
+                    );
+                    ui.close();
+                }
             } else if SHAPE_ROWS.contains(&item.row) {
                 // Spec: automation-editing R11. Five buttons a row.
                 let shapes = if item.row == SHAPE_ROWS[0] {
@@ -256,7 +273,14 @@ impl ContextMenus {
                 };
                 ui.horizontal(|ui| {
                     for shape in shapes {
-                        shape_button(ui, shell, *shape, events);
+                        shape_button(
+                            ui,
+                            shell,
+                            *shape,
+                            bl_shell::automation_commands::INSERT_SHAPE,
+                            &shell.active_contexts(),
+                            events,
+                        );
                     }
                 });
             } else {
@@ -323,14 +347,19 @@ fn selection_menu(shell: &Shell) -> SelectionMenu {
 }
 
 /// One of the shape buttons (the automation editing spec, R11): a drawing
-/// of the shape that assistive technology reads by its name.
-fn shape_button(ui: &mut Ui, shell: &Shell, shape: Shape, events: &mut Vec<UiEvent>) {
+/// of the shape that assistive technology reads by its name. It runs `id`,
+/// the lane's or the Envelope Editor's insert-shape command, when that can
+/// run in `contexts`.
+pub(crate) fn shape_button(
+    ui: &mut Ui,
+    shell: &Shell,
+    shape: Shape,
+    id: &'static str,
+    contexts: &[bl_commands::Context],
+    events: &mut Vec<UiEvent>,
+) {
     let args = json!({ "shape": shape });
-    let enabled = shell.can_invoke_in(
-        bl_shell::automation_commands::INSERT_SHAPE,
-        &args,
-        &shell.active_contexts(),
-    );
+    let enabled = shell.can_invoke_in(id, &args, contexts);
     let (rect, response) = ui.allocate_exact_size(vec2(34.0, 24.0), Sense::click());
     let response = if enabled {
         response
@@ -371,10 +400,7 @@ fn shape_button(ui: &mut Ui, shell: &Shell, shape: Shape, events: &mut Vec<UiEve
     ui.painter()
         .add(egui::Shape::line(line, Stroke::new(1.5, colour)));
     if enabled && response.clicked() {
-        events.push(UiEvent::Invoke(bl_shell::Invocation::new(
-            bl_shell::automation_commands::INSERT_SHAPE,
-            args,
-        )));
+        events.push(UiEvent::Invoke(bl_shell::Invocation::new(id, args)));
         ui.close();
     }
 }

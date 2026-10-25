@@ -51,6 +51,24 @@ impl Shell {
                 ),
             });
         }
+        // Spec: themes R19, R23. A track made new takes the colour the
+        // settings give, in the step that makes it.
+        if let Some(created @ bl_model::Command::CreateTrack { id: track, .. }) = &command {
+            let look = &self.prefs.look;
+            return self
+                .editor
+                .transact(created.label(), |editor| {
+                    let changes =
+                        model::run(editor, id, args).map_err(|error| error.to_string())?;
+                    crate::colours::colour_new(editor, look, &[*track], &[])
+                        .map_err(|error| error.to_string())?;
+                    Ok::<_, String>(changes)
+                })
+                .map_err(|message| ShellError::Failed {
+                    command: id.to_owned(),
+                    message,
+                });
+        }
         let edit = command
             .as_ref()
             .and_then(|command| self.macro_edit(command));
@@ -385,6 +403,32 @@ impl Shell {
             args,
             &mut self.editor,
             &mut self.arrangement,
+            &mut self.envelope_clipboard,
+            &self.devices,
+        )
+        .map_err(|failure| edit_error(id, failure));
+        if *self.editor.document() != before {
+            self.dirty = true;
+            self.document_changed();
+        }
+        self.touch();
+        result
+    }
+
+    /// Runs one of the Envelope Editor's editing commands, on the clip's
+    /// envelope (the clip envelopes spec, R12, R13).
+    pub(super) fn run_clip_envelope_edit(
+        &mut self,
+        id: &str,
+        args: Value,
+    ) -> Result<Value, ShellError> {
+        let before = self.editor.document().clone();
+        let result = crate::clip_envelope_edit::run(
+            id,
+            args,
+            &mut self.editor,
+            &mut self.clip_view,
+            &self.arrangement,
             &mut self.envelope_clipboard,
             &self.devices,
         )

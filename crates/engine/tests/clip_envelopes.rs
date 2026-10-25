@@ -8,8 +8,8 @@ use bl_core::time::{Bpm, TempoMap, Ticks};
 use bl_engine::TransportCommand;
 use bl_model::fader::{fader_gain, fader_position};
 use bl_model::{
-    AutomationTarget, Clip, ClipData, ClipId, Command, MidiData, MixerParam, TrackId, TrackKind,
-    Vector,
+    AutomationTarget, Clip, ClipData, ClipId, Command, Envelope, LinearRange, MidiData, MixerParam,
+    Shape, TrackId, TrackKind, Vector,
 };
 use common::{RATE, Rig, dc, track};
 
@@ -77,6 +77,67 @@ fn want(share: f64) -> f32 {
 /// What the fader plays alone: 0.5.
 fn alone() -> f32 {
     want(1.0)
+}
+
+/// Writes `shape` over the clip's first bar as an envelope for the volume,
+/// on Volume's modulation scale, 0 to 100% (clip-envelopes R13).
+fn insert_shape(rig: &mut Rig, clip: ClipId, shape: Shape) {
+    let mut envelope = Envelope::default();
+    envelope.insert_shape(
+        shape,
+        Ticks::ZERO,
+        Ticks::WHOLE,
+        1.0,
+        &LinearRange { min: 0.0, max: 1.0 },
+    );
+    rig.apply(Command::SetClipEnvelope {
+        kind: bl_model::EnvelopeKind::Modulation,
+        clip,
+        target: volume(),
+        points: envelope.points().collect(),
+    });
+}
+
+// Spec: clip-envelopes R3, R13. A shape inserted into a volume envelope
+// modulates the fader on the frames the shape gives, every bar of the clip's
+// loop: a square holds the fader's own level for the first half of the bar
+// and silences it for the second, and a sine follows its cycle within 1% of
+// the share. Every block runs under the allocation trap.
+#[test]
+fn an_inserted_shape_modulates_the_parameter_on_the_right_frames() {
+    let (mut rig, a) = rig_at(64, 0.5);
+    let clip = looping_clip(&mut rig, a, Ticks::ZERO, 2);
+    insert_shape(&mut rig, clip, Shape::Square);
+    rig.sender.transport(TransportCommand::Play);
+    let out = rig.render(BAR * 2, 64);
+    for (frame, &sample) in out.iter().enumerate() {
+        let at = frame % BAR;
+        // Frames next to the step are the tick the step takes.
+        if at.abs_diff(BAR / 2) < 100 {
+            continue;
+        }
+        let expected = if at < BAR / 2 { alone() } else { want(0.0) };
+        assert!(
+            (sample - expected).abs() < 1e-6,
+            "frame {frame}: {sample} isn't {expected}"
+        );
+    }
+    assert!(out[BAR / 2 + 1_000..BAR].iter().all(|&s| s == 0.0));
+
+    let (mut rig, a) = rig_at(64, 0.5);
+    let clip = looping_clip(&mut rig, a, Ticks::ZERO, 2);
+    insert_shape(&mut rig, clip, Shape::Sine);
+    rig.sender.transport(TransportCommand::Play);
+    let out = rig.render(BAR * 2, 64);
+    for (frame, &sample) in out.iter().enumerate() {
+        let along = (frame % BAR) as f64 / BAR as f64;
+        let share = 0.5 + 0.5 * (std::f64::consts::TAU * along).sin();
+        let (low, high) = (want((share - 0.01).max(0.0)), want((share + 0.01).min(1.0)));
+        assert!(
+            sample >= low - 1e-6 && sample <= high + 1e-6,
+            "frame {frame}: {sample} isn't within 1% of the sine's {share}"
+        );
+    }
 }
 
 // Spec: clip-envelopes R3, R4

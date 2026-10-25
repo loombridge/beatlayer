@@ -53,6 +53,10 @@ pub(super) const ROWS: &[(&str, Readback)] = &[
     ("settings.set_brightness", read("settings.state", "theme_colors.brightness")),
     ("settings.set_color_intensity", read("settings.state", "theme_colors.color_intensity")),
     ("settings.set_color_hue", read("settings.state", "theme_colors.color_hue")),
+    ("settings.set_auto_assign_track_colours", read("settings.state", "theme_colors.auto_assign_track_colours")),
+    ("settings.set_default_track_colour", read("settings.state", "theme_colors.default_track_colour")),
+    ("settings.set_reduced_automatic_colours", read("settings.state", "theme_colors.reduced_automatic_colours")),
+    ("settings.set_clip_colour", read("settings.state", "theme_colors.clip_colour")),
     ("settings.set_warp_recorded_audio", read("settings.state", "warp_recorded_audio")),
     ("view.set_zoom", read("view.state", "window.zoom")),
     (

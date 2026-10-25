@@ -556,3 +556,81 @@ fn launch_selected_launches_the_selection_and_agents_launch_and_stop_by_id() {
     shell.run(ids::LAUNCH_SELECTED, json!({})).unwrap();
     wait_for_slots(&control, &mut shell, "the scene", |slots| slots.len() == 1);
 }
+
+// Spec: session-context-menus R10. Cancel Scene Launch drops what a scene's
+// launch queued and hasn't played, leaves the clips that play, and is refused
+// with nothing queued; `session.state` reads the slots' states back.
+#[test]
+fn cancel_scene_launch_drops_a_queued_launch_and_leaves_what_plays() {
+    use bl_shell::session_view_commands::{LaunchState, SessionViewState};
+
+    let (mut shell, control, track, first, second) = shell_with_a_slot_clip();
+    shell
+        .run(
+            "session.insert_empty_midi_clip",
+            json!({ "track": track, "scene": second }),
+        )
+        .unwrap();
+    let cancel =
+        |shell: &mut Shell| shell.run("session.cancel_scene_launch", json!({ "scene": second }));
+    // Nothing queued: refused, and the menu's item is off.
+    assert!(matches!(
+        cancel(&mut shell),
+        Err(ShellError::Unavailable { .. })
+    ));
+    let contexts = [bl_commands::Context::Session];
+    assert!(!shell.can_invoke_in(
+        "session.cancel_scene_launch",
+        &json!({ "scene": second }),
+        &contexts
+    ));
+
+    // The first scene plays; the second waits for its line.
+    shell
+        .run(ids::SET_QUANTIZATION, json!({ "quantization": "none" }))
+        .unwrap();
+    shell
+        .run("session.launch_scene", json!({ "scene": first }))
+        .unwrap();
+    wait_for_slots(&control, &mut shell, "the first scene", |slots| {
+        slots.len() == 1 && slots[0].state == bl_engine::SlotState::Playing
+    });
+    shell
+        .run(ids::SET_QUANTIZATION, json!({ "quantization": "8_bars" }))
+        .unwrap();
+    shell
+        .run("session.launch_scene", json!({ "scene": second }))
+        .unwrap();
+    wait_for_slots(&control, &mut shell, "the queued launch", |slots| {
+        slots
+            .iter()
+            .any(|s| s.scene == second && s.state == bl_engine::SlotState::Queued)
+    });
+    let state: SessionViewState =
+        serde_json::from_value(shell.run("session.state", json!({})).unwrap()).unwrap();
+    let state_of = |scene| {
+        state
+            .launches
+            .iter()
+            .find(|l| l.slot.scene == scene)
+            .map(|l| l.state)
+    };
+    assert_eq!(state_of(second), Some(LaunchState::Queued));
+    assert_eq!(state_of(first), Some(LaunchState::QueuedToStop));
+    assert!(shell.can_invoke_in(
+        "session.cancel_scene_launch",
+        &json!({ "scene": second }),
+        &contexts
+    ));
+
+    cancel(&mut shell).unwrap();
+    wait_for_slots(&control, &mut shell, "the cancel", |slots| {
+        slots.len() == 1
+            && slots[0].scene == first
+            && slots[0].state == bl_engine::SlotState::Playing
+    });
+    assert!(matches!(
+        cancel(&mut shell),
+        Err(ShellError::Unavailable { .. })
+    ));
+}

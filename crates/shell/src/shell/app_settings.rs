@@ -108,6 +108,12 @@ impl Shell {
         self.prefs.retune_on_tuning_load
     }
 
+    /// Whether Snap Automation to Grid is on (the automation spec, R31).
+    #[must_use]
+    pub fn snap_automation_to_grid(&self) -> bool {
+        self.prefs.snap_automation_to_grid.0
+    }
+
     /// Loop/Warp Short Samples, Auto-Warp Long Samples and Default Warp
     /// Mode (WP-4.9).
     #[must_use]
@@ -157,6 +163,7 @@ impl Shell {
             tempo_midi: self.midi.report(),
             create_fades_on_clip_edges: self.create_fades_on_clip_edges(),
             retune_on_tuning_load: self.retune_on_tuning_load(),
+            snap_automation_to_grid: self.snap_automation_to_grid(),
             warp_recorded_audio: self.warp_recorded_audio(),
             warp: self.prefs.warp,
             file_folder: FileFolderSettings {
@@ -198,6 +205,15 @@ impl Shell {
     #[must_use]
     pub fn look(&self) -> &ThemeLook {
         &self.prefs.look
+    }
+
+    /// Tells the shell the 14 track colours of the theme being drawn, so
+    /// that a DAWproject file's colours are placed on the palette the person
+    /// sees (the DAWproject spec, R23).
+    pub fn set_track_palette(&mut self, colours: Vec<[u8; 3]>) {
+        if !colours.is_empty() {
+            self.track_palette = colours;
+        }
     }
 
     /// Whether the dark colours are drawn now: Follow System resolved
@@ -441,6 +457,12 @@ impl Shell {
             ids::SETTINGS_SET_RETUNE_ON_TUNING_LOAD => {
                 let SwitchArgs { on } = Self::args(id, args)?;
                 self.prefs.retune_on_tuning_load = on;
+                self.save_preferences();
+                Ok(to_value(&SwitchResult { on }))
+            }
+            ids::SETTINGS_SET_SNAP_AUTOMATION_TO_GRID => {
+                let SwitchArgs { on } = Self::args(id, args)?;
+                self.prefs.snap_automation_to_grid = OnByDefault(on);
                 self.save_preferences();
                 Ok(to_value(&SwitchResult { on }))
             }

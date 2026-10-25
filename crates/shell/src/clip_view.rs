@@ -22,8 +22,9 @@ use bl_core::time::{Ticks, TimeSignature, TimeSignatureMap};
 use bl_model::note_ops::{self, MOST_PARTS, Mapping};
 use bl_model::{
     AutomationTarget, ClipData, ClipFolds, ClipId, Command, Document, Editor, Expression,
-    GroupKind, MidiData, MpeView, Note, NoteGroup,
+    GroupKind, MidiData, MpeView, Note, NoteGroup, NoteSpelling,
 };
+use bl_shell_spec::clip_properties::Properties;
 use bl_shell_spec::editing::{Position, SplitArgs};
 use bl_shell_spec::note_filters::{
     InvertSelectionArgs, NoteFilter, NoteFilters, NoteFiltersArgs, NoteFiltersResult,
@@ -49,7 +50,7 @@ mod mpe;
 mod note_time;
 mod note_view;
 
-pub use note_view::{NoteView, fit_key_rows, pauses_follow, region_moved};
+pub use note_view::{Fold, NoteView, fit_key_rows, pauses_follow, region_moved};
 
 use crate::arrangement::ArrangementView;
 use crate::arrangement::editing::{EditFailure, transaction};
@@ -559,6 +560,15 @@ pub struct ClipView {
     /// The clips whose note editor is folded to the rows that hold notes
     /// (F). Saved with the set, like the floating devices' windows.
     folds: ClipFolds,
+    /// The clips whose note editor is folded to their scale (G). Saved with
+    /// the set, like `folds`.
+    scale_folds: ClipFolds,
+    /// Whether Highlight Scales is on (K): one switch for every clip, kept
+    /// between launches in the preferences.
+    highlight_scales: bool,
+    /// How keys are spelled: one choice for every editor, kept between
+    /// launches in the preferences.
+    spelling: NoteSpelling,
     /// The notes selected in each clip, by their places in its notes in
     /// order. A clip's selection holds only while the note editor shows it.
     selected: BTreeMap<ClipId, Vec<u32>>,
@@ -628,6 +638,9 @@ pub struct ClipView {
     /// The MIDI Tools' panel, choices, settings and open application
     /// (WP-6.11).
     pub(crate) tools: crate::midi_tools::MidiTools,
+    /// The panel the left group shows (Spec: clip-properties R1). View state:
+    /// Main Properties when the app starts, never saved.
+    properties: Properties,
     /// Whether the Preview switch is on (Spec: step-recording R1): the
     /// shell keeps it as a preference.
     preview: bool,
@@ -672,6 +685,23 @@ impl ClipView {
     #[must_use]
     pub fn midi_tools(&self) -> &crate::midi_tools::MidiTools {
         &self.tools
+    }
+
+    /// The panel the left group shows for the clip the Clip View shows: the
+    /// one chosen, but Main Properties for a clip not in a Session slot
+    /// (Spec: clip-properties R1).
+    #[must_use]
+    pub fn shown_properties(&self, doc: &Document, arrangement: &ArrangementView) -> Properties {
+        if self.shown_session_clip(doc, arrangement).is_some() {
+            self.properties
+        } else {
+            Properties::Main
+        }
+    }
+
+    /// Chooses the panel the left group shows.
+    pub fn show_properties(&mut self, panel: Properties) {
+        self.properties = panel;
     }
 
     /// Whether the Clip View shows.
@@ -785,6 +815,77 @@ impl ClipView {
         }
         // The rows count differently once folded.
         self.note_view.forget_rows(clip);
+    }
+
+    /// The clips whose note editor is folded to their scale.
+    #[must_use]
+    pub fn scale_folds(&self) -> &ClipFolds {
+        &self.scale_folds
+    }
+
+    /// Replaces the clips folded to their scale, as opening a set does.
+    pub fn set_scale_folds(&mut self, folds: ClipFolds) {
+        self.scale_folds = folds;
+    }
+
+    /// Whether the note editor is folded to the scale for `clip`, whether or
+    /// not its Scale Mode is on now.
+    #[must_use]
+    pub fn is_scale_folded(&self, clip: ClipId) -> bool {
+        self.scale_folds.contains(&clip)
+    }
+
+    /// Folds the note editor to the clip's scale, or unfolds it.
+    pub fn set_scale_folded(&mut self, clip: ClipId, folded: bool) {
+        if folded {
+            self.scale_folds.insert(clip);
+        } else {
+            self.scale_folds.remove(&clip);
+        }
+        self.note_view.forget_rows(clip);
+    }
+
+    /// How the note editor's rows are folded for `clip`: Fold to Scale
+    /// counts only while the clip's Scale Mode is on (the scales spec, R23).
+    #[must_use]
+    pub fn fold(&self, doc: &Document, clip: ClipId) -> Fold {
+        Fold {
+            notes: self.is_folded(clip),
+            scale: doc
+                .clip(clip)
+                .map(|value| value.scale)
+                .filter(|scale| scale.enabled && self.is_scale_folded(clip)),
+        }
+    }
+
+    /// Drops the zoomed rows of a clip folded to its scale: a scale change
+    /// moves its rows (the scales spec, R23).
+    pub fn forget_scale_fold_rows(&mut self) {
+        for clip in &self.scale_folds {
+            self.note_view.forget_rows(*clip);
+        }
+    }
+
+    /// Whether Highlight Scales is on.
+    #[must_use]
+    pub fn highlight_scales(&self) -> bool {
+        self.highlight_scales
+    }
+
+    /// Switches Highlight Scales.
+    pub fn set_highlight_scales(&mut self, on: bool) {
+        self.highlight_scales = on;
+    }
+
+    /// How the note editor spells keys.
+    #[must_use]
+    pub fn note_spelling(&self) -> NoteSpelling {
+        self.spelling
+    }
+
+    /// Chooses how the note editor spells keys.
+    pub fn set_note_spelling(&mut self, spelling: NoteSpelling) {
+        self.spelling = spelling;
     }
 
     /// The MPE tab's lanes and grids.
@@ -1539,6 +1640,9 @@ impl ClipView {
             lanes_hidden: self.lanes.all_hidden(),
             randomize: self.amounts,
             folded: clip.is_some_and(|clip| self.is_folded(clip)),
+            scale_folds: self.scale_folds.iter().copied().collect(),
+            highlight_scales: self.highlight_scales,
+            note_spelling: self.spelling,
             tab: self.tab,
             mpe: self.mpe_state(doc, clip),
             span: clip.and_then(|id| {

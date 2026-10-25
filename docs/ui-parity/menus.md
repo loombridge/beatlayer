@@ -338,7 +338,7 @@ The View menu is taller than the screen at 1600 × 1000 and scrolls.
 | M-OPT-012 | Larger Launch Quantization | ⌘2 | S-SES-025 | | As M-OPT-011; Widen Grid (S-GRID-003) in the Arrangement |
 | M-OPT-013 | Triplet Launch Quantization | ⌘3 | S-SES-026 | disabled | As M-OPT-011; Triplet Grid (S-GRID-004) in the Arrangement |
 | M-OPT-014 | Launch Quantization Enabled | ⌘4 | S-SES-027 | | As M-OPT-011; Snap to Grid (S-GRID-005) in the Arrangement |
-| M-OPT-015 | Snap Automation to Grid | | | disabled | |
+| M-OPT-015 | Snap Automation to Grid | | | ticked | Observed disabled in a new set; Beatlayer's is live and on in a new install ([automation](../specs/automation.md) R31) |
 | M-OPT-016 | Fixed Grid | ⌘5 | S-GRID-006 | disabled | |
 | | — | | | | |
 | M-OPT-017 | Draw Mode | B | S-GRID-001 | | Reads "Draw Mode (Pitch Lock On/Off)" with the MIDI Note Editor focused (manual 10.4.1) |

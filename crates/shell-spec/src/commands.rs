@@ -99,6 +99,13 @@ pub const VIEW_DRAW_MODE: &str = "view.draw_mode";
 /// `view.fold_notes`: fold the note editor to the rows that hold notes (F,
 /// WP-2.3).
 pub const VIEW_FOLD_NOTES: &str = "view.fold_notes";
+/// `view.fold_scale`: fold the note editor to the rows of the clip's scale
+/// and those that hold notes (G, WP-6.7b).
+pub const VIEW_FOLD_SCALE: &str = "view.fold_scale";
+/// `view.highlight_scales`: switch Highlight Scales (K, WP-6.7b).
+pub const VIEW_HIGHLIGHT_SCALES: &str = "view.highlight_scales";
+/// `view.note_spelling`: choose how the note editor spells keys (WP-6.7b).
+pub const VIEW_NOTE_SPELLING: &str = "view.note_spelling";
 /// `view.lane`: choose which value the Clip View's lane shows (WP-2.3).
 pub const VIEW_LANE: &str = "view.lane";
 /// `view.lanes`: show, hide and swap the Clip View's expression lanes, and
@@ -200,6 +207,9 @@ pub const SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES: &str = "settings.set_create_f
 /// `settings.set_retune_on_tuning_load`: switch Retune Set On Loading Tuning
 /// Systems (WP-6.9; the tunings spec, R15).
 pub const SETTINGS_SET_RETUNE_ON_TUNING_LOAD: &str = "settings.set_retune_on_tuning_load";
+/// `settings.set_snap_automation_to_grid`: switch Snap Automation to Grid
+/// (WP-6.57; the automation spec, R31).
+pub const SETTINGS_SET_SNAP_AUTOMATION_TO_GRID: &str = "settings.set_snap_automation_to_grid";
 /// `settings.set_temporary_folder`: choose the Temporary Folder on the File &
 /// Folder page (WP-4.20).
 pub const SETTINGS_SET_TEMPORARY_FOLDER: &str = "settings.set_temporary_folder";
@@ -304,6 +314,9 @@ pub const IDS: &[&str] = &[
     VIEW_SET_PLUGIN_LIST_ONLY_MISSING,
     VIEW_DRAW_MODE,
     VIEW_FOLD_NOTES,
+    VIEW_FOLD_SCALE,
+    VIEW_HIGHLIGHT_SCALES,
+    VIEW_NOTE_SPELLING,
     VIEW_LANE,
     VIEW_LANES,
     VIEW_MPE_LANES,
@@ -345,6 +358,7 @@ pub const IDS: &[&str] = &[
     SETTINGS_SET_CLIP_COLOUR,
     SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES,
     SETTINGS_SET_RETUNE_ON_TUNING_LOAD,
+    SETTINGS_SET_SNAP_AUTOMATION_TO_GRID,
     SETTINGS_SET_TEMPORARY_FOLDER,
     SETTINGS_SET_SAMPLE_EDITOR,
     SETTINGS_SET_WARP_RECORDED_AUDIO,
@@ -810,6 +824,23 @@ pub struct FoldNotesArgs {
     /// Fold (true) or unfold (false); switches if left out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub folded: Option<bool>,
+}
+
+/// Arguments of `view.highlight_scales`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct HighlightScalesArgs {
+    /// Whether Highlight Scales is on. Left out, the switch flips.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on: Option<bool>,
+}
+
+/// Arguments of `view.note_spelling`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct NoteSpellingArgs {
+    /// How the note editor spells keys.
+    pub spelling: bl_model::NoteSpelling,
 }
 
 /// Arguments of `view.lane`.
@@ -1635,6 +1666,55 @@ fn specs() -> Vec<CommandSpec> {
             .binding("S-NOTE-038")
             .args::<FoldNotesArgs>()
             .result::<ClipViewState>(),
+        CommandSpec::new(VIEW_FOLD_SCALE, "Fold to Scale")
+            .description(
+                "Folds or unfolds the MIDI Note Editor to the clip's scale (G, View \u{25b8} Fold \
+                 to Scale, the toolbar's Scale button): while it's folded, the editor shows \
+                 only the key rows of the clip's scale and the rows that hold notes, one \
+                 under the next. With Fold to Notes on too, a row shows only if each fold \
+                 that is on shows it. It works only while the clip's Scale Mode is on, and \
+                 turning Scale Mode off shows every row until it is on again. `clip` names \
+                 the clip; left out, the one the editor shows. `folded` says which way; left \
+                 out, it switches. Folding changes nothing in the set and isn't an undo step: \
+                 it's saved with the set beside the song. The result lists the clips folded \
+                 to their scale in `scale_folds`.",
+            )
+            .permission(Permission::Read)
+            .contexts([ClipView, NoteEditor])
+            .binding("S-NOTE-039")
+            .args::<FoldNotesArgs>()
+            .result::<ClipViewState>(),
+        CommandSpec::new(VIEW_HIGHLIGHT_SCALES, "Highlight Scales")
+            .description(
+                "Switches Highlight Scales (K, Options \u{25b8} Highlight Scales, the toolbar's \
+                 Highlight Scale button): in every clip with Scale Mode on, the note area \
+                 shades the rows of the scale and the piano ruler marks the root more \
+                 strongly than the scale's other keys. `on` says which way; left out, it \
+                 flips. It is one switch for all clips, off in a new install and kept between \
+                 launches as a preference; it isn't part of the set and is never an undo \
+                 step. The result reads it in `highlight_scales`.",
+            )
+            .permission(Permission::Edit)
+            .contexts([Global, ClipView, NoteEditor])
+            .binding("S-NOTE-035")
+            .args::<HighlightScalesArgs>()
+            .result::<ClipViewState>(),
+        CommandSpec::new(VIEW_NOTE_SPELLING, "Note Spelling")
+            .description(
+                "Chooses how the note editor spells keys (the piano ruler's context menu): \
+                 `sharps`, `flats`, `sharps_and_flats`, `auto` (flats when the clip's scale \
+                 has a root of F, B\u{266d}, E\u{266d}, A\u{266d}, D\u{266d} or G\u{266d}) or \
+                 `note_numbers`. A seven-note scale that is on spells its own keys with one \
+                 letter a degree, and the choice names the keys outside it. The rows, the \
+                 Root Note choosers follow the choice. It is one choice for every editor, \
+                 sharps in a new install and kept between launches as a preference; it isn't \
+                 part of the set and is never an undo step. The result reads it in \
+                 `note_spelling`.",
+            )
+            .permission(Permission::Edit)
+            .contexts([Global, ClipView, NoteEditor])
+            .args::<NoteSpellingArgs>()
+            .result::<ClipViewState>(),
         CommandSpec::new(VIEW_LANE, "Note Editor Lane")
             .description(
                 "Makes one of the MIDI Note Editor's expression lanes the active lane, whose \
@@ -2123,6 +2203,24 @@ fn specs() -> Vec<CommandSpec> {
              a tuning is asked first (Retune, or Cancel to change nothing). The setting is kept \
              for the next start, and isn't part of the set or an undo step. The result's `on` \
              is the setting afterwards.",
+        )
+        .permission(Permission::Edit)
+        .context(Settings)
+        .args::<SwitchArgs>()
+        .result::<SwitchResult>(),
+        // Spec: automation R31 (M-OPT-015): an edit-class preference.
+        CommandSpec::new(
+            SETTINGS_SET_SNAP_AUTOMATION_TO_GRID,
+            "Snap Automation to Grid",
+        )
+        .description(
+            "Switches Snap Automation to Grid, the Options menu's item; it's on in a new \
+             install. With it on, breakpoints made or moved with the mouse on an automation \
+             lane snap to the editing grid. With it off they land where the pointer is, \
+             snapping only to their neighbours' positions, and holding Cmd (Alt on Windows) \
+             snaps that drag to the grid. The editing grid's own Snap to Grid still turns all \
+             snapping off. The setting is kept for the next start, and isn't part of the set \
+             or an undo step. The result's `on` is the setting afterwards.",
         )
         .permission(Permission::Edit)
         .context(Settings)

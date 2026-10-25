@@ -24,13 +24,13 @@ use crate::assistant as assistant_ids;
 use crate::commands as ids;
 use crate::commands::ClipEnvelopeArgs;
 use crate::commands::ClipTabArgs;
-use crate::commands::FoldNotesArgs;
 use crate::commands::LaneArgs;
 use crate::commands::LanesArgs;
 use crate::commands::MpeGridArgs;
 use crate::commands::MpeLanesArgs;
 use crate::commands::SwitchResult;
 use crate::commands::ViewState;
+use crate::commands::{FoldNotesArgs, HighlightScalesArgs, NoteSpellingArgs};
 use bl_commands::NoArgs;
 use bl_model::AutomationTarget;
 use bl_model::ClipData;
@@ -288,9 +288,11 @@ impl Shell {
                         .state(self.editor.document(), &self.arrangement),
                 ))
             }
-            ids::VIEW_FOLD_NOTES => {
-                // Spec: piano-roll; M-VIEW-039, S-NOTE-038. View state only,
-                // saved with the set.
+            ids::VIEW_FOLD_NOTES | ids::VIEW_FOLD_SCALE => {
+                // Spec: piano-roll; M-VIEW-039, S-NOTE-038; scales R23,
+                // M-VIEW-040, S-NOTE-039. View state only, saved with the
+                // set.
+                let scale = id == ids::VIEW_FOLD_SCALE;
                 let FoldNotesArgs { clip, folded } = Self::args(id, args)?;
                 let args_clip_named = clip.is_some();
                 let clip = match clip {
@@ -307,18 +309,64 @@ impl Shell {
                     Some(value) if !matches!(value.data, ClipData::Midi(_)) => {
                         return Err(failed("the clip isn't a MIDI clip".to_owned()));
                     }
+                    Some(value) if scale && !value.scale.enabled => {
+                        return Err(unavailable("the clip's Scale Mode is off"));
+                    }
                     Some(_) => {}
                 }
-                let folded = folded.unwrap_or(!self.clip_view.is_folded(clip));
-                self.clip_view.set_folded(clip, folded);
+                let is_folded = |view: &ClipView, clip| {
+                    if scale {
+                        view.is_scale_folded(clip)
+                    } else {
+                        view.is_folded(clip)
+                    }
+                };
+                let folded = folded.unwrap_or(!is_folded(&self.clip_view, clip));
+                let mut clips = vec![clip];
                 if !args_clip_named {
-                    for other in self
-                        .clip_view
-                        .shown(self.editor.document(), &self.arrangement)
-                    {
-                        self.clip_view.set_folded(other, folded);
+                    clips.extend(
+                        self.clip_view
+                            .shown(self.editor.document(), &self.arrangement),
+                    );
+                }
+                for clip in clips {
+                    let doc = self.editor.document();
+                    if scale && doc.clip(clip).is_none_or(|value| !value.scale.enabled) {
+                        continue;
+                    }
+                    if scale {
+                        self.clip_view.set_scale_folded(clip, folded);
+                    } else {
+                        self.clip_view.set_folded(clip, folded);
                     }
                 }
+                Ok(to_value(
+                    &self
+                        .clip_view
+                        .state(self.editor.document(), &self.arrangement),
+                ))
+            }
+            ids::VIEW_HIGHLIGHT_SCALES => {
+                // Spec: scales R22; M-OPT-019, S-NOTE-035. A preference.
+                let HighlightScalesArgs { on } = Self::args(id, args)?;
+                let on = on.unwrap_or(!self.clip_view.highlight_scales());
+                self.clip_view.set_highlight_scales(on);
+                self.prefs.highlight_scales = on;
+                self.save_preferences();
+                self.touch();
+                Ok(to_value(
+                    &self
+                        .clip_view
+                        .state(self.editor.document(), &self.arrangement),
+                ))
+            }
+            ids::VIEW_NOTE_SPELLING => {
+                // Spec: scales R24; C-KEYS-002. A preference.
+                let NoteSpellingArgs { spelling } = Self::args(id, args)?;
+                self.clip_view.set_note_spelling(spelling);
+                self.prefs.note_spelling = spelling;
+                self.save_preferences();
+                self.touch();
                 Ok(to_value(
                     &self
                         .clip_view
@@ -611,19 +659,33 @@ impl Shell {
                 AutomationTarget::Device { device, param } => Some((device, param)),
                 _ => None,
             });
-        let result = self
-            .arrangement
-            .run(id, args, self.editor.document())
-            .map_err(|error| match error {
-                ViewError::InvalidArgs(message) => ShellError::InvalidArgs {
-                    command: id.to_owned(),
-                    message,
-                },
-                ViewError::Unavailable(reason) => ShellError::Unavailable {
-                    command: id.to_owned(),
-                    reason,
-                },
-            });
+        let to_error = |error: ViewError| match error {
+            ViewError::InvalidArgs(message) => ShellError::InvalidArgs {
+                command: id.to_owned(),
+                message,
+            },
+            ViewError::Unavailable(reason) => ShellError::Unavailable {
+                command: id.to_owned(),
+                reason,
+            },
+        };
+        // Spec: automation R25. Adding a lane needs the choosers' order,
+        // which the devices give.
+        let result = if id == view_ids::ADD_AUTOMATION_LANE {
+            Self::args::<view_ids::AddAutomationLaneArgs>(id, args).and_then(|args| {
+                let doc = self.editor.document();
+                let order =
+                    crate::arrangement::lanes::chooser_order(doc, &self.devices, args.track);
+                self.arrangement
+                    .add_lane(doc, &order, args)
+                    .map_err(to_error)?;
+                Ok(self.arrangement.state(doc))
+            })
+        } else {
+            self.arrangement
+                .run(id, args, self.editor.document())
+                .map_err(to_error)
+        };
         if id != view_ids::STATE {
             // A query changes nothing a window shows.
             self.touch();

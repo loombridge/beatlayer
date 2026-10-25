@@ -82,6 +82,7 @@ mod follow;
 pub mod graph;
 mod groove;
 mod ids;
+mod lane_views;
 mod launch;
 mod layers;
 mod linked;
@@ -102,8 +103,10 @@ mod sample_edits;
 mod scale;
 mod scene;
 mod shared;
+mod spelling;
 mod track;
 mod tuning;
+pub mod vst3_state;
 mod warp;
 mod warp_settings;
 mod window_views;
@@ -141,11 +144,12 @@ pub use document::{ArrangementLoop, Document, MAX_CUE_VOLUME, Settings};
 pub use editor::{EditError, Editor, HistoryStep, Maker};
 pub use error::ModelError;
 pub use fades::{EdgeRoom, FadeLimits};
+pub use lane_views::{LaneChoice, LaneViews, TrackLanes};
 pub use mpe_settings::{MAX_NOTE_CHANNELS, MpeMode, MpeSettings, MpeZone, PluginMpe};
 pub use mpe_view::{DEFAULT_LANE_HEIGHT, MpeLane, MpeView};
 pub use note_expression::Expression;
 pub mod freeze;
-pub use colour::{SWATCHES, TRACK_COLOURS, id_swatch};
+pub use colour::{DEFAULT_TRACK_PALETTE, SWATCHES, TRACK_COLOURS, id_swatch, swatch_rgb};
 pub use external::{
     External, ExternalPort, HardwareLatency, MAX_HARDWARE_LATENCY_MS, MAX_HARDWARE_LATENCY_SAMPLES,
 };
@@ -185,6 +189,7 @@ pub use repr::{SavedSong, saved_schema};
 pub use sample_edits::{SampleEdit, SampleEditKind, SampleRange};
 pub use scale::{CHROMATIC, Scale, ScaleName};
 pub use scene::{DEFAULT_SCENE_COUNT, SCENE_TEMPO_MAX, SCENE_TEMPO_MIN, Scene};
+pub use spelling::NoteSpelling;
 pub use track::{
     Channel, CrossfadeAssign, DeviceOutput, Input, MAX_TRACK_DELAY_MS, MAX_TRACK_DELAY_SAMPLES,
     MidiTo, Mixer, Monitor, Output, PanMode, Routing, SendTap, Tap, Track, TrackDelay, TrackKind,

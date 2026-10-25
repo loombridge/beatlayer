@@ -418,6 +418,7 @@ impl MainWindowUi {
                 self.focus_request = Some(FocusRequest::MainView);
             }
             Effect::FocusArea(Area::Assistant) => self.assistant.focus_prompt(),
+            Effect::FocusClipPanels => crate::main_panel::request_focus(ctx),
             Effect::RenameDevice(device) => {
                 // Spec: device-chains R10. Rename types the name in the
                 // title bar.
@@ -440,6 +441,12 @@ impl MainWindowUi {
                 self.devices.start_variation_rename(*rack, *index);
             }
             Effect::RenameTrack(track) => crate::track_menu::start_rename(ctx, *track),
+            Effect::RenameClip(clip) => {
+                crate::session_menus::start_rename(ctx, crate::session_menus::Rename::Clip(*clip))
+            }
+            Effect::RenameScene(scene) => {
+                crate::session_menus::start_rename(ctx, crate::session_menus::Rename::Scene(*scene))
+            }
             Effect::RenameTakeLane(lane) => {
                 // Spec: comping R28. Rename types the name in the take
                 // lane's header.
@@ -741,6 +748,8 @@ impl MainWindowUi {
         }
         self.mixer_typing = crate::mixer::is_typing(ctx)
             || crate::track_menu::is_renaming(ctx)
+            || crate::session_menus::is_renaming(ctx)
+            || crate::session_menus::field_has_focus(ctx)
             || crate::arrangement::take_lanes::is_renaming(ctx)
             || crate::envelope_keys::is_typing(ctx);
         // An open menu, or a dialog, keeps the keys.
@@ -1950,13 +1959,12 @@ fn look(element: Element, shell: &Shell, window: WindowKind) -> Look {
         }
         Element::RootNote => {
             let display = shell.scale_display();
-            let name = display.root.map_or("*", bl_model::Scale::root_name);
+            let name = display
+                .root
+                .map_or_else(|| "*".to_owned(), |root| shell.root_name(root));
             Look {
-                text: Some(name.to_owned()),
-                value: Some(display.root.map_or_else(
-                    || "mixed".to_owned(),
-                    |root| bl_model::Scale::root_name(root).to_owned(),
-                )),
+                text: Some(name.clone()),
+                value: Some(display.root.map_or_else(|| "mixed".to_owned(), |_| name)),
                 description: Some("The root note of the scale.".to_owned()),
                 ..Look::default()
             }
@@ -2269,8 +2277,7 @@ fn scale_command(shell: &Shell, change: &[(&str, serde_json::Value)]) -> Invocat
 fn root_note_menu(ui: &mut egui::Ui, shell: &Shell, events: &mut Vec<UiEvent>) {
     let display = shell.scale_display();
     for root in 0..12u8 {
-        let item =
-            ui.selectable_label(display.root == Some(root), bl_model::Scale::root_name(root));
+        let item = ui.selectable_label(display.root == Some(root), shell.root_name(root));
         if item.clicked() {
             events.push(UiEvent::Invoke(scale_command(
                 shell,

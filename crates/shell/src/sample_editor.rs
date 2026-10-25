@@ -261,6 +261,18 @@ impl SampleView {
         }
     }
 
+    /// Scrolls the span in view, if it is zoomed, so that `at` falls in it,
+    /// keeping its width (Spec: clip-properties R4). `lowest` is the least
+    /// the span may start at.
+    pub(crate) fn reveal(&mut self, at: f64, lowest: f64) {
+        let Some((from, to)) = self.view.filter(|&(from, to)| at < from || at >= to) else {
+            return;
+        };
+        let start = (at - (to - from) / 2.0).max(lowest);
+        self.push_back();
+        self.view = Some((start, start + (to - from)));
+    }
+
     fn push_back(&mut self) {
         if self.back.len() == BACK_STEPS {
             self.back.remove(0);

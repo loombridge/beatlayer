@@ -48,8 +48,44 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
         ("automation.delete", Exception(LANE_KEYS)),
         (
             "automation.re_enable_for",
-            Exception(LaterView("the arrangement's automation lanes (WP-2.12)")),
+            Exception(Equivalent(
+                "Re-Enable Automation in a mixer control's or device parameter's context \
+                 menu, opened with the menu key on the control (automation R29)",
+            )),
         ),
+        // The automation lanes (WP-6.57; the automation spec, R24 to R28): the
+        // lane and hide buttons and the header's toggle are Tab stops, and a
+        // lane header's menu opens with the menu key on its choosers.
+        (
+            "arrangement.add_automation_lane",
+            main(
+                automation_mode,
+                arrangement_view,
+                "Show Automation in New Lane",
+                Key::Enter,
+            ),
+        ),
+        (
+            "arrangement.remove_automation_lane",
+            main(
+                an_automation_lane,
+                arrangement_view,
+                "Hide Automation Lane",
+                Key::Enter,
+            ),
+        ),
+        (
+            "arrangement.show_automation_lanes",
+            main(
+                an_automation_lane,
+                arrangement_view,
+                "Hide Automation Lanes",
+                Key::Enter,
+            ),
+        ),
+        ("arrangement.show_automated_only", Exception(LANE_MENU)),
+        ("automation.clear_track", Exception(LANE_MENU)),
+        ("automation.clear_device", Exception(LANE_MENU)),
         (
             "view.set_zoom",
             settings("display-input", nothing, "Zoom", Key::ArrowUp),
@@ -203,6 +239,14 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             )),
         ),
         ("view.lane", Exception(NOTE_EDITOR)),
+        // The piano ruler's context menu (C-KEYS) is opened by the pointer;
+        // the ruler takes no keyboard focus yet.
+        (
+            "view.note_spelling",
+            Exception(Unobserved(
+                "the piano ruler's context menu, which the pointer opens; whether Live's ruler has a keyboard path isn't observed",
+            )),
+        ),
         ("view.lanes", Exception(NOTE_FOOTER)),
         // The MPE tab's lane toggles are switches Tab reaches (the MPE spec,
         // R34).

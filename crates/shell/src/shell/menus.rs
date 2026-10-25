@@ -43,6 +43,7 @@ use bl_shell_spec::notes as note_ids;
 use bl_shell_spec::notes::ClipTab;
 use bl_shell_spec::session_launch as session_launch_ids;
 use bl_shell_spec::session_record as session_record_ids;
+use bl_shell_spec::session_view as session_ids;
 use bl_shell_spec::slice as slice_ids;
 use bl_shell_spec::stems as stems_ids;
 use bl_shell_spec::tracks as track_ids;
@@ -167,6 +168,10 @@ impl Shell {
     pub fn choice_state(&self, id: &str, args: &Value) -> Option<bool> {
         match id {
             CUE_MODE => Some(self.editor.document().cue_active() == args["enabled"].as_bool()?),
+            ids::VIEW_NOTE_SPELLING => Some(
+                self.clip_view.note_spelling()
+                    == serde_json::from_value(args["spelling"].clone()).ok()?,
+            ),
             // Spec: time-editing R10. The loop brace's menu item is ticked
             // while the song starts at the brace's start.
             locator_ids::SET_START_TIME if args["loop_brace"].as_bool() == Some(true) => Some(
@@ -208,6 +213,17 @@ impl Shell {
                     .shown_clip(self.editor.document(), &self.arrangement)
                     .is_some_and(|clip| self.clip_view.is_folded(clip)),
             ),
+            ids::VIEW_FOLD_SCALE => Some(
+                self.clip_view
+                    .shown_clip(self.editor.document(), &self.arrangement)
+                    .is_some_and(|clip| {
+                        self.clip_view
+                            .fold(self.editor.document(), clip)
+                            .scale
+                            .is_some()
+                    }),
+            ),
+            ids::VIEW_HIGHLIGHT_SCALES => Some(self.clip_view.highlight_scales()),
             ids::VIEW_TOGGLE_INFO_VIEW => Some(self.info_view),
             assistant_ids::VIEW_TOGGLE_ASSISTANT => Some(self.assistant_open),
             ids::VIEW_TOGGLE_UNDO_HISTORY => Some(self.undo_history_open),
@@ -216,6 +232,7 @@ impl Shell {
             ids::FOCUS_TOGGLE_TAB_NAVIGATION => Some(self.prefs.tab_navigation),
             ids::FOCUS_TOGGLE_WRAP_NAVIGATION => Some(self.prefs.wrap_navigation.0),
             ids::SETTINGS_SET_RETUNE_ON_TUNING_LOAD => Some(self.prefs.retune_on_tuning_load),
+            ids::SETTINGS_SET_SNAP_AUTOMATION_TO_GRID => Some(self.prefs.snap_automation_to_grid.0),
             session_launch_ids::SET_QUANTIZATION_ENABLED => Some(self.store.launch().enabled),
             SOLO_IN_PLACE => Some(self.editor.document().settings().solo_in_place),
             DELAY_COMPENSATION => Some(self.editor.document().settings().delay_compensation),
@@ -520,6 +537,15 @@ impl Shell {
                         | Clipboard::Scenes(_) => false,
                     });
             }
+            // Spec: session-context-menus R12, R16. Export MIDI Clip... is for
+            // a MIDI clip.
+            bl_shell_spec::midi_files::EXPORT => {
+                return args
+                    .get("clip")
+                    .and_then(|clip| serde_json::from_value::<bl_model::ClipId>(clip.clone()).ok())
+                    .and_then(|clip| self.editor.document().clip(clip))
+                    .is_some_and(|clip| matches!(clip.data, ClipData::Midi(_)));
+            }
             ids::APP_HIDE => return cfg!(target_os = "macos"),
             ids::SET_OPEN | ids::SET_SAVE | ids::SET_SAVE_AS | ids::APP_SETTINGS => return true,
             ids::SET_DISCARD_CHANGES => return self.unsaved_changes(),
@@ -528,6 +554,15 @@ impl Shell {
             // R8).
             REDUCED_LATENCY_MONITORING => {
                 return self.editor.document().settings().delay_compensation;
+            }
+            // Spec: scales R23. View ▸ Fold to Scale is enabled while the
+            // editor shows a MIDI clip whose Scale Mode is on.
+            ids::VIEW_FOLD_SCALE => {
+                return self
+                    .clip_view
+                    .shown_clip(self.editor.document(), &self.arrangement)
+                    .and_then(|clip| self.editor.document().clip(clip))
+                    .is_some_and(|clip| clip.scale.enabled);
             }
             // Spec: find-and-select-notes R13. Edit ▸ Invert Selection is
             // enabled while the editor shows a clip that holds notes.
@@ -853,6 +888,11 @@ impl Shell {
                 .is_some_and(|schema| bl_commands::validate(schema, &args).is_ok())
                 && self.browser_view.can_run(id, &args);
         }
+        if session_ids::handles(id)
+            && let Some(allowed) = self.can_session_view(id, args)
+        {
+            return allowed;
+        }
         if crate::session_clips::handles(id) {
             let args = if args.is_null() {
                 json!({})
@@ -903,6 +943,9 @@ impl Shell {
                 && engine_transport::command_from_args(id, Self::object(args.clone())).is_ok();
         }
         if engine_session::handles(id) {
+            if let Some(allowed) = self.can_session_view(id, args) {
+                return allowed;
+            }
             // The Session View launches only while an engine runs on a
             // device, as the transport plays.
             // Back to Arrangement is off in a set no clip has taken over

@@ -94,6 +94,7 @@ mod audio_panel;
 pub mod autosample;
 mod bounce;
 mod capture;
+mod clip_properties;
 mod envelope_keys;
 mod export_dialog;
 pub use export_dialog::ExportPrefs;
@@ -324,6 +325,9 @@ pub enum Effect {
     /// Move the keyboard focus to an area of the second window, and bring
     /// it to the front.
     FocusSecondArea(Area),
+    /// Move the keyboard focus to the first control of the Clip View's
+    /// panels (Navigate ▸ Clip Panels).
+    FocusClipPanels,
     /// Move the keyboard focus to the next or previous control, or to the
     /// same control on the next or previous track.
     MoveFocus {
@@ -355,6 +359,20 @@ pub enum Effect {
         /// The file name the dialog suggests.
         default_name: String,
     },
+    /// Ask where to save a MIDI clip as a Standard MIDI File, then run
+    /// `midi.export_clip` there (WP-6.56).
+    PickMidiExportPath {
+        /// The clip.
+        clip: bl_model::ClipId,
+        /// The file name the dialog suggests.
+        default_name: String,
+    },
+    /// Start renaming a Session clip in its slot, where the person types the
+    /// new name; Return runs `clip.rename` with it (WP-6.56).
+    RenameClip(bl_model::ClipId),
+    /// Start renaming a scene in its name field in the Main column; Return
+    /// runs `scene.rename` with the new name (WP-6.56).
+    RenameScene(bl_model::SceneId),
     /// Start renaming a device in its title bar, where the person types the
     /// new name; Return runs `device.rename` with it (WP-2.4).
     RenameDevice(bl_model::DeviceId),
@@ -509,6 +527,10 @@ pub struct Shell {
     /// The report of the last DAWproject import, while the set the import
     /// made is open (R12).
     import_report: Option<bl_shell_spec::dawproject::ImportReport>,
+    /// The 14 track colours of the theme in use, from which a DAWproject
+    /// import draws the palette it places colours on (R23). The bundled
+    /// theme's until a window tells the shell its theme's.
+    track_palette: Vec<[u8; 3]>,
     dirty: bool,
     /// The crash-recovery service (WP-6.62, the crash-recovery spec R21):
     /// it journals the open set's edits, and holds the sets a crash left.
@@ -1154,6 +1176,7 @@ impl Shell {
         let saved = snapshot(&editor);
         let plugin_panels = prefs.plugin_panels.clone();
         let note_preview = prefs.note_preview;
+        let (highlight_scales, note_spelling) = (prefs.highlight_scales, prefs.note_spelling);
         let mut shell = Self {
             browser_view,
             media,
@@ -1181,6 +1204,7 @@ impl Shell {
             set_path: None,
             pending_name: None,
             import_report: None,
+            track_palette: bl_model::DEFAULT_TRACK_PALETTE.to_vec(),
             dirty: false,
             autosave: None,
             journal_label: String::new(),
@@ -1236,6 +1260,8 @@ impl Shell {
             clip_view: {
                 let mut view = ClipView::default();
                 view.set_preview(note_preview);
+                view.set_highlight_scales(highlight_scales);
+                view.set_note_spelling(note_spelling);
                 view
             },
             detail: DetailArea::default(),
@@ -1964,6 +1990,9 @@ impl Shell {
         }
         if bl_shell_spec::audio_panel::handles(id) {
             return self.run_audio_panel(id, args);
+        }
+        if bl_shell_spec::clip_properties::handles(id) {
+            return self.run_clip_properties(id, args);
         }
         if bl_shell_spec::modulation::handles(id) {
             let bl_shell_spec::modulation::StateArgs { track } = Self::args(id, args)?;

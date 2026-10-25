@@ -627,3 +627,62 @@ fn a_shift_hold_in_the_beat_time_ruler_loops() {
     release(&mut h, in_ruler);
     h.wait("playback past the span", |h| h.engine.position >= span.end);
 }
+
+#[test]
+fn a_locator_dragged_near_a_clip_edge_snaps_to_it_and_shows_a_line() {
+    // Spec: arrangement-editing R22, R23. The scrub area is 30 points to a
+    // bar; the locator, dragged to 7.3, is 1.5 points from the clip edge at
+    // 7.25 and 9 from the grid line at 7.
+    let mut s = Harness::with_title_bar(Window::Main);
+    let mut editor = bl_shell::files::factory_default_set();
+    let track = editor.document().top_level().nth(2).unwrap();
+    let id: bl_model::ClipId = editor.new_id();
+    editor
+        .apply(bl_model::Command::CreateClip {
+            track,
+            clip: bl_model::Clip::new(
+                id,
+                Ticks(7 * BAR + BAR / 4),
+                Ticks(BAR),
+                bl_model::ClipData::Audio(bl_model::AudioData::new(bl_model::ContentHash([1; 32]))),
+            ),
+        })
+        .unwrap();
+    editor.clear_history().unwrap();
+    s.shell = bl_ui::arrangement::benchmark::shell_with(editor);
+    s.shell.run(ids::ADD, json!({ "at": 2 * BAR })).unwrap();
+    s.settle();
+    let layout = layout(&s);
+    let (x, y) = (locator_x(&s, &layout, 2), layout.scrub.center().y);
+    let to = locator_x(&s, &layout, 7) + 9.0;
+    let before = steps(&s);
+    s.frame(vec![
+        Event::PointerMoved(pos2(x, y)),
+        Event::PointerButton {
+            pos: pos2(x, y),
+            button: PointerButton::Primary,
+            pressed: true,
+            modifiers: Modifiers::NONE,
+        },
+    ]);
+    for step in 1..=6 {
+        s.frame(vec![Event::PointerMoved(pos2(
+            x + (to - x) * step as f32 / 6.0,
+            y,
+        ))]);
+    }
+    assert_eq!(
+        s.main.arrangement().drawn_snap_line(),
+        Some(Ticks(7 * BAR + BAR / 4))
+    );
+    s.frame(vec![Event::PointerButton {
+        pos: pos2(to, y),
+        button: PointerButton::Primary,
+        pressed: false,
+        modifiers: Modifiers::NONE,
+    }]);
+    s.settle();
+    assert_eq!(locators(&s)[0].1, Ticks(7 * BAR + BAR / 4));
+    assert_eq!(steps(&s), before + 1);
+    assert_eq!(s.main.arrangement().drawn_snap_line(), None);
+}

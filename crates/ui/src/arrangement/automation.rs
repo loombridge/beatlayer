@@ -19,11 +19,15 @@ use bl_model::{
     TrackId,
 };
 use bl_shell::arrangement::automation::{Travel as LaneScale, selected_breakpoints, travel};
+pub(crate) use bl_shell::arrangement::lanes::cycle_target;
 use bl_shell::arrangement::rows::Row;
 use bl_shell::arrangement::{ArrangementView, Horizontal};
 use bl_shell::arrangement_commands as view_ids;
 use bl_shell::{GesturePhase, Invocation, Shell};
-use egui::{Modifiers, Painter, Pos2, Rect, Stroke, Ui, pos2, vec2};
+use egui::accesskit::Role;
+use egui::{
+    Align2, Modifiers, Painter, Pos2, Rect, Sense, Stroke, Ui, WidgetInfo, WidgetType, pos2, vec2,
+};
 use serde_json::{Value, json};
 
 use crate::main_window::UiEvent;
@@ -84,7 +88,12 @@ fn gesture(events: &mut Vec<UiEvent>, phase: GesturePhase, id: &str, args: Value
 pub(super) struct Lane<'a> {
     pub doc: &'a Document,
     pub track: TrackId,
+    /// The lane's number among the track's: 0 is the main lane, which draws
+    /// over the track's clips, and 1 and up are its lanes of its own.
+    pub number: usize,
     pub target: AutomationTarget,
+    /// Whether Snap Automation to Grid is on (the automation spec, R31).
+    pub snap: bool,
     pub rect: Rect,
     pub horizontal: Horizontal,
     pub scale: LaneScale,
@@ -194,19 +203,19 @@ pub(super) enum LaneHit {
     Empty(Ticks),
 }
 
-/// The lane's rectangle on screen, under a track's row.
-pub(super) fn lane_rect(row: &Row, lanes: Rect, scroll_y: f32) -> Rect {
-    let top = lanes.top() + row.top + row.height - scroll_y;
-    Rect::from_min_max(
-        pos2(lanes.left(), top),
-        pos2(lanes.right(), top + row.automation),
-    )
+/// The rectangle of lane `number` of a track's row on screen: the main lane
+/// (0) over the track's own lane, the others under it (the automation spec,
+/// R24, R25).
+pub(super) fn lane_rect(row: &Row, number: usize, lanes: Rect, scroll_y: f32) -> Rect {
+    let (top, bottom) = row.lane_span(number);
+    let y = lanes.top() - scroll_y;
+    Rect::from_min_max(pos2(lanes.left(), y + top), pos2(lanes.right(), y + bottom))
 }
 
 /// The ID of a track's automation lane in the accessibility tree.
 #[must_use]
-pub(super) fn lane_id(track: TrackId) -> egui::Id {
-    egui::Id::new(("arrangement-automation-lane", track))
+pub(super) fn lane_id(track: TrackId, number: usize) -> egui::Id {
+    egui::Id::new(("arrangement-automation-lane", track, number))
 }
 
 /// The lanes in a frame: the rows the shell gave, and the geometry to look a
@@ -221,28 +230,31 @@ pub(super) struct Lanes<'a> {
 }
 
 impl Lanes<'_> {
-    /// The automation lane of `row`, if the row has one and its track shows a
-    /// parameter.
-    pub(super) fn lane(&self, row: &Row, shell: &Shell) -> Option<Lane<'_>> {
-        if !self.view.automation_mode() || row.automation <= 0.0 {
-            return None;
-        }
-        let target = self.view.automation_lane(row.track)?;
-        Some(Lane {
-            doc: self.doc,
-            track: row.track,
-            target,
-            rect: lane_rect(row, self.rect, self.scroll_y),
-            horizontal: self.horizontal,
-            scale: travel(self.doc, shell.devices(), target),
-            selected: selected_breakpoints(self.doc, self.view, row.track, target),
-            span: self.view.time_selection().filter(|_| {
-                self.view
-                    .time_selection_lanes()
-                    .iter()
-                    .any(|lane| lane.track() == row.track && lane.target() == Some(target))
-            }),
-        })
+    /// The automation lanes of `row` that draw an envelope: the main lane,
+    /// then the lanes of its own, while Automation Mode is on (a lane whose
+    /// choosers show None has none to edit).
+    pub(super) fn lanes_of(&self, row: &Row, shell: &Shell) -> Vec<Lane<'_>> {
+        self.view
+            .shown_lane_targets(row.track)
+            .into_iter()
+            .map(|(number, target)| Lane {
+                doc: self.doc,
+                track: row.track,
+                number,
+                target,
+                snap: shell.snap_automation_to_grid(),
+                rect: lane_rect(row, number, self.rect, self.scroll_y),
+                horizontal: self.horizontal,
+                scale: travel(self.doc, shell.devices(), target),
+                selected: selected_breakpoints(self.doc, self.view, row.track, target),
+                span: self.view.time_selection().filter(|_| {
+                    self.view
+                        .time_selection_lanes()
+                        .iter()
+                        .any(|lane| lane.track() == row.track && lane.target() == Some(target))
+                }),
+            })
+            .collect()
     }
 
     /// The row a point is in.
@@ -256,14 +268,15 @@ impl Lanes<'_> {
         (y < row.bottom()).then_some(row)
     }
 
-    /// The automation lane under a point, if any.
+    /// The automation lane under a point, if any: a lane of a track's own
+    /// under it, or its main lane, which covers the track's own lane. A
+    /// clip's title bar and edges in the main lane keep the clip's gestures
+    /// (R24), which the caller tells apart.
     pub(super) fn lane_at(&self, pos: Pos2, shell: &Shell) -> Option<Lane<'_>> {
         let row = self.row_at(pos)?;
-        let y = pos.y - self.rect.top() + self.scroll_y;
-        if y < row.top + row.height {
-            return None;
-        }
-        self.lane(row, shell)
+        self.lanes_of(row, shell)
+            .into_iter()
+            .find(|lane| lane.rect.contains(pos))
     }
 }
 
@@ -283,6 +296,9 @@ pub enum AutomationDevice {
     Clip,
     /// No envelope: the lane stays, with nothing drawn.
     None,
+    /// The device chooser's last entry, Show Automated Parameters Only (the
+    /// automation spec, R27): a switch, never the chooser's value.
+    AutomatedOnly,
 }
 
 /// The device a target belongs to, as the device chooser sees it.
@@ -419,7 +435,7 @@ pub fn control_choices(
             }));
         }
         AutomationDevice::Clip => choices.extend(ClipParam::ALL.map(clip_choice)),
-        AutomationDevice::None => {}
+        AutomationDevice::None | AutomationDevice::AutomatedOnly => {}
     }
     choices
 }
@@ -487,7 +503,7 @@ pub(crate) fn default_target(
         AutomationDevice::Clip => Some(AutomationTarget::Clip {
             param: ClipParam::Gain,
         }),
-        AutomationDevice::None => None,
+        AutomationDevice::None | AutomationDevice::AutomatedOnly => None,
     }
 }
 
@@ -552,6 +568,50 @@ pub(crate) fn mark_controls(
     for choice in choices {
         choice.leds = leds(doc, track, theme, |target| *target == choice.value);
     }
+}
+
+/// Keeps the device chooser's entries that have automation on `track`: the
+/// mixer and the devices with an envelope, and None (the automation spec,
+/// R27).
+pub(crate) fn keep_automated_devices(
+    choices: &mut Vec<Choice<AutomationDevice>>,
+    doc: &Document,
+    track: TrackId,
+) {
+    let Some(owner) = doc.track(track) else {
+        return;
+    };
+    choices.retain(|choice| {
+        choice.value == AutomationDevice::None
+            || owner
+                .automation()
+                .any(|(target, _)| device_of(*target) == choice.value)
+    });
+}
+
+/// Keeps the control chooser's entries that have an envelope on `track` (R27).
+pub(crate) fn keep_automated_controls(
+    choices: &mut Vec<Choice<AutomationTarget>>,
+    doc: &Document,
+    track: TrackId,
+) {
+    let Some(owner) = doc.track(track) else {
+        return;
+    };
+    choices.retain(|choice| owner.automation_for(&choice.value).is_some());
+}
+
+/// Adds the device chooser's last entry, Show Automated Parameters Only,
+/// ticked while the lane's choosers are filtered (R27).
+pub(crate) fn push_automated_only(choices: &mut Vec<Choice<AutomationDevice>>, on: bool) {
+    choices.push(Choice {
+        label: format!(
+            "{}Show Automated Parameters Only",
+            if on { "✔ " } else { "" }
+        ),
+        value: AutomationDevice::AutomatedOnly,
+        leds: NO_LEDS,
+    });
 }
 
 /// One of the eight handles on a hovered time selection's box (the
@@ -828,6 +888,8 @@ enum LaneDrag {
         pointer: Pos2,
         rect: Rect,
         scale: LaneScale,
+        /// Whether Snap Automation to Grid was on when the drag began.
+        snap: bool,
     },
     /// Holding Option/Alt while dragging a segment, to curve it.
     Curve {
@@ -843,7 +905,8 @@ enum LaneDrag {
 /// The automation gestures under way between frames.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(super) struct AutomationGestures {
-    lane: Option<TrackId>,
+    /// The track and number of the lane a drag is in.
+    lane: Option<(TrackId, usize)>,
     drag: Option<LaneDrag>,
 }
 
@@ -858,7 +921,7 @@ impl AutomationGestures {
         if let (Some(handle), Some(span)) = (lane.handle_at(press), lane.span)
             && !matches!(lane.hit(press), LaneHit::Breakpoint(_))
         {
-            self.lane = Some(lane.track);
+            self.lane = Some((lane.track, lane.number));
             self.drag = Some(LaneDrag::Handle {
                 handle,
                 span,
@@ -891,7 +954,7 @@ impl AutomationGestures {
                             .collect()
                     })
                     .unwrap_or_default();
-                self.lane = Some(lane.track);
+                self.lane = Some((lane.track, lane.number));
                 self.drag = Some(LaneDrag::Breakpoint {
                     target: lane.target,
                     at,
@@ -901,6 +964,7 @@ impl AutomationGestures {
                     pointer: press,
                     rect: lane.rect,
                     scale: lane.scale,
+                    snap: lane.snap,
                 });
                 true
             }
@@ -909,7 +973,7 @@ impl AutomationGestures {
                     .envelope()
                     .and_then(|envelope| envelope.point(at))
                     .map_or(0.0, |point| point.bend);
-                self.lane = Some(lane.track);
+                self.lane = Some((lane.track, lane.number));
                 self.drag = Some(LaneDrag::Curve {
                     target: lane.target,
                     at,
@@ -954,7 +1018,7 @@ impl AutomationGestures {
                     })
                     .unwrap_or_default();
                 let grabbed = at[0];
-                self.lane = Some(lane.track);
+                self.lane = Some((lane.track, lane.number));
                 self.drag = Some(LaneDrag::Breakpoint {
                     target: lane.target,
                     at,
@@ -964,6 +1028,7 @@ impl AutomationGestures {
                     pointer: press,
                     rect: lane.rect,
                     scale: lane.scale,
+                    snap: lane.snap,
                 });
                 true
             }
@@ -980,7 +1045,7 @@ impl AutomationGestures {
         pointer: Pos2,
         modifiers: Modifiers,
     ) -> Option<(&'static str, Value)> {
-        let track = self.lane?;
+        let (track, _) = self.lane?;
         match self.drag.as_ref()? {
             LaneDrag::Handle {
                 handle,
@@ -1001,6 +1066,7 @@ impl AutomationGestures {
                 pointer: from,
                 rect,
                 scale,
+                snap,
             } => {
                 let by = horizontal.at(f64::from(pointer.x - rect.left()))
                     - horizontal.at(f64::from(from.x - rect.left()));
@@ -1009,13 +1075,7 @@ impl AutomationGestures {
                 let vertical =
                     modifiers.shift && (pointer.y - from.y).abs() > (pointer.x - from.x).abs();
                 let by = if vertical { Ticks::ZERO } else { by };
-                // S-ENV-006: Cmd (Alt on Windows) bypasses grid snapping.
-                let invert = if cfg!(target_os = "macos") {
-                    modifiers.mac_cmd
-                } else {
-                    modifiers.alt
-                };
-                let snapped = view.snap_drag(doc, *grabbed + by, invert);
+                let snapped = breakpoint_time(view, doc, *grabbed + by, modifiers, *snap);
                 // Spec: automation-editing R3. The drag snaps to the
                 // positions of the breakpoints next to it.
                 let to = if vertical {
@@ -1075,7 +1135,7 @@ impl AutomationGestures {
     /// being dragged (R14).
     pub fn outline(
         &self,
-        track: TrackId,
+        lane: (TrackId, usize),
         view: &ArrangementView,
         doc: &Document,
         pointer: Pos2,
@@ -1090,7 +1150,7 @@ impl AutomationGestures {
         else {
             return None;
         };
-        (self.lane == Some(track)).then(|| {
+        (self.lane == Some(lane)).then(|| {
             let at = handle_time(view, doc, *horizontal, *rect, pointer, modifiers);
             drag_box(*handle, *span, *rect, at, pointer, modifiers)
                 .corners(*rect, |at| rect.left() + horizontal.x(at) as f32)
@@ -1245,8 +1305,38 @@ impl AutomationGestures {
     }
 }
 
-/// The position a click lands on: on the editing grid, unless Cmd (Alt on
-/// Windows) is held to bypass snapping (S-ENV-006).
+/// Whether Cmd (Alt on Windows) is held, which does the opposite of what the
+/// grid's snapping would (S-ENV-006).
+fn bypass(modifiers: Modifiers) -> bool {
+    if cfg!(target_os = "macos") {
+        modifiers.mac_cmd
+    } else {
+        modifiers.alt
+    }
+}
+
+/// Where a breakpoint made or moved with the mouse lands in time (the
+/// automation spec, R31): with Snap Automation to Grid on, on the editing
+/// grid unless Cmd (Alt on Windows) is held to bypass it (S-ENV-006); with it
+/// off, where the pointer is, unless Cmd is held to snap that drag. The
+/// editing grid's own Snap to Grid turns both off.
+pub(super) fn breakpoint_time(
+    view: &ArrangementView,
+    doc: &Document,
+    at: Ticks,
+    modifiers: Modifiers,
+    snap: bool,
+) -> Ticks {
+    if snap {
+        view.snap_drag(doc, at, bypass(modifiers))
+    } else if bypass(modifiers) && view.grid().snap {
+        view.snap(doc, at)
+    } else {
+        at
+    }
+}
+
+/// The position a click lands on (R31).
 pub(super) fn click_at(
     view: &ArrangementView,
     doc: &Document,
@@ -1254,12 +1344,7 @@ pub(super) fn click_at(
     pos: Pos2,
     modifiers: Modifiers,
 ) -> Ticks {
-    let invert = if cfg!(target_os = "macos") {
-        modifiers.mac_cmd
-    } else {
-        modifiers.alt
-    };
-    view.snap_drag(doc, lane.at(pos), invert)
+    breakpoint_time(view, doc, lane.at(pos), modifiers, lane.snap)
 }
 
 /// Paints a lane's background and its top edge.
@@ -1300,6 +1385,14 @@ pub(super) fn paint_envelope(
         x += 2.0;
     }
     if points.len() >= 2 {
+        // The main lane draws over the clips (R24): a dark edge keeps the line
+        // readable on a waveform.
+        if lane.number == 0 {
+            painter.add(egui::Shape::line(
+                points.clone(),
+                Stroke::new(3.5, theme.colors.window.0.gamma_multiply(0.6)),
+            ));
+        }
         painter.add(egui::Shape::line(
             points,
             // Spec: modulation R9: the base, in the automation colour.
@@ -1381,8 +1474,8 @@ pub(crate) fn paint_handles_at(
 
 /// The ID of the accessible node of the breakpoint at `at` in a track's
 /// automation lane.
-fn breakpoint_id(track: TrackId, at: Ticks) -> egui::Id {
-    egui::Id::new(("arrangement-automation-breakpoint", track, at.get()))
+fn breakpoint_id(track: TrackId, number: usize, at: Ticks) -> egui::Id {
+    egui::Id::new(("arrangement-automation-breakpoint", track, number, at.get()))
 }
 
 /// Draws what the keyboard has in a lane: the insert marker with the value
@@ -1411,7 +1504,7 @@ pub(super) fn paint_keys(
     }
     let at = keys.selected.unwrap_or(keys.marker);
     let point = lane.envelope()?.point(at)?;
-    let id = breakpoint_id(lane.track, at);
+    let id = breakpoint_id(lane.track, lane.number, at);
     let rect = Rect::from_center_size(
         lane.point_pos(point),
         vec2(BREAKPOINT_SIZE * 2.0, BREAKPOINT_SIZE * 2.0),
@@ -1427,20 +1520,106 @@ pub(super) fn paint_keys(
     Some(id)
 }
 
-/// Draws a track's automation lane header in the header column: the device
-/// chooser and the parameter chooser.
-pub(super) fn lane_header(
+/// How wide the lane header's small buttons are, in points.
+pub(super) const BUTTON: f32 = 14.0;
+
+/// How tall the choosers are, in points.
+pub(super) const CHOOSER_HEIGHT: f32 = 15.0;
+
+/// Whether Alt (Windows) or Cmd (Mac) is held: the lane and hide buttons then
+/// act on every lane (the automation spec, R25, R26).
+fn all_key(ui: &Ui) -> bool {
+    bypass(ui.input(|i| i.modifiers))
+}
+
+/// A small header button with a glyph, `lit` while it stands for something
+/// switched on. Returns whether it was clicked.
+fn small_button(
+    ui: &mut Ui,
+    theme: &Theme,
+    id: egui::Id,
+    rect: Rect,
+    (glyph, name): (&str, &str),
+    lit: Option<bool>,
+) -> bool {
+    let c = &theme.colors;
+    let response = ui.interact(rect, id, Sense::click());
+    let on = lit == Some(true);
+    let fill = if on {
+        c.accent.0
+    } else if response.hovered() {
+        c.control_hover.0
+    } else {
+        c.control.0
+    };
+    let ink = if on { c.accent_text.0 } else { c.text.0 };
+    let painter = ui.painter_at(rect.expand(1.0));
+    painter.rect_filled(rect, theme.sizes.corner, fill);
+    painter.text(
+        rect.center(),
+        Align2::CENTER_CENTER,
+        glyph,
+        theme.small_font(),
+        ink,
+    );
+    crate::focus::register(ui.ctx(), response.id, bl_shell::Area::MainView, None);
+    match lit {
+        Some(on) => {
+            response.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, true, on, name))
+        }
+        None => response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, name)),
+    }
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_label(name.to_owned());
+        if let Some(on) = lit {
+            node.set_role(Role::Switch);
+            node.set_toggled(if on {
+                egui::accesskit::Toggled::True
+            } else {
+                egui::accesskit::Toggled::False
+            });
+        }
+    });
+    response.clicked()
+}
+
+/// The ID of lane `number`'s lane button (main lane) or hide button.
+#[must_use]
+pub(crate) fn lane_button_id(track: TrackId, number: usize) -> egui::Id {
+    egui::Id::new(("arrangement-automation-lane-button", track, number))
+}
+
+/// The ID of lane `number`'s hide button.
+#[must_use]
+pub(crate) fn hide_button_id(track: TrackId, number: usize) -> egui::Id {
+    egui::Id::new(("arrangement-automation-hide-button", track, number))
+}
+
+/// The ID of a track's toggle that shows or hides its lanes of its own.
+#[must_use]
+pub(crate) fn lanes_toggle_id(track: TrackId) -> egui::Id {
+    egui::Id::new(("arrangement-automation-lanes-toggle", track))
+}
+
+/// A lane's device and parameter choosers, side by side in `rect` (the
+/// automation spec, R14, R27): the main lane's keep the salts they always
+/// had, the other lanes' add their number.
+pub(super) fn lane_choosers(
     ui: &mut Ui,
     shell: &Shell,
     theme: &Theme,
-    track: TrackId,
-    target: Option<AutomationTarget>,
+    (track, number): (TrackId, usize),
     rect: Rect,
     events: &mut Vec<UiEvent>,
 ) {
     let doc = shell.editor().document();
+    let choice = shell
+        .arrangement()
+        .lane_choice(track, number)
+        .unwrap_or_default();
+    let target = choice.target;
     let mut header = ui.new_child(egui::UiBuilder::new().max_rect(rect));
-    header.set_clip_rect(rect);
+    header.set_clip_rect(rect.expand(3.0));
     let gap = 3.0;
     let each = ((rect.width() - gap) / 2.0).max(10.0);
     let device_rect = Rect::from_min_size(rect.min, vec2(each, rect.height()));
@@ -1451,10 +1630,19 @@ pub(super) fn lane_header(
 
     let current_device = target.map_or(AutomationDevice::None, device_of);
     let mut devices = device_choices(doc, track);
+    if choice.only_automated {
+        keep_automated_devices(&mut devices, doc, track);
+    }
     mark_devices(&mut devices, doc, track, theme);
+    push_automated_only(&mut devices, choice.only_automated);
     // The choosers are Tab-reachable: the Accessibility spec, R4.
-    let device_salt = format!("arrangement-automation-device-{}", track.0);
-    let control_salt = format!("arrangement-automation-control-{}", track.0);
+    let suffix = if number == 0 {
+        track.0.to_string()
+    } else {
+        format!("{}-{number}", track.0)
+    };
+    let device_salt = format!("arrangement-automation-device-{suffix}");
+    let control_salt = format!("arrangement-automation-control-{suffix}");
     for salt in [device_salt.as_str(), control_salt.as_str()] {
         crate::focus::register(
             ui.ctx(),
@@ -1473,14 +1661,25 @@ pub(super) fn lane_header(
         Some(&current_device),
         true,
     ) {
-        invoke(
-            events,
-            view_ids::SHOW_AUTOMATION,
-            json!({ "track": track, "target": default_target(shell, doc, chosen) }),
-        );
+        if chosen == AutomationDevice::AutomatedOnly {
+            invoke(
+                events,
+                view_ids::SHOW_AUTOMATED_ONLY,
+                json!({ "track": track, "lane": number, "on": !choice.only_automated }),
+            );
+        } else {
+            invoke(
+                events,
+                view_ids::SHOW_AUTOMATION,
+                json!({ "track": track, "lane": number, "target": default_target(shell, doc, chosen) }),
+            );
+        }
     }
 
     let mut controls = control_choices(shell, doc, current_device);
+    if choice.only_automated {
+        keep_automated_controls(&mut controls, doc, track);
+    }
     mark_controls(&mut controls, doc, track, theme);
     let current_control = target.filter(|target| belongs_to(*target, current_device));
     if let Some(chosen) = widgets::chooser(
@@ -1496,69 +1695,254 @@ pub(super) fn lane_header(
         invoke(
             events,
             view_ids::SHOW_AUTOMATION,
-            json!({ "track": track, "target": chosen }),
+            json!({ "track": track, "lane": number, "target": chosen }),
+        );
+    }
+    // Right-clicking a chooser opens the lane header's menu (R28).
+    for salt in [device_salt.as_str(), control_salt.as_str()] {
+        let rect = if salt == device_salt {
+            device_rect
+        } else {
+            control_rect
+        };
+        let response = header.interact(rect, egui::Id::new(("chooser", salt)), Sense::click());
+        lane_menu(&header, &response, shell, (track, number), events);
+    }
+}
+
+/// The lane button (R25): it moves the envelope the lane's choosers show into
+/// a lane of its own, or with Alt/Cmd every automated parameter of the track
+/// that has none. Hidden while the choosers show None or a parameter that
+/// already has a lane of its own.
+pub(super) fn lane_button(
+    ui: &mut Ui,
+    shell: &Shell,
+    theme: &Theme,
+    (track, number): (TrackId, usize),
+    rect: Rect,
+    events: &mut Vec<UiEvent>,
+) {
+    let view = shell.arrangement();
+    let Some(target) = view
+        .lane_choice(track, number)
+        .and_then(|choice| choice.target)
+    else {
+        return;
+    };
+    if view
+        .own_lanes(track)
+        .iter()
+        .any(|lane| lane.target == Some(target))
+    {
+        return;
+    }
+    if small_button(
+        ui,
+        theme,
+        lane_button_id(track, number),
+        rect,
+        ("+", "Show Automation in New Lane"),
+        None,
+    ) {
+        invoke(
+            events,
+            view_ids::ADD_AUTOMATION_LANE,
+            json!({ "track": track, "lane": number, "all": all_key(ui) }),
         );
     }
 }
 
-/// Every parameter a track's lane choosers list, in their order: the
-/// mixer's controls and sends, then each device's parameters.
-pub(crate) fn lane_parameters(
-    shell: &Shell,
-    doc: &Document,
+/// The toggle in a track's header that shows or hides its lanes of its own
+/// (R26).
+pub(super) fn lanes_toggle(
+    ui: &mut Ui,
+    theme: &Theme,
     track: TrackId,
-) -> Vec<AutomationTarget> {
-    device_choices(doc, track)
-        .into_iter()
-        .filter(|choice| choice.value != AutomationDevice::None)
-        .flat_map(|choice| control_choices(shell, doc, choice.value))
-        .map(|choice| choice.value)
-        .collect()
+    rect: Rect,
+    shown: bool,
+    events: &mut Vec<UiEvent>,
+) {
+    let name = if shown {
+        "Hide Automation Lanes"
+    } else {
+        "Show Automation Lanes"
+    };
+    if small_button(
+        ui,
+        theme,
+        lanes_toggle_id(track),
+        rect,
+        ("≡", name),
+        Some(shown),
+    ) {
+        invoke(
+            events,
+            view_ids::SHOW_AUTOMATION_LANES,
+            json!({ "tracks": [track], "on": !shown }),
+        );
+    }
 }
 
-/// The parameter after (or before) `current` in `all`, going round at the
-/// ends, that `keep` accepts and that isn't `current` itself (the
-/// automation editing spec, R25).
-pub(crate) fn cycle_target(
-    all: &[AutomationTarget],
-    current: Option<AutomationTarget>,
-    forward: bool,
-    keep: impl Fn(&AutomationTarget) -> bool,
-) -> Option<AutomationTarget> {
-    let count = all.len();
-    let at = current.and_then(|current| all.iter().position(|target| *target == current));
-    // With nothing shown that the list holds, the search starts from just
-    // outside the end it moves away from.
-    let from = at.unwrap_or(if forward { count.wrapping_sub(1) } else { 0 });
-    (1..=count)
-        .map(|step| {
-            let step = if forward { step } else { count - step };
-            all[from.wrapping_add(step) % count]
-        })
-        .find(|target| Some(*target) != current && keep(target))
+/// Draws the header of lane `number` (1 and up) of a track in the header
+/// column: its choosers, its hide button and its context menu.
+pub(super) fn own_lane_header(
+    ui: &mut Ui,
+    shell: &Shell,
+    theme: &Theme,
+    lane: (TrackId, usize),
+    rect: Rect,
+    events: &mut Vec<UiEvent>,
+) {
+    let (track, number) = lane;
+    let background = ui.interact(
+        rect,
+        egui::Id::new(("arrangement-automation-header", track, number)),
+        Sense::click(),
+    );
+    let choosers = Rect::from_min_size(
+        pos2(rect.left(), rect.top() + 2.0),
+        vec2(rect.width(), CHOOSER_HEIGHT),
+    );
+    lane_choosers(ui, shell, theme, lane, choosers, events);
+    let hide = Rect::from_min_size(
+        pos2(rect.left(), choosers.bottom() + 5.0),
+        vec2(BUTTON, BUTTON),
+    );
+    if small_button(
+        ui,
+        theme,
+        hide_button_id(track, number),
+        hide,
+        ("×", "Hide Automation Lane"),
+        None,
+    ) {
+        invoke(
+            events,
+            view_ids::REMOVE_AUTOMATION_LANE,
+            json!({ "track": track, "lane": number, "and_after": all_key(ui) }),
+        );
+    }
+    lane_menu(ui, &background, shell, lane, events);
 }
 
-/// The invocation that shows the previous or next parameter in a track's
-/// lane (S-A11Y-026, S-A11Y-027): the one with an envelope, or with `all`,
-/// any the choosers list.
+/// The lane header's context menu (R28): its view items, then the two that
+/// clear envelopes. Their order and names are Beatlayer's own.
+pub(super) fn lane_menu(
+    ui: &Ui,
+    response: &egui::Response,
+    shell: &Shell,
+    (track, number): (TrackId, usize),
+    events: &mut Vec<UiEvent>,
+) {
+    let view = shell.arrangement();
+    let doc = shell.editor().document();
+    let choice = view.lane_choice(track, number).unwrap_or_default();
+    let has_lanes = !view.own_lanes(track).is_empty();
+    let owner = doc.track(track);
+    let device = choice.target.map(device_of);
+    // The device the lane shows, for Clear Envelopes: a device, or the
+    // track's mixer. A lane showing a clip's controls or None has none.
+    let clearing = match device {
+        Some(AutomationDevice::Mixer) => Some((None, "Track Mixer".to_owned())),
+        Some(AutomationDevice::Device(id)) => doc
+            .device(id)
+            .map(|device| (Some(id), device_title(device))),
+        _ => None,
+    };
+    let menu = |ui: &mut Ui| {
+        if ui
+            .selectable_label(choice.only_automated, "Show Automated Parameters Only")
+            .clicked()
+        {
+            invoke(
+                events,
+                view_ids::SHOW_AUTOMATED_ONLY,
+                json!({ "track": track, "lane": number, "on": !choice.only_automated }),
+            );
+            ui.close();
+        }
+        for (label, on) in [("Show All Lanes", true), ("Hide All Lanes", false)] {
+            if ui
+                .add_enabled(has_lanes, egui::Button::new(label))
+                .clicked()
+            {
+                invoke(
+                    events,
+                    view_ids::SHOW_AUTOMATION_LANES,
+                    json!({ "tracks": [track], "on": on }),
+                );
+                ui.close();
+            }
+        }
+        ui.separator();
+        let any = owner.is_some_and(|owner| owner.automation().next().is_some());
+        if ui
+            .add_enabled(any, egui::Button::new("Clear All Envelopes"))
+            .clicked()
+        {
+            invoke(events, "automation.clear_track", json!({ "track": track }));
+            ui.close();
+        }
+        let label = clearing.as_ref().map_or_else(
+            || "Clear Envelopes".to_owned(),
+            |(_, name)| format!("Clear Envelopes of {name}"),
+        );
+        let has = clearing.is_some()
+            && owner.is_some_and(|owner| {
+                owner
+                    .automation()
+                    .any(|(target, _)| Some(device_of(*target)) == device)
+            });
+        if ui.add_enabled(has, egui::Button::new(label)).clicked() {
+            invoke(
+                events,
+                "automation.clear_device",
+                json!({ "track": track, "device": clearing.as_ref().and_then(|(id, _)| *id) }),
+            );
+            ui.close();
+        }
+    };
+    // The menu opens on a right-click, or on the keys that open a focused
+    // item's menu (S-CTX-002). The choosers' own popup holds the response's
+    // popup ID, so this one has the keyboard menu's.
+    if response.secondary_clicked()
+        && let Some(at) = response.interact_pointer_pos()
+    {
+        crate::menus::open_keyboard_context_menu(ui.ctx(), response.id, at);
+    } else if response.has_focus() && crate::menus::context_menu_keys(ui) {
+        crate::menus::open_keyboard_context_menu(
+            ui.ctx(),
+            response.id,
+            response.rect.left_bottom(),
+        );
+    }
+    crate::menus::keyboard_context_menu(response, menu);
+}
+
+/// The invocation that shows the previous or next parameter in lane `number`
+/// of a track (S-A11Y-026, S-A11Y-027): the one with an envelope, or with
+/// `all`, any the choosers list.
 pub(crate) fn cycle_lane(
     shell: &Shell,
-    track: TrackId,
+    (track, number): (TrackId, usize),
     forward: bool,
     all: bool,
 ) -> Option<Invocation> {
     let doc = shell.editor().document();
-    let list = lane_parameters(shell, doc, track);
+    let list = bl_shell::arrangement::lanes::chooser_order(doc, shell.devices(), track);
     let owner = doc.track(track)?;
-    let target = cycle_target(
+    let target = bl_shell::arrangement::lanes::cycle_target(
         &list,
-        shell.arrangement().automation_lane(track),
+        shell
+            .arrangement()
+            .lane_choice(track, number)
+            .and_then(|choice| choice.target),
         forward,
         |target| all || owner.automation_for(target).is_some(),
     )?;
     Some(Invocation::new(
         view_ids::SHOW_AUTOMATION,
-        json!({ "track": track, "target": target }),
+        json!({ "track": track, "lane": number, "target": target }),
     ))
 }
 

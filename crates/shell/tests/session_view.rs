@@ -418,3 +418,122 @@ fn every_view_command_runs_by_id() {
     assert_eq!(shell.session().state().scroll_y, 18.0);
     assert_eq!(shell.session().focus_requests(), 1);
 }
+
+// Spec: session-context-menus R7, R8, R11. Rename types in place: the shell
+// asks the view to, for the selected clip or else the selected scene, and
+// the name is committed by `clip.rename` and `scene.rename`.
+#[test]
+fn rename_asks_the_view_to_type_the_name_of_the_selected_clip_or_scene() {
+    use bl_shell::Effect;
+
+    let mut shell = shell();
+    let (track, scene) = a_midi_slot(&shell);
+    // Nothing selected: refused, and the menu's item is off.
+    assert!(shell.run(ids::RENAME, json!({})).is_err());
+    let contexts = [bl_commands::Context::Session];
+    assert!(!shell.can_invoke_in(ids::RENAME, &json!({}), &contexts));
+
+    shell
+        .run(
+            ids::INSERT_EMPTY_MIDI_CLIP,
+            json!({ "track": track, "scene": scene }),
+        )
+        .unwrap();
+    let clip = shell.editor().document().slot(track, scene).unwrap().id;
+    shell
+        .run(ids::SELECT, json!({ "track": track, "scene": scene }))
+        .unwrap();
+    assert!(shell.can_invoke_in(ids::RENAME, &json!({}), &contexts));
+    shell.take_effects();
+    shell.run(ids::RENAME, json!({})).unwrap();
+    assert!(matches!(shell.take_effects()[..], [Effect::RenameClip(c)] if c == clip));
+
+    // With only a scene selected, the scene's name is typed.
+    shell.run(ids::SELECT, json!({ "scene": scene })).unwrap();
+    shell.run(ids::RENAME, json!({})).unwrap();
+    assert!(matches!(shell.take_effects()[..], [Effect::RenameScene(s)] if s == scene));
+    // Renaming changes nothing until the name is committed.
+    assert_eq!(shell.editor().document().scene(scene).unwrap().name, "");
+    shell
+        .run("scene.rename", json!({ "scene": scene, "name": "Verse" }))
+        .unwrap();
+    assert_eq!(
+        shell.editor().document().scene(scene).unwrap().name,
+        "Verse"
+    );
+}
+
+// Spec: session-context-menus R11. The Delete key (S-EDIT-005) and Cmd+R
+// (S-EDIT-008) are the Session View's own: `session.delete` and
+// `session.rename` in its context, and the items follow the selection.
+#[test]
+fn delete_and_rename_are_bound_in_the_session_context_and_follow_the_selection() {
+    use bl_commands::Context;
+    use bl_shell_spec::keymap::Keymap;
+
+    let keymap = Keymap::live12();
+    let command = |shortcut: &str| {
+        keymap
+            .command_for(shortcut, &[Context::Session])
+            .map(|c| c.id.clone())
+    };
+    assert_eq!(command("S-EDIT-005").as_deref(), Some("session.delete"));
+    assert_eq!(command("S-EDIT-008").as_deref(), Some("session.rename"));
+
+    let mut shell = shell();
+    let (track, scene) = a_midi_slot(&shell);
+    let contexts = [Context::Session];
+    // An empty slot or nothing selected has nothing to delete or rename.
+    assert!(!shell.can_invoke_in(ids::DELETE, &json!({}), &contexts));
+    shell
+        .run(ids::SELECT, json!({ "track": track, "scene": scene }))
+        .unwrap();
+    assert!(!shell.can_invoke_in(ids::DELETE, &json!({}), &contexts));
+    assert!(!shell.can_invoke_in(ids::DEACTIVATE, &json!({}), &contexts));
+    assert!(shell.can_invoke_in(ids::INSERT_EMPTY_MIDI_CLIP, &json!({}), &contexts));
+    shell.run(ids::INSERT_EMPTY_MIDI_CLIP, json!({})).unwrap();
+    assert!(shell.can_invoke_in(ids::DELETE, &json!({}), &contexts));
+    assert!(shell.can_invoke_in(ids::DEACTIVATE, &json!({}), &contexts));
+    assert!(!shell.can_invoke_in(ids::INSERT_EMPTY_MIDI_CLIP, &json!({}), &contexts));
+    // A selected scene can be deleted too.
+    shell.run(ids::SELECT, json!({ "scene": scene })).unwrap();
+    assert!(shell.can_invoke_in(ids::DELETE, &json!({}), &contexts));
+}
+
+// Spec: session-context-menus R16. Export MIDI Clip... without a path asks
+// where to save the file; with one it writes it.
+#[test]
+fn export_midi_clip_without_a_path_asks_where_to_save() {
+    use bl_shell::Effect;
+
+    let mut shell = shell();
+    let (track, scene) = a_midi_slot(&shell);
+    shell
+        .run(
+            ids::INSERT_EMPTY_MIDI_CLIP,
+            json!({ "track": track, "scene": scene }),
+        )
+        .unwrap();
+    let clip = shell.editor().document().slot(track, scene).unwrap().id;
+    shell
+        .run("clip.rename", json!({ "clip": clip, "name": "Hook" }))
+        .unwrap();
+    shell.take_effects();
+    shell
+        .run("midi.export_clip", json!({ "clip": clip }))
+        .unwrap();
+    let effects = shell.take_effects();
+    assert!(
+        matches!(&effects[..], [Effect::PickMidiExportPath { clip: c, default_name }]
+            if *c == clip && default_name == "Hook.mid"),
+        "{effects:?}"
+    );
+    assert!(
+        shell.can_invoke_in(
+            "midi.export_clip",
+            &json!({ "clip": clip }),
+            &[bl_commands::Context::Global]
+        ),
+        "a MIDI clip can be exported"
+    );
+}

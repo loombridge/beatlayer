@@ -81,7 +81,7 @@ This spec covers reading and writing the file and what each element becomes. Wha
 - **R30.** An audio clip whose content is a `Warps` timeline with `contentTimeUnit` seconds holding an `Audio` timeline is warped: each `Warp` event becomes a warp marker, its `time` the beat in the clip's contents and its `contentTime` the time in the file ([warping.md](warping.md) R2), and the clip's tempo is the last segment's; its markers and loop brace are beats of its contents. A `Warps` with fewer than two events, or whose events don't rise in both times, is read as an unwarped clip of its `Audio` and listed. (S2, S4, S13)
 - **R31.** A warped clip's `algorithm` names its warp mode, compared ignoring case, spaces, hyphens and underscores: `repitch` is Re-Pitch, and `beats`, `tones`, `texture`, `complex` and `complexpro` are those modes. Any other name, or none, takes the Default Warp Mode setting, and each other name is listed once with the mode it took. (S2, S4; [warping.md](warping.md))
 - **R32.** An unwarped audio clip in the Arrangement whose loop would play more than once in its length becomes one unlooped clip per pass, back to back over the clip's length: the first from its Start marker to its loop's end, each later one over the loop brace, the last cut at the clip's end. It's listed, since only warped clips loop in the Arrangement. A Session clip keeps its loop. (S4, S13; Beatlayer's own)
-- **R33.** A clip's `fadeInTime` and `fadeOutTime`, in its `fadeTimeUnit` (else its content's unit), become its fades in seconds, each limited to the clip's length. A negative `fadeInTime` makes a crossfade with the clip before it on the lane: the clip still starts at its `time`, the clip before it ends there, and the two meet in a crossfade as long as the negative value is large, as the Arrangement's crossfades between adjacent clips are ([audio-clips.md](audio-clips.md), WP-6.51). A MIDI clip's fades are ignored. (S2, S4, S13)
+- **R33.** A clip's `fadeInTime` and `fadeOutTime`, in its `fadeTimeUnit` (else its content's unit), become its fades in seconds, each limited to the clip's length. A negative `fadeInTime` makes a crossfade with the clip before it on the lane: the clip still starts at its `time`, the clip before it ends there, and the two meet in a crossfade as long as the negative value is large, as the Arrangement's crossfades between adjacent clips are ([audio-clips.md](audio-clips.md), WP-6.51): half of it either side of the boundary, or all of it after the boundary where the later clip can't be read before its start, and shortened by halves until the two clips allow it, the report listing a crossfade that was shortened or couldn't be made. The fades of a clip that is flattened (R34) go to the clips at its edges, the fade-in to the one that starts where it does and the fade-out to the one that ends where it does. A MIDI clip's fades are ignored. (S2, S4, S13)
 - **R34.** A clip whose content is a `Clips` timeline is flattened. On a MIDI track the inner clips' notes are merged into one MIDI clip with the outer clip's place, markers and loop, each inner clip's notes placed where it starts and cut to its region. On an audio track each inner clip becomes an audio clip of its own, at the place the outer clip plays it, cut to the outer clip's region, and repeated for each pass of the outer clip's loop. Deeper nesting flattens level by level. Each flattened clip is listed. (S1, S4; Beatlayer's own)
 - **R35.** A clip with a `reference` plays a copy of the timeline it names, as if that timeline were its own content; the copy is independent of the original, and the report counts the alias clips made copies. A `reference` to something that isn't a timeline leaves the clip out (R7). (S2, S4)
 - **R36.** A clip whose content is a `Lanes` takes its notes or its audio from the first `Notes`, `Audio` or `Warps` timeline in it, and its `Points` as automation (R59 to R62); further note or audio timelines in it are left out and listed. `Video` timelines, and tracks whose only content is video or markers (which WP-6.36b reads, R63), are left out and listed. (S2, S4; Beatlayer's own)
@@ -105,7 +105,7 @@ This spec covers reading and writing the file and what each element becomes. Wha
 - **R45.** A device whose `Enabled` is false, or whose `loaded` is false, is switched off, the latter listed. A device's `name` is the name its title bar shows. (S2, S4, S13)
 - **R46.** A plug-in is found among the plug-ins scanned on this machine by its format and ID ([clap-hosting.md](clap-hosting.md), [vst3-hosting.md](vst3-hosting.md), [au-hosting.md](au-hosting.md)). One that isn't found becomes a device that keeps its ID and its state, passing its input through, as a set's missing plug-in does ([clap-hosting.md](clap-hosting.md) R12), and is listed. A found plug-in is loaded and given its state as a set's is ([clap-hosting.md](clap-hosting.md) R9, [vst3-hosting.md](vst3-hosting.md) R9). (S2, S4, S13)
 - **R47.** A `ClapPlugin`'s `deviceID` is its CLAP ID, and its `State` file's bytes (`.clap-preset`) are the state stream the plug-in saved, handed to it unchanged. (S1, S4, S8)
-- **R48.** A `Vst3Plugin`'s `deviceID` is its class ID, compared ignoring case and dashes. Its `State` is a `.vstpreset` file: its `Comp` chunk is the component's state and its `Cont` chunk, where there is one, the controller's. A preset whose class ID isn't the device's, or that doesn't read, leaves the plug-in at its defaults, listed. (S4, S6, S12)
+- **R48.** A `Vst3Plugin`'s `deviceID` is its class ID, compared ignoring case and dashes, and also with its first three fields byte-swapped, the form the same class prints in on Windows, where class IDs are COM GUIDs. Its `State` is a `.vstpreset` file: its `Comp` chunk is the component's state and its `Cont` chunk, where there is one, the controller's. A preset whose class ID isn't the device's, or that doesn't read, leaves the plug-in at its defaults, listed. (S4, S6, S12)
 - **R49.** An `AuPlugin`'s `deviceID` names its type, subtype and manufacturer, four characters each, joined by `/` or `:`; its `State` is a property list, XML or binary (`.aupreset`), which becomes the unit's state as the set keeps it. On Windows and Linux the device is kept unhosted, as a set's Audio Unit is there ([au-hosting.md](au-hosting.md) R14). An ID that doesn't read leaves the device out, listed. (S4, S7, S13)
 - **R50.** A `Vst2Plugin` is left out and listed, as Beatlayer hosts no VST2 (D10). A `Device` or `BuiltinDevice`, the generic devices of R51 to R54 among them, whose `deviceID` is one of Beatlayer's own device types and whose `State` is a Beatlayer device or rack preset (`.blpreset`) becomes that device or rack, loaded from the preset with its chains and samples as a preset loads, and its generic parameters aren't read. Any other `Device` or `BuiltinDevice` is left out, listed with its `deviceName` and `deviceVendor`. (S2, S4, S12)
 - **R51.** A `Compressor` becomes a Compressor: `Threshold` its Threshold; `Ratio` in `percent` the ratio 1 / (1 − p / 100), 100 % the largest ratio, and in any other unit the ratio as given; `Attack` and `Release` its Attack and Release; `OutputGain` its Out; `AutoMakeup` its Makeup. An `InputGain` other than 0 dB is listed, as the Compressor has none. ([compressor.md](compressor.md); S2, S4)
@@ -119,7 +119,7 @@ This spec covers reading and writing the file and what each element becomes. Wha
 - **R56.** `Points` in the Arrangement's lanes outside clips drive the parameter their `Target` names, whichever lane holds them: a channel's `Volume`, `Pan` or `Mute` its track's mixer control, a send's `Volume` its send level, and a device's parameter that parameter. Points targeting something the import left out are left out with it; points on a target Beatlayer can't automate (a device's `Enabled`, a send's `Pan` or `Enable`) are left out and listed. ([automation.md](automation.md); S2, S4)
 - **R57.** Each point's value is converted to the target's own units: a mixer control's as R21 and R22 read them, a generic device's as R55, and a plug-in parameter in `normalized` units through the loaded plug-in's own mapping from its normalized range to its values. A plug-in that didn't load keeps no automation, listed. The `Points`' `unit`, else its target's, is the values' unit. (S2, S4, S13)
 - **R58.** A `linear` real point is a breakpoint whose segment runs straight to the next. A `hold` real point, and every boolean, integer and enumeration point, is a breakpoint holding its value, followed by a breakpoint with the same value one tick before the next point's, so the value steps there. Of two points at one tick, the later in the file wins. (S2, S4; [automation.md](automation.md))
-- **R59.** `Points` targeting a parameter inside an Arrangement clip drive it over the clip's span on its track, the parts outside the clip left out. Inside a Session slot's clip they become that clip's automation envelope for the parameter ([session-automation.md](session-automation.md) R3). (S2, S4, S13)
+- **R59.** `Points` targeting a parameter inside an Arrangement clip drive it over the clip's span on its track, the parts outside the clip left out, the value in force at the clip's start being its first breakpoint; the envelope is the track's, so its last value holds after the clip. Inside a Session slot's clip they become that clip's automation envelope for the parameter ([session-automation.md](session-automation.md) R3). (S2, S4, S13)
 - **R60.** `Points` with a `channelController` expression for controllers 1 to 31 and 33 to 119, a `pitchBend` or a `channelPressure` expression become the MIDI clip's controller envelopes ([midi-controller-data.md](midi-controller-data.md) R1): `normalized` values from 0 to 1 become 0 to 127, and pitch bend from 0 to 1 becomes −8,192 to 8,191 with 0.5 at rest. Points outside clips in a MIDI track's lanes are copied into the envelopes of the clips they overlap, each clip starting with the value in force at its start; what falls outside every clip is left out and listed. Other controllers, `programChange`, and values for one controller on a second channel are left out and listed. (S2, S4, S5, S13)
 - **R61.** A `polyPressure` expression with a `key` becomes the pressure of the notes of that key it overlaps ([midi-controller-data.md](midi-controller-data.md) R2). Inside a `Note`, a `pressure` expression becomes the note's pressure, from 0 to 1 onto 0 to 127; a `transpose` expression, in semitones, its own pitch bend, and a `timbre` expression its slide (MPE in clips, WP-6.17); `gain`, `pan` and `formant` expressions are left out and listed. (S2, S4, S13)
 - **R62.** Inside an audio clip, a `gain` expression with one value sets the clip's gain, and a `transpose` expression with one value sets its Transpose and Detune, rounded to the nearest cent; an expression that changes over the clip, and any other expression, is left out and listed. (S1, S2, S4)
@@ -161,7 +161,7 @@ This spec covers reading and writing the file and what each element becomes. Wha
 
 ## Tests
 
-The fixtures are written by `tests/fixtures/gen/gen_dawproject.py` into `tests/fixtures/dawproject/`, from the script's own XML, its own generated audio and the test plug-ins' own states; none is a file another application exported. Each fixture has the report it should give beside it, and the golden render test in `crates/cli/tests/dawproject_goldens.rs` plays `bitwig-shaped`'s imported set against the same set built by commands.
+The fixtures are written by `tests/fixtures/gen/gen_dawproject.py` into `tests/fixtures/dawproject/`, from the script's own XML, its own generated audio and the test plug-ins' own states (the CLAP plug-in's as a `.clap-preset`, the VST3 plug-in's component and controller states as a `.vstpreset`, an XML `.aupreset`, a VST2 `.fxp`, and a Beatlayer device and rack as `.blpreset` files); none is a file another application exported. Each fixture has the report it should give beside it, and the golden render tests in `crates/cli/tests/dawproject_goldens.rs` play `bitwig-shaped`'s imported set against the same set built by commands, and the small `ramp`, `crossfade` and `limiter` files against what the commands make.
 
 | Rule | Test | Kind |
 |---|---|---|
@@ -187,7 +187,7 @@ The fixtures are written by `tests/fixtures/gen/gen_dawproject.py` into `tests/f
 | R20 | every_fixture_gives_the_report_it_should, a_comment_is_counted_in_the_report | unit |
 | R21 | tracks_mixer_and_routing_follow_the_file | unit |
 | R22 | the_imported_set_renders_the_same_samples_as_the_set_built_by_commands | unit, golden render |
-| R23 | to be written in WP-6.36b (reading) and WP-6.37 (writing) | unit |
+| R23 | `colours_take_the_nearest_swatch_and_a_missing_colour_the_new_one`; `bl-interop`'s `the_nearest_swatch_is_found_by_lab_distance` (the writing is WP-6.37's) | unit |
 | R24 | clips_follow_the_file | unit |
 | R25 | clips_follow_the_file | unit |
 | R26 | clips_follow_the_file | unit |
@@ -197,7 +197,7 @@ The fixtures are written by `tests/fixtures/gen/gen_dawproject.py` into `tests/f
 | R30 | nested_warped_clips_flatten_over_the_loop | unit, golden render |
 | R31 | every_fixture_gives_the_report_it_should | unit |
 | R32 | the_imported_set_renders_the_same_samples_as_the_set_built_by_commands | unit, golden render |
-| R33 | to be written in WP-6.36b | unit |
+| R33 | `fades_and_crossfades_follow_the_file`; `crates/cli/tests/dawproject_goldens.rs`, `an_imported_crossfade_renders_the_same_as_the_one_the_command_makes`, `the_imported_set_renders_the_same_samples_as_the_set_built_by_commands` | unit, golden render |
 | R34 | nested_warped_clips_flatten_over_the_loop | unit, golden render |
 | R35 | nested_warped_clips_flatten_over_the_loop | unit |
 | R36 | every_fixture_gives_the_report_it_should | unit |
@@ -208,27 +208,27 @@ The fixtures are written by `tests/fixtures/gen/gen_dawproject.py` into `tests/f
 | R41 | every_fixture_gives_the_report_it_should | unit |
 | R42 | scenes_follow_the_file | unit |
 | R43 | scenes_follow_the_file | unit |
-| R44 | to be written in WP-6.36b | unit |
-| R45 | to be written in WP-6.36b | unit |
-| R46 | to be written in WP-6.36b | unit |
-| R47 | to be written in WP-6.36b | unit |
-| R48 | to be written in WP-6.36b | unit |
-| R49 | to be written in WP-6.36b | unit |
-| R50 | to be written in WP-6.36b | unit |
-| R51 | to be written in WP-6.36b | unit |
-| R52 | to be written in WP-6.36b | unit |
-| R53 | to be written in WP-6.36b | unit, golden render |
-| R54 | to be written in WP-6.36b | unit |
-| R55 | to be written in WP-6.36b | unit |
-| R56 | to be written in WP-6.36b | unit |
-| R57 | to be written in WP-6.36b | unit |
-| R58 | to be written in WP-6.36b | unit |
-| R59 | to be written in WP-6.36b | unit |
-| R60 | to be written in WP-6.36b | unit |
-| R61 | to be written in WP-6.36b | unit |
-| R62 | to be written in WP-6.36b | unit |
-| R63 | to be written in WP-6.36b | unit |
-| R64 | to be written in WP-6.36b | unit |
+| R44 | `devices_follow_the_file` | unit |
+| R45 | `devices_follow_the_file` | unit |
+| R46 | `devices_follow_the_file`; `crates/shell/tests/dawproject_plugins.rs`, `plugins_found_on_this_machine_load_with_the_gain_their_states_hold`, `a_plugin_that_is_not_installed_saves_its_state_back_byte_for_byte` | unit |
+| R47 | `devices_follow_the_file`; `crates/shell/tests/dawproject_plugins.rs`, `plugins_found_on_this_machine_load_with_the_gain_their_states_hold` | unit |
+| R48 | `a_vst3_preset_becomes_the_hosts_state`; `bl-model`'s `a_preset_reads_back_the_streams_it_wrote`; `crates/shell/tests/dawproject_plugins.rs`, `plugins_found_on_this_machine_load_with_the_gain_their_states_hold` | unit |
+| R49 | `devices_follow_the_file` | unit |
+| R50 | `devices_follow_the_file` | unit |
+| R51 | `generic_devices_become_the_values_their_tables_give` | unit |
+| R52 | `generic_devices_become_the_values_their_tables_give` | unit |
+| R53 | `generic_devices_become_the_values_their_tables_give`; `crates/cli/tests/dawproject_goldens.rs`, `an_imported_limiter_peaks_at_its_ceiling` | unit, golden render |
+| R54 | `generic_devices_become_the_values_their_tables_give` | unit |
+| R55 | `generic_devices_become_the_values_their_tables_give`; `generic.rs`, `values_convert_from_their_units_and_stay_in_range`, `a_ratio_in_percent_is_one_over_the_rest` | unit |
+| R56 | `automation_becomes_the_envelopes_the_file_asks_for`, `every_fixture_gives_the_report_it_should` | unit |
+| R57 | `automation_becomes_the_envelopes_the_file_asks_for`; `crates/shell/tests/dawproject_plugins.rs`, `a_plugin_parameters_normalized_automation_goes_through_its_mapping` | unit |
+| R58 | `automation_becomes_the_envelopes_the_file_asks_for`; `crates/cli/tests/dawproject_goldens.rs`, `an_imported_volume_ramp_renders_the_same_as_a_hand_drawn_one` | unit, golden render |
+| R59 | `automation_becomes_the_envelopes_the_file_asks_for`, `clip_automation_and_audio_expressions_follow_the_file`, `clip_automation_ends_where_the_clip_cuts_it_and_holds` | unit |
+| R60 | `midi_controllers_and_note_expressions_follow_the_file` | unit |
+| R61 | `midi_controllers_and_note_expressions_follow_the_file` | unit |
+| R62 | `clip_automation_and_audio_expressions_follow_the_file` | unit |
+| R63 | `markers_become_locators` | unit |
+| R64 | `every_fixture_gives_the_report_it_should` (`cubase-shaped`) | unit |
 | R65 | to be written in WP-6.37 | unit, agent test |
 | R66 | to be written in WP-6.37 | unit |
 | R67 | to be written in WP-6.37 | unit |

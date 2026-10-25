@@ -15,8 +15,9 @@ use std::path::{Component, Path, PathBuf};
 
 use bl_core::id::IdAllocator;
 use bl_model::{
-    ClipFolds, ContentHash, DEFAULT_SCENE_COUNT, DeviceWindows, Document, Editor, LaunchSettings,
-    MpeView, MultisamplerViews, RackViewMap, SceneId, TrackId, TrackKind, WindowViews, registry,
+    ClipFolds, ContentHash, DEFAULT_SCENE_COUNT, DeviceWindows, Document, Editor, LaneViews,
+    LaunchSettings, MpeView, MultisamplerViews, RackViewMap, SceneId, TrackId, TrackKind,
+    WindowViews, registry,
 };
 use bl_project::midi_tools::MidiToolSettings;
 use bl_project::{
@@ -196,6 +197,19 @@ pub trait SetStore {
         ClipFolds::new()
     }
 
+    /// Gives the store which clips' MIDI Note Editors are folded to their
+    /// scale (WP-6.7b), for the next save to write beside the document. A
+    /// store that keeps none ignores it.
+    fn set_scale_folds(&mut self, folds: ClipFolds) {
+        let _ = folds;
+    }
+
+    /// Which of the open set's clips are folded to their scale, as it was
+    /// saved.
+    fn scale_folds(&self) -> ClipFolds {
+        ClipFolds::new()
+    }
+
     /// Gives the store the MIDI Tools' chosen tools and settings (WP-6.11),
     /// for the next save to write beside the document. A store that keeps
     /// no MIDI Tool settings ignores it.
@@ -243,6 +257,18 @@ pub trait SetStore {
     /// The open set's MPE tab lanes and grids, as it was saved.
     fn mpe_view(&self) -> MpeView {
         MpeView::default()
+    }
+
+    /// Gives the store the Arrangement's automation lanes (WP-6.57), for the
+    /// next save to write beside the document. A store that keeps none
+    /// ignores them.
+    fn set_lane_views(&mut self, views: LaneViews) {
+        let _ = views;
+    }
+
+    /// The open set's automation lanes, as it was saved.
+    fn lane_views(&self) -> LaneViews {
+        LaneViews::new()
     }
 
     /// Writes `editor` to `path` as a copy without making it the open set:
@@ -332,6 +358,9 @@ pub struct ProjectFiles {
     /// Folded MIDI Note Editors (WP-2.3): the open set's, then the shell's
     /// for the next save.
     folds: ClipFolds,
+    /// Clips folded to their scale (WP-6.7b): the open set's, then the
+    /// shell's for the next save.
+    scale_folds: ClipFolds,
     /// The MIDI Tools' chosen tools and settings (WP-6.11): the open set's,
     /// then the shell's for the next save.
     midi_tools: MidiToolSettings,
@@ -344,6 +373,9 @@ pub struct ProjectFiles {
     /// The MPE tab's lanes and grids (WP-6.18): the open set's, then the
     /// shell's for the next save.
     mpe_view: MpeView,
+    /// The Arrangement's automation lanes (WP-6.57): the open set's, then
+    /// the shell's for the next save.
+    lane_views: LaneViews,
 }
 
 impl ProjectFiles {
@@ -368,10 +400,12 @@ impl SetStore for ProjectFiles {
         self.rack_views = project.rack_views;
         self.multisamplers = project.multisamplers;
         self.folds = project.folds;
+        self.scale_folds = project.scale_folds;
         self.midi_tools = project.midi_tools;
         self.launch = project.launch;
         self.window_views = project.window_views;
         self.mpe_view = project.mpe_view;
+        self.lane_views = project.lane_views;
         self.added.clear();
         Ok((editor, opened))
     }
@@ -440,10 +474,12 @@ impl SetStore for ProjectFiles {
         self.rack_views = RackViewMap::new();
         self.multisamplers = MultisamplerViews::new();
         self.folds = ClipFolds::new();
+        self.scale_folds = ClipFolds::new();
         self.midi_tools = MidiToolSettings::default();
         self.launch = LaunchSettings::default();
         self.window_views = WindowViews::default();
         self.mpe_view = MpeView::default();
+        self.lane_views = LaneViews::new();
         self.added.clear();
     }
 
@@ -461,10 +497,12 @@ impl SetStore for ProjectFiles {
             .with_rack_views(&self.rack_views)
             .with_multisamplers(&self.multisamplers)
             .with_folds(&self.folds)
+            .with_scale_folds(&self.scale_folds)
             .with_midi_tools(&self.midi_tools)
             .with_launch(self.launch)
             .with_window_views(self.window_views)
             .with_mpe_view(&self.mpe_view)
+            .with_lane_views(&self.lane_views)
     }
 
     fn adopt(&mut self, set: Option<SetFile>, project: Project) {
@@ -474,10 +512,12 @@ impl SetStore for ProjectFiles {
         self.rack_views = project.rack_views;
         self.multisamplers = project.multisamplers;
         self.folds = project.folds;
+        self.scale_folds = project.scale_folds;
         self.midi_tools = project.midi_tools;
         self.launch = project.launch;
         self.window_views = project.window_views;
         self.mpe_view = project.mpe_view;
+        self.lane_views = project.lane_views;
         self.added.clear();
     }
 
@@ -521,6 +561,14 @@ impl SetStore for ProjectFiles {
         self.folds.clone()
     }
 
+    fn set_scale_folds(&mut self, folds: ClipFolds) {
+        self.scale_folds = folds;
+    }
+
+    fn scale_folds(&self) -> ClipFolds {
+        self.scale_folds.clone()
+    }
+
     fn set_midi_tools(&mut self, settings: MidiToolSettings) {
         self.midi_tools = settings;
     }
@@ -547,6 +595,14 @@ impl SetStore for ProjectFiles {
 
     fn mpe_view(&self) -> MpeView {
         self.mpe_view.clone()
+    }
+
+    fn set_lane_views(&mut self, views: LaneViews) {
+        self.lane_views = views;
+    }
+
+    fn lane_views(&self) -> LaneViews {
+        self.lane_views.clone()
     }
 
     fn launch(&self) -> LaunchSettings {
@@ -616,10 +672,12 @@ impl SetStore for ProjectFiles {
             .with_rack_views(&self.rack_views)
             .with_multisamplers(&self.multisamplers)
             .with_folds(&self.folds)
+            .with_scale_folds(&self.scale_folds)
             .with_midi_tools(&self.midi_tools)
             .with_launch(self.launch)
             .with_window_views(self.window_views)
-            .with_mpe_view(&self.mpe_view);
+            .with_mpe_view(&self.mpe_view)
+            .with_lane_views(&self.lane_views);
         let mut set = SetFile::open(path)
             .map(|(set, _)| set)
             .unwrap_or_else(|_| SetFile::new(path.to_owned()));
@@ -816,10 +874,12 @@ impl ProjectFiles {
             .with_rack_views(&self.rack_views)
             .with_multisamplers(&self.multisamplers)
             .with_folds(&self.folds)
+            .with_scale_folds(&self.scale_folds)
             .with_midi_tools(&self.midi_tools)
             .with_launch(self.launch)
             .with_window_views(self.window_views)
-            .with_mpe_view(&self.mpe_view);
+            .with_mpe_view(&self.mpe_view)
+            .with_lane_views(&self.lane_views);
         let mut set = self
             .set
             .clone()

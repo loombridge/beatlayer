@@ -55,7 +55,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        265,
+        267,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
              the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
              routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -95,7 +95,7 @@ fn every_document_command_is_registered() {
              set_global_groove_amount, set_auto_load_groove and set_clip_groove, WP-6.9 \
              five for tunings: set_tuning, remove_tuning, set_tuning_reference, \
              set_tuning_range and set_tuning_bypass, WP-6.22 move_clip_to_lane, and WP-6.24b \
-             the two for time: insert_time and delete_time, and WP-6.23 set_track_links, and WP-6.30b the five for colours: set_track_colour, assign_colour_to_clips, assign_colour_to_grouped, set_clip_colour and set_scene_colour, and WP-6.58 the four for info text: set_track_info_text, set_clip_info_text, set_scene_info_text and set_device_info_text"
+             the two for time: insert_time and delete_time, and WP-6.23 set_track_links, and WP-6.30b the five for colours: set_track_colour, assign_colour_to_clips, assign_colour_to_grouped, set_clip_colour and set_scene_colour, and WP-6.57 the two for clearing envelopes: clear_track_automation and clear_device_automation, and WP-6.58 the four for info text: set_track_info_text, set_clip_info_text, set_scene_info_text and set_device_info_text"
     );
 
     for op in &ops {
@@ -2087,6 +2087,10 @@ fn every_command_runs_by_id() {
             .is_none()
     );
 
+    // Clearing a track's or a device's envelopes (automation R28).
+    agent.run("automation.clear_device", json!({ "track": drums }));
+    agent.run("automation.clear_track", json!({ "track": drums }));
+
     // Clip envelopes (WP-3.15): a clip carries envelopes for its track's
     // parameters, linked to the clip unless the Linked switch says
     // otherwise.
@@ -2857,6 +2861,17 @@ fn schemas_match_what_commands_serialise() {
                 },
             },
         ),
+        (
+            "automation.clear_track",
+            Command::ClearTrackAutomation { track },
+        ),
+        (
+            "automation.clear_device",
+            Command::ClearDeviceAutomation {
+                track,
+                device: None,
+            },
+        ),
         ("automation.re_enable", Command::ReEnableAutomation {}),
         (
             "automation.re_enable_for",
@@ -3211,7 +3226,7 @@ fn schemas_match_what_commands_serialise() {
         ),
         (
             "clip.set_signature",
-            Command::SetMidiClipSignature {
+            Command::SetClipSignature {
                 clip,
                 signature: None,
             },

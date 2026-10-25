@@ -99,11 +99,13 @@ fn a_version_1_set_with_split_audio_clips_loads_and_plays_as_it_did() {
         windows: bl_model::DeviceWindows::new(),
         rack_views: bl_model::RackViewMap::new(),
         folds: bl_model::ClipFolds::new(),
+        scale_folds: bl_model::ClipFolds::new(),
         midi_tools: bl_project::midi_tools::MidiToolSettings::default(),
         launch: bl_model::LaunchSettings::default(),
         multisamplers: bl_model::MultisamplerViews::new(),
         window_views: bl_model::WindowViews::default(),
         mpe_view: bl_model::MpeView::default(),
+        lane_views: bl_model::LaneViews::new(),
     };
     let mut saved: Value = serde_json::from_slice(&encode_json(&project, 1).unwrap()).unwrap();
     saved["schema"] = json!(1);
@@ -183,11 +185,13 @@ fn a_set_saved_before_crossfades_opens_with_the_same_fades_and_none_between_clip
         windows: bl_model::DeviceWindows::new(),
         rack_views: bl_model::RackViewMap::new(),
         folds: bl_model::ClipFolds::new(),
+        scale_folds: bl_model::ClipFolds::new(),
         midi_tools: bl_project::midi_tools::MidiToolSettings::default(),
         launch: bl_model::LaunchSettings::default(),
         multisamplers: bl_model::MultisamplerViews::new(),
         window_views: bl_model::WindowViews::default(),
         mpe_view: bl_model::MpeView::default(),
+        lane_views: bl_model::LaneViews::new(),
     };
     let saved: Value = serde_json::from_slice(&encode_json(&project, 1).unwrap()).unwrap();
     // The set holds nothing of curves or crossfades, as before.
@@ -263,11 +267,13 @@ fn sets_from_before_racks_load_unchanged() {
         windows: bl_model::DeviceWindows::new(),
         rack_views: bl_model::RackViewMap::new(),
         folds: bl_model::ClipFolds::new(),
+        scale_folds: bl_model::ClipFolds::new(),
         midi_tools: bl_project::midi_tools::MidiToolSettings::default(),
         launch: bl_model::LaunchSettings::default(),
         multisamplers: bl_model::MultisamplerViews::new(),
         window_views: bl_model::WindowViews::default(),
         mpe_view: bl_model::MpeView::default(),
+        lane_views: bl_model::LaneViews::new(),
     };
     // A device that isn't a rack saves no chains, so a set saved before
     // racks existed is what is saved now.
@@ -308,11 +314,13 @@ fn a_set_saved_before_the_scales_loads_unchanged() {
         windows: bl_model::DeviceWindows::new(),
         rack_views: bl_model::RackViewMap::new(),
         folds: bl_model::ClipFolds::new(),
+        scale_folds: bl_model::ClipFolds::new(),
         midi_tools: bl_project::midi_tools::MidiToolSettings::default(),
         launch: bl_model::LaunchSettings::default(),
         multisamplers: bl_model::MultisamplerViews::new(),
         window_views: bl_model::WindowViews::default(),
         mpe_view: bl_model::MpeView::default(),
+        lane_views: bl_model::LaneViews::new(),
     };
     let saved = encode_json(&project, 1).unwrap();
     let value: Value = serde_json::from_slice(&saved).unwrap();
@@ -387,11 +395,13 @@ fn a_set_saved_before_use_current_scale_loads_its_devices_unchanged() {
         windows: bl_model::DeviceWindows::new(),
         rack_views: bl_model::RackViewMap::new(),
         folds: bl_model::ClipFolds::new(),
+        scale_folds: bl_model::ClipFolds::new(),
         midi_tools: bl_project::midi_tools::MidiToolSettings::default(),
         launch: bl_model::LaunchSettings::default(),
         multisamplers: bl_model::MultisamplerViews::new(),
         window_views: bl_model::WindowViews::default(),
         mpe_view: bl_model::MpeView::default(),
+        lane_views: bl_model::LaneViews::new(),
     };
     let saved = encode_json(&project, 1).unwrap();
     let (loaded, _) = decode_json(&saved, &LoadOptions::default()).unwrap();
@@ -467,11 +477,13 @@ fn a_set_saved_before_the_lanes_loads_unchanged_and_every_note_value_round_trips
         windows: bl_model::DeviceWindows::new(),
         rack_views: bl_model::RackViewMap::new(),
         folds: bl_model::ClipFolds::new(),
+        scale_folds: bl_model::ClipFolds::new(),
         midi_tools: bl_project::midi_tools::MidiToolSettings::default(),
         launch: bl_model::LaunchSettings::default(),
         multisamplers: bl_model::MultisamplerViews::new(),
         window_views: bl_model::WindowViews::default(),
         mpe_view: bl_model::MpeView::default(),
+        lane_views: bl_model::LaneViews::new(),
     };
     let saved = encode_json(&project, 1).unwrap();
     let value: Value = serde_json::from_slice(&saved).unwrap();
@@ -557,11 +569,13 @@ fn probability_groups_are_saved_with_the_clip_and_broken_ones_load_ungrouped() {
         windows: bl_model::DeviceWindows::new(),
         rack_views: bl_model::RackViewMap::new(),
         folds: bl_model::ClipFolds::new(),
+        scale_folds: bl_model::ClipFolds::new(),
         midi_tools: bl_project::midi_tools::MidiToolSettings::default(),
         launch: bl_model::LaunchSettings::default(),
         multisamplers: bl_model::MultisamplerViews::new(),
         window_views: bl_model::WindowViews::default(),
         mpe_view: bl_model::MpeView::default(),
+        lane_views: bl_model::LaneViews::new(),
     };
     let saved = encode_json(&project, 1).unwrap();
     let value: Value = serde_json::from_slice(&saved).unwrap();
@@ -790,11 +804,13 @@ fn an_older_clip_envelope_renders_the_same() {
         windows: bl_model::DeviceWindows::new(),
         rack_views: bl_model::RackViewMap::new(),
         folds: bl_model::ClipFolds::new(),
+        scale_folds: bl_model::ClipFolds::new(),
         midi_tools: bl_project::midi_tools::MidiToolSettings::default(),
         launch: bl_model::LaunchSettings::default(),
         multisamplers: bl_model::MultisamplerViews::new(),
         window_views: bl_model::WindowViews::default(),
         mpe_view: bl_model::MpeView::default(),
+        lane_views: bl_model::LaneViews::new(),
     };
     let mut saved: Value = serde_json::from_slice(&encode_json(&project, 1).unwrap()).unwrap();
     saved["schema"] = json!(4);
@@ -854,11 +870,13 @@ fn a_set_without_b_loads_with_b_equal_to_a() {
         windows: bl_model::DeviceWindows::new(),
         rack_views: bl_model::RackViewMap::new(),
         folds: bl_model::ClipFolds::new(),
+        scale_folds: bl_model::ClipFolds::new(),
         midi_tools: bl_project::midi_tools::MidiToolSettings::default(),
         launch: bl_model::LaunchSettings::default(),
         multisamplers: bl_model::MultisamplerViews::new(),
         window_views: bl_model::WindowViews::default(),
         mpe_view: bl_model::MpeView::default(),
+        lane_views: bl_model::LaneViews::new(),
     };
     // A set from before the two states has neither field.
     let saved: Value = serde_json::from_slice(&encode_json(&project, 1).unwrap()).unwrap();
@@ -1055,11 +1073,13 @@ fn a_set_saved_before_locators_loads_with_none() {
         windows: bl_model::DeviceWindows::new(),
         rack_views: bl_model::RackViewMap::new(),
         folds: bl_model::ClipFolds::new(),
+        scale_folds: bl_model::ClipFolds::new(),
         midi_tools: bl_project::midi_tools::MidiToolSettings::default(),
         launch: bl_model::LaunchSettings::default(),
         multisamplers: bl_model::MultisamplerViews::new(),
         window_views: bl_model::WindowViews::default(),
         mpe_view: bl_model::MpeView::default(),
+        lane_views: bl_model::LaneViews::new(),
     };
     let saved = encode_json(&project, 1).unwrap();
     let value: Value = serde_json::from_slice(&saved).unwrap();
@@ -1107,11 +1127,13 @@ fn the_locators_and_the_song_start_time_are_saved_and_load_again() {
         windows: bl_model::DeviceWindows::new(),
         rack_views: bl_model::RackViewMap::new(),
         folds: bl_model::ClipFolds::new(),
+        scale_folds: bl_model::ClipFolds::new(),
         midi_tools: bl_project::midi_tools::MidiToolSettings::default(),
         launch: bl_model::LaunchSettings::default(),
         multisamplers: bl_model::MultisamplerViews::new(),
         window_views: bl_model::WindowViews::default(),
         mpe_view: bl_model::MpeView::default(),
+        lane_views: bl_model::LaneViews::new(),
     };
     let saved = encode_json(&project, 1).unwrap();
     let (loaded, _) = decode_json(&saved, &LoadOptions::default()).unwrap();
@@ -1129,11 +1151,13 @@ fn project_of(editor: &Editor) -> Project {
         windows: bl_model::DeviceWindows::new(),
         rack_views: bl_model::RackViewMap::new(),
         folds: bl_model::ClipFolds::new(),
+        scale_folds: bl_model::ClipFolds::new(),
         midi_tools: bl_project::midi_tools::MidiToolSettings::default(),
         launch: bl_model::LaunchSettings::default(),
         multisamplers: bl_model::MultisamplerViews::new(),
         window_views: bl_model::WindowViews::default(),
         mpe_view: bl_model::MpeView::default(),
+        lane_views: bl_model::LaneViews::new(),
     }
 }
 
@@ -1519,10 +1543,12 @@ fn a_set_saved_with_pressure_points_opens_and_sends_the_same_pressure() {
         windows: bl_model::DeviceWindows::new(),
         rack_views: bl_model::RackViewMap::new(),
         folds: bl_model::ClipFolds::new(),
+        scale_folds: bl_model::ClipFolds::new(),
         launch: bl_model::LaunchSettings::default(),
         multisamplers: bl_model::MultisamplerViews::new(),
         window_views: bl_model::WindowViews::default(),
         mpe_view: bl_model::MpeView::default(),
+        lane_views: bl_model::LaneViews::new(),
         midi_tools: bl_project::midi_tools::MidiToolSettings::default(),
     };
     // As version 7 saved it: two pressure points, whole-number values.
@@ -1781,6 +1807,106 @@ fn a_set_from_before_colours_loads_in_the_colours_it_was_drawn_in() {
         assert_eq!(loaded.document.clip(slot).unwrap().colour, Some(swatch));
     }
     assert!(loaded.document.scenes().all(|scene| scene.colour.is_none()));
+}
+
+// Spec: automation R26, R33
+#[test]
+fn a_set_saved_before_the_lanes_loads_with_each_track_showing_its_main_lane_only() {
+    let (editor, _clip) = midi_clip_song();
+    let track = editor.document().track_order()[0];
+    let saved = encode_json(&project_of(&editor), 1).unwrap();
+    let value: Value = serde_json::from_slice(&saved).unwrap();
+    assert!(
+        value.get("lane_views").is_none(),
+        "a set with the default lanes writes none"
+    );
+    let (loaded, _) = decode_json(&saved, &LoadOptions::default()).unwrap();
+    assert!(loaded.lane_views.is_empty());
+    assert_eq!(encode_json(&loaded, 1).unwrap(), saved, "written the same");
+
+    // A track with lanes of its own saves them, and opens with them; the
+    // lanes of a track the set doesn't have are dropped.
+    let volume = bl_model::AutomationTarget::Mixer {
+        param: bl_model::MixerParam::Volume,
+    };
+    let pan = bl_model::AutomationTarget::Mixer {
+        param: bl_model::MixerParam::Pan,
+    };
+    let lanes = bl_model::TrackLanes {
+        main: bl_model::LaneChoice::showing(Some(pan)),
+        lanes: vec![bl_model::LaneChoice {
+            target: Some(volume),
+            only_automated: true,
+        }],
+        hidden: true,
+    };
+    let views: bl_model::LaneViews = [
+        (track, lanes.clone()),
+        (
+            bl_model::TrackId(bl_core::id::Id::new(999_999).unwrap()),
+            lanes.clone(),
+        ),
+    ]
+    .into();
+    let saved = encode_json(&project_of(&editor).with_lane_views(&views), 1).unwrap();
+    let (loaded, _) = decode_json(&saved, &LoadOptions::default()).unwrap();
+    assert_eq!(loaded.lane_views, [(track, lanes)].into());
+}
+
+// Spec: automation R33. A set saved before lanes of their own holds no lanes,
+// so it opens with every track showing its main lane only, on its volume; one
+// that has lanes writes them and reads them back.
+#[test]
+fn a_set_saved_before_automation_lanes_opens_with_the_main_lane_only() {
+    let mut editor = Editor::new();
+    let track = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: track,
+            kind: TrackKind::Midi,
+            name: "Keys".to_owned(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    let project = Project::from_editor(&editor, Media::default());
+    let saved = encode_json(&project, 1).unwrap();
+    let value: Value = serde_json::from_slice(&saved).unwrap();
+    assert!(
+        value.get("lane_views").is_none(),
+        "a track with nothing but its main lane on volume writes nothing"
+    );
+    let (loaded, _) = decode_json(&saved, &LoadOptions::default()).unwrap();
+    assert!(loaded.lane_views.is_empty());
+    let lanes = loaded.lane_views.get(&track).cloned().unwrap_or_default();
+    assert_eq!(lanes, bl_model::TrackLanes::default());
+    assert!(lanes.lanes.is_empty(), "no lane of its own");
+    assert_eq!(
+        lanes.main.target,
+        Some(bl_model::AutomationTarget::Mixer {
+            param: bl_model::MixerParam::Volume
+        })
+    );
+
+    // With lanes, they are written and come back.
+    let mut views = bl_model::LaneViews::new();
+    views.insert(
+        track,
+        bl_model::TrackLanes {
+            lanes: vec![bl_model::LaneChoice::showing(Some(
+                bl_model::AutomationTarget::Mixer {
+                    param: bl_model::MixerParam::Pan,
+                },
+            ))],
+            ..bl_model::TrackLanes::default()
+        },
+    );
+    let with = project.with_lane_views(&views);
+    let saved = encode_json(&with, 1).unwrap();
+    let value: Value = serde_json::from_slice(&saved).unwrap();
+    assert!(value.get("lane_views").is_some());
+    let (loaded, _) = decode_json(&saved, &LoadOptions::default()).unwrap();
+    assert_eq!(loaded.lane_views, views);
 }
 
 // Spec: info-view R9. A set saved before the user's own info text loads with

@@ -555,10 +555,11 @@ impl Shell {
                         message: format!("no track has the ID {}", track.0),
                     });
                 }
-                if self.arrangement.automation_lane(track) != Some(target) {
+                let lane = self.arrangement.shown_lane_of(track, target);
+                if lane.is_none() && self.arrangement.automation_lane(track) != Some(target) {
                     return Err(ShellError::Unavailable {
                         command: id.to_owned(),
-                        reason: "the track's automation lane doesn't show that parameter; show \
+                        reason: "none of the track's automation lanes shows that parameter; show \
                                  it with `arrangement.show_automation`, with Automation Mode on"
                             .to_owned(),
                     });
@@ -567,7 +568,7 @@ impl Shell {
                 if self.arrangement.keyboard_lane() != Some((track, target)) {
                     self.run_command(
                         "arrangement.select_tracks",
-                        json!({ "tracks": [track], "automation_lane": true }),
+                        json!({ "tracks": [track], "automation_lane": lane.unwrap_or(0) }),
                     )?;
                 }
                 if self.arrangement.keyboard_lane().is_none() {

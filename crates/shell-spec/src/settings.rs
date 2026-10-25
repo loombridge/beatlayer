@@ -684,6 +684,10 @@ pub struct SettingsState {
     /// Options ▸ Retune Set On Loading Tuning Systems, as
     /// `settings.set_retune_on_tuning_load` sets it (the tunings spec, R15).
     pub retune_on_tuning_load: bool,
+    /// Options ▸ Snap Automation to Grid, as
+    /// `settings.set_snap_automation_to_grid` sets it (the automation spec,
+    /// R31).
+    pub snap_automation_to_grid: bool,
     /// Record, Warp & Launch: Warp Recorded Audio, as
     /// `settings.set_warp_recorded_audio` sets it.
     pub warp_recorded_audio: bool,

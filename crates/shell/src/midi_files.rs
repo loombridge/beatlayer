@@ -182,9 +182,9 @@ pub fn export(
     document: &Document,
     args: &MidiExportArgs,
 ) -> Result<MidiExportResult, MidiFileError> {
-    if args.path.is_empty() {
+    let Some(file) = args.path.as_deref().filter(|path| !path.is_empty()) else {
         return Err(MidiFileError::InvalidArgs("`path` is empty".to_owned()));
-    }
+    };
     let clip = document
         .clip(args.clip)
         .ok_or_else(|| MidiFileError::InvalidArgs(format!("no clip has the ID {}", args.clip.0)))?;
@@ -194,11 +194,10 @@ pub fn export(
             args.clip.0
         )));
     };
-    let path = Path::new(&args.path);
+    let path = Path::new(file);
     if path.exists() && !args.replace {
         return Err(MidiFileError::Failed(format!(
-            "{} is already there; pass `replace` to write over it",
-            args.path
+            "{file} is already there; pass `replace` to write over it"
         )));
     }
     // Spec: midi-clips R19. Live's own export wasn't observable, so these are
@@ -215,9 +214,9 @@ pub fn export(
     };
     let notes: Vec<bl_model::Note> = data.notes.iter().cloned().collect();
     midi::write(path, &name, &notes, tempo, signature)
-        .map_err(|e| MidiFileError::Failed(format!("{}: {e}", args.path)))?;
+        .map_err(|e| MidiFileError::Failed(format!("{file}: {e}")))?;
     Ok(MidiExportResult {
-        path: args.path.clone(),
+        path: file.to_owned(),
         notes: notes.len(),
         start: clip.start,
         length: clip.length,

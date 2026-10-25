@@ -138,6 +138,7 @@ pub use bl_shell_spec::capture_midi as capture_midi_commands;
 /// The Envelope Editor's editing command IDs and their argument and result
 /// types (WP-6.25c).
 pub use bl_shell_spec::clip_envelope_editing as clip_envelope_commands;
+pub use bl_shell_spec::clip_properties as clip_properties_commands;
 /// The Device View's command IDs and their argument and result types
 /// (WP-2.4).
 pub use bl_shell_spec::devices as device_commands;
@@ -155,6 +156,9 @@ pub use bl_shell_spec::file_manager as file_manager_commands;
 /// The Arrangement's locator command IDs and their argument and result
 /// types (WP-6.24).
 pub use bl_shell_spec::locator as locator_commands;
+/// The MIDI file commands' IDs and their argument and result types
+/// (WP-2.21).
+pub use bl_shell_spec::midi_files as midi_file_commands;
 /// The MIDI ports' and the computer MIDI keyboard's command IDs and their
 /// argument and result types (WP-2.2).
 pub use bl_shell_spec::midi_io as midi_io_commands;

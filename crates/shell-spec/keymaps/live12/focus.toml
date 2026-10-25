@@ -126,7 +126,10 @@ trigger = "press"
 milestone = "M2"
 mac = ["Option+Shift+P"]
 win = ["Alt+Shift+P"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "focus.clip_panels", contexts = ["global"] },
+]
 
 [[shortcut]]
 id = "S-FOCUS-011"

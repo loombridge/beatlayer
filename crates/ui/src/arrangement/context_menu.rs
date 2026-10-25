@@ -292,6 +292,17 @@ impl ContextMenus {
                     {
                         self.scrub_at.map(|at| json!({ "at": at }))
                     }
+                    // Spec: session-context-menus R16. Export MIDI Clip...
+                    // writes the first selected clip.
+                    (MenuKind::Clip, Action::Command(id))
+                        if id == bl_shell::midi_file_commands::EXPORT =>
+                    {
+                        shell
+                            .arrangement()
+                            .selected_clips()
+                            .first()
+                            .map(|clip| json!({ "clip": clip }))
+                    }
                     _ => None,
                 };
                 let response = match args {

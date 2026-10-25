@@ -7,7 +7,7 @@ use bl_model::SceneId;
 use bl_shell::Shell;
 use bl_shell::scene_fields::SceneField;
 use egui::accesskit::Role;
-use egui::{Align2, Id, Rect, Ui, pos2, vec2};
+use egui::{Align2, Id, Rect, Sense, Ui, pos2, vec2};
 
 use crate::main_window::UiEvent;
 use crate::scene_fields;
@@ -50,6 +50,18 @@ pub fn show(
         &label,
         theme.small_font(),
         c.text.0,
+    );
+    // Spec: session-context-menus R3. A right-click on the title bar opens
+    // the scene's menu for the selected scenes.
+    let bar = ui.interact(title, Id::new(("scene-view-title", scene)), Sense::click());
+    crate::session_menus::SessionMenus::default().scene(
+        ui,
+        theme,
+        &bar,
+        shell,
+        scene,
+        (title.left_bottom(), false),
+        events,
     );
     ui.ctx().accesskit_node_builder(scene_view_id(), |node| {
         node.set_role(Role::Group);

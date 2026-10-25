@@ -68,6 +68,7 @@ mod scales;
 mod scene_view;
 mod search_field;
 mod second_window;
+mod session_menus;
 mod session_view;
 mod set_exchange;
 mod settings_window;

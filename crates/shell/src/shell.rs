@@ -359,6 +359,20 @@ pub enum Effect {
         /// The file name the dialog suggests.
         default_name: String,
     },
+    /// Ask where to save a MIDI clip as a Standard MIDI File, then run
+    /// `midi.export_clip` there (WP-6.56).
+    PickMidiExportPath {
+        /// The clip.
+        clip: bl_model::ClipId,
+        /// The file name the dialog suggests.
+        default_name: String,
+    },
+    /// Start renaming a Session clip in its slot, where the person types the
+    /// new name; Return runs `clip.rename` with it (WP-6.56).
+    RenameClip(bl_model::ClipId),
+    /// Start renaming a scene in its name field in the Main column; Return
+    /// runs `scene.rename` with the new name (WP-6.56).
+    RenameScene(bl_model::SceneId),
     /// Start renaming a device in its title bar, where the person types the
     /// new name; Return runs `device.rename` with it (WP-2.4).
     RenameDevice(bl_model::DeviceId),

@@ -161,6 +161,9 @@ pub use bl_shell_spec::groove as groove_commands;
 /// The Arrangement's locator command IDs and their argument and result
 /// types (WP-6.24).
 pub use bl_shell_spec::locator as locator_commands;
+/// The MIDI file commands' IDs and their argument and result types
+/// (WP-2.21).
+pub use bl_shell_spec::midi_files as midi_file_commands;
 /// The MIDI ports' and the computer MIDI keyboard's command IDs and their
 /// argument and result types (WP-2.2).
 pub use bl_shell_spec::midi_io as midi_io_commands;

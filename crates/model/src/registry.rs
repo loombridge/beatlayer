@@ -1702,7 +1702,7 @@ const ENTRIES: &[Entry] = &[
         action: Action::Apply("set_clip_info_text"),
         label: "Edit Info Text",
         permission: Permission::Edit,
-        contexts: &[Arrangement],
+        contexts: &[Arrangement, Session, ClipView],
         keys: &[],
         description: "Sets the info text of a clip, in the Arrangement, a Session slot or a take lane, which the Info View shows while the pointer is over it (Edit Info Text). Empty clears it. One undo step, `Change Info Text`.",
     },

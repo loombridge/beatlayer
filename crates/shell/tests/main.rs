@@ -120,6 +120,7 @@ mod shifter;
 mod sidechain;
 mod slice_to_midi;
 mod snap_automation;
+mod snapping;
 mod stems;
 mod step_recording;
 mod take_lanes_view;

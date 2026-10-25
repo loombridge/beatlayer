@@ -11,7 +11,7 @@ Right-clicking a track's title bar opens a menu of what can be done to the track
 
 Items whose commands exist today run them. The rest are drawn in Live's place and disabled, each saying which package makes it work. The menu differs a little when the track is a group, when several tracks are selected, when it opens in the Arrangement, and when the Arrangement has a time selection on the track.
 
-This spec covers the track title bar's menu, Delete and Rename on the selected title bars, Cut, Copy, Paste and Duplicate on whole tracks (R12 to R16), and how the menu opens from the keyboard. The other commands it runs are specified where they live: [tracks and undo](tracks-and-undo.md), [routing](routing.md) for Duplicate Track Without Clips, [comping](comping.md) for the take-lane items and [linked-track editing](linked-track-editing.md) for linking.
+This spec covers the track title bar's menu, Delete and Rename on the selected title bars, Cut, Copy, Paste and Duplicate on whole tracks (R12 to R16), and how the menu opens from the keyboard. The Session View's slot, clip and scene menus and the Clip View title bar's are [session-context-menus.md](session-context-menus.md)'s (WP-6.56), built on this pattern. The other commands it runs are specified where they live: [tracks and undo](tracks-and-undo.md), [routing](routing.md) for Duplicate Track Without Clips, [comping](comping.md) for the take-lane items and [linked-track editing](linked-track-editing.md) for linking.
 
 ## Sources
 

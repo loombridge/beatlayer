@@ -86,6 +86,11 @@ pub fn show(
     if response.clicked() || response.drag_started() {
         response.request_focus();
     }
+    // Spec: session-context-menus R3. While the field has the keyboard,
+    // Delete and the other keys are its.
+    if response.has_focus() {
+        crate::session_menus::note_field_focus(ui.ctx());
+    }
     // I-CLICK-010: a double-click turns the field off.
     if response.double_clicked() {
         push(scene_fields::off(shell, scene, field));
@@ -176,6 +181,16 @@ pub fn show(
             y1: rect.max.y.into(),
         });
     });
+    // Spec: session-context-menus R3. A right-click opens Return to Default.
+    let mut menu_events = Vec::new();
+    crate::session_menus::SessionMenus::default().scene_field(
+        &response,
+        shell,
+        scene,
+        field,
+        &mut menu_events,
+    );
+    events.extend(menu_events);
 }
 
 /// The keys a focused field takes.

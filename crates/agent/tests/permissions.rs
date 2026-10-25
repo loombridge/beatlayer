@@ -11,7 +11,8 @@
 use bl_agent::client::{Client, InProcess};
 use bl_agent::{Agent, Credential, EngineMessage, Outcome, QuestionKind};
 use bl_commands::Permission;
-use bl_engine::TransportCommand;
+use bl_core::time::Frames;
+use bl_engine::{Report, TransportCommand};
 use bl_shell::{GesturePhase, Invocation, Shell};
 use serde_json::{Value, json};
 
@@ -1065,5 +1066,56 @@ fn agent_server_commands_stay_the_person_s_own() {
             .shell
             .agent_settings()
             .is_autonomous("editor")
+    );
+}
+
+#[test]
+fn a_scheduled_paste_is_judged_again_when_it_fires_and_not_run_if_it_would_replace_clips() {
+    // Spec: agent-permissions R1. With the clipboard empty at 17.1.1 the
+    // paste would fail, so scheduling it asks nothing; by the time it fires
+    // the person has copied a clip and put the insert marker over another.
+    let (mut client, midi, a, b) = two_clips(4);
+    let asked = client.transport().asked.len();
+    call(
+        &mut client,
+        "schedule",
+        json!({ "action": "add", "at": "17.1.1", "command": "arrangement.paste", "args": {} }),
+    );
+    assert_eq!(client.transport().asked.len(), asked);
+    let person = &mut client.transport().shell;
+    person
+        .invoke("arrangement.copy", json!({ "clips": [a] }))
+        .unwrap();
+    person
+        .invoke(
+            "arrangement.set_insert_marker",
+            json!({ "at": 4 * BAR, "track": midi }),
+        )
+        .unwrap();
+    let steps = person.editor().undo_history().len();
+
+    let host = client.transport();
+    host.agent.on_report(
+        &mut host.shell,
+        Report::Fired {
+            id: 1,
+            position: Frames(0),
+            clock: 0,
+        },
+    );
+
+    assert!(exists(&mut client, b), "the person's clip is still there");
+    assert_eq!(
+        client.transport().shell.editor().undo_history().len(),
+        steps
+    );
+    let list = call(&mut client, "schedule", json!({ "action": "list" }));
+    let entry = &list["scheduled"][0];
+    assert_eq!(entry["state"], "failed", "{entry}");
+    assert!(
+        entry["detail"]["error"]
+            .as_str()
+            .is_some_and(|error| error.starts_with("not run")),
+        "{entry}"
     );
 }

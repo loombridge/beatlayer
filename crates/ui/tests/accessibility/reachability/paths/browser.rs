@@ -141,6 +141,20 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
                  (`browser.load_selected`)",
             )),
         ),
+        // Packs (WP-6.35b): Install Pack... is in the File menu.
+        (
+            "set.create_pack",
+            Exception(Equivalent(
+                "the File Manager's Packing section's Create Pack button, which Tab reaches",
+            )),
+        ),
+        (
+            "set.cancel_pack",
+            Exception(Equivalent(
+                "the pack progress window's Cancel, which Tab reaches, or Esc",
+            )),
+        ),
+        ("set.pack_status", Exception(Query)),
         (
             "set.export_tracks",
             Exception(Gap(

@@ -16,10 +16,12 @@ use bl_shell_spec::devices as device_ids;
 use bl_shell_spec::file_manager as file_manager_ids;
 use bl_shell_spec::locator as locator_ids;
 use bl_shell_spec::session_launch as session_launch_ids;
+use bl_shell_spec::set_exchange as set_exchange_ids;
 use bl_shell_spec::tracks as track_ids;
 use bl_shell_spec::tunings as tuning_ids;
 use serde_json::Value;
 use serde_json::json;
+use std::path::Path;
 
 impl Shell {
     /// The arguments a person's invocation implies: a new track's ID, name,
@@ -250,6 +252,36 @@ impl Shell {
             }
             ids::SET_SAVE_AS if !has("path") => {
                 self.effects.push(Effect::PickSavePath { then: None });
+                Ok(Value::Null)
+            }
+            // Spec: set-exchange R16, R20. A person's pack or unpack asks
+            // where first, then runs on a worker thread.
+            set_exchange_ids::CREATE_PACK => {
+                if has("path") {
+                    self.start_create_pack(args)?;
+                } else {
+                    let project = args
+                        .get("project")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned);
+                    let root = self.pack_root(project.as_deref())?;
+                    let name = root.file_name().unwrap_or_default().to_string_lossy();
+                    self.effects.push(Effect::PickPackPath {
+                        file_name: format!("{name}.{}", bl_project::pack::EXTENSION),
+                        folder: root.parent().map(Path::to_path_buf).unwrap_or_default(),
+                        project,
+                    });
+                }
+                Ok(Value::Null)
+            }
+            set_exchange_ids::INSTALL_PACK => {
+                match (args.get("pack").and_then(Value::as_str), has("folder")) {
+                    (None, _) => self.effects.push(Effect::PickPack),
+                    (Some(pack), false) => self.effects.push(Effect::PickInstallFolder {
+                        pack: pack.to_owned(),
+                    }),
+                    (Some(_), true) => self.start_install_pack(args)?,
+                }
                 Ok(Value::Null)
             }
             browser_ids::ADD_FOLDER if !has("path") => {

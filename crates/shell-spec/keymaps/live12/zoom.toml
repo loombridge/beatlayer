@@ -67,7 +67,7 @@ mac = ["Option+Shift+F"]
 win = ["Alt+Shift+F"]
 status = "bound"
 commands = [
-  { id = "arrangement.follow", contexts = ["global", "arrangement", "sample-editor"] },
+  { id = "arrangement.follow", contexts = ["global", "arrangement", "sample-editor", "note-editor"] },
 ]
 
 [[shortcut]]

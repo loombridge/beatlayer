@@ -440,8 +440,8 @@ impl Shell {
         let args: CropArgs = Self::args(id, args)?;
         let doc = self.editor.document();
         let shown = self.clip_view.shown_any_clip(doc, &self.arrangement);
-        let span =
-            crop_span(doc, &self.arrangement, shown, &args).map_err(|why| invalid(id, why))?;
+        let span = crop_span(doc, &self.arrangement, &self.clip_view, shown, &args)
+            .map_err(|why| invalid(id, why))?;
         let clip = crop_clip(doc, &self.arrangement, shown, span, &args)
             .ok_or_else(|| unavailable(id, "no clip is selected"))?;
         let value = self.clip_of(id, clip)?;
@@ -469,7 +469,20 @@ impl Shell {
         let ClipData::Midi(midi) = &value.data else {
             return Err(failed(id, "the clip isn't a MIDI clip"));
         };
+        let doc = self.editor.document();
+        let in_slot = doc
+            .clip_track(clip)
+            .and_then(|track| doc.track(track))
+            .is_some_and(|track| track.slots().any(|(_, held)| held.id == clip));
         let command = match span {
+            // A Session clip has no place in the Arrangement to move the
+            // edges of, so it keeps the span's part of its contents.
+            Some((start, end)) if in_slot => Command::CropClip {
+                clip,
+                media: None,
+                from: (midi.start + (start - value.start)).get() as f64,
+                to: (midi.start + (end - value.start)).get() as f64,
+            },
             Some((start, end)) => Command::CropClipToRange {
                 clip,
                 media: None,
@@ -1006,7 +1019,7 @@ impl Shell {
         let args: CropArgs = Self::args(ids::CROP, args.clone())?;
         let doc = self.editor.document();
         let shown = self.clip_view.shown_any_clip(doc, &self.arrangement);
-        let span = crop_span(doc, &self.arrangement, shown, &args)
+        let span = crop_span(doc, &self.arrangement, &self.clip_view, shown, &args)
             .map_err(|why| invalid(ids::CROP, why))?;
         crop_clip(doc, &self.arrangement, shown, span, &args)
             .ok_or_else(|| unavailable(ids::CROP, "no clip is selected"))
@@ -1171,6 +1184,7 @@ fn place(
 pub(crate) fn crop_span(
     doc: &Document,
     view: &ArrangementView,
+    clip_view: &crate::clip_view::ClipView,
     shown: Option<ClipId>,
     args: &CropArgs,
 ) -> Result<Option<(Ticks, Ticks)>, String> {
@@ -1185,9 +1199,48 @@ pub(crate) fn crop_span(
             Ok(Some((start, end)))
         }
         (None, None) if args.clip.is_none() && shown.is_none() => Ok(view.time_selection()),
-        (None, None) => Ok(None),
+        (None, None) => editor_span(doc, view, clip_view, args.clip.or(shown)),
         _ => Err("give `start` and `end` together".to_owned()),
     }
+}
+
+/// The span a crop keeps when the note editor shows the clip and has a time
+/// selection (piano-roll R40), in song positions: the Arrangement's own time
+/// selection comes first when it lies inside the clip.
+fn editor_span(
+    doc: &Document,
+    view: &ArrangementView,
+    clip_view: &crate::clip_view::ClipView,
+    clip: Option<ClipId>,
+) -> Result<Option<(Ticks, Ticks)>, String> {
+    let Some(value) = clip.and_then(|id| doc.clip(id)) else {
+        return Ok(None);
+    };
+    let ClipData::Midi(midi) = &value.data else {
+        return Ok(None);
+    };
+    let Some((from, to)) = clip_view
+        .time_selection(doc, view)
+        .filter(|_| clip_view.shown_clip(doc, view) == Some(value.id))
+    else {
+        return Ok(None);
+    };
+    if let Some((start, end)) = view
+        .time_selection()
+        // Selecting a clip gives the Arrangement a time selection as long as
+        // the clip, which is the clip and not a time of its own.
+        .filter(|&(start, end)| {
+            start >= value.start && end <= value.end() && (start, end) != (value.start, value.end())
+        })
+    {
+        return Ok(Some((start, end)));
+    }
+    let start = (value.start + (from - midi.start)).max(value.start);
+    let end = (value.start + (to - midi.start)).min(value.end());
+    if start >= end {
+        return Err("the time selection lies outside the clip".to_owned());
+    }
+    Ok(Some((start, end)))
 }
 
 /// The clip a crop acts on (R16): the one the call names, the clip the Clip

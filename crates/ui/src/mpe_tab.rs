@@ -624,8 +624,6 @@ pub struct MpeUi {
     menu: Option<Menu>,
     /// Whether a lane's split line is being dragged.
     splitting: bool,
-    /// The serial of the last Z the editor scrolled to.
-    zoomed: u64,
     /// How many Pitch envelopes the last frame drew.
     pitch_drawn: usize,
 }
@@ -650,14 +648,6 @@ impl MpeUi {
     #[must_use]
     pub fn dragging(&self) -> bool {
         self.drag.is_some()
-    }
-
-    /// The serial of the Z request the editor last scrolled to, and its
-    /// update.
-    pub fn take_zoom(&mut self, serial: u64) -> bool {
-        let fresh = serial > self.zoomed;
-        self.zoomed = self.zoomed.max(serial);
-        fresh
     }
 
     /// Esc: drops a drag, or else a value being typed. Returns whether a

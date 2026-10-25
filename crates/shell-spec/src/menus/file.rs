@@ -9,6 +9,7 @@ use crate::commands::{
 };
 use crate::export::OPEN_DIALOG as EXPORT_OPEN_DIALOG;
 use crate::file_manager::{SET_SAVE_COPY, VIEW_TOGGLE_FILE_MANAGER};
+use crate::set_exchange::INSTALL_PACK;
 
 pub(super) const FILE: &[Row] = &[
     ("M-FILE-001", "New Beatlayer Set", Cmd(SET_NEW)),
@@ -16,7 +17,7 @@ pub(super) const FILE: &[Row] = &[
     ("M-FILE-003", "Open Recent Set", Pending(None)),
     ("M-FILE-004", "Close Window", Cmd(WINDOW_CLOSE)),
     SEPARATOR,
-    ("M-FILE-005", "Install Pack...", Pending(None)),
+    ("M-FILE-005", "Install Pack...", Cmd(INSTALL_PACK)),
     (
         "M-FILE-006",
         "Add Folder to Browser...",

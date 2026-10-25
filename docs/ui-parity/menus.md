@@ -40,7 +40,7 @@ Menu-bar order on macOS: Live (application menu), File, Edit, Create, Playback, 
 | M-FILE-003 | Open Recent Set ▸ | | | | Submenu of recently opened sets; its contents are the user's files and weren't recorded |
 | M-FILE-004 | Close Window | ⌘W | S-FILE-009 | disabled | Not in the manual |
 | | — | | | | |
-| M-FILE-005 | Install Pack... | | | | Installs a pack file. Beatlayer: installs a Beatlayer pack (`.blpack`); Ableton's packs are out ([set exchange](../specs/set-exchange.md) R20) |
+| M-FILE-005 | Install Pack... | | | | Installs a pack file. Beatlayer: installs a Beatlayer pack (`.blpack`); Ableton's packs are out ([set exchange](../specs/set-exchange.md) R20). Built in WP-6.35b |
 | M-FILE-006 | Add Folder to Browser... | | | | Adds a folder to the browser's Places |
 | | — | | | | |
 | M-FILE-007 | Manage Files | | | | Opens the File Manager (L-OTH-002); built in WP-6.63 |

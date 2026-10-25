@@ -194,6 +194,7 @@ pub fn render_launching(
         schedule,
         cues,
         launches,
+        device_channels: 0,
     };
     render_launching_with_workers(document, media, &script, settings, 0, sink)
 }
@@ -206,6 +207,11 @@ pub struct Script<'a> {
     pub cues: &'a [Cue],
     /// Each on its frame, in order of frame.
     pub launches: &'a [Launch],
+    /// The audio interface's output channels the render captures after
+    /// Main's: where CV devices write and tracks on Ext. Out play (the CV
+    /// tools spec, R3). `0` for none, as every render but a golden test of
+    /// the CV tools has it: an offline render sends no CV (R7).
+    pub device_channels: usize,
 }
 
 /// [`render_launching`], with the engine's tasks run by `workers` real-time
@@ -227,8 +233,10 @@ pub fn render_launching_with_workers(
         schedule,
         cues,
         launches,
+        device_channels,
     } = *script;
-    let config = EngineConfig::new(settings.sample_rate, settings.block);
+    let mut config = EngineConfig::new(settings.sample_rate, settings.block);
+    config.output_channels = device_channels;
     let mut registry = Registry::new();
     bl_devices::register(&mut registry);
     let kit = bl_devices::kit_host();
@@ -247,7 +255,7 @@ pub fn render_launching_with_workers(
         offline.sender().schedule(command);
     }
     let mut summary = Summary {
-        channels: config.channels,
+        channels: config.channels + device_channels,
         unhosted,
         missing_media,
         ..Summary::default()
@@ -288,9 +296,11 @@ fn take_block(summary: &mut Summary, sink: &mut impl FnMut(&Output<'_>), output:
 
 /// Appends a block to `samples`, interleaved: each frame's channels in turn.
 pub fn interleave(output: &Output<'_>, samples: &mut Vec<f32>) {
-    samples.reserve(output.frames() * output.channels());
+    samples.reserve(output.frames() * (output.channels() + output.ext_channels()));
     for frame in 0..output.frames() {
         samples.extend((0..output.channels()).map(|c| output.channel(c)[frame]));
+        // The device channels follow Main's, when the render has them.
+        samples.extend((0..output.ext_channels()).map(|c| output.ext_channel(c)[frame]));
     }
 }
 

@@ -113,6 +113,9 @@ pub struct Scene {
     pub launches: Vec<Launch>,
     /// Frames to render, at [`SAMPLE_RATE`].
     pub frames: u64,
+    /// The interface's output channels the reference holds after Main's: the
+    /// CV tools' fixtures capture the channels their devices write.
+    pub device_channels: usize,
 }
 
 /// An audio file a fixture's clips play, made in code.
@@ -187,6 +190,7 @@ impl Fixture {
             schedule: &scene.schedule,
             cues: &scene.cues,
             launches: &scene.launches,
+            device_channels: scene.device_channels,
         };
         let summary = render::render_launching_with_workers(
             scene.document(),

@@ -1,16 +1,17 @@
-//! Merging sets and saving tracks or Session clips as a set (WP-6.35): the
-//! commands that bring tracks and device chains from a set file into the open
-//! set, and save selected tracks or Session clips as a new set. A set opened in
-//! the browser is the browser's (`browser.open_folder` on its rows).
+//! Merging sets and saving tracks or Session clips as a set (WP-6.35), and
+//! packing a project into one file (WP-6.35b): the commands that bring tracks
+//! and device chains from a set file into the open set, save selected tracks
+//! or Session clips as a new set, and create and install packs. A set opened
+//! in the browser is the browser's (`browser.open_folder` on its rows).
 //!
 //! They read and write files outside the project, so they belong to the shell
 //! rather than to the document. [`register`] adds their specs, which are pure
 //! data, so `cargo xtask` can check them and list them in the command
 //! reference; `bl-shell` runs them by ID. The behaviour is in the set exchange
-//! spec, R1 to R15.
+//! spec, R1 to R9, R11 to R15 and R16 to R24.
 
-use bl_commands::Context::{Arrangement, Browser, Session, TrackHeaders};
-use bl_commands::{CommandSpec, Permission, RegisterError, Registry};
+use bl_commands::Context::{Arrangement, Browser, Global, Session, TrackHeaders};
+use bl_commands::{CommandSpec, NoArgs, Permission, RegisterError, Registry};
 use bl_model::{ClipId, DeviceId, TrackId};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -22,6 +23,14 @@ pub const IMPORT: &str = "set.import";
 pub const EXPORT_TRACKS: &str = "set.export_tracks";
 /// `set.export_clips`: save Session clips as a new set.
 pub const EXPORT_CLIPS: &str = "set.export_clips";
+/// `set.create_pack`: pack a project folder into one file.
+pub const CREATE_PACK: &str = "set.create_pack";
+/// `set.install_pack`: unpack a pack into a new project folder.
+pub const INSTALL_PACK: &str = "set.install_pack";
+/// `set.cancel_pack`: stop the pack or unpack under way.
+pub const CANCEL_PACK: &str = "set.cancel_pack";
+/// `set.pack_status`: how far the pack or unpack under way has got.
+pub const PACK_STATUS: &str = "set.pack_status";
 
 /// The undo step a merge of tracks makes (R9): Beatlayer's own name.
 pub const IMPORT_TRACKS_STEP: &str = "Import Tracks";
@@ -34,7 +43,15 @@ pub const IMPORT_DEVICES_AND_TRACK_STEP: &str = "Insert Device and Track";
 
 /// Every command [`register`] adds, so a host knows which IDs to send to
 /// `bl-shell`'s `Shell::run`.
-pub const IDS: &[&str] = &[IMPORT, EXPORT_TRACKS, EXPORT_CLIPS];
+pub const IDS: &[&str] = &[
+    IMPORT,
+    EXPORT_TRACKS,
+    EXPORT_CLIPS,
+    CREATE_PACK,
+    INSTALL_PACK,
+    CANCEL_PACK,
+    PACK_STATUS,
+];
 
 /// Whether `id` is one of the set exchange commands.
 #[must_use]
@@ -141,6 +158,81 @@ pub struct ExportedSet {
     pub copied: usize,
 }
 
+/// Arguments of `set.create_pack`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CreatePackArgs {
+    /// The project folder to pack. Left out, the open set's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project: Option<String>,
+    /// Where to write the pack, as a save dialog gives it, such as
+    /// `/Music/Tango Project.blpack`. A person who leaves it out is asked;
+    /// an agent must give it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+}
+
+/// What `set.create_pack` returns.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct CreatedPack {
+    /// The pack's path.
+    pub path: String,
+    /// How many files it holds.
+    pub files: usize,
+    /// How many bytes those files hold, before compression.
+    pub bytes: u64,
+    /// The files the project's sets use from outside its folder, which the
+    /// pack doesn't hold.
+    pub left_out: Vec<String>,
+}
+
+/// Arguments of `set.install_pack`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct InstallPackArgs {
+    /// The pack to unpack. A person who leaves it out is asked; an agent
+    /// must give it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pack: Option<String>,
+    /// The folder to make the project folder in. A person who leaves it out
+    /// is asked, the pack's own folder first; an agent must give it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder: Option<String>,
+}
+
+/// What `set.install_pack` returns.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct InstalledPack {
+    /// The new project folder.
+    pub folder: String,
+    /// The sets in it, by path.
+    pub sets: Vec<String>,
+    /// How many files were written.
+    pub files: usize,
+    /// How many bytes they hold.
+    pub bytes: u64,
+}
+
+/// What a pack job is doing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PackJob {
+    /// Packing a project.
+    Create,
+    /// Unpacking a pack.
+    Install,
+}
+
+/// What `set.pack_status` returns.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PackStatus {
+    /// What is going on, or nothing when no pack or unpack is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub job: Option<PackJob>,
+    /// How far it has got, from 0 to 1.
+    pub share: f64,
+}
+
 /// Adds the set exchange commands to a registry.
 ///
 /// # Errors
@@ -212,6 +304,68 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
             .args::<ExportClipsArgs>()
             .result::<ExportedSet>(),
     )?;
+    registry.register(
+        CommandSpec::new(CREATE_PACK, "Create Pack")
+            .description(
+                "Packs a project folder (the open set's when `project` is left out) into one \
+                 `.blpack` file at `path`, as the File Manager's Create Pack does: every file \
+                 and folder in it, byte for byte, in a ZIP64 archive whose first entry is a \
+                 manifest, without hidden files (sets' journals and saves under way) and \
+                 without `Backup`. Files the project's sets use from outside its folder aren't \
+                 in the pack; the result names them. Refused while the open set has unsaved \
+                 changes or was never saved, when its project is the one packed. The pack is \
+                 written to a hidden file and renamed into place, so a pack that stops or is \
+                 cancelled (`set.cancel_pack`) leaves nothing. An agent's call waits for the \
+                 end and returns the pack; a person's runs on a worker thread, and \
+                 `set.pack_status` shows how far it has got. Changes nothing in the project. Writes a file outside it.",
+            )
+            .permission(Permission::External)
+            .context(Global)
+            .args::<CreatePackArgs>()
+            .result::<CreatedPack>(),
+    )?;
+    registry.register(
+        CommandSpec::new(INSTALL_PACK, "Install Pack...")
+            .description(
+                "Unpacks a `.blpack` file into a new project folder inside `folder`, as File ▸ \
+                 Install Pack... does: named as the pack's project folder, with \" 2\", \" 3\" \
+                 and so on when `folder` already holds one of that name. The whole pack is \
+                 checked before anything is written (a manifest from a later version, a name \
+                 that is absolute, climbs out with `..`, is a link or can't be a file name, or \
+                 more bytes than `folder` has free refuse it), then written to a hidden folder \
+                 that is renamed into place once every file has the size and checksum the pack \
+                 says, so a pack that is refused, fails or is cancelled (`set.cancel_pack`) \
+                 leaves nothing. Opens no set and changes nothing in the open set. An agent's \
+                 call waits for the end and returns the new folder and its sets; the browser \
+                 lists the folder where it lies in a place. Reads a file and writes files \
+                 outside the project.",
+            )
+            .permission(Permission::External)
+            .context(Global)
+            .args::<InstallPackArgs>()
+            .result::<InstalledPack>(),
+    )?;
+    registry.register(
+        CommandSpec::new(CANCEL_PACK, "Cancel")
+            .description(
+                "Stops the pack or unpack under way, leaving no pack and no unpacked folder.",
+            )
+            .permission(Permission::Edit)
+            .context(Global)
+            .args::<NoArgs>()
+            .result::<PackStatus>(),
+    )?;
+    registry.register(
+        CommandSpec::new(PACK_STATUS, "Pack Status")
+            .description(
+                "Reads whether a pack or unpack is under way, and how far it has got, from 0 \
+                 to 1.",
+            )
+            .permission(Permission::Read)
+            .context(Global)
+            .args::<NoArgs>()
+            .result::<PackStatus>(),
+    )?;
     Ok(())
 }
 
@@ -227,11 +381,16 @@ mod tests {
         assert_eq!(registry.len(), IDS.len());
         for id in IDS {
             assert!(registry.contains(id), "{id}");
-            assert_eq!(
-                registry.get(id).unwrap().permission,
-                Some(Permission::External),
-                "{id} reads or writes files outside the project"
-            );
+            let permission = registry.get(id).unwrap().permission;
+            match *id {
+                CANCEL_PACK => assert_eq!(permission, Some(Permission::Edit)),
+                PACK_STATUS => assert_eq!(permission, Some(Permission::Read)),
+                _ => assert_eq!(
+                    permission,
+                    Some(Permission::External),
+                    "{id} reads or writes files outside the project"
+                ),
+            }
         }
         let problems: Vec<String> = registry
             .problems()

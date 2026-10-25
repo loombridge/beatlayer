@@ -712,6 +712,10 @@ impl MainWindowUi {
             // the window while it's open, and the progress window while an
             // export runs.
             crate::export_dialog::show(ctx, shell, theme, &mut events);
+            // Spec: set-exchange R20, R23. A pack dropped on the window is
+            // unpacked, and a pack or unpack under way shows its progress.
+            crate::file_manager::drop_pack(ctx, &mut events);
+            crate::file_manager::pack_progress(ctx, shell, theme, &mut events);
             // Spec: multisampler R64. The autosampler's dialog sits over the
             // window while it's open.
             crate::autosampler::show(ctx, shell, theme, &mut events);
@@ -733,6 +737,7 @@ impl MainWindowUi {
                 && (shell.stems_dialog().is_some()
                     || shell.export_dialog().is_some()
                     || shell.export_running()
+                    || shell.pack_status().job.is_some()
                     || shell.autosampler_dialog().is_some()
                     || shell.slice_dialog().is_some()
                     || shell.mpe_settings_dialog().open));

@@ -166,7 +166,7 @@ What happens when something is dropped, by target.
 | I-DROP-020 | Take lane | Several samples or MIDI files, Cmd (Ctrl) held while dragging | Puts each on a track of its own, from the one dropped on down, on the take lane at the same place in each track | man 21.4 |
 | I-DROP-021 | Track title bar, or either view's drop area | A set file from the browser | Adds the set's tracks except its return tracks and Main | man 5.4.3 |
 | I-DROP-022 | Track, or a drop area | A track, a group or a Devices row from a set opened in the browser | Adds it; a Devices row's chain comes without its automation | man 5.4.3; release notes 12.0 |
-| I-DROP-023 | Main window | A pack | Asks where to unpack it, then unpacks it | man 5.9 |
+| I-DROP-023 | Main window | A pack | Asks where to unpack it, then unpacks it. Built in WP-6.35b | man 5.9 |
 | I-DROP-024 | Nested collection's label | Browser items | Beatlayer addition (IMP-07): puts them in it ([browser tags](../specs/browser-tags.md) R46) | Beatlayer |
 | I-DROP-025 | Main window | .dawproject file | Beatlayer addition: imports it as a new set, after asking whether to save changes ([dawproject](../specs/dawproject.md) R85) | Beatlayer |
 

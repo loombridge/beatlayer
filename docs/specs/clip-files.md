@@ -65,7 +65,7 @@ This spec covers the clip file, saving a clip, the Clips label, placing a clip f
 | R13 | `crates/shell/tests/clip_files.rs`, `an_audio_clip_file_previews_through_its_own_warp_settings` | unit |
 | R14 | `crates/project/src/clip_file.rs`, `a_clip_file_over_the_size_limit_is_refused`, `newer_and_damaged_clip_files_are_refused`; `fuzz/fuzz_targets/clip_file.rs` | unit, fuzz |
 | R15 | `crates/cli/tests/agent.rs`, `an_agent_saves_a_clip_file_places_it_and_reads_both_back`; `crates/shell-spec/src/browser.rs`, `every_listed_id_is_registered_and_complete`; `cargo xtask commands` | unit, agent API |
-| R16 | to be written in WP-6.34b | |
+| R16 | `crates/shell/tests/clip_files.rs`, `a_midi_clip_file_with_an_instrument_previews_as_its_render_of_one_loop`, `a_midi_clip_file_preview_starts_on_the_next_bar_and_raw_at_once`, `a_clip_file_with_a_clap_plugin_renders_through_a_fresh_instance`, `a_chain_without_an_instrument_previews_nothing_and_another_file_drops_a_render`; `crates/shell/src/browser/preview.rs`, `a_render_is_kept_until_the_file_or_the_tempo_changes`, `a_newer_request_or_a_stop_cancels_the_render_before_it`; `rtsan/tests/preview.rs` | unit, through `Shell::run` |
 | R17 | to be written in WP-6.19 | |
 
 ## Not built yet
@@ -73,4 +73,3 @@ This spec covers the clip file, saving a clip, the Clips label, placing a clip f
 - A clip file is read on the thread that runs the command when a command or a drop places it; only previewing reads it on a background thread (R14).
 - The Session View doesn't highlight the slot a clip file would go in (R7), as it doesn't for audio files; its drop area and the Arrangement's lanes do.
 - A clip's groove isn't in the clip file (R17): grooves aren't in the document yet (WP-6.19).
-- A MIDI clip file doesn't preview (R16, WP-6.34b).

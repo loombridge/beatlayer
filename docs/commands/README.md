@@ -7134,6 +7134,59 @@ One of:
 
 </details>
 
+### `CreatedPack`
+
+What `set.create_pack` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | The pack's path. |
+| `files` | integer, at least 0 | yes | How many files it holds. |
+| `bytes` | integer, at least 0 | yes | How many bytes those files hold, before compression. |
+| `left_out` | array of string | yes | The files the project's sets use from outside its folder, which the pack doesn't hold. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `set.create_pack` returns.",
+  "properties": {
+    "bytes": {
+      "description": "How many bytes those files hold, before compression.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "files": {
+      "description": "How many files it holds.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "left_out": {
+      "description": "The files the project's sets use from outside its folder, which the pack doesn't hold.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "path": {
+      "description": "The pack's path.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "path",
+    "files",
+    "bytes",
+    "left_out"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `CropResult`
 
 What `clip.crop` did.
@@ -13584,6 +13637,59 @@ One of:
 
 </details>
 
+### `InstalledPack`
+
+What `set.install_pack` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `folder` | string | yes | The new project folder. |
+| `sets` | array of string | yes | The sets in it, by path. |
+| `files` | integer, at least 0 | yes | How many files were written. |
+| `bytes` | integer, at least 0 | yes | How many bytes they hold. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `set.install_pack` returns.",
+  "properties": {
+    "bytes": {
+      "description": "How many bytes they hold.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "files": {
+      "description": "How many files were written.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "folder": {
+      "description": "The new project folder.",
+      "type": "string"
+    },
+    "sets": {
+      "description": "The sets in it, by path.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "folder",
+    "sets",
+    "files",
+    "bytes"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `Item`
 
 One row of the content pane.
@@ -19375,6 +19481,78 @@ One of:
 
 </details>
 
+### `PackJob`
+
+What a pack job is doing.
+
+One of:
+
+- `"create"`: Packing a project.
+- `"install"`: Unpacking a pack.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a pack job is doing.",
+  "oneOf": [
+    {
+      "const": "create",
+      "description": "Packing a project.",
+      "type": "string"
+    },
+    {
+      "const": "install",
+      "description": "Unpacking a pack.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `PackStatus`
+
+What `set.pack_status` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `share` | number | yes | How far it has got, from 0 to 1. |
+| `job` | [`PackJob`](#packjob) or null | no | What is going on, or nothing when no pack or unpack is. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `set.pack_status` returns.",
+  "properties": {
+    "job": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PackJob"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "What is going on, or nothing when no pack or unpack is."
+    },
+    "share": {
+      "description": "How far it has got, from 0 to 1.",
+      "format": "double",
+      "type": "number"
+    }
+  },
+  "required": [
+    "share"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `PackageStatus`
 
 A package the separation needs.
@@ -21375,6 +21553,7 @@ The preview: the switch, the volume, and what plays.
 | `position_seconds` | number | yes | How far it has played, in seconds. |
 | `length_seconds` | number | yes | How long it is, in seconds. |
 | `loading` | string or null | no | The file being decoded for a preview, if any. |
+| `note` | string or null | no | Why the file selected last doesn't preview, if it doesn't: a MIDI clip file whose chain has no instrument, or a clip file whose audio is missing. The preview strip shows it. |
 | `playing` | string or null | no | The file playing, if any. |
 
 <details><summary>JSON Schema</summary>
@@ -21390,6 +21569,13 @@ The preview: the switch, the volume, and what plays.
     },
     "loading": {
       "description": "The file being decoded for a preview, if any.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "note": {
+      "description": "Why the file selected last doesn't preview, if it doesn't: a MIDI clip file whose chain has no instrument, or a clip file whose audio is missing. The preview strip shows it.",
       "type": [
         "string",
         "null"

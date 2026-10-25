@@ -81,6 +81,7 @@ mod note_filters;
 mod note_view;
 mod offline_plugins;
 mod offline_vst3_au;
+mod packs;
 mod plugin_list;
 mod plugin_scanning;
 mod plugins;

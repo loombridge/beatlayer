@@ -6,5 +6,6 @@
 mod common;
 mod crash_recovery;
 mod interrupted_save;
+mod pack;
 mod round_trip;
 mod schemas;

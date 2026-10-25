@@ -57,6 +57,7 @@ pub mod history;
 pub mod journal;
 pub mod midi_tools;
 pub mod migrate;
+pub mod pack;
 pub mod preset;
 pub mod rack_preset;
 pub mod registry;

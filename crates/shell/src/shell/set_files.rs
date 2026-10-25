@@ -99,6 +99,7 @@ impl Shell {
         // What a DAWproject import said about the set that's gone (R11, R12).
         self.pending_name = None;
         self.import_report = None;
+        self.dawproject_report_window = None;
         // A file still being written was for the set that's gone: its worker
         // deletes it when it finds nobody waiting (WP-4.20).
         self.processed.clear();
@@ -319,7 +320,7 @@ impl Shell {
         match id {
             dawproject_ids::IMPORT_DAWPROJECT => {
                 let args = Self::args::<dawproject_ids::ImportDawProjectArgs>(id, args)?;
-                if self.dirty {
+                if self.unsaved_changes() {
                     return Err(unavailable(
                         "the set has unsaved changes; save them with `set.save` or \
                          `set.save_as`, or throw them away with `set.discard_changes`, first",
@@ -465,8 +466,69 @@ impl Shell {
                 let report = self.import_report.clone().unwrap_or_default();
                 Ok(to_value(&report))
             }
+            dawproject_ids::CLOSE_REPORT => {
+                Self::args::<NoArgs>(id, args)?;
+                self.dawproject_report_window = None;
+                self.touch();
+                Ok(to_value(&dawproject_ids::ReportWindowState { open: false }))
+            }
             _ => Err(ShellError::UnknownCommand(id.to_owned())),
         }
+    }
+
+    /// The command a person's choice of `path` runs: the import for a
+    /// `.dawproject` file, the open for anything else (the DAWproject spec,
+    /// R83 to R85).
+    #[must_use]
+    pub fn open_invocation(path: &Path) -> Invocation {
+        let id = if path
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("dawproject"))
+        {
+            dawproject_ids::IMPORT_DAWPROJECT
+        } else {
+            ids::SET_OPEN
+        };
+        Invocation::new(id, json!({ "path": path.to_string_lossy() }))
+    }
+
+    /// The window that lists the report of the import or export a person
+    /// just ran, if it is open (R87).
+    #[must_use]
+    pub fn dawproject_report_window(&self) -> Option<&dawproject_ids::ReportWindow> {
+        self.dawproject_report_window.as_ref()
+    }
+
+    /// The file name the Export DAWproject... dialog suggests: the set's
+    /// name with `.dawproject` (R86).
+    #[must_use]
+    pub fn dawproject_file_name(&self) -> String {
+        format!(
+            "{}.dawproject",
+            bl_project::preset::file_safe(&self.set_name())
+        )
+    }
+
+    /// Runs a person's import or export, which has its path: a report with
+    /// entries opens the report window, and one without says so in the
+    /// Status Bar (R87).
+    pub(super) fn run_dawproject_for_person(
+        &mut self,
+        id: &str,
+        args: Value,
+    ) -> Result<Value, ShellError> {
+        let result = self.run(id, args)?;
+        let export = id == dawproject_ids::EXPORT_DAWPROJECT;
+        let report: dawproject_ids::ImportReport =
+            serde_json::from_value(result["report"].clone()).unwrap_or_default();
+        if !export {
+            self.set_message(format!("Imported {}", self.set_name()), false);
+        }
+        if !report.entries.is_empty() {
+            self.dawproject_report_window = Some(dawproject_ids::ReportWindow { export, report });
+            self.touch();
+        }
+        Ok(result)
     }
 
     /// The plug-ins the scanner found, for an import to look its plug-ins up

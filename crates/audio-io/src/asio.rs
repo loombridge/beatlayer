@@ -16,8 +16,8 @@
 use std::cell::UnsafeCell;
 use std::ffi::{c_long, c_void};
 use std::ptr;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicPtr, Ordering};
+use std::sync::atomic::{AtomicPtr, AtomicU32, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use azo::driver::{Driver, Metadata, Proxy};
 use azo::dto::{BufferSize, ChannelId, Granularity};
@@ -37,6 +37,14 @@ use crate::{
 
 /// The open stream's shared state, or null. ASIO callbacks find it here.
 static ACTIVE: AtomicPtr<Shared> = AtomicPtr::new(ptr::null_mut());
+
+/// The open stream's driver as `devices()` lists it, while the stream has it
+/// loaded. Behind a lock rather than in [`Shared`], because the app lists
+/// devices on its own thread while another can drop the stream.
+static OPEN: Mutex<Option<DeviceInfo>> = Mutex::new(None);
+
+/// The rate the open stream's driver last announced, in hertz.
+static OPEN_RATE: AtomicU32 = AtomicU32::new(0);
 
 /// The callbacks every driver gets. Static, so they outlive any buffers.
 static CALLBACKS: Callbacks = Callbacks {
@@ -76,37 +84,62 @@ impl AsioBackend {
     }
 
     fn describe(&self, driver: &Metadata, is_default: bool) -> DeviceInfo {
-        let mut info = DeviceInfo {
-            id: device_id(driver),
-            name: driver.description.to_string_lossy(),
-            is_default_output: is_default,
-            is_default_input: is_default,
-            output_channels: 0,
-            input_channels: 0,
-            sample_rates: Vec::new(),
-            current_sample_rate: None,
-            buffer_sizes: BufferSizes::Unknown,
-            default_buffer_size: None,
-        };
-        // A driver whose hardware is unplugged often won't load; list it anyway.
-        let Ok(proxy) = self.load(driver) else {
-            return info;
-        };
-        if let Ok(counts) = proxy.channel_counts() {
-            info.output_channels = clamp_channels(counts.out);
-            info.input_channels = clamp_channels(counts.in_);
+        // The driver of the open stream is already loaded: a second instance
+        // of it can fail, or disturb the running one.
+        if let Some(open) = open_listing(&device_id(driver)) {
+            return open;
         }
-        info.sample_rates = STANDARD_SAMPLE_RATES
-            .into_iter()
-            .filter(|&rate| proxy.can_sample_rate(f64::from(rate)).is_ok())
-            .collect();
-        info.current_sample_rate = proxy.get_sample_rate().ok().map(rate_hz);
-        if let Ok(sizes) = proxy.buffer_size() {
-            info.buffer_sizes = buffer_sizes(&sizes);
-            info.default_buffer_size = u32::try_from(sizes.preferred).ok();
+        let mut info = unlisted(driver, is_default);
+        // A driver whose hardware is unplugged often won't load; list it anyway.
+        if let Ok(proxy) = self.load(driver) {
+            list(&mut info, &proxy);
         }
         info
     }
+}
+
+/// A driver's entry in the device list before it has been asked anything.
+fn unlisted(driver: &Metadata, is_default: bool) -> DeviceInfo {
+    DeviceInfo {
+        id: device_id(driver),
+        name: driver.description.to_string_lossy(),
+        is_default_output: is_default,
+        is_default_input: is_default,
+        output_channels: 0,
+        input_channels: 0,
+        sample_rates: Vec::new(),
+        current_sample_rate: None,
+        buffer_sizes: BufferSizes::Unknown,
+        default_buffer_size: None,
+    }
+}
+
+/// Fills in what a loaded driver says about itself.
+fn list(info: &mut DeviceInfo, proxy: &Proxy) {
+    if let Ok(counts) = proxy.channel_counts() {
+        info.output_channels = clamp_channels(counts.out);
+        info.input_channels = clamp_channels(counts.in_);
+    }
+    info.sample_rates = STANDARD_SAMPLE_RATES
+        .into_iter()
+        .filter(|&rate| proxy.can_sample_rate(f64::from(rate)).is_ok())
+        .collect();
+    info.current_sample_rate = proxy.get_sample_rate().ok().map(rate_hz);
+    if let Ok(sizes) = proxy.buffer_size() {
+        info.buffer_sizes = buffer_sizes(&sizes);
+        info.default_buffer_size = u32::try_from(sizes.preferred).ok();
+    }
+}
+
+/// The entry for the driver of the open stream, with the rate the driver last
+/// announced, if `id` is that driver.
+fn open_listing(id: &DeviceId) -> Option<DeviceInfo> {
+    let open = OPEN.lock().unwrap_or_else(PoisonError::into_inner);
+    let listing = open.as_ref().filter(|listing| listing.id == *id)?;
+    Some(DeviceInfo {
+        current_sample_rate: Some(OPEN_RATE.load(Ordering::Relaxed)),
+        ..listing.clone()
+    })
 }
 
 fn drivers() -> Result<Vec<Metadata>, Error> {
@@ -293,6 +326,13 @@ impl Backend for AsioBackend {
                 .get_sample_rate()
                 .map_err(|e| driver_error("couldn't read the sample rate", e))?,
         );
+        let mut listing = unlisted(
+            driver,
+            drivers
+                .first()
+                .is_some_and(|first| device_id(first) == device_id(driver)),
+        );
+        list(&mut listing, &proxy);
         let counts = proxy
             .channel_counts()
             .map_err(|e| driver_error("couldn't count channels", e))?;
@@ -416,6 +456,8 @@ impl Backend for AsioBackend {
             info,
             counters,
         };
+        OPEN_RATE.store(sample_rate, Ordering::Relaxed);
+        *OPEN.lock().unwrap_or_else(PoisonError::into_inner) = Some(listing);
 
         // SAFETY: `CALLBACKS` is static, so it outlives the buffers.
         let halves = unsafe {
@@ -564,6 +606,7 @@ extern "system" fn buffer_switch_time_info(
 }
 
 extern "system" fn sample_rate_did_change(rate: SampleRate) {
+    OPEN_RATE.store(rate_hz(rate), Ordering::Relaxed);
     with_shared(|shared| {
         if (rate - shared.sample_rate).abs() >= 1.0 {
             shared.counters.record_invalidated();
@@ -651,6 +694,7 @@ impl Drop for AsioStream {
             Ordering::AcqRel,
             Ordering::Acquire,
         );
+        *OPEN.lock().unwrap_or_else(PoisonError::into_inner) = None;
         // SAFETY: the driver has stopped and released its buffers, so no
         // callback reaches `shared` any more, and `ACTIVE` no longer points
         // at it. It came from `Box::into_raw` in `open_stream`.
@@ -696,6 +740,38 @@ mod tests {
             BufferSizes::List(vec![256])
         );
         assert_eq!(buffer_sizes(&sizes(0, 256, None)), BufferSizes::Unknown);
+    }
+
+    #[test]
+    fn the_open_driver_is_listed_without_loading_it_again() {
+        let id = DeviceId::new(BackendKind::Asio, "open");
+        let other = DeviceId::new(BackendKind::Asio, "other");
+        assert!(open_listing(&id).is_none());
+
+        let listing = DeviceInfo {
+            id: id.clone(),
+            name: "Open".to_owned(),
+            is_default_output: true,
+            is_default_input: true,
+            output_channels: 2,
+            input_channels: 2,
+            sample_rates: vec![44_100, 48_000],
+            current_sample_rate: Some(48_000),
+            buffer_sizes: BufferSizes::Unknown,
+            default_buffer_size: None,
+        };
+        OPEN_RATE.store(48_000, Ordering::Relaxed);
+        *OPEN.lock().unwrap() = Some(listing);
+
+        // The driver announces a new rate: its entry follows, with no load.
+        sample_rate_did_change(44_100.0);
+        let open = open_listing(&id).unwrap();
+        assert_eq!(open.current_sample_rate, Some(44_100));
+        assert_eq!(open.output_channels, 2);
+        assert!(open_listing(&other).is_none());
+
+        *OPEN.lock().unwrap() = None;
+        assert!(open_listing(&id).is_none());
     }
 
     #[test]

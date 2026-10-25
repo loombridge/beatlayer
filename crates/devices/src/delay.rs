@@ -65,6 +65,9 @@ const PARAMS: usize = 21;
 
 /// The longest free delay the manual records, in seconds.
 pub(crate) const MAX_DELAY_SECONDS: f64 = 5.0;
+/// The longest synced delay, in seconds: sixteen sixteenths with a +50% Offset
+/// at 20 BPM, the slowest tempo the transport allows (the musical time spec).
+const MAX_SYNC_SECONDS: f64 = 18.0;
 /// The LFO's deepest delay-time movement, in seconds.
 const MODULATION_SECONDS: f64 = 0.02;
 /// How long a change of delay time takes in Repitch and Fade, in seconds.
@@ -267,7 +270,7 @@ struct Delay {
 impl Delay {
     fn new(device: &Device, config: &NodeConfig) -> Self {
         let rate = config.sample_rate.as_f64();
-        let len = ((MAX_DELAY_SECONDS + MODULATION_SECONDS + 0.1) * rate).ceil() as usize + 2;
+        let len = ((MAX_SYNC_SECONDS + MODULATION_SECONDS + 0.1) * rate).ceil() as usize + 2;
         Self {
             lines: (0..config.channels).map(|_| Line::new(len)).collect(),
             lfo: Lfo::new(config.sample_rate, device.id.0.get()),
@@ -329,14 +332,19 @@ impl Delay {
             let tap_left = self.lines[0].tap(base_left, modulation, settings.mode, settings.glide);
             let tap_right = has_second
                 .then(|| self.lines[1].tap(base_right, modulation, settings.mode, settings.glide));
-            let input_left = if settings.freeze {
-                0.0
-            } else {
-                f64::from(first[i])
+            let dry_left = f64::from(first[i]);
+            let dry_right = second.as_deref().map_or(0.0, |right| f64::from(right[i]));
+            let ping_pong = settings.ping_pong && has_second;
+            // Freeze stops new input entering the lines; the dry path stays untouched (R7).
+            // Ping Pong sums both channels into the left line (R4).
+            let input_left = match (settings.freeze, ping_pong) {
+                (true, _) => 0.0,
+                (false, true) => dry_left + dry_right,
+                (false, false) => dry_left,
             };
             let output_left = tap_left;
-            first[i] = (input_left * (1.0 - dry_wet) + dry_wet * output_left) as f32;
-            let write_left = if settings.ping_pong && has_second {
+            first[i] = (dry_left * (1.0 - dry_wet) + dry_wet * output_left) as f32;
+            let write_left = if ping_pong {
                 input_left + feedback * tap_right.unwrap_or(0.0)
             } else {
                 input_left + feedback * tap_left
@@ -349,18 +357,16 @@ impl Delay {
                 settings.rate,
             );
             if let Some(right) = second.as_deref_mut() {
-                let input = if settings.freeze {
-                    0.0
-                } else {
-                    f64::from(right[i])
-                };
+                let input = if settings.freeze { 0.0 } else { dry_right };
                 let output = tap_right.unwrap_or(0.0);
-                let write = if settings.ping_pong {
-                    input + feedback * tap_left
+                // The left line's repeat crosses at full level; the Feedback is
+                // applied where the right line returns to the left.
+                let write = if ping_pong {
+                    tap_left
                 } else {
                     input + feedback * output
                 };
-                right[i] = (input * (1.0 - dry_wet) + dry_wet * output) as f32;
+                right[i] = (dry_right * (1.0 - dry_wet) + dry_wet * output) as f32;
                 self.lines[1].push(
                     write,
                     settings.filter_on,
@@ -555,7 +561,8 @@ impl Line {
         let delay = delay.clamp(1.0, (len - 2) as f64);
         let position = (self.write as f64 - delay).rem_euclid(len as f64);
         let low = position.floor();
-        let i = low as usize;
+        // `rem_euclid` can round a tiny negative up to exactly `len`.
+        let i = low as usize % len;
         let fraction = (position - low) as f32;
         let a = self.buffer[i];
         let b = self.buffer[(i + 1) % len];
@@ -633,6 +640,18 @@ mod tests {
     use bl_core::time::{Bpm, TempoMap};
 
     use super::*;
+
+    // Spec: delay R9
+    #[test]
+    fn a_delay_a_hair_over_a_whole_number_reads_inside_the_line() {
+        let mut line = Line::new(96_002);
+        line.write(1.0);
+        for _ in 1..5_000 {
+            line.write(0.0);
+        }
+        // `(5000 - 5000.000000000001).rem_euclid(96002)` rounds up to the length.
+        assert!((line.read(5_000.000_000_000_001) - 1.0).abs() < 1e-6);
+    }
 
     // Spec: delay R8
     #[test]

@@ -411,3 +411,77 @@ fn a_timecode_of_minus_128_frames_is_refused() {
         Err(midi::MidiFileError::OutOfRange)
     ));
 }
+
+// Review 23 October 2026: a second note-on on a key with a note open
+// replaced the first, so the earlier note was lost and the later one cut.
+#[test]
+fn overlapping_notes_on_one_key_each_pair_with_a_note_off_in_order() {
+    let bytes = generate(
+        Format::SingleTrack,
+        &[(
+            "Keys",
+            &[
+                Gen {
+                    start: 0,
+                    length: 96,
+                    key: 60,
+                    velocity: 100,
+                },
+                Gen {
+                    start: 48,
+                    length: 96,
+                    key: 60,
+                    velocity: 80,
+                },
+            ],
+            &[],
+        )],
+    );
+    let notes = &midi::read_bytes(&bytes).unwrap().tracks[0].notes;
+    assert_eq!(notes.len(), 2);
+    assert_eq!(
+        (notes[0].start, notes[0].length, notes[0].velocity),
+        (Ticks::ZERO, at(96), 100)
+    );
+    assert_eq!(
+        (notes[1].start, notes[1].length, notes[1].velocity),
+        (at(48), at(96), 80)
+    );
+}
+
+#[test]
+fn overlapping_same_key_notes_survive_a_written_file() {
+    let notes = vec![
+        Note::new(60, Ticks::ZERO, Ticks::from_quarters(2), 100),
+        Note::new(60, Ticks::from_quarters(1), Ticks::from_quarters(2), 90),
+    ];
+    let signature = TimeSignature::new(4, 4).unwrap();
+    let bytes = midi::write_bytes("Clip", &notes, Bpm::new(120.0).unwrap(), signature).unwrap();
+    assert_eq!(midi::read_bytes(&bytes).unwrap().tracks[0].notes, notes);
+}
+
+// Review 23 October 2026: a gap past 2^28 - 1 file ticks was masked to 28
+// bits and written as an earlier position, with the writer returning Ok.
+#[test]
+fn a_gap_too_long_for_a_delta_time_is_refused() {
+    let signature = TimeSignature::new(4, 4).unwrap();
+    let tempo = Bpm::new(120.0).unwrap();
+    // 10,000 quarter notes at 28,224 file ticks each is past 2^28.
+    let late = [Note::new(
+        60,
+        Ticks::from_quarters(10_000),
+        Ticks::from_quarters(1),
+        100,
+    )];
+    assert!(matches!(
+        midi::write_bytes("Clip", &late, tempo, signature),
+        Err(midi::MidiFileError::OutOfRange)
+    ));
+    let near = [Note::new(
+        60,
+        Ticks::from_quarters(9_000),
+        Ticks::from_quarters(1),
+        100,
+    )];
+    assert!(midi::write_bytes("Clip", &near, tempo, signature).is_ok());
+}

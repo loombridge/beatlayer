@@ -1816,13 +1816,14 @@ pub fn run(
                 }
             }
             let (_, recorded) = settled(editor, "Resize clips", (doc, edge_fades), |editor| {
-                let keep: BTreeSet<ClipId> = clips.iter().copied().collect();
                 for clip in &clips {
-                    let value = editor
-                        .document()
-                        .clip(*clip)
-                        .expect("the clips exist")
-                        .clone();
+                    // Another resized clip an edge grows over is cleared like
+                    // any other, so two on one track never overlap. One that
+                    // was cleared away entirely is gone.
+                    let Some(value) = editor.document().clip(*clip).cloned() else {
+                        continue;
+                    };
+                    let keep = BTreeSet::from([*clip]);
                     let track = editor.document().clip_track(*clip).expect("on a track");
                     let lane = editor.document().clip_lane(*clip);
                     match edge {
@@ -1850,6 +1851,10 @@ pub fn run(
                 }
                 Ok(())
             })?;
+            let clips = clips
+                .into_iter()
+                .filter(|c| editor.document().clip(*c).is_some())
+                .collect();
             view.select_clips(editor.document(), clips);
             Ok(to_value(&result(doc, editor, view, recorded)))
         }

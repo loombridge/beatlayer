@@ -48,21 +48,26 @@ struct Hardware;
 impl NativeDevice for Hardware {
     fn process(&mut self, audio: &mut Audio<'_, '_>, params: &ParamBank) {
         let gain = params.ramp(params.index(GAIN).expect("the description holds it"));
-        for channel in 0..audio.channels() {
-            // Spec: external-devices R11. A pair comes back as left and
-            // right and a single channel on both sides; the engine mapped
-            // it, and left silence where the interface lacks the channel
-            // (or no device is open).
-            let returned = audio.external(channel);
-            let out = audio.channel_mut(channel);
-            match returned {
-                Some(returned) => {
-                    for ((sample, heard), gain) in out.iter_mut().zip(returned).zip(gain) {
-                        *sample = heard * gain;
-                    }
+        play_return(audio, gain);
+    }
+}
+
+/// Plays what comes back from the interface, scaled by `gain`: a pair as
+/// left and right and a single channel on both sides; the engine mapped it,
+/// and left silence where the interface lacks the channel (or no device is
+/// open). Spec: external-devices R11. The CV Instrument and CV Triggers
+/// bring their sound back the same way (cv-tools R10).
+pub(crate) fn play_return(audio: &mut Audio<'_, '_>, gain: &[f32]) {
+    for channel in 0..audio.channels() {
+        let returned = audio.external(channel);
+        let out = audio.channel_mut(channel);
+        match returned {
+            Some(returned) => {
+                for ((sample, heard), gain) in out.iter_mut().zip(returned).zip(gain) {
+                    *sample = heard * gain;
                 }
-                None => out.fill(0.0),
             }
+            None => out.fill(0.0),
         }
     }
 }

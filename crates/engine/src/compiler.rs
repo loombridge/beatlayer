@@ -24,7 +24,7 @@ use crate::mixer::{self, Route, Solo, TrackMixer, route};
 use crate::node::{NodeData, NodeKey, NoteBuffer, ParamValue};
 use crate::points::MeterPoint;
 use crate::program::{
-    ChainSendRef, DeviceInput, DeviceMidiSidechain, DeviceSidechain, EngineProgram, ExtOut, Input,
+    ChainSendRef, CvDevice, DeviceInput, DeviceMidiSidechain, DeviceSidechain, EngineProgram, ExtOut, Input,
     Instance, MergeCursor, Migration, ModKind, NO_CHAIN, NO_DELAY, NO_OUTPUT, NO_OUTPUT_BUFFER,
     NO_SLOT, NO_TASK, NodeSlot, NoteDelay, Rack, RackChain, RackMode, Span, Step, Task,
     delay_storage,
@@ -105,8 +105,9 @@ enum Identity {
     /// sample changed is a new node, and one the set keeps gets its audio
     /// sent again. An external device's latency is part of it too (WP-5.35):
     /// its node holds a delay line of that many frames, so a new latency
-    /// makes a new node.
-    Device(DeviceKind, Vec<Option<ContentHash>>, u32),
+    /// makes a new node. A CV Instrument's calibration is too
+    /// (`docs/specs/cv-tools.md`, R14): the node plays pitches through it.
+    Device(DeviceKind, Vec<Option<ContentHash>>, u32, Vec<u64>),
     Player,
     MidiPlayer,
     Mixer,
@@ -1114,6 +1115,17 @@ impl Compiler {
             build.slots[*slot as usize].external_to = Some(*channel);
             kept += 1;
         }
+        // Spec: cv-tools R3. A CV device writes each CV output it declares
+        // into a buffer of its own, one after another, that the program adds
+        // to the output's channel.
+        for cv in &mut build.cv_devices {
+            let outputs = cv.out_channels.len() as u32;
+            cv.buffers = Span {
+                start: kept,
+                end: kept + outputs,
+            };
+            kept += outputs;
+        }
         for (to, at, output) in output_taps {
             let task = build.tasks[task_of[&to] as usize];
             let slot = build.device_slots.get(&output.device).copied();
@@ -1171,6 +1183,28 @@ impl Compiler {
                     track.id(),
                     main_compensation(&build, document, &task_of, track.id()),
                 );
+            }
+        }
+        // Spec: cv-tools R5. An effect's CV outputs are held back by what its
+        // track's path into Main is, as MIDI To's messages are, in delay
+        // lines the program makes; an instrument's leave at its place.
+        for at in 0..build.cv_devices.len() {
+            let cv = &build.cv_devices[at];
+            if !cv.effect {
+                continue;
+            }
+            let (device, slot, outputs) = (cv.device, cv.slot, cv.out_channels.len());
+            let Some(track) = document.device_track(device) else {
+                continue;
+            };
+            let frames = main_compensation(&build, document, &task_of, track);
+            if frames == 0 {
+                continue;
+            }
+            let key = build.slots[slot as usize].key;
+            for output in 0..outputs {
+                let index = line(&mut build, frames, DelayKey::Cv(key, output as u32));
+                build.cv_devices[at].delays[output] = index;
             }
         }
         // Automation is placed with each node's delay in it (WP-2.11), so
@@ -1314,6 +1348,7 @@ impl Compiler {
             cue: cue_out.map(|out| out.task),
             ext_outs,
             external_effects: build.external_effects,
+            cv_devices: build.cv_devices,
             tempo,
             time_signatures,
             base_tempo,
@@ -1916,8 +1951,16 @@ impl Compiler {
                         .frames(self.config.sample_rate.hz()),
                 )
             });
-            let identity =
-                Identity::Device(device.kind.clone(), device.media.clone(), external_latency);
+            let identity = Identity::Device(
+                device.kind.clone(),
+                device.media.clone(),
+                external_latency,
+                device
+                    .external
+                    .as_ref()
+                    .and_then(|external| external.cv_calibration.as_ref())
+                    .map_or_else(Vec::new, bl_model::CvCalibration::key),
+            );
             let (node, latency) = match self.previous(key, &identity) {
                 Some(from) => (Err(from), self.previous_latency(key, &identity)),
                 None => match self.registry.create(device, &config) {
@@ -1965,6 +2008,21 @@ impl Compiler {
                 // own that the engine mixes into them.
                 if let Some(audio_to) = external.audio_to {
                     build.external_effects.push((slot, audio_to));
+                }
+                // Spec: cv-tools R3, R8. A CV device writes its outputs into
+                // buffers of the program's and reads its inputs mapped from
+                // the interface's.
+                if external.is_cv() {
+                    build.slots[slot as usize].cv = Some(build.cv_devices.len() as u32);
+                    build.cv_devices.push(CvDevice {
+                        slot,
+                        device: device.id,
+                        effect: device.role == DeviceRole::AudioEffect,
+                        buffers: Span::default(),
+                        out_channels: external.cv_outputs.iter().map(|p| p.channel).collect(),
+                        in_channels: external.cv_inputs.iter().map(|p| p.channel).collect(),
+                        delays: vec![NO_DELAY; external.cv_outputs.len()],
+                    });
                 }
             }
             // Spec: modulation R20. A modulator works its rows out before
@@ -2278,6 +2336,7 @@ fn claim(
         external: None,
         external_to: None,
         external_out: None,
+        cv: None,
         outputs: Span::default(),
     });
     build.layout.insert(
@@ -2316,6 +2375,10 @@ enum DelayKey {
     Chain(NodeKey),
     /// A drum rack's chain, held to the rack's sum.
     ChainSum(NodeKey),
+    /// A CV device's output, held to its track's compensation into Main
+    /// (`docs/specs/cv-tools.md`, R5): the device's key and the output's
+    /// place.
+    Cv(NodeKey, u32),
 }
 
 /// A program under construction.
@@ -2376,6 +2439,8 @@ struct Build {
     /// The external effects in the program, with their slots and the
     /// interface's outputs they send to (WP-5.35).
     external_effects: Vec<(u32, bl_model::Channel)>,
+    /// The CV devices in the program (`docs/specs/cv-tools.md`, R3).
+    cv_devices: Vec<CvDevice>,
 }
 
 /// The key of the route that carries `edge`.

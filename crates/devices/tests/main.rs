@@ -23,6 +23,7 @@ mod clip_envelopes;
 mod common;
 mod compressor;
 mod curve_mod;
+mod cv_instrument;
 mod delay;
 mod device_compare;
 mod dice;

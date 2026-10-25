@@ -222,6 +222,27 @@ impl Tuner {
             .flatten()
     }
 
+    /// Hears `samples` (mono), measuring the pitch once per analysis
+    /// interval as the device does. Returns `Some` when a measurement was
+    /// made in this call, holding the pitch it found, or none if no tone was
+    /// heard; with more than one interval in `samples`, the last. For the CV
+    /// Instrument's calibration, which listens with the same detector
+    /// (`docs/specs/cv-tools.md`, R14).
+    pub(crate) fn listen(&mut self, samples: &[f32]) -> Option<Option<f64>> {
+        let mut heard = None;
+        for &sample in samples {
+            self.ring_buffer[self.ring_pos] = sample;
+            self.ring_pos = (self.ring_pos + 1) % self.ring_len;
+            self.since_analysis += 1;
+            if self.since_analysis >= ANALYSIS_INTERVAL {
+                self.since_analysis = 0;
+                self.detect_pitch(440.0);
+                heard = Some(self.detected_pitch);
+            }
+        }
+        heard
+    }
+
     fn detect_pitch(&mut self, reference: f64) {
         let min_tau = (self.rate / 2150.0).floor() as usize;
         let max_tau = (self.rate / 39.0).ceil() as usize;

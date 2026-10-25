@@ -153,6 +153,8 @@ pub struct EngineProgram {
     /// The external effects in the program, with their slots and the
     /// interface's outputs they send to (WP-5.35).
     pub(crate) external_effects: Vec<(u32, Channel)>,
+    /// The CV devices in the program (`docs/specs/cv-tools.md`, R3).
+    pub(crate) cv_devices: Vec<CvDevice>,
     /// The task that sums the cue-switched tracks, in Cue mode (WP-3.18):
     /// the last of `ext_outs`, and no track of the set's, so it has no
     /// meters.
@@ -269,6 +271,27 @@ impl Releases {
             self.push(task, at, note);
         }
     }
+}
+
+/// A CV device in a program (`docs/specs/cv-tools.md`, R3, R5, R6): where its
+/// outputs go and its inputs come from.
+#[derive(Clone, Debug)]
+pub(crate) struct CvDevice {
+    /// The device's slot.
+    pub(crate) slot: u32,
+    /// The device, to find its track by.
+    pub(crate) device: bl_model::DeviceId,
+    /// Whether the device is an audio effect, whose outputs wait for
+    /// delay compensation (R5).
+    pub(crate) effect: bool,
+    /// Its output buffers in `tap_pool`, one per output it declares.
+    pub(crate) buffers: Span,
+    /// The interface channel each output is set to, counted from 1.
+    pub(crate) out_channels: Vec<Option<u16>>,
+    /// The interface channel each input is set to, counted from 1.
+    pub(crate) in_channels: Vec<Option<u16>>,
+    /// The delay line holding back each output, or [`NO_DELAY`].
+    pub(crate) delays: Vec<u32>,
 }
 
 /// A track whose Audio To is Ext. Out: its task, and the device channels it
@@ -480,6 +503,9 @@ pub(crate) struct NodeSlot {
     /// For an external effect (WP-5.35): the buffer in `tap_pool` it writes
     /// the signal it sends to the interface into.
     pub(crate) external_out: Option<u32>,
+    /// For a CV device (`docs/specs/cv-tools.md`, R3): its place in
+    /// `cv_devices`.
+    pub(crate) cv: Option<u32>,
     /// For a device with extra audio outputs (WP-5.45): its buffers in
     /// `tap_pool`, one per output in the order the device declares them,
     /// which the program hands it to render into. Empty for a device with
@@ -1437,6 +1463,8 @@ impl EngineProgram {
                     sidechain: None,
                     external: None,
                     external_out: None,
+                    cv_out: None,
+                    cv_in: None,
                     outputs: None,
                     notes: &[],
                     notes_out: Some(turn.notes(notes)),
@@ -1621,6 +1649,8 @@ impl EngineProgram {
                 sidechain: None,
                 external: None,
                 external_out: None,
+                cv_out: None,
+                cv_in: None,
                 outputs: None,
                 notes: &[],
                 notes_out: None,
@@ -1841,7 +1871,54 @@ impl EngineProgram {
             })
             .max()
             .unwrap_or(0);
-        tracks.max(effects)
+        // Spec: cv-tools R3. A CV output writes to the interface's outputs
+        // too.
+        let cv = self
+            .cv_devices
+            .iter()
+            .flat_map(|cv| cv.out_channels.iter().flatten())
+            .map(|&c| usize::from(c))
+            .max()
+            .unwrap_or(0);
+        tracks.max(effects).max(cv)
+    }
+
+    /// Adds the CV devices' outputs from the last run onto `out`, which
+    /// holds `width` device channels `stride` apart, `length` frames from
+    /// `offset`. An output is one channel at full value; a channel past
+    /// `width` is the device's absence and carries nothing.
+    /// Spec: cv-tools R2, R3.
+    pub(crate) fn mix_cv(
+        &self,
+        out: &mut [f32],
+        width: usize,
+        stride: usize,
+        offset: usize,
+        length: usize,
+    ) {
+        let size = self.channels * self.max_frames;
+        for cv in &self.cv_devices {
+            for (output, channel) in cv.out_channels.iter().enumerate() {
+                // Channels count from 1; 0 names nothing.
+                let Some(channel) = channel
+                    .and_then(|c| usize::from(c).checked_sub(1))
+                    .filter(|&c| c < width)
+                else {
+                    continue;
+                };
+                let at = (cv.buffers.start as usize + output) * size;
+                let data = &self.tap_pool[at..at + length.min(self.max_frames)];
+                let to = channel * stride + offset;
+                for (sample, &value) in out[to..to + length].iter_mut().zip(data) {
+                    // R1: never more than full scale, whatever the node wrote.
+                    *sample += if value.is_finite() {
+                        value.clamp(-1.0, 1.0)
+                    } else {
+                        0.0
+                    };
+                }
+            }
+        }
     }
 
     /// Adds the external effects' signals from the last run onto `out`,
@@ -2330,6 +2407,11 @@ impl EngineProgram {
             // reaches it to its port, and hears the interface's inputs it
             // is set to.
             let mut returned = None;
+            let mut cv_in = None;
+            // Spec: cv-tools R3, R6. A CV device's inputs are read as the
+            // interface delivered them, one buffer after the audio's.
+            let cv = turn.slot(slot).cv.map(|at| &self.cv_devices[at as usize]);
+            let pitch = channels * stride;
             if let (Some(audio_from), NodeKey::Device(device), false) =
                 (turn.slot(slot).external, turn.slot(slot).key, bypass)
             {
@@ -2345,7 +2427,22 @@ impl EngineProgram {
                     block.from as usize,
                     frames,
                 );
-                returned = Some(&pass.device[..channels * stride]);
+                if let Some(cv) = cv {
+                    for (input, channel) in cv.in_channels.iter().enumerate() {
+                        let to = &mut pass.device[(1 + input) * pitch..][..frames];
+                        match channel
+                            .and_then(|c| usize::from(c).checked_sub(1))
+                            .filter(|&c| c < self.device_input_channels)
+                        {
+                            Some(index) => to.copy_from_slice(
+                                &self.device_input[index * stride + block.from as usize..][..frames],
+                            ),
+                            None => to.fill(0.0),
+                        }
+                    }
+                    cv_in = Some(&pass.device[pitch..]);
+                }
+                returned = Some(&pass.device[..pitch]);
             }
             let outputs = turn.slot(slot).outputs;
             let output_tapped = outputs.start != outputs.end;
@@ -2360,6 +2457,10 @@ impl EngineProgram {
                 }
                 if let Some(at) = external_out {
                     turn.keep(at).fill(0.0);
+                }
+                // Spec: cv-tools R18. A device switched off sends 0 V.
+                if let Some(cv) = cv {
+                    turn.outputs(cv.buffers).fill(0.0);
                 }
                 node.flush(pass.scratch);
                 // Spec: device-framework R32. A device switched off ends
@@ -2389,6 +2490,8 @@ impl EngineProgram {
                 sidechain: heard.map(|(at, _)| turn.sidechain(at)),
                 external: returned,
                 external_out: external_out.map(|at| turn.keep(at)),
+                cv_out: cv.map(|cv| turn.outputs(cv.buffers)),
+                cv_in,
                 outputs: output_tapped.then(|| turn.outputs(outputs)),
                 notes: heard_notes.unwrap_or_else(|| in_buf.notes()),
                 notes_out: Some(out_buf),
@@ -2409,6 +2512,17 @@ impl EngineProgram {
                 },
             });
             note_idx = 1 - note_idx;
+            // Spec: cv-tools R5. An effect's CV waits for the compensation of
+            // its track's path into Main.
+            if let Some(cv) = cv {
+                for (output, &delay) in cv.delays.iter().enumerate() {
+                    if delay != NO_DELAY {
+                        let (line, ring) = turn.delay(delay);
+                        let samples = &mut turn.outputs(cv.buffers)[output * pitch..][..frames];
+                        delay_in_place(line, ring, samples, 1, stride, frames);
+                    }
+                }
+            }
             // Sidechain Listen: the device's output is what it heard.
             if let Some((at, true)) = heard {
                 let (to, from) = (turn.buffer(buffer), turn.sidechain(at));
@@ -2644,6 +2758,8 @@ impl EngineProgram {
             rows: None,
             external: None,
             external_out: None,
+            cv_out: None,
+            cv_in: None,
             outputs: None,
         });
         turn.selects_mut(rack)[..frames].copy_from_slice(selector.values(frames));
@@ -2840,6 +2956,8 @@ impl EngineProgram {
                     sidechain: None,
                     external: None,
                     external_out: None,
+                    cv_out: None,
+                    cv_in: None,
                     outputs: None,
                     notes: &[],
                     notes_out: None,

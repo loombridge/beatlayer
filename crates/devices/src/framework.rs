@@ -258,6 +258,22 @@ impl<'a> Audio<'_, 'a> {
         (&mut data[range.clone()], out.map(|out| &mut out[range]))
     }
 
+    /// Where a CV device writes its CV output `output` over the stretch, in
+    /// sample values (1.0 is +10 V): `None` for a device without it
+    /// (`docs/specs/cv-tools.md`, R3).
+    pub fn cv_out(&mut self, output: usize) -> Option<&mut [f32]> {
+        let range = self.range.clone();
+        self.block.cv_out_mut(output).map(|data| &mut data[range])
+    }
+
+    /// What a CV device reads on its CV input `input` over the stretch, in
+    /// sample values; `None` for a device without it (R6).
+    #[must_use]
+    pub fn cv_in(&self, input: usize) -> Option<&'a [f32]> {
+        let range = self.range.clone();
+        self.block.cv_in(input).map(|data| &data[range])
+    }
+
     /// Sends a note on from the stretch, at `note.offset` frames after its
     /// first frame (clamped into it): the notes go out in order of offset,
     /// note-offs before note-ons on one frame (spec: device-framework R30).

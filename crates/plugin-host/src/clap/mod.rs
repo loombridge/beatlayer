@@ -416,6 +416,8 @@ impl ClapHost {
                 path: path.to_owned(),
                 device_type: DeviceType {
                     external_output: false,
+                    cv_outputs: Vec::new(),
+                    cv_inputs: Vec::new(),
                     kind: kind(id),
                     name,
                     role,

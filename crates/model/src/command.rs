@@ -23,7 +23,7 @@ use crate::clip_param::ClipParam;
 use crate::device::{Device, DeviceKind, DeviceRole};
 use crate::document::Document;
 use crate::error::ModelError;
-use crate::external::{ExternalPort, HardwareLatency};
+use crate::external::{CvCalibration, ExternalPort, HardwareLatency};
 use crate::follow::FollowPatch;
 use crate::groove::{GLOBAL_AMOUNT_MAX, Groove, GrooveBase, check_percent};
 use crate::ids::{
@@ -2274,6 +2274,23 @@ pub enum Command {
         /// given, so switching the unit sends the converted value.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         hardware_latency: Option<HardwareLatency>,
+        /// A CV device's outputs (`docs/specs/cv-tools.md`, R4): each named
+        /// by its name in the device (Pitch, Gate, Mod 1 and so on) and set
+        /// to an interface channel, counted from 1, or to `null` for No
+        /// Output. The outputs left out stay as they are.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cv_outputs: Option<Vec<crate::external::CvPort>>,
+        /// A CV device's inputs, as `cv_outputs`; `null` is No Input.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cv_inputs: Option<Vec<crate::external::CvPort>>,
+    },
+    /// Stores a CV Instrument's calibration, or takes it away with `null`
+    /// (`docs/specs/cv-tools.md`, R14).
+    SetCvCalibration {
+        /// The device.
+        device: DeviceId,
+        /// The calibration, or none to clear it.
+        calibration: Option<CvCalibration>,
     },
 
     /// Inserts a new device at `index` in a rack's chain, keeping the chain
@@ -3065,9 +3082,17 @@ impl Command {
                 channel: None,
                 mpe: None,
                 audio_from: None,
+                cv_outputs: None,
+                cv_inputs: None,
                 ..
             } => "Change \"Hardware Latency\"",
             Self::SetExternal { .. } => "Change \"Routing\"",
+            // WP-7.17: Beatlayer's own names.
+            Self::SetCvCalibration {
+                calibration: Some(_),
+                ..
+            } => "Calibrate CV Instrument",
+            Self::SetCvCalibration { .. } => "Clear CV Calibration",
             // WP-5.1. Beatlayer's own names, after the device ones.
             Self::InsertChainDevice { .. } => "Insert Device",
             Self::MoveDeviceToChain { .. } => "Move Device",
@@ -4936,6 +4961,8 @@ impl Document {
                 audio_from,
                 audio_to,
                 hardware_latency,
+                cv_outputs,
+                cv_inputs,
             } => {
                 let mut external = self
                     .device_ref(*device)?
@@ -4979,6 +5006,26 @@ impl Document {
                     )?;
                     external.hardware_latency = *latency;
                 }
+                // Spec: cv-tools R4. Each port is named as the device names
+                // it; the ones given change, the others stay.
+                for (given, kept) in [
+                    (cv_outputs, &mut external.cv_outputs),
+                    (cv_inputs, &mut external.cv_inputs),
+                ] {
+                    for port in given.iter().flatten() {
+                        if port.channel == Some(0) {
+                            return Err(ModelError::InvalidInput(
+                                "interface channels count from 1",
+                            ));
+                        }
+                        let Some(held) = kept.iter_mut().find(|p| p.name == port.name) else {
+                            return Err(ModelError::InvalidInput(
+                                "the device has no CV port of that name",
+                            ));
+                        };
+                        held.channel = port.channel;
+                    }
+                }
                 crate::routing::check_port(
                     external.port.as_deref().unwrap_or("-"),
                     external.channel,
@@ -4986,6 +5033,19 @@ impl Document {
                 if Some(&external) != self.device_ref(*device)?.external.as_ref() {
                     self.device_mut(*device)?.external = Some(external);
                 }
+                Ok(())
+            }
+            Command::SetCvCalibration {
+                device,
+                calibration,
+            } => {
+                let mut external = self
+                    .device_ref(*device)?
+                    .external
+                    .clone()
+                    .ok_or(ModelError::NoExternal(*device))?;
+                external.cv_calibration.clone_from(calibration);
+                self.device_mut(*device)?.external = Some(external);
                 Ok(())
             }
             Command::InsertChainDevice {

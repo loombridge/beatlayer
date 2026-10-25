@@ -246,21 +246,70 @@ pub fn register(registry: &mut Registry) {
     });
 }
 
-/// The shares the notes and MIDI have given each source.
+/// The shares the notes and MIDI have given each source. The CV tools read
+/// them the same way (`docs/specs/cv-tools.md`, R13).
 #[derive(Clone, Copy)]
-struct Sources {
-    velocity: f64,
-    modwheel: f64,
-    pitchbend: f64,
-    pressure: f64,
-    keytrack: f64,
-    expression: f64,
-    slide: f64,
-    sustain: f64,
+pub(crate) struct Sources {
+    pub(crate) velocity: f64,
+    pub(crate) modwheel: f64,
+    pub(crate) pitchbend: f64,
+    pub(crate) pressure: f64,
+    pub(crate) keytrack: f64,
+    pub(crate) expression: f64,
+    pub(crate) slide: f64,
+    pub(crate) sustain: f64,
 }
 
 impl Sources {
-    const START: Self = Self {
+    /// What a note or message says to the sources, with `held` the keys
+    /// down after it: a note on gives Velocity and Keytrack and starts Slide
+    /// at 0, and the per-note sources follow the latest key held.
+    pub(crate) fn take(&mut self, note: &NoteEvent, held: &Held) {
+        match note.kind {
+            NoteKind::On => {
+                self.velocity = f64::from(note.velocity);
+                self.keytrack = f64::from(note.key) / 127.0;
+                self.slide = 0.0;
+            }
+            NoteKind::Off | NoteKind::Choke => {}
+            NoteKind::Control { controller, value } => match controller {
+                1 => self.modwheel = f64::from(value),
+                11 => self.expression = f64::from(value),
+                64 => self.sustain = f64::from(value),
+                _ => {}
+            },
+            NoteKind::PitchBend { value } => self.pitchbend = f64::from(value + 1.0) / 2.0,
+            NoteKind::ChannelPressure { value } => self.pressure = f64::from(value),
+            NoteKind::Expression { expression, value } => {
+                // Per-note sources follow the most recent note held.
+                let latest = held.last().is_some_and(|key| key.names(note));
+                if latest {
+                    match expression {
+                        NoteExpression::Pressure => self.pressure = f64::from(value),
+                        NoteExpression::Slide => self.slide = f64::from(value),
+                        NoteExpression::Bend => {}
+                    }
+                }
+            }
+        }
+    }
+
+    /// The share of source `kind`, an index into [`SOURCES`], except Random
+    /// and Increment, which a tab keeps.
+    pub(crate) fn share(&self, kind: usize) -> f64 {
+        match kind {
+            0 => self.velocity,
+            1 => self.modwheel,
+            2 => self.pitchbend,
+            3 => self.pressure,
+            4 => self.keytrack,
+            5 => self.expression,
+            8 => self.slide,
+            _ => self.sustain,
+        }
+    }
+
+    pub(crate) const START: Self = Self {
         velocity: 0.0,
         modwheel: 0.0,
         pitchbend: 0.5,
@@ -320,9 +369,7 @@ impl PlayMod {
         match note.kind {
             NoteKind::On => {
                 self.held.on(note);
-                self.sources.velocity = f64::from(note.velocity);
-                self.sources.keytrack = f64::from(note.key) / 127.0;
-                self.sources.slide = 0.0;
+                self.sources.take(note, &self.held);
                 for tab in 0..TABS {
                     // Spec: modulation R27, R21. A draw at each note, whether
                     // or not a tab follows Random, so the stream is the same
@@ -336,37 +383,13 @@ impl PlayMod {
             NoteKind::Off | NoteKind::Choke => {
                 self.held.off(note);
             }
-            NoteKind::Control { controller, value } => match controller {
-                1 => self.sources.modwheel = f64::from(value),
-                11 => self.sources.expression = f64::from(value),
-                64 => self.sources.sustain = f64::from(value),
-                _ => {}
-            },
-            NoteKind::PitchBend { value } => self.sources.pitchbend = f64::from(value + 1.0) / 2.0,
-            NoteKind::ChannelPressure { value } => self.sources.pressure = f64::from(value),
-            NoteKind::Expression { expression, value } => {
-                // Per-note sources follow the most recent note held.
-                let latest = self.held.last().is_some_and(|key| key.names(note));
-                if latest {
-                    match expression {
-                        NoteExpression::Pressure => self.sources.pressure = f64::from(value),
-                        NoteExpression::Slide => self.sources.slide = f64::from(value),
-                        NoteExpression::Bend => {}
-                    }
-                }
-            }
+            _ => self.sources.take(note, &self.held),
         }
     }
 
     /// Tab `tab`'s source now, a share from 0 to 1.
     fn source(&self, tab: usize, kind: usize, params: &ParamBank, f: usize) -> f64 {
         match kind {
-            0 => self.sources.velocity,
-            1 => self.sources.modwheel,
-            2 => self.sources.pitchbend,
-            3 => self.sources.pressure,
-            4 => self.sources.keytrack,
-            5 => self.sources.expression,
             6 => self.drawn[tab],
             7 => {
                 let steps = f64::from(
@@ -382,8 +405,7 @@ impl PlayMod {
                     _ => 0.0,
                 }
             }
-            8 => self.sources.slide,
-            _ => self.sources.sustain,
+            _ => self.sources.share(kind),
         }
     }
 }

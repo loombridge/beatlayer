@@ -153,7 +153,8 @@ pub use note_expression::Expression;
 pub mod freeze;
 pub use colour::{DEFAULT_TRACK_PALETTE, SWATCHES, TRACK_COLOURS, id_swatch, swatch_rgb};
 pub use external::{
-    External, ExternalPort, HardwareLatency, MAX_HARDWARE_LATENCY_MS, MAX_HARDWARE_LATENCY_SAMPLES,
+    CvCalibration, CvPort, CvStep, External, ExternalPort, HardwareLatency, MAX_CV_PORTS,
+    MAX_HARDWARE_LATENCY_MS, MAX_HARDWARE_LATENCY_SAMPLES,
 };
 pub use follow::{
     FOLLOW_MULTIPLIER_MAX, FOLLOW_TIME_MAX, FOLLOW_TIME_MIN, FollowAction, FollowActions,

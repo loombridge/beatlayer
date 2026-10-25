@@ -478,8 +478,7 @@ Result: [`ArrangementState`](#arrangementstate).
 
 **Follow**. Permission: `read`. Contexts: `global`, `arrangement`, `sample-editor`, `note-editor`.
 
-Switches Follow, the Control Bar's switch: while it's on and the song plays, the Arrangement View turns the page whenever the playhead leaves the view, so the playhead stays in sight. Scrolling sideways by hand, or clicking the beat-time ruler, pauses it until playback starts or stops, or a click lands in the track lanes or the scrub area; `paused` does the same directly. The Sample Editor follows playback on the same switch (Option-Shift-F there too), and so does the MIDI Note 
-             Editor. With no arguments it toggles Follow, which also resumes it. Changes only the view.
+Switches Follow, the Control Bar's switch: while it's on and the song plays, the Arrangement View turns the page whenever the playhead leaves the view, so the playhead stays in sight. Scrolling sideways by hand, or clicking the beat-time ruler, pauses it until playback starts or stops, or a click lands in the track lanes or the scrub area; `paused` does the same directly. The Sample Editor follows playback on the same switch (Option-Shift-F there too), and so does the MIDI Note Editor. With no arguments it toggles Follow, which also resumes it. Changes only the view.
 
 Default keys:
 

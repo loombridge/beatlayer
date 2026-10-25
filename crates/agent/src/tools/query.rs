@@ -267,15 +267,13 @@ impl View<'_> {
             "delay": track.delay(),
             "keep_monitoring_latency": track.keep_monitoring_latency(),
             "tuning_bypass": track.tuning_bypass(),
+            // Spec: tunings R24. Only a MIDI track's layout does anything.
+            "tuning_layout": track.tuning_layout(),
             "clips": track.clips().len(),
             "devices": track.devices().len(),
             "frozen": track.frozen(),
             "tracks_inside": track.children().len(),
         });
-        // Spec: tunings R24. A MIDI track's MIDI Controller Layout.
-        if track.kind() == bl_model::TrackKind::Midi {
-            value["tuning_layout"] = json!(track.tuning_layout());
-        }
         with_info_text(&mut value, track.info_text());
         value
     }

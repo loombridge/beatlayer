@@ -253,7 +253,7 @@ fn a_sample_from_outside_the_project_is_named_in_the_result() {
         .map(PathBuf::from)
         .unwrap();
     let inside = song.parent().unwrap().join("Samples/Imported/Kick.wav");
-    let outside = scratch.path("elsewhere/Tone.wav");
+    let outside = scratch.path("elsewhere").join("Tone.wav");
     wav(&inside, 4800);
     wav(&outside, 2400);
     add_files(&mut shell, &[&inside, &outside]);

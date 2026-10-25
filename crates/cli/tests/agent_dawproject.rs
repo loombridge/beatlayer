@@ -153,3 +153,93 @@ fn an_agent_reads_the_imported_devices_and_automation() {
     );
     assert!(client.into_transport().finish().unwrap().success());
 }
+
+/// Spec: dawproject R65, R81, R88. `set.export_dawproject` runs by ID: it
+/// writes the open set as a file, returns the file's path and the report,
+/// refuses a file already there unless `replace` is set, and the file
+/// imports again as the set it was made from.
+#[test]
+fn an_agent_exports_the_open_set_and_imports_the_file_again() {
+    let source = fixture("bitwig-shaped.dawproject");
+    let folder =
+        std::env::temp_dir().join(format!("bl-cli-dawproject-export-{}", std::process::id()));
+    std::fs::create_dir_all(&folder).unwrap();
+    let target = folder.join("Exported");
+    let mut client = bl_cli_mcp(&["--autonomous"]);
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "set.import_dawproject",
+                               "args": { "path": source.to_string_lossy() } }] }),
+    );
+    let exported = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "set.export_dawproject",
+                               "args": { "path": target.to_string_lossy() } }] }),
+    );
+    let result = &exported["results"][0]["result"];
+    let written = folder.join("Exported.dawproject");
+    assert_eq!(result["path"], written.to_string_lossy().as_ref());
+    assert!(
+        result["report"]["application"]
+            .as_str()
+            .is_some_and(|label| label.starts_with("Beatlayer ")),
+        "{result}"
+    );
+    let bytes = std::fs::read(&written).expect("the file is written");
+    bl_interop::dawproject::read_container_strict(&bytes).expect("it reads in strict mode");
+
+    // A file already there is refused without `replace`.
+    let again = client
+        .call(
+            "run",
+            json!({ "commands": [{ "command": "set.export_dawproject",
+                                   "args": { "path": written.to_string_lossy() } }] }),
+        )
+        .unwrap();
+    assert!(again.is_error);
+    assert!(again.text.contains("already there"), "{}", again.text);
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "set.export_dawproject",
+                               "args": { "path": written.to_string_lossy(), "replace": true } }] }),
+    );
+
+    // The file imports again, as the set it was written from.
+    let imported = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "set.import_dawproject",
+                               "args": { "path": written.to_string_lossy() } }] }),
+    );
+    assert_eq!(imported["results"][0]["result"]["name"], "Exported");
+    let song = call(&mut client, "query", json!({ "path": "song" }));
+    assert_eq!(song["set"]["name"], "Exported", "{song}");
+    assert!(client.into_transport().finish().unwrap().success());
+    let _ = std::fs::remove_file(&written);
+    let _ = std::fs::remove_dir(&folder);
+}
+
+/// Spec: dawproject R65, R88. Writing a file outside the project is
+/// external, so without `--autonomous` the export is refused.
+#[test]
+fn without_autonomous_a_dawproject_export_is_refused() {
+    let target = std::env::temp_dir().join("bl-cli-dawproject-refused.dawproject");
+    let mut client = bl_cli_mcp(&[]);
+    let refused = client
+        .call(
+            "run",
+            json!({ "commands": [{ "command": "set.export_dawproject",
+                                   "args": { "path": target.to_string_lossy() } }] }),
+        )
+        .unwrap();
+    assert!(refused.is_error);
+    assert!(
+        refused.text.contains("`set.export_dawproject` is external"),
+        "{}",
+        refused.text
+    );
+    assert!(!target.exists());
+}

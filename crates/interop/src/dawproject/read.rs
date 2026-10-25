@@ -630,6 +630,7 @@ fn device(node: &Node, report: &mut ReadReport) -> Option<Device> {
         device_vendor: node.attribute("deviceVendor").map(str::to_owned),
         role: node.attribute("deviceRole").and_then(DeviceRole::parse),
         loaded: node.attribute("loaded").and_then(boolean),
+        plugin_version: node.attribute("pluginVersion").map(str::to_owned),
         enabled: node.child("Enabled").map(bool_parameter),
         state: node.child("State").map(file_reference),
         parameters: parameters(node),

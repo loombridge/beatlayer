@@ -132,6 +132,7 @@ impl Importer<'_, '_> {
                 // A Beatlayer preset in the state makes the device it was
                 // saved from, and its generic values aren't read (R50).
                 if let Some(built) = self.preset_device(device, place) {
+                    self.preset_targets(made, device, &built, place);
                     built
                 } else if matches!(device.body, DeviceBody::Builtin) {
                     let what = format!(
@@ -473,21 +474,43 @@ impl Importer<'_, '_> {
         device: &model::Device,
         place: &str,
     ) -> Option<Built> {
-        let (device_type, entries, label): (&'static str, &[Entry], &str) = match &device.body {
-            DeviceBody::Compressor { .. } => (
-                compressor::COMPRESSOR,
-                generic::COMPRESSOR,
-                "a generic compressor",
-            ),
-            DeviceBody::NoiseGate { .. } => (gate::GATE, generic::GATE, "a generic gate"),
-            DeviceBody::Limiter { .. } => (limiter::LIMITER, generic::LIMITER, "a generic limiter"),
-            DeviceBody::Equalizer { .. } => (eq::EQ, &[], "a generic equaliser"),
+        let label = match &device.body {
+            DeviceBody::Compressor { .. } => "a generic compressor",
+            DeviceBody::NoiseGate { .. } => "a generic gate",
+            DeviceBody::Limiter { .. } => "a generic limiter",
+            DeviceBody::Equalizer { .. } => "a generic equaliser",
             _ => return None,
         };
-        let built = self.native(device_type)?;
+        let mut built = self.native(generic_type(&device.body)?)?;
+        let set = self.generic_values(made, device, built.id, place)?;
+        built.set_both(set.params);
+        Some(Built {
+            device: built,
+            role: bl_model::DeviceRole::AudioEffect,
+            label: label.to_owned(),
+            missing: false,
+        })
+    }
+
+    /// The values of a generic device, and the parameters its automation
+    /// names, for the device `device_id` (R51 to R55).
+    fn generic_values(
+        &mut self,
+        made: &Made,
+        device: &model::Device,
+        device_id: DeviceId,
+        place: &str,
+    ) -> Option<Setting> {
+        let device_type = generic_type(&device.body)?;
+        let entries: &[Entry] = match &device.body {
+            DeviceBody::Compressor { .. } => generic::COMPRESSOR,
+            DeviceBody::NoiseGate { .. } => generic::GATE,
+            DeviceBody::Limiter { .. } => generic::LIMITER,
+            _ => &[],
+        };
         let mut set = Setting {
             track: made.id,
-            device: built.id,
+            device: device_id,
             device_type,
             types: self.native_types(),
             place: place.to_owned(),
@@ -526,14 +549,49 @@ impl Importer<'_, '_> {
             DeviceBody::Equalizer { .. } => self.equaliser_values(&mut set, device),
             _ => {}
         }
-        let mut built = built;
-        built.set_both(set.params);
-        Some(Built {
-            device: built,
-            role: bl_model::DeviceRole::AudioEffect,
-            label: label.to_owned(),
-            missing: false,
-        })
+        Some(set)
+    }
+
+    /// The parameters a Beatlayer preset's device names for automation: a
+    /// generic device's values drive the parameters they stand for, and a
+    /// built-in device's `Parameters` its own, in its own units (R56, R76).
+    fn preset_targets(&mut self, made: &Made, device: &model::Device, built: &Built, place: &str) {
+        let id = built.device.id;
+        if generic_type(&device.body).is_some() {
+            // The values themselves come from the preset (R50).
+            let _ = self.generic_values(made, device, id, place);
+            return;
+        }
+        let device_type = device.device_id.clone().unwrap_or_default();
+        for parameter in &device.parameters {
+            let (parameter_id, native, quantity) = match parameter {
+                model::Parameter::Real(p) => (&p.id, p.parameter_id, Quantity::Plain),
+                model::Parameter::Bool(p) => (&p.id, p.parameter_id, Quantity::Toggle),
+                _ => continue,
+            };
+            let (Some(parameter_id), Some(native)) =
+                (parameter_id, native.and_then(|n| u32::try_from(n).ok()))
+            else {
+                continue;
+            };
+            self.targets.insert(
+                parameter_id.clone(),
+                Driven::Device {
+                    track: made.id,
+                    device: id,
+                    param: ParamId(native),
+                    quantity,
+                    device_type: device_type.clone(),
+                    unit: match parameter {
+                        model::Parameter::Real(p) => p.unit,
+                        _ => None,
+                    },
+                    min: None,
+                    max: None,
+                    offset_db: 0.0,
+                },
+            );
+        }
     }
 
     /// Sets one value of a generic device, and records the parameter its
@@ -557,7 +615,7 @@ impl Importer<'_, '_> {
                     device: set.device,
                     param: entry.param,
                     quantity: entry.quantity,
-                    device_type: set.device_type,
+                    device_type: set.device_type.to_owned(),
                     unit,
                     min,
                     max,
@@ -635,7 +693,7 @@ impl Importer<'_, '_> {
                         device: set.device,
                         param: entry.param,
                         quantity: entry.quantity,
-                        device_type: limiter::LIMITER,
+                        device_type: limiter::LIMITER.to_owned(),
                         unit: parameter.unit,
                         min: parameter.min,
                         max: parameter.max,
@@ -733,6 +791,17 @@ impl Setting {
     fn range(&self, param: ParamId) -> (f64, f64) {
         generic::range_of(&self.types, self.device_type, param).unwrap_or((f64::MIN, f64::MAX))
     }
+}
+
+/// The type of Beatlayer device a generic device becomes (R51 to R54).
+fn generic_type(body: &DeviceBody) -> Option<&'static str> {
+    Some(match body {
+        DeviceBody::Compressor { .. } => compressor::COMPRESSOR,
+        DeviceBody::NoiseGate { .. } => gate::GATE,
+        DeviceBody::Limiter { .. } => limiter::LIMITER,
+        DeviceBody::Equalizer { .. } => eq::EQ,
+        _ => return None,
+    })
 }
 
 /// A DAWproject device role as a chain role (R44).

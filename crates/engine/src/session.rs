@@ -1087,8 +1087,9 @@ impl SessionLauncher {
         };
         let now = playhead.position.max(Ticks::ZERO);
         let bar = playhead.signatures.signature_at(now).bar_length();
-        let step = Some(settings.quantization)
-            .filter(|_| settings.enabled)
+        let step = settings
+            .enabled
+            .then_some(settings.quantization)
             .and_then(|step| step.ticks(bar))
             .unwrap_or(Ticks::SIXTEENTH / 2);
         let time = slot.clip_time_at(now, playhead.frames(now));

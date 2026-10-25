@@ -151,8 +151,11 @@ fn send_at(rig: &mut Rig, now: &mut i64, at: i64, block: usize, command: Session
     rig.sender.session(command);
 }
 
-/// The note-ons so far, as `(frame, key)`, and the note-offs.
-fn ons_and_offs(rig: &mut Rig) -> (Vec<(i64, u8)>, Vec<(i64, u8)>) {
+/// Notes as `(frame, key)`.
+type Notes = Vec<(i64, u8)>;
+
+/// The note-ons so far, and the note-offs.
+fn ons_and_offs(rig: &mut Rig) -> (Notes, Notes) {
     let (mut ons, mut offs) = (Vec::new(), Vec::new());
     for note in rig.probe.recorded_notes() {
         let list = if note.event.kind == NoteKind::On {
@@ -587,7 +590,7 @@ fn a_follow_next_between_two_legato_clips_keeps_the_clip_time() {
         // clip's fourth, instead of its own first.
         let (ons, _) = ons_and_offs(&mut rig);
         assert_eq!(
-            ons.iter().find(|&&(frame, _)| frame >= 1 + BAR_FRAMES),
+            ons.iter().find(|&&(frame, _)| frame > BAR_FRAMES),
             Some(&(1 + BAR_FRAMES, 64)),
             "blocks of {block}: {ons:?}"
         );

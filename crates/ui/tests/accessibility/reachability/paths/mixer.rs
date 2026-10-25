@@ -18,6 +18,27 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             main(nothing, arrangement_track_3, "Arm Recording", Key::Enter),
         ),
         ("mixer_view.state", Exception(Query)),
+        // The mixer's height, a column's width and the peak readout's reset
+        // (the mixer view spec, R32 to R36): Live's own keys for them aren't
+        // observed yet.
+        (
+            "mixer_view.set_height",
+            Exception(Unobserved(
+                "a drag on the mixer's top edge or the strip section's top border (I-DRAG-030)",
+            )),
+        ),
+        (
+            "mixer_view.set_column_width",
+            Exception(Unobserved(
+                "a drag on the edge of a title bar in the Session View (I-DRAG-004, I-DRAG-005)",
+            )),
+        ),
+        (
+            "mixer_view.reset_peak",
+            Exception(Unobserved(
+                "a click on the peak level readout while the extended meters show (I-CLICK-052)",
+            )),
+        ),
         // The track menu's colour palette and Assign Track Color items (the
         // themes spec, R16, R17): from the title bar with the context menu
         // keys, then Up and Down, and Enter on a swatch or an item.

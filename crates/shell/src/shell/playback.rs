@@ -193,6 +193,9 @@ impl Shell {
                 });
             }
         }
+        // Spec: mixer-view R33, R34. The peaks the strips hold, whether the
+        // meters are the engine's or a test's.
+        self.observe_peaks();
         // Spec: drum-racks R20. With Auto Select on, a drum rack's chain
         // list selects each chain a note reaches.
         if running {

@@ -270,6 +270,11 @@ pub struct Processor {
     loop_region: Option<LoopRegion>,
     /// `loop_region` in frames, if it's at least a frame long.
     loop_frames: Option<LoopFrames>,
+    /// The span a held click in the scrub area loops, until it's released
+    /// (the transport spec, R23).
+    held_scrub: Option<LoopRegion>,
+    /// `held_scrub` in frames, if it's at least a frame long.
+    held_frames: Option<LoopFrames>,
     /// Where the song starts, when it has a song start time (the transport
     /// spec, R21).
     song_start: Option<Ticks>,
@@ -359,6 +364,8 @@ impl Processor {
             insert_marker: Ticks::ZERO,
             loop_region: None,
             loop_frames: None,
+            held_scrub: None,
+            held_frames: None,
             song_start: None,
             groove_amount: 1.0,
             scale: Scale::default(),
@@ -1015,6 +1022,8 @@ impl Processor {
                     self.quantized_locate(target);
                 }
             }
+            // Spec: transport R23
+            TransportCommand::Scrub { point, held } => self.scrub(point, held),
             // Spec: transport R9
             TransportCommand::InsertMarkerToPlayhead => {
                 let ticks = self
@@ -1169,6 +1178,41 @@ impl Processor {
         }
     }
 
+    /// A press in the scrub area, or its release (the transport spec, R23).
+    /// A press loops the span of the global launch quantisation at `point`,
+    /// jumping to its start as a quantised locate does and starting playback
+    /// there if the song is stopped. A release ends the loop and leaves
+    /// playback where it is; with none held, it plays from `point` as a click
+    /// does.
+    fn scrub(&mut self, point: Ticks, held: bool) {
+        let mut target = point.max(Ticks::ZERO);
+        if held {
+            let signatures = match &self.program {
+                Some(program) => &program.get().time_signatures,
+                None => &self.fallback_time_signatures,
+            };
+            let (start, end) = self.session.settings().scrub_span(target, signatures);
+            self.held_scrub = Some(LoopRegion { start, end });
+            self.update_loop_frames();
+            target = start;
+        } else if self.held_scrub.take().is_some() {
+            self.update_loop_frames();
+            return;
+        }
+        self.insert_marker = target;
+        if self.playing {
+            self.quantized_locate(target);
+        } else {
+            self.start_playing_at(target);
+        }
+    }
+
+    /// The loop the song plays now: a held click in the scrub area's, which
+    /// the Arrangement loop gives way to, or else the Arrangement loop.
+    fn active_loop(&self) -> Option<LoopFrames> {
+        self.held_frames.or(self.loop_frames)
+    }
+
     /// Applies a jump waiting for the next line of the global launch
     /// quantisation, once the playhead reaches that line (the transport
     /// spec, R22).
@@ -1194,11 +1238,17 @@ impl Processor {
                 .map(|ticks| self.frames_at(ticks.max(Ticks::ZERO))),
             end: self.punch.end.map(|ticks| self.frames_at(ticks)),
         };
-        self.loop_frames = self.loop_region.and_then(|region| {
+        let frames = |region: LoopRegion| {
             let start = self.frames_at(region.start.max(Ticks::ZERO));
             let end = self.frames_at(region.end);
             (end > start).then_some(LoopFrames { start, end })
-        });
+        };
+        let (loop_frames, held_frames) = (
+            self.loop_region.and_then(frames),
+            self.held_scrub.and_then(frames),
+        );
+        self.loop_frames = loop_frames;
+        self.held_frames = held_frames;
     }
 
     /// Holds a transport command for a frame of the engine clock, or runs it
@@ -1328,7 +1378,7 @@ impl Processor {
             self.config.sample_rate,
         );
         let mut at = self.session.frame_for(playhead);
-        if let Some(region) = self.loop_frames
+        if let Some(region) = self.active_loop()
             && self.position < region.end
             && at > region.end
         {
@@ -1709,7 +1759,7 @@ impl Processor {
             }
         }
         // Spec: transport R13
-        if let Some(region) = self.loop_frames {
+        if let Some(region) = self.active_loop() {
             song(region.end);
         }
         // Spec: transport R22. A jump waiting for the next line of the
@@ -1842,7 +1892,7 @@ impl Processor {
             let before = self.position;
             self.position += Frames(length as i64);
             // Spec: transport R13, R14
-            if let Some(region) = self.loop_frames
+            if let Some(region) = self.active_loop()
                 && before < region.end
                 && self.position >= region.end
             {
@@ -1934,7 +1984,7 @@ impl Processor {
             // Spec: recording R11. The loop's wrap is no jump away: the take
             // goes on into the next pass, unless Punch-Out is on, when the
             // wrap ends it (R9). Any other jump ends it.
-            let wrapped = self.loop_frames.filter(|region| {
+            let wrapped = self.held_frames.or(self.loop_frames).filter(|region| {
                 self.punch_frames.end.is_none()
                     && take.wrap.is_none_or(|seen| seen == *region)
                     && take.next == region.end

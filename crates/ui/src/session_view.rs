@@ -169,17 +169,13 @@ impl GridUi {
     ) {
         let doc = shell.editor().document();
         let columns = shell.mixer_columns();
-        let returns: Vec<TrackId> = shell.shown_returns();
-        let sections = crate::mixer::sections(shell);
-        let scroll_x = shell.mixer_view().of(MixerOf::Session).scroll as f32;
         let state = shell.session().state();
         let scroll_y = state.scroll_y as f32;
-        let layout = MixerLayout::compute(
+        let layout = crate::mixer::mixer_layout(
+            shell,
             session.slots,
-            &crate::mixer::folds(shell, &columns).columns,
-            returns.len(),
-            sections,
-            scroll_x,
+            MixerOf::Session,
+            &crate::mixer::folds(shell, &columns),
         );
         let scenes: Vec<(SceneId, String)> = doc
             .scenes()

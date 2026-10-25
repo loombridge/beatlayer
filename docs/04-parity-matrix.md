@@ -34,7 +34,7 @@ Each row's **Notes** name the work packages that build it ("Built in WP-1.8a, WP
 |---|---|---|
 | Arrangement View | M1 | The scrub area's hold and Shift-click: WP-6.59. Built in WP-1.8a, WP-1.8b, WP-6.64, WP-6.59 |
 | Session View | M3 | Built in WP-3.1, WP-3.7, WP-3.8 |
-| Mixer, with sections you can show or hide | M1 | Sections and Mixer in Arrangement too, moved from M6 because M1's mixer keys need them (11 October 2026); each view keeping its own sections (Live 12.0), the extended meters and column widths: WP-6.65. Built in WP-1.6, WP-1.9, WP-6.65 |
+| Mixer, with sections you can show or hide | M1 | Sections and Mixer in Arrangement too, moved from M6 because M1's mixer keys need them (11 October 2026); each view keeping its own sections (Live 12.0); extended meters and column widths in WP-6.65. Built in WP-1.6, WP-1.9, WP-6.65 |
 | Clip View and Device View shown together | M6 | Separate views from M2. Stacked, with the detail area's switches and Expand Clip View ([spec](specs/detail-views.md)). Built in WP-6.27 |
 | Control Bar, Status Bar | M1 | Built in WP-1.5, WP-1.7, WP-1.18 |
 | Info View | M2 (help text), M6 (the user's own info text) | [Spec](specs/info-view.md). Built in WP-2.24, WP-6.58 |

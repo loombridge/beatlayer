@@ -1532,6 +1532,7 @@ impl MainWindowUi {
                         shell,
                         theme,
                         mixer,
+                        rect,
                         bl_shell::mixer_view::MixerOf::Arrangement,
                         events,
                     );

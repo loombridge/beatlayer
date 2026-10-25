@@ -569,6 +569,7 @@ impl Shell {
                 self.arrangement.restore_lanes(self.store.lane_views());
                 self.clip_view.forget_selection();
                 self.mixer.reset();
+                self.mixer.restore_widths(self.store.column_widths());
                 self.session.reset();
                 // The set's files go into the media store, so its clips'
                 // waveforms build (browser R15) and the engine finds their
@@ -624,6 +625,7 @@ impl Shell {
                 self.store.set_mpe_view(self.clip_view.mpe().clone());
                 self.store
                     .set_lane_views(self.arrangement.lane_views().clone());
+                self.store.set_column_widths(self.mixer.widths().clone());
                 self.store
                     .set_midi_tools(self.clip_view.midi_tools().saved());
                 let warnings = self.store.save(&path, &self.editor).map_err(failed)?;
@@ -652,6 +654,7 @@ impl Shell {
                 self.store.set_mpe_view(self.clip_view.mpe().clone());
                 self.store
                     .set_lane_views(self.arrangement.lane_views().clone());
+                self.store.set_column_widths(self.mixer.widths().clone());
                 self.store
                     .set_midi_tools(self.clip_view.midi_tools().saved());
                 self.store.set_temporary_folder(self.temporary_folder());
@@ -816,6 +819,7 @@ impl Shell {
                 self.store.set_mpe_view(self.clip_view.mpe().clone());
                 self.store
                     .set_lane_views(self.arrangement.lane_views().clone());
+                self.store.set_column_widths(self.mixer.widths().clone());
                 self.store
                     .set_midi_tools(self.clip_view.midi_tools().saved());
                 let files = self

@@ -128,6 +128,14 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             )),
         ),
         (
+            "transport.scrub",
+            Exception(Equivalent(
+                "a press or hold in the scrub area or the beat-time ruler; the keyboard plays \
+                 from a point with Play and Tab to a locator, which Enter jumps to (time \
+                 editing R5, R12)",
+            )),
+        ),
+        (
             "edit.go_to_step",
             Exception(Equivalent(
                 "the Undo History panel's rows: click one, or move to it with the arrow keys \

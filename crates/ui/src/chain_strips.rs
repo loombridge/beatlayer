@@ -317,17 +317,21 @@ pub fn strip(
             true,
             events,
         );
-        slider(
-            ui,
-            shell,
-            theme,
-            layout.pan,
-            pan_id(strip.chain),
-            "Pan",
-            strip,
-            false,
-            events,
-        );
+        // Spec: mixer-view R32. A strip shorter than 100 points hides the
+        // pan slider, as a track's pan knob hides.
+        if layout.pan_shown {
+            slider(
+                ui,
+                shell,
+                theme,
+                layout.pan,
+                pan_id(strip.chain),
+                "Pan",
+                strip,
+                false,
+                events,
+            );
+        }
     }
     activator(ui, theme, layout.activator, strip, events);
     solo(ui, shell, theme, layout.solo, strip, events);

@@ -189,6 +189,23 @@ impl LaunchQuantization {
         }
     }
 
+    /// The tick of the grid line at or before `from`: where the span a held
+    /// click in the scrub area loops starts (the time editing spec, R25).
+    /// Bars are counted from the start of the arrangement, as
+    /// [`next_line`](Self::next_line) counts them. With no quantisation,
+    /// `from` itself.
+    #[must_use]
+    pub fn line_at_or_before(self, from: Ticks, signatures: &TimeSignatureMap) -> Ticks {
+        let from = from.max(Ticks::ZERO);
+        if let Some(bars) = self.bars() {
+            let (index, _) = signatures.bar_at(from);
+            return signatures.bar_start(index - index.rem_euclid(bars));
+        }
+        let bar = signatures.signature_at(from).bar_length();
+        self.ticks(bar)
+            .map_or(from, |unit| from - from.rem_euclid(unit))
+    }
+
     /// The tick of the grid line nearest `from`: where a locator set while
     /// the song plays lands (the time editing spec, R3). Bars are counted
     /// from the start of the arrangement, so the "1 Bar" grid has a line at
@@ -344,6 +361,21 @@ impl LaunchSettings {
         }
         self.quantization.next_line(from, signatures)
     }
+
+    /// The span a held click in the scrub area loops: from the grid line at
+    /// or before `point` to the next one, a step long. With quantisation off
+    /// or None it is the bar the point is in (the time editing spec, R25;
+    /// Beatlayer's own).
+    #[must_use]
+    pub fn scrub_span(self, point: Ticks, signatures: &TimeSignatureMap) -> (Ticks, Ticks) {
+        let step = if self.enabled && self.quantization != LaunchQuantization::None {
+            self.quantization
+        } else {
+            LaunchQuantization::Bar
+        };
+        let start = step.line_at_or_before(point, signatures);
+        (start, step.next_line(start, signatures))
+    }
 }
 
 #[cfg(test)]
@@ -419,6 +451,43 @@ mod tests {
             at,
             "no quantisation takes effect at once"
         );
+    }
+
+    #[test]
+    fn a_held_scrub_loops_one_step_from_the_line_at_or_before_the_point() {
+        // Spec: time-editing R25
+        let sigs = four_four();
+        let bar = Ticks::WHOLE;
+        // 3.2.1: a bar and a beat into bar 3.
+        let at = bar * 2 + Ticks::QUARTER;
+        let settings = |quantization, enabled| LaunchSettings {
+            quantization,
+            enabled,
+            ..LaunchSettings::default()
+        };
+        assert_eq!(
+            settings(LaunchQuantization::Bar, true).scrub_span(at, &sigs),
+            (bar * 2, bar * 3)
+        );
+        assert_eq!(
+            settings(LaunchQuantization::Bars2, true).scrub_span(at, &sigs),
+            (bar * 2, bar * 4)
+        );
+        assert_eq!(
+            settings(LaunchQuantization::Quarter, true).scrub_span(at, &sigs),
+            (at, at + Ticks::QUARTER),
+            "a point on a line starts there"
+        );
+        assert_eq!(
+            settings(LaunchQuantization::Half, true).scrub_span(at, &sigs),
+            (bar * 2, bar * 2 + Ticks::WHOLE / 2)
+        );
+        for off in [
+            settings(LaunchQuantization::None, true),
+            settings(LaunchQuantization::Quarter, false),
+        ] {
+            assert_eq!(off.scrub_span(at, &sigs), (bar * 2, bar * 3), "a bar");
+        }
     }
 
     #[test]

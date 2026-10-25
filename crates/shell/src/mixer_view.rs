@@ -1,23 +1,29 @@
 //! What the mixers show (WP-1.9): whether the Session View's and the
 //! Arrangement View's mixers are shown, how far each is scrolled, which
 //! sections show, and which racks' chains are folded out as strips in
-//! them, changed by the `mixer_view.*` commands. View state only:
-//! nothing here is in the set, and no command here is an undo step (the
-//! mixer view spec, R11 to R14, R16).
+//! them, changed by the `mixer_view.*` commands. View state: no
+//! command here is an undo step (the mixer view spec, R11 to R14, R16), and
+//! only the columns' widths are saved with the set, beside the document
+//! (R36).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
+use std::time::Instant;
 
-use bl_model::{Device, DeviceId, Document, RackKind, TrackId};
+use bl_engine::TrackMeter;
+use bl_model::{ColumnWidths, Device, DeviceId, Document, RackKind, TrackId, clamp_column_width};
 use serde_json::Value;
 
 pub use bl_shell_spec::mixer_view::{
-    COLUMN_WIDTH, ChainStrip, MeterValue, MixerOf, MixerViewState, RackFold, ScrollArgs,
-    ScrollReturnsArgs, SectionArgs, ToggleArgs, TrackGainReduction, TrackImpact, TrackMeterValue,
-    ViewMixerState, impact_segments,
+    COLUMN_WIDTH, ChainStrip, ColumnWidth, EXTENDED_METERS_HEIGHT, MAIN_COLUMN_WIDTH,
+    MIN_STRIP_HEIGHT, MeterValue, MixerOf, MixerViewState, PAN_HIDES_BELOW, PEAK_HOLD_SECONDS,
+    RackFold, ResetPeakArgs, STRIP_HEIGHT, ScrollArgs, ScrollReturnsArgs, SectionArgs,
+    SetColumnWidthArgs, SetHeightArgs, TICK_LABELS_WIDTH, ToggleArgs, TrackGainReduction,
+    TrackImpact, TrackMeterValue, TrackPeak, ViewMixerState, ViewSectionArgs, impact_segments,
 };
 use bl_shell_spec::mixer_view::{
-    CROSSFADER, DEVICES, FOCUS, FOLD_CHAINS, IN_OUT, PERFORMANCE_IMPACT, RETURN_TRACKS,
-    RETURN_TRACKS_SCROLL, SCENE_TEMPO, SCROLL, SENDS, STATE, TOGGLE, TRACK_OPTIONS, VOLUME,
+    CROSSFADER, DEVICES, FOCUS, FOLD_CHAINS, IN_OUT, PERFORMANCE_IMPACT, RESET_PEAK, RETURN_TRACKS,
+    RETURN_TRACKS_SCROLL, SCENE_TEMPO, SCROLL, SENDS, SET_COLUMN_WIDTH, SET_HEIGHT, STATE, TOGGLE,
+    TRACK_OPTIONS, VOLUME,
 };
 
 use crate::arrangement::ArrangementView;
@@ -35,19 +41,16 @@ pub enum MixerViewError {
 pub struct MixerView {
     session: ViewMixerState,
     arrangement: ViewMixerState,
-    in_out: bool,
-    sends: bool,
-    volume: bool,
-    crossfader: bool,
     scene_tempo: bool,
-    return_tracks: bool,
     /// Whether the return tracks scroll with the tracks (IMP-01, the mixer
     /// view spec R21). Off in a new install, so they stay pinned, as in
     /// Live.
     return_tracks_scroll: bool,
-    track_options: bool,
-    performance_impact: bool,
-    devices: bool,
+    /// The columns' widths where they aren't the default (R36), saved with
+    /// the set.
+    widths: ColumnWidths,
+    /// Each track's held peak and peak lines (R33, R34).
+    peaks: BTreeMap<TrackId, PeakHold>,
     /// The racks whose chains are folded out as strips in the mixers (racks
     /// spec, R27).
     folded: BTreeSet<DeviceId>,
@@ -70,24 +73,12 @@ impl MixerView {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            session: ViewMixerState {
-                shown: true,
-                scroll: 0.0,
-            },
-            arrangement: ViewMixerState {
-                shown: false,
-                scroll: 0.0,
-            },
-            in_out: true,
-            sends: true,
-            volume: true,
-            crossfader: false,
+            session: ViewMixerState::new(true),
+            arrangement: ViewMixerState::new(false),
             scene_tempo: false,
-            return_tracks: true,
             return_tracks_scroll: false,
-            track_options: false,
-            performance_impact: false,
-            devices: false,
+            widths: ColumnWidths::new(),
+            peaks: BTreeMap::new(),
             folded: BTreeSet::new(),
             focus_requests: 0,
         }
@@ -101,6 +92,81 @@ impl MixerView {
             return_tracks_scroll: self.return_tracks_scroll,
             ..Self::new()
         };
+    }
+
+    /// The columns' widths, as a save writes them (R36).
+    #[must_use]
+    pub fn widths(&self) -> &ColumnWidths {
+        &self.widths
+    }
+
+    /// Gives the mixers the widths a set was saved with.
+    pub fn restore_widths(&mut self, widths: ColumnWidths) {
+        self.widths = widths;
+    }
+
+    /// The default width of `track`'s column: 94, and Main's 104.
+    fn column_width_default(&self, doc: &Document, track: TrackId) -> f32 {
+        if track == doc.main_id() {
+            MAIN_COLUMN_WIDTH
+        } else {
+            COLUMN_WIDTH
+        }
+    }
+
+    /// The width of `track`'s column in points at 100% (R36): the one it was
+    /// resized to, or 94, and Main's 104.
+    #[must_use]
+    pub fn column_width(&self, doc: &Document, track: TrackId) -> f32 {
+        self.widths
+            .get(&track)
+            .copied()
+            .unwrap_or_else(|| self.column_width_default(doc, track))
+    }
+
+    /// Takes the peaks the engine published, at `now`: each track's held
+    /// peak keeps the highest one until it is reset, and each channel's
+    /// peak line holds for two seconds before it falls to the current peak
+    /// (R33, R34).
+    pub fn observe_peaks(&mut self, meters: &[TrackMeter], now: Instant) {
+        let mut before = std::mem::take(&mut self.peaks);
+        for meter in meters {
+            let held = before.remove(&meter.track).unwrap_or(PeakHold {
+                peak: 0.0,
+                current: [0.0; 2],
+                line: [0.0; 2],
+                since: [now; 2],
+            });
+            self.peaks
+                .insert(meter.track, held.observe(meter.peak, now));
+        }
+    }
+
+    /// Each track's held peak and peak lines, for `mixer_view.state`.
+    #[must_use]
+    pub fn peaks(&self) -> Vec<TrackPeak> {
+        self.peaks
+            .iter()
+            .map(|(track, held)| TrackPeak {
+                track: *track,
+                peak: held.peak,
+                hold: held.line,
+            })
+            .collect()
+    }
+
+    /// The highest peak `track` has had since its readout was last reset
+    /// (R33), as a linear amplitude.
+    #[must_use]
+    pub fn held_peak(&self, track: TrackId) -> f32 {
+        self.peaks.get(&track).map_or(0.0, |held| held.peak)
+    }
+
+    /// The line `track`'s meter marks each channel's highest recent peak
+    /// with (R34), as a linear amplitude.
+    #[must_use]
+    pub fn peak_line(&self, track: TrackId) -> [f32; 2] {
+        self.peaks.get(&track).map_or([0.0; 2], |held| held.line)
     }
 
     /// One view's mixer.
@@ -119,41 +185,11 @@ impl MixerView {
         }
     }
 
-    /// Whether the In/Out section shows.
-    #[must_use]
-    pub fn in_out(&self) -> bool {
-        self.in_out
-    }
-
-    /// Whether the Sends section shows.
-    #[must_use]
-    pub fn sends(&self) -> bool {
-        self.sends
-    }
-
-    /// Whether the strips show.
-    #[must_use]
-    pub fn volume(&self) -> bool {
-        self.volume
-    }
-
-    /// Whether the Crossfader section shows.
-    #[must_use]
-    pub fn crossfader(&self) -> bool {
-        self.crossfader
-    }
-
     /// Whether the Main column shows the scene tempo and time signature
     /// fields.
     #[must_use]
     pub fn scene_tempo(&self) -> bool {
         self.scene_tempo
-    }
-
-    /// Whether the return tracks' columns show.
-    #[must_use]
-    pub fn return_tracks(&self) -> bool {
-        self.return_tracks
     }
 
     /// Whether the return tracks scroll with the tracks (IMP-01, the mixer
@@ -167,24 +203,6 @@ impl MixerView {
     /// application setting the preferences keep does.
     pub fn set_return_tracks_scroll(&mut self, on: bool) {
         self.return_tracks_scroll = on;
-    }
-
-    /// Whether the tracks' Track Options sections show.
-    #[must_use]
-    pub fn track_options(&self) -> bool {
-        self.track_options
-    }
-
-    /// Whether the Performance Impact section shows.
-    #[must_use]
-    pub fn performance_impact(&self) -> bool {
-        self.performance_impact
-    }
-
-    /// Whether the Devices section shows (IMP-25, the mixer view spec R24).
-    #[must_use]
-    pub fn devices(&self) -> bool {
-        self.devices
     }
 
     /// How many times `mixer_view.focus` has run.
@@ -201,19 +219,13 @@ impl MixerView {
         MixerViewState {
             session: self.session,
             arrangement: self.arrangement,
-            in_out: self.in_out,
-            sends: self.sends,
-            volume: self.volume,
-            crossfader: self.crossfader,
             scene_tempo: self.scene_tempo,
-            return_tracks: self.return_tracks,
             return_tracks_scroll: self.return_tracks_scroll,
-            track_options: self.track_options,
-            performance_impact: self.performance_impact,
-            devices: self.devices,
             performance_impact_values: Vec::new(),
             gain_reduction: Vec::new(),
             meters: Vec::new(),
+            peaks: self.peaks(),
+            column_widths: self.column_widths(doc, arrangement),
             racks,
             chains,
         }
@@ -286,22 +298,38 @@ impl MixerView {
         }
     }
 
+    /// Every column's width, in the order the columns run: the tracks, the
+    /// return tracks, Main (R36, R38).
+    fn column_widths(&self, doc: &Document, arrangement: &ArrangementView) -> Vec<ColumnWidth> {
+        columns(doc, arrangement)
+            .into_iter()
+            .chain(doc.returns())
+            .chain(std::iter::once(doc.main_id()))
+            .map(|track| ColumnWidth {
+                track,
+                width: self.column_width(doc, track),
+            })
+            .collect()
+    }
+
     /// Whether a switch-like command is on now, for a menu's check mark:
-    /// the Mixer item for the view in `front`, and the sections.
+    /// the Mixer item for the view in `front`, and the sections, as that
+    /// view's mixer shows them (R37).
     #[must_use]
     pub fn switch_state(&self, id: &str, front: MixerOf) -> Option<bool> {
+        let mixer = self.of(front);
         match id {
-            TOGGLE => Some(self.of(front).shown),
-            IN_OUT => Some(self.in_out),
-            SENDS => Some(self.sends),
-            VOLUME => Some(self.volume),
-            CROSSFADER => Some(self.crossfader),
+            TOGGLE => Some(mixer.shown),
+            IN_OUT => Some(mixer.in_out),
+            SENDS => Some(mixer.sends),
+            VOLUME => Some(mixer.volume),
+            CROSSFADER => Some(mixer.crossfader),
             SCENE_TEMPO => Some(self.scene_tempo),
-            RETURN_TRACKS => Some(self.return_tracks),
+            RETURN_TRACKS => Some(mixer.return_tracks),
             RETURN_TRACKS_SCROLL => Some(self.return_tracks_scroll),
-            TRACK_OPTIONS => Some(self.track_options),
-            PERFORMANCE_IMPACT => Some(self.performance_impact),
-            DEVICES => Some(self.devices),
+            TRACK_OPTIONS => Some(mixer.track_options),
+            PERFORMANCE_IMPACT => Some(mixer.performance_impact),
+            DEVICES => Some(mixer.devices),
             _ => None,
         }
     }
@@ -337,21 +365,75 @@ impl MixerView {
                 let mixer = self.of_mut(view.unwrap_or(front));
                 mixer.shown = shown.unwrap_or(!mixer.shown);
             }
-            IN_OUT | SENDS | VOLUME | CROSSFADER | SCENE_TEMPO | RETURN_TRACKS | TRACK_OPTIONS
-            | PERFORMANCE_IMPACT | DEVICES => {
+            SCENE_TEMPO => {
                 let SectionArgs { shown } = serde_json::from_value(args).map_err(parse_error)?;
+                self.scene_tempo = shown.unwrap_or(!self.scene_tempo);
+            }
+            IN_OUT | SENDS | VOLUME | CROSSFADER | RETURN_TRACKS | TRACK_OPTIONS
+            | PERFORMANCE_IMPACT | DEVICES => {
+                let ViewSectionArgs { view, shown } =
+                    serde_json::from_value(args).map_err(parse_error)?;
+                let mixer = self.of_mut(view.unwrap_or(front));
                 let section = match id {
-                    IN_OUT => &mut self.in_out,
-                    SENDS => &mut self.sends,
-                    VOLUME => &mut self.volume,
-                    CROSSFADER => &mut self.crossfader,
-                    SCENE_TEMPO => &mut self.scene_tempo,
-                    TRACK_OPTIONS => &mut self.track_options,
-                    PERFORMANCE_IMPACT => &mut self.performance_impact,
-                    DEVICES => &mut self.devices,
-                    _ => &mut self.return_tracks,
+                    IN_OUT => &mut mixer.in_out,
+                    SENDS => &mut mixer.sends,
+                    VOLUME => &mut mixer.volume,
+                    CROSSFADER => &mut mixer.crossfader,
+                    TRACK_OPTIONS => &mut mixer.track_options,
+                    PERFORMANCE_IMPACT => &mut mixer.performance_impact,
+                    DEVICES => &mut mixer.devices,
+                    _ => &mut mixer.return_tracks,
                 };
                 *section = shown.unwrap_or(!*section);
+            }
+            SET_HEIGHT => {
+                let SetHeightArgs { view, height } =
+                    serde_json::from_value(args).map_err(parse_error)?;
+                if !height.is_finite() {
+                    return Err(MixerViewError::InvalidArgs(
+                        "`height` must be a finite number".to_owned(),
+                    ));
+                }
+                self.of_mut(view.unwrap_or(front)).height = height.max(MIN_STRIP_HEIGHT);
+            }
+            SET_COLUMN_WIDTH => {
+                let SetColumnWidthArgs { track, width } =
+                    serde_json::from_value(args).map_err(parse_error)?;
+                if !width.is_finite() {
+                    return Err(MixerViewError::InvalidArgs(
+                        "`width` must be a finite number".to_owned(),
+                    ));
+                }
+                let targets = match track {
+                    Some(track) if doc.track(track).is_some() => vec![track],
+                    Some(track) => {
+                        return Err(MixerViewError::InvalidArgs(format!("no track {track}")));
+                    }
+                    None => columns(doc, arrangement),
+                };
+                let width = clamp_column_width(width);
+                for track in targets {
+                    // A column at its default width has no entry, as a set
+                    // saved before columns could be resized has none.
+                    if (width - self.column_width_default(doc, track)).abs() < f32::EPSILON {
+                        self.widths.remove(&track);
+                    } else {
+                        self.widths.insert(track, width);
+                    }
+                }
+            }
+            RESET_PEAK => {
+                let ResetPeakArgs { track } = serde_json::from_value(args).map_err(parse_error)?;
+                if let Some(track) = track
+                    && doc.track(track).is_none()
+                {
+                    return Err(MixerViewError::InvalidArgs(format!("no track {track}")));
+                }
+                for (held_track, held) in &mut self.peaks {
+                    if track.is_none_or(|t| t == *held_track) {
+                        held.reset();
+                    }
+                }
             }
             RETURN_TRACKS_SCROLL => {
                 let ScrollReturnsArgs { on } = serde_json::from_value(args).map_err(parse_error)?;
@@ -364,9 +446,7 @@ impl MixerView {
                         "`x` must be a finite number".to_owned(),
                     ));
                 }
-                let columns =
-                    columns(doc, arrangement).len() + self.folds(doc, arrangement).1.len();
-                let max = max_scroll(columns, doc.returns().count(), self.return_tracks_scroll);
+                let max = self.max_scroll(doc, arrangement);
                 let mixer = self.of_mut(view.unwrap_or(front));
                 mixer.scroll = (mixer.scroll + x).clamp(0.0, max);
             }
@@ -406,12 +486,26 @@ impl MixerView {
         Ok(self.state(doc, arrangement))
     }
 
+    /// The furthest the mixers scroll (R14): see [`max_scroll`].
+    fn max_scroll(&self, doc: &Document, arrangement: &ArrangementView) -> f64 {
+        let (_, chains) = self.folds(doc, arrangement);
+        let mut tracks = Vec::new();
+        for track in columns(doc, arrangement) {
+            tracks.push(self.column_width(doc, track));
+            let strips = chains.iter().filter(|c| c.track == track).count();
+            tracks.extend(std::iter::repeat_n(COLUMN_WIDTH, strips));
+        }
+        let returns: Vec<f32> = doc
+            .returns()
+            .map(|track| self.column_width(doc, track))
+            .collect();
+        max_scroll(&tracks, &returns, self.return_tracks_scroll)
+    }
+
     /// Keeps each scroll within the set's columns, after the set changed.
     /// The chain strips count as columns of their own (racks spec, R27).
     pub fn clamp_scroll(&mut self, doc: &Document, arrangement: &ArrangementView) {
-        let (_, chains) = self.folds(doc, arrangement);
-        let columns = columns(doc, arrangement).len() + chains.len();
-        let max = max_scroll(columns, doc.returns().count(), self.return_tracks_scroll);
+        let max = self.max_scroll(doc, arrangement);
         for mixer in [&mut self.session, &mut self.arrangement] {
             mixer.scroll = mixer.scroll.min(max);
         }
@@ -435,16 +529,53 @@ pub fn chains_fold(rack: &Device) -> bool {
     rack.chains.len() > 1
 }
 
-/// The furthest a mixer of `columns` track columns scrolls: until its last
-/// track's column is the first in view. With the return tracks scrolling
-/// with the tracks (IMP-01), the returns are columns of their own in the
-/// scroll, so the scroll reaches the last return.
+/// The furthest a mixer whose track columns are `tracks` points wide scrolls:
+/// until its last track's column is the first in view. With the return
+/// tracks scrolling with the tracks (IMP-01), the returns, `returns` points
+/// wide, are columns of their own in the scroll, so the scroll reaches the
+/// last return.
 #[must_use]
-pub fn max_scroll(columns: usize, returns: usize, returns_scroll: bool) -> f64 {
+pub fn max_scroll(tracks: &[f32], returns: &[f32], returns_scroll: bool) -> f64 {
+    let sum = |widths: &[f32]| widths.iter().map(|w| f64::from(*w)).sum::<f64>();
     if returns_scroll {
-        (columns + returns) as f64 * f64::from(COLUMN_WIDTH)
+        sum(tracks) + sum(returns)
     } else {
-        columns.saturating_sub(1) as f64 * f64::from(COLUMN_WIDTH)
+        sum(tracks) - tracks.last().map_or(0.0, |w| f64::from(*w))
+    }
+}
+
+/// A track's held peak and the lines its meter's channels mark their highest
+/// recent peaks with (R33, R34).
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct PeakHold {
+    /// The highest peak since the readout was last reset.
+    peak: f32,
+    /// The channels' current peaks, as the engine last published them.
+    current: [f32; 2],
+    /// Each channel's peak line.
+    line: [f32; 2],
+    /// When each line last rose to a peak.
+    since: [Instant; 2],
+}
+
+impl PeakHold {
+    /// Takes the channels' peaks at `now`.
+    fn observe(mut self, peak: [f32; 2], now: Instant) -> Self {
+        self.current = peak;
+        self.peak = self.peak.max(peak[0]).max(peak[1]);
+        for (channel, level) in peak.into_iter().enumerate() {
+            let held = now.duration_since(self.since[channel]).as_secs_f64();
+            if level >= self.line[channel] || held >= PEAK_HOLD_SECONDS {
+                self.line[channel] = level;
+                self.since[channel] = now;
+            }
+        }
+        self
+    }
+
+    /// Sets the held peak back to the current one.
+    fn reset(&mut self) {
+        self.peak = self.current[0].max(self.current[1]);
     }
 }
 

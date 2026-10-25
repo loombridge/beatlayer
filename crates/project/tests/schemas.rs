@@ -280,6 +280,7 @@ fn fixture_project() -> Project {
         window_views: bl_model::WindowViews::default(),
         mpe_view: bl_model::MpeView::default(),
         lane_views: bl_model::LaneViews::new(),
+        column_widths: bl_model::ColumnWidths::new(),
     }
 }
 

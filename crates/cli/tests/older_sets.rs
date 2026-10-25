@@ -106,6 +106,7 @@ fn a_version_1_set_with_split_audio_clips_loads_and_plays_as_it_did() {
         window_views: bl_model::WindowViews::default(),
         mpe_view: bl_model::MpeView::default(),
         lane_views: bl_model::LaneViews::new(),
+        column_widths: bl_model::ColumnWidths::new(),
     };
     let mut saved: Value = serde_json::from_slice(&encode_json(&project, 1).unwrap()).unwrap();
     saved["schema"] = json!(1);
@@ -192,6 +193,7 @@ fn a_set_saved_before_crossfades_opens_with_the_same_fades_and_none_between_clip
         window_views: bl_model::WindowViews::default(),
         mpe_view: bl_model::MpeView::default(),
         lane_views: bl_model::LaneViews::new(),
+        column_widths: bl_model::ColumnWidths::new(),
     };
     let saved: Value = serde_json::from_slice(&encode_json(&project, 1).unwrap()).unwrap();
     // The set holds nothing of curves or crossfades, as before.
@@ -274,6 +276,7 @@ fn sets_from_before_racks_load_unchanged() {
         window_views: bl_model::WindowViews::default(),
         mpe_view: bl_model::MpeView::default(),
         lane_views: bl_model::LaneViews::new(),
+        column_widths: bl_model::ColumnWidths::new(),
     };
     // A device that isn't a rack saves no chains, so a set saved before
     // racks existed is what is saved now.
@@ -321,6 +324,7 @@ fn a_set_saved_before_the_scales_loads_unchanged() {
         window_views: bl_model::WindowViews::default(),
         mpe_view: bl_model::MpeView::default(),
         lane_views: bl_model::LaneViews::new(),
+        column_widths: bl_model::ColumnWidths::new(),
     };
     let saved = encode_json(&project, 1).unwrap();
     let value: Value = serde_json::from_slice(&saved).unwrap();
@@ -402,6 +406,7 @@ fn a_set_saved_before_use_current_scale_loads_its_devices_unchanged() {
         window_views: bl_model::WindowViews::default(),
         mpe_view: bl_model::MpeView::default(),
         lane_views: bl_model::LaneViews::new(),
+        column_widths: bl_model::ColumnWidths::new(),
     };
     let saved = encode_json(&project, 1).unwrap();
     let (loaded, _) = decode_json(&saved, &LoadOptions::default()).unwrap();
@@ -484,6 +489,7 @@ fn a_set_saved_before_the_lanes_loads_unchanged_and_every_note_value_round_trips
         window_views: bl_model::WindowViews::default(),
         mpe_view: bl_model::MpeView::default(),
         lane_views: bl_model::LaneViews::new(),
+        column_widths: bl_model::ColumnWidths::new(),
     };
     let saved = encode_json(&project, 1).unwrap();
     let value: Value = serde_json::from_slice(&saved).unwrap();
@@ -576,6 +582,7 @@ fn probability_groups_are_saved_with_the_clip_and_broken_ones_load_ungrouped() {
         window_views: bl_model::WindowViews::default(),
         mpe_view: bl_model::MpeView::default(),
         lane_views: bl_model::LaneViews::new(),
+        column_widths: bl_model::ColumnWidths::new(),
     };
     let saved = encode_json(&project, 1).unwrap();
     let value: Value = serde_json::from_slice(&saved).unwrap();
@@ -811,6 +818,7 @@ fn an_older_clip_envelope_renders_the_same() {
         window_views: bl_model::WindowViews::default(),
         mpe_view: bl_model::MpeView::default(),
         lane_views: bl_model::LaneViews::new(),
+        column_widths: bl_model::ColumnWidths::new(),
     };
     let mut saved: Value = serde_json::from_slice(&encode_json(&project, 1).unwrap()).unwrap();
     saved["schema"] = json!(4);
@@ -877,6 +885,7 @@ fn a_set_without_b_loads_with_b_equal_to_a() {
         window_views: bl_model::WindowViews::default(),
         mpe_view: bl_model::MpeView::default(),
         lane_views: bl_model::LaneViews::new(),
+        column_widths: bl_model::ColumnWidths::new(),
     };
     // A set from before the two states has neither field.
     let saved: Value = serde_json::from_slice(&encode_json(&project, 1).unwrap()).unwrap();
@@ -1080,6 +1089,7 @@ fn a_set_saved_before_locators_loads_with_none() {
         window_views: bl_model::WindowViews::default(),
         mpe_view: bl_model::MpeView::default(),
         lane_views: bl_model::LaneViews::new(),
+        column_widths: bl_model::ColumnWidths::new(),
     };
     let saved = encode_json(&project, 1).unwrap();
     let value: Value = serde_json::from_slice(&saved).unwrap();
@@ -1134,6 +1144,7 @@ fn the_locators_and_the_song_start_time_are_saved_and_load_again() {
         window_views: bl_model::WindowViews::default(),
         mpe_view: bl_model::MpeView::default(),
         lane_views: bl_model::LaneViews::new(),
+        column_widths: bl_model::ColumnWidths::new(),
     };
     let saved = encode_json(&project, 1).unwrap();
     let (loaded, _) = decode_json(&saved, &LoadOptions::default()).unwrap();
@@ -1158,6 +1169,7 @@ fn project_of(editor: &Editor) -> Project {
         window_views: bl_model::WindowViews::default(),
         mpe_view: bl_model::MpeView::default(),
         lane_views: bl_model::LaneViews::new(),
+        column_widths: bl_model::ColumnWidths::new(),
     }
 }
 
@@ -1549,6 +1561,7 @@ fn a_set_saved_with_pressure_points_opens_and_sends_the_same_pressure() {
         window_views: bl_model::WindowViews::default(),
         mpe_view: bl_model::MpeView::default(),
         lane_views: bl_model::LaneViews::new(),
+        column_widths: bl_model::ColumnWidths::new(),
         midi_tools: bl_project::midi_tools::MidiToolSettings::default(),
     };
     // As version 7 saved it: two pressure points, whole-number values.

@@ -790,7 +790,7 @@ fn progress(ctx: &Context, theme: &Theme, running: &RunningStatus, events: &mut 
 
 /// A progress bar, painted, read by a screen reader as a progress
 /// indicator with its share.
-fn bar(ui: &mut Ui, theme: &Theme, fraction: f32, name: &str) {
+pub(crate) fn bar(ui: &mut Ui, theme: &Theme, fraction: f32, name: &str) {
     let (rect, response) =
         ui.allocate_exact_size(Vec2::new(ui.available_width(), 10.0), Sense::hover());
     let painter = ui.painter_at(rect);

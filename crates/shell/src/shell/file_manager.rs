@@ -191,7 +191,7 @@ impl Shell {
     }
 
     /// The open set's project folder: the folder its file is in.
-    fn set_project_folder(&self) -> Option<PathBuf> {
+    pub(super) fn set_project_folder(&self) -> Option<PathBuf> {
         self.set_path
             .as_deref()
             .and_then(Path::parent)
@@ -245,26 +245,31 @@ impl Shell {
     /// A project folder's or the User Library's files, with their
     /// locations (R16).
     fn folder_file_rows(&self) -> Vec<FileRow> {
-        let Some(root) = self.file_manager_root() else {
-            return Vec::new();
-        };
+        self.file_manager_root()
+            .map_or_else(Vec::new, |root| self.project_file_rows(&root))
+    }
+
+    /// The files the sets of the project folder `root` use, with their
+    /// locations (R16).
+    pub(super) fn project_file_rows(&self, root: &Path) -> Vec<FileRow> {
         let library = self.user_library();
         let mut rows: Vec<FileRow> = Vec::new();
-        for set in ProjectFolder::new(&root).sets().unwrap_or_default() {
+        for set in ProjectFolder::new(root).sets().unwrap_or_default() {
             let Ok((project, _)) = bl_project::load(&set) else {
                 continue;
             };
-            let folder = set.parent().unwrap_or(&root).to_path_buf();
+            let folder = set.parent().unwrap_or(root).to_path_buf();
             for file in project.media.iter() {
                 let Some(path) = file.path.resolve(&folder) else {
                     continue;
                 };
+                let path = without_parent_parts(&path);
                 let hash = ContentHash::from_bytes(file.hash.0);
                 if rows.iter().any(|row| row.hash == hex(hash)) {
                     continue;
                 }
                 let used_by = users_of(&project.document, hash);
-                let location = location_of(&path, Some(&root), library.as_deref());
+                let location = location_of(&path, Some(root), library.as_deref());
                 rows.push(FileRow {
                     hash: hex(hash),
                     name: file_name(&path),
@@ -848,6 +853,21 @@ fn users_of(document: &Document, hash: ContentHash) -> Vec<String> {
         }
     }
     users
+}
+
+/// `path` with its `..` parts folded in, so `Project/../Other/a.wav`, how a
+/// set's media table names a file beside its project, is `Other/a.wav` and
+/// not taken for a file inside `Project`.
+fn without_parent_parts(path: &Path) -> PathBuf {
+    let mut clean = PathBuf::new();
+    for part in path.components() {
+        if part == std::path::Component::ParentDir && clean.file_name().is_some() {
+            clean.pop();
+        } else {
+            clean.push(part);
+        }
+    }
+    clean
 }
 
 /// Where a file is, relative to the folder the File Manager works on

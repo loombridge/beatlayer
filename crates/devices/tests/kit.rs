@@ -5,10 +5,14 @@
 //! trap.
 
 use crate::common;
+use bl_core::time::{Frames, Ticks};
 use bl_devices::KitHost;
-use bl_engine::{Block, NoteBuffer, NoteEvent, NoteKind, Registry, TransportInfo};
-use bl_model::{DeviceKind, DeviceRole};
-use common::{CHANNELS, RATE, config, device, run, set};
+use bl_engine::{
+    Block, Collector, Compiler, EngineConfig, NodeKey, NoteBuffer, NoteEvent, NoteKind, Registry,
+    TransportInfo,
+};
+use bl_model::{AutomationTarget, Command, DeviceKind, DeviceRole, Editor, TrackKind};
+use common::{CHANNELS, RATE, config, device, run, run_at, set};
 use lspk_example_gain::{GAIN, Gain};
 use lspk_example_sine::Sine;
 use serde_json::json;
@@ -158,4 +162,100 @@ fn a_command_runs_on_the_main_thread_and_reports_its_changes() {
     assert_eq!(&state.data[..4], b"LSPK");
     let elsewhere = bl_model::DeviceId(bl_core::id::Id::new(99).expect("an ID"));
     assert!(host.commands(elsewhere).is_none());
+}
+
+// Spec: device-framework R22, automation R2
+#[test]
+fn an_envelope_drives_a_kit_plugins_parameter() {
+    let (host, registry) = host_with_examples();
+    let gain = host.device_types()[0].clone();
+    let mut editor = Editor::new();
+    let track = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: track,
+            kind: TrackKind::Midi,
+            name: String::new(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    let id = editor.new_id();
+    editor
+        .apply(Command::InsertDevice {
+            track,
+            index: 0,
+            device: gain.device(id),
+        })
+        .unwrap();
+    // The gain falls from 1 at beat 2 to 0 at beat 3: 24,000 frames a beat.
+    let target = AutomationTarget::Device {
+        device: id,
+        param: GAIN,
+    };
+    for (at, value) in [(Ticks::QUARTER, 1.0), (Ticks::QUARTER * 2, 0.0)] {
+        editor
+            .apply(Command::SetAutomationBreakpoint {
+                track,
+                target,
+                at,
+                value,
+            })
+            .unwrap();
+    }
+    let collector = Collector::new();
+    let mut compiler = Compiler::new(EngineConfig::new(RATE, 2048), registry, collector.handle());
+    let data = compiler
+        .sync(editor.document())
+        .data
+        .into_iter()
+        .find(|(key, _)| matches!(key, NodeKey::Device(device) if *device == id))
+        .expect("the device's node is sent its automation")
+        .1;
+    host.idle();
+
+    let (_, registry) = host_with_examples();
+    let mut node = registry
+        .create(&gain.device(id), &config(2048))
+        .expect("a node");
+    node.receive_data(data);
+    let tempo = editor.document().settings().tempo.clone();
+    let input = vec![vec![1.0f32; 2048]; 2];
+    let mut last = 1.0;
+    for block in 0..3 {
+        let out = run_at(
+            node.as_mut(),
+            &input,
+            &[],
+            &tempo,
+            TransportInfo {
+                playing: true,
+                position: Frames(36_000 + block * 2048),
+            },
+        );
+        last = out[0][2047];
+    }
+    // Halfway down the ramp, and nowhere near the control's own 1.
+    assert!((0.1..0.6).contains(&last), "{last}");
+}
+
+// Spec: device-framework R22
+#[test]
+fn a_processor_still_in_the_queue_when_it_is_asked_for_goes_back() {
+    let (host, registry) = host_with_examples();
+    let gain = host.device_types()[0].clone();
+    let quiet = device(&gain, &[(GAIN, 0.25)]);
+    let mut node = std::thread::scope(|s| {
+        s.spawn(|| registry.create(&quiet, &config(64)))
+            .join()
+            .expect("the compiler thread")
+    })
+    .expect("a node");
+    // The processor is sent, and let go of before the node has taken it.
+    host.idle();
+    host.clear();
+    for _ in 0..2 {
+        let out = run(node.as_mut(), &[0.5; 64], &[]);
+        assert!(out[0].iter().all(|s| *s == 0.5), "never run: {}", out[0][0]);
+    }
 }
